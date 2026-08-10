@@ -4,6 +4,7 @@ import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import temp, DEV, Context
+from test.helpers import assert_kernel_count
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -42,7 +43,7 @@ class TestAssign(unittest.TestCase):
     # it should copy into the empty buffer
     GlobalCounters.reset()
     c.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
 
   def test_assign_slice(self):
     X = Tensor([1,2,3,4]).realize()
@@ -50,7 +51,7 @@ class TestAssign(unittest.TestCase):
     xs.assign(xs+1)
     GlobalCounters.reset()
     self.assertListEqual(X.tolist(), [1,2,4,5])
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
 
   def test_assign_slice_alt(self):
     X = Tensor([1,2,3,4]).realize()
@@ -58,7 +59,7 @@ class TestAssign(unittest.TestCase):
     xs1.assign(xs2+1)
     GlobalCounters.reset()
     self.assertListEqual(X.tolist(), [1,4,5,4])
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
 
   def test_assign_flip(self):
     ref = np.arange(16, dtype=np.float32)
@@ -68,7 +69,7 @@ class TestAssign(unittest.TestCase):
     xs.assign(xs + X)
     ref = ref + ref[::-1]
     np.testing.assert_allclose(X.numpy(), ref)
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
 
   def test_assign_add(self):
     for T in (1, 2, 10):#, 100): # this crashes in CI, not sure why
@@ -331,14 +332,14 @@ class TestAssign(unittest.TestCase):
     a = (Tensor.arange(16).reshape(4,4).clone().realize() + 1)
     GlobalCounters.reset()
     b.assign(a.contiguous()).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
 
   def test_assign_contiguous_permute(self):
     b = Tensor.arange(16).reshape(4,4).clone().realize()
     a = (Tensor.arange(16).reshape(4,4).clone().realize() + 1).permute((1,0))
     GlobalCounters.reset()
     b.assign(a.contiguous()).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
 
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -413,7 +414,7 @@ class TestAssign(unittest.TestCase):
 
     GlobalCounters.reset()
     Tensor.realize(b, c, d)
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     np.testing.assert_allclose(b.numpy(), a.sum(1).numpy()+1)
     np.testing.assert_allclose(c.numpy(), a.sum(1).numpy()+2)
     np.testing.assert_allclose(d.numpy(), a.sum(1).numpy()+3)
@@ -461,7 +462,7 @@ class TestAssign(unittest.TestCase):
     b.assign(r + b)
     c.assign(r + b_perm.contiguous())
     Tensor.realize(b, c)
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
     np.testing.assert_equal(b.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32))
     np.testing.assert_equal(c.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32).transpose(1, 0))
 
@@ -471,7 +472,7 @@ class TestAssign(unittest.TestCase):
     a.assign(a + b)
     GlobalCounters.reset()
     a.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     np.testing.assert_equal(a.numpy(), np.ones((4, 4))+np.pad(np.ones((4, 4))[:, 0:2], ((0, 0), (0, 2)), constant_values=2))
 
   def test_permuted_assignment_masked_view_not_contiguous(self):
@@ -510,7 +511,7 @@ class TestAssign(unittest.TestCase):
     expected[0:10] = expected[50:60].copy()
     GlobalCounters.reset()
     a[0:10].assign(a[50:60]).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)  # currently conservative, forces contiguous
+    assert_kernel_count(2)  # currently conservative, forces contiguous
     np.testing.assert_allclose(a.numpy(), expected)
 
   def test_setitem_half(self):
@@ -630,7 +631,7 @@ class TestAssign(unittest.TestCase):
     GlobalCounters.reset()
     x.realize()
     # N assigns (1 kernel each) producing N kernels total
-    self.assertEqual(GlobalCounters.kernel_count, N)
+    assert_kernel_count(N)
 
   def test_shared_computation_assign_kernel_count(self):
     """When a .contiguous() is shared between an assign value and the next layer's input (like QKV projection in LLM),
@@ -648,7 +649,7 @@ class TestAssign(unittest.TestCase):
     GlobalCounters.reset()
     caches[-1][:1].contiguous().realize()
     # N matmuls + N assigns + 1 final read = 2*N+1 (AFTER embedding allows full graph scheduling with shared contiguous reuse)
-    self.assertEqual(GlobalCounters.kernel_count, 2*N+1)
+    assert_kernel_count(2*N+1)
 
   def test_double_assign_from_const(self):
     a = Tensor.empty(2)
@@ -656,12 +657,12 @@ class TestAssign(unittest.TestCase):
     a.assign(Tensor.ones(2, buffer=False))
     GlobalCounters.reset()
     a.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     self.assertEqual(a.tolist(), [1.,1.])
 
   def test_assign_deviceless_const(self):
     s = Tensor.empty(4, device="CPU:1", dtype=dtypes.float)
-    s.assign(Tensor(UOp.const(dtypes.float, 2.0)))
+    s.assign(Tensor(UOp.const(2.0).cast(dtypes.float)))
     np.testing.assert_equal(s.numpy(), [2, 2, 2, 2])
 
   def test_nested_after_contiguous_store(self):
@@ -672,7 +673,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)  # TODO: first copy is dead, could be 1
+    assert_kernel_count(2)  # TODO: first copy is dead, could be 1
     self.assertEqual(base.tolist(), [1,4,3])
 
   def test_nested_after_contiguous_store_no_init(self):
@@ -682,7 +683,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     self.assertEqual(base.tolist(), [1,4,3])
 
 class TestAssignOrdering(unittest.TestCase):
@@ -1065,6 +1066,14 @@ class TestAfterCachePatterns(unittest.TestCase):
     head.realize()
     np.testing.assert_array_equal(head.numpy(), [3])
     np.testing.assert_array_equal(full.numpy(), [1, 2])
+
+class TestBatchNormRunningStats(unittest.TestCase):
+  @unittest.expectedFailure  # TODO: nothing reads the stat update so it is never scheduled, and the chain grows every step
+  def test_running_stats_are_realized(self):
+    from tinygrad import nn
+    bn, x = nn.BatchNorm(4), Tensor.randn(2, 4, 3, 3).contiguous().realize()
+    with Context(TRAINING=1): bn(x).realize()
+    self.assertTrue(bn.running_mean.uop.base.is_realized)
 
 if __name__ == "__main__":
   unittest.main()

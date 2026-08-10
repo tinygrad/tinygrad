@@ -181,7 +181,7 @@ class TestTensorPad(unittest.TestCase):
     t = Tensor.arange(9).reshape(1, 1, 3, 3)
     self.assertEqual(t.dtype, dtypes.int)
     r = t.pad((1, 2, 0, -1), value=-float('inf'))
-    self.assertEqual(r.dtype, dtypes.float)
+    self.assertEqual(r.dtype, dtypes.weakfloat)
     self.assertEqual(r.shape, (1, 1, 2, 6))
 
 class TestTensorDeviceMismatch(unittest.TestCase):

@@ -5,9 +5,10 @@ from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
 from extra.llama_kernels import local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
+from extra.llama_kernels.swiglu import swiglu
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
-from test.helpers import needs_second_gpu
+from test.helpers import needs_second_gpu, assert_kernel_count
 from test.backend.test_asm_gemm import has_hipcc
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
@@ -80,7 +81,7 @@ class TestQuantizeFP8(unittest.TestCase):
   @needs_second_gpu
   def test_multi(self):
     devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(8))
-    x = Tensor.empty(2048*8, 1024, dtype=dtypes.bfloat16, device=devs).uop.multi(0)
+    x = Tensor.empty(2048*8, 1024, dtype=dtypes.bfloat16, device=devs).uop.unshard(0)
     x = Tensor(x, device=devs)
     amax_state = Tensor.full((), 2.0, dtype=dtypes.float32, device=devs).contiguous()
     amax_out = Tensor.zeros((), dtype=dtypes.float32, device=devs).realize()
@@ -95,7 +96,7 @@ class TestLocalAmax(unittest.TestCase):
     x = Tensor.arange(16).reshape(4, 4).cast(dtypes.float).clone(devices[0]).realize().shard(devices, axis=0).realize()
     GlobalCounters.reset()
     out = (x * local_abs_max(x)).clone().realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
     self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
 
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
@@ -160,6 +161,32 @@ class TestFusedQKVRoPE(unittest.TestCase):
     dv_ref = dv_partial.float().reshape(B, PARTIALS, N, H_KV, D).sum(1).cast(dtypes.bfloat16).unsqueeze(3)
     ref = Tensor.cat(dq_ref, dk_ref, dv_ref, dim=3).reshape(*dx.shape).realize()
     with Context(DEBUG=0): self.assertTrue(dx.allclose(ref, atol=2e-2, rtol=2e-2).item(), "backward mismatch")
+
+def run_swiglu(test:unittest.TestCase, shape:tuple[int, ...]) -> None:
+  Tensor.manual_seed(0)
+  x = (Tensor.randn(*shape) * 2).cast(dtypes.bfloat16).realize()
+  hidden = x.shape[-1] // 2
+  out, ref = swiglu(x), x[..., :hidden].silu() * x[..., hidden:]
+  Tensor.realize(out, ref)
+  with Context(DEBUG=0): test.assertTrue(out.allclose(ref, atol=2.5e-1, rtol=3e-2).item(), "SwiGLU forward mismatch")
+
+  grad = (Tensor.randn(*out.shape) * 2).cast(dtypes.bfloat16).realize()
+  grad_x, grad_ref = out.gradient(x, gradient=grad)[0], ref.gradient(x, gradient=grad)[0]
+  Tensor.realize(grad_x, grad_ref)
+  test.assertEqual(grad_x.shape, shape)
+  test.assertEqual(grad_x.dtype, dtypes.bfloat16)
+  with Context(DEBUG=0): test.assertTrue(grad_x.allclose(grad_ref, atol=2.5e-1, rtol=3e-2).item(), "SwiGLU backward mismatch")
+
+class TestSwiGLU(unittest.TestCase):
+  def setUp(self):
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
+
+  def test_simple(self): run_swiglu(self, (2, 32, 64))
+
+  def test_llama_shape(self):
+    if Device.DEFAULT != "AMD" or not Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950"):
+      self.skipTest("only run on real machine for speed")
+    run_swiglu(self, (2, 8192, 28672))
 
 if __name__ == '__main__':
   unittest.main()

@@ -60,7 +60,7 @@ class TestTensorUOpClone(unittest.TestCase):
     t = _t(3, 4).float()
     self.assertIs(_strip_unique(t.clone().uop), _strip_unique(t.uop.clone()))
   def test_clone_deviceless_const(self):
-    u = UOp.const(dtypes.float, 2.0)
+    u = UOp.const(2.0)
     self.assertIs(_strip_unique(Tensor(u).clone().uop), _strip_unique(u.clone()))
 
 class TestTensorUOpGradient(unittest.TestCase):
@@ -382,7 +382,7 @@ class TestTensorUOpStack(unittest.TestCase):
     self.assertIs(_t(2, 3).uop.stack(w.uop).dtype, dtypes.float32)
   def test_stack_index_dtype(self):
     # index is outside the promotion lattice, equal dtypes bypass promotion
-    self.assertEqual(UOp.const(dtypes.weakint, 1).stack(UOp.const(dtypes.weakint, 2)).shape, (2,))
+    self.assertEqual(UOp.const(1).stack(UOp.const(2)).shape, (2,))
 
 class TestTensorUOpConv2d(unittest.TestCase):
   def test_conv2d_basic(self):

@@ -29,7 +29,7 @@ TID_SIZE = WARPGROUP_SIZE*WARP_SIZE
 
 def copy(dest:UOp, src:UOp, rng:int, set=False, upcast=()):
   assert dest.shape == src.shape
-  rngs = [UOp.range(s, rng+i, AxisType.UPCAST if i in upcast else AxisType.LOOP) for i,s in enumerate(src.shape)]
+  rngs = [UOp.range(s, rng+i, AxisType.UPCAST if i in upcast else AxisType.WEAK) for i,s in enumerate(src.shape)]
   copy = dest[*rngs].store(src[*rngs]).end(*rngs)
   return dest.after(copy) if set else copy
 

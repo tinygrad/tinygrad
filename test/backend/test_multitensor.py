@@ -1,12 +1,12 @@
 import unittest, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
-from tinygrad.uop.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp, AxisType
 from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import run_linear, compile_linear
 import numpy as np
 from hypothesis import given, strategies as strat, settings
-from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph
+from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph, check_schedule, assert_kernel_count
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -52,15 +52,17 @@ class TestMultiTensor(unittest.TestCase):
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
-    for lb in X.uop.src:
-      assert lb.shape == (128,)
+    assert X.uop.src[0].shape == (128,)
+    # the MULTI carries and ends the DEVICE range as its second src
+    assert X.uop.src[1].op is Ops.RANGE and X.uop.src[1].arg[-1] is AxisType.DEVICE
+    assert X.uop.ended_ranges == X.uop.src[1:]
     (X + X).realize()
 
   @unittest.expectedFailure # TODO: fix
   def test_shard_empty(self):
     GlobalCounters.reset()
     X = Tensor.empty(256).shard(devices_2, 0).realize()
-    assert GlobalCounters.kernel_count == 0
+    assert_kernel_count(0)
     (X + X).realize()
 
   # TODO: fix this to not copy on the src device
@@ -73,6 +75,13 @@ class TestMultiTensor(unittest.TestCase):
     names = [call.src[0].src[0].arg.name for call in linear.src if call.src[0].op is Ops.PROGRAM]
     run_linear(linear)
     self.assertEqual(len(set(names)), 1, "function was relinearized")
+
+  def test_shard_beam(self):
+    cpu_2 = ("CPU:1", "CPU:2")
+    src = Tensor.ones(16).shard(cpu_2, 0).realize()
+    pad = src.to(cpu_2[::-1]).schedule_linear().src[0]
+    with Context(BEAM=1, IGNORE_BEAM_CACHE=1): prg = compile_linear(UOp(Ops.LINEAR, src=(pad,))).src[0].src[0]
+    self.assertNotEqual(prg.src[0].arg.applied_opts, ())
 
   def test_shard_same_device(self):
     X = Tensor.ones(256).contiguous().realize()
@@ -346,8 +355,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_const_like_shrink_on_shard_axis(self):
     t = Tensor.ones(16, 16, dtype=dtypes.int).shard(devices_2, axis=0)
     out = t.const_like(2)[:, :8]
-    linear, var_vals = out.linear_with_vars()
-    self.assertEqual(len(linear.src), 0)
+    linear, var_vals = check_schedule(out, 0)
     run_linear(linear, var_vals)
     self.assertEqual(out.tolist(), [[2]*8]*16)
 
@@ -422,6 +430,49 @@ class TestMultiBufferView(unittest.TestCase):
       self.assertEqual(len(compiled), 0)
     run_linear(linear, var_vals)
     np.testing.assert_equal(out.numpy(), ref[5].numpy())
+
+@unittest.skipIf(not_support_multi_device(), "need multi")
+class Test2DShard(unittest.TestCase):
+  def setUp(self):
+    self.devices_4 = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
+    self.rng = UOp.range(4, -1, AxisType.DEVICE)
+    self.rng0, self.rng1 = self.rng // 2, self.rng % 2
+
+  def _shard_2d(self, t:Tensor) -> Tensor:
+    u = t.uop.copy_to_device(self.devices_4)._shard(0, self.rng0)._shard(1, self.rng1).unshard((0, 1), (self.rng0, self.rng1))
+    return Tensor(u)
+
+  def test_2d_shard_basic(self):
+    ref = Tensor.arange(16).reshape(4, 4).contiguous().realize()
+    t = self._shard_2d(ref)
+    out = t.contiguous().realize()
+    np.testing.assert_equal(out.numpy(), ref.numpy())
+
+  def test_2d_shard_elementwise(self):
+    ref = Tensor.arange(16).reshape(4, 4).contiguous().realize()
+    t = self._shard_2d(ref)
+    out = (t + 1).contiguous().realize()
+    np.testing.assert_equal(out.numpy(), ref.numpy() + 1)
+
+  def test_2d_shard_sum_all(self):
+    ref = Tensor.arange(16).reshape(4, 4).contiguous().realize()
+    t = self._shard_2d(ref)
+    out = t.sum().contiguous().realize()
+    np.testing.assert_equal(out.numpy(), np.array(ref.numpy().sum()))
+
+  def test_2d_shard_sum_non_sharded_axis(self):
+    ref = Tensor.arange(4*4*2).reshape(4, 4, 2).contiguous().realize()
+    t = self._shard_2d(ref)
+    out = t.sum(axis=2).contiguous().realize()
+    np.testing.assert_equal(out.numpy(), ref.numpy().sum(axis=2))
+
+  def test_2d_shard_matmul(self):
+    a = Tensor.arange(16).reshape(4, 4).contiguous().realize()
+    b = Tensor.arange(16).reshape(4, 4).contiguous().realize()
+    a_s = self._shard_2d(a)
+    b_s = self._shard_2d(b)
+    out = (a_s @ b_s).contiguous().realize()
+    np.testing.assert_equal(out.numpy(), a.numpy() @ b.numpy())
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):

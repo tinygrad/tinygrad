@@ -6,16 +6,18 @@ from tinygrad.helpers import strip_parens
 def _mask(dt:DType): return 0xFF if dt.itemsize == 1 else 0xFFFF
 
 def sign_extend(val:UOp, sext_am:int):
-  return (UOp.where((val >> (sext_am - 1)) > 0, UOp.const(dtypes.uint32, 0xffffffff) << sext_am, UOp.const(dtypes.uint32, 0)) \
+  return (UOp.where((val >> (sext_am - 1)) > 0, UOp.const(0xffffffff << sext_am, dtypes.uint32), UOp.const(0, dtypes.uint32)) \
         | val.bitcast(dtypes.uint32)).bitcast(dtypes.int)
 
 # store for char: buf[idx/4] <- (var << (idx%4)*8))
 def packed_store(bidx:UOp, var:UOp, gate:UOp|None=None):
   elems, mask = 4//var.dtype.itemsize, _mask(var.dtype)
   shift_am, div_idx = (bidx.src[1].cast(dtypes.uint32) % elems) * (8*var.dtype.itemsize), bidx.src[1] // elems
+  # bool does its mask math at int32: renderer rewrites run after weak dtypes are lowered, and bool & 0xFF would create a weakint const
+  if var.dtype == dtypes.bool: var = var.cast(dtypes.int32)
   new_v, wmask = (var & mask).cast(dtypes.uint32) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
   idx = UOp(Ops.INDEX, src=(bidx.src[0], div_idx))
-  buf = UOp.load(idx, *((UOp.const(dtypes.uint32, 0), gate) if gate is not None else ()), dtype=dtypes.uint32)
+  buf = UOp.load(idx, *((UOp.const(0, dtypes.uint32), gate) if gate is not None else ()), dtype=dtypes.uint32)
   return UOp.store(idx, (buf & wmask) | new_v, *((gate,) if gate is not None else ()))
 
 # load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))
@@ -47,7 +49,7 @@ wgsl_matcher = PatternMatcher([
    lambda b,var,gate,s: packed_store(b,var,gate) if is_packed(s) else None),
   (UPat.store(UPat.var("b"), UPat.var("var"), name="s"), lambda b,var,s: packed_store(b,var) if is_packed(s) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
-  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
   # fix nan check: 'a != a -> is_nan()'
   (UPat.var("a") != UPat.var("a"), is_nan),
   ])
@@ -66,10 +68,10 @@ class WGSLRenderer(CStyleLanguage):
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.NEG, dtypes.uints, src=(UPat.var('x'))), lambda ctx,x: f"(0-{ctx[x]})"),
-    (UPat.cvar("x", dtype=dtypes.bool), lambda x: "true" if x.arg else "false"),
+    (UPat.cvar("x", dtype=dtypes.bool), lambda x: "true" if x.val else "false"),
     (UPat(Ops.CONST, dtype=(dtypes.uchar, dtypes.ushort, dtypes.uint32), name="x"),
-     lambda x: f"bitcast<u32>({x.arg})" if x.arg < 0 else f"{x.arg&0xFFFFFFFF}u"),
-    (UPat(Ops.CONST, dtype=dtypes.int32, name="x"), lambda ctx,x: f"{truncate[x.dtype](x.arg)}"),
+     lambda x: f"bitcast<u32>({x.val})" if x.val < 0 else f"{x.val&0xFFFFFFFF}u"),
+    (UPat(Ops.CONST, dtype=dtypes.int32, name="x"), lambda ctx,x: f"{truncate[x.dtype](x.val)}"),
     (UPat(Ops.BUFFER, name="x"), lambda ctx,x:
      f"var{'<workgroup>' if x.addrspace == AddrSpace.LOCAL else ''} {ctx[x]}: array<{ctx.buf_map(x)},{_packed_size(x)}>;"),
     (UPat(Ops.BITCAST, dtype=dtypes.half, name="x", src=(UPat(dtype=(dtypes.short, dtypes.ushort, dtypes.uint32),),)),

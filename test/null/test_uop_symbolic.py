@@ -5,19 +5,19 @@ import z3
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
 from test.helpers import get_uops
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
-from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load
+from tinygrad.uop.spec import spec_shared, type_verify
+from tinygrad.uop.symbolic import sym, pm_fold_cast_const, commutative, pm_simplify_valid, pm_move_where_on_load
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
   sym_vars = {v.render():v for v in v.toposort() if v.op in (Ops.RANGE, Ops.SPECIAL, Ops.PARAM)}
   s_eval = eval(s, sym_vars)
-  if isinstance(s_eval, int) and v.dtype==dtypes.weakint: s_eval = UOp.const(dtypes.weakint, s_eval)
-  elif isinstance(s_eval, (bool, int, float)): s_eval = UOp.const(dtypes.from_py(s_eval), s_eval)
+  if isinstance(s_eval, (bool, int, float)): s_eval = UOp.const(s_eval)
   s_eval = graph_rewrite(s_eval, commutative, name="cannonicalize eval")
   self.assertIs(s_eval, v, f"eval did not match simplified: {s_eval} != {v.render()} for {s}")
 
 def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.weakint): return UOp.variable(name,min_val,max_val,dtype)
-def uconst(val): return UOp.const(dtypes.weakint, val)
+def uconst(val): return UOp.const(val)
 def usum(ops): return functools.reduce(lambda x,y: x+y, ops)
 def uand(ops): return functools.reduce(lambda x,y: x*y, ops)
 
@@ -35,7 +35,7 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(solver.check(expr1 != expr2), z3.unsat, "simplified expression not equal to original")
 
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
-    v_simplified = graph_rewrite(v, sym, name="simplify symbolic uop")
+    v_simplified = graph_rewrite(v, sym+pm_fold_cast_const, name="simplify symbolic uop")
     if test_z3: self.check_equal_z3(v, v_simplified)
     nmin, nmax = v_simplified.vmin, v_simplified.vmax
     check_uop_against_string(self, v_simplified, s)
@@ -103,16 +103,16 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(UOp.gcd(a, a*b, a*3).simplify(), a)
     self.assertEqual(UOp.gcd(a*a*a, a*b*a, a*3*a).simplify(), a*a)
     self.assertEqual(UOp.gcd(a*a*10, b*a*5, a*a*5).simplify(), a*5)
-    self.assertEqual(UOp.gcd(a*10, b*5, a*5).simplify(), a.const_like(5))
-    self.assertEqual(UOp.gcd(a, b*5, a*5).simplify(), a.const_like(1))
+    self.assertEqual(UOp.gcd(a*10, b*5, a*5).simplify(), uconst(5))
+    self.assertEqual(UOp.gcd(a, b*5, a*5).simplify(), uconst(1))
 
   def test_divides_exact(self):
     a = Variable("a", 1, 8)
     b = Variable("b", 1, 8)
     self.assertEqual((a*a*3).divide_exact(a).simplify(), a*3)
-    self.assertEqual((a*a*3).divide_exact(a*a*3).simplify(), a.const_like(1))
-    self.assertEqual((a*a*6).divide_exact(a*a*3).simplify(), a.const_like(2))
-    self.assertEqual((a*b*3).divide_exact(a.const_like(3)).simplify(), a*b)
+    self.assertEqual((a*a*3).divide_exact(a*a*3).simplify(), uconst(1))
+    self.assertEqual((a*a*6).divide_exact(a*a*3).simplify(), uconst(2))
+    self.assertEqual((a*b*3).divide_exact(uconst(3)).simplify(), a*b)
     self.assertEqual((a*a*3).divide_exact(a*(-3)).simplify(), a*-1)
     self.assertEqual((a*a*b*3).divide_exact(a*b).simplify(), a*3)
     self.assertEqual((a*3+a*b).divide_exact(a).simplify(), b+3)
@@ -346,6 +346,12 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_lt(self):
     self.helper_test_variable(Variable("a", 0, 5)*4 < 13, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 0, 5)*4 < 16, 0, 1, "(a<4)")
+    self.helper_test_variable(Variable("a", -5, 5)*4 < -13, 0, 1, "(a<-3)")
+    self.helper_test_variable(Variable("a", -5, 5)*-4 < 13, 0, 1, "((a*-1)<4)")
+    c0, c1 = 2, 2**54+1
+    self.helper_test_variable(Variable("a", 0, c1)*c0 < c1, 0, 1, f"(a<{2**53+1})")
+    c0, c1 = -2, -(2**54-1)
+    self.helper_test_variable(Variable("a", 0, -c1)*c0 < c1, 0, 1, f"((a*-1)<{-(2**53-1)})")
     self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "((a*-1)<0)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 12, 0, 1, "((a<3)!=True)")
     self.helper_test_variable(Variable("a", 0, 5)*4 >= 13, 0, 1, "((a<4)!=True)")
@@ -876,7 +882,7 @@ class TestSymbolic(unittest.TestCase):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable(idx//4, 0, 6, "(idx//4)")
     # TODO: simplify the true branch
-    self.helper_test_variable((idx<4).where(idx//4, idx.const_like(-1)), -1, 6, "(idx<4).where((idx//4), -1)")
+    self.helper_test_variable((idx<4).where(idx//4, uconst(-1)), -1, 6, "(idx<4).where((idx//4), -1)")
 
   def test_floordiv_lt(self):
     # x//d<c <=> x<c*d for d>0, and <=> c*d<x for d<0
@@ -935,7 +941,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_where_removal(self):
     cond = Variable("a", 0, 3) < 2
-    u1, u0 = cond.const_like(True), cond.const_like(False)
+    u1, u0 = UOp.const(True), UOp.const(False)
     self.helper_test_variable(cond, 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0), 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0).where(u1, u0), 0, 1, "(a<2)")
@@ -967,6 +973,28 @@ class TestSymbolic(unittest.TestCase):
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((x<2).where(a, b)+(x<2).where(a, 0))")
 
+  def test_where_combine_cross_zero(self):
+    cond = Variable("x", 0, 3) < 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    self.helper_test_variable(cond.where(a, a.ufix(0)) + cond.where(b.ufix(0), b), 0, 3, "(x<2).where(a, b)")
+    self.helper_test_variable(cond.where(a, a.ufix(0)) + cond.where(a.ufix(0), a), 0, 3, "a")
+
+  def test_where_or_dual(self):
+    m1 = Variable("x", 0, 3) < 2
+    m2 = Variable("y", 0, 3) < 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    self.helper_test_variable(m1.where(a, m2.where(a, b)), 0, 3, "((x<2)|(y<2)).where(a, b)")
+
+  def test_bool_ne_false(self):
+    cond = Variable("x", 0, 3) < 2
+    self.helper_test_variable(cond.ne(False), 0, 1, "(x<2)")
+
+  def test_bitcast_chain(self):
+    a = UOp.variable("a", 0, 3, dtype=dtypes.int32)
+    self.assertIs(graph_rewrite(a.bitcast(dtypes.float32).bitcast(a.dtype), sym), a)
+
   def test_negation_in_where(self):
     cond = Variable("x", 0, 3) < 2
     a = Variable("a", 0, 3)
@@ -988,12 +1016,12 @@ class TestSymbolic(unittest.TestCase):
 
     # TODO: copied from render, render does not support cast
     glbl = UOp.param(0, dtypes.int, (1,))
-    uops = get_uops(UOp(Ops.STORE, src=(glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
+    uops = get_uops(UOp(Ops.STORE, src=(glbl.index(UOp.const(0, dtypes.int)), expr)).sink())
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
 
     # the vars are now scalar PARAMs
     pvar = {u.expr: u for u in rewritten_uop.toposort() if u.op is Ops.PARAM}
-    self.assertEqual(rewritten_uop, (pvar['s']<2).where(pvar['a'].cast(dtypes.half), pvar['b'].cast(dtypes.half)))
+    self.assertEqual(rewritten_uop, (pvar['s']<UOp.const(2, dtypes.int)).where(pvar['a'].cast(dtypes.half), pvar['b'].cast(dtypes.half)))
 
   def test_where_merge_branches(self):
     cond1 = Variable("s", 0, 10) < 6
@@ -1150,7 +1178,7 @@ class TestSymbolicVariables(unittest.TestCase):
     b = Variable("x", 1, 1).bind(1)
     s = b.simplify()
     self.assertEqual(s.op, Ops.CONST)
-    self.assertEqual(s.arg, 1)
+    self.assertEqual(s.val, 1)
 
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):
@@ -1174,9 +1202,13 @@ class TestSymInfer(unittest.TestCase):
     # floor: 1 % -1000 = -999, 1 // -1000 = -1
     assert sym_infer(a%b, var_vals) == -999
     assert sym_infer(a//b, var_vals) == -1
+  def test_sym_infer_with_cast(self):
+    a = Variable("a", 0, 100, dtypes.int)
+    assert sym_infer(a.cast(dtypes.long) + 1, {a.expr: 5}) == 6
+    assert sym_infer(a.cast(dtypes.float) * 0.5, {a.expr: 5}) == 2.5
   def test_sym_infer_with_bitcast(self):
     a = Variable("a", 1, 10, dtypes.int)
-    expr = ((a.bitcast(dtypes.uint) << UOp.const(dtypes.uint, 1)).bitcast(dtypes.int) + 2)
+    expr = ((a.bitcast(dtypes.uint) << UOp.const(1)).bitcast(dtypes.int) + 2)
     ret = sym_infer(expr, {a.expr: 2})
     assert isinstance(ret, int)
     assert ret == 6
@@ -1187,7 +1219,7 @@ class TestSymInfer(unittest.TestCase):
     c = Variable("c", 0, 0xFFFFFFFF, dtypes.uint)
     assert sym_infer(c.bitcast(dtypes.int), {c.expr: 0xFFFFFFFF}) == -1
 
-    assert sym_infer(UOp.const(dtypes.float, 1.5).bitcast(dtypes.uint), {}) == 1069547520
+    assert sym_infer(UOp.const(1.5).cast(dtypes.float).bitcast(dtypes.uint), {}) == 1069547520
 
   def test_sym_infer_deeply_nested(self):
     # build an expression that exceeds Python's nested parentheses limit for eval
@@ -1308,7 +1340,8 @@ class TestInvalidIndex(unittest.TestCase):
   def test_invalid_times_0(self):
     ridx = Variable("ridx", 0, 10)
     idx = (ridx<5).where(ridx, UOp.invalid())*0
-    self.assertIs(idx.simplify(), (ridx<5).where(0, UOp.invalid()), "multiplying an index by 0 should preserve the invalid")
+    self.assertIs(idx.simplify(), (ridx<5).where(uconst(0), UOp.invalid()),
+                  "multiplying an index by 0 should preserve the invalid")
 
   def test_alu_moves_inside_invalid(self):
     ridx = Variable("ridx", 0, 10)
@@ -1332,24 +1365,24 @@ class TestInvalidIndex(unittest.TestCase):
     self.assertIs((UOp.invalid()<Variable("a",0,10)).simplify().dtype, dtypes.bool)
 
   def test_alu_invalid_vconst(self):
-    c1 = UOp.const(dtypes.weakint, (1, 1, Invalid, Invalid))
-    c2 = UOp.const(dtypes.weakint, (1, Invalid, 1, 1))
-    self.assertIs((c1+c2).simplify(), UOp.const(dtypes.weakint, (2, Invalid, Invalid, Invalid)))
+    c1 = UOp.const((1, 1, Invalid, Invalid))
+    c2 = UOp.const((1, Invalid, 1, 1))
+    self.assertIs((c1+c2).simplify(), UOp.const((2, Invalid, Invalid, Invalid)))
 
 class TestStoreLoadFolding(unittest.TestCase):
   """Tests for store(index, load(index)) -> NOOP rule. This rule matches patterns that EMERGE during simplification."""
   def test_store_load_folding(self):
     # store(idx, load(idx)) -> NOOP, including emergent patterns like store(idx, load(idx) + 0)
     buf = UOp.param(0, dtypes.int, (1,))
-    index = buf.index(UOp.const(dtypes.weakint, 0))
+    index = buf.index(UOp.const(0))
     # Direct: store(idx, load(idx)) -> NOOP
     self.assertEqual(graph_rewrite(index.store(index.load()), sym).op, Ops.NOOP)
     # Emergent: store(idx, load(idx) + 0) -> store(idx, load(idx)) -> NOOP
-    self.assertEqual(graph_rewrite(index.store(index.load() + UOp.const(dtypes.int, 0)), sym).op, Ops.NOOP)
+    self.assertEqual(graph_rewrite(index.store(index.load() + UOp.const(0)), sym).op, Ops.NOOP)
     # Emergent: store(idx, load(idx) * 1) -> store(idx, load(idx)) -> NOOP
-    self.assertEqual(graph_rewrite(index.store(index.load() * UOp.const(dtypes.int, 1)), sym).op, Ops.NOOP)
+    self.assertEqual(graph_rewrite(index.store(index.load() * UOp.const(1)), sym).op, Ops.NOOP)
     # Negative: store(idx, load(idx) + 1) should NOT fold
-    self.assertEqual(graph_rewrite(index.store(index.load() + UOp.const(dtypes.int, 1)), sym).op, Ops.STORE)
+    self.assertEqual(graph_rewrite(index.store(index.load() + UOp.const(1)), sym).op, Ops.STORE)
 
 class TestMoveWhereOnLoad(unittest.TestCase):
   def test_bool_index_preserves_dtype(self):
@@ -1360,13 +1393,9 @@ class TestMoveWhereOnLoad(unittest.TestCase):
     cond = (a < 4) & (r < 2)
     valid = (a < 2)  # pre-existing valid on the load (to pass can_move check for the r-only clause)
     idx = buf.index(a.valid(valid))
-    expr = cond.where(idx, idx.const_like(0))
+    expr = cond.where(idx, UOp.const(0))
     out = graph_rewrite(expr, pm_move_where_on_load)
-    # any WHERE in the rewritten graph must have matched-dtype branches
-    for u in out.toposort():
-      if u.op is Ops.WHERE:
-        self.assertEqual(u.dtype, u.src[1].dtype, f"WHERE branch 1 dtype mismatch: {u}")
-        self.assertEqual(u.dtype, u.src[2].dtype, f"WHERE branch 2 dtype mismatch: {u}")
+    type_verify(out, spec_shared)  # Invalid matches any dtype
 
 class TestSymbolicRealWorld(unittest.TestCase):
   def test_resnet_half(self):
@@ -1449,7 +1478,7 @@ class TestFuzzFailure(unittest.TestCase):
     v2=Variable('v2', 0, 2)
     v3=Variable('v3', 0, 1)
     expr = (((((((((((((((((((((((0//4)%2)//8)+-2)+-4)+-3)+v1)+-4)+v2)+-2)+v3)+v2)//3)%7)*1)//2)+v2)*-1)+2)+1)+0)+-3)+v3)
-    v1_val, v2_val, v3_val = v1.const_like(8), v2.const_like(0), v3.const_like(0)
+    v1_val, v2_val, v3_val = UOp.const(8), UOp.const(0), UOp.const(0)
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     assert num==rn, f"{num} != {rn}"

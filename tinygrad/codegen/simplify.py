@@ -1,7 +1,7 @@
 import itertools
 from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType
-from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const, invalid_gate
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
 
@@ -32,7 +32,7 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
         s0, s1 = r0.src[0], r1.src[0]
         # do the merge
         new_range = r0.replace(src=(s0*s1,))
-        nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
+        nidx = graph_rewrite(u, _substitute+symbolic+pm_fold_cast_const+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
                              name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
 
         # check if it simplifies
@@ -47,7 +47,7 @@ def mark_gated(ctx, idx):
     guards = {r:c for v in cond.split_uop(Ops.AND) if v.op is Ops.CMPLT and (r:=v.src[0]).op is Ops.RANGE and (c:=v.src[1]).op is Ops.CONST}
   else: x, guards = idx, {}
   # ensure that we choose max(c_i) for all i where r < c_i
-  ctx |= {r:c for r,c in guards.items() if (r not in ctx or ctx[r].arg < c.arg)}
+  ctx |= {r:c for r,c in guards.items() if (r not in ctx or ctx[r].val < c.val)}
   # but if a range is ever ungated, we cannot shrink it
   ctx |= {r:r.src[0] for r in x.ranges if r not in guards}
 
@@ -60,7 +60,9 @@ pm_simplify_ranges = PatternMatcher([
 ])
 
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
-  if r not in ctx and r.arg[-1] is not AxisType.WARP and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
+  # ranges that aren't looped over can't be split
+  if r not in ctx and r.arg[-1] not in {AxisType.WARP, AxisType.DEVICE} \
+    and r.src[0].op is Ops.CONST and r.src[0].divides(c.val) is not None: ctx[r] = c
 
 def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
   ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
@@ -84,9 +86,9 @@ def reduce_unparented(red:UOp) -> UOp|None:
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
   if red.arg[0] is Ops.ADD:
-    for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype)
+    for r in reduce_unparented: ret = ret * r.src[0]
   if red.arg[0] is Ops.MUL:
-    for r in reduce_unparented: ret = ret ** r.src[0].cast(ret.dtype)
+    for r in reduce_unparented: ret = ret ** r.src[0]
   return ret
 
 pm_reduce_unparented = PatternMatcher([
@@ -96,7 +98,7 @@ pm_reduce_unparented = PatternMatcher([
 
 pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   # lift x+y out of reduce on lt
-  ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"), lambda x,y,c: (x < (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
+  ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
   # lift x*y out of reduce
   ((UPat.var("x")*UPat.var("y")) < UPat.var("c"),
    lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and dtypes.is_int(y.dtype) and y.vmin > 0 else None),
@@ -107,13 +109,14 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
     ((UPat.var("r")<UPat.var("lower")).logical_not()&(UPat(Ops.RANGE, name="r")<UPat.var("upper"))).where(UPat.var("val"), 0),
   ).reduce(UPat.var("r"), arg=Ops.ADD), lambda r,val,lower=None,upper=None:
     ((upper.minimum(r.src[0]) if upper is not None else r.src[0]) -
-     (lower.maximum(0) if lower is not None else r.const_like(0))).maximum(0).minimum(r.src[0]).cast(val.dtype) * val if no_range(val) else None),
-  # REDUCE on ADD
+     (lower.maximum(0) if lower is not None else r.const_like(0))).maximum(0).minimum(r.src[0]) * val if no_range(val) else None),
+  (invalid_gate.reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
+   lambda cond,x,i,r: cond.where(x.reduce(*r.src[1:], arg=Ops.ADD), i) if no_range(cond) else None),
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
    lambda x,y,r: x.reduce(*r.src[1:], arg=Ops.ADD) + y.reduce(*r.src[1:],arg=Ops.ADD)),
   # AND on WHERE
   ((UPat(Ops.PARAM, name="x") & UPat.var("y")).where(UPat.var("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
-    lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
+    lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x),
   # MUL casted bool
   ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
 ])+symbolic

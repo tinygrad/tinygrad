@@ -959,7 +959,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # Reimplemented here because you need legacy RNG for passing ONNX tests.
   def dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
     import numpy as np
-    if not training_mode: return data, data.const_like(True).cast(dtypes.bool)
+    if not training_mode: return data, data.const_like(True, dtypes.bool)
     if seed is not None:
       rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), dtype=data.dtype, device=data.device)
     else:
@@ -1093,7 +1093,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def RMSNormalization(X:Tensor, scale:Tensor, axis:int=-1, epsilon:float=1e-5, stash_type:int=1):
     assert stash_type == 1, "only float32 is supported"
     norm = X.cast(dtypes.float).square().mean(axis=tuple(range(axis + X.ndim if axis < 0 else axis, X.ndim)), keepdim=True).add(epsilon).rsqrt()
-    return X.cast(X.dtype) * norm * scale
+    return X * norm * scale
 
   def RotaryEmbedding(X:Tensor, cos_cache:Tensor, sin_cache:Tensor, position_ids:Tensor|None=None, interleaved:int=0, num_heads:int|None=None,
                       rotary_embedding_dim:int=0):

@@ -1,8 +1,8 @@
 import itertools, functools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg
-from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg, graph_rewrite
+from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate, sym
 from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv, is_image_shape
 from tinygrad.renderer import Renderer
 
@@ -27,11 +27,14 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
     lo, hi = (c + 1, X.vmax) if is_upper_bound else (X.vmin, c - 1)
     if lo <= hi:
       fake = UOp.variable(f"fake{i}", lo, hi, X.dtype)
-      for coord,b in zip(idx.src, (width, height)):
-        rw = coord.substitute({X:fake}).simplify()
-        if rw.vmin >= b or rw.vmax < 0:
-          drop_stmt.append(stmt)
-          break
+      subs = [{X: fake}]
+      # idx may not have X itself, so also substitute a term of X: v -> fake - (X - v)
+      terms = list(X.split_uop(Ops.ADD))
+      v = next((u for u in terms if u.op in GroupOp.Irreducible and u.op is not Ops.CONST), None)
+      if v is not None and (rest:=[u for u in terms if u is not v]): subs.append({v: fake - UOp.usum(*rest)})
+      if any((testidx:=graph_rewrite(coord.substitute(sub), sym)).vmin >= b or testidx.vmax < 0
+             for sub in subs for coord,b in zip(idx.src, (width, height))):
+        drop_stmt.append(stmt)
   return drop_stmt
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
@@ -84,7 +87,7 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].index(1).simplify().backward_slice))
   buf = buf.replace(src=(shape_to_shape_arg((h, w, 4)),))
   shapes[buf.arg.slot] = (h, w)
-  if valid.op is not Ops.CONST or valid.arg is not True:
+  if valid.op is not Ops.CONST or valid.val is not True:
     return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid), dtype=dtypes.float)
   else:
     return buf.index(cidx.src[1], cidx.src[0], dtype=dtypes.float)
@@ -111,10 +114,10 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       if buf.addrspace == AddrSpace.REG: continue
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
       root_src: UOp|str
-      if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
-      elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
-      elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
-      elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
+      if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].val
+      elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].val
+      elif idx.op is Ops.CONST and idx.val is Invalid: root_src, arg = "INVALID", 0
+      elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.val
       else: root_src, arg = idx, 0
       memory[(u.op, buf, root_src, valid)].setdefault(arg, []).append(u)
 
@@ -127,7 +130,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     if ctx is not None and ctx.target.device == "DSP":
       lengths = [128,64,32,16,8,4]
       must_divide = False
-    elif buf.dtype not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not is_image_shape(buf._shape):
+    elif buf.dtype not in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and not is_image_shape(buf._shape):
       pass
     elif buf.addrspace == AddrSpace.REG:
       pass
@@ -141,12 +144,12 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
     for full_grp in grouped_offsets:
       while len(full_grp):
-        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(dtypes.weakint, full_grp[0])
+        offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(full_grp[0])
         length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
         grp = full_grp[:length]
         # NOTE: we apply the valid again after we determine the length
         offset = offset.valid(valid) if valid is not None else offset
-        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(dtypes.weakint, len(grp)))) if len(grp) > 1 else buf.index(offset)
+        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(len(grp)))) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):
@@ -158,7 +161,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
           ld = idx.load()
           for i,g in enumerate(grp):
             for oo in offsets[g]:
-              replacements[oo] = ld.index(UOp.const(dtypes.weakint, i)) if len(grp) > 1 else ld
+              replacements[oo] = ld.index(i) if len(grp) > 1 else ld
         full_grp = full_grp[length:]
 
   # apply

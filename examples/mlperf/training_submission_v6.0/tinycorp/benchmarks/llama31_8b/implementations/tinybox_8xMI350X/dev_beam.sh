@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 export PYTHONPATH="."
-export PATH="/opt/rocm-7.1.1/bin:$PATH"
-export ROCM_PATH="/opt/rocm-7.1.1"
+export ROCM_PATH=${ROCM_PATH:-/opt/rocm-7.1.1}
+export PATH="$ROCM_PATH/bin:$PATH"
 export DEV=${DEV:-AMD}
 export CHECK_OOB=0
 export REWRITE_STACK_LIMIT=5000000 HCQDEV_WAIT_TIMEOUT_MS=240000
@@ -16,7 +16,7 @@ export USE_ATOMICS=${USE_ATOMICS:-1}
 export ASM_GEMM=${ASM_GEMM:-1}
 export WQKV=${WQKV:-1}
 export MASTER_WEIGHTS=${MASTER_WEIGHTS:-1}
-export FP8=${FP8:-1}
+export MXFP4=${MXFP4:-1}
 export ALLREDUCE_CAST=${ALLREDUCE_CAST:-1}
 export FAST_CE=${FAST_CE:-1}
 export FUSED_INPUT_QUANTIZE=${FUSED_INPUT_QUANTIZE:-1}

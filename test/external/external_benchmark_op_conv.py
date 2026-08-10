@@ -13,9 +13,9 @@ from tinygrad.dtype import Invalid
 
 def vision_conv_143():
   c0 = UOp.param(0, dtypes.half, shape=(16, 1024, 4))
-  c2 = UOp.range(32, 3, AxisType.LOOP)
-  c5 = UOp.range(128, 4, AxisType.LOOP)
-  c8 = UOp.range(16, 2, AxisType.LOOP)
+  c2 = UOp.range(32, 3)
+  c5 = UOp.range(128, 4)
+  c8 = UOp.range(16, 2)
   c16 = UOp.range(7, 0, AxisType.REDUCE)
   c17 = c8*2+c16
   c24 = ((c17<3)!=True)&(c17<35)
@@ -24,8 +24,8 @@ def vision_conv_143():
   c32 = ((c27<3)!=True)&(c27<67)
   c34 = UOp.param(1, dtypes.half, shape=(32, 1024, 4))
   c38 = c5//2
-  c45 = (c32&c24).where((c27*64+c38+c17*4096+-12480), UOp.const(dtypes.weakint, Invalid))
-  c48 = (c24&c32).where(c34.index(c45), UOp.const(dtypes.float, 0.0))
+  c45 = (c32&c24).where((c27*64+c38+c17*4096+-12480), UOp.const(Invalid, dtypes.weakint))
+  c48 = (c24&c32).where(c34.index(c45), UOp.const(0.0, dtypes.float))
   c49 = UOp.param(2, dtypes.half, shape=(64, 49, 4))
   c61 = c48*c49.index((c26*4+c5%2+c16*28+c38*196))
   c63 = UOp.param(3, dtypes.float, (128,))
@@ -39,9 +39,9 @@ def vision_conv_143():
 
 def vision_conv_153():
   c0 = UOp.param(0, dtypes.half, shape=(8, 1024, 4))
-  c2 = UOp.range(16, 3, AxisType.LOOP)
-  c5 = UOp.range(256, 4, AxisType.LOOP)
-  c8 = UOp.range(8, 2, AxisType.LOOP)
+  c2 = UOp.range(16, 3)
+  c5 = UOp.range(256, 4)
+  c8 = UOp.range(8, 2)
   c16 = UOp.range(7, 0, AxisType.REDUCE)
   c17 = c8*2+c16
   c24 = ((c17<3)!=True)&(c17<19)
@@ -50,8 +50,8 @@ def vision_conv_153():
   c32 = ((c27<3)!=True)&(c27<35)
   c34 = UOp.param(1, dtypes.half, shape=(16, 1024, 4))
   c38 = c5//2
-  c45 = (c32&c24).where((c27*128+c38+c17*4096+-12672), UOp.const(dtypes.weakint, Invalid))
-  c48 = (c24&c32).where(c34.index(c45), UOp.const(dtypes.float, 0.0))
+  c45 = (c32&c24).where((c27*128+c38+c17*4096+-12672), UOp.const(Invalid, dtypes.weakint))
+  c48 = (c24&c32).where(c34.index(c45), UOp.const(0.0, dtypes.float))
   c49 = UOp.param(2, dtypes.half, shape=(128, 49, 4))
   c61 = c48*c49.index((c26*4+c5%2+c16*28+c38*196))
   c63 = UOp.param(3, dtypes.float, (256,))
@@ -65,7 +65,7 @@ def vision_conv_153():
 
 def dm_conv_172():
   c0 = UOp.param(0, dtypes.half, shape=(1, 240, 4))
-  c2 = UOp.range(960, 4, AxisType.LOOP)
+  c2 = UOp.range(960, 4)
   c5 = UOp.param(1, dtypes.half, shape=(8, 384, 4))
   c7 = UOp.range(32, 0, AxisType.REDUCE)
   c10 = UOp.range(4, 1, AxisType.REDUCE)

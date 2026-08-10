@@ -2,8 +2,9 @@ import numpy as np
 import unittest
 from tinygrad.function import function
 from tinygrad import Tensor, GlobalCounters, Device
-from tinygrad.dtype import dtypes, Invalid
+from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+from test.helpers import assert_kernel_count
 
 class TestFunction(unittest.TestCase):
   def test_simple(self):
@@ -535,7 +536,7 @@ class TestFunctionTuple(unittest.TestCase):
 
     @function(precompile=True, precompile_backward=True)
     def f(a:Tensor):
-      c = Tensor(Tensor.invalids(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.multi(0), device=devs)
+      c = Tensor(Tensor.invalids(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.unshard(0), device=devs)
       return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
 
     np.testing.assert_allclose(f(a).numpy(), 14.0)
@@ -543,7 +544,7 @@ class TestFunctionTuple(unittest.TestCase):
     # g is f with empty output instead of invalids
     @function(precompile=True, allow_implicit=True)
     def g(a:Tensor):
-      c = Tensor(Tensor.empty(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.multi(0), device=devs)
+      c = Tensor(Tensor.empty(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.unshard(0), device=devs)
       return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
 
     np.testing.assert_allclose(g(a).numpy(), 14.0)
@@ -593,7 +594,7 @@ class TestFunctionTuple(unittest.TestCase):
     state = Tensor([10., 20., 30., 40.], device="CPU").contiguous().realize()
     @function(precompile=True, allow_implicit=True)
     def f(a:Tensor):
-      after = state.uop.after(state.uop.shrink(((0, 2),)).store(UOp.const(dtypes.float32, Invalid, shape=(2,))))
+      after = state.uop.after(state.uop.shrink(((0, 2),)).store(Invalid))
       return Tensor(after).contiguous() + a
     out = f(Tensor([1., 1., 1., 1.], device="CPU").contiguous().realize())
     np.testing.assert_allclose(out.numpy(), [11., 21., 31., 41.])
@@ -608,7 +609,7 @@ class TestFunctionTuple(unittest.TestCase):
     @function(precompile=True)
     def f(a:Tensor):
       c = Tensor.invalids(*a.uop.shard_shape, dtype=a.dtype, device=a.device)
-      if multi: c = Tensor(c.uop.multi(a.uop.axis), device=a.device)
+      if multi: c = Tensor(c.uop.unshard(a.uop.axis), device=a.device)
       c = Tensor.custom_kernel(c, a, fxn=my_kernel)[0]
       return c + 1
 
@@ -618,7 +619,7 @@ class TestFunctionTuple(unittest.TestCase):
     out = f(a)
     GlobalCounters.reset()
     out.realize()
-    self.assertEqual(GlobalCounters.kernel_count, kernel_count)
+    assert_kernel_count(kernel_count)
     np.testing.assert_allclose(out.numpy(), [3., 5., 7., 9.])
 
   def test_custom_kernel_precompile_further_compute_multi(self): self.test_custom_kernel_precompile_further_compute(multi=True, kernel_count=4)
