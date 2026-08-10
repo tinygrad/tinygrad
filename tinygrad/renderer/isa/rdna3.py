@@ -160,7 +160,7 @@ def fold_global(base:UOp, idx:UOp): # (voff, ioffs)
   def foldable(v:int) -> bool: return -(1 << 12) <= v < (1 << 12)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST and foldable((_offs := idx.src[1].val * disp_scale)):
     vaddr, offs = idx.src[0], const(_offs, dtypes.int16)
-  vaddr = UOp(Ops.SHL, dtype=dtypes.uint64, src=(int_to_int64(vaddr, dtypes.uint64), shft))
+  vaddr = int_to_int64(vaddr << shft, dtypes.uint64)
   return (UOp(Ops.ADD, dtype=dtypes.uint64, src=(vaddr, base.bitcast(dtype=dtypes.uint64))), offs)
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
@@ -325,14 +325,9 @@ def cvt(ctx, y:UOp, x:UOp):
     else: return y.index(0)
   return x.ins(_cvt_ins(y.dtype,x.dtype))
 
-# TODO: cleanup this slop + manual constr
 def int_to_int64(y:UOp, tdt:DType):
-  if not dtypes.is_unsigned(y.dtype): # sext
-    nbits = y.dtype.itemsize*8
-    lo = vmov(y)
-    hi = getsign(to_vgpr(y), nbits)
-  else: lo, hi = vmov(y), vmov(const(0))
-  return UOp.group(lo, hi, dtype=tdt)
+  hi = vmov(const(0)) if dtypes.is_unsigned(y.dtype) else getsign(to_vgpr(y), y.dtype.itemsize*8)
+  return UOp.group(to_vgpr(y), hi, dtype=tdt)
 
 # NOTE: use v_bfe instead of hand rolled masking
 def intcast(y:UOp, x:UOp):
