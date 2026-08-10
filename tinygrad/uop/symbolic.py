@@ -293,8 +293,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
     tuple(dedup(flatten([(y,) if y.op in {Ops.RANGE, Ops.STORE, Ops.CALL, Ops.FUNCTION, Ops.BARRIER, Ops.END, Ops.LINEAR, Ops.STAGE}
                         else y.src for y in x.src[1:]]))))),
-  # after with 1 src is just src[0]
-  (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
+  # after/end with 1 src is just src[0]
+  (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
 ])+div_and_mod_symbolic
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
