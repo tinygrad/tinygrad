@@ -37,7 +37,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   else: use_all2all, use_ring = False, False
   if DEBUG >= 2: print(f"{'ALL2ALL' if use_all2all else 'RING' if use_ring else 'NAIVE'} ALLREDUCE {ndev}x{numel} | {buf.dtype}")
 
-  if not concrete: buf = buf.pad_to(buf.max_shape)
+  buf = buf.pad_to(buf.max_shape)
   # Copies need stable storage. AFTER only adds dependencies to an existing buffer, so preserve that
   # identity instead of materializing a second full-size buffer before reduce-scatter.
   direct_slices = buf.has_buffer_identity(after_ok=True)
@@ -45,8 +45,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
 
   # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:
-    out = functools.reduce(lambda x,y: x.alu(op, y), [buf.mselect(i).copy_to_device(device) for i in range(ndev)])
-    return out if concrete else out.shrink_to(shape)
+    return functools.reduce(lambda x,y: x.alu(op, y), [buf.mselect(i).copy_to_device(device) for i in range(ndev)]).shrink_to(shape)
 
   # chunk data into ndev pieces
   assert isinstance(numel, int)

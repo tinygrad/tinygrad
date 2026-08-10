@@ -1,10 +1,11 @@
 from __future__ import annotations
 from typing import cast, Callable, TypeVar, Generic, Any, Sequence
-import struct, functools, time, collections, itertools
+import struct, functools, time, collections, itertools, decimal, statistics
 from dataclasses import replace, dataclass
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap
-from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
+from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar, perf_counter_us, Context
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
 from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
 from tinygrad.dtype import dtypes, truncate
@@ -32,6 +33,7 @@ class HCQInfo:
 
   input_idxs:tuple[int, ...] = () # indexes into input_uops used by this call
   inputs:int|None = None
+  prof:tuple[ProfileGraphEntry, ...] = () # st_id/en_id are timestamp signal slots until collect
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -170,7 +172,7 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
     fins.append(make_call("hcq_finalizer", UOp.sink(epoch_slot.store(epoch + 1), sched_epoch.after(fin_submit).index(0).store(epoch)), HCQInfo(devs)))
   return fences, fins, signal_tags
 
-def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]]) -> list[UOp]:
+def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]], profile:bool) -> list[UOp]:
   batch_info = [(devices, "COMPUTE:0" if call.src[0].op is Ops.PROGRAM else "COPY:0") for call, devices in batch]
 
   # schedule deps
@@ -188,7 +190,7 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]]) -> list[UOp]:
   fences, finalizers, finalizer_signal_tags = _build_finalizers(batch, batch_info, deps_tracker, slots)
   signal_tags |= finalizer_signal_tags
 
-  src = []
+  src, prof = [], []
   for tag, ((call, _), (devices, queue), q) in enumerate(zip(batch, batch_info, call_waits)):
     # first queue use, sync prior device work with the device timeline
     if batch_info.index((devices, queue)) == tag:
@@ -197,20 +199,27 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]]) -> list[UOp]:
 
     # and make hcq call
     name, info = get_call_name(call, get_call_arg_uops(call)), HCQInfo(devices, estimate_uop(call))
-    q += [call.replace(arg=replace(call.arg, aux=info))]
+    ts_ids = [next(UOp.unique_num) for _ in range(2)] if profile else []
+    prof += [ProfileGraphEntry(d, name, *ts_ids) for d in devices if ts_ids]
+
+    ts_ins = [UOp(Ops.INS, arg="timestamp", src=(make_signal(devices, s),)) for s in ts_ids]
+    q += ts_ins[:1] + [call.replace(arg=replace(call.arg, aux=info))] + ts_ins[1:]
 
     # signal the queue if someone waits for us
     if tag in signal_tags: q += [UOp(Ops.INS, arg="store", src=(make_signal(devices, slots[queue]), UOp.const(tag + 1, dtypes.uint64)))]
     src.append(make_call(name, make_submit(*q, devs=devices, queue=queue).sink(), info))
+
+  # append batch timestamps to finalizers
+  finalizers = [f.replace(arg=replace(f.arg, aux=replace(a:=f.arg.aux, prof=tuple(e for e in prof if e.device in a.device)))) for f in finalizers]
   return fences + src + finalizers
 
-def sched_hcq_batches(l:UOp) -> UOp:
+def sched_hcq_batches(l:UOp, profile:bool) -> UOp:
   srcs:list[UOp] = []
   batch:list[tuple[UOp, tuple[str, ...]]] = []
   for call in l.src:
     if (devs:=next((b.device for b in call.src[1:] if all_devices_in(b.device, HCQ_DEVS)), None)) is not None: batch.append((call, to_tuple(devs)))
-    else: srcs, batch = srcs + _finalize_batch(batch) + [call], []
-  return l.replace(src=tuple(srcs + _finalize_batch(batch)))
+    else: srcs, batch = srcs + _finalize_batch(batch, profile) + [call], []
+  return l.replace(src=tuple(srcs + _finalize_batch(batch, profile)))
 
 # *****************
 # 3. merge into queues
@@ -246,7 +255,7 @@ def merge_queues(linear:UOp) -> UOp:
   return linear.replace(src=tuple(new_src + [_merged_hcq_call(c) for c in opened_qs.values()]))
 
 pm_schedule_and_merge = PatternMatcher([(UPat(Ops.LINEAR, name="l"),
-  lambda ctx, l: merge_queues(sched_hcq_batches(l).substitute(ctx, walk=True, enter_calls=True)))])
+  lambda ctx, l: merge_queues(sched_hcq_batches(l, ctx[1]).substitute(ctx[0], walk=True, enter_calls=True)))])
 
 # *****************
 # 4.2. hcq lowering: ops to ir
@@ -395,21 +404,21 @@ def callify_hcq(call:UOp, cf:UOp) -> UOp:
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
   UPat(Ops.CUSTOM_FUNCTION, arg="hcq_args", src=(UPat(Ops.SINK),), name="cf"),), name="call", allow_any_len=True), callify_hcq)])
 
-hcq_compile_cache:dict[bytes, UOp] = {}
+hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
 
-@rewrite_group(lambda linear,input_uops,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
-def hcq_compile(linear:UOp, input_uops:list[UOp]|None=None) -> UOp:
+@rewrite_group(lambda linear,input_uops,profile,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
+def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
   if input_uops is not None:
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
     linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffer")
 
-  if (final_linear:=(hcq_compile_cache.get(cache_key:=linear.key))) is None:
+  if (final_linear:=(hcq_compile_cache.get(cache_key:=(linear.key, profile)))) is None:
     # prep
     linear = linear.substitute(back_map:={s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}, walk=True)
     linear = graph_rewrite(linear, pm_insert_copy_staging+pm_flatten_linear, name="insert copy staging")
 
     # schedule
-    linear = graph_rewrite(linear, pm_schedule_and_merge, ctx={s:p for p,s in back_map.items()}, walk=True, name="schedule and merge hcq")
+    linear = graph_rewrite(linear, pm_schedule_and_merge, ctx=({s:p for p,s in back_map.items()}, profile), walk=True, name="schedule and merge hcq")
 
     # lowering to hcq ir
     linear = graph_rewrite(linear, pm_encode_cmdbufs+pm_pack_placeholders, walk=True, name="encode and pack", enter_calls=True)
@@ -516,6 +525,27 @@ class HCQ2Compiled(Compiled):
 
     self.rt_buffer = Buffer(self.device, 64 << 20, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True))
     self.rt_allocator = BumpAllocator(64 << 20)
+    self.prof_ents:dict[int, ProfileGraphEntry] = {}
+
+  def collect_prof(self):
+    if PROFILE:
+      es = list(self.prof_ents.values())
+      sigs = [self.signal(i)._buf.cpu_view().view(fmt='Q')[0]/decimal.Decimal(self.timestamp_divider) for e in es for i in (e.st_id, e.en_id)]
+      Compiled.profile_events.append(ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,e in enumerate(es)], [], sigs))
+    self.prof_ents.clear()
+
+  def _at_profile_finalize(self):
+    from tinygrad.tensor import Tensor
+    tdiffs = []
+    for _ in range(5):
+      with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
+      if not (ents:=list(self.prof_ents.values())): return
+      self.prof_ents.clear()
+      st = perf_counter_us()
+      self.synchronize()
+      gpu = max(self.signal(e.en_id)._buf.cpu_view().view(fmt='Q')[0] for e in ents)/decimal.Decimal(self.timestamp_divider)
+      tdiffs.append((st+perf_counter_us())/2 - gpu)
+    Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
 
   def new_buffer(self, b:UOp, cache:bool) -> Buffer:
     if cache or b.tag in HCQ_CACHE_TAGS:
@@ -537,6 +567,7 @@ class HCQ2Compiled(Compiled):
     st = time.perf_counter()
     while sig[0] < tl[0] - 1:
       if time.perf_counter() - st > (timeout or 3000) / 1000: self.on_device_hang()
+    if self.prof_ents: self.collect_prof()
 
   def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
 

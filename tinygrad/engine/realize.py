@@ -221,11 +221,16 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
   exec_kernel(replace(ctx, update_stats=False), call, ast)
 
-  st = time.perf_counter()
-  for d in call.arg.aux.device:
-    with track_stats(ctx, call, d, [], ctx.var_vals):
-      if ctx.wait: cast(Any, Device[d]).synchronize(timeout=ctx.timeout)
-  return time.perf_counter() - st
+  tms:list[float|None] = []
+  for e in (aux:=call.arg.aux).prof: cast(Any, Device[e.device]).prof_ents[e.st_id] = e
+  for d in [cast(Any, Device[x]) for x in aux.device]:
+    with track_stats(ctx, call, d.device, [], ctx.var_vals) as et:
+      if ctx.wait:
+        d.synchronize(timeout=ctx.timeout)
+        ts = [d.signal(i)._buf.cpu_view().view(fmt='Q')[0] for e in aux.prof if e.device == d.device for i in (e.st_id, e.en_id)]
+        if ts: et[0] = float(max(ts)-min(ts))/d.timestamp_divider/1e6
+      tms += et
+  return tms[0]
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
@@ -267,11 +272,11 @@ pm_exec = PatternMatcher([
 
 if getenv("HCQ2"): from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link # noqa: E402 # down here, hcq2 imports the helpers above
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None) -> UOp:
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
-  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops)
+  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, bool(PROFILE) if profile is None else profile)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
 def link_linear(linear:UOp, cache=True) -> UOp: return hcq_link(linear, cache=cache) if getenv("HCQ2") else linear
@@ -289,5 +294,5 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
       from tinygrad.tensor import Tensor
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0), cache=ctx.cache)
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True), cache=ctx.cache)
   return max(pm_exec.rewrite(c, ctx) or 0.0 for c in linear.src)
