@@ -527,6 +527,8 @@ jobs:
             TestMultiTensor.test_backward_sum TestMultiTensor.test_matmul_shard_0_0
       - name: Run HCQ2 JIT tests
         run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/unit/test_jit.py
+      - name: Run HCQ2 unit tests
+        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python -m pytest test/device/test_hcq2.py
 
   testmockam:
     name: Linux (am)
