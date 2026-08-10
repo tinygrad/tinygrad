@@ -691,7 +691,7 @@ class Transformer:
       n_toks = min(chunk_size, len(tokens) - start_pos)
       # Recurrent blocks execute an explicit recurrence over T. Give them a static chunk length so
       # Python constructs the recurrence once per encountered size; decode remains the T=1 JIT.
-      if chunked_recurrent and n_toks != 1:
+      if chunked_recurrent:
         # Token count is static for the recurrent kernel, but cache position must remain a runtime
         # variable so repeated chunks do not replay MLA stores at the capture position.
         sp = v_start_pos.bind(start_pos)
