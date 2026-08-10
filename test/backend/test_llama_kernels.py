@@ -99,23 +99,6 @@ class TestLocalAmax(unittest.TestCase):
     assert_kernel_count(2)
     self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
 
-class TestSwiGLU(unittest.TestCase):
-  def test_forward_backward(self):
-    Tensor.manual_seed(1)
-    x = Tensor.randn(2, 32, 64).cast(dtypes.bfloat16).contiguous().realize()
-    x.requires_grad = True
-    grad = Tensor.randn(2, 32, 32).cast(dtypes.bfloat16).contiguous().realize()
-    out = swiglu(x)
-    actual_grad = out.gradient(x, gradient=grad)[0].realize()
-
-    act, gate = x[..., :32].float(), x[..., 32:].float()
-    sig, upstream = act.sigmoid(), grad.float()
-    expected = (act * sig * gate).cast(dtypes.bfloat16).realize()
-    expected_grad = Tensor.cat(upstream * sig * (1.0 + act * (1.0 - sig)) * gate, upstream * act * sig, dim=-1).cast(dtypes.bfloat16).realize()
-    with Context(DEBUG=0):
-      self.assertTrue(out.allclose(expected, atol=0.25, rtol=0.03).item(), "forward mismatch")
-      self.assertTrue(actual_grad.allclose(expected_grad, atol=0.25, rtol=0.03).item(), "backward mismatch")
-
 @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
 class TestRMSNormMul(unittest.TestCase):
   def test_forward_backward(self):
@@ -223,6 +206,32 @@ class TestFusedQKVRoPE(unittest.TestCase):
     dv_ref = dv_partial.float().reshape(B, PARTIALS, N, H_KV, D).sum(1).cast(dtypes.bfloat16).unsqueeze(3)
     ref = Tensor.cat(dq_ref, dk_ref, dv_ref, dim=3).reshape(*dx.shape).realize()
     with Context(DEBUG=0): self.assertTrue(dx.allclose(ref, atol=2e-2, rtol=2e-2).item(), "backward mismatch")
+
+def run_swiglu(test:unittest.TestCase, shape:tuple[int, ...]) -> None:
+  Tensor.manual_seed(0)
+  x = (Tensor.randn(*shape) * 2).cast(dtypes.bfloat16).realize()
+  hidden = x.shape[-1] // 2
+  out, ref = swiglu(x), x[..., :hidden].silu() * x[..., hidden:]
+  Tensor.realize(out, ref)
+  with Context(DEBUG=0): test.assertTrue(out.allclose(ref, atol=2.5e-1, rtol=3e-2).item(), "SwiGLU forward mismatch")
+
+  grad = (Tensor.randn(*out.shape) * 2).cast(dtypes.bfloat16).realize()
+  grad_x, grad_ref = out.gradient(x, gradient=grad)[0], ref.gradient(x, gradient=grad)[0]
+  Tensor.realize(grad_x, grad_ref)
+  test.assertEqual(grad_x.shape, shape)
+  test.assertEqual(grad_x.dtype, dtypes.bfloat16)
+  with Context(DEBUG=0): test.assertTrue(grad_x.allclose(grad_ref, atol=2.5e-1, rtol=3e-2).item(), "SwiGLU backward mismatch")
+
+class TestSwiGLU(unittest.TestCase):
+  def setUp(self):
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
+
+  def test_simple(self): run_swiglu(self, (2, 32, 64))
+
+  def test_llama_shape(self):
+    if Device.DEFAULT != "AMD" or not Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950"):
+      self.skipTest("only run on real machine for speed")
+    run_swiglu(self, (2, 8192, 28672))
 
 if __name__ == '__main__':
   unittest.main()
