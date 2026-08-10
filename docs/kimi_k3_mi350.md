@@ -49,6 +49,15 @@ DEV=AMD python examples/kimi_k3_smoke.py --devices 8
 
 The last two commands are deliberately small. They compile CDNA4 kernels and then exercise the complete TP8 topology without loading the checkpoint.
 
+For performance iteration, use the exact-width fake-weight harness before another official load:
+
+```sh
+DEV=AMD python extra/benchmark_kimi_k3_fake.py --mode attention --iterations 20
+DEV=AMD python extra/benchmark_kimi_k3_fake.py --mode block --iterations 20
+```
+
+It retains K3's 7,168-wide residual stream, 12,288-wide KDA state, 96 heads, 128×128 recurrent matrices, TP8 layouts, top-k 16 routing, packed MXFP4 expert shapes, collectives, and decode JIT, but uses one layer and 16 fake experts. Fake attention weights initialize in about 0.9 seconds and the full block in about 3 seconds. The retained path measured 0.630 ms per fake attention layer and 1.367 ms per complete fake block, projecting about 7.87 tok/s across 93 identical blocks versus 6.25 tok/s for the official heterogeneous model. Treat this as a candidate admission benchmark, not a correctness substitute for official weights.
+
 ## First official load
 
 Start at a short context so cache allocation and compilation are bounded. The loader reads disk-backed safetensors, TP-shards every destination before realizing it, and drops each source shard/projection immediately afterward.
@@ -114,6 +123,8 @@ The final official context-128 validation loaded in 389.84 seconds with 2.71 GiB
 A final load-first experiment increased the disk-to-HBM io_uring queue depth from one to the 32 existing bounded 2 MiB staging buffers. On a direct 1 GiB read from fragmented shard 28 it measured 6.834 GB/s versus 6.832 GB/s for the original path, so the change was rejected. The subsequent unmodified official 96-shard load completed in 389.48 seconds, confirming both the prior result and the single-NVMe lower bound. Peak RSS was 2.75 GiB with zero swap.
 
 Two direct packed-expert MFMA prototypes were also rejected after that load. A fused gate/up kernel was about 29% faster in isolation at the TP8-local shape, and a routed-down kernel which combined projection, probability weighting, and route reduction measured 1.45 ms versus 2.42 ms in isolation. End-to-end, however, stable replay produced `[198, 2338, 2127, 148297]`, prefill measured 38.87 tok/s, and decode measured 6.263 tok/s. That is indistinguishable from the retained 38.65/6.25 tok/s path while changing floating-point reduction order, so neither kernel was retained.
+
+A whole-core KDA decode experiment fused convolution, Q/K normalization, channel decay, recurrence, RMS normalization, output gating, and four persistent state updates. Its raw kernel replayed in about 109 microseconds per local KDA layer and matched a one-step synthetic reference within `9.77e-4` output and `8.13e-4` state maximum error. The exact-width fake-layer gate caught that it was slower than the retained attention path (0.665 versus 0.633 ms/layer). The already-running official validation was stopped after its first invalid greedy sequence, `[198, 163840, 163840, 163840]`, where 163840 is outside the checkpoint's vocabulary. The kernel was rejected and removed.
 
 | Maximum context | Load | Short-prompt replay | Result |
 |---:|---:|---:|---|
