@@ -1,8 +1,9 @@
 from __future__ import annotations
-import functools, itertools, pathlib
+import array, functools, itertools, pathlib
 from dataclasses import dataclass, replace
-from typing import cast
+from typing import Callable, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
+from tinygrad.device import MultiBuffer
 from tinygrad.nn import Linear
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.llm.quant import dequantize_mxfp4, quantize_dequantize_mxfp8
@@ -499,13 +500,13 @@ class GatedDeltaNetBlock(FFNBlock):
       isinstance(self.ssm_out.weight.device, tuple) and amd_custom_kernels_supported(out.device) else self.ssm_out(out)
     return ret.realize(*state_updates)
 
-  # recurrent state can't be partially reused after divergence, force a full rebuild
-  def _state_reset_ops(self):
+  # Recurrent serving currently rebuilds each independently rendered request; attention-only blocks still reuse KV.
+  def _state_tensors(self) -> tuple[Tensor, ...]:
     if hasattr(self, "conv_state_q"):
-      return [s.assign(s.const_like(0)) for s in (self.conv_state_q, self.conv_state_k, self.conv_state_v, self.recurrent_state)]
-    return [self.conv_state.assign(self.conv_state.const_like(0)), self.recurrent_state.assign(self.recurrent_state.const_like(0))] \
-      if hasattr(self, "conv_state") else []
-  def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return 0 if prefix_len != cached_len else prefix_len
+      return self.conv_state_q, self.conv_state_k, self.conv_state_v, self.recurrent_state
+    return (self.conv_state, self.recurrent_state) if hasattr(self, "conv_state") else ()
+  def _state_reset_ops(self): return [s.assign(s.const_like(0)) for s in self._state_tensors()]
+  def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return 0
 
   def _init_state(self, x):
     if not hasattr(self, "conv_state") and not hasattr(self, "conv_state_q"):
@@ -540,11 +541,15 @@ class Transformer:
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
+    self._state_zero_hosts:dict[int, memoryview] = {}
+    self._token_buffer:Tensor|None = None
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
     self.greedy_prefill_jit = TinyJit(self.forward)
     self.greedy_rollout_jit = TinyJit(self.forward)
+    self.recurrent_prefill_jits:dict[int, Callable[..., Tensor]] = {}
+    self.recurrent_greedy_prefill_jits:dict[int, Callable[..., Tensor]] = {}
     self.reset_jit = TinyJit(self._reset_state)
 
   def _reset_state(self) -> None:
@@ -576,6 +581,11 @@ class Transformer:
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor|None) -> Tensor:
     token_count = tokens.numel()
+    if self.has_recurrent_block and resolve(token_count != 1):
+      assert isinstance(token_count, int)
+      cache = self.recurrent_greedy_prefill_jits if temperature is None else self.recurrent_prefill_jits
+      jit = cache.setdefault(token_count, TinyJit(self.forward))
+      return jit(tokens.flatten().contiguous(), start_pos, temperature)
     if temperature is None:
       return (self.greedy_prefill_jit if resolve(token_count != 1) else self.greedy_rollout_jit)(tokens.flatten().contiguous(), start_pos, None)
     return (self.prefill_jit if resolve(token_count != 1) else self.rollout_jit)(tokens.flatten().contiguous(), start_pos, temperature)
@@ -664,7 +674,17 @@ class Transformer:
     return model, kv
 
   def warmup(self):
-    for _ in range(2): list(zip(range(2), self.generate([0])))
+    prompt = [0] * max(1, min(8, self.max_context-1)) if self.has_recurrent_block else [0]
+    for _ in range(2): list(zip(range(2), self.generate(prompt)))
+
+  def _reset_amd_state(self) -> None:
+    """Zero realized recurrent buffers without changing their UOp identities or invalidating captured graphs."""
+    for state in (s for block in self.blk if isinstance(block, GatedDeltaNetBlock) for s in block._state_tensors()):
+      realized = state.uop.buf_uop.buffer
+      buffers = realized.bufs if isinstance(realized, MultiBuffer) else [realized]
+      for buf in buffers:
+        zero = self._state_zero_hosts.setdefault(buf.nbytes, memoryview(bytearray(buf.nbytes)))
+        buf.ensure_allocated().allocator._copyin(buf._buf, zero)
 
   def get_start_pos(self, tokens:list[int]) -> int:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
@@ -680,11 +700,22 @@ class Transformer:
     # TODO: use UOp.variable for temperature once float variables are supported
     model_device = self.token_embd.weight.device
     temp = None if temperature == 0.0 else Tensor([temperature], device=model_device)
-    # assign all input tokens once, then slice from start_pos for the model call
-    t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32", device=model_device).reshape(1, self.max_context)
+    # Keep the replicated AMD token buffer identity stable across HTTP requests so captured graphs
+    # see the same input topology. Updating this small int32 buffer is cheaper than rebuilding JITs.
+    if isinstance(model_device, tuple) and all(d.startswith("AMD") for d in model_device):
+      if self._token_buffer is None:
+        self._token_buffer = Tensor.empty(1, self.max_context, dtype=dtypes.int32, device=model_device).realize()
+      token_storage = self._token_buffer.uop.buf_uop.buffer
+      token_buffers = token_storage.bufs if isinstance(token_storage, MultiBuffer) else [token_storage]
+      input_host = memoryview(array.array('i', tokens + [0] * (self.max_context-len(tokens)))).cast('B')
+      for buf in token_buffers: buf.ensure_allocated().allocator._copyin(buf._buf, input_host)
+      t = self._token_buffer
+    else: t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32", device=model_device).reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
-    if start_pos < len(self._cached_tokens) and self.has_recurrent_block: self.reset_jit()
+    if start_pos < len(self._cached_tokens) and self.has_recurrent_block:
+      if isinstance(model_device, tuple) and all(d.startswith("AMD") for d in model_device): self._reset_amd_state()
+      else: self.reset_jit()
     out, prompt_len = None, len(tokens)
     token_host = memoryview(bytearray(4)) if isinstance(model_device, tuple) and all(d.startswith("AMD") for d in model_device) else None
     while len(tokens) < self.max_context:
@@ -695,7 +726,7 @@ class Transformer:
         # Token count is static for the recurrent kernel, but cache position must remain a runtime
         # variable so repeated chunks do not replay MLA stores at the capture position.
         sp = v_start_pos.bind(start_pos)
-        model_input = t[:, start_pos:start_pos+n_toks] if start_pos < prompt_len or out is None else out
+        model_input = t[:, sp:sp+n_toks] if start_pos < prompt_len or out is None else out
       else:
         sp = v_start_pos.bind(start_pos)
         nt = v_toks.bind(n_toks)

@@ -93,6 +93,8 @@ class TestKimiK3(unittest.TestCase):
       value.replace(Tensor.full(value.shape, fill, dtype=value.dtype if value.dtype is dtypes.uint8 else dtypes.bfloat16, device="PYTHON"))
     self.assertIsInstance(next(model.generate([1], chunk_size=2)), int)
     for _ in range(3): self.assertIsInstance(next(model.generate([1, 2, 3, 4], chunk_size=2)), int)
+    self.assertIsInstance(next(model.generate([1, 2, 3, 4, 5], chunk_size=3)), int)
+    self.assertEqual(set(model.recurrent_greedy_prefill_jits), {2, 3})
     self.assertEqual(model._cached_tokens[:4], [1, 2, 3, 4])
 
 if __name__ == "__main__": unittest.main()
