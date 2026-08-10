@@ -83,6 +83,7 @@ class SSMConfig:
   time_step_rank: int
   inner_size: int
   kda: bool = False
+  channel_decay: bool = False
 
 @dataclass(frozen=True)
 class TransformerConfig:
@@ -413,7 +414,8 @@ class GatedDeltaNetBlock(FFNBlock):
       self.ssm_alpha = Linear(config.dim, self.num_v_heads, bias=False)
     self.ssm_beta = Linear(config.dim, self.num_v_heads, bias=False)
     self.ssm_dt = {"bias": Tensor.zeros(ssm.inner_size if ssm.kda else self.num_v_heads)}
-    self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
+    self.ssm_a = Tensor.zeros(self.head_v_dim if ssm.channel_decay else self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
+    self.kda_channel_decay = ssm.channel_decay
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
@@ -466,9 +468,10 @@ class GatedDeltaNetBlock(FFNBlock):
     v = v.reshape(B, T, self.num_v_heads, self.head_v_dim).transpose(1, 2).float()
     beta = (beta_logits.float() if self.config.ssm and self.config.ssm.kda else beta_logits).sigmoid().transpose(1, 2)
     gate_logits = (alpha_logits.float() + self.ssm_dt["bias"]).reshape(B, T, self.num_v_heads, -1)
+    a_shape = (1, 1, 1, self.head_v_dim) if self.kda_channel_decay else (1, 1, self.num_v_heads, 1)
     if self.config.kda_gate_lower_bound:
-      log_alpha = self.config.kda_gate_lower_bound * ((-self.ssm_a).reshape(1, 1, self.num_v_heads, -1) * gate_logits).sigmoid()
-    else: log_alpha = gate_logits.softplus() * self.ssm_a.reshape(1, 1, self.num_v_heads, -1)
+      log_alpha = self.config.kda_gate_lower_bound * ((-self.ssm_a).reshape(a_shape) * gate_logits).sigmoid()
+    else: log_alpha = gate_logits.softplus() * self.ssm_a.reshape(a_shape)
     alpha = log_alpha.squeeze(-1).transpose(1, 2).exp() if log_alpha.shape[-1] == 1 else log_alpha.permute(0, 2, 1, 3).exp()
     if T == 1:
       # Keep decode on the small elementwise graph. The fused prefill kernel writes a temporary

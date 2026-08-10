@@ -76,6 +76,43 @@ DEV=AMD DEBUG=1 python -m tinygrad.llm.cli --model /raid/weights/kimi-k3 \
   --devices 8 --max_context 4096 --warmup --benchmark 20
 ```
 
+## MI350X validation results (2026-08-10)
+
+The official directory was audited in place: 96 shards, 497,220 indexed tensors, 497,052 language tensors, and 1,560,860,324,864 total bytes. All eight devices reported `gfx950`. No checkpoint file was converted, copied, or modified, and every model run used a single process. The actual text tower is 1,559,965,606,912 bytes; its checked TP8 layout is 196,784,397,312 bytes per GPU.
+
+The preserved first full-checkpoint error was an `A_log` shape mismatch, `(128,) -> (96, 1)`. K3 stores one decay value per 128-wide KDA channel, not one per head. The loader now keeps this field replicated and applies the official channel-wise broadcast. A numerical unit test covers the distinction from the older head-wise Kimi Linear behavior.
+
+Load speed was fixed before generation. The original loader opened thousands of individual expert tensors and independently realized eight strided TP slices. The MI350 path now does the following without changing the checkpoint:
+
+- copies contiguous axis-zero shards and replicas directly into their final device buffers;
+- stages an inner-axis tensor once and schedules all eight TP slices together;
+- reads each layer's contiguous 15.72 GB expert region once, reorders its lexicographically stored expert records on GPU 0, and realizes all six packed/scale destinations together;
+- retains only final MultiBuffer identities, drops the reorder graph, and flushes the 15.72 GB staging allocation before the next layer.
+
+One real expert layer leaves exactly 1,965,293,568 bytes resident on each GPU and zero bytes in the GPU-0 allocator cache. Complete context-128 loads measured 527.20 seconds before the final staging cleanup and 490.05/489.59 seconds afterward. Peak host RSS for the unprofiled correctness run was 2.11 GiB with zero swap. RAID variability produced later loads from 489.06 to 532.85 seconds.
+
+The fixed XTML prompt `Reply with exactly: OK` encodes to 93 tokens. After excluding the cold JIT capture from replay comparison, two greedy runs produced the identical eight-token sequence:
+
+```text
+[9545, 59991, 10580, 14404, 9545, 59991, 9545, 59991]
+```
+
+At context 128, steady prefill was 14.32 seconds (6.49 tok/s) and eight-token decode was 2.27 seconds (3.53 tok/s, 283.3 ms/token). The same first tokens remained stable at every admitted context. These rates are much lower than the planning estimates below and should be treated as the current measured baseline.
+
+| Maximum context | Load | Short-prompt replay | Result |
+|---:|---:|---:|---|
+| 128 | 489.59s | 14.32s | stable 8-token replay |
+| 4,096 | 489.06s | 14.32s | stable replay, zero swap |
+| 32,768 | 532.85s | 14.33s | stable replay, zero swap |
+| 131,072 | 520.91s | 14.37s | stable first token, zero swap |
+| 262,144 | 497.34s | 14.41s | stable first token, zero swap |
+
+These are maximum-context/cache admission tests with the same 93-token prompt, not full-length 32K/131K/262K prefills. The full cache allocation path was exercised, but filling those contexts remains a separate long-running throughput test.
+
+Runtime profiling bracketed four steady decode tokens. It recorded 6,304 kernel events and 477.97 ms of summed GPU work across the eight devices inside a 1,573.99 ms profiled wall interval. The packed `mxfp4_expert_linear_wave64` kernels accounted for only 22.47 ms summed; the largest families were small 1,792-wide reductions. This identifies launch/synchronization granularity as the immediate MI350 bottleneck rather than packed-weight bandwidth. `JIT_BATCH_SIZE=64` produced the same 3.53 tok/s as 32. A gfx950 fused MXFP8 QDQ experiment was bit-exact but slower on the real device (about 95 microseconds versus 57--64 microseconds), so it was rejected. The next retained performance work should fuse the reduction/collective boundaries called out below.
+
+The checkpoint's bundled Transformers code was used as the architectural reference for channel decay and tensor mapping. A full independent Transformers/vLLM token comparison was not run on this host because the required `compressed_tensors`/serving backend is not installed; deterministic tinygrad replay and the numerical KDA, loader-layout, NULL gfx950 compile, and real TP8 smoke tests are the completed correctness gates.
+
 ## Known hardware-only gate
 
 The correctness path now consumes packed MXFP4 expert weights directly on gfx950 with a wave64 software-decode kernel, so it does not create selected-expert BF16 weight expansions. MXFP8 activation quantization is still emulated. tinygrad has gfx950/CDNA4 BF16 and FP8 matrix-core support, but this branch does not yet have a hardware-validated native MXFP4×MXFP8 expert GEMM. Expect the first run to be a correctness bring-up, not production throughput. Capture profiles on MI350X before changing the representation: native FP4 work cannot be validated faithfully on the available gfx1100 cards.

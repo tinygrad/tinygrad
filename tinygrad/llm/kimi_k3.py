@@ -1,17 +1,18 @@
 from __future__ import annotations
-import gc, json, pathlib
+import gc, json, math, pathlib
 from dataclasses import replace
 from collections import defaultdict
 from typing import Callable, cast
-from tinygrad import Tensor, Device, nn
+from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.device import Buffer
+from tinygrad.uop.ops import UOp
 from tinygrad.nn.state import safe_load
 from tinygrad.llm.kimi import load_kimi_tokenizer_data
 from tinygrad.llm.model import SSMConfig, Transformer, TransformerConfig
 
 KIMI_K3_TOTAL_SIZE = 1_560_860_324_864
-KIMI_K3_TEXT_SIZE = 1_559_945_066_624
-KIMI_K3_TP8_BYTES_PER_GPU = 196_781_639_152
+KIMI_K3_TEXT_SIZE = 1_559_965_606_912
+KIMI_K3_TP8_BYTES_PER_GPU = 196_784_397_312
 KIMI_K3_SHARDS = 96
 KIMI_K3_EXPERTS = 896
 KIMI_K3_LAYERS = 93
@@ -25,7 +26,7 @@ def kimi_k3_config(max_context:int) -> TransformerConfig:
     q_lora_rank=1536, kv_lora_rank=512, num_experts=896, num_experts_per_tok=16, norm_topk_prob=True,
     shared_expert_dim=6144, leading_dense_blocks=1, dense_hidden_dim=33792, routed_scaling_factor=1.0,
     expert_bias=True, expert_mxfp4=True, bf16_activations=True, kda_split_qkv=True,
-    ssm=SSMConfig(conv_kernel=4, state_size=128, group_count=96, time_step_rank=96, inner_size=12288, kda=True),
+    ssm=SSMConfig(conv_kernel=4, state_size=128, group_count=96, time_step_rank=96, inner_size=12288, kda=True, channel_decay=True),
     ssm_layers=KIMI_K3_SSM_LAYERS, shared_expert_gate=False, attn_output_gate=True,
     activation_situ_beta=4.0, activation_situ_linear_beta=25.0, routed_expert_dim=3584, latent_moe_norm=True,
     route_weights_uncorrected=True, attn_res_block_size=12, kda_full_rank_gate=True, kda_gate_lower_bound=-5.0,
@@ -33,10 +34,12 @@ def kimi_k3_config(max_context:int) -> TransformerConfig:
 
 def kimi_k3_smoke_config(max_context:int=4) -> TransformerConfig:
   """Reduced K3 with every architectural feature retained for cheap compile/hardware admission tests."""
-  return replace(kimi_k3_config(max_context), num_blocks=2, dim=32, hidden_dim=256, n_heads=8, n_kv_heads=8,
+  # Keep both the routed latent and the TP8-local expert hidden dimension wave64 aligned. The real
+  # gfx950 packed-expert kernel requires this, so the hardware smoke test must preserve the constraint.
+  return replace(kimi_k3_config(max_context), num_blocks=2, dim=32, hidden_dim=512, n_heads=8, n_kv_heads=8,
     vocab_size=64, head_dim=8, rope_dim=4, v_head_dim=4, q_lora_rank=16, kv_lora_rank=8, num_experts=512,
-    num_experts_per_tok=2, shared_expert_dim=32, dense_hidden_dim=64, routed_expert_dim=32,
-    ssm=SSMConfig(4, 4, 8, 8, 32, True), ssm_layers=(True, False), attn_res_block_size=1)
+    num_experts_per_tok=2, shared_expert_dim=32, dense_hidden_dim=64, routed_expert_dim=64,
+    ssm=SSMConfig(4, 4, 8, 8, 32, True, True), ssm_layers=(True, False), attn_res_block_size=1)
 
 def _shard_kimi_k3(model:Transformer, devices:tuple[str, ...]) -> None:
   """Tensor parallel layout for K3. The official dimensions are divisible by TP8."""
@@ -52,7 +55,7 @@ def _shard_kimi_k3(model:Transformer, devices:tuple[str, ...]) -> None:
                         ".attn_output.weight", ".ssm_out.weight")): axis = 1
     elif name.endswith((".attn_q_b.weight", ".attn_k_b.weight", ".attn_v_b.weight", ".attn_gate.weight",
                         ".attn_q.weight", ".attn_k.weight", ".attn_v.weight", ".ssm_f_b.weight", ".ssm_g_full.weight", ".ssm_beta.weight")): axis = 0
-    elif name.endswith((".ssm_q_conv1d.weight", ".ssm_k_conv1d.weight", ".ssm_v_conv1d.weight", ".ssm_a", ".ssm_dt.bias")): axis = 0
+    elif name.endswith((".ssm_q_conv1d.weight", ".ssm_k_conv1d.weight", ".ssm_v_conv1d.weight", ".ssm_dt.bias")): axis = 0
     value.shard_(devices, axis=axis)
 
 def _validate_config(config:dict) -> None:
@@ -125,8 +128,40 @@ def _layer_sources(i:int, is_kda:bool) -> dict[str, str]:
 
 def _replace(dst:Tensor, src:Tensor) -> None:
   if dst.shape != src.shape: raise ValueError(f"shape mismatch: expected {dst.shape}, got {src.shape}")
-  dst.replace(src if isinstance(src.device, tuple) else src.shard(dst.device, dst.uop.axis) if isinstance(dst.device, tuple) else src.to(dst.device))
-  dst.realize()
+  if not isinstance(dst.device, tuple):
+    dst.replace(src.to(dst.device)).realize()
+    return
+  if isinstance(src.device, tuple):
+    dst.replace(src.shard_like(dst)).realize()
+    return
+
+  # Build the final MultiBuffer directly. The generic shard().realize() path schedules several
+  # kernels per tensor and recompiles them for every DISK:<filename> device. Axis-0 shards and
+  # replicas are contiguous, so copy those bytes straight into their final device buffers.
+  devices, axis, shape = dst.device, dst.uop.axis, tuple(int(x) for x in dst.shape)
+  try: src_buffer = cast(Buffer, src.uop.buffer)
+  except (AssertionError, RuntimeError):
+    src = src.clone().realize()
+    src_buffer = cast(Buffer, src.uop.buffer)
+
+  if axis is None or axis == 0:
+    part_shape = shape if axis is None else (shape[0]//len(devices), *shape[1:])
+    part_numel = math.prod(part_shape)
+    parts:list[Tensor] = []
+    for i,device in enumerate(devices):
+      part = Tensor.empty(*part_shape, dtype=src.dtype, device=device).realize()
+      source = src_buffer if axis is None else src_buffer.view(part_numel, src.dtype, i*part_numel*src.dtype.itemsize)
+      cast(Buffer, part.uop.buffer).ensure_allocated().copy_from(source.ensure_allocated())
+      parts.append(part)
+  else:
+    # Inner-axis TP slices are strided in row-major safetensors. Stage one complete tensor on
+    # GPU 0, then schedule all slice kernels and peer copies as one multi-device graph.
+    staging = Tensor.empty(*shape, dtype=src.dtype, device=devices[0]).realize()
+    cast(Buffer, staging.uop.buffer).ensure_allocated().copy_from(src_buffer.ensure_allocated())
+    dst.replace(staging.shard(devices, axis=axis)).realize()
+    return
+  dst.replace(Tensor(parts[0].uop.mstack(*(x.uop for x in parts[1:])).unshard(axis)) if axis is not None else
+              Tensor(parts[0].uop.mstack(*(x.uop for x in parts[1:]))))
 
 def _load_stacked_experts(dst:Tensor, sources:list[Tensor]) -> None:
   """Read expert tensors once into a transient GPU staging buffer, then redistribute TP slices over the GPU fabric."""
@@ -148,23 +183,10 @@ def _load_stacked_experts(dst:Tensor, sources:list[Tensor]) -> None:
     staging_buffer.view(cast(int, source.numel()), source.dtype, offset).ensure_allocated().copy_from(source_buffer.ensure_allocated())
     offset += source.nbytes()
 
-  # The full projection is at most the packed down-expert matrix. Materialize one TP slice at a time,
-  # transfer it peer-to-peer, and immediately release the GPU-0 gather temporary.
-  parts:list[Tensor] = []
-  for i,device in enumerate(devices):
-    bounds = [(0, int(s)) for s in shape]
-    shard_size = int(shape[axis])//len(devices)
-    bounds[axis] = (i*shard_size, (i+1)*shard_size)
-    local_part = staging.shrink(tuple(bounds)).contiguous().realize()
-    part = local_part if device == devices[0] else local_part.to(device).realize()
-    parts.append(part)
-    if part is not local_part:
-      del local_part
-      gc.collect()
-      free_staging_cache()
-
-  dst.replace(Tensor(parts[0].uop.mstack(*(x.uop for x in parts[1:])).unshard(axis)))
-  del staging, parts
+  # Schedule all TP slices and peer copies together. This avoids eight independent realization
+  # passes and lets the runtime overlap the multi-device transfer graph.
+  dst.replace(staging.shard(devices, axis=axis)).realize()
+  del staging
   gc.collect()
   free_staging_cache()
 
@@ -184,10 +206,14 @@ def _load_nonexperts(root:pathlib.Path, weight_map:dict[str, str], model:Transfo
     shard = safe_load(root / filename)
     for source in sources:
       value, targets = shard[source], mappings[source].split("|")
-      if source.endswith("A_log"): value = -value.float().exp().reshape(96, 1)
+      # A_log is the only checkpoint tensor requiring arithmetic during load. Realize its 128
+      # channel values on CPU so replicating it does not try to render the disk/PYTHON graph.
+      if source.endswith("A_log"): value = (-value.to("CPU").float().exp()).reshape(model_state[targets[0]].shape).realize()
       if source.endswith("conv1d.weight"): value = value.squeeze(1)
       if source.endswith("kv_b_proj.weight"):
-        value = value.reshape(96, 256, 512)
+        # Splitting K/V includes a transpose, which cannot be rendered against a disk buffer.
+        # Materialize only this one 25 MiB projection on CPU, then release it with the shard.
+        value = value.to("CPU").realize().reshape(96, 256, 512)
         values:tuple[Tensor, ...] = (value[:, :128].transpose(1, 2), value[:, 128:])
       else: values = (value,)
       for target,tensor in zip(targets, values): _replace(model_state[target], tensor)
@@ -197,20 +223,62 @@ def _load_nonexperts(root:pathlib.Path, weight_map:dict[str, str], model:Transfo
   return consumed
 
 def _load_experts(root:pathlib.Path, weight_map:dict[str, str], model:Transformer, progress:Callable[[str], None]) -> set[str]:
-  model_state, consumed = nn.state.get_state_dict(model), set()
+  model_state, consumed = nn.state.get_state_dict(model), set[str]()
   for i in range(1, KIMI_K3_LAYERS):
-    for wid,dst_name in (("w1","ffn_gate_exps"),("w3","ffn_up_exps"),("w2","ffn_down_exps")):
-      base = f"language_model.model.layers.{i}.block_sparse_moe.experts"
-      packed_keys = [f"{base}.{e}.{wid}.weight_packed" for e in range(KIMI_K3_EXPERTS)]
-      scale_keys = [f"{base}.{e}.{wid}.weight_scale" for e in range(KIMI_K3_EXPERTS)]
-      files = sorted({weight_map[k] for k in packed_keys+scale_keys})
-      progress(f"loading layer {i}/92 {wid} routed experts from {', '.join(files)}")
-      shards = {fn:safe_load(root / fn) for fn in files}
-      _load_stacked_experts(model_state[f"blk.{i}.{dst_name}.weight"], [shards[weight_map[k]][k] for k in packed_keys])
-      _load_stacked_experts(model_state[f"blk.{i}.{dst_name}.weight_scale"], [shards[weight_map[k]][k] for k in scale_keys])
-      consumed.update(packed_keys+scale_keys)
-      del shards
-      gc.collect()
+    base = f"language_model.model.layers.{i}.block_sparse_moe.experts"
+    fields = tuple((wid, suffix, dst_name) for wid,dst_name in (("w1","ffn_gate_exps"),("w2","ffn_down_exps"),("w3","ffn_up_exps"))
+                   for suffix in ("weight_packed", "weight_scale"))
+    keys = {(e,wid,suffix):f"{base}.{e}.{wid}.{suffix}" for e in range(KIMI_K3_EXPERTS) for wid,suffix,_ in fields}
+    files = sorted({weight_map[k] for k in keys.values()})
+    progress(f"loading layer {i}/92 routed experts from {', '.join(files)}")
+    shards = {fn:safe_load(root / fn) for fn in files}
+
+    # Official K3 stores all six tensors for an expert contiguously and all 896 experts for a
+    # layer in one contiguous shard region, ordered lexicographically by expert name. Read that
+    # region once, then reorder/split on GPU 0 directly into the six TP8 destinations.
+    blocks:list[tuple[int, int, int, list[Buffer]]] = []
+    for e in range(KIMI_K3_EXPERTS):
+      bufs = [cast(Buffer, shards[weight_map[keys[e,wid,suffix]]][keys[e,wid,suffix]].uop.buffer) for wid,suffix,_ in fields]
+      if not all(bufs[j].device == bufs[0].device and bufs[j].offset+bufs[j].nbytes == bufs[j+1].offset for j in range(len(bufs)-1)):
+        raise ValueError(f"layer {i} expert {e} tensors are not contiguous in the official shard")
+      blocks.append((bufs[0].offset, bufs[-1].offset+bufs[-1].nbytes, e, bufs))
+    blocks.sort()
+    if len(files) != 1 or not all(blocks[j][1] == blocks[j+1][0] for j in range(len(blocks)-1)):
+      raise ValueError(f"layer {i} routed experts are not one contiguous official-shard region")
+    row_bytes = blocks[0][1]-blocks[0][0]
+    if any(end-start != row_bytes for start,end,_,_ in blocks): raise ValueError(f"layer {i} expert records have inconsistent sizes")
+
+    devices = cast(tuple[str, ...], model_state[f"blk.{i}.ffn_gate_exps.weight"].device)
+    raw = Tensor.empty(KIMI_K3_EXPERTS, row_bytes, dtype=dtypes.uint8, device=devices[0]).realize()
+    raw_buffer, first_buffer = cast(Buffer, raw.uop.buffer), blocks[0][3][0]
+    raw_buffer.ensure_allocated().copy_from(first_buffer.base.view(KIMI_K3_EXPERTS*row_bytes, dtypes.uint8, blocks[0][0]).ensure_allocated())
+    lexpos = {expert:pos for pos,(_,_,expert,_) in enumerate(blocks)}
+    permutation = Tensor([lexpos[e] for e in range(KIMI_K3_EXPERTS)], device=devices[0])
+    field_offset, outputs = 0, []
+    for field_idx,(wid,suffix,dst_name) in enumerate(fields):
+      field_bytes = blocks[0][3][field_idx].nbytes
+      dst = model_state[f"blk.{i}.{dst_name}.weight" + ("_scale" if suffix == "weight_scale" else "")]
+      axis = dst.uop.axis
+      if axis is None: raise ValueError(f"layer {i} expert destination {dst_name} is not TP-sharded")
+      value = raw[:, field_offset:field_offset+field_bytes][permutation].reshape(dst.shape).shard(devices, axis=axis)
+      # Realize into a buffer-identity tensor, then retain only that identity in the model. Keeping
+      # value's arithmetic UOp would also keep the 15.7 GB raw staging tensor and its reorder graph
+      # alive for every loaded weight, wasting about 44 GB on GPU 0 after the load completes.
+      shard_shape = tuple(int(x) for x in value.uop.shard_shape)
+      storage = UOp.new_buffer(devices, math.prod(shard_shape), dst.dtype).reshape(shard_shape).unshard(axis)
+      final = Tensor(storage)
+      final.assign(value)
+      outputs.append((dst, final, storage))
+      field_offset += field_bytes
+    if field_offset != row_bytes: raise ValueError(f"layer {i} expert field sizes do not cover the contiguous record")
+    outputs[0][1].realize(*(value for _,value,_ in outputs[1:]))
+    for dst,_,storage in outputs: dst.replace(Tensor(storage))
+    consumed.update(keys.values())
+    # Drop the realized assignment graphs before flushing the allocator cache. Their final storage
+    # UOps remain in model_state, while the graphs themselves still reference raw and permutation.
+    del shards, raw, raw_buffer, permutation, outputs, value, final, storage, dst
+    gc.collect()
+    if (free_cache:=getattr(Device[devices[0]].allocator, "free_cache", None)) is not None: free_cache()
   return consumed
 
 def load_kimi_k3(model_dir:str|pathlib.Path, max_context:int=4096, devices:int=8,

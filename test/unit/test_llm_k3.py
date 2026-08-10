@@ -3,12 +3,17 @@ from dataclasses import replace
 import numpy as np
 from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.kimi_k3 import KIMI_K3_FULL_ATTN_LAYERS, KIMI_K3_SSM_LAYERS, KIMI_K3_TEXT_SIZE, KIMI_K3_TP8_BYTES_PER_GPU, \
-  _layer_sources, _load_stacked_experts, _shard_kimi_k3, _validate_config, kimi_k3_config, kimi_k3_smoke_config
+  _layer_sources, _load_stacked_experts, _replace, _shard_kimi_k3, _validate_config, kimi_k3_config, kimi_k3_smoke_config
 from tinygrad.llm.model import FFNBlock, Transformer
 
 def small_k3_config(max_context:int=4): return replace(kimi_k3_smoke_config(max_context), num_experts=8)
 
 class TestKimiK3(unittest.TestCase):
+  def test_smoke_config_preserves_gfx950_expert_alignment(self):
+    c = kimi_k3_smoke_config()
+    self.assertEqual(c.routed_expert_dim % 64, 0)
+    self.assertEqual((c.hidden_dim // 8) % 64, 0)
+
   def test_official_config(self):
     c = kimi_k3_config(1_048_576)
     self.assertEqual((c.num_blocks, c.dim, c.n_heads, c.num_experts, c.num_experts_per_tok), (93, 7168, 96, 896, 16))
@@ -16,6 +21,7 @@ class TestKimiK3(unittest.TestCase):
     self.assertEqual(KIMI_K3_FULL_ATTN_LAYERS, (*range(3, 93, 4), 92))
     self.assertEqual((c.routed_expert_dim, c.hidden_dim, c.shared_expert_dim), (3584, 3072, 6144))
     self.assertTrue(c.route_weights_uncorrected and c.kda_full_rank_gate and c.attn_output_gate)
+    self.assertTrue(c.ssm is not None and c.ssm.channel_decay)
     self.assertEqual((c.activation_situ_beta, c.activation_situ_linear_beta, c.kda_gate_lower_bound), (4.0, 25.0, -5.0))
 
   def test_config_rejects_wrong_checkpoint(self):
@@ -34,11 +40,13 @@ class TestKimiK3(unittest.TestCase):
     self.assertEqual(targets, set(state))
     self.assertEqual(state["blk.1.ffn_gate_exps.weight"].shape, (896, 3072, 1792))
     self.assertEqual(state["blk.1.ffn_gate_exps.weight_scale"].shape, (896, 3072, 112))
+    self.assertEqual(state["blk.0.ssm_a"].shape, (128, 1))
     _shard_kimi_k3(model, tuple(f"NULL:{i}" for i in range(8)))
     total, per_gpu = 0, 0
     for name,value in state.items():
-      dtype = dtypes.uint8 if name.endswith(("weight_scale", "_exps.weight")) else \
-        dtypes.float32 if name.endswith(("ssm_a", "ssm_dt.bias")) else dtypes.bfloat16
+      dtype = dtypes.uint8 if name.endswith(("weight_scale", "_exps.weight")) else dtypes.float32 if name.endswith(
+        ("exp_probs_b.bias", "ssm_q_conv1d.weight", "ssm_k_conv1d.weight", "ssm_v_conv1d.weight", "ssm_norm.weight", "ssm_a", "ssm_dt.bias")) \
+        else dtypes.bfloat16
       size = value.numel() * dtype.itemsize
       total += size
       per_gpu += size if value.uop.axis is None else size//8
@@ -75,6 +83,7 @@ class TestKimiK3(unittest.TestCase):
       self.assertEqual(state[name].uop.axis, axis, name)
     self.assertIsNone(state["blk.1.attn_res_norm.weight"].uop.axis)
     self.assertIsNone(state["blk.1.ffn_routed_norm.weight"].uop.axis)
+    self.assertIsNone(state["blk.0.ssm_a"].uop.axis)
 
   def test_direct_expert_staging(self):
     devices = tuple(f"PYTHON:{i}" for i in range(4))
@@ -84,6 +93,15 @@ class TestKimiK3(unittest.TestCase):
     for axis in (1, 2):
       dst = Tensor.zeros(8, 8, 4, dtype=dtypes.uint8, device=devices[0]).shard(devices, axis=axis)
       _load_stacked_experts(dst, sources)
+      np.testing.assert_equal(dst.numpy(), expected)
+
+  def test_direct_tp_replacement(self):
+    devices = tuple(f"PYTHON:{i}" for i in range(4))
+    source = Tensor.arange(64, dtype=dtypes.float32).reshape(8, 8).realize()
+    expected = source.numpy()
+    for axis in (None, 0, 1):
+      dst = Tensor.zeros(8, 8, device="PYTHON").shard(devices, axis=axis)
+      _replace(dst, source)
       np.testing.assert_equal(dst.numpy(), expected)
 
   def test_chunked_recurrent_generate(self):
