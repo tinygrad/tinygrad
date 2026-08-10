@@ -223,6 +223,43 @@ def _mxfp4_expert_linear_wave64_kernel(out:UOp, sel:UOp, x:UOp, weight:UOp, scal
   return store.end(lane, row).sink(arg=KernelInfo(name="mxfp4_expert_linear_wave64", opts_to_apply=()))
 
 @functools.cache
+def _mxfp4_expert_linear_wave64_prefill_kernel(out:UOp, sel:UOp, x:UOp, weight:UOp, scale:UOp) -> UOp:
+  """Tiled CDNA4 prefill GEMM. Four adjacent outputs share activation loads and each wave half reduces in parallel."""
+  batch, tokens, topk, out_features = cast(tuple[int, int, int, int], out.shape[:4])
+  partials = cast(int, out.shape[4]) if len(out.shape) == 5 else 1
+  in_features, output_tile = cast(int, weight.shape[-1])*2, 4
+  assert tokens > 1 and in_features % 64 == 0 and out_features % output_tile == 0
+  assert x.shape[-1] == in_features and sel.shape == (batch, tokens, topk)
+  xchoices = cast(int, x.shape[-2])
+  assert xchoices in (1, topk)
+  total_rows = batch*tokens*topk*(out_features//output_tile)*partials
+  row, lane = UOp.range(total_rows, 0), UOp.range(64, 1, axis_type=AxisType.LOCAL)
+  partial, output_block, route = row%partials, (row//partials)%(out_features//output_tile), row//((out_features//output_tile)*partials)
+  outputs = tuple(output_block*output_tile+i for i in range(output_tile))
+  token, choice = route//topk, route%topk
+  expert = sel.reshape(batch*tokens, topk)[token, choice]
+  xv = x.reshape(batch*tokens, xchoices, in_features)
+  acc = UOp.placeholder((output_tile,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
+  acc = acc.after(acc.store(acc.const_like(0.0)))
+  group = UOp.range(in_features//64, 2, AxisType.REDUCE)
+  activation = xv[token, 0 if xchoices == 1 else choice, group*64+lane].float()
+  updates = []
+  for i,output in enumerate(outputs):
+    packed = weight[expert, output, group*32+lane//2]
+    code = (packed >> ((lane&1)*4).cast(dtypes.uint8)) & 15
+    weight_value = _mxfp4_value(code) * _e8m0_value(scale[expert, output, group*2+lane//32])
+    updates.append(acc.after(group)[i].load()+activation*weight_value)
+  update = acc.store(UOp.stack(*updates)).end(group)
+  half_totals = tuple(warp_reduce(acc.after(update)[i], full_wave=True) for i in range(output_tile))
+  local = UOp.placeholder((output_tile, 2), dtypes.float32, slot=1, addrspace=AddrSpace.LOCAL)
+  half = (lane//32).valid((lane&31).eq(0))
+  barrier = UOp.group(*(local[i, half].store(total) for i,total in enumerate(half_totals))).barrier()
+  out = out.reshape(batch*tokens, topk, out_features, partials)
+  stores = (out[token, choice, output, partial.valid(lane.eq(0))].store(
+    (local.after(barrier)[i, 0]+local.after(barrier)[i, 1]).cast(out.dtype)) for i,output in enumerate(outputs))
+  return UOp.group(*stores).end(lane, row).sink(arg=KernelInfo(name="mxfp4_expert_linear_wave64_prefill", opts_to_apply=()))
+
+@functools.cache
 def _bf16_partial_linear_kernel(out:UOp, x:UOp, weight:UOp) -> UOp:
   """Per-device BF16 down projection; its dummy final axis is reduced after combining TP partials."""
   batch, tokens, out_features, partials = cast(tuple[int, int, int, int], out.shape)

@@ -38,7 +38,8 @@ def amd_int32_item(x:Tensor, host:memoryview) -> int:
 
 def mxfp4_expert_linear(sel:Tensor, x:Tensor, weight:Tensor, scale:Tensor, partial:bool=False) -> Tensor:
   """Run a TP routed projection without materializing selected BF16 weights."""
-  from tinygrad.llm.kernels.amd import _mxfp4_expert_linear_kernel, _mxfp4_expert_linear_wave64_kernel
+  from tinygrad.llm.kernels.amd import (_mxfp4_expert_linear_kernel, _mxfp4_expert_linear_wave64_kernel,
+                                        _mxfp4_expert_linear_wave64_prefill_kernel)
   batch, tokens, topk = sel.shape
   out_features = weight.shape[1]
   weight_axis = weight.uop.axis
@@ -59,7 +60,9 @@ def mxfp4_expert_linear(sel:Tensor, x:Tensor, weight:Tensor, scale:Tensor, parti
     out = Tensor(parts[0].mstack(*parts[1:]).unshard(axis))
   else:
     out = Tensor.empty(batch, tokens, topk, out_features, dtype=dtypes.bfloat16, device=weight.device)
-  kernel = _mxfp4_expert_linear_wave64_kernel if amd_wave64_custom_kernels_supported(weight.device) else _mxfp4_expert_linear_kernel
+  if amd_wave64_custom_kernels_supported(weight.device):
+    kernel = _mxfp4_expert_linear_wave64_prefill_kernel if tokens > 1 else _mxfp4_expert_linear_wave64_kernel
+  else: kernel = _mxfp4_expert_linear_kernel
   out = Tensor.custom_kernel(out, sel.contiguous(), x.contiguous(), weight, scale, fxn=kernel)[0]
   return out if weight_axis == 2 and partial else out.sum(4).cast(dtypes.bfloat16) if weight_axis == 2 else out
 
@@ -203,7 +206,7 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   assert alpha.shape in ((batch, heads, tokens), (batch, heads, tokens, key_dim))
   assert state.shape == (batch, heads, value_dim, key_dim)
   kernel = _gated_delta_prefill_kernel
-  if amd_custom_kernels_supported(q.device) and key_dim % 32 == 0 and value_dim % 4 == 0:
+  if amd_exact_bf16_custom_kernels_supported(q.device) and key_dim % 32 == 0 and value_dim % 4 == 0:
     from tinygrad.llm.kernels.amd import _gated_delta_prefill_kernel as kernel
   core, next_state, kq = Tensor.empty_like(v), Tensor.empty_like(state), (q*k).sum(-1).contiguous()
   result = Tensor.custom_kernel(core, next_state, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq,

@@ -29,7 +29,7 @@ def main() -> None:
   parser.add_argument("--prompt", default="Reply with exactly: OK")
   parser.add_argument("--stable-tokens", type=int, default=8)
   parser.add_argument("--decode-tokens", type=int, default=8)
-  parser.add_argument("--chunk-size", type=int, default=8)
+  parser.add_argument("--chunk-size", type=int, default=128)
   args = parser.parse_args()
 
   begin = time.perf_counter()
@@ -47,9 +47,9 @@ def main() -> None:
   print(f"prompt: {len(prompt)} tokens, chunk={args.chunk_size}", flush=True)
 
   sequences:list[list[int]] = []
-  # The first execution captures the prefill and rollout JITs. Correctness comparisons must use
-  # identical replay paths, rather than comparing compilation/capture numerics to replay numerics.
-  for trial in range(3):
+  # TinyJit executes uncaptured once, captures the second call, and replays from the third call.
+  # Compare two replay paths rather than capture numerics/timing against replay.
+  for trial in range(4):
     gen = fresh_generate(model, prompt, args.chunk_size)
     sequence:list[int] = []
     prefill = 0.0
@@ -57,8 +57,9 @@ def main() -> None:
       token, elapsed = timed_next(gen, args.devices)
       sequence.append(token)
       if step == 0: prefill = elapsed
-    if trial: sequences.append(sequence)
-    print(f"{'capture warmup' if trial == 0 else f'stable trial {trial}'}: prefill={prefill:.3f}s "
+    if trial >= 2: sequences.append(sequence)
+    label = ("uncaptured warmup", "capture warmup", "stable trial 1", "stable trial 2")[trial]
+    print(f"{label}: prefill={prefill:.3f}s "
           f"({len(prompt)/prefill:.3f} tok/s), tokens={sequence}", flush=True)
   if sequences[0] != sequences[1]: raise RuntimeError(f"greedy output is not repeatable: {sequences}")
   print(f"stable text: {tok.decode(sequences[0])!r}", flush=True)

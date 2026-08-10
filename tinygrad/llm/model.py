@@ -204,9 +204,15 @@ class FFNBlock:
         self.ffn_down_exps(sel, routed_activation)
       out = (x_down * probs.unsqueeze(-1).unsqueeze(-1)).sum(axis=2) if combine_down else \
         (x_down * probs.unsqueeze(-1)).sum(axis=2).cast(x_down.dtype)  # (B, T, D[, devices])
+      combine_final = resolve(x.shape[1] == 1) and hasattr(self, 'ffn_routed_up') and hasattr(self, 'ffn_gate_shexp') and \
+        not hasattr(self, 'ffn_gate_inp_shexp') and isinstance(self.ffn_routed_up.weight.device, tuple) and \
+        isinstance(self.ffn_down_shexp.weight.device, tuple) and self.ffn_routed_up.weight.uop.axis == self.ffn_down_shexp.weight.uop.axis == 1 and \
+        self.ffn_routed_up.weight.shape[1] % (32*len(self.ffn_routed_up.weight.device)) == 0 and \
+        self.ffn_down_shexp.weight.shape[1] % (32*len(self.ffn_down_shexp.weight.device)) == 0 and \
+        amd_exact_bf16_custom_kernels_supported(x.device)
       if hasattr(self, 'ffn_routed_up'):
         if hasattr(self, 'ffn_routed_norm'): out = self.ffn_routed_norm(out)
-        out = self.ffn_routed_up(out)
+        out = bf16_partial_linear(out, self.ffn_routed_up.weight) if combine_final else self.ffn_routed_up(out)
       if hasattr(self, 'ffn_gate_shexp'):
         if resolve(x.shape[1] == 1) and amd_exact_bf16_custom_kernels_supported(x.device) and \
            self.ffn_gate_shexp.weight.shape == self.ffn_up_shexp.weight.shape:
@@ -215,6 +221,8 @@ class FFNBlock:
         else: shared_gate, shared_up = self.ffn_gate_shexp(x).contiguous(), self.ffn_up_shexp(x).contiguous()
         shared_activation = self._activation(shared_gate, shared_up).contiguous()
         if combine_down:
+          out = (out + bf16_partial_linear(shared_activation, self.ffn_down_shexp.weight)).sum(3).cast(dtypes.bfloat16)
+        elif combine_final:
           out = (out + bf16_partial_linear(shared_activation, self.ffn_down_shexp.weight)).sum(3).cast(dtypes.bfloat16)
         else:
           shexp = self.ffn_down_shexp(shared_activation)
@@ -229,7 +237,7 @@ class FFNBlock:
     else: dense_gate, dense_up = self.ffn_gate(x).contiguous(), self.ffn_up(x).contiguous()
     dense_activation = self._activation(dense_gate, dense_up).contiguous()
     if resolve(x.shape[1] == 1) and isinstance(self.ffn_down.weight.device, tuple) and self.ffn_down.weight.uop.axis == 1 and \
-       amd_custom_kernels_supported(x.device):
+       self.ffn_down.weight.shape[1] % (32*len(self.ffn_down.weight.device)) == 0 and amd_exact_bf16_custom_kernels_supported(x.device):
       return bf16_partial_linear(dense_activation, self.ffn_down.weight).sum(3).cast(dtypes.bfloat16)
     return self.ffn_down(dense_activation)
 
@@ -379,7 +387,8 @@ class MLATransformerBlock(FFNBlock):
     attn = attn.softmax(-1, dtype=dtypes.float32).cast(q.dtype)
     attn = ((attn @ v) @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
     if hasattr(self, "attn_gate"): attn = attn * self.attn_gate(x).sigmoid()
-    if resolve(T == 1) and isinstance(self.attn_output.weight.device, tuple) and amd_custom_kernels_supported(attn.device):
+    if resolve(T == 1) and isinstance(self.attn_output.weight.device, tuple) and \
+       self.attn_output.weight.shape[1] % (32*len(self.attn_output.weight.device)) == 0 and amd_exact_bf16_custom_kernels_supported(attn.device):
       return bf16_partial_linear(attn, self.attn_output.weight).sum(3).cast(dtypes.bfloat16)
     return self.attn_output(attn)
 
@@ -441,7 +450,7 @@ class GatedDeltaNetBlock(FFNBlock):
     # update is fused into one kernel so prefill doesn't build a Python-unrolled graph.
     split_qkv = hasattr(self, "attn_q")
     if split_qkv:
-      if resolve(T == 1) and amd_custom_kernels_supported(x.device) and \
+      if resolve(T == 1) and amd_packed_mxfp4_supported(x.device) and \
          self.attn_q.weight.shape == self.attn_k.weight.shape == self.attn_v.weight.shape:
         projected_q, projected_k, projected_v = kda_qkv_linear(x, self.attn_q.weight, self.attn_k.weight, self.attn_v.weight)
       else: projected_q, projected_k, projected_v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
@@ -500,7 +509,8 @@ class GatedDeltaNetBlock(FFNBlock):
     out = (core_attn_out * gate).reshape(B, T, -1)
     out = out.cast(x.dtype)
     ret = bf16_partial_linear(out, self.ssm_out.weight).sum(3).cast(dtypes.bfloat16) if resolve(T == 1) and \
-      isinstance(self.ssm_out.weight.device, tuple) and amd_custom_kernels_supported(out.device) else self.ssm_out(out)
+      isinstance(self.ssm_out.weight.device, tuple) and self.ssm_out.weight.shape[1] % (32*len(self.ssm_out.weight.device)) == 0 and \
+      amd_exact_bf16_custom_kernels_supported(out.device) else self.ssm_out(out)
     return ret.realize(*state_updates)
 
   # Recurrent serving currently rebuilds each independently rendered request; attention-only blocks still reuse KV.
@@ -575,7 +585,7 @@ class Transformer:
       x = FFNBlock._apply_attn_res(x.reshape(-1, x.shape[-1]), block_residual,
                                    self.output_attn_res_proj, self.output_attn_res_norm).reshape(x.shape)
     final_x = self.output_norm(x)
-    if temperature is None and resolve(tokens.numel() == 1) and amd_custom_kernels_supported(x.device):
+    if temperature is None and resolve(tokens.numel() == 1) and amd_exact_bf16_custom_kernels_supported(x.device):
       return bf16_matvec(final_x, self.output.weight).argmax(-1, keepdim=True)
     logits = self.output(final_x)[:, -1, :]
     if temperature is None: return logits.argmax(-1, keepdim=True)

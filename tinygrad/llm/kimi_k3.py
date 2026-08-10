@@ -30,7 +30,7 @@ def kimi_k3_config(max_context:int) -> TransformerConfig:
     ssm_layers=KIMI_K3_SSM_LAYERS, shared_expert_gate=False, attn_output_gate=True,
     activation_situ_beta=4.0, activation_situ_linear_beta=25.0, routed_expert_dim=3584, latent_moe_norm=True,
     route_weights_uncorrected=True, attn_res_block_size=12, kda_full_rank_gate=True, kda_gate_lower_bound=-5.0,
-    recurrent_prefill_chunked=True, recurrent_prefill_chunk_size=8)
+    recurrent_prefill_chunked=True, recurrent_prefill_chunk_size=128)
 
 def kimi_k3_smoke_config(max_context:int=4) -> TransformerConfig:
   """Reduced K3 with every architectural feature retained for cheap compile/hardware admission tests."""
@@ -301,7 +301,6 @@ def _load_experts(root:pathlib.Path, weight_map:dict[str, str], model:Transforme
     # UOps remain in model_state, while the graphs themselves still reference raw and permutation.
     del shards, raw, raw_buffer, permutation, outputs, value, final, storage, dst
     if (free_cache:=getattr(Device[devices[0]].allocator, "free_cache", None)) is not None: free_cache()
-  gc.collect()
   return consumed
 
 def load_kimi_k3(model_dir:str|pathlib.Path, max_context:int=4096, devices:int=8,
@@ -323,7 +322,13 @@ def load_kimi_k3(model_dir:str|pathlib.Path, max_context:int=4096, devices:int=8
   model = Transformer(kimi_k3_config(max_context))
   _shard_kimi_k3(model, tuple(f"{Device.DEFAULT}:{i}" for i in range(devices)))
   consumed = _load_nonexperts(root, weight_map, model, progress)
-  consumed.update(_load_experts(root, weight_map, model, progress))
+  # Expert staging graphs are acyclic and released by reference counting after each layer. Avoid
+  # unnecessary cyclic-collector scans across the complete persistent model graph during this loop.
+  gc_was_enabled = gc.isenabled()
+  gc.disable()
+  try: consumed.update(_load_experts(root, weight_map, model, progress))
+  finally:
+    if gc_was_enabled: gc.enable()
   unused_language = {k for k in weight_map if k.startswith("language_model.")} - consumed
   if unused_language: raise ValueError(f"unmapped language tensors: {sorted(unused_language)[:20]}")
   return model
