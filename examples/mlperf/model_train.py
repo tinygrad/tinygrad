@@ -1492,8 +1492,7 @@ def train_llama3():
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
     loss_cpu = loss_acc.to("CPU")
-    loss_acc.assign(0)
-    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
+    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_acc.assign(0), *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
 
     return lr_cpu, grad_norm_cpu, loss_cpu
 
