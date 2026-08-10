@@ -103,7 +103,7 @@ class TransformerConfig:
   expert_proj_bias: bool = False
   oai_swiglu: bool = False
   sliding_window: int = 0
-  swa_layers: tuple[bool, ...] = ()
+  sliding_window_pattern: int = 0
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
@@ -363,7 +363,7 @@ class Transformer:
     self.blk:list[FFNBlock] = []
     for i in range(config.num_blocks):
       c = dense_config if i < config.leading_dense_blocks else config
-      if config.swa_layers and not config.swa_layers[i]: c = replace(c, sliding_window=0)
+      if config.sliding_window_pattern != 0 and (i+1) % config.sliding_window_pattern == 0: c = replace(c, sliding_window=0)
       self.blk.append(GatedDeltaNetBlock(c, config.ssm) if config.ssm and config.ssm_layers[i] else block_cls(c))
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
@@ -466,8 +466,7 @@ class Transformer:
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict,
       expert_proj_bias='blk.0.ffn_gate_exps.bias' in state_dict, attn_output_bias='blk.0.attn_output.bias' in state_dict,
       oai_swiglu=arch == 'gpt-oss', attn_sinks='blk.0.attn_sinks.weight' in state_dict,
-      sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
-      swa_layers = tuple(i % 2 == 0 for i in range(kv[f'{arch}.block_count'])) if arch == 'gpt-oss' else ())
+      sliding_window=kv.get(f'{arch}.attention.sliding_window', 0), sliding_window_pattern=kv.get(f'{arch}.attention.sliding_window_pattern', 0))
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
