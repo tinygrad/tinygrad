@@ -82,7 +82,7 @@ def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp]|None:
   if dq_native.shape != (B, H, N, D) or dk_partial.shape != (B * partials, N, H_KV, D) or dv_partial.shape != dk_partial.shape: return None
   return dq_native, dk_partial, dv_partial
 
-def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp) -> tuple[None, None, None, UOp, None]:
+def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp, *, prequantize_mxfp4:bool=False) -> tuple[None, None, None, UOp, None]:
   dq, dk, dv = Tensor(dq_u, device=dq_u.device), Tensor(dk_u, device=dk_u.device), Tensor(dv_u, device=dv_u.device)
   xqkv_u, freqs_u = call.src[4], call.src[5]
   xqkv, freqs_cis = Tensor(xqkv_u, device=xqkv_u.device), Tensor(freqs_u, device=freqs_u.device)
@@ -99,7 +99,7 @@ def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp) -> tuple[None, 
   assert fa_native is not None, "fused QKV RoPE backward requires native Flash Attention gradients"
   dq, dk, dv = (Tensor(x, device=x.device) for x in fa_native)
   dxqkv = _sharded_empty_like(xqkv, axis=xqkv.uop.axis if isinstance(xqkv.device, tuple) else None)
-  if getenv("MXFP4"):
+  if prequantize_mxfp4:
     from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs, _grad_mxfp4_mailbox
     quant = alloc_mxfp4_outputs(dxqkv, flatten_row=True)
     fxn = functools.partial(custom_fused_qkv_rope_backward_mxfp4, device=single_device, arch=arch,
@@ -113,7 +113,8 @@ def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp) -> tuple[None, 
     dxqkv = Tensor.custom_kernel(dxqkv, dq, dk, dv, freqs_cis, fxn=fxn)[0]
   return None, None, None, dxqkv.uop, None
 
-def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, head_dim:int) -> tuple[Tensor, Tensor, Tensor]:
+def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, head_dim:int, *,
+                   prequantize_grad_mxfp4:bool=False) -> tuple[Tensor, Tensor, Tensor]:
   B, N, packed_dim = xqkv.shape
   assert packed_dim == n_kv_heads * (n_heads // n_kv_heads + 2) * head_dim
   assert freqs_cis.dtype == dtypes.bfloat16, f"fused QKV RoPE requires bfloat16 frequencies, got {freqs_cis.dtype}"
@@ -133,7 +134,8 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
   v = _sharded_empty((B, N, n_kv_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
   fxn = functools.partial(custom_fused_qkv_rope_forward, device=single_device, arch=arch,
                           B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=head_dim)
-  q, k, v, *_ = Tensor.custom_kernel(q, k, v, xqkv, freqs_cis, fxn=fxn, grad_fxn=_fused_qkv_rope_grad)
+  grad_fxn = functools.partial(_fused_qkv_rope_grad, prequantize_mxfp4=prequantize_grad_mxfp4)
+  q, k, v, *_ = Tensor.custom_kernel(q, k, v, xqkv, freqs_cis, fxn=fxn, grad_fxn=grad_fxn)
   return q, k, v
 
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:

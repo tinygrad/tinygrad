@@ -1,6 +1,5 @@
 import functools, math, pathlib
 from tinygrad import Tensor, dtypes
-from tinygrad.helpers import getenv
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import alloc_like, compile_hip
@@ -47,12 +46,13 @@ def _custom_swiglu_bwd_mxfp4(grad_out:UOp, row_fp4:UOp, row_scale:UOp, col_fp4:U
   lib = compile_hip(src, [f"-I{inc}", f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}"])
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
-def _swiglu_bwd(gradient:UOp, kernel:UOp):
+def _swiglu_bwd(gradient:UOp, kernel:UOp, *, prequantize_mxfp4:bool=False):
   _, x_w13 = kernel.src[1:]
   axis = x_w13.axis if isinstance(x_w13.device, tuple) else None
   grad_out = alloc_like(x_w13.shape, dtypes.bfloat16, x_w13.device, axis)
   M, N = math.prod(x_w13.shape[:-1]), x_w13.shape[-1]
-  if getenv("MXFP4") and M % 256 == 0 and N % 256 == 0:
+  if prequantize_mxfp4:
+    assert M % 256 == 0 and N % 256 == 0, f"MXFP4 SwiGLU gradient requires multiples of 256, got {(M, N)}"
     from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs, _grad_mxfp4_mailbox
     quant = alloc_mxfp4_outputs(grad_out, flatten_row=True)
     ret = Tensor.custom_kernel(grad_out, *quant, Tensor(x_w13, device=x_w13.device),
@@ -64,9 +64,10 @@ def _swiglu_bwd(gradient:UOp, kernel:UOp):
                                         fxn=_custom_swiglu_bwd)
   return (None, grad_out.uop)
 
-def swiglu(x_w13:Tensor) -> Tensor:
+def swiglu(x_w13:Tensor, *, prequantize_grad_mxfp4:bool=False) -> Tensor:
   assert x_w13.dtype == dtypes.bfloat16 and x_w13.ndim >= 2 and x_w13.shape[-1] % 32 == 0
   *prefix, two_k = x_w13.shape
   axis = x_w13.uop.axis if isinstance(x_w13.device, tuple) else None
   out = alloc_like((*prefix, two_k//2), dtypes.bfloat16, x_w13.device, axis)
-  return Tensor.custom_kernel(out, x_w13, fxn=_custom_swiglu, grad_fxn=_swiglu_bwd)[0]
+  grad_fxn = functools.partial(_swiglu_bwd, prequantize_mxfp4=prequantize_grad_mxfp4)
+  return Tensor.custom_kernel(out, x_w13, fxn=_custom_swiglu, grad_fxn=grad_fxn)[0]

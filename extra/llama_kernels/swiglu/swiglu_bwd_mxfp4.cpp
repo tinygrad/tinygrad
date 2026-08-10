@@ -32,12 +32,11 @@ __device__ __forceinline__ void swiglu_grads(const __hip_bfloat16* packed, const
 }
 
 __device__ __forceinline__ void store_quantized_tile(
-    uint16_t* tile, __hip_bfloat16* grad_out,
+    uint16_t* tile,
     uint8_t* row_fp4, uint8_t* row_scale, uint8_t* col_fp4, uint8_t* col_scale,
     const __hip_bfloat16 (&values)[VALUES_PER_THREAD], int row, int col, int line, int lane) {
   #pragma unroll
   for (int j = 0; j < VALUES_PER_THREAD; j++) {
-    grad_out[row * N + col + j] = values[j];
     tile[line * SMEM_STRIDE + lane * VALUES_PER_THREAD + j] = *reinterpret_cast<const uint16_t*>(&values[j]);
   }
   __syncthreads();
@@ -84,7 +83,7 @@ void KERNEL_NAME(__hip_bfloat16* __restrict__ grad_out,
       dact[j] = __hip_bfloat16(dact_f);
       dgate[j] = __hip_bfloat16(dgate_f);
     }
-    store_quantized_tile(tile, grad_out, row_fp4, row_scale, col_fp4, col_scale, dact, row, col, line, lane);
-    store_quantized_tile(tile, grad_out, row_fp4, row_scale, col_fp4, col_scale, dgate, row, HIDDEN + col, line, lane);
+    store_quantized_tile(tile, row_fp4, row_scale, col_fp4, col_scale, dact, row, col, line, lane);
+    store_quantized_tile(tile, row_fp4, row_scale, col_fp4, col_scale, dgate, row, HIDDEN + col, line, lane);
   }
 }

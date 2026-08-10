@@ -132,7 +132,7 @@ def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, s_2:Tensor,
                              grad_amax_xout:Tensor|None, next_grad_amax_xout:Tensor|None, mxfp4_w=None):
   if FUSED_SILU_W13 and MXFP4:
     from extra.llama_kernels.swiglu import swiglu
-    out, *ret = matmul(swiglu(x_w13), w2, amax_x=amax_x2, w_inv_scale=s_2, grad_amax_state=grad_amax_xout,
+    out, *ret = matmul(swiglu(x_w13, prequantize_grad_mxfp4=True), w2, amax_x=amax_x2, w_inv_scale=s_2, grad_amax_state=grad_amax_xout,
                        next_grad_amax_state=next_grad_amax_xout, next_amax_x=next_amax_x2, mxfp4_w=mxfp4_w, save_mxfp4_input=True)
     return out, ret
   if FUSED_SILU_W13 and not MXFP4:
@@ -232,7 +232,8 @@ class FlatTransformer:
     saves.extend([x_normed, rrms, *s, xqkv])
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention, fused_qkv_rope
-      xq, xk, xv = fused_qkv_rope(xqkv, freqs_cis, self.n_heads, self.n_kv_heads, self.head_dim)
+      xq, xk, xv = fused_qkv_rope(xqkv, freqs_cis, self.n_heads, self.n_kv_heads, self.head_dim,
+                                  prequantize_grad_mxfp4=bool(MXFP4))
       attn, *save = flash_attention(xq, xk, xv, is_causal=True, write_flat=True)
       saves.extend(save)
     else:
