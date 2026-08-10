@@ -1565,6 +1565,9 @@ def train_llama3():
         mst = time.perf_counter()
         data_time += mst - ist
         minibatch(tokens)
+        # The first call runs outside the JIT graph. Finish its cross-device copies before capture reuses intermediates.
+        if minibatch.cnt == 1:
+          for d in device: Device[d].synchronize()
         dev_time += time.perf_counter() - mst
       if stopped: break
 
