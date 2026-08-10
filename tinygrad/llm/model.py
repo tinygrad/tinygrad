@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from typing import cast
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context, dtypes, Device
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context, dtypes
 from tinygrad.llm.kernels import Linear, gated_delta_prefill, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
@@ -432,14 +432,7 @@ class Transformer:
     if self.has_recurrent_block:
       x = Tensor.empty(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
       for block in self.blk: block._init_state(x)
-    # Eager execution is prohibitively expensive over USB because every kernel launch is a separate round trip. Capture immediately instead;
-    # CAPTURING suppresses execution while constructing the schedule, and the completed graph is executed once before __call__ returns.
-    dev = Device[str(self.token_embd.weight.device)]
-    usb = dev.is_usb() if hasattr(dev, "is_usb") else False
-    if usb:
-      if self.prefill_jit.cnt == 0: self.prefill_jit.cnt = 1
-      if self.rollout_jit.cnt == 0: self.rollout_jit.cnt = 1
-    for _ in range(1 if usb else 2):
+    for _ in range(2):
       # NOTE: chunk_size must match what generate uses at serve time, otherwise the captured JIT rejects the new toks range
       warm = self.generate(prompt, chunk_size=chunk_size)
       with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
