@@ -924,8 +924,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
-    # if self.op is Ops.BITCAST: return self.src[0].has_buffer_identity(after_ok)
-    # if self.op is Ops.SHRINK: return self.src[0].op is Ops.PARAM and self.src[1].op is Ops.CONST
     return self.op in {Ops.BUFFER, Ops.SLICE, Ops.PARAM}
 
   def _base_buffer_is_realized(self) -> bool:
