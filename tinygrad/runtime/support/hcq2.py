@@ -385,7 +385,7 @@ def resolve_getaddr_view(bv:UOp, g:UOp) -> UOp:
 
 pm_early_simplify = PatternMatcher([
   (UPat(Ops.GETADDR, src=(UPat((Ops.SLICE, Ops.SHRINK, Ops.BITCAST), name="bv").or_after(),), name="g"), resolve_getaddr_view),
-  (UPat(Ops.INDEX, src=(UPat(Ops.SLICE, name="bv"),), allow_any_len=True, name="x"),
+  (UPat(Ops.INDEX, src=(UPat((Ops.SLICE, Ops.SHRINK), name="bv"),), allow_any_len=True, name="x"),
    lambda bv,x: x.replace(src=(bv.src[0], x.src[1] + bv.src[1].cast(x.src[1].dtype), *x.src[2:]))),
 ])
 
@@ -403,7 +403,7 @@ def pack_hcq_placeholders(call:UOp) -> UOp|None:
       sizes[b.tag] = offs[b] + b.max_numel()
   counts = collections.Counter(b.tag for b in bufs)
   bases = {b.tag:UOp.placeholder((sizes[b.tag],), b.dtype, next(UOp.unique_num), device=b.device).rtag(b.tag) for b in bufs if counts[b.tag] > 1}
-  subs = {b:UOp(Ops.SLICE, b.dtype, (bases[b.tag], UOp.const(offs.get(b, 0))), b.max_numel()) for b in bufs if b.tag in bases}
+  subs = {b:bases[b.tag][(off:=offs.get(b, 0)):off+b.max_numel()] for b in bufs if b.tag in bases}
   return call.replace(src=(call.src[0].substitute(subs, walk=True), *call.src[1:])) if subs else None
 pm_pack_placeholders = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), pack_hcq_placeholders)])
