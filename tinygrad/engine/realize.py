@@ -225,10 +225,10 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   for (name,estimates,prof),device in itertools.product(info.kernels, info.device):
     d, tm = cast(Any, Device[device]), None
     if prof:
-      d.prof_ents[ev.st_id] = (ev:=ProfileGraphEntry(device, name, *prof))
+      d.prof_ents[prof[0]] = ProfileGraphEntry(device, name, *prof)
       if ctx.wait:
         d.synchronize(timeout=ctx.timeout)
-        st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in (ev.st_id, ev.en_id))
+        st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
         tms.append(tm:=float(en-st)/d.timestamp_divider/1e6)
     with track_stats(ctx, call.replace(arg=replace(call.arg, name=name, aux=replace(info, estimates=estimates))), d.device, [], ctx.var_vals) as et:
       et[0] = tm
