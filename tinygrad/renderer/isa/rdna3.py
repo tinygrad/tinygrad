@@ -129,7 +129,9 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
 
   if x.op is Ops.GROUP:
     vreg = ctx.vreg(GP_VGPRS, width=len(x.src))
+    # TODO: replace all references to src edges to avoid duplicates because of tag changes
     return x.replace(tag=(vreg,), src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)))
+
   elif isinstance(x.tag, tuple):
     cons, width = x.tag if isinstance(x.tag[0], tuple) else (x.tag, 1)
     vr = ctx.vreg(cons, width=width)
@@ -327,7 +329,7 @@ def cvt(ctx, y:UOp, x:UOp):
 
 def int_to_int64(y:UOp, tdt:DType):
   hi = vmov(const(0)) if dtypes.is_unsigned(y.dtype) else getsign(to_vgpr(y), y.dtype.itemsize*8)
-  return UOp.group(vmov(y), hi, dtype=tdt)
+  return UOp.group(to_vgpr(y), hi, dtype=tdt)
 
 # NOTE: use v_bfe instead of hand rolled masking
 def intcast(y:UOp, x:UOp):
@@ -389,22 +391,20 @@ class BiasMemoryCtx:
     self.mgroups: dict[ParamArg, list[tuple[UOp|None, int|None]]] = {}
     for u in sink.toposort():
       if u.op in {Ops.LOAD, Ops.STORE} and u.src[0].addrspace is not AddrSpace.REG:
-        base,idx = u.src[0].src[:2]
-        arg = None
-        if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
-          arg = idx.src[1].val
-        self.mgroups.setdefault(base.arg, []).append((idx,arg))
+        base,idx,arg = (*u.src[0].src[:2], None)
+        if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: arg = idx.src[1].val
+        self.mgroups.setdefault(base.arg, []).append((idx,arg or 0))
 
     self.normalized: dict[UOp, UOp] = {}
     for b, uses in self.mgroups.items():
-      args = [v[1] for v in uses if v[1] is not None]
-      if len(args) == 0: continue
-      mean = sum(args) // len(args)
-      if mean == 0: continue
+      if len(args := [v[1] for v in uses if v[1] is not None]) == 0: continue
+      if (mean := sum(args) // len(args)) == 0: continue
       for idx,v in uses:
         if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
+          # propagate the normalize addition down sum edges to hint hoist outside range?
+          # this is where this starts to belong in codegen optimizations maybe
           self.normalized[idx] = idx.replace(src=(idx.src[0] + const(mean, idx.dtype), const(idx.src[1].val - mean, idx.dtype)))
-        elif v is None: # dynamic base no ioffs
+        else: # dynamic base no ioffs
           self.normalized[idx] = (idx + const(mean, idx.dtype)) + const(-mean, idx.dtype)
 
 pm_bias_memory_addrs = PatternMatcher([
@@ -680,7 +680,7 @@ class RDNA3Renderer(ISARenderer):
       return clauses
 
     for i,(p,l) in enumerate((gather(loads) | gather(stores)).items()):
-      nuops.insert(p+i, UOp(Ops.INS, arg=RDNA3Ops.s_clause, src=(const(l-1),)))
+      if l > 1: nuops.insert(p+i, UOp(Ops.INS, arg=RDNA3Ops.s_clause, src=(const(l-1),)))
 
     pc = 0
     targets: dict[str, int] = {}
