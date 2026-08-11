@@ -18,6 +18,7 @@ isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 # (uop, prefix, opcodes, support 32 and 64 bit encoding (e32/e64 branches with keys))
 # TODO: fold MAX, MIN, GT, GE etcw.. ins patterns where possible in isel
 insdefs = [
+  (Ops.MAX, "v_max", ["f32_e32", "i32_e32", "u32_e32", "f64", "f16_e32"], False),
   (Ops.ADD, "v_add", ["f16_e32", "f32_e32", "f64", "nc_i32", "nc_u32_e32", "nc_u16", "nc_i16"], False),
   (Ops.SUB, "v_sub", ["f16_e32", "f32_e32", "nc_i32", "nc_i16", "nc_u16", "nc_u32_e32"], False),
   (Ops.MUL, "v_mul", ["f16_e32", "f32_e32", "f64", "lo_u32", "lo_u16"], False), # TODO: mul i16?
@@ -45,6 +46,7 @@ def _build_ins_table(srcs):
 
 OP_INS = _build_ins_table(insdefs)
 V_FMA = { dtypes.float16:RDNA3Ops.v_fma_f16, dtypes.float32:RDNA3Ops.v_fma_f32, dtypes.float64:RDNA3Ops.v_fma_f64 }
+# V_MIN = { dtypes.float32:RDNA3Ops.v_min_f32_e32, dtypes.float16:RDNA3Ops.v_min_f16_e32, dtypes.uint32:RDNA3Ops.v_min_u32_e32, dtypes.int32:RDNA3Ops.v_min_i32_e32, dtypes.float64:RDNA3Ops.v_min_f64 }
 V_LSHL = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
 V_LSHR = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
 V_ASHR = { 4:RDNA3Ops.v_ashrrev_i32_e32, 8:RDNA3Ops.v_ashrrev_i64 }
@@ -411,7 +413,7 @@ pm_bias_memory_addrs = PatternMatcher([
 ])
 
 extra_matcher = PatternMatcher([
-  (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(x.val if isinstance(x.val, InvalidDtype) else to_storage_scalar(x.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
+  (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(x.val if isinstance(x.val, InvalidType) else to_storage_scalar(x.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
@@ -475,8 +477,11 @@ pre_isel_matcher = PatternMatcher([
   (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), \
     lambda y: (y & const((1 << 16) - 1, dtypes.uint16)).replace(dtype=dtypes.uint16)),
   # hack?
+  (UPat(Ops.MAX, dtypes.int64s, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda a,b,x: (a < b).where(b, a).replace(dtype=x.dtype)),
   (UPat(Ops.MUL, dtypes.int32, name="x"), lambda x: x.replace(dtype=dtypes.uint32).bitcast(dtypes.int32)),
+  (UPat(Ops.MAX, dtypes.int16s, name="x"), lambda x: x.replace(dtype=smux(x.dtype, dtypes.int32, dtypes.uint32)).bitcast(x.dtype)),
 ]) + pm_float_to_int + pm_int_to_float
+
 
 isel_matcher = PatternMatcher([
   # --- mem ops ---
@@ -613,7 +618,7 @@ class RDNA3Renderer(ISARenderer):
   extra_matcher = extra_matcher
   post_regalloc_matcher = post_regalloc_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL, Ops.MAX)}
   post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
     super().__init__(target)
@@ -678,8 +683,11 @@ class RDNA3Renderer(ISARenderer):
         clauses[start] = clauses.setdefault(start, 0) + 1
       return clauses
 
-    for i,(p,l) in enumerate((gather(loads) | gather(stores)).items()):
-      if l > 1: nuops.insert(p+i, UOp(Ops.INS, arg=RDNA3Ops.s_clause, src=(const(l-1),)))
+    dp = 0
+    for p,l in (gather(loads) | gather(stores)).items():
+      if l > 1:
+        nuops.insert(p+dp, UOp(Ops.INS, arg=RDNA3Ops.s_clause, src=(const(l-1),)))
+        dp += 1
 
     pc = 0
     targets: dict[str, int] = {}
@@ -695,4 +703,3 @@ class RDNA3Renderer(ISARenderer):
     lin = lin.replace(src=tuple([u if not isinstance(u.tag, str) else \
       u.replace(arg=RDNA3Ops.SOPP(u.arg.op, (targets[u.tag] - upc[u]) // 4)) for u in nuops]))
     return assemble_linear(prg, lin, self.target.arch, scratch_size=self.spill_size)
-
