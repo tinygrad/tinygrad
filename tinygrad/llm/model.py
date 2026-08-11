@@ -89,7 +89,6 @@ class SSMConfig:
 @dataclass(frozen=True)
 class DeepSeek4Config:
   compress_ratios: tuple[int, ...]
-  window_size: int
   index_n_heads: int
   index_head_dim: int
   index_topk: int
@@ -99,10 +98,7 @@ class DeepSeek4Config:
   hc_sinkhorn_iters: int
   hc_eps: float
   hash_layers: int
-  swiglu_clamp: tuple[float, ...]
-  shared_swiglu_clamp: tuple[float, ...]
   compress_rope_theta: float
-  yarn: tuple[float, int, float, float]
 
 @dataclass(frozen=True)
 class TransformerConfig:
@@ -118,6 +114,8 @@ class TransformerConfig:
   rope_dim: int
   v_head_dim: int
   max_context: int = 0
+  sliding_window: int = 0
+  yarn: tuple[float, int, float, float]|None = None
   qk_norm: int = 0
   num_experts: int = 0
   num_experts_per_tok: int = 0
@@ -134,6 +132,8 @@ class TransformerConfig:
   leading_dense_blocks: int = 0
   dense_hidden_dim: int = 0
   routed_scaling_factor: float = 1.0
+  swiglu_clamp: tuple[float, ...] = ()
+  shared_swiglu_clamp: tuple[float, ...] = ()
   qkv_bias: bool = False
   expert_bias: bool = False
   mxfp4_experts: bool = False
@@ -266,7 +266,8 @@ class TransformerBlock(FFNBlock):
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
       self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim, device=x.device)
-      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
+      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
+                                            device=x.device, yarn=self.config.yarn)
 
 class MLATransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
@@ -344,7 +345,8 @@ class MLATransformerBlock(FFNBlock):
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_k"):
       self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
-      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
+      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta,
+                                            device=x.device, yarn=self.config.yarn)
 
 class GatedDeltaNetBlock(FFNBlock):
   def __init__(self, config:TransformerConfig, ssm:SSMConfig):
@@ -413,16 +415,47 @@ class GatedDeltaNetBlock(FFNBlock):
       self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
       self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_v_dim, device=x.device).clone()
 
-def _hyper_connection(mixes:Tensor, scale:Tensor, base:Tensor, hc:int, eps:float, iters:int) -> tuple[Tensor, Tensor, Tensor]:
-  B, T, _ = mixes.shape
-  pre = (mixes[..., :hc]*scale[0]+base[:hc]).sigmoid()+eps
-  post = (mixes[..., hc:2*hc]*scale[1]+base[hc:2*hc]).sigmoid()*2
-  comb = (mixes[..., 2*hc:]*scale[2]+base[2*hc:]).reshape(B, T, hc, hc).softmax(-1)+eps
-  comb = comb/(comb.sum(-2, keepdim=True)+eps)
-  for _ in range(1, iters):
-    comb = comb/(comb.sum(-1, keepdim=True)+eps)
-    comb = comb/(comb.sum(-2, keepdim=True)+eps)
-  return pre, post, comb
+class HyperConnection:
+  def __init__(self, config:TransformerConfig):
+    dsv4 = config.deepseek4
+    assert dsv4 is not None
+    width = (2+dsv4.hc_mult)*dsv4.hc_mult
+    self.fn = {"weight": Tensor.zeros(width, dsv4.hc_mult*config.dim)}
+    self.base, self.scale = {"weight": Tensor.zeros(width)}, {"weight": Tensor.zeros(3)}
+    self.hc, self.norm_eps = dsv4.hc_mult, config.norm_eps
+    self.eps, self.iters = dsv4.hc_eps, dsv4.hc_sinkhorn_iters
+
+  def prepare(self, x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
+    flat = x.flatten(2)
+    mixes = (flat @ self.fn["weight"].T) * (flat.square().mean(-1, keepdim=True)+self.norm_eps).rsqrt()
+    scale, base = self.scale["weight"], self.base["weight"]
+    B, T, _ = mixes.shape
+    pre = (mixes[..., :self.hc]*scale[0]+base[:self.hc]).sigmoid()+self.eps
+    post = (mixes[..., self.hc:2*self.hc]*scale[1]+base[self.hc:2*self.hc]).sigmoid()*2
+    comb = (mixes[..., 2*self.hc:]*scale[2]+base[2*self.hc:]).reshape(B, T, self.hc, self.hc).softmax(-1)+self.eps
+    comb = comb/(comb.sum(-2, keepdim=True)+self.eps)
+    for _ in range(1, self.iters):
+      comb = comb/(comb.sum(-1, keepdim=True)+self.eps)
+      comb = comb/(comb.sum(-2, keepdim=True)+self.eps)
+    return (pre.unsqueeze(-1)*x).sum(2).cast(x.dtype), post, comb
+
+  @staticmethod
+  def mix(x:Tensor, residual:Tensor, post:Tensor, comb:Tensor) -> Tensor:
+    return (post.unsqueeze(-1)*x.unsqueeze(-2) + (comb.unsqueeze(-1)*residual.unsqueeze(-2)).sum(2)).cast(x.dtype)
+
+class HyperConnectionOutput:
+  def __init__(self, config:TransformerConfig):
+    dsv4 = config.deepseek4
+    assert dsv4 is not None
+    self.fn = {"weight": Tensor.zeros(dsv4.hc_mult, dsv4.hc_mult*config.dim)}
+    self.base, self.scale = {"weight": Tensor.zeros(dsv4.hc_mult)}, {"weight": Tensor.zeros(1)}
+    self.norm_eps, self.eps = config.norm_eps, dsv4.hc_eps
+
+  def __call__(self, x:Tensor) -> Tensor:
+    flat = x.flatten(2)
+    mixes = (flat @ self.fn["weight"].T) * (flat.square().mean(-1, keepdim=True)+self.norm_eps).rsqrt()
+    pre = (mixes*self.scale["weight"]+self.base["weight"]).sigmoid()+self.eps
+    return (pre.unsqueeze(-1)*x).sum(2)
 
 class DeepSeek4Compressor:
   def __init__(self, config:TransformerConfig, ratio:int, head_dim:int, rotate:bool=False):
@@ -499,17 +532,14 @@ class DeepSeek4Block(MLATransformerBlock):
     assert dsv4 is not None
     super().__init__(config)
     self.dsv4, self.compress_ratio = dsv4, dsv4.compress_ratios[layer_id]
-    self.swiglu_clamp, self.shared_swiglu_clamp = dsv4.swiglu_clamp[layer_id], dsv4.shared_swiglu_clamp[layer_id]
+    self.swiglu_clamp, self.shared_swiglu_clamp = config.swiglu_clamp[layer_id], config.shared_swiglu_clamp[layer_id]
     self.attn_kv_a_mqa = nn.Linear(config.dim, config.head_dim, bias=False)
     self.attn_kv_a_norm = nn.RMSNorm(config.head_dim, config.norm_eps)
     self.attn_output_a = nn.Linear(config.n_heads*config.head_dim//dsv4.output_groups,
                                    dsv4.output_groups*dsv4.output_lora_rank, bias=False)
     self.attn_output_b = nn.Linear(dsv4.output_groups*dsv4.output_lora_rank, config.dim, bias=False)
 
-    mix_hc, hc_dim = (2+dsv4.hc_mult)*dsv4.hc_mult, dsv4.hc_mult*config.dim
-    for name, shape in (("hc_attn_fn", (mix_hc, hc_dim)), ("hc_attn_base", (mix_hc,)), ("hc_attn_scale", (3,)),
-                        ("hc_ffn_fn", (mix_hc, hc_dim)), ("hc_ffn_base", (mix_hc,)), ("hc_ffn_scale", (3,))):
-      setattr(self, name, {"weight": Tensor.zeros(*shape)})
+    self.hc_attn, self.hc_ffn = HyperConnection(config), HyperConnection(config)
 
     if self.compress_ratio:
       self.compressor = DeepSeek4Compressor(config, self.compress_ratio, config.head_dim)
@@ -519,34 +549,24 @@ class DeepSeek4Block(MLATransformerBlock):
       self.ffn_gate_tid2eid = {"weight": Tensor.zeros(config.vocab_size, config.num_experts_per_tok, dtype="int32")}
     else: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
 
-  def _hc_pre(self, x:Tensor, name:str) -> tuple[Tensor, Tensor, Tensor]:
-    flat = x.flatten(2)
-    mixes = (flat @ getattr(self, name+"_fn")["weight"].T) * (flat.square().mean(-1, keepdim=True)+self.config.norm_eps).rsqrt()
-    pre, post, comb = _hyper_connection(mixes, getattr(self, name+"_scale")["weight"], getattr(self, name+"_base")["weight"], self.dsv4.hc_mult,
-                                        self.dsv4.hc_eps, self.dsv4.hc_sinkhorn_iters)
-    return (pre.unsqueeze(-1)*x).sum(2).cast(x.dtype), post, comb
-
-  @staticmethod
-  def _hc_post(x:Tensor, residual:Tensor, post:Tensor, comb:Tensor) -> Tensor:
-    return (post.unsqueeze(-1)*x.unsqueeze(-2) + (comb.unsqueeze(-1)*residual.unsqueeze(-2)).sum(2)).cast(x.dtype)
-
   def _compressed_indices(self, qr:Tensor|None, x:Tensor, start_pos:int|UOp, cache:Tensor) -> tuple[Tensor, Tensor]:
-    cache = self.compressor(x, start_pos, self.freqs_cis, cache, self.dsv4.window_size)
+    cache = self.compressor(x, start_pos, self.freqs_cis, cache, self.config.sliding_window)
     if hasattr(self, "indexer"): return cache, self.indexer(cast(Tensor, qr), x, start_pos, self.freqs_cis)
     count = (Tensor(start_pos).to(x.device)+1)//self.compress_ratio
-    idx = Tensor.arange(cache.shape[1]-self.dsv4.window_size).to(x.device).reshape(1, 1, -1)
+    idx = Tensor.arange(cache.shape[1]-self.config.sliding_window).to(x.device).reshape(1, 1, -1)
     return cache, (idx < count).where(idx, -1)
 
   def _cache_attention(self, qr:Tensor|None, x:Tensor, start_pos:int|UOp, c_kv:Tensor, k_rope:Tensor) -> tuple[Tensor, Tensor, Tensor|None]:
     B, T, _ = x.shape
     kv = c_kv.cat(k_rope, dim=-1)
-    window_pos = start_pos % self.dsv4.window_size
+    window = self.config.sliding_window
+    window_pos = start_pos % window
     cache = Tensor(self.kv_cache.uop.after(self.kv_cache[:, window_pos:window_pos+1].uop.store(kv.uop)))
-    window_idx = Tensor(start_pos, device=x.device)-self.dsv4.window_size+1+Tensor.arange(self.dsv4.window_size).to(x.device)
-    window_idx = (window_idx >= 0).where(window_idx % self.dsv4.window_size, -1).reshape(1, 1, -1)
+    window_idx = Tensor(start_pos, device=x.device)-window+1+Tensor.arange(window).to(x.device)
+    window_idx = (window_idx >= 0).where(window_idx % window, -1).reshape(1, 1, -1)
     if self.compress_ratio:
       cache, compressed_idx = self._compressed_indices(qr, x, start_pos, cache)
-      compressed_idx = (compressed_idx >= 0).where(compressed_idx+self.dsv4.window_size, -1)
+      compressed_idx = (compressed_idx >= 0).where(compressed_idx+window, -1)
       indices = window_idx.cat(compressed_idx, dim=-1)
     else: indices = window_idx
     indices = indices.expand(B, T, indices.shape[-1])
@@ -568,19 +588,19 @@ class DeepSeek4Block(MLATransformerBlock):
     return self.attn_output_b(out)
 
   def _attention_residual(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    h, post, comb = self._hc_pre(x, "hc_attn")
-    return self._hc_post(self._attention(self.attn_norm(h), start_pos), x, post, comb)
+    h, post, comb = self.hc_attn.prepare(x)
+    return self.hc_attn.mix(self._attention(self.attn_norm(h), start_pos), x, post, comb)
 
   def _feed_forward_residual(self, x:Tensor, tokens:Tensor|None) -> Tensor:
-    h, post, comb = self._hc_pre(x, "hc_ffn")
-    return self._hc_post(self._feed_forward(self.ffn_norm(h), tokens), x, post, comb)
+    h, post, comb = self.hc_ffn.prepare(x)
+    return self.hc_ffn.mix(self._feed_forward(self.ffn_norm(h), tokens), x, post, comb)
 
   def _init_state(self, x:Tensor):
     if hasattr(self, "kv_cache"): return
-    cache_size = self.dsv4.window_size + (max(1, ceildiv(self.config.max_context, self.compress_ratio)) if self.compress_ratio else 0)
+    cache_size = self.config.sliding_window + (max(1, ceildiv(self.config.max_context, self.compress_ratio)) if self.compress_ratio else 0)
     self.kv_cache = Tensor.zeros(x.shape[0], cache_size, self.config.head_dim, dtype=x.dtype, device=x.device).clone()
     rope_theta = self.dsv4.compress_rope_theta if self.compress_ratio else self.config.rope_theta
-    yarn = self.dsv4.yarn if self.compress_ratio else None
+    yarn = self.config.yarn if self.compress_ratio else None
     self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, rope_theta, device=x.device, yarn=yarn)
     if not self.compress_ratio: return
     self.compressor.init_state(x)
@@ -602,11 +622,7 @@ class Transformer:
                                GatedDeltaNetBlock(dense_config if i < config.leading_dense_blocks else config, config.ssm)
                                if config.ssm and config.ssm_layers[i] else
                                block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
-    if config.deepseek4:
-      hc_dim = config.deepseek4.hc_mult*config.dim
-      self.output_hc_fn = {"weight": Tensor.zeros(config.deepseek4.hc_mult, hc_dim)}
-      self.output_hc_base = {"weight": Tensor.zeros(config.deepseek4.hc_mult)}
-      self.output_hc_scale = {"weight": Tensor.zeros(1)}
+    if config.deepseek4: self.output_hc = HyperConnectionOutput(config)
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
@@ -622,11 +638,7 @@ class Transformer:
     if dsv4 := self.config.deepseek4:
       x = x.unsqueeze(2).expand(*x.shape[:2], dsv4.hc_mult, x.shape[-1]).contiguous()
     for block in self.blk: x = block(x, start_pos, tokens)
-    if dsv4:
-      flat = x.flatten(2)
-      mixes = (flat @ self.output_hc_fn["weight"].T) * (flat.square().mean(-1, keepdim=True)+self.config.norm_eps).rsqrt()
-      pre = (mixes*self.output_hc_scale["weight"]+self.output_hc_base["weight"]).sigmoid()+dsv4.hc_eps
-      x = (pre.unsqueeze(-1)*x).sum(2)
+    if dsv4: x = self.output_hc(x)
     logits = self.output(self.output_norm(x))[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
@@ -679,24 +691,27 @@ class Transformer:
     head_dim = kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads))
     rope_dim = kv.get(f'{arch}.rope.dimension_count', head_dim)
 
-    dsv4 = None
+    dsv4, yarn = None, None
+    sliding_window = kv.get(f'{arch}.attention.sliding_window', 0)
+    swiglu_clamp:tuple[float, ...] = ()
+    shared_swiglu_clamp:tuple[float, ...] = ()
     if arch == 'deepseek4':
       num_blocks = kv[f'{arch}.block_count']
       def as_layers(value): return tuple(value) if isinstance(value, list) else (value,)*num_blocks
+      swiglu_clamp = as_layers(kv[f'{arch}.swiglu_clamp_exp'])
+      shared_swiglu_clamp = as_layers(kv.get(f'{arch}.swiglu_clamp_shexp', kv[f'{arch}.swiglu_clamp_exp']))
+      yarn = (kv[f'{arch}.rope.scaling.factor'], kv[f'{arch}.rope.scaling.original_context_length'],
+              kv[f'{arch}.rope.scaling.yarn_beta_fast'], kv[f'{arch}.rope.scaling.yarn_beta_slow'])
       dsv4 = DeepSeek4Config(
         compress_ratios=tuple(kv[f'{arch}.attention.compress_ratios'][:num_blocks]),
-        window_size=kv[f'{arch}.attention.sliding_window'],
         index_n_heads=kv[f'{arch}.attention.indexer.head_count'], index_head_dim=kv[f'{arch}.attention.indexer.key_length'],
         index_topk=kv[f'{arch}.attention.indexer.top_k'], output_groups=kv[f'{arch}.attention.output_group_count'],
         output_lora_rank=kv[f'{arch}.attention.output_lora_rank'], hc_mult=kv[f'{arch}.hyper_connection.count'],
         hc_sinkhorn_iters=kv[f'{arch}.hyper_connection.sinkhorn_iterations'], hc_eps=kv[f'{arch}.hyper_connection.epsilon'],
-        hash_layers=kv[f'{arch}.hash_layer_count'], swiglu_clamp=as_layers(kv[f'{arch}.swiglu_clamp_exp']),
-        shared_swiglu_clamp=as_layers(kv.get(f'{arch}.swiglu_clamp_shexp', kv[f'{arch}.swiglu_clamp_exp'])),
-        compress_rope_theta=kv[f'{arch}.attention.compress_rope_freq_base'],
-        yarn=(kv[f'{arch}.rope.scaling.factor'], kv[f'{arch}.rope.scaling.original_context_length'],
-              kv[f'{arch}.rope.scaling.yarn_beta_fast'], kv[f'{arch}.rope.scaling.yarn_beta_slow']))
+        hash_layers=kv[f'{arch}.hash_layer_count'], compress_rope_theta=kv[f'{arch}.attention.compress_rope_freq_base'])
       state_dict = {k.replace('.attn_kv.weight', '.attn_kv_a_mqa.weight').replace('attn_compressor_', 'compressor.')
-                     .replace('indexer_compressor_', 'indexer.compressor.'):v for k,v in state_dict.items()}
+                     .replace('indexer_compressor_', 'indexer.compressor.').replace('.hc_attn_', '.hc_attn.')
+                     .replace('.hc_ffn_', '.hc_ffn.').replace('output_hc_', 'output_hc.'):v for k,v in state_dict.items()}
 
     # Permute RoPE weights from interleaved to half-split layout.
     for name in state_dict:
@@ -719,7 +734,7 @@ class Transformer:
       rope_theta=kv[f'{arch}.rope.freq_base'],
       rope_dim=rope_dim,
       v_head_dim=kv.get(f'{arch}.attention.value_length_mla', kv.get(f'{arch}.attention.value_length', head_dim)),
-      max_context=max_context,
+      max_context=max_context, sliding_window=sliding_window, yarn=yarn,
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear')),
@@ -731,7 +746,8 @@ class Transformer:
         kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0)),
       shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
-      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
+      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), swiglu_clamp=swiglu_clamp,
+      shared_swiglu_clamp=shared_swiglu_clamp, attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
       ssm_layers=ssm_layers,
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict,
