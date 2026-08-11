@@ -409,7 +409,6 @@ class BiasMemoryCtx:
         if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
           # propagate the normalize addition down sum edges to hint hoist outside range?
           # this is where this starts to belong in codegen optimizations maybe
-          print(idx.src[0].op, [s.op for s in idx.src[0].src])
           self.normalized[idx] = idx.replace(src=(idx.src[0] + const(mean, idx.dtype), const(idx.src[1].val - mean, idx.dtype)))
         else: # dynamic base no ioffs
           self.normalized[idx] = (idx + const(mean, idx.dtype)) + const(-mean, idx.dtype)
@@ -496,7 +495,7 @@ pm_alu_fusion = PatternMatcher([
     lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
 ])
 
-isel_matcher = PatternMatcher([
+isel_matcher = pm_alu_fusion + PatternMatcher([
   # --- control flow ---
   # how to remove positional arg contracts, make inter-lowering semantics explicit
   # so its clear what src args represent. try to match spec
@@ -536,7 +535,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
   (UPat(name="x").bitcast().named("y"), lambda x,y: x if y.tag is None else x.replace(tag=y.tag)),
-]) + pm_alu_fusion
+])
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda ctx,x: ((nx := x.ins(RDNA3Ops.s_load_b64)), [nx])),
