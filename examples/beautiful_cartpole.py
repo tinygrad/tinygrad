@@ -89,7 +89,7 @@ if __name__ == "__main__":
     get_action.reset()   # NOTE: if you don't reset the jit here it captures the wrong model on the first run through
 
     obs = env.reset()[0]
-    rews, terminated, truncated = [], False, False
+    X_epn, A_epn, rews, terminated, truncated = [], [], [], False, False
     # NOTE: we don't want to early stop since then the rewards are wrong for the last episode
     while not terminated and not truncated:
       # pick actions
@@ -97,8 +97,8 @@ if __name__ == "__main__":
       act = get_action(Tensor(obs)).item()
 
       # save this state action pair
-      X_buff[pos] = Tensor(obs)
-      A_buff[pos] = act
+      X_epn.append(tuple(float(x) for x in obs))
+      A_epn.append(act)
       pos = (pos + 1) % REPLAY_BUFFER_SIZE
       n_valid = min(n_valid + 1, REPLAY_BUFFER_SIZE)
 
@@ -107,13 +107,21 @@ if __name__ == "__main__":
     steps += len(rews)
 
     # reward to go
+    X_ep, A_ep = Tensor(X_epn), Tensor(A_epn, dtype=dtypes.int)
     discounts = DISCOUNT_FACTOR ** Tensor.arange(len(rews))
     R_ep = (Tensor(rews) * discounts).flip(0).cumsum(0).flip(0) / discounts
     if (lo := pos - len(rews)) >= 0:
+      X_buff[lo:pos] = X_ep
+      A_buff[lo:pos] = A_ep
       R_buff[lo:pos] = R_ep
     else:
+      X_buff[REPLAY_BUFFER_SIZE+lo:] = X_ep[:-lo]
+      A_buff[REPLAY_BUFFER_SIZE+lo:] = A_ep[:-lo]
       R_buff[REPLAY_BUFFER_SIZE+lo:] = R_ep[:-lo]
-      if pos > 0: R_buff[:pos] = R_ep[-lo:]
+      if pos > 0:
+        X_buff[:pos] = X_ep[-lo:]
+        A_buff[:pos] = A_ep[-lo:]
+        R_buff[:pos] = R_ep[-lo:]
 
     X, A, R = X_buff[:n_valid], A_buff[:n_valid], R_buff[:n_valid]
 
@@ -123,6 +131,7 @@ if __name__ == "__main__":
       # TODO: is this recompiling based on the shape?
       action_loss, entropy_loss, critic_loss = train_step(X[samples], A[samples], R[samples], old_log_dist[samples])
     t.set_description(f"sz: {n_valid:5d} steps/s: {steps/(time.perf_counter()-st):7.2f} action_loss: {action_loss.item():7.3f} entropy_loss: {entropy_loss.item():7.3f} critic_loss: {critic_loss.item():8.3f} reward: {sum(rews):6.2f}")
+    del X_ep, A_ep, R_ep, X, A, R, old_log_dist, samples, action_loss, entropy_loss, critic_loss
 
   test_rew = evaluate(model, gym.make(ENVIRONMENT_NAME, render_mode='human'))
   print(f"test reward: {test_rew}")
