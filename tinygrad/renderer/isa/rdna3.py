@@ -378,16 +378,16 @@ def lower_range(ctx, x:UOp):
   acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),))
   ctx.loop_label[acc] = range_str(x)
   ctx.exec_mask[acc] = mask
+  ctx.range_bnd[acc] = bnd
   loop_body = label(ctx, f".LOOP_BODY_{range_str(x)}")
-  pred = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(acc,bnd), tag=(EXEC,))
-  jmp_out = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, tag=f".LOOP_END_{range_str(x)}")
-  return acc, [acc, loop_body, pred, jmp_out]
+  return acc, [acc, loop_body]
 
 def lower_end(ctx, x:UOp, acc:UOp):
   loop_end = label(ctx, f".LOOP_END_{ctx.loop_label[acc]}")
   inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(const(1), acc), tag=acc.tag)
-  jmp_back = UOp(Ops.INS, arg=RDNA3Ops.s_branch, tag=f".LOOP_BODY_{ctx.loop_label[acc]}")
-  return inc, [inc, jmp_back, loop_end, restoreexec(ctx.exec_mask[acc])]
+  jmp = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_BODY_{ctx.loop_label[acc]}")
+  pred = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(acc,ctx.range_bnd[acc]), tag=(EXEC,))
+  return inc, [inc, pred, jmp, loop_end, restoreexec(ctx.exec_mask[acc])]
 
 # ---- lowering passes ----
 class BiasMemoryCtx:
@@ -409,6 +409,7 @@ class BiasMemoryCtx:
         if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
           # propagate the normalize addition down sum edges to hint hoist outside range?
           # this is where this starts to belong in codegen optimizations maybe
+          print(idx.src[0].op, [s.op for s in idx.src[0].src])
           self.normalized[idx] = idx.replace(src=(idx.src[0] + const(mean, idx.dtype), const(idx.src[1].val - mean, idx.dtype)))
         else: # dynamic base no ioffs
           self.normalized[idx] = (idx + const(mean, idx.dtype)) + const(-mean, idx.dtype)
@@ -487,11 +488,15 @@ pre_isel_matcher = PatternMatcher([
   (UPat(Ops.MAX, dtypes.int16s, name="x"), lambda x: x.replace(dtype=smux(x.dtype, dtypes.int32, dtypes.uint32)).bitcast(x.dtype)),
 ]) + pm_float_to_int + pm_int_to_float
 
+pm_alu_fusion = PatternMatcher([
+  (UPat().sqrt().named("x").reciprocal(), lambda x: x.ins(V_RSQ[x.dtype]) if x.dtype in V_RSQ else None),
+  ((UPat(Ops.MUL, dtypes.floats, name="a") + UPat.var("b")).named("x"),
+    lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
+  (UPat(Ops.ADD, dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"),
+    lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
+])
 
 isel_matcher = PatternMatcher([
-  # --- mem ops ---
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(allow_any_len=True, name="x"), lambda ctx,x,idx: load(ctx, x, idx)),
   # --- control flow ---
   # how to remove positional arg contracts, make inter-lowering semantics explicit
   # so its clear what src args represent. try to match spec
@@ -501,12 +506,6 @@ isel_matcher = PatternMatcher([
   # add exec mask edge to src
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), \
     lambda x,rng: x.replace(src=(x.src[0],rng,rng.src[-1])) if rng.src[-1].op is Ops.INS else None),
-  # --- fused alu ---
-  (UPat.var("x").sqrt().reciprocal(), lambda ctx,x: _vop2(ctx, x.ins(V_RSQ[x.dtype])) if x.dtype in V_RSQ else None),
-  ((UPat(Ops.MUL, dtypes.floats, name="a") + UPat.var("b")).named("x"),
-    lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
-  (UPat(Ops.ADD, dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"),
-    lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
   # --- double precis bit alu ---
   (UPat(Ops.ADD, dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_add_f64)),
   (UPat(Ops.MUL, dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_mul_f64)),
@@ -524,6 +523,9 @@ isel_matcher = PatternMatcher([
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
   (UPat.var("y").cast(name="x"), cvt),
+  # --- mem ops ---
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(allow_any_len=True, name="x"), lambda ctx,x,idx: load(ctx, x, idx)),
   # --- other ---
   (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x)
     if not any(isinstance(v,(VRegister, Register)) for v in rdefs(x)) else None),
@@ -534,7 +536,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
   (UPat(name="x").bitcast().named("y"), lambda x,y: x if y.tag is None else x.replace(tag=y.tag)),
-])
+]) + pm_alu_fusion
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda ctx,x: ((nx := x.ins(RDNA3Ops.s_load_b64)), [nx])),
@@ -615,7 +617,9 @@ class CntType(Enum):
 @dataclass
 class RDNA3LinearCtx:
   loop_label: dict[UOp, str] = field(default_factory=dict)
+  # TODO: remove these
   exec_mask: dict[UOp, UOp] = field(default_factory=dict)
+  range_bnd: dict[UOp, UOp] = field(default_factory=dict)
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
@@ -635,7 +639,7 @@ class RDNA3Renderer(ISARenderer):
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
 
   def early(self, full_sink:UOp) -> UOp:
-    return graph_rewrite(full_sink, pm_bias_memory_addrs, ctx=BiasMemoryCtx(full_sink))
+    return graph_rewrite(full_sink, pm_bias_memory_addrs, ctx=BiasMemoryCtx(full_sink), name="bias mem offsets")
 
   # use scratch memory space for spilling thread local memory, addressed as:
   # SCRATCH_BASE + Swizzle(addr, tid) 12 bit ioffs, ensure no overflow!
