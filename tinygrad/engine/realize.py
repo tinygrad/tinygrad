@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, wait_cond
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, buffers, graph_rewrite
-from tinygrad.device import Device, Buffer, MultiBuffer
+from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import args_from_ast
@@ -210,9 +210,9 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   return t[0]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  if (inputs:=call.arg.aux.inputs) is not None:
+  if (info:=call.arg.aux).inputs is not None:
     bufs = [_resolve(ctx.input_uops[i], ctx.input_uops).buffer for i in call.arg.aux.input_idxs]
-    table = call.src[1+inputs].buffer
+    table = call.src[1+info.inputs].buffer
     for j,dev in enumerate(call.arg.aux.device):
       addrs = array.array('Q', [(b.bufs[j] if isinstance(b, MultiBuffer) else b).get_buf(dev).va_addr for b in bufs])
       mv = (table.bufs[j] if isinstance(table, MultiBuffer) else table).ensure_allocated()._buf.cpu_view().view(fmt='Q')
@@ -221,15 +221,18 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
   exec_kernel(replace(ctx, update_stats=False), call, ast)
 
-  for e,_ in (prof:=(aux:=call.arg.aux).prof): cast(Any, Device[e.device]).prof_ents[e.st_id] = e
-  if not ctx.wait or not prof: return None
-  for d in aux.device: cast(Any, Device[d]).synchronize(timeout=ctx.timeout)
-  for e,estimates in prof:
-    st, en = ((d:=cast(Any, Device[e.device])).signal(i)._buf.cpu_view().view(fmt='Q')[0] for i in (e.st_id, e.en_id))
-    tm = float(en-st)/d.timestamp_divider/1e6
-    with track_stats(ctx, call.replace(arg=replace(call.arg, name=cast(str, e.name), aux=replace(aux, estimates=estimates))), d.device,
-                     [], ctx.var_vals) as et: et[0] = tm
-  return tm
+  tms = []
+  for (name,estimates,prof),device in itertools.product(info.kernels, info.device):
+    d, tm = cast(Any, Device[device]), None
+    if prof:
+      d.prof_ents[ev.st_id] = (ev:=ProfileGraphEntry(device, name, *prof))
+      if ctx.wait:
+        d.synchronize(timeout=ctx.timeout)
+        st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in (ev.st_id, ev.en_id))
+        tms.append(tm:=float(en-st)/d.timestamp_divider/1e6)
+    with track_stats(ctx, call.replace(arg=replace(call.arg, name=name, aux=replace(info, estimates=estimates))), d.device, [], ctx.var_vals) as et:
+      et[0] = tm
+  return max(tms) if tms else None
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
