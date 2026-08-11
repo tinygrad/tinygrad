@@ -330,7 +330,7 @@ def cvt(ctx, y:UOp, x:UOp):
 
 def int_to_int64(y:UOp, tdt:DType):
   hi = vmov(const(0)) if dtypes.is_unsigned(y.dtype) else getsign(to_vgpr(y), y.dtype.itemsize*8)
-  return UOp.group(to_vgpr(y), hi, dtype=tdt)
+  return UOp.group(vmov(y), hi, dtype=tdt)
 
 # NOTE: use v_bfe instead of hand rolled masking
 def intcast(y:UOp, x:UOp):
