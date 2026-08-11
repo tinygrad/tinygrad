@@ -3,7 +3,7 @@ from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype, strong_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group, identity_element
+from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group, identity_element, remove_all_tags
 from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
@@ -163,7 +163,7 @@ def _renumber_range(ctx:SplitCtx, u:UOp) -> UOp:
   return u.replace(arg=(ctx.range_number, u.arg[-1]))
 
 pm_split_graph = PatternMatcher([
-  (UPat((Ops.PARAM, Ops.AFTER), name="u"), _split_graph),
+  (UPat((Ops.PARAM, Ops.AFTER, Ops.BUFFER), name="u"), _split_graph),
   (UPat(Ops.RANGE, name="u"), _renumber_range),
 ])
 
@@ -181,6 +181,11 @@ debug_tag_factor = PatternMatcher([
   (UPat(GroupOp.All, name="x"), lambda ctx,x: x.rtag(ctx[0][x] if x not in ctx[1] else 'REAL') if x.tag is None else None),
 ])
 
+def remove_stage(ctx, x:UOp) -> UOp:
+  buf = UOp.new_buffer(x.arg.device, x.max_numel(), x.dtype, num=next(ctx))
+  return buf.after(buf.reshape(x.shape).index(*x.src[1:]).store(x.src[0]).end(*x.src[1:])).reshape(x.shape)
+pm_remove_stage = PatternMatcher([(UPat(Ops.STAGE, name="x"), remove_stage)])
+
 @rewrite_group(new_ctx=False)
 def get_kernel_graph(sink:UOp) -> UOp:
   # TODO: multi should just be part of rangeify
@@ -195,18 +200,23 @@ def get_kernel_graph(sink:UOp) -> UOp:
   realize = {}
   consumes = {tsink:0}
   for u in reversed(tsink.toposort()):
-    assert u in consumes
-    if (u.op in GroupOp.ALU or u.op is Ops.REDUCE) and consumes[u] > 1:
-      realize[u] = None
+    assert u in consumes, f"{u.op} not in consumes"
+    if (u.op in GroupOp.ALU or u.op is Ops.REDUCE) and consumes[u] > 1 and u.device is not None:
+      # TODO: rename to stage
+      realize[u] = u.rtag(1).bufferize(arg=BufferizeOpts(device=u.device))
       consumes[u] = 1
     if u.op is Ops.STORE: consumes[u] = 1
     if u.op is Ops.EXPAND: consumes[u] *= u.max_numel() // u.src[0].max_numel()
-    for s in u.src[1:] if u.op is Ops.STORE else u.src:
+    for i,s in enumerate(u.src):
       if s not in consumes: consumes[s] = 0
-      consumes[s] += consumes[u]
+      if u.op is not Ops.STORE or i > 0:
+        consumes[s] += consumes[u]
   if VIZ:
     with Context(TRACK_MATCH_STATS=0): ctags = graph_rewrite(tsink, debug_tag_factor, ctx=(consumes, realize), bottom_up=True)
     graph_rewrite(ctags, PatternMatcher([]), name="View Consumes")
+
+  # add stages
+  tsink = graph_rewrite(tsink.substitute(realize), remove_all_tags, name="untag")
 
   # simple rangeify
   tsink = graph_rewrite(tsink, pm_range_creation+pm_range_migration, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
@@ -214,6 +224,8 @@ def get_kernel_graph(sink:UOp) -> UOp:
   # TODO: merging and splitting algorithm
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
+
+  tsink = graph_rewrite(tsink, pm_remove_stage, ctx=itertools.count(0), bottom_up=True, name="remove stage")
 
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
 
