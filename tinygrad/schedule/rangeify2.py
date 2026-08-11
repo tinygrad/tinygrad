@@ -138,19 +138,33 @@ pm_range_migration = PatternMatcher([
 
 # *** split into kernels ***
 
-def _split_graph(ctx, u:UOp):
-  ctx.append(u)
-  return u.param_like(len(ctx)-1)
-pm_split_graph = PatternMatcher([(UPat((Ops.PARAM, Ops.AFTER), name="u"), _split_graph),])
+@dataclass
+class SplitCtx:
+  call_args:list = field(default_factory=list)
+  range_number:int = -1
+
+def _split_graph(ctx:SplitCtx, u:UOp) -> UOp:
+  ctx.call_args.append(u)
+  return u.param_like(len(ctx.call_args)-1)
+
+def _renumber_range(ctx:SplitCtx, u:UOp) -> UOp:
+  ctx.range_number += 1
+  return u.replace(arg=(ctx.range_number, u.arg[-1]))
+
+pm_split_graph = PatternMatcher([
+  (UPat((Ops.PARAM, Ops.AFTER), name="u"), _split_graph),
+  (UPat(Ops.RANGE, name="u"), _renumber_range),
+])
 
 def split_store(x:UOp) -> UOp:
-  kernel_splits = []
-  ret = graph_rewrite(x, pm_split_graph, ctx=kernel_splits, name="split kernel", bottom_up=True, walk=True)
-  return ret.sink(arg=KernelInfo()).call(*kernel_splits)
+  ret = graph_rewrite(x, pm_split_graph, ctx:=SplitCtx(), name="split kernel", bottom_up=True, walk=True)
+  return ret.sink(arg=KernelInfo()).call(*ctx.call_args)
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
+
+# *** main rangeify ***
 
 @rewrite_group(new_ctx=False)
 def get_kernel_graph(sink:UOp) -> UOp:
