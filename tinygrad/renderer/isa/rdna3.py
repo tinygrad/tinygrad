@@ -157,10 +157,9 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
     vr = ctx.vreg(GP_VGPRS, width=max(x.dtype.itemsize // 4, 1))
   return x.replace(tag=(vr,))
 
-# TODO: batch param loading? ex. s_load_b128
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
-# NOTE: codegen doesnt know to place param s_loads early...
-# - delay lowering like load/store
+# TODO: batch param loading? ex. s_load_b128
+# NOTE: codegen doesnt know to place param s_loads early, delay lowering like load/store
 def abi(ctx, x:UOp) -> UOp|None:
   if x.op is Ops.SPECIAL:
     dim = int(x.arg[-1])
@@ -169,9 +168,8 @@ def abi(ctx, x:UOp) -> UOp|None:
       return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(x.replace(tag=WIIDS), const(10 * dim), const(10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:ctx.func_args.index(x)])
   addr = (kernarg_ptr, const(offs))
-  if x.addrspace is AddrSpace.ALU: return vmov(x.ins(RDNA3Ops.s_load_b32, src=addr, tag=(ctx.vreg(GP_SGPRS),)))
+  if x.addrspace is AddrSpace.ALU: return vmov(x.replace(src=addr, tag=ctx.vreg(GP_SGPRS)))
   return x.replace(dtype=dtypes.ulong, src=addr, tag=ctx.vreg(GP_SGPRS, width=2, alignment=2),)
-  # return x.ins(RDNA3Ops.s_load_b64, dtype=dtypes.ulong, src=addr, tag=(ctx.vreg(GP_SGPRS, width=2, alignment=2),))
 
 # ----- memory access ----
 # GLOBAL_ADDR = VADDR_U64 + IMMOFFS_u16
@@ -554,7 +552,7 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
 ])
 
 pre_regalloc_matcher = PatternMatcher([
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ((nx := x.ins(RDNA3Ops.s_load_b64)), [nx])),
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ((nx := x.ins(RDNA3Ops.s_load_b32 if x.addrspace is AddrSpace.ALU else RDNA3Ops.s_load_b64)), [nx])),
   # Lower a gated load as one adjacent sequence after linearization so the alt initialization cannot escape its CFG block.
   (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"), UPat.var("alt"), UPat.var("gate")), name="x"), lower_gated_load),
   (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"),), name="x"), lambda x,addr: ((nx := x.ins(addr.arg).replace(src=addr.src)), [nx])),
