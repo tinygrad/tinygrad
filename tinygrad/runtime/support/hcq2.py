@@ -33,7 +33,7 @@ class HCQInfo:
 
   input_idxs:tuple[int, ...] = () # indexes into input_uops used by this call
   inputs:int|None = None
-  prof:tuple[ProfileGraphEntry, ...] = () # st_id/en_id are timestamp signal slots until collect
+  kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...]], ...] = ()
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -199,10 +199,10 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]], profile:bool) -> li
     signal_tags |= cur_signal_tags
 
   # build fences and finalizers
-  fences, finalizers, finalizer_signal_tags = _build_finalizers(batch, batch_info, deps_tracker, slots)
+  fences, fins, finalizer_signal_tags = _build_finalizers(batch, batch_info, deps_tracker, slots)
   signal_tags |= finalizer_signal_tags
 
-  src, prof = [], []
+  src, kerns = [], []
   for tag, ((call, _), (devices, queue), q) in enumerate(zip(batch, batch_info, call_waits)):
     # first queue use, sync prior device work with the device timeline
     if batch_info.index((devices, queue)) == tag:
@@ -212,18 +212,18 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]], profile:bool) -> li
     # and make hcq call
     name, info = get_call_name(call, get_call_arg_uops(call)), HCQInfo(devices, estimate_uop(call))
     ts_ids = [next(UOp.unique_num) for _ in range(2)] if profile else []
-    prof += [ProfileGraphEntry(d, name, *ts_ids) for d in devices if ts_ids]
+    kerns.append((devices, name, info.estimates, tuple(ts_ids)))
 
     ts_ins = [UOp(Ops.INS, arg="timestamp", src=(make_signal(devices, s),)) for s in ts_ids]
     q += ts_ins[:1] + [call.replace(arg=replace(call.arg, aux=info))] + ts_ins[1:]
 
     # signal the queue if someone waits for us
     if tag in signal_tags: q += [UOp(Ops.INS, arg="store", src=(make_signal(devices, slots[queue]), UOp.const(tag + 1, dtypes.uint64)))]
-    src.append(make_call(name, make_submit(*q, devs=devices, queue=queue).sink(), info))
+    src.append(make_call(f"submit {name}", make_submit(*q, devs=devices, queue=queue).sink(), info))
 
   # append batch timestamps to finalizers
-  finalizers = [f.replace(arg=replace(f.arg, aux=replace(a:=f.arg.aux, prof=tuple(e for e in prof if e.device in a.device)))) for f in finalizers]
-  return fences + src + finalizers
+  fins = [f.replace(arg=replace(f.arg, aux=replace(a:=f.arg.aux, kernels=tuple(x for x in kerns if set(x[0]) & set(a.device))))) for f in fins]
+  return fences + src + fins
 
 def sched_hcq_batches(l:UOp, profile:bool) -> UOp:
   srcs:list[UOp] = []

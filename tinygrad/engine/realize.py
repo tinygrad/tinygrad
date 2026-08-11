@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, wait_cond
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, buffers, graph_rewrite
-from tinygrad.device import Device, Buffer, MultiBuffer
+from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import args_from_ast
@@ -210,27 +210,30 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   return t[0]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  if (inputs:=call.arg.aux.inputs) is not None:
+  if (info:=call.arg.aux).inputs is not None:
     bufs = [_resolve(ctx.input_uops[i], ctx.input_uops).buffer for i in call.arg.aux.input_idxs]
-    table = call.src[1+inputs].buffer
+    table = call.src[1+info.inputs].buffer
     for j,dev in enumerate(call.arg.aux.device):
       addrs = array.array('Q', [(b.bufs[j] if isinstance(b, MultiBuffer) else b).get_buf(dev).va_addr for b in bufs])
       mv = (table.bufs[j] if isinstance(table, MultiBuffer) else table).ensure_allocated()._buf.cpu_view().view(fmt='Q')
       wait_cond(lambda: mv[0], value=0, timeout_ms=ctx.timeout or getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000), msg=f"{dev} hang detected")
       mv[:len(addrs)] = addrs
 
-  exec_kernel(replace(ctx, update_stats=False), call, ast)
+  exec_kernel(replace(ctx, update_stats=DEBUG>=3), call, ast)
 
-  tms:list[float|None] = []
-  for e in (aux:=call.arg.aux).prof: cast(Any, Device[e.device]).prof_ents[e.st_id] = e
-  for d in [cast(Any, Device[x]) for x in aux.device]:
-    with track_stats(ctx, call, d.device, [], ctx.var_vals) as et:
-      if ctx.wait:
-        d.synchronize(timeout=ctx.timeout)
-        ts = [d.signal(i)._buf.cpu_view().view(fmt='Q')[0] for e in aux.prof if e.device == d.device for i in (e.st_id, e.en_id)]
-        if ts: et[0] = float(max(ts)-min(ts))/d.timestamp_divider/1e6
-      tms += et
-  return tms[0]
+  tms = []
+  for devices,name,estimates,prof in info.kernels:
+    for device in devices:
+      d, tm = cast(Any, Device[device]), None
+      if prof:
+        d.prof_ents[prof[0]] = ProfileGraphEntry(device, name, *prof)
+        if ctx.wait:
+          d.synchronize(timeout=ctx.timeout)
+          st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
+          tms.append(tm:=float(en-st)/d.timestamp_divider/1e6)
+      with track_stats(ctx, call.replace(arg=replace(call.arg, name=name, aux=replace(info, estimates=estimates))), d.device, [], ctx.var_vals) as et:
+        et[0] = tm
+  return max(tms) if tms else None
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
@@ -276,7 +279,7 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
-  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, bool(PROFILE) if profile is None else profile)
+  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
 def link_linear(linear:UOp, cache=True) -> UOp: return hcq_link(linear, cache=cache) if getenv("HCQ2") else linear
