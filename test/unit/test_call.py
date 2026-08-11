@@ -359,5 +359,15 @@ class TestCallMultiSharded(unittest.TestCase):
     np.testing.assert_allclose(a.grad.numpy(), b.numpy(), rtol=1e-5)
     np.testing.assert_allclose(b.grad.numpy(), a.numpy(), rtol=1e-5)
 
+  def test_symbolic_reshape_shard_axis(self):
+    toks = UOp.variable("toks", 1, 2).bind(2)
+    devs = ("CPU:0", "CPU:1")
+    x = Tensor(np.arange(16, dtype=np.float32).reshape(1, 2, 8)).shard(devs, axis=2).realize()
+    @function
+    def f(x:Tensor) -> Tensor: return x.reshape(1, x.shape[1], 2, 4)
+    out = f(x[:, :toks]).realize()
+    self.assertEqual(out.uop.axis, 2)
+    np.testing.assert_equal(out[:1, :2].to(devs[0]).numpy(), np.arange(16, dtype=np.float32).reshape(1, 2, 2, 4))
+
 if __name__ == '__main__':
   unittest.main()

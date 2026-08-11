@@ -437,7 +437,7 @@ def reset_bufs(bufs:list[Buffer]):
   for buf in bufs: buf.copy_from(Buffer("PYTHON", buf.size, buf.dtype, opaque=memoryview(bytearray(buf.nbytes))))
 
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
-                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):
+                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[], check_default_opt=True):
   outbufs = real_bufs[:len(realized_ast.src)]
   wanna_output = [np.array(x).flatten() for x in wanna_output]
   buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in real_bufs]
@@ -459,9 +459,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
     for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
 
   # Check correctness of handcoded optimiztions.
-  reset_bufs(outbufs)
-  run_prg(opts=None)
-  for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
+  if check_default_opt: check_opt(None)
   for x in opts: # Check custom transformations if any.
     check_opt(([Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, 1))] if apply_tc else [])+x)
 
