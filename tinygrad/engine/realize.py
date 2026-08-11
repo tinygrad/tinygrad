@@ -219,19 +219,20 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
       wait_cond(lambda: mv[0], value=0, timeout_ms=ctx.timeout or getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000), msg=f"{dev} hang detected")
       mv[:len(addrs)] = addrs
 
-  exec_kernel(replace(ctx, update_stats=False), call, ast)
+  exec_kernel(replace(ctx, update_stats=DEBUG>=3), call, ast)
 
   tms = []
-  for (name,estimates,prof),device in itertools.product(info.kernels, info.device):
-    d, tm = cast(Any, Device[device]), None
-    if prof:
-      d.prof_ents[prof[0]] = ProfileGraphEntry(device, name, *prof)
-      if ctx.wait:
-        d.synchronize(timeout=ctx.timeout)
-        st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
-        tms.append(tm:=float(en-st)/d.timestamp_divider/1e6)
-    with track_stats(ctx, call.replace(arg=replace(call.arg, name=name, aux=replace(info, estimates=estimates))), d.device, [], ctx.var_vals) as et:
-      et[0] = tm
+  for devices,name,estimates,prof in info.kernels:
+    for device in devices:
+      d, tm = cast(Any, Device[device]), None
+      if prof:
+        d.prof_ents[prof[0]] = ProfileGraphEntry(device, name, *prof)
+        if ctx.wait:
+          d.synchronize(timeout=ctx.timeout)
+          st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
+          tms.append(tm:=float(en-st)/d.timestamp_divider/1e6)
+      with track_stats(ctx, call.replace(arg=replace(call.arg, name=name, aux=replace(info, estimates=estimates))), d.device, [], ctx.var_vals) as et:
+        et[0] = tm
   return max(tms) if tms else None
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
