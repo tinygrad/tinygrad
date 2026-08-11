@@ -26,14 +26,15 @@ class SimpleTokenizer:
       runs = [list(g) for _, g in itertools.groupby(cps, lambda e: e[1]-e[0])]
       return "".join(re.escape(chr(g[0][1])) + (f"-{re.escape(chr(g[-1][1]))}" if len(g) > 1 else "") for g in runs)
     r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
-    self._split_to_word = re.compile("(?i:'s|'t|'re|'ve|'m|'ll|'d)|" + \
-      f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+")
     if preset == "joyai-llm":
       r_p_M, r_p_P, r_p_S = ucat_range("M"), ucat_range("P"), ucat_range("S")
-      self._split_to_word = re.compile(f"[{r_p_N}]{{1,3}}|[一-龥぀-ゟ゠-ヿ]+|" +
+      pattern = (f"[{r_p_N}]{{1,3}}|[一-龥぀-ゟ゠-ヿ]+|" +
         r"[!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~][A-Za-z]+|" +
         f"[^\\r\\n{r_p_L}{r_p_P}{r_p_S}]?[{r_p_L}{r_p_M}]+| ?[{r_p_P}{r_p_S}]+[\\r\\n]*|" +
         f"[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+")
+    else: pattern = "(?i:'s|'t|'re|'ve|'m|'ll|'d)|" + \
+      f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+"
+    self._split_to_word = re.compile(pattern)
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
 
     self._normal_tokens = {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}

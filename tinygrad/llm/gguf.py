@@ -42,9 +42,9 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int, dequantize:bool=True)
     return t.unsqueeze(-1).div(shift_tensor, rounding_mode="trunc").bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   if (nelements_nbytes := _GGML_QUANT.get(ggml_type)) is not None:
-    from tinygrad.runtime.autogen import ggml_common as _ggml
     blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1])).contiguous()
     if not dequantize: return blocks
+    from tinygrad.runtime.autogen import ggml_common as _ggml
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
       d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
@@ -149,10 +149,14 @@ def _gguf_parse(tensor: Tensor, preserve_quantized:Callable[[str, int], bool]|No
 
   def load_tensor(name:str, dims:tuple[int, ...], typ:int, off:int) -> Tensor:
     packed = preserve_quantized is not None and preserve_quantized(name, typ)
+    if packed and typ not in _GGML_QUANT: raise ValueError(f"cannot preserve non-quantized tensor '{name}' with GGML type {typ}")
+    if packed and (not dims or dims[0] % _GGML_QUANT[typ][0] != 0):
+      raise ValueError(f"cannot preserve tensor '{name}': first GGUF dimension must be divisible by "
+                       f"{_GGML_QUANT[typ][0]}, got {dims[0] if dims else 0}")
     data = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ, dequantize=not packed)
     if not packed: return data.reshape(*reversed(dims))
-    block_size = prod(dims)//data.shape[0]
-    return data.reshape(*reversed(dims[1:]), dims[0]//block_size, data.shape[1])
+    block_size, type_size = _GGML_QUANT[typ]
+    return data.reshape(*reversed(dims[1:]), dims[0]//block_size, type_size)
   state_dict = {name:load_tensor(name, dims, typ, off) for name, dims, typ, off in t_infos}
   return kv_data, state_dict
 
@@ -165,6 +169,7 @@ def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
 def gguf_load(fn: Tensor|str|pathlib.Path, preserve_quantized:Callable[[str, int], bool]|None=None) -> tuple[dict, dict[str, Tensor]]:
   """
   Loads a .gguf file, returning the `kv_data` and `state_dict`. Multi-part splits are auto-merged when loaded by path.
+  `preserve_quantized`, when provided, selects quantized tensors to return as packed uint8 blocks instead of dequantizing them.
 
   ```python
   import pathlib
