@@ -154,7 +154,7 @@ class SplitCtx:
   range_number:int = -1
 
 def _split_graph(ctx:SplitCtx, u:UOp) -> UOp:
-  assert len(u.shape) == 1, "rangeify needs to reduce to a single idx"
+  assert len(u.shape) <= 1, f"rangeify needs to reduce to a single idx, not {u.shape}"
   ctx.call_args.append(u)
   return u.param_like(len(ctx.call_args)-1)
 
