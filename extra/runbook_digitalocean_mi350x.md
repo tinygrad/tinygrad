@@ -27,12 +27,13 @@ apt-get install -y amdrocm-core-dev
 This installs `hip/hip_runtime.h` at `/opt/rocm/core-7.14/include/hip/hip_runtime.h`.
 The symlink `/opt/rocm/include` → `/opt/rocm/core-7.14/include` makes it available at `/opt/rocm/include/hip/hip_runtime.h`.
 
-### 1.4 Remove Ubuntu comgr, use ROCm comgr
-The Ubuntu repo has comgr 6.0 which doesn't know gfx950. Remove it:
+### 1.4 Configure ROCm comgr
+ROCm 7.14 ships comgr 3.3 at `/opt/rocm/lib/libamd_comgr.so`. tinygrad's DLL loader needs explicit env vars to find it (it searches for `libcomgr.so*` by default, not `libamd_comgr.so*`). Set these in the run command:
 ```bash
-apt-get remove -y libamd-comgr-dev libamd-comgr2
+export COMGR_PATH=/opt/rocm/lib/libamd_comgr.so
+export COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so
 ```
-ROCm 7.14 ships comgr 3.3 at `/opt/rocm/lib/libamd_comgr.so`. Add ROCm libs to ldconfig:
+Also add ROCm libs to ldconfig so comgr's shared library dependencies resolve:
 ```bash
 cat > /etc/ld.so.conf.d/rocm.conf << 'EOF'
 /opt/rocm/lib
@@ -43,30 +44,8 @@ ldconfig
 ```
 
 ### 1.5 Install geohot tmux config
-From `geohot/configuration` repo:
 ```bash
-cat > ~/.tmux.conf << 'EOF'
-unbind C-b
-set -g prefix `
-bind-key ` last-window
-bind-key e send-prefix
-
-set -g status-position bottom
-set -g status-bg colour234
-set -g status-fg colour137
-set -g status-left ''
-set -g status-right '#[fg=colour233,bg=colour241,bold] %d/%m #[fg=colour233,bg=colour245,bold] %H:%M:%S '
-set -g status-right-length 50
-set -g status-left-length 20
-setw -g mode-keys vi
-
-setw -g window-status-current-format ' #I#[fg=colour250]:#[fg=colour255]#W#[fg=colour50]#F '
-setw -g window-status-format ' #I#[fg=colour237]:#[fg=colour250]#W#[fg=colour244]#F '
-
-set-option -g history-limit 5000
-set -g extended-keys on
-set -g extended-keys-format csi-u
-EOF
+curl -sL https://raw.githubusercontent.com/geohot/configuration/master/.tmux.conf -o ~/.tmux.conf
 ```
 
 ### 1.6 Reload amdgpu driver
@@ -157,18 +136,6 @@ WANDB=1 \
 | `BASEDIR` | `/root/datasets/c4-8b/` | Where C4 dataset was downloaded (script hardcodes `/raid/datasets/c4-8b/`) |
 | `WANDB` | `1` | Enable wandb logging (off by default) |
 
-## What the submission script sets
-
-The `dev_run.sh` script sets all training-specific env vars:
-- `DEV=AMD`, `DP=8`, `MP=1`, `BS=16`, `GRADIENT_ACC_STEPS=2` → GBS=32
-- `MXFP4=1`, `ASM_GEMM=1`, `HK_FLASH_ATTENTION=1` — FP4 weights, assembly GEMM, flash attention
-- `MASTER_WEIGHTS=1`, `WQKV=1`, `FAST_CE=1` — master weights, fused QKV, fused cross-entropy
-- `FUSED_INPUT_QUANTIZE=1`, `FUSED_ADD_NORM_MUL_QUANTIZE=1`, `FUSED_SILU_W13=1` — fused kernels
-- `DEFAULT_FLOAT=bfloat16`, `OPTIM_DTYPE=float32`
-- `LR=1e-3`, `END_LR=1e-4`, `WARMUP_SAMPLES=4096`, `MAX_STEPS=1200000`
-- `SEQLEN=8192`, `LLAMA3_SIZE=8B`, `SMALL=1`
-- `JITBEAM=3`, beam search params
-
 ## Architecture
 
 | Component | Source file |
@@ -197,10 +164,9 @@ apt-get install -y amdrocm-core-dev
 System clang doesn't know gfx950. Set `CC=/opt/rocm/core-7.14/lib/llvm/bin/clang`.
 
 ### `comgr not available: try setting COMGR_PATH?`
-Remove Ubuntu comgr, add ROCm libs to ldconfig, set `COMGR_PATH` and `COMGR_3_PATH`:
+Add ROCm libs to ldconfig and set `COMGR_PATH` and `COMGR_3_PATH`:
 ```bash
-apt-get remove -y libamd-comgr-dev libamd-comgr2
-# add /opt/rocm/lib paths to /etc/ld.so.conf.d/rocm.conf
+# /etc/ld.so.conf.d/rocm.conf should contain /opt/rocm/lib paths
 ldconfig
 ```
 
@@ -217,9 +183,7 @@ mkdir -p /raid/datasets && ln -s /root/datasets/c4-8b /raid/datasets/c4-8b
 Install clang: `apt-get install -y clang` (for CPU compilation).
 For gfx950 HIP compilation, comgr (not clang) is used — ensure the ROCm 7.14 comgr 3.3 is properly loaded via `COMGR_PATH` and `COMGR_3_PATH`.
 
-## Appendix: KVM Virtualization Notes
-
-The DigitalOcean MI350X machine is a **KVM virtual machine** with GPU PCI passthrough, not raw metal. This has several implications:
+## Appendix: KVM Virtualization Observations
 
 ### Virtualization detection
 ```
@@ -230,60 +194,42 @@ $ lspci -nn | grep AMD
 ```
 CPU flags include `hypervisor`. `dmesg` shows `Hypervisor detected: KVM`.
 
-### PCI device ID mismatch
-The physical GPU has device ID `0x75a0` (visible as the **subsystem** ID), but the KVM host presents it to the guest with device ID `0x75b0`. tinygrad's `PCIIface` in `ops_amd.py` and `hive_reset.py` only listed `0x75a0` (and other IDs), so the GPU was not found.
-
-Fix: add `0x75b0` to the device ID list in:
-- `tinygrad/runtime/ops_amd.py` line 845 (`PCIIface.__init__`)
-- `extra/amdpci/hive_reset.py` line 14
-
-```python
-# ops_amd.py
-devices=((0xffff, (0x74a1,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0,0x75b0)),),
+### PCI device ID
+`lspci -v` shows device ID `0x75b0` and subsystem ID `0x75a0`:
 ```
+83:00.0 Processing accelerators: ... Device 75b0
+    Subsystem: ... Device 75a0
+```
+tinygrad's `PCIIface` in `ops_amd.py` and `hive_reset.py` did not list `0x75b0`, so the GPU was not found. Adding `0x75b0` to the device ID list in both files fixes the detection.
 
-### amdgpu driver issues
-amdgpu loads and binds to all 8 GPUs, but on this VM it fails to fully initialize:
+### amdgpu driver behavior
+On first boot, amdgpu loaded and bound to all 8 GPUs. On one boot it failed to initialize:
 ```
 [  799.780369] amdgpu 0000:83:00.0: Failed to alloc msi vectors
 [  799.781476] amdgpu 0000:83:00.0: sw_init of IP block <vega20_ih> failed -22
 [  799.782724] amdgpu 0000:83:00.0: amdgpu_device_ip_init failed
 [  799.793885] amdgpu 0000:83:00.0: Fatal error during GPU init
 ```
-This is because MSI vectors can't be allocated in the VM (no host interrupt remapping exposed to guest). After a failed init, `rmmod amdgpu` can wedge the module (stuck in "Unloading" state), requiring a full VM reboot.
+On a subsequent boot, amdgpu initialized successfully (SMU initialized, VRAM ready). After unbinding all 8 GPUs from amdgpu, `rmmod amdgpu` wedged the module (stuck in "Unloading" state in `/proc/modules`), requiring a full VM reboot.
 
-### `/dev/kfd` not usable
-Even when amdgpu loads successfully (after a fresh boot), `/dev/kfd` exists but returns `EINVAL` on open. tinygrad's `KFDIface` path cannot be used. The `PCIIface` (direct PCI) path must be used instead.
+### `/dev/kfd`
+`/dev/kfd` exists when amdgpu is loaded. Opening it returns `OSError: [Errno 22] Invalid argument`.
 
 ### VRAM BAR reads all 0xFF
-After amdgpu initializes and then is unbound from the GPU, the VRAM BAR reads all `0xFF` — the discovery table at end of VRAM is gone. This means tinygrad's `AMDev._run_discovery()` fails with `discovery signatures mismatch`.
+After amdgpu initializes the GPU and is then unbound, reading the VRAM BAR (via `/sys/bus/pci/devices/0000:83:00.0/resource0`) returns all `0xFF` at all offsets — including the discovery table at `vram_size - 64KB`. tinygrad's `AMDev._run_discovery()` fails with `AssertionError: discovery signatures mismatch`.
 
-This happens because:
-1. amdgpu binds and initializes the GPU (VBIOS populates VRAM)
-2. amdgpu is unbound (or fails and finishes)
-3. The GPU state is left in a partially cleaned state
-4. VRAM contents (including discovery table) are lost
+A PCI reset (`echo 1 > /sys/bus/pci/devices/0000:83:00.0/reset`) did not change the VRAM contents — still all `0xFF`.
 
-A PCI `reset` (`echo 1 > /sys/bus/pci/devices/0000:83:00.0/reset`) does not repopulate the discovery table — only the VBIOS/firmware boot sequence does.
+VRAM was also all `0xFF` when read via `/dev/mem` at the BAR physical address (`0xa0000000000`).
 
 ### VFIO attempt
-Tried binding the GPU to `vfio-pci` with `enable_unsafe_noiommu_mode=1`. The GPU binds to vfio-pci successfully, but VRAM BAR still reads all `0xFF`. The GPU needs firmware initialization (by amdgpu) before the discovery table is populated, and after unbinding it's lost.
+Bound the GPU to `vfio-pci` with `enable_unsafe_noiommu_mode=1`. The GPU bound successfully and `/dev/vfio/noiommu-0` appeared. Running tinygrad with `VFIO=1` still failed with the same `discovery signatures mismatch` — VRAM BAR still reads all `0xFF`.
 
 ### No IOMMU in guest
-There is no AMD IOMMU visible inside the guest (`dmesg` has no `AMD-Vi` entries). PCI devices have no `iommu_group`. The IOMMU is on the host side, invisible to the guest. This is normal for KVM passthrough.
+`dmesg` has no `AMD-Vi` entries. PCI devices have no `iommu_group` symlink.
 
 ### No fan control
-No `fan*` or `pwm*` hwmon entries are exposed. MI350X fans are managed by the host hardware/BMC, not the guest VM. GPU temps read ~56-63°C, power ~265W each at idle.
+No `fan*` or `pwm*` hwmon entries exist. Only `temp*`, `power*`, `freq*` are exposed. GPU temps read 56-63°C, power ~265W per GPU.
 
 ### Current status: NOT WORKING
-tinygrad's direct PCI path (`PCIIface`) cannot initialize the GPU on this VM because:
-1. The VRAM discovery table is not populated (amdgpu must boot the GPU first)
-2. After amdgpu unbind, VRAM is cleared
-3. tinygrad does not load VBIOS firmware itself — it relies on the discovery table already being in VRAM
-
-On raw metal (e.g. tinybox), the GPU's VBIOS runs at POST time and populates the discovery table before the OS boots. In this KVM VM, the VBIOS does not run, so the discovery table is never populated unless amdgpu initializes it.
-
-Potential paths forward:
-- Get amdgpu to fully initialize (fix MSI issue, possibly with `pci=assign-busses` or interrupt remapping on host)
-- Use the KFDIface path if `/dev/kfd` can be made to work
-- Have tinygrad load VBIOS/firmware itself (like amdgpu does)
+tinygrad's `PCIIface` finds the GPU (after adding `0x75b0`) but `AMDev._run_discovery()` fails because the VRAM discovery table reads all `0xFF`. This was observed with the GPU unbound from any driver, after PCI reset, and with VFIO bound.
