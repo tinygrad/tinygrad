@@ -180,7 +180,7 @@ class CapturedJit(Generic[ReturnType]):
       if call.op is not Ops.CALL: continue
       arg_uops = get_call_arg_uops(call)
       outs, ins = get_call_outs_ins(call)
-      out |= {arg_uops[k] for k in set(outs) - set(ins) if arg_uops[k].op in (Ops.BUFFER, Ops.SLICE)}
+      out |= {b for k in set(outs) - set(ins) if (b:=u if (cv:=(u:=arg_uops[k]).contiguous_view()) is None else cv[0]).op in {Ops.BUFFER, Ops.SLICE}}
     return out
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
