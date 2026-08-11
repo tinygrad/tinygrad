@@ -221,16 +221,15 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
   exec_kernel(replace(ctx, update_stats=False), call, ast)
 
-  tms:list[float|None] = []
-  for e in (aux:=call.arg.aux).prof: cast(Any, Device[e.device]).prof_ents[e.st_id] = e
-  for d in [cast(Any, Device[x]) for x in aux.device]:
-    with track_stats(ctx, call, d.device, [], ctx.var_vals) as et:
-      if ctx.wait:
-        d.synchronize(timeout=ctx.timeout)
-        ts = [d.signal(i)._buf.cpu_view().view(fmt='Q')[0] for e in aux.prof if e.device == d.device for i in (e.st_id, e.en_id)]
-        if ts: et[0] = float(max(ts)-min(ts))/d.timestamp_divider/1e6
-      tms += et
-  return tms[0]
+  for e,_ in (prof:=(aux:=call.arg.aux).prof): cast(Any, Device[e.device]).prof_ents[e.st_id] = e
+  if not ctx.wait or not prof: return None
+  for d in aux.device: cast(Any, Device[d]).synchronize(timeout=ctx.timeout)
+  for e,estimates in prof:
+    st, en = ((d:=cast(Any, Device[e.device])).signal(i)._buf.cpu_view().view(fmt='Q')[0] for i in (e.st_id, e.en_id))
+    tm = float(en-st)/d.timestamp_divider/1e6
+    with track_stats(ctx, call.replace(arg=replace(call.arg, name=cast(str, e.name), aux=replace(aux, estimates=estimates))), d.device,
+                     [], ctx.var_vals) as et: et[0] = tm
+  return tm
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
@@ -276,7 +275,7 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
-  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, bool(PROFILE) if profile is None else profile)
+  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
 def link_linear(linear:UOp, cache=True) -> UOp: return hcq_link(linear, cache=cache) if getenv("HCQ2") else linear

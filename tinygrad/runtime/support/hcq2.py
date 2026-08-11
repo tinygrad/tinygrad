@@ -33,7 +33,7 @@ class HCQInfo:
 
   input_idxs:tuple[int, ...] = () # indexes into input_uops used by this call
   inputs:int|None = None
-  prof:tuple[ProfileGraphEntry, ...] = () # st_id/en_id are timestamp signal slots until collect
+  prof:tuple[tuple[ProfileGraphEntry, Estimates], ...] = ()
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -212,7 +212,7 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]], profile:bool) -> li
     # and make hcq call
     name, info = get_call_name(call, get_call_arg_uops(call)), HCQInfo(devices, estimate_uop(call))
     ts_ids = [next(UOp.unique_num) for _ in range(2)] if profile else []
-    prof += [ProfileGraphEntry(d, name, *ts_ids) for d in devices if ts_ids]
+    prof += [(ProfileGraphEntry(d, name, *ts_ids), info.estimates) for d in devices if ts_ids]
 
     ts_ins = [UOp(Ops.INS, arg="timestamp", src=(make_signal(devices, s),)) for s in ts_ids]
     q += ts_ins[:1] + [call.replace(arg=replace(call.arg, aux=info))] + ts_ins[1:]
@@ -222,7 +222,7 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]], profile:bool) -> li
     src.append(make_call(name, make_submit(*q, devs=devices, queue=queue).sink(), info))
 
   # append batch timestamps to finalizers
-  finalizers = [f.replace(arg=replace(f.arg, aux=replace(a:=f.arg.aux, prof=tuple(e for e in prof if e.device in a.device)))) for f in finalizers]
+  finalizers = [f.replace(arg=replace(f.arg, aux=replace(a:=f.arg.aux, prof=tuple(x for x in prof if x[0].device in a.device)))) for f in finalizers]
   return fences + src + finalizers
 
 def sched_hcq_batches(l:UOp, profile:bool) -> UOp:
