@@ -63,7 +63,11 @@ extern "C" __global__ __launch_bounds__(THREADS) void rmsnorm_add_mul_bwd(
       const int h = tid * VEC + v * THREADS * VEC;
       __hip_bfloat16 o[VEC];
       #pragma unroll
-      for (int i = 0; i < VEC; i++) { const int j=v*VEC+i; o[i]=__hip_bfloat16(rs*(dy[j]-y[j]*mean)+direct[j]); }
+      for (int i = 0; i < VEC; i++) {
+        const int j = v*VEC+i;
+        const __hip_bfloat16 rms_grad = __hip_bfloat16(rs*(dy[j]-y[j]*mean));
+        o[i] = __hip_bfloat16(static_cast<float>(rms_grad) + direct[j]);
+      }
       *reinterpret_cast<float4*>(&dh[row*HIDDEN+h]) = *reinterpret_cast<float4*>(o);
 #if WRITE_MXFP4_ROW
       *reinterpret_cast<float4*>(&quant_row[h]) = *reinterpret_cast<float4*>(o);

@@ -16,16 +16,19 @@ constexpr int TILE_M = 128;
 constexpr int THREADS_PER_ROW = 8;
 constexpr int VALUES_PER_THREAD = 4;
 constexpr int SMEM_STRIDE = BLOCK + 2;
-constexpr float LOG2E = 1.4426950408889634f;
 
 static_assert(M % TILE_M == 0 && HIDDEN % BLOCK == 0);
+
+__device__ __forceinline__ float sigmoidf(const float x) {
+  return __frcp_rn(1.0f + __expf(-x));
+}
 
 __device__ __forceinline__ void swiglu_grads(const __hip_bfloat16* packed, const __hip_bfloat16* grad,
                                              int row, int col, float& dact, float& dgate) {
   const float act = static_cast<float>(packed[row * N + col]);
   const float gate = static_cast<float>(packed[row * N + HIDDEN + col]);
   const float upstream = static_cast<float>(grad[row * HIDDEN + col]);
-  const float sigmoid = 1.0f / (1.0f + exp2f(-LOG2E * act));
+  const float sigmoid = sigmoidf(act);
   const float silu = act * sigmoid;
   dact = upstream * (sigmoid + silu * (1.0f - sigmoid)) * gate;
   dgate = upstream * silu;

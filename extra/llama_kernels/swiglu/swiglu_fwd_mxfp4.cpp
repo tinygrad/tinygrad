@@ -17,9 +17,12 @@ constexpr int TILE_N = 64;
 constexpr int THREADS_PER_ROW = 8;
 constexpr int VALUES_PER_THREAD = 4;
 constexpr int SMEM_STRIDE = BLOCK + 2;
-constexpr float LOG2E = 1.4426950408889634f;
 
 static_assert(M % TILE_M == 0 && N % TILE_N == 0);
+
+__device__ __forceinline__ float sigmoidf(const float x) {
+  return __frcp_rn(1.0f + __expf(-x));
+}
 
 } // namespace
 
@@ -45,7 +48,7 @@ void KERNEL_NAME(__hip_bfloat16* __restrict__ out,
       for (int j = 0; j < VALUES_PER_THREAD; j++) {
         const float act = static_cast<float>(packed[row * INPUT_N + col + j]);
         const float gate = static_cast<float>(packed[row * INPUT_N + N + col + j]);
-        values[j] = __hip_bfloat16(act / (1.0f + exp2f(-LOG2E * act)) * gate);
+        values[j] = __hip_bfloat16((act * sigmoidf(act)) * gate);
         tile[line * SMEM_STRIDE + lane * VALUES_PER_THREAD + j] = *reinterpret_cast<const uint16_t*>(&values[j]);
       }
       __syncthreads();
