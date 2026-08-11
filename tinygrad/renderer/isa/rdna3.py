@@ -45,6 +45,7 @@ def _build_ins_table(srcs):
   return tbl
 
 OP_INS = _build_ins_table(insdefs)
+V_RSQ = { dtypes.float32:RDNA3Ops.v_rsq_f32_e32, dtypes.float64:RDNA3Ops.v_rsq_f64_e32, dtypes.float16:RDNA3Ops.v_rsq_f16_e32}
 V_FMA = { dtypes.float16:RDNA3Ops.v_fma_f16, dtypes.float32:RDNA3Ops.v_fma_f32, dtypes.float64:RDNA3Ops.v_fma_f64 }
 # V_MIN = { dtypes.float32:RDNA3Ops.v_min_f32_e32, dtypes.float16:RDNA3Ops.v_min_f16_e32, dtypes.uint32:RDNA3Ops.v_min_u32_e32, dtypes.int32:RDNA3Ops.v_min_i32_e32, dtypes.float64:RDNA3Ops.v_min_f64 }
 V_LSHL = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
@@ -501,6 +502,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), \
     lambda x,rng: x.replace(src=(x.src[0],rng,rng.src[-1])) if rng.src[-1].op is Ops.INS else None),
   # --- fused alu ---
+  (UPat.var("x").sqrt().reciprocal(), lambda ctx,x: _vop2(ctx, x.ins(V_RSQ[x.dtype])) if x.dtype in V_RSQ else None),
   ((UPat(Ops.MUL, dtypes.floats, name="a") + UPat.var("b")).named("x"),
     lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
   (UPat(Ops.ADD, dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"),
