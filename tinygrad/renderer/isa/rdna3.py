@@ -1,7 +1,7 @@
 from tinygrad.dtype import dtypes, AddrSpace, truncate, DType, InvalidType, to_storage_scalar
 from tinygrad.codegen.opt import tc
 from tinygrad.helpers import Target
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp, graph_rewrite
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
@@ -18,6 +18,7 @@ isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 # (uop, prefix, opcodes, support 32 and 64 bit encoding (e32/e64 branches with keys))
 # TODO: fold MAX, MIN, GT, GE etcw.. ins patterns where possible in isel
 insdefs = [
+  (Ops.MAX, "v_max", ["f32_e32", "i32_e32", "u32_e32", "f64", "f16_e32"], False),
   (Ops.ADD, "v_add", ["f16_e32", "f32_e32", "f64", "nc_i32", "nc_u32_e32", "nc_u16", "nc_i16"], False),
   (Ops.SUB, "v_sub", ["f16_e32", "f32_e32", "nc_i32", "nc_i16", "nc_u16", "nc_u32_e32"], False),
   (Ops.MUL, "v_mul", ["f16_e32", "f32_e32", "f64", "lo_u32", "lo_u16"], False), # TODO: mul i16?
@@ -44,7 +45,9 @@ def _build_ins_table(srcs):
   return tbl
 
 OP_INS = _build_ins_table(insdefs)
+V_RSQ = { dtypes.float32:RDNA3Ops.v_rsq_f32_e32, dtypes.float64:RDNA3Ops.v_rsq_f64_e32, dtypes.float16:RDNA3Ops.v_rsq_f16_e32}
 V_FMA = { dtypes.float16:RDNA3Ops.v_fma_f16, dtypes.float32:RDNA3Ops.v_fma_f32, dtypes.float64:RDNA3Ops.v_fma_f64 }
+# V_MIN = { dtypes.float32:RDNA3Ops.v_min_f32_e32, dtypes.float16:RDNA3Ops.v_min_f16_e32, dtypes.uint32:RDNA3Ops.v_min_u32_e32, dtypes.int32:RDNA3Ops.v_min_i32_e32, dtypes.float64:RDNA3Ops.v_min_f64 }
 V_LSHL = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
 V_LSHR = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
 V_ASHR = { 4:RDNA3Ops.v_ashrrev_i32_e32, 8:RDNA3Ops.v_ashrrev_i64 }
@@ -70,20 +73,36 @@ GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 VCC, EXEC = Register("vcc", 0, size=4), Register("exec_lo", 0, size=4)
 FLAT_SCRATCH_LO, FLAT_SCRATCH_HI = Register("flat_scratch_lo", 0, size=4), Register("flat_scratch_hi", 0, size=4)
 
+kernarg_ptr = def_reg(dtypes.uint64, KERNARG_PTR)
 execop, vccop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, VCC)
 flat_scratch_ptr = (def_reg(dtypes.uint32, FLAT_SCRATCH_LO), def_reg(dtypes.uint32, FLAT_SCRATCH_HI))
 
 # ---- register movement helpers ----
-def packb16(ctx, lo:UOp, hi:UOp):
+def packb16(lo:UOp, hi:UOp):
   if dtypes.is_float(lo.dtype): return UOp(Ops.INS, arg=RDNA3Ops.v_pack_b32_f16, src=(lo,hi))
   lo = lo & const(0xFFFF) # mask off upper half
-  return _vop3(ctx, UOp(Ops.INS, arg=RDNA3Ops.v_lshl_or_b32, src=(hi, const(16, dtypes.int32), lo)))
+  return _vop3(UOp(Ops.INS, arg=RDNA3Ops.v_lshl_or_b32, src=(hi, const(16, dtypes.int32), lo)))
 
-def stack2regs(ctx, x:UOp):
+# TODO: replicate this for b8
+# stack of 16 bit loads -> load directly into high/low halfs
+def load_into_stack(ctx, x:UOp) -> UOp:
+  if x.src[0].src[0].addrspace is not AddrSpace.GLOBAL: return None
+  out = []
+  vp = ctx.vreg(GP_VGPRS, width=len(x.src)//2)
+  for l in range(0, len(x.src), 2):
+    vr = vp.sub(l//2)
+    lo,hi = x.src[l], x.src[l+1]
+    lo,hi = load(ctx, lo, lo.src[0]), load(ctx, hi, hi.src[0])
+    def _mopc(u:UOp, opc) -> UOp: return u.replace(src=(u.src[0].replace(arg=opc),) + u.src[1:])
+    lo,hi = _mopc(lo, RDNA3Ops.global_load_d16_b16).replace(tag=(vr,)), _mopc(hi, RDNA3Ops.global_load_d16_hi_b16).replace(tag=(vr,))
+    out.append(hi.after(lo))
+  return UOp.group(*out, dtype=x.dtype, tag=(vp,))
+
+def stack2regs(x:UOp):
   nregs, mvs = ((len(x.src) * x.dtype.itemsize) + 3) // 4, []
   for i in range(nregs):
     if x.dtype.itemsize == 2:
-      if i*2+1 < len(x.src): mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]))
+      if i*2+1 < len(x.src): mvs.append(packb16(x.src[i*2], x.src[i*2+1]))
       else: mvs.append(vmov(x.src[i*2]))
     elif x.dtype.itemsize == 1:
       def _pk(j:int):
@@ -108,7 +127,7 @@ def gethalf(x:UOp, buf:UOp, idx:UOp):
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
 # ---- operand legalization wrappers ----
-def _vop3(ctx, x:UOp):
+def _vop3(x:UOp):
   lits = [s for s in x.src if s.op is Ops.CONST]
   return x if len(lits) <= 1 else x.replace(src=tuple([vmov(s) if s in lits[1:] else s for s in x.src]))
 
@@ -128,7 +147,9 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
 
   if x.op is Ops.GROUP:
     vreg = ctx.vreg(GP_VGPRS, width=len(x.src))
+    # TODO: replace all references to src edges to avoid duplicates because of tag changes
     return x.replace(tag=(vreg,), src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)))
+
   elif isinstance(x.tag, tuple):
     cons, width = x.tag if isinstance(x.tag[0], tuple) else (x.tag, 1)
     vr = ctx.vreg(cons, width=width)
@@ -136,8 +157,9 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
     vr = ctx.vreg(GP_VGPRS, width=max(x.dtype.itemsize // 4, 1))
   return x.replace(tag=(vr,))
 
-# TODO: batch param loading? ex. s_load_b128
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
+# TODO: batch param loading? ex. s_load_b128
+# NOTE: codegen doesnt know to place param s_loads early, delay lowering like load/store
 def abi(ctx, x:UOp) -> UOp|None:
   if x.op is Ops.SPECIAL:
     dim = int(x.arg[-1])
@@ -145,9 +167,9 @@ def abi(ctx, x:UOp) -> UOp|None:
     else: # granulated work item ids, packed into 3 10 bit fields in v0, extract with bfe
       return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(x.replace(tag=WIIDS), const(10 * dim), const(10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:ctx.func_args.index(x)])
-  addr = (x.replace(tag=KERNARG_PTR), const(offs))
-  if x.addrspace is AddrSpace.ALU: return vmov(x.ins(RDNA3Ops.s_load_b32, src=addr, tag=(ctx.vreg(GP_SGPRS),)))
-  return x.ins(RDNA3Ops.s_load_b64, dtype=dtypes.ulong, src=addr, tag=(ctx.vreg(GP_SGPRS, width=2, alignment=2),))
+  addr = (kernarg_ptr, const(offs))
+  if x.addrspace is AddrSpace.ALU: return vmov(x.replace(src=addr, tag=ctx.vreg(GP_SGPRS)))
+  return x.replace(dtype=dtypes.ulong, src=addr, tag=ctx.vreg(GP_SGPRS, width=2, alignment=2),)
 
 # ----- memory access ----
 # GLOBAL_ADDR = VADDR_U64 + IMMOFFS_u16
@@ -156,10 +178,10 @@ def fold_global(base:UOp, idx:UOp): # (voff, ioffs)
   disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
   shft = const(disp_scale.bit_length() - 1, dtypes.int32)
   vaddr, offs = idx, const(0, dtypes.uint16)
-  if idx.op is Ops.CONST: vaddr = idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(idx.arg, dtypes.int32),))
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST and -(1 << 12) <= (_offs := idx.src[1].arg * disp_scale) < (1 << 12):
+  def foldable(v:int) -> bool: return -(1 << 12) <= v < (1 << 12)
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST and foldable((_offs := idx.src[1].val * disp_scale)):
     vaddr, offs = idx.src[0], const(_offs, dtypes.int16)
-  vaddr = UOp(Ops.SHL, dtype=dtypes.uint64, src=(int_to_int64(vaddr, dtypes.uint64), shft))
+  vaddr = int_to_int64(vaddr << shft, dtypes.uint64)
   return (UOp(Ops.ADD, dtype=dtypes.uint64, src=(vaddr, base.bitcast(dtype=dtypes.uint64))), offs)
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
@@ -218,7 +240,7 @@ def cmp(ctx, x:UOp):
   ins = _mask_cmp[x.op] if scmp else OP_INS[x.op][64][dt]
   if scmp and x.op is Ops.CMPLT: x=x.replace(src=(x.src[1], x.src[0]))
   x = x.ins(ins, tag=GP_SGPRS)
-  return x if scmp else _vop3(ctx, x)
+  return x if scmp else _vop3(x)
 
 def arith64(ctx, x:UOp, add:bool):
   a, b = x.src
@@ -294,10 +316,10 @@ def alu(ctx, x:UOp):
   ins = x.arg if isinstance(x.arg, functools.partial) else OP_INS[x.op][x.dtype]
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
-def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
+def where(pred:UOp, a:UOp, b:UOp, x:UOp):
   if x.dtype is dtypes.bool: return (pred & a) | (~pred & b)
   ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16
-  return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
+  return _vop3(x.ins(ins, src=(b,a,pred)))
 
 def render_wmma(ctx, wmma:UOp):
   a,b,acc = wmma.src
@@ -324,14 +346,9 @@ def cvt(ctx, y:UOp, x:UOp):
     else: return y.index(0)
   return x.ins(_cvt_ins(y.dtype,x.dtype))
 
-# TODO: cleanup this slop + manual constr
 def int_to_int64(y:UOp, tdt:DType):
-  if not dtypes.is_unsigned(y.dtype): # sext
-    nbits = y.dtype.itemsize*8
-    lo = vmov(y)
-    hi = getsign(to_vgpr(y), nbits)
-  else: lo, hi = vmov(y), vmov(const(0))
-  return UOp.group(lo, hi, dtype=tdt)
+  hi = vmov(const(0)) if dtypes.is_unsigned(y.dtype) else getsign(to_vgpr(y), y.dtype.itemsize*8)
+  return UOp.group(vmov(y), hi, dtype=tdt)
 
 # NOTE: use v_bfe instead of hand rolled masking
 def intcast(y:UOp, x:UOp):
@@ -374,20 +391,47 @@ def lower_range(ctx, x:UOp):
   acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),))
   ctx.loop_label[acc] = range_str(x)
   ctx.exec_mask[acc] = mask
+  ctx.range_bnd[acc] = bnd
   loop_body = label(ctx, f".LOOP_BODY_{range_str(x)}")
-  pred = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(acc,bnd), tag=(EXEC,))
-  jmp_out = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execz, tag=f".LOOP_END_{range_str(x)}")
-  return acc, [acc, loop_body, pred, jmp_out]
+  return acc, [acc, loop_body]
 
 def lower_end(ctx, x:UOp, acc:UOp):
   loop_end = label(ctx, f".LOOP_END_{ctx.loop_label[acc]}")
   inc = UOp(Ops.INS, arg=RDNA3Ops.v_add_nc_u32_e32, src=(const(1), acc), tag=acc.tag)
-  jmp_back = UOp(Ops.INS, arg=RDNA3Ops.s_branch, tag=f".LOOP_BODY_{ctx.loop_label[acc]}")
-  return inc, [inc, jmp_back, loop_end, restoreexec(ctx.exec_mask[acc])]
+  jmp = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_BODY_{ctx.loop_label[acc]}")
+  pred = UOp(Ops.INS, arg=RDNA3Ops.v_cmpx_lt_u32_e64, src=(acc,ctx.range_bnd[acc]), tag=(EXEC,))
+  return inc, [inc, pred, jmp, loop_end, restoreexec(ctx.exec_mask[acc])]
 
 # ---- lowering passes ----
+class BiasMemoryCtx:
+# - should this be put in codegen? most good compilers already optimize this in the renderer ex. LLVM, probably HIP
+  def __init__(self, sink:UOp):
+    # shared base op -> idx and optional const arg
+    self.mgroups: dict[ParamArg, list[tuple[UOp|None, int|None]]] = {}
+    for u in sink.toposort():
+      if u.op in {Ops.LOAD, Ops.STORE} and u.src[0].addrspace is not AddrSpace.REG:
+        base,idx,arg = (*u.src[0].src[:2], None)
+        if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: arg = idx.src[1].val
+        self.mgroups.setdefault(base.arg, []).append((idx,arg or 0))
+
+    self.normalized: dict[UOp, UOp] = {}
+    for b, uses in self.mgroups.items():
+      if len(args := [v[1] for v in uses if v[1] is not None]) == 0: continue
+      if (mean := sum(args) // len(args)) == 0: continue
+      for idx,v in uses:
+        if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
+          # propagate the normalize addition down sum edges to hint hoist outside range?
+          # this is where this starts to belong in codegen optimizations maybe
+          self.normalized[idx] = idx.replace(src=(idx.src[0] + const(mean, idx.dtype), const(idx.src[1].val - mean, idx.dtype)))
+        else: # dynamic base no ioffs
+          self.normalized[idx] = (idx + const(mean, idx.dtype)) + const(-mean, idx.dtype)
+
+pm_bias_memory_addrs = PatternMatcher([
+  (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x: x.replace(src=(x.src[0], ctx.normalized[x.src[1]], *x.src[2:])) if x.src[1] in ctx.normalized else None),
+])
+
 extra_matcher = PatternMatcher([
-  (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(x.val if isinstance(x.val, InvalidDtype) else to_storage_scalar(x.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
+  (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(x.val if isinstance(x.val, InvalidType) else to_storage_scalar(x.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
@@ -412,6 +456,7 @@ pm_int_to_float = PatternMatcher([
 ])
 
 pre_isel_matcher = PatternMatcher([
+  (UPat(Ops.STACK, name="x"), lambda x: stack2regs(x) if len(x.src) and not (x.dtype.itemsize == 2 and all(s.op is Ops.LOAD for s in x.src)) else None),
   # --- bool repr ---
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), \
@@ -442,7 +487,6 @@ pre_isel_matcher = PatternMatcher([
   (UPat((Ops.SHR, Ops.SHL), dtypes.int64s, src=(UPat.var("val"), UPat.var("shft")), name="x"),
     lambda x,val,shft: x.replace(src=(val, shft.cast(dtypes.uint32)))),
   # --- other ---
-  (UPat(Ops.STACK, name="x"), lambda ctx,x: stack2regs(ctx, x) if len(x.src) else None),
   (UPat(Ops.CDIV, name="x"), idiv),
   # NOTE: this exposes issues with vgpr value representation invariants, if a value takes up less than 32 bits either we dont care about
   # what else is in there, could be garbage, or it has to be masked at boundaries and sign extended carefully etc... so it can be operated on
@@ -451,13 +495,21 @@ pre_isel_matcher = PatternMatcher([
   (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), \
     lambda y: (y & const((1 << 16) - 1, dtypes.uint16)).replace(dtype=dtypes.uint16)),
   # hack?
+  (UPat(Ops.MAX, dtypes.int64s, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda a,b,x: (a < b).where(b, a).replace(dtype=x.dtype)),
   (UPat(Ops.MUL, dtypes.int32, name="x"), lambda x: x.replace(dtype=dtypes.uint32).bitcast(dtypes.int32)),
+  (UPat(Ops.MAX, dtypes.int16s, name="x"), lambda x: x.replace(dtype=smux(x.dtype, dtypes.int32, dtypes.uint32)).bitcast(x.dtype)),
 ]) + pm_float_to_int + pm_int_to_float
 
-isel_matcher = PatternMatcher([
-  # --- mem ops ---
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(allow_any_len=True, name="x"), lambda ctx,x,idx: load(ctx, x, idx)),
+pm_alu_fusion = PatternMatcher([
+  (UPat().sqrt().named("x").reciprocal(), lambda x: x.ins(V_RSQ[x.dtype]) if x.dtype in V_RSQ else None),
+  ((UPat(Ops.MUL, dtypes.floats, name="a") + UPat.var("b")).named("x"),
+    lambda ctx,a,b,x: _vop3(x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
+  (UPat(Ops.ADD, dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"),
+    lambda ctx,x,y,b: _vop3(x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
+])
+
+isel_matcher = pm_alu_fusion + PatternMatcher([
+  (UPat(Ops.STACK, dtypes.int16s+(dtypes.half,dtypes.bfloat16), src=UPat(Ops.LOAD), name="x"), load_into_stack),
   # --- control flow ---
   # how to remove positional arg contracts, make inter-lowering semantics explicit
   # so its clear what src args represent. try to match spec
@@ -467,11 +519,6 @@ isel_matcher = PatternMatcher([
   # add exec mask edge to src
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), \
     lambda x,rng: x.replace(src=(x.src[0],rng,rng.src[-1])) if rng.src[-1].op is Ops.INS else None),
-  # --- fused alu ---
-  ((UPat(Ops.MUL, dtypes.floats, name="a") + UPat.var("b")).named("x"),
-    lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
-  (UPat(Ops.ADD, dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"),
-    lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
   # --- double precis bit alu ---
   (UPat(Ops.ADD, dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_add_f64)),
   (UPat(Ops.MUL, dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_mul_f64)),
@@ -489,9 +536,12 @@ isel_matcher = PatternMatcher([
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
   (UPat.var("y").cast(name="x"), cvt),
+  # --- mem ops ---
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(allow_any_len=True, name="x"), lambda ctx,x,idx: load(ctx, x, idx)),
   # --- other ---
   (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x)
-    if not any(isinstance(v,Register) for v in rdefs(x)) else None),
+    if not any(isinstance(v,(VRegister, Register)) for v in rdefs(x)) else None),
   (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # 16 bit indexes get expanded into extract moves/shifts
@@ -502,10 +552,10 @@ isel_matcher = PatternMatcher([
 ])
 
 pre_regalloc_matcher = PatternMatcher([
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ((nx := x.ins(RDNA3Ops.s_load_b32 if x.addrspace is AddrSpace.ALU else RDNA3Ops.s_load_b64)), [nx])),
   # Lower a gated load as one adjacent sequence after linearization so the alt initialization cannot escape its CFG block.
   (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"), UPat.var("alt"), UPat.var("gate")), name="x"), lower_gated_load),
   (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"),), name="x"), lambda x,addr: ((nx := x.ins(addr.arg).replace(src=addr.src)), [nx])),
-
   (UPat(Ops.STORE, src=(UPat(Ops.NOOP, name="addr"), UPat.var("val")), name="x"), lambda addr,x,val: ((nx := x.ins(addr.arg).replace(src=addr.src + (val,))), [nx])),
   # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
   (UPat(Ops.IF, src=(UPat.var("gate"),), allow_any_len=True, name="x"), lambda ctx,x,gate: \
@@ -564,7 +614,7 @@ def encode(ctx, x:UOp):
     if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: oprs = oprs[:1]
     if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: oprs = oprs[:2]
     args = [_fuse(rdefs(x))] + [_immorreg(u) for u in oprs]
-  elif group is RDNA3Ops.SOPP: args = (0,)
+  elif group is RDNA3Ops.SOPP: args = (oprs[0].val,) if len(oprs) > 0 and oprs[0].op is Ops.CONST else (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
   return x.replace(arg=(enc(**kw) if kw is not None else enc(*args)))
 
@@ -580,7 +630,9 @@ class CntType(Enum):
 @dataclass
 class RDNA3LinearCtx:
   loop_label: dict[UOp, str] = field(default_factory=dict)
+  # TODO: remove these
   exec_mask: dict[UOp, UOp] = field(default_factory=dict)
+  range_bnd: dict[UOp, UOp] = field(default_factory=dict)
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
@@ -589,7 +641,7 @@ class RDNA3Renderer(ISARenderer):
   extra_matcher = extra_matcher
   post_regalloc_matcher = post_regalloc_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL, Ops.MAX)}
   post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
     super().__init__(target)
@@ -598,7 +650,9 @@ class RDNA3Renderer(ISARenderer):
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
-  def stack_alloc(self, uops:list[UOp]): return uops
+
+  def early(self, full_sink:UOp) -> UOp:
+    return graph_rewrite(full_sink, pm_bias_memory_addrs, ctx=BiasMemoryCtx(full_sink), name="bias mem offsets")
 
   # use scratch memory space for spilling thread local memory, addressed as:
   # SCRATCH_BASE + Swizzle(addr, tid) 12 bit ioffs, ensure no overflow!
@@ -625,6 +679,7 @@ class RDNA3Renderer(ISARenderer):
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     deps: set[Register] = set()
     nuops = []
+    # s_waitcnt
     for u in lin.src:
       if any(r in deps for s in u.src for r in rdefs(s)):
         nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt, src=(const(0, dtypes.uint16),)))
@@ -632,6 +687,30 @@ class RDNA3Renderer(ISARenderer):
       if (tp := CntType.get(u)) is not None and tp in [CntType.DS_CNT, CntType.LOAD_CNT]:
         deps.update(rdefs(u))
       nuops.append(u)
+
+    # s_clause
+    loads: dict[int, UOp] = {}
+    stores: dict[int, UOp] = {}
+    for i,u in enumerate(nuops):
+      if u.arg.func is RDNA3Ops.GLOBAL:
+        if u.dtype is dtypes.void: stores[i] = u
+        else: loads[i] = u
+
+    def gather(instances:dict[int, UOp]) -> dict[int, int]:
+      clauses: dict[int, int] = {}
+      start, last = None, None
+      for k in sorted(instances.keys()):
+        if last is not None and k > last+1: last, start = None, None
+        if start is None: start = k
+        last = k
+        clauses[start] = clauses.setdefault(start, 0) + 1
+      return clauses
+
+    dp = 0
+    for p,l in (gather(loads) | gather(stores)).items():
+      if l > 1:
+        nuops.insert(p+dp, UOp(Ops.INS, arg=RDNA3Ops.s_clause, src=(const(l-1),)))
+        dp += 1
 
     pc = 0
     targets: dict[str, int] = {}

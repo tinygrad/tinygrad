@@ -8,7 +8,7 @@ from tinygrad import Tensor, Variable, TinyJit, Device, dtypes
 from tinygrad.engine.jit import graph_class
 from tinygrad.helpers import JIT, DEV, GlobalCounters
 from tinygrad.uop.ops import Ops
-from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.isa import ISARenderer
 
 class TestJit(unittest.TestCase):
   def test_simple_jit(self):
@@ -36,7 +36,7 @@ class TestJit(unittest.TestCase):
       x = (Tensor.arange(10).float() + i * 10).clone().realize()
       np.testing.assert_allclose(f(x).numpy(), x.numpy()[2:5] + 1)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "estimates are wrong for x86")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "estimates are wrong for isa backends")
   def test_global_counters_jit(self):
     @TinyJit
     def f(a, b):

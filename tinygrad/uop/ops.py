@@ -328,6 +328,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
+    # ntoe: hash is probably wrong, is arg order significant
     return (self.op.value, self.arg.__hash__(), self.dtype,)+tuple([x.tuplize for x in self.src])
 
   # *** uop shape stuff ***
