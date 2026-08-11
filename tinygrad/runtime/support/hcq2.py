@@ -623,6 +623,8 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
     return self._do_map(buf)
 
+  def _do_unmap(self, mb): self.dev.iface.free(mb)
+
   @suppress_finalizing
   def _free(self, buf:HCQ2Buffer, options:BufferSpec|None=None):
     if options is not None and options.external_ptr is not None: return
@@ -631,6 +633,6 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
 
   def _unmap(self, mb):
     self.dev.synchronize()
-    self.dev.iface.free(mb)
+    self._do_unmap(mb)
 
   def _offset(self, buf, size:int, offset:int) -> HCQ2Buffer: return buf.offset(offset=offset, size=size)
