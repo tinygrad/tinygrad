@@ -72,6 +72,7 @@ GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
 VCC, EXEC = Register("vcc", 0, size=4), Register("exec_lo", 0, size=4)
 FLAT_SCRATCH_LO, FLAT_SCRATCH_HI = Register("flat_scratch_lo", 0, size=4), Register("flat_scratch_hi", 0, size=4)
 
+kernarg_ptr = def_reg(dtypes.uint64, KERNARG_PTR)
 execop, vccop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, VCC)
 flat_scratch_ptr = (def_reg(dtypes.uint32, FLAT_SCRATCH_LO), def_reg(dtypes.uint32, FLAT_SCRATCH_HI))
 
@@ -142,6 +143,8 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
 
 # TODO: batch param loading? ex. s_load_b128
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
+# NOTE: codegen doesnt know to place param s_loads early...
+# - delay lowering like load/store
 def abi(ctx, x:UOp) -> UOp|None:
   if x.op is Ops.SPECIAL:
     dim = int(x.arg[-1])
@@ -149,9 +152,10 @@ def abi(ctx, x:UOp) -> UOp|None:
     else: # granulated work item ids, packed into 3 10 bit fields in v0, extract with bfe
       return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(x.replace(tag=WIIDS), const(10 * dim), const(10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:ctx.func_args.index(x)])
-  addr = (x.replace(tag=KERNARG_PTR), const(offs))
+  addr = (kernarg_ptr, const(offs))
   if x.addrspace is AddrSpace.ALU: return vmov(x.ins(RDNA3Ops.s_load_b32, src=addr, tag=(ctx.vreg(GP_SGPRS),)))
-  return x.ins(RDNA3Ops.s_load_b64, dtype=dtypes.ulong, src=addr, tag=(ctx.vreg(GP_SGPRS, width=2, alignment=2),))
+  return x.replace(dtype=dtypes.ulong, src=addr, tag=ctx.vreg(GP_SGPRS, width=2, alignment=2),)
+  # return x.ins(RDNA3Ops.s_load_b64, dtype=dtypes.ulong, src=addr, tag=(ctx.vreg(GP_SGPRS, width=2, alignment=2),))
 
 # ----- memory access ----
 # GLOBAL_ADDR = VADDR_U64 + IMMOFFS_u16
@@ -520,7 +524,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y").cast(name="x"), cvt),
   # --- other ---
   (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x)
-    if not any(isinstance(v,Register) for v in rdefs(x)) else None),
+    if not any(isinstance(v,(VRegister, Register)) for v in rdefs(x)) else None),
   (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   # 16 bit indexes get expanded into extract moves/shifts
@@ -531,10 +535,10 @@ isel_matcher = PatternMatcher([
 ])
 
 pre_regalloc_matcher = PatternMatcher([
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ((nx := x.ins(RDNA3Ops.s_load_b64)), [nx])),
   # Lower a gated load as one adjacent sequence after linearization so the alt initialization cannot escape its CFG block.
   (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"), UPat.var("alt"), UPat.var("gate")), name="x"), lower_gated_load),
   (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"),), name="x"), lambda x,addr: ((nx := x.ins(addr.arg).replace(src=addr.src)), [nx])),
-
   (UPat(Ops.STORE, src=(UPat(Ops.NOOP, name="addr"), UPat.var("val")), name="x"), lambda addr,x,val: ((nx := x.ins(addr.arg).replace(src=addr.src + (val,))), [nx])),
   # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
   (UPat(Ops.IF, src=(UPat.var("gate"),), allow_any_len=True, name="x"), lambda ctx,x,gate: \
