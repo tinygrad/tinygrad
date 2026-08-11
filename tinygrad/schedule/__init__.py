@@ -81,7 +81,8 @@ def create_schedule(sched_sink:UOp) -> UOp:
 
 from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear
-from tinygrad.schedule.rangeify import get_kernel_graph
+#from tinygrad.schedule.rangeify import get_kernel_graph
+from tinygrad.schedule.rangeify2 import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg
 from tinygrad.dtype import AddrSpace
