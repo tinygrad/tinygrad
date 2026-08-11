@@ -383,7 +383,7 @@ def resolve_getaddr_slice(bv:UOp, g:UOp) -> UOp:
   return UOp(Ops.GETADDR, src=(base,), arg=g.arg) + UOp.const(bv.src[1].val * itemsize, dtypes.uint64)
 
 pm_early_simplify = PatternMatcher([
-  (UPat(Ops.GETADDR, src=(UPat.any(sl:=UPat(Ops.SLICE, name="bv"), sl.after(allow_any_len=True)),), name="g"), resolve_getaddr_slice),
+  (UPat(Ops.GETADDR, src=(UPat.any(sl:=UPat((Ops.SLICE, Ops.SHRINK), name="bv"), sl.after(allow_any_len=True)),), name="g"), resolve_getaddr_slice),
   (UPat(Ops.INDEX, src=(UPat(Ops.SLICE, name="bv"),), allow_any_len=True, name="x"),
    lambda bv,x: x.replace(src=(bv.src[0], x.src[1] + bv.src[1].cast(x.src[1].dtype), *x.src[2:]))),
 ])

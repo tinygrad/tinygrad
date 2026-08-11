@@ -568,9 +568,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     in_tuple = self.src[0] if self.op is Ops.FUNCTION else self
     assert in_tuple.op is Ops.TUPLE, f"gettuple requires FUNCTION or TUPLE source, got {self.op}"
     return UOp(Ops.GETTUPLE, src=(self,), arg=idx)
-  def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
+  def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
-    return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]))
+    return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]), **kwargs)
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].val]
@@ -822,7 +822,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   unique_num = itertools.count(0)
 
   def getaddr(self, device=None) -> UOp:
-    if self.without_after.op not in {Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM}: return self
+    if self.without_after.op not in {Ops.BUFFER, Ops.SLICE, Ops.SHRINK, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM}: return self
     return UOp(Ops.GETADDR, src=(self,), arg=device or to_tuple(self.device)[0])
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
@@ -901,8 +901,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     while len(s.src) and s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK}: s = s.src[0]
     return s
 
-  def contiguous_view_offset(self) -> int|None:
-    """If movement ops on a BUFFER collapse to a contiguous range, return `offset` in elements. Otherwise None."""
+  def contiguous_view(self) -> tuple[UOp, int]|None:
     from tinygrad.schedule.rangeify import pm_mops
     from tinygrad.uop.symbolic import symbolic
 
@@ -915,7 +914,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
     idx = self.flatten().index(UOp.range(self.numel(), 0))
     out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
-    return out.val if out.op is Ops.CONST and isinstance(out.val, int) else None
+    if out.op is not Ops.INDEX or not (b:=out.src[0]).tag or (c:=out.src[1]).op is not Ops.CONST or not isinstance(c.val, int): return None
+    return b.rtag(None), c.val
+
+  def contiguous_view_offset(self) -> int|None: return None if (view := self.contiguous_view()) is None else view[1]
 
   def has_buffer_identity(self, after_ok=False):
     """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/UNSHARD -> BUFFER chain)."""
@@ -932,18 +934,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:
-    if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
+    if self.op in {Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
-    if self is not self.base:
-      buf = self.base.buffer
-      assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
-      offset = self.contiguous_view_offset()
-      if offset is None: raise RuntimeError(f"non-contiguous view is not supported for {buf.device} buffer")
-      return buf.view(prod(self.max_shape), self.dtype, offset*self.dtype.itemsize)
-    if self.op is Ops.BITCAST:
-      buf = self.src[0].buffer
-      assert isinstance(buf, Buffer), "must be a Buffer for BITCAST"
-      return buf.view(prod(self.max_shape), self.dtype, 0)
+    if self is not self.base or self.op is Ops.BITCAST:
+      if (cv := self.contiguous_view()) is None: raise RuntimeError(f"non-contiguous view is not supported for {self.device} buffer")
+      buf, offset = (b:=cv[0]).base.buffer, cv[1]
+      if isinstance(buf, MultiBuffer):
+        mbuf = MultiBuffer.__new__(MultiBuffer)
+        mbuf.bufs = [x.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize) for x in buf.bufs]
+        return mbuf
+      return buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
     if self.op is Ops.SLICE:
       if (cret:=buffers.get(self)) is not None: return cret
       buf = self.src[0].buffer
@@ -1775,10 +1775,14 @@ pm_unbind = PatternMatcher([(UPat(Ops.BIND, name="x"), do_unbind)])
 
 # ctx is source UOp for which we are finding a contiguous view for. used in contiguous_view_offset
 pm_contiguous_view_offset = PatternMatcher([
-  (UPat(Ops.INDEX, src=(UPat(),)), lambda: UOp.const(0)),
-  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.RANGE))), lambda: UOp.const(0)),
-  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.RANGE)+UPat.cvar('c'))), lambda c: c),
-  (UPat(Ops.INDEX, src=(UPat(), UPat.cvar('c'))), lambda ctx, c: c if resolve(ctx.numel() == 1, False) else None),
+  # normalize to 1d bitcasts
+  (UPat(Ops.BITCAST, name="b"), lambda b: b.src[0].flatten().bitcast(b.dtype).reshape(b.shape) if len(b.shape) != 1 else None),
+  (UPat(Ops.BITCAST, name="b").index(UPat.cvar("c")), lambda ctx, b, c:
+   b.src[0].flatten().index(UOp.range(ctx.numel() * (osz:=b.element_size())//(isz:=b.src[0].element_size()), 0) + (c * osz//isz)) if b.tag else None),
+  (UPat(Ops.INDEX, src=(UPat.var("b"),)), lambda b: b.rtag().index(0)),
+  (UPat(Ops.INDEX, src=(UPat.var("b"), UPat(Ops.RANGE))), lambda b: b.rtag().index(0)),
+  (UPat(Ops.INDEX, src=(UPat.var("b"), UPat(Ops.RANGE)+UPat.cvar('c'))), lambda ctx, b, c: b.rtag().index(c)),
+  (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.cvar('c'))), lambda ctx, b, c: b.rtag().index(c) if resolve(ctx.numel() == 1, False) else None),
 ])
 
 # *** what was symbolic.py ***
