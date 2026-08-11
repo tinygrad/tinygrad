@@ -7,7 +7,7 @@ from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrit
 from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
-from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
+from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element, Context
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op
@@ -178,7 +178,7 @@ split_kernels = PatternMatcher([
 # *** main rangeify ***
 
 debug_tag_factor = PatternMatcher([
-  (UPat(GroupOp.All, name="x"), lambda ctx,x: x.rtag(ctx[x]) if x.tag is None else None),
+  (UPat(GroupOp.All, name="x"), lambda ctx,x: x.rtag(ctx[0][x] if x not in ctx[1] else 'REAL') if x.tag is None else None),
 ])
 
 @rewrite_group(new_ctx=False)
@@ -190,18 +190,23 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_expand_broadcast, bottom_up=True, name="expand broadcast")
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
-  # TODO: add safe STAGEs to never duplicate compute
-
-  # we compute the number of times a buffer is consumed, everything starts with 0
+  # add safe STAGEs to never duplicate compute
+  # we compute the number of times a buffer is consumed. if > 1, we realize
+  realize = {}
   consumes = {tsink:0}
   for u in reversed(tsink.toposort()):
     assert u in consumes
+    if (u.op in GroupOp.ALU or u.op is Ops.REDUCE) and consumes[u] > 1:
+      realize[u] = None
+      consumes[u] = 1
     if u.op is Ops.STORE: consumes[u] = 1
     if u.op is Ops.EXPAND: consumes[u] *= u.max_numel() // u.src[0].max_numel()
     for s in u.src[1:] if u.op is Ops.STORE else u.src:
       if s not in consumes: consumes[s] = 0
       consumes[s] += consumes[u]
-  if VIZ: graph_rewrite(tsink, debug_tag_factor, ctx=consumes, name="view consumes tags", bottom_up=True)
+  if VIZ:
+    with Context(TRACK_MATCH_STATS=0): ctags = graph_rewrite(tsink, debug_tag_factor, ctx=(consumes, realize), bottom_up=True)
+    graph_rewrite(ctags, PatternMatcher([]), name="View Consumes")
 
   # simple rangeify
   tsink = graph_rewrite(tsink, pm_range_creation+pm_range_migration, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
