@@ -118,6 +118,11 @@ def index_on_stack(stack:UOp, idx:UOp):
   for k in range(len(srcs)-2, -1, -1): ret = r0.eq(k).where(srcs[k], ret)
   return ret
 
+def walk_mop(u:UOp):
+  if u.op in GroupOp.Movement or u.op is Ops.INDEX: return u.src[0]
+  assert u.op == Ops.AFTER
+  return u
+
 pm_range_migration = PatternMatcher([
   # INDEX without src is nothing
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
@@ -131,9 +136,14 @@ pm_range_migration = PatternMatcher([
   # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").index(name="idx", allow_any_len=True), _mop_index),
   (UPat(Ops.STACK, name="stack").index(name="idx", allow_any_len=True), index_on_stack),
+  # move movement ops and INDEX after AFTER
+  (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
+   lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
   # pass index through elementwise
   (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
    lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
+  # remove movement ops from SINK. TODO: should be generic
+  (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src))),
 ])
 
 # *** split into kernels ***
@@ -144,6 +154,7 @@ class SplitCtx:
   range_number:int = -1
 
 def _split_graph(ctx:SplitCtx, u:UOp) -> UOp:
+  assert len(u.shape) == 1, "rangeify needs to reduce to a single idx"
   ctx.call_args.append(u)
   return u.param_like(len(ctx.call_args)-1)
 
@@ -166,6 +177,10 @@ split_kernels = PatternMatcher([
 
 # *** main rangeify ***
 
+debug_tag_factor = PatternMatcher([
+  (UPat(GroupOp.All, name="x"), lambda ctx,x: x.rtag(ctx[x]) if x.tag is None else None),
+])
+
 @rewrite_group(new_ctx=False)
 def get_kernel_graph(sink:UOp) -> UOp:
   # TODO: multi should just be part of rangeify
@@ -176,6 +191,17 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
   # TODO: add safe STAGEs to never duplicate compute
+
+  # we compute the number of times a buffer is consumed, everything starts with 0
+  consumes = {tsink:0}
+  for u in reversed(tsink.toposort()):
+    assert u in consumes
+    if u.op is Ops.STORE: consumes[u] = 1
+    if u.op is Ops.EXPAND: consumes[u] *= u.max_numel() // u.src[0].max_numel()
+    for s in u.src[1:] if u.op is Ops.STORE else u.src:
+      if s not in consumes: consumes[s] = 0
+      consumes[s] += consumes[u]
+  if VIZ: graph_rewrite(tsink, debug_tag_factor, ctx=consumes, name="view consumes tags", bottom_up=True)
 
   # simple rangeify
   tsink = graph_rewrite(tsink, pm_range_creation+pm_range_migration, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
