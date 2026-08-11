@@ -78,16 +78,31 @@ execop, vccop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, VCC)
 flat_scratch_ptr = (def_reg(dtypes.uint32, FLAT_SCRATCH_LO), def_reg(dtypes.uint32, FLAT_SCRATCH_HI))
 
 # ---- register movement helpers ----
-def packb16(ctx, lo:UOp, hi:UOp):
+def packb16(lo:UOp, hi:UOp):
   if dtypes.is_float(lo.dtype): return UOp(Ops.INS, arg=RDNA3Ops.v_pack_b32_f16, src=(lo,hi))
   lo = lo & const(0xFFFF) # mask off upper half
-  return _vop3(ctx, UOp(Ops.INS, arg=RDNA3Ops.v_lshl_or_b32, src=(hi, const(16, dtypes.int32), lo)))
+  return _vop3(UOp(Ops.INS, arg=RDNA3Ops.v_lshl_or_b32, src=(hi, const(16, dtypes.int32), lo)))
 
-def stack2regs(ctx, x:UOp):
+# TODO: replicate this for b8
+# stack of 16 bit loads -> load directly into high/low halfs
+def load_into_stack(ctx, x:UOp) -> UOp:
+  if x.src[0].src[0].addrspace is not AddrSpace.GLOBAL: return None
+  out = []
+  vp = ctx.vreg(GP_VGPRS, width=len(x.src)//2)
+  for l in range(0, len(x.src), 2):
+    vr = vp.sub(l//2)
+    lo,hi = x.src[l], x.src[l+1]
+    lo,hi = load(ctx, lo, lo.src[0]), load(ctx, hi, hi.src[0])
+    def _mopc(u:UOp, opc) -> UOp: return u.replace(src=(u.src[0].replace(arg=opc),) + u.src[1:])
+    lo,hi = _mopc(lo, RDNA3Ops.global_load_d16_b16).replace(tag=(vr,)), _mopc(hi, RDNA3Ops.global_load_d16_hi_b16).replace(tag=(vr,))
+    out.append(hi.after(lo))
+  return UOp.group(*out, dtype=x.dtype, tag=(vp,))
+
+def stack2regs(x:UOp):
   nregs, mvs = ((len(x.src) * x.dtype.itemsize) + 3) // 4, []
   for i in range(nregs):
     if x.dtype.itemsize == 2:
-      if i*2+1 < len(x.src): mvs.append(packb16(ctx, x.src[i*2], x.src[i*2+1]))
+      if i*2+1 < len(x.src): mvs.append(packb16(x.src[i*2], x.src[i*2+1]))
       else: mvs.append(vmov(x.src[i*2]))
     elif x.dtype.itemsize == 1:
       def _pk(j:int):
@@ -112,7 +127,7 @@ def gethalf(x:UOp, buf:UOp, idx:UOp):
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
 # ---- operand legalization wrappers ----
-def _vop3(ctx, x:UOp):
+def _vop3(x:UOp):
   lits = [s for s in x.src if s.op is Ops.CONST]
   return x if len(lits) <= 1 else x.replace(src=tuple([vmov(s) if s in lits[1:] else s for s in x.src]))
 
@@ -227,7 +242,7 @@ def cmp(ctx, x:UOp):
   ins = _mask_cmp[x.op] if scmp else OP_INS[x.op][64][dt]
   if scmp and x.op is Ops.CMPLT: x=x.replace(src=(x.src[1], x.src[0]))
   x = x.ins(ins, tag=GP_SGPRS)
-  return x if scmp else _vop3(ctx, x)
+  return x if scmp else _vop3(x)
 
 def arith64(ctx, x:UOp, add:bool):
   a, b = x.src
@@ -303,10 +318,10 @@ def alu(ctx, x:UOp):
   ins = x.arg if isinstance(x.arg, functools.partial) else OP_INS[x.op][x.dtype]
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
-def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
+def where(pred:UOp, a:UOp, b:UOp, x:UOp):
   if x.dtype is dtypes.bool: return (pred & a) | (~pred & b)
   ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16
-  return _vop3(ctx, x.ins(ins, src=(b,a,pred)))
+  return _vop3(x.ins(ins, src=(b,a,pred)))
 
 def render_wmma(ctx, wmma:UOp):
   a,b,acc = wmma.src
@@ -443,6 +458,7 @@ pm_int_to_float = PatternMatcher([
 ])
 
 pre_isel_matcher = PatternMatcher([
+  (UPat(Ops.STACK, name="x"), lambda x: stack2regs(x) if len(x.src) and not (x.dtype.itemsize == 2 and all(s.op is Ops.LOAD for s in x.src)) else None),
   # --- bool repr ---
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), \
@@ -473,7 +489,6 @@ pre_isel_matcher = PatternMatcher([
   (UPat((Ops.SHR, Ops.SHL), dtypes.int64s, src=(UPat.var("val"), UPat.var("shft")), name="x"),
     lambda x,val,shft: x.replace(src=(val, shft.cast(dtypes.uint32)))),
   # --- other ---
-  (UPat(Ops.STACK, name="x"), lambda ctx,x: stack2regs(ctx, x) if len(x.src) else None),
   (UPat(Ops.CDIV, name="x"), idiv),
   # NOTE: this exposes issues with vgpr value representation invariants, if a value takes up less than 32 bits either we dont care about
   # what else is in there, could be garbage, or it has to be masked at boundaries and sign extended carefully etc... so it can be operated on
@@ -490,12 +505,13 @@ pre_isel_matcher = PatternMatcher([
 pm_alu_fusion = PatternMatcher([
   (UPat().sqrt().named("x").reciprocal(), lambda x: x.ins(V_RSQ[x.dtype]) if x.dtype in V_RSQ else None),
   ((UPat(Ops.MUL, dtypes.floats, name="a") + UPat.var("b")).named("x"),
-    lambda ctx,a,b,x: _vop3(ctx, x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
+    lambda ctx,a,b,x: _vop3(x.ins(V_FMA[a.dtype], src=a.src + (b,)))),
   (UPat(Ops.ADD, dtypes.uint32, src=(UPat(Ops.ADD, name="y"), UPat.var("b")), name="x"),
-    lambda ctx,x,y,b: _vop3(ctx, x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
+    lambda ctx,x,y,b: _vop3(x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
 ])
 
 isel_matcher = pm_alu_fusion + PatternMatcher([
+  (UPat(Ops.STACK, dtypes.int16s+(dtypes.half,dtypes.bfloat16), src=UPat(Ops.LOAD), name="x"), load_into_stack),
   # --- control flow ---
   # how to remove positional arg contracts, make inter-lowering semantics explicit
   # so its clear what src args represent. try to match spec
