@@ -521,11 +521,7 @@ jobs:
       - name: Run HCQ2 tests
         run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/test_tiny.py
       - name: Run HCQ2 multi-device tests
-        run: |
-          HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python -m pytest -n=auto test/backend/test_multitensor.py \
-            -k "not (multitensor_jit_input or multitensor_inside_jit or four_add or elementwise_dtype or stack or \
-                     test_2d_shard_basic or test_2d_shard_elementwise or test_2d_shard_sum_non_sharded_axis or test_2d_shard_matmul or test_numpy or \
-                     data_parallel_simple_train_step or multi_tensor_jit_graph_assign_updates_each_shard or test_transformer or test_shrink_2d)"
+        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python -m pytest -n=auto test/backend/test_multitensor.py
       - name: Run HCQ2 JIT tests
         run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/unit/test_jit.py
       - name: Run HCQ2 unit tests
