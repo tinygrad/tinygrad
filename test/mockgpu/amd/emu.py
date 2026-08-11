@@ -1150,6 +1150,9 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOPC_DPP16|ir3.VOP3|ir4.VOPC|ir4.VOPC_DPP16
   def get_cmp_bit(lane) -> UOp:
     lc = lane.cast(dtypes.int) if isinstance(lane, UOp) else _c(lane, dtypes.int)
     s0 = _load_dpp16_src0(ctx, inst, lc, _c(0)) if is_dpp16 else ctx.rsrc_dyn(src0_off, lc, bits['s0'], literal, is_f64)
+    if is_vopc and not isinstance(inst, irc.VOPC) and bits['s0'] == 16 and not is_dpp16:
+      src0_hi = src0_off >= _c(384)
+      s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_hi.where(src0_off - _c(384), _c(0)), lc)), s0)
     s1 = _cond_hi16(vsrc1_hi, ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal, is_f64)) if bits['s0'] == 16 \
       else ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal, is_f64)
     if bits['s0'] == 16 and opsel: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)

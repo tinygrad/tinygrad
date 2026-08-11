@@ -1,14 +1,13 @@
 from tinygrad.dtype import dtypes, AddrSpace, truncate, DType, InvalidType, to_storage_scalar
 from tinygrad.codegen.opt import tc
 from tinygrad.helpers import Target
-from tinygrad.renderer.amd.dsl import InsOp
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp, graph_rewrite
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.renderer.amd.elf import assemble_linear
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
-import itertools
+import itertools, functools
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
@@ -252,7 +251,7 @@ def bitwise64(ctx, x:UOp, ins):
 
 # Allows embedding special alu instructions ex. mul_hi without introducing
 # Ops.INS which have None shape and cause alu() _broadcast to error
-def _aluhint(x:UOp, hint:InsOp): return x.replace(arg=hint)
+def _aluhint(x:UOp, hint): return x.replace(arg=hint)
 def _mulhi(a:UOp, b:UOp, signed:bool) -> UOp:
   return _aluhint(UOp(Ops.MUL, dtypes.uint32, src=(a, b)), RDNA3Ops.v_mul_hi_i32 if signed else RDNA3Ops.v_mul_hi_u32)
 # use explicit SUBs (not x + y*-1): this runs post-decomp so nothing repairs the weak -1, and weak consts break isel vreg sizing
@@ -294,7 +293,7 @@ def idiv(ctx, x:UOp):
 
 def alu(ctx, x:UOp):
   # alu arg used for machine instruction overrides, ex. mul_hi for cdiv
-  ins = x.arg if isinstance(x.arg, InsOp) else OP_INS[x.op][x.dtype]
+  ins = x.arg if isinstance(x.arg, functools.partial) else OP_INS[x.op][x.dtype]
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
 
 def where(ctx, pred:UOp, a:UOp, b:UOp, x:UOp):
@@ -412,7 +411,7 @@ pm_bias_memory_addrs = PatternMatcher([
 ])
 
 extra_matcher = PatternMatcher([
-  (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(to_storage_scalar(x.arg, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
+  (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(x.val if isinstance(x.val, InvalidDtype) else to_storage_scalar(x.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
@@ -560,7 +559,7 @@ def encode(ctx, x:UOp):
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
-  enc, group, opc, oprs = x.arg, x.arg.func, x.arg.opc, x.src
+  enc, group, opc, oprs = x.arg, x.arg.func, x.arg.args[0].name.lower(), x.src
   kw = args = None
 
   if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(rdefs(oprs[0])), soffset=dsl.NULL, offset=oprs[-1].arg)

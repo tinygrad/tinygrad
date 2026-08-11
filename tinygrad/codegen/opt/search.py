@@ -1,6 +1,6 @@
 import math, time, multiprocessing, traceback, signal, atexit
 from dataclasses import replace
-from tinygrad.uop.ops import sym_infer, AxisType, UOp
+from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
 from tinygrad.uop.render import pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
@@ -62,7 +62,8 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
   ret = None
   try:
     st = time.perf_counter()
-    prg = to_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].ren)
+    ast, dev = x[1].copy().get_optimized_ast(name_override="test"), x[1].ren.target.device
+    prg = to_program(ast.substitute({p: p.replace(arg=replace(p.arg, device=dev)) for p in ast.toposort() if p.op is Ops.PARAM}), x[1].ren)
     et = time.perf_counter() - st
     uops = prg.src[1].src
     if len(uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
@@ -111,7 +112,7 @@ def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dic
   return acted
 
 beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
-def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
+def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   global beam_pool
   key = {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": s.ren.target.device, "suffix": s.ren.suffix}
   if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
@@ -136,7 +137,6 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in s.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[s.ren.target.device]
     while not exiting:

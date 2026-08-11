@@ -50,7 +50,7 @@ def worker_prog():
 
   # spin on windows, sem_wait to sleep on posix
   if WIN: ready = (v:=wait.after(lw:=UOp.loop(1), cur)[0].load()).end(lw, v <= cur)
-  else: ready = wait.after(cur)[0].load().call(sem.after(cur)[0], ret_dtype=dtypes.void)
+  else: ready = (rv:=wait.after(lw:=UOp.loop(1), cur)[0].load().call(sem.after(cur)[0], ret_dtype=dtypes.int)).end(lw, rv != 0)
 
   entry = [ring.after(ready).index((cur % RING_SLOTS) * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
   return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(cur)
