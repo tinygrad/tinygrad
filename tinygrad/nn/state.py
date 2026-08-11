@@ -1,4 +1,4 @@
-import json, math, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib
+import json, math, pathlib, struct, functools, io, zlib
 from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
@@ -219,6 +219,7 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
 
 @accept_filename
 def zip_extract(t: Tensor) -> dict[str, Tensor]:
+  import zipfile
   files: dict[str, Tensor] = {}
   with zipfile.ZipFile(TensorIO(t), "r") as myzip:
     # sadly, the extra length needs to be read from the local header of each file.
@@ -249,6 +250,7 @@ def tar_extract(t: Tensor) -> dict[str, Tensor]:
   tensors = nn.state.tar_extract(Tensor(pathlib.Path("archive.tar")))
   ```
   """
+  import tarfile
   with tarfile.open(fileobj=TensorIO(t), mode="r") as tar:
     return {member.name:t[member.offset_data:member.offset_data+member.size] for member in tar if member.type == tarfile.REGTYPE}
 
@@ -303,6 +305,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
                "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
   class Dummy: pass
+  import pickle, zipfile, tarfile
   class TorchPickle(pickle.Unpickler):
     def find_class(self, module, name):
       module_root = module.split(".")[0]

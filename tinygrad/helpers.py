@@ -1,9 +1,9 @@
 from __future__ import annotations
 import time
 START_TIME = time.perf_counter()
-import os, functools, platform, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
+import os, functools, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 from collections import defaultdict
-import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, difflib
+import shutil, math, types, copyreg, inspect, importlib, decimal, itertools, difflib
 from dataclasses import dataclass, field, replace
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
@@ -13,8 +13,8 @@ U = TypeVar("U")
 def prod(x:Iterable[T]) -> T|int: return functools.reduce(operator.mul, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
-OSX, WIN = platform.system() == "Darwin", sys.platform == "win32"
-ARCH_X86 = any(x in platform.processor() for x in ("Intel", "i386", "x86_64"))
+OSX, WIN = sys.platform == "darwin", sys.platform == "win32"
+ARCH_X86 = any(x in os.uname().machine for x in ("i386", "x86_64", "amd64"))
 BASEDIR = pathlib.Path(__file__).parent
 
 # fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
@@ -454,9 +454,9 @@ def _ensure_downloads_dir() -> pathlib.Path:
   if pathlib.Path("/etc/tinybox-release").is_file():
     # try creating dir with sudo
     if not (downloads_dir := pathlib.Path("/raid/downloads")).exists():
-      subprocess.run(["sudo", "mkdir", "-p", downloads_dir], check=True)
-      subprocess.run(["sudo", "chown", "tiny:root", downloads_dir], check=True)
-      subprocess.run(["sudo", "chmod", "775", downloads_dir], check=True)
+      system(f"sudo mkdir -p {downloads_dir}")
+      system(f"sudo chown tiny:root {downloads_dir}")
+      system(f"sudo chmod 775 {downloads_dir}")
     return downloads_dir
   return pathlib.Path(cache_dir) / "downloads"
 
@@ -497,6 +497,7 @@ def fetch_fw(path:str, name:str, sha256:str) -> bytes:
 # *** Exec helpers
 
 def system(cmd:str, **kwargs) -> str:
+  import subprocess
   st = time.perf_counter()
   try: ret = subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT, **kwargs).decode().strip()
   except subprocess.CalledProcessError as e:
