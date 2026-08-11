@@ -69,9 +69,9 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
 def _make_buffer_view(src:UOp) -> UOp|None:
   if (cv := src.contiguous_view()) is None: return None
   (buf, offset), size = cv, src.max_numel() * src.element_size() // cv[0].element_size()
-  if buf.op is not Ops.BUFFER or buf.nbytes() == src.nbytes(): return None
+  if buf.op is not Ops.BUFFER: return None
   # NB: make offset a UOp.variable here to do the offset computation in the kernels
-  return UOp(Ops.SHRINK, buf.dtype, (buf, UOp.const(offset), UOp.const(size))).bitcast(src.dtype)
+  return buf[offset:offset+size].bitcast(src.dtype)
 
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -83,10 +83,9 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   if not all_int(c.shape): return None
 
   if buf.op is not Ops.UNSHARD and (view := _make_buffer_view(src)) is not None:
-    if c.op is Ops.BITCAST: view = view.bitcast(c.dtype)
     ctx.views.add(view)
     view = view.reshape(c.shape)
-    return c.replace(src=(view,)) if c.op is Ops.COPY else view
+    return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
   # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then create SHRINK on the resolved result
   if not isinstance(c.device, str):
@@ -151,7 +150,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
-  (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
+  (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
+  (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, name="copy"), lambda x,copy:
