@@ -663,9 +663,6 @@ jobs:
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
       - name: Run test_ops (IMAGE)
-        env:
-          NULL_ALLOW_COPYOUT: 1
-          DEV: ${{ matrix.dev }}
         if: contains(matrix.dev, 'a630')
         shell: bash
         env:
@@ -673,5 +670,5 @@ jobs:
           NULL_ALLOW_COPYOUT: 1
           DEV: "${{ matrix.dev }},IMAGE_PITCH_ALIGNMENT=64"
         run: |
-          DEBUG=4 python3 test/backend/test_ops.py TestOps.test_gemm | grep image_load
+          DEBUG=7 python3 test/backend/test_ops.py TestOps.test_gemm | grep isam
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
