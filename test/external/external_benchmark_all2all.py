@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
 import time
-
 from tinygrad import Context, Device, Tensor, TinyJit, dtypes
 from tinygrad.helpers import colored
 
