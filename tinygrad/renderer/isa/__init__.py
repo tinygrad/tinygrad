@@ -1,5 +1,5 @@
 from __future__ import annotations
-import itertools
+import itertools, functools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort
@@ -10,6 +10,7 @@ class Register:
   index: int
   size: int = 8
   def __repr__(self): return self.name
+  def __hash__(self): return hash(self.name) * 256 + self.index
 
 # TODO: iter over subregisters
 @dataclass(frozen=True)
@@ -25,8 +26,13 @@ class VRegister:
   def sub(self, i:int) -> VRegister:
     assert i < self.width, f"sub-register index out of width range ({i} >= {self.width})"
     return VRegister(f"{self.name}.{i}", self.cons, self.width, self.alignment, self, i)
-  def candidates(self) -> list[tuple[Register,...]]:
+  @functools.cached_property
+  def _hash(self): return hash((self.name, len(self.cons), self.width, self.alignment, self.pos, (self.parent.name if self.parent else None)))
+  def __hash__(self): return self._hash
+  @functools.cached_property
+  def _candidates(self) -> list[tuple[Register,...]]:
     return [self.cons[i:i+self.width] for i in range(len(self.cons) - self.width + 1) if self.cons[i].index % self.alignment == 0]
+  def candidates(self) -> list[tuple[Register,...]]: return self._candidates
 
 def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
   if u.op in {Ops.AFTER, Ops.NOOP} and len(u.src): return rdefs(u.src[0])
