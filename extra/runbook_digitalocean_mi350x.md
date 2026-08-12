@@ -74,8 +74,8 @@ rclone config create mlc-training s3 provider=Cloudflare \
   secret_access_key=a53625c4d45e3ca8ac0df8a353ea3a41ffc3292aa25259addd8b7dc5a6ce2936 \
   endpoint=c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
 
-mkdir -p /root/datasets/c4-8b
-rclone copy mlc-training:mlcommons-training-wg-public/llama3_1/datasets/c4/llama3_1_8b/ /root/datasets/c4-8b/ -P
+mkdir -p /raid/datasets/c4-8b
+rclone copy mlc-training:mlcommons-training-wg-public/llama3_1/datasets/c4/llama3_1_8b/ /raid/datasets/c4-8b/ -P
 ```
 
 Files downloaded (~85GB total, ~6 minutes):
@@ -85,13 +85,6 @@ Files downloaded (~85GB total, ~6 minutes):
 - `c4-validation-91205-samples.en_text_document.idx` (1.8 MB)
 - `LICENSE.txt`, `NOTICE.txt`
 
-### Symlink for the submission script
-The `dev_run.sh` script hardcodes `BASEDIR="/raid/datasets/c4-8b/"`. Symlink:
-```bash
-mkdir -p /raid/datasets
-ln -s /root/datasets/c4-8b /raid/datasets/c4-8b
-```
-
 ## Phase 4: wandb Login
 ```bash
 wandb login
@@ -100,7 +93,7 @@ Enter API key from https://wandb.ai/authorize
 
 ## Phase 5: Run Training
 
-### 5.1 Smoke test (beam search, 2 layers, fake data)
+### 5.1 Smoke test (beam search, 2 layers, real data)
 Always run beam first to validate the pipeline:
 ```bash
 cd /root/tinygrad
@@ -108,7 +101,7 @@ COMGR_PATH=/opt/rocm/lib/libamd_comgr.so \
 COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so \
 CC=/opt/rocm/core-7.14/lib/llvm/bin/clang \
 DEV=AMD:HIP \
-ROCM_PATH=/opt/rocm BASEDIR=/root/datasets/c4-8b/ \
+ROCM_PATH=/opt/rocm \
   bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_beam.sh
 ```
 
@@ -119,7 +112,7 @@ COMGR_PATH=/opt/rocm/lib/libamd_comgr.so \
 COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so \
 CC=/opt/rocm/core-7.14/lib/llvm/bin/clang \
 DEV=AMD:HIP \
-ROCM_PATH=/opt/rocm BASEDIR=/root/datasets/c4-8b/ \
+ROCM_PATH=/opt/rocm \
 WANDB=1 \
   bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_run.sh
 ```
@@ -133,7 +126,6 @@ WANDB=1 \
 | `CC` | `/opt/rocm/core-7.14/lib/llvm/bin/clang` | System clang doesn't know gfx950; must use ROCm's bundled clang |
 | `DEV` | `AMD:HIP` | Force HIPRenderer (comgr-based) over HIPCCRenderer (hipcc subprocess) |
 | `ROCM_PATH` | `/opt/rocm` | Script defaults to `/opt/rocm-7.1.1` which doesn't exist |
-| `BASEDIR` | `/root/datasets/c4-8b/` | Where C4 dataset was downloaded (script hardcodes `/raid/datasets/c4-8b/`) |
 | `WANDB` | `1` | Enable wandb logging (off by default) |
 
 ## Architecture
@@ -172,12 +164,6 @@ ldconfig
 
 ### `comgr not available: try setting COMGR_3_PATH?`
 comgr 3.x uses a separate module. Set `COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so` too.
-
-### `FileNotFoundError: '/raid/datasets/c4-8b/...'`
-Script hardcodes `BASEDIR`. Either symlink or edit the script:
-```bash
-mkdir -p /raid/datasets && ln -s /root/datasets/c4-8b /raid/datasets/c4-8b
-```
 
 ### `No such file or directory: 'clang'`
 Install clang: `apt-get install -y clang` (for CPU compilation).
