@@ -136,6 +136,8 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
+  ((UPat.cvar("a") < UPat.var("b")).where(UPat.var("b"), UPat.cvar("c")), lambda a,b,c: UOp.maximum(a,b) if a.val == c.val else None),
+  ((UPat.var("a") < UPat.cvar("b")).where(UPat.cvar("c"), UPat.var("a")), lambda a,b,c: UOp.maximum(a,b) if b.val == c.val else None),
   (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)),), name="a"), fold_const_alu),
   # NOTE: THREEFRY(const,const) folds via its decomposition
   (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.CONST, Ops.STACK)),)*2, name="a"), fold_const_alu),
