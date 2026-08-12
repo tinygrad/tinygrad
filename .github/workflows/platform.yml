@@ -159,6 +159,8 @@ jobs:
     name: Windows (DEV=${{ matrix.dev }})
     runs-on: windows-2025
     timeout-minutes: 15
+    env:
+      PYTHONFAULTHANDLER: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -171,14 +173,14 @@ jobs:
       - name: Set env
         shell: bash
         run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
+      - name: Run test_tiny
+        shell: bash
+        run: python -m pytest -n=auto test/test_tiny.py --durations=20
       - name: Check Device.DEFAULT and print some source
         shell: bash
         run: |
           python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
           DEBUG=4 python test/test_tiny.py TestTiny.test_plus
-      - name: Run test_tiny
-        shell: bash
-        run: python -m pytest -n=auto test/test_tiny.py --durations=20
 
 
   qcomclcompiletests:
