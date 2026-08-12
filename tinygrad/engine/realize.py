@@ -214,15 +214,15 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   tms = []
   for devices,name,estimates,prof in info.kernels:
     for device in devices:
-      d, tm = cast(Any, Device[device]), None
+      tm = None
       if prof:
-        d.prof_ents[prof[0]] = ProfileGraphEntry(device, name, *prof)
+        (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, name, *prof)
         if ctx.wait:
           d.synchronize(timeout=ctx.timeout)
           st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
           tms.append(tm:=float(en-st)/d.timestamp_divider/1e6)
-      with track_stats(ctx, call.replace(arg=replace(call.arg, name=name, aux=replace(info, estimates=estimates))), d.device, [], ctx.var_vals) as et:
-        et[0] = tm
+      stat_call = call.replace(arg=replace(call.arg, name=name, aux=replace(info, estimates=estimates, kernels=())))
+      with track_stats(ctx, stat_call, device, [], ctx.var_vals) as et: et[0] = tm
   return max(tms) if tms else None
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
