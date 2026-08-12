@@ -9,7 +9,7 @@ from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphE
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
 from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
 from tinygrad.dtype import dtypes, truncate
-from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.hcq import HCQBuffer
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop
@@ -22,7 +22,8 @@ HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 
-HCQ_DEVS = frozenset(("AMD", "CPU"))
+HCQ_DEVS = frozenset(("AMD", "CPU") if HCQ_RUNTIME_DEV.value == "CPU" else ("AMD",)) # the cpu queue is woken by a call, only a native runtime can
+HCQ_P2P_DEVS = HCQ_DEVS | frozenset(("CPU",))
 HCQ_CACHE_TAGS = frozenset(("program", "systems", "template"))
 
 @dataclass(frozen=True)
@@ -93,11 +94,12 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_
 # *****************
 # 1.1. prep: staging copies
 
-def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_DEVS)
+def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_P2P_DEVS)
 
 def _get_enqueue_devs(call:UOp) -> Any|None:
-  if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
-  return min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
+  if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_P2P_DEVS) for b in bufs): return None
+  devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
+  return devs if all_devices_in(devs, HCQ_DEVS) else None
 
 def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
@@ -171,7 +173,11 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
 
     # wait the syncs and signal the device epoch, then bump the timeline on the host
     tl_signal, tl_value = make_signal(devs, tag="timeline_signal"), make_signal(devs, tag="timeline_value")
-    fin_submit = make_submit(*waits, UOp(Ops.INS, arg="store", src=(tl_signal, tl_value.index(0))), devs=devs, queue="COMPUTE:0")
+    if all_devices_in(devs, HCQ_DEVS):
+      fin_submit = make_submit(*waits, UOp(Ops.INS, arg="store", src=(tl_signal, tl_value.index(0))), devs=devs, queue="COMPUTE:0")
+    else: # no queue to submit to, the runtime spins on the deps and bumps the epoch itself
+      spins = [(cur:=w.src[0].after(l:=UOp.loop(next(UOp.unique_num))).index(0).load()).end(l, cur < w.src[1]) for w in waits]
+      fin_submit = tl_signal.after(*spins).index(0).store(tl_value.index(0))
     epoch = (epoch_slot:=tl_value.after(fin_submit).index(0)).load()
 
     # fence once per device group on this schedule's previous epoch, then reset any queue signals used by the group
@@ -600,8 +606,6 @@ class HCQ2Compiled(Compiled):
     return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in filtered],
                                f"No interface for {dev}:{self.device_id} is available")
 
-  def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
-
   def finalize(self):
     try: self.synchronize() # try to finalize the device in any case
     except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
@@ -609,27 +613,18 @@ class HCQ2Compiled(Compiled):
     # if the device has an interface, call device_fini to clean up resources
     if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
 
-@dataclass
-class HCQ2Buffer:
-  va_addr:sint
-  meta:Any=None
-  view:MMIOInterface|None=None
-
-  def offset(self, offset:int, size:int) -> HCQ2Buffer:
-    return HCQ2Buffer(self.va_addr+offset, meta=self.meta, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
-
 class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
-  def _as_buffer(self, buf:HCQ2Buffer) -> memoryview:
+  def _as_buffer(self, buf:HCQBuffer) -> memoryview:
     return unwrap(buf.view).mv
 
-  def _map(self, buf:HCQ2Buffer) -> HCQ2Buffer:
+  def _map(self, buf:HCQBuffer) -> HCQBuffer:
     if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
     return self._do_map(buf)
 
   def _do_unmap(self, mb): self.dev.iface.free(mb)
 
   @suppress_finalizing
-  def _free(self, buf:HCQ2Buffer, options:BufferSpec|None=None):
+  def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):
     if options is not None and options.external_ptr is not None: return
     self.dev.synchronize()
     if hasattr(self, '_do_free'): self._do_free(buf, options)
@@ -638,4 +633,4 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     self.dev.synchronize()
     self._do_unmap(mb)
 
-  def _offset(self, buf, size:int, offset:int) -> HCQ2Buffer: return buf.offset(offset=offset, size=size)
+  def _offset(self, buf, size:int, offset:int) -> HCQBuffer: return buf.offset(offset=offset, size=size)

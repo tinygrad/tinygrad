@@ -5,7 +5,7 @@ from typing import cast, Callable
 from tinygrad.helpers import to_mv, from_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, to_tuple
 from tinygrad.device import Buffer, BufferSpec, TinyELF, Program, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_cmdbuf, make_signal, HCQ_RUNTIME_DEV
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_cmdbuf, make_signal
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
@@ -162,7 +162,7 @@ class CPUProgram(Program['CPUDevice']):
 
       self.fxn = ctypes.CFUNCTYPE(None)(self.addr)
 
-  def lvp_args(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]) -> list[int]:
+  def lvp_args(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int|None, ...]) -> list[int]:
     # LVP takes one pointer to [args address, arg count, buffer addresses, values], which lives in the ring entry itself
     q, args = self.dev.submitter, bytearray(12 + (len(bufs) + len(vals)) * 8)
     addr = q.ring._buf.va_addr + (q.pos % RING_SLOTS) * CMD_SIZE * 8 + 16
@@ -171,13 +171,13 @@ class CPUProgram(Program['CPUDevice']):
     return [addr, *array.array('Q', bytes(args) + bytes(-len(args) % 8))]
 
   def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
+               vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
     ts = [self.dev.prgs[timestamp_prog].addr, self.dev.prof._buf.va_addr] + \
          ([] if WIN else [self.dev.func_ptr('clock_gettime')._buf.va_addr])
     if wait: self.dev.push(ts)
 
     for tid in range(1 if self.lvp else global_size[0]):
-      args = self.lvp_args(bufs, vals) if self.lvp else [*[cast(int, b.va_addr) for b in bufs], *vals]
+      args = self.lvp_args(bufs, vals) if self.lvp else [*[cast(int, b.va_addr) for b in bufs], *cast(tuple[int, ...], vals)]
       if not self.lvp and 'core_id' in self.runtimevars: args[self.runtimevars['core_id']] = tid
       assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(args)}"
       self.dev.push([self.addr, *args])
@@ -256,7 +256,7 @@ class CPUDevice(HCQ2Compiled):
   @functools.cached_property
   def prof(self) -> Buffer: return Buffer(self.device, 2, dtypes.uint64, preallocate=True)
 
-  def func_ptr(self, name:str) -> Buffer: return self.func_table.view(1, dtypes.uint64, FUNCS.index(name)*8)
+  def func_ptr(self, name:str) -> Buffer: return self.func_table.view(1, dtypes.uint64, FUNCS.index(name)*8).ensure_allocated()
 
   @functools.cached_property
   def func_table(self) -> Buffer: # the entrypoints the queue calls, generated code loads them from here
@@ -279,7 +279,7 @@ class CPUDevice(HCQ2Compiled):
 
   def synchronize(self, timeout:int|None=None):
     # drain the submitter first, so every epoch bump it carries has been issued, then wait on the epoch itself
-    if self.device == HCQ_RUNTIME_DEV.value and self.synced_pos != (pos:=self.submitter.pos):
+    if self.synced_pos != (pos:=self.submitter.pos):
       self.fence += 1
       self.push([self.prgs[signal_prog].addr, (sig:=self.signal("fence")._buf).va_addr, self.fence])
       self.synced_pos, mv, st = pos + 1, sig.cpu_view().view(fmt='I'), time.perf_counter()
