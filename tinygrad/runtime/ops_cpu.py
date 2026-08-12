@@ -51,8 +51,8 @@ def quit_prog():
 
 def worker_prog():
   ring = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,), volatile=True)
-  wait, sem = UOp.param(1, dtypes.uint64, (1,), volatile=True), UOp.param(2, dtypes.uint64, (1,))
-  done, cur = UOp.param(3, dtypes.uint64, (1,), volatile=True), UOp.range(2**64-1, 0, dtype=dtypes.uint64)
+  wait, done = UOp.param(1, dtypes.uint64, (1,), volatile=True), UOp.param(2, dtypes.uint64, (1,), volatile=True)
+  sem, cur = UOp.param(3, dtypes.uint64, (1,)), UOp.range(2**64-1, 0, dtype=dtypes.uint64) # sem is unused on windows, it has to come last
 
   # spin on windows, sem_wait to sleep on posix
   if WIN: ready = (v:=wait.after(lw:=UOp.loop(1), cur)[0].load()).end(lw, v <= cur)
@@ -226,7 +226,7 @@ class CPUQueue:
     self.ring_view, self.done_view = (b._buf.cpu_view().view(fmt='Q') for b in (self.ring, self.done))
 
     threading.Thread(target=dev.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in
-      [self.ring._buf.va_addr, self.sys._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, self.addr, self.done._buf.va_addr]]).start()
+      [self.ring._buf.va_addr, self.sys._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, self.done._buf.va_addr, self.addr]]).start()
 
   def push(self, cmd:list[int]):
     while self.pos - self.done_view[0] >= RING_SLOTS: pass # the ring is full, let the worker catch up
