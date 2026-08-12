@@ -181,8 +181,10 @@ def fold_global(base:UOp, idx:UOp): # (voff, ioffs)
   def foldable(v:int) -> bool: return -(1 << 12) <= v < (1 << 12)
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST and foldable((_offs := idx.src[1].val * disp_scale)):
     vaddr, offs = idx.src[0], const(_offs, dtypes.int16)
-  vaddr = int_to_int64(vaddr << shft, dtypes.uint64)
-  return (UOp(Ops.ADD, dtype=dtypes.uint64, src=(vaddr, base.bitcast(dtype=dtypes.uint64))), offs)
+    vaddr = int_to_int64(vaddr << shft, dtypes.uint64)
+    return (UOp(Ops.ADD, dtype=dtypes.uint64, src=(vaddr, base.bitcast(dtype=dtypes.uint64))), offs)
+  else: # saddr + vaddr
+    return (to_vgpr(vaddr) << shft, base)
 
 # LDS_ADDR = VGPR_ADDR_u32 + imm_byte_offset_u16
 # TODO: actually calculate lds offset per seperate BUFFER, (ctx.func_args)
@@ -595,7 +597,9 @@ def encode(ctx, x:UOp):
     if rdef(x) is not None: kw["vdst"] = _fuse(rdefs(x))
     else: kw["data"] = _fuse(rdefs(oprs[1]))
   elif group is RDNA3Ops.GLOBAL:
-    kw = dict(addr=_immorreg(oprs[0]),  offset=_immorreg(oprs[1]))
+    kw = dict(addr=_immorreg(oprs[0]))#,  offset=_immorreg(oprs[1]))
+    if oprs[1].op is Ops.CONST: kw["offset"] = _immorreg(oprs[1])
+    else: kw["saddr"] = _fuse(rdefs(oprs[1]))
     if rdef(x) is None: kw["data"]=_fuse(rdefs(oprs[2]))
     else: kw["vdst"]=_fuse(rdefs(x))
   elif group is RDNA3Ops.DS:
@@ -689,6 +693,7 @@ class RDNA3Renderer(ISARenderer):
       nuops.append(u)
 
     # s_clause
+    # NOTE: do the grouped instructions need to share src?
     loads: dict[int, UOp] = {}
     stores: dict[int, UOp] = {}
     for i,u in enumerate(nuops):
