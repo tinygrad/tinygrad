@@ -597,9 +597,10 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   # destination buffer; its generated STORE will then take the same direct SDMA lowering path.
   is_slice_copy = ((input_src.op is Ops.SHRINK and input_src.tag == ("allreduce",)) or
                    (input_src.op is Ops.AFTER and input_src.src[0].op is Ops.SHRINK and input_src.src[0].tag == ("allreduce",)))
-  # An AFTER(view, STORE) is an already reduced allgather source. Preserve its COPY even while visiting the child
-  # bottom-up, so the parent STORE can lower source and destination slices together instead of inserting a staging copy.
-  source_is_stored = input_src.op is Ops.AFTER and any(s.op is Ops.STORE for s in input_src.src[1:])
+  # An already reduced allgather source owns a STORE dependency at its base. pm_mops represents this as
+  # SHRINK(AFTER(...)); preserve its COPY so the parent STORE can lower both physical views together.
+  source_state = input_src.base
+  source_is_stored = source_state.op is Ops.AFTER and any(s.op is Ops.STORE for s in source_state.src[1:])
   if is_slice_copy and (existing_buf is not None or source_is_stored): return None
   if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
   input_src = input_src.flatten()

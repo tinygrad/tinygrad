@@ -29,16 +29,17 @@ class TestRingAllReduce(unittest.TestCase):
       self.assertEqual(len(set(pairs)), N)
 
   def test_schedule_all2all(self):
-    with Context(ALL2ALL=2):
-      N = 4
-      ds = tuple(f"CPU:{i}" for i in range(N))
-      t = Tensor.empty(N, N*100).shard(ds, axis=0).realize()
-      linear = t.sum(0).mul(2.0).contiguous().linear_with_vars()[0]
-      copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
-      sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
-      self.assertEqual(len(copies), 24)
-      # source shards are staged once, then their physical slices feed SDMA directly
-      self.assertEqual(len(sinks), 23)
+    for width, expected_sinks in ((400, 23), (4096, 18)):
+      with self.subTest(width=width), Context(ALL2ALL=2):
+        N = 4
+        ds = tuple(f"CPU:{i}" for i in range(N))
+        t = Tensor.empty(N, width).shard(ds, axis=0).realize()
+        linear = t.sum(0).mul(2.0).contiguous().linear_with_vars()[0]
+        copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
+        sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
+        self.assertEqual(len(copies), 24)
+        # source shards are staged once, then their physical slices feed SDMA directly
+        self.assertEqual(len(sinks), expected_sinks)
 
   def test_correct_all2all_direct_slices(self):
     with Context(ALL2ALL=2):
