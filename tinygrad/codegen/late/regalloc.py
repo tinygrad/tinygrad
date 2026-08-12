@@ -4,6 +4,7 @@ from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, AddrSpace
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.dtype import dtypes
+from bisect import bisect_left
 
 REG_OPS = {Ops.LOAD, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.IF, Ops.ENDIF}
 
@@ -44,7 +45,16 @@ class LinearScanRegallocContext:
     def alloc(v:VRegister, cons:list[tuple[Register, ...]], i:int) -> tuple[Register,...]:
       cons = cons or v.candidates()
       live_inv = {r:k for k,v in live.items() for r in v}
-      block = max(cons, key=lambda b: min(next((j-i for j in lr[live_inv.get(r)] if j >= i), len(uops)) if r in live_inv else len(uops) for r in b))
+
+      # greedy first pass no evict
+      if (block := next((b for b in cons if all(r not in live_inv for r in b)), None)):
+        return block
+
+      def next_use(v:VRegister, i:int):
+        p = bisect_left(lr[v], i)
+        return lr[v][p] if p < len(lr[v]) else len(uops)
+
+      block = max(cons, key=lambda b: min(next_use(live_inv[r], i) if r in live_inv else len(uops) for r in b))
       for r in block:
         if r in live_inv and (v := live_inv.get(r)) in live: live.pop(v)
       return block
