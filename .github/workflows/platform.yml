@@ -159,6 +159,8 @@ jobs:
     name: Windows (DEV=${{ matrix.dev }})
     runs-on: windows-2025
     timeout-minutes: 15
+    env:
+      PYTHONFAULTHANDLER: 1 # native crashes print the faulting thread
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -171,11 +173,21 @@ jobs:
       - name: Set env
         shell: bash
         run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
-      - name: Check Device.DEFAULT and print some source
+      - name: Check Device.DEFAULT
+        shell: bash
+        run: python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
+      - name: Probe the CPU queue
         shell: bash
         run: |
-          python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
-          DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+          DEBUG=4 python -c "
+          from tinygrad import Device, Tensor
+          d = Device['CPU']; print('device', flush=True)
+          print('worker', d.submitter.pos, flush=True)
+          d.synchronize(); print('empty sync', flush=True)
+          print('add', (Tensor([1.0, 2.0], device='CPU') + 1).tolist(), flush=True)"
+      - name: Print some source
+        shell: bash
+        run: DEBUG=4 python test/test_tiny.py TestTiny.test_plus
       - name: Run test_tiny
         shell: bash
         run: python -m pytest -n=auto test/test_tiny.py --durations=20
