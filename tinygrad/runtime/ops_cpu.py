@@ -52,6 +52,7 @@ def quit_prog():
 def worker_prog():
   ring = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,), volatile=True)
   wait, sem = UOp.param(1, dtypes.uint64, (1,), volatile=True), UOp.param(2, dtypes.uint64, (1,))
+  done = UOp.param(3, dtypes.uint64, (1,), volatile=True)
   cur = UOp.range(2**64-1, 0, dtype=dtypes.uint64)
 
   # spin on windows, sem_wait to sleep on posix
@@ -59,7 +60,7 @@ def worker_prog():
   else: ready = (rv:=wait.after(lw:=UOp.loop(1), cur)[0].load().call(sem.after(cur)[0], ret_dtype=dtypes.int)).end(lw, rv != 0)
 
   entry = [ring.after(ready).index((cur % RING_SLOTS) * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
-  return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(cur)
+  return done.after(entry[0].call(*entry[1:], ret_dtype=dtypes.void)).index(0).store(cur + 1).end(cur)
 
 # *****************
 # 2. queue encoders
@@ -222,12 +223,15 @@ class CPUQueue:
     self.sem = Buffer(dev.device, 1, dtypes.uint8, options=BufferSpec(external_ptr=self.addr), preallocate=True)
 
     threading.Thread(target=dev.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in
-      [self.ring._buf.va_addr, self.sys._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, self.addr]]).start()
+      [self.ring._buf.va_addr, self.sys._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, self.addr, self.done._buf.va_addr]]).start()
 
   @functools.cached_property
   def ring_view(self): return self.ring._buf.cpu_view().view(fmt='Q')
+  @functools.cached_property
+  def done_view(self): return self.done._buf.cpu_view().view(fmt='Q')
 
   def push(self, cmd:list[int]):
+    while self.pos - self.done_view[0] >= RING_SLOTS: pass # the ring is full, let the worker catch up
     self.ring_view[(base:=(self.pos % RING_SLOTS) * CMD_SIZE):base+len(cmd)] = array.array('Q', [x & ((1<<64)-1) for x in cmd])
     self.pos += 1
     if WIN: self.sys._buf.cpu_view().view(fmt='Q')[0] = self.pos
@@ -244,7 +248,7 @@ class CPUDevice(HCQ2Compiled):
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
 
     self.pm_bufferize = PatternMatcher(
-      [(UPat(Ops.PARAM, tag=f"COMPUTE:0_{n}"), lambda ctx, n=n: getattr(ctx[0].queue, n)) for n in ("ring", "put", "sem", "sys")] +
+      [(UPat(Ops.PARAM, tag=f"COMPUTE:0_{n}"), lambda ctx, n=n: getattr(ctx[0].queue, n)) for n in ("ring", "put", "sem", "sys", "done")] +
       [(UPat(Ops.PARAM, tag=f"func:{f}"), lambda ctx, f=f: ctx[0].func_ptr(f)) for f in FUNCS]) + self.pm_bufferize
     self.synced_pos = self.fence = 0
 
@@ -259,9 +263,8 @@ class CPUDevice(HCQ2Compiled):
   def func_ptr(self, name:str) -> Buffer: return self.func_table.view(1, dtypes.uint64, FUNCS.index(name)*8).ensure_allocated()
 
   @functools.cached_property
-  def func_table(self) -> Buffer: # the entrypoints the queue calls, generated code loads them from here
-    if sys.platform == "win32": lib = ctypes.windll.kernel32 # mypy only narrows the platform on sys.platform
-    else: lib = libc.dll
+  def func_table(self) -> Buffer:
+    lib = ctypes.windll.kernel32 if sys.platform == "win32" else libc.dll # type: ignore[attr-defined]
     (ft:=Buffer(self.device, len(FUNCS), dtypes.uint64, preallocate=True))._buf.cpu_view().view(fmt='Q')[:] = \
       array.array('Q', [unwrap(ctypes.cast(getattr(lib, f), ctypes.c_void_p).value) for f in FUNCS])
     return ft
@@ -282,9 +285,11 @@ class CPUDevice(HCQ2Compiled):
     if self.synced_pos != (pos:=self.submitter.pos):
       self.fence += 1
       self.push([self.prgs[signal_prog].addr, (sig:=self.signal("fence")._buf).va_addr, self.fence])
-      self.synced_pos, mv, st = pos + 1, sig.cpu_view().view(fmt='I'), time.perf_counter()
+      self.synced_pos, mv, st, done = pos + 1, sig.cpu_view().view(fmt='I'), time.perf_counter(), -1
       while mv[0] != self.fence:
-        if time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
+        # a deep queue takes as long as it takes, only a worker that stops running entries is a hang
+        if done != (done:=self.submitter.done_view[0]): st = time.perf_counter()
+        elif time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
     super().synchronize(timeout)
 
   def finalize(self):
