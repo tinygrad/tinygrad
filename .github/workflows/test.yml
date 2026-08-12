@@ -657,6 +657,7 @@ jobs:
         if: contains(matrix.dev, 'QCOMCL')
         shell: bash
         run: |
+          sudo update-binfmts --import
           uname -m
           docker info --format 'daemon: {{.OSType}}/{{.Architecture}} driver={{.Driver}}'
           ls /proc/sys/fs/binfmt_misc/ || echo "binfmt_misc not mounted"
