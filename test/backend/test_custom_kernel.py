@@ -422,9 +422,8 @@ class TestCustomKernel(unittest.TestCase):
       return Tensor.custom_kernel(y, x, fxn=custom_add_one_kernel)[0]
     GlobalCounters.reset()
     y = run(x[0]).realize()
-    # it's copying the input and the output
-    # TODO: subbuffer usage has runtime specific behavior, this will be fixed after the removal of SLICE.
-    assert_kernel_count(2 if y.device in ("CL", "WEBGPU") else 1)
+    # backends that support contiguous views don't launch extra kernels
+    assert_kernel_count(2 if x[0].uop.contiguous_view() is None else 1)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
   @Context(DEV="CPU")
