@@ -1,9 +1,9 @@
-import math, time, multiprocessing, traceback, signal, atexit
+import math, time, multiprocessing, traceback, signal, atexit, os, pickle
 from dataclasses import replace
 from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
 from tinygrad.uop.render import pyrender
 from tinygrad.device import Device, Buffer
-from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
+from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, ContextVar, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.engine.realize import time_call
@@ -54,11 +54,21 @@ def timeout_handler(signum, frame):
   if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
   raise TimeoutException()
 
-def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
+def _record_compile_timeout(idx:int, s:Scheduler, ast:UOp, timeout_sec:int) -> None:
+  out_dir = "/tmp/degenerate_kernels"
+  os.makedirs(out_dir, exist_ok=True)
+  fn = os.path.join(out_dir, f"{time.time_ns()}_{os.getpid()}_{idx}.pkl")
+  applied = len(ast.arg.applied_opts) if ast.arg is not None else 0
+  with open(fn, "wb") as f:
+    pickle.dump({"ast": ast, "opts": tuple(s.applied_opts[applied:]), "renderer": s.ren,
+                 "context": {k:v.value for k,v in ContextVar._cache.items()}, "timeout_sec": timeout_sec}, f)
+
+def _try_compile(x:tuple[int,Scheduler,UOp]) -> tuple[int, tuple[UOp, float]|None]:
+  timeout_sec = getenv("BEAM_TIMEOUT_SEC", 10)
   if hasattr(signal, "alarm"):
     signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
-    signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
+    signal.alarm(timeout_sec)
   ret = None
   try:
     st = time.perf_counter()
@@ -70,6 +80,9 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(uops)=}, {uops_max=}")
       raise RuntimeError("too many uops")
     ret = (prg, et)
+  except TimeoutException:
+    _record_compile_timeout(x[0], x[1], x[2], timeout_sec)
+    if getenv("BEAM_STRICT_MODE"): raise
   except RuntimeError:
     if DEBUG >= 4: traceback.print_exc()
   except Exception as e:
@@ -143,7 +156,8 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:i
       candidates: list[Scheduler] = flatten([get_kernel_actions(si, include_0=False).values() for si,_ in beam])
       timed: list[tuple[Scheduler, float]] = []
       least_compute_ops = math.inf
-      for i, proc in ((map if beam_pool is None else beam_pool.imap_unordered)(_try_compile, enumerate(candidates))):
+      for i, proc in ((map if beam_pool is None else beam_pool.imap_unordered)
+                      (_try_compile, ((i, candidate, s.ast) for i,candidate in enumerate(candidates)))):
         if proc is None: continue
         prg, compile_et = proc
         if (lib:=prg.src[3].arg) in seen_libs: continue
