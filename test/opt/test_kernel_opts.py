@@ -242,11 +242,9 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(a.sum(0).exp(), [[Opt(OptOps.PADTO, 1, 32)],])
 
   def test_padto_group_full_unroll_sum(self):
-    c1 = UOp(Ops.PARAM, dtypes.float, (UOp.const(28672, dtypes.weakint),),
-             ParamArg(0, dtypes.float, device=('AMD', 'AMD:1', 'AMD:2', 'AMD:3', 'AMD:4', 'AMD:5', 'AMD:6', 'AMD:7')))
+    c1 = UOp(Ops.PARAM, dtypes.float, (UOp.const(28672, dtypes.weakint),), ParamArg(0, dtypes.float))
     c2 = UOp.range(28672, 2, AxisType.GLOBAL)
-    c5 = UOp(Ops.PARAM, dtypes.bfloat16, (UOp.const(234881024, dtypes.weakint),),
-             ParamArg(1, dtypes.bfloat16, device=('AMD', 'AMD:1', 'AMD:2', 'AMD:3', 'AMD:4', 'AMD:5', 'AMD:6', 'AMD:7')))
+    c5 = UOp(Ops.PARAM, dtypes.bfloat16, (UOp.const(234881024, dtypes.weakint),), ParamArg(1, dtypes.bfloat16))
     c8 = UOp.range(4096, 1, AxisType.REDUCE)
     c11 = UOp.range(2, 0, AxisType.REDUCE)
     c18 = (c5.index((c2*UOp.const(4096, dtypes.weakint)+c8+c11*UOp.const(117440512, dtypes.weakint))) * \
