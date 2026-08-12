@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, sys, os, ctypes, functools, mmap, threading, array, itertools
+import platform, sys, os, ctypes, ctypes.util, functools, mmap, threading, array, itertools
 from dataclasses import replace
 from typing import cast
 from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, partition
@@ -50,7 +50,7 @@ def worker_prog():
 
   # spin on windows, sem_wait to sleep on posix
   if WIN: ready = (v:=wait.after(lw:=UOp.loop(1), cur)[0].load()).end(lw, v <= cur)
-  else: ready = wait.after(cur)[0].load().call(sem.after(cur)[0], ret_dtype=dtypes.void)
+  else: ready = (rv:=wait.after(lw:=UOp.loop(1), cur)[0].load().call(sem.after(cur)[0], ret_dtype=dtypes.int)).end(lw, rv != 0)
 
   entry = [ring.after(ready).index((cur % RING_SLOTS) * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
   return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(cur)

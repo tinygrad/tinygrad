@@ -5,7 +5,7 @@ from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 from tinygrad.helpers import DEV
-import gzip, base64, platform, sysconfig, os
+import gzip, base64, sysconfig, os
 dll = c.DLL('mesa', 'tinymesa_cpu' if DEV.renderer == 'LVP' else 'tinymesa', os.path.join(sysconfig.get_paths()['platlib'], 'tinymesa'), emsg='pip install tinymesa==25.2.7.2')
 class struct_u_printf_info(c.Struct): pass
 u_printf_info: TypeAlias = struct_u_printf_info
