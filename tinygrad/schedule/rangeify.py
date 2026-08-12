@@ -629,7 +629,6 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   # pm_mops can create adjacent movement ops after their subtree was visited bottom-up.
   tsink = graph_rewrite(tsink, mop_cleanup, name="movement cleanup")
-  tsink = graph_rewrite(tsink, pm_forward_assembled_store, bottom_up=True, name="forward assembled stores")
 
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 

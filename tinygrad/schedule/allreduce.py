@@ -9,12 +9,19 @@ def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool]:
   return use_all2all, use_ring
 
 def _allreduce_view(buf:UOp, start:int, end:int) -> UOp:
-  base = buf.buf_uop.flatten().rtag(("allreduce_base",))
+  base = buf.buf_uop.rtag(("allreduce_base",)).flatten()
   return base.shrink(((start, end),)).rtag(("allreduce",))
 
-def _allreduce_chunk(buf:UOp, start:int, end:int, input_staged:bool) -> UOp:
-  # Input chunks are physical views of the already staged allocation.
-  chunks = [_allreduce_view(buf.mselect(i), start, end) for i in range(len(buf.device))]
+def _allreduce_input_view(buf:UOp, start:int, end:int) -> UOp:
+  # Tag the flattened view, not the buffer identity: this protects its physical offset through rewrites while
+  # keeping the COPY argument attached to the realized staging allocation.
+  return buf.buf_uop.flatten().rtag(("allreduce_base",)).shrink(((start, end),)).rtag(("allreduce",))
+
+def _allreduce_chunk(buf:UOp, start:int, end:int, input_staged:bool, physical:bool=False) -> UOp:
+  # All-to-all selects concrete children and can transfer physical views directly. Ring carries the multi-device
+  # value through successive hops, so retain semantic views for its existing materialization path.
+  chunks = [(_allreduce_input_view(buf.mselect(i), start, end) if physical else
+             buf.mselect(i).buf_uop.flatten().shrink(((start, end),))) for i in range(len(buf.device))]
   if not input_staged: chunks = [chunk.after(buf) for chunk in chunks]
   return UOp.mstack(*chunks)
 
@@ -53,7 +60,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   # reduce-scatter
   reduced_chunks:list[UOp] = []
   for i,(s,e) in enumerate(chunks):
-    chunk = _allreduce_chunk(buf, s, e, input_staged)
+    chunk = _allreduce_chunk(buf, s, e, input_staged, physical=use_all2all)
     if use_all2all:
       # _allreduce_chunk is an MSTACK of concrete physical views. Select its children directly so the view
       # remains the COPY argument instead of depending on a later MSELECT(MSTACK) simplification.
