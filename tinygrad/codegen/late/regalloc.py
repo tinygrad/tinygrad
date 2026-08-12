@@ -46,10 +46,6 @@ class LinearScanRegallocContext:
       cons = cons or v.candidates()
       live_inv = {r:k for k,v in live.items() for r in v}
 
-      # greedy first pass no evict
-      if (block := next((b for b in cons if all(r not in live_inv for r in b)), None)):
-        return block
-
       def next_use(v:VRegister, i:int):
         p = bisect_left(lr[v], i)
         return lr[v][p] if p < len(lr[v]) else len(uops)
