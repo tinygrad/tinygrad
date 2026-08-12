@@ -163,7 +163,7 @@ class LLVMRenderer(Renderer):
         for s in u.src: self.tail_control[s] = u
       else:
         if u.op in (Ops.THEN, Ops.ELSE): self.if_targets.setdefault(u.src[0], {})[u.op] = u
-        if u.src[0].op in GroupOp.Block: self.tail_control[u.src[0]] = u
+        if len(u.src) and u.src[0].op in GroupOp.Block: self.tail_control[u.src[0]] = u
       if u.op not in GroupOp.Block: continue
       if u.op is Ops.END:
         self.backedge[u.src[1]] = u
