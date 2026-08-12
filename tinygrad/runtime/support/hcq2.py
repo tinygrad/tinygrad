@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Callable, TypeVar, Generic, Any, Sequence
-import struct, functools, time, collections, itertools, decimal, statistics
+import struct, functools, time, collections, itertools, decimal, statistics, ctypes
 from dataclasses import replace, dataclass
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar, perf_counter_us, Context
@@ -10,6 +10,7 @@ from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, g
 from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
 from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop
@@ -22,8 +23,7 @@ HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 
-HCQ_DEVS = frozenset(("AMD",))
-HCQ_P2P_DEVS = HCQ_DEVS | frozenset(("CPU",))
+HCQ_DEVS = frozenset(("AMD", "CPU"))
 HCQ_CACHE_TAGS = frozenset(("program", "systems", "template"))
 
 @dataclass(frozen=True)
@@ -94,9 +94,11 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_
 # *****************
 # 1.1. prep: staging copies
 
-def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS) and not all_devices_in(b.device, HCQ_P2P_DEVS)
+def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_DEVS)
 
-def hcq_call_devs(call:UOp) -> Any|None: return next((b.device for b in call.src[1:] if all_devices_in(b.device, HCQ_DEVS)), None)
+def _get_enqueue_devs(call:UOp) -> Any|None:
+  if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
+  return min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
 
 def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
@@ -105,7 +107,7 @@ def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   return UOp(Ops.LINEAR, src=(src.copy_to_device("CPU").call(stage, src), stage.copy_to_device(dst.device).call(dst, stage)))
 
 def kernel_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
-  if (devs:=hcq_call_devs(call)) is None or Device[(dev:=to_tuple(devs)[0])].has_copy_queue: return None
+  if (devs:=_get_enqueue_devs(call)) is None or Device[(dev:=to_tuple(devs)[0])].has_copy_queue: return None
   d, s = (UOp.param(i, dst.dtype, (n:=dst.max_numel(),), device=devs) for i in range(2))
   ast = d.index(r:=UOp.range(n, 0)).store(s.index(r).load()).end(r).sink(arg=KernelInfo(name="copy"), tag=1)
   return call.replace(src=(to_program(ast, Device[dev].renderer), dst, src))
@@ -136,7 +138,7 @@ def _get_deps(ctx:DepsTracker, bufs_by_lane:list[list[Any]], write, key:tuple[tu
 
 def _build_wait_cmds(slots:dict[str, int], dep_lanes:list[tuple[tuple, int, int]], devices:tuple[str, ...], queue:str) -> tuple[list[UOp], set[int]]:
   # opt1: same-queue ops are fifo-ordered
-  if devices[0].split(":")[0] in {"AMD", "QCOM"} or queue.startswith("COPY"):
+  if devices[0].split(":")[0] in {"AMD", "QCOM", "CPU"} or queue.startswith("COPY"):
     dep_lanes = [(dep, dlane, lane) for dep, dlane, lane in dep_lanes if (dep[0][dlane], dep[1]) != (devices[lane], queue)]
 
   # opt2: keep latest dep per (dep device, queue, cur lane)
@@ -229,7 +231,7 @@ def sched_hcq_batches(l:UOp, profile:bool) -> UOp:
   srcs:list[UOp] = []
   batch:list[tuple[UOp, tuple[str, ...]]] = []
   for call in l.src:
-    if (devs:=hcq_call_devs(call)) is not None: batch.append((call, to_tuple(devs)))
+    if (devs:=_get_enqueue_devs(call)) is not None: batch.append((call, to_tuple(devs)))
     else: srcs, batch = srcs + _finalize_batch(batch, profile) + [call], []
   return l.replace(src=tuple(srcs + _finalize_batch(batch, profile)))
 
@@ -521,6 +523,7 @@ def hcq_link(linear:UOp, cache=True) -> UOp:
 
 class HCQ2Compiled(Compiled):
   timestamp_divider: float = 1000.0
+  wait_timeout_ms: float = 30000.0
 
   def __init__(self, device:str, allocator:HCQAllocator, compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
@@ -531,6 +534,7 @@ class HCQ2Compiled(Compiled):
       (UPat(Ops.PARAM, tag="timeline_signal"), lambda ctx: ctx[0].signal("timeline")),
       (UPat(Ops.PARAM, tag="timeline_value"), lambda ctx: ctx[0].signal("value", 1)),
       (UPat(Ops.PARAM, tag="signal", name="b"), lambda ctx, b: ctx[0].signal(b.arg.slot)),
+      (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx[0].c_func(b.tag[5:]) if isinstance(b.tag, str) and b.tag.startswith("func:") else None),
       (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if b.tag is None else ctx[0].new_buffer(b, cache=ctx[1]))
     ])
 
@@ -566,6 +570,9 @@ class HCQ2Compiled(Compiled):
     return self.rt_buffer.view(b.max_numel(), b.dtype, self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
 
   @functools.cache
+  def c_func(self, name:str) -> Buffer: return self.signal(f"func:{name}", unwrap(ctypes.cast(getattr(libc.dll, name), ctypes.c_void_p).value))
+
+  @functools.cache
   def signal(self, name:str|int, init_value:int=0) -> Buffer:
     buf = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
     buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
@@ -579,7 +586,7 @@ class HCQ2Compiled(Compiled):
     timeout = timeout if timeout is not None and self.can_recover else None
     st = time.perf_counter()
     while sig[0] < tl[0] - 1:
-      if time.perf_counter() - st > (timeout or 3000) / 1000: self.on_device_hang()
+      if time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
     if self.prof_ents: self.collect_prof()
 
   def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
