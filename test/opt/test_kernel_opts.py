@@ -1,7 +1,6 @@
 import unittest
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.device import Buffer
 from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
 
 # TODO: write a clean version of this
@@ -258,8 +257,8 @@ class TestKernelOpts(unittest.TestCase):
     # reduces uninitialized padded lanes and returns all NaNs.
     opts_to_apply = [Opt(OptOps.GROUPTOP, 1, 256), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.UNROLL, 2, 0), Opt(OptOps.UPCAST, 0, 7)]
     inp = Tensor.ones(234881024, dtype=dtypes.bfloat16).realize()
-    out = Buffer(Device.DEFAULT, 28672, dtypes.float).allocate()
-    _helper_linearizer_opt_ast(ast, [out, inp.uop.base.buffer], [opts_to_apply], check_default_opt=False)
+    out = Tensor.empty(28672, dtype=dtypes.float).realize()
+    _helper_linearizer_opt_ast(ast, [out.uop.base.buffer, inp.uop.base.buffer], [opts_to_apply], check_default_opt=False)
 
   def test_padto_sum(self):
     N = 18
