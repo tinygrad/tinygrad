@@ -52,8 +52,7 @@ def quit_prog():
 def worker_prog():
   ring = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,), volatile=True)
   wait, sem = UOp.param(1, dtypes.uint64, (1,), volatile=True), UOp.param(2, dtypes.uint64, (1,))
-  done = UOp.param(3, dtypes.uint64, (1,), volatile=True)
-  cur = UOp.range(2**64-1, 0, dtype=dtypes.uint64)
+  done, cur = UOp.param(3, dtypes.uint64, (1,), volatile=True), UOp.range(2**64-1, 0, dtype=dtypes.uint64)
 
   # spin on windows, sem_wait to sleep on posix
   if WIN: ready = (v:=wait.after(lw:=UOp.loop(1), cur)[0].load()).end(lw, v <= cur)
@@ -105,7 +104,9 @@ def encode_queue(q:UOp) -> UOp:
   put = make_signal(devs, tag=f"{q}_put")
 
   # only submits write this ring and they all run on the submitter, so its put pointer is ours to bump
-  base = ((put.index(0).load() % RING_SLOTS) * CMD_SIZE).cast(dtypes.int)
+  ran = make_signal(devs, tag=f"{q}_done").after(l:=UOp.loop(next(UOp.unique_num))).index(0).load()
+  room = ran.end(l, put.index(0).load() - ran > RING_SLOTS - cnt) # wait for the worker to free room for cnt entries
+  base = ((put.after(room).index(0).load() % RING_SLOTS) * CMD_SIZE).cast(dtypes.int)
   e = UOp.range(cnt, next(UOp.unique_num), dtype=dtypes.int, src=(cmdbuf, ring))
   copy = UOp.group(*[ring.index((base + e*CMD_SIZE + w) % (RING_SLOTS*CMD_SIZE)).store(cmdbuf.index(e*CMD_SIZE + w).load()) for w in range(CMD_SIZE)])
 
@@ -214,7 +215,7 @@ class CPUAllocator(HCQAllocator['CPUDevice']):
 class CPUQueue:
   def __init__(self, dev:CPUDevice):
     self.dev, self.pos = dev, 0
-    self.ring, self.put, self.sys = (Buffer(dev.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1))
+    self.ring, self.put, self.sys, self.done = (Buffer(dev.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1, 1))
     self.addr = 0
     if not WIN:
       self.hsem = libc.sem_open(nm:=f"/tinygrad-{os.getpid()}-{id(self):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
@@ -222,13 +223,10 @@ class CPUQueue:
       if self.addr == ctypes.c_void_p(-1).value or libc.sem_unlink(nm): raise OSError(ctypes.get_errno(), "semaphore")
     self.sem = Buffer(dev.device, 1, dtypes.uint8, options=BufferSpec(external_ptr=self.addr), preallocate=True)
 
+    self.ring_view, self.done_view = (b._buf.cpu_view().view(fmt='Q') for b in (self.ring, self.done))
+
     threading.Thread(target=dev.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in
       [self.ring._buf.va_addr, self.sys._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, self.addr, self.done._buf.va_addr]]).start()
-
-  @functools.cached_property
-  def ring_view(self): return self.ring._buf.cpu_view().view(fmt='Q')
-  @functools.cached_property
-  def done_view(self): return self.done._buf.cpu_view().view(fmt='Q')
 
   def push(self, cmd:list[int]):
     while self.pos - self.done_view[0] >= RING_SLOTS: pass # the ring is full, let the worker catch up
