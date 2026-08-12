@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, sys, os, ctypes, functools, mmap, threading, array, itertools
+import platform, sys, os, ctypes, ctypes.util, functools, mmap, threading, array, itertools
 from dataclasses import replace
 from typing import cast
 from tinygrad.helpers import to_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, partition
