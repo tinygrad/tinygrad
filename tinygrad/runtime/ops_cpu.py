@@ -19,6 +19,7 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher, graph_rewrite
 
 MAX_ARGS, CMD_SIZE, RING_SLOTS = 63, 64, (16 << 10)
+FUNCS = ('ExitThread',) if WIN else ('clock_gettime', 'pthread_exit', 'sem_wait', 'sem_close', 'sem_post')
 
 # *****************
 # 1. workers
@@ -35,7 +36,8 @@ def timestamp_prog():
   if WIN: val = UOp.const(0, dtypes.uint64)
   else:
     fn, ts = UOp.param(1, dtypes.uint64, (1,)), UOp.placeholder((2,), dtypes.uint64, slot=0, addrspace=AddrSpace.REG)
-    call = fn[0].load().call(UOp.const(6 if OSX else 1, dtypes.int), ts[0], ret_dtype=dtypes.void) # clock_gettime(CLOCK_MONOTONIC, &ts)
+    # clock_gettime(CLOCK_MONOTONIC, &ts)
+    call = fn[0].load().call(UOp.const(6 if OSX else 1, dtypes.int), ts[0], ret_dtype=dtypes.void)
     val = ts.after(call)[0].load() * 1_000_000_000 + ts.after(call)[1].load()
   return UOp.param(0, dtypes.uint64, (1,))[0].store(val)
 
@@ -87,7 +89,7 @@ pm_cpu_opsel = PatternMatcher([
   (UPat(Ops.INS, arg="store", src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))),
    lambda ctx, dst, val: cpu_cmd(ctx, signal_prog, dst.getaddr(ctx), val.cast(dtypes.uint64))),
   (UPat(Ops.INS, arg="timestamp", src=(UPat(name="dst"),)),
-   lambda ctx, dst: cpu_cmd(ctx, timestamp_prog, dst.getaddr(ctx), make_signal(ctx, tag="func:clock_gettime").getaddr(ctx))),
+   lambda ctx, dst: cpu_cmd(ctx, timestamp_prog, dst.getaddr(ctx), *(() if WIN else (make_signal(ctx, tag="func:clock_gettime").getaddr(ctx),)))),
 ])
 
 def encode_queue(q:UOp) -> UOp:
@@ -170,7 +172,8 @@ class CPUProgram(Program['CPUDevice']):
 
   def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
-    ts = [self.dev.prgs[timestamp_prog].addr, self.dev.prof._buf.va_addr, self.dev.c_func("clock_gettime")._buf.va_addr]
+    ts = [self.dev.prgs[timestamp_prog].addr, self.dev.prof._buf.va_addr] + \
+         ([] if WIN else [self.dev.func_ptr('clock_gettime')._buf.va_addr])
     if wait: self.dev.push(ts)
 
     for tid in range(1 if self.lvp else global_size[0]):
@@ -213,13 +216,13 @@ class CPUQueue:
     self.ring, self.put, self.sys = (Buffer(dev.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1))
     self.addr = 0
     if not WIN:
-      self.sem = libc.sem_open(nm:=f"/tinygrad-{os.getpid()}-{id(self):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
-      self.addr = unwrap(ctypes.cast(self.sem, ctypes.c_void_p).value)
+      self.hsem = libc.sem_open(nm:=f"/tinygrad-{os.getpid()}-{id(self):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
+      self.addr = unwrap(ctypes.cast(self.hsem, ctypes.c_void_p).value)
       if self.addr == ctypes.c_void_p(-1).value or libc.sem_unlink(nm): raise OSError(ctypes.get_errno(), "semaphore")
-    self.sem_buf = Buffer(dev.device, 1, dtypes.uint8, options=BufferSpec(external_ptr=self.addr), preallocate=True)
+    self.sem = Buffer(dev.device, 1, dtypes.uint8, options=BufferSpec(external_ptr=self.addr), preallocate=True)
 
     threading.Thread(target=dev.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in
-      [self.ring._buf.va_addr, self.sys._buf.va_addr if WIN else dev.c_func('sem_wait')._buf.va_addr, self.addr]]).start()
+      [self.ring._buf.va_addr, self.sys._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, self.addr]]).start()
 
   @functools.cached_property
   def ring_view(self): return self.ring._buf.cpu_view().view(fmt='Q')
@@ -228,7 +231,7 @@ class CPUQueue:
     self.ring_view[(base:=(self.pos % RING_SLOTS) * CMD_SIZE):base+len(cmd)] = array.array('Q', [x & ((1<<64)-1) for x in cmd])
     self.pos += 1
     if WIN: self.sys._buf.cpu_view().view(fmt='Q')[0] = self.pos
-    else: assert libc.sem_post(self.sem) == 0
+    else: assert libc.sem_post(self.hsem) == 0
 
 class CPUDevice(HCQ2Compiled):
   pm_lower = PatternMatcher([
@@ -241,8 +244,8 @@ class CPUDevice(HCQ2Compiled):
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
 
     self.pm_bufferize = PatternMatcher(
-      [(UPat(Ops.PARAM, tag=f"COMPUTE:0_{t}"), lambda ctx, n=n: getattr(ctx[0].queue, n))
-       for t,n in (("ring", "ring"), ("put", "put"), ("sem", "sem_buf"), ("sys", "sys"))]) + self.pm_bufferize
+      [(UPat(Ops.PARAM, tag=f"COMPUTE:0_{n}"), lambda ctx, n=n: getattr(ctx[0].queue, n)) for n in ("ring", "put", "sem", "sys")] +
+      [(UPat(Ops.PARAM, tag=f"func:{f}"), lambda ctx, f=f: ctx[0].func_ptr(f)) for f in FUNCS]) + self.pm_bufferize
     self.synced_pos = self.fence = 0
 
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
@@ -252,6 +255,16 @@ class CPUDevice(HCQ2Compiled):
 
   @functools.cached_property
   def prof(self) -> Buffer: return Buffer(self.device, 2, dtypes.uint64, preallocate=True)
+
+  def func_ptr(self, name:str) -> Buffer: return self.func_table.view(1, dtypes.uint64, FUNCS.index(name)*8)
+
+  @functools.cached_property
+  def func_table(self) -> Buffer: # the entrypoints the queue calls, generated code loads them from here
+    if sys.platform == "win32": lib = ctypes.windll.kernel32 # mypy only narrows the platform on sys.platform
+    else: lib = libc.dll
+    (ft:=Buffer(self.device, len(FUNCS), dtypes.uint64, preallocate=True))._buf.cpu_view().view(fmt='Q')[:] = \
+      array.array('Q', [unwrap(ctypes.cast(getattr(lib, f), ctypes.c_void_p).value) for f in FUNCS])
+    return ft
 
   # the submitter runs everything python pushes, the compute queue is fed by the submits it runs
   @functools.cached_property
@@ -276,6 +289,6 @@ class CPUDevice(HCQ2Compiled):
 
   def finalize(self):
     if self.submitter.pos == 0: return # the worker starts with the first submit
-    quit_args = (self.c_func("pthread_exit")._buf.va_addr, self.submitter.sem_buf._buf.va_addr, self.c_func("sem_close")._buf.va_addr)
-    self.push([self.prgs[quit_prog].addr, *(quit_args[:1] if WIN else quit_args)])
+    quit_args = (self.func_ptr('ExitThread'),) if WIN else (self.func_ptr('pthread_exit'), self.submitter.sem, self.func_ptr('sem_close'))
+    self.push([self.prgs[quit_prog].addr, *[b._buf.va_addr for b in quit_args]])
     self.submitter.pos = self.synced_pos = self.fence = 0

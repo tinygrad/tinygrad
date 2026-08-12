@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Callable, TypeVar, Generic, Any, Sequence
-import struct, functools, time, collections, itertools, decimal, statistics, ctypes
+import struct, functools, time, collections, itertools, decimal, statistics
 from dataclasses import replace, dataclass
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar, perf_counter_us, Context
@@ -10,7 +10,6 @@ from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, g
 from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
 from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop
@@ -534,7 +533,6 @@ class HCQ2Compiled(Compiled):
       (UPat(Ops.PARAM, tag="timeline_signal"), lambda ctx: ctx[0].signal("timeline")),
       (UPat(Ops.PARAM, tag="timeline_value"), lambda ctx: ctx[0].signal("value", 1)),
       (UPat(Ops.PARAM, tag="signal", name="b"), lambda ctx, b: ctx[0].signal(b.arg.slot)),
-      (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx[0].c_func(b.tag[5:]) if isinstance(b.tag, str) and b.tag.startswith("func:") else None),
       (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if b.tag is None else ctx[0].new_buffer(b, cache=ctx[1]))
     ])
 
@@ -568,9 +566,6 @@ class HCQ2Compiled(Compiled):
     if cache or b.tag in HCQ_CACHE_TAGS:
       return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=True, cpu_access=True, nolru=True))
     return self.rt_buffer.view(b.max_numel(), b.dtype, self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
-
-  @functools.cache
-  def c_func(self, name:str) -> Buffer: return self.signal(f"func:{name}", unwrap(ctypes.cast(getattr(libc.dll, name), ctypes.c_void_p).value))
 
   @functools.cache
   def signal(self, name:str|int, init_value:int=0) -> Buffer:
