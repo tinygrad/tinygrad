@@ -1,10 +1,9 @@
 import unittest
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
 
 # TODO: write a clean version of this
-from test.backend.test_linearizer import _helper_linearizer_opt_ast, helper_linearizer_opt
+from test.backend.test_linearizer import helper_linearizer_opt
 
 class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -244,21 +243,10 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.expectedFailure
   def test_padto_group_full_unroll_sum(self):
-    c1 = UOp.param(0, dtypes.float, (28672,))
-    c2 = UOp.range(28672, 2, AxisType.GLOBAL)
-    c5 = UOp.param(1, dtypes.bfloat16, (234881024,))
-    c8 = UOp.range(4096, 1, AxisType.REDUCE)
-    c11 = UOp.range(2, 0, AxisType.REDUCE)
-    c18 = (c5[c2*4096+c8+c11*117440512] * 0.5).cast(dtypes.float)
-    c19 = c18*c18
-    c20 = c19.reduce(c11, c8, arg=(Ops.ADD, 0))
-    c22 = c1.index(c2).store(c20).end(c2)
-    ast = c22.sink(arg=KernelInfo("test"))
-    # reduces uninitialized padded lanes and returns all NaNs.
+    a = Tensor.ones(2, 28, 4096, dtype=dtypes.bfloat16).realize()
+    out = ((a * 0.5).float().square()).sum(axis=(0, 2))
     opts_to_apply = [Opt(OptOps.GROUPTOP, 1, 256), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.UNROLL, 2, 0), Opt(OptOps.UPCAST, 0, 7)]
-    inp = Tensor.ones(234881024, dtype=dtypes.bfloat16).realize()
-    out = Tensor.empty(28672, dtype=dtypes.float).realize()
-    _helper_linearizer_opt_ast(ast, [out.uop.base.buffer, inp.uop.base.buffer], [opts_to_apply], check_default_opt=False)
+    helper_linearizer_opt(out, [opts_to_apply], check_default_opt=False)
 
   def test_padto_sum(self):
     N = 18
