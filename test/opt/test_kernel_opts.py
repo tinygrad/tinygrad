@@ -249,8 +249,7 @@ class TestKernelOpts(unittest.TestCase):
     c5 = UOp.param(1, dtypes.bfloat16, (234881024,))
     c8 = UOp.range(4096, 1, AxisType.REDUCE)
     c11 = UOp.range(2, 0, AxisType.REDUCE)
-    c18 = (c5.index((c2*UOp.const(4096, dtypes.weakint)+c8+c11*UOp.const(117440512, dtypes.weakint))) * \
-           UOp.const(0.5, dtypes.bfloat16)).cast(dtypes.float)
+    c18 = (c5[c2*4096+c8+c11*117440512] * 0.5).cast(dtypes.float)
     c19 = c18*c18
     c20 = c19.reduce(c11, c8, arg=(Ops.ADD, 0))
     c22 = c1.index(c2).store(c20).end(c2)
