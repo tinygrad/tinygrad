@@ -181,7 +181,7 @@ runs:
         fi
         # **** QEMU ****
         if [[ "${{ inputs.qemu }}" == "true" ]]; then
-          pkgs+=" qemu-user-static binfmt-support"
+          pkgs+=" qemu-user-static"
         fi
 
         echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"

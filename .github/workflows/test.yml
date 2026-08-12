@@ -652,17 +652,11 @@ jobs:
         with:
           key: compile-${{ matrix.backend }}
           deps: "testing_unit mesa"
-          qemu: ${{ contains(matrix.dev, 'QCOMCL') }}
-      - name: Debug qemu/binfmt
+      - name: setup qemu
         if: contains(matrix.dev, 'QCOMCL')
-        shell: bash
-        run: |
-          sudo update-binfmts --import
-          uname -m
-          docker info --format 'daemon: {{.OSType}}/{{.Architecture}} driver={{.Driver}}'
-          ls /proc/sys/fs/binfmt_misc/ || echo "binfmt_misc not mounted"
-          cat /proc/sys/fs/binfmt_misc/qemu-aarch64 2>/dev/null || echo "no qemu-aarch64 handler"
-          docker run --rm --platform linux/arm64 python:3.12-slim uname -m || true
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
       - name: Run test_ops
         shell: bash
         env:
