@@ -136,8 +136,6 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
-  ((UPat.cvar("a") < UPat.var("b")).where(UPat.var("b"), UPat.cvar("c")), lambda a,b,c: UOp.maximum(a,b) if a.val == c.val else None),
-  ((UPat.var("a") < UPat.cvar("b")).where(UPat.cvar("c"), UPat.var("a")), lambda a,b,c: UOp.maximum(a,b) if b.val == c.val else None),
   (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)),), name="a"), fold_const_alu),
   # NOTE: THREEFRY(const,const) folds via its decomposition
   (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.CONST, Ops.STACK)),)*2, name="a"), fold_const_alu),
@@ -251,6 +249,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
    lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST,)), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
+  ((UPat.cvar("a") < UPat.var("b")).where(UPat.var("b"), UPat.cvar("c")), lambda a,b,c: UOp.maximum(a,b) if a.val == c.val else None),
+  ((UPat.var("a") < UPat.cvar("b")).where(UPat.cvar("c"), UPat.var("a")), lambda a,b,c: UOp.maximum(a,b) if b.val == c.val else None),
   (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # TODO: why does this rule break beautiful_mnist?
   #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
