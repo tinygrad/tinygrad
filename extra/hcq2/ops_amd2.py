@@ -288,14 +288,16 @@ def amd_build_program(prg:UOp) -> UOp:
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
-    super().__init__(dev, supports_copy_from_disk=dev.has_sdma_queue, supports_transfer=dev.has_sdma_queue and not dev.is_usb())
+    super().__init__(dev, supports_copy_from_disk=dev.has_copy_queue, supports_transfer=dev.has_copy_queue and not dev.is_usb())
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQ2Buffer:
-    return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_sdma_queue)
+    return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_copy_queue)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
   def _do_map(self, buf:HCQ2Buffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
+
+  def _do_unmap(self, buf:HCQ2Buffer): self.dev.iface.unmap(buf)
 
 @dataclass
 class AMDQueueDesc:
@@ -388,15 +390,24 @@ class KFDIface:
     return hcqbuf
 
   def free(self, mem):
+    self._unmap(mem)
+    if mem.va_addr: FileIOInterface.munmap(mem.va_addr, mem.size)
+    kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
+
+  def unmap(self, mem):
+    self._unmap(mem)
+    if getattr(mem, '_owns_kfd_handle', False): kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
+
+  def _unmap(self, mem):
     gpus = (ctypes.c_int32 * 1)(self.gpu_id)
     stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(gpus), n_devices=1)
     assert stm.n_success == 1
-    if mem.owner == self.dev:
-      if mem.va_addr: FileIOInterface.munmap(mem.va_addr, mem.size)
-      kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
 
   def map(self, mem):
-    if mem.owner is not None and mem.owner._is_cpu(): return self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
+    if mem.owner is not None and mem.owner._is_cpu():
+      mapped = self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
+      mapped._owns_kfd_handle = True
+      return mapped
 
     c_gpus = (ctypes.c_int32 * 1)(self.gpu_id)
     stm = kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=1)
@@ -468,6 +479,7 @@ class PCIIface(PCIIfaceBase):
 
   def require_profile_mode(self): return True
   def is_wgp_active(self, xcc, se, sa, wgp) -> bool: return True # TODO: account for WGP disablement on some asics.
+  def unmap(self, mem): self.free(mem)
 
   def _compute_props(self):
     self.ip_versions = self.dev_impl.ip_ver
@@ -581,7 +593,7 @@ class AMDDevice(HCQ2Compiled):
 
     self.max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
     self.sdma_queues:dict = {}
-    self.has_sdma_queue = True # self.sdma_queue(0) is not None, TODO: think of this
+    self.has_copy_queue = not getenv("AMD_DISABLE_SDMA")
 
     super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, can_recover=self.is_am(), arch=self.arch)
 

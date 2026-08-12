@@ -48,6 +48,8 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     linear, var_vals = Tensor(t).linear_with_vars()
+  # test compiling the linear
+  compile_linear(linear)
   kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)
                    for call in linear.src if call.src[0].op is Ops.SINK or not filter_sink)
   if kernel_cnt != allowed:
@@ -57,8 +59,6 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
         print("kernel", i+1)
         print(call.src[0])
     raise KernelCountException(allowed, kernel_cnt)
-  # test compiling the linear
-  compile_linear(linear)
   return linear, var_vals
 
 def assert_kernel_count(expected:int):

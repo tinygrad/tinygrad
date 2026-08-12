@@ -249,6 +249,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
    lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST,)), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
+  ((UPat.cvar("a") < UPat.var("b")).where(UPat.var("b"), UPat.cvar("c")), lambda a,b,c: UOp.maximum(a,b) if a.val == c.val else None),
+  ((UPat.var("a") < UPat.cvar("b")).where(UPat.cvar("c"), UPat.var("a")), lambda a,b,c: UOp.maximum(a,b) if b.val == c.val else None),
   (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # TODO: why does this rule break beautiful_mnist?
   #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
@@ -293,8 +295,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
     tuple(dedup(flatten([(y,) if y.op in {Ops.RANGE, Ops.STORE, Ops.CALL, Ops.FUNCTION, Ops.BARRIER, Ops.END, Ops.LINEAR, Ops.STAGE}
                         else y.src for y in x.src[1:]]))))),
-  # after with 1 src is just src[0]
-  (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
+  # after/end with 1 src is just src[0]
+  (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
 ])+div_and_mod_symbolic
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
