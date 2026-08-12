@@ -1,5 +1,6 @@
 import time, inspect
 from collections import deque
+from dataclasses import replace
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup
@@ -8,14 +9,14 @@ from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SC
 
 # unwrap VIEW/CAST/etc to find the actual data source (kernel output, buffer, or multi-device op)
 def _unwrap_src(s: UOp) -> UOp:
-  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.BIND}: s = s.src[0]
+  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
   return s
 
-# a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states, BIND is not a buffer dependency
+# a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states, bound Variables are not buffer dependencies
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
-  if s.op is Ops.BIND: return []
+  if is_bound_var(s): return []
   assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
 
@@ -35,6 +36,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
     reads: list[tuple[UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read)
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
+      if is_bound_var(u): continue  # a bound Variable is an input value, not a buffer write
       kernels, after_deps = _split_after(u)
       prev_state = _unwrap_src(u.src[0])
       prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
@@ -71,7 +73,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       else:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
+        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not is_bound_var(s))
         linearized.append(k.src[0].call(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
@@ -83,7 +85,7 @@ from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
-from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg
+from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg, is_bound_var
 from tinygrad.dtype import AddrSpace
 
 def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
@@ -100,7 +102,9 @@ pm_post_sched_cache = PatternMatcher([
 
 def resolve_linear_call(linear_call:UOp):
   linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
-  binds = {f"p{i}":x.src[0] for i,x in enumerate(linear_call.src[1:]) if x.op is Ops.BIND}
+  # map the call body params back to the original Variables stored in the call args
+  binds = {f"p{i}":UOp(Ops.PARAM, src=x.src[0].src, arg=replace(x.src[0].arg, slot=-1))
+           for i,x in enumerate(linear_call.src[1:]) if is_bound_var(x)}
   return linear.substitute({v:binds[v.expr] for v in linear.variables() if v.expr in binds}, enter_calls=True, name="resolve scalar params")
 
 pm_resolve_linear_call = PatternMatcher([
@@ -184,13 +188,13 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
-  # get var_vals
+  # get var_vals from the bound Variables in the call args
   var_vals: dict[str, int] = {}
   for b in big_sink.src[1:]:
-    if b.op is Ops.BIND:
+    if is_bound_var(b):
       nm = b.src[0].expr
       if nm not in used_vars: continue
-      val = b.src[1].val
+      val = b.src[1].src[1].val
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
 

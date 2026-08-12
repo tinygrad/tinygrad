@@ -3,7 +3,7 @@ from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype, strong_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group, identity_element
+from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group, identity_element, is_variable, is_bound_var
 from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
@@ -466,6 +466,10 @@ class LocalAddBufferContext:
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
+  # Variables (ALU buffers with a value range) are scalar symbolic values, not real buffers: they become ALU params with no slot
+  if is_variable(buf):
+    return UOp(Ops.PARAM, src=buf.src, arg=ParamArg(-1, buf.dtype, name=buf.arg.name, vmin_vmax=buf.arg.vmin_vmax,
+                                                    multiple_of=buf.arg.multiple_of, addrspace=AddrSpace.ALU))
   param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),),
               arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
@@ -502,8 +506,7 @@ to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
   (UPat(Ops.PARAM, name="v"), lambda v:
-   UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype, multiple_of=v.arg.multiple_of)
-   if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
+   v.replace(arg=replace(v.arg, slot=-1)) if v.arg.name is not None and v.arg.vmin_vmax is not None and v.arg.slot != -1 else None),
 
   # this renumbers the params
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
@@ -512,7 +515,8 @@ to_define_global = PatternMatcher([
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
 
-  (UPat(Ops.BIND, name="b"), unbind_kernel),
+  # bound Variables are stores into Variable buffers: strip the store, the buffer becomes an ALU param via debuf
+  (UPat(Ops.AFTER, name="b"), lambda ctx,b: unbind_kernel(ctx, b) if is_bound_var(b) else None),
   (UPat(Ops.AFTER, name="after"), handle_after),
 
   # remove device from local BUFFERIZE
@@ -541,6 +545,9 @@ pm_add_param_range_tags = PatternMatcher([
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split. open DEVICE ranges are fine, they are bound per device at launch
   if any(r.arg[-1] is not AxisType.DEVICE for r in x.ranges): return None
+  # a bound Variable's store is an input value, not a kernel
+  st = x.src[0] if x.op is Ops.END else x
+  if st.op is Ops.STORE and is_variable(st.src[0].src[0] if st.src[0].op is Ops.INDEX else st.src[0]): return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
@@ -548,6 +555,7 @@ def split_store(x:UOp) -> UOp|None:
 
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
   return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values(), *lctx.vars.keys())
+
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),

@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer, DepsTracker
 from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, rewrite_group, graph_rewrite
+from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, rewrite_group, graph_rewrite, is_bound_var
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime
 from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_outs_ins
@@ -44,7 +44,7 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
     current_batch, current_batch_devs = [], []
 
   for si in linear.src:
-    devs = dedup([Device[x] for b in si.src[1:] if b.op is not Ops.BIND for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
+    devs = dedup([Device[x] for b in si.src[1:] if not is_bound_var(b) for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
     graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
 
     can_graph = graph_t is not None and graph_t.supports_uop(devs, si)

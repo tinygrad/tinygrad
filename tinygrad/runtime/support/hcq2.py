@@ -6,7 +6,7 @@ from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, s
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar, perf_counter_us, Context
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphEvent
-from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
+from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp, is_bound_var
 from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
 from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -87,8 +87,8 @@ def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
 def replace_call_buffers(ctx:tuple[list[UOp], dict[UOp, int]], call:UOp) -> UOp|None:
   bufs, slots = ctx
   for s in call.src[1:]:
-    if s.op not in (Ops.PARAM, Ops.BIND) and slots.setdefault(s, len(bufs)) == len(bufs): bufs.append(s)
-  return call.replace(src=call.src[:1] + tuple(s if s.op in (Ops.PARAM, Ops.BIND) else s.param_like(slots[s]) for s in call.src[1:]))
+    if s.op is not Ops.PARAM and not is_bound_var(s) and slots.setdefault(s, len(bufs)) == len(bufs): bufs.append(s)
+  return call.replace(src=call.src[:1] + tuple(s if s.op is Ops.PARAM or is_bound_var(s) else s.param_like(slots[s]) for s in call.src[1:]))
 pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_buffers)])
 
 # *****************

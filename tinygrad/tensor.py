@@ -9,6 +9,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, ParamArg, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import is_variable, is_bound_var
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -109,7 +110,7 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled FUNCTION, got {c.src[0].op}"
-  input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
+  input_buffers = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])
 
   # add the outputs to the call
   srcs = c.src[0].src
@@ -176,6 +177,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
 ])
 
 def finalize_after(ctx:AllocCtx, x:UOp):
+  # bound Variables are call inputs, not assigns: they stay in the graph and pm_replace_buf turns them into call args
+  if is_bound_var(x): return None
   # untagged: record as an assign for the call body
   if x.tag is None:
     ctx.assigns.append(x)
@@ -196,7 +199,8 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
-  if b.op is Ops.BIND: return b.param_like(len(ctx.replacements)-1)
+  # bound Variables and bare Variables become ALU params in the call body
+  if is_bound_var(b) or is_variable(b): return b.param_like(len(ctx.replacements)-1)
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
                    addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
 
@@ -214,8 +218,8 @@ pm_replace_buf = PatternMatcher([
   # replace SHRINK with PARAM
   (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),), name="b", allow_any_len=True), replace_input_view),
   (UPat(Ops.BITCAST, src=(UPat.any(UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),), allow_any_len=True), UPat(Ops.BUFFER)),), name="b"), replace_input_view),
-  # strip value from BIND for cache key normalization, so different values hit same cache
-  (UPat(Ops.BIND, src=(UPat(Ops.PARAM), UPat(Ops.CONST)), name="b"), replace_input_buffer),
+  # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
+  (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if is_bound_var(b) else None),
 ])
 
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
@@ -741,7 +745,7 @@ class Tensor(RandMixin):
     the reference frames (`ref_frames`).
     """
     ref_frames = [x.contiguous() for x in ref_frames or []]
-    assert frame_pos.op is Ops.BIND, "frame_pos must be a bound Variable"
+    assert is_bound_var(frame_pos), "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
     fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.src[0], *[UOp.const(s, dtypes.int) for s in shape]), arg="encdec")
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))

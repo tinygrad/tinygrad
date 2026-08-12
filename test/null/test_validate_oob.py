@@ -1,5 +1,6 @@
 import unittest
-from tinygrad import dtypes, Variable
+from tinygrad import dtypes
+from tinygrad.uop.ops import param_variable as Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, UOp, AxisType

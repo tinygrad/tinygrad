@@ -3,7 +3,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group, param_variable
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
@@ -305,10 +305,10 @@ class TestVizTree(unittest.TestCase):
 
   def test_tree_view(self):
     with save_viz() as viz:
-      a = UOp.variable("a",0,10)
-      b = UOp.variable("b",0,10)
-      c = UOp.variable("c",0,10)
-      d = UOp.variable("d",0,10)
+      a = param_variable("a",0,10)
+      b = param_variable("b",0,10)
+      c = param_variable("c",0,10)
+      d = param_variable("d",0,10)
       sink = UOp.sink(a+b, c+d)
       def tree_rewrite(): return graph_rewrite(sink, root, name="root")
       tree_rewrite()

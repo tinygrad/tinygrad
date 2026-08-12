@@ -1,6 +1,6 @@
 import itertools
 from typing import Callable
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType, param_variable
 from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const, invalid_gate
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
@@ -137,7 +137,7 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
     for u in included:
       for s in u.src:
         if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.BUFFER}: continue
-        replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
+        replaces[s] = param_variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
     sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")
     if not no_range(sink): return None

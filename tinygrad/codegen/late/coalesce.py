@@ -1,7 +1,7 @@
 import itertools, functools
 from collections import defaultdict
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg, graph_rewrite
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg, graph_rewrite, param_variable
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate, sym
 from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv, is_image_shape
 from tinygrad.renderer import Renderer
@@ -26,7 +26,7 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
     # check if idx is out of bound when X is on the wrong side of the bound: X in [c+1, vmax] or [vmin, c-1]
     lo, hi = (c + 1, X.vmax) if is_upper_bound else (X.vmin, c - 1)
     if lo <= hi:
-      fake = UOp.variable(f"fake{i}", lo, hi, X.dtype)
+      fake = param_variable(f"fake{i}", lo, hi, X.dtype)
       subs = [{X: fake}]
       # idx may not have X itself, so also substitute a term of X: v -> fake - (X - v)
       terms = list(X.split_uop(Ops.ADD))
