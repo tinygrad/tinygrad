@@ -138,7 +138,11 @@ def forward_assembled_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
   if old_output.op not in {Ops.BUFFER, Ops.PARAM, Ops.MSTACK, Ops.MSELECT}: return None
   return output.after(*(s.substitute({old_output:output}) for s in src.src[1:]))
 
-earliest_rewrites = mop_cleanup+PatternMatcher([
+pm_forward_assembled_store = PatternMatcher([
+  (UPat(Ops.AFTER, src=(UPat.var("output"), UPat(Ops.STORE, src=(UPat.var("target"), UPat.var("src"))))), forward_assembled_store),
+])
+
+earliest_rewrites = mop_cleanup+pm_forward_assembled_store+PatternMatcher([
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
 
@@ -146,7 +150,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # resolve allreduce (must be bottom up)
-  (UPat(Ops.AFTER, src=(UPat.var("output"), UPat(Ops.STORE, src=(UPat.var("target"), UPat.var("src"))))), forward_assembled_store),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
 
   # split_reduceop
@@ -602,7 +605,7 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   source_state = input_src.base
   source_is_stored = source_state.op is Ops.AFTER and any(s.op is Ops.STORE for s in source_state.src[1:])
   if is_slice_copy and (existing_buf is not None or source_is_stored): return None
-  if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
+  if not is_slice_copy and not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
   input_src = input_src.flatten()
   if existing_buf is not None:
     # if the existing buffer is not a full buffer, we can't use it
@@ -624,6 +627,9 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
+  # pm_mops can create adjacent movement ops after their subtree was visited bottom-up.
+  tsink = graph_rewrite(tsink, mop_cleanup, name="movement cleanup")
+  tsink = graph_rewrite(tsink, pm_forward_assembled_store, bottom_up=True, name="forward assembled stores")
 
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 

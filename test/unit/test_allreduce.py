@@ -29,7 +29,7 @@ class TestRingAllReduce(unittest.TestCase):
       self.assertEqual(len(set(pairs)), N)
 
   def test_schedule_all2all(self):
-    for width, expected_sinks in ((400, 23), (4096, 18)):
+    for width, expected_sinks in ((400, 11), (4096, 6)):
       with self.subTest(width=width), Context(ALL2ALL=2):
         N = 4
         ds = tuple(f"CPU:{i}" for i in range(N))
@@ -38,7 +38,7 @@ class TestRingAllReduce(unittest.TestCase):
         copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
         sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
         self.assertEqual(len(copies), 24)
-        # source shards are staged once, then their physical slices feed SDMA directly
+        # the full input is staged once; its physical slices feed SDMA without per-chunk staging
         self.assertEqual(len(sinks), expected_sinks)
 
   def test_correct_all2all_direct_slices(self):

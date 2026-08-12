@@ -9,13 +9,12 @@ def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool]:
   return use_all2all, use_ring
 
 def _allreduce_view(buf:UOp, start:int, end:int) -> UOp:
-  base = buf.buf_uop.rtag(("allreduce_base",)).flatten()
+  base = buf.buf_uop.flatten().rtag(("allreduce_base",))
   return base.shrink(((start, end),)).rtag(("allreduce",))
 
 def _allreduce_chunk(buf:UOp, start:int, end:int, input_staged:bool) -> UOp:
-  # Input chunks remain ordinary semantic SHRINKs so COPY materialization preserves the existing reduce-scatter
-  # kernel graph. Only final-output chunks remain physical call-argument views for direct allgather.
-  chunks = [buf.mselect(i).buf_uop.flatten().shrink(((start, end),)) for i in range(len(buf.device))]
+  # Input chunks are physical views of the already staged allocation.
+  chunks = [_allreduce_view(buf.mselect(i), start, end) for i in range(len(buf.device))]
   if not input_staged: chunks = [chunk.after(buf) for chunk in chunks]
   return UOp.mstack(*chunks)
 
