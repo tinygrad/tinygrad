@@ -37,6 +37,7 @@ pm_fold_moved_after = PatternMatcher([
 
 # movement op on INDEX as a PatternMatcher
 def _mop_index(r:UOp, idx:UOp):
+  if r.op is Ops.SHRINK and r.tag == ("allreduce",): return None
   idxs = idx.src[1:]
   if len(idxs) == len(r.shape):
     return r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), dtype=idx.dtype, arg=idx.arg)
@@ -52,7 +53,7 @@ pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
   # move movement ops and INDEX after AFTER
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
-   lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
+   lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg, tag=r.tag)),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
 ])
 
@@ -125,13 +126,17 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
 def forward_assembled_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
-  """Retarget a complete set of disjoint slice writes to an already allocated output buffer."""
+  """Retarget a complete set of disjoint view writes to an already allocated output buffer."""
   while target.op is Ops.RESHAPE: target = target.src[0]
   while src.op in {Ops.RESHAPE, Ops.CONTIGUOUS, Ops.CAST}: src = src.src[0]
-  if (target is not output or src.op is not Ops.AFTER or src.src[0].base.op not in {Ops.BUFFER, Ops.PARAM}
-      or output.dtype != src.dtype or output.numel() != src.numel() or output.device != src.device): return None
-  if not any(s.op is Ops.AFTER and s.src[0].op is Ops.SLICE and s.src[0].tag == ("allreduce",) for s in src.src[1:]): return None
-  return output.after(*(s.substitute({src.src[0].base:output}) for s in src.src[1:]))
+  full_target = target is output or (target.base is output and target.contiguous_view_offset() == 0 and target.numel() == output.numel())
+  if (not full_target or src.op is not Ops.AFTER or output.dtype != src.dtype or output.numel() != src.numel()
+      or output.device != src.device): return None
+  if not any(s.op is Ops.AFTER and s.src[0].op is Ops.SHRINK and s.src[0].tag == ("allreduce",) for s in src.src[1:]):
+    return None
+  old_output = src.src[0].buf_uop
+  if old_output.op not in {Ops.BUFFER, Ops.PARAM, Ops.MSTACK, Ops.MSELECT}: return None
+  return output.after(*(s.substitute({old_output:output}) for s in src.src[1:]))
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve FUNCTION calls (inline the body)
@@ -157,7 +162,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # COPY transfers a contiguous range, so materialize a source that's resized (shrink/pad/expand) or reordered (permute/flip)
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),), name="c"),
-   lambda c,r: c.replace(src=(r.contiguous(),)) if resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None else None),
+   lambda c,r: c.replace(src=(r.contiguous(),)) if r.tag != ("allreduce",) and
+   (resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None) else None),
 
   # copy to same device is a no-op
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
@@ -301,12 +307,6 @@ def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:]: return None
   return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
 
-def normalize_slice_source(x:UOp) -> UOp|None:
-  # Rangeify can wrap a physical slice's buffer in INDEX. Keep the slice attached to the buffer itself so
-  # scheduling and runtime argument resolution retain the physical offset.
-  if x.tag != ("allreduce",) or x.src[0].op is not Ops.INDEX or x.src[1].op is not Ops.CONST: return None
-  return UOp(Ops.SLICE, x.dtype, (x.src[0].src[0], x.src[1]), x.arg, tag=x.tag)
-
 def after_all_invalid(after:UOp):
   buf = after.src[0].buf_uop
   # check all ranges are used (no expand), and same size (no pad and shrink)
@@ -315,7 +315,6 @@ def after_all_invalid(after:UOp):
     and resolve(cast(UOp, prod(r.src[0] for r in s.ended_ranges)).eq(buf.numel()), False) for s in after.src[1:])
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
-  (UPat(Ops.SLICE, name="x"), normalize_slice_source),
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
@@ -352,9 +351,8 @@ def no_indexing_calls(u:UOp):
       # TODO: we should add safety checks here for contiguous
       new_srcs.append(x.src[0])
     elif x.op is Ops.SHRINK:
-      # SHRINK with offset 0 is fine
-      # TODO: check offset
-      new_srcs.append(x.src[0])
+      # Physical allreduce views intentionally carry a nonzero call-argument offset.
+      new_srcs.append(x if x.tag == ("allreduce",) else x.src[0])
     else:
       # everything else we pass through
       new_srcs.append(x)
@@ -518,7 +516,7 @@ def find_bufs(x:UOp):
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
-  (UPat(Ops.SLICE, name="buf"), lambda ctx,buf: debuf(ctx, buf) if buf.tag == ("allreduce",) else None),
+  (UPat(Ops.SHRINK, name="buf"), lambda ctx,buf: debuf(ctx, buf) if buf.tag == ("allreduce",) else None),
   (UPat(Ops.PARAM, name="v"), lambda v:
    UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype, multiple_of=v.arg.multiple_of)
    if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
@@ -557,16 +555,15 @@ pm_add_param_range_tags = PatternMatcher([
 ])
 
 def copy_slice_src(x:UOp) -> tuple[UOp, UOp]|None:
-  """Recover a hardware slice and retain the state that produced it."""
+  """Recover a physical allreduce view and retain the state that produced it."""
   state = x
-  while x.op is Ops.AFTER: x = x.src[0]
-  if x.op is Ops.INDEX and x.src[0].op is Ops.SLICE: x = x.src[0]
-  if x.op is not Ops.SLICE or x.tag != ("allreduce",) or x.src[1].op is not Ops.CONST: return None
-  src = x.src[0].src[0] if x.src[0].op is Ops.INDEX else x.src[0]
-  return (x if src is x.src[0] else UOp(Ops.SLICE, x.dtype, (src, x.src[1]), x.arg, tag=x.tag)), state
+  while x.op in {Ops.AFTER, Ops.CONTIGUOUS}: x = x.src[0]
+  if x.op is Ops.INDEX and x.src[0].op is Ops.SHRINK and x.src[0].tag == ("allreduce",): x = x.src[0]
+  if x.op is not Ops.SHRINK or x.tag != ("allreduce",) or x.contiguous_view_offset() is None: return None
+  return x, state
 
 def split_copy_slice(x:UOp) -> UOp|None:
-  """Lower STORE(COPY(SLICE)) directly to a copy call with sliced source and destination arguments."""
+  """Lower STORE(COPY(view)) directly to a copy call with viewed source and destination arguments."""
   if any(r.arg[-1] is not AxisType.DEVICE for r in x.ranges): return None
   store = x.src[0] if x.op is Ops.END else x
   if store.op is not Ops.STORE or store.src[1].op is not Ops.COPY or (slice_src:=copy_slice_src(store.src[1].src[0])) is None: return None
@@ -596,11 +593,11 @@ split_kernels = PatternMatcher([
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   input_src = copy.src[0]
-  # A hardware-slice COPY already under STORE is ready for split_copy_slice. A standalone COPY still needs its
+  # A physical-view COPY already under STORE is ready for split_copy_slice. A standalone COPY still needs its
   # destination buffer; its generated STORE will then take the same direct SDMA lowering path.
-  is_slice_copy = ((input_src.op is Ops.SLICE and input_src.tag == ("allreduce",)) or
-                   (input_src.op is Ops.AFTER and input_src.src[0].op is Ops.SLICE and input_src.src[0].tag == ("allreduce",)))
-  # An AFTER(SLICE, STORE) is an already reduced allgather source. Preserve its COPY even while visiting the child
+  is_slice_copy = ((input_src.op is Ops.SHRINK and input_src.tag == ("allreduce",)) or
+                   (input_src.op is Ops.AFTER and input_src.src[0].op is Ops.SHRINK and input_src.src[0].tag == ("allreduce",)))
+  # An AFTER(view, STORE) is an already reduced allgather source. Preserve its COPY even while visiting the child
   # bottom-up, so the parent STORE can lower source and destination slices together instead of inserting a staging copy.
   source_is_stored = input_src.op is Ops.AFTER and any(s.op is Ops.STORE for s in input_src.src[1:])
   if is_slice_copy and (existing_buf is not None or source_is_stored): return None

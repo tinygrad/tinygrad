@@ -1,7 +1,6 @@
 import functools, itertools
 from tinygrad.helpers import all_int, all_same, prod, DEBUG, RING, ALL2ALL, getenv
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.dtype import dtypes
 
 # *** allreduce implementation ***
 def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool]:
@@ -9,11 +8,14 @@ def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool]:
   use_ring = not use_all2all and (RING >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   return use_all2all, use_ring
 
+def _allreduce_view(buf:UOp, start:int, end:int) -> UOp:
+  base = buf.buf_uop.rtag(("allreduce_base",)).flatten()
+  return base.shrink(((start, end),)).rtag(("allreduce",))
+
 def _allreduce_chunk(buf:UOp, start:int, end:int, input_staged:bool) -> UOp:
-  # Keep chunks as physical views so SDMA reads the stable allocation directly. Outside a precompiled function,
-  # retain the staging store as an explicit dependency; buf_uop alone carries the address but not its producer event.
-  chunks = [UOp(Ops.SLICE, buf.dtype, (buf.mselect(i).buf_uop, UOp.const(start, dtypes.weakint)), end-start,
-                tag=("allreduce",)) for i in range(len(buf.device))]
+  # Input chunks remain ordinary semantic SHRINKs so COPY materialization preserves the existing reduce-scatter
+  # kernel graph. Only final-output chunks remain physical call-argument views for direct allgather.
+  chunks = [buf.mselect(i).buf_uop.flatten().shrink(((start, end),)) for i in range(len(buf.device))]
   if not input_staged: chunks = [chunk.after(buf) for chunk in chunks]
   return UOp.mstack(*chunks)
 
@@ -54,7 +56,9 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   for i,(s,e) in enumerate(chunks):
     chunk = _allreduce_chunk(buf, s, e, input_staged)
     if use_all2all:
-      chunks_on_i = [chunk.mselect(j).copy_to_device(buf.device[i]) for j in range(ndev)]
+      # _allreduce_chunk is an MSTACK of concrete physical views. Select its children directly so the view
+      # remains the COPY argument instead of depending on a later MSELECT(MSTACK) simplification.
+      chunks_on_i = [chunk.src[j].copy_to_device(buf.device[i]) for j in range(ndev)]
       reduced_chunks.append(functools.reduce(lambda x,y: x.alu(op, y), chunks_on_i))
     else:
       reduced = chunk
@@ -68,8 +72,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   # a padded MSTACK and then running a full-size reassembly kernel on every device.
   if direct_stack:
     if output is None: output = UOp.empty(*shape, dtype=reduced_chunks[0].dtype, device=device)
-    states = [[UOp(Ops.SLICE, output.dtype, (output.mselect(j).buf_uop, UOp.const(s, dtypes.weakint)), e-s, tag=("allreduce",))
-               for s,e in chunks] for j in range(ndev)]
+    states = [[_allreduce_view(output.mselect(j), s, e) for s,e in chunks] for j in range(ndev)]
     for i,rc in enumerate(reduced_chunks):
       owner = i if use_all2all else (i-1) % ndev
       target = states[owner][i]

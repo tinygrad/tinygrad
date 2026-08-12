@@ -1,5 +1,4 @@
 import unittest
-from unittest.mock import MagicMock
 from tinygrad import Device
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import dtypes
@@ -11,36 +10,27 @@ class TestMetalGraph(unittest.TestCase):
     self.MetalGraph = MetalGraph
     self.dev = Device[Device.DEFAULT]
 
-  def metal_buf(self, offset):
-    buf = MagicMock()
-    if offset > 0:
-      buf.op = Ops.SLICE
-      src = MagicMock()
-      src.dtype = dtypes.uint8
-      buf.src = (src, UOp.const(offset))
-      buf.dtype = dtypes.uint8
-    else:
-      buf.op = Ops.BUFFER
-    buf.device = Device.DEFAULT
-    return buf
+  def metal_buf(self, offset, bitcast=False):
+    size = 4 if bitcast else 1
+    buf = UOp.new_buffer(Device.DEFAULT, offset+size, dtypes.uint8)
+    if offset: buf = buf[offset:offset+size]
+    return buf.bitcast(dtypes.float32) if bitcast else buf
 
-  def call(self, *bufs):
-    c = MagicMock()
-    c.src = (MagicMock(op=Ops.PROGRAM),) + tuple(bufs)
-    return c
+  def supports_uop(self, *bufs):
+    return self.MetalGraph.supports_uop([self.dev], UOp(Ops.PROGRAM, src=(UOp.sink(),)).call(*bufs))
 
   def test_supports_uop_normal_offset(self):
-    assert self.MetalGraph.supports_uop([self.dev], self.call(self.metal_buf(0), self.metal_buf(100), self.metal_buf(0xFFFFFFFF))) is True
+    assert self.supports_uop(self.metal_buf(0), self.metal_buf(100), self.metal_buf(0xFFFFFFFF)) is True
 
   def test_supports_uop_overflow_offset(self):
-    assert self.MetalGraph.supports_uop([self.dev], self.call(self.metal_buf(0), self.metal_buf(0x100000000))) is False
+    assert self.supports_uop(self.metal_buf(0), self.metal_buf(0x100000000)) is False
 
-  def test_supports_uop_nonmetal_buf(self):
-    # non-SLICE ops should not be checked for offset
-    buf = MagicMock()
-    buf.op = Ops.BUFFER
-    buf.device = Device.DEFAULT
-    self.MetalGraph.supports_uop([self.dev], self.call(buf))
+  def test_supports_uop_non_view_buf(self):
+    assert self.supports_uop(self.metal_buf(0)) is True
+
+  def test_supports_uop_bitcast(self):
+    assert self.supports_uop(self.metal_buf(0xFFFFFFFF, bitcast=True)) is True
+    assert self.supports_uop(self.metal_buf(0x100000000, bitcast=True)) is False
 
 if __name__ == "__main__":
   unittest.main()

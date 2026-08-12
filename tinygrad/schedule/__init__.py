@@ -1,6 +1,6 @@
 import time, inspect
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup
 
@@ -9,30 +9,32 @@ from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SC
 # unwrap VIEW/CAST/etc to find the actual data source (kernel output, buffer, or multi-device op)
 def _unwrap_src(s: UOp) -> UOp:
   while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.BIND} and \
-        not (s.op is Ops.SLICE and s.tag == ("allreduce",) and s.src[0].op is not Ops.INDEX): s = s.src[0]
+        not (s.op is Ops.SHRINK and s.tag == ("allreduce",)): s = s.src[0]
   return s
 
 # a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states, BIND is not a buffer dependency
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
-  if s.op is Ops.SLICE and s.tag == ("allreduce",): return _states(s.src[0])
+  if s.op is Ops.SHRINK and s.tag == ("allreduce",): return _states(s.src[0])
   if s.op is Ops.BIND: return []
   assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
 
+def _physical_view(s:UOp) -> UOp:
+  """Remove ordering wrappers from a movement view while preserving its address calculation."""
+  if s.op is Ops.AFTER: return _physical_view(s.src[0])
+  if s.op in GroupOp.Movement: return s.replace(src=(_physical_view(s.src[0]), *s.src[1:]))
+  return s
+
 def _slice_region(s:UOp) -> tuple[UOp, int, int]|None:
-  """Return the concrete byte interval accessed through nested hardware slices."""
-  offset, size = 0, None
-  while True:
-    s = _unwrap_src(s)
-    if s.op is Ops.AFTER: s = s.src[0]
-    elif s.op is Ops.SLICE and s.src[1].op is Ops.CONST:
-      offset += s.src[1].val * s.src[0].dtype.itemsize
-      if size is None: size = s.arg * s.dtype.itemsize
-      s = s.src[0]
-    else: break
-  return (s.buf_uop, offset, offset+size) if size is not None else None
+  """Return the concrete byte interval accessed through a tagged contiguous allreduce view."""
+  s = _unwrap_src(s)
+  if s.op is Ops.AFTER: s = s.src[0]
+  if s.op is not Ops.SHRINK or s.tag != ("allreduce",) or s.src[1].op is not Ops.CONST: return None
+  # SHRINK stores (start, length); the tagged views are always constructed on a flattened physical buffer.
+  start = s.src[1].val * s.dtype.itemsize
+  return _physical_view(s).src[0].buf_uop, start, start+s.nbytes()
 
 def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
   kernels, remaining = partition(after.src[1:], lambda s: s.op in {Ops.CALL, Ops.END})
@@ -44,7 +46,8 @@ def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
 def _call_buf_uop(s:UOp) -> UOp:
   """Resolve a call argument's storage, preserving a dependency-wrapped hardware slice as the actual view."""
   s = _unwrap_src(s)
-  if s.op is Ops.AFTER and s.src[0].op is Ops.SLICE and s.src[0].tag == ("allreduce",): return s.src[0]
+  if s.op is Ops.AFTER and s.src[0].op is Ops.SHRINK and s.src[0].tag == ("allreduce",): return _physical_view(s.src[0])
+  if s.op is Ops.SHRINK and s.tag == ("allreduce",): return _physical_view(s)
   return s.buf_uop
 
 def create_schedule(sched_sink:UOp) -> UOp:

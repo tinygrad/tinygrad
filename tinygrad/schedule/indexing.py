@@ -23,7 +23,7 @@ class IndexingContext:
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(0)
 
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER, Ops.SLICE,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER,
                       Ops.CONST, Ops.BIND, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
                       Ops.LOAD, Ops.CALL, Ops.FUNCTION}
 
@@ -34,8 +34,7 @@ def realize_srcs(ctx:IndexingContext, rb:UOp) -> None:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx.realize_map[s] = None
 
 def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
-  # don't realize SLICE when it's the direct source of STORE+AFTER — the target buffer is the output
-  if src.op is Ops.SLICE and src in ctx.realize_map \
+  if src.op is Ops.SHRINK and src.tag == ("allreduce",) and src in ctx.realize_map \
      and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
     del ctx.realize_map[src]
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
@@ -74,7 +73,7 @@ def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
 # TODO: srcs contain (real data srcs, something else, ranges) and the boundary is confusing. see range_start
 def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
   if op in {Ops.PARAM, Ops.BUFFER, Ops.RANGE, Ops.SPECIAL, Ops.BIND}: return ()
-  if op in GroupOp.Movement|{Ops.INDEX, Ops.SLICE, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END}: return src[:1]
+  if op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END}: return src[:1]
   return src
 
 def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
@@ -84,7 +83,7 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   for i, s in enumerate(x.src):
     new_src = s
     src_rngs = broadcast_rngs(x, s, ctx.range_map[x][0]) if x in ctx.range_map else ()
-    if s.op in {Ops.PARAM, Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
+    if s.op in {Ops.PARAM, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.AFTER} or (s.op is Ops.SHRINK and s.tag == ("allreduce",)):
       if x in ctx.range_map and i < data_src_count: new_src = new_src.index(*src_rngs)
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
@@ -105,7 +104,7 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   return new_srcs
 
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
-  if x.op in {Ops.STAGE, Ops.INDEX}: return None
+  if x.op in {Ops.STAGE, Ops.INDEX} or (x.op is Ops.SHRINK and x.tag == ("allreduce",)): return None
   return x.replace(src=tuple(create_bufferize_and_index_srcs(ctx, x)))
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
@@ -201,7 +200,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     tsink_toposort = tsink.toposort(gate_kernel_sink)
     consumer_map: dict[UOp, dict[UOp, None]] = {x:{} for x in tsink_toposort}
     for c in tsink_toposort:
-      for x in data_srcs(c.op, c.src):
+      for x in (() if c.op is Ops.SHRINK and c.tag == ("allreduce",) else data_srcs(c.op, c.src)):
         if x in consumer_map: consumer_map[x][c] = None
 
   # explicit rangeify
@@ -215,6 +214,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     # treat MSTACK/MSELECT like SINK
     if x.op in {Ops.MSTACK, Ops.MSELECT}: continue
+
+    if x.op is Ops.SHRINK and x.tag == ("allreduce",): continue
 
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
     # ranges the consumers iterate that this node broadcasts over
