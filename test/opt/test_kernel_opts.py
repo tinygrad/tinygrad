@@ -1,9 +1,11 @@
 import unittest
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
+from tinygrad.device import Buffer
+from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo, ParamArg
 
 # TODO: write a clean version of this
-from test.backend.test_linearizer import helper_linearizer_opt
+from test.backend.test_linearizer import _helper_linearizer_opt_ast, helper_linearizer_opt
 
 class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -238,6 +240,27 @@ class TestKernelOpts(unittest.TestCase):
     # having unsafe ops after sum is fine
     helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])
     helper_linearizer_opt(a.sum(0).exp(), [[Opt(OptOps.PADTO, 1, 32)],])
+
+  def test_padto_group_full_unroll_sum(self):
+    c1 = UOp(Ops.PARAM, dtypes.float, (UOp.const(28672, dtypes.weakint),),
+             ParamArg(0, dtypes.float, device=('AMD', 'AMD:1', 'AMD:2', 'AMD:3', 'AMD:4', 'AMD:5', 'AMD:6', 'AMD:7')))
+    c2 = UOp.range(28672, 2, AxisType.GLOBAL)
+    c5 = UOp(Ops.PARAM, dtypes.bfloat16, (UOp.const(234881024, dtypes.weakint),),
+             ParamArg(1, dtypes.bfloat16, device=('AMD', 'AMD:1', 'AMD:2', 'AMD:3', 'AMD:4', 'AMD:5', 'AMD:6', 'AMD:7')))
+    c8 = UOp.range(4096, 1, AxisType.REDUCE)
+    c11 = UOp.range(2, 0, AxisType.REDUCE)
+    c18 = (c5.index((c2*UOp.const(4096, dtypes.weakint)+c8+c11*UOp.const(117440512, dtypes.weakint))) * \
+           UOp.const(0.5, dtypes.bfloat16)).cast(dtypes.float)
+    c19 = c18*c18
+    c20 = c19.reduce(c11, c8, arg=(Ops.ADD, 0))
+    c22 = c1.index(c2).store(c20).end(c2)
+    ast = c22.sink(arg=KernelInfo(name='test', axis_types=(), dont_use_locals=False, applied_opts=(), opts_to_apply=None,
+                                  estimates=None, beam=3))
+    # reduces uninitialized padded lanes and returns all NaNs.
+    opts_to_apply = [Opt(OptOps.GROUPTOP, 1, 256), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.UNROLL, 2, 0), Opt(OptOps.UPCAST, 0, 7)]
+    inp = Tensor.ones(234881024, dtype=dtypes.bfloat16).realize()
+    out = Buffer(Device.DEFAULT, 28672, dtypes.float).allocate()
+    _helper_linearizer_opt_ast(ast, [out, inp.uop.base.buffer], [opts_to_apply], check_default_opt=False)
 
   def test_padto_sum(self):
     N = 18
