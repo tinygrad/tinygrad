@@ -159,8 +159,6 @@ jobs:
     name: Windows (DEV=${{ matrix.dev }})
     runs-on: windows-2025
     timeout-minutes: 15
-    env:
-      PYTHONFAULTHANDLER: 1 # native crashes print the faulting thread
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -173,48 +171,11 @@ jobs:
       - name: Set env
         shell: bash
         run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
-      - name: Check Device.DEFAULT
+      - name: Check Device.DEFAULT and print some source
         shell: bash
-        run: python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
-      - name: Probe A - build the device, never start a worker
-        shell: bash
-        continue-on-error: true
         run: |
-          python -c "
-          import tinygrad.runtime.ops_cpu as m
-          m.CPUDevice.finalize = lambda self: None
-          from tinygrad import Device
-          Device['CPU']; print('device', flush=True)"
-      - name: Probe B - start the worker, push nothing
-        shell: bash
-        continue-on-error: true
-        run: |
-          python -c "
-          from tinygrad import Device
-          print('worker', Device['CPU'].submitter.pos, flush=True)"
-      - name: Probe C - run a kernel, then skip interpreter shutdown
-        shell: bash
-        continue-on-error: true
-        run: |
-          DEBUG=4 python -c "
-          import os
-          from tinygrad import Device, Tensor
-          d = Device['CPU']; print('device', flush=True)
-          d.synchronize(); print('empty sync', flush=True)
-          print('add', (Tensor([1.0, 2.0], device='CPU') + 1).tolist(), flush=True)
-          os._exit(0)"
-      - name: Probe D - run a kernel, then shut down normally
-        shell: bash
-        continue-on-error: true
-        run: |
-          DEBUG=4 python -c "
-          from tinygrad import Device, Tensor
-          d = Device['CPU']; print('device', flush=True)
-          d.synchronize(); print('empty sync', flush=True)
-          print('add', (Tensor([1.0, 2.0], device='CPU') + 1).tolist(), flush=True)"
-      - name: Print some source
-        shell: bash
-        run: DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+          python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
+          DEBUG=4 python test/test_tiny.py TestTiny.test_plus
       - name: Run test_tiny
         shell: bash
         run: python -m pytest -n=auto test/test_tiny.py --durations=20

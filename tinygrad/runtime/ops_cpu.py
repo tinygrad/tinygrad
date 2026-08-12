@@ -185,7 +185,7 @@ class CPUProgram(Program['CPUDevice']):
       self.dev.push([self.addr, *args])
 
     if not wait: return None
-    self.dev.push([ts[0], ts[1] + 8, ts[2]])
+    self.dev.push([ts[0], ts[1] + 8, *ts[2:]]) # windows has no clock_gettime arg
     self.dev.synchronize(timeout=timeout)
     return (self.dev.prof_view[1] - self.dev.prof_view[0]) / 1e9
 
