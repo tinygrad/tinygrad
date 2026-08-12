@@ -495,14 +495,14 @@ def fetch_fw(path:str, name:str, sha256:str) -> bytes:
 
 # *** Exec helpers
 
-def system(cmd:str, **kwargs) -> str:
+def system(cmd:str, decode=True, **kwargs) -> str:
   import subprocess
   st = time.perf_counter()
-  try: ret = subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT, **kwargs).decode().strip()
+  try: ret = subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT, **kwargs)
   except subprocess.CalledProcessError as e:
     raise RuntimeError(f"system: '{cmd}' failed with exit code {e.returncode}\n{(e.output or b'').decode().strip()}") from e
   if DEBUG >= 1: print(f"system: '{cmd}' returned {len(ret)} bytes in {(time.perf_counter() - st)*1e3:.2f} ms")
-  return ret
+  return ret.decode().strip() if decode else ret
 
 def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:

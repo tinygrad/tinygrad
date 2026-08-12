@@ -637,7 +637,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [ir3, nak]
+        backend: [ir3, nak, qcomcl]
     name: Compile-only (${{ matrix.backend }})
     runs-on: *linux
     timeout-minutes: 15
@@ -651,7 +651,7 @@ jobs:
           deps: "testing_unit mesa"
       - name: Set env
         shell: bash
-        run: printf "NULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'DEV=NULL:IR3:a630' || matrix.backend == 'nak' && 'DEV=NULL:NAK:sm_120' }}" >> $GITHUB_ENV
+        run: printf "NULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'DEV=NULL:IR3:a630' || matrix.backend == 'qcomcl' && 'DEV=NULL:QCOMCL:a630' || matrix.backend == 'nak' && 'DEV=NULL:NAK:sm_120' }}" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |
@@ -659,11 +659,11 @@ jobs:
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
       - name: Run test_ops (IMAGE)
-        if: matrix.backend == 'ir3'
+        if: matrix.backend == 'ir3' || matrix.backend == 'qcomcl'
         shell: bash
         env:
           IMAGE: 1
-          DEV: "NULL:IR3:a630,IMAGE_PITCH_ALIGNMENT=64"
+          DEV: "NULL:${{ matrix.backend == 'ir3' && 'IR3' || 'QCOMCL' }}:a630,IMAGE_PITCH_ALIGNMENT=64"
         run: |
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_gemm | grep image_load
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
