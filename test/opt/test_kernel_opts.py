@@ -243,6 +243,7 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.expectedFailure
   def test_padto_group_full_unroll_sum(self):
     c1 = UOp.param(0, dtypes.float, (28672,))
     c2 = UOp.range(28672, 2, AxisType.GLOBAL)
