@@ -49,7 +49,7 @@ class HCQGraph(MultiGraphRunner):
 
     self.comp_queues: dict[HCQCompiled, HWQueue] = {dev: unwrap(dev.hw_compute_queue_t)() for dev in self.devices}
     self.copy_queues: dict[tuple[HCQCompiled, int], HWQueue] = {} # lazy allocation, keyed by (device, queue_idx)
-    self.rdma_queues: dict[tuple[HCQCompiled, HCQCompiled], RDMACopyQueue] = {} # lazy allocation, keyed by device pair
+    self.rdma_queues: dict[tuple[HCQCompiled, HCQCompiled], "RDMACopyQueue"] = {} # lazy allocation, keyed by device pair
     self.num_copy_queues: int = getenv("HCQ_NUM_SDMA", min(len(self.devices), 8) if ALL2ALL >= 1 else 1)
     self.num_rdma_ops: dict[tuple[HCQCompiled, HCQCompiled], int] = collections.defaultdict(int)
 

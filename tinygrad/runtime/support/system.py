@@ -1,5 +1,6 @@
 from __future__ import annotations
-import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum, atexit
+import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, itertools, struct, socket
+import subprocess, time, enum, atexit
 from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system, _ensure_downloads_dir, DEBUG, flatten, pluralize
 from tinygrad.runtime.autogen import libc, pci, vfio
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
