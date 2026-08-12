@@ -637,8 +637,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [ir3, nak, qcomcl]
-    name: Compile-only (${{ matrix.backend }})
+        dev:
+          - 'NULL:IR3:a630'
+          - 'NULL:QCOMCL:a630'
+          - 'NULL:NAK:sm_120'
+    name: Compile-only (DEV=${{ matrix.dev }})
     runs-on: *linux
     timeout-minutes: 15
     steps:
@@ -649,21 +652,26 @@ jobs:
         with:
           key: compile-${{ matrix.backend }}
           deps: "testing_unit mesa"
-      - name: Set env
-        shell: bash
-        run: printf "NULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'DEV=NULL:IR3:a630' || matrix.backend == 'qcomcl' && 'DEV=NULL:QCOMCL:a630' || matrix.backend == 'nak' && 'DEV=NULL:NAK:sm_120' }}" >> $GITHUB_ENV
+          qemu: contains(matrix.dev, 'QCOMCL')
       - name: Run test_ops
         shell: bash
+        env:
+          NULL_ALLOW_COPYOUT: 1
+          DEV: ${{ matrix.dev }}
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
       - name: Run test_ops (IMAGE)
-        if: matrix.backend == 'ir3' || matrix.backend == 'qcomcl'
+        env:
+          NULL_ALLOW_COPYOUT: 1
+          DEV: ${{ matrix.dev }}
+        if: contains(matrix.dev, 'a630')
         shell: bash
         env:
           IMAGE: 1
-          DEV: "NULL:${{ matrix.backend == 'ir3' && 'IR3' || 'QCOMCL' }}:a630,IMAGE_PITCH_ALIGNMENT=64"
+          NULL_ALLOW_COPYOUT: 1
+          DEV: "${{ matrix.dev }},IMAGE_PITCH_ALIGNMENT=64"
         run: |
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_gemm | grep image_load
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
