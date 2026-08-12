@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.runtime.support.am.amdev import AMDev
 
 if __name__ == "__main__":
-  gpus = System.pci_scan_bus(0x1002, [(0xffff, [0x74a1, 0x75a0])])
+  gpus = System.pci_scan_bus(0x1002, [(0xffff, [0x74a1, 0x75a0, 0x75b0])])
   for gpu in gpus:
     drv_path = f"/sys/bus/pci/devices/{gpu}/driver"
     if FileIOInterface.exists(drv_path) and os.path.basename(os.readlink(drv_path)) == "amdgpu":

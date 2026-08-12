@@ -173,14 +173,16 @@ class MemoryManager:
   va_allocator: ClassVar[TLSFAllocator|None] = None
 
   def __init__(self, dev, vram_size:int, boot_size:int, pt_t, va_bits:int, va_shifts:list[int], va_base:int,
-               palloc_ranges:list[tuple[int, int]], first_lv:int=0, reserve_ptable=False):
+               palloc_ranges:list[tuple[int, int]], first_lv:int=0, reserve_ptable=False, paddr_base:int=0):
     self.dev, self.vram_size, self.va_shifts, self.va_base, lvl_msb = dev, vram_size, va_shifts, va_base, va_shifts + [va_bits + 1]
     self.pte_covers, self.pte_cnt = [1 << x for x in va_shifts][::-1], [1 << (lvl_msb[i+1] - lvl_msb[i]) for i in range(len(lvl_msb) - 1)][::-1]
     self.pt_t, self.palloc_ranges, self.level_cnt, self.va_bits, self.reserve_ptable = pt_t, palloc_ranges, len(va_shifts), va_bits, reserve_ptable
 
-    self.boot_allocator = TLSFAllocator(boot_size, base=0)
-    self.ptable_allocator = TLSFAllocator(round_up(vram_size // 512, 1 << 20) if self.reserve_ptable else 0, base=self.boot_allocator.size)
-    self.pa_allocator = TLSFAllocator(vram_size - (off_sz:=self.boot_allocator.size + self.ptable_allocator.size), base=off_sz)
+    self.boot_allocator = TLSFAllocator(boot_size, base=paddr_base)
+    self.ptable_allocator = TLSFAllocator(round_up(vram_size // 512, 1 << 20) if self.reserve_ptable else 0,
+                                          base=paddr_base + self.boot_allocator.size)
+    off_sz = paddr_base + self.boot_allocator.size + self.ptable_allocator.size
+    self.pa_allocator = TLSFAllocator(vram_size - off_sz, base=off_sz)
     self.root_page_table = pt_t(self.dev, self.palloc(0x1000, zero=not self.dev.smi_dev, boot=True), lv=first_lv)
 
   def _frag_size(self, va, sz, must_cover=True):
