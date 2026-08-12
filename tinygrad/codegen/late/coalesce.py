@@ -139,7 +139,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     elif ctx.target.device == "AMD":
       must_divide = False
       lengths = [4,2]
-      if buf.dtype == dtypes.half: lengths.extend(8,6)
+      if buf.dtype == dtypes.half: lengths.extend([8,6])
       elif buf.dtype.itemsize == 4: lengths.append(3)
     elif ctx is not None and ctx.supports_float4:
       # TODO: a better way to get this than ctx
