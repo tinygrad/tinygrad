@@ -652,7 +652,7 @@ jobs:
         with:
           key: compile-${{ matrix.backend }}
           deps: "testing_unit mesa"
-          qemu: contains(matrix.dev, 'QCOMCL')
+          qemu: ${{ contains(matrix.dev, 'QCOMCL') }}
       - name: Run test_ops
         shell: bash
         env:
