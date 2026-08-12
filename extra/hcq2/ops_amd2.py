@@ -297,6 +297,8 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 
   def _do_map(self, buf:HCQ2Buffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
+  def _do_unmap(self, buf:HCQ2Buffer): self.dev.iface.unmap(buf)
+
 @dataclass
 class AMDQueueDesc:
   ring: Buffer; read_ptr: Buffer; write_ptr: Buffer; doorbell: Buffer; put_value: Buffer  # noqa: E702
@@ -388,15 +390,24 @@ class KFDIface:
     return hcqbuf
 
   def free(self, mem):
+    self._unmap(mem)
+    if mem.va_addr: FileIOInterface.munmap(mem.va_addr, mem.size)
+    kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
+
+  def unmap(self, mem):
+    self._unmap(mem)
+    if getattr(mem, '_owns_kfd_handle', False): kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
+
+  def _unmap(self, mem):
     gpus = (ctypes.c_int32 * 1)(self.gpu_id)
     stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(gpus), n_devices=1)
     assert stm.n_success == 1
-    if mem.owner == self.dev:
-      if mem.va_addr: FileIOInterface.munmap(mem.va_addr, mem.size)
-      kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
 
   def map(self, mem):
-    if mem.owner is not None and mem.owner._is_cpu(): return self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
+    if mem.owner is not None and mem.owner._is_cpu():
+      mapped = self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
+      mapped._owns_kfd_handle = True
+      return mapped
 
     c_gpus = (ctypes.c_int32 * 1)(self.gpu_id)
     stm = kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=1)
@@ -468,6 +479,7 @@ class PCIIface(PCIIfaceBase):
 
   def require_profile_mode(self): return True
   def is_wgp_active(self, xcc, se, sa, wgp) -> bool: return True # TODO: account for WGP disablement on some asics.
+  def unmap(self, mem): self.free(mem)
 
   def _compute_props(self):
     self.ip_versions = self.dev_impl.ip_ver

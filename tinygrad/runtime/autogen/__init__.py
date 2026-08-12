@@ -1,4 +1,4 @@
-import glob, importlib, os, pathlib, shutil, subprocess, tarfile, tempfile
+import glob, importlib, os, pathlib, subprocess
 from tinygrad.helpers import fetch, flatten, system, getenv
 
 root = (here:=pathlib.Path(__file__).parent).parents[2]
@@ -31,6 +31,7 @@ def load(name, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists() or getenv('REGEN'):
     files, kwargs['args'] = files() if callable(files) else files, args() if callable(args:=kwargs.get('args', [])) else args
     if (srcs:=kwargs.pop('srcs', None)):
+      import tempfile, tarfile
       srcpath = (td:=tempfile.TemporaryDirectory(f"autogen-src-{name.replace('/','-')}")).name + "/"
       for src in (srcs if isinstance(srcs, list) else [srcs]):
         if 'tar' in src:
@@ -157,7 +158,7 @@ def __getattr__(nm):
           *[f"python3 src/compiler/nir/nir_{s}_h.py --outdir gen" for s in ["intrinsics", "intrinsics_indices"]]]), cwd=path, shell=True, check=True),
   srcs="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
   dll=f"'tinymesa_cpu' if DEV.renderer == 'LVP' else 'tinymesa', {tinymesa_path}, emsg='pip install tinymesa==25.2.7.2'",
-  prolog=["from tinygrad.helpers import DEV", "import gzip, base64, platform, sysconfig, os"],
+  prolog=["from tinygrad.helpers import DEV", "import gzip, base64, sysconfig, os"],
   epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang":
       return load("libclang",

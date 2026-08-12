@@ -45,8 +45,7 @@ axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.THREA
 axis_to_pos = {AxisType.DEVICE: -2, AxisType.WEAK: -1, AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1,
                AxisType.LOCAL: 2, AxisType.UPCAST: 3, AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
-range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.FUNCTION: 1,
-               Ops.SLICE: 2, Ops.LINEAR: 0}
+range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.FUNCTION: 1, Ops.LINEAR: 0}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op])
@@ -171,9 +170,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return arg.dtype
     case Ops.BINARY:
       return dtypes.uint8
-    case Ops.SLICE:
-      # TODO: slice just shouldn't exist
-      return None
     case Ops.CAST | Ops.BITCAST:
       assert isinstance(arg, DType), f"CAST/BITCAST arg must be DType, got {arg}"
       return arg
@@ -221,7 +217,7 @@ class UOpMetaClass(type):
     return created
 
 # some uops map to other stuff
-buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER/SLICE uops to their device Buffers
+buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER/view uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
@@ -386,10 +382,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.BUFFER:
         if len(self.src): return self.src[0].as_shape
         return ()
-      case Ops.SLICE:
-        # HACK: SLICE is used inside kernels, so we set the shape to () if it's on an INDEX
-        if self.src[0].op is Ops.INDEX: return ()
-        return (self.arg,)
       case Ops.CUSTOM | Ops.CUSTOMI:
         if self.dtype is dtypes.void: return None
         input_shapes = [x._shape for x in self.src if x._shape is not None]
@@ -822,7 +814,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   unique_num = itertools.count(0)
 
   def getaddr(self, device=None) -> UOp:
-    if self.without_after.op not in {Ops.BUFFER, Ops.SLICE, Ops.SHRINK, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM}: return self
+    if self.without_after.op not in {Ops.BUFFER, Ops.SHRINK, Ops.BITCAST, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM}: return self
     return UOp(Ops.GETADDR, src=(self,), arg=device or to_tuple(self.device)[0])
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
@@ -924,7 +916,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
-    return self.op in {Ops.BUFFER, Ops.SLICE, Ops.PARAM}
+    return self.op in {Ops.BUFFER, Ops.PARAM}
 
   def _base_buffer_is_realized(self) -> bool:
     """Walk through AFTER chain to find if the underlying buffer is realized (has allocated memory)."""
@@ -937,25 +929,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base or self.op is Ops.BITCAST:
+      if (cret:=buffers.get(self)) is not None: return cret
       if (cv := self.contiguous_view()) is None: raise RuntimeError(f"non-contiguous view is not supported for {self.device} buffer")
       buf, offset = (b:=cv[0]).base.buffer, cv[1]
       if isinstance(buf, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
         mbuf.bufs = [x.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize) for x in buf.bufs]
-        return mbuf
-      return buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
-    if self.op is Ops.SLICE:
-      if (cret:=buffers.get(self)) is not None: return cret
-      buf = self.src[0].buffer
-      offset = self.src[1].val
-      if isinstance(buf, MultiBuffer):
-        mbuf = MultiBuffer.__new__(MultiBuffer)
-        mbuf.bufs = [b.view(self.arg, self.dtype, offset * self.src[0].dtype.itemsize) for b in buf.bufs]
         buffers[self] = mbuf
         return mbuf
-      assert isinstance(buf, Buffer), "must be a Buffer for SLICE"
-      buffers[self] = bv = buf.view(self.arg, self.dtype, offset * self.src[0].dtype.itemsize)
-      return bv
+      buffers[self] = buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
+      return buffers[self]
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)
@@ -1181,7 +1164,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)
 
   # opaque bodies stay as Ops.CALL; value-producing bodies become Ops.FUNCTION (wrapped in TUPLE)
-  _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.SLICE, Ops.CUSTOM_FUNCTION}
+  _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}
   def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
     if ret_dtype is not None: return UOp(Ops.CALL, ret_dtype, src=(self,)+srcs)
