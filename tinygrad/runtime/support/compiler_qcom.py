@@ -10,18 +10,14 @@ def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 class QCOMCompiler(Compiler):
   def __init__(self, arch:str):
     assert arch.split(',')[0] == "a630", "only a630 supported"
-    self.arch, self.chip_id = arch, 0x6030001
-    if platform.machine() == "aarch64": self.llvm_inst = llvm_qcom.cl_compiler_create_llvm_instance()
-    else:
-      tg, lib = pathlib.Path(__file__).parent.parent.parent, fetch("https://github.com/sirhcm/tinydreno/raw/refs/heads/master/libllvm-qcom.so")
-      self.compiler_process = subprocess.Popen((f"docker run --rm -i --platform linux/aarch64 -v {tg}:/tinygrad -v {lib}:/lib/libllvm-qcom.so "
-                                                f"-e PYTHONPATH=/ python:3.12-slim python /tinygrad/runtime/support/compiler_qcom.py {arch}").split(),
-                                               stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
+    if platform.machine() == "aarch64": self.chip_id, self.llvm_inst = 0x6030001, llvm_qcom.cl_compiler_create_llvm_instance()
+    else: self.compiler_process = subprocess.Popen(
+      (f"docker run --rm -i --platform linux/aarch64 -v {pathlib.Path(__file__).parent.parent.parent}:/tinygrad -v "
+       f"{fetch('https://github.com/sirhcm/tinydreno/raw/refs/heads/master/libllvm-qcom.so')}:/lib/libllvm-qcom.so -e PYTHONPATH=/ python:3.12-slim "
+       f"python /tinygrad/runtime/support/compiler_qcom.py {arch}").split(), stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
     super().__init__(f"compile_qcomcl_{arch}")
 
-  def __del__(self):
-    if platform.machine() == "aarch64": llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst)
-    else: self.compiler_process.kill()
+  def __del__(self): llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst) if platform.machine() == "aarch64" else self.compiler_process.kill()
 
   def __reduce__(self): return QCOMCompiler, (self.arch,)
 
@@ -50,7 +46,6 @@ class QCOMCompiler(Compiler):
   def disassemble(self, lib: bytes): disas_adreno(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)], self.chip_id)
 
 if __name__ == "__main__":
-  assert platform.machine() == "aarch64"
   compiler = QCOMCompiler(sys.argv[1])
   while (amt:=sys.stdin.buffer.read(4)):
     try: lib = compiler.compile(sys.stdin.read(struct.unpack("I", amt)[0]))
