@@ -1,3 +1,4 @@
+import subprocess
 from tinygrad.device import Compiler
 from tinygrad.helpers import getenv, capstone_flatdump
 from tinygrad.runtime.support.elf import jit_loader
@@ -17,7 +18,6 @@ class ClangCompiler(Compiler):
 
   def compile_to_obj(self, src:str) -> bytes:
     """Compile C source to ELF object file (before linking)."""
-    import subprocess
     # -fno-math-errno is required for __builtin_sqrt to become an instruction instead of a function call
     return subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib',
                                     '-fno-ident', f'--target={self.arch}-none-unknown-elf', *self.args, '-', '-o', '-'], input=src.encode('utf-8'))
