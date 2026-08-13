@@ -12,6 +12,6 @@ def all_to_all(*srcs:Tensor): return Tensor.realize(*(src.to(dst) for i,src in e
 if __name__ == "__main__":
   with Context(ALL2ALL=1, JIT_BATCH_SIZE=0):
     for i in range(-WARMUP, ITERS):
-      with Timing("ALL2ALL ", lambda ns: f"{SZ*GPUS*(GPUS-1)*DEPTH/ns:.2f} GB/s", enabled=i>=0):
+      with Timing("ALL2ALL ", lambda ns: f" {SZ*GPUS*(GPUS-1)*DEPTH/ns:.2f} GB/s", enabled=i>=0):
         all_to_all(*bufs)
         for dev in devs: Device[dev].synchronize()
