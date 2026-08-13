@@ -79,11 +79,11 @@ lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop 
 base_rewrite = PatternMatcher([
   # register index
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), lambda ctx,buf,idx,x:
-   f"  {ctx[x]} = extractelement {ldt(buf.dtype, buf.max_numel())} {ctx[buf]}, i32 {idx.val}" if buf.addrspace == AddrSpace.ALU else None),
+   f"{ctx[x]} = extractelement {ldt(buf.dtype, buf.max_numel())} {ctx[buf]}, i32 {idx.val}" if buf.addrspace == AddrSpace.ALU else None),
 
   # memory load/store
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.GETTUPLE, Ops.AFTER)),), allow_any_len=True, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
+   f"{ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
 
   # load/store
   (UPat.var('idx').load(name="x", allow_any_len=True), lambda ctx,x,idx:
@@ -208,7 +208,7 @@ class LLVMRenderer(Renderer):
         l: list[str]|str|None = self.string_rewrite.rewrite(u, ctx=self)
         if l is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         else: block.extend([l] if isinstance(l, str) else l)
-    
+
     return tuple(local_args), "\n".join(self._render_block(b, sched) for b,sched in blocks.items())
 
 class CPULLVMRenderer(LLVMRenderer):

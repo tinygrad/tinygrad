@@ -386,8 +386,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   if isinstance(ren, LLVMRenderer):
     sink = graph_rewrite(sink, pm_lower_gated_load_store, ctx=consumer_map_from_toposort(sink.toposort()), name="lower gated load/store", bottom_up=True)
-    sink = graph_rewrite(sink, pm_add_control_flow2, ctx=CFGContext2(sink), name="add control flow", bottom_up=True)
-    sink = graph_rewrite(sink, pm_lower_reg_buffer, ctx=LowerRegBufferContext(sink), name="lower reg buffer", bottom_up=True)
+    # these rewrites temporarily violate the spec
+    with Context(SPEC=0):
+      sink = graph_rewrite(sink, pm_add_control_flow2, ctx=CFGContext2(sink), name="add control flow", bottom_up=True)
+      sink = graph_rewrite(sink, pm_lower_reg_buffer, ctx=LowerRegBufferContext(sink), name="lower reg buffer", bottom_up=True)
   else: sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")

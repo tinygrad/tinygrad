@@ -21,17 +21,18 @@ def lower_gated_load(ctx:dict[UOp, dict[UOp, None]], load:UOp, cond:UOp):
   phi = UOp(Ops.GETTUPLE, load.dtype, (merge,), arg=next(i for i,l in enumerate(gated_loads) if l is load))
   return phi
 
-def lower_gated_store(store:UOp, addr:UOp, val:UOp, cond:UOp):
+def lower_gated_store(ctx:dict[UOp, dict[UOp, None]], cond:UOp):
   branch = UOp(Ops.IF, dtypes.void, (cond,))
-  store = store.replace(src=(addr, val, branch))
-  if_then = UOp(Ops.THEN, dtypes.void, src=(branch, store))
+  gated_stores = [x for x in ctx[cond] if x.op is Ops.STORE and len(x.src) == 3 and x.src[2] is cond]
+  in_if_then = tuple(x.replace(src=x.src[:2] + (branch,)) for x in gated_stores)
+  if_then = UOp(Ops.THEN, dtypes.void, src=(branch,) + in_if_then)
   if_else = UOp(Ops.ELSE, dtypes.void, src=(branch,))
   merge = UOp(Ops.ENDIF, dtypes.void, src=(if_then, if_else))
   return merge
 
 pm_lower_gated_load_store = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK)).load(UPat(), UPat.var("cond", dtypes.bool), name="load"), lower_gated_load),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("cond", dtypes.bool), name="store"), lower_gated_store),
+  (UPat((Ops.INDEX, Ops.SHRINK)).store(UPat(), UPat.var("cond", dtypes.bool)), lower_gated_store),
 ])
 
 # there are 3 relationships between ranges:
@@ -70,18 +71,30 @@ class CFGContext2:
       for x,y in zip(order, order[1:] + [k]): self.idom[y if y is k else _entry(y)] = x
 
 def lower_range(ctx:CFGContext2, x:UOp) -> UOp|None:
-  if x not in ctx.idom: return None
-  it = UOp(Ops.CONST, dtypes.int32, (), 0)
-  rng = UOp(Ops.RANGE, dtypes.void, (ctx.idom[x], it), x.arg)
-  return rng
+  idom = ctx.idom.get(x)
+  if idom is None: return None
+  arg = UOp(Ops.CONST, dtypes.int32, (), 0)
+  # if the loop might not run at all we must gate it
+  if x.src[0].vmin < 1:
+    cond = UOp(Ops.CMPLT, dtypes.bool, (arg, x.src[0]))
+    gate = UOp(Ops.IF, dtypes.void, (idom, cond))
+    idom = UOp(Ops.THEN, dtypes.void, (gate,))
+  return UOp(Ops.RANGE, dtypes.void, (idom, arg), x.arg)
 
 def lower_end(ctx:CFGContext2, x:UOp) -> UOp|None:
-  if x not in ctx.idom: return None
+  idom = ctx.idom.get(x)
+  if idom is None: return None
   rng = x.src[1]
   inc = UOp(Ops.ADD, rng.dtype, (rng, UOp(Ops.CONST, rng.dtype, arg=1)))
   cond = UOp(Ops.CMPLT, dtypes.bool, (inc, rng.src[0]))
   rest = () if x.src[0].op is Ops.END else x.src[0].src if x.src[0].op is Ops.GROUP else (x.src[0],)
-  end = UOp(Ops.END, dtypes.void, (ctx.idom[x], rng, cond, inc) + rest)
+  end = UOp(Ops.END, dtypes.void, (idom, rng, cond, inc) + rest)
+  # if the loop might not run at all we must gate it
+  if rng.src[0].vmin < 1:
+    cond = UOp(Ops.CMPLT, dtypes.bool, (UOp(Ops.CONST, dtypes.int32, (), 0), rng.src[0]))
+    gate = UOp(Ops.IF, dtypes.void, (ctx.idom[rng], cond))
+    if_else = UOp(Ops.ELSE, dtypes.void, (gate,))
+    return UOp(Ops.ENDIF, dtypes.void, (end, if_else))
   return end
 
 pm_add_control_flow2 = PatternMatcher([
@@ -139,11 +152,19 @@ def lower_load_update(ctx:LowerRegBufferContext, load:UOp, ofst:UOp, buf:UOp, af
   return proj
 
 after_end = UPat(Ops.AFTER, src=(UPat(Ops.BUFFER, name="buf"), UPat(Ops.END, name="end")))
+after_endif = UPat(Ops.AFTER, src=(UPat(Ops.BUFFER, name="buf"), UPat(Ops.ENDIF, src=(UPat(Ops.END, name="end"),), allow_any_len=True)))
 after_range = UPat(Ops.AFTER, src=(UPat(Ops.BUFFER, name="buf"),), allow_any_len=True, name="after")
 
 pm_lower_reg_buffer = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), src=(after_end, UPat.cvar("ofst"))).load(), lower_load_after),
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(after_endif, UPat.cvar("ofst"))).load(), lower_load_after),
   (UPat((Ops.INDEX, Ops.SHRINK), src=(after_range, UPat.cvar("ofst"))).load(name="load"), lower_load_update),
   (UPat(Ops.RANGE, name="rng"), lower_range_args),
   (UPat(Ops.END, name="end"), lower_end_args),
 ])
+
+# TODO: 3 issues with the current lower reg buffer
+# 1 - must handle gated range, in that case the endif must merge the updated arg inside END and the init arg in ELSE
+# 2 - must handle reduce across 2 ranges where there's an IF/ENDIF between them, so you don't get the outer rng by looking at the inner rngs idom
+# 3 - must handle reduce range with 2 BUFFER, can't assume 1 red range == 1 BUFFER
+

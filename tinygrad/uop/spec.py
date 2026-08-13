@@ -222,6 +222,9 @@ spec_program = PatternMatcher([
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 
   # control flow
+  # IF before being wired to the CFG
+  (UPat(Ops.IF, dtypes.void, (UPat(dtype=dtypes.bool),)), lambda: True),
+  # IF after being wired to the CFG
   (UPat(Ops.IF, dtypes.void, (UPat(GroupOp.Control), UPat(dtype=dtypes.bool))), lambda: True),
   (UPat(Ops.ENDIF, dtypes.void), lambda: True),
   (UPat(Ops.GETTUPLE, src=(UPat((Ops.RANGE, Ops.ENDIF, Ops.START)),)), lambda: True),

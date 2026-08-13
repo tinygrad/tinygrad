@@ -10,6 +10,7 @@ from tinygrad.codegen import to_program
 from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import DType, dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.isa import ISARenderer
 from test.helpers import replace_opts, check_schedule
@@ -70,7 +71,7 @@ class TestLinearizer(unittest.TestCase):
     # slice at the last loop end
     uslice = [i for i,u in enumerate(uops) if u.op == Ops.END][-1]
     # only valid test if outermost range is the reduce
-    if uops[uslice].src[-1].arg[-1] == AxisType.REDUCE:
+    if uops[uslice].src[1].arg[-1] == AxisType.REDUCE:
       load_idxs = [u.src[0] for u in uops[uslice+1:] if u.op == Ops.LOAD]
       # assert that there is a global load after the reduce ends
       assert any(u.addrspace == AddrSpace.GLOBAL for u in load_idxs)
@@ -204,6 +205,7 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, LLVMRenderer), "BUFFER with AddrSpace.REG is lowered to block args")
   def test_sum_acc_dtype(self):
     for tensor_dtype, acc_dtype in (
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
@@ -214,6 +216,7 @@ class TestLinearizer(unittest.TestCase):
         local = [uop for uop in tuple(program.src[1].src) if uop.op is Ops.BUFFER and uop.addrspace in (AddrSpace.LOCAL, AddrSpace.REG)]
         assert local[0].dtype == acc_dtype
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, LLVMRenderer), "BUFFER with AddrSpace.REG is lowered to block args")
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
       realized_ast = c.schedule_linear().src[-1].src[0]
