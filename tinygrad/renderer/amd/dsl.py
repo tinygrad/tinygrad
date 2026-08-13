@@ -200,11 +200,11 @@ class VGPRField(SrcField):
   def __get__(self, obj, objtype=None):
     if obj is None: return self
     raw = (obj._raw >> self.lo) & self.mask
-    if (self.lo == 17 or getattr(obj, "opsel", 0)) and (hi := bool(raw & 0x80)):
+    if getattr(obj, "opsel", 0) == 8 or (self.lo == 17 and raw & 0x7F):
       reg = self.decode(raw & 0x7F)
-      return Reg(reg.offset, obj.op_regs[self.name], hi=hi)
+      return Reg(reg.offset, obj.op_regs[self.name], hi=True)
     else:
-      return self.decode(raw)
+      return super().__get__(obj, objtype)
 
 class SGPRField(SrcField): _valid_range = (0, 127)
 class SSrcField(SrcField): _valid_range = (0, 255)
