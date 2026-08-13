@@ -219,9 +219,13 @@ def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
   acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp)).end(*r.src[1:]).rtag("mergeable")
   return acc.after(acc_out)
 
+def reduce_invalid(ctx, gate:UOp, value:UOp) -> UOp|None:
+  if not value.dtype.min <= ctx <= value.dtype.max: return None
+  identity = value.const_like(ctx)
+  return gate.where(value, identity) if identity.base.val == ctx else None
+
 pm_reduce_invalid = PatternMatcher([
-  (UPat.var("gate").where(UPat.var("value"), UPat(Ops.CONST, arg=Invalid)),
-   lambda ctx,gate,value: gate.where(value, value.const_like(ctx))),
+  (UPat.var("gate").where(UPat.var("value"), UPat(Ops.CONST, arg=Invalid)), reduce_invalid),
 ])
 
 def expand_horizontal_reduce(r:UOp):
