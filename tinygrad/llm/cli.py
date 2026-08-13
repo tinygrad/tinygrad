@@ -91,6 +91,9 @@ models = {
   "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
   "moonlight": "https://huggingface.co/gabriellarson/Moonlight-16B-A3B-Instruct-GGUF/resolve/main/Moonlight-16B-A3B-Instruct-Q4_K_M.gguf",
   "glm-4.7-flash": "https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/resolve/main/GLM-4.7-Flash-Q4_K_M.gguf",
+  "qwen3-vl:2b":"https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3VL-2B-Instruct-F16.gguf",
+  "qwen3-vl:4b":"https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-F16.gguf",
+  "qwen3-vl:8b":"https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3VL-8B-Instruct-F16.gguf", # untested, not enough memory
 }
 
 class FallbackTemplate:
@@ -122,7 +125,8 @@ class FallbackTemplate:
       elif isinstance(content, list):
         for c in content:
           if c["type"] == "text": out += c["text"]
-          else: raise RuntimeError(f"unhandled type: {c['type']}")
+          elif c["type"] == "image_url": continue # todo
+          else:raise RuntimeError(f"unhandled type: {c['type']}")
       elif content is not None: raise RuntimeError(f"unknown content type: {type(content)}")
       out += self.end_turn()
     return out + self.role("assistant") if add_generation_prompt else out
