@@ -19,6 +19,12 @@ class TestTransformerGenerate(unittest.TestCase):
     with patch.object(model, "generate", generate): model.warmup()
     self.assertEqual(calls, [[0], [0]])
 
+  def test_warmup_then_generate_with_default_chunk(self):
+    # warmup must not capture JIT graphs that generate()'s default chunk_size then rejects
+    model = Transformer(TEST_CONFIG)
+    model.warmup()
+    self.assertIsInstance(next(model.generate([5, 6, 7, 8])), int)
+
   def test_first_recurrent_generate_before_state_init(self):
     model = Transformer(TEST_CONFIG)
     model.has_recurrent_block = True
@@ -177,6 +183,12 @@ class TestTransformerGenerate(unittest.TestCase):
       runs.add(out)
     # with temperature=2.0, we should see at least 2 distinct outputs across 5 runs
     self.assertGreater(len(runs), 1, "high temperature should produce varied outputs")
+
+  def test_recurrent_temperature_high_produces_variety(self):
+    model = Transformer(TEST_CONFIG)
+    model.has_recurrent_block = True
+    outputs = {model.forward(Tensor([[1]]), 0, Tensor([2.0])).item() for _ in range(5)}
+    self.assertGreater(len(outputs), 1)
 
   def test_temperature_passed_to_forward(self):
     """Temperature from generate should be passed through to __call__."""
