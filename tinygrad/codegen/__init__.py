@@ -8,7 +8,7 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes, AddrSpace, Invalid
+from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType, PyConst
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -219,17 +219,17 @@ def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
   acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp)).end(*r.src[1:]).rtag("mergeable")
   return acc.after(acc_out)
 
-def reduce_invalid(ctx, gate:UOp, value:UOp) -> UOp|None:
-  if not value.dtype.min <= ctx <= value.dtype.max: return None
-  identity = value.const_like(ctx)
-  return gate.where(value, identity) if identity.base.val == ctx else None
+def reduce_invalid(ctx:tuple[PyConst, DType], gate:UOp, value:UOp) -> UOp|None:
+  identity, dtype = ctx
+  if value.dtype != dtype: return None
+  return gate.where(value, value.const_like(identity))
 
 pm_reduce_invalid = PatternMatcher([
   (UPat.var("gate").where(UPat.var("value"), UPat(Ops.CONST, arg=Invalid)), reduce_invalid),
 ])
 
 def expand_horizontal_reduce(r:UOp):
-  inp = graph_rewrite(r.src[0], pm_reduce_invalid, ctx=identity_element(r.arg[0], r.dtype))
+  inp = graph_rewrite(r.src[0], pm_reduce_invalid, ctx=(identity_element(r.arg[0], r.dtype), r.dtype))
   vals = [inp.index(*idx) for idx in itertools.product(*[range(inp.max_shape[a]) for a in range(r.arg[1])])]
   return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
 
