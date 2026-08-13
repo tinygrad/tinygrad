@@ -139,8 +139,8 @@ class PythonProgram(Program['PythonDevice']):
           cfunc = ctypes.CFUNCTYPE(None, *[ctypes.c_uint64] * (len(src_values)-1))
           values[u] = []
           for args,gate in zip(zip(*src_values), exec_masks[-1]):
-            args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]
-            values[u].append(cfunc(args[0])(*args[1:]) if gate else None)
+            call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]
+            values[u].append(cfunc(call_args[0])(*call_args[1:]) if gate else None)
         elif u.op is Ops.WMMA:
           first_src_dtype = u.src[0].dtype
           assert isinstance(first_src_dtype, DType) # mypy

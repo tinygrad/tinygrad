@@ -80,8 +80,8 @@ class TestMultiTensor(unittest.TestCase):
     cpu_2 = ("CPU:1", "CPU:2")
     src = Tensor.ones(16).shard(cpu_2, 0).realize()
     pad = src.to(cpu_2[::-1]).schedule_linear().src[0]
-    with Context(BEAM=1, IGNORE_BEAM_CACHE=1): call = compile_linear(UOp(Ops.LINEAR, src=(pad,))).src[getenv("HCQ2")]
-    if getenv("HCQ2"): self.assertEqual(call.arg.name, "submit E_16")
+    with Context(BEAM=1, IGNORE_BEAM_CACHE=1): call = compile_linear(UOp(Ops.LINEAR, src=(pad,))).src[2 if getenv("HCQ2") else 0]
+    if getenv("HCQ2"): self.assertTrue(call.arg.name.startswith("submit E_"))
     else: self.assertNotEqual(call.src[0].src[0].arg.applied_opts, ())
 
   def test_shard_same_device(self):

@@ -155,9 +155,10 @@ class CPUProgram(Program['CPUDevice']):
                vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
     st = time.perf_counter()
     if self.lvp:
-      args = bytearray(12 + (len(bufs) + len(vals)) * 8)
-      struct.pack_into(f'<3I{len(bufs)}Q', args, 0, *data64_le((addr:=mv_address(args)) + 12), (len(bufs)+len(vals))*2, *[b.va_addr for b in bufs])
-      for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs)*8)): struct.pack_into(f'<{dt.fmt}', args, 12+off, v)
+      lvp_args = bytearray(12 + (len(bufs) + len(vals)) * 8)
+      addr = mv_address(lvp_args)
+      struct.pack_into(f'<3I{len(bufs)}Q', lvp_args, 0, *data64_le(addr+12), (len(bufs)+len(vals))*2, *[b.va_addr for b in bufs])
+      for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs)*8)): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, v)
       self.fxn(addr)
     else:
       args = [*[cast(int, b.va_addr) for b in bufs], *cast(tuple[int, ...], vals)]
