@@ -79,8 +79,9 @@ class TestMultiTensor(unittest.TestCase):
   def test_shard_beam(self):
     cpu_2 = ("CPU:1", "CPU:2")
     src = Tensor.ones(16).shard(cpu_2, 0).realize()
-    with Context(BEAM=1, IGNORE_BEAM_CACHE=1): out = src.to(cpu_2[::-1]).realize()
-    np.testing.assert_equal(out.numpy(), 1)
+    pad = src.to(cpu_2[::-1]).schedule_linear().src[0]
+    with Context(BEAM=1, IGNORE_BEAM_CACHE=1): prg = compile_linear(UOp(Ops.LINEAR, src=(pad,))).src[0].src[0]
+    self.assertNotEqual(prg.src[0].arg.applied_opts, ())
 
   def test_shard_same_device(self):
     X = Tensor.ones(256).contiguous().realize()
