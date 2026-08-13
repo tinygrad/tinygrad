@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
 from tinygrad.nn import Linear
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
@@ -187,8 +187,8 @@ class TransformerBlock(FFNBlock):
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
-      # TODO: how is the dtype of this determined?
-      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim, device=x.device)
+      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
+                                   dtype=dtypes.default_float, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
 
 class MLATransformerBlock(FFNBlock):
