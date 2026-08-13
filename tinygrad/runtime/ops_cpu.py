@@ -55,22 +55,6 @@ def worker_prog():
 @dataclass
 class CPUWorker: ring:Buffer; put:Buffer; sem:Buffer; sys:Buffer; done:Buffer; thread:threading.Thread  # noqa: E702
 
-def create_worker(dev:CPUDevice) -> CPUWorker:
-  ring, put, sysbuf, done = (Buffer(dev.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1, 1))
-  addr, hsem = 0, None
-
-  # sem are posix-only
-  if not WIN:
-    hsem = libc.sem_open(nm:=f"/tinygrad-{os.getpid()}-{id(ring):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
-    if (addr:=unwrap(ctypes.cast(hsem, ctypes.c_void_p).value)) == ctypes.c_void_p(-1).value or libc.sem_unlink(nm):
-      raise OSError(ctypes.get_errno(), "semaphore")
-  sem = Buffer(dev.device, 1, dtypes.uint64, options=BufferSpec(external_ptr=addr), preallocate=True)
-
-  # create worker thread
-  worker_args = [ring._buf.va_addr, sysbuf._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, done._buf.va_addr, addr]
-  (worker:=threading.Thread(target=dev.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in worker_args])).start()
-  return CPUWorker(ring, put, sem, sysbuf, done, worker)
-
 # *****************
 # 2. queue encoders
 
@@ -234,4 +218,17 @@ class CPUDevice(HCQ2Compiled):
     return ft
 
   @functools.cached_property
-  def worker(self) -> CPUWorker: return create_worker(self)
+  def worker(self) -> CPUWorker:
+    ring, put, sysbuf, done = (Buffer(self.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1, 1))
+    addr, hsem = 0, None
+
+    # sem are posix-only
+    if not WIN:
+      hsem = libc.sem_open(nm:=f"/tinygrad-{os.getpid()}-{id(ring):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
+      if (addr:=unwrap(ctypes.cast(hsem, ctypes.c_void_p).value)) == ctypes.c_void_p(-1).value or libc.sem_unlink(nm):
+        raise OSError(ctypes.get_errno(), "semaphore")
+    sem = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(external_ptr=addr), preallocate=True)
+
+    worker_args = [ring._buf.va_addr, sysbuf._buf.va_addr if WIN else self.func_ptr('sem_wait')._buf.va_addr, done._buf.va_addr, addr]
+    (worker:=threading.Thread(target=self.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in worker_args])).start()
+    return CPUWorker(ring, put, sem, sysbuf, done, worker)
