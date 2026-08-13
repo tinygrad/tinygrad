@@ -22,7 +22,7 @@ HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 
-HCQ_DEVS = frozenset(("AMD", "CPU") if HCQ_RUNTIME_DEV.value == "CPU" else ("AMD",)) # the cpu queue is woken by a call, only a native runtime can
+HCQ_DEVS = frozenset(("AMD", "CPU"))
 HCQ_P2P_DEVS = HCQ_DEVS | frozenset(("CPU",))
 HCQ_CACHE_TAGS = frozenset(("program", "systems", "template"))
 

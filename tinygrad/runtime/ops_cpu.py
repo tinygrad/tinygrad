@@ -76,7 +76,7 @@ def create_worker(dev:CPUDevice, pref:str="") -> CPUWorker:
     hsem = libc.sem_open(nm:=f"/tinygrad-{os.getpid()}-{id(ring):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
     if (addr:=unwrap(ctypes.cast(hsem, ctypes.c_void_p).value)) == ctypes.c_void_p(-1).value or libc.sem_unlink(nm):
       raise OSError(ctypes.get_errno(), "semaphore")
-  sem = Buffer(dev.device, 1, dtypes.uint8, options=BufferSpec(external_ptr=addr), preallocate=True)
+  sem = Buffer(dev.device, 1, dtypes.uint64, options=BufferSpec(external_ptr=addr), preallocate=True)
 
   # create worker thread
   worker_args = [ring._buf.va_addr, sysbuf._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, done._buf.va_addr, addr]
