@@ -14,7 +14,7 @@ class QCOMCompiler(Compiler):
     else:
       self.arch, self.chip_id, self.fs = arch, 0x6030001, tempfile.TemporaryDirectory()
       with tarfile.open(fetch('https://git.tinygrad.win/sirhcm/images/releases/download/v2/qcomcl.tar.gz')) as t: t.extractall(fs:=self.fs.name)
-      self.compiler_process = subprocess.Popen(["qemu-aarch64-static", "-cpu=max,pauth=off", "-L", fs, f"{fs}/usr/bin/python3.13", __file__, arch],
+      self.compiler_process = subprocess.Popen(["qemu-aarch64-static", "-cpu", "max,pauth=off", "-L", fs, f"{fs}/usr/bin/python3.13", __file__, arch],
                                                stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
     super().__init__(f"compile_qcomcl_{arch}")
 
