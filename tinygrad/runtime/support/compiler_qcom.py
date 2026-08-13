@@ -10,10 +10,10 @@ def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 class QCOMCompiler(Compiler):
   def __init__(self, arch:str):
     assert arch.split(',')[0] == "a630", "only a630 supported"
-    if platform.machine() == "aarch64": self.chip_id, self.llvm_inst = 0x6030001, llvm_qcom.cl_compiler_create_llvm_instance()
-    else: self.chip_id, self.compiler_process = 0x6030001, subprocess.Popen(
-      (f"docker run --rm -i --platform linux/aarch64 -v {pathlib.Path(__file__).parent.parent.parent}:/tinygrad -v "
-       f"{fetch('https://github.com/sirhcm/tinydreno/raw/refs/heads/master/libllvm-qcom.so')}:/lib/libllvm-qcom.so -e PYTHONPATH=/ python:3.12-slim "
+    if platform.machine() == "aarch64": self.arch, self.chip_id, self.llvm_inst = arch, 0x6030001, llvm_qcom.cl_compiler_create_llvm_instance()
+    else: self.arch, self.chip_id, self.compiler_process = arch, 0x6030001, subprocess.Popen(
+      (f"docker run --rm -i --platform linux/aarch64 -e PYTHONPATH=/ -e QEMU_CPU=max,pauth=off -v {pathlib.Path(__file__).parents[3]}:/tinygrad "
+       f"-v {fetch('https://github.com/sirhcm/tinydreno/raw/refs/heads/master/libllvm-qcom.so')}:/lib/libllvm-qcom.so python:3.12-slim "
        f"python /tinygrad/runtime/support/compiler_qcom.py {arch}").split(), stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
     super().__init__(f"compile_qcomcl_{arch}")
 
