@@ -9,6 +9,7 @@ from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 def amd_custom_kernels_supported(device:str) -> bool:
   # the custom kernels are tuned for RDNA3 (gfx11): the WMMA register layouts don't match gfx12 (RDNA4)
   # or CDNA (MFMA-only, wave64), and the dp4a builtins and 32-lane wave ops aren't portable either.
+  if device.split(":")[0] != "AMD": return False
   # Device[...] trips ALLOW_DEVICE_USAGE=0 in function contexts, the device is always open here anyway
   with Context(ALLOW_DEVICE_USAGE=1):
     return (t:=getattr(Device[device], "target", None)) is not None and t[0] == 11
