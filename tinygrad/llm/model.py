@@ -245,7 +245,8 @@ def _tree_sum(xs:list[UOp]) -> UOp:
   return xs[0]
 
 @functools.cache
-def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp, start_pos:UOp|None=None) -> UOp:
+def _gated_delta_prefill_kernel(local:bool, core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp,
+                                start_pos:UOp|None=None) -> UOp:
   batch, heads, tokens, value_dim = cast(tuple[int, int, int, int], core.shape)
   key_dim, alpha_dim = cast(int, q.shape[-1]), cast(int, alpha.shape[-1]) if len(alpha.shape) == 4 else 1
   core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
@@ -253,8 +254,10 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   beta, kq = (x.reshape(batch*heads, tokens) for x in (beta, kq))
   alpha, state = alpha.reshape(batch*heads, tokens, alpha_dim), state.reshape(batch*heads, value_dim, key_dim)
   # parallel over (batch*head, state row): one thread owns one state row in registers across the sequential token loop.
-  # one block per (batch*head), rows are the LOCAL threads so k/q token loads broadcast within the block
-  bh, row = UOp.range(batch*heads, 0, AxisType.GLOBAL), UOp.range(value_dim, 1, AxisType.LOCAL)
+  # one block per (batch*head), rows are the LOCAL threads so k/q token loads broadcast within the block.
+  # CPUs have no local workgroups (one launch item per batch*head) and loop the rows in-thread
+  bh = UOp.range(batch*heads, 0, AxisType.GLOBAL)
+  row = UOp.range(value_dim, 1, AxisType.LOCAL) if local else UOp.range(value_dim, 2)
   cols = tuple(range(key_dim))
   current = UOp.placeholder((key_dim,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   initial = None if start_pos is None else start_pos.eq(0)
@@ -298,12 +301,13 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
     tokens = q.shape[2]
   core, kq = Tensor.empty(batch, heads, tokens, value_dim), (q*k).sum(-1).contiguous()
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
-  if start_pos is None: out = Tensor.custom_kernel(*srcs, fxn=_gated_delta_prefill_kernel)[0]
+  fxn = functools.partial(_gated_delta_prefill_kernel, cast(str, q.device) != "CPU")
+  if start_pos is None: out = Tensor.custom_kernel(*srcs, fxn=fxn)[0]
   else:
     contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
     params = tuple(UOp.placeholder_like(x, slot=i) for i, x in enumerate(contig))
     assert start_pos.uop.op is Ops.BIND
-    call = _gated_delta_prefill_kernel(*params, start_pos.uop.src[0]).call(*contig, start_pos.uop)
+    call = fxn(*params, start_pos.uop.src[0]).call(*contig, start_pos.uop)
     out = Tensor(contig[0].after(call))
   return (out if static else out[:, :, :out_shape[2]]).reshape(out_shape)
 

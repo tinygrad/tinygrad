@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, dtypes, nn, Device
+from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
@@ -40,8 +40,6 @@ class TestAttention(unittest.TestCase):
     expected = apply_rope_new(k[..., :rope_dim], block.freqs_cis[:seqlen]).cat(k[..., rope_dim:], dim=-1)
     np.testing.assert_allclose(block.cache_kv[0, :, :, :seqlen, :].numpy(), expected.numpy(), rtol=1e-5, atol=1e-5)
 
-# GatedDeltaNetBlock prefill uses a custom kernel that requires local workgroups
-@unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "requires local workgroups")
 class TestGatedDeltaNetBlock(unittest.TestCase):
   def _tensor_linspace(self, start:float, stop:float, shape:tuple[int, ...]) -> Tensor:
     return Tensor.linspace(start, stop, int(np.prod(shape)), dtype=dtypes.float32).reshape(*shape)

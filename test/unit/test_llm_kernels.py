@@ -1,10 +1,7 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, UOp, Device
+from tinygrad import Tensor, UOp
 from tinygrad.llm.model import gated_delta_prefill
-
-# the kernel assumes a GPU-like renderer (GLOBAL x LOCAL thread mapping)
-requires_local = unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "kernel requires local workgroups")
 
 def numpy_ref(q, k, v, beta, alpha, initial):
   state, out = initial.copy(), np.empty_like(v)
@@ -17,7 +14,6 @@ def numpy_ref(q, k, v, beta, alpha, initial):
     out[:, :, t] = (previous*q[:, :, t, None]).sum(-1)*sa + delta*(q[:, :, t]*k[:, :, t]).sum(-1, keepdims=True)
   return out, state
 
-@requires_local
 class TestGatedDeltaPrefill(unittest.TestCase):
   def _make(self, B, H, T, V, K, alpha_4d=False, seed=42):
     rng = np.random.default_rng(seed)
