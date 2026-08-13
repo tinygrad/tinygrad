@@ -461,7 +461,6 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
 class LocalAddBufferContext:
   dg:int = 0
   map:dict = field(default_factory=dict)
-  vars:dict = field(default_factory=dict)
   range:int = 0
   opts:tuple|None = None
 
@@ -478,10 +477,6 @@ def debuf(ctx:LocalAddBufferContext, buf:UOp):
   if buf not in ctx.map: ctx.map[buf] = buf
   ctx.dg += 1
   return ret
-
-def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
-  ctx.vars[b] = None
-  return b.src[0]
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
   if after.addrspace == AddrSpace.LOCAL: return None
@@ -516,7 +511,7 @@ to_define_global = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
 
   # bound Variables are stores into Variable buffers: strip the store, the buffer becomes an ALU param via debuf
-  (UPat(Ops.AFTER, name="b"), lambda ctx,b: unbind_kernel(ctx, b) if is_bound_var(b) else None),
+  (UPat(Ops.AFTER, name="b"), lambda b: b.src[0] if is_bound_var(b) else None),
   (UPat(Ops.AFTER, name="after"), handle_after),
 
   # remove device from local BUFFERIZE
@@ -554,8 +549,7 @@ def split_store(x:UOp) -> UOp|None:
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
-  return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values(), *lctx.vars.keys())
-
+  return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values())
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),

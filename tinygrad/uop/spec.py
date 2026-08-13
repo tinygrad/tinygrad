@@ -1,6 +1,6 @@
 import math
 from typing import Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, is_variable
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
@@ -142,9 +142,7 @@ spec_tensor = PatternMatcher([
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
   # a Variable is a 0-d ALU BUFFER with a value range and no device
-  (UPat(Ops.BUFFER, src=(UPat(),), name="buf"),
-   lambda buf: isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.ALU and buf.arg.device is None \
-     and buf.arg.vmin_vmax is not None or None),
+  (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf: is_variable(buf) and buf.arg.device is None or None),
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),

@@ -1,6 +1,5 @@
 import time, inspect
 from collections import deque
-from dataclasses import replace
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup
@@ -12,7 +11,7 @@ def _unwrap_src(s: UOp) -> UOp:
   while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
   return s
 
-# a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states, bound Variables are not buffer dependencies
+# a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
@@ -101,7 +100,7 @@ pm_post_sched_cache = PatternMatcher([
 def resolve_linear_call(linear_call:UOp):
   linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
   # map the call body params back to the original Variables stored in the call args
-  binds = {f"p{i}":UOp(Ops.PARAM, src=x.src[0].src, arg=replace(x.src[0].arg, slot=-1))
+  binds = {f"p{i}":UOp.variable((b:=x.src[0]).expr, b.vmin, b.vmax, b.dtype, b.arg.multiple_of, param=True)
            for i,x in enumerate(linear_call.src[1:]) if is_bound_var(x)}
   return linear.substitute({v:binds[v.expr] for v in linear.variables() if v.expr in binds}, enter_calls=True, name="resolve scalar params")
 
