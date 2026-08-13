@@ -132,11 +132,30 @@ def forward_assembled_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
   full_target = target is output or (target.base is output and target.contiguous_view_offset() == 0 and target.numel() == output.numel())
   if (not full_target or src.op is not Ops.AFTER or output.dtype != src.dtype or output.numel() != src.numel()
       or output.device != src.device): return None
-  if not any(s.op is Ops.AFTER and s.src[0].op is Ops.SHRINK and s.src[0].tag == ("allreduce",) for s in src.src[1:]):
+  old_form = any(s.op is Ops.AFTER and s.src[0].op is Ops.SHRINK and s.src[0].tag == ("allreduce",) for s in src.src[1:])
+  new_form = any(s.op is Ops.SHRINK and s.tag == ("allreduce",) and s.src[0].op is Ops.AFTER for s in src.src[1:])
+  if not old_form and not new_form:
     return None
   old_output = src.src[0].buf_uop
   if old_output.op not in {Ops.BUFFER, Ops.PARAM, Ops.MSTACK, Ops.MSELECT}: return None
-  return output.after(*(s.substitute({old_output:output}) for s in src.src[1:]))
+  if old_form: return output.after(*(s.substitute({old_output:output}) for s in src.src[1:]))
+
+  # pm_mops commutes SHRINK through AFTER, separating each physical view from the state that produced it. Retarget
+  # the flat state allocation and its per-device aliases independently, then restore AFTER(view, writes).
+  replacement = output.flatten()
+  aliases = {old_output:replacement}
+  for s in src.src[1:]:
+    for u in s.toposort():
+      if u.op is Ops.MSELECT and u.tag == ("allreduce_base",) and u.src[0] is old_output:
+        aliases[u] = output.mselect(u.arg).buf_uop.rtag(("allreduce_base",)).flatten()
+  dependencies = []
+  for s in src.src[1:]:
+    if s.op is Ops.SHRINK and s.tag == ("allreduce",) and s.src[0].op is Ops.AFTER:
+      after = s.src[0]
+      view = s.replace(src=(after.src[0],)+s.src[1:])
+      s = after.replace(src=(view,)+after.src[1:])
+    dependencies.append(s.substitute(aliases))
+  return output.after(*dependencies)
 
 pm_forward_assembled_store = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat.var("output"), UPat(Ops.STORE, src=(UPat.var("target"), UPat.var("src"))))), forward_assembled_store),
@@ -629,6 +648,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   # pm_mops can create adjacent movement ops after their subtree was visited bottom-up.
   tsink = graph_rewrite(tsink, mop_cleanup, name="movement cleanup")
+  tsink = graph_rewrite(tsink, pm_forward_assembled_store, bottom_up=True, name="forward assembled stores")
 
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
