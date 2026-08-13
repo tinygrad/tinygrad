@@ -969,10 +969,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1) -> UOp:
-    # a Variable is a 0-d BUFFER in the ALU addrspace; binding it is storing a CONST into it. it becomes a PARAM inside kernels
-    return UOp(Ops.BUFFER, src=(shape_to_shape_arg(()),),
-               arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of, addrspace=AddrSpace.ALU))
+  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1, param:bool=False) -> UOp:
+    # a Variable is a 0-d BUFFER in the ALU addrspace; binding it is storing a CONST into it
+    # param=True creates the kernel-side form directly: an ALU PARAM (what the BUFFER becomes inside kernels)
+    arg = ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of, addrspace=AddrSpace.ALU)
+    return UOp(Ops.PARAM if param else Ops.BUFFER, src=(shape_to_shape_arg(()),), arg=arg)
   @property
   def expr(self) -> str:
     assert self.op in {Ops.PARAM, Ops.BUFFER}
@@ -990,7 +991,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret:dict[Variable, int] = {}
     return graph_rewrite(self, pm_unbind, ctx=ret), ret
   def variables(self) -> list[Variable]:
-    return sorted({x if x.op in {Ops.PARAM, Ops.BUFFER} else param_variable("_device_num", 0, x.vmax, dtype=x.dtype)
+    return sorted({x if x.op in {Ops.PARAM, Ops.BUFFER} else UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype, param=True)
                    for x in self.backward_slice_with_self if (x.op is Ops.RANGE and x.arg[-1] is AxisType.DEVICE) or
                    (x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.ALU) or is_variable(x)}, key=lambda v: v.expr)
 
@@ -1766,11 +1767,6 @@ def is_bound_var(u:UOp) -> bool:
   dest = store.src[0]
   if dest.op is Ops.INDEX: dest = dest.src[0]  # rangeify indexes the store target
   return dest is u.src[0]
-
-def param_variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1) -> UOp:
-  """the kernel-side form of a Variable: an ALU PARAM (UOp.variable creates the tensor-side BUFFER)"""
-  return UOp(Ops.PARAM, src=(shape_to_shape_arg(()),), arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val),
-                                                                  multiple_of=multiple_of, addrspace=AddrSpace.ALU))
 
 def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()
