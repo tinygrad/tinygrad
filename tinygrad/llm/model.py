@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
 from tinygrad.nn import Linear
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
@@ -187,8 +187,8 @@ class TransformerBlock(FFNBlock):
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
-      # TODO: how is the dtype of this determined?
-      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim, device=x.device)
+      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
+                                   dtype=dtypes.default_float, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
 
 class MLATransformerBlock(FFNBlock):
@@ -261,13 +261,14 @@ class GatedDeltaNetBlock(FFNBlock):
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
     assert T == 1, "GatedDeltaNetBlock currently only supports T=1"
+    is_kda = hasattr(self, "ssm_g_a")
 
     # input processing
     x = x.half()
-    out_gate = self.ssm_g_b(self.ssm_g_a(x)) if hasattr(self, "ssm_g_a") else self.attn_gate(x)
+    out_gate = self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)
     out_gate = out_gate.reshape(B, 1, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x).sigmoid().reshape(B, self.num_v_heads, 1, 1)
-    alpha = self.ssm_f_b(self.ssm_f_a(x)) if hasattr(self, "ssm_f_a") else self.ssm_alpha(x)
+    alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
     alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, self.num_v_heads, -1) *
              self.ssm_a.reshape(1, self.num_v_heads, -1)).exp().unsqueeze(-2)
 
@@ -291,14 +292,13 @@ class GatedDeltaNetBlock(FFNBlock):
 
     # output
     core_attn_out = self.ssm_norm((recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
-    out_gate = out_gate.sigmoid() if hasattr(self, "ssm_g_a") else out_gate.silu()
+    out_gate = out_gate.sigmoid() if is_kda else out_gate.silu()
     return self.ssm_out((core_attn_out * out_gate).reshape(B, 1, -1).cast(x.dtype))
 
   # recurrent state can't be partially reused after divergence, force a full rebuild
   def _state_reset_ops(self):
     return [self.conv_state.assign(self.conv_state.const_like(0)),
             self.recurrent_state.assign(self.recurrent_state.const_like(0))] if hasattr(self, "conv_state") else []
-  def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return 0 if prefix_len != cached_len else prefix_len
 
   def _init_state(self, x):
     if not hasattr(self, "conv_state"):
@@ -326,7 +326,8 @@ class Transformer:
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
-    logits = self.output(self.output_norm(x))[:, -1, :]
+    # only run the output projection on the last token
+    logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
@@ -420,6 +421,10 @@ class Transformer:
     for _ in range(2): list(zip(range(2), self.generate([0])))
 
   def get_start_pos(self, tokens:list[int]) -> int:
+    # recurrent state can't be partially reused after divergence: reuse it only when tokens extend the cached prefix
+    if self.has_recurrent_block:
+      return len(self._cached_tokens) if self._cached_tokens and len(self._cached_tokens) < len(tokens) \
+        and tokens[:len(self._cached_tokens)] == self._cached_tokens else 0
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
