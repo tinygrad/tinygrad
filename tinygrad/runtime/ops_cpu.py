@@ -1,7 +1,7 @@
 from __future__ import annotations
-import platform, sys, os, ctypes, functools, mmap, threading, array, struct
+import platform, sys, os, ctypes, functools, mmap, threading, array, struct, time
 from dataclasses import dataclass, replace
-from typing import cast, Callable, Any
+from typing import cast, Callable
 from tinygrad.helpers import to_mv, from_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, to_tuple
 from tinygrad.device import Buffer, BufferSpec, TinyELF, Program, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface
@@ -19,7 +19,7 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher, graph_rewrite
 
 MAX_ARGS, CMD_SIZE, RING_SLOTS = 63, 64, (16 << 10)
-FUNCS = ('ExitThread',) if WIN else ('clock_gettime', 'pthread_exit', 'sem_wait', 'sem_close', 'sem_post')
+FUNCS = () if WIN else ('clock_gettime', 'sem_wait', 'sem_post')
 
 # *****************
 # 1. workers
@@ -41,14 +41,6 @@ def timestamp_prog():
     val = ts.after(call)[0].load() * 1_000_000_000 + ts.after(call)[1].load()
   return UOp.param(0, dtypes.uint64, (1,))[0].store(val)
 
-def quit_prog():
-  fn = UOp.param(0, dtypes.uint64, (1,))
-  if WIN: return fn[0].load().call(UOp.const(0, dtypes.uint64), ret_dtype=dtypes.void) # ExitThread(0)
-  sem, close_fn = UOp.param(1, dtypes.uint64, (1,)), UOp.param(2, dtypes.uint64, (1,))
-
-  close = close_fn[0].load().call(sem[0], ret_dtype=dtypes.void) # sem_close(sem)
-  return fn.after(close)[0].load().call(UOp.const(0, dtypes.uint64), ret_dtype=dtypes.void) # pthread_exit(0)
-
 def worker_prog():
   ring = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,), volatile=True)
   wait, done = UOp.param(1, dtypes.uint64, (1,), volatile=True), UOp.param(2, dtypes.uint64, (1,), volatile=True)
@@ -63,12 +55,10 @@ def worker_prog():
 
 @dataclass
 class CPUWorker:
-  ring:Buffer; put:Buffer; sem:Buffer; sys:Buffer; done:Buffer; hsem:Any; ring_view:memoryview; put_view:memoryview; done_view:memoryview; thread:threading.Thread
+  ring:Buffer; put:Buffer; sem:Buffer; sys:Buffer; done:Buffer; thread:threading.Thread
 
-def create_worker(dev:CPUDevice, pref:str="") -> CPUWorker:
-  ring, sysbuf = (Buffer(dev.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1))
-  if pref: put, done = dev.signal(f"{pref}value", 1), dev.signal(f"{pref}timeline")
-  else: put, done = (Buffer(dev.device, 1, dtypes.uint64, preallocate=True) for _ in range(2))
+def create_worker(dev:CPUDevice) -> CPUWorker:
+  ring, put, sysbuf, done = (Buffer(dev.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1, 1))
   addr, hsem = 0, None
 
   # sem are posix-only
@@ -81,8 +71,7 @@ def create_worker(dev:CPUDevice, pref:str="") -> CPUWorker:
   # create worker thread
   worker_args = [ring._buf.va_addr, sysbuf._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, done._buf.va_addr, addr]
   (worker:=threading.Thread(target=dev.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in worker_args])).start()
-  return CPUWorker(ring, put, sem, sysbuf, done, hsem, ring._buf.cpu_view().view(fmt='Q'), put._buf.cpu_view().view(fmt='Q'),
-                   done._buf.cpu_view().view(fmt='Q'), worker)
+  return CPUWorker(ring, put, sem, sysbuf, done, worker)
 
 # *****************
 # 2. queue encoders
@@ -181,30 +170,21 @@ class CPUProgram(Program['CPUDevice']):
 
       self.fxn = ctypes.CFUNCTYPE(None)(self.addr)
 
-  def lvp_args(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int|None, ...]) -> list[int]:
-    # LVP takes one pointer to [args address, arg count, buffer addresses, values], which lives in the ring entry itself
-    q, args = self.dev.submitter, bytearray(12 + (len(bufs) + len(vals)) * 8)
-    addr = q.ring._buf.va_addr + ((q.put_view[0] - 1) % RING_SLOTS) * CMD_SIZE * 8 + 16
-    struct.pack_into(f'<3I{len(bufs)}Q', args, 0, *data64_le(addr + 12), (len(bufs)+len(vals))*2, *[b.va_addr for b in bufs])
-    for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs) * 8)): struct.pack_into(f'<{dt.fmt}', args, 12 + off, v)
-    return [addr, *array.array('Q', bytes(args) + bytes(-len(args) % 8))]
-
   def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
-    ts = [self.dev.prgs[timestamp_prog].addr, self.dev.prof._buf.va_addr] + \
-         ([] if WIN else [self.dev.func_ptr('clock_gettime')._buf.va_addr])
-    if wait: self.dev.push(ts)
-
-    for tid in range(1 if self.lvp else global_size[0]):
-      args = self.lvp_args(bufs, vals) if self.lvp else [*[cast(int, b.va_addr) for b in bufs], *cast(tuple[int, ...], vals)]
-      if not self.lvp and 'core_id' in self.runtimevars: args[self.runtimevars['core_id']] = tid
+    st = time.perf_counter()
+    if self.lvp:
+      args = bytearray(12 + (len(bufs) + len(vals)) * 8)
+      struct.pack_into(f'<3I{len(bufs)}Q', args, 0, *data64_le((addr:=mv_address(args)) + 12), (len(bufs)+len(vals))*2, *[b.va_addr for b in bufs])
+      for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs)*8)): struct.pack_into(f'<{dt.fmt}', args, 12+off, v)
+      self.fxn(addr)
+    else:
+      args = [*[cast(int, b.va_addr) for b in bufs], *cast(tuple[int, ...], vals)]
       assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(args)}"
-      self.dev.push([self.addr, *args])
-
-    if not wait: return None
-    self.dev.push([ts[0], ts[1] + 8, *ts[2:]]) # windows has no clock_gettime arg
-    self.dev.synchronize(timeout=timeout)
-    return (self.dev.prof_view[1] - self.dev.prof_view[0]) / 1e9
+      for tid in range(global_size[0]):
+        if 'core_id' in self.runtimevars: args[self.runtimevars['core_id']] = tid
+        self.fxn(*[ctypes.c_uint64(x) for x in args])
+    return time.perf_counter() - st if wait else None
 
   @suppress_finalizing
   def __del__(self):
@@ -238,16 +218,13 @@ class CPUDevice(HCQ2Compiled):
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
 
     self.pm_bufferize = PatternMatcher(
-      [(UPat(Ops.PARAM, tag=f"COMPUTE:0_{n}"), lambda ctx, n=n: getattr(ctx[0].worker_pool, n)) for n in ("ring", "put", "sem", "sys", "done")] +
+      [(UPat(Ops.PARAM, tag=f"COMPUTE:0_{n}"), lambda ctx, n=n: getattr(ctx[0].worker, n)) for n in ("ring", "put", "sem", "sys", "done")] +
       [(UPat(Ops.PARAM, tag=f"func:{f}"), lambda ctx, f=f: ctx[0].func_ptr(f)) for f in FUNCS]) + self.pm_bufferize
 
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
       clang = ClangRenderer(replace(self.renderer.target, renderer="CLANG"))
       self.prgs:dict[Callable, CPUProgram] = {f: CPUProgram(self, do_to_program(f().sink(arg=KernelInfo(f.__name__), tag=1), clang).to_elf())
-                                              for f in (signal_prog, wait_prog, timestamp_prog, quit_prog, worker_prog)}
-
-  @functools.cached_property
-  def prof(self) -> Buffer: return Buffer(self.device, 2, dtypes.uint64, preallocate=True)
+                                              for f in (signal_prog, wait_prog, timestamp_prog, worker_prog)}
 
   def func_ptr(self, name:str) -> Buffer: return self.func_table.view(1, dtypes.uint64, FUNCS.index(name)*8).ensure_allocated()
 
@@ -258,30 +235,5 @@ class CPUDevice(HCQ2Compiled):
       array.array('Q', [unwrap(ctypes.cast(getattr(lib, f), ctypes.c_void_p).value) for f in FUNCS])
     return ft
 
-  # The submitter runs everything Python pushes; HCQ submissions feed the worker pool.
   @functools.cached_property
-  def submitter(self) -> CPUWorker: return create_worker(self, "submitter_")
-  @functools.cached_property
-  def worker_pool(self) -> CPUWorker: return create_worker(self)
-
-  @functools.cached_property
-  def prof_view(self): return self.prof._buf.cpu_view().view(fmt='Q')
-
-  def push(self, cmd:list[int]):
-    q = self.submitter
-    pos = q.put_view[0] - 1
-    while pos - q.done_view[0] >= RING_SLOTS: pass # the ring is full, let the worker catch up
-    q.ring_view[(base:=(pos % RING_SLOTS) * CMD_SIZE):base+len(cmd)] = array.array('Q', [x & ((1<<64)-1) for x in cmd])
-    q.put_view[0] = pos + 2
-    if WIN: q.sys._buf.cpu_view().view(fmt='Q')[0] = pos + 1
-    else: assert libc.sem_post(q.hsem) == 0
-
-  def synchronize(self, timeout:int|None=None):
-    super().synchronize(timeout, pref="submitter_")
-    super().synchronize(timeout)
-
-  def finalize(self):
-    if "submitter" not in self.__dict__ or self.submitter.put_view[0] == 1: return # the worker starts with the first submit
-    quit_args = (self.func_ptr('ExitThread'),) if WIN else (self.func_ptr('pthread_exit'), self.submitter.sem, self.func_ptr('sem_close'))
-    self.push([self.prgs[quit_prog].addr, *[b._buf.va_addr for b in quit_args]])
-    self.submitter.put_view[0] = 1
+  def worker(self) -> CPUWorker: return create_worker(self)

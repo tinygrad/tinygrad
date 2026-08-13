@@ -173,11 +173,7 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
 
     # wait the syncs and signal the device epoch, then bump the timeline on the host
     tl_signal, tl_value = make_signal(devs, tag="timeline_signal"), make_signal(devs, tag="timeline_value")
-    if all_devices_in(devs, HCQ_DEVS):
-      fin_submit = make_submit(*waits, UOp(Ops.INS, arg="store", src=(tl_signal, tl_value.index(0))), devs=devs, queue="COMPUTE:0")
-    else: # no queue to submit to, the runtime spins on the deps and bumps the epoch itself
-      spins = [(cur:=w.src[0].after(l:=UOp.loop(next(UOp.unique_num))).index(0).load()).end(l, cur < w.src[1]) for w in waits]
-      fin_submit = tl_signal.after(*spins).index(0).store(tl_value.index(0))
+    fin_submit = make_submit(*waits, UOp(Ops.INS, arg="store", src=(tl_signal, tl_value.index(0))), devs=devs, queue="COMPUTE:0")
     epoch = (epoch_slot:=tl_value.after(fin_submit).index(0)).load()
 
     # fence once per device group on this schedule's previous epoch, then reset any queue signals used by the group
@@ -579,17 +575,17 @@ class HCQ2Compiled(Compiled):
     buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 
-  def synchronize(self, timeout:int|None=None, pref:str=""):
+  def synchronize(self, timeout:int|None=None):
     if HCQ_RUNTIME_DEV.value != self.device: Device[HCQ_RUNTIME_DEV.value].synchronize()
 
-    sig = self.signal(f"{pref}timeline").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
-    tl = self.signal(f"{pref}value", 1).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
+    sig = self.signal("timeline").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
+    tl = self.signal("value", 1).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
     timeout = timeout if timeout is not None and self.can_recover else None
     st, done = time.perf_counter(), sig[0]
     while done < tl[0] - 1:
       if done != (done:=sig[0]): st = time.perf_counter()
       elif time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
-    if not pref and self.prof_ents: self.collect_prof()
+    if self.prof_ents: self.collect_prof()
 
   def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
 
