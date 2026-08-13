@@ -1,7 +1,7 @@
 from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid, least_upper_dtype, strong_dtype, weak_dtype
 from tinygrad.helpers import unwrap
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, GroupOp, graph_rewrite, dtype_from_uop, is_variable
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, GroupOp, graph_rewrite, dtype_from_uop
 
 def select_dtype(u:UOp):
   if u.dtype is dtypes.weakfloat: return dtypes.default_float
@@ -23,11 +23,8 @@ pm_lower_weak = PatternMatcher([
   # Binary can widen from the bounds, all other nodes derive from the lowered sources.
   # a weakfloat Unary (sin/exp2/...) must resolve here, before the transcendental decomposition
   (UPat(GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK, Ops.SPECIAL}, name="u"), lower_weak_node),
-  (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
+  (UPat((Ops.PARAM, Ops.BUFFER), dtype=dtypes.weakint, name="u"),
     lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=select_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
-  # same for a Variable (ALU BUFFER)
-  (UPat(Ops.BUFFER, dtype=dtypes.weakint, name="u"),
-    lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=select_dtype(u))).cast(dtypes.weakint) if is_variable(u) else None),
 ])
 
 def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
