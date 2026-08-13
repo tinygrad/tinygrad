@@ -6,10 +6,11 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
-def amd_custom_kernels_supported(device:str) -> bool:
+def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   # the custom kernels are tuned for RDNA3 (gfx11): the WMMA register layouts don't match gfx12 (RDNA4)
   # or CDNA (MFMA-only, wave64), and the dp4a builtins and 32-lane wave ops aren't portable either.
-  if device.split(":")[0] != "AMD": return False
+  if isinstance(device, tuple): device = device[0]
+  if device is None or device.split(":")[0] != "AMD": return False
   # Device[...] trips ALLOW_DEVICE_USAGE=0 in function contexts, the device is always open here anyway
   with Context(ALLOW_DEVICE_USAGE=1):
     return (t:=getattr(Device[device], "target", None)) is not None and t[0] == 11
@@ -34,7 +35,7 @@ class Linear(nn.Linear):
                                                                               packed_dtype, raw_offset)))
   def __call__(self, x:Tensor) -> Tensor:
     static = isinstance(x.numel(), int)
-    supported = self.use_custom_quant and amd_custom_kernels_supported(cast(str, self.weight.device))
+    supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
     if self.ggml_type is None and not static: supported = self.use_custom_quant = False
     if self.ggml_type is None and supported: self.set_quantized(self.weight)
     if self.ggml_type in (13, 14, 23) and supported:
@@ -74,7 +75,7 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   assert alpha.shape in ((batch, heads, tokens), (batch, heads, tokens, value_dim))
   assert state.shape == (batch, heads, value_dim, key_dim)
   kernel = _gated_delta_prefill_kernel
-  if amd_custom_kernels_supported(cast(str, q.device)) and key_dim % 32 == 0 and value_dim % 4 == 0:
+  if amd_custom_kernels_supported(q.device) and key_dim % 32 == 0 and value_dim % 4 == 0:
     from tinygrad.llm.kernels.amd import _gated_delta_prefill_kernel as kernel
   core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)

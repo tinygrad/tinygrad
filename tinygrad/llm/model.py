@@ -1,7 +1,6 @@
 from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
-from typing import cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context, dtypes
 from tinygrad.llm.kernels import Linear, gated_delta_prefill, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_load
@@ -192,7 +191,7 @@ class TransformerBlock(FFNBlock):
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
       # hybrid models use a quantized KV cache on AMD, sized in flash decode blocks of 256
-      quantize = amd_custom_kernels_supported(cast(str, x.device)) and self.config.ssm is not None
+      quantize = amd_custom_kernels_supported(x.device) and self.config.ssm is not None
       assert not quantize or self.config.max_context % 256 == 0, \
         f"quantized KV cache needs max_context to be a multiple of 256, got {self.config.max_context}"
       self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
