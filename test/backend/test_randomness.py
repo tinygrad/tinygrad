@@ -71,6 +71,7 @@ class TestRandomness(unittest.TestCase):
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "PTX and NIR use pointer arithmetic")
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "X86 callee saved registers have ulong dtype")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, RDNA3Renderer), "RDNA3 uses ulong dtype for param addresses")
   def test_threefry_doesnt_use_long(self):
     linear = Tensor.rand(20).schedule_linear()
     for call in linear.src:
