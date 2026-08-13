@@ -1,7 +1,7 @@
 from __future__ import annotations
 import platform, sys, os, ctypes, functools, mmap, threading, array, struct, time
-from dataclasses import replace
-from typing import cast, Callable
+from dataclasses import dataclass, replace
+from typing import cast, Callable, Any
 from tinygrad.helpers import to_mv, from_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, to_tuple
 from tinygrad.device import Buffer, BufferSpec, TinyELF, Program, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface
@@ -60,6 +60,26 @@ def worker_prog():
 
   entry = [ring.after(ready).index((cur % RING_SLOTS) * CMD_SIZE + i).load() for i in range(CMD_SIZE)]
   return done.after(entry[0].call(*entry[1:], ret_dtype=dtypes.void)).index(0).store(cur + 1).end(cur)
+
+@dataclass
+class CPUWorker:
+  ring:Buffer; put:Buffer; sem:Buffer; sys:Buffer; done:Buffer; hsem:Any; ring_view:memoryview; done_view:memoryview; thread:threading.Thread
+
+def create_worker(dev:CPUDevice) -> CPUWorker:
+  ring, put, sysbuf, done = (Buffer(dev.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1, 1))
+  addr, hsem = 0, None
+
+  # sem are posix-only
+  if not WIN:
+    hsem = libc.sem_open(nm:=f"/tinygrad-{os.getpid()}-{id(ring):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
+    if (addr:=unwrap(ctypes.cast(hsem, ctypes.c_void_p).value)) == ctypes.c_void_p(-1).value or libc.sem_unlink(nm):
+      raise OSError(ctypes.get_errno(), "semaphore")
+  sem = Buffer(dev.device, 1, dtypes.uint8, options=BufferSpec(external_ptr=addr), preallocate=True)
+
+  # create worker thread
+  worker_args = [ring._buf.va_addr, sysbuf._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, done._buf.va_addr, addr]
+  (worker:=threading.Thread(target=dev.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in worker_args])).start()
+  return CPUWorker(ring, put, sem, sysbuf, done, hsem, ring._buf.cpu_view().view(fmt='Q'), done._buf.cpu_view().view(fmt='Q'), worker)
 
 # *****************
 # 2. queue encoders
@@ -167,7 +187,7 @@ class CPUProgram(Program['CPUDevice']):
   def lvp_args(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int|None, ...]) -> list[int]:
     # LVP takes one pointer to [args address, arg count, buffer addresses, values], which lives in the ring entry itself
     q, args = self.dev.submitter, bytearray(12 + (len(bufs) + len(vals)) * 8)
-    addr = q.ring._buf.va_addr + (q.pos % RING_SLOTS) * CMD_SIZE * 8 + 16
+    addr = q.ring._buf.va_addr + (self.dev.submit_pos % RING_SLOTS) * CMD_SIZE * 8 + 16
     struct.pack_into(f'<3I{len(bufs)}Q', args, 0, *data64_le(addr + 12), (len(bufs)+len(vals))*2, *[b.va_addr for b in bufs])
     for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs) * 8)): struct.pack_into(f'<{dt.fmt}', args, 12 + off, v)
     return [addr, *array.array('Q', bytes(args) + bytes(-len(args) % 8))]
@@ -212,43 +232,19 @@ class CPUAllocator(HCQAllocator['CPUDevice']):
     return HCQBuffer(buf.view.addr, buf.size, view=buf.view, owner=buf.owner)
   def _unmap(self, mb): pass  # CPU _do_map returns a view wrapper, nothing to release
 
-class CPUQueue:
-  def __init__(self, dev:CPUDevice):
-    self.dev, self.pos = dev, 0
-    self.ring, self.put, self.sys, self.done = (Buffer(dev.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1, 1))
-    self.addr = 0
-    if not WIN:
-      self.hsem = libc.sem_open(nm:=f"/tinygrad-{os.getpid()}-{id(self):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
-      self.addr = unwrap(ctypes.cast(self.hsem, ctypes.c_void_p).value)
-      if self.addr == ctypes.c_void_p(-1).value or libc.sem_unlink(nm): raise OSError(ctypes.get_errno(), "semaphore")
-    self.sem = Buffer(dev.device, 1, dtypes.uint8, options=BufferSpec(external_ptr=self.addr), preallocate=True)
-
-    self.ring_view, self.done_view = (b._buf.cpu_view().view(fmt='Q') for b in (self.ring, self.done))
-
-    threading.Thread(target=dev.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in
-      [self.ring._buf.va_addr, self.sys._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, self.done._buf.va_addr, self.addr]]).start()
-
-  def push(self, cmd:list[int]):
-    while self.pos - self.done_view[0] >= RING_SLOTS: pass # the ring is full, let the worker catch up
-    self.ring_view[(base:=(self.pos % RING_SLOTS) * CMD_SIZE):base+len(cmd)] = array.array('Q', [x & ((1<<64)-1) for x in cmd])
-    self.pos += 1
-    if WIN: self.sys._buf.cpu_view().view(fmt='Q')[0] = self.pos
-    else: assert libc.sem_post(self.hsem) == 0
-
 class CPUDevice(HCQ2Compiled):
-  pm_lower = PatternMatcher([
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue)])
-
-  wait_timeout_ms, has_copy_queue = 30000, False # a slow cpu kernel is not a hang
+  wait_timeout_ms, has_copy_queue = 30000, False
+  pm_lower = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue)])
 
   def __init__(self, device:str=""):
     super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], CPUProgram,
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
 
     self.pm_bufferize = PatternMatcher(
-      [(UPat(Ops.PARAM, tag=f"COMPUTE:0_{n}"), lambda ctx, n=n: getattr(ctx[0].queue, n)) for n in ("ring", "put", "sem", "sys", "done")] +
+      [(UPat(Ops.PARAM, tag=f"COMPUTE:0_{n}"), lambda ctx, n=n: getattr(ctx[0].worker_pool, n)) for n in ("ring", "put", "sem", "sys", "done")] +
       [(UPat(Ops.PARAM, tag=f"func:{f}"), lambda ctx, f=f: ctx[0].func_ptr(f)) for f in FUNCS]) + self.pm_bufferize
     self.synced_pos = self.fence = 0
+    self.submit_pos = 0
 
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
       clang = ClangRenderer(replace(self.renderer.target, renderer="CLANG"))
@@ -267,20 +263,26 @@ class CPUDevice(HCQ2Compiled):
       array.array('Q', [unwrap(ctypes.cast(getattr(lib, f), ctypes.c_void_p).value) for f in FUNCS])
     return ft
 
-  # the submitter runs everything python pushes, the compute queue is fed by the submits it runs
+  # The submitter runs everything Python pushes; HCQ submissions feed the worker pool.
   @functools.cached_property
-  def submitter(self) -> CPUQueue: return CPUQueue(self)
+  def submitter(self) -> CPUWorker: return create_worker(self)
   @functools.cached_property
-  def queue(self) -> CPUQueue: return CPUQueue(self)
+  def worker_pool(self) -> CPUWorker: return create_worker(self)
 
   @functools.cached_property
   def prof_view(self): return self.prof._buf.cpu_view().view(fmt='Q')
 
-  def push(self, cmd:list[int]): self.submitter.push(cmd)
+  def push(self, cmd:list[int]):
+    q = self.submitter
+    while self.submit_pos - q.done_view[0] >= RING_SLOTS: pass # the ring is full, let the worker catch up
+    q.ring_view[(base:=(self.submit_pos % RING_SLOTS) * CMD_SIZE):base+len(cmd)] = array.array('Q', [x & ((1<<64)-1) for x in cmd])
+    self.submit_pos += 1
+    if WIN: q.sys._buf.cpu_view().view(fmt='Q')[0] = self.submit_pos
+    else: assert libc.sem_post(q.hsem) == 0
 
   def synchronize(self, timeout:int|None=None):
     # drain the submitter first, so every epoch bump it carries has been issued, then wait on the epoch itself
-    if self.synced_pos != (pos:=self.submitter.pos):
+    if self.synced_pos != (pos:=self.submit_pos):
       self.fence += 1
       self.push([self.prgs[signal_prog].addr, (sig:=self.signal("fence")._buf).va_addr, self.fence])
       self.synced_pos, mv, st, done = pos + 1, sig.cpu_view().view(fmt='I'), time.perf_counter(), -1
@@ -291,7 +293,7 @@ class CPUDevice(HCQ2Compiled):
     super().synchronize(timeout)
 
   def finalize(self):
-    if self.submitter.pos == 0: return # the worker starts with the first submit
+    if self.submit_pos == 0: return # the worker starts with the first submit
     quit_args = (self.func_ptr('ExitThread'),) if WIN else (self.func_ptr('pthread_exit'), self.submitter.sem, self.func_ptr('sem_close'))
     self.push([self.prgs[quit_prog].addr, *[b._buf.va_addr for b in quit_args]])
-    self.submitter.pos = self.synced_pos = self.fence = 0
+    self.submit_pos = self.synced_pos = self.fence = 0
