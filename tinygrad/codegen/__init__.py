@@ -8,7 +8,6 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, PreRegallocContext
-from tinygrad.renderer.isa.rdna3 import RDNA3Renderer
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
 
 # import all pattern matchers here
@@ -413,7 +412,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
   # TODO: cleaner way of ISA TUPLE_ORDER?
-  lst = line_rewrite(linearize(sink, tuple_order=not isinstance(ctx, RDNA3Renderer)), pm_linearize_cleanups)
+  lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
     if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, ctx.pre_regalloc_context)

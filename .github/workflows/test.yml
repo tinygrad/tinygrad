@@ -576,6 +576,7 @@ jobs:
     env:
       DEV: MOCKKFD+AMD:${{ matrix.renderer }}:${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
+      TUPLE_ORDER: ${{ matrix.renderer == 'RDNA3' && '0' || '1' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
