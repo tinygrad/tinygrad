@@ -1,6 +1,7 @@
 import math, functools
 from dataclasses import dataclass
 from tinygrad.dtype import DType, dtypes
+from tinygrad.uop.ops import PatternMatcher, UOp, UPat, Ops
 
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
@@ -103,7 +104,7 @@ amd_rdna3 = [TensorCore(dims=(16,16,16), threads=32, elements_per_thread=(16,16,
   opts=("l0","l0","l0","l0","l1","u1","u1","u1"),
   swizzle=((('l4', 'u0', 'u1', 'u2', 'l0'), ('r1', 'r2', 'r3'), ('l1', 'l2', 'l3', 'r0')),
            (('l0', 'l1', 'l2', 'l3', 'l4'), ('r1', 'r2', 'r3'), ('u0', 'u1', 'u2', 'r0'))))
-  for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float)]]
+  for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.int8,dtypes.int32)]]
 amd_rdna4 = [TensorCore(dims=(16,16,16), threads=32, elements_per_thread=(8,8,8), dtype_in=di, dtype_out=do,
   opts=("l0","l0","l0","l0","u1","u1","u1","l1"),
   swizzle=((('u0', 'u1', 'u2', 'l4', 'r2'), ('r0', 'r1', 'r3'), ('l0', 'l1', 'l2', 'l3')),
@@ -135,6 +136,42 @@ amd_cdna4 = amd_cdna_1616128 + amd_cdna_161632 + amd_cdna_161616
 
 def get_amd(arch): return {"gfx942": amd_cdna3, "gfx950": amd_cdna4, "gfx1200": amd_rdna4, "gfx1201": amd_rdna4}.get(arch, amd_rdna3)
 
+pm_validate_wmma_rdna3 = PatternMatcher([
+  (UPat(Ops.WMMA, name="x", dtype=dtypes.int32), lambda x: x.replace(
+    src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
+    if x.src[0].dtype == dtypes.int8 and x.src[0].max_numel() == 16 else None),
+  (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
+      src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(UOp.const(j//2, dtypes.int16))
+      if j%2 == 0 else UOp.const(0.0, x.src[2].dtype)
+      for j in range(x.max_numel()*2)))),
+      arg=(*x.arg[:4], None)).index(UOp.const(i*2, dtypes.int16))
+      for i in range(x.max_numel()))) if x.max_numel() == 8 else None),
+  (UPat(Ops.WMMA, name="x"), lambda x: x.replace(
+    src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
+    if x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 16 else None),
+])
+
+pm_validate_wmma_rdna4 = PatternMatcher([
+  (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16), lambda x: x.replace(
+    dtype=dtypes.uint16,
+    src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2].bitcast(dtypes.uint16)))
+      .bitcast(dtypes.bfloat16) if x.max_numel() == 8 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None),
+  (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+    lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
+    if x.max_numel() == 8 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None)
+])
+
+pm_validate_wmma_cdna = PatternMatcher([
+  (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+    lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
+    if x.arg[0][2] == 128 and x.src[0].dtype.itemsize <= 8 else None),
+  (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+    lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
+    if x.max_numel() == 4 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 4 else None),
+  (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+    lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64), x.src[2]))
+    if x.max_numel() == 4 and x.src[0].dtype in dtypes.fp8_ocp and x.src[0].max_numel() == 8 else None),
+])
 # ***** Apple Metal *****
 
 metal = [TensorCore(dims=(8,8,8), threads=32, elements_per_thread=(2,2,2), dtype_in=di, dtype_out=do,

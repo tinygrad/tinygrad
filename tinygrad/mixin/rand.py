@@ -1,9 +1,9 @@
 from __future__ import annotations
 import math
 from typing import Self, cast
-from tinygrad.dtype import DType, DTypeLike, dtypes, least_upper_dtype, to_dtype
+from tinygrad.dtype import DType, DTypeLike, dtypes, least_upper_dtype, to_dtype, bitcast
 from tinygrad.helpers import all_int, argfix, ceildiv, prod, TRAINING
-from tinygrad.mixin import OpMixin
+from tinygrad.mixin.op import OpMixin
 from tinygrad.device import canonicalize_device
 
 
@@ -11,8 +11,8 @@ class RandMixin(OpMixin):
   @staticmethod
   def _threefry_random_bits(key, counts0, counts1):
     x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
-    x = x.threefry((key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
-    return (x & 0xffffffff).cast(dtypes.uint32).cat(((x >> 32) & 0xffffffff).cast(dtypes.uint32))
+    x = x.threefry((key[1].cast(dtypes.uint64) << 32) | key[0].cast(dtypes.uint64))
+    return x.cast(dtypes.uint32).cat((x >> 32).cast(dtypes.uint32))
 
   @classmethod
   def random_bits(cls, key:Self, counter:Self, num:int) -> Self:
@@ -21,7 +21,7 @@ class RandMixin(OpMixin):
     for i in range(0, num, dtypes.uint32.max):
       chunk_num = min(num - i, dtypes.uint32.max)
       c_low = low + (i & 0xffffffff)
-      c_high = high + (i >> 32) + (c_low < low).cast(dtypes.uint32)
+      c_high = high + (i >> 32) + (c_low < low)
       new_key = cls._threefry_random_bits(key, c_low, c_high)
       counts0 = cls.arange(ceildiv(chunk_num, 2), dtype=dtypes.uint32)
       counts1 = counts0 + ceildiv(chunk_num, 2)
@@ -33,7 +33,7 @@ class RandMixin(OpMixin):
     _, nmant = dtypes.finfo(dtype)
     uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
     uint_bits = bits.bitcast(uint_dtype)
-    float_one_bits = uint_bits.const_like(1).cast(dtype).bitcast(uint_dtype)
+    float_one_bits = bitcast(1.0, dtype, uint_dtype)
     return uint_bits.rshift(dtype.bitsize - nmant).bitwise_or(float_one_bits).bitcast(dtype)[:prod(shape)].sub(1).reshape(shape)
 
   @classmethod
@@ -60,7 +60,7 @@ class RandMixin(OpMixin):
     ```
     """
     dt = to_dtype(dtype or dtypes.default_float)
-    if not dtypes.is_float(dt): raise ValueError(f"rand only supports float dtypes, got {dt}")
+    if not dtypes.is_float(dt) or dt in dtypes.weaks: raise ValueError(f"rand only supports concrete float dtypes, got {dt}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     device = cast(str, canonicalize_device(device))
@@ -97,9 +97,10 @@ class RandMixin(OpMixin):
     print(Tensor.randn_like(t).numpy())
     ```
     """
+    if (dt:=to_dtype(dtype or self.dtype)) in dtypes.weaks and dtype is None: raise ValueError(f"randn_like requires an explicit dtype for {dt}")
     src = self.stack(self).rand_like(**{**kwargs, "dtype": dtypes.float32})
     # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
-    return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(to_dtype(dtype or self.dtype))
+    return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dt)
 
   @classmethod
   def randn(cls, *shape, dtype:DTypeLike|None=None, **kwargs) -> Self:
@@ -268,7 +269,7 @@ class RandMixin(OpMixin):
     if replacement or num_samples == 1:
       cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
       unif_samples = type(self).rand(num_samples, cdf.shape[0], 1).to(self.device)  # type: ignore[attr-defined]
-      indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+      indices = (unif_samples >= cdf).sum(2).permute((1, 0))
     else:
       # Efraimidis-Spirakis
       indices = (weight.rand_like(dtype=dtypes.float32).log2() / weight).topk(num_samples, dim=1)[1]
@@ -319,7 +320,7 @@ class RandMixin(OpMixin):
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-      attn_mask = qk.const_like(1).cast(dtypes.bool).tril()
+      attn_mask = qk.const_like(True, dtypes.bool).tril()
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask

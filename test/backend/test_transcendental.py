@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import Context, getenv, DEV, OSX
-from test.backend.test_schedule import check_schedule
+from test.helpers import check_schedule
 from test.backend.test_dtype_alu import ht, dtypes_float
 import numpy as np
 import math
@@ -170,7 +170,7 @@ class TestTranscendentalSchedule(unittest.TestCase):
 class TestTranscendentalVectorized(unittest.TestCase):
   def _vectorized_data(self, low, high, vec_size):
     np_data = np.linspace(low, high, num=(128 // vec_size) * vec_size, dtype=np.float32).reshape(-1, vec_size)
-    data = Tensor(np_data, dtype=dtypes.float32.vec(vec_size))
+    data = Tensor(np_data, dtype=dtypes.float32)
     return data, np_data
 
   def _test_vectorized_op(self, fxn, np_fxn, data_range, vec_size, param_range=None):

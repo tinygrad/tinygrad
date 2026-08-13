@@ -1,10 +1,11 @@
 from __future__ import annotations
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum, atexit
+import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, itertools, struct, socket
+import subprocess, time, enum, atexit
 from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system, _ensure_downloads_dir, DEBUG, flatten, pluralize
-from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
+from tinygrad.runtime.autogen import libc, pci, vfio
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator
-from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, ASM24Controller, USBMMIOInterface
+from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, USBMMIOInterface
 
 MAP_FIXED, MAP_FIXED_NOREPLACE = 0x10, 0x100000
 MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
@@ -55,6 +56,7 @@ class _System:
   def pci_scan_bus(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None) -> list[str]:
     all_devs = []
     if OSX:
+      from tinygrad.runtime.autogen import iokit, corefoundation
       def read_prop(svc, key) -> int:
         cfkey = corefoundation.CFStringCreateWithCString(None, key.encode(), corefoundation.kCFStringEncodingUTF8)
         cfdata = ctypes.cast(iokit.IORegistryEntryCreateCFProperty(svc, ctypes.cast(cfkey, iokit.CFStringRef), None, 0), corefoundation.CFDataRef)
@@ -85,7 +87,7 @@ class _System:
     except IndexError: raise RuntimeError(f"{device}:{dev_id} does not exist ({pluralize('device', len(ds))} available)")
     return cl(device[:2], pcibus)
 
-  def pci_setup_usb_bars(self, usb:CustomASM24Controller|ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
+  def pci_setup_usb_bars(self, usb:CustomASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
     for bus in range(gpu_bus):
       # All 3 values must be written at the same time.
       buses = (0 << 0) | ((bus+1) << 8) | ((gpu_bus) << 16)
@@ -163,6 +165,11 @@ class PCIDevice:
 
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
+    if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
+
+    # remove sibling functions of the gpu, if any
+    for fn in range(1, 8):
+      if FileIOInterface.exists(sib:=f"/sys/bus/pci/devices/{self.pcibus[:-1]}{fn}"): FileIOInterface(f"{sib}/remove", os.O_WRONLY).write("1")
 
     if getenv("VFIO", 0) and (vfio_fd:=System.vfio) is not None:
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
@@ -220,9 +227,9 @@ class USBPCIDevice(PCIDevice):
   def __init__(self, devpref:str, dev, pcibus):
     self.pcibus, self.peer_group = pcibus, f"USBPCIDevice_{pcibus}"
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
-    usb = USB3(dev, 0x81, 0x83, 0x02, 0x04)
+    usb = USB3(dev)
     if DEBUG >= 1: print(f"am {self.pcibus}: product string: {usb.product!r}")
-    self.usb: CustomASM24Controller | ASM24Controller = CustomASM24Controller(usb) if usb.is_custom else ASM24Controller(usb)
+    self.usb: CustomASM24Controller = CustomASM24Controller(usb)
     self._bar_info = System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
     self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
 

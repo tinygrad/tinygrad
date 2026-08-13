@@ -1,15 +1,16 @@
-from typing import TypeVar, Generic, Callable, Any
-import functools, collections
+from typing import TypeVar, Generic, Callable, Any, overload
+import functools
 from tinygrad.tensor import Tensor, all_tensors
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
-from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
-from tinygrad.dtype import DType, dtypes
-from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import capturing, Estimates, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ, disable_gc
+from tinygrad.device import Buffer, Compiled, Device, MultiBuffer, DepsTracker
+from tinygrad.dtype import DType
+from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, rewrite_group, graph_rewrite
+from tinygrad.renderer import Estimates
+from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime
 from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_outs_ins
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
-from tinygrad.schedule.rangeify import mop_cleanup
+from tinygrad.uop.movement import mop_cleanup
 from dataclasses import dataclass
 
 def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
@@ -25,8 +26,8 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
 def create_graph_call(batch:list[UOp]) -> UOp:
   # all external inputs are PARAMs
   input_list = dedup(u for si in batch for b in si.src[1:] for u in b.toposort() if u.op is Ops.PARAM)
-  cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, src=tuple(batch)),), arg="graph")
-  return cf.call(*input_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
+  cf = UOp(Ops.CUSTOM_FUNCTION, src=(UOp(Ops.LINEAR, src=tuple(batch)),), arg="graph")
+  return cf.call(*input_list)
 
 def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
   new_src: list[UOp] = []
@@ -43,8 +44,6 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
     current_batch, current_batch_devs = [], []
 
   for si in linear.src:
-    if si.src[0].op is Ops.SLICE: continue
-
     devs = dedup([Device[x] for b in si.src[1:] if b.op is not Ops.BIND for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
     graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
 
@@ -60,10 +59,10 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
   return linear.replace(src=tuple(new_src))
 
 def _copy_input(u:UOp) -> UOp:
-  run_linear(UOp(Ops.LINEAR, src=(u.copy_to_device(u.device).call(new:=UOp.new_buffer(u.device, u.max_numel(), u.dtype), u, metadata=()),)))
+  run_linear(UOp(Ops.LINEAR, src=(u.copy_to_device(u.device).call(new:=UOp.new_buffer(u.device, u.max_numel(), u.dtype), u),)))
   return new
 
-@track_rewrites(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
+@rewrite_group(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
 
@@ -86,34 +85,6 @@ def _check_no_non_tensor_return(ret):
   raise JitError(f"JIT return contains non-Tensor value of type {type(ret).__name__}")
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
-
-class DepsTracker:
-  def __init__(self):
-    # tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
-    self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
-    self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
-
-  @staticmethod
-  def _buf_key(buf:Buffer) -> int: return id(buf.base)
-
-  def access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
-    wait_nodes = []
-    for i,buf in enumerate(bufs):
-      key, s, e = self._buf_key(buf), buf.offset, buf.offset + buf.nbytes
-      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
-      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
-    for i,buf in enumerate(bufs):
-      key, s, e = self._buf_key(buf), buf.offset, buf.offset + buf.nbytes
-      if i in write:
-        for dmap in [self.w_dependency_map, self.r_dependency_map]:
-          kept = []
-          for st,en,dep in dmap[key]:
-            if st < min(s, en): kept.append((st, min(s, en), dep))
-            if max(e, st) < en: kept.append((max(e, st), en, dep))
-          dmap[key] = kept
-        self.w_dependency_map[key].append((s, e, new_dependency))
-      else: self.r_dependency_map[key].append((s, e, new_dependency))
-    return list({id(x):x for x in wait_nodes}.values())
 
 class GraphRunner:
   def __init__(self, linear:UOp, input_uops:tuple[UOp, ...]=()):
@@ -207,7 +178,7 @@ class CapturedJit(Generic[ReturnType]):
       if call.op is not Ops.CALL: continue
       arg_uops = get_call_arg_uops(call)
       outs, ins = get_call_outs_ins(call)
-      out |= {arg_uops[k] for k in set(outs) - set(ins) if arg_uops[k].op in (Ops.BUFFER, Ops.SLICE)}
+      out |= {b for k in set(outs) - set(ins) if (b:=u if (cv:=(u:=arg_uops[k]).contiguous_view()) is None else cv[0]).op is Ops.BUFFER}
     return out
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
@@ -233,20 +204,20 @@ def _prepare_jit_inputs(args, kwargs):
   for x in args + tuple(kwargs.values()):
     it = x if isinstance(x, (tuple,list)) else x.values() if isinstance(x, dict) else []
     tensors += [t for t in it if t.__class__ is Tensor and not any(t is y for y in tensors)]
-  def get_input_uops() -> list[UOp]: return flatten([t.uop.src if t.uop.op is Ops.MULTI else [t.uop] for t in tensors])
-  if any(u.device is None for u in get_input_uops()): raise JitError("JIT inputs must be real buffers; use .clone()")
+  def get_input_uops() -> list[UOp]: return flatten([[t.uop.src[0]] if t.uop.op is Ops.UNSHARD else [t.uop] for t in tensors])
+  if any(u.is_virtual for u in get_input_uops()): raise JitError("JIT inputs must be real buffers; use .clone()")
   if len(unrealized_tensors := [x for x in tensors if not x.uop.is_realized]): Tensor.realize(*unrealized_tensors)
   input_uops = get_input_uops()
   # collect buffer UOps (including MultiBuffer)
   input_buf_uops: list[UOp] = [u.base for u in input_uops if u.base.realized is not None]
   if len(set(input_buf_uops)) != len(input_buf_uops): raise JitError("duplicate inputs to JIT")
-  inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device) for u in input_uops]
+  inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP, u.base.dtype)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device) for u in input_uops]
   _var_vals = merge_dicts([x[1] for x in inputs] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   var_vals = {k.expr:v for k,v in _var_vals.items()}
   expected_input_info = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in inputs]
   return input_buf_uops, var_vals, names, expected_input_info
 
-class TinyJit(Generic[ReturnType]):
+class _TinyJit(Generic[ReturnType]):
   def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
@@ -267,6 +238,7 @@ class TinyJit(Generic[ReturnType]):
 
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
+  @disable_gc()
   def __call__(self, *args, **kwargs) -> ReturnType:
     input_buf_uops, var_vals, names, expected_input_info = _prepare_jit_inputs(args, kwargs)
     if not JIT or self.cnt == 0:
@@ -313,3 +285,10 @@ class TinyJit(Generic[ReturnType]):
 
     self.cnt += 1
     return ret
+
+# overload signatures support both @TinyJit and @TinyJit(prune=True) syntax
+@overload
+def TinyJit(fxn:Callable[..., ReturnType], *, prune:bool=False) -> _TinyJit[ReturnType]: ...
+@overload
+def TinyJit(fxn:None=None, *, prune:bool=False) -> Callable[[Callable[..., ReturnType]], _TinyJit[ReturnType]]: ...
+def TinyJit(fxn=None, **kwargs): return (lambda f: _TinyJit(f, **kwargs)) if fxn is None else _TinyJit(fxn, **kwargs)

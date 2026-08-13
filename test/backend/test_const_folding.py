@@ -2,6 +2,7 @@ import unittest, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DTYPES_DICT
 from tinygrad.uop.ops import Ops, UOp
+from tinygrad.codegen.decomp.op import threefry2x32
 import numpy as np
 from test.helpers import not_support_multi_device
 
@@ -15,7 +16,7 @@ def _check_ast_count(desired_count:int, t:Tensor):
 
 class TestMovedConstFolding(unittest.TestCase):
   def test_contiguous_deviceless_const(self):
-    t = Tensor(UOp.const(dtypes.float, 2.0)).contiguous()
+    t = Tensor(UOp.const(2.0, dtypes.float)).contiguous()
     self.assertIs(t.uop.op, Ops.CONST)
     self.assertIsNone(t.uop.device)
 
@@ -167,7 +168,8 @@ class TestMultiConstFolding(unittest.TestCase):
 
 class TestThreefryConstFolding(unittest.TestCase):
   def test_threefry(self):
-    x = UOp.const(dtypes.uint64, 5).threefry(UOp.const(dtypes.uint64, 10))
+    # THREEFRY(const,const) folds to a const once decomposed
+    x = threefry2x32(UOp.const(5, dtypes.uint64), UOp.const(10, dtypes.uint64))
     self.assertIs(x.simplify().op, Ops.CONST)
 
 class TestTautologicalCompare(unittest.TestCase):

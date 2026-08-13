@@ -2,12 +2,12 @@
 from typing import Any, Sequence, cast, Literal, NamedTuple, Generator
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
 from tinygrad.nn.state import TensorIO
-from tinygrad.tensor import Tensor, _broadcast_shape
-from tinygrad.mixin import ReductionStr
-from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN, Context
+from tinygrad.tensor import Tensor, is_numpy_ndarray
+from tinygrad.mixin.op import ReductionStr
+from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, get_single_element, polyN, Context
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype, DTYPES_DICT
 from tinygrad.device import Device
-from tinygrad.uop.ops import sint
+from tinygrad.uop.ops import sint, _broadcast_shape
 
 # ***** protobuf definitions ******
 class WireType(enum.IntEnum):
@@ -423,9 +423,6 @@ class OnnxRunner:
     if not eligible_ops: raise NotImplementedError(f"{op=} is not supported for domain {required_opset.domain} and version {required_opset.version}")
     return eligible_ops[max(eligible_ops.keys())]
 
-  def get_empty_input_data(self, device:str|None=None, dtype:DType|None=None) -> dict[str, Tensor]:
-    return {name:Tensor.empty(*spec.shape, device=device, dtype=dtype or spec.dtype) for name, spec in self.graph_inputs.items()}
-
   def to(self, device:str|None):
     self.graph_values = {k: (v.to(device) if isinstance(v, Tensor) else v) for k,v in self.graph_values.items()}
     self.graph_nodes = tuple(OnnxNode(n.op, n.opset_id, tuple(n.inputs), tuple(n.outputs),
@@ -620,6 +617,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y
   def Sub(x:Tensor|int,y:Tensor): return x - y # some test has input as int
   def Div(x:Tensor,y:Tensor): return x.div(y, rounding_mode='trunc' if dtypes.is_int(x.dtype) else None)
+  # ONNX Pow is (T, T1) -> T, the output takes the base dtype while Tensor.pow promotes base and exponent
+  def Pow(x:Tensor,y:Tensor): return x.pow(y).round().cast(x.dtype) if dtypes.is_int(x.dtype) else x.pow(y)
   def Less(x:Tensor,y:Tensor): return x < y
   def LessOrEqual(x:Tensor,y:Tensor): return x <= y
   def Greater(x:Tensor,y:Tensor): return x > y
@@ -960,7 +959,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # Reimplemented here because you need legacy RNG for passing ONNX tests.
   def dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
     import numpy as np
-    if not training_mode: return data, data.const_like(True).cast(dtypes.bool)
+    if not training_mode: return data, data.const_like(True, dtypes.bool)
     if seed is not None:
       rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), dtype=data.dtype, device=data.device)
     else:
@@ -1094,7 +1093,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def RMSNormalization(X:Tensor, scale:Tensor, axis:int=-1, epsilon:float=1e-5, stash_type:int=1):
     assert stash_type == 1, "only float32 is supported"
     norm = X.cast(dtypes.float).square().mean(axis=tuple(range(axis + X.ndim if axis < 0 else axis, X.ndim)), keepdim=True).add(epsilon).rsqrt()
-    return X.cast(X.dtype) * norm * scale
+    return X * norm * scale
 
   def RotaryEmbedding(X:Tensor, cos_cache:Tensor, sin_cache:Tensor, position_ids:Tensor|None=None, interleaved:int=0, num_heads:int|None=None,
                       rotary_embedding_dim:int=0):
@@ -1300,7 +1299,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   return {
     # Tensor ops
-    **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
+    **{op: getattr(Tensor, op.lower()) for op in ("Neg", "Reciprocal", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan",
     "Asin", "Acos", "Atan", "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh",
     "Tanh", "Softsign", "Asinh", "Acosh", "Atanh", "Elu", "Celu", "Selu", "Round", "Erf")},
     # Implemented ops

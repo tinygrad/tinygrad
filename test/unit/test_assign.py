@@ -4,6 +4,7 @@ import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import temp, DEV, Context
+from test.helpers import assert_kernel_count
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -42,7 +43,7 @@ class TestAssign(unittest.TestCase):
     # it should copy into the empty buffer
     GlobalCounters.reset()
     c.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
 
   def test_assign_slice(self):
     X = Tensor([1,2,3,4]).realize()
@@ -50,7 +51,7 @@ class TestAssign(unittest.TestCase):
     xs.assign(xs+1)
     GlobalCounters.reset()
     self.assertListEqual(X.tolist(), [1,2,4,5])
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
 
   def test_assign_slice_alt(self):
     X = Tensor([1,2,3,4]).realize()
@@ -58,7 +59,7 @@ class TestAssign(unittest.TestCase):
     xs1.assign(xs2+1)
     GlobalCounters.reset()
     self.assertListEqual(X.tolist(), [1,4,5,4])
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
 
   def test_assign_flip(self):
     ref = np.arange(16, dtype=np.float32)
@@ -68,7 +69,7 @@ class TestAssign(unittest.TestCase):
     xs.assign(xs + X)
     ref = ref + ref[::-1]
     np.testing.assert_allclose(X.numpy(), ref)
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
 
   def test_assign_add(self):
     for T in (1, 2, 10):#, 100): # this crashes in CI, not sure why
@@ -102,6 +103,16 @@ class TestAssign(unittest.TestCase):
     f(x)
     out = x.item()
     assert out == 1, f"expected 1, got {out}"
+
+  def test_pending_assign_chain_preserves_intermediate_reads(self):
+    x = Tensor([0.0]).contiguous().realize()
+    y0 = x + 0
+    x.assign(x + 1)
+    y1 = x + 0
+    x.assign(x + 1)
+    y2 = x + 0
+    x.assign(x + 1)
+    assert [y0.item(), y1.item(), y2.item(), x.item()] == [0.0, 1.0, 2.0, 3.0]
 
   def test_assign_add_jit(self):
     @TinyJit
@@ -306,19 +317,29 @@ class TestAssign(unittest.TestCase):
     t.assign(t + 100)
     np.testing.assert_equal(t.numpy(), [[100, 104, 108, 112], [101, 105, 109, 113], [102, 106, 110, 114], [103, 107, 111, 115]])
 
+  def test_assign_corealize_order_independent(self):
+    for order in [lambda x,y: Tensor.realize(x, y), lambda x,y: Tensor.realize(y, x)]:
+      x = Tensor([1.0]).realize()
+      y = x + 10
+      x.assign(x*2)
+      x.assign(x+3)
+      order(x, y)
+      self.assertEqual(y.tolist(), [11.0])
+      self.assertEqual(x.tolist(), [5.0])
+
   def test_assign_contiguous(self):
     b = Tensor.arange(16).reshape(4,4).clone().realize()
     a = (Tensor.arange(16).reshape(4,4).clone().realize() + 1)
     GlobalCounters.reset()
     b.assign(a.contiguous()).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
 
   def test_assign_contiguous_permute(self):
     b = Tensor.arange(16).reshape(4,4).clone().realize()
     a = (Tensor.arange(16).reshape(4,4).clone().realize() + 1).permute((1,0))
     GlobalCounters.reset()
     b.assign(a.contiguous()).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
 
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -393,7 +414,7 @@ class TestAssign(unittest.TestCase):
 
     GlobalCounters.reset()
     Tensor.realize(b, c, d)
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     np.testing.assert_allclose(b.numpy(), a.sum(1).numpy()+1)
     np.testing.assert_allclose(c.numpy(), a.sum(1).numpy()+2)
     np.testing.assert_allclose(d.numpy(), a.sum(1).numpy()+3)
@@ -441,7 +462,7 @@ class TestAssign(unittest.TestCase):
     b.assign(r + b)
     c.assign(r + b_perm.contiguous())
     Tensor.realize(b, c)
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    assert_kernel_count(2)
     np.testing.assert_equal(b.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32))
     np.testing.assert_equal(c.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32).transpose(1, 0))
 
@@ -451,7 +472,7 @@ class TestAssign(unittest.TestCase):
     a.assign(a + b)
     GlobalCounters.reset()
     a.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     np.testing.assert_equal(a.numpy(), np.ones((4, 4))+np.pad(np.ones((4, 4))[:, 0:2], ((0, 0), (0, 2)), constant_values=2))
 
   def test_permuted_assignment_masked_view_not_contiguous(self):
@@ -490,7 +511,7 @@ class TestAssign(unittest.TestCase):
     expected[0:10] = expected[50:60].copy()
     GlobalCounters.reset()
     a[0:10].assign(a[50:60]).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)  # currently conservative, forces contiguous
+    assert_kernel_count(2)  # currently conservative, forces contiguous
     np.testing.assert_allclose(a.numpy(), expected)
 
   def test_setitem_half(self):
@@ -610,7 +631,7 @@ class TestAssign(unittest.TestCase):
     GlobalCounters.reset()
     x.realize()
     # N assigns (1 kernel each) producing N kernels total
-    self.assertEqual(GlobalCounters.kernel_count, N)
+    assert_kernel_count(N)
 
   def test_shared_computation_assign_kernel_count(self):
     """When a .contiguous() is shared between an assign value and the next layer's input (like QKV projection in LLM),
@@ -628,7 +649,7 @@ class TestAssign(unittest.TestCase):
     GlobalCounters.reset()
     caches[-1][:1].contiguous().realize()
     # N matmuls + N assigns + 1 final read = 2*N+1 (AFTER embedding allows full graph scheduling with shared contiguous reuse)
-    self.assertEqual(GlobalCounters.kernel_count, 2*N+1)
+    assert_kernel_count(2*N+1)
 
   def test_double_assign_from_const(self):
     a = Tensor.empty(2)
@@ -636,12 +657,12 @@ class TestAssign(unittest.TestCase):
     a.assign(Tensor.ones(2, buffer=False))
     GlobalCounters.reset()
     a.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     self.assertEqual(a.tolist(), [1.,1.])
 
   def test_assign_deviceless_const(self):
     s = Tensor.empty(4, device="CPU:1", dtype=dtypes.float)
-    s.assign(Tensor(UOp.const(dtypes.float, 2.0)))
+    s.assign(Tensor(UOp.const(2.0).cast(dtypes.float)))
     np.testing.assert_equal(s.numpy(), [2, 2, 2, 2])
 
   def test_nested_after_contiguous_store(self):
@@ -652,7 +673,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)  # TODO: first copy is dead, could be 1
+    assert_kernel_count(2)  # TODO: first copy is dead, could be 1
     self.assertEqual(base.tolist(), [1,4,3])
 
   def test_nested_after_contiguous_store_no_init(self):
@@ -662,7 +683,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    assert_kernel_count(1)
     self.assertEqual(base.tolist(), [1,4,3])
 
 class TestAssignOrdering(unittest.TestCase):
@@ -853,6 +874,28 @@ class TestAssignOrdering(unittest.TestCase):
       b_np *= 0.9
     np.testing.assert_allclose(param.item(), p_np, atol=1e-5)
 
+  def test_war_reader_already_depends_on_write(self):
+    x = Tensor([1.0]).contiguous().realize()
+    y = Tensor([2.0]).contiguous().realize()
+    x_expr = x + 10
+    x.assign(x * 2)
+    y.assign(y + x)
+    z = y + x_expr
+    Tensor.realize(x, y, z)
+    # TODO: z should be 15: x_expr means 11 (x captured at build time), but the read is fused past the assign and
+    # sees the new bytes. once stale readers are scheduled before the overwrite, update this to 15
+    np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 16.0])
+
+  def test_war_multi_read_then_assign(self):
+    devices = ("CPU:0", "CPU:1")
+    for realize_reader_first in (False, True):
+      buf = Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize().shard(devices, 0).realize()
+      stale = buf.to("CPU")
+      buf.assign(Tensor.full(buf.shape, 10.0, device="CPU").shard(devices, 0).contiguous().realize())
+      Tensor.realize(stale, buf) if realize_reader_first else Tensor.realize(buf, stale)
+      np.testing.assert_equal(stale.numpy(), [1., 2., 3., 4.])
+      np.testing.assert_equal(buf.numpy(), [10., 10., 10., 10.])
+
   def test_multiple_slice_assigns_then_read(self):
     """Multiple non-overlapping slice assigns then read."""
     buf = Tensor.zeros(4).contiguous().realize()
@@ -1023,6 +1066,14 @@ class TestAfterCachePatterns(unittest.TestCase):
     head.realize()
     np.testing.assert_array_equal(head.numpy(), [3])
     np.testing.assert_array_equal(full.numpy(), [1, 2])
+
+class TestBatchNormRunningStats(unittest.TestCase):
+  @unittest.expectedFailure  # TODO: nothing reads the stat update so it is never scheduled, and the chain grows every step
+  def test_running_stats_are_realized(self):
+    from tinygrad import nn
+    bn, x = nn.BatchNorm(4), Tensor.randn(2, 4, 3, 3).contiguous().realize()
+    with Context(TRAINING=1): bn(x).realize()
+    self.assertTrue(bn.running_mean.uop.base.is_realized)
 
 if __name__ == "__main__":
   unittest.main()

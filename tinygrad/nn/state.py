@@ -1,9 +1,9 @@
-import json, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib
+import json, math, pathlib, struct, functools, io, zlib
 from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, GlobalCounters, tqdm, round_up, T, strides_for_shape
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, GlobalCounters, tqdm, round_up, T, strides_for_shape, CHUNK_SIZE
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
@@ -31,7 +31,8 @@ class TensorIO(io.RawIOBase, BinaryIO):
   def writelines(self, lines: Iterable[Any]): raise io.UnsupportedOperation("TensorIO.writelines not supported")
 
 safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dtypes.int16, "U16":dtypes.uint16, "I32":dtypes.int, "U32":dtypes.uint,
-               "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
+               "I64":dtypes.int64, "U64":dtypes.uint64, "F8_E4M3":dtypes.fp8e4m3, "F8_E5M2":dtypes.fp8e5m2,
+               "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
 def accept_filename(func: Callable[[Tensor], T]) -> Callable[[Tensor|str|pathlib.Path], T]:
@@ -69,6 +70,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   nn.state.safe_save({'t':t}, "test.safetensor")
   ```
   """
+  if any(v.dtype in dtypes.weaks for v in tensors.values()): raise ValueError("safe_save requires concrete dtypes")
   headers, offset = {}, 0
   if metadata: headers['__metadata__'] = metadata
   for k,v in tensors.items():
@@ -81,6 +83,59 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   t[0:8].bitcast(dtypes.int64).assign([len(j)])
   t[8:8+len(j)].assign(list(j.encode('utf-8')))
   for k,v in safe_load(t).items(): v.assign(tensors[k])
+
+# tinyfs
+
+def fs_store(t:Tensor) -> Tensor:
+  """
+  Store a tensor to storage.
+  """
+  # TODO: this should work locally as well
+  data = t.contiguous().flatten().bitcast(dtypes.uint8)
+
+  # pad to a multiple of 1mb
+  if (tsize := data.shape[0]) % CHUNK_SIZE != 0: data = data.pad((0, CHUNK_SIZE - tsize % CHUNK_SIZE))
+  size = data.shape[0]
+
+  base_chunks = math.ceil(size / CHUNK_SIZE)
+  tree_depth = math.ceil(math.log(base_chunks, CHUNK_SIZE // 16))
+
+  to_device = "CPU" if isinstance(t.device, str) and t.device.startswith("DISK") else t.device
+
+  level_chunks = base_chunks
+  for _ in range(tree_depth + 1):
+    # assign data into tinyfs:store and read back hashes
+    data = Tensor.empty(data.shape[0], dtype=dtypes.uint8, device="tinyfs:store").assign(data)[:level_chunks * 16].to(to_device)
+    if (tsize := data.shape[0]) % CHUNK_SIZE != 0: data = data.pad((0, CHUNK_SIZE - tsize % CHUNK_SIZE))
+    level_chunks = math.ceil(data.shape[0] / CHUNK_SIZE)
+
+  return data[:16].contiguous()
+
+def fs_load(t:Tensor, size:int) -> Tensor:
+  """
+  Load a tensor from storage.
+
+  t should be a tensor of the hash to load
+  """
+  # TODO: this should work locally as well
+  assert t.dtype == dtypes.uint8, "hash is expected to be uint8"
+  h = t.contiguous().flatten()
+  assert h.shape[0] == 16, "expected hash"
+
+  base_chunks = math.ceil(size / CHUNK_SIZE)
+  tree_depth = math.ceil(math.log(base_chunks, CHUNK_SIZE // 16))
+  data, level_chunks = h, 0
+  for i in reversed(range(tree_depth + 1)):
+    # if not last level, its still hashes
+    if i > 0 or tree_depth == 0:
+      level_chunks = max(1, math.ceil(base_chunks / (CHUNK_SIZE // 16)**(i-1)))
+      out_sz = 16 * level_chunks
+    else: out_sz = CHUNK_SIZE * level_chunks
+    # assign hash into tinyfs:load and read back data
+    (load:=Tensor.empty(out_sz, dtype=dtypes.uint8, device="tinyfs:load"))[:data.shape[0]].assign(data)
+    data = load
+
+  return data.to(t.device)[:size]
 
 # state dict
 
@@ -164,6 +219,7 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
 
 @accept_filename
 def zip_extract(t: Tensor) -> dict[str, Tensor]:
+  import zipfile
   files: dict[str, Tensor] = {}
   with zipfile.ZipFile(TensorIO(t), "r") as myzip:
     # sadly, the extra length needs to be read from the local header of each file.
@@ -194,6 +250,7 @@ def tar_extract(t: Tensor) -> dict[str, Tensor]:
   tensors = nn.state.tar_extract(Tensor(pathlib.Path("archive.tar")))
   ```
   """
+  import tarfile
   with tarfile.open(fileobj=TensorIO(t), mode="r") as tar:
     return {member.name:t[member.offset_data:member.offset_data+member.size] for member in tar if member.type == tarfile.REGTYPE}
 
@@ -248,6 +305,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
                "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
   class Dummy: pass
+  import pickle, zipfile, tarfile
   class TorchPickle(pickle.Unpickler):
     def find_class(self, module, name):
       module_root = module.split(".")[0]

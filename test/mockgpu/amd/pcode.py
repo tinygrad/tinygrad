@@ -7,7 +7,7 @@ from tinygrad.codegen.decomp.dtype import f2f
 # Type alias for vars dict: stores UOps and tuples for lambda definitions
 VarVal = UOp | tuple[str, list[str], str]
 
-def _const(dt, v): return UOp.const(dt, v)
+def _const(dt, v): return UOp.const(v, dt)
 def _u32(v): return _const(dtypes.uint32, v)
 def _u64(v): return _const(dtypes.uint64, v)
 def _to_u32(v): return v if v.dtype == dtypes.uint32 else v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
@@ -55,8 +55,8 @@ def _expr_bits(v: UOp) -> int:
   if v.op in (Ops.AND, Ops.XOR):
     widths: list[int] = []
     for src in v.src:
-      if src.op == Ops.CONST and isinstance(src.arg, int) and src.arg > 0 and (src.arg & (src.arg + 1)) == 0:
-        widths.append(src.arg.bit_length())
+      if src.op == Ops.CONST and isinstance(src.val, int) and src.val > 0 and (src.val & (src.val + 1)) == 0:
+        widths.append(src.val.bit_length())
     if widths: return max(widths)
   return v.dtype.bitsize
 
@@ -77,7 +77,7 @@ def _val_to_bits(val):
   return val if val.dtype == dtypes.uint32 else val.cast(dtypes.uint32)
 
 def _floor(x):
-  t = UOp(Ops.TRUNC, x.dtype, (x,))
+  t = UOp(Ops.TRUNC, src=(x,))
   return ((x < _const(x.dtype, 0)) & x.ne(t)).where(t - _const(x.dtype, 1), t)
 def _f16_extract(v): return (v & _u32(0xFFFF)).cast(dtypes.uint16).bitcast(dtypes.half) if v.dtype == dtypes.uint32 else v
 
@@ -144,9 +144,9 @@ def _minmax_reduce(is_max: bool, dt, *args: UOp) -> UOp:
 def _find_two_pi_mul(x):
   if x.op != Ops.MUL or len(x.src) != 2: return None
   for i, s in enumerate(x.src):
-    if s.op == Ops.CONST and abs(s.arg - 6.283185307179586) < 1e-5: return (x.src[1-i], 6.283185307179586)
+    if s.op == Ops.CONST and abs(s.val - 6.283185307179586) < 1e-5: return (x.src[1-i], 6.283185307179586)
     if s.op == Ops.MUL and len(s.src) == 2:
-      vals = [ss.arg for ss in s.src if ss.op == Ops.CONST] + [ss.src[0].arg for ss in s.src if ss.op == Ops.CAST and ss.src[0].op == Ops.CONST]
+      vals = [ss.val for ss in s.src if ss.op == Ops.CONST] + [ss.src[0].val for ss in s.src if ss.op == Ops.CAST and ss.src[0].op == Ops.CONST]
       if len(vals) == 2 and abs(vals[0] * vals[1] - 6.283185307179586) < 1e-5: return (x.src[1-i], vals[0] * vals[1])
   return None
 
@@ -156,14 +156,14 @@ def _trig_reduce(x, phase=0.0):
     turns, two_pi = match
     if phase: turns = turns + _const(turns.dtype, phase)
     n = _floor(turns + _const(turns.dtype, 0.5))
-    return UOp(Ops.SIN, turns.dtype, ((turns - n) * _const(turns.dtype, two_pi),))
+    return UOp(Ops.SIN, src=((turns - n) * _const(turns.dtype, two_pi),))
   if phase: x = x + _const(x.dtype, phase * 6.283185307179586)
   n = _floor(x * _const(x.dtype, 0.15915494309189535) + _const(x.dtype, 0.5))
-  return UOp(Ops.SIN, x.dtype, (x - n * _const(x.dtype, 6.283185307179586),))
+  return UOp(Ops.SIN, src=(x - n * _const(x.dtype, 6.283185307179586),))
 
 def _signext(val: UOp) -> UOp:
   for bits, mask, ext in [(4, 0xF, 0xFFFFFFF0), (8, 0xFF, 0xFFFFFF00), (16, 0xFFFF, 0xFFFF0000)]:
-    if (val.op == Ops.AND and len(val.src) == 2 and val.src[1].op == Ops.CONST and val.src[1].arg == mask) or val.dtype.itemsize == bits // 8:
+    if (val.op == Ops.AND and len(val.src) == 2 and val.src[1].op == Ops.CONST and val.src[1].val == mask) or val.dtype.itemsize == bits // 8:
       v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
       sb = (v32 >> _u32(bits - 1)) & _u32(1)
       return sb.ne(_u32(0)).where(v32 | _u32(ext), v32).cast(dtypes.int)
@@ -184,7 +184,7 @@ def _abs(val: UOp) -> UOp:
 
 def _f_to_u(f, dt):
   clamped = (f < _const(f.dtype, 0.0)).where(_const(f.dtype, 0.0), f)
-  truncated = UOp(Ops.TRUNC, f.dtype, (clamped,))
+  truncated = UOp(Ops.TRUNC, src=(clamped,))
   return (truncated >= _const(f.dtype, 2**(dt.itemsize*8))).where(_const(dt, dt.max), truncated.cast(dt))
 
 def _cvt_quiet(val: UOp) -> UOp:
@@ -230,7 +230,7 @@ def _ldexp(val: UOp, exp: UOp) -> UOp:
   if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
   elif val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
   if exp.dtype in (dtypes.uint32, dtypes.uint64): exp = exp.cast(dtypes.int if exp.dtype == dtypes.uint32 else dtypes.int64)
-  return val * UOp(Ops.EXP2, val.dtype, (exp.cast(val.dtype),))
+  return val * UOp(Ops.EXP2, src=(exp.cast(val.dtype),))
 
 def _frexp_mant(val: UOp) -> UOp:
   val = val.bitcast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float64) if val.dtype == dtypes.uint64 else val
@@ -288,20 +288,20 @@ def _sad_u8(a: UOp, b: UOp, acc: UOp, masked: bool = False) -> UOp:
   return result
 
 _FUNCS: dict[str, Callable[..., UOp]] = {
-  'sqrt': lambda a: UOp(Ops.SQRT, a.dtype, (a,)), 'trunc': lambda a: UOp(Ops.TRUNC, a.dtype, (a,)),
-  'log2': lambda a: UOp(Ops.LOG2, a.dtype, (a,)), 'sin': lambda a: _trig_reduce(a),
+  'sqrt': lambda a: UOp(Ops.SQRT, src=(a,)), 'trunc': lambda a: UOp(Ops.TRUNC, src=(a,)),
+  'log2': lambda a: UOp(Ops.LOG2, src=(a,)), 'sin': lambda a: _trig_reduce(a),
   'cos': lambda a: _trig_reduce(a, 0.25), 'floor': _floor, 'fract': lambda a: a - _floor(a),
   'signext': _signext, 'abs': _abs,
-  'isEven': lambda a: (UOp(Ops.TRUNC, a.dtype, (a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
-  'max': lambda a, b: UOp(Ops.MAX, a.dtype, (a, b)),
-  'min': lambda a, b: UOp(Ops.MAX, a.dtype, (a.neg(), b.neg())).neg(),
-  'pow': lambda a, b: UOp(Ops.EXP2, dtypes.float32, (b.bitcast(dtypes.float32),)),
+  'isEven': lambda a: (UOp(Ops.TRUNC, src=(a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
+  'max': lambda a, b: UOp(Ops.MAX, src=(a, b)),
+  'min': lambda a, b: UOp(Ops.MAX, src=(a.neg(), b.neg())).neg(),
+  'pow': lambda a, b: UOp(Ops.EXP2, src=(b.bitcast(dtypes.float32),)),
   'fma': lambda a, b, c: a * b + c,
   'i32_to_f32': lambda a: a.cast(dtypes.int).cast(dtypes.float32),
   'u32_to_f32': lambda a: a.cast(dtypes.uint32).cast(dtypes.float32),
-  'f32_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a.bitcast(dtypes.float32),)).cast(dtypes.int),
+  'f32_to_i32': lambda a: UOp(Ops.TRUNC, src=(a.bitcast(dtypes.float32),)).cast(dtypes.int),
   'f32_to_u32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint32),
-  'f64_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float64, (a.bitcast(dtypes.float64),)).cast(dtypes.int),
+  'f64_to_i32': lambda a: UOp(Ops.TRUNC, src=(a.bitcast(dtypes.float64),)).cast(dtypes.int),
   'f64_to_u32': lambda a: _f_to_u(a.bitcast(dtypes.float64), dtypes.uint32),
   'f16_to_f32': lambda a: _f16_extract(a).cast(dtypes.float32),
   'f32_to_f16': lambda a: a.cast(dtypes.half),
@@ -309,8 +309,8 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'f64_to_f32': lambda a: a.bitcast(dtypes.float64).cast(dtypes.float32),
   'i32_to_f64': lambda a: a.cast(dtypes.int).cast(dtypes.float64),
   'u32_to_f64': lambda a: a.cast(dtypes.uint32).cast(dtypes.float64),
-  'f16_to_i16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a),)).cast(dtypes.int16),
-  'f16_to_u16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a),)).cast(dtypes.uint16),
+  'f16_to_i16': lambda a: UOp(Ops.TRUNC, src=(_f16_extract(a),)).cast(dtypes.int16),
+  'f16_to_u16': lambda a: UOp(Ops.TRUNC, src=(_f16_extract(a),)).cast(dtypes.uint16),
   'i16_to_f16': lambda a: a.cast(dtypes.int16).cast(dtypes.half),
   'u16_to_f16': lambda a: a.cast(dtypes.uint16).cast(dtypes.half),
   'bf16_to_f32': lambda a: (((a.cast(dtypes.uint32) if a.dtype != dtypes.uint32 else a) & _u32(0xFFFF)) << _u32(16)).bitcast(dtypes.float32),
@@ -343,7 +343,7 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'i8_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xFF)),
   'i4_to_i32': lambda a: _signext_4bit(a.cast(dtypes.uint32) & _u32(0xF)),
   # Float to int16 conversions
-  'v_cvt_i16_f32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a.bitcast(dtypes.float32),)).cast(dtypes.int16),
+  'v_cvt_i16_f32': lambda a: UOp(Ops.TRUNC, src=(a.bitcast(dtypes.float32),)).cast(dtypes.int16),
   'v_cvt_u16_f32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint16),
   # SAD (Sum of Absolute Differences) - sum |a_i - b_i| for 4 bytes + accumulator
   'v_sad_u8': lambda a, b, c: _sad_u8(a, b, c),
@@ -492,9 +492,12 @@ class Parser:
       case '>=' | '<=' | '>' | '<' | '<>':
         ops = {'>=':(lambda a,b:a>=b),'<=':(lambda a,b:a<=b),'>':(lambda a,b:a>b),'<':(lambda a,b:a<b),'<>':(lambda a,b:a.ne(b))}
         return self._cmp_nan(left, right, ops[op])
-      case '>>' | '<<': return (left >> right) if op == '>>' else (left << right)
+      case '>>' | '<<':
+        if not dtypes.is_int(left.dtype): left = left.cast(dtypes.uint32)
+        if not dtypes.is_int(right.dtype): right = right.cast(dtypes.uint32)
+        return (left >> right) if op == '>>' else (left << right)
       case '+' | '-':
-        if op == '-' and left.op == Ops.CONST and right.op == Ops.CONST: return _const(left.dtype, left.arg - right.arg)
+        if op == '-' and left.op == Ops.CONST and right.op == Ops.CONST: return _const(left.dtype, left.val - right.val)
         return (left + right) if op == '+' else (left - right)
       case '*' | '/':
         # Integer promotion: promote 16-bit integers to 32-bit before multiply to avoid overflow
@@ -504,7 +507,7 @@ class Parser:
           left, right = left.cast(pdt), right.cast(pdt)
         if op == '*': return left * right
         return (left // right) if dtypes.is_int(left.dtype) else (left / right)
-      case '**': return UOp(Ops.EXP2, left.dtype, (right.cast(left.dtype),)) if left.op == Ops.CONST and left.arg == 2.0 else left
+      case '**': return UOp(Ops.EXP2, src=(right.cast(left.dtype),)) if left.op == Ops.CONST and left.val == 2.0 else left
 
   _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/'), ('**',)]
 
@@ -527,7 +530,7 @@ class Parser:
     if self.try_eat_val('-', 'OP'):
       inner = self.unary()
       if inner.op == Ops.CONST:
-        return _const(dtypes.int if inner.dtype == dtypes.uint32 else inner.dtype, -inner.arg)
+        return _const(dtypes.int if inner.dtype == dtypes.uint32 else inner.dtype, -inner.val)
       return inner.neg()
     if self.try_eat_val('+', 'OP'): return self.unary()
     return self.postfix()
@@ -584,7 +587,7 @@ class Parser:
         vgpr = self.vars.get('_vgpr')
         if vgpr is None: return _u32(0)
         ws = self.vars.get('_wave_size', 32)
-        return vgpr.index(_to_u32(reg) * _u32(ws) + _to_u32(lane), ptr=True).load()
+        return vgpr.index(_to_u32(reg) * _u32(ws) + _to_u32(lane)).load()
       if self.try_eat('LPAREN'):
         args = self._parse_args()
         self.eat('RPAREN')
@@ -610,7 +613,7 @@ class Parser:
           vgpr = self.vars.get('_vgpr')
           if vgpr is None: return _u32(0)
           ws = self.vars.get('_wave_size', 32)
-          return vgpr.index(_to_u32(reg) * _u32(ws) + _u32(int(idx)), ptr=True).load()
+          return vgpr.index(_to_u32(reg) * _u32(ws) + _u32(int(idx))).load()
         elem = self.vars.get(f'{name}@{idx}', self.vars.get(f'{name}{idx}'))
         if elem is None:
           # Extract bit idx from base variable (like var[idx])
@@ -667,14 +670,14 @@ class Parser:
       width = self.parse()
       self.eat('RBRACKET')
       if width.op == Ops.CONST:
-        w = int(width.arg)
+        w = int(width.val)
         return (base >> _to_u32(first)) & _const(base.dtype, (1 << w) - 1)
       return base
     if self.try_eat('COLON'):
       second = self.parse()
       self.eat('RBRACKET')
       if first.op == Ops.CONST and second.op == Ops.CONST:
-        a, b = int(first.arg), int(second.arg)
+        a, b = int(first.val), int(second.val)
         if a < b: return _bitreverse(base, b - a + 1)
         hi, lo = a, b
         if lo >= base.dtype.itemsize * 8:
@@ -685,10 +688,10 @@ class Parser:
         return _extract_bits(base, hi, lo)
       # Dynamic bit slice: (base >> lo) & ((1 << (hi - lo + 1)) - 1)
       dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
-      hi, lo = first.cast(dt), second.cast(dt)
-      width = hi - lo + _const(dt, 1)
+      hi_u, lo_u = first.cast(dt), second.cast(dt)
+      width = hi_u - lo_u + _const(dt, 1)
       mask = (_const(dt, 1) << width) - _const(dt, 1)
-      return (base.cast(dt) >> lo) & mask
+      return (base.cast(dt) >> lo_u) & mask
     self.eat('RBRACKET')
     dt_suffix = None
     if self.try_eat('DOT'):
@@ -696,7 +699,7 @@ class Parser:
     if var_name is None:
       var_name = self._find_var_name(base)
     if first.op == Ops.CONST:
-      idx = int(first.arg)
+      idx = int(first.val)
       # Check for array element (var@idx)
       if var_name and f'{var_name}@{idx}' in self.vars:
         v = self.vars[f'{var_name}@{idx}']
@@ -828,22 +831,22 @@ class Parser:
     assert mem is not None, "memory load requires _vmem or _lds"
     adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
     active = self.vars.get('_active')
-    def mindex(idx:UOp, ptr=False): return mem.index(idx.valid(active) if active is not None else idx, ptr=ptr)
-    byte_mem = mem.dtype.base == dtypes.uint8
+    def mindex(idx:UOp): return mem.index(idx.valid(active) if active is not None else idx)
+    byte_mem = mem.dtype == dtypes.uint8
     if byte_mem:
       idx = addr
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
         val = _u32(0).cast(dtypes.uint64)
-        for i in range(8): val = val | (mindex(idx + _const(dtypes.int, i), ptr=True).load().cast(dtypes.uint64) << _u64(i * 8))
+        for i in range(8): val = val | (mindex(idx + _const(adt, i)).load().cast(dtypes.uint64) << _u64(i * 8))
       elif dt in (dtypes.uint8, dtypes.int8):
-        val = mindex(idx, ptr=True).load().cast(dt)
+        val = mindex(idx).load().cast(dt)
       elif dt in (dtypes.uint16, dtypes.int16, dtypes.short):
-        lo = mindex(idx, ptr=True).load().cast(dtypes.uint32)
-        hi = mindex(idx + _const(dtypes.int, 1), ptr=True).load().cast(dtypes.uint32)
+        lo = mindex(idx).load().cast(dtypes.uint32)
+        hi = mindex(idx + _const(adt, 1)).load().cast(dtypes.uint32)
         val = (lo | (hi << _u32(8))).cast(dt)
       else:
         val = _u32(0)
-        for i in range(4): val = val | (mindex(idx + _const(dtypes.int, i), ptr=True).load().cast(dtypes.uint32) << _u32(i * 8))
+        for i in range(4): val = val | (mindex(idx + _const(adt, i)).load().cast(dtypes.uint32) << _u32(i * 8))
     else:
       idx = addr >> _const(addr.dtype, 2)
       val = mindex(idx)
@@ -863,13 +866,13 @@ class Parser:
         idx_hi_native = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int64)
         safe_idx_hi = is_unaligned.where(idx_hi_native, idx_native)
         hi = mindex(safe_idx_hi)
-        combined = val.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-        val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(dtypes.uint64, 8))).cast(dtypes.uint32), val)
+        combined = val.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(32, dtypes.uint64))
+        val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(8, dtypes.uint64))).cast(dtypes.uint32), val)
     return _cast_to(val, dt)
 
   def _coerce_cmp(self, l: UOp, r: UOp) -> tuple[UOp, UOp]:
     if l.dtype != r.dtype:
-      if r.dtype == dtypes.int and r.op == Ops.CONST and r.arg < 0: l = l.cast(dtypes.int)
+      if r.dtype == dtypes.int and r.op == Ops.CONST and r.val < 0: l = l.cast(dtypes.int)
       else: r = r.cast(l.dtype)
     return l, r
 
@@ -967,7 +970,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         if p.at('NUM'): return int(p.eat('NUM').val.rstrip('UuLl'))
         expr = p.parse().simplify()
         assert expr.op == Ops.CONST, f"loop bound must be constant, got {expr}"
-        return int(expr.arg)
+        return int(expr.val)
       start_val = parse_bound()
       p.eat('COLON')
       end_val = parse_bound()
@@ -1120,11 +1123,11 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           val = parse_tokens(toks[j:], env, funcs)
           lo_dt, hi_dt = DTYPES.get(lo_type, dtypes.uint64), DTYPES.get(hi_type, dtypes.uint32)
           lo_bits = 64 if lo_dt in (dtypes.uint64, dtypes.int64) else 32
-          lo_val = val.cast(lo_dt) if val.dtype.itemsize * 8 <= lo_bits else (val & _const(val.dtype, (1 << lo_bits) - 1)).cast(lo_dt)
-          hi_val = (val >> _const(val.dtype, lo_bits)).cast(hi_dt)
-          block_assigns[lo_var] = env[lo_var] = lo_val
-          block_assigns[hi_var] = env[hi_var] = hi_val
-          if assigns is not None: assigns.extend([(f'{lo_var}.{lo_type}', lo_val), (f'{hi_var}.{hi_type}', hi_val)])
+          lo_u = val.cast(lo_dt) if val.dtype.itemsize * 8 <= lo_bits else (val & _const(val.dtype, (1 << lo_bits) - 1)).cast(lo_dt)
+          hi_u = (val >> _const(val.dtype, lo_bits)).cast(hi_dt)
+          block_assigns[lo_var] = env[lo_var] = lo_u
+          block_assigns[hi_var] = env[hi_var] = hi_u
+          if assigns is not None: assigns.extend([(f'{lo_var}.{lo_type}', lo_u), (f'{hi_var}.{hi_type}', hi_u)])
           i += 1
           continue
 
@@ -1255,7 +1258,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       def parse_cond(s, kw):
         ll = s.lower()
         return _to_bool(parse_expr(s[ll.find(kw) + len(kw):ll.rfind('then')].strip(), env, funcs))
-      def is_const(c, v): return c.op == Ops.CONST and c.arg is v
+      def is_const(c, v): return c.op == Ops.CONST and c.val is v
       cond = parse_cond(line, 'if')
       conditions: list[tuple[UOp, UOp | dict[str, VarVal] | None]] = [(cond, None)] if not is_const(cond, False) else []
       branch_assigns: list[tuple[UOp, list]] = []  # (cond, assigns_list) for side-effect merging
@@ -1304,7 +1307,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         result = else_branch[0]
         for c, rv in reversed(conditions):
           if isinstance(rv, UOp) and isinstance(result, UOp):
-            if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
+            if rv.dtype != result.dtype: result = result.cast(rv.dtype)
             result = c.where(rv, result)
         return i, block_assigns, result
       # If statically true, use that branch directly; otherwise merge with WHERE
@@ -1325,7 +1328,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
             if isinstance(ba, dict) and var in ba:
               tv = ba[var]
               if isinstance(tv, UOp) and isinstance(res, UOp):
-                res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
+                res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype else res)
           block_assigns[var] = env[var] = res
         # Merge side effects from branches with conditions
         if assigns is not None:
@@ -1336,7 +1339,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
               return (dest, (val[0], cnd.where(val[1], val[1])))
             return (dest, val)
           # Build combined condition: each branch fires when its cond is true AND no earlier cond was true
-          remaining = UOp.const(dtypes.bool, True)
+          remaining = UOp.const(True)
           for bc, bse in branch_assigns:
             effective = remaining & bc if remaining.op != Ops.CONST else bc
             for dest, val in bse: assigns.append(_cond_side_effect(effective, dest, val))

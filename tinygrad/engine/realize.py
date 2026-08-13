@@ -2,14 +2,13 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import time, random, itertools, math, contextlib, weakref, array
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, TRACEMETA, prod, flatten, Context, getenv, to_tuple
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
-from tinygrad.device import Device, Buffer, MultiBuffer
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, wait_cond
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite
+from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import to_program
-from tinygrad.codegen.opt.postrange import bufs_from_ast
+from tinygrad.codegen.opt.postrange import args_from_ast
 
 # **************** Helpers ****************
 
@@ -18,7 +17,7 @@ def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.src[0]
   if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
-  if ast.op in (Ops.COPY, Ops.SLICE): return (0,), (1,)
+  if ast.op is Ops.COPY: return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
 
@@ -28,13 +27,10 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
 
   ast, arg_uops = call.src[0], get_call_arg_uops(call)
   if ast.op is Ops.PROGRAM: return ast.arg.name
-  if ast.op is Ops.SLICE:
-    offset = ast.src[1].arg * arg_uops[1].dtype.itemsize
-    return colored(f"view {_uop_sz_to_str(arg_uops[0]):>10} @ {offset:<10d}", "yellow")
   if ast.op is Ops.COPY: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {_dev_str(bufs[0]):>7s} <- {_dev_str(bufs[1]):7s}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return colored(f"batched {len(ast.src[0].src)}", "cyan")
-  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return call.arg.aux.name
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return cast(str, call.arg.name)
   raise NotImplementedError("get_call_name is not implemented")
 
 # **************** Stat ****************
@@ -54,7 +50,7 @@ first_run_cache:set[bytes] = set()
 def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_vals:dict[str, int]):
   if PROFILE:
     outputs, inputs = get_call_outs_ins(call)
-    cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
+    cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": var_vals,
       "bufs": [b.trace_num for b in bufs], "name": get_call_name(call, bufs, var_vals), "outputs": outputs, "inputs": inputs}))
   et: list[float|None] = [None]
   if DEBUG >= 2: st = time.perf_counter()
@@ -81,21 +77,23 @@ def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_va
       colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
       f" {display_name+' '*(46-ansilen(display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
-      ("" if et[0] is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
-      f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in call.arg.metadata] if call.arg.metadata else ''}")
+      ("" if et[0] is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})"))
     first_run_cache.add(call.src[0].key)
 
 local_size_cache: dict[bytes, tuple[int, ...]] = {}
 def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
-  device = prg.src[1].arg
+  device = to_tuple(prg.device)[0]
   if prg.arg.local_size is not None or not Device[device].renderer.has_local or not all_int(prg.arg.global_size): return None
 
   if (local_size:=local_size_cache.get(prg.key)) is None:
-    bufs = [UOp.from_buffer(b.allocate()) for b in bufs_from_ast(prg.src[0], device)]
+    # reuse one loaded runtime across candidates, only launch dims vary
+    (bufs, var_vals), runtime = args_from_ast(prg.src[0], device), get_runtime(device, prg, cache=False)
+    bufs  = [b.allocate() for b in bufs]
     def try_exec(local_size):
       try:
         new_gs = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
-        return time_call(prg.replace(arg=replace(prg.arg, global_size=new_gs, local_size=tuple(local_size))).call(*bufs))
+        return runtime(*[bufs[i].get_buf(device) for i in prg.arg.globals], global_size=new_gs, local_size=(*local_size,),
+                       vals=prg.arg.vals(var_vals), wait=True)
       except Exception: return float('inf')
 
     MAX_WORKGROUP = 1024
@@ -112,9 +110,8 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
 
 runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp, cache=True):
-  assert ast.op is Ops.PROGRAM and isinstance(ast.arg, ProgramInfo), "get_runtime should only be called with a PROGRAM ast"
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
-    runtime = Device[device].runtime(ast.arg.function_name, ast.src[4].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars, prg=ast)
+    runtime = Device[device].runtime(ast.to_elf())
     if cache: runtime_cache[key] = runtime
   return runtime
 
@@ -140,7 +137,7 @@ class ExecContext:
   cache: bool = True
 
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
-  if b.op in (Ops.SLICE, Ops.MSELECT) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg.slot], *b.src[1:]))
+  if b.op in (Ops.MSELECT, Ops.SHRINK) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg.slot], *b.src[1:]))
   if b.op is Ops.MSTACK: return b.replace(src=tuple(_resolve(x, inputs) for x in b.src))
   return inputs[b.arg.slot] if b.op is Ops.PARAM else b
 def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in get_call_arg_uops(call)]
@@ -149,15 +146,10 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
   bufs = [b.buffer for b in resolved]
   if not any(isinstance(b, MultiBuffer) for b in bufs): yield cast(list[Buffer], bufs), {}
   else:
-    dnum = next((x.expr for x in call.src[0].variables() if x.expr == '_device_num'), None)
-    for j, per_dev in enumerate(zip(*[cast(MultiBuffer, b).bufs for b in bufs])): yield list(per_dev), {dnum: j} if dnum else {}
-
-def exec_view(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  resolved = resolve_params(call, ctx.input_uops)
-  bufs = [cast(Buffer, b.buffer) for b in resolved]
-  bv = bufs[1].view(resolved[0].max_numel(), ast.dtype, ast.src[1].arg*bufs[1].dtype.itemsize)
-  with track_stats(ctx, call, bv.device, [bv, bufs[1]], ctx.var_vals): buffers[resolved[0]] = bv
-  return None
+    # the DEVICE axis is bound per device at launch: it's a RANGE in the AST and the _device_num variable after codegen
+    has_dnum = any((x.op is Ops.RANGE and x.arg[-1] is AxisType.DEVICE) or (x.op is Ops.PARAM and x.arg.name == '_device_num')
+                   for x in call.src[0].toposort())
+    for j, per_dev in enumerate(zip(*[cast(MultiBuffer, b).bufs for b in bufs])): yield list(per_dev), {"_device_num": j} if has_dnum else {}
 
 def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
@@ -168,9 +160,8 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
       elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
            and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
         dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-      elif src.device.startswith(("DISK", "TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
-        src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
-      else: dest.copyin(src.as_memoryview(allow_zero_copy=True))
+      elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
+      else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return None
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
@@ -198,7 +189,7 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
 def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
-  shape, pos_var = tuple(s.arg for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
+  shape, pos_var = tuple(s.val for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
   with track_stats(ctx, call, bufs[0].device, bufs, ctx.var_vals):
     bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
   return None
@@ -209,18 +200,30 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   return t[0]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  if call.arg.aux.inputs is not None:
-    for j,dev in enumerate(call.arg.aux.devs):
-      addrs = [(b.bufs[j] if isinstance(b:=ctx.input_uops[i].buffer, MultiBuffer) else b).get_buf(dev).va_addr for i in call.arg.aux.params]
-      buf = b.bufs[j] if isinstance(b:=call.src[1+call.arg.aux.inputs].buffer, MultiBuffer) else b
-      buf.ensure_allocated()._buf.cpu_view().view(fmt='Q')[:len(addrs)] = array.array('Q', addrs)
+  if (info:=call.arg.aux).inputs is not None:
+    bufs = [_resolve(ctx.input_uops[i], ctx.input_uops).buffer for i in call.arg.aux.input_idxs]
+    table = call.src[1+info.inputs].buffer
+    for j,dev in enumerate(call.arg.aux.device):
+      addrs = array.array('Q', [(b.bufs[j] if isinstance(b, MultiBuffer) else b).get_buf(dev).va_addr for b in bufs])
+      mv = (table.bufs[j] if isinstance(table, MultiBuffer) else table).ensure_allocated()._buf.cpu_view().view(fmt='Q')
+      wait_cond(lambda: mv[0], value=0, timeout_ms=ctx.timeout or getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000), msg=f"{dev} hang detected")
+      mv[:len(addrs)] = addrs
 
-  pm_exec.rewrite(call.replace(src=(ast,) + call.src[1:]), replace(ctx, update_stats=False, wait=True))
+  exec_kernel(replace(ctx, update_stats=DEBUG>=3), call, ast)
 
-  for d in call.arg.aux.devs:
-    with track_stats(ctx, call, d, [], ctx.var_vals):
-      if ctx.wait: Device[d].synchronize()
-  return None
+  tms = []
+  for devices,name,estimates,prof in info.kernels:
+    for device in devices:
+      tm = None
+      if prof:
+        (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, name, *prof)
+        if ctx.wait:
+          d.synchronize(timeout=ctx.timeout)
+          st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
+          tms.append(tm:=float(en-st)/d.timestamp_divider/1e6)
+      stat_call = call.replace(arg=replace(call.arg, name=name, aux=replace(info, estimates=estimates, kernels=())))
+      with track_stats(ctx, stat_call, device, [], ctx.var_vals) as et: et[0] = tm
+  return max(tms) if tms else None
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
@@ -230,9 +233,9 @@ pm_flatten_linear = PatternMatcher([
 
 def _validate(call:UOp, sink:UOp) -> UOp:
   params = get_call_arg_uops(call)
-  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype.base) for p in params)
+  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
   copies = tuple(p.copy_to_device(s.device).call(s, p) for s, p in zip(shadows, params))
-  return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sink,), arg="validate").call(*shadows, *params)))
+  return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, src=(sink,), arg="validate").call(*shadows, *params)))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value
@@ -251,7 +254,6 @@ pm_optimize_local_size = PatternMatcher([
 ])
 
 pm_exec = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SLICE, name="ast"),), name="call", allow_any_len=True), exec_view),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True), exec_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
@@ -260,31 +262,29 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False) -> UOp:
+if getenv("HCQ2"): from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link # noqa: E402 # down here, hcq2 imports the helpers above
+
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
-  if getenv("HCQ2"):
-    from extra.hcq2.hcq2 import hcq_compile
-    linear = hcq_compile(linear)
+  if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
-def link_linear(linear:UOp) -> UOp:
-  if getenv("HCQ2"):
-    from extra.hcq2.hcq2 import hcq_link
-    linear = hcq_link(linear)
-  return linear
+def link_linear(linear:UOp, cache=True) -> UOp: return hcq_link(linear, cache=cache) if getenv("HCQ2") else linear
 
-def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), update_stats=True, jit=False, wait=False):
-  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU))
-  ctx = ExecContext(var_vals or {}, input_uops, update_stats, jit, wait or DEBUG>=2)
+def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
+  inputs = list(input_uops)
+  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs))
+  ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: pm_exec.rewrite(call, ctx)
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> float:
   if clear_l2:
-    if hasattr(dev:=Device[call.src[0].src[1].arg], 'invalidate_caches'): dev.invalidate_caches()
+    if hasattr(dev:=Device[call.src[1].device], 'invalidate_caches'): dev.invalidate_caches()
     else:
       from tinygrad.tensor import Tensor
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
-  call = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0)).src[0]
-  return pm_exec.rewrite(call, ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False))
+  ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True), cache=ctx.cache)
+  return max(pm_exec.rewrite(c, ctx) or 0.0 for c in linear.src)

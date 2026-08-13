@@ -23,6 +23,7 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
                        .style("color", d => d.color).text(d => d.st)).node();
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
+const viewBounds = () => [rect(".ctx-list-parent").right, rect(".metadata-parent").left];
 
 // dims of shapes on the canvas aren't tracked by the browser, we compute it
 const canvasRect = (s, pixelScale) => {
@@ -119,9 +120,9 @@ const drawGraph = (data) => {
     .attr("transform", d => `translate(${d.width/2-8}, ${-d.height/2+8})`).datum(e => ({ rect:true, width:10, height:10, fill:e.addrspace, stroke:"none" })));
   const CALL_TAG_WIDTH = 14;
   addTags(nodes.selectAll("g.type").data(d => d.collapsible ? [d] : []).join("g").attr("class", d => `tag clickable ${d.collapsed ? 'collapsed' : 'expanded'}`)
-    .attr("transform", d => d.callNode ? `translate(${CALL_TAG_WIDTH/2-d.width/2}, ${0})` : `translate(${-d.width/2}, ${0})`)
-    .datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.callNode ? null : d.color,
-      ...(d.callNode && { rect:true, width:CALL_TAG_WIDTH }) })).on("click", (e,d) => {
+    .attr("transform", d => d.collapsePorts != null ? `translate(${CALL_TAG_WIDTH/2-d.width/2}, ${0})` : `translate(${-d.width/2}, ${0})`)
+    .datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.collapsePorts != null ? null : d.color,
+      ...(d.collapsePorts != null && { rect:true, width:CALL_TAG_WIDTH }) })).on("click", (e,d) => {
       e.stopPropagation();
       const t = d3.zoomTransform(document.getElementById("graph-svg"));
       const [x, y] = t.apply([d.x, d.y]);
@@ -301,12 +302,13 @@ function timeAtCycle(clk) {
 }
 
 function getZoomIdentity() {
+  const xscale = timelineScale(), deviceRight = rect("#device-list").right, [viewLeft, sidebarLeft] = viewBounds();
+  const viewRight = sidebarLeft || rect(".main-container").right;
+  const x0 = Math.max(0, viewLeft-deviceRight), x1 = Math.min(canvasDims()[0], viewRight-deviceRight);
   // for packets, set zoom to the full range of instruction events
-  if (data.instSt != null) {
-    const k = (data.dur - data.first) / (data.instEt - data.instSt), xscale = timelineScale();
-    return d3.zoomIdentity.translate(-xscale(data.instSt) * k, 0).scale(k);
-  }
-  return d3.zoomIdentity;
+  const [st, et] = data.instSt != null ? [data.instSt, data.instEt] : [data.first, data.dur];
+  const k = (x1-x0)/(xscale(et)-xscale(st));
+  return d3.zoomIdentity.translate(x0-xscale(st)*k, 0).scale(k);
 }
 
 const Modes = {0:'read', 1:'write', 2:'write+read'};
@@ -733,6 +735,7 @@ async function renderProfiler(path, opts) {
     }
   }
 
+  let lastCanvasRect = null;
   function resize() {
     const [width, height] = canvasDims();
     if (canvas.width === width*dpr && canvas.height === height*dpr) return;
@@ -741,6 +744,11 @@ async function renderProfiler(path, opts) {
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
+    const newRect = rect(canvas);
+    if (lastCanvasRect != null && lastCanvasRect.width > 0) {
+      zoomLevel = d3.zoomIdentity.translate(zoomLevel.x+lastCanvasRect.left-newRect.left, 0).scale(zoomLevel.k*lastCanvasRect.width/width);
+    }
+    lastCanvasRect = { left:newRect.left, width };
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
@@ -805,8 +813,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const svg = d3.select("#graph-svg");
   svg.call(svgZoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
-  const x0 = rect(".ctx-list-parent").right;
-  const x1 = rect(".metadata-parent").left;
+  const [x0, x1] = viewBounds();
   const pad = 16;
   const R = { x: x0+pad, y: mainRect.top+pad, width: (x1>0 ? x1-x0 : mainRect.width)-2*pad, height: mainRect.height-2*pad };
   const r = rect("#render");
@@ -1053,13 +1060,13 @@ async function main() {
   }
   // ** Graph view
   // if we don't have a complete cache yet we start streaming graphs in this step
-  if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
+  if (!(ckey in cache) || (!cache[ckey].done && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
     const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
-      if (e.data === "[DONE]") return eventSource.close();
+      if (e.data === "[DONE]") { ret.done = true; eventSource.close(); return; }
       const chunk = JSON.parse(e.data);
       ret.push(chunk);
       // if it's the first one render this new rgaph

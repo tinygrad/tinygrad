@@ -1,9 +1,8 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, IMAGE
-from tinygrad.dtype import PtrDType
 from tinygrad.uop.ops import Ops, resolve, AxisType
-from tinygrad.codegen.late.devectorizer import image_valid_dims
+from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
 
 def hand_coded_optimizations(k:Scheduler) -> Scheduler:
@@ -27,22 +26,18 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   """
   # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
   if USE_TC > 0 and (len(k.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (TC_OPT.value >= 1)):
-    good_tc_opt = False
-    tk = k.copy()
-    try: # check TC first and apply hand-coded opts if successful
-      rngs = tk.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
-      good_tc_opt = True
-    except KernelOptError:
-      pass
-    if good_tc_opt:
-      if rngs is not None:
-        for tc_dim in [1,0]: # attempt to upcast M and N
-          szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
-          if szs:
-            # set it to the replaced range
-            rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
-        if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
-          tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
+    for axis in range(3):
+      tk = k.copy()
+      # check TC first and apply hand-coded opts if successful
+      try: rngs = tk.apply_opt(Opt(OptOps.TC, axis, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
+      except KernelOptError: continue
+      for tc_dim in [1,0]: # attempt to upcast M and N
+        szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
+        if szs:
+          # set it to the replaced range
+          rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
+      if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
+        tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
       return tk
 
   # make a copy so it does not mutate the input
@@ -51,10 +46,11 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
   if IMAGE:
     for buf_index,buf in enumerate(k.bufs):
-      if isinstance(buf.src[0].dtype, PtrDType) and image_valid_dims(buf.src[0].dtype.base, buf.src[0].dtype.size, k.ren.target.arch):
-        # part of is_expanded
-        unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if
-          c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
+      if image_valid_dims(buf.src[0].dtype, buf.src[0].max_numel(), k.ren.target.arch):
+        idx = k.bufs[buf_index].src[1]
+        # IMAGE upcasts require one validity shared by all four unit-stride lanes so memory_coalescing can combine them into one vector read.
+        unit_stride_axes_mul_4 = [k.rngs.index(c) for c in idx.get_idx().split_uop(Ops.ADD) if
+          c.op is Ops.RANGE and (c.vmax+1)%4 == 0 and c not in idx.get_valid().backward_slice]
         if len(unit_stride_axes_mul_4):
           if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
             k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
@@ -130,8 +126,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
           if rng in idx.backward_slice: num_strides += 1
           for c in idx.split_uop(Ops.ADD):
             if c is rng: sum_strides += 1
-            if c.op is Ops.MUL and c.src[0] is rng and c.src[1].op is Ops.CONST: sum_strides += c.src[1].arg
-            if c.op is Ops.MUL and c.src[1] is rng and c.src[0].op is Ops.CONST: sum_strides += c.src[0].arg
+            if c.op is Ops.MUL and c.src[0] is rng and c.src[1].op is Ops.CONST: sum_strides += c.src[1].val
+            if c.op is Ops.MUL and c.src[1] is rng and c.src[0].op is Ops.CONST: sum_strides += c.src[0].val
         xb_choices.append((num_strides, sum_strides, axis, upcast_amount))
     if xb_choices:
       xb_choices = sorted(xb_choices)
@@ -169,7 +165,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     else:
       # prioritize making expand axes local
       local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().backward_slice for b in k.bufs), axis) \
-                              for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP) if k.rngs[axis].src[0].op is Ops.CONST]
+                              for axis in k.axes_of(AxisType.GLOBAL, AxisType.WEAK) if k.rngs[axis].src[0].op is Ops.CONST]
       to_local: list[tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):
         local_size = prod(sz for _, sz in to_local)
@@ -188,7 +184,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     for threads in [32,16,12,8,6,5,4,3,2]:
       # Skip if too many threads. Heuristic: use about 128K ops per thread
       if threads > k.ren.global_max[0] or resolve(prod(k.full_shape) // (128 << 10) < threads): continue
-      for axis in k.axes_of(AxisType.LOOP):
+      for axis in k.axes_of(AxisType.WEAK):
         if k.full_shape[axis] % threads == 0:
           try: k.apply_opt(Opt(OptOps.THREAD, axis, threads))
           except KernelOptError: pass
