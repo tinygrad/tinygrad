@@ -18,8 +18,7 @@ from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher, graph_rewrite
 
-MAX_ARGS, CMD_SIZE, RING_SLOTS = 63, 64, (16 << 10)
-FUNCS = () if WIN else ('clock_gettime', 'sem_wait', 'sem_post')
+MAX_ARGS, CMD_SIZE, RING_SLOTS, FUNCS = 63, 64, (16 << 10), (() if WIN else ('clock_gettime', 'sem_wait', 'sem_post'))
 
 # *****************
 # 1. workers
@@ -54,8 +53,7 @@ def worker_prog():
   return done.after(entry[0].call(*entry[1:], ret_dtype=dtypes.void)).index(0).store(cur + 1).end(cur)
 
 @dataclass
-class CPUWorker:
-  ring:Buffer; put:Buffer; sem:Buffer; sys:Buffer; done:Buffer; thread:threading.Thread
+class CPUWorker: ring:Buffer; put:Buffer; sem:Buffer; sys:Buffer; done:Buffer; thread:threading.Thread  # noqa: E702
 
 def create_worker(dev:CPUDevice) -> CPUWorker:
   ring, put, sysbuf, done = (Buffer(dev.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1, 1))

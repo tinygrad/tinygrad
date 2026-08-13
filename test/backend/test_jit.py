@@ -377,8 +377,8 @@ class TestJitGraphSplit(unittest.TestCase):
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     inp_cpu = Tensor.randn(10, 10, device="CPU").realize()
     self.expect(f, inp, inp_cpu,
-      graph=[self.ji_graph(2), self.ji_graph(2), self.ji_comp()],
-      multigraph=[self.ji_graph(2), self.ji_graph(2), self.ji_comp()],
+      graph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()],
+      multigraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()],
       hcqgraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()])
 
   def test_jit_multidev(self):

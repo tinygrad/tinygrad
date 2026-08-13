@@ -173,11 +173,12 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
 
     # wait the syncs and signal the device epoch, then bump the timeline on the host
     tl_signal, tl_value = make_signal(devs, tag="timeline_signal"), make_signal(devs, tag="timeline_value")
-    if all_devices_in(devs, HCQ_DEVS - {"CPU"}):
-      fin_submit = make_submit(*waits, UOp(Ops.INS, arg="store", src=(tl_signal, tl_value.index(0))), devs=devs, queue="COMPUTE:0")
-    else: # don't put the finalizer behind waits in the cpu queue
+
+    if devs[0].split(":")[0] == "CPU": # TODO: this should be removed with the C submitter
       spins = [(cur:=w.src[0].after(l:=UOp.loop(next(UOp.unique_num))).index(0).load()).end(l, cur < w.src[1]) for w in waits]
       fin_submit = tl_signal.after(*spins).index(0).store(tl_value.index(0))
+    else: fin_submit = make_submit(*waits, UOp(Ops.INS, arg="store", src=(tl_signal, tl_value.index(0))), devs=devs, queue="COMPUTE:0")
+
     epoch = (epoch_slot:=tl_value.after(fin_submit).index(0)).load()
 
     # fence once per device group on this schedule's previous epoch, then reset any queue signals used by the group
