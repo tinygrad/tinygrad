@@ -571,7 +571,6 @@ jobs:
             renderer: RDNA3
 
     name: Linux (${{ matrix.renderer }} ${{ matrix.arch }})
-    name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 15
     env:
