@@ -126,6 +126,14 @@ class Handler(HTTPRequestHandler):
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
+      # todo, use normaized?
+      for i, msg in enumerate(body["messages"]):
+        content = msg["content"]
+        if isinstance(content, list):
+          print(content)
+          for c in content:
+            if c["type"] == "image_url": print("IMAGE RECEIVED")
+
       # render and tokenize
       normalize_messages(body["messages"])
       rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True, preserve_thinking=True)
