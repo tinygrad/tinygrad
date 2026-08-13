@@ -3,7 +3,7 @@ from typing import cast, Any, Callable
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, encode_kernargs_clike, make_cmdbuf
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, encode_kernargs_clike, make_cmdbuf
 from tinygrad.runtime.support.hcq2 import make_binary_patch
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
@@ -290,14 +290,14 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
     super().__init__(dev, supports_copy_from_disk=dev.has_copy_queue, supports_transfer=dev.has_copy_queue and not dev.is_usb())
 
-  def _alloc(self, size:int, options:BufferSpec) -> HCQ2Buffer:
+  def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_copy_queue)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
-  def _do_map(self, buf:HCQ2Buffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _do_map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
-  def _do_unmap(self, buf:HCQ2Buffer): self.dev.iface.unmap(buf)
+  def _do_unmap(self, buf:HCQBuffer): self.dev.iface.unmap(buf)
 
 @dataclass
 class AMDQueueDesc:
