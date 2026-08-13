@@ -1,6 +1,6 @@
-import ctypes, struct
+import ctypes, struct, platform, pathlib, subprocess, sys
 from tinygrad.device import Compiler
-from tinygrad.helpers import DEBUG, system
+from tinygrad.helpers import DEBUG, system, fetch, unwrap
 from tinygrad.runtime.support.compiler_mesa import disas_adreno
 # see https://github.com/sirhcm/tinydreno
 from tinygrad.runtime.autogen import llvm_qcom
@@ -10,10 +10,14 @@ def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 class QCOMCompiler(Compiler):
   def __init__(self, arch:str):
     assert arch.split(',')[0] == "a630", "only a630 supported"
-    self.arch, self.chip_id, self.llvm_inst = arch, 0x6030001, llvm_qcom.cl_compiler_create_llvm_instance()
+    if platform.machine() == "aarch64": self.arch, self.chip_id, self.llvm_inst = arch, 0x6030001, llvm_qcom.cl_compiler_create_llvm_instance()
+    else: self.arch, self.chip_id, self.compiler_process = arch, 0x6030001, subprocess.Popen(
+      (f"docker run --rm -i --platform linux/aarch64 -e PYTHONPATH=/ -e QEMU_CPU=max,pauth=off -v {pathlib.Path(__file__).parents[2]}:/tinygrad "
+       f"-v {fetch('https://github.com/sirhcm/tinydreno/raw/refs/heads/master/libllvm-qcom.so')}:/lib/libllvm-qcom.so python:3.12-slim "
+       f"python /tinygrad/runtime/support/compiler_qcom.py {arch}").split(), stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
     super().__init__(f"compile_qcomcl_{arch}")
 
-  def __del__(self): llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst)
+  def __del__(self): llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst) if platform.machine() == "aarch64" else self.compiler_process.kill()
 
   def __reduce__(self): return QCOMCompiler, (self.arch,)
 
@@ -25,6 +29,10 @@ class QCOMCompiler(Compiler):
     return handle
 
   def compile(self, src) -> bytes:
+    if platform.machine() != "aarch64":
+      unwrap(self.compiler_process.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
+      if (lib:=unwrap(self.compiler_process.stdout).read(struct.unpack("I", unwrap(self.compiler_process.stdout).read(4))[0])): return lib
+      raise RuntimeError("QCOM Compilation Error")
     ch = self.checked(llvm_qcom.cl_compiler_compile_source(self.llvm_inst, self.chip_id, llvm_qcom.CL_MODE_64BIT, b"", 0, 0, 0, src.encode(), 0,
                                                            llvm_qcom.CL_SRC_STR, None))
     if DEBUG >= 8: print(system("llvm-dis", input=ctypes.string_at((comp:=ch.contents.compiled.contents).llvm_bitcode, comp.llvm_bitcode_size)))
@@ -36,3 +44,13 @@ class QCOMCompiler(Compiler):
     return ret
 
   def disassemble(self, lib: bytes): disas_adreno(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)], self.chip_id)
+
+if __name__ == "__main__":
+  compiler = QCOMCompiler(sys.argv[1])
+  while (amt:=sys.stdin.buffer.read(4)):
+    try: lib = compiler.compile(sys.stdin.buffer.read(struct.unpack("I", amt)[0]).decode())
+    except Exception as e:
+      lib = b""
+      print(e, file=sys.stderr, flush=True)
+    sys.stdout.buffer.write(struct.pack("I", len(lib)) + lib)
+    sys.stdout.buffer.flush()

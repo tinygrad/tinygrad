@@ -948,6 +948,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(cond.where(u0, u1), 0, 1, "((a<2)!=True)")
     self.helper_test_variable(cond.where(u0, u1).where(u0, u1), 0, 1, "(a<2)")
 
+  def test_equivalent_const_max(self):
+    x = Variable("x", -10, 10)
+    self.helper_test_variable((x < 0).where(0, x), 0, 10, "x.maximum(0)")
+    self.helper_test_variable((0 < x).where(x, 0), 0, 10, "x.maximum(0)")
+
   def test_where_combine(self):
     cond = Variable("x", 0, 3) < 2
     a = Variable("a", 0, 3)
