@@ -191,13 +191,16 @@ class TransformerBlock(FFNBlock):
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
-      # hybrid models use a quantized KV cache on AMD, padded to the flash decode block multiple
+      # hybrid models use a quantized KV cache on AMD, sized in flash decode blocks of 256
       quantize = amd_custom_kernels_supported(cast(str, x.device)) and self.config.ssm is not None
-      cache_len = (self.config.max_context+255)//256*256 if quantize else self.config.max_context
-      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, cache_len, self.config.head_dim,
+      assert not quantize or self.config.max_context % 256 == 0, \
+        f"quantized KV cache needs max_context to be a multiple of 256, got {self.config.max_context}"
+      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
                                    dtype=dtypes.int8 if quantize else dtypes.default_float, device=x.device)
-      if quantize: self.cache_kv_scale = Tensor.zeros(2, x.shape[0], self.config.n_kv_heads, cache_len, dtype=dtypes.float16, device=x.device)
-      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, cache_len, self.config.rope_theta, device=x.device)
+      if quantize:
+        self.cache_kv_scale = Tensor.zeros(2, x.shape[0], self.config.n_kv_heads, self.config.max_context,
+                                           dtype=dtypes.float16, device=x.device)
+      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
 
 class MLATransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
