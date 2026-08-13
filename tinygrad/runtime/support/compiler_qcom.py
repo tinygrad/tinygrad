@@ -12,7 +12,7 @@ class QCOMCompiler(Compiler):
     assert arch.split(',')[0] == "a630", "only a630 supported"
     if platform.machine() == "aarch64": self.arch, self.chip_id, self.llvm_inst = arch, 0x6030001, llvm_qcom.cl_compiler_create_llvm_instance()
     else: self.arch, self.chip_id, self.compiler_process = arch, 0x6030001, subprocess.Popen(
-      (f"docker run --rm -i --platform linux/aarch64 -e PYTHONPATH=/ -e QEMU_CPU=max,pauth=off -v {pathlib.Path(__file__).parents[3]}:/tinygrad "
+      (f"docker run --rm -i --platform linux/aarch64 -e PYTHONPATH=/ -e QEMU_CPU=max,pauth=off -v {pathlib.Path(__file__).parents[2]}:/tinygrad "
        f"-v {fetch('https://github.com/sirhcm/tinydreno/raw/refs/heads/master/libllvm-qcom.so')}:/lib/libllvm-qcom.so python:3.12-slim "
        f"python /tinygrad/runtime/support/compiler_qcom.py {arch}").split(), stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
     super().__init__(f"compile_qcomcl_{arch}")
