@@ -644,6 +644,10 @@ jobs:
     name: Compile-only (DEV=${{ matrix.dev }})
     runs-on: *linux
     timeout-minutes: 15
+    env:
+      NULL_ALLOW_COPYOUT: 1
+      DEV: ${{ matrix.dev }}${{ contains(matrix.dev, 'a630') && ',IMAGE_PITCH_ALIGNMENT=64' || '' }}
+      IMAGE: ${{ contains(matrix.dev, 'a630') && '1' || '0' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -652,27 +656,14 @@ jobs:
         with:
           key: compile-${{ matrix.backend }}
           deps: "testing_unit mesa"
-      - name: setup qemu
-        if: contains(matrix.dev, 'QCOMCL')
-        uses: docker/setup-qemu-action@v4
-        with:
-          platforms: arm64
+          docker-qemu: ${{ contains(matrix.dev, 'QCOMCL') }}
+      - name: Test IMAGE
+        shell: bash
+        if: contains(matrix.dev, 'a630')
+        run: DEBUG=7 python3 test/backend/test_ops.py TestOps.test_gemm | grep isam
       - name: Run test_ops
         shell: bash
-        env:
-          NULL_ALLOW_COPYOUT: 1
-          DEV: ${{ matrix.dev }}
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
-          python -m pytest -n=auto test/backend/test_ops.py --durations=20
-      - name: Run test_ops (IMAGE)
-        if: contains(matrix.dev, 'a630')
-        shell: bash
-        env:
-          IMAGE: 1
-          NULL_ALLOW_COPYOUT: 1
-          DEV: "${{ matrix.dev }},IMAGE_PITCH_ALIGNMENT=64"
-        run: |
-          DEBUG=7 python3 test/backend/test_ops.py TestOps.test_gemm | grep isam
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
