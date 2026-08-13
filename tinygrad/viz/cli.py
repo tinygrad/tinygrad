@@ -47,6 +47,7 @@ def decode_profile(data:bytes) -> dict:
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 def to_str(k:str, v) -> str:
+  if isinstance(v, str): return f"{k} {v}"
   if k == "FLOPS" or k.startswith("B/s"): return f"{v*1e-9:.0f} G{k}" if v < 1e13 else f"{v*1e-12:.0f} T{k}"
   if k == "B": return next((f"{v/s:.0f} {u}" for s,u in ((1e9,"GB"),(1e6,"MB"),(1e3,"KB")) if v>=s), f"{v:.0f} B")
   return f"{k}={v}"
@@ -79,14 +80,14 @@ def main(args) -> None:
   def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
   def print_step(step:dict, print_graph=False, reconstruct_matches=False) -> None:
-    data = viz.get_render(viz_data, step["query"])
+    data = viz.get_render(viz_data, step["query"], update_sink=False)
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
         if print_graph and "graph" in m and not args.json:
           for k,v in m["graph"].items():
             print(f"[{k}] {' '.join((lines:=v['label'].splitlines())[:5])}{'...' if len(lines) > 5 else ''}"+(f" tag={v['tag']}" if v['tag'] else ''))
             if v["src"]:
-              print("  src: "+", ".join([f"{i}->[{x}]" for i,x in v["src"][:5]])+(f", ... and {len(v['src'])-5} more" if len(v["src"]) > 5 else ""))
+              print("  src: "+", ".join([f"{i}->[{x}]" for i,x in v["src"]]))
         elif "uop" in m: print(emit(m["graph"] if print_graph else m["uop"]))
         if not reconstruct_matches: return None
         if m.get("diff"):
@@ -155,7 +156,8 @@ def main(args) -> None:
   else:
     timelines = [(n,l) for n,l in profile["layout"].items() if isinstance(l, dict) and l.get("event_type") == 0]
     markers = profile.get("markers", [])
-    interval:tuple[int, int]|None = None if not args.interval else (marker_st(markers, args.interval[0]), marker_st(markers, args.interval[1]))
+    interval:tuple[int, int]|None = None
+    if (rng:=args.interval): interval = (marker_st(markers, rng[0]), marker_st(markers, rng[1]) if len(rng) > 1 else profile["dur"])
     def produce_top_kernels() -> Iterator[dict]:
       tagged = ((n,e) for n,l in timelines for e in l["events"]) if not args.src else ((args.src[0],e) for e in unwrap(data)["events"])
       agg:dict[tuple[str,str], tuple[float, int, int|None, dict[str, float]]] = {} # map (device, kernel name) to (total time, count, ref, est)
@@ -219,7 +221,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(prog="python -m tinygrad.viz.cli")
   parser.add_argument("-s", "--src", nargs="+", default=[], metavar="NAME", help="Select a data source (default: all)")
   parser.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
-  parser.add_argument("--interval", nargs=2, metavar=("START", "END"), help="Optional start and end marker")
+  parser.add_argument("--interval", nargs="+", metavar=("START", "END"), help="Optional start and end marker")
   parser.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
   parser.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
                       default=temp("profile.pkl", append_user=True))

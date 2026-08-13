@@ -1,5 +1,4 @@
 from collections import defaultdict
-from tinygrad.device import Device
 from tinygrad.helpers import NO_MEMORY_PLANNER, DEBUG, round_up
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
@@ -13,7 +12,8 @@ def _collect_bufs(u:UOp) -> list[UOp]:
 def _can_plan(b:UOp, held_bufs:set[UOp]) -> bool:
   if b in held_bufs: return False
   devs = (b.device,) if isinstance(b.device, str) else b.device
-  return all(not d.startswith(("DISK", "TINYFS")) and hasattr(Device[d].allocator, "_offset") for d in devs)
+  # CL and WEBGPU do not support views, see explanation in contiguous_view_offset
+  return all(not d.startswith(("DISK", "TINYFS", "CL", "WEBGPU")) for d in devs)
 
 LaneKey = tuple[str, int]
 
@@ -39,7 +39,7 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
 
   # suballocation: build sorted open/close events, then alloc/free in order
   block_size = 256
-  nbytes = {b: round_up(b.arg * b.dtype.itemsize, block_size) for b in first_appearance}
+  nbytes = {b: round_up(b.max_numel() * b.dtype.itemsize, block_size) for b in first_appearance}
   events = sorted([(first_appearance[b], True, b) for b in first_appearance] +
                   [(last_appearance[b] + 1 + buf_hold.get(b, 0), False, b) for b in first_appearance], key=lambda x: (x[0], x[1]))
   total_memory = sum(nbytes.values()) * 2
@@ -49,14 +49,12 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
   for _, is_open, buf in events:
     if is_open: offsets[buf] = peaks[_key(buf)][1].alloc(nbytes[buf])
     else: peaks[_key(buf)][1].free(offsets[buf])
-    peaks[_key(buf)] = (max(peaks[_key(buf)][0], offsets[buf] + buf.arg * buf.dtype.itemsize), peaks[_key(buf)][1])
+    peaks[_key(buf)] = (max(peaks[_key(buf)][0], offsets[buf] + buf.max_numel() * buf.dtype.itemsize), peaks[_key(buf)][1])
   arena_sizes = {key: round_up(peak, block_size) for key, (peak, _) in peaks.items()}
 
-  # build replace_map: each buffer becomes a SLICE into a shared per-device-lane arena
+  # build replace_map: each buffer becomes a SHRINK/BITCAST into a shared per-device-lane arena
   arenas = {key: UOp.new_buffer(key[0], sz, dtypes.int8) for key, sz in arena_sizes.items()}
-  replace_map:dict[UOp, UOp] = {}
-  for buf_uop, offset in offsets.items():
-    replace_map[buf_uop] = UOp(Ops.SLICE, buf_uop.dtype, (arenas[_key(buf_uop)], UOp.const(dtypes.weakint, offset)), buf_uop.arg)
+  replace_map = {buf_uop:arenas[_key(buf_uop)][offset:offset+buf_uop.nbytes()].bitcast(buf_uop.dtype) for buf_uop, offset in offsets.items()}
 
   if DEBUG >= 1 and (omem:=sum(nbytes.values()) / 1e6) != (nmem:=sum(arena_sizes.values()) / 1e6):
     print(f"memory reduced from {omem:.2f} MB -> {nmem:.2f} MB, {len(first_appearance)} -> {len(arenas)} bufs")

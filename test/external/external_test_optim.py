@@ -8,6 +8,7 @@ from extra.lr_scheduler import LRSchedulerGroup
 
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
+from tinygrad.helpers import Context
 
 from test.external.mlperf_resnet.lars_optimizer import LARSOptimizer
 
@@ -103,11 +104,7 @@ def create_tf_polylr(initial_lr, end_lr, train_steps, warmup, power=2, skip_list
                                       initial_learning_rate=initial_lr, end_learning_rate=end_lr, warmup_epochs=warmup)
 
 class ExternalTestOptim(unittest.TestCase):
-  def setUp(self):
-    self.old_training = Tensor.training
-    Tensor.training = True
-  def tearDown(self):
-    Tensor.training = self.old_training
+  def setUp(self): self.enterContext(Context(TRAINING=1))
 
   def _test_optim(self, tinygrad_optim, tensorflow_optim, steps, opts, atol, rtol, tiny_sched=None, tf_sched=None, schedopts=None, do_optim=True):
     for x,y in zip(step(tinygrad_optim, steps=steps, kwargs=opts, scheduler=tiny_sched, schedopts=schedopts, do_optim=do_optim),

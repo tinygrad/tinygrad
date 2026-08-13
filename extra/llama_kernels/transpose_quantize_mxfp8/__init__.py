@@ -18,7 +18,7 @@ def _custom_transpose_quantize_mxfp8(q:UOp, e8:UOp, g:UOp, dname:str) -> UOp:
                   arg=KernelInfo(f"transpose_quantize_mxfp8_{M}_{N}", estimates=Estimates(ops=M*N, mem=mem)))
   src = (pathlib.Path(__file__).parent/"transpose_quantize_mxfp8.cpp").read_text()
   defines = [f"-DM_DIM={M}", f"-DN_DIM={N}", f"-DTHREADS_PER_WG={THREADS_PER_WG}"]
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
 
 def transpose_quantize_mxfp8(g:Tensor) -> tuple[Tensor, Tensor, Tensor]:

@@ -1,5 +1,5 @@
-import inspect, functools, math
-from tinygrad.device import Compiled, Allocator, ProfileGraphEntry, ProfileGraphEvent
+import inspect, math
+from tinygrad.device import Compiled, Allocator, ProfileGraphEntry, ProfileGraphEvent, Program, TinyELF
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -16,8 +16,8 @@ class NullRenderer(CStyleLanguage):
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
 
-class NullProgram:
-  def __init__(self, device:str, name:str, lib:bytes, *args, **kwargs): self.device, self.name = device, name
+class NullProgram(Program['NullDevice']):
+  def __init__(self, dev:'NullDevice', obj:TinyELF): self.device, self.name = dev.device, obj.name
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     with cpu_profile(self.name, self.device): return 1e-3
 
@@ -28,7 +28,7 @@ class NullAllocator(Allocator['NullDevice']):
     if not NULL_ALLOW_COPYOUT: raise RuntimeError("no copyout on NULL")
   def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
     with cpu_profile(f"{src_dev.device} -> {dest_dev.device}", f"{src_dev.device}:SDMA:0"): pass
-  def _offset(self, buf, offset:int, size:int): pass
+  def _offset(self, buf, size:int, offset:int): pass
 
 class NullGraph(MultiGraphRunner):
   def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None:
@@ -54,4 +54,4 @@ class NullDevice(Compiled):
       "EMULATE is deprecated, use DEV=NULL:HIP:"+{"AMD":"gfx1100", "AMD_RDNA4":"gfx1201", "AMD_CDNA4":"gfx950"}.get(emu, "<arch>")
     renderers = [NullRenderer] + [r for m in [cstyle, nir, ptx, llvmir, wgsl] for r in m.__dict__.values()
                                   if inspect.isclass(r) and issubclass(r, Renderer)]
-    super().__init__(device, NullAllocator(self), dedup(renderers), functools.partial(NullProgram, device), NullGraph)
+    super().__init__(device, NullAllocator(self), dedup(renderers), NullProgram, NullGraph)

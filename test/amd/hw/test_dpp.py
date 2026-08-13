@@ -6,7 +6,7 @@ when USE_HW=1.
 """
 import ctypes, unittest
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
-from tinygrad.helpers import flat_mv
+from tinygrad.helpers import Target, flat_mv
 from test.amd.hw.helpers import USE_HW, assemble
 from test.mockgpu.amd.emu import run_asm
 
@@ -37,8 +37,7 @@ def _run_wave64_emu(instructions: list, out_reg: int = 1) -> list[int]:
   return list(out_buf)
 
 def _run_wave64_hw(instructions: list, out_reg: int = 1) -> list[int]:
-  from tinygrad.device import Device
-  from tinygrad.runtime.ops_amd import AMDProgram
+  from tinygrad.device import Device, TinyELF
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
   dev = Device["AMD"]
@@ -84,7 +83,7 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
   lib = compiler.compile(asm_src)
-  prg = AMDProgram(dev, "test", lib)  # type: ignore[arg-type]
+  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
   out_gpu = dev.allocator.alloc(WAVE64 * 4)
   prg(out_gpu, global_size=(1, 1, 1), local_size=(WAVE64, 1, 1), wait=True)
   out = bytearray(WAVE64 * 4)

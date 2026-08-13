@@ -11,6 +11,8 @@ def fold_divmod_general(d: UOp) -> UOp|None:
   if y.vmin==y.vmax==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.FLOORDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
   # x//y is constant
   if (xdiv:=x//y).vmin == xdiv.vmax: return x - xdiv.vmin*y if d.op is Ops.FLOORMOD else xdiv.const_like(xdiv.vmin)
+  # PARAM // c is irreducible
+  if x.op is Ops.PARAM and y.op is Ops.CONST and x.arg.multiple_of % y.val == 0: return d.const_like(0) if d.op is Ops.FLOORMOD else None
 
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
@@ -18,7 +20,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
 
   # ** Constant Denominator Rules **
   # these rules strictly require y to be a scalar constant > 0
-  if y.op is Ops.CONST and (c := y.arg) > 0:
+  if y.op is Ops.CONST and (c := y.val) > 0:
     # nested_div: (x%(k*c))//c -> (x//c)%k (requires k>0); the mod case is handled by remove_nested_mod below
     if d.op is Ops.FLOORDIV and x.op is Ops.FLOORMOD and (k := x.src[1].divides(c)) is not None and k > 0: return x.src[0] // y % k
 
@@ -74,7 +76,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
 
   # divide_by_gcd: x//y -> (x//gcd)//(y//gcd)
   gcd = UOp.gcd(*all_uops, y).simplify()
-  if not (gcd.op is Ops.CONST and gcd.arg==1):
+  if not (gcd.op is Ops.CONST and gcd.val==1):
     ret = unwrap(x.divide_exact(gcd)).alu(d.op, unwrap(y.divide_exact(gcd)))
     return ret*gcd if d.op is Ops.FLOORMOD else ret
 
@@ -83,9 +85,9 @@ def fold_divmod_general(d: UOp) -> UOp|None:
   quo, rem = [], []
   for u in all_uops:
     if (q:=u.divide_exact(y)) is not None: quo.append(q)
-    elif y.op is Ops.CONST and (c:=u.const_factor())%y.arg!=c:
-      rem.append(u.divides(c)*(c%y.arg))
-      quo.append(u.divides(c)*(c//y.arg) if d.op is Ops.FLOORDIV else u.const_like(0))
+    elif y.op is Ops.CONST and (c:=u.const_factor())%y.val!=c:
+      rem.append(u.divides(c)*(c%y.val))
+      quo.append(u.divides(c)*(c//y.val) if d.op is Ops.FLOORDIV else u.const_like(0))
     else: rem.append(u)
 
   if not quo: return None
@@ -97,9 +99,10 @@ div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
   # (x//c+a)//d -> (x+a*c)//(c*d) for c>0, d>0
   ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d) if d.vmin>0 else None),
-  # (x+c)//d -> (x+c%d)//d + c//d for d>0 (split out the multiple of d in the constant)
-  ((UPat.var("x", dtypes.weakint)+UPat.cvar("c"))//UPat.cvar("d"),
-    lambda x,c,d: (x+c.arg%d.arg)//d + c.arg//d.arg if c.arg%d.arg!=c.arg and d.arg>0 else None),
+  # (x+c)//d -> (x+c%d)//d + c//d ; (x+c)%d -> (x+c%d)%d  (split the multiple of d out of the const, holds for any d!=0)
+  (UPat((Ops.FLOORDIV, Ops.FLOORMOD), src=(UPat.var("x", dtypes.weakint)+UPat.cvar("c"), UPat.cvar("d")), name="n"),
+    lambda n,x,c,d: None if d.val==0 or c.val%d.val==c.val else
+      (x+c.val%d.val)//d + c.val//d.val if n.op is Ops.FLOORDIV else (x+c.val%d.val)%d),
 
   # ** 2. Slow Rules **
   (UPat((Ops.FLOORDIV, Ops.FLOORMOD), dtypes.weakint, name="d"), lambda d: fold_divmod_general(d)),

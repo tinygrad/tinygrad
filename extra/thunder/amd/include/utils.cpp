@@ -23,7 +23,7 @@ __device__ inline static void atomic_pk_add_bf16_with_warpid(const GL &dst, cons
     std::uint64_t  as_u64 = static_cast<std::uint64_t>(as_int);
     buffer_resource br = make_buffer_resource(as_u64, buffer_size, 0x00020000);
 
-    int lane_offset = laneid * 2 + warpid * 512;
+    int lane_offset = laneid * 2 + warpid * (RT::rows * RT::cols);
 
     using range_type = ducks::art::get_nth_range_t<typename RT::register_ranges, N * RT::width + M>;
 
@@ -65,7 +65,7 @@ __device__ inline static void atomic_pk_add_bf16_with_warpid(const GL &dst, cons
     std::uint64_t  as_u64 = static_cast<std::uint64_t>(as_int);
     buffer_resource br = make_buffer_resource(as_u64, buffer_size, 0x00020000);
 
-    int lane_offset = laneid * 2 + warpid * 512;
+    int lane_offset = laneid * 2 + warpid * (RT::rows * RT::cols);
 
     auto perform_atomic_pk_add_bf16_with_warpid = [&]<int N, int M>() {
         using range_type = ducks::art::get_nth_range_t<typename RT::register_ranges, N * RT::width + M>;
@@ -97,4 +97,33 @@ __device__ inline static void atomic_pk_add_bf16_with_warpid(const GL &dst, cons
             }(std::make_index_sequence<RT::width>{});
         }.template operator()<Ns>(), ...);
     }(std::make_index_sequence<RT::height>{});
+}
+// make_window: complement of make_causal for the window lower boundary (q_pos-k_pos == WINDOW). masks = ~(causal masks)
+template<int N, int M, int GPR, ducks::art::all T0, ducks::art::all T1>
+__device__ static inline void make_window(T0 &dst, const T1 &src) {
+    static_assert(std::is_same_v<typename T0::T, float> && std::is_same_v<typename T1::T, float>, "Only float to float window mask is supported");
+    static_assert(std::is_same_v<typename T0::layout, typename T1::layout>, "Only same layout is supported");
+    static_assert(std::is_same_v<typename T0::shape, typename T1::shape>, "Only same shape is supported");
+
+    if constexpr (std::is_same_v<typename T0::layout, typename ducks::rt_layout::col> && std::is_same_v<typename T0::shape, typename ducks::rt_shape::rt_16x16>) {
+        using range_type_T0 = ducks::art::get_nth_range_t<typename T0::register_ranges, N * T0::width + M>;
+        using registers_T0 = ducks::art::split_many_t<ducks::art::type_list<range_type_T0>, 1>;
+        using range_type_T1 = ducks::art::get_nth_range_t<typename T1::register_ranges, N * T1::width + M>;
+        using registers_T1 = ducks::art::split_many_t<ducks::art::type_list<range_type_T1>, 1>;
+        static_assert(registers_T0::size == registers_T1::size);
+
+        uint64_t window_mask = 0x1FFF01FF001F0001;
+        macros::v_cndmask_b32_e64<ducks::art::get_nth_range_t<registers_T0, 0>::lo, ducks::art::get_nth_range_t<registers_T1, 0>::lo, GPR>(window_mask);
+
+        window_mask = 0x3FFF03FF003F0003;
+        macros::v_cndmask_b32_e64<ducks::art::get_nth_range_t<registers_T0, 1>::lo, ducks::art::get_nth_range_t<registers_T1, 1>::lo, GPR>(window_mask);
+
+        window_mask = 0x7FFF07FF007F0007;
+        macros::v_cndmask_b32_e64<ducks::art::get_nth_range_t<registers_T0, 2>::lo, ducks::art::get_nth_range_t<registers_T1, 2>::lo, GPR>(window_mask);
+
+        window_mask = 0xFFFF0FFF00FF000F;
+        macros::v_cndmask_b32_e64<ducks::art::get_nth_range_t<registers_T0, 3>::lo, ducks::art::get_nth_range_t<registers_T1, 3>::lo, GPR>(window_mask);
+    } else {
+        static_assert(false, "Unsupported window mask");
+    }
 }

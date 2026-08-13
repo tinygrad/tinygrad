@@ -11,7 +11,7 @@ X_train -= X_train.mean()
 # *****
 # 1. Define an MNIST model.
 
-from tinygrad import Tensor
+from tinygrad import Tensor, Context
 
 l1 = Tensor.kaiming_uniform(128, 784)
 l2 = Tensor.kaiming_uniform(10, 128)
@@ -24,11 +24,11 @@ l1n, l2n = l1.numpy(), l2.numpy()
 from tinygrad.nn.optim import SGD
 optim = SGD([l1, l2])
 
-Tensor.training = True
-X, Y = X_train[(samples:=Tensor.randint(128, high=X_train.shape[0]))], Y_train[samples]
-optim.zero_grad()
-model(X).sparse_categorical_crossentropy(Y).backward()
-optim.schedule_step()   # this will step the optimizer without running realize
+with Context(TRAINING=1):
+  X, Y = X_train[(samples:=Tensor.randint(128, high=X_train.shape[0]))], Y_train[samples]
+  optim.zero_grad()
+  model(X).sparse_categorical_crossentropy(Y).backward()
+  optim.schedule_step()   # this will step the optimizer without running realize
 
 # *****
 # 3. Create a schedule (linear uop).

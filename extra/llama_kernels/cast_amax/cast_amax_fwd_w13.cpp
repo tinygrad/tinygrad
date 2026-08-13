@@ -24,7 +24,7 @@ static_assert(HIDDEN % VEC == 0, "HIDDEN must be divisible by VEC (so VEC loads 
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
 fused_silu_mul_cast_amax_w13(
     __hip_fp8_storage_t*  __restrict__ fp8_out,         // fp8, N_ELEMS
-    float*                __restrict__ amax_buf,        // fp32, NUM_WG (per-WG amaxes)
+    float*                __restrict__ amax_out,        // fp32 scalar, initialized to 0 before launch
     const __hip_bfloat16* __restrict__ xw13,            // bf16, 2*N_ELEMS
     const float*          __restrict__ amax_state)      // fp32 scalar
 {
@@ -67,7 +67,7 @@ fused_silu_mul_cast_amax_w13(
     *reinterpret_cast<uint64_t*>(&fp8_out[base]) = *reinterpret_cast<uint64_t*>(out);
   }
 
-  // LDS tree reduction: per-workgroup amax
+  // LDS tree reduction: per-workgroup amax, then global atomic into the scalar.
   sdata[tid] = local_max;
   __syncthreads();
   for (int s = THREADS_PER_WG / 2; s > 0; s >>= 1) {
@@ -75,5 +75,5 @@ fused_silu_mul_cast_amax_w13(
     __syncthreads();
   }
 
-  if (tid == 0) amax_buf[wg] = sdata[0];
+  if (tid == 0 && sdata[0] > *amax_out) atomicMax(reinterpret_cast<int32_t*>(amax_out), __float_as_int(sdata[0]));
 }

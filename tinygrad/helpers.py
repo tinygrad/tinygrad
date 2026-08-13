@@ -1,9 +1,9 @@
 from __future__ import annotations
 import time
 START_TIME = time.perf_counter()
-import os, functools, platform, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
+import os, functools, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 from collections import defaultdict
-import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, difflib
+import shutil, math, types, copyreg, inspect, importlib, decimal, itertools, difflib
 from dataclasses import dataclass, field, replace
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
@@ -13,8 +13,7 @@ U = TypeVar("U")
 def prod(x:Iterable[T]) -> T|int: return functools.reduce(operator.mul, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
-OSX, WIN = platform.system() == "Darwin", sys.platform == "win32"
-ARCH_X86 = any(x in platform.processor() for x in ("Intel", "i386", "x86_64"))
+OSX, WIN = sys.platform == "darwin", sys.platform == "win32"
 BASEDIR = pathlib.Path(__file__).parent
 
 # fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
@@ -34,6 +33,7 @@ def get_shape(x) -> tuple[int, ...]:
   if not hasattr(x, "__len__") or isinstance(x, str) or getattr(x, "shape", None) == (): return ()
   if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
+def is_image_shape(shape): return shape is not None and len(shape) == 3 and shape[-1] == 4
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:str|None, background=False): # replace the termcolor library
   if NO_COLOR: return st
@@ -80,7 +80,6 @@ def to_be32(val:Any) -> Any: return ((val & 0xFF) << 24) | (((val >> 8) & 0xFF) 
 def to_be64(val:Any) -> Any: return to_be32(val >> 32) | (to_be32(val & 0xFFFFFFFF) << 32)
 def getbits(value: int, start: int, end: int): return (value >> start) & ((1 << (end - start + 1)) - 1)
 def i2u(bits: int, value: int): return value if value >= 0 else (1<<bits)+value
-def is_numpy_ndarray(x) -> bool: return str(type(x)) == "<class 'numpy.ndarray'>"
 def merge_dicts(ds:Iterable[dict[T,U]]) -> dict[T,U]:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   if len(kvs) != len(set(kv[0] for kv in kvs)): raise RuntimeError(f"{kvs} contains different values for the same key")
@@ -121,13 +120,6 @@ def strides_for_shape(shape:tuple[T, ...]) -> tuple[T, ...]:
   if not shape: return ()
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
   return canonicalize_strides(shape, strides)
-
-# returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
-def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[list[int]]|None: # T is sint
-  acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
-  try: split = [0 if isinstance(acc, int) and acc == 1 else acc_old.index(acc)+1 for acc in acc_new]
-  except ValueError: return None
-  return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
 
 def suppress_finalizing(func):
   def wrapper(*args, **kwargs):
@@ -238,7 +230,8 @@ class _DEV(ContextVar):
 
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
-JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
+JIT, JIT_BATCH_SIZE = ContextVar("JIT", 1), ContextVar("JIT_BATCH_SIZE", 32)
+CHUNK_SIZE = 2**20  # TinyFS content-addressed store: blob chunk + hash-tree node granularity
 WINO, CAPTURING, TRACEMETA, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1), ContextVar("NO_COLOR", 0)
 TRAINING = ContextVar("TRAINING", 0)
 USE_TC, TC_SELECT, TC_OPT = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0)
@@ -253,8 +246,20 @@ FUSE_OPTIM = ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
 MAX_KERNEL_BUFFERS = ContextVar("MAX_KERNEL_BUFFERS", 0)
 EMULATED_DTYPES = ContextVar("EMULATED_DTYPES", "")
+DEFAULT_FLOAT, DEFAULT_INT = ContextVar("DEFAULT_FLOAT", "float32"), ContextVar("DEFAULT_INT", "int32")
 CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
-CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
+def _get_cpu_count() -> int:
+  # os.process_cpu_count (3.13+) respects cgroup limits
+  if hasattr(os, "process_cpu_count"): return max(1, os.process_cpu_count() or 1)
+  # cgroup v2 (containers with --cpus=N)
+  try:
+    with open("/sys/fs/cgroup/cpu.max") as f:
+      quota, period = f.read().strip().split()
+      if quota != "max": return max(1, int(quota) // int(period))
+  except (FileNotFoundError, ValueError, ZeroDivisionError): pass
+  # fall back to affinity (respects taskset but not cgroup quota)
+  return max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1))
+NUM_CPU_THREADS = ContextVar("NUM_CPU_THREADS", _get_cpu_count())
 NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
@@ -275,12 +280,11 @@ SCACHE = ContextVar("SCACHE", 1)
 # allow use of atomics for embedding backward
 USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
 # don't allow broadcast
-DISALLOW_BROADCAST = ContextVar("DISALLOW_BROADCAST", 1)
+DISALLOW_BROADCAST = ContextVar("DISALLOW_BROADCAST", 0)
 
 @dataclass(frozen=True)
 class Metadata:
   name: str
-  caller: str
   backward: bool = False
   def __hash__(self): return hash(self.name)
   def __str__(self): return self.name + (" bw" if self.backward else "")
@@ -398,6 +402,7 @@ def db_connection():
     # another connection has set it already or is in the process of setting it
     # that connection will lock the database
     with contextlib.suppress(sqlite3.OperationalError): _db_connection.execute("PRAGMA journal_mode=WAL").fetchone()
+    _db_connection.execute("PRAGMA synchronous=NORMAL")
     if DEBUG >= 8: _db_connection.set_trace_callback(print)
   return _db_connection
 
@@ -417,7 +422,7 @@ def diskcache_get(table:str, key:dict|str|int) -> Any:
   if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
   return None
 
-_db_tables = set()
+_db_tables: set[str] = set()
 def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
   if CACHELEVEL < 1: return val
   if isinstance(key, (str,int)): key = {"key": key}
@@ -448,9 +453,9 @@ def _ensure_downloads_dir() -> pathlib.Path:
   if pathlib.Path("/etc/tinybox-release").is_file():
     # try creating dir with sudo
     if not (downloads_dir := pathlib.Path("/raid/downloads")).exists():
-      subprocess.run(["sudo", "mkdir", "-p", downloads_dir], check=True)
-      subprocess.run(["sudo", "chown", "tiny:root", downloads_dir], check=True)
-      subprocess.run(["sudo", "chmod", "775", downloads_dir], check=True)
+      system(f"sudo mkdir -p {downloads_dir}")
+      system(f"sudo chown tiny:root {downloads_dir}")
+      system(f"sudo chmod 775 {downloads_dir}")
     return downloads_dir
   return pathlib.Path(cache_dir) / "downloads"
 
@@ -491,6 +496,7 @@ def fetch_fw(path:str, name:str, sha256:str) -> bytes:
 # *** Exec helpers
 
 def system(cmd:str, **kwargs) -> str:
+  import subprocess
   st = time.perf_counter()
   try: ret = subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT, **kwargs).decode().strip()
   except subprocess.CalledProcessError as e:
@@ -516,6 +522,18 @@ def capstone_flatdump(lib: bytes, arch:str):
   for instr in cs.disasm(lib, 0):
     print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
   sys.stdout.flush()
+
+def _find_llvm_objdump():
+  if OSX: return '/opt/homebrew/opt/llvm/bin/llvm-objdump'
+  # Try ROCm path first, then versioned, then unversioned
+  for p in ['/opt/rocm/llvm/bin/llvm-objdump', 'llvm-objdump-21', 'llvm-objdump-20', 'llvm-objdump']:
+    if shutil.which(p): return p
+  raise FileNotFoundError("llvm-objdump not found")
+
+def amdgpu_disassemble(lib:bytes):
+  asm = system(f"{_find_llvm_objdump()} -d -", input=lib).splitlines()
+  while asm and ("s_nop 0" in asm[-1] or "s_code_end" in asm[-1]): asm.pop()
+  print("\n".join(asm))
 
 def wait_cond(cb, *args, value=True, timeout_ms=10000, msg="") -> bool:
   start_time = int(time.perf_counter() * 1000)
@@ -576,6 +594,8 @@ class tqdm(Generic[T]):
 def trange(n:int, **kwargs) -> tqdm[int]: return tqdm(range(n), total=n, **kwargs)
 
 class disable_gc(contextlib.ContextDecorator):
+  # ContextDecorator otherwise reuses self, so recursive calls overwrite _was_enabled.
+  def _recreate_cm(self): return type(self)()
   def __enter__(self):
     self._was_enabled = gc.isenabled()
     if self._was_enabled: gc.disable()

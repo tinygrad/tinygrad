@@ -1,6 +1,6 @@
 from typing import Self, Sequence
 from tinygrad.uop import Ops
-from tinygrad.dtype import DTypeLike, dtypes, sum_acc_dtype, to_dtype
+from tinygrad.dtype import DTypeLike, dtypes, strong_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import make_tuple
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.movement import MovementMixin
@@ -11,10 +11,11 @@ class ReduceMixin(DTypeMixin, MovementMixin):
     raise NotImplementedError
 
   def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
+    self = self.cast(strong_dtype(self.dtype))
     axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
     if self.ndim == 0: axis = ()
     ret = self._rop(op, axis)
-    return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
+    return ret.reshape(tuple(1 if i in axis else s for i,s in enumerate(self.shape))) if keepdim else ret
 
   def sum(self, axis:int|Sequence[int]|None=None, keepdim=False, dtype:DTypeLike|None=None) -> Self:
     """

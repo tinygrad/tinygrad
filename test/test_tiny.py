@@ -1,7 +1,7 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest, random
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, OSX
 
 class TestTiny(unittest.TestCase):
 
@@ -39,14 +39,21 @@ class TestTiny(unittest.TestCase):
     out = Tensor.ones(N).contiguous().sum()
     self.assertEqual(out.item(), N)
 
-  def test_gemm(self, N=getenv("GEMM_N", 64)):
-    a = Tensor.ones(N,N).contiguous()
-    b = Tensor.eye(N).clone()
+  def test_eye(self):
+    out = Tensor.eye(3).flatten()
+    self.assertListEqual(out.tolist(), [1.0,0.0,0.0, 0.0,1.0,0.0, 0.0,0.0,1.0])
+
+  def test_gemm(self, N=getenv("GEMM_N", 64), dtype=dtypes.float):
+    a = Tensor.ones(N,N, dtype=dtype).contiguous()
+    b = Tensor.eye(N, dtype=dtype).clone()
     lst = (out:=a@b).tolist()
     for y in range(N):
       for x in range(N):
         self.assertEqual(lst[y][x], 1.0, msg=f"mismatch at ({y},{x})")
-    self.assertEqual(out.dtype, dtypes.float)
+    self.assertEqual(out.dtype, dtype)
+
+  @unittest.skipIf(Device.DEFAULT == "DSP", "half is broken on DSP")
+  def test_hgemm(self): self.test_gemm(dtype=dtypes.half)
 
   def test_gemv(self, N=getenv("GEMV_N", 64), out_dtype=dtypes.float):
     a = Tensor.ones(1,N).contiguous()
@@ -89,6 +96,7 @@ class TestTiny(unittest.TestCase):
 
   # *** BEAM (for Kernel speed) ***
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and OSX, "WEBGPU's timestamp-query is unreliable on dawn's metal backend")
   def test_beam(self):
     with Context(BEAM=1, IGNORE_BEAM_CACHE=1): self.test_plus()
 

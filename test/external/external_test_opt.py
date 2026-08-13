@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from tinygrad import GlobalCounters, Tensor, Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing, run_linear
 from tinygrad.tensor import _to_np_dtype
@@ -38,11 +38,7 @@ from extra.models.vit import ViT
 
 @unittest.skipUnless(Device.DEFAULT == "CL", "Not Implemented")
 class TestInferenceMinKernels(unittest.TestCase):
-  def setUp(self):
-    self.training_old = Tensor.training
-    Tensor.training = False
-  def tearDown(self):
-    Tensor.training = self.training_old
+  def setUp(self): self.enterContext(Context(TRAINING=0))
 
   def test_convnext(self):
     model = ConvNeXt()

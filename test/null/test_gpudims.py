@@ -12,7 +12,7 @@ class TestGroupedDims(unittest.TestCase):
     idxs = get_grouped_dims(prefix, dims, max_sizes, reverse)
     loop_idxs = dedup(flatten([[y for y in x.toposort() if y.op is Ops.SPECIAL] for x in idxs]))
     loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg)
-    sizes = [x.src[0].arg for x in loop_idxs]
+    sizes = [x.src[0].val for x in loop_idxs]
     assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
     if assert_same_length:
       assert len(loop_idxs) == min(len(sizes), len(dims)), f"expected idxs to have length {min(len(sizes), len(dims))}, got {len(loop_idxs)}"
@@ -24,10 +24,10 @@ class TestGroupedDims(unittest.TestCase):
     total = math.prod(dims)
     specials = sorted(dedup(flatten([[y for y in x.toposort() if y.op is Ops.SPECIAL] for x in idxs])), key=lambda u: u.arg)
     # build flat index and primed flat (same expression with renamed SPECIALs)
-    flat = UOp.const(dtypes.weakint, 0)
+    flat = UOp.const(0)
     for i, idx in enumerate(idxs):
       flat = flat + idx * int(math.prod(dims[i+1:]))
-    flat_p = flat.substitute({s: UOp(Ops.SPECIAL, s.dtype, s.src, s.arg+"_p") for s in specials})
+    flat_p = flat.substitute({s: UOp(Ops.SPECIAL, src=s.src, arg=s.arg+"_p") for s in specials})
     solver = z3.Solver()
     [z3_flat, z3_flat_p] = uops_to_z3(solver, flat, flat_p)
     # bounds
@@ -94,9 +94,20 @@ class TestGroupedDims(unittest.TestCase):
     assert idxs[2].op is Ops.SPECIAL, f"expected SPECIAL for direct-mapped dim, got {idxs[2].op}"
     assert idxs[3].op is Ops.SPECIAL, f"expected SPECIAL for direct-mapped dim, got {idxs[3].op}"
 
+  def test_grouped_dims_high_rank(self):
+    # 4D collapsed onto 2 axes
+    self._check_grouped_dims("gidx", (4,4,4,4), (16,16), False, [16,16])
+    # 4D untouched
+    self._check_grouped_dims("gidx", (2,3,4,5), None, False, [2,3,4,5])
+    idxs = get_grouped_dims("gidx", (2,3,4,5), None, False)
+    assert all(u.op is Ops.SPECIAL for u in idxs), f"expected all-SPECIAL when untouched, got {[u.op for u in idxs]}"
+    # 5D and 6D collapsed onto 3 axes
+    self._check_grouped_dims("gidx", (2,2,2,2,2), (4,4,4), False, [4,4,2])
+    self._check_grouped_dims("gidx", (2,2,2,2,2,2), (8,8,8), False, [8,4,2])
+
   def test_global_prod_max(self):
     g, l = UOp.range(256, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
-    sink = UOp.param(0, dtypes.float.ptr()).index(g + l).store(UOp.const(dtypes.float, 1.0)).end(g, l).sink(arg=KernelInfo())
+    sink = UOp.param(0, dtypes.float, (512,)).index(g + l).store(UOp.const(1.0)).end(g, l).sink(arg=KernelInfo())
     class R(Renderer): global_max, local_max, global_prod_max = (256, 256, 256), (128, 128, 128), (128, 128, 128)
     specials = [u for u in add_gpudims(R(Target()), sink).toposort() if u.op is Ops.SPECIAL]
     self.assertGreater(len([s for s in specials if "lidx" in s.arg]), 1)

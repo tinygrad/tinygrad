@@ -1,6 +1,6 @@
 import unittest, itertools, math
 from tinygrad import Tensor, dtypes, Context
-from tinygrad.dtype import DType, ConstType
+from tinygrad.dtype import DType, ConstType, truncate
 from tinygrad.uop.ops import Ops, UOp
 from test.helpers import full_rewrite
 import numpy as np
@@ -33,6 +33,34 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     x = Tensor.randn(32, 32)
     x = x.clip(0, 1).realize()
     _check_ast_count(1, x.neg())
+
+class TestWeakConstFolding(unittest.TestCase):
+  def test_weakint_math(self):
+    out = (UOp.const(2**40) + UOp.const(2**40)).simplify()
+    self.assertEqual((out.op, out.dtype, out.val), (Ops.CONST, dtypes.weakint, 2**41))
+
+  def test_float_unaries(self):
+    for op in (Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL):
+      out = UOp.const(4.0).alu(op).simplify()
+      self.assertEqual((out.op, out.dtype), (Ops.CONST, dtypes.weakfloat))
+
+  def test_weakfloat_math(self):
+    out = (UOp.const(1.25) + UOp.const(2.5)).simplify()
+    self.assertEqual((out.op, out.dtype, out.val), (Ops.CONST, dtypes.weakfloat, 3.75))
+
+  def test_invalid_poison(self):
+    self.assertTrue(UOp.invalid().alu(Ops.CDIV, UOp.const(0)).simplify().is_invalid)
+
+  def test_cast_commits_to_dtype_grid(self):
+    # committing a weak const to a stated width puts the value on that width's grid, same as storage packing and native compilers
+    v = 1/123008  # not representable in float16
+    out = UOp.const(v).cast(dtypes.half).simplify()
+    self.assertEqual((out.op, out.dtype, out.val), (Ops.CONST, dtypes.half, truncate[dtypes.half](v)))
+    self.assertNotEqual(out.val, v)
+    # the grid commit preserves the sign of zero
+    self.assertEqual(math.copysign(1, UOp.const(-0.0).cast(dtypes.half).simplify().val), -1)
+    # observable at tensor level: the const-folded comparison agrees with the committed value
+    self.assertTrue((Tensor(-3.2).cast(dtypes.float32) <= truncate[dtypes.float32](-3.2)).item())
 
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
@@ -103,10 +131,10 @@ class TestBitcastConstFolding(unittest.TestCase):
     def t(cases: dict[DType, ConstType]):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
         if not math.isnan(from_v):
-          r = full_rewrite(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
+          r = full_rewrite(UOp.const(from_v, from_dt).bitcast(to_dt).sink()).src[0]
           self.assertEqual(r.op, Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
           self.assertEqual(r.dtype, to_dt, msg)
-          np.testing.assert_equal(r.arg, to_v, msg)
+          np.testing.assert_equal(r.val, to_v, msg)
 
     t({dtypes.int8: 0, dtypes.uint8: 0, dtypes.bool: False})
     t({dtypes.int8: 1, dtypes.uint8: 1, dtypes.bool: True})
@@ -127,9 +155,9 @@ class TestBitcastConstFolding(unittest.TestCase):
 
   def test_vec_bitcast(self):
     with Context(SPEC=0):
-      srcs = full_rewrite(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src
+      srcs = full_rewrite(UOp.const((-1, -2**31, 75), dtypes.int32).bitcast(dtypes.uint32).sink()).src
     self.assertTrue(all(r.op is Ops.CONST and r.dtype == dtypes.uint32 for r in srcs))
-    self.assertEqual(tuple(x.arg for x in srcs), (2**32-1, 2**31, 75))
+    self.assertEqual(tuple(x.val for x in srcs), (2**32-1, 2**31, 75))
 
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):

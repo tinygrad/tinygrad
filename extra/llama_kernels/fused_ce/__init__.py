@@ -36,7 +36,7 @@ def _custom_fused_ce_loss_bwd(d_logits:UOp, logits:UOp, lse:UOp, targets:UOp, sc
   smooth = label_smoothing / vocab
   grad = (prob - target - smooth) * scale[0]
 
-  return d_logits[b, s, v].store(grad.cast(d_logits.dtype.base)).end(v, row).sink(arg=KernelInfo(f"fused_ce_loss_bwd_{rows}_{vocab}"))
+  return d_logits[b, s, v].store(grad.cast(d_logits.dtype)).end(v, row).sink(arg=KernelInfo(f"fused_ce_loss_bwd_{rows}_{vocab}"))
 
 def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
   # NOTE: forward inputs are (loss_out, max_out, lse_out, logits, targets)
@@ -48,7 +48,7 @@ def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
     axis = logits_u.axis
     ndev = len(device)
     local_shape = tuple(s//ndev if i == axis else s for i,s in enumerate((MBS, SEQ, VOCAB)))
-    d_logits = Tensor(Tensor.invalids(*local_shape, dtype=dtypes.bfloat16, device=device).uop.multi(axis), device=device)
+    d_logits = Tensor(Tensor.invalids(*local_shape, dtype=dtypes.bfloat16, device=device).uop.unshard(axis), device=device)
     rows_per_dev = local_shape[0] * local_shape[1]
     seq_per_dev = local_shape[1]
   else:
@@ -74,11 +74,11 @@ def fused_ce_loss(logits:Tensor, targets:Tensor, label_smoothing:float=0.1) -> T
     axis = logits.uop.axis
     assert axis in (0, 1), f"unsupported sharding axis={axis} for CE loss"
     ndev = len(logits.device)
-    loss_out = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.multi(0),
+    loss_out = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.unshard(0),
                       device=logits.device)
-    max_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.multi(0),
+    max_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.unshard(0),
                       device=logits.device)
-    lse_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.multi(0),
+    lse_out  = Tensor(Tensor.invalids(rows // ndev, dtype=dtypes.float32, device=logits.device).uop.unshard(0),
                       device=logits.device)
     local_shape = tuple(s//ndev if i == axis else s for i,s in enumerate(logits.shape))
     rows_per_dev = local_shape[0] * local_shape[1]

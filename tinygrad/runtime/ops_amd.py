@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filter_visible_devices, hcq_profile
 from tinygrad.uop.ops import sint
-from tinygrad.device import Compiled, BufferSpec
+from tinygrad.device import Compiled, BufferSpec, TinyELF
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar, TracingKey
 from tinygrad.helpers import VIZ, ceildiv, unwrap, pluralize
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
@@ -386,7 +386,7 @@ class AMDComputeQueue(HWQueue):
     with self.pred_exec(xcc_mask=0b1):
       # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
       self.release_mem(signal.value_addr, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
-                       self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
+                       self.pm4.int_sel__mec_release_mem__none, cache_flush=True)
 
       if (dev:=signal.owner) is not None and signal.is_timeline and not dev.is_am():
         self.release_mem(dev.queue_event_mailbox_ptr, dev.queue_event.event_id, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
@@ -490,8 +490,6 @@ class AMDCopyQueue(HWQueue):
     if (dev:=signal.owner) is not None and signal.is_timeline and not dev.is_am():
       self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
       self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
-    elif dev is not None and dev.is_am(): self.q(self.sdma.SDMA_OP_TRAP, 0)
-
     return self
 
   def wait(self, signal:AMDSignal, value:sint=0):
@@ -559,10 +557,10 @@ class AMDCopyQueue(HWQueue):
 
     sdma_queue.signal_doorbell(dev)
 
-class AMDProgram(HCQProgram):
-  def __init__(self, dev:AMDDevice, name:str, lib:bytes, **kwargs):
+class AMDProgram(HCQProgram['AMDDevice']):
+  def __init__(self, dev:AMDDevice, obj:TinyELF):
     # TODO; this API needs the type signature of the function and global_size/local_size
-    self.dev, self.name, self.lib = dev, name, lib
+    self.dev, self.name, self.lib = dev, obj.name, obj.lib
 
     image, sections, relocs = elf_loader(self.lib)
 
@@ -604,23 +602,22 @@ class AMDProgram(HCQProgram):
 
     if dev.sqtt_enabled: self.libhash: tuple[int, int] = struct.unpack('<Q', hashlib.md5(self.lib).digest()[:8])*2
 
-    super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
-                     base=self.lib_gpu.va_addr)
+    super().__init__(CLikeArgsState, self.dev, obj, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, base=self.lib_gpu.va_addr)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(),
                wait=False, timeout:int|None=None):
-    if self.dev.sqtt_enabled: cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).sqtt_start(self.dev.sqtt_buffers).submit(self.dev)
+    if self.dev.sqtt_enabled: cast(AMDComputeQueue, unwrap(self.dev.hw_compute_queue_t)()).sqtt_start(self.dev.sqtt_buffers).submit(self.dev)
     res = super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait, timeout=timeout)
     if self.dev.pmc_enabled:
-      cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).pmc_read(self.dev.pmc_buffer, self.dev.pmc_sched) \
-                                                          .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+      cast(AMDComputeQueue, unwrap(self.dev.hw_compute_queue_t)()).pmc_read(self.dev.pmc_buffer, self.dev.pmc_sched) \
+                                                                  .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
       self.dev.allocator._copyout(pmc_buf:=memoryview(bytearray(self.dev.pmc_buffer.size)), self.dev.pmc_buffer)
       Compiled.profile_events += [ProfilePMCEvent(self.dev.device, self.prof_prg_counter, self.dev.pmc_sched, bytes(pmc_buf),
                                                   self.dev.prof_exec_counter)]
     if self.dev.sqtt_enabled:
-      cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).sqtt_stop(self.dev.sqtt_wptrs) \
-                                                          .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+      cast(AMDComputeQueue, unwrap(self.dev.hw_compute_queue_t)()).sqtt_stop(self.dev.sqtt_wptrs) \
+                                                                  .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
       self.dev.synchronize()
 
       for se, buf in enumerate(self.dev.sqtt_buffers):
@@ -642,7 +639,7 @@ class AMDProgram(HCQProgram):
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
-    super().__init__(dev, copy_bufs=getattr(dev.iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None,
+    super().__init__(dev, copy_bufs=getattr(dev.iface, 'copy_bufs', None),
                      supports_copy_from_disk=dev.has_sdma_queue, supports_transfer=dev.has_sdma_queue and not dev.is_usb())
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
@@ -650,11 +647,10 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 
   def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
-  def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _do_map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     if not self.dev.is_usb(): return super()._copyout(dest, src)
-    if not self.dev.iface.pci_dev.usb.usb.is_custom: return super()._copyout(dest, src)
     self.dev.synchronize()
 
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=TracingKey(f"{self.dev.device} -> TINY", ret=dest.nbytes), enabled=PROFILE,
@@ -680,11 +676,12 @@ class AMDQueueDesc:
     try:
       self.write_ptr[0] = self.put_value
 
-      # Ensure all prior writes are visible to the GPU.
-      System.memory_barrier()
+      # No mapped access with usb
+      if dev.is_am() and not dev.is_usb():
+        # Ensure all prior writes are visible to the GPU.
+        System.memory_barrier()
+        dev.iface.dev_impl.gmc.flush_hdp()
 
-      # Flush hdp if queue is in dev mem.
-      if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
       self.doorbell[0] = self.put_value if doorbell_value is None else doorbell_value
     except Exception as e:
       dev.error_state = e
@@ -912,16 +909,15 @@ class PCIIface(PCIIfaceBase):
 
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
-    if dev_id >= len(visible:=hcq_filter_visible_devices(USB3.list_devices(0xADD1, 0x0001), "AMD")):
+    if dev_id >= len(visible:=hcq_filter_visible_devices(USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001), "AMD")):
       raise RuntimeError(f"AMD:{dev_id} does not exist ({pluralize('device', len(visible))} available)")
     self.dev, self.pci_dev, self.vram_bar, self.count = dev, USBPCIDevice("AM", *visible[dev_id]), 0, len(visible)
     self.dev_impl = AMDev(self.pci_dev)
     self._compute_props()
-    self.pci_dev.usb._pci_cacheable += [self.pci_dev.bar_info(2)] # doorbell region is cacheable
 
     # special regions
     self.copy_bufs = [self._dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x80000)]
-    self.sys_buf, self.sys_next_off = self._dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), 0x800
+    self.sys_buf, self.sys_next_off = self._dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), 0x200
     self.cq_buf = self._dma_region(ctrl_addr=0xb800, sys_addr=0x822000, size=0x1000)
 
   def _dma_region(self, ctrl_addr, sys_addr, size):
@@ -929,18 +925,13 @@ class USBIface(PCIIface):
     return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(region, has_cpu_mapping=False), view=self.pci_dev.dma_view(ctrl_addr, size), owner=self.dev)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
-    # custom usb allocates uncached and cpu_access in vram. vram writes are faster than sram writes
-    if (host or (not self.pci_dev.usb.usb.is_custom and uncached and cpu_access)) and self.sys_next_off + size < self.sys_buf.size:
+    # usb allocates uncached and cpu_access in vram. vram writes are faster than sram writes
+    if host and self.sys_next_off + size < self.sys_buf.size:
       self.sys_next_off += size
       return self.sys_buf.offset(self.sys_next_off - size, size)
 
     # force devmem
     return super().alloc(size, host=False, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, force_devmem=True, **kwargs)
-
-  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
-                   xcc_id=0, idx=0):
-    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE: self.pci_dev.usb._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
-    return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id, idx)
 
   def sleep(self, timeout): pass
 
@@ -999,7 +990,7 @@ class AMDDevice(HCQCompiled):
     self.sdma_queues:dict = {}
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
-    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], functools.partial(AMDProgram, self), AMDSignal,
+    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], AMDProgram, AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
                      functools.partial(AMDCopyQueue, self, max_copy_size=self.max_copy_size) if self.has_sdma_queue else None,
                      kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000,

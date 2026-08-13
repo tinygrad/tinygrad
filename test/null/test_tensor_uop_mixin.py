@@ -1,9 +1,10 @@
 import math, unittest
-from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
+from dataclasses import replace
+from tinygrad import Tensor, dtypes, Context
+from tinygrad.uop.ops import ParamArg, UOp, UPat, Ops, PatternMatcher, graph_rewrite
 
 _strip_unique_pm = PatternMatcher([
-  (UPat((Ops.UNIQUE, Ops.LUNIQUE), name="u"), lambda u: u.replace(arg=0) if u.arg != 0 else None),
+  (UPat(Ops.BUFFER, name="b"), lambda b: b.replace(arg=replace(b.arg, slot=0)) if isinstance(b.arg, ParamArg) and b.arg.slot != 0 else None),
 ])
 def _strip_unique(u: UOp) -> UOp: return graph_rewrite(u, _strip_unique_pm)
 
@@ -59,7 +60,7 @@ class TestTensorUOpClone(unittest.TestCase):
     t = _t(3, 4).float()
     self.assertIs(_strip_unique(t.clone().uop), _strip_unique(t.uop.clone()))
   def test_clone_deviceless_const(self):
-    u = UOp.const(dtypes.float, 2.0)
+    u = UOp.const(2.0)
     self.assertIs(_strip_unique(Tensor(u).clone().uop), _strip_unique(u.clone()))
 
 class TestTensorUOpGradient(unittest.TestCase):
@@ -221,6 +222,10 @@ class TestTensorUOpBitcast(unittest.TestCase):
     t = _t(4)
     self.assertIs(t.bitcast("uint32").uop, t.uop.bitcast("uint32"))
     self.assertIs(t.uop.bitcast("uint32").dtype, dtypes.uint32)
+  def test_bitcast_same_and_diff_size(self):
+    _check(self, _t(4).float(), lambda x: x.bitcast(dtypes.uint32))              # same size
+    _check(self, _t(4).cast(dtypes.uint8), lambda x: x.bitcast(dtypes.uint16))   # widen: uint8[4] -> uint16[2]
+    _check(self, _t(4).cast(dtypes.uint16), lambda x: x.bitcast(dtypes.uint8))   # narrow: uint16[4] -> uint8[8]
 
 class TestTensorUOpRand(unittest.TestCase):
   def test_random_bits(self):
@@ -371,6 +376,13 @@ class TestTensorUOpStack(unittest.TestCase):
   def test_stack_dim1(self):     _check(self, _t(2, 3), lambda x: x.stack(x, dim=1))
   def test_stack_3tensors(self): _check(self, _t(2, 3), lambda x: x.stack(x, x, dim=0))
   def test_stack_new_last(self): _check(self, _t(2, 3), lambda x: x.stack(x, dim=-1))
+  def test_stack_mixed_dtype(self):
+    w = _t(2, 3).float()
+    _check(self, _t(2, 3), lambda x: x.stack(w if isinstance(x, Tensor) else w.uop))
+    self.assertIs(_t(2, 3).uop.stack(w.uop).dtype, dtypes.float32)
+  def test_stack_index_dtype(self):
+    # index is outside the promotion lattice, equal dtypes bypass promotion
+    self.assertEqual(UOp.const(1).stack(UOp.const(2)).shape, (2,))
 
 class TestTensorUOpConv2d(unittest.TestCase):
   def test_conv2d_basic(self):
@@ -394,12 +406,34 @@ class TestTensorUOpConv2d(unittest.TestCase):
   def test_conv2d_3d(self):
     w = _t(1, 1, 2, 2, 2).float()
     _check(self, _t(1, 1, 3, 3, 3).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop))
+  def test_conv2d_winograd(self):
+    w, a = _t(2, 2, 3, 3).float(), _t(1, 2, 6, 6).float()
+    with Context(WINO=0): direct = a.conv2d(w).uop
+    with Context(WINO=1):
+      self.assertIsNot(a.conv2d(w).uop, direct)
+      _check(self, a, lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop))
+  def test_conv2d_image(self):
+    w, a = _t(4, 4, 3, 3).float(), _t(1, 4, 8, 8).float()
+    with Context(IMAGE=0): direct = a.conv2d(w).uop
+    with Context(IMAGE=1):
+      self.assertIsNot(a.conv2d(w).uop, direct)
+      _check(self, a, lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop))
+  def test_dot_image(self):
+    y, a = _t(4, 3).float(), _t(2, 4).float()
+    with Context(IMAGE=0): direct = a.dot(y).uop
+    with Context(IMAGE=1):
+      self.assertIsNot(a.dot(y).uop, direct)
+      _check(self, a, lambda x: x.dot(y if isinstance(x, Tensor) else y.uop))
   def test_conv_transpose2d_basic(self):
     w = _t(1, 1, 2, 2).float()
     _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv_transpose2d(w if isinstance(x, Tensor) else w.uop))
   def test_conv_transpose2d_stride(self):
     w = _t(1, 1, 2, 2).float()
     _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv_transpose2d(w if isinstance(x, Tensor) else w.uop, stride=2))
+
+class TestTensorUOpHashing(unittest.TestCase):
+  def test_keccak_sha3_256(self):  _check(self, _t(8).cast(dtypes.uint8), lambda x: x.keccak())
+  def test_keccak_shake_128(self): _check(self, _t(8).cast(dtypes.uint8), lambda x: x.keccak("shake_128"))
 
 class TestTensorUOpEinsum(unittest.TestCase):
   def test_einsum_dot(self):       _check(self, _t(2, 3), lambda x: type(x).einsum("ij,ij->", x, x))
@@ -437,7 +471,6 @@ class TestTensorUOpSVD(unittest.TestCase):
   def test_svd_batched(self):   self._check(_t(2, 2, 2).float())
   def test_svd_nonfull(self):   self._check(_t(3, 2).float(), full_matrices=False)
 
-# UOp.empty / UOp.empty_like are the canonical buffer allocators; Tensor.empty / Tensor.empty_like just forward.
 class TestUOpEmpty(unittest.TestCase):
   def test_empty_dtype_string(self):
     self.assertEqual(UOp.empty((3, 4), dtype="float32").dtype, dtypes.float32)
@@ -456,11 +489,12 @@ class TestUOpEmpty(unittest.TestCase):
       self.assertTrue(u.has_buffer_identity())
 
   def test_empty_direct_singleton_tuple_device(self):
-    # regression: direct UOp.empty with a singleton-tuple device + axis must not trip .multi()'s tuple assert
-    u = UOp.empty((4,), dtype=dtypes.float32, device=("NULL:0",), axis=0)
+    u = UOp.empty((4,), dtype=dtypes.float32, device=("NULL:0",))
     self.assertEqual((u.shape, u.device, u.axis), ((4,), "NULL", None))
 
 class TestTensorUOpCreation(unittest.TestCase):
+  def test_empty(self):
+    self.assertIs(_strip_unique(Tensor.empty(2, 3).uop), _strip_unique(UOp.empty(2, 3)))
   def test_full(self):
     self.assertIs(_strip_unique(Tensor.full((2, 3), 42).uop), _strip_unique(UOp.full((2, 3), 42)))
   def test_full_kwargs(self):

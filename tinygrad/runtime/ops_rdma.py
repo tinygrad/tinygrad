@@ -14,11 +14,11 @@ class RDMACopyQueue(HWQueue):
     super().__init__()
 
   def _wqe_data(self, buf:HCQBuffer, sz:int, nic:RDMADevice) -> bytes:
-    cast(HCQAllocatorBase, nic.allocator).map(buf)
+    cast(HCQAllocatorBase, nic.allocator)._map(buf)
     return struct.pack('>IIQ', sz, buf.mappings[nic].meta, buf.mappings[nic].va_addr + (buf.va_addr - buf.base.va_addr))
 
   def encode_ring(self, hwq:HWQueue, dev:HCQCompiled, iface:MLXIface, qp:MLXQP, cq_buf:HCQBuffer, head:sint, ring_uar:bool=False):
-    for buf in [iface.dbr_buf, cq_buf] + ([iface.uar_buf] if ring_uar else []): cast(HCQAllocator, dev.allocator).map(buf)
+    for buf in [iface.dbr_buf, cq_buf] + ([iface.uar_buf] if ring_uar else []): cast(HCQAllocator, dev.allocator)._map(buf)
     hwq.write(iface.dbr_buf.offset(qp.qp_dbr + (4 if ring_uar else 0)), to_be32(head + 1))
     if ring_uar: hwq.write(iface.uar_buf.offset(0x800), to_be64(((head << 8) | 0x0a) << 32 | ((qp.qp_info['qpn'] << 8) | 2)), b64=True)
     hwq.poll_bit(cq_buf.offset((head & (qp.cq_size - 1)) * 64 + 60, 4), ((head >> (qp.cq_size.bit_length() - 1)) & 1) << 24, mask=0x01000000)
@@ -72,7 +72,7 @@ class MLXIface(PCIIfaceBase):
 class RDMAAllocator(HCQAllocatorBase):
   def __init__(self, dev:RDMADevice): super().__init__(dev, batch_cnt=0)
 
-  def _map(self, buf:HCQBuffer) -> HCQBuffer:
+  def _do_map(self, buf:HCQBuffer) -> HCQBuffer:
     owner = unwrap(buf.base.owner)
     bar, paddrs = owner.iface.pci_dev.bar_info(owner.iface.vram_bar)[0], buf.base.meta.mapping.paddrs  # type: ignore[attr-defined]
     page_sz = (2 << 20) if min(sz for _, sz in paddrs) >= (2 << 20) else (4 << 10)

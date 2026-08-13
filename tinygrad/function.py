@@ -1,7 +1,6 @@
 import functools, time
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
-from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
@@ -22,8 +21,7 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
   # invalids() returns fresh write-only scratch: a clone storing CONST(Invalid)
   # don't capture it as an input; only skip fresh buffers, not realized ones
   return {u.src[0].buf_uop for u in uret.backward_slice_with_self
-          if u.op is Ops.STORE and u.src[1].base.op is Ops.CONST and u.src[1].base.arg is Invalid
-          and not u.src[0].buf_uop.is_realized}
+          if u.op is Ops.STORE and u.src[1].base.is_invalid and not u.src[0].buf_uop.is_realized}
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
@@ -71,7 +69,7 @@ class _function(Generic[ReturnType]):
     if not self.allow_implicit:
       implicit_buffers = [x for x in call_uops[num_explicit:] if x.op is Ops.BUFFER]
       if implicit_buffers:
-        buf_strs = '\n  '.join(f"{i}: dtype={b.dtype}, size={b.arg}, device={b.device}" for i,b in enumerate(implicit_buffers))
+        buf_strs = '\n  '.join(f"{i}: dtype={b.dtype}, size={b.max_numel()}, device={b.device}" for i,b in enumerate(implicit_buffers))
         raise RuntimeError(f"function {name} has {len(implicit_buffers)} implicit buffer(s), but allow_implicit=False\n  {buf_strs}")
 
     fret = uret.call(*call_uops, grad_fxn=self.grad_fxn, name=name, precompile=self.precompile,
