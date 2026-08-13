@@ -985,7 +985,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert uval.divides(self.arg.multiple_of) is not None, f"bind {val} not divisible by {self.arg.multiple_of}"
     return self.after(self.store(uval))
   def unbind(self) -> tuple[Variable, int]:
-    assert is_bound_var(self), f"can't unbind {self}"
+    assert is_bound_var(self) and self.src[1].op is Ops.STORE and self.src[1].src[1].op is Ops.CONST, f"can't unbind {self}"
     return self.src[0], self.src[1].src[1].val
   def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
     ret:dict[Variable, int] = {}
@@ -1760,13 +1760,8 @@ def is_variable(u:UOp) -> bool:
   return u.op is Ops.BUFFER and isinstance(u.arg, ParamArg) and u.arg.vmin_vmax is not None and u.arg.addrspace is AddrSpace.ALU
 
 def is_bound_var(u:UOp) -> bool:
-  """a bound Variable stores a CONST into the Variable buffer: AFTER(var, STORE(var, CONST))"""
-  if u.op is not Ops.AFTER or len(u.src) != 2 or not is_variable(u.src[0]): return False
-  store = u.src[1]
-  if store.op is not Ops.STORE or store.src[1].op is not Ops.CONST: return False
-  dest = store.src[0]
-  if dest.op is Ops.INDEX: dest = dest.src[0]  # rangeify indexes the store target
-  return dest is u.src[0]
+  """a bound Variable is an AFTER of a Variable buffer: bind() stores a CONST into it, AFTER(var, STORE(var, CONST))"""
+  return u.op is Ops.AFTER and is_variable(u.src[0])
 
 def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()

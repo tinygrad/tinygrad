@@ -16,7 +16,6 @@ def _unwrap_src(s: UOp) -> UOp:
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
-  if is_bound_var(s): return []
   assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
 
@@ -36,7 +35,6 @@ def create_schedule(sched_sink:UOp) -> UOp:
     reads: list[tuple[UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read)
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
-      if is_bound_var(u): continue  # a bound Variable is an input value, not a buffer write
       kernels, after_deps = _split_after(u)
       prev_state = _unwrap_src(u.src[0])
       prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
@@ -192,9 +190,9 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   var_vals: dict[str, int] = {}
   for b in big_sink.src[1:]:
     if is_bound_var(b):
-      nm = b.src[0].expr
+      v, val = b.unbind()
+      nm = v.expr
       if nm not in used_vars: continue
-      val = b.src[1].src[1].val
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
 
