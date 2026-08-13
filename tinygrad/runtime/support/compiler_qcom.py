@@ -1,4 +1,4 @@
-import ctypes, struct, platform, subprocess, sys, tarfile, tempfile
+import ctypes, struct, platform, pathlib, shutil, subprocess, sys, tarfile, tempfile
 from tinygrad.device import Compiler
 from tinygrad.helpers import DEBUG, system, fetch, unwrap
 from tinygrad.runtime.support.compiler_mesa import disas_adreno
@@ -14,8 +14,10 @@ class QCOMCompiler(Compiler):
     else:
       self.arch, self.chip_id, self.fs = arch, 0x6030001, tempfile.TemporaryDirectory()
       with tarfile.open(fetch('https://git.tinygrad.win/sirhcm/images/releases/download/v2/qcomcl.tar.gz')) as t: t.extractall(fs:=self.fs.name)
-      self.compiler_process = subprocess.Popen(["qemu-aarch64-static", "-cpu", "max,pauth=off", "-L", fs, f"{fs}/usr/bin/python3.13", __file__, arch],
-                                               stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
+      if (qemu:=shutil.which("qemu-aarch64-static")): argv = f"{qemu} -cpu max,pauth=off -L {fs} {fs}/usr/bin/python3 {__file__} {arch}"
+      else: argv = (f"docker run --rm -i --platform linux/aarch64 -v {fs}/usr:/usr -v {pathlib.Path(__file__).parents[2]}:/tinygrad "
+                    f"-e PYTHONPATH=/ -e QEMU_CPU=max,pauth=off gcr.io/distroless/static python3 /tinygrad/runtime/support/compiler_qcom.py {arch}")
+      self.compiler_process = subprocess.Popen(argv.split(), stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
     super().__init__(f"compile_qcomcl_{arch}")
 
   def __del__(self): llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst) if platform.machine() == "aarch64" else self.compiler_process.kill()
