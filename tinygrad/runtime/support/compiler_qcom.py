@@ -48,7 +48,7 @@ class QCOMCompiler(Compiler):
 if __name__ == "__main__":
   compiler = QCOMCompiler(sys.argv[1])
   while (amt:=sys.stdin.buffer.read(4)):
-    try: lib = compiler.compile(sys.stdin.read(struct.unpack("I", amt)[0]))
+    try: lib = compiler.compile(sys.stdin.buffer.read(struct.unpack("I", amt)[0]).decode())
     except Exception as e:
       lib = b""
       print(e, file=sys.stderr, flush=True)
