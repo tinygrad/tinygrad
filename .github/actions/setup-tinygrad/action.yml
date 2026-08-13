@@ -41,12 +41,12 @@ inputs:
     description: "Install LLVM?"
     required: false
     default: 'false'
-  tinydreno:
-    description: "Install tinydreno"
-    required: false
-    default: 'false'
   qemu:
     description: "Install qemu"
+    required: false
+    default: 'false'
+  docker-qemu:
+    description: "Setup docker to use qemu"
     required: false
     default: 'false'
 runs:
@@ -277,12 +277,6 @@ runs:
       shell: bash
       run: brew install llvm@20
 
-    # *** tinydreno ***
-    - name: Install tinydreno (linux)
-      if: inputs.tinydreno == 'true' && runner.os == 'Linux'
-      shell: bash
-      run: sudo curl -fL https://github.com/sirhcm/tinydreno/raw/refs/heads/master/libllvm-qcom.so -o /usr/lib/libllvm-qcom.so
-
     # *** OpenCL ***
     - name: Install rusticl
       if: inputs.opencl == 'true'
@@ -292,3 +286,9 @@ runs:
         sudo mkdir -p /etc/OpenCL/vendors
         echo "/usr/lib/libRusticlOpenCL.so" | sudo tee /etc/OpenCL/vendors/rusticl.icd
         echo "RUSTICL_ENABLE=llvmpipe" >> "$GITHUB_ENV"
+
+    - name: Setup docker to use qemu
+      if: inputs.docker-qemu == 'true'
+      uses: docker/setup-qemu-action@v4
+      with:
+        platforms: arm64
