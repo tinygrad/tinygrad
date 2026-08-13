@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, sys, os, ctypes, functools, mmap, threading, array, struct, time
+import platform, sys, os, ctypes, functools, mmap, threading, array, struct
 from dataclasses import dataclass, replace
 from typing import cast, Callable, Any
 from tinygrad.helpers import to_mv, from_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, to_tuple
@@ -63,10 +63,12 @@ def worker_prog():
 
 @dataclass
 class CPUWorker:
-  ring:Buffer; put:Buffer; sem:Buffer; sys:Buffer; done:Buffer; hsem:Any; ring_view:memoryview; done_view:memoryview; thread:threading.Thread
+  ring:Buffer; put:Buffer; sem:Buffer; sys:Buffer; done:Buffer; hsem:Any; ring_view:memoryview; put_view:memoryview; done_view:memoryview; thread:threading.Thread
 
-def create_worker(dev:CPUDevice) -> CPUWorker:
-  ring, put, sysbuf, done = (Buffer(dev.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1, 1))
+def create_worker(dev:CPUDevice, pref:str="") -> CPUWorker:
+  ring, sysbuf = (Buffer(dev.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1))
+  if pref: put, done = dev.signal(f"{pref}value", 1), dev.signal(f"{pref}timeline")
+  else: put, done = (Buffer(dev.device, 1, dtypes.uint64, preallocate=True) for _ in range(2))
   addr, hsem = 0, None
 
   # sem are posix-only
@@ -79,7 +81,8 @@ def create_worker(dev:CPUDevice) -> CPUWorker:
   # create worker thread
   worker_args = [ring._buf.va_addr, sysbuf._buf.va_addr if WIN else dev.func_ptr('sem_wait')._buf.va_addr, done._buf.va_addr, addr]
   (worker:=threading.Thread(target=dev.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in worker_args])).start()
-  return CPUWorker(ring, put, sem, sysbuf, done, hsem, ring._buf.cpu_view().view(fmt='Q'), done._buf.cpu_view().view(fmt='Q'), worker)
+  return CPUWorker(ring, put, sem, sysbuf, done, hsem, ring._buf.cpu_view().view(fmt='Q'), put._buf.cpu_view().view(fmt='Q'),
+                   done._buf.cpu_view().view(fmt='Q'), worker)
 
 # *****************
 # 2. queue encoders
@@ -110,29 +113,26 @@ pm_cpu_opsel = PatternMatcher([
 ])
 
 def encode_queue(q:UOp) -> UOp:
-  devs = to_tuple(q.arg[0])
-  lin = graph_rewrite(q, pm_cpu_opsel+pm_flatten_linear, ctx=devs, walk=True, name=f"{q.arg[1]} opsel")
+  devs, queue = to_tuple(q.arg[0]), q.arg[1]
+  lin = graph_rewrite(q, pm_cpu_opsel+pm_flatten_linear, ctx=devs, walk=True, name=f"{queue} opsel")
 
   cnt = sum(len(ins.src) for ins in lin.src) // CMD_SIZE
   assert cnt < RING_SLOTS, f"submit of {cnt} entries doesn't fit the ring"
   cmdbuf = make_cmdbuf(lin, devs, buf=UOp.placeholder((cnt*CMD_SIZE,), dtypes.uint64, next(UOp.unique_num), device=devs).rtag("cmdbuf"))
-  q = q.arg[1]
-  ring = UOp.placeholder((RING_SLOTS*CMD_SIZE,), dtypes.uint64, 0, device=devs, volatile=True).rtag(f"{q}_ring")
-  put = make_signal(devs, tag=f"{q}_put")
+  ring = UOp.placeholder((ring_words:=RING_SLOTS*CMD_SIZE,), dtypes.uint64, 0, device=devs, volatile=True).rtag(f"{queue}_ring")
+  put, done, sem, sysbuf = (make_signal(devs, tag=f"{queue}_{name}") for name in ("put", "done", "sem", "sys"))
 
-  # only submits write this ring and they all run on the submitter, so its put pointer is ours to bump
-  ran = make_signal(devs, tag=f"{q}_done").after(l:=UOp.loop(next(UOp.unique_num))).index(0).load()
-  room = ran.end(l, put.index(0).load() - ran > RING_SLOTS - cnt) # wait for the worker to free room for cnt entries
+  # submits are serialized on the submitter, so they can bump put without atomics
+  ran = done.after(l:=UOp.loop(next(UOp.unique_num))).index(0).load()
+  room = ran.end(l, put.index(0).load() - ran > RING_SLOTS - cnt) # wait until cnt entries fit in the ring
   base = ((put.after(room).index(0).load() % RING_SLOTS) * CMD_SIZE).cast(dtypes.int)
   e = UOp.range(cnt, next(UOp.unique_num), dtype=dtypes.int, src=(cmdbuf, ring))
-  copy = UOp.group(*[ring.index((base + e*CMD_SIZE + w) % (RING_SLOTS*CMD_SIZE)).store(cmdbuf.index(e*CMD_SIZE + w).load()) for w in range(CMD_SIZE)])
+  copy = UOp.group(*[ring.index((base + e*CMD_SIZE + w) % ring_words).store(cmdbuf.index(e*CMD_SIZE + w).load()) for w in range(CMD_SIZE)])
 
-  # wake the queue's worker for the entry just written, the post has to sit with the stores or it hoists out of the loop
-  if WIN: done = copy.end(e)
-  else: done = make_signal(devs, tag="func:sem_post").after(copy).index(0).load() \
-                                                     .call(make_signal(devs, tag=f"{q}_sem").index(0), ret_dtype=dtypes.void).end(e)
-  bumped = put.after(done).index(0).store(put.index(0).load() + cnt)
-  return make_signal(devs, tag=f"{q}_sys").after(bumped).index(0).store(put.index(0).load() + cnt) if WIN else bumped
+  # wake the worker after each entry, keeping the post with the stores stops it from hoisting out of the loop
+  wake = copy.end(e) if WIN else make_signal(devs, tag="func:sem_post").after(copy).index(0).load().call(sem.index(0), ret_dtype=dtypes.void).end(e)
+  bumped = put.after(wake).index(0).store(put.index(0).load() + cnt)
+  return sysbuf.after(bumped).index(0).store(put.index(0).load() + cnt) if WIN else bumped
 
 # *****************
 
@@ -184,7 +184,7 @@ class CPUProgram(Program['CPUDevice']):
   def lvp_args(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int|None, ...]) -> list[int]:
     # LVP takes one pointer to [args address, arg count, buffer addresses, values], which lives in the ring entry itself
     q, args = self.dev.submitter, bytearray(12 + (len(bufs) + len(vals)) * 8)
-    addr = q.ring._buf.va_addr + (self.dev.submit_pos % RING_SLOTS) * CMD_SIZE * 8 + 16
+    addr = q.ring._buf.va_addr + ((q.put_view[0] - 1) % RING_SLOTS) * CMD_SIZE * 8 + 16
     struct.pack_into(f'<3I{len(bufs)}Q', args, 0, *data64_le(addr + 12), (len(bufs)+len(vals))*2, *[b.va_addr for b in bufs])
     for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs) * 8)): struct.pack_into(f'<{dt.fmt}', args, 12 + off, v)
     return [addr, *array.array('Q', bytes(args) + bytes(-len(args) % 8))]
@@ -240,8 +240,6 @@ class CPUDevice(HCQ2Compiled):
     self.pm_bufferize = PatternMatcher(
       [(UPat(Ops.PARAM, tag=f"COMPUTE:0_{n}"), lambda ctx, n=n: getattr(ctx[0].worker_pool, n)) for n in ("ring", "put", "sem", "sys", "done")] +
       [(UPat(Ops.PARAM, tag=f"func:{f}"), lambda ctx, f=f: ctx[0].func_ptr(f)) for f in FUNCS]) + self.pm_bufferize
-    self.synced_pos = self.fence = 0
-    self.submit_pos = 0
 
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
       clang = ClangRenderer(replace(self.renderer.target, renderer="CLANG"))
@@ -262,7 +260,7 @@ class CPUDevice(HCQ2Compiled):
 
   # The submitter runs everything Python pushes; HCQ submissions feed the worker pool.
   @functools.cached_property
-  def submitter(self) -> CPUWorker: return create_worker(self)
+  def submitter(self) -> CPUWorker: return create_worker(self, "submitter_")
   @functools.cached_property
   def worker_pool(self) -> CPUWorker: return create_worker(self)
 
@@ -271,26 +269,19 @@ class CPUDevice(HCQ2Compiled):
 
   def push(self, cmd:list[int]):
     q = self.submitter
-    while self.submit_pos - q.done_view[0] >= RING_SLOTS: pass # the ring is full, let the worker catch up
-    q.ring_view[(base:=(self.submit_pos % RING_SLOTS) * CMD_SIZE):base+len(cmd)] = array.array('Q', [x & ((1<<64)-1) for x in cmd])
-    self.submit_pos += 1
-    if WIN: q.sys._buf.cpu_view().view(fmt='Q')[0] = self.submit_pos
+    pos = q.put_view[0] - 1
+    while pos - q.done_view[0] >= RING_SLOTS: pass # the ring is full, let the worker catch up
+    q.ring_view[(base:=(pos % RING_SLOTS) * CMD_SIZE):base+len(cmd)] = array.array('Q', [x & ((1<<64)-1) for x in cmd])
+    q.put_view[0] = pos + 2
+    if WIN: q.sys._buf.cpu_view().view(fmt='Q')[0] = pos + 1
     else: assert libc.sem_post(q.hsem) == 0
 
   def synchronize(self, timeout:int|None=None):
-    # drain the submitter first, so every epoch bump it carries has been issued, then wait on the epoch itself
-    if self.synced_pos != (pos:=self.submit_pos):
-      self.fence += 1
-      self.push([self.prgs[signal_prog].addr, (sig:=self.signal("fence")._buf).va_addr, self.fence])
-      self.synced_pos, mv, st, done = pos + 1, sig.cpu_view().view(fmt='I'), time.perf_counter(), -1
-      while mv[0] != self.fence:
-        # a deep queue takes as long as it takes, only a worker that stops running entries is a hang
-        if done != (done:=self.submitter.done_view[0]): st = time.perf_counter()
-        elif time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
+    super().synchronize(timeout, pref="submitter_")
     super().synchronize(timeout)
 
   def finalize(self):
-    if self.submit_pos == 0: return # the worker starts with the first submit
+    if "submitter" not in self.__dict__ or self.submitter.put_view[0] == 1: return # the worker starts with the first submit
     quit_args = (self.func_ptr('ExitThread'),) if WIN else (self.func_ptr('pthread_exit'), self.submitter.sem, self.func_ptr('sem_close'))
     self.push([self.prgs[quit_prog].addr, *[b._buf.va_addr for b in quit_args]])
-    self.submit_pos = self.synced_pos = self.fence = 0
+    self.submitter.put_view[0] = 1

@@ -579,16 +579,17 @@ class HCQ2Compiled(Compiled):
     buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 
-  def synchronize(self, timeout:int|None=None):
+  def synchronize(self, timeout:int|None=None, pref:str=""):
     if HCQ_RUNTIME_DEV.value != self.device: Device[HCQ_RUNTIME_DEV.value].synchronize()
 
-    sig = self.signal("timeline").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
-    tl = self.signal("value", 1).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
+    sig = self.signal(f"{pref}timeline").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
+    tl = self.signal(f"{pref}value", 1).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
     timeout = timeout if timeout is not None and self.can_recover else None
-    st = time.perf_counter()
-    while sig[0] < tl[0] - 1:
-      if time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
-    if self.prof_ents: self.collect_prof()
+    st, done = time.perf_counter(), sig[0]
+    while done < tl[0] - 1:
+      if done != (done:=sig[0]): st = time.perf_counter()
+      elif time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
+    if not pref and self.prof_ents: self.collect_prof()
 
   def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
 
