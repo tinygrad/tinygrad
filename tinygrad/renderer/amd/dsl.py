@@ -196,6 +196,16 @@ class VGPRField(SrcField):
         raise ValueError(f"VGPRField: v[{encoded}].h not encodable in 8-bit field (v[0:127] only for .h)")
       encoded |= 0x80
     return encoded
+
+  def __get__(self, obj, objtype=None):
+    if obj is None: return self
+    raw = (obj._raw >> self.lo) & self.mask
+    if (self.lo == 17 or getattr(obj, "opsel", 0)) and (hi := bool(raw & 0x80)):
+      reg = self.decode(raw & 0x7F)
+      return Reg(reg.offset, obj.op_regs[self.name], hi=hi)
+    else:
+      return self.decode(raw)
+
 class SGPRField(SrcField): _valid_range = (0, 127)
 class SSrcField(SrcField): _valid_range = (0, 255)
 
