@@ -416,7 +416,7 @@ class BiasMemoryCtx:
         if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: arg = idx.src[1].val
         self.mgroups.setdefault(base.arg, []).append((idx,arg or 0))
 
-    self.normalized: dict[UOp, UOp] = {}
+    self.normalized: dict[tuple[ParamArg,UOp], UOp] = {}
     for b, uses in self.mgroups.items():
       if len(args := [v[1] for v in uses if v[1] is not None]) == 0: continue
       if (mean := sum(args) // len(args)) == 0: continue
@@ -424,12 +424,13 @@ class BiasMemoryCtx:
         if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
           # propagate the normalize addition down sum edges to hint hoist outside range?
           # this is where this starts to belong in codegen optimizations maybe
-          self.normalized[idx] = idx.replace(src=(idx.src[0] + const(mean, idx.dtype), const(idx.src[1].val - mean, idx.dtype)))
+          self.normalized[(b,idx)] = idx.replace(src=(idx.src[0] + const(mean, idx.dtype), const(idx.src[1].val - mean, idx.dtype)))
         else: # dynamic base no ioffs
-          self.normalized[idx] = (idx + const(mean, idx.dtype)) + const(-mean, idx.dtype)
+          self.normalized[(b,idx)] = (idx + const(mean, idx.dtype)) + const(-mean, idx.dtype)
 
 pm_bias_memory_addrs = PatternMatcher([
-  (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x: x.replace(src=(x.src[0], ctx.normalized[x.src[1]], *x.src[2:])) if x.src[1] in ctx.normalized else None),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x: x.replace(src=(x.src[0], ctx.normalized[(x.src[0].arg,x.src[1])], *x.src[2:]))
+    if (x.src[0].arg,x.src[1]) in ctx.normalized else None),
 ])
 
 extra_matcher = PatternMatcher([
@@ -580,7 +581,9 @@ def encode(ctx, x:UOp):
   import tinygrad.renderer.amd.dsl as dsl
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  }
-  def _route(r:Register): return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
+  def _route(r:Register):
+    assert isinstance(r, Register)
+    return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
   def _immorreg(x:UOp):
     while x.op is Ops.AFTER: x=x.src[0]
     return x.val if x.op is Ops.CONST else _fuse(rdefs(x))
