@@ -162,7 +162,7 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
     for b in itertools.chain.from_iterable(_get_call_bufs_by_lane(call, devices)):
       for bd in to_tuple(b.device): dev_bufs[bd][id(b)] = b
 
-  n, fences, fins, signal_tags = len(batch_info), [], [], set()
+  n, fences, resets, fins, signal_tags = len(batch_info), [], [], [], set()
   for _, devgroup in itertools.groupby(sorted(dev_bufs), key=lambda d: d.split(":")[0]):
     devs = tuple(devgroup)
 
@@ -176,16 +176,17 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
     fin_submit = make_submit(*waits, UOp(Ops.INS, arg="store", src=(tl_signal, tl_value.index(0))), devs=devs, queue="COMPUTE:0")
     epoch = (epoch_slot:=tl_value.after(fin_submit).index(0)).load()
 
-    # fence once per device group on this schedule's previous epoch, then reset any queue signals used by the group
+    # fence once per device group on this schedule's previous epoch
     qs = dedup([qn for bdevs, qn in batch_info if set(bdevs) & set(devs)])
     sched_epoch = make_signal(devs, next(UOp.unique_num))
 
     wait_device_epoch = (done:=tl_signal.after(loop:=UOp.loop(0)).index(0).load()).end(loop, done < sched_epoch.index(0).load())
-    resets = [make_signal(devs, slots[q]).after(wait_device_epoch).index(0).store(0) for q in qs]
+    fences.append(make_call("hcq_fence", UOp.sink(wait_device_epoch), HCQInfo(devs)))
 
-    fences.append(make_call("hcq_fence", UOp.sink(*(resets or [wait_device_epoch])), HCQInfo(devs)))
+    # queues of other groups wait on these signals, so reset them only after every group reached its epoch
+    if qs: resets.append(make_call("hcq_reset", UOp.sink(*[make_signal(devs, slots[q]).index(0).store(0) for q in qs]), HCQInfo(devs)))
     fins.append(make_call("hcq_finalizer", UOp.sink(epoch_slot.store(epoch + 1), sched_epoch.after(fin_submit).index(0).store(epoch)), HCQInfo(devs)))
-  return fences, fins, signal_tags
+  return fences + resets, fins, signal_tags
 
 def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]], profile:bool) -> list[UOp]:
   batch_info = [(devices, "COMPUTE:0" if call.src[0].op is Ops.PROGRAM else "COPY:0") for call, devices in batch]
