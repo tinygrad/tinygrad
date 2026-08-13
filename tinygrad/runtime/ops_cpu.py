@@ -147,7 +147,7 @@ class CPUProgram(Program['CPUDevice']):
       ctypes.windll.kernel32.GetCurrentProcess.restype = ctypes.c_void_p
       proc = ctypes.windll.kernel32.GetCurrentProcess()
       ctypes.windll.kernel32.FlushInstructionCache(ctypes.c_void_p(proc), ctypes.c_void_p(self.addr), ctypes.c_size_t(len(obj.lib)))
-      self.fxn = ctypes.CFUNCTYPE(None)(self.addr)
+      self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if self.lvp else ctypes.CFUNCTYPE(None)(self.addr)
     else:
       # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
       # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
@@ -168,7 +168,7 @@ class CPUProgram(Program['CPUDevice']):
         # msync should be a universal POSIX way to do this
         libc.msync(ctypes.c_void_p(self.addr), len(lib), libc.MS_SYNC | libc.MS_INVALIDATE)
 
-      self.fxn = ctypes.CFUNCTYPE(None)(self.addr)
+      self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if self.lvp else ctypes.CFUNCTYPE(None)(self.addr)
 
   def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
