@@ -288,7 +288,7 @@ runs:
         echo "RUSTICL_ENABLE=llvmpipe" >> "$GITHUB_ENV"
 
     - name: Setup docker to use qemu
-      if: inputs.opencl == 'true'
+      if: inputs.docker-qemu == 'true'
       uses: docker/setup-qemu-action@v4
       with:
         platforms: arm64
