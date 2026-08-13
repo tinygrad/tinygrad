@@ -363,7 +363,8 @@ def _rank_ranges(uops:Iterable[UOp]) -> dict[UOp, UOp]:
 
 def replace_params(call:UOp) -> UOp|None:
   body, variables, param_ops = call.src[0], call.src[0].variables(), {Ops.PARAM, Ops.MSTACK}
-  args = dedup([s for u in (tops:=body.toposort(gate=lambda u: u.op not in param_ops)) for s in u.src if s.op in param_ops and s not in variables])
+  tops = body.toposort(gate=lambda u: u.op not in param_ops)
+  args = dedup([s for u in tops for s in u.src if s.op in param_ops and s not in variables])
 
   patched, refhold = partition(call.src[1:], lambda x: x.src[0] in args)
   by_root = {p.src[0]: p for p in patched}
