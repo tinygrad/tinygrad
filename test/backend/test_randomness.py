@@ -8,6 +8,7 @@ from tinygrad.uop.ops import Ops
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.isa.rdna3 import RDNA3Renderer
 from test.helpers import not_support_multi_device, needs_second_gpu
 from test.unit.test_randomness import equal_distribution, normal_test
 
