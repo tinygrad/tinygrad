@@ -200,7 +200,9 @@ class VGPRField(SrcField):
   def __get__(self, obj, objtype=None):
     if obj is None: return self
     raw = (obj._raw >> self.lo) & self.mask
-    if getattr(obj, "opsel", 0) == 8 or (self.lo == 17 and raw & 0x80):
+    # NOTE:: better way to check arch?
+    is_rdna3 = "rdna3" in str(obj.__module__)
+    if is_rdna3 and (getattr(obj, "opsel", 0) == 8 or (self.lo == 17 and raw & 0x80)):
       reg = self.decode(raw & 0x7F)
       return Reg(reg.offset, obj.op_regs[self.name], hi=True)
     else:
