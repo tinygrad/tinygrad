@@ -26,7 +26,7 @@ class RDMACopyQueue(HWQueue):
     return self
 
   def copy(self, dest:HCQBuffer, src:HCQBuffer, sz:int):
-    src_qp, dest_qp, _, _ = self.dev.iface.connect(remote_nic:=cast(HCQCompiled, unwrap(dest.owner)).rdma_dev())
+    src_qp, dest_qp, _, _ = self.dev.iface.connect(remote_nic:=unwrap(dest.owner).rdma_dev())
 
     sq_wqe = bytearray(64)
     sq_wqe[4:8] = struct.pack('>I', (src_qp.qp_info['qpn'] << 8) | 2)
