@@ -331,23 +331,6 @@ def render_wmma(ctx, wmma:UOp):
   return UOp(Ops.INS, arg=ins, dtype=wmma.dtype, src=(a,b,acc), tag=(ctx.vreg(GP_VGPRS, width=8),))
 
 # ---- casting utilities -----
-def cvt(ctx, y:UOp, x:UOp):
-  # NOTE: this is hacky
-  def _needcast(x:DType, y:DType): return not (dt_to_isa[x][0] == dt_to_isa[y][0])
-  def _cvt_ins(dtin:DType, dtout:DType):
-    try: return getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[dtout]}_{dt_to_isa[dtin]}_e32")
-    except Exception as e: raise Exception(f"isa doesn't support requested cast from: {dtin} -> {dtout}")
-
-  if x.dtype in dtypes.int64s and y.dtype.itemsize == 4: # b32 -> b64
-    targ = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
-    lo = y.ins(_cvt_ins(y.dtype, targ)) if _needcast(y.dtype, targ) else y
-    return to_vgpr(UOp(Ops.STACK, src=(lo, const(0, targ))))
-  elif y.dtype in dtypes.int64s and x.dtype.itemsize == 4: # b64 -> b32
-    src = dtypes.uint32 if dtypes.is_unsigned(y.dtype) else dtypes.int32
-    if _needcast(src, x.dtype): return x.ins(_cvt_ins(src, x.dtype), src=(y.index(0),))
-    else: return y.index(0)
-  return x.ins(_cvt_ins(y.dtype,x.dtype))
-
 def int_to_int64(y:UOp, tdt:DType):
   hi = vmov(const(0)) if dtypes.is_unsigned(y.dtype) else getsign(to_vgpr(y), y.dtype.itemsize*8)
   return UOp.group(vmov(y), hi, dtype=tdt)
@@ -538,7 +521,7 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   (UPat.var("pred").where(UPat.var("a"), UPat.var("b")).named("x"), where),
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
-  (UPat.var("y").cast(name="x"), cvt),
+  (UPat.var("y").cast(name="x"), lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e32"))),
   # --- mem ops ---
   (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(allow_any_len=True, name="x"), lambda ctx,x,idx: load(ctx, x, idx)),
