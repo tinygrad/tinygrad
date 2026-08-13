@@ -45,9 +45,8 @@ class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
 
   def _sleep(self, time_spent_since_last_sleep_ms:int):
-    # KFD completion interrupts cause spikes even when the host is not waiting. Poll long waits at low frequency instead,
-    # while still using KFD events to detect faults. Direct interfaces can block on their interrupt handler as before.
-    if time_spent_since_last_sleep_ms > 200 and self.owner is not None: self.owner.iface.sleep(200 if self.owner.is_am() else 1)
+    # Reasonable to sleep for long workloads (which take more than 200ms) and only timeline signals.
+    if time_spent_since_last_sleep_ms > 200 and self.owner is not None: self.owner.iface.sleep(200)
 
 class AMDComputeQueue(HWQueue):
   def __init__(self, dev:AMDDevice):
@@ -388,6 +387,10 @@ class AMDComputeQueue(HWQueue):
       # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
       self.release_mem(signal.value_addr, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                        self.pm4.int_sel__mec_release_mem__none, cache_flush=True)
+
+      if (dev:=signal.owner) is not None and signal.is_timeline and not dev.is_am():
+        self.release_mem(dev.queue_event_mailbox_ptr, dev.queue_event.event_id, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+                         self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, ctxid=dev.queue_event.event_id)
     return self
 
   def bind(self, dev:AMDDevice):
@@ -483,6 +486,10 @@ class AMDCopyQueue(HWQueue):
   def signal(self, signal:AMDSignal, value:sint=0):
     fence_flags = self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.dev.target[0] != 9 else 0
     self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(signal.value_addr), value)
+
+    if (dev:=signal.owner) is not None and signal.is_timeline and not dev.is_am():
+      self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
+      self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
     return self
 
   def wait(self, signal:AMDSignal, value:sint=0):
@@ -723,12 +730,16 @@ class KFDIface:
       kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_page_offset=KFDIface.event_page.meta.handle)
     else: self.map(KFDIface.event_page)
 
+    # Event to wait for queues completion
+    self.dev.queue_event = kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_type=kfd.KFD_IOC_EVENT_SIGNAL, auto_reset=1)
+    self.dev.queue_event_mailbox_ptr = KFDIface.event_page.va_addr + self.dev.queue_event.event_slot_index * 8
+
     # OS events to collect memory and hardware faults
     self.mem_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_type=kfd.KFD_IOC_EVENT_MEMORY)
     self.hw_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_type=kfd.KFD_IOC_EVENT_HW_EXCEPTION)
 
-    self.queue_event_arr = (kfd.struct_kfd_event_data * 2)(kfd.struct_kfd_event_data(event_id=self.mem_fault_event.event_id),
-                                                          kfd.struct_kfd_event_data(event_id=self.hw_fault_event.event_id))
+    self.queue_event_arr = (kfd.struct_kfd_event_data * 3)(kfd.struct_kfd_event_data(event_id=self.dev.queue_event.event_id),
+      kfd.struct_kfd_event_data(event_id=self.mem_fault_event.event_id), kfd.struct_kfd_event_data(event_id=self.hw_fault_event.event_id))
     self.queue_event_arr_ptr = ctypes.addressof(self.queue_event_arr)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, cpu_addr=None) -> HCQBuffer:
@@ -798,20 +809,20 @@ class KFDIface:
                         doorbell=MMIOInterface(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8, fmt='Q'))
 
   def sleep(self, tm:int):
-    kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=2, wait_for_all=0, timeout=tm)
-    if self.queue_event_arr[0].memory_exception_data.gpu_id or self.queue_event_arr[1].hw_exception_data.gpu_id: self.on_device_hang()
+    kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=3, wait_for_all=0, timeout=tm)
+    if self.queue_event_arr[1].memory_exception_data.gpu_id or self.queue_event_arr[2].hw_exception_data.gpu_id: self.on_device_hang()
 
   def on_device_hang(self):
     def _str(st): return ' '.join(f'{k[0]}={getattr(st, k[0])}' for k in st._real_fields_)
 
     # try to collect fault info if not already set from sleep().
-    if not self.queue_event_arr[0].memory_exception_data.gpu_id and not self.queue_event_arr[1].hw_exception_data.gpu_id:
+    if not self.queue_event_arr[1].memory_exception_data.gpu_id and not self.queue_event_arr[2].hw_exception_data.gpu_id:
       with contextlib.suppress(RuntimeError): self.sleep(tm=1)
 
     report = []
-    if self.queue_event_arr[0].memory_exception_data.gpu_id:
-      report += [f"MMU fault: 0x{self.queue_event_arr[0].memory_exception_data.va:X} | {_str(self.queue_event_arr[0].memory_exception_data.failure)}"]
-    if self.queue_event_arr[1].hw_exception_data.gpu_id: report += [f"HW fault: {_str(self.queue_event_arr[1].hw_exception_data)}"]
+    if self.queue_event_arr[1].memory_exception_data.gpu_id:
+      report += [f"MMU fault: 0x{self.queue_event_arr[1].memory_exception_data.va:X} | {_str(self.queue_event_arr[1].memory_exception_data.failure)}"]
+    if self.queue_event_arr[2].hw_exception_data.gpu_id: report += [f"HW fault: {_str(self.queue_event_arr[2].hw_exception_data)}"]
 
     raise RuntimeError("\n".join(report))
 
