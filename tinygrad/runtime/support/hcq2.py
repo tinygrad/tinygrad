@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import cast, Callable, TypeVar, Generic, Any, Sequence
+from typing import cast, Callable, TypeVar, Generic, Any, Sequence, Iterable
 import struct, functools, time, collections, itertools, decimal, statistics
 from dataclasses import replace, dataclass
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
@@ -358,9 +358,12 @@ pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION
 
 # *****************
 
+def _rank_ranges(uops:Iterable[UOp]) -> dict[UOp, UOp]:
+  return {r: r.replace(arg=(i,)+r.arg[1:]) for i,r in enumerate(sorted([u for u in uops if u.op is Ops.RANGE], key=lambda r: r.arg))}
+
 def replace_params(call:UOp) -> UOp|None:
   body, variables, param_ops = call.src[0], call.src[0].variables(), {Ops.PARAM, Ops.MSTACK}
-  args = dedup([s for u in body.toposort(gate=lambda u: u.op not in param_ops) for s in u.src if s.op in param_ops and s not in variables])
+  args = dedup([s for u in (tops:=body.toposort(gate=lambda u: u.op not in param_ops)) for s in u.src if s.op in param_ops and s not in variables])
 
   patched, refhold = partition(call.src[1:], lambda x: x.src[0] in args)
   by_root = {p.src[0]: p for p in patched}
@@ -372,7 +375,7 @@ def replace_params(call:UOp) -> UOp|None:
   refhold += [a for a in addrs if a not in held and all(b.op is not Ops.PARAM or b.tag is not None for b in unwrap_mstack(a))]
 
   sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
-         for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM}
+         for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM} | _rank_ranges(tops)
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.without_after.tag == "inputs"), None))
   return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold),
                       arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
