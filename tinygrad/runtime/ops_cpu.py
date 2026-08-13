@@ -85,7 +85,6 @@ def create_worker(dev:CPUDevice) -> CPUWorker:
 # 2. queue encoders
 
 def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
-  # a fixed prog is looked up on the device, a rendered one is loaded from its elf
   progs = [get_runtime(d, prog) if isinstance(prog, UOp) else cast(CPUDevice, Device[d]).prgs[prog] for d in devs]
   addrs = tuple(UOp.const(p.addr, dtypes.uint64) for p in progs)
   words = ((addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, dtypes.uint64, addrs)),) + args
@@ -95,10 +94,8 @@ def cpu_exec(ctx:tuple[str, ...], call:UOp, prg:UOp) -> UOp:
   args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in prg.arg.vars]
   if (core:=prg.arg.runtimevars.get('core_id')) is None: return cpu_cmd(ctx, prg, *args)
 
-  # one entry per core, each with its own core_id
-  cid = len(prg.arg.globals) + core
-  return UOp(Ops.LINEAR, dtypes.void, tuple(cpu_cmd(ctx, prg, *args[:cid], UOp.const(t, dtypes.uint64), *args[cid+1:])
-                                            for t in range(prg.arg.global_size[0])))
+  la = [cpu_cmd(ctx,prg,*args[:(cid:=(len(prg.arg.globals)+core))],UOp.const(t, dtypes.uint64),*args[cid+1:]) for t in range(prg.arg.global_size[0])]
+  return UOp(Ops.LINEAR, dtypes.void, tuple(la))
 
 pm_cpu_opsel = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), cpu_exec),
