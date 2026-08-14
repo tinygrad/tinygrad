@@ -142,7 +142,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 
-  (UPat(Ops.BARRIER), lambda ctx: "")
+  (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst")
 ])
 
 class LLVMRenderer(Renderer):
