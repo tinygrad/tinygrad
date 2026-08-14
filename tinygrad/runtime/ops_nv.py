@@ -318,8 +318,6 @@ class NVProgram(HCQProgram['NVDevice']):
 
     smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= smem_size) // 4096 + 1
     max_smem_cfg = 0x11 if dev.iface.compute_class < nv_gpu.AMPERE_COMPUTE_A else 0x1a
-    if getenv("QMD_DEBUG"):
-      print(f"QMD_DEBUG name={self.name} shmem_usage={self.shmem_usage} smem_cfg={smem_cfg:#x} max_smem_cfg={max_smem_cfg:#x} qmd_dict={qmd}")
 
     self.qmd:QMD = QMD(dev, **qmd, qmd_group_id=0x3f, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
       invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1, barrier_count=1,
