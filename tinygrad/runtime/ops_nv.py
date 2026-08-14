@@ -167,16 +167,21 @@ class NVComputeQueue(NVCommandQueue):
   def signal(self, signal:HCQSignal, value:sint=0):
     if self.active_qmd is not None:
       for i in range(2):
-        if self.active_qmd.read(f'release{i}_enable') == 0:
-          self.active_qmd.write(**{f'release{i}_enable': 1})
+        enable_key = f'semaphore_release_enable{i}' if self.active_qmd.ver < 3 else f'release{i}_enable'
+        if self.active_qmd.read(enable_key) == 0:
+          self.active_qmd.write(**{enable_key: 1})
 
           addr_off = self.active_qmd.field_offset(f'release{i}_address_lower' if self.active_qmd.ver<4 else f'release_semaphore{i}_addr_lower')
           self.bind_sints_to_mem(signal.value_addr & 0xffffffff, mem=self.active_qmd_buf.cpu_view(), fmt='I', offset=addr_off)
           self.bind_sints_to_mem(signal.value_addr >> 32, mem=self.active_qmd_buf.cpu_view(), fmt='I', mask=0xf, offset=addr_off+4)
 
-          val_off = self.active_qmd.field_offset(f'release{i}_payload_lower' if self.active_qmd.ver<4 else f'release_semaphore{i}_payload_lower')
-          self.bind_sints_to_mem(value & 0xffffffff, mem=self.active_qmd_buf.cpu_view(), fmt='I', offset=val_off)
-          self.bind_sints_to_mem(value >> 32, mem=self.active_qmd_buf.cpu_view(), fmt='I', offset=val_off+4)
+          if self.active_qmd.ver < 3:
+            val_off = self.active_qmd.field_offset(f'release{i}_payload')
+            self.bind_sints_to_mem(value & 0xffffffff, mem=self.active_qmd_buf.cpu_view(), fmt='I', offset=val_off)
+          else:
+            val_off = self.active_qmd.field_offset(f'release{i}_payload_lower' if self.active_qmd.ver<4 else f'release_semaphore{i}_payload_lower')
+            self.bind_sints_to_mem(value & 0xffffffff, mem=self.active_qmd_buf.cpu_view(), fmt='I', offset=val_off)
+            self.bind_sints_to_mem(value >> 32, mem=self.active_qmd_buf.cpu_view(), fmt='I', offset=val_off+4)
           return self
 
     self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(signal.value_addr), *data64_le(value),
@@ -306,8 +311,9 @@ class NVProgram(HCQProgram['NVDevice']):
       if not NAK: self.cbuf_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
       qmd = {'qmd_major_version':3 if dev.iface.compute_class >= nv_gpu.AMPERE_COMPUTE_A else 2, 'sm_global_caching_enable':1,
         'program_address_upper':hi32(prog_addr), 'program_address_lower':lo32(prog_addr),
-        'shared_memory_size':self.shmem_usage, 'register_count_v':self.regs_usage,
-        f'shader_local_memory_{"low" if NAK else "high"}_size':self.dev.slm_per_thread}
+        'shared_memory_size':self.shmem_usage, 'register_count_v':self.regs_usage}
+      if dev.iface.compute_class >= nv_gpu.AMPERE_COMPUTE_A: qmd[f'shader_local_memory_{"low" if NAK else "high"}_size'] = self.dev.slm_per_thread
+      else: qmd['shader_local_memory_low_size'], qmd['shader_local_memory_high_size'] = self.dev.slm_per_thread, 0
 
     smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
 
