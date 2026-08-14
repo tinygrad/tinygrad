@@ -16,8 +16,9 @@ apt-get install -y python3-pip python3-venv git tmux rclone clang
 
 ### 1.2 Install Python deps
 ```bash
-python3 -m pip install --break-system-packages numpy tqdm wandb tiktoken sentencepiece
+python3 -m pip install --break-system-packages --ignore-installed typing-extensions numpy tqdm wandb tiktoken sentencepiece
 ```
+Note: `--ignore-installed typing-extensions` is needed because the base image ships typing-extensions 4.10.0 without a RECORD file, so pip cannot uninstall it.
 
 ### 1.3 Install ROCm dev headers
 The base image has ROCm runtime but NOT the HIP dev headers. Need:
@@ -74,8 +75,8 @@ rclone config create mlc-training s3 provider=Cloudflare \
   secret_access_key=a53625c4d45e3ca8ac0df8a353ea3a41ffc3292aa25259addd8b7dc5a6ce2936 \
   endpoint=c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
 
-mkdir -p /root/datasets/c4-8b
-rclone copy mlc-training:mlcommons-training-wg-public/llama3_1/datasets/c4/llama3_1_8b/ /root/datasets/c4-8b/ -P
+mkdir -p /raid/datasets/c4-8b
+rclone copy mlc-training:mlcommons-training-wg-public/llama3_1/datasets/c4/llama3_1_8b/ /raid/datasets/c4-8b/ -P
 ```
 
 Files downloaded (~85GB total, ~6 minutes):
@@ -85,11 +86,9 @@ Files downloaded (~85GB total, ~6 minutes):
 - `c4-validation-91205-samples.en_text_document.idx` (1.8 MB)
 - `LICENSE.txt`, `NOTICE.txt`
 
-### Symlink for the submission script
-The `dev_run.sh` script hardcodes `BASEDIR="/raid/datasets/c4-8b/"`. Symlink:
+**Wait for rclone to fully complete before starting training.** Starting training while the dataset is still downloading will read a truncated .bin file, causing `ValueError: all input arrays must have the same shape` in the dataloader. The stale `.index_cache` and `.blend_cache` files must also be deleted if this happens:
 ```bash
-mkdir -p /raid/datasets
-ln -s /root/datasets/c4-8b /raid/datasets/c4-8b
+rm -f /raid/datasets/c4-8b/*.index_cache /raid/datasets/c4-8b/*.blend_cache
 ```
 
 ## Phase 4: wandb Login
@@ -98,30 +97,34 @@ wandb login
 ```
 Enter API key from https://wandb.ai/authorize
 
+Alternatively, pass the key directly:
+```bash
+wandb login <API_KEY>
+```
+
 ## Phase 5: Run Training
 
-### 5.1 Smoke test (beam search, 2 layers, fake data)
+Run training in tmux so it survives SSH disconnects:
+```bash
+tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=AMD:HIP ROCM_PATH=/opt/rocm WANDB=1 bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_run.sh 2>&1 | tee /root/train.log'
+```
+Attach with `tmux attach -t train`.
+
+### 5.1 Smoke test (beam search, 2 layers, real data)
 Always run beam first to validate the pipeline:
 ```bash
-cd /root/tinygrad
-COMGR_PATH=/opt/rocm/lib/libamd_comgr.so \
-COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so \
-CC=/opt/rocm/core-7.14/lib/llvm/bin/clang \
-DEV=AMD:HIP \
-ROCM_PATH=/opt/rocm BASEDIR=/root/datasets/c4-8b/ \
-  bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_beam.sh
+tmux new-session -d -s beam 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=AMD:HIP ROCM_PATH=/opt/rocm bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_beam.sh 2>&1 | tee /root/beam.log'
 ```
+
+The beam test runs 10 training steps with 2 layers. Expected results:
+- ~0.29s per step after warmup
+- ~700K GFLOPS, ~7% MFU (low because only 2 layers)
+- ~380 GB VRAM used
+- Loss stable at ~12.55 with random init
 
 ### 5.2 Full training run
 ```bash
-cd /root/tinygrad
-COMGR_PATH=/opt/rocm/lib/libamd_comgr.so \
-COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so \
-CC=/opt/rocm/core-7.14/lib/llvm/bin/clang \
-DEV=AMD:HIP \
-ROCM_PATH=/opt/rocm BASEDIR=/root/datasets/c4-8b/ \
-WANDB=1 \
-  bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_run.sh
+tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=AMD:HIP ROCM_PATH=/opt/rocm WANDB=1 bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_run.sh 2>&1 | tee /root/train.log'
 ```
 
 ## Environment Variable Reference
@@ -133,7 +136,6 @@ WANDB=1 \
 | `CC` | `/opt/rocm/core-7.14/lib/llvm/bin/clang` | System clang doesn't know gfx950; must use ROCm's bundled clang |
 | `DEV` | `AMD:HIP` | Force HIPRenderer (comgr-based) over HIPCCRenderer (hipcc subprocess) |
 | `ROCM_PATH` | `/opt/rocm` | Script defaults to `/opt/rocm-7.1.1` which doesn't exist |
-| `BASEDIR` | `/root/datasets/c4-8b/` | Where C4 dataset was downloaded (script hardcodes `/raid/datasets/c4-8b/`) |
 | `WANDB` | `1` | Enable wandb logging (off by default) |
 
 ## Architecture
@@ -173,12 +175,6 @@ ldconfig
 ### `comgr not available: try setting COMGR_3_PATH?`
 comgr 3.x uses a separate module. Set `COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so` too.
 
-### `FileNotFoundError: '/raid/datasets/c4-8b/...'`
-Script hardcodes `BASEDIR`. Either symlink or edit the script:
-```bash
-mkdir -p /raid/datasets && ln -s /root/datasets/c4-8b /raid/datasets/c4-8b
-```
-
 ### `No such file or directory: 'clang'`
 Install clang: `apt-get install -y clang` (for CPU compilation).
 For gfx950 HIP compilation, comgr (not clang) is used — ensure the ROCm 7.14 comgr 3.3 is properly loaded via `COMGR_PATH` and `COMGR_3_PATH`.
@@ -194,13 +190,18 @@ $ lspci -nn | grep AMD
 ```
 CPU flags include `hypervisor`. `dmesg` shows `Hypervisor detected: KVM`.
 
-### PCI device ID
-`lspci -v` shows device ID `0x75b0` and subsystem ID `0x75a0`:
-```
-83:00.0 Processing accelerators: ... Device 75b0
-    Subsystem: ... Device 75a0
-```
-tinygrad's `PCIIface` in `ops_amd.py` and `hive_reset.py` did not list `0x75b0`, so the GPU was not found. Adding `0x75b0` to the device ID list in both files fixes the detection.
+### Working path: amdgpu driver (KFDIface)
+The amdgpu driver loads on boot and binds to all 8 GPUs, creating `/dev/kfd` and 64 renderD nodes (`/dev/dri/renderD128` through `/dev/dri/renderD191`). tinygrad's `KFDIface` enumerates GPUs through `/sys/devices/virtual/kfd/kfd/topology/nodes` and uses `/dev/kfd` for ioctl. No PCI device ID patching is needed — the KFD path does not use `PCIIface` or `AMDev._run_discovery()`.
+
+This is the working configuration. No code changes to tinygrad are required.
+
+### PCIIface path (does not work on this VM)
+For reference, the `PCIIface` path was also explored but does not work in this KVM guest:
+
+- `PCIIface` in `ops_amd.py` does not list device ID `0x75b0`. Adding it allows PCI detection but `AMDev._run_discovery()` fails because the VRAM BAR reads all `0xFF`.
+- This was observed with the GPU unbound from any driver, after PCI reset, and with VFIO bound.
+- VFIO binding (`vfio-pci` with `enable_unsafe_noiommu_mode=1`) succeeded but VRAM BAR still reads all `0xFF`.
+- No IOMMU in guest — `dmesg` has no `AMD-Vi` entries, PCI devices have no `iommu_group` symlink.
 
 ### amdgpu driver behavior
 On first boot, amdgpu loaded and bound to all 8 GPUs. On one boot it failed to initialize:
@@ -212,24 +213,5 @@ On first boot, amdgpu loaded and bound to all 8 GPUs. On one boot it failed to i
 ```
 On a subsequent boot, amdgpu initialized successfully (SMU initialized, VRAM ready). After unbinding all 8 GPUs from amdgpu, `rmmod amdgpu` wedged the module (stuck in "Unloading" state in `/proc/modules`), requiring a full VM reboot.
 
-### `/dev/kfd`
-`/dev/kfd` exists when amdgpu is loaded. Opening it returns `OSError: [Errno 22] Invalid argument`.
-
-### VRAM BAR reads all 0xFF
-After amdgpu initializes the GPU and is then unbound, reading the VRAM BAR (via `/sys/bus/pci/devices/0000:83:00.0/resource0`) returns all `0xFF` at all offsets — including the discovery table at `vram_size - 64KB`. tinygrad's `AMDev._run_discovery()` fails with `AssertionError: discovery signatures mismatch`.
-
-A PCI reset (`echo 1 > /sys/bus/pci/devices/0000:83:00.0/reset`) did not change the VRAM contents — still all `0xFF`.
-
-VRAM was also all `0xFF` when read via `/dev/mem` at the BAR physical address (`0xa0000000000`).
-
-### VFIO attempt
-Bound the GPU to `vfio-pci` with `enable_unsafe_noiommu_mode=1`. The GPU bound successfully and `/dev/vfio/noiommu-0` appeared. Running tinygrad with `VFIO=1` still failed with the same `discovery signatures mismatch` — VRAM BAR still reads all `0xFF`.
-
-### No IOMMU in guest
-`dmesg` has no `AMD-Vi` entries. PCI devices have no `iommu_group` symlink.
-
 ### No fan control
 No `fan*` or `pwm*` hwmon entries exist. Only `temp*`, `power*`, `freq*` are exposed. GPU temps read 56-63°C, power ~265W per GPU.
-
-### Current status: NOT WORKING
-tinygrad's `PCIIface` finds the GPU (after adding `0x75b0`) but `AMDev._run_discovery()` fails because the VRAM discovery table reads all `0xFF`. This was observed with the GPU unbound from any driver, after PCI reset, and with VFIO bound.
