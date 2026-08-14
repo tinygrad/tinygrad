@@ -1,6 +1,6 @@
 import unittest
 import functools
-from tinygrad import Tensor, Variable, UOp
+from tinygrad import Tensor, Variable, UOp, function
 from tinygrad.uop.ops import KernelInfo
 from tinygrad.schedule import schedule_cache
 
@@ -46,6 +46,23 @@ class TestScheduleCache(unittest.TestCase):
     b = Tensor.custom_kernel(b, fxn=fxn)[0]
     b.realize()
     self.assertEqual(b.item(), 10)
+    self.assertEqual(len(schedule_cache), cache_size_after_first)
+
+  def test_custom_kernel_cache(self):
+    @function(precompile=True)
+    def f(x:Tensor) -> Tensor:
+      out = Tensor.invalids(*x.shape, dtype=x.dtype, device=x.device)
+      out = Tensor.custom_kernel(out, fxn=functools.partial(custom_set0_kernel, num=10))[0]
+      return out + x
+
+    x = Tensor.ones(1).realize()
+
+    first = f(x).realize()
+    cache_size_after_first = len(schedule_cache)
+    # it should hit the cache the second time
+    second = f(x).realize()
+    self.assertEqual(first.item(), 11)
+    self.assertEqual(second.item(), 11)
     self.assertEqual(len(schedule_cache), cache_size_after_first)
 
   def test_simple(self):

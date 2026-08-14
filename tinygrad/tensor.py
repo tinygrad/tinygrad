@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, cast, get_args, ParamSpec, TypeGuard, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, strong_dtype, \
@@ -152,6 +152,9 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
     else:
       items.append(t.after(t.store(s.after(*after_deps))))
   fxn = UOp.sink(*(x.substitute(subs) for x in items))
+  bufs = sorted((x for x in fxn.toposort(enter_calls=False) if x.op is Ops.BUFFER and isinstance(x.arg, ParamArg)
+                        and x.addrspace is AddrSpace.GLOBAL), key=lambda x:x.arg.slot)
+  fxn = fxn.substitute({x:x.replace(arg=replace(x.arg, slot=i)) for i,x in enumerate(bufs)}, enter_calls=False)
 
   # body switches from TUPLE to SINK, so the node becomes an opaque CALL (not FUNCTION)
   new_call = UOp(Ops.CALL, src=(fxn, *input_buffers, *outs), arg=c.arg)
