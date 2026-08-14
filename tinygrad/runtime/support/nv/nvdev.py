@@ -9,6 +9,12 @@ from tinygrad.runtime.support.hcq import MMIOInterface
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
 
+NV_CHIP_ARCHITECTURES = {0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}
+def nv_chip_prefix(architecture:int) -> str:
+  if architecture not in NV_CHIP_ARCHITECTURES:
+    raise RuntimeError(f"Unrecognized NVIDIA GPU architecture id {architecture:#x}. This GPU architecture is not supported by tinygrad.")
+  return NV_CHIP_ARCHITECTURES[architecture]
+
 class NVReg:
   def __init__(self, nvdev, base, off, fields=None): self.nvdev, self.base, self.off, self.fields = nvdev, base, off, fields
 
@@ -111,7 +117,7 @@ class NVDev:
     self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
     self.chip_id = self.reg("NV_PMC_BOOT_0").read()
     self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
-    self.chip_name = {0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}[self.chip_details['architecture']] + f"{self.chip_details['implementation']:02d}"
+    self.chip_name = nv_chip_prefix(self.chip_details['architecture']) + f"{self.chip_details['implementation']:02d}"
     self.fw_name = {"GB2": "gb202", "AD1": "ad102", "GA1": "ga102"}[self.chip_name[:3]]
     self.mmu_ver, self.fmc_boot = (3, True) if self.chip_details['architecture'] >= 0x1a else (2, False)
 
