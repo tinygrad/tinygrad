@@ -131,7 +131,13 @@ class NVDev:
     self.pte_t, self.pde_t, self.dual_pde_t = [self.__dict__[name] for name in [f'NV_MMU_VER{self.mmu_ver}_PTE', f'NV_MMU_VER{self.mmu_ver}_PDE',
                                                                                 f'NV_MMU_VER{self.mmu_ver}_DUAL_PDE']]
 
-    self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
+    if self.fw_name == "tu102":
+      self.include("dev_fb", "gp102")
+      f = self.reg("NV_PFB_PRI_MMU_LOCAL_MEMORY_RANGE").read_bitfields()
+      self.vram_size = f['lower_mag'] << (f['lower_scale'] + 20)
+      if f['ecc_mode'] == 1: self.vram_size = self.vram_size // 16 * 15
+    else:
+      self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
 
     self.vram, self.mmio = self.pci_dev.map_bar(1), self.pci_dev.map_bar(0, fmt='I')
     self.large_bar = self.vram.nbytes >= self.vram_size
