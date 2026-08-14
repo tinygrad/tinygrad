@@ -1,6 +1,6 @@
 import math
 from typing import Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, is_variable
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
@@ -142,7 +142,7 @@ spec_tensor = PatternMatcher([
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
   # a Variable is a 0-d ALU BUFFER with a value range and no device
-  (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf: is_variable(buf) and buf.arg.device is None or None),
+  (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
@@ -247,12 +247,11 @@ spec_full = PatternMatcher([
 spec_kernel_graph = PatternMatcher([
   # sink
   (UPat(Ops.SINK, dtypes.void), lambda: True),
-  # bound Variables are AFTER(BUFFER, STORE(BUFFER, CONST)) in call args
-  (UPat(Ops.STORE, dtypes.void), lambda: True),
-  # const + stack to make vconsts
+  # the store of a bound Variable binds it: AFTER(BUFFER, STORE(BUFFER, CONST)) in call args
+  (UPat(Ops.STORE, dtypes.void, (UPat(Ops.BUFFER, name="b"), UPat(Ops.CONST))), lambda b: b.is_variable),
+  # const + stack to make vconsts and shape args
   (UPat(Ops.CONST, src=()), lambda: True),
-  (UPat(Ops.STACK, src=()), lambda: True),
-  (UPat(Ops.STACK, src=UPat((Ops.CONST, Ops.AFTER, Ops.PARAM))), lambda: True),
+  (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) or x.is_variable or x.is_bound_var for x in s.src) or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
   # param is outside buffer, buffer is local buffer

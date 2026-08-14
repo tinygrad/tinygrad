@@ -70,7 +70,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       else:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not is_bound_var(s))
+        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
         linearized.append(k.src[0].call(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
@@ -82,7 +82,7 @@ from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
-from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg, is_bound_var
+from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg
 from tinygrad.dtype import AddrSpace
 
 def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
@@ -101,7 +101,7 @@ def resolve_linear_call(linear_call:UOp):
   linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
   # map the call body params back to the original Variables stored in the call args
   binds = {f"p{i}":UOp.variable((b:=x.src[0]).expr, b.vmin, b.vmax, b.dtype, b.arg.multiple_of, param=True)
-           for i,x in enumerate(linear_call.src[1:]) if is_bound_var(x)}
+           for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}
   return linear.substitute({v:binds[v.expr] for v in linear.variables() if v.expr in binds}, enter_calls=True, name="resolve scalar params")
 
 pm_resolve_linear_call = PatternMatcher([
@@ -188,7 +188,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   # get var_vals from the bound Variables in the call args
   var_vals: dict[str, int] = {}
   for b in big_sink.src[1:]:
-    if is_bound_var(b):
+    if b.is_bound_var:
       v, val = b.unbind()
       nm = v.expr
       if nm not in used_vars: continue

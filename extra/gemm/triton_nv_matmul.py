@@ -6,7 +6,7 @@ import numpy as np
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, ProgramInfo, is_bound_var
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, ProgramInfo
 from tinygrad.helpers import getenv
 np.set_printoptions(suppress=True)
 
@@ -79,7 +79,7 @@ if __name__ == "__main__":
   linear, var_vals = C.linear_with_vars()
   last_call = linear.src[-1]
   ast = last_call.src[0]
-  bufs = [s.buffer for s in last_call.src[1:] if not is_bound_var(s)]
+  bufs = [s.buffer for s in last_call.src[1:] if not s.is_bound_var]
 
   src = compiled.asm["ptx"]
   # specify the shared memory here so we don't need to do it dynamically

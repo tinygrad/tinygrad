@@ -5,7 +5,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import Context, to_mv, prod
-from tinygrad.uop.ops import Ops, UOp, is_bound_var
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen import to_program
 import json
 from collections import OrderedDict
@@ -35,7 +35,7 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     return name
 
   for call in iter_kernel_calls(linear):
-    arg_uops = [b for b in call.src[1:] if not is_bound_var(b)]
+    arg_uops = [b for b in call.src[1:] if not b.is_bound_var]
     prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
     info = prg.arg
     functions[info.function_name] = prg.src[2].arg
