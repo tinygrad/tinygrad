@@ -131,18 +131,17 @@ class TestScheduleScaling(unittest.TestCase):
     self._assert_linear(concat_chain)
 
   @Context(DEV="NULL:HIP:gfx1100")
-  def test_custom_call_assign_scaling(self):
+  def test_custom_kernel_assign_scaling(self):
     from tinygrad.uop.ops import UOp, Ops, KernelInfo
     from tinygrad.runtime.autogen.amd.rdna3.ins import s_nop
-    call_id = itertools.count(0)
-    def custom_call_assign(n):
+    count = itertools.count(0)
+    def custom_kernel_assign(n):
       def custom_asm(out):
-        return UOp(Ops.PROGRAM, src=(UOp.sink(out, arg=KernelInfo(f"call_{next(call_id)}")),
+        return UOp(Ops.PROGRAM, src=(UOp.sink(out, arg=KernelInfo(f"fxn_{next(count)}")),
                                      UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=s_nop(i)) for i in range(n*8)))))
-      out = Tensor.custom_kernel(Tensor.empty(1), fxn=custom_asm)[0]
-      dsts = [Tensor.empty(1).assign(out+i) for i in range(n)]
-      return dsts[0].cat(*dsts[1:])
-    self._assert_linear(custom_call_assign, n_small=50, n_large=500)
+      call = Tensor.custom_kernel(Tensor.empty(1), fxn=custom_asm)[0]
+      return Tensor.cat(*[Tensor.empty(1).assign(call+i) for i in range(n)])
+    self._assert_linear(custom_kernel_assign, n_small=50, n_large=500)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
