@@ -36,6 +36,31 @@ class SimpleTokenizer:
     self.preset = preset
     self.bos_id, self.eos_id, self.eot_id = bos_id, eos_id, eot_id
 
+  # todo remove
+  def prefix(self) -> list[int]:
+    return ([] if self.bos_id is None else [self.bos_id]) + (self.encode("<sop>") if self.preset == 'glm4' else [])
+
+  # todo remove
+  def role(self, role:str):
+    if self.preset == 'olmo': return self.encode("<|" + role + "|>\n")  # OLMoE Instruct format
+    if self.preset == 'kimi-k2': return self.encode("<|im_" + role + "|>" + role + "<|im_middle|>")
+    if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
+    if self.preset == 'glm4': return self.encode("<|" + role + "|>")
+    if self.preset == 'tekken':
+      if role == 'user': return self.encode("[INST]")
+      if role == 'assistant': return []
+      raise ValueError(f"Unsupported role '{role}' for tokenizer preset '{self.preset}'")
+    return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
+
+  # todo remove
+  def end_turn(self):
+    if self.preset == 'olmo': return self.encode("\n")
+    if self.preset == 'kimi-k2': return [self.eos_id]
+    if self.preset == 'qwen2': return [self.eos_id] + self.encode("\n")
+    if self.preset == 'glm4': return []
+    if self.preset == 'tekken': return self.encode("[/INST]")
+    return [self.eos_id]
+
   @staticmethod
   def from_gguf_kv(kv:dict):
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820

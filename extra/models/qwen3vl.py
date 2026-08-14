@@ -130,7 +130,7 @@ class Qwen3VLVis():
     self.prefill(lang=lang, image=Tensor(image), start_pos=start_pos)
 
     # for generate func
-    #if end_turn: lang._cached_tokens.extend(self.tok.end_turn())
+    if end_turn: lang._cached_tokens.extend(self.tok.end_turn())
     lang._cached_tokens.extend([0] * (self.toks_per_img + self.prefix.shape[0] + self.suffix.shape[0]))
 
   @TinyJit
