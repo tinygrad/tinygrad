@@ -65,6 +65,7 @@ def cast_weak_srcs(c:UOp, u:UOp) -> UOp|None:
 
 pm_cast_weak = PatternMatcher([
   (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.ALU, dtype=dtypes.weaks, name="u"),)), cast_weak_srcs),
+  (UPat(Ops.CAST, name="c", src=(UPat(Ops.CONST, dtype=dtypes.weaks, name="u"),)), lambda c,u: commit_weak(u, c.dtype)),
 ])
 
 pm_lower_index_dtype = pm_commit_weak+pm_cast_weak+PatternMatcher([

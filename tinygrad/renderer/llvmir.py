@@ -238,8 +238,8 @@ class AMDLLVMRenderer(LLVMRenderer):
     (UPat(Ops.CAST, dtypes.fp8s, (UPat(dtype=dtypes.float),), name="x",), lambda ctx,x:
       f"  {ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {'1' if x.dtype == dtypes.fp8e5m2 else '0'})"),
     (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",), lambda ctx,x,y:
-      f"  {ctx[x.src[0]]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
-      f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x.src[0]]}_i32, i32 0)"),
+      f"  {ctx[x]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
+      f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x]}_i32, i32 0)"),
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
     # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
