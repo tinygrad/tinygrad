@@ -656,7 +656,7 @@ jobs:
         with:
           key: compile-${{ matrix.backend }}
           deps: "testing_unit mesa"
-          docker-qemu: ${{ contains(matrix.dev, 'QCOMCL') }}
+          qemu: ${{ contains(matrix.dev, 'QCOMCL') }}
       - name: Test IMAGE
         shell: bash
         if: contains(matrix.dev, 'a630')

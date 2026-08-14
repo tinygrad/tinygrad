@@ -150,9 +150,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.STACK:
       if len(src) == 0: return dtypes.void
       return promo_dtype(src)
-    case Ops.BIND:
-      assert src[0].dtype == src[1].dtype, f"bind dtype mismatch {src[0].dtype} != {src[1].dtype}"
-      return src[0].dtype
     case Ops.WMMA:
       # WMMA output dtype is the accumulator dtype (src[2])
       return src[2].dtype
@@ -377,7 +374,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
       # some ops init the shape
       case Ops.GETADDR: return ()
-      case Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
+      case Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER:
         if len(self.src): return self.src[0].as_shape
@@ -960,8 +957,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.UNSHARD: return self.src[0].realized
     # only these can be realized
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
-    # LOCAL/REG scratch buffers are never realized
-    if self.op is Ops.BUFFER and self.addrspace in (AddrSpace.LOCAL, AddrSpace.REG): return None
+    # LOCAL/REG scratch buffers are never realized, and Variables (ALU) have no real storage
+    if self.op is Ops.BUFFER and self.addrspace in (AddrSpace.LOCAL, AddrSpace.REG, AddrSpace.ALU): return None
     # an unbacked intermediate BUFFER (directly or as an MSTACK source) is not realized
     if any(b.op is Ops.BUFFER and buffers.get(b) is None for b in self.backward_slice_with_self): return None
     # NOTE: this is used by the JIT to determine which inputs we capture
@@ -972,29 +969,41 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1) -> UOp:
-    return UOp(Ops.PARAM, src=(shape_to_shape_arg(()),),
-               arg=ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of, addrspace=AddrSpace.ALU))
+  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1, param:bool=False) -> UOp:
+    # a Variable is a 0-d BUFFER in the ALU addrspace; binding it is storing a CONST into it
+    # param=True creates the kernel-side form directly: an ALU PARAM (what the BUFFER becomes inside kernels)
+    arg = ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of, addrspace=AddrSpace.ALU)
+    return UOp(Ops.PARAM if param else Ops.BUFFER, src=(shape_to_shape_arg(()),), arg=arg)
+  @property
+  def is_variable(self) -> bool:
+    # a Variable is a 0-d BUFFER in the ALU addrspace that carries a value range (it becomes a PARAM inside kernels)
+    return self.op is Ops.BUFFER and isinstance(self.arg, ParamArg) and \
+           self.arg.vmin_vmax is not None and self.arg.addrspace is AddrSpace.ALU and self._shape == ()
+  @property
+  def is_bound_var(self) -> bool:
+    # a bound Variable is bind()'s AFTER(var, STORE(var, CONST))
+    return self.op is Ops.AFTER and self.src[0].is_variable and self.src[1].op is Ops.STORE and \
+           self.src[1].src[0] is self.src[0] and self.src[1].src[1].op is Ops.CONST and len(self.src) == 2
   @property
   def expr(self) -> str:
-    assert self.op is Ops.PARAM
+    assert self.op in {Ops.PARAM, Ops.BUFFER}
     return unwrap(self.arg.name)
   def bind(self, val:int|UOp):
-    assert self.op is Ops.PARAM and self.addrspace is AddrSpace.ALU, f"op is {self.op}, need PARAM"
+    assert self.is_variable, f"op is {self.op}, need Variable"
     uval = self.const_like(val) if isinstance(val, int) else val
     assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
     assert uval.divides(self.arg.multiple_of) is not None, f"bind {val} not divisible by {self.arg.multiple_of}"
-    return UOp(Ops.BIND, src=(self, uval))
+    return self.after(self.store(uval))
   def unbind(self) -> tuple[Variable, int]:
-    assert self.op is Ops.BIND and self.src[0].op is Ops.PARAM and self.src[1].op is Ops.CONST, f"can't unbind {self}"
-    return self.src[0], self.src[1].val
+    assert self.is_bound_var, f"can't unbind {self}"
+    return self.src[0], self.src[1].src[1].val
   def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
     ret:dict[Variable, int] = {}
     return graph_rewrite(self, pm_unbind, ctx=ret), ret
   def variables(self) -> list[Variable]:
-    return sorted({x if x.op is Ops.PARAM else UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype)
-                   for x in self.backward_slice_with_self if (x.op is Ops.RANGE and x.arg[-1] is AxisType.DEVICE) or x.op is Ops.PARAM
-                   and x.arg.addrspace is AddrSpace.ALU}, key=lambda v: v.expr)
+    return sorted({x if x.op in {Ops.PARAM, Ops.BUFFER} else UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype, param=True)
+                   for x in self.backward_slice_with_self if (x.op is Ops.RANGE and x.arg[-1] is AxisType.DEVICE) or
+                   (x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.ALU) or x.is_variable}, key=lambda v: v.expr)
 
   # *** uop symbolic stuff ***
 
@@ -1005,7 +1014,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.STACK: return math.gcd(*[x.const_factor() for x in self.src])
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
     if self.op is Ops.MUL: return self.src[0].val if self.src[0].op is Ops.CONST else self.src[1].val if self.src[1].op is Ops.CONST else 1
-    if self.op is Ops.PARAM and self.arg.multiple_of is not None: return self.arg.multiple_of
+    if self.op in (Ops.PARAM, Ops.BUFFER) and isinstance(self.arg, ParamArg) and self.arg.multiple_of is not None: return self.arg.multiple_of
     return 1
   def divides(self, v:int) -> UOp|None:
     if v==1: return self
@@ -1017,7 +1026,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.MUL:
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
-    if self.op is Ops.PARAM and self.arg.multiple_of is not None: return self // v if self.arg.multiple_of%v == 0 else None
+    if self.op in (Ops.PARAM, Ops.BUFFER) and isinstance(self.arg, ParamArg) and self.arg.multiple_of is not None:
+      return self // v if self.arg.multiple_of%v == 0 else None
     return None # generic None if we aren't sure
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, PyConst]:  # NOTE: assume Invalid ALU is resolved
     return (self.src[0], self.src[1].val) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
@@ -1082,9 +1092,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # float has NAN issue and we use explicit NAN in transcendental
     if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
-    if self.op is Ops.PARAM and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
+    if self.op in (Ops.PARAM, Ops.BUFFER) and isinstance(self.arg, ParamArg) and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
-    if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
+    if self.op is Ops.AFTER: return self.src[0]._min_max
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     if self.op is Ops.CONST and self.val is not Invalid: return self.val, self.val
     if self.op is Ops.INDEX: return self.src[0]._min_max
@@ -1101,7 +1111,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _sym_fxn(self):
     from tinygrad.uop.render import _render_with_splits, renderer_infer
     sself = self.simplify()
-    varnames = tuple(dedup(x.expr for x in sself.toposort() if x.op is Ops.PARAM and x.arg.addrspace == AddrSpace.ALU))
+    varnames = tuple(dedup(x.expr for x in sself.toposort() if (x.op is Ops.PARAM and x.arg.addrspace == AddrSpace.ALU) or x.is_variable))
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
     lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
@@ -1156,7 +1166,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)
     return UOp(Ops.PARAM, src=src, arg=ParamArg(slot, dtype, vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
   def param_like(self, slot:int):
-    if self.op is Ops.BIND: return self.src[0].replace(arg=replace(self.src[0].arg, slot=slot, name=f"p{slot}"))
+    # Variables become ALU params in the call body; the stored value (if bound) stays in the call args
+    if self.is_bound_var or self.is_variable:
+      b = self.src[0] if self.op is Ops.AFTER else self
+      return UOp(Ops.PARAM, src=b.src, arg=replace(b.arg, slot=slot, name=f"p{slot}"))
     addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
     return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
 
@@ -1754,7 +1767,7 @@ def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()
   ctx[v] = i
   return v
-pm_unbind = PatternMatcher([(UPat(Ops.BIND, name="x"), do_unbind)])
+pm_unbind = PatternMatcher([(UPat(Ops.AFTER, name="x"), lambda ctx,x: do_unbind(ctx,x) if x.is_bound_var else None)])
 
 # ctx is source UOp for which we are finding a contiguous view for. used in contiguous_view_offset
 pm_contiguous_view_offset = PatternMatcher([

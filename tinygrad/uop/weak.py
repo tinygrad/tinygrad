@@ -23,7 +23,7 @@ pm_lower_weak = PatternMatcher([
   # Binary can widen from the bounds, all other nodes derive from the lowered sources.
   # a weakfloat Unary (sin/exp2/...) must resolve here, before the transcendental decomposition
   (UPat(GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK, Ops.SPECIAL}, name="u"), lower_weak_node),
-  (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
+  (UPat((Ops.PARAM, Ops.BUFFER), dtype=dtypes.weakint, name="u"),
     lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=select_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
 ])
 

@@ -60,7 +60,7 @@ pm_mops = PatternMatcher([
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.backward_slice_with_self: return None
+  if (base:=target.base) not in src.toposort(enter_calls=False): return None
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
@@ -461,11 +461,12 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
 class LocalAddBufferContext:
   dg:int = 0
   map:dict = field(default_factory=dict)
-  vars:dict = field(default_factory=dict)
   range:int = 0
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
+  # Variables (ALU buffers with a value range) are scalar symbolic values, not real buffers: they become ALU params with no slot
+  if buf.is_variable: return buf.replace(op=Ops.PARAM)
   param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),),
               arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
@@ -474,10 +475,6 @@ def debuf(ctx:LocalAddBufferContext, buf:UOp):
   if buf not in ctx.map: ctx.map[buf] = buf
   ctx.dg += 1
   return ret
-
-def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
-  ctx.vars[b] = None
-  return b.src[0]
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
   if after.addrspace == AddrSpace.LOCAL: return None
@@ -502,8 +499,7 @@ to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
   (UPat(Ops.PARAM, name="v"), lambda v:
-   UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype, multiple_of=v.arg.multiple_of)
-   if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
+   v.replace(arg=replace(v.arg, slot=-1)) if v.arg.name is not None and v.arg.vmin_vmax is not None and v.arg.slot != -1 else None),
 
   # this renumbers the params
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
@@ -512,7 +508,8 @@ to_define_global = PatternMatcher([
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
 
-  (UPat(Ops.BIND, name="b"), unbind_kernel),
+  # bound Variables are stores into Variable buffers: strip the store, the buffer becomes an ALU param via debuf
+  (UPat(Ops.AFTER, name="b"), lambda b: b.src[0] if b.is_bound_var else None),
   (UPat(Ops.AFTER, name="after"), handle_after),
 
   # remove device from local BUFFERIZE
@@ -541,13 +538,16 @@ pm_add_param_range_tags = PatternMatcher([
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split. open DEVICE ranges are fine, they are bound per device at launch
   if any(r.arg[-1] is not AxisType.DEVICE for r in x.ranges): return None
+  # the store of a bound Variable is an input value, not a kernel
+  st = x.src[0] if x.op is Ops.END else x
+  if st.op is Ops.STORE and st.src[0].is_variable: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
-  return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values(), *lctx.vars.keys())
+  return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values())
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
