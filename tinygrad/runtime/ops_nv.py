@@ -316,11 +316,12 @@ class NVProgram(HCQProgram['NVDevice']):
       else: qmd['shader_local_memory_low_size'], qmd['shader_local_memory_high_size'] = self.dev.slm_per_thread, 0
 
     smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
+    max_smem_cfg = 0x11 if dev.iface.compute_class < nv_gpu.AMPERE_COMPUTE_A else 0x1a
 
     self.qmd:QMD = QMD(dev, **qmd, qmd_group_id=0x3f, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
       invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1, barrier_count=1,
       cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, constant_buffer_invalidate_0=1, min_sm_config_shared_mem_size=smem_cfg,
-      target_sm_config_shared_mem_size=smem_cfg, max_sm_config_shared_mem_size=0x1a, program_prefetch_size=min(prog_sz>>8, 0x1ff),
+      target_sm_config_shared_mem_size=smem_cfg, max_sm_config_shared_mem_size=max_smem_cfg, program_prefetch_size=min(prog_sz>>8, 0x1ff),
       sass_version=dev.sass_version, program_prefetch_addr_upper_shifted=prog_addr>>40, program_prefetch_addr_lower_shifted=prog_addr>>8)
 
     for i,(addr,sz) in self.constbufs.items():
