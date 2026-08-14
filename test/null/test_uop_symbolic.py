@@ -16,7 +16,8 @@ def check_uop_against_string(self, v:UOp, s:str):
   s_eval = graph_rewrite(s_eval, commutative, name="cannonicalize eval")
   self.assertIs(s_eval, v, f"eval did not match simplified: {s_eval} != {v.render()} for {s}")
 
-def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.weakint): return UOp.variable(name,min_val,max_val,dtype)
+def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.weakint):
+  return UOp.variable(name, min_val, max_val, dtype, param=True)
 def uconst(val): return UOp.const(val)
 def usum(ops): return functools.reduce(lambda x,y: x+y, ops)
 def uand(ops): return functools.reduce(lambda x,y: x*y, ops)
@@ -442,7 +443,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(uand([uconst(1), Variable("a", 0, 1)]), 0, 1, "a")
 
   def test_masked_shr_fold(self):
-    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32, param=True)
     self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)")
 
   def test_bool_or_not_tautology(self):
@@ -483,12 +484,12 @@ class TestSymbolic(unittest.TestCase):
 
   def test_div_drop_small_terms(self):
     # from openpilot, shouldnt simplify
-    gidx0 = UOp.variable("gidx0", 0, 10)
-    gidx1 = UOp.variable("gidx1", 0, 10)
-    lidx0 = UOp.variable("lidx0", 0, 1)
-    lidx1 = UOp.variable("lidx1", 0, 1)
-    ridx1005 = UOp.variable("ridx1005", 0, 2)
-    ridx1006 = UOp.variable("ridx1006", 0, 2)
+    gidx0 = UOp.variable("gidx0", 0, 10, param=True)
+    gidx1 = UOp.variable("gidx1", 0, 10, param=True)
+    lidx0 = UOp.variable("lidx0", 0, 1, param=True)
+    lidx1 = UOp.variable("lidx1", 0, 1, param=True)
+    ridx1005 = UOp.variable("ridx1005", 0, 2, param=True)
+    ridx1006 = UOp.variable("ridx1006", 0, 2, param=True)
     self.helper_test_variable((lidx1+((gidx1*18)+(ridx1005*18)+(lidx0*162))+(gidx0*2)+(ridx1006*2)+-40)//18, -3, 20,
       "(gidx1+ridx1005+lidx0*9+(gidx0+ridx1006+7)//9+-3)")
 
@@ -997,7 +998,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(cond.ne(False), 0, 1, "(x<2)")
 
   def test_bitcast_chain(self):
-    a = UOp.variable("a", 0, 3, dtype=dtypes.int32)
+    a = UOp.variable("a", 0, 3, dtype=dtypes.int32, param=True)
     self.assertIs(graph_rewrite(a.bitcast(dtypes.float32).bitcast(a.dtype), sym), a)
 
   def test_negation_in_where(self):
@@ -1180,7 +1181,7 @@ class TestSymbolicVariables(unittest.TestCase):
     assert (a//4 + a//6).variables() == [a]
 
   def test_variable_min_eq_max_bind_folds(self):
-    b = Variable("x", 1, 1).bind(1)
+    b = UOp.variable("x", 1, 1).bind(1)
     s = b.simplify()
     self.assertEqual(s.op, Ops.CONST)
     self.assertEqual(s.val, 1)
