@@ -12,7 +12,7 @@ NV_DEBUG = getenv("NV_DEBUG", 0)
 NV_CHIP_ARCHITECTURES = {0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}
 def nv_chip_prefix(architecture:int) -> str:
   if architecture not in NV_CHIP_ARCHITECTURES:
-    raise RuntimeError(f"Unrecognized NVIDIA GPU architecture id {architecture:#x}. This GPU architecture is not supported by tinygrad.")
+    raise RuntimeError(f"Unrecognized NVIDIA GPU architecture id {architecture:#x}")
   return NV_CHIP_ARCHITECTURES[architecture]
 
 class NVReg:
