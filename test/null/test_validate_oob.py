@@ -1,9 +1,11 @@
 import unittest
-from tinygrad import dtypes, Variable
+from tinygrad import dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, UOp, AxisType
 from test.helpers import to_uops_list
+
+def Variable(name, nmin, nmax): return UOp.variable(name, nmin, nmax, param=True)
 
 class TestValidateOOB(unittest.TestCase):
   """Test z3 validation of index bounds for different ALU ops and patterns."""

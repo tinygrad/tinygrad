@@ -44,7 +44,7 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
     current_batch, current_batch_devs = [], []
 
   for si in linear.src:
-    devs = dedup([Device[x] for b in si.src[1:] if b.op is not Ops.BIND for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
+    devs = dedup([Device[x] for b in si.src[1:] if not b.is_bound_var for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
     graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
 
     can_graph = graph_t is not None and graph_t.supports_uop(devs, si)

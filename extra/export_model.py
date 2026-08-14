@@ -35,7 +35,7 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     return name
 
   for call in iter_kernel_calls(linear):
-    arg_uops = [b for b in call.src[1:] if b.op is not Ops.BIND]
+    arg_uops = [b for b in call.src[1:] if not b.is_bound_var]
     prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
     info = prg.arg
     functions[info.function_name] = prg.src[2].arg
