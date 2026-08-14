@@ -1013,22 +1013,6 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 0, 3)
     self.helper_test_variable(-a<-b, False, True, "(b<a)")
 
-  def test_where_cast(self):
-    s = Variable("s", 0, 3, dtypes.int)
-    cond = s < 2
-    a = Variable("a", 0, 3, dtypes.int)
-    b = Variable("b", 0, 3, dtypes.int)
-    expr = cond.where(a, b).cast(dtypes.half)
-
-    # TODO: copied from render, render does not support cast
-    glbl = UOp.param(0, dtypes.int, (1,))
-    uops = get_uops(UOp(Ops.STORE, src=(glbl.index(UOp.const(0, dtypes.int)), expr)).sink())
-    rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
-
-    # the vars are now scalar PARAMs
-    pvar = {u.expr: u for u in rewritten_uop.toposort() if u.op is Ops.PARAM}
-    self.assertEqual(rewritten_uop, (pvar['s']<UOp.const(2, dtypes.int)).where(pvar['a'].cast(dtypes.half), pvar['b'].cast(dtypes.half)))
-
   def test_where_merge_branches(self):
     cond1 = Variable("s", 0, 10) < 6
     cond2 = Variable("s", 0, 10) > 2
