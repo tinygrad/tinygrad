@@ -45,10 +45,12 @@ class QMD:
   fields: dict[str, dict[str, tuple[int, int]]] = {}
 
   def __init__(self, dev:NVDevice, view:MMIOInterface|None=None, **kwargs):
-    self.ver, self.sz = (5, 0x60) if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else (3, 0x40)
+    if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A: self.ver, self.sz = 5, 0x60
+    elif dev.iface.compute_class >= nv_gpu.AMPERE_COMPUTE_A: self.ver, self.sz = 3, 0x40
+    else: self.ver, self.sz = 2, 0x40
 
     # Init fields from module
-    if (pref:="NVCEC0_QMDV05_00" if self.ver == 5 else "NVC6C0_QMDV03_00") not in QMD.fields:
+    if (pref:="NVCEC0_QMDV05_00" if self.ver == 5 else "NVC6C0_QMDV03_00" if self.ver == 3 else "NVC6C0_QMDV02_03") not in QMD.fields:
       QMD.fields[pref] = {**{name[len(pref)+1:]: dt for name,dt in nv_gpu.__dict__.items() if name.startswith(pref) and isinstance(dt, tuple)},
         **{name[len(pref)+1:]+f"_{i}": dt(i) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith(pref) and callable(dt)}}
 
@@ -153,6 +155,9 @@ class NVComputeQueue(NVCommandQueue):
         self.nvm(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS_B, nv_flags("NVC6C0_SEND_SIGNALING_PCAS_B", invalidate="true", schedule="true"))
       else:
         self.nvm(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 9)
+    elif self.active_qmd.ver < 3:
+      self.active_qmd.write(dependent_qmd_pointer=qmd_buf.va_addr >> 8, dependent_qmd_schedule_enable=1,
+        dependent_qmd_type=nv_gpu.NVC6C0_QMDV02_03_DEPENDENT_QMD_TYPE_GRID, dependent_qmd_field_copy=1)
     else:
       self.active_qmd.write(dependent_qmd0_pointer=qmd_buf.va_addr >> 8, dependent_qmd0_action=1, dependent_qmd0_prefetch=1, dependent_qmd0_enable=1)
 
@@ -299,7 +304,8 @@ class NVProgram(HCQProgram['NVDevice']):
         f'shader_local_memory_{"low" if NAK else "high"}_size_shifted4': self.dev.slm_per_thread>>4}
     else:
       if not NAK: self.cbuf_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
-      qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'program_address_upper':hi32(prog_addr), 'program_address_lower':lo32(prog_addr),
+      qmd = {'qmd_major_version':3 if dev.iface.compute_class >= nv_gpu.AMPERE_COMPUTE_A else 2, 'sm_global_caching_enable':1,
+        'program_address_upper':hi32(prog_addr), 'program_address_lower':lo32(prog_addr),
         'shared_memory_size':self.shmem_usage, 'register_count_v':self.regs_usage,
         f'shader_local_memory_{"low" if NAK else "high"}_size':self.dev.slm_per_thread}
 
