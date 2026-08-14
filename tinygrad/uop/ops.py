@@ -796,11 +796,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
       case Ops.PERMUTE | Ops.FLIP: src_args = []
       case Ops.STACK:
-        # arg is the other srcs; all are cast to the promoted dtype, spec requires STACK srcs to match its dtype
         srcs = (self,)+tuple(arg)
         dtype = cast(DType, dtype_from_uop(Ops.STACK, srcs, None))
-        # TODO: why cast here?
-        return UOp(Ops.STACK, dtype, tuple(u if u.base.is_invalid else u.cast(dtype) for u in srcs))
+        return UOp(Ops.STACK, dtype, tuple(u if u.base.is_invalid else UOp.const(u.val, dtype) if u.op is Ops.CONST else u.cast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)
