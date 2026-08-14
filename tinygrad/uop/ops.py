@@ -1423,9 +1423,9 @@ class UPat(OpMixin):
     return res
 
 def deconstruct_function(fxn:Callable) -> tuple:
-  new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
-  for co in fxn.__code__.co_consts:
-    if isinstance(co, types.CodeType): new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
+  # globals can be referenced from arbitrarily nested code objects (comprehensions/lambdas, pre PEP 709)
+  def names(co:types.CodeType) -> set: return set(co.co_names).union(*(names(c) for c in co.co_consts if isinstance(c, types.CodeType)))
+  new_globals = {k:v for k,v in fxn.__globals__.items() if k in names(fxn.__code__)}
   # NOTE: optional round trip through pickle!
   assert fxn.__closure__ is None, "closures are not supported in pattern matchers"
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
