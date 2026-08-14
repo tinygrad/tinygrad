@@ -302,20 +302,21 @@ class NVProgram(HCQProgram['NVDevice']):
     self.dev.allocator._copyin(self.lib_gpu, image)
     self.dev.synchronize()
 
+    smem_size = round_up(self.shmem_usage, 0x100)
     if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A:
       if not NAK: self.cbuf_0[188:192], self.cbuf_0[223] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window)], 0xfffdc0
       qmd = {'qmd_major_version':5, 'qmd_type':nv_gpu.NVCEC0_QMDV05_00_QMD_TYPE_GRID_CTA, 'program_address_upper_shifted4':hi32(prog_addr>>4),
-        'program_address_lower_shifted4':lo32(prog_addr>>4), 'register_count':self.regs_usage, 'shared_memory_size_shifted7':self.shmem_usage>>7,
+        'program_address_lower_shifted4':lo32(prog_addr>>4), 'register_count':self.regs_usage, 'shared_memory_size_shifted7':smem_size>>7,
         f'shader_local_memory_{"low" if NAK else "high"}_size_shifted4': self.dev.slm_per_thread>>4}
     else:
       if not NAK: self.cbuf_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
       qmd = {'qmd_major_version':3 if dev.iface.compute_class >= nv_gpu.AMPERE_COMPUTE_A else 2, 'sm_global_caching_enable':1,
         'program_address_upper':hi32(prog_addr), 'program_address_lower':lo32(prog_addr),
-        'shared_memory_size':self.shmem_usage, 'register_count_v':self.regs_usage}
+        'shared_memory_size':smem_size, 'register_count_v':self.regs_usage}
       if dev.iface.compute_class >= nv_gpu.AMPERE_COMPUTE_A: qmd[f'shader_local_memory_{"low" if NAK else "high"}_size'] = self.dev.slm_per_thread
       else: qmd['shader_local_memory_low_size'], qmd['shader_local_memory_high_size'] = self.dev.slm_per_thread, 0
 
-    smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
+    smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= smem_size) // 4096 + 1
     max_smem_cfg = 0x11 if dev.iface.compute_class < nv_gpu.AMPERE_COMPUTE_A else 0x1a
     if getenv("QMD_DEBUG"):
       print(f"QMD_DEBUG name={self.name} shmem_usage={self.shmem_usage} smem_cfg={smem_cfg:#x} max_smem_cfg={max_smem_cfg:#x} qmd_dict={qmd}")
