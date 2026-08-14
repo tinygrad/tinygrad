@@ -76,6 +76,8 @@ def _swiglu_bwd(gradient:UOp, kernel:UOp, *, prequantize_mxfp4:bool=False):
                                         fxn=_custom_swiglu_bwd)
   return (None,)*(len(kernel.src)-2) + (grad_out.uop,)
 
+def _swiglu_bwd_mxfp4(gradient:UOp, kernel:UOp): return _swiglu_bwd(gradient, kernel, prequantize_mxfp4=True)
+
 def swiglu(x_w13:Tensor, *, prequantize_grad_mxfp4:bool=False) -> Tensor:
   assert x_w13.dtype == dtypes.bfloat16 and x_w13.ndim >= 2 and x_w13.shape[-1] % 32 == 0
   *prefix, two_k = x_w13.shape
@@ -91,6 +93,5 @@ def swiglu_mxfp4(x_w13:Tensor) -> tuple[Tensor, tuple[Tensor, Tensor, Tensor, Te
   out = alloc_like((*prefix, two_k//2), dtypes.bfloat16, x_w13.device, axis)
   from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs
   quant = alloc_mxfp4_outputs(out)
-  grad_fxn = functools.partial(_swiglu_bwd, prequantize_mxfp4=True)
-  ret = Tensor.custom_kernel(out, *quant, x_w13, fxn=_custom_swiglu_mxfp4, grad_fxn=grad_fxn)
+  ret = Tensor.custom_kernel(out, *quant, x_w13, fxn=_custom_swiglu_mxfp4, grad_fxn=_swiglu_bwd_mxfp4)
   return ret[0], tuple(ret[1:5])

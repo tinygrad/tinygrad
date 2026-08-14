@@ -407,6 +407,12 @@ def custom_mxfp4_gemm_bw(gradient:UOp, kernel:UOp, save_original_input:bool=Fals
   grad_w = _mxfp4_gemm_quantized(g_col, a_col, scale_g_col, scale_a_col).reshape(w.shape)
   return (None, None, None, None, None, grad_a.uop, grad_w.uop) + (None,)*(len(inputs)-7)
 
+def custom_mxfp4_gemm_bw_saved_input(gradient:UOp, kernel:UOp):
+  return custom_mxfp4_gemm_bw(gradient, kernel, save_original_input=True)
+
+def custom_mxfp4_gemm_bw_saved_quantized(gradient:UOp, kernel:UOp):
+  return custom_mxfp4_gemm_bw(gradient, kernel, save_original_input=False)
+
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
@@ -471,8 +477,8 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       else:
         assert a_col is not None and scale_a_col is not None
         saved = [a_col, scale_a_col, b_col, scale_b_col]
-      out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b, a, w, *saved, fxn=fxn,
-                                 grad_fxn=functools.partial(custom_mxfp4_gemm_bw, save_original_input=save_original_input))[0]
+      grad_fxn = custom_mxfp4_gemm_bw_saved_input if save_original_input else custom_mxfp4_gemm_bw_saved_quantized
+      out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b, a, w, *saved, fxn=fxn, grad_fxn=grad_fxn)[0]
     elif mx:
       # mxfp8 1x32 block scaling
       if mx_scales is not None:

@@ -113,6 +113,9 @@ def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp, *, prequantize_
     dxqkv = Tensor.custom_kernel(dxqkv, dq, dk, dv, freqs_cis, fxn=fxn)[0]
   return None, None, None, dxqkv.uop, None
 
+def _fused_qkv_rope_grad_mxfp4(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp):
+  return _fused_qkv_rope_grad(dq_u, dk_u, dv_u, call, prequantize_mxfp4=True)
+
 def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, head_dim:int, *,
                    prequantize_grad_mxfp4:bool=False) -> tuple[Tensor, Tensor, Tensor]:
   B, N, packed_dim = xqkv.shape
@@ -134,7 +137,7 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
   v = _sharded_empty((B, N, n_kv_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
   fxn = functools.partial(custom_fused_qkv_rope_forward, device=single_device, arch=arch,
                           B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=head_dim)
-  grad_fxn = functools.partial(_fused_qkv_rope_grad, prequantize_mxfp4=prequantize_grad_mxfp4)
+  grad_fxn = _fused_qkv_rope_grad_mxfp4 if prequantize_grad_mxfp4 else functools.partial(_fused_qkv_rope_grad, prequantize_mxfp4=False)
   q, k, v, *_ = Tensor.custom_kernel(q, k, v, xqkv, freqs_cis, fxn=fxn, grad_fxn=grad_fxn)
   return q, k, v
 
@@ -184,6 +187,7 @@ def _windowed_delta(xq:Tensor, xk:Tensor, xv:Tensor, do:Tensor, sinks, W:int) ->
   delta = (dob * o).sum(-1)
   return delta.reshape(B, H, N).unsqueeze(2)
 
+@functools.cache
 def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=0):
   def grad(dou:UOp, ker:UOp) -> tuple:
     do = Tensor(dou, device=dou.device)
