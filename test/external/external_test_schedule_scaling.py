@@ -1,4 +1,4 @@
-import unittest, time
+import unittest, time, itertools
 from tinygrad import Tensor, Context
 
 class TestScheduleScaling(unittest.TestCase):
@@ -134,13 +134,11 @@ class TestScheduleScaling(unittest.TestCase):
   def test_custom_call_assign_scaling(self):
     from tinygrad.uop.ops import UOp, Ops, KernelInfo
     from tinygrad.runtime.autogen.amd.rdna3.ins import s_nop
-    call_id = 0
+    call_id = itertools.count(0)
     def custom_call_assign(n):
-      nonlocal call_id
-      call_id += 1
       def custom_asm(out):
-        return UOp(Ops.PROGRAM, src=(UOp.sink(out.base, arg=KernelInfo(f"call_{call_id}")),
-          UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=s_nop(i)) for i in range(n*8)))))
+        return UOp(Ops.PROGRAM, src=(UOp.sink(out, arg=KernelInfo(f"call_{next(call_id)}")),
+                                     UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=s_nop(i)) for i in range(n*8)))))
       out = Tensor.custom_kernel(Tensor.empty(1), fxn=custom_asm)[0]
       dsts = [Tensor.empty(1).assign(out+i) for i in range(n)]
       return dsts[0].cat(*dsts[1:])
