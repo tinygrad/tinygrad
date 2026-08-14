@@ -540,6 +540,10 @@ class TestAssign(unittest.TestCase):
     c = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
     c[0:2].bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000], dtype=dtypes.uint32)).realize()
     np.testing.assert_allclose(c.numpy(), [4.0, 3.0, 3.0, 4.0])
+    # without .realize()
+    a = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
+    a.bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.uint32))
+    np.testing.assert_allclose(a.numpy(), [4.0, 3.0, 2.0, 1.0])
 
   def test_assign_bitcast_different_size(self):
     # assign to a shape-changing bitcast view (only works on DISK currently)
