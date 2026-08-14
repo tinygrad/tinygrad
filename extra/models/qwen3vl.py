@@ -3,7 +3,7 @@ from tinygrad.llm.gguf import gguf_load
 from tinygrad.helpers import fetch, Context, DEBUG
 from tinygrad.nn.state import load_state_dict
 import argparse, json, typing, base64, pathlib, math
-from tinygrad.llm.cli import SimpleTokenizer, LLMServer, Handler
+#from tinygrad.llm.cli import SimpleTokenizer, LLMServer, Handler
 from tinygrad.llm.model import Transformer
 from tinygrad.uop.ops import UOp, Ops
 import numpy as np
@@ -67,7 +67,7 @@ def get_vision_position_ids(h: int, w:int, merge_size: int):
   return Tensor.stack(hpos_ids, wpos_ids, dim=-1)
 
 class Qwen3VLVis():
-  def __init__(self, tok:SimpleTokenizer, size="2B", res:list=[640, 640]):
+  def __init__(self, tok, size="2B", res:list=[640, 640]):
     assert len(res) == 2, f"Invalid qwen resolution: {res}"
     res = [math.ceil(x / 32) * 32 for x in res] # make divisible by 32
     self.res = res
@@ -130,7 +130,7 @@ class Qwen3VLVis():
     self.prefill(lang=lang, image=Tensor(image), start_pos=start_pos)
 
     # for generate func
-    if end_turn: lang._cached_tokens.extend(self.tok.end_turn())
+    #if end_turn: lang._cached_tokens.extend(self.tok.end_turn())
     lang._cached_tokens.extend([0] * (self.toks_per_img + self.prefix.shape[0] + self.suffix.shape[0]))
 
   @TinyJit

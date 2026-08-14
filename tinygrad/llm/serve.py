@@ -130,9 +130,16 @@ class Handler(HTTPRequestHandler):
       for i, msg in enumerate(body["messages"]):
         content = msg["content"]
         if isinstance(content, list):
-          print(content)
           for c in content:
-            if c["type"] == "image_url": print("IMAGE RECEIVED")
+            if i == len(body["messages"]) - 1 and c["type"] == "image_url":
+              if hasattr(self.server.model, "vis"):
+                import base64
+                from tinygrad import Variable
+                #ids.extend([0] * (self.server.model.vis.toks_per_img + self.server.model.vis.prefix.shape[0] + self.server.model.vis.suffix.shape[0]))
+                self.server.model.vis(lang=self.server.model, image=base64.b64decode(c["image_url"]["url"].split(',')[1]), start_pos=\
+                Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)), end_turn=i>0)
+              else:
+                print("NO VIS")
 
       # render and tokenize
       normalize_messages(body["messages"])

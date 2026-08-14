@@ -152,6 +152,13 @@ def main():
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
 
+  if "qwen3-vl" in args.model:
+    from extra.models.qwen3vl import Qwen3VLVis
+    from tinygrad import Tensor, dtypes, Variable
+    model.vis = Qwen3VLVis(size="2B", tok=tok)
+    for _ in range(2):
+      model.vis.prefill(lang=model, image=Tensor.rand(*model.vis.res, 3).cast(dtypes.uint8), start_pos=Variable("pos", 0, model.max_context).bind(42))
+
   # use the model's chat template if jinja2 is available (enables model-specific formatting)
   template: jinja2.Template|FallbackTemplate = FallbackTemplate(tok)
   if (ct := kv.get('tokenizer.chat_template')) is not None:
