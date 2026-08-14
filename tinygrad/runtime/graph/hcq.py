@@ -252,7 +252,7 @@ class HCQGraph(MultiGraphRunner):
     dname = enqueue_dev.device.split(":", 1)[0]
     nv_chains = True
     if dname == "NV":
-      from tinygrad.runtime.autogen import nv_gpu
+      from tinygrad.runtime.autogen import nv_570 as nv_gpu
       nv_chains = getattr(enqueue_dev.iface, "compute_class", 0) > nv_gpu.TURING_COMPUTE_A
     can_opt = dname in {"AMD", "QCOM"} or (dname == "NV" and nv_chains and len(sync_signals) == 0 and len(opt_deps) == 1 and id(opt_deps[0][0]) == id(out_signal))
     if (can_opt or is_copy) and rdma_qp is None: opt_deps = [x for x in opt_deps if id(x[0]) != id(out_signal)]
