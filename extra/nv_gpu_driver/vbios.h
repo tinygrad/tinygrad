@@ -191,6 +191,53 @@ typedef struct {
 #define FALCON_UCODE_DESC_V3_44_FMT     "9d1w2b2w"
 #define BCRT30_RSA3K_SIG_SIZE 384
 
+typedef struct {
+    FALCON_UCODE_DESC_HEADER Hdr;
+    unsigned int StoredSize;
+    unsigned int UncompressedSize;
+    unsigned int VirtualEntry;
+    unsigned int InterfaceOffset;
+    unsigned int IMEMPhysBase;
+    unsigned int IMEMLoadSize;
+    unsigned int IMEMVirtBase;
+    unsigned int IMEMSecBase;
+    unsigned int IMEMSecSize;
+    unsigned int DMEMOffset;
+    unsigned int DMEMPhysBase;
+    unsigned int DMEMLoadSize;
+    unsigned int AltIMEMLoadSize;
+    unsigned int AltDMEMLoadSize;
+} FALCON_UCODE_DESC_V2;
+
+#define FALCON_UCODE_DESC_V2_SIZE_60    60
+
+typedef struct {
+    NvU32 blStartTag;
+    NvU32 blDmemDescLoadOff;
+    NvU32 blCodeOffset;
+    NvU32 blCodeSize;
+    NvU32 blDataOffset;
+    NvU32 blDataSize;
+} __attribute__((packed)) RM_FLCN_BL_DESC;
+
+typedef struct {
+    NvU32 reserved[4];
+    NvU32 signature[4];
+    NvU32 ctxDma;
+    NvU32 codeDmaBaseLo;
+    NvU32 codeDmaBaseHi;
+    NvU32 nonSecureCodeOff;
+    NvU32 nonSecureCodeSize;
+    NvU32 secureCodeOff;
+    NvU32 secureCodeSize;
+    NvU32 codeEntryPoint;
+    NvU32 dataDmaBaseLo;
+    NvU32 dataDmaBaseHi;
+    NvU32 dataSize;
+    NvU32 argc;
+    NvU32 argv;
+} __attribute__((packed)) RM_FLCN_BL_DMEM_DESC;
+
 typedef struct
 {
     NvU32 version;
