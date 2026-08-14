@@ -100,8 +100,7 @@ pm_post_sched_cache = PatternMatcher([
 def resolve_linear_call(linear_call:UOp):
   linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
   # map the call body params back to the original Variables stored in the call args
-  binds = {f"p{i}":UOp.variable((b:=x.src[0]).expr, b.vmin, b.vmax, b.dtype, b.arg.multiple_of, param=True)
-           for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}
+  binds = {f"p{i}":x.src[0].replace(op=Ops.PARAM) for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}
   return linear.substitute({v:binds[v.expr] for v in linear.variables() if v.expr in binds}, enter_calls=True, name="resolve scalar params")
 
 pm_resolve_linear_call = PatternMatcher([

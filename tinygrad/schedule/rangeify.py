@@ -466,9 +466,7 @@ class LocalAddBufferContext:
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   # Variables (ALU buffers with a value range) are scalar symbolic values, not real buffers: they become ALU params with no slot
-  if buf.is_variable:
-    return UOp(Ops.PARAM, src=buf.src, arg=ParamArg(-1, buf.dtype, name=buf.arg.name, vmin_vmax=buf.arg.vmin_vmax,
-                                                    multiple_of=buf.arg.multiple_of, addrspace=AddrSpace.ALU))
+  if buf.is_variable: return buf.replace(op=Ops.PARAM)
   param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),),
               arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)

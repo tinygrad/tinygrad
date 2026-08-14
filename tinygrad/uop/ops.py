@@ -1014,8 +1014,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.STACK: return math.gcd(*[x.const_factor() for x in self.src])
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
     if self.op is Ops.MUL: return self.src[0].val if self.src[0].op is Ops.CONST else self.src[1].val if self.src[1].op is Ops.CONST else 1
-    if self.op is Ops.PARAM and self.arg.multiple_of is not None: return self.arg.multiple_of
-    if self.op is Ops.BUFFER and isinstance(self.arg, ParamArg) and self.arg.multiple_of is not None: return self.arg.multiple_of
+    if self.op in (Ops.PARAM, Ops.BUFFER) and isinstance(self.arg, ParamArg) and self.arg.multiple_of is not None: return self.arg.multiple_of
     return 1
   def divides(self, v:int) -> UOp|None:
     if v==1: return self
@@ -1093,8 +1092,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # float has NAN issue and we use explicit NAN in transcendental
     if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
-    if self.op is Ops.PARAM and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
-    if self.op is Ops.BUFFER and isinstance(self.arg, ParamArg) and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
+    if self.op in (Ops.PARAM, Ops.BUFFER) and isinstance(self.arg, ParamArg) and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
     if self.op is Ops.AFTER: return self.src[0]._min_max
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
