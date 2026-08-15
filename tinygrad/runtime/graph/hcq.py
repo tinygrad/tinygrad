@@ -254,7 +254,8 @@ class HCQGraph(MultiGraphRunner):
     if dname == "NV":
       from tinygrad.runtime.autogen import nv_570 as nv_gpu
       nv_chains = getattr(enqueue_dev.iface, "compute_class", 0) > nv_gpu.TURING_COMPUTE_A
-    can_opt = dname in {"AMD", "QCOM"} or (dname == "NV" and nv_chains and len(sync_signals) == 0 and len(opt_deps) == 1 and id(opt_deps[0][0]) == id(out_signal))
+    can_opt = dname in {"AMD", "QCOM"} or \
+      (dname == "NV" and nv_chains and len(sync_signals) == 0 and len(opt_deps) == 1 and id(opt_deps[0][0]) == id(out_signal))
     if (can_opt or is_copy) and rdma_qp is None: opt_deps = [x for x in opt_deps if id(x[0]) != id(out_signal)]
 
     # Enable necessary signals in the schedule by setting the signal value.

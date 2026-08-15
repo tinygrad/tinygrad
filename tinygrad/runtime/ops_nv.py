@@ -85,7 +85,8 @@ class QMD:
     elif self.ver < 4:
       return {'enable': f'release{i}_enable', 'addr_lower': f'release{i}_address_lower', 'payload_lower': f'release{i}_payload_lower'}
     else:
-      return {'enable': f'release{i}_enable', 'addr_lower': f'release_semaphore{i}_addr_lower', 'payload_lower': f'release_semaphore{i}_payload_lower'}
+      return {'enable': f'release{i}_enable', 'addr_lower': f'release_semaphore{i}_addr_lower',
+        'payload_lower': f'release_semaphore{i}_payload_lower'}
 
 class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
   def __init__(self):
