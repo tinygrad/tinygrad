@@ -152,9 +152,10 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
     else:
       items.append(t.after(t.store(s.after(*after_deps))))
   fxn = UOp.sink(*(x.substitute(subs) for x in items))
-  bufs = sorted((x for x in fxn.toposort(enter_calls=False) if x.op is Ops.BUFFER and isinstance(x.arg, ParamArg)
-                        and x.addrspace is AddrSpace.GLOBAL), key=lambda x:x.arg.slot)
-  fxn = fxn.substitute({x:x.replace(arg=replace(x.arg, slot=i)) for i,x in enumerate(bufs)}, enter_calls=False)
+  # Captured inputs are PARAMs, so any remaining global BUFFERs are allocations local to this call.
+  # Give those allocations deterministic slots so equivalent precompiled bodies share a cache key.
+  local_bufs = [x for x in fxn.toposort(enter_calls=False) if x.op is Ops.BUFFER and isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL]
+  fxn = fxn.substitute({x:x.replace(arg=replace(x.arg, slot=i)) for i,x in enumerate(local_bufs)}, enter_calls=False)
 
   # body switches from TUPLE to SINK, so the node becomes an opaque CALL (not FUNCTION)
   new_call = UOp(Ops.CALL, src=(fxn, *input_buffers, *outs), arg=c.arg)

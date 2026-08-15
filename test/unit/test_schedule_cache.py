@@ -4,7 +4,7 @@ from tinygrad import Tensor, Variable, UOp, function
 from tinygrad.uop.ops import KernelInfo
 from tinygrad.schedule import schedule_cache
 
-def custom_set0_kernel(A:UOp, num:int) -> UOp:
+def custom_set0_kernel(A:UOp, _input:UOp|None=None, *, num:int) -> UOp:
   return A[0].set(num).sink(arg=KernelInfo(f"custom_set0_{num}"))
 
 class TestScheduleCache(unittest.TestCase):
@@ -49,20 +49,30 @@ class TestScheduleCache(unittest.TestCase):
     self.assertEqual(len(schedule_cache), cache_size_after_first)
 
   def test_custom_kernel_cache(self):
-    @function(precompile=True)
+    def set0_backward(grad_output:UOp, _) -> tuple[None, UOp]:
+      zero = Tensor.invalids(*grad_output.shape, dtype=grad_output.dtype, device=grad_output.device)
+      zero = Tensor.custom_kernel(zero, fxn=functools.partial(custom_set0_kernel, num=0))[0]
+      return None, (zero * Tensor(grad_output, device=grad_output.device)).uop
+
+    @function(precompile=True, precompile_backward=True)
     def f(x:Tensor) -> Tensor:
       out = Tensor.invalids(*x.shape, dtype=x.dtype, device=x.device)
-      out = Tensor.custom_kernel(out, fxn=functools.partial(custom_set0_kernel, num=10))[0]
+      out = Tensor.custom_kernel(out, x, fxn=functools.partial(custom_set0_kernel, num=10), grad_fxn=set0_backward)[0]
       return out + x
 
     x = Tensor.ones(1).realize()
-
-    first = f(x).realize()
+    out = f(x)
+    out.sum().backward()
+    self.assertEqual(out.item(), 11)
+    self.assertEqual(x.grad.item(), 1)
     cache_size_after_first = len(schedule_cache)
+
     # it should hit the cache the second time
-    second = f(x).realize()
-    self.assertEqual(first.item(), 11)
-    self.assertEqual(second.item(), 11)
+    x = Tensor.ones(1).realize()
+    out = f(x)
+    out.sum().backward()
+    self.assertEqual(out.item(), 11)
+    self.assertEqual(x.grad.item(), 1)
     self.assertEqual(len(schedule_cache), cache_size_after_first)
 
   def test_simple(self):
