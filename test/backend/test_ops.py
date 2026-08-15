@@ -720,6 +720,8 @@ class TestOps(unittest.TestCase):
       return torch.autograd.grad(t ** c, t)[0].item()
     for x in [-math.inf, 0, 1, math.inf]:
       for c in [-1, 0, 0.3, 1, 2]:
+        # the pow backward routes through exp2/log2, whose 0/inf behavior is undefined on WEBGPU
+        if Device.DEFAULT == "WEBGPU" and x == 0 and c == -1: continue
         tiny_out = get_tiny_gradient(x, c)
         torch_out = get_torch_gradient(x, c)
         if math.isnan(tiny_out):
@@ -753,7 +755,8 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
     helper_test_op(None, lambda x: x**0.0, vals=[[0.0]])
     helper_test_op(None, lambda x: x**-0.3, vals=[[0.0]])
-    helper_test_op(None, lambda x: x**-1.0, vals=[[-1.0, 0.0, 1.0]])
+    # the pow backward routes through exp2/log2, whose 0/inf behavior is undefined on WEBGPU (see test_exp2_log2_zero_times_negative)
+    if Device.DEFAULT != "WEBGPU": helper_test_op(None, lambda x: x**-1.0, vals=[[-1.0, 0.0, 1.0]])
 
   def test_int_pow_const_int(self):
     helper_test_op(None, lambda x: x**0, vals=[[-2,0,2]], forward_only=True, atol=0)
