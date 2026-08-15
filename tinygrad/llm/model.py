@@ -296,9 +296,8 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   out_shape = v.shape
   if not static:
     # pad the variable-length sequence to its max size with no-op steps: beta=0 and alpha=1 leave the state untouched
-    # pad_to goes through the uop: Tensor has no max_shape
-    q, k, v, beta = (x.pad_to(x.uop.max_shape) for x in (q, k, v, beta))
-    alpha = (alpha - 1).pad_to(alpha.uop.max_shape) + 1
+    q, k, v, beta = (x.pad_to(x.max_shape) for x in (q, k, v, beta))
+    alpha = alpha.pad_to(alpha.max_shape, value=1)
     tokens = q.shape[2]
   core, kq = Tensor.empty(batch, heads, tokens, value_dim), (q*k).sum(-1).contiguous()
   state = state if state.uop.op is Ops.AFTER else state.contiguous()  # keep the AFTER chain of in-place state updates
@@ -334,7 +333,7 @@ class GatedDeltaNetBlock(FFNBlock):
     initial = Tensor(start_pos).eq(0)
     is_kda = hasattr(self, "ssm_g_a")
     symbolic = isinstance(T, UOp)
-    T_pad = int(cast(UOp, T).vmax) if symbolic else T  # symbolic chunks are padded to their max size: one graph serves every size
+    T_pad = x.max_shape[1]  # symbolic chunks are padded to their max size: one graph serves every size
 
     # input processing
     x = x.half()
