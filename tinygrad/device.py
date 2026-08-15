@@ -103,7 +103,7 @@ class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
                initial_value:bytes|pickle.PickleBuffer|None=None, uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
-    self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
+    self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = Device.canonicalize(device), size, dtype, options, offset, 0
     self._bufs: dict[str, Any] = {}
     if base is None:
       assert offset == 0, "base buffers can't have offset"
@@ -116,7 +116,7 @@ class Buffer:
         if isinstance(initial_value, pickle.PickleBuffer): initial_value.release()
     else:
       assert base._base is None, "base can't have a base"
-      assert device == base.device, "base must have the same device"
+      assert self.device == base.device, "base must have the same device"
       self._base = base
     if preallocate: self.allocate()
   @property
@@ -133,7 +133,7 @@ class Buffer:
   # check if the underlying buffer is allocated, possibly from the base object
   def is_allocated(self) -> bool: return self.base.is_allocated() if self._base is not None else self.device in self._bufs
   def get_buf(self, device: str) -> Any:
-    if device not in self._bufs:
+    if (device:=Device.canonicalize(device)) not in self._bufs:
       allocator = Device[device].allocator
       if device == self.device: self.ensure_allocated()
       elif self._base is not None: self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
