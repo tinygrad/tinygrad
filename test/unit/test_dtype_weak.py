@@ -93,6 +93,13 @@ class TestWeakPromotion(unittest.TestCase):
       out = Tensor(1.0, dtype=dtypes.float32, device="CPU") / denom
       self.assertAlmostEqual(out.item(), 1 / (70000 + 1e-5), places=10)
 
+  def test_stacked_weak_casts_convert_each_kind(self):
+    # each weak cast is a kind conversion: weakint truncates before weakfloat re-lifts (neither is only a marker)
+    x = Tensor([2.5, -3.7], dtype=dtypes.float32, device="CPU")
+    stacked = x.cast(dtypes.weakint).cast(dtypes.weakfloat)
+    self.assertIs(stacked.dtype, dtypes.weakfloat)
+    self.assertEqual(stacked.tolist(), [2.0, -3.0])
+
   def test_uop_scalar_const_lifts_kind(self):
     for dtype, value, out_dtype, const_dtype in ((dtypes.weakint, 1, dtypes.weakint, dtypes.weakint),
                                                  (dtypes.int32, 1, dtypes.int32, dtypes.weakint),
