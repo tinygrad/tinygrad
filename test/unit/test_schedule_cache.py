@@ -70,7 +70,6 @@ class TestScheduleCache(unittest.TestCase):
       print(num)
     self.assertEqual(len(schedule_cache), start_len_schedule_cache)
 
-  @unittest.expectedFailure
   def test_simple_precompile(self):
     @function(precompile=True, precompile_backward=True)
     def f(x:Tensor) -> Tensor:
