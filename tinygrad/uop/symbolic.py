@@ -100,10 +100,6 @@ pm_remove_invalid = PatternMatcher([
    if any(x.is_invalid for x in s.src) else None),
 ])
 
-# the one rule that collapses the pair CAST(dt, CONST(v)) into a typed CONST
-# TODO: delete this once CONST has no dtype
-pm_fold_cast_const = PatternMatcher([(UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val))])
-
 symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
