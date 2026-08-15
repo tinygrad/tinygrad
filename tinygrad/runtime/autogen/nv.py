@@ -4601,6 +4601,55 @@ class FALCON_UCODE_DESC_V3(c.Struct):
   Reserved: int
 FALCON_UCODE_DESC_V3.register_fields([('Hdr', FALCON_UCODE_DESC_HEADER, 0), ('StoredSize', ctypes.c_uint32, 4), ('PKCDataOffset', ctypes.c_uint32, 8), ('InterfaceOffset', ctypes.c_uint32, 12), ('IMEMPhysBase', ctypes.c_uint32, 16), ('IMEMLoadSize', ctypes.c_uint32, 20), ('IMEMVirtBase', ctypes.c_uint32, 24), ('DMEMPhysBase', ctypes.c_uint32, 28), ('DMEMLoadSize', ctypes.c_uint32, 32), ('EngineIdMask', ctypes.c_uint16, 36), ('UcodeId', ctypes.c_ubyte, 38), ('SignatureCount', ctypes.c_ubyte, 39), ('SignatureVersions', ctypes.c_uint16, 40), ('Reserved', ctypes.c_uint16, 42)])
 @c.record
+class FALCON_UCODE_DESC_V2(c.Struct):
+  SIZE = 60
+  Hdr: FALCON_UCODE_DESC_HEADER
+  StoredSize: int
+  UncompressedSize: int
+  VirtualEntry: int
+  InterfaceOffset: int
+  IMEMPhysBase: int
+  IMEMLoadSize: int
+  IMEMVirtBase: int
+  IMEMSecBase: int
+  IMEMSecSize: int
+  DMEMOffset: int
+  DMEMPhysBase: int
+  DMEMLoadSize: int
+  AltIMEMLoadSize: int
+  AltDMEMLoadSize: int
+FALCON_UCODE_DESC_V2.register_fields([('Hdr', FALCON_UCODE_DESC_HEADER, 0), ('StoredSize', ctypes.c_uint32, 4), ('UncompressedSize', ctypes.c_uint32, 8), ('VirtualEntry', ctypes.c_uint32, 12), ('InterfaceOffset', ctypes.c_uint32, 16), ('IMEMPhysBase', ctypes.c_uint32, 20), ('IMEMLoadSize', ctypes.c_uint32, 24), ('IMEMVirtBase', ctypes.c_uint32, 28), ('IMEMSecBase', ctypes.c_uint32, 32), ('IMEMSecSize', ctypes.c_uint32, 36), ('DMEMOffset', ctypes.c_uint32, 40), ('DMEMPhysBase', ctypes.c_uint32, 44), ('DMEMLoadSize', ctypes.c_uint32, 48), ('AltIMEMLoadSize', ctypes.c_uint32, 52), ('AltDMEMLoadSize', ctypes.c_uint32, 56)])
+FALCON_UCODE_DESC_V2_SIZE_60 = 60
+@c.record
+class RM_FLCN_BL_DESC(c.Struct):
+  SIZE = 24
+  blStartTag: int
+  blDmemDescLoadOff: int
+  blCodeOffset: int
+  blCodeSize: int
+  blDataOffset: int
+  blDataSize: int
+RM_FLCN_BL_DESC.register_fields([('blStartTag', NvU32, 0), ('blDmemDescLoadOff', NvU32, 4), ('blCodeOffset', NvU32, 8), ('blCodeSize', NvU32, 12), ('blDataOffset', NvU32, 16), ('blDataSize', NvU32, 20)])
+@c.record
+class RM_FLCN_BL_DMEM_DESC(c.Struct):
+  SIZE = 84
+  reserved: c.Array[ctypes.c_uint32, Literal[4]]
+  signature: c.Array[ctypes.c_uint32, Literal[4]]
+  ctxDma: int
+  codeDmaBaseLo: int
+  codeDmaBaseHi: int
+  nonSecureCodeOff: int
+  nonSecureCodeSize: int
+  secureCodeOff: int
+  secureCodeSize: int
+  codeEntryPoint: int
+  dataDmaBaseLo: int
+  dataDmaBaseHi: int
+  dataSize: int
+  argc: int
+  argv: int
+RM_FLCN_BL_DMEM_DESC.register_fields([('reserved', c.Array[NvU32, Literal[4]], 0), ('signature', c.Array[NvU32, Literal[4]], 16), ('ctxDma', NvU32, 32), ('codeDmaBaseLo', NvU32, 36), ('codeDmaBaseHi', NvU32, 40), ('nonSecureCodeOff', NvU32, 44), ('nonSecureCodeSize', NvU32, 48), ('secureCodeOff', NvU32, 52), ('secureCodeSize', NvU32, 56), ('codeEntryPoint', NvU32, 60), ('dataDmaBaseLo', NvU32, 64), ('dataDmaBaseHi', NvU32, 68), ('dataSize', NvU32, 72), ('argc', NvU32, 76), ('argv', NvU32, 80)])
+@c.record
 class FWSECLIC_READ_VBIOS_DESC(c.Struct):
   SIZE = 24
   version: int
