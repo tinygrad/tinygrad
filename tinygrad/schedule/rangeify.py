@@ -4,7 +4,7 @@ import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype, strong_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group, identity_element
-from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
+from tinygrad.uop.symbolic import symbolic
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
@@ -584,7 +584,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
 
   tsink = graph_rewrite(tsink,
-                        symbolic+pm_fold_cast_const+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize+pm_no_indexing_calls,
+                        symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize+pm_no_indexing_calls,
                         name="symbolic+reduce_collapse+debuf")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 

@@ -16,10 +16,10 @@ def lower_weak_node(u:UOp) -> UOp|None:
 
 pm_lower_weak = PatternMatcher([
   (UPat(Ops.CONST, dtype=dtypes.weaks, name="u"), lambda u: UOp.const(u.val, select_dtype(u)).cast(u.dtype)),
-  # two stacked weak casts are a weakint value used as weakfloat (or vice versa): resolve the inner one at the outer kind's default.
+  # two stacked weak casts are two kind conversions: each resolves at its own kind's default
   # a SINGLE weak cast is never rewritten here, each consumer absorbs it on its own edge (see lower_weak_srcs)
   (UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("x"),)),), name="u"),
-   lambda u,x: x.cast(select_dtype(u)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
+   lambda u,x: x.cast(select_dtype(u.src[0])).cast(select_dtype(u)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
   # Binary can widen from the bounds, all other nodes derive from the lowered sources.
   # a weakfloat Unary (sin/exp2/...) must resolve here, before the transcendental decomposition
   (UPat(GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK, Ops.SPECIAL}, name="u"), lower_weak_node),
@@ -69,6 +69,9 @@ pm_cast_weak = PatternMatcher([
 ])
 
 pm_lower_index_dtype = pm_commit_weak+pm_cast_weak+PatternMatcher([
+  # a CAST between two concrete dtypes over a CONST is a value conversion: evaluate it once, at the width the CAST states
+  # TODO: delete this once CONST has no dtype
+  (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat.cvar("c", dtypes.all),)), lambda root, c: root.const_like(c.val)),
   (UPat(GroupOp.All, name="u"),
    lambda ctx,u: lower_weak_srcs(ctx, u) if u.dtype not in dtypes.weaks and any(s.dtype in dtypes.weaks for s in u.src) else None),
   # a valid index into an n-element buffer lives in [0,n): a gated long index narrows when n-1 fits int32 (out-of-gate wraps, discarded)
