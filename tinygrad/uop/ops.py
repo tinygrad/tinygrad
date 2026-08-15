@@ -517,10 +517,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.CONST: return self
     if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and len(s.src) == 0) for s in self.src): return self
     # late import!
-    from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
+    from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic+pm_fold_cast_const, name="simplify")
-  def ssimplify(self) -> UOp|ConstType: return ret.val if (ret:=self.simplify()).op is Ops.CONST else ret
+      return graph_rewrite(self, symbolic, name="simplify")
+  def ssimplify(self) -> UOp|ConstType:
+    if (ret := self.simplify()).op is Ops.CAST and ret.src[0].op is Ops.CONST: return ret.dtype.const(ret.src[0].val)
+    return ret.val if ret.op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
     vmin, vmax = (simple_self:=self.simplify())._min_max
@@ -796,11 +798,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
       case Ops.PERMUTE | Ops.FLIP: src_args = []
       case Ops.STACK:
-        # arg is the other srcs; all are cast to the promoted dtype, spec requires STACK srcs to match its dtype
         srcs = (self,)+tuple(arg)
         dtype = cast(DType, dtype_from_uop(Ops.STACK, srcs, None))
-        # TODO: why cast here?
-        return UOp(Ops.STACK, dtype, tuple(u if u.base.is_invalid else u.cast(dtype) for u in srcs))
+        return UOp(Ops.STACK, dtype, tuple(u if u.base.is_invalid else UOp.const(u.val, dtype) if u.op is Ops.CONST else u.cast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)
@@ -1423,9 +1423,9 @@ class UPat(OpMixin):
     return res
 
 def deconstruct_function(fxn:Callable) -> tuple:
-  new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
-  for co in fxn.__code__.co_consts:
-    if isinstance(co, types.CodeType): new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
+  # globals can be referenced from arbitrarily nested code objects (comprehensions/lambdas, pre PEP 709)
+  def names(co:types.CodeType) -> set: return set(co.co_names).union(*(names(c) for c in co.co_consts if isinstance(c, types.CodeType)))
+  new_globals = {k:v for k,v in fxn.__globals__.items() if k in names(fxn.__code__)}
   # NOTE: optional round trip through pickle!
   assert fxn.__closure__ is None, "closures are not supported in pattern matchers"
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__

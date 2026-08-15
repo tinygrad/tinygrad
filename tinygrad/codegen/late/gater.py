@@ -3,7 +3,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops
 from tinygrad.dtype import Invalid, dtypes
 
 def move_where_load(gate, l, a, w):
-  return l.replace(src=(l.src[0], l.vconst_like(0) if a.is_invalid else
+  return l.replace(src=(l.src[0], l.vconst_like(0) if a.is_invalid else l.const_like(a.val) if a.op is Ops.CONST else
     a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), l.src[2])).cast(w.dtype)
 
 pm_move_gates_from_index = PatternMatcher([
