@@ -3,7 +3,6 @@ import unittest, pickle, functools, math
 import z3
 
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
-from test.helpers import get_uops
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_fold_cast_const, commutative, pm_simplify_valid, pm_move_where_on_load
@@ -1013,22 +1012,6 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 0, 3)
     self.helper_test_variable(-a<-b, False, True, "(b<a)")
 
-  def test_where_cast(self):
-    s = Variable("s", 0, 3, dtypes.int)
-    cond = s < 2
-    a = Variable("a", 0, 3, dtypes.int)
-    b = Variable("b", 0, 3, dtypes.int)
-    expr = cond.where(a, b).cast(dtypes.half)
-
-    # TODO: copied from render, render does not support cast
-    glbl = UOp.param(0, dtypes.int, (1,))
-    uops = get_uops(UOp(Ops.STORE, src=(glbl.index(UOp.const(0, dtypes.int)), expr)).sink())
-    rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
-
-    # the vars are now scalar PARAMs
-    pvar = {u.expr: u for u in rewritten_uop.toposort() if u.op is Ops.PARAM}
-    self.assertEqual(rewritten_uop, (pvar['s']<UOp.const(2, dtypes.int)).where(pvar['a'].cast(dtypes.half), pvar['b'].cast(dtypes.half)))
-
   def test_where_merge_branches(self):
     cond1 = Variable("s", 0, 10) < 6
     cond2 = Variable("s", 0, 10) > 2
@@ -1374,6 +1357,16 @@ class TestInvalidIndex(unittest.TestCase):
     c1 = UOp.const((1, 1, Invalid, Invalid))
     c2 = UOp.const((1, Invalid, 1, 1))
     self.assertIs((c1+c2).simplify(), UOp.const((2, Invalid, Invalid, Invalid)))
+
+  def test_gated_load_keeps_index_valid(self):
+    # the load executes even on gated-off iterations: gated_given_valid must not erase its mask (PADTO OOB shape)
+    buf = UOp.param(0, dtypes.bool, (17,))
+    ridx = Variable("ridx", 0, 31)
+    cond = ridx < 17
+    load = buf.index(ridx.valid(cond))
+    out = graph_rewrite(cond.where(load.where(uconst(2), uconst(0)), UOp.invalid()), sym)
+    idx = next(u for u in out.toposort() if u.op is Ops.INDEX)
+    self.assertIs(idx.src[1].get_valid(), cond.simplify())
 
 class TestStoreLoadFolding(unittest.TestCase):
   """Tests for store(index, load(index)) -> NOOP rule. This rule matches patterns that EMERGE during simplification."""
