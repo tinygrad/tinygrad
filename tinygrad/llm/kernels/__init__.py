@@ -6,6 +6,11 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
+def kernel_var(x:UOp) -> UOp:
+  # a Variable is a 0-d ALU BUFFER in the tensor graph; inside kernels it takes the ALU PARAM form (same name keeps the value binding)
+  return x.substitute({v: UOp.variable(v.expr, v.vmin, v.vmax, dtype=v.dtype, multiple_of=v.arg.multiple_of, param=True)
+                       for v in x.toposort() if v.is_variable})
+
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   # the custom kernels are tuned for RDNA3 (gfx11): the WMMA register layouts don't match gfx12 (RDNA4)
   # or CDNA (MFMA-only, wave64), and the dp4a builtins and 32-lane wave ops aren't portable either.
@@ -83,5 +88,5 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
   assert start_pos.uop.is_bound_var
-  call = kernel(*params, start_pos.uop.src[0]).call(*contig, start_pos.uop)
+  call = kernel(*params, kernel_var(start_pos.uop.src[0])).call(*contig, start_pos.uop)
   return Tensor(contig[0].after(call))

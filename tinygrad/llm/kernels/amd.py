@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, math
 from typing import Callable, cast
 from tinygrad import Tensor, UOp
-from tinygrad.llm.kernels import Linear
+from tinygrad.llm.kernels import Linear, kernel_var
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
 from tinygrad.dtype import AddrSpace, dtypes
 
@@ -27,6 +27,7 @@ def _reg(shape:tuple[int, ...], slot:int, value:float, dep:UOp|None=None) -> UOp
 
 @functools.cache
 def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, cache_scale, valid_kv_len, max_kv_len, block_n):
+  if isinstance(valid_kv_len, UOp): valid_kv_len = kernel_var(valid_kv_len.unbind_all()[0])
   _, B, H_KV, N, D = cast(tuple[int, int, int, int, int], cache_kv.shape)
   _, H, M, _ = cast(tuple[int, int, int, int], q.shape)
   assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % block_n == 0
@@ -84,6 +85,7 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
 
 @functools.cache
 def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, kv_scale:UOp, valid_kv_len:int|UOp) -> UOp:
+  if isinstance(valid_kv_len, UOp): valid_kv_len = kernel_var(valid_kv_len.unbind_all()[0])
   BH, M, D = q.shape
   _, B, H_KV, physical_n, cache_dim = cache.shape
   k, v = cache[0].reshape(B*H_KV, physical_n, cache_dim), cache[1].reshape(B*H_KV, physical_n, cache_dim)
@@ -188,7 +190,8 @@ def quantized_attention(q:Tensor, stacked_kv:Tensor, cache_kv:Tensor, cache_scal
   # each store goes on its own buffer's AFTER: sharing both stores across both AFTERs leaves
   # un-ended stores with open ranges in the kernel graph
   assigned_kv, assigned_scale = Tensor(cache_kv.uop.after(store_kv)), Tensor(cache_scale.uop.after(store_scale))
-  valid_end = start_pos.unbind_all()[0]+T if isinstance(start_pos, UOp) else start_pos+T
+  # keep start_pos in its bound form at the graph level, the kernel builders unbind it to the kernel-side PARAM form
+  valid_end = start_pos+T
   return amd_flash_attention_decode(q.half(), assigned_kv, valid_end, assigned_scale, cast(int, cache_kv.shape[3])) if resolve(T == 1) else \
     flash_attention_causal_cached(q.half(), assigned_kv, valid_end, assigned_scale)
 
