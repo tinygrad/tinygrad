@@ -11,10 +11,7 @@ NV_DEBUG = getenv("NV_DEBUG", 0)
 
 CHIP_ARCH_NAMES = {0x16: "TU1", 0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}
 CHIP_FW_NAMES = {"TU1": "tu102", "GA1": "ga102", "AD1": "ad102", "GB2": "gb202"}
-# TU116/TU117 (GTX 16-series) are a separate signed-firmware family from TU102/104/106 (RTX 20-series); NV_PMC_BOOT_42's
-# 'implementation' field is 0x07/0x08 for TU117/TU116 vs 0x02/0x04/0x06 for TU102/104/106 (both share architecture 0x16 "TU1").
-# Unlike TU102/104/106 (whose marketing number's last digit IS the implementation value), TU11x's doesn't match, so their
-# chip_name can't be derived mechanically like every other chip's.
+
 TU11X_IMPLEMENTATIONS = {0x07: "TU117", 0x08: "TU116"}
 
 class NVReg:
