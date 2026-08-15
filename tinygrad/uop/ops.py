@@ -1188,6 +1188,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
     # value-producing bodies are always wrapped in TUPLE so FUNCTION dtype is always void
     body = self if self.op is Ops.TUPLE else UOp.maketuple(self)
+    body = body.substitute({b:b.replace(arg=replace(b.arg, slot=i)) for i,b in
+                            enumerate(x for x in body.toposort(enter_calls=False) if x.op is Ops.BUFFER)})
     return UOp(Ops.FUNCTION, src=(body,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
