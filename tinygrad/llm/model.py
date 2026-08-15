@@ -302,8 +302,7 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   core, kq = Tensor.empty(batch, heads, tokens, value_dim), (q*k).sum(-1).contiguous()
   state = state if state.uop.op is Ops.AFTER else state.contiguous()  # keep the AFTER chain of in-place state updates
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
-  fxn = _gated_delta_prefill_kernel
-  out = Tensor.custom_kernel(*srcs, *(() if initial is None else (initial,)), fxn=fxn)[0]
+  out = Tensor.custom_kernel(*srcs, *(() if initial is None else (initial,)), fxn=_gated_delta_prefill_kernel)[0]
   return (out if static else out[:, :, :out_shape[2]]).reshape(out_shape)
 
 class GatedDeltaNetBlock(FFNBlock):
