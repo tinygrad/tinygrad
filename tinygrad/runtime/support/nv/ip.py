@@ -185,8 +185,6 @@ class NV_FLCN(NV_IP):
       _, self.frts_image_paddr, _ = self.nvdev._alloc_boot_mem(len(patched_image), data=patched_image, sysmem=False)
 
   def prep_frts_bootloader(self, image:bytes):
-    # The generic bootloader is a tiny PIO-loaded ucode that DMAs the (unsigned) FWSEC-FRTS image itself, since TU10x/TU11x
-    # falcons have no hardware BROM/PKC unit to verify a directly DMA-loaded image the way execute_hs() does on GA102+.
     assert self.desc_v2.DMEMPhysBase == 0, "generic bootloader always loads DMEM at destination offset 0"
 
     gen_bl_fw_name = self.nvdev.fw_name
@@ -196,7 +194,6 @@ class NV_FLCN(NV_IP):
     self.bl_ucode = bytes(b[h.data_offset:h.data_offset + bl_desc.blCodeSize]).ljust(round_up(bl_desc.blCodeSize, 0x100), b'\x00')
     self.bl_start_tag = bl_desc.blStartTag
 
-    # The DMA source object must mirror the falcon's destination IMEM layout, so pad its start by IMEMPhysBase.
     align_padding = self.desc_v2.IMEMPhysBase
     _, _, sysaddrs = self.nvdev._alloc_boot_mem(align_padding + len(image), data=bytes(align_padding) + image, contiguous=True, sysmem=True)
     code_dma_base = sysaddrs[0]
@@ -307,7 +304,6 @@ class NV_FLCN(NV_IP):
 
   def execute_bootloader(self, base:int, ucode:bytes, start_tag:int, dmem_desc:bytes, ctx_dma:int, mailbox=None):
     self.disable_ctx_req(base)
-    # start_tag is block-scale (256B blocks); imem_copy_direct's tag param is byte-scale (it right-shifts by 8), so pre-shift left.
     self.imem_copy_direct(base, 0x10000 - len(ucode), ucode, secure=False, tag=start_tag << 8)
     self.dmem_copy_direct(base, 0, dmem_desc)
     self.nvdev.NV_PFALCON_FBIF_TRANSCFG.with_base(base)[ctx_dma].update(target=self.nvdev.NV_PFALCON_FBIF_TRANSCFG_TARGET_COHERENT_SYSMEM,
