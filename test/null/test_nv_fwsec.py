@@ -23,7 +23,6 @@ class TestNVFwsecBootloaderStructs(unittest.TestCase):
       secureCodeOff=0x300, secureCodeSize=0x400, codeEntryPoint=0, dataDmaBaseLo=0xeeff0011, dataDmaBaseHi=0x2, dataSize=0x500,
       argc=0, argv=0)
     b = bytes(d)
-    # reserved[4] + signature[4] occupy the first 32 bytes and must stay zeroed (no HS signature on the non-PKC path)
     assert b[0:32] == b'\x00' * 32
     assert int.from_bytes(b[32:36], 'little') == 4                # ctxDma
     assert int.from_bytes(b[36:40], 'little') == 0xaabbccdd        # codeDmaBaseLo
