@@ -137,8 +137,6 @@ class NV_FLCN(NV_IP):
         ucode_desc_size = ucode_desc_hdr.vDesc >> 16
         ucode_desc_ver = (ucode_desc_hdr.vDesc >> 8) & 0xff
 
-    # TU10x/TU11x falcons predate the BROM/PKC signature unit GA102+ uses in execute_hs(), so their FWSEC-FRTS ucode is stored
-    # with the older V2 descriptor (no PKC fields) and can't be DMA-loaded/hardware-verified directly; see prep_frts_bootloader().
     needs_bootloader = self.nvdev.fw_name == "tu102"
     if (ucode_desc_ver == nv.NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V2) != needs_bootloader:
       raise RuntimeError(f"unexpected FWSEC ucode descriptor version {ucode_desc_ver} for {self.nvdev.chip_name}")
