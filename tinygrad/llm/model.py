@@ -238,11 +238,6 @@ class MLATransformerBlock(FFNBlock):
       self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
 
-def kernel_var(x:UOp) -> UOp:
-  # a Variable is a 0-d ALU BUFFER in the tensor graph; inside kernels it takes the ALU PARAM form (same name keeps the value binding)
-  return x.substitute({v: UOp.variable(v.expr, v.vmin, v.vmax, dtype=v.dtype, multiple_of=v.arg.multiple_of, param=True)
-                       for v in x.toposort() if v.is_variable})
-
 def _tree_sum(xs:list[UOp]) -> UOp:
   # balanced tree keeps the reduction depth at log2(n) (compilers can't reassociate floats, so this shape reaches the ALU)
   if not xs: return UOp.const(0, dtypes.float32)
@@ -251,7 +246,7 @@ def _tree_sum(xs:list[UOp]) -> UOp:
 
 @functools.cache
 def _gated_delta_prefill_kernel(local:bool, core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp,
-                                start_pos:UOp|None=None) -> UOp:
+                                initial:UOp|None=None) -> UOp:
   batch, heads, tokens, value_dim = cast(tuple[int, int, int, int], core.shape)
   key_dim, alpha_dim = cast(int, q.shape[-1]), cast(int, alpha.shape[-1]) if len(alpha.shape) == 4 else 1
   core, v = (x.reshape(batch*heads, tokens, value_dim) for x in (core, v))
@@ -265,9 +260,10 @@ def _gated_delta_prefill_kernel(local:bool, core:UOp, q:UOp, k:UOp, v:UOp, beta:
   row = UOp.range(value_dim, 1, AxisType.LOCAL) if local else UOp.range(value_dim, 2)
   cols = tuple(range(key_dim))
   current = UOp.placeholder((key_dim,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
-  initial = None if start_pos is None else start_pos.eq(0)
-  current = current.after(UOp.group(*(current[col].store(state[bh, row, col].float() if initial is None else
-    initial.where(0, state[bh, row, col].float())) for col in cols)))
+  # the state starts from zero when the (scalar bool) initial flag is set; otherwise it resumes from `state`
+  reset = None if initial is None else initial.reshape(1)[0].load()
+  current = current.after(UOp.group(*(current[col].store(state[bh, row, col].float() if reset is None else
+    reset.where(0, state[bh, row, col].float())) for col in cols)))
   token = UOp.range(tokens, 3, AxisType.REDUCE)
   previous = tuple(current.after(token)[col].load() for col in cols)
   keys, queries = (tuple(x[bh, token, col].load() for col in cols) for x in (k, q))
@@ -280,23 +276,23 @@ def _gated_delta_prefill_kernel(local:bool, core:UOp, q:UOp, k:UOp, v:UOp, beta:
   stores = (state[bh, row, col].store(current.after(step)[col].load().cast(state.dtype)) for col in cols)
   return UOp.group(*stores).end(row, bh).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
 
-def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, start_pos:Tensor|None=None) -> Tensor:
+def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, initial:Tensor|None=None) -> Tensor:
   """Gated delta rule over `tokens` steps in one kernel, updating the recurrent state in place.
 
   q, k: (batch, heads, tokens, key_dim). v: (batch, heads, tokens, value_dim). beta: (batch, heads, tokens).
   alpha: (batch, heads, tokens) for head-wise decay, or (batch, heads, tokens, value_dim) for per-channel decay.
-  state: (batch, heads, value_dim, key_dim), updated in place. start_pos: scalar Tensor; state is zeroed when it binds to 0.
+  state: (batch, heads, value_dim, key_dim), updated in place. initial: scalar bool Tensor; state starts from zero when set.
   `tokens` may be symbolic: the sequence is padded to its maximum size and masked (beta=0, alpha=1), so one
   graph serves every chunk size. Decoding (tokens == 1) takes a static path without padding.
   """
-  batch, heads, toks_sym, key_dim = q.shape
-  tokens:sint = toks_sym
+  tokens:sint = q.shape[2]
+  batch, heads, _, key_dim = q.shape
   value_dim = cast(int, v.shape[-1])
   assert isinstance(key_dim, int), "key/value dims must be static"
   assert q.shape == k.shape and v.shape[:3] == q.shape[:3] and beta.shape == (batch, heads, tokens)
   assert alpha.shape in ((batch, heads, tokens), (batch, heads, tokens, value_dim))
   assert state.shape == (batch, heads, value_dim, key_dim)
-  static = not isinstance(tokens, UOp)
+  static = isinstance(tokens, int)
   out_shape = v.shape
   if not static:
     # pad the variable-length sequence to its max size with no-op steps: beta=0 and alpha=1 leave the state untouched
@@ -305,15 +301,10 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
     alpha = (alpha - 1).pad_to(alpha.uop.max_shape) + 1
     tokens = q.shape[2]
   core, kq = Tensor.empty(batch, heads, tokens, value_dim), (q*k).sum(-1).contiguous()
+  state = state if state.uop.op is Ops.AFTER else state.contiguous()  # keep the AFTER chain of in-place state updates
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
   fxn = functools.partial(_gated_delta_prefill_kernel, cast(str, q.device) != "CPU")
-  if start_pos is None: out = Tensor.custom_kernel(*srcs, fxn=fxn)[0]
-  else:
-    contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
-    params = tuple(UOp.placeholder_like(x, slot=i) for i, x in enumerate(contig))
-    assert start_pos.uop.is_bound_var
-    call = fxn(*params, kernel_var(start_pos.uop.src[0])).call(*contig, start_pos.uop)
-    out = Tensor(contig[0].after(call))
+  out = Tensor.custom_kernel(*srcs, *(() if initial is None else (initial,)), fxn=fxn)[0]
   return (out if static else out[:, :, :out_shape[2]]).reshape(out_shape)
 
 class GatedDeltaNetBlock(FFNBlock):
@@ -338,8 +329,12 @@ class GatedDeltaNetBlock(FFNBlock):
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
+    # bind ints to a variable so the reset flag stays a runtime value (it toggles when generation restarts at position 0)
     start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(start_pos)
+    initial = Tensor(start_pos).eq(0)
     is_kda = hasattr(self, "ssm_g_a")
+    symbolic = isinstance(T, UOp)
+    T_pad = int(cast(UOp, T).vmax) if symbolic else T  # symbolic chunks are padded to their max size: one graph serves every size
 
     # input processing
     x = x.half()
@@ -351,11 +346,9 @@ class GatedDeltaNetBlock(FFNBlock):
       if is_kda else ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
 
     # qkv conv, conv_state is reset when starting from position 0
-    conv_state = Tensor(start_pos).eq(0).where(0, self.conv_state)
-    # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad to the max chunk].
-    # one graph serves every chunk size; padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
-    symbol = not isinstance(T, int)
-    T_pad = int(T.vmax) if isinstance(T, UOp) else T
+    conv_state = initial.where(0, self.conv_state)
+    # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad].
+    # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
     conv_window = Tensor.zeros(B, self.ssm_conv_kernel-1 + T_pad, self.conv_channels)
     win = conv_window.uop
     win = win.after(win[:, :self.ssm_conv_kernel-1].store(conv_state.cast(win.dtype).uop))
@@ -366,24 +359,24 @@ class GatedDeltaNetBlock(FFNBlock):
 
     conv_out = functools.reduce(lambda a,b: a+b,
       (conv_window[:, i:i+T_pad] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel))).silu()
-    if symbol:
+    if symbolic:
       out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
       beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, self.num_v_heads))
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
-    q = q.reshape(B, T_pad, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=1e-12 if is_kda else 1e-6)
-    k = k.reshape(B, T_pad, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=1e-12 if is_kda else 1e-6)
-    q, k = q.repeat(1, 1, self.num_v_heads//self.num_k_heads, 1), k.repeat(1, 1, self.num_v_heads//self.num_k_heads, 1)
+    qk_eps = 1e-12 if is_kda else 1e-6
+    q, k = (z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=qk_eps)
+            .repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
     v = v.reshape(B, T_pad, self.num_v_heads, self.head_v_dim)
     q, k, v, beta = [z.transpose(1, 2).float() for z in (q, k, v, beta)]
     alpha = log_alpha.transpose(1, 2).exp()
 
     # recurrent: the conv and recurrent states are updated in place
     state = Tensor(self.recurrent_state.uop.after(conv_state_store))
-    core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, state, Tensor(start_pos)).transpose(1, 2)
+    core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, state, initial).transpose(1, 2)
 
     # output; undo the padding before the output projection
     z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
-    if symbol: z = z[:, :T]
+    if symbolic: z = z[:, :T]
     return self.ssm_out(z.reshape(B, T, -1))
 
   def _init_state(self, x):

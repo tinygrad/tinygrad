@@ -51,8 +51,8 @@ class TestGatedDeltaPrefill(unittest.TestCase):
     garbage = np.full_like(initial, 1.0e9)
     def run(sp, init):
       state = Tensor(init).contiguous().realize()
-      start_pos = Tensor(UOp.variable("start_pos", 0, 63).bind(sp))
-      return gated_delta_prefill(Tensor(q), Tensor(k), Tensor(v), Tensor(beta), Tensor(alpha), state, start_pos).realize(), state
+      initial = Tensor(UOp.variable("start_pos", 0, 63).bind(sp)).eq(0)
+      return gated_delta_prefill(Tensor(q), Tensor(k), Tensor(v), Tensor(beta), Tensor(alpha), state, initial).realize(), state
     out_reset, state_reset = run(0, garbage)
     expected_out, expected_state = numpy_ref(q, k, v, beta, alpha, np.zeros_like(initial))
     np.testing.assert_allclose(out_reset.numpy(), expected_out, rtol=1e-4, atol=1e-4)
