@@ -969,7 +969,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.weakint, multiple_of:int=1, param:bool=False) -> UOp:
+  def variable(name:str, min_val:PyConst, max_val:PyConst, dtype:DType=dtypes.int, multiple_of:int=1, param:bool=False) -> UOp:
     # a Variable is a 0-d BUFFER in the ALU addrspace; binding it is storing a CONST into it
     # param=True creates the kernel-side form directly: an ALU PARAM (what the BUFFER becomes inside kernels)
     arg = ParamArg(-1, dtype, name=name, vmin_vmax=(min_val, max_val), multiple_of=multiple_of, addrspace=AddrSpace.ALU)
