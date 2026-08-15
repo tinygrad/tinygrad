@@ -82,5 +82,24 @@ class TestScheduleCache(unittest.TestCase):
       print(num)
     self.assertEqual(len(schedule_cache), start_len_schedule_cache)
 
+  @unittest.expectedFailure
+  def test_simple_precompile(self):
+    @function(precompile=True)
+    def f(x:Tensor) -> Tensor:
+      out = Tensor.invalids(*x.shape, dtype=x.dtype, device=x.device)
+      out = Tensor.custom_kernel(out, fxn=functools.partial(custom_set0_kernel, num=10))[0]
+      return out + x
+
+    # warmup
+    x = Tensor.ones(1).realize()
+    _ = f(x).realize()
+
+    # use the cache next time function is called
+    start_len_schedule_cache = len(schedule_cache)
+    for _ in range(3):
+      num = f(x).realize()
+      self.assertEqual(num.item(), 11)
+    self.assertEqual(len(schedule_cache), start_len_schedule_cache)
+
 if __name__ == "__main__":
   unittest.main()
