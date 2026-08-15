@@ -98,7 +98,7 @@ class NV_FLCN(NV_IP):
   def init_sw(self):
     self.nvdev.include("dev_gsp", "ga102")
     self.nvdev.include("dev_falcon_v4", "ga102")
-    self.nvdev.include("dev_riscv_pri", "tu102" if self.nvdev.fw_name in ("tu102", "tu116") else "ga102")
+    self.nvdev.include("dev_riscv_pri", "tu102" if self.nvdev.fw_name in ("tu102") else "ga102")
     self.nvdev.include("dev_fbif_v4", "ga102")
     self.nvdev.include("dev_falcon_second_pri", "ga102")
     self.nvdev.include("dev_sec_pri", "ga102")
@@ -139,7 +139,7 @@ class NV_FLCN(NV_IP):
 
     # TU10x/TU11x falcons predate the BROM/PKC signature unit GA102+ uses in execute_hs(), so their FWSEC-FRTS ucode is stored
     # with the older V2 descriptor (no PKC fields) and can't be DMA-loaded/hardware-verified directly; see prep_frts_bootloader().
-    needs_bootloader = self.nvdev.fw_name in ("tu102", "tu116")
+    needs_bootloader = self.nvdev.fw_name in ("tu102")
     if (ucode_desc_ver == nv.NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V2) != needs_bootloader:
       raise RuntimeError(f"unexpected FWSEC ucode descriptor version {ucode_desc_ver} for {self.nvdev.chip_name}")
 
@@ -189,7 +189,7 @@ class NV_FLCN(NV_IP):
     # falcons have no hardware BROM/PKC unit to verify a directly DMA-loaded image the way execute_hs() does on GA102+.
     assert self.desc_v2.DMEMPhysBase == 0, "generic bootloader always loads DMEM at destination offset 0"
 
-    gen_bl_fw_name = "tu102" if self.nvdev.fw_name == "tu116" else self.nvdev.fw_name # bootloader/gsp images are shared with tu102
+    gen_bl_fw_name = self.nvdev.fw_name
     sha = {"tu102": "b37776a511b4a00901e4e3ac568db917086d3bf439f85bc9b3e4adc7338a0aff"}[gen_bl_fw_name]
     h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{gen_bl_fw_name}/gsp", "gen_bootloader-570.144.bin", sha))
     bl_desc = nv.RM_FLCN_BL_DESC.from_buffer_copy(b, h.header_offset)
@@ -211,8 +211,7 @@ class NV_FLCN(NV_IP):
   def prep_booter(self):
     sha = {"ga102":"4497e3eff7e95c774b8a569d17b27c08c9650158d10b229d2be81cdcad9a085b",
            "ad102":"8b293e19b637c5e22c87a2428d1c71bb13e0904e8a88ac6b3c6c1f2679c6e37a",
-           "tu102":"7bb181f544a942299bbf4642da6d9bb58bfed8459725094e2ace56647cd3ec8c",
-           "tu116":"9bd01804b4b91d92904e7735b025e07a3c935bc6fb92e3833e85c297546025b9"}[self.nvdev.fw_name]
+           "tu102":"7bb181f544a942299bbf4642da6d9bb58bfed8459725094e2ace56647cd3ec8c"}[self.nvdev.fw_name]
     h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{self.nvdev.fw_name}/gsp", "booter_load-570.144.bin", sha))
     lh = nv.struct_nvfw_hs_load_header_v2.from_buffer_copy(b, (hs:=nv.struct_nvfw_hs_header_v2.from_buffer_copy(b, h.header_offset)).header_offset)
     app = nv.struct_nvfw_hs_load_header_v2_app.from_buffer_copy(b, hs.header_offset + ctypes.sizeof(nv.struct_nvfw_hs_load_header_v2))
@@ -222,7 +221,7 @@ class NV_FLCN(NV_IP):
 
     (patched_image:=bytearray(b[h.data_offset:h.data_offset + h.data_size]))[patch_loc:patch_loc+sig_len] = sig
 
-    if self.nvdev.fw_name in ("tu102", "tu116"):
+    if self.nvdev.fw_name in ("tu102"):
       self.booter_image = bytes(patched_image)
       self.booter_ns_off, self.booter_ns_sz = lh.os_code_offset, lh.os_code_size
       self.booter_sec_off, self.booter_sec_sz = app.offset, app.size
@@ -236,7 +235,7 @@ class NV_FLCN(NV_IP):
     self.falcon, self.sec2 = 0x00110000, 0x00840000
 
     self.reset(self.falcon)
-    if self.nvdev.fw_name in ("tu102", "tu116"):
+    if self.nvdev.fw_name in ("tu102"):
       self.execute_bootloader(self.falcon, self.bl_ucode, self.bl_start_tag, self.dmem_desc, ctx_dma=4)
     else:
       self.execute_hs(self.falcon, self.frts_image_paddr, code_off=0x0, data_off=self.desc_v3.IMEMLoadSize,
@@ -253,7 +252,7 @@ class NV_FLCN(NV_IP):
 
     # booter
     self.reset(self.sec2)
-    if self.nvdev.fw_name in ("tu102", "tu116"):
+    if self.nvdev.fw_name in ("tu102"):
       mbx = self.execute_direct(self.sec2, self.booter_image, self.booter_ns_off, self.booter_ns_sz,
         self.booter_sec_off, self.booter_sec_sz, self.booter_data_off, self.booter_data_sz, mailbox=self.nvdev.gsp.wpr_meta_sysmem)
     else:
@@ -263,7 +262,7 @@ class NV_FLCN(NV_IP):
     assert mbx[0] == 0x0, f"Booter failed to execute, mailbox is {mbx[0]:08x}, {mbx[1]:08x}"
 
     self.nvdev.NV_PFALCON_FALCON_OS.with_base(self.falcon).write(0x0)
-    if self.nvdev.fw_name in ("tu102", "tu116"):
+    if self.nvdev.fw_name in ("tu102"):
       assert self.nvdev.NV_PRISCV_RISCV_CORE_SWITCH_RISCV_STATUS.with_base(self.falcon).read_bitfields()['active_stat'] == 1, \
         "GSP Core is not active"
     else:
@@ -390,7 +389,7 @@ class NV_FLCN(NV_IP):
 
     wait_cond(lambda: self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(base).read_bitfields()['mem_scrubbing'], value=0, msg="Scrubbing not completed")
 
-    if self.nvdev.fw_name in ("tu102", "tu116"):
+    if self.nvdev.fw_name in ("tu102"):
       self.nvdev.NV_PFALCON_FALCON_RM.with_base(base).write(self.nvdev.chip_id)
       return
 
@@ -518,7 +517,7 @@ class NV_GSP(NV_IP):
     libos_args_view[:sum(ctypes.sizeof(s) for s in libos_structs)] = b''.join(bytes(s) for s in libos_structs)
 
   def init_gsp_image(self):
-    gsp_fw_name = "tu102" if self.nvdev.fw_name in ("tu102", "tu116") else "ga102"
+    gsp_fw_name = "tu102" if self.nvdev.fw_name in ("tu102") else "ga102"
     sha = {"ga102": "a8c3ebeed280323aedb51c061f321e73379cce7a9ae643a33dd03915df027f7f",
            "tu102": "3052aee2872182a14d8d7c069e3a14fe4642405894b24692c4aca4101dfb1809"}[gsp_fw_name]
     _, sections, _ = elf_loader(fetch_fw(f"nvidia/{gsp_fw_name}/gsp", "gsp-570.144.bin", sha))
@@ -545,7 +544,7 @@ class NV_GSP(NV_IP):
     self.gsp_signature_bar1 = gsp_sig_addrs[0]
 
   def init_boot_binary_image(self):
-    boot_fw_name = "tu102" if self.nvdev.fw_name == "tu116" else self.nvdev.fw_name # bootloader image is shared with tu102
+    boot_fw_name = self.nvdev.fw_name
     sha = {"ga102":"82428f532240727e95bb3083fbaaba9b2cc7b937314323f2d546ce7245f27fad",
            "ad102":"65ab2e6b6e0fca95365c4deac79a34582abcfeb15b6ae234138f22e7183118a8",
            "gb202":"d40b48e431d1707dc77af3605db358ed7a32ebfc2830eb74de2eddb4d3025071",
