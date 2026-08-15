@@ -238,6 +238,11 @@ class MLATransformerBlock(FFNBlock):
       self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
 
+def kernel_var(x:UOp) -> UOp:
+  # a Variable is a 0-d ALU BUFFER in the tensor graph; inside kernels it takes the ALU PARAM form (same name keeps the value binding)
+  return x.substitute({v: UOp.variable(v.expr, v.vmin, v.vmax, dtype=v.dtype, multiple_of=v.arg.multiple_of, param=True)
+                       for v in x.toposort() if v.is_variable})
+
 def _tree_sum(xs:list[UOp]) -> UOp:
   # balanced tree keeps the reduction depth at log2(n) (compilers can't reassociate floats, so this shape reaches the ALU)
   if not xs: return UOp.const(0, dtypes.float32)
@@ -306,8 +311,8 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   else:
     contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
     params = tuple(UOp.placeholder_like(x, slot=i) for i, x in enumerate(contig))
-    assert start_pos.uop.op is Ops.BIND
-    call = fxn(*params, start_pos.uop.src[0]).call(*contig, start_pos.uop)
+    assert start_pos.uop.is_bound_var
+    call = fxn(*params, kernel_var(start_pos.uop.src[0])).call(*contig, start_pos.uop)
     out = Tensor(contig[0].after(call))
   return (out if static else out[:, :, :out_shape[2]]).reshape(out_shape)
 
