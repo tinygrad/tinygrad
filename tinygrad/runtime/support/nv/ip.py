@@ -98,7 +98,7 @@ class NV_FLCN(NV_IP):
   def init_sw(self):
     self.nvdev.include("dev_gsp", "ga102")
     self.nvdev.include("dev_falcon_v4", "ga102")
-    self.nvdev.include("dev_riscv_pri", "tu102" if self.nvdev.fw_name in ("tu102") else "ga102")
+    self.nvdev.include("dev_riscv_pri", "tu102" if self.nvdev.fw_name == "tu102" else "ga102")
     self.nvdev.include("dev_fbif_v4", "ga102")
     self.nvdev.include("dev_falcon_second_pri", "ga102")
     self.nvdev.include("dev_sec_pri", "ga102")
@@ -139,7 +139,7 @@ class NV_FLCN(NV_IP):
 
     # TU10x/TU11x falcons predate the BROM/PKC signature unit GA102+ uses in execute_hs(), so their FWSEC-FRTS ucode is stored
     # with the older V2 descriptor (no PKC fields) and can't be DMA-loaded/hardware-verified directly; see prep_frts_bootloader().
-    needs_bootloader = self.nvdev.fw_name in ("tu102")
+    needs_bootloader = self.nvdev.fw_name == "tu102"
     if (ucode_desc_ver == nv.NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V2) != needs_bootloader:
       raise RuntimeError(f"unexpected FWSEC ucode descriptor version {ucode_desc_ver} for {self.nvdev.chip_name}")
 
@@ -221,7 +221,7 @@ class NV_FLCN(NV_IP):
 
     (patched_image:=bytearray(b[h.data_offset:h.data_offset + h.data_size]))[patch_loc:patch_loc+sig_len] = sig
 
-    if self.nvdev.fw_name in ("tu102"):
+    if self.nvdev.fw_name == "tu102":
       self.booter_image = bytes(patched_image)
       self.booter_ns_off, self.booter_ns_sz = lh.os_code_offset, lh.os_code_size
       self.booter_sec_off, self.booter_sec_sz = app.offset, app.size
@@ -235,7 +235,7 @@ class NV_FLCN(NV_IP):
     self.falcon, self.sec2 = 0x00110000, 0x00840000
 
     self.reset(self.falcon)
-    if self.nvdev.fw_name in ("tu102"):
+    if self.nvdev.fw_name == "tu102":
       self.execute_bootloader(self.falcon, self.bl_ucode, self.bl_start_tag, self.dmem_desc, ctx_dma=4)
     else:
       self.execute_hs(self.falcon, self.frts_image_paddr, code_off=0x0, data_off=self.desc_v3.IMEMLoadSize,
@@ -252,7 +252,7 @@ class NV_FLCN(NV_IP):
 
     # booter
     self.reset(self.sec2)
-    if self.nvdev.fw_name in ("tu102"):
+    if self.nvdev.fw_name == "tu102":
       mbx = self.execute_direct(self.sec2, self.booter_image, self.booter_ns_off, self.booter_ns_sz,
         self.booter_sec_off, self.booter_sec_sz, self.booter_data_off, self.booter_data_sz, mailbox=self.nvdev.gsp.wpr_meta_sysmem)
     else:
@@ -262,7 +262,7 @@ class NV_FLCN(NV_IP):
     assert mbx[0] == 0x0, f"Booter failed to execute, mailbox is {mbx[0]:08x}, {mbx[1]:08x}"
 
     self.nvdev.NV_PFALCON_FALCON_OS.with_base(self.falcon).write(0x0)
-    if self.nvdev.fw_name in ("tu102"):
+    if self.nvdev.fw_name == "tu102":
       assert self.nvdev.NV_PRISCV_RISCV_CORE_SWITCH_RISCV_STATUS.with_base(self.falcon).read_bitfields()['active_stat'] == 1, \
         "GSP Core is not active"
     else:
@@ -286,13 +286,7 @@ class NV_FLCN(NV_IP):
         tag += 1
       self.nvdev.NV_PFALCON_FALCON_IMEMD.with_base(base)[0].write(data=int.from_bytes(data[i:i+4].ljust(4, b'\x00'), 'little'))
 
-  def execute_direct(self, base:int, image:bytes, ns_off:int, ns_sz:int, sec_off:int, sec_sz:int, dmem_off:int, dmem_sz:int, mailbox=None):
-    self.disable_ctx_req(base)
-    self.imem_copy_direct(base, 0, image[ns_off:ns_off+ns_sz], secure=False, tag=ns_off)
-    self.imem_copy_direct(base, round_up(ns_sz, 0x100), image[sec_off:sec_off+sec_sz], secure=True, tag=sec_off)
-    self.dmem_copy_direct(base, 0, image[dmem_off:dmem_off+dmem_sz])
-    self.nvdev.NV_PFALCON_FALCON_BOOTVEC.with_base(base).write(0)
-
+  def _run_and_read_mailbox(self, base:int, mailbox=None):
     if mailbox is not None:
       self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).write(lo32(mailbox))
       self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).write(hi32(mailbox))
@@ -302,6 +296,14 @@ class NV_FLCN(NV_IP):
 
     if mailbox is not None:
       return self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).read(), self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).read()
+
+  def execute_direct(self, base:int, image:bytes, ns_off:int, ns_sz:int, sec_off:int, sec_sz:int, dmem_off:int, dmem_sz:int, mailbox=None):
+    self.disable_ctx_req(base)
+    self.imem_copy_direct(base, 0, image[ns_off:ns_off+ns_sz], secure=False, tag=ns_off)
+    self.imem_copy_direct(base, round_up(ns_sz, 0x100), image[sec_off:sec_off+sec_sz], secure=True, tag=sec_off)
+    self.dmem_copy_direct(base, 0, image[dmem_off:dmem_off+dmem_sz])
+    self.nvdev.NV_PFALCON_FALCON_BOOTVEC.with_base(base).write(0)
+    return self._run_and_read_mailbox(base, mailbox)
 
   def execute_bootloader(self, base:int, ucode:bytes, start_tag:int, dmem_desc:bytes, ctx_dma:int, mailbox=None):
     self.disable_ctx_req(base)
@@ -311,16 +313,7 @@ class NV_FLCN(NV_IP):
     self.nvdev.NV_PFALCON_FBIF_TRANSCFG.with_base(base)[ctx_dma].update(target=self.nvdev.NV_PFALCON_FBIF_TRANSCFG_TARGET_COHERENT_SYSMEM,
       mem_type=self.nvdev.NV_PFALCON_FBIF_TRANSCFG_MEM_TYPE_PHYSICAL)
     self.nvdev.NV_PFALCON_FALCON_BOOTVEC.with_base(base).write(start_tag << 8)
-
-    if mailbox is not None:
-      self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).write(lo32(mailbox))
-      self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).write(hi32(mailbox))
-
-    self.start_cpu(base)
-    self.wait_cpu_halted(base)
-
-    if mailbox is not None:
-      return self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).read(), self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).read()
+    return self._run_and_read_mailbox(base, mailbox)
 
   def execute_dma(self, base:int, cmd:int, dest:int, mem_off:int, src:int, size:int):
     wait_cond(lambda: self.nvdev.NV_PFALCON_FALCON_DMATRFCMD.with_base(base).read_bitfields()['full'], value=0, msg="DMA does not progress")
@@ -389,7 +382,7 @@ class NV_FLCN(NV_IP):
 
     wait_cond(lambda: self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(base).read_bitfields()['mem_scrubbing'], value=0, msg="Scrubbing not completed")
 
-    if self.nvdev.fw_name in ("tu102"):
+    if self.nvdev.fw_name == "tu102":
       self.nvdev.NV_PFALCON_FALCON_RM.with_base(base).write(self.nvdev.chip_id)
       return
 
@@ -517,7 +510,7 @@ class NV_GSP(NV_IP):
     libos_args_view[:sum(ctypes.sizeof(s) for s in libos_structs)] = b''.join(bytes(s) for s in libos_structs)
 
   def init_gsp_image(self):
-    gsp_fw_name = "tu102" if self.nvdev.fw_name in ("tu102") else "ga102"
+    gsp_fw_name = "tu102" if self.nvdev.fw_name == "tu102" else "ga102"
     sha = {"ga102": "a8c3ebeed280323aedb51c061f321e73379cce7a9ae643a33dd03915df027f7f",
            "tu102": "3052aee2872182a14d8d7c069e3a14fe4642405894b24692c4aca4101dfb1809"}[gsp_fw_name]
     _, sections, _ = elf_loader(fetch_fw(f"nvidia/{gsp_fw_name}/gsp", "gsp-570.144.bin", sha))
