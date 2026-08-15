@@ -82,6 +82,6 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   if start_pos is None: return Tensor.custom_kernel(*srcs, fxn=kernel)[0]
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  assert start_pos.uop.op is Ops.BIND
+  assert start_pos.uop.is_bound_var
   call = kernel(*params, start_pos.uop.src[0]).call(*contig, start_pos.uop)
   return Tensor(contig[0].after(call))

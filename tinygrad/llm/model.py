@@ -423,6 +423,7 @@ class Transformer:
     return model, kv
 
   def get_start_pos(self, tokens:list[int]) -> int:
+    # recurrent state can't be partially reused after divergence: reuse it only when tokens extend the cached prefix
     if self.has_recurrent_block:
       return len(self._cached_tokens) if self._cached_tokens and len(self._cached_tokens) < len(tokens) \
         and tokens[:len(self._cached_tokens)] == self._cached_tokens else 0
