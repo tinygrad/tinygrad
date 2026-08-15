@@ -517,8 +517,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
 
 class HCQBuffer:
-  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQBuffer|None=None, view:MMIOInterface|None=None,
-               owner:HCQCompiled|None=None):
+  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQBuffer|None=None, view:MMIOInterface|None=None, owner:Any=None):
     self.va_addr, self.size, self.meta, self._base, self.view = va_addr, size, meta, _base, view
     self._devs, self.owner = ([owner] if owner is not None else []), owner
     self._mappings:dict[HCQCompiled, HCQBuffer] = {} # mapping to the other devices

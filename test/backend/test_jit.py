@@ -360,7 +360,7 @@ class TestJitGraphSplit(unittest.TestCase):
     self.expect(f, inp, inp_cpu,
       graph=[self.ji_graph(2), self.ji_comp(), self.ji_comp()],
       multigraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp()],
-      hcqgraph=[self.ji_graph(4)])
+      hcqgraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp()]) # cpu is hcq2 now, it does not join hcq graphs
 
   def test_jit_cpu_several(self):
     if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
@@ -377,9 +377,9 @@ class TestJitGraphSplit(unittest.TestCase):
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     inp_cpu = Tensor.randn(10, 10, device="CPU").realize()
     self.expect(f, inp, inp_cpu,
-      graph=[self.ji_graph(2), self.ji_graph(2), self.ji_comp()],
-      multigraph=[self.ji_graph(2), self.ji_graph(2), self.ji_comp()],
-      hcqgraph=[self.ji_graph(5)])
+      graph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()],
+      multigraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()],
+      hcqgraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()])
 
   def test_jit_multidev(self):
     if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")

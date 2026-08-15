@@ -1,6 +1,6 @@
 import unittest, itertools, math
 from tinygrad import Tensor, dtypes, Context
-from tinygrad.dtype import DType, ConstType, truncate
+from tinygrad.dtype import DType, ConstType
 from tinygrad.uop.ops import Ops, UOp
 from test.helpers import full_rewrite
 import numpy as np
@@ -51,16 +51,13 @@ class TestWeakConstFolding(unittest.TestCase):
   def test_invalid_poison(self):
     self.assertTrue(UOp.invalid().alu(Ops.CDIV, UOp.const(0)).simplify().is_invalid)
 
-  def test_cast_commits_to_dtype_grid(self):
-    # committing a weak const to a stated width puts the value on that width's grid, same as storage packing and native compilers
-    v = 1/123008  # not representable in float16
-    out = UOp.const(v).cast(dtypes.half).simplify()
-    self.assertEqual((out.op, out.dtype, out.val), (Ops.CONST, dtypes.half, truncate[dtypes.half](v)))
-    self.assertNotEqual(out.val, v)
-    # the grid commit preserves the sign of zero
-    self.assertEqual(math.copysign(1, UOp.const(-0.0).cast(dtypes.half).simplify().val), -1)
-    # observable at tensor level: the const-folded comparison agrees with the committed value
-    self.assertTrue((Tensor(-3.2).cast(dtypes.float32) <= truncate[dtypes.float32](-3.2)).item())
+  def test_single_rounding_log10_backward(self):
+    # log10 backward folds log10(2)/log(2) = 1/log(10) in one rounding, not the double-rounded 1/float32(log(10))
+    x = Tensor([1.0, 2.0, 3.0])
+    ast = next(s.src[0] for s in x.log10().sum().gradient(x)[0].schedule_linear().src if s.src[0].op is Ops.SINK)
+    const = next(u.arg for u in full_rewrite(ast).toposort() if u.op is Ops.CONST and u.dtype is dtypes.float32)
+    # correctly rounded: within half a float32 ulp of the exact value (folding at float32 lands 0.66 ulp off)
+    self.assertLess(abs(const - 1/math.log(10)), 2**-26)
 
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
