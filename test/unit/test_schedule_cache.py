@@ -76,14 +76,14 @@ class TestScheduleCache(unittest.TestCase):
     def f(x:Tensor) -> Tensor:
       out = Tensor.invalids(*x.shape, dtype=x.dtype, device=x.device)
       out = Tensor.custom_kernel(out, x, fxn=functools.partial(custom_add_kernel, num=10), grad_fxn=custom_add_backward)[0]
-      return out * x
+      return out + x
 
     # warmup
     x = Tensor.ones(1).realize()
     out = f(x)
     out.backward(x)
-    self.assertEqual(out.item(), 11)
-    self.assertEqual(x.grad.item(), 12)
+    self.assertEqual(out.item(), 12)
+    self.assertEqual(x.grad.item(), 2)
 
     # use the cache next time function is called
     start_len_schedule_cache = len(schedule_cache)
@@ -91,8 +91,8 @@ class TestScheduleCache(unittest.TestCase):
       x = Tensor.ones(1).realize()
       out = f(x)
       out.backward(x)
-      self.assertEqual(out.item(), 11)
-      self.assertEqual(x.grad.item(), 12)
+      self.assertEqual(out.item(), 12)
+      self.assertEqual(x.grad.item(), 2)
     self.assertEqual(len(schedule_cache), start_len_schedule_cache)
 
 if __name__ == "__main__":
