@@ -11,6 +11,11 @@ NV_DEBUG = getenv("NV_DEBUG", 0)
 
 CHIP_ARCH_NAMES = {0x16: "TU1", 0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}
 CHIP_FW_NAMES = {"TU1": "tu102", "GA1": "ga102", "AD1": "ad102", "GB2": "gb202"}
+# TU116/TU117 (GTX 16-series) are a separate signed-firmware family from TU102/104/106 (RTX 20-series); NV_PMC_BOOT_42's
+# 'implementation' field is 0x07/0x08 for TU117/TU116 vs 0x02/0x04/0x06 for TU102/104/106 (both share architecture 0x16 "TU1").
+# Unlike TU102/104/106 (whose marketing number's last digit IS the implementation value), TU11x's doesn't match, so their
+# chip_name can't be derived mechanically like every other chip's.
+TU11X_IMPLEMENTATIONS = {0x07: "TU117", 0x08: "TU116"}
 
 class NVReg:
   def __init__(self, nvdev, base, off, fields=None): self.nvdev, self.base, self.off, self.fields = nvdev, base, off, fields
@@ -114,8 +119,10 @@ class NVDev:
     self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
     self.chip_id = self.reg("NV_PMC_BOOT_0").read()
     self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
-    self.chip_name = CHIP_ARCH_NAMES[self.chip_details['architecture']] + f"{self.chip_details['implementation']:02d}"
-    self.fw_name = CHIP_FW_NAMES[self.chip_name[:3]]
+    is_tu11x = self.chip_details['architecture'] == 0x16 and self.chip_details['implementation'] in TU11X_IMPLEMENTATIONS
+    self.chip_name = TU11X_IMPLEMENTATIONS[self.chip_details['implementation']] if is_tu11x else \
+      CHIP_ARCH_NAMES[self.chip_details['architecture']] + f"{self.chip_details['implementation']:02d}"
+    self.fw_name = "tu116" if is_tu11x else CHIP_FW_NAMES[self.chip_name[:3]]
     self.mmu_ver, self.fmc_boot = (3, True) if self.chip_details['architecture'] >= 0x1a else (2, False)
 
     self.flcn:NV_FLCN|NV_FLCN_COT = NV_FLCN_COT(self) if self.fmc_boot else NV_FLCN(self)
@@ -131,7 +138,7 @@ class NVDev:
     self.pte_t, self.pde_t, self.dual_pde_t = [self.__dict__[name] for name in [f'NV_MMU_VER{self.mmu_ver}_PTE', f'NV_MMU_VER{self.mmu_ver}_PDE',
                                                                                 f'NV_MMU_VER{self.mmu_ver}_DUAL_PDE']]
 
-    if self.fw_name == "tu102":
+    if self.fw_name in ("tu102", "tu116"):
       self.include("dev_fb", "gp102")
       f = self.reg("NV_PFB_PRI_MMU_LOCAL_MEMORY_RANGE").read_bitfields()
       self.vram_size = f['lower_mag'] << (f['lower_scale'] + 20)

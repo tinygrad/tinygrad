@@ -98,7 +98,7 @@ class NV_FLCN(NV_IP):
   def init_sw(self):
     self.nvdev.include("dev_gsp", "ga102")
     self.nvdev.include("dev_falcon_v4", "ga102")
-    self.nvdev.include("dev_riscv_pri", "tu102" if self.nvdev.fw_name == "tu102" else "ga102")
+    self.nvdev.include("dev_riscv_pri", "tu102" if self.nvdev.fw_name in ("tu102", "tu116") else "ga102")
     self.nvdev.include("dev_fbif_v4", "ga102")
     self.nvdev.include("dev_falcon_second_pri", "ga102")
     self.nvdev.include("dev_sec_pri", "ga102")
@@ -137,16 +137,20 @@ class NV_FLCN(NV_IP):
         ucode_desc_size = ucode_desc_hdr.vDesc >> 16
         ucode_desc_ver = (ucode_desc_hdr.vDesc >> 8) & 0xff
 
-    if (ucode_desc_ver == nv.NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V2) != (self.nvdev.fw_name == "tu102"):
+    # TU10x/TU11x falcons predate the BROM/PKC signature unit GA102+ uses in execute_hs(), so their FWSEC-FRTS ucode is stored
+    # with the older V2 descriptor (no PKC fields) and can't be DMA-loaded/hardware-verified directly; see prep_frts_bootloader().
+    needs_bootloader = self.nvdev.fw_name in ("tu102", "tu116")
+    if (ucode_desc_ver == nv.NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V2) != needs_bootloader:
       raise RuntimeError(f"unexpected FWSEC ucode descriptor version {ucode_desc_ver} for {self.nvdev.chip_name}")
-    if self.nvdev.fw_name == "tu102":
-      raise NotImplementedError("TU10x/GA100 FWSEC-FRTS needs the generic (non-PKC) bootloader boot path (WITH_LOADER)")
 
-    self.desc_v3 = nv.FALCON_UCODE_DESC_V3.from_buffer_copy(vbios_bytes[ucode_desc_off:ucode_desc_off + ucode_desc_size])
-
-    sig_total_size = ucode_desc_size - nv.FALCON_UCODE_DESC_V3_SIZE_44
-    signature = vbios_bytes[ucode_desc_off + nv.FALCON_UCODE_DESC_V3_SIZE_44:][:sig_total_size]
-    image = vbios_bytes[ucode_desc_off + ucode_desc_size:][:round_up(self.desc_v3.StoredSize, 256)]
+    if needs_bootloader:
+      self.desc_v2 = nv.FALCON_UCODE_DESC_V2.from_buffer_copy(vbios_bytes[ucode_desc_off:ucode_desc_off + ucode_desc_size])
+      image = vbios_bytes[ucode_desc_off + ucode_desc_size:][:round_up(self.desc_v2.StoredSize, 256)]
+    else:
+      self.desc_v3 = nv.FALCON_UCODE_DESC_V3.from_buffer_copy(vbios_bytes[ucode_desc_off:ucode_desc_off + ucode_desc_size])
+      image = vbios_bytes[ucode_desc_off + ucode_desc_size:][:round_up(self.desc_v3.StoredSize, 256)]
+      sig_total_size = ucode_desc_size - nv.FALCON_UCODE_DESC_V3_SIZE_44
+      signature = vbios_bytes[ucode_desc_off + nv.FALCON_UCODE_DESC_V3_SIZE_44:][:sig_total_size]
 
     self.frts_offset = self.nvdev.vram_size - 0x100000 - 0x100000
     read_vbios_desc = nv.FWSECLIC_READ_VBIOS_DESC(version=0x1, size=ctypes.sizeof(nv.FWSECLIC_READ_VBIOS_DESC), flags=2)
@@ -154,30 +158,61 @@ class NV_FLCN(NV_IP):
       frtsRegionOffset4K=self.frts_offset >> 12, frtsRegionSize=0x100, frtsRegionMediaType=2)
     frts_cmd = nv.FWSECLIC_FRTS_CMD(readVbiosDesc=read_vbios_desc, frtsRegionDesc=frst_reg_desc)
 
-    def __patch(cmd_id, cmd):
+    def __patch(cmd_id, cmd, imem_load_size, interface_offset, pkc_data_offset):
       patched_image = bytearray(image)
 
       dmem_offset = 0
-      hdr = nv.FALCON_APPLICATION_INTERFACE_HEADER_V1.from_buffer_copy(image[(app_hdr_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.InterfaceOffset):])
+      hdr = nv.FALCON_APPLICATION_INTERFACE_HEADER_V1.from_buffer_copy(image[(app_hdr_off:=imem_load_size+interface_offset):])
       ents = (nv.FALCON_APPLICATION_INTERFACE_ENTRY_V1 * hdr.entryCount).from_buffer_copy(image[app_hdr_off + ctypes.sizeof(hdr):])
       for i in range(hdr.entryCount):
         if ents[i].id == nv.FALCON_APPLICATION_INTERFACE_ENTRY_ID_DMEMMAPPER: dmem_offset = ents[i].dmemOffset
 
       # Patch image
-      dmem = nv.FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3.from_buffer_copy(image[(dmem_mapper_offset:=self.desc_v3.IMEMLoadSize+dmem_offset):])
+      dmem = nv.FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3.from_buffer_copy(image[(dmem_mapper_offset:=imem_load_size+dmem_offset):])
       dmem.init_cmd = cmd_id
       patched_image[dmem_mapper_offset : dmem_mapper_offset+len(bytes(dmem))] = bytes(dmem)
-      patched_image[(cmd_off:=self.desc_v3.IMEMLoadSize+dmem.cmd_in_buffer_offset) : cmd_off+len(cmd)] = cmd
-      patched_image[(sig_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.PKCDataOffset) : sig_off+0x180] = signature[-0x180:]
+      patched_image[(cmd_off:=imem_load_size+dmem.cmd_in_buffer_offset) : cmd_off+len(cmd)] = cmd
+      if pkc_data_offset is not None: # V2 (no BROM/PKC) has no signature to embed; see prep_frts_bootloader()
+        patched_image[(sig_off:=imem_load_size+pkc_data_offset) : sig_off+0x180] = signature[-0x180:]
 
-      return self.nvdev._alloc_boot_mem(len(patched_image), data=patched_image, sysmem=False)
+      return bytes(patched_image)
 
-    _, self.frts_image_paddr, _ = __patch(0x15, bytes(frts_cmd))
+    if needs_bootloader:
+      patched_image = __patch(0x15, bytes(frts_cmd), self.desc_v2.IMEMLoadSize, self.desc_v2.InterfaceOffset, None)
+      self.prep_frts_bootloader(patched_image)
+    else:
+      patched_image = __patch(0x15, bytes(frts_cmd), self.desc_v3.IMEMLoadSize, self.desc_v3.InterfaceOffset, self.desc_v3.PKCDataOffset)
+      _, self.frts_image_paddr, _ = self.nvdev._alloc_boot_mem(len(patched_image), data=patched_image, sysmem=False)
+
+  def prep_frts_bootloader(self, image:bytes):
+    # The generic bootloader is a tiny PIO-loaded ucode that DMAs the (unsigned) FWSEC-FRTS image itself, since TU10x/TU11x
+    # falcons have no hardware BROM/PKC unit to verify a directly DMA-loaded image the way execute_hs() does on GA102+.
+    assert self.desc_v2.DMEMPhysBase == 0, "generic bootloader always loads DMEM at destination offset 0"
+
+    gen_bl_fw_name = "tu102" if self.nvdev.fw_name == "tu116" else self.nvdev.fw_name # bootloader/gsp images are shared with tu102
+    sha = {"tu102": "b37776a511b4a00901e4e3ac568db917086d3bf439f85bc9b3e4adc7338a0aff"}[gen_bl_fw_name]
+    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{gen_bl_fw_name}/gsp", "gen_bootloader-570.144.bin", sha))
+    bl_desc = nv.RM_FLCN_BL_DESC.from_buffer_copy(b, h.header_offset)
+    self.bl_ucode = bytes(b[h.data_offset:h.data_offset + bl_desc.blCodeSize]).ljust(round_up(bl_desc.blCodeSize, 0x100), b'\x00')
+    self.bl_start_tag = bl_desc.blStartTag
+
+    # The DMA source object must mirror the falcon's destination IMEM layout, so pad its start by IMEMPhysBase.
+    align_padding = self.desc_v2.IMEMPhysBase
+    _, _, sysaddrs = self.nvdev._alloc_boot_mem(align_padding + len(image), data=bytes(align_padding) + image, contiguous=True, sysmem=True)
+    code_dma_base = sysaddrs[0]
+    data_dma_base = code_dma_base + align_padding + self.desc_v2.DMEMOffset
+
+    self.dmem_desc = bytes(nv.RM_FLCN_BL_DMEM_DESC(ctxDma=4, # FALCON_DMAIDX_PHYS_SYS_NCOH
+      codeDmaBaseLo=lo32(code_dma_base), codeDmaBaseHi=hi32(code_dma_base),
+      nonSecureCodeOff=self.desc_v2.IMEMPhysBase, nonSecureCodeSize=self.desc_v2.IMEMLoadSize - self.desc_v2.IMEMSecSize,
+      secureCodeOff=self.desc_v2.IMEMPhysBase + (self.desc_v2.IMEMSecBase - self.desc_v2.IMEMVirtBase), secureCodeSize=self.desc_v2.IMEMSecSize,
+      codeEntryPoint=0, dataDmaBaseLo=lo32(data_dma_base), dataDmaBaseHi=hi32(data_dma_base), dataSize=self.desc_v2.DMEMLoadSize, argc=0, argv=0))
 
   def prep_booter(self):
     sha = {"ga102":"4497e3eff7e95c774b8a569d17b27c08c9650158d10b229d2be81cdcad9a085b",
            "ad102":"8b293e19b637c5e22c87a2428d1c71bb13e0904e8a88ac6b3c6c1f2679c6e37a",
-           "tu102":"7bb181f544a942299bbf4642da6d9bb58bfed8459725094e2ace56647cd3ec8c"}[self.nvdev.fw_name]
+           "tu102":"7bb181f544a942299bbf4642da6d9bb58bfed8459725094e2ace56647cd3ec8c",
+           "tu116":"9bd01804b4b91d92904e7735b025e07a3c935bc6fb92e3833e85c297546025b9"}[self.nvdev.fw_name]
     h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{self.nvdev.fw_name}/gsp", "booter_load-570.144.bin", sha))
     lh = nv.struct_nvfw_hs_load_header_v2.from_buffer_copy(b, (hs:=nv.struct_nvfw_hs_header_v2.from_buffer_copy(b, h.header_offset)).header_offset)
     app = nv.struct_nvfw_hs_load_header_v2_app.from_buffer_copy(b, hs.header_offset + ctypes.sizeof(nv.struct_nvfw_hs_load_header_v2))
@@ -187,7 +222,7 @@ class NV_FLCN(NV_IP):
 
     (patched_image:=bytearray(b[h.data_offset:h.data_offset + h.data_size]))[patch_loc:patch_loc+sig_len] = sig
 
-    if self.nvdev.fw_name == "tu102":
+    if self.nvdev.fw_name in ("tu102", "tu116"):
       self.booter_image = bytes(patched_image)
       self.booter_ns_off, self.booter_ns_sz = lh.os_code_offset, lh.os_code_size
       self.booter_sec_off, self.booter_sec_sz = app.offset, app.size
@@ -201,10 +236,13 @@ class NV_FLCN(NV_IP):
     self.falcon, self.sec2 = 0x00110000, 0x00840000
 
     self.reset(self.falcon)
-    self.execute_hs(self.falcon, self.frts_image_paddr, code_off=0x0, data_off=self.desc_v3.IMEMLoadSize,
-      imemPa=self.desc_v3.IMEMPhysBase, imemVa=self.desc_v3.IMEMVirtBase, imemSz=self.desc_v3.IMEMLoadSize,
-      dmemPa=self.desc_v3.DMEMPhysBase, dmemVa=0x0, dmemSz=self.desc_v3.DMEMLoadSize,
-      pkc_off=self.desc_v3.PKCDataOffset, engid=self.desc_v3.EngineIdMask, ucodeid=self.desc_v3.UcodeId)
+    if self.nvdev.fw_name in ("tu102", "tu116"):
+      self.execute_bootloader(self.falcon, self.bl_ucode, self.bl_start_tag, self.dmem_desc, ctx_dma=4)
+    else:
+      self.execute_hs(self.falcon, self.frts_image_paddr, code_off=0x0, data_off=self.desc_v3.IMEMLoadSize,
+        imemPa=self.desc_v3.IMEMPhysBase, imemVa=self.desc_v3.IMEMVirtBase, imemSz=self.desc_v3.IMEMLoadSize,
+        dmemPa=self.desc_v3.DMEMPhysBase, dmemVa=0x0, dmemSz=self.desc_v3.DMEMLoadSize,
+        pkc_off=self.desc_v3.PKCDataOffset, engid=self.desc_v3.EngineIdMask, ucodeid=self.desc_v3.UcodeId)
     assert self.nvdev.NV_PFB_PRI_MMU_WPR2_ADDR_HI.read() != 0, "WPR2 is not initialized"
 
     self.reset(self.falcon, riscv=True)
@@ -215,7 +253,7 @@ class NV_FLCN(NV_IP):
 
     # booter
     self.reset(self.sec2)
-    if self.nvdev.fw_name == "tu102":
+    if self.nvdev.fw_name in ("tu102", "tu116"):
       mbx = self.execute_direct(self.sec2, self.booter_image, self.booter_ns_off, self.booter_ns_sz,
         self.booter_sec_off, self.booter_sec_sz, self.booter_data_off, self.booter_data_sz, mailbox=self.nvdev.gsp.wpr_meta_sysmem)
     else:
@@ -225,7 +263,7 @@ class NV_FLCN(NV_IP):
     assert mbx[0] == 0x0, f"Booter failed to execute, mailbox is {mbx[0]:08x}, {mbx[1]:08x}"
 
     self.nvdev.NV_PFALCON_FALCON_OS.with_base(self.falcon).write(0x0)
-    if self.nvdev.fw_name == "tu102":
+    if self.nvdev.fw_name in ("tu102", "tu116"):
       assert self.nvdev.NV_PRISCV_RISCV_CORE_SWITCH_RISCV_STATUS.with_base(self.falcon).read_bitfields()['active_stat'] == 1, \
         "GSP Core is not active"
     else:
@@ -255,6 +293,25 @@ class NV_FLCN(NV_IP):
     self.imem_copy_direct(base, round_up(ns_sz, 0x100), image[sec_off:sec_off+sec_sz], secure=True, tag=sec_off)
     self.dmem_copy_direct(base, 0, image[dmem_off:dmem_off+dmem_sz])
     self.nvdev.NV_PFALCON_FALCON_BOOTVEC.with_base(base).write(0)
+
+    if mailbox is not None:
+      self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).write(lo32(mailbox))
+      self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).write(hi32(mailbox))
+
+    self.start_cpu(base)
+    self.wait_cpu_halted(base)
+
+    if mailbox is not None:
+      return self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).read(), self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).read()
+
+  def execute_bootloader(self, base:int, ucode:bytes, start_tag:int, dmem_desc:bytes, ctx_dma:int, mailbox=None):
+    self.disable_ctx_req(base)
+    # start_tag is block-scale (256B blocks); imem_copy_direct's tag param is byte-scale (it right-shifts by 8), so pre-shift left.
+    self.imem_copy_direct(base, 0x10000 - len(ucode), ucode, secure=False, tag=start_tag << 8)
+    self.dmem_copy_direct(base, 0, dmem_desc)
+    self.nvdev.NV_PFALCON_FBIF_TRANSCFG.with_base(base)[ctx_dma].update(target=self.nvdev.NV_PFALCON_FBIF_TRANSCFG_TARGET_COHERENT_SYSMEM,
+      mem_type=self.nvdev.NV_PFALCON_FBIF_TRANSCFG_MEM_TYPE_PHYSICAL)
+    self.nvdev.NV_PFALCON_FALCON_BOOTVEC.with_base(base).write(start_tag << 8)
 
     if mailbox is not None:
       self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).write(lo32(mailbox))
@@ -333,7 +390,7 @@ class NV_FLCN(NV_IP):
 
     wait_cond(lambda: self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(base).read_bitfields()['mem_scrubbing'], value=0, msg="Scrubbing not completed")
 
-    if self.nvdev.fw_name == "tu102":
+    if self.nvdev.fw_name in ("tu102", "tu116"):
       self.nvdev.NV_PFALCON_FALCON_RM.with_base(base).write(self.nvdev.chip_id)
       return
 
@@ -461,7 +518,7 @@ class NV_GSP(NV_IP):
     libos_args_view[:sum(ctypes.sizeof(s) for s in libos_structs)] = b''.join(bytes(s) for s in libos_structs)
 
   def init_gsp_image(self):
-    gsp_fw_name = "tu102" if self.nvdev.fw_name == "tu102" else "ga102"
+    gsp_fw_name = "tu102" if self.nvdev.fw_name in ("tu102", "tu116") else "ga102"
     sha = {"ga102": "a8c3ebeed280323aedb51c061f321e73379cce7a9ae643a33dd03915df027f7f",
            "tu102": "3052aee2872182a14d8d7c069e3a14fe4642405894b24692c4aca4101dfb1809"}[gsp_fw_name]
     _, sections, _ = elf_loader(fetch_fw(f"nvidia/{gsp_fw_name}/gsp", "gsp-570.144.bin", sha))
@@ -488,11 +545,12 @@ class NV_GSP(NV_IP):
     self.gsp_signature_bar1 = gsp_sig_addrs[0]
 
   def init_boot_binary_image(self):
+    boot_fw_name = "tu102" if self.nvdev.fw_name == "tu116" else self.nvdev.fw_name # bootloader image is shared with tu102
     sha = {"ga102":"82428f532240727e95bb3083fbaaba9b2cc7b937314323f2d546ce7245f27fad",
            "ad102":"65ab2e6b6e0fca95365c4deac79a34582abcfeb15b6ae234138f22e7183118a8",
            "gb202":"d40b48e431d1707dc77af3605db358ed7a32ebfc2830eb74de2eddb4d3025071",
-           "tu102":"12e987b636c2f00fa40f42fd95097515c0817b158119c584049a37faf38f8f96"}[self.nvdev.fw_name]
-    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{self.nvdev.fw_name}/gsp", "bootloader-570.144.bin", sha))
+           "tu102":"12e987b636c2f00fa40f42fd95097515c0817b158119c584049a37faf38f8f96"}[boot_fw_name]
+    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{boot_fw_name}/gsp", "bootloader-570.144.bin", sha))
     self.booter_image, self.booter_desc = b[h.data_offset:h.data_offset+h.data_size], nv.RM_RISCV_UCODE_DESC.from_buffer_copy(b, h.header_offset)
     _, _, booter_addrs = self.nvdev._alloc_boot_mem(len(self.booter_image), data=self.booter_image)
     self.booter_bar1 = booter_addrs[0]
