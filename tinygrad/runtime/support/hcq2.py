@@ -7,7 +7,7 @@ from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, Co
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
-from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
+from tinygrad.uop.symbolic import symbolic
 from tinygrad.dtype import dtypes, truncate
 from tinygrad.runtime.support.hcq import MMIOInterface, HCQBuffer
 from tinygrad.runtime.support.memory import BumpAllocator
@@ -445,7 +445,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
     linear = graph_rewrite(linear, pm_encode_cmdbufs+pm_pack_placeholders, walk=True, name="encode and pack", enter_calls=True)
 
     # patches and runtime uops
-    linear = graph_rewrite(linear, pm_early_simplify+symbolic+pm_fold_cast_const, bottom_up=False, name="simplify patches", enter_calls=True)
+    linear = graph_rewrite(linear, pm_early_simplify+symbolic, bottom_up=False, name="simplify patches", enter_calls=True)
     linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
 
     # and compile it
@@ -477,7 +477,7 @@ def fold_binary(buf:UOp, blob:UOp) -> UOp:
 def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
   for off,val in zip(off.src, val.src):
     for b,v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
-      data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype](v.val))
+      data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype]((v.src[0] if v.op is Ops.CAST else v).val))
       b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[(bo:=off.val*buf.dtype.itemsize):bo+len(data)] = data
   return UOp(Ops.NOOP)
 
@@ -492,7 +492,7 @@ def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
 
 pm_resolve_patches = PatternMatcher([
   # multi
-  (UPat(GroupOp.ALU, src=[UPat(Ops.STACK, name="s"), UPat(Ops.CONST)], name="op"), push_stack),
+  (UPat(GroupOp.ALU, src=[UPat(Ops.STACK, name="s"), UPat.any(UPat(Ops.CONST), UPat(Ops.CAST, src=(UPat(Ops.CONST),)))], name="op"), push_stack),
   (UPat(Ops.CAST, src=(UPat(Ops.STACK, name="s"),), name="op"), push_stack),
 
   # getaddr
@@ -518,7 +518,7 @@ def hcq_link(linear:UOp, cache=True) -> UOp:
   bufs = {(j,i):a for j,c in enumerate(linear.src) for i,a in enumerate(c.src[1:], 1)
           if a.op is Ops.AFTER and unwrap_mstack(a.src[0])[0].tag in HCQ_CACHE_TAGS}
   linear = linear.substitute({x:link_buf_cache[k] for a in bufs.values() if (k:=link_buf_key(a)) in link_buf_cache for x in (a, a.src[0])}, walk=True)
-  linear = graph_rewrite(linear, pm_resolve_patches+symbolic+pm_fold_cast_const+pm_assert_no_afters, bpm=pm_bufferize, ctx=cache, bottom_up=False,
+  linear = graph_rewrite(linear, pm_resolve_patches+symbolic+pm_assert_no_afters, bpm=pm_bufferize, ctx=cache, bottom_up=False,
                          name="resolve patches")
   for (j,i),a in bufs.items(): link_buf_cache.setdefault(link_buf_key(a), linear.src[j].src[i])
   if cache: link_linear_cache[linear_key] = linear

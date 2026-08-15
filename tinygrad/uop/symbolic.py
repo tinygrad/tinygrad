@@ -23,8 +23,12 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   if c.dtype.fmt is None or root.dtype.fmt is None or c.dtype.itemsize != root.dtype.itemsize: return None
   return root.const_like(bitcast(c.val, c.dtype, root.dtype))
 
+# const folding works for CONST, STACK, and casted CONST
+const_folding_pat = UPat.any(UPat((Ops.CONST, Ops.STACK)), UPat(Ops.CAST, src=(UPat(Ops.CONST),)))
+
 def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
   if u.op is Ops.CONST: return u.val
+  if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return u.dtype.const(u.src[0].val)
   if u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src): return tuple(s.val for s in u.src)
   return None
 
@@ -136,10 +140,10 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
-  (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)),), name="a"), fold_const_alu),
+  (UPat(GroupOp.Unary, src=(const_folding_pat,), name="a"), fold_const_alu),
   # NOTE: THREEFRY(const,const) folds via its decomposition
-  (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.CONST, Ops.STACK)),)*2, name="a"), fold_const_alu),
-  (UPat(GroupOp.Ternary, src=(UPat((Ops.CONST, Ops.STACK)),)*3, name="a"), fold_const_alu),
+  (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(const_folding_pat,)*2, name="a"), fold_const_alu),
+  (UPat(GroupOp.Ternary, src=(const_folding_pat,)*3, name="a"), fold_const_alu),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
