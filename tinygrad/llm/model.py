@@ -245,7 +245,7 @@ def _tree_sum(xs:list[UOp]) -> UOp:
   return xs[0]
 
 @functools.cache
-def _gated_delta_prefill_kernel(local:bool, core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp,
+def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:UOp, state:UOp, kq:UOp,
                                 initial:UOp|None=None) -> UOp:
   batch, heads, tokens, value_dim = cast(tuple[int, int, int, int], core.shape)
   key_dim, alpha_dim = cast(int, q.shape[-1]), cast(int, alpha.shape[-1]) if len(alpha.shape) == 4 else 1
@@ -254,10 +254,10 @@ def _gated_delta_prefill_kernel(local:bool, core:UOp, q:UOp, k:UOp, v:UOp, beta:
   beta, kq = (x.reshape(batch*heads, tokens) for x in (beta, kq))
   alpha, state = alpha.reshape(batch*heads, tokens, alpha_dim), state.reshape(batch*heads, value_dim, key_dim)
   # parallel over (batch*head, state row): one thread owns one state row in registers across the sequential token loop.
-  # one block per (batch*head), rows are the LOCAL threads so k/q token loads broadcast within the block.
-  # CPUs have no local workgroups (one launch item per batch*head) and loop the rows in-thread
+  # one block per (batch*head), rows are the LOCAL threads so k/q token loads broadcast within the block
+  # (on renderers without local workgroups, gpudims reruns the rows as a sequential in-thread loop)
   bh = UOp.range(batch*heads, 0, AxisType.GLOBAL)
-  row = UOp.range(value_dim, 1, AxisType.LOCAL) if local else UOp.range(value_dim, 2)
+  row = UOp.range(value_dim, 1, AxisType.LOCAL)
   cols = tuple(range(key_dim))
   current = UOp.placeholder((key_dim,), dtypes.float32, slot=0, addrspace=AddrSpace.REG)
   # the state starts from zero when the (scalar bool) initial flag is set; otherwise it resumes from `state`
@@ -302,7 +302,7 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   core, kq = Tensor.empty(batch, heads, tokens, value_dim), (q*k).sum(-1).contiguous()
   state = state if state.uop.op is Ops.AFTER else state.contiguous()  # keep the AFTER chain of in-place state updates
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
-  fxn = functools.partial(_gated_delta_prefill_kernel, cast(str, q.device) != "CPU")
+  fxn = _gated_delta_prefill_kernel
   out = Tensor.custom_kernel(*srcs, *(() if initial is None else (initial,)), fxn=fxn)[0]
   return (out if static else out[:, :, :out_shape[2]]).reshape(out_shape)
 

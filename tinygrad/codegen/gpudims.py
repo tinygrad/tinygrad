@@ -43,6 +43,14 @@ def add_gpudims(ctx:Renderer, s:UOp):
   s_topo = list(s.toposort())
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
 
+  # renderers without local workgroups execute LOCAL/WARP ranges as sequential loops in the thread.
+  # this is only valid without cross-thread communication (BARRIER), local memory stays unsupported
+  if not ctx.has_local and any(r.op is Ops.RANGE and r.arg[-1] in (AxisType.LOCAL, AxisType.WARP) for r in s_topo):
+    if any(x.op is Ops.BARRIER or (x.op is Ops.BUFFER and x.addrspace is AddrSpace.LOCAL) for x in s_topo): return None
+    s = s.substitute({r: r.replace(arg=r.arg[0:-1]+(AxisType.LOOP,)) for r in s_topo if r.op is Ops.RANGE
+                      and r.arg[-1] in (AxisType.LOCAL, AxisType.WARP)})
+    s_topo = list(s.toposort())
+
   # get ranges
   all_ranges = {x.arg[0:-1]:x for x in s_topo if x.op is Ops.RANGE}
 
