@@ -198,6 +198,7 @@ class CPUDevice(HCQ2Compiled):
   pm_lower = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue)])
 
   def __init__(self, device:str=""):
+    self.workers:list[CPUWorker] = []
     super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], CPUProgram,
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
 
@@ -211,6 +212,12 @@ class CPUDevice(HCQ2Compiled):
                                               for f in (signal_prog, wait_prog, timestamp_prog, worker_prog)}
 
   def func_ptr(self, name:str) -> Buffer: return self.func_table.view(1, dtypes.uint64, FUNCS.index(name)*8).ensure_allocated()
+
+  def synchronize(self, timeout:int|None=None):
+    for worker in self.workers:
+      put, done = (getattr(worker, x)._buf.cpu_view().view(fmt='Q') for x in ("put", "done"))
+      while done[0] < put[0]: self._wait_signal(done, put[0], timeout)
+    super().synchronize(timeout)
 
   @functools.cached_property
   def func_table(self) -> Buffer:
@@ -232,5 +239,6 @@ class CPUDevice(HCQ2Compiled):
     sem = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(external_ptr=addr), preallocate=True)
 
     worker_args = [ring._buf.va_addr, sysbuf._buf.va_addr if WIN else self.func_ptr('sem_wait')._buf.va_addr, done._buf.va_addr, addr]
-    (worker:=threading.Thread(target=self.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in worker_args])).start()
-    return CPUWorker(ring, put, sem, sysbuf, done, worker)
+    (thread:=threading.Thread(target=self.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in worker_args])).start()
+    self.workers.append(worker:=CPUWorker(ring, put, sem, sysbuf, done, thread))
+    return worker
