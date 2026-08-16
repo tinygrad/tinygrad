@@ -343,6 +343,7 @@ class Compiled:
     from tinygrad.renderer import Renderer
     self.device, self.allocator, self.runtime_t, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
+    self.cached_renderer:dict[Any, Renderer] = {}
 
   @property
   def renderer(self) -> Renderer: return self._select_renderer()
@@ -362,7 +363,7 @@ class Compiled:
       f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} or {self.device}_CC={rn} instead"
     t = DEV.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
     return select_first_inited(select_by_name(self.renderers, self._renderer_name, t.renderer, f"{self.device} has no renderer {t.renderer!r}"),
-                               f"No renderer for {self.device} is available", t)
+                               f"No renderer for {self.device} is available", self.cached_renderer, t)
 
   def _select_iface(self, device:str):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
