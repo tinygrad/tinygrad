@@ -23,8 +23,7 @@ HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 
 HCQ_DEVS = frozenset(("AMD", "CPU"))
-HCQ_P2P_DEVS = HCQ_DEVS | frozenset(("CPU",))
-HCQ_CACHE_TAGS = frozenset(("program", "systems", "template"))
+HCQ_CACHE_TAGS = frozenset(("program", "systems"))
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -94,10 +93,10 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_
 # *****************
 # 1.1. prep: staging copies
 
-def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_P2P_DEVS)
+def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_DEVS)
 
 def _get_enqueue_devs(call:UOp) -> Any|None:
-  if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_P2P_DEVS) for b in bufs): return None
+  if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
   devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
   return devs if all_devices_in(devs, HCQ_DEVS) else None
 

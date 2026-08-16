@@ -343,9 +343,7 @@ class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, graph=None, arch=None):
     from tinygrad.renderer import Renderer
     self.device, self.allocator, self.runtime_t, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
-    self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.arch = arch
-    self.cached_renderer:dict[Any, Renderer] = {}
+    self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
 
   @property
   def renderer(self) -> Renderer: return self._select_renderer()
@@ -365,10 +363,10 @@ class Compiled:
       f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} or {self.device}_CC={rn} instead"
     t = DEV.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
     return select_first_inited(select_by_name(self.renderers, self._renderer_name, t.renderer, f"{self.device} has no renderer {t.renderer!r}"),
-                               f"No renderer for {self.device} is available", self.cached_renderer, t)
+                               f"No renderer for {self.device} is available", t)
 
   def _select_iface(self, device:str):
-    self.device_id = int(device.split(":")[1]) if ":" in device else 0 # iface selection runs before Compiled.__init__
+    self.device_id = int(device.split(":")[1]) if ":" in device else 0
     assert (v:=getenv(k:=f'{type(self).__name__[:-6].upper()}_IFACE', "")) == "",  \
       f"{k}={v} is deprecated, use DEV={replace(DEV.target(type(self).__name__[:-6]), interface=v)} instead"
     t = DEV.target(dev:=type(self).__name__[:-6])
