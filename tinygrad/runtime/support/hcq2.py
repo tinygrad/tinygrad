@@ -31,8 +31,8 @@ class HCQInfo:
   device:tuple[str, ...]
   estimates:Estimates = Estimates()
 
-  input_idxs:tuple[int, ...] = () # indexes into input_uops used by this call
-  inputs:int|None = None
+  input_idxs:tuple[tuple[tuple[str, ...], tuple[int, ...]], ...] = () # per inputs table: (devices, indexes into input_uops)
+  inputs:tuple[int, ...] = () # per inputs table: index into call.src
   kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...]], ...] = ()
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
@@ -353,7 +353,8 @@ def split_patches(call:UOp) -> UOp|None:
   lt_srcs = collections.defaultdict(list)
   for p in lt_patches: lt_srcs[p.buf_uop].append(p)
   return call.replace(src=(body, *call.src[1:], *[b.after(*ps) for b,ps in lt_srcs.items()], *fills),
-    arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=tuple(sorted(dedup(b.arg.slot for g in inputs for b in unwrap_mstack(g.buf_uop)))))))
+    arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=((call.arg.aux.device,
+      tuple(sorted(dedup(b.arg.slot for g in inputs for b in unwrap_mstack(g.buf_uop))))),) if inputs else call.arg.aux.input_idxs)))
 pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), split_patches)])
 
 # *****************
@@ -377,7 +378,7 @@ def replace_params(call:UOp) -> UOp|None:
 
   sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM} | _rank_ranges(tops)
-  info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.without_after.tag == "inputs"), None))
+  info = replace(call.arg.aux, inputs=tuple(i for i,u in enumerate(c_args + refhold) if u.without_after.tag == "inputs"))
   return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold),
                       arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
 pm_replace_params = PatternMatcher([
@@ -425,6 +426,28 @@ def callify_hcq(call:UOp, cf:UOp) -> UOp:
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
   UPat(Ops.CUSTOM_FUNCTION, arg="hcq_args", src=(UPat(Ops.SINK),), name="cf"),), name="call", allow_any_len=True), callify_hcq)])
 
+# *****************
+# 9. one C submitter per batch: the hcq programs of a batch become the cmds of one host queue submit, lowered like any other hcq call
+
+def merge_batch(batch:list[UOp]) -> UOp:
+  cmds = [c.src[0].src[0].call(*[x.mselect(j) if len(to_tuple((x:=a.without_after).device)) > 1 else x for a in c.src[1:]])
+          for c in batch for j in range(len(c.arg.aux.device))] # multi device programs run per lane
+  info = HCQInfo((HCQ_RUNTIME_DEV.value,), sum((c.arg.aux.estimates for c in batch), start=Estimates()),
+                 input_idxs=tuple(x for c in batch for x in c.arg.aux.input_idxs), kernels=tuple(k for c in batch for k in c.arg.aux.kernels))
+  call = make_call(f"hcq_submitter ({len(batch)})", make_submit(*cmds, devs=HCQ_RUNTIME_DEV.value, queue="HOST").sink(), info)
+  return call.replace(src=call.src + tuple(s for c in batch for s in c.src[1:])) # the inner patches and buffers stay linked and held
+
+def merge_submitters(linear:UOp) -> UOp:
+  batches = [(k, list(g)) for k, g in itertools.groupby(linear.src, key=lambda c: isinstance(c.arg.aux, HCQInfo))]
+  return linear.replace(src=tuple(c for is_hcq, b in batches for c in ([merge_batch(b)] if is_hcq and len(b) > 1 else b)))
+
+def hcq_lower(linear:UOp, pm_encode:PatternMatcher) -> UOp:
+  linear = graph_rewrite(linear, pm_encode, walk=True, name="encode and pack", enter_calls=True)
+  linear = graph_rewrite(linear, pm_early_simplify+symbolic, bottom_up=False, name="simplify patches", enter_calls=True)
+  linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
+  linear = graph_rewrite(linear, pm_replace_params, name="replace params")
+  return graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
+
 hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
 
 @rewrite_group(lambda linear,input_uops,profile,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
@@ -441,16 +464,10 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
     # schedule
     linear = graph_rewrite(linear, pm_schedule_and_merge, ctx=({s:p for p,s in back_map.items()}, profile), walk=True, name="schedule and merge hcq")
 
-    # lowering to hcq ir
-    linear = graph_rewrite(linear, pm_encode_cmdbufs+pm_pack_placeholders, walk=True, name="encode and pack", enter_calls=True)
-
-    # patches and runtime uops
-    linear = graph_rewrite(linear, pm_early_simplify+symbolic, bottom_up=False, name="simplify patches", enter_calls=True)
-    linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
-
-    # and compile it
-    linear = graph_rewrite(linear, pm_replace_params, name="replace params")
-    final_linear = hcq_compile_cache[cache_key] = graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
+    # lower to hcq programs, then pack the programs of every batch into one C submitter (needs a C runtime device for the program addresses)
+    linear = hcq_lower(linear, pm_encode_cmdbufs+pm_pack_placeholders)
+    if HCQ_RUNTIME_DEV.value.split(":")[0] == "CPU": linear = hcq_lower(merge_submitters(linear), pm_encode_cmdbufs)
+    final_linear = hcq_compile_cache[cache_key] = linear
 
   return final_linear
 

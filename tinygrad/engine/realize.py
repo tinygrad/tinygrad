@@ -166,9 +166,10 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   et = None
-  for device, (bufs, device_vars) in zip(to_tuple(call.src[1].device), unwrap_multi(call, resolve_params(call, ctx.input_uops))):
+  resolved = resolve_params(call, ctx.input_uops)
+  for device, (bufs, device_vars) in zip(to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
     var_vals = {**ctx.var_vals, **device_vars}
-    prg_bufs = [bufs[i].ensure_allocated() for i in ast.arg.globals]
+    prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
     global_size, local_size = ast.arg.launch_dims(var_vals)
     with track_stats(ctx, call, device, prg_bufs, var_vals) as tm:
@@ -200,10 +201,10 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   return t[0]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  if (info:=call.arg.aux).inputs is not None:
-    bufs = [_resolve(ctx.input_uops[i], ctx.input_uops).buffer for i in call.arg.aux.input_idxs]
-    table = call.src[1+info.inputs].buffer
-    for j,dev in enumerate(call.arg.aux.device):
+  for i, (devices, idxs) in zip((info:=call.arg.aux).inputs, info.input_idxs):
+    bufs = [_resolve(ctx.input_uops[k], ctx.input_uops).buffer for k in idxs]
+    table = call.src[1+i].buffer
+    for j,dev in enumerate(devices):
       addrs = array.array('Q', [(b.bufs[j] if isinstance(b, MultiBuffer) else b).get_buf(dev).va_addr for b in bufs])
       mv = (table.bufs[j] if isinstance(table, MultiBuffer) else table).ensure_allocated()._buf.cpu_view().view(fmt='Q')
       wait_cond(lambda: mv[0], value=0, timeout_ms=ctx.timeout or getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000), msg=f"{dev} hang detected")

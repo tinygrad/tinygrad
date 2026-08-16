@@ -64,7 +64,9 @@ def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
   return UOp(Ops.INS, dtypes.void, words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)), arg="cmd")
 
 def cpu_exec(ctx:tuple[str, ...], call:UOp, prg:UOp) -> UOp:
-  args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in prg.arg.vars]
+  lane = next((a.arg for a in get_call_arg_uops(call) if a.op is Ops.MSELECT), None) # a batch submitter runs multi device programs per lane
+  args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + \
+         [UOp.const(lane, dtypes.uint64) if lane is not None and v.arg.name == '_device_num' else v.cast(dtypes.uint64) for v in prg.arg.vars]
   if (core:=prg.arg.runtimevars.get('core_id')) is None: return cpu_cmd(ctx, prg, *args)
 
   la = [cpu_cmd(ctx,prg,*args[:(cid:=(len(prg.arg.globals)+core))],UOp.const(t, dtypes.uint64),*args[cid+1:]) for t in range(prg.arg.global_size[0])]
@@ -89,6 +91,9 @@ def encode_queue(q:UOp) -> UOp:
   cnt = sum(len(ins.src) for ins in lin.src) // CMD_SIZE
   assert cnt < RING_SLOTS, f"submit of {cnt} entries doesn't fit the ring"
   cmdbuf = make_cmdbuf(lin, devs, buf=UOp.placeholder((cnt*CMD_SIZE,), dtypes.uint64, next(UOp.unique_num), device=devs).rtag("cmdbuf"))
+  if queue == "HOST": # the submitter runs the cmds itself, in order
+    e = UOp.range(cnt, next(UOp.unique_num), dtype=dtypes.int, src=(cmdbuf,))
+    return (entry:=[cmdbuf.index(e*CMD_SIZE + i).load() for i in range(CMD_SIZE)])[0].call(*entry[1:], ret_dtype=dtypes.void).end(e)
   ring = UOp.placeholder((ring_words:=RING_SLOTS*CMD_SIZE,), dtypes.uint64, 0, device=devs, volatile=True).rtag(f"{queue}_ring")
   put, done, sem, sysbuf = (make_signal(devs, tag=f"{queue}_{name}") for name in ("put", "done", "sem", "sys"))
 
