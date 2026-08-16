@@ -441,6 +441,11 @@ def merge_submitters(linear:UOp) -> UOp:
   batches = [(k, list(g)) for k, g in itertools.groupby(linear.src, key=lambda c: isinstance(c.arg.aux, HCQInfo))]
   return linear.replace(src=tuple(c for is_hcq, b in batches for c in ([merge_batch(b)] if is_hcq else b)))
 
+# *****************
+# hcq schedule
+
+hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
+
 def hcq_lower(linear:UOp, pm_encode:PatternMatcher) -> UOp:
   # lowering to hcq ir
   linear = graph_rewrite(linear, pm_encode, walk=True, name="encode and pack", enter_calls=True)
