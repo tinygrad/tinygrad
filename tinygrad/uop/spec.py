@@ -220,17 +220,27 @@ spec_program = PatternMatcher([
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 
+  # if has a <gate, index_for_dedup>
+  # TODO: rm this IF/ENDIF once all renderers have been refactored to support new control flow
+  (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),
+  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
+
+  # GETTUPLE extracts a block argument TODO: unify old GETTUPLE with new version
+  (UPat(Ops.GETTUPLE, src=(UPat(name="y"),), name="x"), lambda y,x: isinstance(x.arg, int) and matches_dtype(y.get_arg(x.arg), x.dtype)),
+
   # control flow
-  # IF before being wired to the CFG
+  (UPat(Ops.START, dtypes.void), lambda: True),
+  # IF before and after being wired to the CFG
   (UPat(Ops.IF, dtypes.void, (UPat(dtype=dtypes.bool),)), lambda: True),
-  # IF after being wired to the CFG
   (UPat(Ops.IF, dtypes.void, (UPat(GroupOp.Control), UPat(dtype=dtypes.bool))), lambda: True),
-  (UPat(Ops.ENDIF, dtypes.void), lambda: True),
-  (UPat(Ops.GETTUPLE, src=(UPat((Ops.RANGE, Ops.ENDIF, Ops.START)),)), lambda: True),
+  # THEN/ELSE are the branches of the IF
   (UPat((Ops.THEN, Ops.ELSE), dtypes.void, (UPat(Ops.IF),), allow_any_len=True), lambda: True),
-  (UPat(Ops.ELSE), lambda: True),
-  (UPat(Ops.END), lambda: True),
-  (UPat(Ops.START), lambda: True),
+  # ENDIF merges the control flow split by the IF
+  (UPat(Ops.ENDIF, dtypes.void, (UPat(GroupOp.Control), UPat(GroupOp.Control))), lambda: True),
+  # END is a special IF, if True the successor is RANGE, if False the successor is the END's consumer
+  # src[3:] are args END passes to RANGE
+  (UPat(Ops.END, dtypes.void, (UPat(GroupOp.Control), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool)), allow_any_len=True, name="x"),
+   lambda x: all(matches_dtype(rng_arg, end_arg.dtype) for rng_arg,end_arg in zip(x.src[1].src[1:], x.src[3:]))),
 
   # SPECIAL is int32 after index lowering
   (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: matches_dtype(x, s.dtype) and isinstance(s.arg, str)),
