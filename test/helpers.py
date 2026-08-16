@@ -86,7 +86,7 @@ def assert_jit_cache_len(fxn, expected_len):
   if linear is None or not linear.src:
     if expected_len != 0: raise KernelCountException(expected_len, 0)
     return
-  if expected_len and all(call_is_hcq(call) for call in linear.src): expected_len = 3 # HCQ2: merged same-queue calls + finalizer + bumps
+  if expected_len and all(call_is_hcq(call) for call in linear.src): expected_len = 4 # HCQ2: fence + reset + merged same-queue calls + finalizer
   if call_is_graph(linear.src[0]):
     if len(linear.src) != 1: raise KernelCountException(1, len(linear.src))
     inner = linear.src[0].src[0].src[0]  # LINEAR UOp inside CUSTOM_FUNCTION

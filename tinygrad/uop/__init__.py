@@ -13,9 +13,6 @@ class FastEnum(IntEnum):
 class Ops(FastEnum):
   # ** 1 -- defines/special **
 
-  # BIND pairs a symbolic PARAM with a concrete value
-  BIND = auto()
-
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
 

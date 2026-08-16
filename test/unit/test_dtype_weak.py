@@ -76,6 +76,11 @@ class TestWeakPromotion(unittest.TestCase):
       committed = graph_rewrite((UOp.const(1).cast(dtypes.int32) + UOp.const(1.0)).cast(dtypes.float32), pm_lower_index_dtype, ctx={})
     self.assertEqual([u.dtype for u in committed.toposort() if u.op is Ops.ADD], [dtypes.float32])
 
+  def test_div_sub_operand_kept_weak(self):
+    a = Tensor.empty(4, dtype=dtypes.float32)
+    for t in (a / 1, a - 0):
+      self.assertEqual(t.uop.src[1].dtype, dtypes.weakfloat)
+
   def test_cast_weak_expression_commits_at_cast_floor(self):
     # the floor never narrows: a cast BELOW the default does not pull the compute width down with it
     with Context(DEFAULT_FLOAT=dtypes.float32):
@@ -87,6 +92,13 @@ class TestWeakPromotion(unittest.TestCase):
       denom = Tensor.ones(1, dtype=dtypes.int32, device="CPU").sum() * 70000 + 1e-5
       out = Tensor(1.0, dtype=dtypes.float32, device="CPU") / denom
       self.assertAlmostEqual(out.item(), 1 / (70000 + 1e-5), places=10)
+
+  def test_stacked_weak_casts_convert_each_kind(self):
+    # each weak cast is a kind conversion: weakint truncates before weakfloat re-lifts (neither is only a marker)
+    x = Tensor([2.5, -3.7], dtype=dtypes.float32, device="CPU")
+    stacked = x.cast(dtypes.weakint).cast(dtypes.weakfloat)
+    self.assertIs(stacked.dtype, dtypes.weakfloat)
+    self.assertEqual(stacked.tolist(), [2.0, -3.0])
 
   def test_uop_scalar_const_lifts_kind(self):
     for dtype, value, out_dtype, const_dtype in ((dtypes.weakint, 1, dtypes.weakint, dtypes.weakint),

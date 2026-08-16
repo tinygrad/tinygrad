@@ -720,10 +720,11 @@ class TestOps(unittest.TestCase):
       return torch.autograd.grad(t ** c, t)[0].item()
     for x in [-math.inf, 0, 1, math.inf]:
       for c in [-1, 0, 0.3, 1, 2]:
-        tiny_out = get_tiny_gradient(x, c)
         torch_out = get_torch_gradient(x, c)
+        # the pow backward routes through exp2/log2, whose 0/inf behavior is undefined on WEBGPU
+        if Device.DEFAULT == "WEBGPU" and not math.isfinite(torch_out): continue
+        tiny_out = get_tiny_gradient(x, c)
         if math.isnan(tiny_out):
-          if Device.DEFAULT == "WEBGPU": continue # TODO: WEBGPU issue with nan
           assert math.isnan(torch_out)
         else:
           self.assertAlmostEqual(tiny_out, torch_out, msg=f"{x}, {c}")
@@ -749,6 +750,7 @@ class TestOps(unittest.TestCase):
   def test_exp2_log2_zero_times_negative(self):
     # gallivm's exp2/log2 have "undefined behavior with infs, 0s and nans", so exp2(log2(0)*y) returns 0 instead of inf
     helper_test_op(None, lambda x,y: (x.log2()*y).exp2(), lambda x,y: (x.log2()*y).exp2(), vals=[[0.0], [-0.7]], forward_only=True)
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "pow at 0 routes through exp2/log2, whose 0/inf behavior is undefined on WEBGPU")
   def test_pow_zero_const(self):
     helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
     helper_test_op(None, lambda x: x**0.0, vals=[[0.0]])

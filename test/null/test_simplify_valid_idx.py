@@ -25,7 +25,7 @@ def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UO
   ))
 
 def Special(expr, nmax): return UOp(Ops.SPECIAL, src=(UOp.const(nmax),), arg=expr)
-def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
+def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax, param=True)
 def Range(n, nmax): return UOp.range(nmax, n)
 
 class TestValidIdxSimplification(unittest.TestCase):
