@@ -24,10 +24,10 @@ class CLCompiler(Compiler):
     super().__init__(f"compile_cl_{compile_key}")
   def compile(self, src:str) -> bytes:
     program = checked(cl.clCreateProgramWithSource(self.dev.context, 1, to_char_p_p([src.encode()]), None, status := ctypes.c_int32()), status)
-    build_status: int = cl.clBuildProgram(program, 1, self.dev.device_id, None, BP_CB(), None)
+    build_status: int = cl.clBuildProgram(program, 1, self.dev.cl_dev, None, BP_CB(), None)
     if build_status != 0:
-      cl.clGetProgramBuildInfo(program, self.dev.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, log_size := ctypes.c_size_t())
-      cl.clGetProgramBuildInfo(program, self.dev.device_id, cl.CL_PROGRAM_BUILD_LOG,
+      cl.clGetProgramBuildInfo(program, self.dev.cl_dev, cl.CL_PROGRAM_BUILD_LOG, 0, None, log_size := ctypes.c_size_t())
+      cl.clGetProgramBuildInfo(program, self.dev.cl_dev, cl.CL_PROGRAM_BUILD_LOG,
                                log_size.value, mstr := ctypes.create_string_buffer(log_size.value), None)
       raise CompileError(f"OpenCL Compile Error\n\n{mstr.value.decode()}")
     check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARY_SIZES, ctypes.sizeof(ctypes.c_size_t), binary_sizes := (ctypes.c_size_t * 1)(), None))
@@ -39,11 +39,11 @@ class CLCompiler(Compiler):
 class CLProgram(Program['CLDevice']):
   def __init__(self, device:CLDevice, obj:TinyELF):
     self.dev, self.lib, self.signature = device, device.cl_compiler.compile_cached(obj.lib.decode()), obj.signature
-    self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, device.device_id, (ctypes.c_size_t * 1)(len(self.lib)),
+    self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, device.cl_dev, (ctypes.c_size_t * 1)(len(self.lib)),
                                                         to_char_p_p([self.lib], ctypes.c_ubyte), binary_status := ctypes.c_int32(),
                                                         errcode_ret := ctypes.c_int32()), errcode_ret)
     check(binary_status.value)
-    check(cl.clBuildProgram(self.program, 1, device.device_id, None, BP_CB(), None)) # NOTE: OSX requires this
+    check(cl.clBuildProgram(self.program, 1, device.cl_dev, None, BP_CB(), None)) # NOTE: OSX requires this
     self.kernel = checked(cl.clCreateKernel(self.program, obj.name.encode(), status := ctypes.c_int32()), status)
 
   def __del__(self):
@@ -101,17 +101,17 @@ class CLDevice(Compiled):
       CLDevice.device_ids = c.init_c_var((cl.cl_device_id * num_devices.value),
                                          lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))
 
-    self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
-    self.device_name = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_NAME, 256,
+    self.cl_dev = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
+    self.device_name = (cl.clGetDeviceInfo(self.cl_dev, cl.CL_DEVICE_NAME, 256,
                                            buf:=ctypes.create_string_buffer(256), None), buf.value.decode())[1]
-    self.driver_version = (cl.clGetDeviceInfo(self.device_id, cl.CL_DRIVER_VERSION, 256,
+    self.driver_version = (cl.clGetDeviceInfo(self.cl_dev, cl.CL_DRIVER_VERSION, 256,
                                               buf:=ctypes.create_string_buffer(256), None), buf.value.decode())[1]
     if DEBUG >= 1: print(f"CLDevice: opening {self.device_name} with version {self.driver_version}")
-    self.context = checked(cl.clCreateContext(None, 1, self.device_id, CC_CB(), None, status := ctypes.c_int32()), status)
-    self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, status), status)
+    self.context = checked(cl.clCreateContext(None, 1, self.cl_dev, CC_CB(), None, status := ctypes.c_int32()), status)
+    self.queue = checked(cl.clCreateCommandQueue(self.context, self.cl_dev, cl.CL_QUEUE_PROFILING_ENABLE, status), status)
     self.pending_copyin: list[memoryview] = []
-    check(cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_EXTENSIONS, 0, None, ctypes.byref(exts_len:=ctypes.c_size_t())))
-    self.device_exts = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_EXTENSIONS, exts_len.value,
+    check(cl.clGetDeviceInfo(self.cl_dev, cl.CL_DEVICE_EXTENSIONS, 0, None, ctypes.byref(exts_len:=ctypes.c_size_t())))
+    self.device_exts = (cl.clGetDeviceInfo(self.cl_dev, cl.CL_DEVICE_EXTENSIONS, exts_len.value,
                                            ctypes.byref(buf := ctypes.create_string_buffer(exts_len.value)), None),
                                            ctypes.string_at(buf).decode().split())[1]
 
@@ -119,7 +119,7 @@ class CLDevice(Compiled):
 
     arch = ",".join(self.device_exts)
     if "cl_khr_image2d_from_buffer" in self.device_exts:
-      check(cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_IMAGE_PITCH_ALIGNMENT, 4, ctypes.byref(ipa := ctypes.c_uint32()), None))
+      check(cl.clGetDeviceInfo(self.cl_dev, cl.CL_DEVICE_IMAGE_PITCH_ALIGNMENT, 4, ctypes.byref(ipa := ctypes.c_uint32()), None))
       arch += f",IMAGE_PITCH_ALIGNMENT={ipa.value}"
     super().__init__(device, CLAllocator(self), [OpenCLRenderer], CLProgram, arch=arch)
 

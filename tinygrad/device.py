@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
+from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal
 from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
@@ -338,9 +338,12 @@ class Compiled:
 
   has_copy_queue:bool = True
 
+  ifaces:list[Callable] = []
+
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, graph=None, arch=None):
     from tinygrad.renderer import Renderer
     self.device, self.allocator, self.runtime_t, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
+    self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.arch = arch
     self.cached_renderer:dict[Any, Renderer] = {}
 
@@ -364,11 +367,21 @@ class Compiled:
     return select_first_inited(select_by_name(self.renderers, self._renderer_name, t.renderer, f"{self.device} has no renderer {t.renderer!r}"),
                                f"No renderer for {self.device} is available", self.cached_renderer, t)
 
+  def _select_iface(self, device:str):
+    self.device_id = int(device.split(":")[1]) if ":" in device else 0 # iface selection runs before Compiled.__init__
+    assert (v:=getenv(k:=f'{type(self).__name__[:-6].upper()}_IFACE', "")) == "",  \
+      f"{k}={v} is deprecated, use DEV={replace(DEV.target(type(self).__name__[:-6]), interface=v)} instead"
+    t = DEV.target(dev:=type(self).__name__[:-6])
+    filtered = select_by_name(self.ifaces, lambda i: i.__name__[:-5], t.interface, f"{dev} has no interface {t.interface!r}")
+    filtered = [i for i in filtered if t.interface.startswith("MOCK") or not i.__name__[:-5].startswith("MOCK")] # never fallback to mock ifaces
+    return select_first_inited([functools.partial(iface, self, self.device_id) for iface in filtered],
+                               f"No interface for {dev}:{self.device_id} is available")
+
   def count(self) -> int:
     """
     Returns the number of physical accelerators available to the runtime.
     """
-    return 1
+    return self.iface.count if hasattr(self, 'iface') else 1
 
   def synchronize(self):
     """
@@ -386,7 +399,7 @@ class Compiled:
     """
     Called at the end of process lifetime to allow the device to finalize.
     """
-    # override this in your device implementation
+    if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
 
 if PROFILE:
   @atexit.register
@@ -408,7 +421,7 @@ def enumerate_devices_str() -> Generator[str, None, None]:
     ren_results, iface_results = [], []
     try:
       d = Device[device]
-      for iface in [i for i in getattr(d, 'ifaces', []) if not i.__name__.startswith("MOCK")]:
+      for iface in [i for i in d.ifaces if not i.__name__.startswith("MOCK")]:
         try:
           name = iface.__name__[:-5]
           default_text, count = ("(default)", d.count()) if type(d.iface) is iface else (f"(DEV={name}+{device} to make default)", iface(d, 0).count) # type: ignore
