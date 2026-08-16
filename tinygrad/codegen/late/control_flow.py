@@ -111,45 +111,48 @@ pm_add_control_flow2 = PatternMatcher([
 
 class LowerRegBufferContext:
   def __init__(self, sink:UOp):
-    self.range_regbuf: dict[UOp, UOp] = {}
-    self.regbuf_init: dict[UOp, dict[UOp, UOp]] = {}
-    self.regbuf_update: dict[UOp, dict[UOp, UOp]] = {}
+    self.regbuf_init: dict[tuple[UOp, UOp], UOp] = {}
+    self.rng_args: dict[UOp, dict[tuple[UOp, UOp], UOp]] = {}
+    self.end_args: dict[UOp, dict[tuple[UOp, UOp], UOp]] = {}
+
+    def after_rng(u:UOp): return u.op is Ops.AFTER and u.src[0].op is Ops.BUFFER and u.src[0].addrspace is AddrSpace.REG and u.src[1].op is Ops.STORE
 
     for u in sink.toposort():
-      if u.op is Ops.AFTER and u.src[0].op is Ops.BUFFER and u.src[0].addrspace is AddrSpace.REG and u.src[1].op is Ops.STORE:
+      if after_rng(u):
         for s in u.src:
-          if s.op is Ops.STORE: self.regbuf_init.setdefault(u.src[0], {})[s.src[0].src[1]] = s.src[1]
-          if s.op is Ops.RANGE: self.range_regbuf[s] = u.src[0]
-      if u.op is Ops.STORE and (after:=u.src[0].src[0]).op is Ops.AFTER and (buf:=after.src[0]).op is Ops.BUFFER and buf.addrspace is AddrSpace.REG:
-        self.regbuf_update.setdefault(buf, {})[u.src[0].src[1]] = u.src[1]
+          if s.op is Ops.STORE: self.regbuf_init[(u.src[0], s.src[0].src[1])] = s.src[1]
+
+      if u.op is Ops.STORE and after_rng(u.src[0].src[0]):
+        after = u.src[0].src[0]
+        buf = after.src[0]
+        arg = self.regbuf_init[(buf, u.src[0].src[1])]
+        idx = (buf, u.src[0].src[1])
+        rngs = [s for s in after.src if s.op is Ops.RANGE]
+        for i,rng in enumerate(rngs):
+          if i == 0: self.rng_args.setdefault(rng, {})[idx] = arg
+          else: self.rng_args.setdefault(rng, {})[idx] = UOp(Ops.GETTUPLE, arg.dtype, (rngs[i-1],), len(self.rng_args[rngs[i-1]]))
+          self.end_args.setdefault(rng, {})[idx] = u.src[1]
 
 def lower_end_args(ctx:LowerRegBufferContext, end:UOp) -> UOp|None:
-  if end.src[1] not in ctx.range_regbuf: return None
-  args = tuple(ctx.regbuf_update[ctx.range_regbuf[end.src[1]]].values())
-  return end.replace(src=end.src[:4] + args)
+  if end.src[1] not in ctx.end_args: return None
+  return end.replace(src=end.src[:4] + tuple(ctx.end_args[end.src[1]].values()))
 
 def lower_range_args(ctx:LowerRegBufferContext, rng:UOp) -> UOp|None:
-  if rng not in ctx.range_regbuf: return None
-  buf = ctx.range_regbuf[rng]
-  args = tuple(ctx.regbuf_init[buf].values())
-  # if rng is an inner range in a reduce it takes the projs of the args of the outer reduce range
-  if rng.src[0] in ctx.range_regbuf and ctx.range_regbuf[rng.src[0]] is buf:
-    args = tuple(UOp(Ops.GETTUPLE, s.dtype, (rng.src[0],), 1+i) for i,s in enumerate(args))
-  return rng.replace(src=rng.src + args)
+  if rng not in ctx.rng_args: return None
+  return rng.replace(src=rng.src + tuple(ctx.rng_args[rng].values()))
 
 # the after/index/load sequence after the END is removed and the updated value is accessed directly
 def lower_load_after(ctx:LowerRegBufferContext, buf:UOp, end:UOp, ofst:UOp) -> UOp|None:
   if buf.addrspace is not AddrSpace.REG: return None
+  val = ctx.end_args[end.src[1]].get((buf, ofst))
   # if value isn't updated we access the init directly, no block arg is created
-  if ofst not in ctx.regbuf_update[buf]: return ctx.regbuf_init[buf][ofst]
-  return ctx.regbuf_update[buf][ofst]
+  return ctx.regbuf_init[(buf, ofst)] if val is None else val
 
 # the buffer/index/store/after/index/load sequence is removed and the block argument is accessed directly
 def lower_load_update(ctx:LowerRegBufferContext, load:UOp, ofst:UOp, buf:UOp, after:UOp) -> UOp|None:
   if buf.addrspace != AddrSpace.REG: return None
   inner_rng = after.src[-1]
-  proj = UOp(Ops.GETTUPLE, load.dtype, (inner_rng,), 1+next(i for i,of in enumerate(ctx.regbuf_update[buf]) if of is ofst))
-  return proj
+  return UOp(Ops.GETTUPLE, load.dtype, (inner_rng,), 1+next(i for i,idx in enumerate(ctx.rng_args[inner_rng]) if idx == (buf, ofst)))
 
 after_end = UPat(Ops.AFTER, src=(UPat(Ops.BUFFER, name="buf"), UPat(Ops.END, name="end")))
 after_endif = UPat(Ops.AFTER, src=(UPat(Ops.BUFFER, name="buf"), UPat(Ops.ENDIF, src=(UPat(Ops.END, name="end"),), allow_any_len=True)))
@@ -163,8 +166,4 @@ pm_lower_reg_buffer = PatternMatcher([
   (UPat(Ops.END, name="end"), lower_end_args),
 ])
 
-# TODO: 3 issues with the current lower reg buffer
-# 1 - must handle gated range, in that case the endif must merge the updated arg inside END and the init arg in ELSE
-# 2 - must handle reduce across 2 ranges where there's an IF/ENDIF between them, so you don't get the outer rng by looking at the inner rngs idom
-# 3 - must handle reduce range with 2 BUFFER, can't assume 1 red range == 1 BUFFER
-
+# TODO: must handle gated range, in that case the endif must merge the updated arg inside END and the init arg in ELSE
