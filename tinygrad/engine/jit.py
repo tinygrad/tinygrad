@@ -62,17 +62,27 @@ def _copy_input(u:UOp) -> UOp:
   run_linear(UOp(Ops.LINEAR, src=(u.copy_to_device(u.device).call(new:=UOp.new_buffer(u.device, u.max_numel(), u.dtype), u),)))
   return new
 
+def _get_written_uops(linear:UOp) -> frozenset[UOp]:
+  out:set[UOp] = set()
+  for call in linear.toposort():
+    if call.op is not Ops.CALL: continue
+    arg_uops = get_call_arg_uops(call)
+    outs, ins = get_call_outs_ins(call)
+    out |= {b for k in set(outs) - set(ins) if (b:=u if (cv:=(u:=arg_uops[k]).contiguous_view()) is None else cv[0]).op is Ops.BUFFER}
+  return frozenset(out)
+
 @rewrite_group(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
-def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
+def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> tuple[UOp, frozenset[UOp]]:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
   linear = memory_plan_rewrite(linear, held_bufs)
+  written_uops = _get_written_uops(linear)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
-  return linear
+  return linear, written_uops
 
 class GraphException(Exception): pass
 class JitError(Exception): pass
@@ -165,24 +175,24 @@ class CapturedJit(Generic[ReturnType]):
   _linear: UOp
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
+  _pre_written_uops: frozenset[UOp]
 
   @functools.cached_property
   def linear(self) -> UOp: return link_linear(self._linear)
 
-  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
+  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info, self._pre_written_uops)
 
   @functools.cached_property
-  def _written_uops(self) -> set[UOp]:
-    out: set[UOp] = set()
-    for call in self.linear.toposort():
-      if call.op is not Ops.CALL: continue
-      arg_uops = get_call_arg_uops(call)
-      outs, ins = get_call_outs_ins(call)
-      out |= {b for k in set(outs) - set(ins) if (b:=u if (cv:=(u:=arg_uops[k]).contiguous_view()) is None else cv[0]).op is Ops.BUFFER}
-    return out
+  def _written_uops(self) -> frozenset[UOp]: return _get_written_uops(self.linear)
+
+  @functools.cached_property
+  def _input_alias_uops(self) -> frozenset[UOp]: return self._pre_written_uops | self._written_uops
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
-    concrete = tuple(_copy_input(u) if u in self._written_uops else u for u in input_uops)
+    for u in self._pre_written_uops:
+      if (buf:=buffers.get(u)) is not None:
+        for b in (buf.bufs if isinstance(buf, MultiBuffer) else (buf,)): b.ensure_allocated()
+    concrete = tuple(_copy_input(u) if u in self._input_alias_uops else u for u in input_uops)
     if DEBUG >= 1 and len(self.linear.src) >= 10: print(f"jit execs {len(self.linear.src)} calls")
     run_linear(self.linear, var_vals, input_uops=concrete, jit=True)
     return self.ret
@@ -191,11 +201,20 @@ class CapturedJit(Generic[ReturnType]):
     # drop graph runners
     for call in self.linear.src:
       if call.src[0].op is Ops.CUSTOM_FUNCTION and call.src[0].arg == "graph": graph_cache.pop(call.src[0], None)
-    for u in self._written_uops:
+    freed = False
+    for u in self._input_alias_uops:
       if (buf:=buffers.get(u)) is None: continue
       for b in (buf.bufs if isinstance(buf, MultiBuffer) else (buf,)):
-        if b.is_initialized(): b.deallocate()
-        if (base:=b._base) is not None and base.allocated_views == 0 and base.is_allocated(): base.deallocate()
+        if b.is_initialized():
+          b.deallocate()
+          freed = True
+        if (base:=b._base) is not None and base.allocated_views == 0 and base.is_allocated():
+          base.deallocate()
+          freed = True
+    if freed:
+      from tinygrad.runtime.support.hcq2 import link_linear_cache
+      link_linear_cache.pop(self._linear.key, None)
+      for name in ("linear", "_written_uops", "_input_alias_uops"): self.__dict__.pop(name, None)
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
@@ -272,8 +291,8 @@ class _TinyJit(Generic[ReturnType]):
 
       # hold all buffers reachable from live Tensors (e.g. lazy .grad created during capture), the memory planner can't suballocate those
       held_bufs = set(buffers) | {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if u.op is Ops.BUFFER}
-      linear = jit_lower(big_linear, held_bufs, input_buf_uops)
-      self.captured = CapturedJit(ret, linear, names, expected_input_info)
+      linear, written_uops = jit_lower(big_linear, held_bufs, input_buf_uops)
+      self.captured = CapturedJit(ret, linear, names, expected_input_info, written_uops)
       ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
       # jit exec

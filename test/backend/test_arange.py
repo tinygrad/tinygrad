@@ -9,11 +9,12 @@ from test.helpers import needs_second_gpu, check_schedule, assert_kernel_count, 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
     GlobalCounters.reset()
-    linear = compile_linear(tensor.schedule_linear())
+    linear = tensor.schedule_linear()
     if len(linear.src) != 1: raise KernelCountException(1, len(linear.src))
+    compiled = compile_linear(linear)
     run_linear(linear)
     np.testing.assert_equal(tensor.numpy(), desired)
-    return estimate_uop(linear.src[-1]).ops
+    return estimate_uop(compiled.src[-1]).ops
 
   def test_arange_complexity(self):
     self.assertLess(self._get_flops(Tensor.arange(256).clone(), np.arange(256)), 256*4)

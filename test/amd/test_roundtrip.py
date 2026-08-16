@@ -56,13 +56,13 @@ class KernelSnapshot:
 
 def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, int], dict[int, bytes]]:
   """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
-  from tinygrad import Tensor
+  from tinygrad import Tensor, Context
   from tinygrad.uop.ops import Ops
   from tinygrad.engine.realize import compile_linear, resolve_params, unwrap_multi
   from tinygrad.runtime.support.elf import elf_loader
 
   out = op_fn(Tensor)
-  linear = compile_linear(out.schedule_linear())
+  with Context(HCQ2=0): linear = compile_linear(out.schedule_linear())
   kernels = []
   buf_pool: dict[int, int] = {}  # buffer id -> size
   buf_data: dict[int, bytes] = {}  # buffer id -> initial data from COPY

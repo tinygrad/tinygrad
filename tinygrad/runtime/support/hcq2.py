@@ -128,7 +128,8 @@ class HCQDepsTracker(DepsTracker):
 
 def _get_call_bufs_by_lane(call:UOp, devices:tuple[str, ...]) -> list[list[Any]]:
   refs = get_call_arg_uops(call)
-  return [[b if b.op is Ops.PARAM else mb.bufs[lane] if isinstance(mb:=b.buffer, MultiBuffer) else mb for b in refs] for lane in range(len(devices))]
+  return [[b.base if b.base.op is Ops.PARAM else mb.bufs[lane] if isinstance(mb:=b.buffer, MultiBuffer) else mb for b in refs]
+          for lane in range(len(devices))]
 
 def _get_deps(ctx:DepsTracker, bufs_by_lane:list[list[Any]], write, key:tuple[tuple[str, ...], str, int]) -> list[tuple[tuple, int, int]]:
   dep_lanes:list[tuple[tuple, int, int]] = []
@@ -420,7 +421,8 @@ pm_pack_placeholders = PatternMatcher([
 # 8. callify hcq programs
 
 def callify_hcq(call:UOp, cf:UOp) -> UOp:
-  prg = to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device[HCQ_RUNTIME_DEV.value].renderer)
+  with Context(EMULATED_DTYPES=""):
+    prg = to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device[HCQ_RUNTIME_DEV.value].renderer)
   return call.replace(src=(cf.replace(src=(prg,), arg="hcq"), *call.src[1:]))
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
   UPat(Ops.CUSTOM_FUNCTION, arg="hcq_args", src=(UPat(Ops.SINK),), name="cf"),), name="call", allow_any_len=True), callify_hcq)])
