@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import cast, Callable, TypeVar, Generic, Any, Sequence, Iterable
+from typing import cast, TypeVar, Generic, Any, Sequence, Iterable
 import struct, functools, time, collections, itertools, decimal, statistics
 from dataclasses import replace, dataclass
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
+from tinygrad.helpers import suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
 from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar, perf_counter_us, Context
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphEvent
@@ -23,8 +23,7 @@ HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 
 HCQ_DEVS = frozenset(("AMD", "CPU"))
-HCQ_P2P_DEVS = HCQ_DEVS | frozenset(("CPU",))
-HCQ_CACHE_TAGS = frozenset(("program", "systems", "template"))
+HCQ_CACHE_TAGS = frozenset(("program", "systems"))
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -94,10 +93,10 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_
 # *****************
 # 1.1. prep: staging copies
 
-def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_P2P_DEVS)
+def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_DEVS)
 
 def _get_enqueue_devs(call:UOp) -> Any|None:
-  if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_P2P_DEVS) for b in bufs): return None
+  if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
   devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
   return devs if all_devices_in(devs, HCQ_DEVS) else None
 
@@ -532,7 +531,6 @@ class HCQ2Compiled(Compiled):
   wait_timeout_ms: float = 30000.0
 
   def __init__(self, device:str, allocator:HCQAllocator, compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
-    self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
     self.can_recover = can_recover
 
     self.pm_bufferize = PatternMatcher([
@@ -596,26 +594,12 @@ class HCQ2Compiled(Compiled):
 
   def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
 
-  def count(self) -> int: return self.iface.count if hasattr(self, 'iface') else 1
-
-  def _select_iface(self):
-    assert (v:=getenv(k:=f'{type(self).__name__[:-6].upper()}_IFACE', "")) == "",  \
-      f"{k}={v} is deprecated, use DEV={replace(DEV.target(type(self).__name__[:-6]), interface=v)} instead"
-    assert hasattr(self, "ifaces"), "must have ifaces to select an iface"
-    t = DEV.target(dev:=type(self).__name__[:-6])
-    filtered = select_by_name(self.ifaces, lambda i: i.__name__[:-5], t.interface, f"{dev} has no interface {t.interface!r}")
-    filtered = [i for i in filtered if t.interface.startswith("MOCK") or not i.__name__[:-5].startswith("MOCK")] # never fall back to mock ifaces
-    return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in filtered],
-                               f"No interface for {dev}:{self.device_id} is available")
-
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
   def finalize(self):
     try: self.synchronize() # try to finalize the device in any case
     except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
-
-    # if the device has an interface, call device_fini to clean up resources
-    if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
+    super().finalize()
 
 @dataclass
 class HCQ2Buffer:
