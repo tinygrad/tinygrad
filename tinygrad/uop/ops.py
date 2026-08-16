@@ -471,10 +471,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret
 
   @property
-  def max_shape(self) -> tuple[int, ...]: return to_max_shape(self.shape)
-  def max_numel(self) -> int: return prod(self.max_shape)
-
-  @property
   def shard_shape(self) -> tuple[sint, ...]:
     if not isinstance(self.device, tuple) or self.axis is None: return self.shape
     dcount = int(self.src[1].vmax)+1 if self.op is Ops.UNSHARD else len(self.device)
