@@ -421,21 +421,22 @@ pm_pack_placeholders = PatternMatcher([
 # 8. callify hcq programs
 
 def callify_hcq(call:UOp, cf:UOp) -> UOp:
-  prg = to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device[HCQ_RUNTIME_DEV.value].renderer)
+  name = "hcq_submitter" if (call.arg.name or "").startswith("hcq_submitter") else "hcq_submit"
+  prg = to_program(cf.src[0].replace(arg=KernelInfo(name), tag=1), Device[HCQ_RUNTIME_DEV.value].renderer)
   return call.replace(src=(cf.replace(src=(prg,), arg="hcq"), *call.src[1:]))
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
   UPat(Ops.CUSTOM_FUNCTION, arg="hcq_args", src=(UPat(Ops.SINK),), name="cf"),), name="call", allow_any_len=True), callify_hcq)])
 
 # *****************
-# 9. one C submitter per batch: the hcq programs of a batch become the cmds of one host queue submit, lowered like any other hcq call
+# 9. one C submitter per batch: the hcq programs of a batch become one CPU queue submit, lowered like any other hcq call
 
 def merge_batch(batch:list[UOp]) -> UOp:
   cmds = [c.src[0].src[0].call(*[x.mselect(j) if len(to_tuple((x:=a.without_after).device)) > 1 else x for a in c.src[1:]])
           for c in batch for j in range(len(c.arg.aux.device))] # multi device programs run per lane
   info = HCQInfo((HCQ_RUNTIME_DEV.value,), sum((c.arg.aux.estimates for c in batch), start=Estimates()),
                  input_idxs=tuple(x for c in batch for x in c.arg.aux.input_idxs), kernels=tuple(k for c in batch for k in c.arg.aux.kernels))
-  call = make_call(f"hcq_submitter ({len(batch)})", make_submit(*cmds, devs=HCQ_RUNTIME_DEV.value, queue="HOST").sink(), info)
-  return call.replace(src=call.src + tuple(s for c in batch for s in c.src[1:])) # the inner patches and buffers stay linked and held
+  call = make_call(f"hcq_submitter ({len(batch)})", make_submit(*cmds, devs=HCQ_RUNTIME_DEV.value, queue="COMPUTE:0").sink(), info)
+  return call.replace(src=call.src + tuple(s for c in batch for s in c.src[1:]))
 
 def merge_submitters(linear:UOp) -> UOp:
   batches = [(k, list(g)) for k, g in itertools.groupby(linear.src, key=lambda c: isinstance(c.arg.aux, HCQInfo))]

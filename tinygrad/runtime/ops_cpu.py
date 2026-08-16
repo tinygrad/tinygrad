@@ -91,9 +91,6 @@ def encode_queue(q:UOp) -> UOp:
   cnt = sum(len(ins.src) for ins in lin.src) // CMD_SIZE
   assert cnt < RING_SLOTS, f"submit of {cnt} entries doesn't fit the ring"
   cmdbuf = make_cmdbuf(lin, devs, buf=UOp.placeholder((cnt*CMD_SIZE,), dtypes.uint64, next(UOp.unique_num), device=devs).rtag("cmdbuf"))
-  if queue == "HOST": # the submitter runs the cmds itself, in order
-    e = UOp.range(cnt, next(UOp.unique_num), dtype=dtypes.int, src=(cmdbuf,))
-    return (entry:=[cmdbuf.index(e*CMD_SIZE + i).load() for i in range(CMD_SIZE)])[0].call(*entry[1:], ret_dtype=dtypes.void).end(e)
   ring = UOp.placeholder((ring_words:=RING_SLOTS*CMD_SIZE,), dtypes.uint64, 0, device=devs, volatile=True).rtag(f"{queue}_ring")
   put, done, sem, sysbuf = (make_signal(devs, tag=f"{queue}_{name}") for name in ("put", "done", "sem", "sys"))
 
