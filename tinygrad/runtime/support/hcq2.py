@@ -421,8 +421,7 @@ pm_pack_placeholders = PatternMatcher([
 # 8. callify hcq programs
 
 def callify_hcq(call:UOp, cf:UOp) -> UOp:
-  name = "hcq_submitter" if (call.arg.name or "").startswith("hcq_submitter") else "hcq_submit"
-  prg = to_program(cf.src[0].replace(arg=KernelInfo(name), tag=1), Device[HCQ_RUNTIME_DEV.value].renderer)
+  prg = to_program(cf.src[0].replace(arg=KernelInfo("hcq_submit"), tag=1), Device[HCQ_RUNTIME_DEV.value].renderer)
   return call.replace(src=(cf.replace(src=(prg,), arg="hcq"), *call.src[1:]))
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
   UPat(Ops.CUSTOM_FUNCTION, arg="hcq_args", src=(UPat(Ops.SINK),), name="cf"),), name="call", allow_any_len=True), callify_hcq)])
@@ -443,9 +442,14 @@ def merge_submitters(linear:UOp) -> UOp:
   return linear.replace(src=tuple(c for is_hcq, b in batches for c in ([merge_batch(b)] if is_hcq and len(b) > 1 else b)))
 
 def hcq_lower(linear:UOp, pm_encode:PatternMatcher) -> UOp:
+  # lowering to hcq ir
   linear = graph_rewrite(linear, pm_encode, walk=True, name="encode and pack", enter_calls=True)
+
+  # patches and runtime uops
   linear = graph_rewrite(linear, pm_early_simplify+symbolic, bottom_up=False, name="simplify patches", enter_calls=True)
   linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
+
+  # and compile it
   linear = graph_rewrite(linear, pm_replace_params, name="replace params")
   return graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
 
