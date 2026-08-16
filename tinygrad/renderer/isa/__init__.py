@@ -36,6 +36,8 @@ class VRegister:
 
 def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
   if u.op in {Ops.AFTER, Ops.NOOP} and len(u.src): return rdefs(u.src[0])
+  # pass through INDEXed op before regalloc unless overrided (tag on INDEX)
+  if u.op is Ops.INDEX and u.tag is None and isinstance(rdef(u.src[0]), VRegister): return rdefs(u.src[0])
   return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)))
 def rdef(u:UOp) -> None|tuple[VRegister|Register,...]: return rdefs(u)[0] if len(rdefs(u)) >= 1 else None
 

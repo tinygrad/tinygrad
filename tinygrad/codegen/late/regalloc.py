@@ -17,11 +17,7 @@ class LinearScanRegallocContext:
 
     lr = self.live_intervals
     range_vars: list[VRegister] = []
-    def live_edge(u:UOp) -> tuple[VRegister,...]: # account for subregister lifetimes in parent live intervals/ranges
-      # hmmm, why doesnt rdefs fix this?
-      if u.op in {Ops.AFTER, Ops.NOOP} and len(u.src) > 0: return live_edge(u.src[0])
-      if u.op is Ops.INDEX and not (u.tag is not None and any(isinstance(v,VRegister) for v in u.tag)): return live_edge(u.src[0]) # hack
-      return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))
+    def live_edge(u:UOp) -> tuple[VRegister,...]: return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))
     for i, u in enumerate(reversed(self.uops)):
       defs, uses = live_edge(u), []
       for s in dedup(u.src): uses.extend(live_edge(s))
