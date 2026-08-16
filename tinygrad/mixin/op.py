@@ -758,6 +758,40 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     pooled = self.transpose(axis,-1)._pad_constant(pads, identity_element(op, self.dtype))._pool((self.shape[axis],))
     return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
 
+  def associative_scan(self, fn:Callable[[Self, Self], Self], axis:int=0, reverse:bool=False) -> Self:
+    """
+    Computes a parallel prefix scan along `axis` using an associative binary function.
+
+    `fn` must take two tensors with matching shapes and return a tensor with the same
+    shape. For example, `lambda a,b: a+b` gives the same result as `cumsum`.
+    """
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self
+    if reverse: return self.flip(axis).associative_scan(fn, axis).flip(axis)
+
+    def _slice(x:Self, start:int, stop:int|None=None, step:int=1) -> Self:
+      idx = [slice(None)] * x.ndim
+      idx[axis] = slice(start, stop, step)
+      return x[tuple(idx)]
+
+    def _interleave(even:Self, odd:Self, n:int) -> Self:
+      if odd.shape[axis] == 0: return even
+      paired = _slice(even, 0, odd.shape[axis]).stack(odd, dim=axis+1).flatten(axis, axis+1)
+      return paired if n%2 == 0 else paired.cat(_slice(even, odd.shape[axis], odd.shape[axis]+1), dim=axis)
+
+    def _scan(x:Self) -> Self:
+      n = x.shape[axis]
+      assert isinstance(n, int), "associative_scan requires a static scan axis"
+      if n <= 1: return x
+      even, odd = _slice(x, 0, None, 2), _slice(x, 1, None, 2)
+      pairs = fn(_slice(even, 0, odd.shape[axis]), odd)
+      scanned_pairs = _scan(pairs)
+      even_out = _slice(even, 0, 1)
+      if even.shape[axis] > 1: even_out = even_out.cat(fn(_slice(scanned_pairs, 0, even.shape[axis]-1), _slice(even, 1, None)), dim=axis)
+      return _interleave(even_out, scanned_pairs, n)
+
+    return _scan(self)
+
   def _split_cumalu(self, axis:int, op:Ops) -> Self:
     axis = self._resolve_dim(axis)
     if self.ndim == 0 or 0 in self.shape: return self.cast(self.sum().dtype) if op is Ops.ADD else self

@@ -1136,6 +1136,25 @@ class TestOps(unittest.TestCase):
     helper_test_op([(0,3)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(2,3,0)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2))
 
+  def test_associative_scan_add(self):
+    helper_test_op([(3, 7)], lambda x: torch.cumsum(x, dim=1), lambda x: x.associative_scan(lambda a,b: a+b, axis=1))
+
+  def test_associative_scan_reverse_add(self):
+    helper_test_op([(7,)], lambda x: torch.flip(torch.cumsum(torch.flip(x, dims=(0,)), dim=0), dims=(0,)),
+                   lambda x: x.associative_scan(lambda a,b: a+b, axis=0, reverse=True))
+
+  def test_associative_scan_max(self):
+    helper_test_op([(5, 6)], lambda x: torch.cummax(x, dim=0).values,
+                   lambda x: x.associative_scan(lambda a,b: a.maximum(b), axis=0), forward_only=True)
+
+  def test_associative_scan_matmul(self):
+    vals = np.linspace(-1.0, 1.0, 20, dtype=np.float32).reshape(5, 2, 2)
+    expected, acc = [], vals[0]
+    for i in range(vals.shape[0]):
+      if i: acc = acc @ vals[i]
+      expected.append(acc.copy())
+    np.testing.assert_allclose(Tensor(vals).associative_scan(lambda a,b: a@b, axis=0).numpy(), np.stack(expected), atol=1e-6, rtol=1e-6)
+
   def test_small_cumprod(self):
     helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
   @slow_test
