@@ -73,7 +73,7 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   return UOp.custom_function("submit_cmdbuf", UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue)))
 def get_submit(ast:UOp) -> UOp: return next(u for u in ast.toposort() if u.op is Ops.CUSTOM_FUNCTION and u.arg == "submit_cmdbuf")
 
-def make_call(name:str, body:UOp, info:HCQInfo) -> UOp: return UOp.custom_function("hcq", body).call(name=name, aux=info)
+def make_call(name:str, body:UOp, info:HCQInfo, *srcs:UOp) -> UOp: return UOp.custom_function("hcq", body).call(*srcs, name=name, aux=info)
 
 def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
   data, info = prg.arg
@@ -427,7 +427,7 @@ pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
   UPat(Ops.CUSTOM_FUNCTION, arg="hcq_args", src=(UPat(Ops.SINK),), name="cf"),), name="call", allow_any_len=True), callify_hcq)])
 
 # *****************
-# 9. one C submitter per batch: the hcq programs of a batch become one CPU queue submit, lowered like any other hcq call
+# 9. merge submitters
 
 def merge_batch(batch:list[UOp]) -> UOp:
   cmds = [c.src[0].src[0].call(*[x.mselect(j) if len(to_tuple((x:=a.without_after).device)) > 1 else x for a in c.src[1:]])
@@ -439,7 +439,7 @@ def merge_batch(batch:list[UOp]) -> UOp:
 
 def merge_submitters(linear:UOp) -> UOp:
   batches = [(k, list(g)) for k, g in itertools.groupby(linear.src, key=lambda c: isinstance(c.arg.aux, HCQInfo))]
-  return linear.replace(src=tuple(c for is_hcq, b in batches for c in ([merge_batch(b)] if is_hcq and len(b) > 1 else b)))
+  return linear.replace(src=tuple(c for is_hcq, b in batches for c in ([merge_batch(b)] if is_hcq else b)))
 
 def hcq_lower(linear:UOp, pm_encode:PatternMatcher) -> UOp:
   # lowering to hcq ir
@@ -452,8 +452,6 @@ def hcq_lower(linear:UOp, pm_encode:PatternMatcher) -> UOp:
   # and compile it
   linear = graph_rewrite(linear, pm_replace_params, name="replace params")
   return graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
-
-hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
 
 @rewrite_group(lambda linear,input_uops,profile,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
@@ -471,8 +469,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
 
     # lower to hcq programs, then pack the programs of every batch into one C submitter (needs a C runtime device for the program addresses)
     linear = hcq_lower(linear, pm_encode_cmdbufs+pm_pack_placeholders)
-    if HCQ_RUNTIME_DEV.value.split(":")[0] == "CPU": linear = hcq_lower(merge_submitters(linear), pm_encode_cmdbufs)
-    final_linear = hcq_compile_cache[cache_key] = linear
+    final_linear = hcq_compile_cache[cache_key] = hcq_lower(merge_submitters(linear), pm_encode_cmdbufs) if HCQ_RUNTIME_DEV.value == "CPU" else linear
 
   return final_linear
 
