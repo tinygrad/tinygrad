@@ -3,9 +3,10 @@ from typing import cast, Iterator, Any, Sequence
 import time, random, itertools, math, contextlib, weakref, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, wait_cond
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
+from tinygrad.dtype import dtypes
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import args_from_ast
@@ -201,16 +202,15 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   return t[0]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  for i, (devices, idxs) in zip((info:=call.arg.aux).inputs, info.input_idxs):
-    bufs = [_resolve(ctx.input_uops[k], ctx.input_uops).buffer for k in idxs]
-    table = call.src[1+i].buffer
-    for j,dev in enumerate(devices):
-      addrs = array.array('Q', [(b.bufs[j] if isinstance(b, MultiBuffer) else b).get_buf(dev).va_addr for b in bufs])
-      mv = (table.bufs[j] if isinstance(table, MultiBuffer) else table).ensure_allocated()._buf.cpu_view().view(fmt='Q')
-      wait_cond(lambda: mv[0], value=0, timeout_ms=ctx.timeout or getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000), msg=f"{dev} hang detected")
-      mv[:len(addrs)] = addrs
+  dev = cast(Any, Device[(info:= call.arg.aux).device[0]])
+  addrs = [(b.bufs[j] if isinstance(b:=_resolve(ctx.input_uops[k], ctx.input_uops).buffer, MultiBuffer) else b).get_buf(dev_name).va_addr
+           for devs, idxs in info.input_idxs for j, dev_name in enumerate(devs) for k in idxs]
+  dev.rt_buffer._buf.cpu_view().view(offset=(base:=dev.rt_allocator.alloc(len(addrs) * 8)), fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
-  exec_kernel(replace(ctx, update_stats=DEBUG>=3), call, ast)
+  tables = [UOp.from_buffer(dev.rt_buffer.view(len(idxs), dtypes.uint64, base + j*len(idxs)*8), HCQ_RUNTIME_DEV.value)
+            for devs, idxs in info.input_idxs for j in range(len(devs))]
+  if info.inputs: call = call.substitute({call.src[1+i]: UOp.mstack(*tables) for i in info.inputs})
+  exec_kernel(replace(ctx, update_stats=DEBUG>=3, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer._buf.va_addr + base}), call, ast)
 
   tms = []
   for devices,name,estimates,prof in info.kernels:
@@ -263,7 +263,7 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-if getenv("HCQ2"): from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link # noqa: E402 # down here, hcq2 imports the helpers above
+if getenv("HCQ2"): from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQ_RUNTIME_DEV # noqa: E402 # down here, hcq2 imports realize
 
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)

@@ -346,10 +346,6 @@ def split_patches(call:UOp) -> UOp|None:
   scatter = make_scatter_loops(input_patches, tables[0], lt_patches)
   body = body.substitute({p:p.substitute(scatter | reads) for p in rt_patches})
 
-  if inputs: # fence inputs
-    fills.append((t:=tables[0][0]).after(make_binary_patch(t, bytes(t.max_numel() * 8)))) # zeroed at link, slot 0 is the host fence
-    body = body.replace(src=(UOp.sink(*body.src[0].src, t.after(*body.src[0].src).index(0).store(0)),)) # open it once consumed
-
   lt_srcs = collections.defaultdict(list)
   for p in lt_patches: lt_srcs[p.buf_uop].append(p)
   return call.replace(src=(body, *call.src[1:], *[b.after(*ps) for b,ps in lt_srcs.items()], *fills),
@@ -379,8 +375,7 @@ def replace_params(call:UOp) -> UOp|None:
   sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM} | _rank_ranges(tops)
   info = replace(call.arg.aux, inputs=tuple(i for i,u in enumerate(c_args + refhold) if u.without_after.tag == "inputs"))
-  return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold),
-                      arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
+  return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold), arg=replace(call.arg, aux=info))
 pm_replace_params = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), replace_params)])
 
@@ -429,13 +424,18 @@ pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
 # *****************
 # 9. merge submitters
 
+def _lane_arg(a:UOp, lane:int, table:UOp) -> UOp: return table if a.tag == "inputs" else a.mselect(lane) if len(to_tuple(a.device)) > 1 else a
+
 def merge_batch(batch:list[UOp]) -> UOp:
-  cmds = [c.src[0].src[0].call(*[x.mselect(j) if len(to_tuple((x:=a.without_after).device)) > 1 else x for a in c.src[1:]])
-          for c in batch for j in range(len(c.arg.aux.device))] # multi device programs run per lane
+  tables = UOp.variable("hcq_inputs_ptr", 0, 2**64-1, dtypes.uint64, param=True)
+  lanes = [(c, j, sum(len(idxs) * 8 for _, idxs in c.arg.aux.input_idxs)) for c in batch for j in range(len(c.arg.aux.device))] # (call, lane, bytes)
+  offs = itertools.accumulate((table_bytes for _, _, table_bytes in lanes), initial=0) # every lane owns the next table of the region
+  cmds = [c.src[0].src[0].call(*[_lane_arg(a.without_after, j, tables + off) for a in c.src[1:]]) for (c, j, _), off in zip(lanes, offs)]
+
   info = HCQInfo((HCQ_RUNTIME_DEV.value,), sum((c.arg.aux.estimates for c in batch), start=Estimates()),
                  input_idxs=tuple(x for c in batch for x in c.arg.aux.input_idxs), kernels=tuple(k for c in batch for k in c.arg.aux.kernels))
-  body = UOp.custom_function("hcq", make_submit(*cmds, devs=HCQ_RUNTIME_DEV.value, queue="COMPUTE:0").sink())
-  return body.call(*[s for c in batch for s in c.src[1:]], name=f"hcq_submitter ({len(batch)})", aux=info)
+  body = UOp.custom_function("hcq", make_submit(*cmds, devs=HCQ_RUNTIME_DEV.value, queue="SUBMIT:0").sink())
+  return body.call(*[s for c in batch for s in c.src[1:] if s.without_after.tag != "inputs"], name=f"hcq_submitter ({len(batch)})", aux=info)
 
 def merge_submitters(linear:UOp) -> UOp:
   batches = [(k, list(g)) for k, g in itertools.groupby(linear.src, key=lambda c: isinstance(c.arg.aux, HCQInfo))]
@@ -569,7 +569,6 @@ class HCQ2Compiled(Compiled):
 
     super().__init__(device, allocator, compilers, runtime, None, arch=arch)
 
-    self.rt_buffer = Buffer(self.device, 64 << 20, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True))
     self.rt_allocator = BumpAllocator(64 << 20)
     self.prof_ents:dict[int, ProfileGraphEntry] = {}
 
@@ -592,6 +591,10 @@ class HCQ2Compiled(Compiled):
       gpu = max(self.signal(e.en_id)._buf.cpu_view().view(fmt='Q')[0] for e in ents)/decimal.Decimal(self.timestamp_divider)
       tdiffs.append((st+perf_counter_us())/2 - gpu)
     Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
+
+  @functools.cached_property
+  def rt_buffer(self) -> Buffer:
+    return Buffer(self.device, self.rt_allocator.size, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True), preallocate=True)
 
   def new_buffer(self, b:UOp, cache:bool) -> Buffer:
     if cache or b.tag in HCQ_CACHE_TAGS:

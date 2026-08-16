@@ -204,7 +204,8 @@ class CPUDevice(HCQ2Compiled):
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
 
     self.pm_bufferize = PatternMatcher(
-      [(UPat(Ops.PARAM, tag=f"COMPUTE:0_{n}"), lambda ctx, n=n: getattr(ctx[0].worker, n)) for n in ("ring", "put", "sem", "sys", "done")] +
+      [(UPat(Ops.PARAM, tag=f"{q}_{n}"), lambda ctx, q=q,n=n: getattr(ctx[0].worker(q), n))
+       for q in ("COMPUTE:0", "SUBMIT:0") for n in ("ring", "put", "sem", "sys", "done")] +
       [(UPat(Ops.PARAM, tag=f"func:{f}"), lambda ctx, f=f: ctx[0].func_ptr(f)) for f in FUNCS]) + self.pm_bufferize
 
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
@@ -227,8 +228,8 @@ class CPUDevice(HCQ2Compiled):
       array.array('Q', [unwrap(ctypes.cast(getattr(lib, f), ctypes.c_void_p).value) for f in FUNCS])
     return ft
 
-  @functools.cached_property
-  def worker(self) -> CPUWorker:
+  @functools.cache
+  def worker(self, queue:str) -> CPUWorker:
     ring, put, sysbuf, done = (Buffer(self.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1, 1))
     addr, hsem = 0, None
 
