@@ -434,8 +434,8 @@ def merge_batch(batch:list[UOp]) -> UOp:
           for c in batch for j in range(len(c.arg.aux.device))] # multi device programs run per lane
   info = HCQInfo((HCQ_RUNTIME_DEV.value,), sum((c.arg.aux.estimates for c in batch), start=Estimates()),
                  input_idxs=tuple(x for c in batch for x in c.arg.aux.input_idxs), kernels=tuple(k for c in batch for k in c.arg.aux.kernels))
-  call = make_call(f"hcq_submitter ({len(batch)})", make_submit(*cmds, devs=HCQ_RUNTIME_DEV.value, queue="COMPUTE:0").sink(), info)
-  return call.replace(src=call.src + tuple(s for c in batch for s in c.src[1:]))
+  body = UOp.custom_function("hcq", make_submit(*cmds, devs=HCQ_RUNTIME_DEV.value, queue="COMPUTE:0").sink())
+  return body.call(*[s for c in batch for s in c.src[1:]], name=f"hcq_submitter ({len(batch)})", aux=info)
 
 def merge_submitters(linear:UOp) -> UOp:
   batches = [(k, list(g)) for k, g in itertools.groupby(linear.src, key=lambda c: isinstance(c.arg.aux, HCQInfo))]
