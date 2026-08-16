@@ -101,10 +101,11 @@ def encode_queue(q:UOp) -> UOp:
   e = UOp.range(cnt, next(UOp.unique_num), dtype=dtypes.int, src=(cmdbuf, ring))
   copy = UOp.group(*[ring.index((base + e*CMD_SIZE + w) % ring_words).store(cmdbuf.index(e*CMD_SIZE + w).load()) for w in range(CMD_SIZE)])
 
-  # wake the worker after each entry, keeping the post with the stores stops it from hoisting out of the loop
-  wake = copy.end(e) if WIN else make_signal(devs, tag="func:sem_post").after(copy).index(0).load().call(sem.index(0), ret_dtype=dtypes.void).end(e)
-  bumped = put.after(wake).index(0).store(put.index(0).load() + cnt)
-  return sysbuf.after(bumped).index(0).store(put.index(0).load() + cnt) if WIN else bumped
+  bumped = put.after(copy.end(e)).index(0).store(put.index(0).load() + cnt)
+  if WIN: return sysbuf.after(bumped).index(0).store(put.after(bumped).index(0).load())
+
+  e = UOp.range(cnt, next(UOp.unique_num), dtype=dtypes.int, src=(bumped,))
+  return make_signal(devs, tag="func:sem_post").after(e).index(0).load().call(sem.after(e).index(0), ret_dtype=dtypes.void).end(e)
 
 # *****************
 
