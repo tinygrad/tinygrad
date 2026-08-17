@@ -506,7 +506,7 @@ simple_tensor_methods = [
   # reduce
   "all", "any", "argmax", "argmin", "cumsum", "cumprod",
   # complex
-  "avg_pool2d", "linspace"]
+  "linspace"]
 
 tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_methods}, **{
   "aten.add.out": lambda input,other,alpha=1: input+alpha*other,
@@ -635,15 +635,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.masked_select": Tensor.masked_select,
   "aten.all": Tensor.all,
   "aten.sgn": Tensor.sign,
-  "aten.acos": Tensor.acos,
   "aten.any": Tensor.any,
-  "aten.bitwise_not": Tensor.bitwise_not,
-  # tinygrad indexes with int32, torch's arg reduces return int64
-  "aten.argmax": lambda self, dim=None, keepdim=False: self.argmax(dim, keepdim).cast(dtypes.int64),
-  "aten.argmin": lambda self, dim=None, keepdim=False: self.argmin(dim, keepdim).cast(dtypes.int64),
-  "aten.asinh": Tensor.asinh,
-  "aten.mul": Tensor.mul,
-  "aten.atanh": Tensor.atanh,
   "aten.fill_.Tensor": lambda self, value: self.const_like(value.reshape(()).item()),
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": Tensor.scatter_reduce,
@@ -656,8 +648,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
   "aten.topk": Tensor.topk,
   "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value).contiguous(),
-  # TODO: input contiguous is needed to prevent CFGContext circular dependency assertion for shapes >512 (see test_cumsum_arange_large)
-  "aten.cumsum": lambda self, dim: self.contiguous().cumsum(dim),
+  "aten.cumsum": lambda self, dim: self.cumsum(dim),
   "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),
   "aten.roll": Tensor.roll,
   "aten.logcumsumexp": Tensor.logcumsumexp,
