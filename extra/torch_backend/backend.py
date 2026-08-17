@@ -73,10 +73,11 @@ def wrap_view_op(fn):
     return wrap(ret)
   return _wrap
 
+# NOTE: list assignment raises IndexError on an out of range dim, and the index must be a tuple: a list of all ints is one advanced index
 def _index_dim(self, dim, idx):
   idxs = [slice(None)] * self.ndim
   idxs[dim] = idx
-  return self[idxs]
+  return self[tuple(idxs)]
 
 view_ops = {
   "aten.view": Tensor.reshape,

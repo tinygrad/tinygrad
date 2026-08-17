@@ -551,6 +551,11 @@ class TestTorchBackend(unittest.TestCase):
     a = torch.arange(12, dtype=torch.int32, device=device).reshape(3, 4)
     with self.assertRaises(IndexError): a.select(5, 0)
 
+  def test_select_collapses_the_only_dim(self):
+    a = torch.arange(3, dtype=torch.int32, device=device)
+    self.assertEqual(a.select(0, 1).shape, ())
+    np.testing.assert_equal(a.select(0, 1).cpu().numpy(), 1)
+
   def test_slice_negative_dim(self):
     a = torch.arange(13, dtype=torch.int32, device=device).repeat(8, 1)
     torch_chunks = a.chunk(3, -1)
