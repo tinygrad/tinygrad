@@ -368,7 +368,7 @@ def replace_params(call:UOp) -> UOp|None:
 
   # keep buffers whose addresses become link-time constants alive and mapped
   held = args + [r.without_after for r in refhold]
-  addrs = dedup([g.src[0].without_after for x in call.src for g in x.toposort() if g.op is Ops.GETADDR])
+  addrs = dedup([g.src[0].without_after for g in call.toposort() if g.op is Ops.GETADDR])
   refhold += [a for a in addrs if a not in held and all(b.op is not Ops.PARAM or b.tag is not None for b in unwrap_mstack(a))]
 
   sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
