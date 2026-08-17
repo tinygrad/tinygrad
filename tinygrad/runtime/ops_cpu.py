@@ -13,7 +13,7 @@ from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.autogen import libc
 from tinygrad.codegen import do_to_program
-from tinygrad.engine.realize import pm_flatten_linear, get_call_arg_uops, get_runtime
+from tinygrad.engine.realize import pm_flatten_linear, get_call_arg_uops, get_call_var_uops, get_runtime
 from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher, graph_rewrite
@@ -64,7 +64,7 @@ def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
   return UOp(Ops.INS, dtypes.void, words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)), arg="cmd")
 
 def cpu_exec(ctx:tuple[str, ...], call:UOp, prg:UOp) -> UOp:
-  args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in prg.arg.vars]
+  args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
   if (core:=prg.arg.runtimevars.get('core_id')) is None: return cpu_cmd(ctx, prg, *args)
 
   la = [cpu_cmd(ctx,prg,*args[:(cid:=(len(prg.arg.globals)+core))],UOp.const(t, dtypes.uint64),*args[cid+1:]) for t in range(prg.arg.global_size[0])]

@@ -429,7 +429,8 @@ def merge_batch(batch:list[UOp]) -> UOp:
   tables = UOp.variable("hcq_inputs_ptr", 0, 2**64-1, dtypes.uint64, param=True)
   lanes = [(c, j, sum(len(idxs) * 8 for _, idxs in c.arg.aux.input_idxs)) for c in batch for j in range(len(c.arg.aux.device))] # (call, lane, bytes)
   offs = itertools.accumulate((table_bytes for _, _, table_bytes in lanes), initial=0) # every lane owns the next table of the region
-  cmds = [c.src[0].src[0].call(*[_lane_arg(a.without_after, j, tables + off) for a in c.src[1:]]) for (c, j, _), off in zip(lanes, offs)]
+  cmds = [c.src[0].src[0].call(*[_lane_arg(a.without_after, j, tables + off) for a in c.src[1:]], UOp.variable("_device_num", 0, 1 << 30).bind(j))
+          for (c, j, _), off in zip(lanes, offs)]
 
   info = HCQInfo((HCQ_RUNTIME_DEV.value,), sum((c.arg.aux.estimates for c in batch), start=Estimates()),
                  input_idxs=tuple(x for c in batch for x in c.arg.aux.input_idxs), kernels=tuple(k for c in batch for k in c.arg.aux.kernels))
