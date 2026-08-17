@@ -289,6 +289,12 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if value == 0: return base
     return MovementMixin.pad(X.const_like(True, dtypes.bool), pads).where(base, value)
 
+  def pad_to(self, shape, *args, value:ConstType=0) -> Self:
+    # same mask trick as _pad_constant so the fill survives backends that realize PAD as 0-fill
+    ret = MovementMixin.pad_to(self, shape, *args)
+    if value == 0 or ret is self: return ret
+    return MovementMixin.pad_to(self.const_like(True, dtypes.bool), shape, *args).where(ret, value)
+
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Self:
     # shrink first for negative pads, then wrap the non-negative remainder
     X = self.shrink(tuple((-smin(pB,0), smin(pA+sh,sh)) for (pB,pA),sh in zip(pX, self.shape)))

@@ -242,9 +242,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   arg:Any = None
   tag:Any = None
   def __del__(self):
-    if Ops is not None and self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
+    # NOTE: getattr because this object may be partially constructed (e.g. if __init__ raised, like the BEAM timeout SIGALRM)
+    if Ops is not None and getattr(self, 'op', None) is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     try: del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg, self.tag)]
-    except AttributeError: pass
+    except (AttributeError, KeyError): pass
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
     if self.op is Ops.BUFFER and self.realized is not None: args.append(self.realized)
@@ -471,10 +472,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret
 
   @property
-  def max_shape(self) -> tuple[int, ...]: return to_max_shape(self.shape)
-  def max_numel(self) -> int: return prod(self.max_shape)
-
-  @property
   def shard_shape(self) -> tuple[sint, ...]:
     if not isinstance(self.device, tuple) or self.axis is None: return self.shape
     dcount = int(self.src[1].vmax)+1 if self.op is Ops.UNSHARD else len(self.device)
@@ -587,9 +584,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def const_like(self, b:ConstLike, dtype:DType|None=None):
     ret = UOp.const(b, dtype or self.dtype)
     return ret._mop(Ops.EXPAND, arg=self._shape) if self._shape and ret._shape != self._shape else ret
-  def vconst_like(self, b:ConstLike, dtype:DType|None=None):
+  def vconst_like(self, b:ConstLike):
     # for use after movement ops have been removed
-    return UOp.const(b, dtype or self.dtype).broadcast(self.max_numel())
+    return UOp.const(b, self.dtype).broadcast(self.max_numel())
   def ufix(self, x):
     if isinstance(x, UOp): return x
     return UOp.const(x)
@@ -1407,7 +1404,7 @@ class UPat(OpMixin):
     if self.is_any: return flatten([x.match(uop, store.copy()) for x in self.src[0]])
     if (self.op is not None and uop.op not in self.op) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
-       (self.match_dtype is not None and uop.dtype not in self.match_dtype and uop.dtype.scalar() not in self.match_dtype) or \
+       (self.match_dtype is not None and uop.dtype not in self.match_dtype) or \
        (self.arg is not None and self.arg != uop.arg) or \
        (self.match_tag is not None and uop.tag not in self.match_tag) or \
        (len(uop.src) < self.required_len) or \
