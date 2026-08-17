@@ -14,6 +14,11 @@ from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingCont
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.allreduce import create_allreduce_function
 
+def walk_mop(u:UOp, non_after_okay=False):
+  if u.op in GroupOp.Movement or u.op is Ops.INDEX: return u.src[0]
+  assert u.op == Ops.AFTER or non_after_okay
+  return u
+
 # *** preparation ***
 
 from tinygrad.helpers import all_same
@@ -57,7 +62,7 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   return c.src[0].substitute(dict_map, walk=True)
 
-pm_expand_broadcast = PatternMatcher([
+pm_prepare_graph = PatternMatcher([
   # CALL inputs need buffer identity
   (UPat(Ops.CALL, name="c"),
    lambda c: c.replace(src=c.src[0:1]+tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src[1:]))),
@@ -69,6 +74,12 @@ pm_expand_broadcast = PatternMatcher([
   (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
   # also expand bitcasts
   (UPat(Ops.BITCAST, name="bc"), expand_bitcast),
+  # move movement ops and INDEX after AFTER
+  (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
+   lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
+  # remove movement ops from SINK/AFTER. TODO: should be generic
+  (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src))),
+  (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u, non_after_okay=True) for u in s.src[1:]))),
 ])
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
@@ -151,11 +162,6 @@ def index_on_stack(stack:UOp, idx:UOp):
   for k in range(len(srcs)-2, -1, -1): ret = r0.eq(k).where(srcs[k], ret)
   return ret
 
-def walk_mop(u:UOp):
-  if u.op in GroupOp.Movement or u.op is Ops.INDEX: return u.src[0]
-  assert u.op == Ops.AFTER
-  return u
-
 pm_range_migration = PatternMatcher([
   # INDEX without src is nothing
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
@@ -178,8 +184,6 @@ pm_range_migration = PatternMatcher([
   # pass index through elementwise
   (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
    lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
-  # remove movement ops from SINK. TODO: should be generic
-  (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src))),
 ])
 
 # *** split into kernels ***
@@ -231,7 +235,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
 
   # prepare
-  tsink = graph_rewrite(tsink, pm_expand_broadcast, bottom_up=True, name="expand broadcast")
+  tsink = graph_rewrite(tsink, pm_prepare_graph, bottom_up=True, name="prepare graph")
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
   # add safe STAGEs to never duplicate compute
