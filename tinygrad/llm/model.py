@@ -271,15 +271,14 @@ class GatedDeltaNetBlock(FFNBlock):
     out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
     alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
-    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) * self.ssm_a).squeeze(-1) \
-      if is_kda else ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
+    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) *
+                 self.ssm_a.reshape(self.num_v_heads, -1))
 
     # qkv conv, conv_state is reset when starting from position 0
     conv_state = initial.where(0, self.conv_state)
     # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad].
     # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
-    conv_window = Tensor.zeros(B, self.ssm_conv_kernel-1 + T_pad, self.conv_channels)
-    win = conv_window.uop
+    win = Tensor.zeros(B, self.ssm_conv_kernel-1 + T_pad, self.conv_channels).uop
     win = win.after(win[:, :self.ssm_conv_kernel-1].store(conv_state.cast(win.dtype).uop))
     win = win.after(win[:, self.ssm_conv_kernel-1:self.ssm_conv_kernel-1+T].store(self.attn_qkv(x).cast(win.dtype).uop))
     conv_window = Tensor(win)
@@ -290,31 +289,30 @@ class GatedDeltaNetBlock(FFNBlock):
       (conv_window[:, i:i+T_pad] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel))).silu()
     if symbolic:
       out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
-      beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, self.num_v_heads))
+      beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, *log_alpha.shape[2:]))
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
     qk_eps = 1e-12 if is_kda else 1e-6
     q, k = (z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=qk_eps)
             .repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
     v = v.reshape(B, T_pad, self.num_v_heads, self.head_v_dim)
-    q, k, v, beta = [z.transpose(1, 2).float() for z in (q, k, v, beta)]
-    alpha = log_alpha.transpose(1, 2).exp()
+    # layout the per-step operands to broadcast against the (B, H, V, K) state
+    q, k, v, beta = (z.transpose(1, 2).float() for z in (q, k, v, beta))
+    q, k, v, beta = q.unsqueeze(-2) * self.head_k_dim**-0.5, k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
+    alpha = log_alpha.transpose(1, 2).exp().unsqueeze(-1)  # per-channel decay for kda, per-head otherwise (B, H, T, V|1, 1)
 
     # recurrent: scan over the (padded) tokens, updating the recurrent state. the output rows go to a static-size buffer
     state = Tensor(self.recurrent_state.uop.after(conv_state_store)).float()  # carry the conv write into this graph
     state = initial.where(0, state)
-    core = Tensor.zeros(B, self.num_v_heads, T_pad, self.head_v_dim)
-    out = core.uop
+    core_uop = Tensor.zeros(B, self.num_v_heads, T_pad, self.head_v_dim).uop
     for t in range(T_pad):
-      key = k[:, :, t]  # (B, H, K)
-      decay = alpha[:, :, t].unsqueeze(-1) if len(alpha.shape) == 4 else alpha[:, :, t].reshape(B, self.num_v_heads, 1, 1)
-      s1 = state * decay
-      delta = (v[:, :, t].unsqueeze(-1) - (s1 * key.unsqueeze(-2)).sum(-1, keepdim=True)) * beta[:, :, t].reshape(B, self.num_v_heads, 1, 1)
-      state = s1 + delta * key.unsqueeze(-2)
-      out = out.after(out[:, :, t].store(((state * q[:, :, t].unsqueeze(-2)).sum(-1) * self.head_k_dim**-0.5).uop))
+      s1 = state * alpha[:, :, t]  # decay the state
+      delta = (v[:, :, t] - (s1*k[:, :, t]).sum(-1, keepdim=True)) * beta[:, :, t]  # the delta rule update
+      state = s1 + delta * k[:, :, t]
+      core_uop = core_uop.after(core_uop[:, :, t].store(((state * q[:, :, t]).sum(-1)).uop))
 
     # store the updated recurrent state in place, then read the output buffer after the write
     recurrent_state_store = self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop)
-    core = Tensor(out.after(recurrent_state_store)).transpose(1, 2)
+    core = Tensor(core_uop.after(recurrent_state_store)).transpose(1, 2)
 
     # output; undo the padding before the output projection
     z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
