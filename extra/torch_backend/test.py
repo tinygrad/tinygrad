@@ -822,8 +822,6 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_allclose(b_tiny.grad.cpu().numpy(), b_cpu.grad.numpy(), atol=1e-4, rtol=1e-3)
 
   def test_write_through_detach_of_unrealized(self):
-    # how every module parameter is initialized under set_default_device("tiny"). on torch<2.10 detach is a tracked view,
-    # so this writes through a view whose shape equals its base's, and the base has no buffer of its own yet
     a = torch.empty(4, device=device)
     a.detach().fill_(3)
     np.testing.assert_equal(a.cpu().numpy(), [3, 3, 3, 3])

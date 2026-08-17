@@ -88,9 +88,6 @@ view_ops = {
   "aten.diagonal": Tensor.diagonal,
   }
 
-# torch 2.10 handles this natively
-if tuple(map(int, torch.__version__.split('.')[:2])) < (2, 10): view_ops.update({"aten.detach": Tensor.detach})
-
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
 
 def _get_view_ops(view): return getattr(view, "_view_ops", [])
@@ -99,10 +96,10 @@ def _apply_view_ops(target, ops):
   for fn, args, kwargs in ops: target = fn(target, *args, **kwargs)
   return target
 
-# a chain of reshapes (and detaches, which move nothing) is undone by reshaping the value back to the base
+# a chain of reshapes is undone by reshaping the value back to the base
 def _try_simple_reshape_view_write(base: Tensor, view: Tensor, val: Tensor) -> bool:
   if not (ops := _get_view_ops(view)): return False
-  if any(fn not in (Tensor.reshape, Tensor.detach) for fn, _, _ in ops): return False
+  if any(fn is not Tensor.reshape for fn, _, _ in ops): return False
   base.assign(val.reshape(base.shape))
   return True
 
