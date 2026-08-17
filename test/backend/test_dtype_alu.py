@@ -7,6 +7,8 @@ from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.uop import Ops
+from tinygrad.codegen import to_program
+from tinygrad.renderer.isa import ISARenderer
 import numpy as np
 import pytest
 from hypothesis import assume, given, strategies as strat, settings
@@ -398,6 +400,28 @@ class TestDTypeALU(unittest.TestCase):
   def test_float_cast_to_unsigned_underflow(self, a, float_dtype, unsigned_dtype):
     if float_dtype not in supported_dtypes: float_dtype = dtypes.float32
     universal_test_cast(a, float_dtype, unsigned_dtype)
+
+  # an ISA renderer is excluded because its program is machine instructions, so no Ops.FDIV survives to be counted.
+  # only the op count is asserted: the value is not bit-exact anywhere, LLVM emits fdiv with arcp/afn and AMD then
+  # lowers it to an unrefined v_rcp, which is 1 ulp off the correctly rounded quotient
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer) or
+                   Ops.FDIV not in Device[Device.DEFAULT].renderer.code_for_op, "renderer divides by reciprocal")
+  def test_float_div_is_not_a_reciprocal_multiply(self):
+    # a*(1/b) is 1-2 ulp worse than a/b, so the contraction must fire even with the bare 1 the decomp now mints
+    def ops(t): return [u.op for u in to_program(t.contiguous().schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer).src[1].src]
+    strong = ops(Tensor([1e10], dtype=dtypes.float32)/Tensor([1.5], dtype=dtypes.float32))
+    self.assertEqual((strong.count(Ops.FDIV), strong.count(Ops.MUL)), (1, 0))
+    # with a weak numerator the 2.0 rides in bare, so the contraction sees a different shape on the way in
+    weak = ops(2.0/Tensor([1.5], dtype=dtypes.float32))
+    self.assertEqual((weak.count(Ops.FDIV), weak.count(Ops.MUL)), (1, 0))
+
+  def test_out_of_range_unsigned_literal_keeps_its_width(self):
+    # -1000000 stays MATHEMATICAL even though it does not fit uint64 (wrapping to 2**64-1000000 would miscompile
+    # in-range programs), and the width comes from the strong sibling's promotion -- a uint64 multiply, not a bounds default
+    b = Tensor([True], dtype=dtypes.bool).contiguous()
+    out_of_range = (b*Tensor(-1000000, dtype=dtypes.uint64)+1e10).item()
+    self.assertEqual(out_of_range, (b*Tensor(2**64-1000000, dtype=dtypes.uint64)+1e10).item())
+    self.assertEqual(out_of_range, 1.8446744073709552e+19)
 
   def test_unsafe_cast_float_to_int(self):
     # the value is off the float32 grid but rounds in-range: the buffer and const-fold paths must agree

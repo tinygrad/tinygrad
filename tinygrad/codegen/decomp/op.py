@@ -1,6 +1,6 @@
 from typing import Callable
 import functools
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, weak_dtype
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 from tinygrad.renderer import Renderer
 
@@ -128,6 +128,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
     if Ops.SHL in ops: pat += [(UPat.var('x').alu(Ops.SHL, UPat.cvar('n'))+UPat.var('c'), lambda x,n,c: x.alu(Ops.MULACC, x.const_like(1<<n.val), c))]
   # some backends emit FDIV for RECIP, in that case: a*(1/b) -> a/b
   if Ops.FDIV in ops:
-    pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
-    pat += [(UPat.var("a", dtypes.floats) * UPat(Ops.FDIV, dtypes.floats, src=(UPat.const(1), UPat.var("b"))), lambda a,b: a.alu(Ops.FDIV, b))]
+    # mint the 1 bare: the contraction rule below matches it as a bare CONST
+    pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1, weak_dtype(x.dtype)).alu(Ops.FDIV, x))]
+    pat += [(UPat.var("a") * UPat(Ops.FDIV, dtypes.floats, src=(UPat.const(1), UPat.var("b"))), lambda a,b: a.alu(Ops.FDIV, b))]
   return PatternMatcher(pat)

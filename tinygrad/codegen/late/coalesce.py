@@ -61,6 +61,14 @@ indexing_simplify = PatternMatcher([
                                          UPat.var("valid").where(UPat.var("idx_x"), UPat(arg=Invalid)))), simplify_valid_image_load),
 ])
 
+# a valid index into an n-element buffer lives in [0,n): a gated long index narrows when n-1 fits int32 (out-of-gate wraps, discarded)
+# TODO: more generic
+pm_narrow_index = PatternMatcher([
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.long), UPat(Ops.CONST, arg=Invalid))),
+        allow_any_len=True, name="u"),
+   lambda u,buf,gate,idx: u.replace(src=(buf, idx.cast(dtypes.int).valid(gate))+u.src[2:]) if buf.max_numel()-1 <= dtypes.int32.max else None),
+])
+
 # get list of (height, width) that do not require pitch padding
 def image_valid_dims(base:DType, size:int, arch:str) -> list[tuple[int,int]]:
   if (ALIGN:=next((int(p.split('=')[1]) for p in arch.split(',') if p.startswith("IMAGE_PITCH_ALIGNMENT=")), 0)) == 0: return []

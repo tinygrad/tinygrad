@@ -1,10 +1,11 @@
 import itertools
-from tinygrad.helpers import dedup
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
+from tinygrad.helpers import dedup, panic
+from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register, greg
 from tinygrad.dtype import dtypes
 
-PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
+# CAST replaces CONST here: the linearizer drops every CONST, so a literal reaches regalloc as the CAST over it
+PSEUDO_OPS = {Ops.CAST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
 
 class LinearScanRegallocContext:
   # returns the uop that defines the virtual register
@@ -131,6 +132,10 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
 
   return nx, before + [nx] + after
 
+# an op that survives isel outside this set consumes no program point from ctx.idx and silently shifts every later index
+_indexed = {Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat(_indexed, name="x"), regalloc_rewrite),
+  (UPat(GroupOp.All-_indexed-{Ops.SINK}, name="x"),
+   lambda x: panic(RuntimeError, f"{x.op} {x.dtype} survived isel, regalloc program points would mis-index")),
 ])

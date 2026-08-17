@@ -3,12 +3,14 @@ from tinygrad.dtype import dtypes, DType, truncate
 from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES, Context, SPEC
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite, ParamArg
+from tinygrad.uop.weak import commit_weak
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.decomp.transcendental import exponent_bias, shl, shr
 
 # ***** long as 2 ints *****
 
 l2i_dt = {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}
+long_word_tags = {(w, dt) for w in (0, 1) for dt in l2i_dt.values()}
 def unpack32(v:UOp) -> tuple[UOp, UOp]: return v.bitcast(dtypes.uint) & 0xFFFF, shr(v.bitcast(dtypes.uint), 16)
 def reindex(idx:UOp, off:int, mul=2) -> UOp:
   if idx.op is Ops.SHRINK:
@@ -134,8 +136,14 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
   if (n:=val.max_numel()) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
   return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.index(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
+def split_word(x:UOp, v:int) -> UOp: return UOp.const(truncate[x.tag[1]]((v >> 32) if x.tag[0] == 1 else (v & 0xFFFFFFFF)), x.tag[1])
+
 # tag is the 32-bit word this node becomes - (0 for the low word, 1 for the high, the dtype the consumer wants)
 pm_long_decomp = PatternMatcher([
+  # a weak CONST states no width and cannot be split into words: commit it at the long dtype a sibling src states
+  (UPat(GroupOp.All, name='x'), lambda x: x.replace(src=tuple(commit_weak(s, dt) if s.op is Ops.CONST and s.dtype in dtypes.weaks else s
+    for s in x.src)) if any(s.op is Ops.CONST and s.dtype in dtypes.weaks for s in x.src)
+    and (dt:=next((s.dtype for s in x.src if s.dtype in l2i_dt), None)) is not None else None),
   (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:
    x.replace(dtype=l2i_dt[x.dtype], arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(sz*2,)) if x.dtype in l2i_dt else None),
   (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x:
@@ -147,6 +155,8 @@ pm_long_decomp = PatternMatcher([
    split_l2i(ctx, x.op, dt:=l2i_dt[a.dtype], *flatten((s.rtag((0, dt)), s.rtag((1, dt))) for s in x.src))),
   (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda ctx,a,x:
    split_l2i(ctx, Ops.BITCAST, l2i_dt[x.dtype], a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt)))[x.tag[0]]),
+  # a literal splits by value; the general CAST arm below would drop its high word
+  (UPat(Ops.CAST, src=(UPat(Ops.CONST, name='c'),), tag=long_word_tags, name='x'), lambda x,c: split_word(x, c.val)),
   (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda ctx,a,x:
    split_l2i(ctx, x.op, x.dtype, a)[x.tag[0]] if x.tag is not None else None),
   (UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda ctx,a,x:
@@ -161,8 +171,6 @@ pm_long_decomp = PatternMatcher([
    if x.tag is not None else None),
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
    x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag[0]).replace(dtype=l2i_dt[x.dtype], tag=None),), tag=None) if x.tag is not None else None),
-  (UPat(Ops.CONST, tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'), lambda x:
-   UOp.const(truncate[x.tag[1]]((x.val >> 32) if x.tag[0] == 1 else (x.val & 0xFFFFFFFF)), x.tag[1]))
 ])
 
 # float decomposition patterns - ctx is (fr, to) tuple

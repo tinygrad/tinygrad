@@ -14,9 +14,14 @@ simple_pm = PatternMatcher([
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.val+c2.val)),
 ])
 
+def lit_value(u:UOp):
+  if u.op is Ops.CONST: return u.val
+  return u.src[0].val
+
 def const_values(u:UOp):
   if u.op is Ops.CONST: return (u.val,)
-  if u.op is Ops.STACK: return tuple(x.val for x in u.src)
+  if u.op is Ops.CAST: return (u.src[0].val,)
+  if u.op is Ops.STACK: return tuple(lit_value(x) for x in u.src)
   raise AssertionError(f"expected const-like UOp, got {u.op}")
 
 class TestGraphRewriteConst(unittest.TestCase):
@@ -25,7 +30,7 @@ class TestGraphRewriteConst(unittest.TestCase):
     v2 = v1.index(1)
     ret = graph_rewrite(v2, sym)
     self.assertEqual(ret.dtype, dtypes.int)
-    self.assertEqual(ret.val, 1)
+    self.assertEqual(ret.src[0].val, 1)
 
   def test_add_const(self):
     v1 = UOp.const((0,1,2))
@@ -196,10 +201,10 @@ class TestUOpGraph(unittest.TestCase):
     c2 = UOp.const(2.0, dtypes.float)
     out = c1+c2
     uops = to_uops_list([out])
-    self.assertEqual(len(uops), 2)  # +1 for SINK
+    self.assertEqual(len(uops), 2)  # +1 for SINK (a literal's inner CONST is not linearized, only its CAST)
     out = uops[-2]
-    self.assertEqual(out.op, Ops.CONST)
-    self.assertEqual(out.val, 3.0)
+    self.assertTrue(out.op is Ops.CAST and out.src[0].op is Ops.CONST)
+    self.assertEqual(out.src[0].val, 3.0)
 
   def test_where_same_fold(self):
     v = UOp.variable('tmp', 0, 1)
@@ -210,8 +215,8 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
     out = uops[-2]
-    self.assertEqual(out.op, Ops.CONST)
-    self.assertEqual(out.val, 1.0)
+    self.assertTrue(out.op is Ops.CAST and out.src[0].op is Ops.CONST)
+    self.assertEqual(out.src[0].val, 1.0)
 
   def test_where_const_fold(self):
     bf = UOp.const(False)
@@ -221,8 +226,8 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
     out = uops[-2]
-    self.assertEqual(out.op, Ops.CONST)
-    self.assertEqual(out.val, 2.0)
+    self.assertTrue(out.op is Ops.CAST and out.src[0].op is Ops.CONST)
+    self.assertEqual(out.src[0].val, 2.0)
 
   def test_const_cast(self):
     bf = UOp.const(False)
@@ -230,8 +235,8 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
     out = uops[-2]
-    self.assertEqual(out.op, Ops.CONST)
-    self.assertEqual(out.val, 0)
+    self.assertTrue(out.op is Ops.CAST and out.src[0].op is Ops.CONST)
+    self.assertEqual(out.src[0].val, 0)
 
   def test_const_bitcast(self):
     bf = UOp.const(1.0, dtypes.float)
@@ -239,8 +244,8 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
     out = uops[-2]
-    self.assertEqual(out.op, Ops.CONST)
-    self.assertEqual(out.val, 0x3F800000)
+    self.assertTrue(out.op is Ops.CAST and out.src[0].op is Ops.CONST)
+    self.assertEqual(out.src[0].val, 0x3F800000)
 
   @unittest.expectedFailure
   def test_const_shape_change_bitcast(self):
@@ -315,7 +320,8 @@ class TestUOpGraph(unittest.TestCase):
       vec = UOp(Ops.STACK, src=tuple(consts))
       with Context(SPEC=0):
         uops = to_uops_list([vec.index(i) for i in range(vec_size)])
-        for uop, const in zip(uops, consts):
+        # each element folds to a two-uop literal, so read the outputs off the SINK
+        for uop, const in zip(uops[-1].src, consts):
           self.assertEqual(uop, const)
 
   def test_cast_alu_fold(self):
@@ -326,7 +332,7 @@ class TestUOpGraph(unittest.TestCase):
     alu = (ld<1).cast(dtypes.bool)
     out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
-    self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 0)
+    self.assertEqual(len([x for x in uops if x.op is Ops.CAST and x.src[0].op is not Ops.CONST]), 0)
 
   def test_double_cast_fold(self):
     d0 = UOp.param(0, dtypes.float, (1,))
@@ -336,7 +342,7 @@ class TestUOpGraph(unittest.TestCase):
     alu = ld.cast(dtypes.float).cast(dtypes.float)
     out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
-    self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 1)
+    self.assertEqual(len([x for x in uops if x.op is Ops.CAST and x.src[0].op is not Ops.CONST]), 1)
 
   def test_depth_2_const_fold(self):
     v = UOp.variable("tmp", 0, 1, dtypes.int, param=True)
@@ -348,8 +354,8 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len(uops), 5)  # +1 for SINK, +1 for the PARAM shape STACK
     out = uops[-2]  # -2 to skip SINK
     self.assertEqual(out.op, Ops.ADD)
-    self.assertEqual(out.src[1].op, Ops.CONST)
-    self.assertEqual(out.src[1].val, 6)
+    self.assertTrue(out.src[1].op is Ops.CAST and out.src[1].src[0].op is Ops.CONST)
+    self.assertEqual(out.src[1].src[0].val, 6)
 
   def test_bitcast_to_same_dtype_fold(self):
     for dt in dtypes.ints + dtypes.floats + (dtypes.bool,):
@@ -361,7 +367,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_sub_with_cast_folds(self):
     a = Variable("a", 0, 5)
     uops = to_uops_list([a.cast(dtypes.int)+(-a).cast(dtypes.int)])
-    assert uops[0] == UOp.const(0, dtypes.int)
+    assert uops[-2] == UOp.const(0, dtypes.int)
     assert uops[-1].op == Ops.SINK
 
   def test_where_on_gated_load_fold(self):
@@ -373,7 +379,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].val==5
+      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].src[0].val==5
 
   def test_where_on_gated_load_folds_swapped_branches(self):
     ridx0 = UOp.range(100, 0)
@@ -383,7 +389,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([w])
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD: assert u.src[1].val==5
+      if u.op is Ops.LOAD: assert u.src[1].src[0].val==5
 
   def test_where_on_gated_load_with_cast(self):
     ridx0 = UOp.range(100, 0)
@@ -395,7 +401,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].val == 5
+      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].src[0].val == 5
 
   def test_where_on_casted_gated_load_extra_cond(self):
     ridx0 = UOp.range(100, 0)
@@ -427,7 +433,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([st])
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.STORE: assert u.src[1].val==5
+      if u.op is Ops.STORE: assert u.src[1].src[0].val==5
 
   def test_load_idx_becomes_int(self):
     # mnist indexing with split reduceop

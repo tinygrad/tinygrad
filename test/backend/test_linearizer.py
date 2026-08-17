@@ -16,7 +16,7 @@ from test.helpers import replace_opts, check_schedule
 from test.backend.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
 
-from tinygrad.uop.render import print_uops # noqa: F401 # pylint: disable=unused-import
+from tinygrad.uop.render import print_uops
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "isa backends don't preserve the op spec when lowering")
 class TestLinearizer(unittest.TestCase):
@@ -248,11 +248,11 @@ class TestLinearizer(unittest.TestCase):
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     begin_range = [i for i, x in enumerate(uops) if x.op is Ops.RANGE][-1]
     end_range = [i for i, x in enumerate(uops) if x.op is Ops.END][0]
-    for i,u in enumerate(uops): print(i, u.op, [uops.index(s) for s in u.src], u.arg, u.dtype)
+    print_uops(list(uops))
     for u in uops:
       if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.REG:
         if uops.index(u) < begin_range:
-          assert u.src[1].op is Ops.CONST
+          assert u.src[1].op is Ops.CAST and u.src[1].src[0].op is Ops.CONST
         else:
           assert u.src[1].op in GroupOp.ALU
           assert begin_range < uops.index(u) < end_range
@@ -268,9 +268,9 @@ class TestLinearizer(unittest.TestCase):
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     idxs = dedup([uop for uop in uops if uop.op is Ops.SPECIAL])
     idxs = sorted(idxs, key=lambda uop: uop.arg)
-    assert (idxs[0].arg, idxs[0].src[0].val) == ('gidx0', 6), idxs[0]
-    assert (idxs[1].arg, idxs[1].src[0].val) == ('gidx1', 5), idxs[1].arg
-    assert (idxs[2].arg, idxs[2].src[0].val) == ('gidx2', 4), idxs[2].arg
+    assert (idxs[0].arg, idxs[0].src[0].src[0].val) == ('gidx0', 6), idxs[0]
+    assert (idxs[1].arg, idxs[1].src[0].src[0].val) == ('gidx1', 5), idxs[1].arg
+    assert (idxs[2].arg, idxs[2].src[0].src[0].val) == ('gidx2', 4), idxs[2].arg
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()

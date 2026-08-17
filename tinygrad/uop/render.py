@@ -1,6 +1,6 @@
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, multirange_str, range_str, consumer_map_from_toposort
+from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, multirange_str, range_str, consumer_map_from_toposort, sint
 from tinygrad.helpers import strip_parens
 
 def pretty_print(x:UOp, cache=None, d=0)->str:
@@ -18,7 +18,8 @@ def pretty_print(x:UOp, cache=None, d=0)->str:
 def print_uops(uops:list[UOp]):
   uops_index = {u:i for i,u in enumerate(uops)}
   for i,u in enumerate(uops):
-    formatted_srcs = [(uops_index[x] if x.op is not Ops.CONST else f"{x.val}") if x in uops else "--" for x in u.src]
+    # a literal is data, not a program point: print its value
+    formatted_srcs = [(f"{x.src[0].val}" if x.op is Ops.CAST and x.src[0].op is Ops.CONST else uops_index[x]) if x in uops else "--" for x in u.src]
     print(f"{i:4d} {str(u.op):20s}: {multirange_str(u.ranges, color=True, pad=10)} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
 
 # for debug
@@ -38,6 +39,7 @@ renderer = PatternMatcher([
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: f"loop{x.arg[0]}"),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
+  (UPat.cvar("c").cast(), lambda c: str(c.val)),
   (UPat(Ops.CONST, name="x"), lambda x: str(x.val)),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"),
   (UPat(Ops.NEG, name="x"), lambda ctx,x: f"(-{ctx[x.src[0]]})"),
@@ -67,21 +69,23 @@ renderer_infer = PatternMatcher([
 # *** pyrender ***
 
 def srcs(ctx, src): return f"({ctx[src[0]]},)" if len(src) == 1 else f"({', '.join([ctx[x] for x in src])})"
+# marg is ssimplify'd, so a bound can be a node this graph never contained -- render that one on its own
+def marg_str(ctx, a:sint) -> str: return str(a) if not isinstance(a, UOp) else ctx[a] if a in ctx else a.render()
+
 def render_marg(ctx,x:UOp):
   if x.op is Ops.PERMUTE: return str(x.marg)
   if x.op is Ops.FLIP: return str(tuple([i for i,x in enumerate(x.marg) if x]))
   pieces = []
-  if x.op in {Ops.RESHAPE, Ops.EXPAND}:
-    pieces = [f"{ctx[a] if isinstance(a, UOp) else str(a)}" for a in x.marg]
-  if x.op in {Ops.PAD, Ops.SHRINK}:
-    pieces = [f"({ctx[a[0]] if isinstance(a[0], UOp) else str(a[0])}, {ctx[a[1]] if isinstance(a[1], UOp) else str(a[1])})" for a in x.marg]
+  if x.op in {Ops.RESHAPE, Ops.EXPAND}: pieces = [marg_str(ctx, a) for a in x.marg]
+  if x.op in {Ops.PAD, Ops.SHRINK}: pieces = [f"({marg_str(ctx, a[0])}, {marg_str(ctx, a[1])})" for a in x.marg]
   return f"({','.join(pieces)})" if len(pieces) != 1 else f"({pieces[0]},)"
 
 sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,
          Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER, Ops.DETACH}
 pm_pyrender_extra = PatternMatcher([
-  (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val}, {x.dtype})"),
-  (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})"),
+  (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val})"),  # a bare CONST derives its dtype from the value
+  # a same-dtype cast does not round-trip (.cast folds it away), so fall through to the raw UOp(...) form
+  (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})" if x.dtype != x.src[0].dtype else None),
   (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].val}, {repr(x.arg)}, dtype={x.dtype})"),
   (UPat(Ops.BUFFER, src=(UPat(),), name="x"), lambda x:
     f"UOp.new_buffer({repr(x.arg.device)}, {x.max_numel()}, {x.dtype}, {x.arg.slot})"

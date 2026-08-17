@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Device
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
-from tinygrad.renderer.isa.x86 import X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm, def_reg
+from tinygrad.renderer.isa.x86 import X86Ops, X86Renderer, RBP, RBX, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm, def_reg
 
 def ins(op, dt, src, tag=None): return UOp(Ops.INS, arg=op, dtype=dt, src=src, tag=tag)
 
@@ -146,6 +146,15 @@ class TestEncodingsX86(unittest.TestCase):
     cmove = ins(X86Ops.CMOVE, dtypes.int32, (def_reg(dtypes.int32, RAX), UOp(Ops.INS, arg=X86Ops.CMP)), RDX)
     # cmove edx, eax
     self.assertEqual(bytes.fromhex(self.encode(cmove)), bytes.fromhex("0F 44 D0"))
+
+  # a byte operand demotes the instruction, a byte access to index 4-7 requires REX
+  def test_byte_demotion_needs_rex(self):
+    op = ins(X86Ops.AND, dtypes.bool, (def_reg(dtypes.int32, RBP),), RBX)
+    # and bl, bpl -- without the REX this is "22 DD" which is and bl, ch
+    self.assertEqual(bytes.fromhex(self.encode(op)), bytes.fromhex("40 22 DD"))
+    op = ins(X86Ops.AND, dtypes.bool, (def_reg(dtypes.int32, RAX),), RBX)
+    # and bl, al -- rax is index 0 so no REX is needed
+    self.assertEqual(bytes.fromhex(self.encode(op)), bytes.fromhex("22 D8"))
 
 if __name__ == "__main__":
   unittest.main()

@@ -58,7 +58,8 @@ class PythonProgram(Program['PythonDevice']):
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values[v] for v in u.src if v.dtype is not dtypes.void]
+        # a literal's CONST half is never executed, so it has no entry in values
+        src_values = [values[v] for v in u.src if v.dtype is not dtypes.void and v.op is not Ops.CONST]
         src_dtypes = [v.dtype for v in u.src if v.dtype is not dtypes.void]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
         if u.op is Ops.END:
@@ -104,7 +105,7 @@ class PythonProgram(Program['PythonDevice']):
         elif u.op is Ops.SPECIAL:
           if u.arg[0] == 'g': values[u] = [idxs[2-int(u.arg[-1])]] * warp_size
           elif u.arg[0] == 'l': values[u] = [x[2-int(u.arg[-1])] for x in warp]
-        elif u.op is Ops.CONST: values[u] = [u.val] * warp_size
+        elif u.op is Ops.CAST and u.src[0].op is Ops.CONST: values[u] = [u.src[0].val] * warp_size
         elif u.op in {Ops.INDEX, Ops.SHRINK}:
           ret:list = []
           if u.src[0].addrspace == AddrSpace.ALU:

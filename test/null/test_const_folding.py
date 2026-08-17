@@ -55,7 +55,7 @@ class TestWeakConstFolding(unittest.TestCase):
     # log10 backward folds log10(2)/log(2) = 1/log(10) in one rounding, not the double-rounded 1/float32(log(10))
     x = Tensor([1.0, 2.0, 3.0])
     ast = next(s.src[0] for s in x.log10().sum().gradient(x)[0].schedule_linear().src if s.src[0].op is Ops.SINK)
-    const = next(u.arg for u in full_rewrite(ast).toposort() if u.op is Ops.CONST and u.dtype is dtypes.float32)
+    const = next(u.src[0].val for u in full_rewrite(ast).toposort() if u.dtype is dtypes.float32 and u.op is Ops.CAST and u.src[0].op is Ops.CONST)
     # correctly rounded: within half a float32 ulp of the exact value (folding at float32 lands 0.66 ulp off)
     self.assertLess(abs(const - 1/math.log(10)), 2**-26)
 
@@ -129,9 +129,9 @@ class TestBitcastConstFolding(unittest.TestCase):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
         if not math.isnan(from_v):
           r = full_rewrite(UOp.const(from_v, from_dt).bitcast(to_dt).sink()).src[0]
-          self.assertEqual(r.op, Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
+          self.assertTrue(r.op is Ops.CAST and r.src[0].op is Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
           self.assertEqual(r.dtype, to_dt, msg)
-          np.testing.assert_equal(r.val, to_v, msg)
+          np.testing.assert_equal(r.src[0].val, to_v, msg)
 
     t({dtypes.int8: 0, dtypes.uint8: 0, dtypes.bool: False})
     t({dtypes.int8: 1, dtypes.uint8: 1, dtypes.bool: True})
@@ -153,8 +153,8 @@ class TestBitcastConstFolding(unittest.TestCase):
   def test_vec_bitcast(self):
     with Context(SPEC=0):
       srcs = full_rewrite(UOp.const((-1, -2**31, 75), dtypes.int32).bitcast(dtypes.uint32).sink()).src
-    self.assertTrue(all(r.op is Ops.CONST and r.dtype == dtypes.uint32 for r in srcs))
-    self.assertEqual(tuple(x.val for x in srcs), (2**32-1, 2**31, 75))
+    self.assertTrue(all(r.op is Ops.CAST and r.src[0].op is Ops.CONST and r.dtype == dtypes.uint32 for r in srcs))
+    self.assertEqual(tuple(x.src[0].val for x in srcs), (2**32-1, 2**31, 75))
 
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):

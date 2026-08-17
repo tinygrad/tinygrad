@@ -6,7 +6,7 @@ from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
-from tinygrad.uop.weak import pm_lower_index_dtype
+from tinygrad.uop.weak import pm_commit_weak, pm_lower_weak
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
 from test.helpers import eval_uop, to_uops_list
@@ -68,6 +68,11 @@ class TestDTypeFromUOp(unittest.TestCase):
     self.assertIs((out:=graph_rewrite(gate.where(value, UOp.invalid()), pm_remove_invalid)).src[2], UOp.const(0, dtypes.float))
     type_verify(out.sink(), spec_program)
 
+  def test_bitcast_rejects_a_weak_operand(self):
+    # a bitcast reinterprets its operand's bits, so the operand must state a width: a raw build raises
+    with self.assertRaises(RuntimeError): UOp(Ops.BITCAST, src=(UOp.const(1.0),), arg=dtypes.uint32)
+    self.assertEqual(UOp(Ops.BITCAST, src=(UOp.const(1.0, dtypes.float32),), arg=dtypes.uint32).dtype, dtypes.uint32)
+
   def test_remove_invalid_stack_lanes(self):
     stack = UOp(Ops.STACK, dtypes.half, (UOp.const(1, dtypes.half), UOp.invalid()))
     out = graph_rewrite(stack, pm_remove_invalid)
@@ -75,22 +80,26 @@ class TestDTypeFromUOp(unittest.TestCase):
     type_verify(out.sink(), spec_program)
 
 class TestLowerIndexDtype(unittest.TestCase):
+  def lower(self, u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, pm_commit_weak), pm_lower_weak)
+
   def test_gated_shrink_lowers_to_selected_width(self):
     # coalesce builds gated SHRINKs for masked vectorized loads; lowering must resolve them at the
     # width the offset bounds select (this one needs long)
     buf = UOp.param(0, dtypes.float, (2**31+64,))
     i = UOp.variable("i", 0, 2**28)
     shrink = UOp(Ops.SHRINK, src=(buf, (i*24).valid(i < 2**28), UOp.const(4)))
-    lowered = graph_rewrite(shrink.sink(), pm_lower_index_dtype)
-    self.assertTrue(all(u.dtype != dtypes.weakint for u in lowered.backward_slice_with_self), "lowering must resolve all weakint")
+    lowered = self.lower(shrink.sink())
+    self.assertTrue(all(u.op is Ops.CONST for u in lowered.backward_slice_with_self if u.dtype in dtypes.weaks),
+                    "lowering must resolve every weak width, except a typed literal's value half")
     sh = next(u for u in lowered.backward_slice_with_self if u.op is Ops.SHRINK)
     self.assertEqual(sh.src[1].dtype, dtypes.long)
 
   def test_reg_buffer_size_lowers(self):
     reg = UOp.placeholder((4,), dtypes.float, 0, addrspace=AddrSpace.REG)
     self.assertEqual(reg.src[0].dtype, dtypes.weakint)
-    lowered = graph_rewrite(reg.sink(), pm_lower_index_dtype)
-    self.assertTrue(all(u.dtype != dtypes.weakint for u in lowered.backward_slice_with_self), "lowering must resolve all weakint")
+    lowered = self.lower(reg.sink())
+    self.assertTrue(all(u.op is Ops.CONST for u in lowered.backward_slice_with_self if u.dtype in dtypes.weaks),
+                    "lowering must resolve every weak width, except a typed literal's value half")
     self.assertEqual(next(u for u in lowered.backward_slice_with_self if u.op is Ops.BUFFER).src[0].dtype, dtypes.int)
 
 class TestSafeCast(unittest.TestCase):
@@ -134,7 +143,7 @@ class TestConstFloatEq(unittest.TestCase):
     self.assertFalse(Invalid != HoldsInvalid())
 
   def test_matchers_agree_on_nan(self):
-    n = UOp.const(math.nan, dtypes.float32)
+    n = UOp.const(math.nan)
     for compiled in (False, True):
       pm = PatternMatcher([(UPat(Ops.CONST, arg=math.nan), lambda: True)], compiled=compiled)
       self.assertTrue(pm.rewrite(n), f"{compiled=}")
@@ -279,6 +288,9 @@ class TestGatedStoreRewrite(unittest.TestCase):
     for x in gated_uops: self.assertIs(x.op, Ops.STORE)
     for x in gated_uops: self.assertEqual(len(x.src), 2)
 
+# assertions below count arithmetic ops: a literal's CAST is filtered out (one test asserts a CAST must NOT appear)
+def alu_ops(uops): return [x.op for x in uops if x.op is not Ops.CAST or x.src[0].op is not Ops.CONST]
+
 @unittest.skipIf(Device.DEFAULT == "METAL", "compiler bug")
 @unittest.skipUnless(Ops.SHR in Device[Device.DEFAULT].renderer.code_for_op, "fast_idiv requires SHR")
 class TestFastIdiv(unittest.TestCase):
@@ -290,7 +302,7 @@ class TestFastIdiv(unittest.TestCase):
       a = UOp(Ops.CDIV, dt, (l, c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       Device[Device.DEFAULT].renderer.render(uops)
-      ops = [x.op for x in uops]
+      ops = alu_ops(uops)
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
       self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
 
@@ -301,7 +313,7 @@ class TestFastIdiv(unittest.TestCase):
       c = UOp.const(8).cast(dt)
       a = UOp(Ops.FLOORMOD, dt, (g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
-      ops = [x.op for x in uops]
+      ops = alu_ops(uops)
       self.assertIn(Ops.AND, ops, f"For dtype={dt} FLOORMOD by pow2 did not simplify to AND")
       self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORMOD by pow2 left a MOD")
       self.assertNotIn(Ops.FLOORMOD, ops, f"For dtype={dt} FLOORMOD survived past late rewrite")
@@ -313,7 +325,7 @@ class TestFastIdiv(unittest.TestCase):
       c = UOp.const(2).cast(dt)
       a = UOp(Ops.FLOORDIV, dt, (g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
-      ops = [x.op for x in uops]
+      ops = alu_ops(uops)
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
       self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
       self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
@@ -327,14 +339,14 @@ class TestFastIdiv(unittest.TestCase):
     a = UOp(Ops.CDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
-    ops = [x.op for x in uops]
+    ops = alu_ops(uops)
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.CDIV, ops)
 
     b = UOp(Ops.CMOD, src=(l, c))
     uops = to_uops_list([b], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
-    ops = [x.op for x in uops]
+    ops = alu_ops(uops)
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.CMOD, ops)
 
@@ -348,7 +360,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_fast_idiv_remove_powers_of_two(self):
     ridx = UOp.range(2**20, 0)
     uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
-    ops = [x.op for x in uops]
+    ops = alu_ops(uops)
     # this requires shifting out the powers of two before doing fast_idiv
     # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
     self.assertNotIn(Ops.CAST, ops)
@@ -362,7 +374,7 @@ class TestFastIdiv(unittest.TestCase):
     a = UOp(Ops.CDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
-    ops = [x.op for x in uops]
+    ops = alu_ops(uops)
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.CDIV, ops)
 
@@ -373,7 +385,7 @@ class TestFastIdiv(unittest.TestCase):
     a = UOp(Ops.CDIV, src=(l, c))
     with Context(DISABLE_FAST_IDIV=1):
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
-    ops = [x.op for x in uops]
+    ops = alu_ops(uops)
     self.assertNotIn(Ops.SHR, ops)
     self.assertIn(Ops.CDIV, ops)
 

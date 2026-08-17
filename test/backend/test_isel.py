@@ -46,10 +46,11 @@ class TestIselX86(unittest.TestCase):
   # complex address is [base + index*scale + displacement]
   def test_complex_address(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
-    load = UOp.param(0, dtypes.int32, (16,)).index(a + 1).load()
+    # a program states every width, so the offset that folds into the displacement is a literal, not a bare const
+    load = UOp.param(0, dtypes.int32, (16,)).index(a + UOp.const(1, dtypes.int32)).load()
     n = self.isel_rewrite(load)
     # displacement is the constant in "a" scaled to the buffer element size, dtype is int8 when the value fits otherwise int32
-    self.assertTrue(n.src[2].op is Ops.CONST and n.src[2].dtype is dtypes.int8 and n.src[2].val == 4)
+    self.assertTrue(n.src[2].op is Ops.CAST and n.src[2].dtype is dtypes.int8 and n.src[2].src[0].val == 4)
 
 if __name__ == "__main__":
   unittest.main()

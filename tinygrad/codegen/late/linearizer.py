@@ -43,7 +43,8 @@ def linearize(sink:UOp) -> list[UOp]:
     for v in u.src:
       out_degree[v] -= 1
       if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
-  newlst = newlst[::-1]
+  # a renderer never emits a CONST, only the CAST over it: drop the value halves
+  newlst = [u for u in newlst[::-1] if u.op is not Ops.CONST]
 
   if getenv("DEBUG_LINEARIZE"):
     for i,u in enumerate(newlst):

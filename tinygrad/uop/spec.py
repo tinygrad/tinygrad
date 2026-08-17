@@ -1,6 +1,6 @@
 import math
 from typing import Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, dtype_from_uop
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
@@ -53,8 +53,8 @@ spec_shared = PatternMatcher([
   # NOOP. TODO: remove this
   (UPat(Ops.NOOP), lambda: True),
 
-  # CONST is everywhere; Invalid is a bool const
-  (UPat(Ops.CONST, src=(), name="x"), lambda x: x.dtype is dtypes.bool if x.is_invalid else type(x.val) is type(x.dtype.const(x.val))),
+  # a CONST states no width: its dtype must be the one DERIVED from its arg. any other dtype is spelled CAST(dt, CONST(v))
+  (UPat(Ops.CONST, src=(), name="x"), lambda x: x.dtype is dtype_from_uop(Ops.CONST, x.src, x.arg)),
 
   # STACK is everywhere too
   (UPat(Ops.STACK, dtype=dtypes.void, src=()), lambda: True),
@@ -73,7 +73,7 @@ spec_shared = PatternMatcher([
   (UPat(GroupOp.ALU, name="x"), lambda x: all(matches_dtype(y, x.dtype) or y.dtype in dtypes.weaks for y in x.src)),
 
   # CAST
-  (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: isinstance(x.arg, DType)),
+  (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: isinstance(x.arg, DType) and x.dtype is x.arg),
 
   # RANGE can be in the big graph now. a void RANGE is a bound-less loop header, the arg is an axis id like RANGE
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
@@ -200,11 +200,12 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # index and weak dtypes are not allowed in programs
-  (UPat(GroupOp.All, (dtypes.weakint, dtypes.weakfloat)), lambda: False),
+  # every width in a program is stated: a CONST appears only under the CAST stating its width, and is the only weak node
+  (UPat(GroupOp.All, name="x"), lambda x: False if x.op is not Ops.CAST and any(s.op is Ops.CONST for s in x.src) else None),
+  (UPat(GroupOp.All, dtypes.weaks, name="x"), lambda x: None if x.op is Ops.CONST else False),
 
   # allow special SHRINK
-  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
+  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CAST, src=(UPat(Ops.CONST),)))), lambda: True),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),
@@ -249,9 +250,11 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.SINK, dtypes.void), lambda: True),
   # the store of a bound Variable binds it: AFTER(BUFFER, STORE(BUFFER, CONST)) in call args
   (UPat(Ops.STORE, dtypes.void, (UPat(Ops.BUFFER, name="b"), UPat(Ops.CONST))), lambda b: b.is_variable),
-  # const + stack to make vconsts and shape args
+  # const + stack to make vconsts and shape args, in both spellings -- each at the dtypes its mint fixes
   (UPat(Ops.CONST, src=()), lambda: True),
-  (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) or x.is_variable or x.is_bound_var for x in s.src) or None),
+  (UPat(Ops.CAST, src=(UPat(Ops.CONST, src=()),)), lambda: True),
+  (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) or (x.op is Ops.CAST and x.src[0].op is Ops.CONST)
+                                            or x.is_variable or x.is_bound_var for x in s.src) or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
   # param is outside buffer, buffer is local buffer

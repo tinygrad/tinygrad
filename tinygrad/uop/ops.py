@@ -96,9 +96,11 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
   for x in arg:
     if isinstance(x, UOp) and not dtypes.is_int(x.dtype): raise RuntimeError(f"shape must be int, got {x.dtype} in {arg}")
-  if len(arg) == 0: return UOp(Ops.STACK)
-  elif len(arg) == 1: return UOp.const(arg[0], dtypes.weakint)
-  else: return UOp(Ops.STACK, src=tuple(UOp.const(x) if isinstance(x, int) else x for x in arg))
+    # a dim is a sint. anything else (like a float dim) is a bug in the caller: reject it here, loudly
+    if not isinstance(x, (int, UOp)): raise RuntimeError(f"shape must be int, got {type(x).__name__} {x} in {arg}")
+  # a dim is metadata, never emitted code, so an int dim states no width
+  src = tuple(UOp.const(x) if isinstance(x, int) else x for x in arg)
+  return src[0] if len(src) == 1 else UOp(Ops.STACK, src=src)
 
 def consumer_map_from_toposort(lst:Iterable[UOp]):
   ret: dict[UOp, dict[UOp, None]] = {}
@@ -169,6 +171,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return dtypes.uint8
     case Ops.CAST | Ops.BITCAST:
       assert isinstance(arg, DType), f"CAST/BITCAST arg must be DType, got {arg}"
+      # a BITCAST reinterprets its operand's BITS, so that operand must state a width and a weak value states none
+      if op is Ops.BITCAST and src[0].dtype in dtypes.weaks: raise RuntimeError(f"cannot bitcast a weak value, got {src[0].dtype}")
       return arg
     case Ops.CONST:
       # derived from the value. order matters: bool is an int subclass, ConstFloat is a float subclass
@@ -187,14 +191,16 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
-    if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
-    # CONST derives its dtype by value only when the constructor omits one
+    # ONE derivation, two duties: it FILLS an omitted dtype and is the SPEC=2 answer (asking with an Invalid src can RAISE)
+    derived = dtype_from_uop(op, src, arg) if dtype is None or (SPEC == 2 and not any(s.base.is_invalid for s in src)) else None
+    if dtype is None: dtype = derived or dtypes.void
+    # a literal's value belongs on its CAST's grid: re-mint it there, unless the re-mint has the cast's own dtype
+    if op is Ops.CAST and src[0].op is Ops.CONST and (c:=UOp(Ops.CONST, arg=dtype.const(src[0].arg))).dtype is not dtype: src = (c,)
     # TODO: delete this once the dtype field is removed, for now it just re-implements spec.py
     # an INDEX presents its access dtype, which a still-weak source matches up to weakness
-    if SPEC == 2 and op is not Ops.CONST and \
-       not any(s.base.is_invalid for s in src) and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype and \
-       not (op is Ops.INDEX and weak_dtype(expected_dtype) == weak_dtype(dtype)):
-      raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
+    if SPEC == 2 and derived is not None and derived != dtype and \
+       not (op is Ops.INDEX and weak_dtype(derived) == weak_dtype(dtype)):
+      raise RuntimeError(f"bad dtype {dtype}, expected {derived} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     if metadata is not None: all_metadata[created] = metadata
@@ -257,6 +263,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if (self.op, self.dtype, self.src, self.arg, self.tag) == new_args: return self
     return UOp(*new_args)
   def rtag(self, tag=True): return self.replace(tag=tag)
+  # the value is minted on the cast's grid, so .val on the CONST reads the literal at its stated width in either spelling
   @property
   def val(self):
     assert self.op is Ops.CONST, f"val is only for CONST, got {self.op}"
@@ -614,7 +621,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.cast(dtype)
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
-    return UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
+    # .cast folds away at exactly the dtypes a CONST derives (bool/weakint/weakfloat): bare there, the pair everywhere else
+    return UOp(Ops.CONST, arg=dtype.const(b), src=()).cast(dtype)
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.WEAK, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
@@ -987,7 +995,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return unwrap(self.arg.name)
   def bind(self, val:int|UOp):
     assert self.is_variable, f"op is {self.op}, need Variable"
-    uval = self.const_like(val) if isinstance(val, int) else val
+    # the Variable states the width, so the bound value stays BARE: is_bound_var tests for a CONST there, unbind reads .val
+    uval = UOp.const(val) if isinstance(val, int) else val
     assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
     assert uval.divides(self.arg.multiple_of) is not None, f"bind {val} not divisible by {self.arg.multiple_of}"
     return self.after(self.store(uval))
