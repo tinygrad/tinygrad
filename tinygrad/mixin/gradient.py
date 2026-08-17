@@ -3,6 +3,7 @@ import math, dataclasses
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes
 from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
+from tinygrad.function import renumber_invalid_outputs
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   if op == Ops.ADD: return (ctx._broadcast_to(ret.src[0].shape),)
@@ -40,6 +41,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   # collect needed gradient bodies, compact unused params, create a single backward CALL
   grad_bodies = [(i, grads[p]) for i in needed if (p:=params.get(i)) is not None and p in grads]
   bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies)).substitute(fwd_subs, walk=True)
+  bwd_body = renumber_invalid_outputs(bwd_body)
   bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))
   bwd_call = bwd_body.call(*compact_args, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
   gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}

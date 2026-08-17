@@ -39,7 +39,7 @@ def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
      and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
     del ctx.realize_map[src]
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
-  if dest.base in src.backward_slice_with_self: ctx.realize_map[src] = None
+  if dest.base in src.toposort(enter_calls=False): ctx.realize_map[src] = None
 
 def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
   for s in c.src[1:]:

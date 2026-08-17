@@ -60,7 +60,7 @@ pm_mops = PatternMatcher([
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.backward_slice_with_self: return None
+  if (base:=target.base) not in src.toposort(enter_calls=False): return None
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
