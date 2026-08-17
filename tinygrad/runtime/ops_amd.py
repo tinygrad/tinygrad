@@ -790,14 +790,10 @@ class KFDIface:
 
   def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
                    xcc_id=0, idx=0):
-    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA and idx and self.kfd_ver >= (1,17):
-      queue_type = kfd.KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID
-      sdma_engine_id = idx % (self.props['num_sdma_engines'] + self.props.get('num_sdma_xgmi_engines', 0))
-    else: sdma_engine_id = 0
     queue = kfd.AMDKFD_IOC_CREATE_QUEUE(KFDIface.kfd, ring_base_address=ring.va_addr, ring_size=ring.size, gpu_id=self.gpu_id,
       queue_type=queue_type, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE|(xcc_id<<8), queue_priority=getenv("AMD_KFD_QUEUE_PRIORITY", 7),
       eop_buffer_address=eop_buffer.va_addr if eop_buffer else 0, eop_buffer_size=eop_buffer.size if eop_buffer else 0, ctl_stack_size=ctl_stack_size,
-      ctx_save_restore_address=cwsr_buffer.va_addr if cwsr_buffer else 0, ctx_save_restore_size=ctx_save_restore_size, sdma_engine_id=sdma_engine_id,
+      ctx_save_restore_address=cwsr_buffer.va_addr if cwsr_buffer else 0, ctx_save_restore_size=ctx_save_restore_size,
       write_pointer_address=gart.va_addr+wptr, read_pointer_address=gart.va_addr+rptr+8*xcc_id)
 
     if not hasattr(self, 'doorbells'):
@@ -948,9 +944,7 @@ class AMDDevice(HCQCompiled):
   def is_usb(self) -> bool: return isinstance(self.iface, USBIface)
 
   def __init__(self, device:str=""):
-    self.device_id = int(device.split(":")[1]) if ":" in device else 0
-
-    self.iface = self._select_iface()
+    self.iface = self._select_iface(device)
 
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target

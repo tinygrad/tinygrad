@@ -12,18 +12,18 @@ def lower_weak_node(u:UOp) -> UOp|None:
   if src == u.src or any(s.dtype in dtypes.weaks for s in src[start:]): return None
   dt = strong_dtype(least_upper_dtype(select_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary
                     else unwrap(dtype_from_uop(u.op, src, u.arg)))
-  return u.replace(dtype=None, src=src[:start]+tuple(s if s.base.is_invalid else s.cast(dt) for s in src[start:])).cast(u.dtype)
+  return u.replace(dtype=None, src=src[:start]+tuple(s if s.base.is_invalid else commit_weak(s, dt) for s in src[start:])).cast(u.dtype)
 
 pm_lower_weak = PatternMatcher([
   (UPat(Ops.CONST, dtype=dtypes.weaks, name="u"), lambda u: UOp.const(u.val, select_dtype(u)).cast(u.dtype)),
-  # two stacked weak casts are a weakint value used as weakfloat (or vice versa): resolve the inner one at the outer kind's default.
+  # two stacked weak casts are two kind conversions: each resolves at its own kind's default
   # a SINGLE weak cast is never rewritten here, each consumer absorbs it on its own edge (see lower_weak_srcs)
   (UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("x"),)),), name="u"),
-   lambda u,x: x.cast(select_dtype(u)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
+   lambda u,x: x.cast(select_dtype(u.src[0])).cast(select_dtype(u)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
   # Binary can widen from the bounds, all other nodes derive from the lowered sources.
   # a weakfloat Unary (sin/exp2/...) must resolve here, before the transcendental decomposition
   (UPat(GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK, Ops.SPECIAL}, name="u"), lower_weak_node),
-  (UPat(Ops.PARAM, dtype=dtypes.weakint, name="u"),
+  (UPat((Ops.PARAM, Ops.BUFFER), dtype=dtypes.weakint, name="u"),
     lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=select_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
 ])
 
@@ -40,7 +40,7 @@ def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
   return None if ret is u else ret
 
 def commit_weak(s:UOp, dt:DType) -> UOp:
-  # a bare weak CONST commits directly (the value stays mathematical, emission truncates), a weak non-const src takes the demand cast
+  # a CONST commits directly at dt (the value stays mathematical, emission truncates), a non-const src takes the cast
   return UOp.const(s.val, dt) if s.op is Ops.CONST else s.cast(dt)
 
 def commit_weak_srcs(u:UOp) -> UOp|None:
@@ -65,9 +65,13 @@ def cast_weak_srcs(c:UOp, u:UOp) -> UOp|None:
 
 pm_cast_weak = PatternMatcher([
   (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.ALU, dtype=dtypes.weaks, name="u"),)), cast_weak_srcs),
+  (UPat(Ops.CAST, name="c", src=(UPat(Ops.CONST, dtype=dtypes.weaks, name="u"),)), lambda c,u: commit_weak(u, c.dtype)),
 ])
 
 pm_lower_index_dtype = pm_commit_weak+pm_cast_weak+PatternMatcher([
+  # a CAST between two concrete dtypes over a CONST is a value conversion: evaluate it once, at the width the CAST states
+  # TODO: delete this once CONST has no dtype
+  (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat.cvar("c", dtypes.all),)), lambda root, c: root.const_like(c.val)),
   (UPat(GroupOp.All, name="u"),
    lambda ctx,u: lower_weak_srcs(ctx, u) if u.dtype not in dtypes.weaks and any(s.dtype in dtypes.weaks for s in u.src) else None),
   # a valid index into an n-element buffer lives in [0,n): a gated long index narrows when n-1 fits int32 (out-of-gate wraps, discarded)

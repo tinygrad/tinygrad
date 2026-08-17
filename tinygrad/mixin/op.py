@@ -289,6 +289,12 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if value == 0: return base
     return MovementMixin.pad(X.const_like(True, dtypes.bool), pads).where(base, value)
 
+  def pad_to(self, shape, *args, value:ConstType=0) -> Self:
+    # same mask trick as _pad_constant so the fill survives backends that realize PAD as 0-fill
+    ret = MovementMixin.pad_to(self, shape, *args)
+    if value == 0 or ret is self: return ret
+    return MovementMixin.pad_to(self.const_like(True, dtypes.bool), shape, *args).where(ret, value)
+
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Self:
     # shrink first for negative pads, then wrap the non-negative remainder
     X = self.shrink(tuple((-smin(pB,0), smin(pA+sh,sh)) for (pB,pA),sh in zip(pX, self.shape)))
@@ -460,6 +466,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
     if not (self.is_floating_point() and all(t.is_floating_point() for t in targets)): raise RuntimeError("only float Tensors have gradient")
+    if any(t.dtype in dtypes.weaks for t in targets): raise RuntimeError("cannot take gradient wrt a weak Tensor")
     from tinygrad.mixin.gradient import compute_gradient
     if gradient is None: gradient = self.const_like(1.0)
     target_uops = [t._uop for t in targets]

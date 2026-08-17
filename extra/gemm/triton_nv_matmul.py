@@ -79,7 +79,7 @@ if __name__ == "__main__":
   linear, var_vals = C.linear_with_vars()
   last_call = linear.src[-1]
   ast = last_call.src[0]
-  bufs = [s.buffer for s in last_call.src[1:] if s.op is not Ops.BIND]
+  bufs = [s.buffer for s in last_call.src[1:] if not s.is_bound_var]
 
   src = compiled.asm["ptx"]
   # specify the shared memory here so we don't need to do it dynamically
