@@ -30,9 +30,9 @@ class HCQInfo:
   device:tuple[str, ...]
   estimates:Estimates = Estimates()
 
-  input_idxs:tuple[int, ...] = () # indexes into input_uops used by this call
-  inputs:int|None = None
-  kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...]], ...] = ()
+  input_idxs:tuple[tuple[tuple[str, ...], tuple[int, ...]], ...] = () # per inputs table: (devices, indexes into input_uops)
+  inputs:int|None = None # index of the inputs table in call.src
+  kernels:tuple[tuple[tuple[str, ...], UOp, tuple[int, ...]], ...] = () # per kernel: (devices, a call carrying its name and estimates, timestamps)
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -215,7 +215,7 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]], profile:bool) -> li
     # and make hcq call
     name, info = get_call_name(call, get_call_arg_uops(call)), HCQInfo(devices, estimate_uop(call))
     ts_ids = [next(UOp.unique_num) for _ in range(2)] if profile else []
-    kerns.append((devices, name, info.estimates, tuple(ts_ids)))
+    kerns.append((devices, make_call(name, call.src[0], info), tuple(ts_ids)))
 
     ts_ins = [UOp(Ops.INS, arg="timestamp", src=(make_signal(devices, s),)) for s in ts_ids]
     q += ts_ins[:1] + [call.replace(arg=replace(call.arg, aux=info))] + ts_ins[1:]
@@ -345,14 +345,11 @@ def split_patches(call:UOp) -> UOp|None:
   scatter = make_scatter_loops(input_patches, tables[0], lt_patches)
   body = body.substitute({p:p.substitute(scatter | reads) for p in rt_patches})
 
-  if inputs: # fence inputs
-    fills.append((t:=tables[0][0]).after(make_binary_patch(t, bytes(t.max_numel() * 8)))) # zeroed at link, slot 0 is the host fence
-    body = body.replace(src=(UOp.sink(*body.src[0].src, t.after(*body.src[0].src).index(0).store(0)),)) # open it once consumed
-
   lt_srcs = collections.defaultdict(list)
   for p in lt_patches: lt_srcs[p.buf_uop].append(p)
   return call.replace(src=(body, *call.src[1:], *[b.after(*ps) for b,ps in lt_srcs.items()], *fills),
-    arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=tuple(sorted(dedup(b.arg.slot for g in inputs for b in unwrap_mstack(g.buf_uop)))))))
+    arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=((call.arg.aux.device,
+      tuple(sorted(dedup(b.arg.slot for g in inputs for b in unwrap_mstack(g.buf_uop))))),) if inputs else call.arg.aux.input_idxs)))
 pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), split_patches)])
 
 # *****************
@@ -371,14 +368,13 @@ def replace_params(call:UOp) -> UOp|None:
 
   # keep buffers whose addresses become link-time constants alive and mapped
   held = args + [r.without_after for r in refhold]
-  addrs = dedup([g.src[0].without_after for x in call.src for g in x.toposort() if g.op is Ops.GETADDR])
+  addrs = dedup([g.src[0].without_after for g in call.toposort() if g.op is Ops.GETADDR])
   refhold += [a for a in addrs if a not in held and all(b.op is not Ops.PARAM or b.tag is not None for b in unwrap_mstack(a))]
 
   sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM} | _rank_ranges(tops)
-  info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args) if u.without_after.tag == "inputs"), None))
-  return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold),
-                      arg=replace(call.arg, aux=info)) # TODO: call.after(*refhold)?
+  info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args + refhold) if u.without_after.tag == "inputs"), None))
+  return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold), arg=replace(call.arg, aux=info))
 pm_replace_params = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), replace_params)])
 
@@ -424,7 +420,43 @@ def callify_hcq(call:UOp, cf:UOp) -> UOp:
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, src=(
   UPat(Ops.CUSTOM_FUNCTION, arg="hcq_args", src=(UPat(Ops.SINK),), name="cf"),), name="call", allow_any_len=True), callify_hcq)])
 
+# *****************
+# 9. merge submitters
+
+def _lane_arg(a:UOp, lane:int, table:UOp) -> UOp: return table if a.tag == "inputs" else a.mselect(lane) if len(to_tuple(a.device)) > 1 else a
+
+def merge_batch(batch:list[UOp]) -> UOp:
+  tables = UOp.variable("hcq_inputs_ptr", 0, 2**64-1, dtypes.uint64, param=True)
+  lanes = [(c, j, sum(len(idxs) * 8 for _, idxs in c.arg.aux.input_idxs)) for c in batch for j in range(len(c.arg.aux.device))] # (call, lane, bytes)
+  offs = itertools.accumulate((table_bytes for _, _, table_bytes in lanes), initial=0) # every lane owns the next table of the region
+  cmds = [c.src[0].src[0].call(*[_lane_arg(a.without_after, j, tables + off) for a in c.src[1:]], UOp.variable("_device_num", 0, 1 << 30).bind(j))
+          for (c, j, _), off in zip(lanes, offs)]
+
+  info = HCQInfo((HCQ_RUNTIME_DEV.value,), sum((c.arg.aux.estimates for c in batch), start=Estimates()),
+                 input_idxs=tuple(x for c in batch for x in c.arg.aux.input_idxs), kernels=tuple(k for c in batch for k in c.arg.aux.kernels))
+  body = UOp.custom_function("hcq", make_submit(*cmds, devs=HCQ_RUNTIME_DEV.value, queue="SUBMIT:0").sink())
+  return body.call(*[s for c in batch for s in c.src[1:] if s.without_after.tag != "inputs"], name=f"hcq_submitter ({len(batch)})", aux=info)
+
+def merge_submitters(linear:UOp) -> UOp:
+  batches = [(k, list(g)) for k, g in itertools.groupby(linear.src, key=lambda c: isinstance(c.arg.aux, HCQInfo))]
+  return linear.replace(src=tuple(c for is_hcq, b in batches for c in ([merge_batch(b)] if is_hcq else b)))
+
+# *****************
+# hcq schedule
+
 hcq_compile_cache:dict[tuple[bytes, bool], UOp] = {}
+
+def hcq_lower(linear:UOp, pm_encode:PatternMatcher) -> UOp:
+  # lowering to hcq ir
+  linear = graph_rewrite(linear, pm_encode, walk=True, name="encode and pack", enter_calls=True)
+
+  # patches and runtime uops
+  linear = graph_rewrite(linear, pm_early_simplify+symbolic, bottom_up=False, name="simplify patches", enter_calls=True)
+  linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
+
+  # and compile it
+  linear = graph_rewrite(linear, pm_replace_params, name="replace params")
+  return graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
 
 @rewrite_group(lambda linear,input_uops,profile,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
@@ -440,16 +472,9 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
     # schedule
     linear = graph_rewrite(linear, pm_schedule_and_merge, ctx=({s:p for p,s in back_map.items()}, profile), walk=True, name="schedule and merge hcq")
 
-    # lowering to hcq ir
-    linear = graph_rewrite(linear, pm_encode_cmdbufs+pm_pack_placeholders, walk=True, name="encode and pack", enter_calls=True)
-
-    # patches and runtime uops
-    linear = graph_rewrite(linear, pm_early_simplify+symbolic, bottom_up=False, name="simplify patches", enter_calls=True)
-    linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
-
-    # and compile it
-    linear = graph_rewrite(linear, pm_replace_params, name="replace params")
-    final_linear = hcq_compile_cache[cache_key] = graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
+    # lower to hcq programs, then pack the programs of every batch into one C submitter (needs a C runtime device for the program addresses)
+    linear = hcq_lower(linear, pm_encode_cmdbufs+pm_pack_placeholders)
+    final_linear = hcq_compile_cache[cache_key] = hcq_lower(merge_submitters(linear), pm_encode_cmdbufs) if HCQ_RUNTIME_DEV.value == "CPU" else linear
 
   return final_linear
 
@@ -543,7 +568,6 @@ class HCQ2Compiled(Compiled):
 
     super().__init__(device, allocator, compilers, runtime, None, arch=arch)
 
-    self.rt_buffer = Buffer(self.device, 64 << 20, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True))
     self.rt_allocator = BumpAllocator(64 << 20)
     self.prof_ents:dict[int, ProfileGraphEntry] = {}
 
@@ -567,6 +591,10 @@ class HCQ2Compiled(Compiled):
       tdiffs.append((st+perf_counter_us())/2 - gpu)
     Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
 
+  @functools.cached_property
+  def rt_buffer(self) -> Buffer:
+    return Buffer(self.device, self.rt_allocator.size, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True), preallocate=True)
+
   def new_buffer(self, b:UOp, cache:bool) -> Buffer:
     if cache or b.tag in HCQ_CACHE_TAGS:
       return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=True, cpu_access=True, nolru=True))
@@ -578,16 +606,19 @@ class HCQ2Compiled(Compiled):
     buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')[0] = init_value
     return buf
 
+  def _wait_signal(self, sig:memoryview, value:int, timeout:int|None=None):
+    timeout = timeout if timeout is not None and self.can_recover else None
+    st, done = time.perf_counter(), sig[0]
+    while done < value:
+      if done != (done:=sig[0]): st = time.perf_counter()
+      elif time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
+
   def synchronize(self, timeout:int|None=None):
     if HCQ_RUNTIME_DEV.value != self.device: Device[HCQ_RUNTIME_DEV.value].synchronize()
 
     sig = self.signal("timeline").as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
     tl = self.signal("value", 1).as_memoryview(force_zero_copy=True, no_sync=True).cast('Q')
-    timeout = timeout if timeout is not None and self.can_recover else None
-    st, done = time.perf_counter(), sig[0]
-    while done < tl[0] - 1:
-      if done != (done:=sig[0]): st = time.perf_counter()
-      elif time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
+    self._wait_signal(sig, tl[0] - 1, timeout)
     if self.prof_ents: self.collect_prof()
 
   def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
