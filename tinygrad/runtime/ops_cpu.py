@@ -13,7 +13,7 @@ from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.autogen import libc
 from tinygrad.codegen import do_to_program
-from tinygrad.engine.realize import pm_flatten_linear, get_call_arg_uops, get_runtime
+from tinygrad.engine.realize import pm_flatten_linear, get_call_arg_uops, get_call_var_uops, get_runtime
 from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher, graph_rewrite
@@ -64,7 +64,7 @@ def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
   return UOp(Ops.INS, dtypes.void, words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)), arg="cmd")
 
 def cpu_exec(ctx:tuple[str, ...], call:UOp, prg:UOp) -> UOp:
-  args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in prg.arg.vars]
+  args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
   if (core:=prg.arg.runtimevars.get('core_id')) is None: return cpu_cmd(ctx, prg, *args)
 
   la = [cpu_cmd(ctx,prg,*args[:(cid:=(len(prg.arg.globals)+core))],UOp.const(t, dtypes.uint64),*args[cid+1:]) for t in range(prg.arg.global_size[0])]
@@ -99,10 +99,11 @@ def encode_queue(q:UOp) -> UOp:
   e = UOp.range(cnt, next(UOp.unique_num), dtype=dtypes.int, src=(cmdbuf, ring))
   copy = UOp.group(*[ring.index((base + e*CMD_SIZE + w) % ring_words).store(cmdbuf.index(e*CMD_SIZE + w).load()) for w in range(CMD_SIZE)])
 
-  # wake the worker after each entry, keeping the post with the stores stops it from hoisting out of the loop
-  wake = copy.end(e) if WIN else make_signal(devs, tag="func:sem_post").after(copy).index(0).load().call(sem.index(0), ret_dtype=dtypes.void).end(e)
-  bumped = put.after(wake).index(0).store(put.index(0).load() + cnt)
-  return sysbuf.after(bumped).index(0).store(put.index(0).load() + cnt) if WIN else bumped
+  bumped = put.after(copy.end(e)).index(0).store(put.index(0).load() + cnt)
+  if WIN: return sysbuf.after(bumped).index(0).store(put.after(bumped).index(0).load())
+
+  e = UOp.range(cnt, next(UOp.unique_num), dtype=dtypes.int, src=(bumped,))
+  return make_signal(devs, tag="func:sem_post").after(e).index(0).load().call(sem.after(e).index(0), ret_dtype=dtypes.void).end(e)
 
 # *****************
 
@@ -196,11 +197,13 @@ class CPUDevice(HCQ2Compiled):
   pm_lower = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue)])
 
   def __init__(self, device:str=""):
+    self.workers:list[CPUWorker] = []
     super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], CPUProgram,
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
 
     self.pm_bufferize = PatternMatcher(
-      [(UPat(Ops.PARAM, tag=f"COMPUTE:0_{n}"), lambda ctx, n=n: getattr(ctx[0].worker, n)) for n in ("ring", "put", "sem", "sys", "done")] +
+      [(UPat(Ops.PARAM, tag=f"{q}_{n}"), lambda ctx, q=q,n=n: getattr(ctx[0].worker(q), n))
+       for q in ("COMPUTE:0", "SUBMIT:0") for n in ("ring", "put", "sem", "sys", "done")] +
       [(UPat(Ops.PARAM, tag=f"func:{f}"), lambda ctx, f=f: ctx[0].func_ptr(f)) for f in FUNCS]) + self.pm_bufferize
 
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
@@ -210,6 +213,12 @@ class CPUDevice(HCQ2Compiled):
 
   def func_ptr(self, name:str) -> Buffer: return self.func_table.view(1, dtypes.uint64, FUNCS.index(name)*8).ensure_allocated()
 
+  def synchronize(self, timeout:int|None=None):
+    for worker in self.workers:
+      put, done = (getattr(worker, x)._buf.cpu_view().view(fmt='Q') for x in ("put", "done"))
+      while done[0] < put[0]: self._wait_signal(done, put[0], timeout)
+    super().synchronize(timeout)
+
   @functools.cached_property
   def func_table(self) -> Buffer:
     lib = ctypes.windll.kernel32 if sys.platform == "win32" else libc.dll # type: ignore[attr-defined]
@@ -217,8 +226,8 @@ class CPUDevice(HCQ2Compiled):
       array.array('Q', [unwrap(ctypes.cast(getattr(lib, f), ctypes.c_void_p).value) for f in FUNCS])
     return ft
 
-  @functools.cached_property
-  def worker(self) -> CPUWorker:
+  @functools.cache
+  def worker(self, queue:str) -> CPUWorker:
     ring, put, sysbuf, done = (Buffer(self.device, sz, dtypes.uint64, preallocate=True) for sz in (RING_SLOTS*CMD_SIZE, 1, 1, 1))
     addr, hsem = 0, None
 
@@ -230,5 +239,6 @@ class CPUDevice(HCQ2Compiled):
     sem = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(external_ptr=addr), preallocate=True)
 
     worker_args = [ring._buf.va_addr, sysbuf._buf.va_addr if WIN else self.func_ptr('sem_wait')._buf.va_addr, done._buf.va_addr, addr]
-    (worker:=threading.Thread(target=self.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in worker_args])).start()
-    return CPUWorker(ring, put, sem, sysbuf, done, worker)
+    (thread:=threading.Thread(target=self.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in worker_args])).start()
+    self.workers.append(worker:=CPUWorker(ring, put, sem, sysbuf, done, thread))
+    return worker
