@@ -1,10 +1,16 @@
 from __future__ import annotations
-import functools, itertools, pathlib
+import enum, functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
 from tinygrad.nn import Linear
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
+
+class ExpertGating(enum.IntEnum):
+  SOFTMAX = 1
+  SIGMOID = 2
+  SOFTMAX_WEIGHT = 3  # softmax over the top-k selected logits
+  SQRT_SOFTPLUS = 4
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|None=None) -> Tensor:
@@ -61,6 +67,7 @@ class TransformerConfig:
   num_experts: int = 0
   num_experts_per_tok: int = 0
   norm_topk_prob: bool = False
+  expert_gating_func: ExpertGating = ExpertGating.SOFTMAX
   q_lora_rank: int = 0
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
@@ -103,14 +110,21 @@ class FFNBlock:
     if hasattr(self, 'ffn_gate_exps'):
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       logits = self.ffn_gate_inp(x)
-      if hasattr(self, 'exp_probs_b'):
-        probs = logits.sigmoid()
-        _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
-        probs = probs.gather(-1, sel)
-        if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
-      else:
-        vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
-        probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
+      bias = self.exp_probs_b["bias"] if hasattr(self, 'exp_probs_b') else None
+      gating, normalize_topk = self.config.expert_gating_func, self.config.norm_topk_prob
+      # fast path: without selection bias, normalized SOFTMAX is equivalent to SOFTMAX_WEIGHT
+      if gating == ExpertGating.SOFTMAX and bias is None and normalize_topk:
+        gating, normalize_topk = ExpertGating.SOFTMAX_WEIGHT, False
+      if   gating == ExpertGating.SOFTMAX_WEIGHT: scores = logits
+      elif gating == ExpertGating.SOFTMAX:        scores = logits.softmax(-1)
+      elif gating == ExpertGating.SIGMOID:        scores = logits.sigmoid()
+      elif gating == ExpertGating.SQRT_SOFTPLUS:  scores = logits.softplus().sqrt()
+
+      _, sel = pairwise_topk(scores if bias is None else scores + bias, self.config.num_experts_per_tok)
+      probs = scores.gather(-1, sel)
+      # SOFTMAX_WEIGHT applies softmax after top-k selection
+      if gating == ExpertGating.SOFTMAX_WEIGHT: probs = probs.softmax(-1)
+      if normalize_topk: probs = probs / probs.sum(axis=-1, keepdim=True)
       probs = probs * self.config.routed_scaling_factor
       x_down = self.ffn_down_exps(sel, (self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h)).contiguous())  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
@@ -398,6 +412,7 @@ class Transformer:
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe', 'kimi-linear')),
+      expert_gating_func=ExpertGating(kv.get(f'{arch}.expert_gating_func', ExpertGating.SOFTMAX)),
       kv_lora_rank=kv_lora_rank, q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
       shared_expert_dim=kv.get(
