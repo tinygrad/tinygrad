@@ -31,7 +31,7 @@ class HCQInfo:
   estimates:Estimates = Estimates()
 
   input_idxs:tuple[tuple[tuple[str, ...], tuple[int, ...]], ...] = () # per inputs table: (devices, indexes into input_uops)
-  inputs:tuple[int, ...] = () # per inputs table: index into call.src
+  inputs:int|None = None # index of the inputs table in call.src
   kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...]], ...] = ()
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
@@ -373,7 +373,7 @@ def replace_params(call:UOp) -> UOp|None:
 
   sub = {(b:=u.without_after): UOp.param(i, u.dtype, shape=b.shape, device=HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM} | _rank_ranges(tops)
-  info = replace(call.arg.aux, inputs=tuple(i for i,u in enumerate(c_args + refhold) if u.without_after.tag == "inputs"))
+  info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args + refhold) if u.without_after.tag == "inputs"), None))
   return call.replace(src=(body.substitute(sub).replace(arg="hcq_args"), *c_args, *refhold), arg=replace(call.arg, aux=info))
 pm_replace_params = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), replace_params)])

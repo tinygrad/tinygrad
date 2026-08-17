@@ -209,7 +209,7 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
 
   tables = [UOp.from_buffer(dev.rt_buffer.view(len(idxs), dtypes.uint64, base + j*len(idxs)*8), HCQ_RUNTIME_DEV.value)
             for devs, idxs in info.input_idxs for j in range(len(devs))]
-  if info.inputs: call = call.substitute({call.src[1+i]: UOp.mstack(*tables) for i in info.inputs})
+  if info.inputs is not None: call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*tables)})
   exec_kernel(replace(ctx, update_stats=DEBUG>=3, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer._buf.va_addr + base}), call, ast)
 
   tms = []
