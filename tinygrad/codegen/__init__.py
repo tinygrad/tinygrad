@@ -56,9 +56,8 @@ def expand_reduce(r:UOp):
       for i,s in enumerate(u.shape):
         if s > 1: new_axes.append(i)
   if len(new_axes) == 0: return None
-  x = r.src[0]
-  # replace Invalid with the identity element
-  if x.op is Ops.WHERE and x.src[2].is_invalid: x = x.src[0].where(x.src[1], x.const_like(identity_element(r.arg[0], r.dtype)))
+  assert r.arg[1] == 0
+  if (x:=r.src[0]).op is Ops.WHERE and x.src[2].is_invalid: x = x.src[0].where(x.src[1], x.const_like(identity_element(r.arg[0], r.dtype)))
   # permute so new_axes come to front, then reduce
   perm = tuple(new_axes) + tuple(i for i in range(len(r.src[0].shape)) if i not in new_axes)
   out_shape = tuple([1 if i in new_axes else s for i,s in enumerate(r.src[0].shape)])
