@@ -466,7 +466,7 @@ pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="buf"), bufferize_buf)])
 # 7. resolve patches
 
 def push_stack(op, s): return UOp(Ops.STACK,
-  src=tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
+  src=tuple(op.replace(dtype=op.dtype, src=tuple(x if y is s else y for y in op.src)) for x in s.src))
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
   for b in (m.bufs if isinstance(m:=buf.buffer, MultiBuffer) else (m,)):
