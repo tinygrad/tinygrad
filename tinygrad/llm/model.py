@@ -300,19 +300,18 @@ class GatedDeltaNetBlock(FFNBlock):
     q, k, v, beta = q.unsqueeze(-2) * self.head_k_dim**-0.5, k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
     alpha = log_alpha.transpose(1, 2).exp().unsqueeze(-1)  # per-channel decay for kda, per-head otherwise (B, H, T, V|1, 1)
 
-    # recurrent: scan over the (padded) tokens, updating the recurrent state. the output rows go to a static-size buffer
+    # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
     state = Tensor(self.recurrent_state.uop.after(conv_state_store)).float()  # carry the conv write into this graph
     state = initial.where(0, state)
-    core_uop = Tensor.zeros(B, self.num_v_heads, T_pad, self.head_v_dim).uop
+    outs = []
     for t in range(T_pad):
       s1 = state * alpha[:, :, t]  # decay the state
       delta = (v[:, :, t] - (s1*k[:, :, t]).sum(-1, keepdim=True)) * beta[:, :, t]  # the delta rule update
       state = s1 + delta * k[:, :, t]
-      core_uop = core_uop.after(core_uop[:, :, t].store(((state * q[:, :, t]).sum(-1)).uop))
+      outs.append((state * q[:, :, t]).sum(-1))
 
-    # store the updated recurrent state in place, then read the output buffer after the write
-    recurrent_state_store = self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop)
-    core = Tensor(core_uop.after(recurrent_state_store)).transpose(1, 2)
+    # store the updated recurrent state in place, then read the stacked outputs after the write
+    core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop)))
 
     # output; undo the padding before the output projection
     z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
