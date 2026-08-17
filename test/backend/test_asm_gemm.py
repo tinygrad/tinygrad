@@ -46,16 +46,16 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
                    next_grad_amax_state=next_grad_amax_state)
   else:
     tst = asm_gemm(a, b)
-  tst.sum().backward()
-  Tensor.realize(tst, a.grad, b.grad)
+  tst_grad_a, tst_grad_b = tst.sum().gradient(a, b)
+  Tensor.realize(tst, tst_grad_a, tst_grad_b)
 
   if multi and isinstance(a_ref.device, str): a_ref, b_ref = a_ref.shard(devs, axis=a_shard), b_ref.shard(devs, axis=b_shard)
   if dtype == FP8_DTYPE:
     ref = ((a_ref @ b_ref.T) * ((x_scale.float() + 1e-8) / FP8_MAX) * w_scale).cast(dtypes.bfloat16)
   else:
     ref = a_ref @ b_ref
-  ref.sum().backward()
-  Tensor.realize(ref, a_ref.grad, b_ref.grad)
+  ref_grad_a, ref_grad_b = ref.sum().gradient(a_ref, b_ref)
+  Tensor.realize(ref, ref_grad_a, ref_grad_b)
 
   # no validation on the NULL device
   if Device.DEFAULT.startswith("NULL"): return None
@@ -67,11 +67,11 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
     if getenv("USE_NPY"):
       import numpy as np
       np.testing.assert_allclose(tst.numpy(), ref.numpy(), atol=atol, rtol=rtol)
-      np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), atol=grad_atol, rtol=grad_rtol)
-      np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), atol=grad_atol, rtol=grad_rtol)
+      np.testing.assert_allclose(tst_grad_a.numpy(), ref_grad_a.numpy(), atol=grad_atol, rtol=grad_rtol)
+      np.testing.assert_allclose(tst_grad_b.numpy(), ref_grad_b.numpy(), atol=grad_atol, rtol=grad_rtol)
     assert tst.allclose(ref, atol=atol, rtol=rtol).item(), "forward mismatch"
-    assert a.grad.allclose(a_ref.grad, atol=grad_atol, rtol=grad_rtol).item(), "grad_a mismatch"
-    assert b.grad.allclose(b_ref.grad, atol=grad_atol, rtol=grad_rtol).item(), "grad_b mismatch"
+    assert tst_grad_a.allclose(ref_grad_a, atol=grad_atol, rtol=grad_rtol).item(), "grad_a mismatch"
+    assert tst_grad_b.allclose(ref_grad_b, atol=grad_atol, rtol=grad_rtol).item(), "grad_b mismatch"
 
 def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=1) -> None:
   run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=0, b_shard=None, gpus=gpus)
@@ -120,6 +120,7 @@ class TestAsmGEMM(unittest.TestCase):
       self.skipTest("assembly gemm is only for cdna4")
 
   def test_tiny(self): verify_asm_gemm(1, 256, 256, 256)
+  def test_mlperf_1(self): verify_asm_gemm(1, 16384, 128256, 4096)
 
   def test_verify_with_numpy(self):
     import numpy as np

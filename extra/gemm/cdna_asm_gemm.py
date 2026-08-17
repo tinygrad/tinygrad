@@ -221,6 +221,37 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
 # ** bf16 A @ B.T kernel in C
 
 @functools.cache
+def custom_asm_bf16_mlperf_gemm1(D:UOp, C:UOp, A:UOp, B:UOp, WS:UOp, Flags:UOp) -> UOp:
+  from extra.gemm.asm_bf16_gemm1 import build_kernel
+  M, N, K = 128256, 16384, 4096
+  threads, workgroups = UOp.special(256, "lidx0"), UOp.special(255, "gidx0")
+  lds = UOp.placeholder((135168,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  zero = UOp.const(0)
+  # The LINEAR source below supplies the real ISA. These metadata-only accesses tell scheduling, memory planning, and HCQ
+  # dependency analysis which opaque assembly arguments are read or written.
+  d_write = D.flatten().index(zero).store(C.flatten().index(zero).load())
+  ws_write = WS.flatten().index(zero).store(WS.flatten().index(zero).load())
+  flags_write = Flags.flatten().index(zero).store(Flags.flatten().index(zero).load())
+  sink = UOp.sink(d_write, A.flatten().index(zero).load(), B.flatten().index(zero).load(), ws_write, flags_write, lds, threads, workgroups,
+                  arg=KernelInfo(f"asm_bf16_gemm1_{M}_{N}_{K}",
+                                 estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K+M*N)*2)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in build_kernel(M, N, K)))))
+
+def custom_asm_bf16_mlperf_gemm1_bw(gradient:UOp, kernel:UOp):
+  # The physical output is B @ A.T: A is the original weight.T and B is the original activation.
+  _, _, a_phys, b_phys, _, _ = kernel.src[1:]
+  # The logical output is replicated after unsharding the data-parallel rows, so its gradient arrives replicated too.
+  # Restore the physical output's row sharding before launching the two backward GEMMs.
+  g = Tensor(gradient, device=gradient.device).reshape(-1, 128256).cast(dtypes.bfloat16)
+  if b_phys.axis == 0 and g.uop.axis is None:
+    drange = UOp.range(len(g.device), -1, AxisType.DEVICE)
+    g = Tensor(g.uop._shard(0, drange).unshard(0))
+  a_t, b_t = Tensor(a_phys, device=a_phys.device), Tensor(b_phys, device=b_phys.device).reshape(-1, 4096)
+  grad_a = asm_gemm(g.T, b_t)
+  grad_b = asm_gemm(g, a_t).reshape(b_phys.shape)
+  return None, None, grad_a.uop, grad_b.uop, None, None
+
+@functools.cache
 def custom_hk_bf16_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str) -> UOp:
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
@@ -500,7 +531,16 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       bw = functools.partial(custom_gemm_bw, n_scales=len(scales), has_grad_amax=grad_amax_state is not None, has_w_post=w_post_scale is not None)
       out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, fxn=fxn, grad_fxn=bw)[0]
     elif a.dtype == dtypes.bfloat16:
-      out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
+      local_m = batch * M // len(a.device) if is_multi and a.uop.axis in (0, 1) else batch * M
+      if (local_m, N, K) == (16384, 128256, 4096) and not (is_multi and (m_sharded or n_sharded or k_sharded)):
+        workspace = Tensor.empty(1 << 30, dtype=dtypes.uint8, device=a.device)
+        flags = Tensor.zeros(1 << 20, dtype=dtypes.uint8, device=a.device)
+        # The imported ABI has distinct D and C pointers. C is still used to form/load buffer descriptors even with beta=0,
+        # so alias the complete output allocation as the replay harness does; a one-element dummy can fault on JIT replay.
+        out = Tensor.custom_kernel(out, out, b.T.contiguous(), a, workspace, flags,
+                                   fxn=custom_asm_bf16_mlperf_gemm1, grad_fxn=custom_asm_bf16_mlperf_gemm1_bw)[0]
+      else:
+        out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
   else:
     out = Tensor.custom_kernel(out, a, b, fxn=custom_uop_gemm, grad_fxn=custom_gemm_bw)[0]
   if k_sharded: out = out.sum(0)
