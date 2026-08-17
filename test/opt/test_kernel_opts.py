@@ -241,7 +241,6 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.expectedFailure
   def test_padto_group_full_unroll_sum(self):
     a = Tensor.ones(2, 28, 4096, dtype=dtypes.bfloat16).realize()
     out = ((a * 0.5).float().square()).sum(axis=(0, 2))
