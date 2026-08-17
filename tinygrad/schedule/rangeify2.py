@@ -150,13 +150,16 @@ pm_range_migration = PatternMatcher([
 
 @dataclass
 class SplitCtx:
+  # TODO: params and args should be able to be in any order
   call_args:list = field(default_factory=list)
+  call_params:list = field(default_factory=list)
   range_number:int = -1
 
 def _split_graph(ctx:SplitCtx, u:UOp) -> UOp:
   assert len(u.shape) <= 1, f"rangeify needs to reduce to a single idx, not {u.shape}"
-  ctx.call_args.append(u)
-  return u.param_like(len(ctx.call_args)-1)
+  args = {AddrSpace.GLOBAL: ctx.call_args, AddrSpace.ALU: ctx.call_params}[u.addrspace]
+  args.append(u)
+  return u.param_like((1000 if u.addrspace == AddrSpace.ALU else 0) + (len(args)-1))
 
 def _renumber_range(ctx:SplitCtx, u:UOp) -> UOp:
   ctx.range_number += 1
@@ -169,7 +172,7 @@ pm_split_graph = PatternMatcher([
 
 def split_store(x:UOp) -> UOp:
   ret = graph_rewrite(x, pm_split_graph, ctx:=SplitCtx(), name="split kernel", bottom_up=True, walk=True)
-  return ret.sink(arg=KernelInfo()).call(*ctx.call_args)
+  return ret.sink(arg=KernelInfo()).call(*ctx.call_args, *ctx.call_params)
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
