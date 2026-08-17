@@ -201,13 +201,17 @@ def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace
 def load(ctx, x:UOp, idx:UOp):
   if idx.addrspace is AddrSpace.REG:
     return x.replace(tag=ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4)) if x.tag is None else None
+  oidx = idx
+  while idx.op is Ops.AFTER: idx=idx.src[0]
   n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.src[0].dtype.itemsize
   suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
   prefix = "global" if idx.addrspace is AddrSpace.GLOBAL else "ds"
   opc = getattr(RDNA3Ops, f"{prefix}_load_{suffix}{sz*8}")
   vp = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
-  return x.replace(src=(UOp(Ops.NOOP, src=fold_address(idx), arg=opc), *x.src[1:]), tag=(vp,))
+  addr = UOp(Ops.NOOP, src=fold_address(idx), arg=opc)
+  if oidx.op is Ops.AFTER: addr = addr.replace(src=(addr.src[0].after(*oidx.src[1:]),) + addr.src[1:])
+  return x.replace(src=(addr, *x.src[1:]), tag=(vp,))
 
 def lower_gated_load(ctx, x:UOp, addr:UOp, alt:UOp, gate:UOp):
   init = [ctx.ren.copy(s, rdef(x).sub(i)) for i,s in enumerate(alt.src)] if alt.op is Ops.GROUP else [ctx.ren.copy(alt, rdef(x))]
@@ -216,23 +220,21 @@ def lower_gated_load(ctx, x:UOp, addr:UOp, alt:UOp, gate:UOp):
   return load, init + [mif, load, UOp(Ops.ENDIF, src=(mif,))]
 
 def store(ctx, x:UOp, idx:UOp, val:UOp):
-  # NOTE: probably fails on 64 bit SHRINK
   if idx.addrspace is AddrSpace.REG:
-    vregs = ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4)
+    vregs, i = ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4), idx.src[1].val
     if val.op is Ops.GROUP:
-      assert idx.op is Ops.INDEX
-      i = idx.src[1].val
-      if idx.dtype.itemsize == 8:
-        image = UOp.group(val.src[i*2], val.src[i*2+1], dtype=idx.dtype)
-        return ctx.ren.copy(image, vregs[i])
+      if idx.dtype.itemsize == 8: return ctx.ren.copy(UOp.group(val.src[i*2], val.src[i*2+1], dtype=idx.dtype), vregs[i])
       else: return ctx.ren.copy(val.src[idx.src[1].val].after(val, idx), vregs[idx.src[1].val])
-      # else: return UOp.group(*[ctx.ren.copy(s,v) for s,v in zip(val.src, vregs)]).replace(tag=vregs)
     else: return ctx.ren.copy(val.after(idx).replace(dtype=idx.dtype), *vregs)
+  oidx = idx
+  while idx.op is Ops.AFTER: idx = idx.src[0]
   n = idx.src[-1].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.dtype.itemsize
   prefix = "global" if idx.addrspace is AddrSpace.GLOBAL else "ds"
   opc = getattr(RDNA3Ops, f"{prefix}_store_b{sz*8}")
-  return UOp(Ops.STORE, src=(UOp(Ops.NOOP, src=fold_address(idx), arg=opc), to_vgpr(val)) + x.src[2:])
+  addr = UOp(Ops.NOOP, src=fold_address(idx), arg=opc)
+  if oidx.op is Ops.AFTER: addr = addr.replace(src=(addr.src[0].after(*oidx.src[1:]),) + addr.src[1:])
+  return UOp(Ops.STORE, src=(addr, to_vgpr(val)) + x.src[2:])
 
 # ------ ALU ------
 def cmp(ctx, x:UOp):
@@ -244,10 +246,10 @@ def cmp(ctx, x:UOp):
   x = x.ins(ins, tag=GP_SGPRS)
   return x if scmp else _vop3(x)
 
-def arith64(ctx, x:UOp, add:bool):
+def arith64(ctx, x:UOp):
   a, b = x.src
-  ins_lo = RDNA3Ops.v_add_co_u32 if add else RDNA3Ops.v_sub_co_u32
-  ins_hi = RDNA3Ops.v_add_co_ci_u32 if add else RDNA3Ops.v_sub_co_ci_u32
+  ins_lo = RDNA3Ops.v_add_co_u32 if x.op is Ops.ADD else RDNA3Ops.v_sub_co_u32
+  ins_hi = RDNA3Ops.v_add_co_ci_u32 if x.op is Ops.ADD else RDNA3Ops.v_sub_co_ci_u32
   narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   vreg = ctx.vreg(GP_VGPRS, width=2) # NOTE: after causes a problem for auto allocating group reg?
   lo = UOp(Ops.INS, dtype=dtypes.uint32, arg=ins_lo, src=(a.index(0), b.index(0)), tag=(vreg.sub(0),))
@@ -261,7 +263,7 @@ def mul64(ctx, x:UOp):
   a, b = x.src
   p1 = _up(_mad(a.index(1), b.index(0)))
   p2 = _up(_mad(a.index(0), b.index(1)))
-  p3 = arith64(ctx, UOp(Ops.ADD, x.dtype, src=(p1,p2)), add=True)
+  p3 = arith64(ctx, UOp(Ops.ADD, x.dtype, src=(p1,p2)))
   return _mad(a.index(0), b.index(0), p3)
 
 # TODO: fold const 64 as imms here?, shift hi, mask lo
@@ -313,15 +315,9 @@ def idiv(ctx, x:UOp):
   if signed: q = _sub(q ^ sign, sign)  # (q ^ sign) - sign negates q iff sign is all-ones
   return q if q.dtype == x.dtype else q.cast(x.dtype)
 
-def alu(ctx, x:UOp):
-  # alu arg used for machine instruction overrides, ex. mul_hi for cdiv
+def alu(ctx, x:UOp): # alu arg used for machine instruction overrides, ex. mul_hi for cdiv
   ins = x.arg if isinstance(x.arg, functools.partial) else OP_INS[x.op][x.dtype]
   return x.ins(ins) if len(x.src) == 1 else _vop2(ctx, x.ins(ins))
-
-def where(pred:UOp, a:UOp, b:UOp, x:UOp):
-  if x.dtype is dtypes.bool: return (pred & a) | (~pred & b)
-  ins = RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16
-  return _vop3(x.ins(ins, src=(b,a,pred)))
 
 def render_wmma(ctx, wmma:UOp):
   a,b,acc = wmma.src
@@ -388,8 +384,8 @@ def lower_end(ctx, x:UOp, acc:UOp):
   return inc, [inc, pred, jmp, loop_end, restoreexec(ctx.exec_mask[acc])]
 
 # ---- lowering passes ----
+# TODO: cleanup and put in codegen (ISA backends only? most good compilers already optimize this in the renderer ex. LLVM, probably HIP)
 class BiasMemoryCtx:
-# - should this be put in codegen? most good compilers already optimize this in the renderer ex. LLVM, probably HIP
   def __init__(self, sink:UOp):
     # shared base op -> idx and optional const arg
     self.mgroups: dict[ParamArg, list[tuple[UOp|None, int|None]]] = {}
@@ -495,10 +491,10 @@ pm_alu_fusion = PatternMatcher([
 ])
 
 isel_matcher = pm_alu_fusion + PatternMatcher([
+  # TODO: make this general
   (UPat(Ops.STACK, dtypes.int16s+(dtypes.half,dtypes.bfloat16), src=UPat(Ops.LOAD), name="x"), load_into_stack),
   # --- control flow ---
-  # how to remove positional arg contracts, make inter-lowering semantics explicit
-  # so its clear what src args represent. try to match spec
+  # how to remove positional arg contracts, make inter-lowering semantics explicit so its clear what src edges represent
   (UPat(Ops.RANGE, name="x"), \
     lambda ctx,x: x.replace(src=x.src + (UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(execop,), tag=ctx.vreg(GP_SGPRS)),))
     if x.src[-1].op is not Ops.INS else None),
@@ -506,10 +502,8 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), \
     lambda x,rng: x.replace(src=(x.src[0],rng,rng.src[-1])) if rng.src[-1].op is Ops.INS else None),
   # --- double precis bit alu ---
-  (UPat(Ops.ADD, dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_add_f64)),
-  (UPat(Ops.MUL, dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_mul_f64)),
   (UPat(Ops.MUL, dtypes.int64s, name="x"), mul64),
-  (UPat((Ops.ADD, Ops.SUB), dtypes.int64s+(dtypes.float64,), name="x"), lambda ctx,x: arith64(ctx, x, x.op == Ops.ADD)),
+  (UPat((Ops.ADD, Ops.SUB), dtypes.int64s, name="x"), arith64),
   # --- general alu ---
   (UPat(Ops.SHR, name="x"), lambda ctx,x: _vop2(ctx, x.ins(V_LSHR[max(2, x.dtype.itemsize)] \
     if dtypes.is_unsigned(x.dtype) else V_ASHR[max(4, x.dtype.itemsize)]))),
@@ -518,20 +512,21 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   (UPat((Ops.AND, Ops.OR, Ops.XOR), name="x"), lambda ctx,x: \
     _vop2(ctx, x.ins(getattr(RDNA3Ops, f"v_{x.op.name.lower()}_b32_e32"))) \
     if x.dtype.itemsize < 8 else bitwise64(ctx, x, getattr(RDNA3Ops, f"v_{x.op.name.lower()}_b32_e32"))),
-  (UPat.var("pred").where(UPat.var("a"), UPat.var("b")).named("x"), where),
+  (UPat(Ops.WHERE, dtypes.bool, src=(UPat.var("mask"), UPat.var("a"), UPat.var("b")), name="x"),
+    lambda mask,a,b,x: (mask & a) | (~mask & b)),
+  (UPat.var("pred").where(UPat.var("a"), UPat.var("b")).named("x"), lambda pred,a,b,x:
+    _vop3(x.ins(RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16, src=(b,a,pred)))),
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
   (UPat.var("y").cast(name="x"), lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e32"))),
   # --- mem ops ---
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(allow_any_len=True, name="x"), lambda ctx,x,idx: load(ctx, x, idx)),
+  (UPat((Ops.INDEX, Ops.SHRINK)).or_after("idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
+  (UPat((Ops.INDEX, Ops.SHRINK)).or_after("idx").load(allow_any_len=True, name="x"), load),
   # --- other ---
   (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x)
     if not any(isinstance(v,(VRegister, Register)) for v in rdefs(x)) else None),
   (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
-  # 16 bit indexes get expanded into extract moves/shifts
-  # NOTE: this messes up a WMMA test that loads from 16b indexs?
   (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
   (UPat(name="x").bitcast().named("y"), lambda x,y: x if y.tag is None else x.replace(tag=y.tag)),

@@ -18,6 +18,7 @@ from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
 from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
 from tinygrad.codegen.late.coalesce import indexing_simplify
+from tinygrad.codegen.late.interleave import WMMASchedulePolicy, pm_schedule_interleave_wmma
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
@@ -471,6 +472,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
+
+    full_sink = graph_rewrite(full_sink, pm_schedule_interleave_wmma, ctx=WMMASchedulePolicy(full_sink), name="wmma schedule")
     # instruction selection
     if isinstance(renderer, ISARenderer):
       full_sink = renderer.early(full_sink)
