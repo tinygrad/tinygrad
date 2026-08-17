@@ -653,8 +653,18 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(Tensor([[1, 2]]).pad_to(2, 3).numpy(), [[1, 2, 0], [0, 0, 0]])
     np.testing.assert_equal(Tensor([[1, 2]]).pad_to(1, 3).numpy(), [[1, 2, 0]])
     np.testing.assert_equal(Tensor([[1, 2]]).pad_to(None, 3).numpy(), [[1, 2, 0]])
+    np.testing.assert_equal(Tensor([1, 2]).pad_to(4, value=2).numpy(), [1, 2, 2, 2])
+    np.testing.assert_equal(Tensor([[1, 2]]).pad_to(2, 3, value=-1).numpy(), [[1, 2, -1], [-1, -1, -1]])
+    np.testing.assert_equal(Tensor([1, 2]).pad_to(None, value=5).numpy(), [1, 2])  # no-op pad ignores the fill
     with self.assertRaises(ValueError): Tensor([1, 2]).pad_to(2, 3)
     with self.assertRaises(ValueError): Tensor([[1, 2]]).pad_to(3)
+
+  def test_max_shape(self):
+    from tinygrad import UOp
+    t = Tensor.empty(2, UOp.variable('v', 1, 32), 4)
+    self.assertEqual(t.max_shape, (2, 32, 4))
+    self.assertEqual(t.max_numel(), 2*32*4)
+    self.assertEqual(Tensor.empty(2, 3).max_shape, (2, 3))
 
   def test_shrink_into_zero(self):
     t = Tensor.rand(3, 4).realize()

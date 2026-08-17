@@ -30,7 +30,7 @@ class TestLinearizer(unittest.TestCase):
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
     linear = c.schedule_linear()
     run_linear(linear)
-    rawbufs = [s.buffer for s in linear.src[-1].src[1:] if s.op is not Ops.BIND]
+    rawbufs = [s.buffer for s in linear.src[-1].src[1:] if not s.is_bound_var]
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.uop.base.realized, b.uop.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
@@ -411,7 +411,7 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   last_call = linear.src[-1]
   ast = last_call.src[0]
   assert ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {last_call}"
-  last_bufs = [s.buffer for s in last_call.src[1:] if s.op is not Ops.BIND]
+  last_bufs = [s.buffer for s in last_call.src[1:] if not s.is_bound_var]
   # now all input buffers in last_call should be realized
   # create fresh buffers for the outputs
   bufs = [Buffer(x.device, x.size, x.dtype).allocate() if i < len(ast.src) else x for i,x in enumerate(last_bufs)]

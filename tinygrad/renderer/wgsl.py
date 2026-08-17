@@ -50,8 +50,9 @@ wgsl_matcher = PatternMatcher([
   (UPat.store(UPat.var("b"), UPat.var("var"), name="s"), lambda b,var,s: packed_store(b,var) if is_packed(s) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
-  # fix nan check: 'a != a -> is_nan()'
-  (UPat.var("a") != UPat.var("a"), is_nan),
+  # fix nan check: 'a != a -> is_nan()'. the decomp rewrites (a != a).logical_not() to CMPEQ, so match both forms
+  (UPat.var("a", dtypes.floats) != UPat.var("a"), is_nan),
+  (UPat.var("a", dtypes.floats).alu(Ops.CMPEQ, UPat.var("a")), lambda a: is_nan(a).ne(True)),
   ])
 
 class WGSLRenderer(CStyleLanguage):
