@@ -4,7 +4,7 @@
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops, GroupOp
-from tinygrad.helpers import getenv, prod, strides_for_shape, argfix
+from tinygrad.helpers import getenv, prod, strides_for_shape
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, operator, functools, weakref
@@ -99,38 +99,11 @@ def _apply_view_ops(target, ops):
   for fn, args, kwargs in ops: target = fn(target, *args, **kwargs)
   return target
 
-# similar to https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/InferSize.h
-def _reshape_target_shape(shape:tuple[int, ...], args) -> tuple[int, ...]|None:
-  if not (req := argfix(*args)): return None
-  new_shape, infer_idx = [], -1
-  for i, s in enumerate(req):
-    if s is None: s = shape[i] if i < len(shape) else None
-    if not isinstance(s, int): return None
-    if s == -1:
-      if infer_idx != -1: return None
-      infer_idx = len(new_shape)
-    new_shape.append(s)
-  total = prod(shape)
-  if infer_idx != -1:
-    known = prod(x for x in new_shape if x != -1)
-    if known == 0:
-      if total != 0: return None
-      new_shape[infer_idx] = 0
-    else: new_shape[infer_idx] = total // known
-  return tuple(new_shape) if prod(new_shape) == total else None
-
-# TODO: can we get rid of this? only for test_flatten_reshape_add
+# a chain of reshapes (and detaches, which move nothing) is undone by reshaping the value back to the base
 def _try_simple_reshape_view_write(base: Tensor, view: Tensor, val: Tensor) -> bool:
   if not (ops := _get_view_ops(view)): return False
-  shapes = [base.shape]
-  for fn, args, _ in ops:
-    if fn is Tensor.detach: continue  # detach leaves every element where it was (a tracked view only on torch<2.10)
-    if fn is not Tensor.reshape: return False
-    if not (next_shape := _reshape_target_shape(shapes[-1], args)): return False
-    shapes.append(next_shape)
-  if shapes[-1] != view.shape: return False
-  for s in reversed(shapes[:-1]): val = val.reshape(s)
-  base.assign(val)
+  if any(fn not in (Tensor.reshape, Tensor.detach) for fn, _, _ in ops): return False
+  base.assign(val.reshape(base.shape))
   return True
 
 def _view_write(base: Tensor, view: Tensor, value: Tensor) -> None:
@@ -445,6 +418,7 @@ def _linalg_svd(self, full_matrices=False):
 from torch._decomp import get_decompositions
 decomps = [
   aten.native_layer_norm_backward,
+  aten.native_group_norm_backward,
   aten.linalg_cross,
   aten.addmm,
   aten.addcmul,
@@ -479,7 +453,13 @@ decomps = [
   aten._softmax_backward_data, aten.embedding_dense_backward,
   aten.linalg_vector_norm,
   aten.binary_cross_entropy, aten.binary_cross_entropy_backward,
+  # the C++ mse/smooth_l1 kernels resize their out tensor, and a tiny tensor has no storage to resize
+  aten.mse_loss, aten.mse_loss_backward,
+  aten.smooth_l1_loss, aten.smooth_l1_loss_backward,
   aten.upsample_nearest2d.out,
+  # NOTE: only the "out" overload, the "vec" one is CompositeImplicitAutograd and overriding it loses the autograd kernel
+  aten.upsample_bicubic2d.out,
+  aten._adaptive_avg_pool2d,
   # activations
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
@@ -661,8 +641,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.acos": Tensor.acos,
   "aten.any": Tensor.any,
   "aten.bitwise_not": Tensor.bitwise_not,
-  "aten.argmax": Tensor.argmax,
-  "aten.argmin": Tensor.argmin,
+  # tinygrad indexes with int32, torch's arg reduces return int64
+  "aten.argmax": lambda self, dim=None, keepdim=False: self.argmax(dim, keepdim).cast(dtypes.int64),
+  "aten.argmin": lambda self, dim=None, keepdim=False: self.argmin(dim, keepdim).cast(dtypes.int64),
   "aten.asinh": Tensor.asinh,
   "aten.mul": Tensor.mul,
   "aten.atanh": Tensor.atanh,
@@ -688,6 +669,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
     self.ones_like(**{k: v for k, v in {"dtype": _from_torch_dtype(dtype) if dtype else None,
                                         "device": _from_torch_device(device) if device else None}.items() if v is not None}),
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64)),
+  "aten.min.dim": lambda self, dim, keepdim=False: (self.min(dim, keepdim), self.argmin(dim, keepdim).cast(dtype=dtypes.int64)),
   "aten.cummax": lambda self, dim: ((r := self.cummax(dim))[0], r[1].cast(dtypes.int64)),
   "aten.cummin": lambda self, dim: ((r := self.cummin(dim))[0], r[1].cast(dtypes.int64)),
   "aten.nonzero": Tensor.nonzero,
