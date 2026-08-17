@@ -6,6 +6,7 @@ from tinygrad.dtype import PyConst, ConstType, dtypes, can_lossless_cast, Invali
 from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 from tinygrad.uop.movement import mop_cleanup
+from tinygrad.uop.weak import commit_weak
 
 # TODO: symbolic shouldn't be importing from codegen
 from tinygrad.codegen.decomp.transcendental import xpow
@@ -433,6 +434,10 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   # reorder ALU/VECTORIZE
   (UPat(GroupOp.ALU, src=(UPat(Ops.STACK, src=UPat(name='x')), UPat(Ops.STACK, src=UPat(name='y'))), name='alu'),
    lambda x,y,alu: UOp(Ops.STACK, src=(UOp(alu.op, src=(x,y)),))),
+  # ** where **
+  # push cast to branches
+  (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"),
+   lambda s,a,b,cast: s.where(commit_weak(a, cast.dtype), commit_weak(b, cast.dtype))),
   # ** pow **
   ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
   # ** load/store folding **
