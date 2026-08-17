@@ -796,6 +796,13 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_allclose(w_tiny.grad.cpu().numpy(), w_cpu.grad.numpy(), atol=1e-4, rtol=1e-3)
     np.testing.assert_allclose(b_tiny.grad.cpu().numpy(), b_cpu.grad.numpy(), atol=1e-4, rtol=1e-3)
 
+  def test_write_through_detach_of_unrealized(self):
+    # how every module parameter is initialized under set_default_device("tiny"). on torch<2.10 detach is a tracked view,
+    # so this writes through a view whose shape equals its base's, and the base has no buffer of its own yet
+    a = torch.empty(4, device=device)
+    a.detach().fill_(3)
+    np.testing.assert_equal(a.cpu().numpy(), [3, 3, 3, 3])
+
   def test_square_transpose_inplace(self):
     # a same-shape transpose is not a reshape: writing the transposed values straight back would scramble the base
     a = torch.tensor([[0., 1., 2.], [3., 4., 5.], [6., 7., 8.]], device=device)
@@ -823,6 +830,10 @@ class TestTorchBackend(unittest.TestCase):
     b = torch.tensor([True, False, True, False], device=device)
     np.testing.assert_equal(torch.logical_or(a, b).cpu().numpy(), [True, True, True, False])
     np.testing.assert_equal(torch.logical_xor(a, b).cpu().numpy(), [False, True, True, False])
+    # bool-valued whatever the input dtype, so this is not | and ^
+    i, j = torch.tensor([2, 0, 5, 0], device=device), torch.tensor([0, 0, 1, 1], device=device)
+    np.testing.assert_equal(torch.logical_or(i, j).cpu().numpy(), [True, False, True, True])
+    np.testing.assert_equal(torch.logical_xor(i, j).cpu().numpy(), [True, False, False, True])
 
   def test_slice_scatter(self):
     # the scatters are functional: they return a new tensor and must leave the one they were given alone

@@ -124,6 +124,7 @@ def _try_simple_reshape_view_write(base: Tensor, view: Tensor, val: Tensor) -> b
   if not (ops := _get_view_ops(view)): return False
   shapes = [base.shape]
   for fn, args, _ in ops:
+    if fn is Tensor.detach: continue  # detach leaves every element where it was (a tracked view only on torch<2.10)
     if fn is not Tensor.reshape: return False
     if not (next_shape := _reshape_target_shape(shapes[-1], args)): return False
     shapes.append(next_shape)
@@ -137,7 +138,9 @@ def _view_write(base: Tensor, view: Tensor, value: Tensor) -> None:
   if _try_simple_reshape_view_write(base, view, val): return
   idx_base = Tensor.arange(base.numel(), dtype=dtypes.int32).reshape(base.shape)
   idx_view = _apply_view_ops(idx_base, _get_view_ops(view)).reshape(-1)
-  flat_base = base.reshape(base.numel()).contiguous()
+  # clone, not contiguous: contiguous() on a base that already owns its buffer returns the base itself, and scattering
+  # into that is an in-place write to a buffer other tensors still hold, which setitem refuses
+  flat_base = base.reshape(base.numel()).clone()
   flat_base[idx_view] = val.reshape(-1)
   base.assign(flat_base.reshape(base.shape))
 
@@ -481,7 +484,9 @@ decomps = [
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
   aten.gelu, aten.gelu_backward,
-  aten.logical_and, aten.logical_or, aten.logical_xor,
+  # NOTE: no aten.logical_or here, its decomposition reaches aten.bitwise_or through a path that checks aliasing by
+  # reading storage, which a tiny tensor has none of. it gets a direct impl below instead
+  aten.logical_and, aten.logical_xor,
   aten.randint,
   aten.eye,
   aten.hardsigmoid_backward,
@@ -642,7 +647,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.logical_or_": lambda x, y: x | y,
+  # compare against zero first: logical_* is bool-valued for any input dtype, while | is bitwise
+  "aten.logical_or": lambda x, y: (x != 0) | (y != 0),
+  "aten.logical_or_": lambda x, y: (x != 0) | (y != 0),
   "aten.multinomial": Tensor.multinomial,
   "aten.masked_fill_.Scalar": lambda self, mask, value: self.masked_fill(mask, value),
   "aten.masked_fill_.Tensor": lambda self, mask, value: self.masked_fill(mask, value),
