@@ -46,7 +46,8 @@ pm_expand_broadcast = PatternMatcher([
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   input_src = copy.src[0]
-  if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
+  # if it's a COPY, we need to give the input buffer identity
+  if not input_src.has_buffer_identity(after_ok=True) and copy.op is Ops.COPY: input_src = input_src.contiguous()
   input_src = input_src.flatten()
   if existing_buf is not None:
     # if the existing buffer is not a full buffer, we can't use it
@@ -58,18 +59,9 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   # reshape back to input
   return buf.after(buf.store(input_src)).reshape(copy.shape)
 
-def convert_contig_to_store(ctx, copy:UOp):
-  input_src = copy.src[0]
-  # create the output buffer
-  buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), copy.dtype, device=copy.device))
-  # reshape back to input
-  view = buf.shrink_to(input_src.shape)
-  return view.after(view.store(input_src))
-
 pm_copy_to_store = PatternMatcher([
   (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),
-  (UPat(Ops.COPY, name="copy"), convert_copy_to_store),
-  (UPat(Ops.CONTIGUOUS, name="copy"), convert_contig_to_store),
+  (UPat((Ops.COPY, Ops.CONTIGUOUS), name="copy"), convert_copy_to_store),
 ])
 
 # *** RANGE creation ***
@@ -173,7 +165,7 @@ class SplitCtx:
   range_number:int = -1
 
 def _split_graph(ctx:SplitCtx, u:UOp) -> UOp:
-  assert len(u.shape) <= 1, f"rangeify needs to reduce to a single idx, not {u.shape}"
+  if len(u.shape) > 1: raise RuntimeError(f"rangeify needs to reduce to a single idx, not {u.shape}")
   args = {AddrSpace.GLOBAL: ctx.call_args, AddrSpace.ALU: ctx.call_params}[u.addrspace]
   args.append(u)
   return u.param_like((1000 if u.addrspace == AddrSpace.ALU else 0) + (len(args)-1))
