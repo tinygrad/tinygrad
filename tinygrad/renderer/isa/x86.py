@@ -165,7 +165,7 @@ def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
   return UOp.placeholder((count,), elem_dt, slot, AddrSpace.LOCAL)
 
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
-  local = scratch_buffer(addr.src[0].dtype.scalar(), x.max_numel(), next(ctx))
+  local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx))
   local_idx = local.index(UOp.const(0, dtypes.int32), dtype=dtypes.uint64)
   # the selected address is a 64bit value, the AFTER orders the load after the scratch store and carries the element dtype for the encoder
   sel = gate.where(addr.replace(dtype=dtypes.uint64), local_idx)
@@ -173,7 +173,7 @@ def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   return ptr.load(dtype=x.dtype)
 
 def gated_store(addr:UOp, gate:UOp, val:UOp):
-  local = scratch_buffer(addr.src[0].dtype.scalar(), val.max_numel(), -1)
+  local = scratch_buffer(addr.src[0].dtype, val.max_numel(), -1)
   sel = gate.where(addr.replace(dtype=dtypes.uint64), local.index(UOp.const(0, dtypes.int32), dtype=dtypes.uint64))
   return UOp(Ops.AFTER, addr.dtype, (sel,)).store(val)
 
@@ -237,7 +237,7 @@ def cmp(x:UOp) -> UOp:
   return x.ins(X86Ops.CMP, dtype=dtypes.void) if (i:=to_imm(x.src[1])) is None else x.ins(X86Ops.CMPi, dtype=dtypes.void, src=(x.src[0], i))
 def vcmp(x:UOp) -> UOp:
   v = imm(dtypes.uint8, {Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op])
-  if x.dtype.scalar() is dtypes.float32: return x.ins(X86Ops.VCMPSS if x.max_numel() == 1 else X86Ops.VCMPPS, src=x.src + (v,))
+  if x.dtype is dtypes.float32: return x.ins(X86Ops.VCMPSS if x.max_numel() == 1 else X86Ops.VCMPPS, src=x.src + (v,))
   return x.ins(X86Ops.VCMPSD if x.max_numel() == 1 else X86Ops.VCMPPD, src=x.src + (v,))
 
 # vinsertps xmm2, xmm0, xmm1, imm
@@ -252,7 +252,7 @@ def vinsertps(x:UOp) -> UOp:
 # vpinsq xmm2, xmm0, rax, imm
 # inserts element in rax into any position in xmm0, result is written to xmm2 according to imm
 def vpins(x:UOp) -> UOp:
-  op = {1: X86Ops.VPINSRB, 2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD, 8: X86Ops.VPINSRQ}[x.dtype.scalar().itemsize]
+  op = {1: X86Ops.VPINSRB, 2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD, 8: X86Ops.VPINSRQ}[x.dtype.itemsize]
   return functools.reduce(lambda ret,i: x.ins(op, src=(ret, x.src[i], imm(dtypes.uint8, i))), range(len(x.src)), def_reg(x.dtype))
 
 # we don't call ctx.vreg on the srcs to avoid duplicates, a rewrite will assign the tuple of valid registers to a vreg
