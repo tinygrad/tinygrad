@@ -133,7 +133,7 @@ class Buffer:
   # check if the underlying buffer is allocated, possibly from the base object
   def is_allocated(self) -> bool: return self.base.is_allocated() if self._base is not None else self.device in self._bufs
   def get_buf(self, device: str) -> Any:
-    if (device:=Device.canonicalize(device)) not in self._bufs:
+    if device not in self._bufs and (device:=Device.canonicalize(device)) not in self._bufs:
       allocator = Device[device].allocator
       if device == self.device: self.ensure_allocated()
       elif self._base is not None: self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)

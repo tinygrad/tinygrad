@@ -270,8 +270,9 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
+  linear = graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
   if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
-  return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
+  return linear
 
 def link_linear(linear:UOp, cache=True) -> UOp: return hcq_link(linear, cache=cache) if getenv("HCQ2") else linear
 

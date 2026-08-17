@@ -97,6 +97,7 @@ def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and
 
 def _get_enqueue_devs(call:UOp) -> Any|None:
   if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
+  if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
   devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
   return devs if all_devices_in(devs, HCQ_DEVS) else None
 
@@ -597,7 +598,7 @@ class HCQ2Compiled(Compiled):
 
   def new_buffer(self, b:UOp, cache:bool) -> Buffer:
     if cache or b.tag in HCQ_CACHE_TAGS:
-      return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=True, cpu_access=True, nolru=True))
+      return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=b.tag != "program", cpu_access=True, nolru=True))
     return self.rt_buffer.view(b.max_numel(), b.dtype, self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
 
   @functools.cache
