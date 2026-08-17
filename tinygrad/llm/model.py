@@ -124,8 +124,6 @@ class FFNBlock:
 
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
-  # return writes that reset this block's state after a cache mismatch
-  def _state_reset_ops(self) -> list[Tensor]: return []
   def _init_state(self, x:Tensor): raise NotImplementedError
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
 
@@ -260,45 +258,68 @@ class GatedDeltaNetBlock(FFNBlock):
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
-    assert T == 1, "GatedDeltaNetBlock currently only supports T=1"
+    # bind ints to a variable so the reset flag stays a runtime value (it toggles when generation restarts at position 0)
+    start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(start_pos)
+    initial = Tensor(start_pos).eq(0)
     is_kda = hasattr(self, "ssm_g_a")
+    symbolic = isinstance(T, UOp)
+    T_pad = x.max_shape[1]  # symbolic chunks are padded to their max size: one graph serves every size
 
     # input processing
     x = x.half()
     out_gate = self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)
-    out_gate = out_gate.reshape(B, 1, self.num_v_heads, self.head_v_dim)
-    beta = self.ssm_beta(x).sigmoid().reshape(B, self.num_v_heads, 1, 1)
+    out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
+    beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
     alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
-    alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, self.num_v_heads, -1) *
-             self.ssm_a.reshape(1, self.num_v_heads, -1)).exp().unsqueeze(-2)
+    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) * self.ssm_a).squeeze(-1) \
+      if is_kda else ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
 
-    # qkv conv
-    conv_window = self.conv_state.cat(self.attn_qkv(x), dim=1)
-    conv_out = (conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
+    # qkv conv, conv_state is reset when starting from position 0
+    conv_state = initial.where(0, self.conv_state)
+    # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad].
+    # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
+    conv_window = Tensor.zeros(B, self.ssm_conv_kernel-1 + T_pad, self.conv_channels)
+    win = conv_window.uop
+    win = win.after(win[:, :self.ssm_conv_kernel-1].store(conv_state.cast(win.dtype).uop))
+    win = win.after(win[:, self.ssm_conv_kernel-1:self.ssm_conv_kernel-1+T].store(self.attn_qkv(x).cast(win.dtype).uop))
+    conv_window = Tensor(win)
+    # the last conv_kernel-1 columns of the window become the next conv state
+    conv_state_store = self.conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).uop)
+
+    conv_out = functools.reduce(lambda a,b: a+b,
+      (conv_window[:, i:i+T_pad] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel))).silu()
+    if symbolic:
+      out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
+      beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, self.num_v_heads))
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
-    q = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1).repeat(1, self.num_v_heads//self.num_k_heads, 1)
-    k = k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1).repeat(1, self.num_v_heads//self.num_k_heads, 1)
-    v = v.reshape(B, self.num_v_heads, self.head_v_dim)
-    q, k, v = q.mul(self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
+    qk_eps = 1e-12 if is_kda else 1e-6
+    q, k = (z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=qk_eps)
+            .repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
+    v = v.reshape(B, T_pad, self.num_v_heads, self.head_v_dim)
+    q, k, v, beta = [z.transpose(1, 2).float() for z in (q, k, v, beta)]
+    alpha = log_alpha.transpose(1, 2).exp()
 
-    # recurrent
-    recurrent_state = self.recurrent_state * alpha
-    recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
+    # recurrent: scan over the (padded) tokens, updating the recurrent state. the output rows go to a static-size buffer
+    state = Tensor(self.recurrent_state.uop.after(conv_state_store)).float()  # carry the conv write into this graph
+    state = initial.where(0, state)
+    core = Tensor.zeros(B, self.num_v_heads, T_pad, self.head_v_dim)
+    out = core.uop
+    for t in range(T_pad):
+      key = k[:, :, t]  # (B, H, K)
+      decay = alpha[:, :, t].unsqueeze(-1) if len(alpha.shape) == 4 else alpha[:, :, t].reshape(B, self.num_v_heads, 1, 1)
+      s1 = state * decay
+      delta = (v[:, :, t].unsqueeze(-1) - (s1 * key.unsqueeze(-2)).sum(-1, keepdim=True)) * beta[:, :, t].reshape(B, self.num_v_heads, 1, 1)
+      state = s1 + delta * key.unsqueeze(-2)
+      out = out.after(out[:, :, t].store(((state * q[:, :, t].unsqueeze(-2)).sum(-1) * self.head_k_dim**-0.5).uop))
 
-    # store the updated state
-    conv_state_store = self.conv_state.uop.store(conv_window[:, 1:, :].cast(self.conv_state.dtype).uop)
-    recurrent_state_store = self.recurrent_state.uop.store(recurrent_state.cast(self.recurrent_state.dtype).uop)
-    recurrent_state = Tensor(self.recurrent_state.uop.after(recurrent_state_store, conv_state_store))
+    # store the updated recurrent state in place, then read the output buffer after the write
+    recurrent_state_store = self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop)
+    core = Tensor(out.after(recurrent_state_store)).transpose(1, 2)
 
-    # output
-    core_attn_out = self.ssm_norm((recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
-    out_gate = out_gate.sigmoid() if is_kda else out_gate.silu()
-    return self.ssm_out((core_attn_out * out_gate).reshape(B, 1, -1).cast(x.dtype))
-
-  # recurrent state can't be partially reused after divergence, force a full rebuild
-  def _state_reset_ops(self):
-    return [self.conv_state.assign(self.conv_state.const_like(0)),
-            self.recurrent_state.assign(self.recurrent_state.const_like(0))] if hasattr(self, "conv_state") else []
+    # output; undo the padding before the output projection
+    z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
+    if symbolic: z = z[:, :T]
+    return self.ssm_out(z.reshape(B, T, -1))
 
   def _init_state(self, x):
     if not hasattr(self, "conv_state"):
@@ -429,7 +450,6 @@ class Transformer:
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
-    if self.has_recurrent_block: chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
@@ -438,7 +458,6 @@ class Transformer:
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
-    if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)

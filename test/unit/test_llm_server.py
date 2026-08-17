@@ -42,7 +42,8 @@ class TestTransformerGenerate(unittest.TestCase):
       return Tensor([[42]])
     with patch.object(Transformer, '__call__', mock_call):
       next(model.generate([1, 2, 3, 4, 5, 42, 10]))
-    self.assertEqual(calls, [((1, 1), V_START_POS.bind(5)), ((1, 1), V_START_POS.bind(6))])
+    # recurrent blocks prefill chunks like attention blocks: the 2 new tokens go through one chunked call
+    self.assertEqual(calls, [((1, V_TOKS.bind(2)), V_START_POS.bind(5))])
 
   def test_recurrent_divergent_prompt_restarts(self):
     model, calls = Transformer(TEST_CONFIG), []
