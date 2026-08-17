@@ -64,7 +64,7 @@ def render_wmma(ctx: "PTXRenderer", wmma: UOp):
 
   for src, regs in zip(wmma.src, ctx.wmma_r):
     for i, reg in enumerate(regs): # pack input and acc registers
-      if (elems_per_reg := 4 // src.dtype.scalar().itemsize) == 1: yield f"mov.b32 {reg}, {ctx.r[src][i]};"
+      if (elems_per_reg := 4 // src.dtype.itemsize) == 1: yield f"mov.b32 {reg}, {ctx.r[src][i]};"
       else: yield f"mov.b32 {reg}, {{{', '.join(ctx.r[src][i * elems_per_reg : (i+1) * elems_per_reg])}}};"
 
   dt_map_in, dt_map_out = {dtypes.float: "tf32", dtypes.half: "f16"}, {dtypes.float: "f32", dtypes.half: "f16"}
@@ -101,17 +101,17 @@ string_rewrite = PatternMatcher([
      if loc.addrspace == AddrSpace.REG else None),
   (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc"), UPat.var("var"))),
    lambda ctx, loc, var: f"st.{mem_type(loc)}" + \
-    f"{f'.v{cnt}' if ((cnt:=var.max_numel())>1) else ''}.{ctx.mem_types[var.dtype.scalar()]} " + \
+    f"{f'.v{cnt}' if ((cnt:=var.max_numel())>1) else ''}.{ctx.mem_types[var.dtype]} " + \
     f"[{ctx.r[loc]}+0], {('{' + ', '.join(ctx.r[var]) + '}') if var.max_numel() > 1 else ctx.r[var]};"),
   (UPat(Ops.LOAD, name="x", src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc"), UPat.var("alt"), UPat.var("gate"))),
     lambda ctx, x, loc, alt, gate: flatten([
-    [f"mov.{ctx.mem_types[x.dtype.scalar()]} {v}, {render_val(0, x.dtype.scalar())};" for v in ctx.r[x]],
-    [f"@{ctx.r[gate]} ld.{mem_type(loc)}.v{x.max_numel()}.{ctx.mem_types[x.dtype.scalar()]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];"]
+    [f"mov.{ctx.mem_types[x.dtype]} {v}, {render_val(0, x.dtype)};" for v in ctx.r[x]],
+    [f"@{ctx.r[gate]} ld.{mem_type(loc)}.v{x.max_numel()}.{ctx.mem_types[x.dtype]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];"]
   ]) if alt.max_numel() > 1 else [
-    f"@{ctx.r[gate]} ld.{mem_type(loc)}.{ctx.mem_types[x.dtype.scalar()]} {ctx.r[x]}, [{ctx.r[loc]}+0];",
-    f"@!{ctx.r[gate]} mov.b{ctx.types[x.dtype.scalar()][1:]} {ctx.r[x]}, {ctx.r[alt]};"]),
+    f"@{ctx.r[gate]} ld.{mem_type(loc)}.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{ctx.r[loc]}+0];",
+    f"@!{ctx.r[gate]} mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {ctx.r[alt]};"]),
   (UPat(Ops.LOAD, name="x", src=(UPat((Ops.INDEX, Ops.SHRINK), name="loc"),)),
-    lambda ctx, x, loc: f"ld.{mem_type(loc)}.v{x.max_numel()}.{ctx.mem_types[x.dtype.scalar()]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];" \
+    lambda ctx, x, loc: f"ld.{mem_type(loc)}.v{x.max_numel()}.{ctx.mem_types[x.dtype]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];" \
      if x.max_numel() > 1 else f"ld.{mem_type(loc)}.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{ctx.r[loc]}+0];"),
   # simple
   (UPat(Ops.BUFFER, name="x"), lambda ctx, x: [] if x.addrspace == AddrSpace.REG else [
@@ -197,7 +197,7 @@ class PTXRenderer(Renderer):
         r[u] = [cast(str,r[x]) for x in u.src]
         continue
       if u.op is Ops.BUFFER and u.addrspace == AddrSpace.REG:
-        r[u] = [ssa("reg", u, self.types[u.dtype.scalar()]) for _ in range(u.max_numel())]
+        r[u] = [ssa("reg", u, self.types[u.dtype]) for _ in range(u.max_numel())]
         continue
       if u.op in {Ops.INDEX, Ops.SHRINK, Ops.LOAD} and u.src[0].addrspace in (AddrSpace.REG, AddrSpace.ALU):
         # on REG, INDEX/SHRINK pick the register (must be CONST) and LOAD is a noop
@@ -207,14 +207,14 @@ class PTXRenderer(Renderer):
         continue
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
       elif u.op is Ops.LOAD:
-        r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.max_numel())] if u.max_numel() > 1 else ssa('val', u)
+        r[u] = [ssa('val', dtype=self.types[u.dtype]) for _ in range(u.max_numel())] if u.max_numel() > 1 else ssa('val', u)
       elif u.op is Ops.PARAM: bufs.append((f"data{u.arg.slot}", u))
       elif u.op is Ops.WMMA:
         # registers for packing/unpacking input and acc
-        self.wmma_r = [[ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[0]]), 4 // u.src[0].dtype.scalar().itemsize)],
-                       [ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[1]]), 4 // u.src[0].dtype.scalar().itemsize)],
-                       [ssa("wmma_acc", dtype="b32") for _ in range(0, len(r[u.src[2]]), 4 // u.dtype.scalar().itemsize)]]
-        r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.max_numel())]
+        self.wmma_r = [[ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[0]]), 4 // u.src[0].dtype.itemsize)],
+                       [ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[1]]), 4 // u.src[0].dtype.itemsize)],
+                       [ssa("wmma_acc", dtype="b32") for _ in range(0, len(r[u.src[2]]), 4 // u.dtype.itemsize)]]
+        r[u] = [ssa("wmma", dtype=self.types[u.dtype]) for _ in range(u.max_numel())]
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.END: ("pred", "pred"), Ops.RANGE: ("ridx", None),
         Ops.CONST: ("const", None), Ops.BUFFER: ("local", "u64"), Ops.INDEX: ("bidx", "u64"), Ops.SHRINK: ("bidx", "u64"),
         Ops.PARAM: ("dat", "u64" if u.addrspace is AddrSpace.GLOBAL else None), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))

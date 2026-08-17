@@ -4,7 +4,7 @@
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops, GroupOp
-from tinygrad.helpers import getenv, prod, strides_for_shape, argfix
+from tinygrad.helpers import getenv, prod, strides_for_shape
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, operator, functools, weakref
@@ -99,46 +99,21 @@ def _apply_view_ops(target, ops):
   for fn, args, kwargs in ops: target = fn(target, *args, **kwargs)
   return target
 
-# similar to https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/InferSize.h
-def _reshape_target_shape(shape:tuple[int, ...], args) -> tuple[int, ...]|None:
-  if not (req := argfix(*args)): return None
-  new_shape, infer_idx = [], -1
-  for i, s in enumerate(req):
-    if s is None: s = shape[i] if i < len(shape) else None
-    if not isinstance(s, int): return None
-    if s == -1:
-      if infer_idx != -1: return None
-      infer_idx = len(new_shape)
-    new_shape.append(s)
-  total = prod(shape)
-  if infer_idx != -1:
-    known = prod(x for x in new_shape if x != -1)
-    if known == 0:
-      if total != 0: return None
-      new_shape[infer_idx] = 0
-    else: new_shape[infer_idx] = total // known
-  return tuple(new_shape) if prod(new_shape) == total else None
-
-# TODO: can we get rid of this? only for test_flatten_reshape_add
+# a chain of reshapes (and detaches, which move nothing) is undone by reshaping the value back to the base
 def _try_simple_reshape_view_write(base: Tensor, view: Tensor, val: Tensor) -> bool:
   if not (ops := _get_view_ops(view)): return False
-  shapes = [base.shape]
-  for fn, args, _ in ops:
-    if fn is Tensor.reshape:
-      if not (next_shape := _reshape_target_shape(shapes[-1], args)): return False
-      shapes.append(next_shape)
-  if shapes[-1] != view.shape: return False
-  for s in reversed(shapes[:-1]): val = val.reshape(s)
-  base.assign(val)
+  if any(fn not in (Tensor.reshape, Tensor.detach) for fn, _, _ in ops): return False
+  base.assign(val.reshape(base.shape))
   return True
 
 def _view_write(base: Tensor, view: Tensor, value: Tensor) -> None:
   val = value if value.dtype == base.dtype else value.cast(base.dtype)
-  if view.shape == base.shape: return base.assign(val)
   if _try_simple_reshape_view_write(base, view, val): return
   idx_base = Tensor.arange(base.numel(), dtype=dtypes.int32).reshape(base.shape)
   idx_view = _apply_view_ops(idx_base, _get_view_ops(view)).reshape(-1)
-  flat_base = base.reshape(base.numel()).contiguous()
+  # clone, not contiguous: contiguous() on a base that already owns its buffer returns the base itself, and scattering
+  # into that is an in-place write to a buffer other tensors still hold, which setitem refuses
+  flat_base = base.reshape(base.numel()).clone()
   flat_base[idx_view] = val.reshape(-1)
   base.assign(flat_base.reshape(base.shape))
 
@@ -301,6 +276,34 @@ def slice_tensor(self, dim=0, start=None, end=None, step=1):
   slices[dim] = slice(start, end, step)
   return self[slices]
 
+# the functional scatters. without an impl aten falls back to a path that assumes a real storage: "self.has_storage() INTERNAL ASSERT FAILED"
+def _scatter_into(self, src, dim, index):
+  out = unwrap(self).clone()
+  slices = [slice(None)] * out.ndim
+  slices[dim] = index
+  out[slices] = unwrap(src).cast(out.dtype)  # torch casts src to self's dtype, tinygrad setitem demands they already match
+  return wrap(out)
+
+@torch.library.impl("aten::slice_scatter", "privateuseone")
+def slice_scatter(self, src, dim=0, start=None, end=None, step=1): return _scatter_into(self, src, dim, slice(start, end, step))
+
+@torch.library.impl("aten::select_scatter", "privateuseone")
+def select_scatter(self, src, dim, index): return _scatter_into(self, src, dim, index)
+
+@torch.library.impl("aten::diagonal_scatter", "privateuseone")
+def diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
+  # a diagonal is not one axis, so scatter through the flat indices it picks out
+  base, out = unwrap(self), unwrap(self).clone().reshape(-1)
+  idx = Tensor.arange(base.numel(), dtype=dtypes.int32).reshape(base.shape).diagonal(offset, dim1, dim2).reshape(-1)
+  out[idx] = unwrap(src).cast(base.dtype).reshape(-1)
+  return wrap(out.reshape(base.shape))
+
+# the functional copy_. without an impl the fallback segfaults on a tensor with no storage
+@torch.library.impl("aten::copy", "privateuseone")
+def copy(self, src, non_blocking=False):
+  dest = unwrap(self)
+  return wrap(unwrap(src).cast(dest.dtype).to(dest.device).expand(dest.shape))
+
 @torch.library.impl("aten::slice_backward", "privateuseone")
 def slice_backward(grad_out, input_sizes, dim, start, end, step):
   grad_input = Tensor.zeros(input_sizes).contiguous()
@@ -341,7 +344,9 @@ for dim in [1, 2, 3]:
     torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
     torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
 
-def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
+# the schemas are all positional: (self, output_size, align_corners, *scales) for linear, (self, output_size, *scales) for nearest.
+def upsample(self, size, *args, mode=None):
+  return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=args[0] if mode == "linear" else False))
 for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::upsample_{pre}linear{i+1}d", "privateuseone")(functools.partial(upsample, mode="linear"))
   torch.library.impl(f"aten::upsample_nearest{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest"))
@@ -413,6 +418,7 @@ def _linalg_svd(self, full_matrices=False):
 from torch._decomp import get_decompositions
 decomps = [
   aten.native_layer_norm_backward,
+  aten.native_group_norm_backward,
   aten.linalg_cross,
   aten.addmm,
   aten.addcmul,
@@ -447,12 +453,20 @@ decomps = [
   aten._softmax_backward_data, aten.embedding_dense_backward,
   aten.linalg_vector_norm,
   aten.binary_cross_entropy, aten.binary_cross_entropy_backward,
+  # the C++ mse/smooth_l1 kernels resize their out tensor, and a tiny tensor has no storage to resize
+  aten.mse_loss, aten.mse_loss_backward,
+  aten.smooth_l1_loss, aten.smooth_l1_loss_backward,
   aten.upsample_nearest2d.out,
+  # NOTE: only the "out" overload, the "vec" one is CompositeImplicitAutograd and overriding it loses the autograd kernel
+  aten.upsample_bicubic2d.out,
+  aten._adaptive_avg_pool2d,
   # activations
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
   aten.gelu, aten.gelu_backward,
-  aten.logical_and,
+  # NOTE: no aten.logical_or here, its decomposition reaches aten.bitwise_or through a path that checks aliasing by
+  # reading storage, which a tiny tensor has none of. it gets a direct impl below instead
+  aten.logical_and, aten.logical_xor,
   aten.randint,
   aten.eye,
   aten.hardsigmoid_backward,
@@ -579,8 +593,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # inplace ops using replace for fusion
   "aten.zero_": lambda x: x.const_like(0),
   "aten.fill_.Scalar": lambda x, y: x.const_like(y),
-  "aten.add_.Tensor": lambda self, other, alpha=1.0: self + other * alpha,
-  "aten.add_.Scalar": lambda self, other, alpha=1.0: self + other * alpha,
+  "aten.add_.Tensor": lambda self, other, alpha=1: self + other * alpha,
+  "aten.add_.Scalar": lambda self, other, alpha=1: self + other * alpha,
   "aten.mul_.Tensor": lambda self, other: self * other,
   "aten.mul_.Scalar": lambda self, other: self * other,
   # relu doesn't have an out form?
@@ -613,7 +627,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.logical_or_": lambda x, y: x | y,
+  # compare against zero first: logical_* is bool-valued for any input dtype, while | is bitwise
+  "aten.logical_or": lambda x, y: (x != 0) | (y != 0),
+  "aten.logical_or_": lambda x, y: (x != 0) | (y != 0),
   "aten.multinomial": Tensor.multinomial,
   "aten.masked_fill_.Scalar": lambda self, mask, value: self.masked_fill(mask, value),
   "aten.masked_fill_.Tensor": lambda self, mask, value: self.masked_fill(mask, value),
@@ -625,8 +641,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.acos": Tensor.acos,
   "aten.any": Tensor.any,
   "aten.bitwise_not": Tensor.bitwise_not,
-  "aten.argmax": Tensor.argmax,
-  "aten.argmin": Tensor.argmin,
+  # tinygrad indexes with int32, torch's arg reduces return int64
+  "aten.argmax": lambda self, dim=None, keepdim=False: self.argmax(dim, keepdim).cast(dtypes.int64),
+  "aten.argmin": lambda self, dim=None, keepdim=False: self.argmin(dim, keepdim).cast(dtypes.int64),
   "aten.asinh": Tensor.asinh,
   "aten.mul": Tensor.mul,
   "aten.atanh": Tensor.atanh,
@@ -652,6 +669,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
     self.ones_like(**{k: v for k, v in {"dtype": _from_torch_dtype(dtype) if dtype else None,
                                         "device": _from_torch_device(device) if device else None}.items() if v is not None}),
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64)),
+  "aten.min.dim": lambda self, dim, keepdim=False: (self.min(dim, keepdim), self.argmin(dim, keepdim).cast(dtype=dtypes.int64)),
   "aten.cummax": lambda self, dim: ((r := self.cummax(dim))[0], r[1].cast(dtypes.int64)),
   "aten.cummin": lambda self, dim: ((r := self.cummin(dim))[0], r[1].cast(dtypes.int64)),
   "aten.nonzero": Tensor.nonzero,
