@@ -81,6 +81,9 @@ pm_prepare_graph = PatternMatcher([
   (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src if u.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="s"),
    lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u, non_after_okay=True) for u in s.src[1:] if u.op is not Ops.NOOP))),
+  # reduce of size 0 is the identity element
+  (UPat(Ops.REDUCE, name="reduce", src=(UPat.var("x"),)),
+   lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if 0 in x.shape and 0 not in reduce.shape else None),
   # size 0 STORE is NOOP
   (UPat(Ops.STORE, name="s"), lambda s: UOp(Ops.NOOP) if 0 in s.shape else None),
 ])
@@ -209,7 +212,7 @@ def _renumber_range(ctx:SplitCtx, u:UOp) -> UOp:
   return u.replace(arg=(ctx.range_number, u.arg[-1]))
 
 pm_split_graph = PatternMatcher([
-  (UPat((Ops.PARAM, Ops.AFTER, Ops.BUFFER), name="u"), _split_graph),
+  (UPat((Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK), name="u"), _split_graph),
   (UPat(Ops.RANGE, name="u"), _renumber_range),
 ])
 
