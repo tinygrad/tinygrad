@@ -46,6 +46,27 @@ def custom_fused_qkv_rope_backward(dxqkv:UOp, dq:UOp, dk:UOp, dv:UOp, freqs_cis:
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
+@functools.cache
+def custom_fused_qkv_rope_backward_mxfp4(dxqkv:UOp, row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UOp,
+                                         dq:UOp, dk:UOp, dv:UOp, freqs_cis:UOp,
+                                         device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
+  assert (B, N, H, H_KV, D) == (2, 8192, 32, 8, 128)
+  code = (pathlib.Path(__file__).parent / "fused_qkv_rope_bwd.cpp").read_text()
+  threads = 256
+  thread_idx = UOp.special(threads, "lidx0")
+  gsz = (B, N // 64, H + 2 * H_KV)
+  block_idx_x, block_idx_y, block_idx_z = (UOp.special(x, f"gidx{i}") for i, x in enumerate(gsz))
+  sink = UOp.sink(dxqkv.base, row_fp4.base, row_scale.base, col_fp4.base, col_scale.base,
+                  dq.base, dk.base, dv.base, freqs_cis.base, thread_idx, block_idx_x, block_idx_y, block_idx_z,
+                  arg=KernelInfo(name="fused_qkv_rope_backward_mxfp4"))
+  include = pathlib.Path(__file__).parent / "include"
+  quant_include = pathlib.Path(__file__).parents[2] / "llama_kernels" / "quantize_mxfp4"
+  compile_args = [f"-I{include}", f"-I{quant_include}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS",
+                  "-DWRITE_MXFP4", "-ffast-math", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
+                  f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DTHREADS_PER_BLOCK={threads}"]
+  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+
 def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp]|None:
   def unwrap_partial(x:UOp) -> UOp|None:
     expected = (Ops.CAST, Ops.REDUCE, Ops.PERMUTE, Ops.CAST, Ops.RESHAPE, Ops.AFTER)
@@ -61,7 +82,7 @@ def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp]|None:
   if dq_native.shape != (B, H, N, D) or dk_partial.shape != (B * partials, N, H_KV, D) or dv_partial.shape != dk_partial.shape: return None
   return dq_native, dk_partial, dv_partial
 
-def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp) -> tuple[None, None, None, UOp, None]:
+def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp, *, prequantize_mxfp4:bool=False) -> tuple[None, None, None, UOp, None]:
   dq, dk, dv = Tensor(dq_u, device=dq_u.device), Tensor(dk_u, device=dk_u.device), Tensor(dv_u, device=dv_u.device)
   xqkv_u, freqs_u = call.src[4], call.src[5]
   xqkv, freqs_cis = Tensor(xqkv_u, device=xqkv_u.device), Tensor(freqs_u, device=freqs_u.device)
@@ -78,12 +99,25 @@ def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp) -> tuple[None, 
   assert fa_native is not None, "fused QKV RoPE backward requires native Flash Attention gradients"
   dq, dk, dv = (Tensor(x, device=x.device) for x in fa_native)
   dxqkv = _sharded_empty_like(xqkv, axis=xqkv.uop.axis if isinstance(xqkv.device, tuple) else None)
-  fxn = functools.partial(custom_fused_qkv_rope_backward, device=single_device, arch=arch,
-                          B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D)
-  dxqkv = Tensor.custom_kernel(dxqkv, dq, dk, dv, freqs_cis, fxn=fxn)[0]
+  if prequantize_mxfp4:
+    from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs, _grad_mxfp4_mailbox
+    quant = alloc_mxfp4_outputs(dxqkv, flatten_row=True)
+    fxn = functools.partial(custom_fused_qkv_rope_backward_mxfp4, device=single_device, arch=arch,
+                            B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D)
+    ret = Tensor.custom_kernel(dxqkv, *quant, dq, dk, dv, freqs_cis, fxn=fxn)
+    dxqkv, quant = ret[0], list(ret[1:5])
+    _grad_mxfp4_mailbox[dxqkv.uop] = tuple(x.uop for x in quant)
+  else:
+    fxn = functools.partial(custom_fused_qkv_rope_backward, device=single_device, arch=arch,
+                            B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D)
+    dxqkv = Tensor.custom_kernel(dxqkv, dq, dk, dv, freqs_cis, fxn=fxn)[0]
   return None, None, None, dxqkv.uop, None
 
-def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, head_dim:int) -> tuple[Tensor, Tensor, Tensor]:
+def _fused_qkv_rope_grad_mxfp4(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp):
+  return _fused_qkv_rope_grad(dq_u, dk_u, dv_u, call, prequantize_mxfp4=True)
+
+def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, head_dim:int, *,
+                   prequantize_grad_mxfp4:bool=False) -> tuple[Tensor, Tensor, Tensor]:
   B, N, packed_dim = xqkv.shape
   assert packed_dim == n_kv_heads * (n_heads // n_kv_heads + 2) * head_dim
   assert freqs_cis.dtype == dtypes.bfloat16, f"fused QKV RoPE requires bfloat16 frequencies, got {freqs_cis.dtype}"
@@ -103,7 +137,8 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
   v = _sharded_empty((B, N, n_kv_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
   fxn = functools.partial(custom_fused_qkv_rope_forward, device=single_device, arch=arch,
                           B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=head_dim)
-  q, k, v, *_ = Tensor.custom_kernel(q, k, v, xqkv, freqs_cis, fxn=fxn, grad_fxn=_fused_qkv_rope_grad)
+  grad_fxn = _fused_qkv_rope_grad_mxfp4 if prequantize_grad_mxfp4 else functools.partial(_fused_qkv_rope_grad, prequantize_mxfp4=False)
+  q, k, v, *_ = Tensor.custom_kernel(q, k, v, xqkv, freqs_cis, fxn=fxn, grad_fxn=grad_fxn)
   return q, k, v
 
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
@@ -152,6 +187,7 @@ def _windowed_delta(xq:Tensor, xk:Tensor, xv:Tensor, do:Tensor, sinks, W:int) ->
   delta = (dob * o).sum(-1)
   return delta.reshape(B, H, N).unsqueeze(2)
 
+@functools.cache
 def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=0):
   def grad(dou:UOp, ker:UOp) -> tuple:
     do = Tensor(dou, device=dou.device)

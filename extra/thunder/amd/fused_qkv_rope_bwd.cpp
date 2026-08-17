@@ -1,4 +1,7 @@
 #include "kittens.cuh"
+#ifdef WRITE_MXFP4
+#include "quantize_mxfp4_device.h"
+#endif
 
 using namespace kittens;
 
@@ -123,6 +126,12 @@ __device__ __forceinline__ void inverse_rope(RT &tile, const bf16_2 *freqs, cons
 extern "C" __global__ __launch_bounds__(THREADS_PER_BLOCK) void
 fused_qkv_rope_backward(
     bf16*       __restrict__ dxqkv,
+#ifdef WRITE_MXFP4
+    uint8_t*    __restrict__ row_fp4,
+    uint8_t*    __restrict__ row_scale,
+    uint8_t*    __restrict__ col_fp4,
+    uint8_t*    __restrict__ col_scale,
+#endif
     const bf16* __restrict__ dq,
     const bf16* __restrict__ dk,
     const bf16* __restrict__ dv,
@@ -158,4 +167,44 @@ fused_qkv_rope_backward(
     const int out_head = kvh * (GROUP_SIZE + 2) + GROUP_SIZE + !is_k;
     store<1>(out, tile, {b, n_tile, out_head, 0});
   }
+
+#ifdef WRITE_MXFP4
+  __syncthreads();
+  __shared__ uint16_t quant_tile[32 * 34];
+  constexpr int MATRIX_M = ATTN_B * ATTN_N;
+  constexpr int MATRIX_N = PACKED_H * ATTN_D;
+  const int line = threadIdx.x / 8, lane = threadIdx.x % 8;
+  const int out_head = field < ATTN_H ? (field / GROUP_SIZE) * (GROUP_SIZE + 2) + field % GROUP_SIZE :
+    (field - ATTN_H - (field < ATTN_H + ATTN_H_KV ? 0 : ATTN_H_KV)) * (GROUP_SIZE + 2) +
+      GROUP_SIZE + !(field < ATTN_H + ATTN_H_KV);
+  const uint16_t* out_raw = reinterpret_cast<const uint16_t*>(dxqkv);
+
+  #pragma unroll
+  for (int chunk_m = 0; chunk_m < 2; chunk_m++) {
+    #pragma unroll
+    for (int chunk_n = 0; chunk_n < ATTN_D / 32; chunk_n++) {
+      const int row = b * ATTN_N + blockIdx.y * 64 + chunk_m * 32 + line;
+      const int col = out_head * ATTN_D + chunk_n * 32 + lane * 4;
+      const uint64_t packed = *reinterpret_cast<const uint64_t*>(out_raw + row * MATRIX_N + col);
+      *reinterpret_cast<uint32_t*>(quant_tile + line * 34 + lane * 4) = static_cast<uint32_t>(packed);
+      *reinterpret_cast<uint32_t*>(quant_tile + line * 34 + lane * 4 + 2) = static_cast<uint32_t>(packed >> 32);
+      __syncthreads();
+
+      const auto row_result = mxfp4::quantize(mxfp4::load_bf16x4(quant_tile + line * 34 + lane * 4), lane);
+      mxfp4::store_fp4<false>(row_fp4, row, col / 2, MATRIX_N / 2, row_result.fp4);
+      if (lane == 0) mxfp4::store_scale(row_scale, row, col / 32, MATRIX_N / 32, row_result.scale);
+
+      const int row_lane = lane * 4;
+      const int col_line = out_head * ATTN_D + chunk_n * 32 + line;
+      const auto col_result = mxfp4::quantize(make_float4(
+        __uint_as_float(static_cast<uint32_t>(quant_tile[(row_lane + 0) * 34 + line]) << 16),
+        __uint_as_float(static_cast<uint32_t>(quant_tile[(row_lane + 1) * 34 + line]) << 16),
+        __uint_as_float(static_cast<uint32_t>(quant_tile[(row_lane + 2) * 34 + line]) << 16),
+        __uint_as_float(static_cast<uint32_t>(quant_tile[(row_lane + 3) * 34 + line]) << 16)), lane);
+      mxfp4::store_fp4<false>(col_fp4, col_line, (row - line + row_lane) / 2, MATRIX_M / 2, col_result.fp4);
+      if (lane == 0) mxfp4::store_scale(col_scale, col_line, (row - line) / 32, MATRIX_M / 32, col_result.scale);
+      __syncthreads();
+    }
+  }
+#endif
 }

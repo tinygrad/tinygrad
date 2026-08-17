@@ -241,6 +241,12 @@ class TestMemoryPlanner(unittest.TestCase):
     ]
     check_assign(bs, copies=[(b(1), b(0)), (b(3), b(1))])
 
+  def test_allreduce_view_through_reshape(self):
+    base = UOp.new_buffer(("NULL", "NULL:1"), 16, dtypes.int8)
+    view = base.mselect(0).reshape((4, 4)).flatten().shrink(((4, 12),)).rtag(("allreduce",))
+    result = memory_plan_rewrite(_make_linear([[view]]))
+    self.assertNotIn(base, result.src[0].src[1].toposort())
+
   def test_deferred_copy_frees_chain(self):
     bs = []
     copies = []

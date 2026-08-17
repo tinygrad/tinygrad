@@ -1,6 +1,6 @@
 import time, inspect
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup
 
@@ -8,15 +8,32 @@ from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SC
 
 # unwrap VIEW/CAST/etc to find the actual data source (kernel output, buffer, or multi-device op)
 def _unwrap_src(s: UOp) -> UOp:
-  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
+  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK} and \
+        not (s.op is Ops.SHRINK and s.tag == ("allreduce",)): s = s.src[0]
   return s
 
 # a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
+  if s.op is Ops.SHRINK and s.tag == ("allreduce",): return _states(s.src[0])
   assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
+
+def _physical_view(s:UOp) -> UOp:
+  """Remove ordering wrappers from a movement view while preserving its address calculation."""
+  if s.op is Ops.AFTER: return _physical_view(s.src[0])
+  if s.op in GroupOp.Movement: return s.replace(src=(_physical_view(s.src[0]), *s.src[1:]))
+  return s
+
+def _slice_region(s:UOp) -> tuple[UOp, int, int]|None:
+  """Return the concrete byte interval accessed through a tagged contiguous allreduce view."""
+  s = _unwrap_src(s)
+  if s.op is Ops.AFTER: s = s.src[0]
+  if s.op is not Ops.SHRINK or s.tag != ("allreduce",) or s.src[1].op is not Ops.CONST: return None
+  # SHRINK stores (start, length); the tagged views are always constructed on a flattened physical buffer.
+  start = s.src[1].val * s.dtype.itemsize
+  return _physical_view(s).src[0].buf_uop, start, start+s.nbytes()
 
 def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
   kernels, remaining = partition(after.src[1:], lambda s: s.op in {Ops.CALL, Ops.END})
@@ -25,13 +42,20 @@ def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
     raise AssertionError(f"AFTER source should be CALL, END, STORE, or AFTER, not {invalid[0].op}")
   return tuple(kernels), tuple(deps)
 
+def _call_buf_uop(s:UOp) -> UOp:
+  """Resolve a call argument's storage, preserving a dependency-wrapped hardware slice as the actual view."""
+  s = _unwrap_src(s)
+  if s.op is Ops.AFTER and s.src[0].op is Ops.SHRINK and s.src[0].tag == ("allreduce",): return _physical_view(s.src[0])
+  if s.op is Ops.SHRINK and s.tag == ("allreduce",): return _physical_view(s)
+  return s.buf_uop
+
 def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # build kernel dependency graph: edges from producer kernel to consumer kernels
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
     writes: dict[UOp, list[tuple[UOp, UOp, tuple[UOp, ...]]]] = {}  # buffer -> (AFTER, prior state, new kernels)
-    reads: list[tuple[UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read)
+    reads: list[tuple[UOp, UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read, access)
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       kernels, after_deps = _split_after(u)
@@ -42,20 +66,24 @@ def create_schedule(sched_sink:UOp) -> UOp:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
         kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
-        read_states = [st for s in kernel_deps for st in _states(s)]
-        reads += [(u, k, st) for st in read_states]
+        read_states = [(st, s) for s in kernel_deps for st in _states(s)]
+        reads += [(u, k, st, access) for st,access in read_states]
         # RAW deps: a kernel runs after the kernels that produced the states it reads or joins
-        for st in read_states + [st for s in after_deps for st in _states(s)]:
+        for st in [st for st,_ in read_states] + [st for s in after_deps for st in _states(s)]:
           if st.op is Ops.AFTER:
             for t in _split_after(st)[0]:
               children.setdefault(t, []).append(k)
               in_degree[k] += 1
     # WAR deps: a kernel reading buffer state S must run before another write that supersedes S. an AFTER only
     # supersedes its immediate prior state; join members already present in that prior state are ordering deps, not writes
-    for u, k, s in reads:
+    for u, k, s, access in reads:
       for a, prev_state, write_kernels in writes.get(s.buf_uop, []):
         if a is u or prev_state is not s: continue
         for t in write_kernels:
+          call = t.src[0] if t.op is Ops.END else t
+          # Disjoint physical intervals do not alias and therefore need no WAR edge.
+          if ((rr:=_slice_region(access)) is not None and len(call.src) > 1 and (wr:=_slice_region(call.src[1])) is not None
+              and (rr[0] is not wr[0] or rr[2] <= wr[1] or wr[2] <= rr[1])): continue
           if t is not k and t not in k.backward_slice:
             children.setdefault(k, []).append(t)
             in_degree[t] += 1
@@ -70,7 +98,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       else:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
+        buf_uops = tuple(_call_buf_uop(s) for s in k.src[1:] if not s.is_bound_var)
         linearized.append(k.src[0].call(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
@@ -160,6 +188,9 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
 
   # replace this with a copy if it's a copy
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r")).f(Ops.COPY)).end(UPat(Ops.RANGE, name="r")).sink(),),
+                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_copy_uop),

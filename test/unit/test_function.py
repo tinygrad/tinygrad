@@ -522,6 +522,52 @@ class TestFunctionTuple(unittest.TestCase):
     Tensor.realize(a.grad)
     np.testing.assert_allclose(a.grad.numpy(), [2., 2., 2., 2.])
 
+  def test_custom_kernel_precompile_reshaped_saved_output_no_copy(self):
+    def custom_save(C:UOp, A:UOp) -> UOp:
+      C, A = C.flatten(), A.flatten()
+      i = UOp.range(A.numel(), 0)
+      return C[i].store(A[i] * 2).end(i).sink(arg=KernelInfo(name="custom_save"))
+
+    @function(precompile=True)
+    def f(a:Tensor):
+      saved = Tensor.invalids(1, *a.shape, dtype=a.dtype, device=a.device)
+      saved = Tensor.custom_kernel(saved, a.reshape(1, *a.shape), fxn=custom_save)[0].squeeze(0)
+      out = Tensor.invalids(*saved.shape, dtype=saved.dtype, device=saved.device)
+      out = Tensor.custom_kernel(out, saved, fxn=custom_save)[0]
+      return out, saved
+
+    a = Tensor.full((4, 4), 3, device="CPU").contiguous().realize()
+    out, saved = f(a)
+    GlobalCounters.reset()
+    Tensor.realize(out, saved)
+    assert_kernel_count(2)
+    np.testing.assert_equal(saved.numpy(), 6)
+    np.testing.assert_equal(out.numpy(), 12)
+
+  def test_custom_kernel_precompile_reshaped_saved_output_no_copy_multidevice(self):
+    devices = ("CPU:0", "CPU:1")
+    def custom_save(C:UOp, A:UOp) -> UOp:
+      C, A = C.flatten(), A.flatten()
+      i = UOp.range(A.numel(), 0)
+      return C[i].store(A[i] * 2).end(i).sink(arg=KernelInfo(name="custom_save"))
+
+    @function(precompile=True)
+    def f(a:Tensor):
+      saved_local = Tensor.invalids(a.shape[0]//len(devices), a.shape[1], dtype=a.dtype, device=devices)
+      saved = Tensor.custom_kernel(Tensor(saved_local.uop.unshard(0), device=devices), a, fxn=custom_save)[0]
+      saved = saved.reshape(1, *a.shape).squeeze(0)
+      out_local = Tensor.invalids(a.shape[0]//len(devices), a.shape[1], dtype=a.dtype, device=devices)
+      out = Tensor.custom_kernel(Tensor(out_local.uop.unshard(0), device=devices), saved, fxn=custom_save)[0]
+      return out, saved
+
+    a = Tensor.full((4, 4), 3).shard(devices, axis=0).realize()
+    out, saved = f(a)
+    GlobalCounters.reset()
+    Tensor.realize(out, saved)
+    assert_kernel_count(6)
+    np.testing.assert_equal(saved.numpy(), 6)
+    np.testing.assert_equal(out.numpy(), 12)
+
   def test_custom_kernel_precompile_multidevice(self):
     # a custom_kernel output placeholder (invalids) under multi-device @function(precompile=True) must return the
     # kernel's computed result. read it back through .numpy() so the cross-device gather reads the output buffer

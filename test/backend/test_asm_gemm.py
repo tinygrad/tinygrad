@@ -172,6 +172,21 @@ class TestMXFP4(unittest.TestCase):
     self.assertTrue((row_scale == 127).any())
     self.assertTrue((row_scale != 127).any())
 
+    row_only, row_scale_only, _, _ = quantize_mxfp4(Tensor(x, dtype=dtypes.bfloat16), col=False)
+    _, _, col_only, col_scale_only = quantize_mxfp4(Tensor(x, dtype=dtypes.bfloat16), row=False)
+    Tensor.realize(row_only, row_scale_only, col_only, col_scale_only)
+    np.testing.assert_array_equal(row_only.numpy(), row)
+    np.testing.assert_array_equal(row_scale_only.numpy(), row_scale)
+    np.testing.assert_array_equal(col_only.numpy(), col)
+    np.testing.assert_array_equal(col_scale_only.numpy(), col_scale)
+
+    updated = Tensor(rng.standard_normal((256, 256), dtype=np.float32), dtype=dtypes.bfloat16)
+    expected = quantize_mxfp4(updated)
+    cached = quantize_mxfp4(Tensor(x, dtype=dtypes.bfloat16))
+    refresh = quantize_mxfp4(updated, out=cached)
+    Tensor.realize(*expected, *refresh)
+    for actual, reference in zip(cached, expected): np.testing.assert_array_equal(actual.numpy(), reference.numpy())
+
   def test_correctness(self):
     import numpy as np
     M = N = K = 256
@@ -181,6 +196,36 @@ class TestMXFP4(unittest.TestCase):
     out = asm_gemm(a, b.T, mxfp4=True).realize().numpy().astype(np.float32)
     ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32).T
     self.assertLess(np.linalg.norm(out-ref) / np.linalg.norm(ref), 0.2)
+
+  def test_save_original_input(self):
+    import numpy as np
+    rng = np.random.default_rng(2)
+    a_np = rng.standard_normal((256, 256), dtype=np.float32)
+    w_np = rng.standard_normal((256, 256), dtype=np.float32)
+    a_ref, w_ref = Tensor(a_np, dtype=dtypes.bfloat16), Tensor(w_np, dtype=dtypes.bfloat16)
+    a_recompute, w_recompute = Tensor(a_np, dtype=dtypes.bfloat16), Tensor(w_np, dtype=dtypes.bfloat16)
+    out_ref = asm_gemm(a_ref, w_ref.T, mxfp4=True)
+    out_recompute = asm_gemm(a_recompute, w_recompute.T, mxfp4=True, save_original_input=True)
+    out_ref.sum().backward()
+    out_recompute.sum().backward()
+    Tensor.realize(out_ref, out_recompute, a_ref.grad, w_ref.grad, a_recompute.grad, w_recompute.grad)
+    np.testing.assert_array_equal(out_recompute.numpy(), out_ref.numpy())
+    np.testing.assert_array_equal(a_recompute.grad.numpy(), a_ref.grad.numpy())
+    np.testing.assert_array_equal(w_recompute.grad.numpy(), w_ref.grad.numpy())
+
+  def test_return_mxfp4_saves(self):
+    import numpy as np
+    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+    rng = np.random.default_rng(3)
+    a = Tensor(rng.standard_normal((256, 256), dtype=np.float32), dtype=dtypes.bfloat16)
+    w = Tensor(rng.standard_normal((256, 256), dtype=np.float32), dtype=dtypes.bfloat16)
+    ret = asm_gemm(a, w.T, mxfp4=True, return_mxfp4_saves=True)
+    assert isinstance(ret, tuple)
+    out, a_col, scale_a_col = ret
+    _, _, expected_col, expected_scale_col = quantize_mxfp4(a, shuffle_col=True)
+    Tensor.realize(out, a_col, scale_a_col, expected_col, expected_scale_col)
+    np.testing.assert_array_equal(a_col.numpy(), expected_col.numpy())
+    np.testing.assert_array_equal(scale_a_col.numpy(), expected_scale_col.numpy())
 
   def test_empty(self):
     M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
