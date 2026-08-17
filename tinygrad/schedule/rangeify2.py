@@ -190,6 +190,9 @@ pm_range_migration = PatternMatcher([
   # pass index through elementwise
   (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
    lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
+  # move RESHAPEs through MSELECT/MSTACK
+  (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
+   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src])).reshape(m.shape)),
 ])
 
 # *** split into kernels ***
