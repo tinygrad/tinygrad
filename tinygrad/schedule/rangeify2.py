@@ -37,7 +37,34 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
+pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p) if p.arg.slot >= 0 else None), ])
+def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
+  if c.arg.precompile: return None
+  params: list[UOp] = []
+  graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")
+  params = sorted(params, key=lambda x: x.arg.slot)
+  args = c.src[1:]
+
+  # NOTE: this isn't really needed. it's okay if there's unused args in the function
+  if not allow_param_mismatch:
+    if [x.arg.slot for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg.slot for x in params]}")
+    if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
+
+  dict_map = {x:args[x.arg.slot] for x in params}
+  for i, (p, a) in enumerate(dict_map.items()):
+    if p.axis != a.axis: raise TypeError(f"arg {i} axis mismatch: expected {p.axis}, got {a.axis}")
+    if p.max_shape != a.max_shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
+    if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
+  return c.src[0].substitute(dict_map, walk=True)
+
 pm_expand_broadcast = PatternMatcher([
+  # CALL inputs need buffer identity
+  (UPat(Ops.CALL, name="c"),
+   lambda c: c.replace(src=c.src[0:1]+tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src[1:]))),
+  # resolve FUNCTION calls (inline the body)
+  (UPat(Ops.FUNCTION, name="c"), resolve_function),
+  # resolve TUPLE+GETTUPLE
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
   # expand broadcasts first
   (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
   # also expand bitcasts
