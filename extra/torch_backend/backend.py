@@ -124,9 +124,10 @@ def _try_simple_reshape_view_write(base: Tensor, view: Tensor, val: Tensor) -> b
   if not (ops := _get_view_ops(view)): return False
   shapes = [base.shape]
   for fn, args, _ in ops:
-    if fn is Tensor.reshape:
-      if not (next_shape := _reshape_target_shape(shapes[-1], args)): return False
-      shapes.append(next_shape)
+    if fn is Tensor.detach: continue  # detach leaves every element where it was (a tracked view only on torch<2.10)
+    if fn is not Tensor.reshape: return False
+    if not (next_shape := _reshape_target_shape(shapes[-1], args)): return False
+    shapes.append(next_shape)
   if shapes[-1] != view.shape: return False
   for s in reversed(shapes[:-1]): val = val.reshape(s)
   base.assign(val)
@@ -134,11 +135,12 @@ def _try_simple_reshape_view_write(base: Tensor, view: Tensor, val: Tensor) -> b
 
 def _view_write(base: Tensor, view: Tensor, value: Tensor) -> None:
   val = value if value.dtype == base.dtype else value.cast(base.dtype)
-  if view.shape == base.shape: return base.assign(val)
   if _try_simple_reshape_view_write(base, view, val): return
   idx_base = Tensor.arange(base.numel(), dtype=dtypes.int32).reshape(base.shape)
   idx_view = _apply_view_ops(idx_base, _get_view_ops(view)).reshape(-1)
-  flat_base = base.reshape(base.numel()).contiguous()
+  # clone, not contiguous: contiguous() on a base that already owns its buffer returns the base itself, and scattering
+  # into that is an in-place write to a buffer other tensors still hold, which setitem refuses
+  flat_base = base.reshape(base.numel()).clone()
   flat_base[idx_view] = val.reshape(-1)
   base.assign(flat_base.reshape(base.shape))
 
@@ -301,6 +303,34 @@ def slice_tensor(self, dim=0, start=None, end=None, step=1):
   slices[dim] = slice(start, end, step)
   return self[slices]
 
+# the functional scatters. without an impl aten falls back to a path that assumes a real storage: "self.has_storage() INTERNAL ASSERT FAILED"
+def _scatter_into(self, src, dim, index):
+  out = unwrap(self).clone()
+  slices = [slice(None)] * out.ndim
+  slices[dim] = index
+  out[slices] = unwrap(src).cast(out.dtype)  # torch casts src to self's dtype, tinygrad setitem demands they already match
+  return wrap(out)
+
+@torch.library.impl("aten::slice_scatter", "privateuseone")
+def slice_scatter(self, src, dim=0, start=None, end=None, step=1): return _scatter_into(self, src, dim, slice(start, end, step))
+
+@torch.library.impl("aten::select_scatter", "privateuseone")
+def select_scatter(self, src, dim, index): return _scatter_into(self, src, dim, index)
+
+@torch.library.impl("aten::diagonal_scatter", "privateuseone")
+def diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
+  # a diagonal is not one axis, so scatter through the flat indices it picks out
+  base, out = unwrap(self), unwrap(self).clone().reshape(-1)
+  idx = Tensor.arange(base.numel(), dtype=dtypes.int32).reshape(base.shape).diagonal(offset, dim1, dim2).reshape(-1)
+  out[idx] = unwrap(src).cast(base.dtype).reshape(-1)
+  return wrap(out.reshape(base.shape))
+
+# the functional copy_. without an impl the fallback segfaults on a tensor with no storage
+@torch.library.impl("aten::copy", "privateuseone")
+def copy(self, src, non_blocking=False):
+  dest = unwrap(self)
+  return wrap(unwrap(src).cast(dest.dtype).to(dest.device).expand(dest.shape))
+
 @torch.library.impl("aten::slice_backward", "privateuseone")
 def slice_backward(grad_out, input_sizes, dim, start, end, step):
   grad_input = Tensor.zeros(input_sizes).contiguous()
@@ -341,7 +371,9 @@ for dim in [1, 2, 3]:
     torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
     torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
 
-def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
+# the schemas are all positional: (self, output_size, align_corners, *scales) for linear, (self, output_size, *scales) for nearest.
+def upsample(self, size, *args, mode=None):
+  return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=args[0] if mode == "linear" else False))
 for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::upsample_{pre}linear{i+1}d", "privateuseone")(functools.partial(upsample, mode="linear"))
   torch.library.impl(f"aten::upsample_nearest{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest"))
@@ -452,7 +484,9 @@ decomps = [
   aten.hardswish, aten.hardswish_backward,
   aten.hardtanh, aten.hardtanh_backward,
   aten.gelu, aten.gelu_backward,
-  aten.logical_and,
+  # NOTE: no aten.logical_or here, its decomposition reaches aten.bitwise_or through a path that checks aliasing by
+  # reading storage, which a tiny tensor has none of. it gets a direct impl below instead
+  aten.logical_and, aten.logical_xor,
   aten.randint,
   aten.eye,
   aten.hardsigmoid_backward,
@@ -579,8 +613,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # inplace ops using replace for fusion
   "aten.zero_": lambda x: x.const_like(0),
   "aten.fill_.Scalar": lambda x, y: x.const_like(y),
-  "aten.add_.Tensor": lambda self, other, alpha=1.0: self + other * alpha,
-  "aten.add_.Scalar": lambda self, other, alpha=1.0: self + other * alpha,
+  "aten.add_.Tensor": lambda self, other, alpha=1: self + other * alpha,
+  "aten.add_.Scalar": lambda self, other, alpha=1: self + other * alpha,
   "aten.mul_.Tensor": lambda self, other: self * other,
   "aten.mul_.Scalar": lambda self, other: self * other,
   # relu doesn't have an out form?
@@ -613,7 +647,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.logical_or_": lambda x, y: x | y,
+  # compare against zero first: logical_* is bool-valued for any input dtype, while | is bitwise
+  "aten.logical_or": lambda x, y: (x != 0) | (y != 0),
+  "aten.logical_or_": lambda x, y: (x != 0) | (y != 0),
   "aten.multinomial": Tensor.multinomial,
   "aten.masked_fill_.Scalar": lambda self, mask, value: self.masked_fill(mask, value),
   "aten.masked_fill_.Tensor": lambda self, mask, value: self.masked_fill(mask, value),
