@@ -7,7 +7,7 @@ from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrit
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
-from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element, Context
+from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element, Context, panic
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op
@@ -25,9 +25,23 @@ def expand_broadcast(x:UOp):
   shape = _broadcast_shape(*shapes)
   return x.replace(src=tuple([u.expand(shape) for u in x.src]))
 
+# shape-changing bitcast
+def expand_bitcast(bc:UOp) -> UOp|None:
+  x = bc.src[0]
+  if (ns:=bc.dtype.itemsize) == (os:=x.dtype.itemsize) or (isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS"))): return None
+  new_uint, tmp = to_dtype(f"uint{8*ns}"), x.bitcast(to_dtype(f"uint{8*os}"))
+  if ns > os:
+    tmp = tmp.reshape(x.shape[:-1] + (x.shape[-1]//(rate := ns//os), rate))
+    parts = [tmp.shrink((None,)*(len(tmp.shape)-1) + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(rate)]
+    return parts[0].usum(*parts[1:]).squeeze(-1).bitcast(bc.dtype)
+  parts = [tmp>>8*i*ns for i in range(os//ns)]
+  return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
+
 pm_expand_broadcast = PatternMatcher([
   # expand broadcasts first
   (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
+  # also expand bitcasts
+  (UPat(Ops.BITCAST, name="bc"), expand_bitcast),
 ])
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
@@ -139,6 +153,9 @@ pm_range_migration = PatternMatcher([
   # move movement ops and INDEX after AFTER
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
+  # block bitcast that changes shape
+  (UPat(Ops.BITCAST, name="b").index(allow_any_len=True),
+   lambda b: panic(RuntimeError, "shape changing bitcast not allowed in rangeify") if b.src[0].shape != b.shape else None),
   # pass index through elementwise
   (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
    lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
