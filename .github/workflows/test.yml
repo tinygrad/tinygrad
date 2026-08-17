@@ -86,6 +86,27 @@ jobs:
     - name: Custom tests
       run: DEV=CPU:LLVM GPUS=4 TINY_BACKEND=1 python3 -m pytest -nauto extra/torch_backend/test.py extra/torch_backend/test_inplace.py extra/torch_backend/test_multigpu.py extra/torch_backend/test_kernel_fusion.py --durations=20
 
+  torchbackendtrain:
+    name: Torch Backend Training
+    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: torch-backend-pillow-torchvision-et-pt
+        deps: testing_unit
+        pydeps: "pillow torchvision expecttest"
+        llvm: 'true'
+    - name: Install ninja
+      run: |
+        sudo apt update || true
+        sudo apt install -y --no-install-recommends ninja-build
+    - name: Test beautiful_mnist in torch with TINY_BACKEND
+      run: STEPS=20 DEV=CPU TARGET_EVAL_ACC_PCT=90.0 MAX_BUFFER_SIZE=0 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py
+
   bepython:
     name: Python Backend
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
