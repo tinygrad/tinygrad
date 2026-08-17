@@ -583,9 +583,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def const_like(self, b:ConstLike, dtype:DType|None=None):
     ret = UOp.const(b, dtype or self.dtype)
     return ret._mop(Ops.EXPAND, arg=self._shape) if self._shape and ret._shape != self._shape else ret
-  def vconst_like(self, b:ConstLike, dtype:DType|None=None):
+  def vconst_like(self, b:ConstLike):
     # for use after movement ops have been removed
-    return UOp.const(b, dtype or self.dtype).broadcast(self.max_numel())
+    return UOp.const(b, self.dtype).broadcast(self.max_numel())
   def ufix(self, x):
     if isinstance(x, UOp): return x
     return UOp.const(x)
@@ -1403,7 +1403,7 @@ class UPat(OpMixin):
     if self.is_any: return flatten([x.match(uop, store.copy()) for x in self.src[0]])
     if (self.op is not None and uop.op not in self.op) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
-       (self.match_dtype is not None and uop.dtype not in self.match_dtype and uop.dtype.scalar() not in self.match_dtype) or \
+       (self.match_dtype is not None and uop.dtype not in self.match_dtype) or \
        (self.arg is not None and self.arg != uop.arg) or \
        (self.match_tag is not None and uop.tag not in self.match_tag) or \
        (len(uop.src) < self.required_len) or \
