@@ -215,16 +215,15 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   exec_kernel(replace(ctx, update_stats=DEBUG>=3, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer._buf.va_addr + base}), call, ast)
 
   tms = []
-  for devices,name,estimates,prof in info.kernels:
+  for devices, stat_call, prof in info.kernels:
     for device in devices:
       tm = None
       if prof:
-        (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, name, *prof)
+        (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, *prof)
         if ctx.wait:
           d.synchronize(timeout=ctx.timeout)
           st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
           tms.append(tm:=float(en-st)/d.timestamp_divider/1e6)
-      stat_call = call.replace(arg=replace(call.arg, name=name, aux=replace(info, estimates=estimates, kernels=())))
       with track_stats(ctx, stat_call, device, [], ctx.var_vals) as et: et[0] = tm
   return max(tms) if tms else None
 
