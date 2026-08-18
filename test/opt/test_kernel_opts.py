@@ -244,8 +244,15 @@ class TestKernelOpts(unittest.TestCase):
   def test_padto_group_full_unroll_sum(self):
     a = Tensor.ones(2, 28, 4096, dtype=dtypes.bfloat16).realize()
     out = ((a * 0.5).float().square()).sum(axis=(0, 2))
-    opts_to_apply = [Opt(OptOps.GROUPTOP, 1, 256), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.UNROLL, 2, 0), Opt(OptOps.UPCAST, 0, 7)]
-    helper_linearizer_opt(out, [opts_to_apply], check_default_opt=False)
+    opts_to_apply = [Opt(OptOps.GROUPTOP, 1, 256), Opt(OptOps.PADTO, 3, 32)]
+    helper_linearizer_opt(out, [opts_to_apply+[Opt(OptOps.UNROLL, 2, 16), Opt(OptOps.UPCAST, 0, 7)]], check_default_opt=False)
+    out = ((a * 0.5).float().square()).sum(axis=(0, 2))
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(out, [opts_to_apply+[Opt(OptOps.UNROLL, 2, 0), Opt(OptOps.UPCAST, 0, 7)]], check_default_opt=False)
+    a = Tensor.ones(2, 28, 4352, dtype=dtypes.bfloat16).realize()
+    out = ((a * 0.5).float().square()).sum(axis=(0, 2))
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(out, [opts_to_apply+[Opt(OptOps.UNROLL, 2, 4), Opt(OptOps.UPCAST, 0, 7)]], check_default_opt=False)
 
   def test_padto_sum(self):
     N = 18
