@@ -1,16 +1,10 @@
-from dataclasses import dataclass, field, replace
-from typing import cast
+from dataclasses import dataclass, field
 import itertools
-from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype, strong_dtype
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group, identity_element, remove_all_tags
-from tinygrad.uop.symbolic import symbolic
-from tinygrad.uop.movement import mop_cleanup
-from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
-from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element, Context, panic
-from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
-from tinygrad.codegen.opt import Opt
-from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op
+from tinygrad.dtype import AddrSpace, Invalid, to_dtype
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
+from tinygrad.uop.ops import graph_rewrite, AxisType, rewrite_group, identity_element, remove_all_tags
+from tinygrad.helpers import all_int, VIZ, SPEC, Context, panic
+from tinygrad.schedule.indexing import BufferizeOpts, apply_movement_op
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.allreduce import create_allreduce_function
 
@@ -63,9 +57,10 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   return c.src[0].substitute(dict_map, walk=True)
 
 pm_prepare_graph = PatternMatcher([
-  # CALL inputs need buffer identity
+  # CALL inputs need buffer identity (and to be flat)
   (UPat(Ops.CALL, name="c"),
-   lambda c: c.replace(src=c.src[0:1]+tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src[1:]))),
+   lambda c: c.replace(src=c.src[0:1]+
+                       tuple(x.contiguous().flatten() if not x.has_buffer_identity(after_ok=True) else x.flatten() for x in c.src[1:]))),
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
   # resolve allreduce (must be bottom up)
@@ -208,12 +203,12 @@ class SplitCtx:
 
 def _split_graph(ctx:SplitCtx, u:UOp) -> UOp|None:
   if u.tag is not None: return None
-  if len(u.shape) > 1: raise RuntimeError(f"rangeify needs to reduce to a single idx, not {u.shape}")
+  if len(u.shape) > 1: raise RuntimeError(f"rangeify needs to reduce to a single idx, not {u.shape} on {u.op}")
   args = {AddrSpace.GLOBAL: ctx.call_args, AddrSpace.ALU: ctx.call_params}[u.addrspace]
   args.append(u)
   return u.param_like((1000 if u.addrspace == AddrSpace.ALU else 0) + (len(args)-1)).rtag()
 
-def _renumber_range(ctx:SplitCtx, u:UOp) -> UOp:
+def _renumber_range(ctx:SplitCtx, u:UOp) -> UOp|None:
   if u.tag is not None: return None
   ctx.range_number += 1
   return u.replace(arg=(ctx.range_number, u.arg[-1])).rtag()
