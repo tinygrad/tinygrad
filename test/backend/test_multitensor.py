@@ -1,9 +1,9 @@
 import unittest, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
-from tinygrad.uop.ops import Ops, UOp, AxisType
+from tinygrad.uop.ops import Ops, UOp, AxisType, graph_rewrite
 from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters
-from tinygrad.engine.realize import run_linear, compile_linear
+from tinygrad.engine.realize import run_linear, compile_linear, pm_beam, pm_compile
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph, check_schedule, assert_kernel_count
@@ -79,9 +79,9 @@ class TestMultiTensor(unittest.TestCase):
   def test_shard_beam(self):
     cpu_2 = ("CPU:1", "CPU:2")
     src = Tensor.ones(16).shard(cpu_2, 0).realize()
-    pad = src.to(cpu_2[::-1]).schedule_linear().src[0]
-    with Context(BEAM=1, IGNORE_BEAM_CACHE=1): prg = compile_linear(UOp(Ops.LINEAR, src=(pad,))).src[0].src[0]
-    self.assertNotEqual(prg.src[0].arg.applied_opts, ())
+    lin = UOp(Ops.LINEAR, src=(src.to(cpu_2[::-1]).schedule_linear().src[0],))
+    with Context(BEAM=1, IGNORE_BEAM_CACHE=1): call = graph_rewrite(graph_rewrite(lin, pm_beam, ctx=1, walk=True), pm_compile, walk=True).src[0]
+    self.assertNotEqual(call.src[0].src[0].arg.applied_opts, ())
 
   def test_shard_same_device(self):
     X = Tensor.ones(256).contiguous().realize()

@@ -101,6 +101,5 @@ class RDMAAllocator(HCQAllocatorBase):
 
 class RDMADevice(HCQCompiled):
   def __init__(self, device:str=""):
-    self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = MLXIface(self, self.device_id)
+    self.iface = MLXIface(self, int(device.split(":")[1]) if ":" in device else 0)
     super().__init__(device, RDMAAllocator(self), [], None, signal_t=None)

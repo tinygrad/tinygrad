@@ -26,7 +26,7 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
     # check if idx is out of bound when X is on the wrong side of the bound: X in [c+1, vmax] or [vmin, c-1]
     lo, hi = (c + 1, X.vmax) if is_upper_bound else (X.vmin, c - 1)
     if lo <= hi:
-      fake = UOp.variable(f"fake{i}", lo, hi, X.dtype)
+      fake = UOp.variable(f"fake{i}", lo, hi, X.dtype, param=True)
       subs = [{X: fake}]
       # idx may not have X itself, so also substitute a term of X: v -> fake - (X - v)
       terms = list(X.split_uop(Ops.ADD))

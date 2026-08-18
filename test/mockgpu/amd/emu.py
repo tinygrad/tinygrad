@@ -260,19 +260,6 @@ def _cond(cond, if_true, if_false):
 def _cond_hi16(cond, val: UOp) -> UOp: return _cond(cond, _hi16(val), val)
 def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp: return _hi16(val) if opsel & (1 << sel_bit) else val
 
-def _set_lane_bit(old: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
-  """Set/clear a single bit in a mask based on lane index, respecting exec mask."""
-  if old.dtype in (dtypes.uint64, dtypes.int64):
-    dt = dtypes.uint64
-    mask = UOp.const(1, dt) << lane.cast(dt)
-    new_bit = _to_u32(val).cast(dt) << lane.cast(dt)
-    cleared = old.cast(dt) & (mask ^ UOp.const(0xFFFFFFFFFFFFFFFF, dt))
-    return _lane_active(exec_mask, lane).where(cleared | new_bit, old.cast(dt))
-  mask = _c(1) << lane.cast(dtypes.uint32)
-  new_bit = _to_u32(val) << lane.cast(dtypes.uint32)
-  cleared = old & (mask ^ _c(MASK32))
-  return _lane_active(exec_mask, lane).where(cleared | new_bit, old)
-
 def _val_to_u32(val: UOp) -> UOp:
   """Convert any value to uint32 for storage (bitcast floats, cast ints)."""
   if val.dtype == dtypes.uint32: return val
@@ -532,6 +519,19 @@ class _Ctx:
       return [self.wsgpr_dyn(reg, lo), self.wsgpr_dyn(reg + _c(1), hi)]
     return [self.wsgpr_dyn(reg, val)]
 
+  def wmask_lane_bit(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> list[UOp]:
+    """Set/clear bit `lane` of the mask at `reg` from val for exec-active lanes, preserving memory for inactive lanes"""
+    active, bit = _lane_active(exec_mask, lane), _to_u32(val)
+    if self.wave_size <= 32:
+      old = self.rsgpr_dyn(reg)
+      mask = _c(1) << lane.cast(dtypes.uint32)
+      return [self.wsgpr_dyn(reg, active.where((old & (mask ^ _c(MASK32))) | (bit << lane.cast(dtypes.uint32)), old))]
+    off = (lane & _c(31, dtypes.int)).cast(dtypes.uint32)
+    mask = _c(1) << off
+    def half(old: UOp, sel: UOp) -> UOp: return sel.where(active.where((old & (mask ^ _c(MASK32))) | (bit << off), old), old)
+    return [self.wsgpr_dyn(reg, half(self.rsgpr_dyn(reg), lane < _c(32, dtypes.int))),
+            self.wsgpr_dyn(reg + _c(1), half(self.rsgpr_dyn(reg + _c(1)), _c(32, dtypes.int) <= lane))]
+
   def rmask(self, reg: UOp) -> UOp:
     """Read a lane mask (VCC/EXEC). Combines lo/hi for wave64."""
     if self.wave_size > 32: return _u64(self.rsgpr_dyn(reg), self.rsgpr_dyn(reg + _c(1)))
@@ -718,9 +718,7 @@ class _Ctx:
         raw_stores.append(('vgpr_direct', self.vgpr.index(val[0].valid(active)).store(new_val)))
         continue
       if 'D0' in dest and '[laneId]' in dest:
-        old_vcc = self.rmask(_c(VCC_LO.offset))
-        new_vcc = _set_lane_bit(old_vcc, lane, val, exec_mask)
-        raw_stores.extend([('vcc', s) for s in self.wmask(_c(VCC_LO.offset), new_vcc)])
+        raw_stores.extend([('vcc', s) for s in self.wmask_lane_bit(_c(VCC_LO.offset), lane, val, exec_mask)])
       elif dest.startswith('D0'):
         dest_suffix = re.match(r'D0\.(\w+)', dest)
         if dest_suffix is not None:
@@ -1039,13 +1037,11 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
         result = _sdwa_write(old, result, dst_sel, dst_unused)
       stores.append(ctx.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
     elif dest.startswith('VCC'):
-      old_vcc = ctx.rmask(_c(VCC_LO.offset))
-      stores.extend(ctx.wmask(_c(VCC_LO.offset), _set_lane_bit(old_vcc, lane, val, exec_mask)))
+      stores.extend(ctx.wmask_lane_bit(_c(VCC_LO.offset), lane, val, exec_mask))
   if vcc_val is not None:
     # Initialize sdst to 0 before lane loop (old value may be unrelated data), then set lane bits in loop
     init_stores = [ctx.wsgpr_dyn(sdst_off, _c(0)), ctx.wsgpr_dyn(sdst_off + _c(1), _c(0))]
-    old_sdst = ctx.rmask(sdst_off)
-    stores.extend(ctx.wmask(sdst_off, _set_lane_bit(old_sdst, lane, vcc_val, exec_mask)))
+    stores.extend(ctx.wmask_lane_bit(sdst_off, lane, vcc_val, exec_mask))
     if stores:
       return UOp.sink(*init_stores, UOp.sink(*stores).end(lane), *ctx.inc_pc())
     return UOp.sink(*init_stores, *ctx.inc_pc())

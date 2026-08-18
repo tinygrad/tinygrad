@@ -1,4 +1,5 @@
 import functools, time
+from dataclasses import replace
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
@@ -12,7 +13,7 @@ def add_to_ctx(ctx, x:UOp):
   return ret
 
 pm_ctx = PatternMatcher([
-  (UPat((Ops.BUFFER, Ops.BIND), name="x"), add_to_ctx),
+  (UPat(Ops.BUFFER, name="x"), add_to_ctx),
   (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"),
    lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
 ])
@@ -22,6 +23,10 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
   # don't capture it as an input; only skip fresh buffers, not realized ones
   return {u.src[0].buf_uop for u in uret.backward_slice_with_self
           if u.op is Ops.STORE and u.src[1].base.is_invalid and not u.src[0].buf_uop.is_realized}
+
+def renumber_invalid_outputs(uret:UOp) -> UOp:
+  return uret.substitute({b:b.replace(arg=replace(b.arg, slot=i))
+                          for i,b in enumerate(x for x in uret.toposort(enter_calls=False) if x in invalid_outputs(uret))})
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
@@ -65,6 +70,7 @@ class _function(Generic[ReturnType]):
     # the BUFFERs that are left are the implicit inputs
     num_explicit = len(call_uops)
     uret = graph_rewrite(uret, pm_ctx, (call_uops, invalid_outputs(uret)), bottom_up=True, name="get_implicit_inputs")
+    uret = renumber_invalid_outputs(uret)
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
     if not self.allow_implicit:
       implicit_buffers = [x for x in call_uops[num_explicit:] if x.op is Ops.BUFFER]

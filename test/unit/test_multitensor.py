@@ -390,6 +390,12 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(out.shape, (rows, 8))
     np.testing.assert_equal(out[:3].to(Device.DEFAULT).numpy(), np.ones((3, 8)))
 
+  def test_symbolic_broadcast_consumed(self):
+    rows = Variable("rows", 1, 4).bind(3)
+    out = (Tensor.ones(rows).to(devices_2) + 1).realize()
+    self.assertEqual(out.shape, (rows,))
+    np.testing.assert_equal(out[:3].to(Device.DEFAULT).numpy(), np.full(3, 2))
+
   def test_multitensor_jit_in_list(self):
     # test MULTI tensor inside a list container - exercises the container unpacking + MULTI unpacking
     @TinyJit
