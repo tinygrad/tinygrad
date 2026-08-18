@@ -317,7 +317,7 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[UOp, dict[UOp
 def make_gather_loop(patches:list[UOp], table:UOp, slots:dict[UOp, int], lt_patches:list[UOp]) -> dict[UOp, UOp]:
   (dst,), words = dedup(p.buf_uop for p in patches), [(off.val, slots[val]) for p in patches for off, val in zip(p.src[0].src[1].src, p.src[1].src)]
 
-  # one runtime loop writes every input address: dst[off] = table[slot], the (off, slot) pairs are a link-time table
+  # build a runtime loop that writes every input address
   pairs = UOp.placeholder((2*len(words),), dtypes.uint32, next(UOp.unique_num), device=dst.device).rtag("systems")
   lt_patches.append(make_binary_patch(pairs, struct.pack(f'<{2*len(words)}I', *itertools.chain(*words))))
   r = UOp.range(len(words), next(UOp.unique_num), dtype=dtypes.int, src=(pairs, dst))
