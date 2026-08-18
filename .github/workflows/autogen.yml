@@ -35,7 +35,7 @@ jobs:
         key: 'autogen'
         amd: 'true'
         llvm: 'true'
-        pydeps: 'pyyaml mako'
+        deps: 'autogen'
     - name: Install autogen support packages
       run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev libdrm-dev liburing-dev
     - name: Regenerate autogen files

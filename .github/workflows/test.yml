@@ -31,8 +31,7 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        deps: docs
-        pydeps: "capstone torch"
+        deps: "docs testing_minimal"
     - name: Build wheel and show size
       run: |
         uv build --wheel
@@ -73,10 +72,7 @@ jobs:
         deps: testing_unit
         pydeps: "pillow torchvision expecttest"
         llvm: 'true'
-    - name: Install ninja
-      run: |
-        sudo apt update || true
-        sudo apt install -y --no-install-recommends ninja-build
+        ninja: 'true'
     - name: Test ResNet-18
       run: DEBUG=2 python3 extra/torch_backend/example.py
     - name: Test one op in torch tests
@@ -98,12 +94,8 @@ jobs:
       with:
         key: torch-backend-pillow-torchvision-et-pt
         deps: testing_unit
-        pydeps: "pillow torchvision expecttest"
         llvm: 'true'
-    - name: Install ninja
-      run: |
-        sudo apt update || true
-        sudo apt install -y --no-install-recommends ninja-build
+        ninja: 'true'
     - name: Test beautiful_mnist in torch with TINY_BACKEND
       run: STEPS=20 DEV=CPU TARGET_EVAL_ACC_PCT=90.0 MAX_BUFFER_SIZE=0 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py
 
