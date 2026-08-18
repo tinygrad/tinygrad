@@ -31,8 +31,7 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        deps: docs
-        pydeps: "capstone torch"
+        deps: "docs testing_minimal"
     - name: Build wheel and show size
       run: |
         uv build --wheel
@@ -98,7 +97,6 @@ jobs:
       with:
         key: torch-backend-pillow-torchvision-et-pt
         deps: testing_unit
-        pydeps: "pillow torchvision expecttest"
         llvm: 'true'
     - name: Install ninja
       run: |
