@@ -53,7 +53,7 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
 
     scale = "scale." if scaled else ""
     dt_in = dt_map[wmma.arg[1]] if not scaled else ".f8f6f4"
-    return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{scale}{dt_map[wmma.src[-1].dtype]}" + \
+    return f"{ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{scale}{dt_map[wmma.src[-1].dtype]}" + \
            f".{N}x{M}x{K}{dt_in}(" + ", ".join(args) + ")"
   # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
   # example: %wmma0 = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16(<16 x half> %v99,<16 x half> %v100,<8 x float> %v101)
@@ -63,7 +63,7 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
   def _bf16(dt:DType): return dtypes.ushort if dt is dtypes.bfloat16 else dt
   suffix = f".v{wmma.max_numel()}{dt_map[_bf16(wmma.dtype)]}.v{wmma.src[0].max_numel()}{dt_map[_bf16(wmma.arg[1])]}" if rdna4 else ""
   # bfloat treated as i16 in LLVM call
-  return f"  {ctx[wmma]} = call {ldt(_bf16(wmma.dtype), wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
+  return f"{ctx[wmma]} = call {ldt(_bf16(wmma.dtype), wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
     f"{dt_map[wmma.arg[1]]}{suffix}(" + ", ".join(args) + ")"
 
 # llvm ops, lop[<dtype>][<op>]
@@ -77,70 +77,44 @@ float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{fla
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
 
 base_rewrite = PatternMatcher([
-  # memory load/store
-  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.AFTER)),), allow_any_len=True, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
   # register index
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), lambda ctx,buf,idx,x:
-   f"  {ctx[x]} = extractelement {ldt(buf.dtype, buf.max_numel())} {ctx[buf]}, i32 {idx.val}" if buf.addrspace == AddrSpace.ALU else None),
+   f"{ctx[x]} = extractelement {ldt(buf.dtype, buf.max_numel())} {ctx[buf]}, i32 {idx.val}" if buf.addrspace == AddrSpace.ALU else None),
+
+  # memory load/store
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.GETTUPLE, Ops.AFTER)),), allow_any_len=True, name="x"), lambda ctx,x:
+   f"{ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
 
   # load/store
-  (UPat(Ops.LOAD, src=(UPat.var("idx"), UPat.var("alt"), UPat.var("mask")), name="x"),
-   lambda ctx,x,idx,alt,mask:
-   f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
-   f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
-   f"  {ctx[x]}_yes = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
-   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
-   f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
-  (UPat.var('idx').load(name="x"), lambda ctx,x,idx:
+  (UPat.var('idx').load(name="x", allow_any_len=True), lambda ctx,x,idx:
    f"  {ctx[x]} = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
    f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
-  (UPat.var('idx').store(UPat.var("var")), lambda ctx,idx,var:
+  (UPat.var('idx').store(UPat.var("var"), allow_any_len=True), lambda ctx,idx,var:
    f"  store {'volatile ' if is_volatile(idx) else ''}{ldt(var.dtype, idx.max_numel())} {ctx[var]}, "
    f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
 
   # GEP/VECTORIZE/CAST for float4 support
   (UPat(Ops.STACK, name="x"), lambda ctx,x:
-   "\n".join([(f"  {ctx[x]}_{i}" if i+1 != len(x.src) else f"  {ctx[x]}")+
-               f" = insertelement {ldt(x.dtype, x.max_numel())} "+(f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
-               f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
+   [(f"{ctx[x]}.{i}" if i+1 != len(x.src) else f"{ctx[x]}")+
+     f" = insertelement {ldt(x.dtype, x.max_numel())} "+(f"{ctx[x]}.{i-1}" if i != 0 else "poison")+
+     f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)]),
   # unary/binary/ternary ops
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]} to {ldt(x.dtype, x.max_numel())}"),
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
+   f"{ctx[x]} = bitcast {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]} to {ldt(x.dtype, x.max_numel())}"),
+  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"{ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.TRUNC, name="x"),
-   lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.trunc.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
+   lambda ctx,x: f"{ctx[x]} = call {ldt(x.dtype)} @llvm.trunc.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
+   f"{ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
+   f"{ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
 
-  # loop (a RANGE with no src is an unbounded loop header)
-  (UPat(Ops.RANGE, dtypes.void, name="l"), lambda ctx,l: f"  br label %loop_{ctx[l][1:]}\nloop_{ctx[l][1:]}:"),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx,l,c:
-    f"  br i1 {ctx[c]}, label %loop_{ctx[l][1:]}, label %loop_exit_{ctx[l][1:]}\nloop_exit_{ctx[l][1:]}:"),
-
-  # range
-  (UPat(Ops.RANGE, name="r"), lambda ctx,r:
-   f"  br label %loop_entry_{range_str(r)}\n"
-   f"loop_entry_{range_str(r)}:\n"
-   f"  br label %loop_latch_{range_str(r)}\n"
-   f"loop_latch_{range_str(r)}:\n"
-   f"  {ctx[r]} = phi {ldt(r.dtype)} [ 0, %loop_entry_{range_str(r)} ], [ {ctx[r]}phi, %loop_footer_{range_str(r)} ]\n"
-   f"  {ctx[r]}phi = add {ldt(r.dtype)} {ctx[r]}, 1\n"
-   f"  {ctx[r]}cmp = icmp ult {ldt(r.dtype)} {ctx[r]}, {ctx[r.src[0]]}\n"
-   f"  br i1 {ctx[r]}cmp, label %loop_body_{range_str(r)}, label %loop_exit_{range_str(r)}\n"
-   f"loop_body_{range_str(r)}:"),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda r:
-   f"  br label %loop_footer_{range_str(r)}\n"
-   f"loop_footer_{range_str(r)}:\n"
-   f"  br label %loop_latch_{range_str(r)}\n"
-   f"loop_exit_{range_str(r)}:"),
-
-  # if
-  (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
-  (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
+  # phi
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.ENDIF, src=(UPat.var("a"), UPat.var("b"))),), name="x"), lambda ctx,a,b,x:
+   f"{ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [ {ctx[a.get_arg(x.arg)]}, %{ctx[a]} ], [ {ctx[b.get_arg(x.arg)]}, %{ctx[b]} ]"),
+  # loop phi, here the second input comes from the loop backedge
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.RANGE, name="a"),), name="x"), lambda ctx,a,x:
+   f"{ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [ {ctx[a.get_arg(x.arg)]}, %{ctx[a.src[0]]} ], [ {ctx.phi_backedge(ctx.backedge[a], x)}, %{ctx[ctx.backedge[a].src[0]]} ]"),
 
   (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst")
 ])
@@ -151,55 +125,91 @@ class LLVMRenderer(Renderer):
   code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
-  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
+  def __getitem__(self, key): return self.r[key]  # hacky helper
+  def phi_backedge(self, end:UOp, phi:UOp):
+    backedge = end.get_arg(phi.arg)
+    if backedge not in self.r: self.r[backedge] = f"{self.r[phi]}.next"
+    return self.r[backedge]
+  def _render_fn(self, x:UOp):
     # NOTE: CPUAllocator promises 0x20 alignment
-    sargs = ", ".join([f"{ldt(u.dtype, ptr=u.addrspace == AddrSpace.GLOBAL)}{' noalias align 32' if u.addrspace == AddrSpace.GLOBAL else ''} " + \
-      name for name,u in args])
-    return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
-  def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
-    r: dict[UOp, str] = {}
-    args: list[tuple[str, UOp]] = []
-    kernel: list[str] = []
-    vc = -1
+    args = ", ".join([f"{ldt(s.dtype, ptr=s.addrspace == AddrSpace.GLOBAL)}{' noalias align 32' if s.addrspace == AddrSpace.GLOBAL else ''} {self.r[s]}" for s in x.src])
+    return "\n".join((self.prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{x.arg}({args}) #0", "{"])
+
+  # here we attach the label and tail control to each block
+  def _render_block(self, block:UOp, sched:list[str]) -> str:
+    tail = self.tail_control[block]
+    if tail.op is Ops.IF: sched.append(f"br i1 {self.r[tail.src[1]]}, label %{self.r[self.if_targets[tail][Ops.THEN]]}, label %{self.r[self.if_targets[tail][Ops.ELSE]]}")
+    elif tail.op is Ops.END: sched.append(f"br i1 {self.r[tail.src[2]]}, label %{self.r[tail.src[1]]}, label %{self.r[tail]}")
+    elif tail.op is Ops.SINK: sched.append("ret void\n}")
+    else: sched.append(f"br label %{self.r[tail]}")
+    header = (self._render_fn(block) if block.op is Ops.START else "") + f"\n{self.r[block]}:"
+    return "\n".join([header] + [f"  {s}" for s in sched])
+
+  def _render_kernel(self, uops:list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
+    self.prefix = prefix
+    self.r: dict[UOp, str] = {}
+    r = self.r
+    vc = 0
+    b_id = 0
+
+    # get the loop backedges and labels
+    self.backedge: dict[UOp, UOp] = {}
+    self.tail_control: dict[UOp, UOp] = {}
+    self.if_targets: dict[UOp, dict[Ops, UOp]] = {}
+    for u in uops:
+      if u.op not in GroupOp.Control: continue
+      # record the tail control (jump at end of block)
+      if u.op is Ops.ENDIF:
+        for s in u.src: self.tail_control[s] = u
+      else:
+        if u.op in (Ops.THEN, Ops.ELSE): self.if_targets.setdefault(u.src[0], {})[u.op] = u
+        if len(u.src) and u.src[0].op in GroupOp.Block: self.tail_control[u.src[0]] = u
+      if u.op not in GroupOp.Block: continue
+      if u.op is Ops.END:
+        self.backedge[u.src[1]] = u
+        r[u] = f"loop.{range_str(u.src[1])}.exit"
+      elif u.op is Ops.RANGE: r[u] = f"loop.{range_str(u)}.body"
+      else:
+        if u.op is Ops.START: r[u] = f"bb{b_id}.entry"
+        elif u.op is Ops.THEN: r[u] = f"bb{b_id}.if.then"
+        elif u.op is Ops.ELSE: r[u] = f"bb{b_id}.if.else"
+        elif u.op is Ops.ENDIF: r[u] = f"bb{b_id}.if.end"
+        b_id += 1
 
     local_args: list[str] = []
-    name = "test"
+    blocks: dict[UOp, list[str]] = {}
+    block: list[str] = []
     for u in uops:
+      if u.op in GroupOp.Block: blocks[u] = block = []
+      if u.op in GroupOp.Control: continue
       if u.op in {Ops.NOOP, Ops.GROUP}: continue
-      if u.op is Ops.AFTER:
-        r[u] = r[u.src[0]]
-        continue
-      if u.op is Ops.SINK:
-        if u.arg is not None: name = u.arg.function_name
-        continue
-      if u.op is Ops.PARAM:
-        r[u] = f"%data{u.arg.slot}"
-        args.append((r[u], u))
+      if u.op is Ops.AFTER: r[u] = r[u.src[0]]
+      # this a block arg access, no phi
+      elif u.op is Ops.GETTUPLE and u.src[0].op not in (Ops.RANGE, Ops.ENDIF): r[u] = r[u.src[0].get_arg(u.arg)]
+      elif u.op is Ops.PARAM: r[u] = f"%data{u.arg.slot}"
       elif u.op is Ops.BUFFER:
-        r[u] = f"%{'local' if u.addrspace == AddrSpace.LOCAL else 'reg'}_{str(u.arg.slot)}"
+        r[u] = f"%local_{str(u.arg.slot)}"
         size = u.max_numel()
-        if u.addrspace == AddrSpace.REG:
-          kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}]")
-        elif self.has_local:
+        if self.has_local:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{size} x {ldt(u.dtype)}] undef, align 16")
-          kernel.append(f"  {r[u]} = addrspacecast [{size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{size} x {ldt(u.dtype)}]*")
+          block.append(f"{r[u]} = addrspacecast [{size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{size} x {ldt(u.dtype)}]*")
         else:
-          kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}], align 16")
+          block.append(f"{r[u]} = alloca [{size} x {ldt(u.dtype)}], align 16")
       elif u.op is Ops.CONST: r[u] = lconst(u.val, u.dtype)
       elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
       else:
         # if it's an assign target, it's already preallocated
         if u not in r:
-          vc += 1
           r[u] = f"%v{vc}"
+          vc += 1
 
         # do the rendering of the llvm ir code
-        l: str|None = self.string_rewrite.rewrite(u, ctx=r)
-        if l is None:
-          raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
-        kernel.append(l)
-    return tuple(local_args), self._render_fn(name, args, kernel, prefix)
+        l: list[str]|str|None = self.string_rewrite.rewrite(u, ctx=self)
+        if l is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
+        else: block.extend([l] if isinstance(l, str) else l)
+
+    return tuple(local_args), "\n".join(self._render_block(b, sched) for b,sched in blocks.items())
 
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
@@ -231,15 +241,15 @@ class AMDLLVMRenderer(LLVMRenderer):
   abi = "amdgpu_kernel"
   code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
-    (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0]](x.arg[-1])}; "),
+    (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"{ctx[x]} = " + f"{ code_for_workitem[x.arg[0]](x.arg[-1])}; "),
     (UPat(tuple(llvm_intrinsics), name="x"),
-    lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
+    lambda ctx, x: f"{ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
     (UPat(Ops.CAST, dtypes.fp8s, (UPat(dtype=dtypes.float),), name="x",), lambda ctx,x:
-      f"  {ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {'1' if x.dtype == dtypes.fp8e5m2 else '0'})"),
+      f"{ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {'1' if x.dtype == dtypes.fp8e5m2 else '0'})"),
     (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",), lambda ctx,x,y:
-      f"  {ctx[x]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
-      f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x]}_i32, i32 0)"),
+      f"{ctx[x]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
+      f"{ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x]}_i32, i32 0)"),
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
     # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double

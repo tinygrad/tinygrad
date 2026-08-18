@@ -116,7 +116,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   # here are the dtype production rules, eventually this will go in UOp as a recursive property
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
-         Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | \
+         Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | Ops.THEN | Ops.ELSE | Ops.START | \
          Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR:
       # always void
       return dtypes.void
@@ -154,9 +154,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # WMMA output dtype is the accumulator dtype (src[2])
       return src[2].dtype
     case Ops.GETTUPLE:
-      # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
-      in_tuple = src[0].src[0] if src[0].op is Ops.FUNCTION else src[0]
-      return in_tuple.src[arg].dtype
+      # GETTUPLE extracts a block argument
+      return src[0].get_arg(arg).dtype
     case Ops.GETADDR:
       return dtypes.uint64
     case Ops.SHL | Ops.SHR:
@@ -331,7 +330,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.GROUP | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.FUNCTION:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.FUNCTION | Ops.START | Ops.THEN | Ops.ELSE:
         return None
 
       # a void CALL has no shape, the return value of a CALL has the shape of its dtype
@@ -352,10 +351,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return self.src[0]._shape if len(self.src) >= 1 else None
 
       case Ops.GETTUPLE:
-        # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
-        in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
-        assert in_tuple.op is Ops.TUPLE
-        inner_shape = in_tuple.src[self.arg]._shape
+        # GETTUPLE extracts a block argument
+        inner_shape = self.src[0].get_arg(self.arg)._shape
         if inner_shape is None: return None
         # if through a FUNCTION, substitute internal PARAMs in the shape with corresponding args
         if self.src[0].op is Ops.FUNCTION:
@@ -646,6 +643,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def get_valid(self) -> UOp:
     if self.op is Ops.STACK: return UOp.stack(*(x.get_valid() for x in self.src))
     return self.src[0] if self.op is Ops.WHERE and self.src[2].is_invalid else UOp.const(not self.is_invalid)
+  # returns the i'th block argument
+  def get_arg(self, i:int) -> UOp:
+    assert self.op in GroupOp.Block | {Ops.FUNCTION, Ops.TUPLE}
+    if self.op is Ops.FUNCTION: return self.src[0].src[i]
+    if self.op is Ops.END: return self.src[3+i]
+    # NOTE: this only returns the arg on the true branch
+    if self.op is Ops.ENDIF: return self.src[0].get_arg(i)
+    if self.op in (Ops.RANGE, Ops.THEN, Ops.ELSE): return self.src[1+i]
+    return self.src[i]
   def reduce(self, *src:UOp, **kwargs):
     arg = kwargs.pop('arg', None)
     if isinstance(arg, Ops): arg = (arg, 0)
@@ -696,10 +702,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.UNSHARD:
       if len(self.arg) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {self.arg}, use .sharding")
       return self.arg[0]
-    # GETTUPLE: axis comes from the specific TUPLE element, not src[0]
-    if self.op is Ops.GETTUPLE:
-      in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
-      return in_tuple.src[self.arg].axis if in_tuple.op is Ops.TUPLE else None
+    if self.op is Ops.GETTUPLE: return self.src[0].get_arg(self.arg).axis
     if self.op is Ops.PARAM: return self.arg.axis
     # NOTE: they all have to share an axis, we always choose [-1]. src axes are right-aligned into the output shape
     if self.op in GroupOp.ALU.union({Ops.STACK}):
@@ -867,6 +870,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op is Ops.BUFFER: return self.arg.addrspace
+    if self.op is Ops.GETTUPLE: return self.src[0].get_arg(self.arg).addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT, Ops.END, Ops.UNSHARD}:

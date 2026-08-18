@@ -91,11 +91,11 @@ spec_shared = PatternMatcher([
    isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   # GROUP of stores (or groups, or NOOPs)
-  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
+  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END, Ops.ENDIF))), lambda: True),
 
   # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX,
-                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
+                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.GETTUPLE, Ops.INS})),),
         allow_any_len=True, name="x"), lambda x: matches_dtype(x.src[0], x.dtype)),
 
   # CUSTOM (inline and non inline)
@@ -115,11 +115,16 @@ spec_shared = PatternMatcher([
   (UPat(Ops.INS), lambda: True),
 
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
+  # TODO: rm this gated load/store version once all renderers have been refactored
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
    lambda uidx,gate,alt,load: validate_index(uidx, gate) if matches_dtype(alt, load.dtype) else False),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
+
+  # gated LOAD/STORE, gate stops load/store from being hoisted by the linearizer
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat(Ops.IF, src=(UPat(), UPat.var("gate")))), validate_index),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat(Ops.IF, src=(UPat(), UPat.var("gate")))), validate_index),
 
   # STORE in tensor graph: store a value into a target
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
@@ -204,7 +209,7 @@ spec_program = PatternMatcher([
   (UPat(GroupOp.All, (dtypes.weakint, dtypes.weakfloat)), lambda: False),
 
   # allow special SHRINK
-  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
+  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER, Ops.GETTUPLE)), UPat(), UPat(Ops.CONST))), lambda: True),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),
@@ -216,8 +221,26 @@ spec_program = PatternMatcher([
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 
   # if has a <gate, index_for_dedup>
+  # TODO: rm this IF/ENDIF once all renderers have been refactored to support new control flow
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX, Ops.SHRINK)))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
+
+  # GETTUPLE extracts a block argument TODO: unify old GETTUPLE with new version
+  (UPat(Ops.GETTUPLE, src=(UPat(name="y"),), name="x"), lambda y,x: isinstance(x.arg, int) and matches_dtype(y.get_arg(x.arg), x.dtype)),
+
+  # control flow
+  (UPat(Ops.START, dtypes.void), lambda: True),
+  # IF before and after being wired to the CFG
+  (UPat(Ops.IF, dtypes.void, (UPat(dtype=dtypes.bool),)), lambda: True),
+  (UPat(Ops.IF, dtypes.void, (UPat(GroupOp.Control), UPat(dtype=dtypes.bool))), lambda: True),
+  # THEN/ELSE are the branches of the IF
+  (UPat((Ops.THEN, Ops.ELSE), dtypes.void, (UPat(Ops.IF),), allow_any_len=True), lambda: True),
+  # ENDIF merges the control flow split by the IF
+  (UPat(Ops.ENDIF, dtypes.void, (UPat(GroupOp.Control), UPat(GroupOp.Control))), lambda: True),
+  # END is a special IF, if True the successor is RANGE, if False the successor is the END's consumer
+  # src[3:] are args END passes to RANGE
+  (UPat(Ops.END, dtypes.void, (UPat(GroupOp.Control), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool)), allow_any_len=True, name="x"),
+   lambda x: all(matches_dtype(rng_arg, end_arg.dtype) for rng_arg,end_arg in zip(x.src[1].src[1:], x.src[3:]))),
 
   # SPECIAL is int32 after index lowering
   (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: matches_dtype(x, s.dtype) and isinstance(s.arg, str)),

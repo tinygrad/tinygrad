@@ -1,10 +1,11 @@
-import heapq
+import heapq, functools
 from typing import Any
 from collections import defaultdict
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
-from tinygrad.dtype import AddrSpace, dtypes
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, GroupOp, multirange_str, consumer_map_from_toposort
+from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
+# TODO: rm when all renderers are refactored
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
   lst = list(sink.toposort())
@@ -50,6 +51,7 @@ def linearize(sink:UOp) -> list[UOp]:
       print(f"{i:4d} {str(u.op):20s} {multirange_str(u.ranges, color=True, pad=10)} {priorities[u]}")
   return newlst
 
+# TODO: rm when all renderers are refactored
 class CFGContext:
   def __init__(self, sink:UOp):
     # there are 3 relationships between ranges:
@@ -84,12 +86,89 @@ pm_add_control_flow = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
 
-def do_split_ends(e:UOp):
-  ret, backedge = e.src[0], tuple(x for x in e.src[1:] if x.dtype in (dtypes.void, dtypes.bool))
-  for r in sorted(UOp.sink(*[x for x in e.src[1:] if x not in backedge]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
-  return ret.end(*backedge) if len(backedge) else ret
 
-pm_split_ends = PatternMatcher([
-  # split the ends
-  (UPat(Ops.END, name="e"), do_split_ends),
-])
+# the lowest common ancestor of the blocks
+def lca(blocks:tuple[UOp|None, ...]) -> UOp|None:
+  def _lca(a:UOp|None, b:UOp|None) -> UOp|None:
+    while a is not b:
+      if block_depth(a) >= block_depth(b): a = idom(a)
+      else: b = idom(b)
+    return a
+  return functools.reduce(_lca, blocks)
+
+# the immediate dominator of the block
+@functools.cache
+def idom(x:UOp|None) -> UOp|None:
+  if x is None: return None
+  # ENDIF merges multiple blocks so idom is their lca
+  if x.op is Ops.ENDIF: return lca(x.src)
+  if x.op is Ops.START: return None
+  return x.src[0]
+
+@functools.cache
+def block_depth(x:UOp|None) -> int:
+  if x is None: return 0
+  return block_depth(idom(x)) + 1
+
+@functools.cache
+def loop_depth(x:UOp|None) -> int:
+  if x is None: return 0
+  if x.op is Ops.RANGE: return loop_depth(idom(x)) + 1
+  if x.op is Ops.END: return loop_depth(idom(x)) - 1
+  return loop_depth(idom(x))
+
+def linearize2(sink:UOp) -> list[UOp]:
+  topo = sink.toposort()
+  users = consumer_map_from_toposort(topo)
+  sched: dict[UOp, UOp|None] = {}
+  cfg: dict[UOp|None, list[UOp]] = {None: []}
+
+  # early schedule, here we find the earliest block u can go in
+  for u in topo:
+    # control ops are pinned to themselves
+    if u.op in GroupOp.Control: cfg[u] = []
+    # the earliest block for u is the latest block of all its srcs
+    else: sched[u] = max((sched.get(s, s) for s in u.src), key=block_depth, default=None)
+
+  # late schedule, here we find the latest block u can go in, then we pick the best block for u in the range of earliest to latest
+  for u in reversed(sched):
+    # GETTUPLE is pinned to the block whose argument it extracts
+    if u.op is Ops.GETTUPLE: continue
+    # the latest block for u is the latest block that dominates all users of u
+    best = last = lca(tuple(sched.get(s, s if s.op in (Ops.THEN, Ops.ELSE) else idom(s)) for s in users[u]))
+    # we pick the block with least loop nest and most depth, so we hoist out of loops and into branches
+    while True:
+      if loop_depth(last) < loop_depth(best) or block_depth(last) > block_depth(best) or best is not None and best.op is Ops.IF: best = last
+      if last is sched[u]: break
+      assert last is not None
+      last = idom(last)
+    sched[u] = best
+
+  # get the uops in each block
+  for k,v in sched.items(): cfg[v].append(k)
+  # schedule the uops in each block
+  for k in cfg: cfg[k] = block_linearize(cfg[k], users)
+
+  ret = []
+  for k,v in cfg.items(): ret.extend(([k] if k is not None else []) + v)
+  return ret
+
+def block_linearize(lst:list[UOp], users:dict[UOp, dict[UOp, None]]) -> list[UOp]:
+  count:dict[UOp, int] = {}
+  for u in lst: count[u] = len({s for s in u.src if s in count})
+
+  # number the uops in "ideal" order
+  # GETTUPLE must be scheduled at the top of the block
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (x.op is not Ops.GETTUPLE,)+(x.tuplize if TUPLE_ORDER else ())))}
+
+  # then force them to be toposorted in as close to the ideal order as possible
+  heap = [(nkey[u],u) for u in lst if count[u] == 0]
+  heapq.heapify(heap)
+  newlst = []
+  while heap:
+    newlst.append(u:=heapq.heappop(heap)[1])
+    for v in users[u]:
+      if v not in count: continue
+      count[v] -= 1
+      if count[v] == 0: heapq.heappush(heap, (nkey[v],v))
+  return newlst
