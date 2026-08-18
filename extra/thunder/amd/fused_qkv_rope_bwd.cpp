@@ -137,24 +137,50 @@ fused_qkv_rope_backward(
     const bf16* __restrict__ dv,
     const bf16* __restrict__ freqs_cis) {
   gl<bf16, -1, -1, -1, -1> out{dxqkv, ATTN_B, ATTN_N, PACKED_H, ATTN_D};
+#ifdef EXPANDED_FA_GRADS
+  gl<bf16, -1, -1, -1, -1> dqg{const_cast<bf16*>(dq), ATTN_B, ATTN_N, ATTN_H, ATTN_D};
+  // AITER writes one dK/dV contribution per query head. Keep the expanded H stride here and
+  // reduce each GROUP_SIZE run below before packing the shared KV head into dxqkv.
+  gl<bf16, -1, -1, -1, -1> dkg{const_cast<bf16*>(dk), ATTN_B, ATTN_N, ATTN_H, ATTN_D};
+  gl<bf16, -1, -1, -1, -1> dvg{const_cast<bf16*>(dv), ATTN_B, ATTN_N, ATTN_H, ATTN_D};
+#else
   gl<bf16, -1, -1, -1, -1> dqg{const_cast<bf16*>(dq), ATTN_B, ATTN_H, ATTN_N, ATTN_D};
   gl<bf16, -1, -1, -1, -1> dkg{const_cast<bf16*>(dk), ATTN_B * KV_PARTIALS, ATTN_N, ATTN_H_KV, ATTN_D};
   gl<bf16, -1, -1, -1, -1> dvg{const_cast<bf16*>(dv), ATTN_B * KV_PARTIALS, ATTN_N, ATTN_H_KV, ATTN_D};
+#endif
   const int b = blockIdx.x, n_tile = blockIdx.y * NUM_WARPS + kittens::warpid(), n_base = n_tile * TILE_N;
   const int field = blockIdx.z;
 
   if (field < ATTN_H) {
     grad_tile<bf16> tile;
+#ifdef EXPANDED_FA_GRADS
+    load<1>(tile, dqg, {b, n_tile, field, 0});
+    inverse_rope(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
+#else
     load_fa_shuffled<2>(tile, dqg, {b, field, n_tile, 0});
     inverse_rope_fa(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
+#endif
     const int out_head = (field / GROUP_SIZE) * (GROUP_SIZE + 2) + field % GROUP_SIZE;
+#ifdef EXPANDED_FA_GRADS
+    store<1>(out, tile, {b, n_tile, out_head, 0});
+#else
     store_fa_shuffled<1>(out, tile, {b, n_tile, out_head, 0});
+#endif
   } else {
     const bool is_k = field < ATTN_H + ATTN_H_KV;
     const int kvh = field - ATTN_H - (is_k ? 0 : ATTN_H_KV);
     const auto &src = is_k ? dkg : dvg;
     grad_tile<bf16> partial, tile;
     grad_tile<float> partial_f, sum;
+#ifdef EXPANDED_FA_GRADS
+    zero(sum);
+    #pragma unroll
+    for (int qh = 0; qh < GROUP_SIZE; qh++) {
+      load<1>(partial, src, {b, n_tile, kvh * GROUP_SIZE + qh, 0});
+      copy(partial_f, partial);
+      add(sum, sum, partial_f);
+    }
+#else
     zero(sum);
     #pragma unroll
     for (int p = 0; p < KV_PARTIALS; p++) {
@@ -162,6 +188,7 @@ fused_qkv_rope_backward(
       copy(partial_f, partial);
       add(sum, sum, partial_f);
     }
+#endif
     copy(tile, sum);
     if (is_k) inverse_rope(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
     const int out_head = kvh * (GROUP_SIZE + 2) + GROUP_SIZE + !is_k;

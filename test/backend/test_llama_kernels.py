@@ -207,6 +207,33 @@ class TestFusedQKVRoPE(unittest.TestCase):
     ref = Tensor.cat(dq_ref, dk_ref, dv_ref, dim=3).reshape(*dx.shape).realize()
     with Context(DEBUG=0): self.assertTrue(dx.allclose(ref, atol=2e-2, rtol=2e-2).item(), "backward mismatch")
 
+  def test_llama31_8b_backward_expanded_gqa(self):
+    Tensor.manual_seed(2)
+    B, N, H, H_KV, D = self.SHAPE
+    GROUP = H // H_KV
+    freqs_cis = self.freqs_cis()
+    dq = self.rand_bf16(B, N, H, D)
+    dk_expanded = self.rand_bf16(B, N, H, D)
+    dv_expanded = self.rand_bf16(B, N, H, D)
+
+    dx = Tensor.empty(B, N, H_KV * (GROUP + 2) * D, dtype=dtypes.bfloat16)
+    arch = Device[Device.DEFAULT].renderer.target.arch
+    fxn = functools.partial(custom_fused_qkv_rope_backward, device=Device.DEFAULT, arch=arch,
+                            B=B, N=N, H=H, H_KV=H_KV, D=D, expanded_fa_grads=True)
+    dx = Tensor.custom_kernel(dx, dq, dk_expanded, dv_expanded, freqs_cis, fxn=fxn)[0].realize()
+
+    def inverse_rope(x:Tensor) -> Tensor:
+      x = x.reshape(*x.shape[:-1], D//2, 2).float()
+      cs = freqs_cis[:, :N].float()
+      return Tensor.stack(x[..., 0] * cs[..., 0] + x[..., 1] * cs[..., 1],
+                          -x[..., 0] * cs[..., 1] + x[..., 1] * cs[..., 0], dim=-1).flatten(-2).cast(dtypes.bfloat16)
+
+    dq_ref = inverse_rope(dq).reshape(B, N, H_KV, GROUP, D)
+    dk_ref = inverse_rope(dk_expanded.float().reshape(B, N, H_KV, GROUP, D).sum(3).cast(dtypes.bfloat16)).unsqueeze(3)
+    dv_ref = dv_expanded.float().reshape(B, N, H_KV, GROUP, D).sum(3).cast(dtypes.bfloat16).unsqueeze(3)
+    ref = Tensor.cat(dq_ref, dk_ref, dv_ref, dim=3).reshape(*dx.shape).realize()
+    with Context(DEBUG=0): self.assertTrue(dx.allclose(ref, atol=2e-2, rtol=2e-2).item(), "expanded GQA backward mismatch")
+
 def run_swiglu(test:unittest.TestCase, shape:tuple[int, ...]) -> None:
   Tensor.manual_seed(0)
   x = (Tensor.randn(*shape) * 2).cast(dtypes.bfloat16).realize()
