@@ -1013,6 +1013,13 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 0, 3)
     self.helper_test_variable(-a<-b, False, True, "(b<a)")
 
+  def test_where_cast(self):
+    cond = Variable("s", 0, 3, dtypes.int) < 2
+    a = Variable("a", 0, 3, dtypes.int)
+    self.assertIs(graph_rewrite(cond.where(a, a+1).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), (a+1).cast(dtypes.half)))
+    self.assertIs(graph_rewrite(cond.where(a, uconst(2)).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.const(2, dtypes.half)))
+    self.assertIs(graph_rewrite(cond.where(a, UOp.invalid()).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.invalid()))
+
   def test_where_merge_branches(self):
     cond1 = Variable("s", 0, 10) < 6
     cond2 = Variable("s", 0, 10) > 2

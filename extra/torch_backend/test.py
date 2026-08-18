@@ -83,6 +83,12 @@ class TestTorchBackend(unittest.TestCase):
     torch.add(torch.ones(5, device=device), torch.ones(5, device=device), out=a)
     self.assertEqual(a.detach().storage_offset(), 3)
 
+  def test_out_refreshes_views_of_base(self):
+    a = torch.zeros(4, device=device)
+    v = a[2:]
+    torch.add(torch.ones(4, device=device), torch.ones(4, device=device), out=a)
+    np.testing.assert_equal(v.cpu().numpy(), [2., 2.])
+
   @unittest.expectedFailure  # TODO: storage offset assumes a contiguous source, use UOp.contiguous_view_offset
   def test_storage_offset_non_contiguous_source(self):
     a = torch.arange(12., device=device).reshape(3,4)
@@ -541,6 +547,15 @@ class TestTorchBackend(unittest.TestCase):
     cpu_res = torch.arange(20, dtype=torch.float32)[::2][1:4].numpy()
     np.testing.assert_equal(torch_res, cpu_res)
 
+  def test_select_out_of_range_dim(self):
+    a = torch.arange(12, dtype=torch.int32, device=device).reshape(3, 4)
+    with self.assertRaises(IndexError): a.select(5, 0)
+
+  def test_select_collapses_the_only_dim(self):
+    a = torch.arange(3, dtype=torch.int32, device=device)
+    self.assertEqual(a.select(0, 1).shape, ())
+    np.testing.assert_equal(a.select(0, 1).cpu().numpy(), 1)
+
   def test_slice_negative_dim(self):
     a = torch.arange(13, dtype=torch.int32, device=device).repeat(8, 1)
     torch_chunks = a.chunk(3, -1)
@@ -822,8 +837,6 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_allclose(b_tiny.grad.cpu().numpy(), b_cpu.grad.numpy(), atol=1e-4, rtol=1e-3)
 
   def test_write_through_detach_of_unrealized(self):
-    # how every module parameter is initialized under set_default_device("tiny"). on torch<2.10 detach is a tracked view,
-    # so this writes through a view whose shape equals its base's, and the base has no buffer of its own yet
     a = torch.empty(4, device=device)
     a.detach().fill_(3)
     np.testing.assert_equal(a.cpu().numpy(), [3, 3, 3, 3])
