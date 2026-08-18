@@ -3,28 +3,28 @@ from tinygrad.dtype import dtypes, DType, AddrSpace, Invalid, least_upper_dtype,
 from tinygrad.helpers import unwrap
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, GroupOp, graph_rewrite, dtype_from_uop
 
-def select_dtype(u:UOp):
+def default_dtype(u:UOp):
   if u.dtype is dtypes.weakfloat: return dtypes.default_float
   return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
 
 def lower_weak_node(u:UOp) -> UOp|None:
   start, src = (1 if u.op is Ops.WHERE else 0), tuple(s.src[0] if s.op is Ops.CAST and s.dtype in dtypes.weaks else s for s in u.src)
   if src == u.src or any(s.dtype in dtypes.weaks for s in src[start:]): return None
-  dt = strong_dtype(least_upper_dtype(select_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary
+  dt = strong_dtype(least_upper_dtype(default_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary
                     else unwrap(dtype_from_uop(u.op, src, u.arg)))
   return u.replace(dtype=None, src=src[:start]+tuple(s if s.base.is_invalid else commit_weak(s, dt) for s in src[start:])).cast(u.dtype)
 
 pm_lower_weak = PatternMatcher([
-  (UPat(Ops.CONST, dtype=dtypes.weaks, name="u"), lambda u: UOp.const(u.val, select_dtype(u)).cast(u.dtype)),
+  (UPat(Ops.CONST, dtype=dtypes.weaks, name="u"), lambda u: UOp.const(u.val, default_dtype(u)).cast(u.dtype)),
   # two stacked weak casts are two kind conversions: each resolves at its own kind's default
   # a SINGLE weak cast is never rewritten here, each consumer absorbs it on its own edge (see lower_weak_srcs)
   (UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("x"),)),), name="u"),
-   lambda u,x: x.cast(select_dtype(u.src[0])).cast(select_dtype(u)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
+   lambda u,x: x.cast(default_dtype(u.src[0])).cast(default_dtype(u)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
   # Binary can widen from the bounds, all other nodes derive from the lowered sources.
   # a weakfloat Unary (sin/exp2/...) must resolve here, before the transcendental decomposition
   (UPat(GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK, Ops.SPECIAL}, name="u"), lower_weak_node),
   (UPat((Ops.PARAM, Ops.BUFFER), dtype=dtypes.weakint, name="u"),
-    lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=select_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
+    lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=default_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
 ])
 
 def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
@@ -60,7 +60,7 @@ pm_commit_weak = PatternMatcher([
 # a concrete CAST over a weak node states the width the value will live at. that width is a floor, never a narrowing
 def cast_weak_srcs(c:UOp, u:UOp) -> UOp|None:
   if c.dtype in dtypes.weaks or weak_dtype(c.dtype) is not u.dtype: return None
-  dt = least_upper_dtype(c.dtype, select_dtype(u))
+  dt = least_upper_dtype(c.dtype, default_dtype(u))
   return u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src)).cast(c.dtype)
 
 pm_cast_weak = PatternMatcher([
