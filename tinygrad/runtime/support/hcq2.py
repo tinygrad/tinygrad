@@ -3,7 +3,7 @@ from typing import cast, TypeVar, Generic, Any, Sequence, Iterable
 import struct, functools, time, collections, itertools, decimal, statistics
 from dataclasses import replace, dataclass
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
-from tinygrad.helpers import to_tuple, round_up, partition, data64_le, panic, ContextVar, perf_counter_us, Context
+from tinygrad.helpers import to_tuple, round_up, partition, panic, ContextVar, perf_counter_us, Context
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
@@ -48,9 +48,16 @@ def is_value_known_at_link(val:UOp) -> bool:
   return not val.variables() and not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
 
 def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> tuple[UOp, ...]:
-  return tuple(buf.index(UOp(Ops.STACK, dtypes.int, tuple(UOp.const(off // buf.dtype.itemsize, dtypes.int) for off,_ in ps)))
-               .store(UOp(Ops.STACK, buf.dtype, tuple(val.cast(buf.dtype) for _,val in ps))).rtag(tag)
-               for ps, tag in zip(partition(patches, lambda p: is_value_known_at_link(p[1])), ("link", None)) if ps)
+  def _mk_store(ps:list[tuple[sint, UOp]], tag:str|None) -> UOp:
+    offs = UOp(Ops.STACK, dtypes.int, tuple(UOp.const(off // buf.dtype.itemsize, dtypes.int) for off,_ in ps))
+    vals = UOp(Ops.STACK, ps[0][1].dtype, tuple(val for _,val in ps))
+    return buf.index(offs, dtype=vals.dtype).store(vals).rtag(tag)
+
+  patches = [(off, val.cast(buf.dtype) if val.dtype.itemsize == buf.dtype.itemsize else val) for off, val in patches]
+  link, runtime = partition(patches, lambda p: is_value_known_at_link(p[1]))
+  inputs, runtime = partition(runtime, lambda p: p[1].op is Ops.GETADDR)
+  return tuple(_mk_store(list(ps), tag) for cls, tag in ((link, "link"), (inputs, "inputs"), (runtime, None))
+               for _, ps in itertools.groupby(sorted(cls, key=lambda p: p[1].dtype), key=lambda p: p[1].dtype))
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   data = UOp(Ops.BINARY, src=(), arg=blob).bitcast(buf.dtype)
@@ -77,8 +84,8 @@ def make_call(name:str, body:UOp, info:HCQInfo) -> UOp: return UOp.custom_functi
 def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
   data, info = prg.arg
   buf = UOp.placeholder((data.kernargs_alloc_size // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("kernargs")
-  words = [w for gi in info.globals for w in data64_le(get_call_arg_uops(call)[gi].getaddr(devs))] + list(info.vars)
-  return buf.after(*make_patches(buf, [(i * 4, w) for i, w in enumerate(words)]))
+  words = [get_call_arg_uops(call)[gi].getaddr(devs) for gi in info.globals] + list(info.vars)
+  return buf.after(*make_patches(buf, list(zip(itertools.accumulate((w.dtype.itemsize for w in words), initial=0), words))))
 
 # *****************
 # 0.1. prep: replace buffers with params
@@ -307,27 +314,15 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[UOp, dict[UOp
   fills = (table.after(*make_patches(table, [(i*table.dtype.itemsize, addr) for addr, i in slots.items()])),) if slots else ()
   return table, reads, fills, {g:slots[bare[g]] for g in gaddrs}
 
-def is_bare_addr(val:UOp) -> bool: return val.op is Ops.CAST and val.src[0].op in (Ops.AND, Ops.SHR) and val.src[0].src[0].op is Ops.GETADDR
+def make_gather_loop(patches:list[UOp], table:UOp, slots:dict[UOp, int], lt_patches:list[UOp]) -> dict[UOp, UOp]:
+  (dst,), words = dedup(p.buf_uop for p in patches), [(off.val, slots[val]) for p in patches for off, val in zip(p.src[0].src[1].src, p.src[1].src)]
 
-def make_scatter_loops(patches:list[UOp], inputs_table:tuple, lt_patches:list[UOp]) -> dict[UOp, UOp]:
-  table, _, _, slots = inputs_table
-  subs, by_dst = {}, collections.defaultdict(list)
-  for p in patches: by_dst[p.buf_uop].append(p)
-  for dst, patches in by_dst.items():
-    data = []
-    for p in patches:
-      words = [(off, val, get_getaddrs(val)) for off,val in zip(p.src[0].src[1].src, p.src[1].src)]
-      data += [(off.val, slots[gaddrs[0]]) for off,_,gaddrs in words if gaddrs][::2]
-      scalars = [(off.val*dst.dtype.itemsize, val) for off,val,gaddrs in words if not gaddrs]
-      subs[p] = UOp.group(*make_patches(dst, scalars)) if scalars else UOp(Ops.NOOP)
-
-    word_table, slot_table = (UOp.placeholder((len(data),), dtypes.uint32, next(UOp.unique_num), device=dst.device).rtag("systems") for _ in range(2))
-    ridx = UOp.range(len(data), next(UOp.unique_num), dtype=dtypes.int, src=(word_table, slot_table, dst))
-    widx, slot = ((p.index(ridx).load() % bound).cast(dtypes.int) for p,bound in ((word_table, dst.max_numel()-1), (slot_table, table.max_numel())))
-    loop = UOp.group(*[dst.index(widx+i).store((table.index(slot).load() >> 32*i).cast(dtypes.uint32)) for i in range(2)]).end(ridx)
-    lt_patches += [make_binary_patch(buf, struct.pack(f'<{len(data)}I', *vals)) for buf,vals in zip((word_table, slot_table), zip(*data))]
-    subs[patches[0]] = UOp.group(loop, subs[patches[0]])
-  return subs
+  # one runtime loop writes every input address: dst[off] = table[slot], the (off, slot) pairs are a link-time table
+  pairs = UOp.placeholder((2*len(words),), dtypes.uint32, next(UOp.unique_num), device=dst.device).rtag("systems")
+  lt_patches.append(make_binary_patch(pairs, struct.pack(f'<{2*len(words)}I', *itertools.chain(*words))))
+  r = UOp.range(len(words), next(UOp.unique_num), dtype=dtypes.int, src=(pairs, dst))
+  off, slot = ((pairs.index(2*r+i).load() % bound).cast(dtypes.int) for i, bound in ((0, dst.max_numel()-1), (1, table.max_numel())))
+  return {p: UOp(Ops.NOOP) for p in patches} | {patches[0]: dst.index(off, dtype=table.dtype).store(table.index(slot).load()).end(r)}
 
 def is_input_addr(g:UOp) -> bool: return all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop))
 
@@ -341,10 +336,8 @@ def split_patches(call:UOp) -> UOp|None:
   runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbuf"} for x in unwrap_mstack(g.buf_uop)))
   tables = [make_addr_table(call, gs, n) for gs,n in ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems"))]
   reads, fills = {k:v for _,r,_,_ in tables for k,v in r.items()}, [f for t in tables[1:] for f in t[2]] # inputs table is filled by exec
-  input_patches = [p for p in rt_patches if (gs:=get_getaddrs(p)) and all(map(is_input_addr, gs))
-    and all(is_bare_addr(v) for v in p.src[1].src if get_getaddrs(v))]
-  scatter = make_scatter_loops(input_patches, tables[0], lt_patches)
-  body = body.substitute({p:p.substitute(scatter | reads) for p in rt_patches})
+  gathers = make_gather_loop(ipathces, tables[0][0], tables[0][3], lt_patches) if (ipathces:=[p for p in rt_patches if p.tag == "inputs"]) else {}
+  body = body.substitute({p:p.substitute(gathers | reads) for p in rt_patches})
 
   lt_srcs = collections.defaultdict(list)
   for p in lt_patches: lt_srcs[p.buf_uop].append(p)
