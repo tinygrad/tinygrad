@@ -37,10 +37,6 @@ class SimpleTokenizer:
     self.bos_id, self.eos_id, self.eot_id = bos_id, eos_id, eot_id
 
   # todo remove
-  def prefix(self) -> list[int]:
-    return ([] if self.bos_id is None else [self.bos_id]) + (self.encode("<sop>") if self.preset == 'glm4' else [])
-
-  # todo remove
   def role(self, role:str):
     if self.preset == 'olmo': return self.encode("<|" + role + "|>\n")  # OLMoE Instruct format
     if self.preset == 'kimi-k2': return self.encode("<|im_" + role + "|>" + role + "<|im_middle|>")

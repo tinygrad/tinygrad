@@ -127,7 +127,7 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       tok = self.server.tok
-      ids: list[int] = tok.prefix()
+      ids = ([] if tok.bos_id is None else [tok.bos_id]) + (tok.encode("<sop>") if tok.preset == 'glm4' else [])
       for i, msg in enumerate(body["messages"]):
         content = msg["content"]
         text = []
