@@ -17,7 +17,7 @@ class Scheduler:
     self.ast, self.ren = ast, ren
     self.dont_use_locals = self.ast.arg.dont_use_locals if self.ast.arg is not None else False
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
-    self.pad_bound: dict[int, int] = {}  # gcd of padding boundaries in units of each range
+    self.pad_bound:dict[int, int] = {}
     self.opt_range = count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
 
   @property

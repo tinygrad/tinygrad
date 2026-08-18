@@ -247,7 +247,7 @@ class TestKernelOpts(unittest.TestCase):
     opts_to_apply = [Opt(OptOps.GROUPTOP, 1, 256), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.UNROLL, 2, 0), Opt(OptOps.UPCAST, 0, 7)]
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(out(), [opts_to_apply], check_default_opt=False)
-    # this unroll can still since each reduction is either all Invalid or all data
+    # this unroll is okay since each reduction is either all Invalid or all data
     helper_linearizer_opt(out(), [[Opt(OptOps.GROUPTOP, 1, 256), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.UNROLL, 2, 16), Opt(OptOps.UPCAST, 0, 7)]])
 
   def test_padto_sum(self):
