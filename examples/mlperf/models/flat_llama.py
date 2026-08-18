@@ -41,11 +41,11 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
            x_fp8:Tensor|None=None, grad_amax_state:Tensor|None=None, next_grad_amax_state:Tensor|None=None, x_prequant_mx:tuple|None=None,
            next_amax_x:Tensor|None=None, mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
            x_prequant_mxfp4:tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]|None=None,
-           save_original_input:bool=False, save_mxfp4_input:bool=False) -> tuple[Tensor,...]:
+           save_original_input:bool=False, save_mxfp4_input:bool=False, bf16_w_t:Tensor|None=None) -> tuple[Tensor,...]:
   if not fp8:
     if ASM_GEMM:
       from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
-      if can_use_asm_gemm(x, w.T): return (asm_gemm(x, w.T),)
+      if can_use_asm_gemm(x, w.T): return (asm_gemm(x, w.T, bf16_w_t=bf16_w_t),)
     return (x @ w.T,)
   if MXFP4:
     assert x is not None, "MXFP4 matmul requires an unquantized input"
@@ -316,6 +316,7 @@ class FlatTransformer:
     from tinygrad.nn.state import get_parameters
     if not mp:
       for v in get_parameters(self): v.shard_(device, axis=None)
+      self.freqs_cis = self.freqs_cis.cast(dtypes.bfloat16).contiguous().is_param_(False).realize()
     else:
       # flat per-layer weights: axis 0 is n_layers, so shard axes are +1 vs per-layer Transformer
       def _shard_fp8(name:str, axis:int, std:float=0.02):
@@ -347,7 +348,7 @@ class FlatTransformer:
       self.norm.weight.shard_(device, axis=None).realize()
       self.tok_embeddings.weight.shard_(device, axis=0).realize()
       self.output.shard_(device, axis=1).realize()
-      self.freqs_cis.shard_(device, axis=None).realize()
+      self.freqs_cis = self.freqs_cis.cast(dtypes.bfloat16).shard(device, axis=None).contiguous().is_param_(False).realize()
       for amax_dict in (self._fp8_amax, self._fp8_next_amax, self._fp8_grad_amax, self._fp8_next_grad_amax):
         for name in amax_dict:
           for i in range(len(amax_dict[name])):
@@ -357,14 +358,22 @@ class FlatTransformer:
     assert MXFP4
     from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
     names = ("wqkv", "wo", "w1", "w3", "w2") if SPLIT_W13 else ("wqkv", "wo", "w13", "w2")
-    return {name:[quantize_mxfp4(w, shuffle_row=True, shuffle_col=True) for w in getattr(self, name)] for name in names}
+    ret = {}
+    for name in names:
+      weights = getattr(self, name)
+      ret[name] = [quantize_mxfp4(w, shuffle_row=True, shuffle_col=True,
+                                  **({"source":weights, "source_offset":i*w.numel()} if weights.uop.axis is None else {}))
+                   for i, w in enumerate(weights)]
+    return ret
 
   def refresh_mxfp4_weight_cache(self, cache:dict[str, list[tuple[Tensor, Tensor, Tensor, Tensor]]]) -> list[Tensor]:
     from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
     refreshed = []
     for name, layers in cache.items():
-      for weight, outputs in zip(getattr(self, name), layers):
-        refreshed.extend(quantize_mxfp4(weight, shuffle_row=True, shuffle_col=True, out=outputs))
+      weights = getattr(self, name)
+      for i, (weight, outputs) in enumerate(zip(weights, layers)):
+        refreshed.extend(quantize_mxfp4(weight, shuffle_row=True, shuffle_col=True, out=outputs,
+                         **({"source":weights, "source_offset":i*weight.numel()} if weights.uop.axis is None else {})))
     return refreshed
 
   def reset_amax(self):
@@ -402,27 +411,39 @@ class FlatTransformer:
         if mxfp4_weights is not None: ffn_kwargs.update(mxfp4_w13=mxfp4_weights["w13"][i])
       h, *_ = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, save=save)
 
-    logits = matmul(self.norm(h), self.output[0], fp8=False)[0]
+    logits = matmul(self.norm(h), self.output[0], fp8=False, bf16_w_t=getattr(self.output, "_transpose_cache", None))[0]
     return logits
 
 def _get_pads(uop:UOp) -> list[UOp]:
   if uop.op == Ops.ADD: return _get_pads(uop.src[0]) + _get_pads(uop.src[1])
   return [uop]
 
-def apply_grad(grad_buf:Tensor, new_grad:UOp):
+def _accumulate_grad(old:UOp, new:UOp, accumulate:bool|Tensor) -> UOp:
+  if isinstance(accumulate, bool): return old + new if accumulate else new
+  return old * accumulate.uop.cast(old.dtype) + new
+
+def apply_grad(grad_buf:Tensor, new_grad:UOp, accumulate:bool|Tensor=True):
   pads = _get_pads(new_grad)
   if len(pads) <= 1:
     new_grad = new_grad.cast(grad_buf.dtype)
-    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad))
+    value = _accumulate_grad(grad_buf.uop, new_grad, accumulate)
+    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(value))
     return
   cur = grad_buf.uop
+  written:set[tuple[tuple[int, int], ...]|None] = set()
   for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
     if pad.op == Ops.PAD:
       grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg)])
       buf_slice = cur.shrink(grad_shrink)
-      cur = cur.after(buf_slice.store(buf_slice + pad.src[0].cast(cur.dtype)))
+      new_value = pad.src[0].cast(cur.dtype)
+      value = buf_slice + new_value if grad_shrink in written else _accumulate_grad(buf_slice, new_value, accumulate)
+      cur = cur.after(buf_slice.store(value))
+      written.add(grad_shrink)
     else:
-      cur = cur.after(cur.store(cur + pad.cast(cur.dtype)))
+      new_value = pad.cast(cur.dtype)
+      value = cur + new_value if None in written else _accumulate_grad(cur, new_value, accumulate)
+      cur = cur.after(cur.store(value))
+      written.add(None)
   grad_buf.uop = cur
 
 if __name__ == "__main__":

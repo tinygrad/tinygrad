@@ -27,6 +27,14 @@ class TestApplyGradE2E(unittest.TestCase):
       Tensor.realize(loss, *grads.values())
     return [grads[p] for p in get_parameters(model)]
 
+  def _run_with_first_overwrite(self, model, xs):
+    grads = {p: Tensor.full(p.shape, 123, dtype=p.dtype).contiguous().realize() for p in get_parameters(model)}
+    for i,x in enumerate(xs):
+      loss = model(x)
+      for p,g in zip(grads, loss.gradient(*grads)): apply_grad(grads[p], g.uop, accumulate=i != 0)
+      Tensor.realize(loss, *grads.values())
+    return [grads[p] for p in get_parameters(model)]
+
   def _run_reference(self, model, xs):
     for x in xs: model(x).backward()
     return [p.grad for p in get_parameters(model)]
@@ -47,6 +55,12 @@ class TestApplyGradE2E(unittest.TestCase):
     model = FlatModel(n_layers=4, dim=8, hidden=16)
     Tensor.realize(*get_parameters(model))
     self._assert_match(model, [Tensor.randn(2, 8).realize() for _ in range(3)], atol=1e-4, rtol=1e-4)
+
+  def test_e2e_first_overwrite(self):
+    model = FlatModel(n_layers=4, dim=8, hidden=16)
+    Tensor.realize(*get_parameters(model))
+    xs = [Tensor.randn(2, 8).realize() for _ in range(3)]
+    self._assert_close(self._run_with_first_overwrite(model, xs), self._run_reference(model, xs), atol=1e-4, rtol=1e-4)
 
   def test_e2e_jit(self):
     model = FlatModel(n_layers=3, dim=8, hidden=16)

@@ -6,7 +6,7 @@
 #include "quantize_mxfp4_device.h"
 
 #if !defined(KERNEL_NAME) || !defined(M_DIM) || !defined(N_DIM) || !defined(WRITE_ROWWISE_VALUE) || \
-    !defined(WRITE_COLWISE_VALUE) || !defined(SHUFFLE_ROWWISE_FP4_VALUE) || !defined(SHUFFLE_COLWISE_FP4_VALUE)
+    !defined(WRITE_COLWISE_VALUE) || !defined(SHUFFLE_ROWWISE_FP4_VALUE) || !defined(SHUFFLE_COLWISE_FP4_VALUE) || !defined(INPUT_OFFSET)
 #error kernel dimensions and layouts must be defined
 #endif
 
@@ -66,6 +66,7 @@ extern "C" __global__ __launch_bounds__(THREADS, 8)
 void KERNEL_NAME(uint8_t* __restrict__ rowwise_fp4, uint8_t* __restrict__ rowwise_scale,
                  uint8_t* __restrict__ colwise_fp4, uint8_t* __restrict__ colwise_scale,
                  const uint16_t* __restrict__ input) {
+  input += INPUT_OFFSET;
   __shared__ uint16_t tile[BLOCK * SMEM_STRIDE];
   const int tid = threadIdx.x;
   const int line = tid / THREADS_PER_ROW;
