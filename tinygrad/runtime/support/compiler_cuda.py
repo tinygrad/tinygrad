@@ -6,7 +6,7 @@ from tinygrad.device import Compiler, CompileError
 
 CUDA_PATH = getenv("CUDA_PATH", "")
 root = pathlib.Path(__file__).parents[3]
-osx_docker_cmd = f"docker run --rm -i -v {root}:{root} -e PYTHONPATH={root} ghcr.io/tinygrad/cuda-arm64:v2.1"
+osx_docker_cmd = f"docker run --rm -i -v {root}:{root} -e PYTHONPATH={root} ghcr.io/tinygrad/cuda-arm64:v2.3"
 
 def _get_bytes(arg, get_str, get_sz, check) -> bytes:
   x = ctypes.create_string_buffer(init_c_var(ctypes.c_size_t, lambda x: check(get_sz(arg, ctypes.byref(x)))).value)
