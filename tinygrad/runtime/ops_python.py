@@ -214,6 +214,7 @@ class PythonCompiler(Compiler):
 class PythonRenderer(Renderer):
   code_for_op = python_alu
   compiler = PythonCompiler()
+  casted_consts: bool = True
 
   def __init__(self, target:Target):
     assert (emu:=getenv("EMULATE", "")) == "", ("EMULATE is deprecated, use DEV=PYTHON::" +
