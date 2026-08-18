@@ -3,11 +3,12 @@ import tempfile, unittest, math
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
-from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite
+from tinygrad.uop.ops import UOp, Ops, GroupOp, dtype_from_uop, graph_rewrite
 from tinygrad.uop.weak import pm_lower_index_dtype, pm_commit_weak
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.engine.jit import JitError
+from test.helpers import full_rewrite
 
 
 class TestWeakPromotion(unittest.TestCase):
@@ -286,6 +287,19 @@ class TestSignedUint64Weakfloat(unittest.TestCase):
     self.assertEqual((r.dtype, r.cast(dtypes.float32).item()), (dtypes.half, 4.0))
     self.assertEqual((i64 < u64).item(), True)  # comparison meets at float
     self.assertAlmostEqual((i64 + u64).sin().item(), math.sin(2), places=5)  # Unary lowers before transcendental
+
+
+class TestNoRedundantWide(unittest.TestCase):
+  def wide_alu(self, t:Tensor) -> int:
+    return sum(sum(1 for u in full_rewrite(call.src[0]).toposort() if u.op in GroupOp.ALU and u.dtype in {dtypes.long, dtypes.ulong})
+               for call in t.schedule_linear().src if call.src[0].op is Ops.SINK)
+
+  def test_unbounded_long_stays_long(self):
+    self.assertGreater(self.wide_alu(Tensor.empty(16, dtype=dtypes.long)*3 + 1), 0)
+
+  def test_fancy_index_has_no_wide_alu(self):
+    j, o = Tensor([0, 1, 2]).reshape(3, 1), Tensor([0, 1]).reshape(1, 2)
+    self.assertEqual(self.wide_alu(Tensor.empty(8, 9, 10, 11, 12)[1, j, 2, o, 2]), 0)
 
 
 if __name__ == "__main__":
