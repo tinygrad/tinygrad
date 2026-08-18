@@ -45,10 +45,6 @@ inputs:
     description: "Install qemu"
     required: false
     default: 'false'
-  docker-qemu:
-    description: "Setup docker to use qemu"
-    required: false
-    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -286,9 +282,3 @@ runs:
         sudo mkdir -p /etc/OpenCL/vendors
         echo "/usr/lib/libRusticlOpenCL.so" | sudo tee /etc/OpenCL/vendors/rusticl.icd
         echo "RUSTICL_ENABLE=llvmpipe" >> "$GITHUB_ENV"
-
-    - name: Setup docker to use qemu
-      if: inputs.docker-qemu == 'true'
-      uses: docker/setup-qemu-action@v4
-      with:
-        platforms: arm64

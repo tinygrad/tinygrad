@@ -3,7 +3,7 @@ from typing import cast, Any, Callable
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, encode_kernargs_clike, make_cmdbuf
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, encode_kernargs_clike, make_cmdbuf
 from tinygrad.runtime.support.hcq2 import make_binary_patch
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
@@ -179,11 +179,10 @@ class SDMAOps(FastEnum): COPY = auto(); POLL_REGMEM = auto(); FENCE = auto(); TR
 
 def sdma_copy(ctx, call):
   sz = call.src[2].max_numel() * call.src[2].dtype.itemsize
-  src_addr, dst_addr = call.src[2].getaddr(ctx.devs), call.src[1].getaddr(ctx.devs)
-  return call.ins(SDMAOps.COPY, src=tuple(UOp.const(x, dtypes.uint32) for off in range(0, sz, ctx.max_copy_size) for x in (
-    ctx.sdma.SDMA_OP_COPY | ctx.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_COPY_LINEAR),
-    ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz-off, ctx.max_copy_size)-1), 0,
-    *data64_le(src_addr+UOp.const(off, dtypes.uint64)), *data64_le(dst_addr+UOp.const(off, dtypes.uint64)))))
+  hdr = ctx.sdma.SDMA_OP_COPY | ctx.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_COPY_LINEAR)
+  return call.ins(SDMAOps.COPY, src=tuple(x for off in range(0, sz, ctx.max_copy_size) for x in (
+    *(UOp.const(v, dtypes.uint32) for v in (hdr, ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz-off, ctx.max_copy_size)-1), 0)),
+    *(a + UOp.const(off, dtypes.uint64) if off else a for a in (call.src[2].getaddr(ctx.devs), call.src[1].getaddr(ctx.devs))))))
 
 def sdma_wait(ctx, ins, dst, val):
   op = ctx.sdma.SDMA_OP_POLL_REGMEM | ctx.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) \
@@ -290,14 +289,14 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
     super().__init__(dev, supports_copy_from_disk=dev.has_copy_queue, supports_transfer=dev.has_copy_queue and not dev.is_usb())
 
-  def _alloc(self, size:int, options:BufferSpec) -> HCQ2Buffer:
+  def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_copy_queue)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
-  def _do_map(self, buf:HCQ2Buffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _do_map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
-  def _do_unmap(self, buf:HCQ2Buffer): self.dev.iface.unmap(buf)
+  def _do_unmap(self, buf:HCQBuffer): self.dev.iface.unmap(buf)
 
 @dataclass
 class AMDQueueDesc:
@@ -561,9 +560,7 @@ class AMDDevice(HCQ2Compiled):
   def is_usb(self) -> bool: return False
 
   def __init__(self, device:str=""):
-    self.device_id = int(device.split(":")[1]) if ":" in device else 0
-
-    self.iface = self._select_iface()
+    self.iface = self._select_iface(device)
 
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target

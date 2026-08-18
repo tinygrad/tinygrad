@@ -305,10 +305,10 @@ class TestVizTree(unittest.TestCase):
 
   def test_tree_view(self):
     with save_viz() as viz:
-      a = UOp.variable("a",0,10)
-      b = UOp.variable("b",0,10)
-      c = UOp.variable("c",0,10)
-      d = UOp.variable("d",0,10)
+      a = UOp.variable("a",0,10,param=True)
+      b = UOp.variable("b",0,10,param=True)
+      c = UOp.variable("c",0,10,param=True)
+      d = UOp.variable("d",0,10,param=True)
       sink = UOp.sink(a+b, c+d)
       def tree_rewrite(): return graph_rewrite(sink, root, name="root")
       tree_rewrite()

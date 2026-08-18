@@ -3,11 +3,12 @@ import tempfile, unittest, math
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
-from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite
+from tinygrad.uop.ops import UOp, Ops, GroupOp, dtype_from_uop, graph_rewrite
 from tinygrad.uop.weak import pm_lower_index_dtype, pm_commit_weak
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.engine.jit import JitError
+from test.helpers import full_rewrite
 
 
 class TestWeakPromotion(unittest.TestCase):
@@ -76,6 +77,11 @@ class TestWeakPromotion(unittest.TestCase):
       committed = graph_rewrite((UOp.const(1).cast(dtypes.int32) + UOp.const(1.0)).cast(dtypes.float32), pm_lower_index_dtype, ctx={})
     self.assertEqual([u.dtype for u in committed.toposort() if u.op is Ops.ADD], [dtypes.float32])
 
+  def test_div_sub_operand_kept_weak(self):
+    a = Tensor.empty(4, dtype=dtypes.float32)
+    for t in (a / 1, a - 0):
+      self.assertEqual(t.uop.src[1].dtype, dtypes.weakfloat)
+
   def test_cast_weak_expression_commits_at_cast_floor(self):
     # the floor never narrows: a cast BELOW the default does not pull the compute width down with it
     with Context(DEFAULT_FLOAT=dtypes.float32):
@@ -87,6 +93,13 @@ class TestWeakPromotion(unittest.TestCase):
       denom = Tensor.ones(1, dtype=dtypes.int32, device="CPU").sum() * 70000 + 1e-5
       out = Tensor(1.0, dtype=dtypes.float32, device="CPU") / denom
       self.assertAlmostEqual(out.item(), 1 / (70000 + 1e-5), places=10)
+
+  def test_stacked_weak_casts_convert_each_kind(self):
+    # each weak cast is a kind conversion: weakint truncates before weakfloat re-lifts (neither is only a marker)
+    x = Tensor([2.5, -3.7], dtype=dtypes.float32, device="CPU")
+    stacked = x.cast(dtypes.weakint).cast(dtypes.weakfloat)
+    self.assertIs(stacked.dtype, dtypes.weakfloat)
+    self.assertEqual(stacked.tolist(), [2.0, -3.0])
 
   def test_uop_scalar_const_lifts_kind(self):
     for dtype, value, out_dtype, const_dtype in ((dtypes.weakint, 1, dtypes.weakint, dtypes.weakint),
@@ -274,6 +287,19 @@ class TestSignedUint64Weakfloat(unittest.TestCase):
     self.assertEqual((r.dtype, r.cast(dtypes.float32).item()), (dtypes.half, 4.0))
     self.assertEqual((i64 < u64).item(), True)  # comparison meets at float
     self.assertAlmostEqual((i64 + u64).sin().item(), math.sin(2), places=5)  # Unary lowers before transcendental
+
+
+class TestNoRedundantWide(unittest.TestCase):
+  def wide_alu(self, t:Tensor) -> int:
+    return sum(sum(1 for u in full_rewrite(call.src[0]).toposort() if u.op in GroupOp.ALU and u.dtype in {dtypes.long, dtypes.ulong})
+               for call in t.schedule_linear().src if call.src[0].op is Ops.SINK)
+
+  def test_unbounded_long_stays_long(self):
+    self.assertGreater(self.wide_alu(Tensor.empty(16, dtype=dtypes.long)*3 + 1), 0)
+
+  def test_fancy_index_has_no_wide_alu(self):
+    j, o = Tensor([0, 1, 2]).reshape(3, 1), Tensor([0, 1]).reshape(1, 2)
+    self.assertEqual(self.wide_alu(Tensor.empty(8, 9, 10, 11, 12)[1, j, 2, o, 2]), 0)
 
 
 if __name__ == "__main__":

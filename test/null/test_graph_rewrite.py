@@ -143,13 +143,13 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
     self.assertIs(apply_rewrite(x_var_uop.cast(dtypes.weakint) % 10).render(simplify=False), x_var_uop.render(simplify=False))
 
   def test_full_graph_rewrite_division_with_remainder(self):
-    x_var_uop = UOp.variable('x', 7, 9)
+    x_var_uop = UOp.variable('x', 7, 9, param=True)
     optimized_sink = apply_rewrite(x_var_uop // 2)
     for x_value in range(7, 10):
       self.assertEqual(x_value // 2, evaluate_uop(optimized_sink, {'x': x_value}))
 
   def test_full_graph_rewrite_complex_mod_div_expression(self):
-    x_var_uop = UOp.variable('x', 1, 10)
+    x_var_uop = UOp.variable('x', 1, 10, param=True)
     optimized_sink = apply_rewrite(((x_var_uop * 5) % 3) // 2)
     for x_value in range(1, 11):
       original_result = ((x_value * 5) % 3) // 2

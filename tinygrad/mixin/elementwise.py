@@ -115,7 +115,8 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    return a + (-b)
+    # alu, not +: _broadcasted already promoted these, and a second promote would cast -b (only a bare weak CONST is kept weak)
+    return a.alu(Ops.ADD, -b)
 
   def mul(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
@@ -245,8 +246,9 @@ class ElementwiseMixin(CreationMixin):
     if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype):
       if rounding_mode == "trunc": return a.alu(Ops.CDIV, b)
       if rounding_mode == "floor": return a.alu(Ops.FLOORDIV, b)
-      a = a.cast(dtypes.default_float)
-    d = a * b.reciprocal()
+    if dtypes.is_int(a.dtype) or a.dtype == dtypes.bool: a = a.cast(dtypes.default_float)
+    # alu, not *: _broadcasted already promoted these, and a second promote would cast 1/b (only a bare weak CONST is kept weak)
+    d = a.alu(Ops.MUL, b.reciprocal())
     if rounding_mode is None: return d
     if rounding_mode == "trunc": return d.trunc()
     if rounding_mode == "floor": return d.floor()

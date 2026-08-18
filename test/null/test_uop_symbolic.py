@@ -3,10 +3,10 @@ import unittest, pickle, functools, math
 import z3
 
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
-from test.helpers import get_uops
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.spec import spec_shared, type_verify
-from tinygrad.uop.symbolic import sym, pm_fold_cast_const, commutative, pm_simplify_valid, pm_move_where_on_load
+from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load
+from tinygrad.uop.weak import pm_cast_weak
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
@@ -16,7 +16,8 @@ def check_uop_against_string(self, v:UOp, s:str):
   s_eval = graph_rewrite(s_eval, commutative, name="cannonicalize eval")
   self.assertIs(s_eval, v, f"eval did not match simplified: {s_eval} != {v.render()} for {s}")
 
-def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.weakint): return UOp.variable(name,min_val,max_val,dtype)
+def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.weakint):
+  return UOp.variable(name, min_val, max_val, dtype, param=True)
 def uconst(val): return UOp.const(val)
 def usum(ops): return functools.reduce(lambda x,y: x+y, ops)
 def uand(ops): return functools.reduce(lambda x,y: x*y, ops)
@@ -35,7 +36,7 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(solver.check(expr1 != expr2), z3.unsat, "simplified expression not equal to original")
 
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
-    v_simplified = graph_rewrite(v, sym+pm_fold_cast_const, name="simplify symbolic uop")
+    v_simplified = graph_rewrite(v, sym+pm_cast_weak, name="simplify symbolic uop")
     if test_z3: self.check_equal_z3(v, v_simplified)
     nmin, nmax = v_simplified.vmin, v_simplified.vmax
     check_uop_against_string(self, v_simplified, s)
@@ -442,7 +443,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(uand([uconst(1), Variable("a", 0, 1)]), 0, 1, "a")
 
   def test_masked_shr_fold(self):
-    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32, param=True)
     self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)")
 
   def test_bool_or_not_tautology(self):
@@ -483,12 +484,12 @@ class TestSymbolic(unittest.TestCase):
 
   def test_div_drop_small_terms(self):
     # from openpilot, shouldnt simplify
-    gidx0 = UOp.variable("gidx0", 0, 10)
-    gidx1 = UOp.variable("gidx1", 0, 10)
-    lidx0 = UOp.variable("lidx0", 0, 1)
-    lidx1 = UOp.variable("lidx1", 0, 1)
-    ridx1005 = UOp.variable("ridx1005", 0, 2)
-    ridx1006 = UOp.variable("ridx1006", 0, 2)
+    gidx0 = UOp.variable("gidx0", 0, 10, param=True)
+    gidx1 = UOp.variable("gidx1", 0, 10, param=True)
+    lidx0 = UOp.variable("lidx0", 0, 1, param=True)
+    lidx1 = UOp.variable("lidx1", 0, 1, param=True)
+    ridx1005 = UOp.variable("ridx1005", 0, 2, param=True)
+    ridx1006 = UOp.variable("ridx1006", 0, 2, param=True)
     self.helper_test_variable((lidx1+((gidx1*18)+(ridx1005*18)+(lidx0*162))+(gidx0*2)+(ridx1006*2)+-40)//18, -3, 20,
       "(gidx1+ridx1005+lidx0*9+(gidx0+ridx1006+7)//9+-3)")
 
@@ -997,7 +998,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(cond.ne(False), 0, 1, "(x<2)")
 
   def test_bitcast_chain(self):
-    a = UOp.variable("a", 0, 3, dtype=dtypes.int32)
+    a = UOp.variable("a", 0, 3, dtype=dtypes.int32, param=True)
     self.assertIs(graph_rewrite(a.bitcast(dtypes.float32).bitcast(a.dtype), sym), a)
 
   def test_negation_in_where(self):
@@ -1013,20 +1014,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(-a<-b, False, True, "(b<a)")
 
   def test_where_cast(self):
-    s = Variable("s", 0, 3, dtypes.int)
-    cond = s < 2
+    cond = Variable("s", 0, 3, dtypes.int) < 2
     a = Variable("a", 0, 3, dtypes.int)
-    b = Variable("b", 0, 3, dtypes.int)
-    expr = cond.where(a, b).cast(dtypes.half)
-
-    # TODO: copied from render, render does not support cast
-    glbl = UOp.param(0, dtypes.int, (1,))
-    uops = get_uops(UOp(Ops.STORE, src=(glbl.index(UOp.const(0, dtypes.int)), expr)).sink())
-    rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
-
-    # the vars are now scalar PARAMs
-    pvar = {u.expr: u for u in rewritten_uop.toposort() if u.op is Ops.PARAM}
-    self.assertEqual(rewritten_uop, (pvar['s']<UOp.const(2, dtypes.int)).where(pvar['a'].cast(dtypes.half), pvar['b'].cast(dtypes.half)))
+    self.assertIs(graph_rewrite(cond.where(a, a+1).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), (a+1).cast(dtypes.half)))
+    self.assertIs(graph_rewrite(cond.where(a, uconst(2)).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.const(2, dtypes.half)))
+    self.assertIs(graph_rewrite(cond.where(a, UOp.invalid()).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.invalid()))
 
   def test_where_merge_branches(self):
     cond1 = Variable("s", 0, 10) < 6
@@ -1180,7 +1172,7 @@ class TestSymbolicVariables(unittest.TestCase):
     assert (a//4 + a//6).variables() == [a]
 
   def test_variable_min_eq_max_bind_folds(self):
-    b = Variable("x", 1, 1).bind(1)
+    b = UOp.variable("x", 1, 1).bind(1)
     s = b.simplify()
     self.assertEqual(s.op, Ops.CONST)
     self.assertEqual(s.val, 1)
@@ -1373,6 +1365,16 @@ class TestInvalidIndex(unittest.TestCase):
     c1 = UOp.const((1, 1, Invalid, Invalid))
     c2 = UOp.const((1, Invalid, 1, 1))
     self.assertIs((c1+c2).simplify(), UOp.const((2, Invalid, Invalid, Invalid)))
+
+  def test_gated_load_keeps_index_valid(self):
+    # the load executes even on gated-off iterations: gated_given_valid must not erase its mask (PADTO OOB shape)
+    buf = UOp.param(0, dtypes.bool, (17,))
+    ridx = Variable("ridx", 0, 31)
+    cond = ridx < 17
+    load = buf.index(ridx.valid(cond))
+    out = graph_rewrite(cond.where(load.where(uconst(2), uconst(0)), UOp.invalid()), sym)
+    idx = next(u for u in out.toposort() if u.op is Ops.INDEX)
+    self.assertIs(idx.src[1].get_valid(), cond.simplify())
 
 class TestStoreLoadFolding(unittest.TestCase):
   """Tests for store(index, load(index)) -> NOOP rule. This rule matches patterns that EMERGE during simplification."""

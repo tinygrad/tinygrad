@@ -4,7 +4,7 @@ import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype, strong_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group, identity_element
-from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
+from tinygrad.uop.symbolic import symbolic
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
@@ -60,7 +60,7 @@ pm_mops = PatternMatcher([
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.backward_slice_with_self: return None
+  if (base:=target.base) not in src.toposort(enter_calls=False): return None
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
@@ -313,9 +313,9 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
   # hack if a noop turned to a const
   (UPat(Ops.NOOP, src=(UPat.cvar("c"),)), lambda c: c),
-  # mstack on CONST is CONST
-  (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
-   lambda s: c if (c:=s.base).op is Ops.CONST else None),
+  # a deviceless MSTACK src is the same value on every device, so indexing the stack is just indexing that value
+  (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True, name="idx"),
+   lambda s,idx: idx.replace(src=(s,)+idx.src[1:]) if s.device is None else None),
 ])
 
 pm_remove_bufferize = PatternMatcher([
@@ -327,6 +327,9 @@ pm_remove_bufferize = PatternMatcher([
   (UPat(Ops.END, src=(UPat(Ops.NOOP, name="x"),), allow_any_len=True), lambda x: x),
 ])
 
+def strip_zero_offset_shrink(x:UOp) -> UOp:
+  return x.src[0] if x.op is Ops.SHRINK and all(resolve(start == 0, False) for start,_ in x.marg) else x
+
 def no_indexing_calls(u:UOp):
   new_srcs = []
   for x in u.src:
@@ -336,8 +339,9 @@ def no_indexing_calls(u:UOp):
       new_srcs.append(x.src[0])
     elif x.op is Ops.SHRINK:
       # SHRINK with offset 0 is fine
-      # TODO: check offset
-      new_srcs.append(x.src[0])
+      new_srcs.append(strip_zero_offset_shrink(x))
+    elif x.op is Ops.MSTACK:
+      new_srcs.append(x.replace(src=tuple(strip_zero_offset_shrink(s) for s in x.src)))
     else:
       # everything else we pass through
       new_srcs.append(x)
@@ -461,11 +465,12 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
 class LocalAddBufferContext:
   dg:int = 0
   map:dict = field(default_factory=dict)
-  vars:dict = field(default_factory=dict)
   range:int = 0
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
+  # Variables (ALU buffers with a value range) are scalar symbolic values, not real buffers: they become ALU params with no slot
+  if buf.is_variable: return buf.replace(op=Ops.PARAM)
   param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),),
               arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
@@ -474,10 +479,6 @@ def debuf(ctx:LocalAddBufferContext, buf:UOp):
   if buf not in ctx.map: ctx.map[buf] = buf
   ctx.dg += 1
   return ret
-
-def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
-  ctx.vars[b] = None
-  return b.src[0]
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
   if after.addrspace == AddrSpace.LOCAL: return None
@@ -502,8 +503,7 @@ to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
   (UPat(Ops.PARAM, name="v"), lambda v:
-   UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype, multiple_of=v.arg.multiple_of)
-   if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
+   v.replace(arg=replace(v.arg, slot=-1)) if v.arg.name is not None and v.arg.vmin_vmax is not None and v.arg.slot != -1 else None),
 
   # this renumbers the params
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
@@ -512,7 +512,8 @@ to_define_global = PatternMatcher([
   # ALU params are scalar symbolic values, not buffers.
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="v"),)), lambda v: v if v.addrspace == AddrSpace.ALU else None),
 
-  (UPat(Ops.BIND, name="b"), unbind_kernel),
+  # bound Variables are stores into Variable buffers: strip the store, the buffer becomes an ALU param via debuf
+  (UPat(Ops.AFTER, name="b"), lambda b: b.src[0] if b.is_bound_var else None),
   (UPat(Ops.AFTER, name="after"), handle_after),
 
   # remove device from local BUFFERIZE
@@ -541,13 +542,16 @@ pm_add_param_range_tags = PatternMatcher([
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split. open DEVICE ranges are fine, they are bound per device at launch
   if any(r.arg[-1] is not AxisType.DEVICE for r in x.ranges): return None
+  # the store of a bound Variable is an input value, not a kernel
+  st = x.src[0] if x.op is Ops.END else x
+  if st.op is Ops.STORE and st.src[0].is_variable: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
-  return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values(), *lctx.vars.keys())
+  return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values())
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
@@ -584,7 +588,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
 
   tsink = graph_rewrite(tsink,
-                        symbolic+pm_fold_cast_const+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize+pm_no_indexing_calls,
+                        symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize,
                         name="symbolic+reduce_collapse+debuf")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
@@ -595,6 +599,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   paramarg_start: int = max([-1]+slots) + 1
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_param_range_tags, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
+  tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
   if SPEC:
