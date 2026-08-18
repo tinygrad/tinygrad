@@ -1,9 +1,31 @@
 import functools, pathlib
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.helpers import getenv
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from extra.gemm.cdna_asm_gemm import quantize_mxfp8, _mx_block_scale, _mx_block_scale_3d
+
+ZERO_OPTIM = getenv("ZERO_OPTIM", 0)
+
+def reduce_scatter_devaxis(out:Tensor, shard_axis:int=0) -> Tensor:
+  # out: sharded on the device axis, shape (ndev, *rest); return the device-axis sum left sharded on shard_axis.
+  u = out.uop
+  devs, rest = u.device, u.shape[1:]
+  assert rest[shard_axis] % len(devs) == 0, f"reduce_scatter needs even shards: {rest[shard_axis]} % {len(devs)}"
+  # reach the raw per-device buffer below the UNSHARD, keeping the AFTERs so reads stay ordered after the kernel writes
+  node, barriers = u, []
+  while node.op is not Ops.UNSHARD:
+    if node.op is Ops.AFTER: barriers += node.src[1:]
+    node = node.src[0]
+  mbuf = node.src[0].after(*barriers) if barriers else node.src[0]
+  sz = rest[shard_axis] // len(devs)
+  shards = []
+  for i in range(len(devs)):
+    bounds = tuple((0,s) if a != shard_axis else (i*sz,(i+1)*sz) for a,s in enumerate(rest))
+    contribs = [mbuf.mselect(j).reshape(rest).shrink(bounds).copy_to_device(devs[i]) for j in range(len(devs))]
+    shards.append(functools.reduce(lambda a,b: a.alu(Ops.ADD, b), contribs))
+  return Tensor(UOp.mstack(*shards).unshard(shard_axis, UOp.range(len(devs), -1, AxisType.DEVICE)), device=devs)
 
 @functools.cache
 def custom_hk_grouped_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:UOp, dname:str, n_experts:int) -> UOp:
@@ -58,7 +80,8 @@ def grouped_mx_wgrad(g:Tensor, xg:Tensor, expert_off:Tensor, n_experts:int) -> T
   out = Tensor(inv.uop.unshard(0), device=g.device) if is_multi else inv
   out = Tensor.custom_kernel(out, gT, xT, g_si, x_si, expert_off,
                              fxn=functools.partial(custom_hk_grouped_mxfp8_wgrad, dname=dname, n_experts=n_experts))[0]
-  out = out.sum(0) if is_multi else out.squeeze(0)
+  if is_multi and ZERO_OPTIM: out = reduce_scatter_devaxis(out, 0)
+  else: out = out.sum(0) if is_multi else out.squeeze(0)
   return out.reshape(n_experts, N, K)
 
 def mx_pack_3d(e8:Tensor) -> Tensor:

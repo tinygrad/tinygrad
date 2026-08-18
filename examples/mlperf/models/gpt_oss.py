@@ -146,6 +146,7 @@ class GPTOSS:
       return w_q, w_e8.is_param_(False)
     if moe:
       qs = [_one(*shape[1:]) for _ in range(shape[0])]
+      for q in qs: q[0]._zero2 = True  # grad arrives sharded on the expert axis under ZeRO-2 (moe_gemm)
       return [q[0] for q in qs], [q[1] for q in qs]
     return _one(*shape)
 
