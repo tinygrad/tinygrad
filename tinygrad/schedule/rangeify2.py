@@ -204,15 +204,17 @@ class SplitCtx:
   call_params:list = field(default_factory=list)
   range_number:int = -1
 
-def _split_graph(ctx:SplitCtx, u:UOp) -> UOp:
+def _split_graph(ctx:SplitCtx, u:UOp) -> UOp|None:
+  if u.tag is not None: return None
   if len(u.shape) > 1: raise RuntimeError(f"rangeify needs to reduce to a single idx, not {u.shape}")
   args = {AddrSpace.GLOBAL: ctx.call_args, AddrSpace.ALU: ctx.call_params}[u.addrspace]
   args.append(u)
-  return u.param_like((1000 if u.addrspace == AddrSpace.ALU else 0) + (len(args)-1))
+  return u.param_like((1000 if u.addrspace == AddrSpace.ALU else 0) + (len(args)-1)).rtag()
 
 def _renumber_range(ctx:SplitCtx, u:UOp) -> UOp:
+  if u.tag is not None: return None
   ctx.range_number += 1
-  return u.replace(arg=(ctx.range_number, u.arg[-1]))
+  return u.replace(arg=(ctx.range_number, u.arg[-1])).rtag()
 
 pm_split_graph = PatternMatcher([
   (UPat((Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK), name="u"), _split_graph),
@@ -220,7 +222,8 @@ pm_split_graph = PatternMatcher([
 ])
 
 def split_store(x:UOp) -> UOp:
-  ret = graph_rewrite(x, pm_split_graph, ctx:=SplitCtx(), name="split kernel", bottom_up=True, walk=True)
+  ret = graph_rewrite(x, pm_split_graph, ctx:=SplitCtx(), name="split kernel", bottom_up=True)
+  ret = graph_rewrite(ret, remove_all_tags, name="remove split tags", bottom_up=True)
   return ret.sink(arg=KernelInfo()).call(*ctx.call_args, *ctx.call_params)
 
 split_kernels = PatternMatcher([
