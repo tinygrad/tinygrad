@@ -15,7 +15,7 @@ class Kernel:
     return self.instructions
 
 def build_kernel(B: int, N: int, H: int, H_KV: int, D: int):
-  assert (B, N, H, H_KV, D) == (2, 8192, 32, 8, 128), f'unsupported FA shape {(B, N, H, H_KV, D)}'
+  assert B in (1, 2) and (N, H, H_KV, D) == (8192, 32, 8, 128), f'unsupported FA shape {(B, N, H, H_KV, D)}'
   k = Kernel()
   k.emit(s_and_b32(s[1], s[1], LIT, 65535))
   k.emit(s_load_dwordx2(s[20:21], s[0:1], s[0], 0, 0, 0, 0, 1))

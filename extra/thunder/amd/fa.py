@@ -218,10 +218,10 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 @functools.cache
 def custom_asm_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, *, B:int, N:int, H:int, H_KV:int, D:int):
   from extra.thunder.amd.asm_fa_fwd import build_kernel
-  assert (B, N, H, H_KV, D) == (2, 8192, 32, 8, 128)
+  assert B in (1, 2) and (N, H, H_KV, D) == (8192, 32, 8, 128)
   threads = UOp.special(512, "lidx0")
   # AMD's MLPerf trace launches 16 query-tile workgroups (8192 total X threads / 512 threads per workgroup).
-  blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(16, "gidx0"), UOp.special(32, "gidx1"), UOp.special(2, "gidx2")
+  blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(16, "gidx0"), UOp.special(32, "gidx1"), UOp.special(B, "gidx2")
   lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
   zero = UOp.const(0)
   # Metadata-only accesses keep every opaque ISA buffer live and describe its read/write dependencies to the scheduler.
@@ -229,7 +229,7 @@ def custom_asm_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, *, B:int, N:int
   lse_write = l_vec.flatten().index(zero).store(l_vec.flatten().index(zero).load())
   sink = UOp.sink(o_write, lse_write, q.flatten().index(zero).load(), k.flatten().index(zero).load(), v.flatten().index(zero).load(),
                   lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
-                  arg=KernelInfo(name="asm_fa_fwd_bf16_causal_2_8192_32_8_128",
+                  arg=KernelInfo(name=f"asm_fa_fwd_bf16_causal_{B}_8192_32_8_128",
                                  estimates=Estimates(ops=2*B*H*N*N*D, mem=(2*B*N*H*D+2*B*N*H_KV*D)*2+B*H*N*4)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in build_kernel(B, N, H, H_KV, D)))))
 
@@ -269,7 +269,7 @@ def custom_hk_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=N
 @functools.cache
 def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None, *, device:str, arch:str,
                       B:int, N:int, H:int, H_KV:int, D:int, has_sink:bool=True):
-  if arch == "gfx950" and not has_sink and (B, N, H, H_KV, D) == (2, 8192, 32, 8, 128):
+  if getenv("ASM_FA", 1) and arch == "gfx950" and not has_sink and B in (1, 2) and (N, H, H_KV, D) == (8192, 32, 8, 128):
     return custom_asm_fa_forward(o, l_vec, q, k, v, B=B, N=N, H=H, H_KV=H_KV, D=D)
   return custom_hk_fa_forward(o, l_vec, q, k, v, sinks, device=device, arch=arch,
                               B=B, N=N, H=H, H_KV=H_KV, D=D, has_sink=has_sink)
