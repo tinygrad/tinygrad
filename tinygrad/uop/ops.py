@@ -280,7 +280,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
 
   @functools.cached_property
-  def equivalent_op(self:UOp) -> Ops: return UOp._ins_ir_cache.get(self.arg, self.op) if self.op is Ops.INS else self.op
+  def or_raise_ins(self:UOp) -> Ops: return UOp._ins_ir_cache.get(self.arg, self.op) if self.op is Ops.INS else self.op
 
   @functools.cached_property
   def backward_slice(self:UOp) -> dict[UOp, None]:
@@ -1325,12 +1325,12 @@ class UPat(OpMixin):
   def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
                name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None, is_any:bool=False,
-               tag:Any=None):
+               tag:Any=None, match_ins:bool=False):
     assert op is None or isinstance(op, (Ops, tuple, set)), f"op must be Ops or tuple of Ops, not {op!r}"
     self.op: tuple[Ops, ...]|None = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
     self.match_dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else (tuple(dtype) if isinstance(dtype, set) else dtype)
     self.match_tag: tuple[Any, ...]|None = (tag,) if isinstance(tag, str) else (tuple(tag) if isinstance(tag, set) else tag)
-    self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
+    self.arg, self.name, self._in_src, self.custom_early_reject, self.match_ins = arg, name, src, custom_early_reject, match_ins
     self.src: Any = None
     self.is_any = is_any
     assert self.name != "ctx", "UPat can't be named ctx"
@@ -1410,7 +1410,7 @@ class UPat(OpMixin):
 
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
     if self.is_any: return flatten([x.match(uop, store.copy()) for x in self.src[0]])
-    if (self.op is not None and uop.op not in self.op) or \
+    if (self.op is not None and uop.op not in self.op and not (self.match_ins and uop.or_raise_ins in self.op)) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.match_dtype is not None and uop.dtype not in self.match_dtype) or \
        (self.arg is not None and self.arg != uop.arg) or \
