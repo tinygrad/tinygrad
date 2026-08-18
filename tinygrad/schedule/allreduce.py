@@ -58,8 +58,10 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   return UOp.usum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
+  input_red, buf, red = red, buf.flatten(), red.flatten()
   if output is None: output = UOp.invalids(red.shape, dtype=red.dtype, device=red.device)
   to = red.param_like(0)
   src = buf.param_like(1)
-  red = src.allreduce(*red.arg)
-  return output.after(to.after(to.store(handle_allreduce(src, red))).sink().call(output, buf.contiguous(), name="allreduce", precompile=True))
+  red = src.allreduce(*input_red.arg)
+  ar = handle_allreduce(src, red)
+  return output.after(to.after(to.store(ar)).sink().call(output, buf.contiguous(), name="allreduce", precompile=True)).reshape(input_red.shape)

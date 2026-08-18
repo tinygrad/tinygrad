@@ -68,6 +68,8 @@ pm_prepare_graph = PatternMatcher([
    lambda c: c.replace(src=c.src[0:1]+tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src[1:]))),
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
+  # resolve allreduce (must be bottom up)
+  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
   # resolve TUPLE+GETTUPLE
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
   # expand broadcasts first
