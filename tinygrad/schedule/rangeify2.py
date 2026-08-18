@@ -59,8 +59,7 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
 pm_prepare_graph = PatternMatcher([
   # CALL inputs need buffer identity (and to be flat)
   (UPat(Ops.CALL, name="c"),
-   lambda c: c.replace(src=c.src[0:1]+
-                       tuple(x.contiguous().flatten() if not x.has_buffer_identity(after_ok=True) else x.flatten() for x in c.src[1:]))),
+   lambda c: c.replace(src=c.src[0:1]+tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src[1:]))),
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
   # resolve allreduce (must be bottom up)
@@ -187,9 +186,6 @@ pm_range_migration = PatternMatcher([
   # pass index through elementwise
   (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
    lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
-  # move RESHAPEs through MSELECT/MSTACK
-  (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src])).reshape(m.shape)),
 ])
 
 # *** split into kernels ***
@@ -203,10 +199,14 @@ class SplitCtx:
 
 def _split_graph(ctx:SplitCtx, u:UOp) -> UOp|None:
   if u.tag is not None: return None
-  if len(u.shape) > 1: raise RuntimeError(f"rangeify needs to reduce to a single idx, not {u.shape} on {u.op}")
-  args = {AddrSpace.GLOBAL: ctx.call_args, AddrSpace.ALU: ctx.call_params}[u.addrspace]
-  args.append(u)
-  return u.param_like((1000 if u.addrspace == AddrSpace.ALU else 0) + (len(args)-1)).rtag()
+  if u.addrspace == AddrSpace.ALU:
+    ctx.call_params.append(u)
+    return u.param_like(1000+len(ctx.call_params)-1).rtag()
+  elif u.addrspace == AddrSpace.GLOBAL:
+    ctx.call_args.append(u.flatten())
+    return u.flatten().param_like(len(ctx.call_args)-1).rtag().reshape(u.shape)
+  else:
+    raise RuntimeError(f"invalid address space {u.addrspace}")
 
 def _renumber_range(ctx:SplitCtx, u:UOp) -> UOp|None:
   if u.tag is not None: return None
@@ -236,7 +236,13 @@ debug_tag_factor = PatternMatcher([
 def remove_stage(ctx, x:UOp) -> UOp:
   buf = UOp.new_buffer(x.arg.device, x.max_numel(), x.dtype, num=next(ctx))
   return buf.after(buf.reshape(x.shape).index(*x.src[1:]).store(x.src[0]).end(*x.src[1:])).reshape(x.shape)
-pm_remove_stage = PatternMatcher([(UPat(Ops.STAGE, name="x"), remove_stage)])
+
+pm_remove_stage = PatternMatcher([
+  (UPat(Ops.STAGE, name="x"), remove_stage),
+  # move RESHAPEs through MSELECT/MSTACK
+  (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
+   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src])).reshape(m.shape)),
+])
 
 @rewrite_group(new_ctx=False)
 def get_kernel_graph(sink:UOp) -> UOp:
