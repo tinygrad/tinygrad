@@ -172,7 +172,15 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
 
     # delta_vec = (do * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
     delta_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
-    delta_vec, dq = Tensor.custom_kernel(delta_vec, dq, attn, do, fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
+    if use_asm_bwd and getenv("ASM_FA_BWD_PRE", 1):
+      # AITER's main kernel atomically accumulates dQ, so its workspace must be zero before launch.
+      dq = dq.zeros_like().contiguous()
+      delta_vec = Tensor.custom_kernel(attn, do, delta_vec,
+        fxn=functools.partial(custom_asm_fa_backward_pre, B=B_local, N=N, H=H_local, D=D))[2]
+    else:
+      delta_vec, dq = Tensor.custom_kernel(delta_vec, dq, attn, do,
+        fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch,
+                              B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
 
     if use_asm_bwd:
       dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, xq, xk, xv, do, l_vec, delta_vec,
@@ -260,6 +268,21 @@ def custom_asm_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, *, B:int, N:int
                   arg=KernelInfo(name=f"asm_fa_fwd_bf16_causal_{B}_8192_32_8_128",
                                  estimates=Estimates(ops=2*B*H*N*N*D, mem=(2*B*N*H*D+2*B*N*H_KV*D)*2+B*H*N*4)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in build_kernel(B, N, H, H_KV, D)))))
+
+@functools.cache
+def custom_asm_fa_backward_pre(o:UOp, do:UOp, delta:UOp, *, B:int, N:int, H:int, D:int):
+  from extra.thunder.amd.asm_fa_bwd_pre import build_kernel
+  assert (B, N, H, D) == (2, 8192, 32, 128)
+  threads = UOp.special(256, "lidx0")
+  blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(N // 128, "gidx0"), UOp.special(H, "gidx1"), UOp.special(B, "gidx2")
+  lds = UOp.placeholder((40960,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  zero = UOp.const(0)
+  delta_write = delta.flatten().index(zero).store(delta.flatten().index(zero).load())
+  sink = UOp.sink(o.flatten().index(zero).load(), do.flatten().index(zero).load(), delta_write,
+                  lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
+                  arg=KernelInfo(name="asm_fa_bwd_odo_bf16_2_8192_32_128",
+                                 estimates=Estimates(ops=2*B*H*N*D, mem=(2*B*N*H*D)*2+B*H*N*4)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in build_kernel(B, N, H, D)))))
 
 @functools.cache
 def custom_asm_fa_backward(dq_acc:UOp, dk_expanded:UOp, dv_expanded:UOp, q:UOp, k:UOp, v:UOp, do:UOp, lse:UOp, delta:UOp,

@@ -40,12 +40,22 @@ def run_backward(out:Tensor, lse:Tensor, q:Tensor, k:Tensor, v:Tensor, dout:Tens
   return dq, dk, dv
 
 
-def run_asm_backward(out:Tensor, lse:Tensor, q:Tensor, k:Tensor, v:Tensor, dout:Tensor) -> tuple[Tensor, Tensor, Tensor]:
-  arch = Device[Device.DEFAULT].renderer.target.arch
+def run_asm_pre(out:Tensor, dout:Tensor) -> Tensor:
   delta = Tensor.invalids(B, H, 1, N, dtype=dtypes.float32)
-  dq_pre = Tensor.invalids(B, H, N, D, dtype=dtypes.bfloat16)
-  pre = functools.partial(fa.custom_fa_backward_pre, device=Device.DEFAULT, arch=arch, B=B, N=N, H=H, H_KV=H_KV, D=D)
-  delta, dq_pre = Tensor.custom_kernel(delta, dq_pre, out, dout, fxn=pre)[:2]
+  pre = functools.partial(fa.custom_asm_fa_backward_pre, B=B, N=N, H=H, D=D)
+  delta = Tensor.custom_kernel(out, dout, delta, fxn=pre)[2].realize()
+  return delta
+
+
+def run_asm_backward(out:Tensor, lse:Tensor, q:Tensor, k:Tensor, v:Tensor, dout:Tensor, *, aiter_pre:bool=False) -> tuple[Tensor, Tensor, Tensor]:
+  if aiter_pre:
+    delta = run_asm_pre(out, dout)
+  else:
+    arch = Device[Device.DEFAULT].renderer.target.arch
+    delta = Tensor.invalids(B, H, 1, N, dtype=dtypes.float32)
+    dq_pre = Tensor.invalids(B, H, N, D, dtype=dtypes.bfloat16)
+    pre = functools.partial(fa.custom_fa_backward_pre, device=Device.DEFAULT, arch=arch, B=B, N=N, H=H, H_KV=H_KV, D=D)
+    delta, dq_pre = Tensor.custom_kernel(delta, dq_pre, out, dout, fxn=pre)[:2]
 
   dq_acc = Tensor.zeros(B, H, N, D, dtype=dtypes.bfloat16)
   dk_expanded = Tensor.invalids(B, N, H, D, dtype=dtypes.bfloat16)
@@ -69,6 +79,23 @@ def relative_l2(a:Tensor, b:Tensor) -> float:
 
 
 class TestAsmFANumerics(unittest.TestCase):
+  def test_aiter_pre_matches_hk(self):
+    if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("translated FA requires gfx950")
+    Tensor.manual_seed(42)
+    with Context(DEBUG=0):
+      out = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      dout = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      Tensor.realize(out, dout)
+
+    arch = Device[Device.DEFAULT].renderer.target.arch
+    hk_delta = Tensor.invalids(B, H, 1, N, dtype=dtypes.float32)
+    dq_zero = Tensor.invalids(B, H, N, D, dtype=dtypes.bfloat16)
+    hk_pre = functools.partial(fa.custom_fa_backward_pre, device=Device.DEFAULT, arch=arch, B=B, N=N, H=H, H_KV=H_KV, D=D)
+    hk_delta = Tensor.custom_kernel(hk_delta, dq_zero, out, dout, fxn=hk_pre)[0].realize()
+    asm_delta = run_asm_pre(out, dout)
+
+    self.assertLess(relative_l2(asm_delta, hk_delta), 1e-5)
+
   def test_localizes_forward_mismatch(self):
     if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("translated FA requires gfx950")
 
@@ -114,6 +141,24 @@ class TestAsmFANumerics(unittest.TestCase):
     asm_grads = run_asm_backward(out, lse, q, k, v, dout)
     for name, got, ref in zip(("dq", "dk", "dv"), asm_grads, hk_grads):
       self.assertLess(relative_l2(got, ref), 1e-2, name)
+
+  def test_aiter_pre_downstream_grads(self):
+    if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("translated FA requires gfx950")
+    Tensor.manual_seed(42)
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      dout = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      Tensor.realize(q, k, v, dout)
+    out, lse = run_forward(asm_forward, q, k, v)
+    hk_pre_grads = run_asm_backward(out, lse, q, k, v, dout)
+    aiter_pre_grads = run_asm_backward(out, lse, q, k, v, dout, aiter_pre=True)
+    errors = {name: relative_l2(got, ref) for name, got, ref in zip(("dq", "dk", "dv"), aiter_pre_grads, hk_pre_grads)}
+    # The AITER main kernel atomically accumulates dQ and varies by ~2e-3 even between identical runs.
+    self.assertLess(errors["dq"], 3e-3)
+    self.assertLess(errors["dk"], 3e-5)
+    self.assertEqual(errors["dv"], 0.0)
 
 
 if __name__ == "__main__": unittest.main()
