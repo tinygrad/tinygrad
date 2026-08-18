@@ -34,7 +34,9 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   buf = buf.pad_to(buf.max_shape)
   # SDMA reads can outlive the compute allocation that produced them, so reduce-scatter needs stable storage.
   # A precompiled allreduce's PARAM is already backed by the contiguous CALL argument below.
-  if not input_staged:
+  # An identity-preserving view of an external PARAM is already stable; _allreduce_chunk retains its producer dependency.
+  stable_param = buf.has_buffer_identity(after_ok=True) and buf.buf_uop.base.op is Ops.PARAM
+  if not input_staged and not stable_param:
     staged = buf.empty_like()
     buf = staged.after(staged.store(buf))
 
