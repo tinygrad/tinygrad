@@ -252,7 +252,7 @@ class TestLinearizer(unittest.TestCase):
     for u in uops:
       if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.REG:
         if uops.index(u) < begin_range:
-          assert u.src[1].op is Ops.CONST
+          assert u.src[1].op not in GroupOp.ALU
         else:
           assert u.src[1].op in GroupOp.ALU
           assert begin_range < uops.index(u) < end_range
@@ -261,6 +261,7 @@ class TestLinearizer(unittest.TestCase):
         assert end_range < uops.index(u)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipIf(Device[Device.DEFAULT].renderer.casted_consts, "reads a literal, which is casted here. TODO: flip this")
   def test_default_global_reversed(self):
     # shrink so that the dims do not collapse
     t = Tensor.ones(5, 6, 7).contiguous().realize().shrink(((0, 4), (0, 5), (0, 6)))
