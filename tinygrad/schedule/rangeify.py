@@ -128,8 +128,22 @@ def forward_assembled_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
   """Retarget a complete set of disjoint slice writes to an already allocated output buffer."""
   while target.op is Ops.RESHAPE: target = target.src[0]
   while src.op in {Ops.RESHAPE, Ops.CONTIGUOUS, Ops.CAST}: src = src.src[0]
-  if (target is not output or src.op is not Ops.AFTER or src.src[0].base.op not in {Ops.BUFFER, Ops.PARAM}
-      or output.dtype != src.dtype or output.numel() != src.numel() or output.device != src.device): return None
+  if target is not output or output.dtype != src.dtype or output.numel() != src.numel() or output.device != src.device: return None
+  # A replicated MSTACK often consists of COPYs of one freshly produced buffer. Produce directly into shard zero,
+  # then transfer from that stable shard into the other output buffers. This removes both the producer temporary and
+  # the final identity assembly kernels without duplicating the producer computation.
+  if src.op is Ops.MSTACK and isinstance(output.device, tuple) and len(src.src) == len(output.device) \
+     and all(s.op is Ops.COPY and s.shape == output.shape and s.dtype == output.dtype for s in src.src):
+    origins = [s.src[0] for s in src.src]
+    if all(s is origins[0] for s in origins) and origins[0].op is Ops.AFTER:
+      origin, base = origins[0], origins[0].src[0].base
+      if all(d.op is Ops.STORE and d.src[0].base is base and base not in d.src[1].toposort(enter_calls=False) for d in origin.src[1:]):
+        targets = [UOp(Ops.SLICE, output.dtype, (output.mselect(i).buf_uop, UOp.const(0, dtypes.weakint)), output.numel(), tag=("allreduce",))
+                   for i in range(len(src.src))]
+        produced = targets[0].after(*(d.substitute({base:targets[0]}) for d in origin.src[1:]))
+        states = [produced] + [t.after(t.store(produced.copy_to_device(s.device))) for t,s in zip(targets[1:], src.src[1:])]
+        return output.after(*states)
+  if src.op is not Ops.AFTER or src.src[0].base.op not in {Ops.BUFFER, Ops.PARAM}: return None
   if not any(s.op is Ops.AFTER and s.src[0].op is Ops.SLICE and s.src[0].tag == ("allreduce",) for s in src.src[1:]): return None
   return output.after(*(s.substitute({src.src[0].base:output}) for s in src.src[1:]))
 

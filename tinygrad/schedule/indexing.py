@@ -14,6 +14,7 @@ class IndexingContext:
   range_map: dict[UOp, tuple[tuple[UOp, ...], tuple[UOp, ...]]] = field(default_factory=dict)
   # loads reachable from each UOp memoized across matches
   buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
+  store_srcs: tuple[UOp, ...] = ()
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
@@ -33,16 +34,36 @@ def realize_srcs(ctx:IndexingContext, rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx.realize_map[s] = None
 
+def _pointwise_self_store(ctx:IndexingContext, dest:UOp, src:UOp) -> bool:
+  """True when src can be evaluated directly into dest without clobbering a value that is still needed."""
+  base = dest.base
+  reaches_base: dict[UOp, bool] = {}
+  unsafe = {Ops.REDUCE, Ops.ALLREDUCE, Ops.COPY, Ops.PERMUTE, Ops.FLIP, Ops.EXPAND, Ops.PAD, Ops.SHRINK,
+            Ops.MSTACK, Ops.MSELECT, Ops.CALL, Ops.FUNCTION, Ops.BITCAST}
+  for x in src.toposort(gate=lambda x: x.op is not Ops.CONTIGUOUS, enter_calls=False):
+    reaches_base[x] = x is base or any(reaches_base.get(s, False) for s in x.src)
+    if reaches_base[x] and x.op in unsafe: return False
+  # Another assignment reading this pre-store value creates a cross-assignment WAR hazard. Each RHS must materialize
+  # before either destination is overwritten (TestAssign.test_assign_double_diamond_reduce).
+  return sum(base in x.toposort(gate=lambda x: x.op is not Ops.CONTIGUOUS, enter_calls=False) for x in ctx.store_srcs) == 1
+
 def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
   # don't realize SLICE when it's the direct source of STORE+AFTER — the target buffer is the output
   if src.op is Ops.SLICE and src in ctx.realize_map \
      and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
     del ctx.realize_map[src]
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
-  if dest.base in src.toposort(enter_calls=False): ctx.realize_map[src] = None
+  if dest.base in src.toposort(enter_calls=False) and not _pointwise_self_store(ctx, dest, src): ctx.realize_map[src] = None
 
 def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
-  for s in c.src[1:]:
+  # A write-only custom output can be forwarded into the buffer that ultimately stores it. Readable arguments still
+  # need their own materialization: custom kernels cannot consume arbitrary lazy expressions.
+  sink = c.src[0].src[0] if c.src[0].op is Ops.PROGRAM else c.src[0]
+  stores, loads = [x for x in sink.toposort() if x.op is Ops.STORE], [x for x in sink.toposort() if x.op is Ops.LOAD]
+  outs = {p.arg.slot for x in stores for p in x.src[0].toposort() if p.op is Ops.PARAM}
+  ins = {p.arg.slot for x in loads for p in x.src[0].toposort() if p.op is Ops.PARAM}
+  for slot,s in enumerate(c.src[1:]):
+    if slot in outs-ins: continue
     while s.op is Ops.RESHAPE: s = s.src[0]
     if s.op not in ALWAYS_CONTIGUOUS:
       ctx.realize_map[s] = None
@@ -192,6 +213,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   if debug: print("**************************")
   rctx = IndexingContext()
+  rctx.store_srcs = tuple(x.src[1] for x in tsink.toposort(gate_kernel_sink) if x.op is Ops.STORE)
 
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx, name="get realize")
