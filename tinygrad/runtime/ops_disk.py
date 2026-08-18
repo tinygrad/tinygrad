@@ -49,8 +49,7 @@ class DiskDevice(Compiled):
     DiskDevice._tried_io_uring_init = True
 
     if sys.platform == 'linux' and not hasattr(sys, "getandroidapilevel"):
-      p = io_uring.struct_io_uring_params(flags=io_uring.IORING_SETUP_SQPOLL, sq_thread_idle=0xffffffff)
-      fd = libc.syscall(io_uring.NR_io_uring_setup, 4096, ctypes.byref(p))
+      fd = libc.syscall(io_uring.NR_io_uring_setup, 4096, ctypes.byref(p:=io_uring.struct_io_uring_params()))
       if fd < 0: return
 
       sq_ptr = libc.mmap(0, p.sq_off.array + p.sq_entries * 4, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_POPULATE, fd, 0)
@@ -68,7 +67,6 @@ class DiskDevice(Compiled):
         kring_mask=u32ptr(sq_ptr+p.cq_off.ring_mask), cqes=ctypes.cast(cq_ptr+p.cq_off.cqes, ctypes.POINTER(io_uring.struct_io_uring_cqe)))
 
       DiskDevice.io_uring = io_uring.struct_io_uring(ring_fd=fd, sq=sqdesc, cq=cqdesc) # type: ignore
-      libc.syscall(io_uring.NR_io_uring_enter, fd, 0, 0, io_uring.IORING_ENTER_SQ_WAKEUP)
 
 class DiskBuffer:
   def __init__(self, device:DiskDevice, size:int, offset=0):
@@ -126,6 +124,7 @@ class DiskAllocator(Allocator):
         # Send sqe
         DiskDevice.io_uring.sq.array[sqe_index] = sqe_index
         DiskDevice.io_uring.sq.ktail[0] = tail + 1
+        libc.syscall(io_uring.NR_io_uring_enter, DiskDevice.io_uring.ring_fd, 1, 1, io_uring.IORING_ENTER_GETEVENTS)
 
         reqs.append((copy_batch, copied_in, minor_offset, real_copy_size:=min(sqe.len - minor_offset, size - copied_in)))
         next_read_offset += sqe.len
