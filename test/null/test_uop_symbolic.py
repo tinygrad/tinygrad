@@ -1490,5 +1490,16 @@ class TestFuzzFailure(unittest.TestCase):
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     assert num==rn, f"{num} != {rn}"
 
+class TestCastPlacement(unittest.TestCase):
+  def test_cast_is_not_left_on_where(self):
+    # an important where canonicalization, cast belongs on the branches of a WHERE
+    c = Variable("c", 0, 1, dtypes.int).ne(0)
+    a, b = Variable("a", 0, 100, dtypes.int), Variable("b", 0, 100, dtypes.int)
+    for e in [c.where(a, b).cast(dtypes.float), c.where(a, b).cast(dtypes.long),
+              c.where(a.const_like(3), a.const_like(5)).cast(dtypes.float)]:
+      out = graph_rewrite(e, sym)
+      self.assertEqual([u.op for u in out.toposort() if u.op is Ops.CAST and u.src[0].op is Ops.WHERE], [], e.render())
+
+
 if __name__ == '__main__':
   unittest.main()

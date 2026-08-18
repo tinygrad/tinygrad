@@ -7,6 +7,35 @@ def default_dtype(u:UOp):
   if u.dtype is dtypes.weakfloat: return dtypes.default_float
   return dtypes.long if u.overflows(dtypes.int32) else dtypes.int
 
+def commit_weak(s:UOp, dt:DType) -> UOp:
+  # a CONST commits directly at dt (the value stays mathematical, emission truncates), a non-const src takes the cast
+  return UOp.const(s.val, dt) if s.op is Ops.CONST else s.cast(dt)
+
+def commit_weak_srcs(u:UOp) -> UOp|None:
+  if not any(s.dtype in dtypes.weaks for s in u.src): return None
+  if (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
+  # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
+  return u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src))
+
+# runs in index lowering and in the decomps: a rule that mints a weak const commits it in the same rewrite, so none reaches the renderer
+pm_commit_weak = PatternMatcher([
+  (UPat(GroupOp.Broadcastable, name="u"), commit_weak_srcs),
+  # demand from the destination: a STORE's weak value commits at the destination's dtype
+  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
+   lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.src[0].dtype), *u.src[2:]))),
+])
+
+# a concrete CAST over a weak node states the width the value will live at. that width is a floor, never a narrowing
+def cast_weak_srcs(c:UOp, u:UOp) -> UOp|None:
+  if c.dtype in dtypes.weaks or weak_dtype(c.dtype) is not u.dtype: return None
+  dt = least_upper_dtype(c.dtype, default_dtype(u))
+  return u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src)).cast(c.dtype)
+
+pm_cast_weak = PatternMatcher([
+  (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.ALU, dtype=dtypes.weaks, name="u"),)), cast_weak_srcs),
+  (UPat(Ops.CAST, name="c", src=(UPat(Ops.CONST, dtype=dtypes.weaks, name="u"),)), lambda c,u: commit_weak(u, c.dtype)),
+])
+
 def lower_weak_node(u:UOp) -> UOp|None:
   start, src = (1 if u.op is Ops.WHERE else 0), tuple(s.src[0] if s.op is Ops.CAST and s.dtype in dtypes.weaks else s for s in u.src)
   if src == u.src or any(s.dtype in dtypes.weaks for s in src[start:]): return None
@@ -38,35 +67,6 @@ def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
   # a comparison demands a common operand width: lower it whole so the Binary rule unifies its operands
   ret = lower(u) if u.op in GroupOp.Comparison else u.replace(src=tuple(lower(s) if s.dtype in dtypes.weaks else s for s in u.src))
   return None if ret is u else ret
-
-def commit_weak(s:UOp, dt:DType) -> UOp:
-  # a CONST commits directly at dt (the value stays mathematical, emission truncates), a non-const src takes the cast
-  return UOp.const(s.val, dt) if s.op is Ops.CONST else s.cast(dt)
-
-def commit_weak_srcs(u:UOp) -> UOp|None:
-  if not any(s.dtype in dtypes.weaks for s in u.src): return None
-  if (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
-  # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
-  return u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src))
-
-# runs in index lowering and in the decomps: a rule that mints a weak const commits it in the same rewrite, so none reaches the renderer
-pm_commit_weak = PatternMatcher([
-  (UPat(GroupOp.Broadcastable, name="u"), commit_weak_srcs),
-  # demand from the destination: a STORE's weak value commits at the destination's dtype
-  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
-   lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.src[0].dtype), *u.src[2:]))),
-])
-
-# a concrete CAST over a weak node states the width the value will live at. that width is a floor, never a narrowing
-def cast_weak_srcs(c:UOp, u:UOp) -> UOp|None:
-  if c.dtype in dtypes.weaks or weak_dtype(c.dtype) is not u.dtype: return None
-  dt = least_upper_dtype(c.dtype, default_dtype(u))
-  return u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src)).cast(c.dtype)
-
-pm_cast_weak = PatternMatcher([
-  (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.ALU, dtype=dtypes.weaks, name="u"),)), cast_weak_srcs),
-  (UPat(Ops.CAST, name="c", src=(UPat(Ops.CONST, dtype=dtypes.weaks, name="u"),)), lambda c,u: commit_weak(u, c.dtype)),
-])
 
 pm_lower_index_dtype = pm_commit_weak+pm_cast_weak+PatternMatcher([
   # a CAST between two concrete dtypes over a CONST is a value conversion: evaluate it once, at the width the CAST states
