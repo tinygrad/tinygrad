@@ -312,7 +312,6 @@ class Compiler:
   def disassemble(self, lib:bytes): pass
   def server(self, cmd:str, arch:str, *args) -> subprocess.Popen:
     argv = f"{cmd} {pathlib.Path(__file__).parent}/runtime/support/compileserver.py {type(self).__module__}:{type(self).__name__} {arch}"
-    print(f"starting compileserver with `{argv}`")
     return subprocess.Popen(argv.split() + [str(a) for a in args], stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
   def compile_server(self, src:str, proc:subprocess.Popen) -> bytes:
     unwrap(proc.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
