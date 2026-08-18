@@ -1,35 +1,27 @@
 import unittest
 from tinygrad import Tensor, UOp, dtypes
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import Ops
-from tinygrad.schedule.allreduce import create_allreduce_function, handle_allreduce
+from tinygrad.uop.ops import Ops, KernelInfo
+from tinygrad.schedule.allreduce import create_allreduce_function, handle_allreduce, _is_stable_custom_output
 
 class TestRingAllReduce(unittest.TestCase):
-  @staticmethod
-  def _has_staging_store(ret:UOp, src:UOp) -> bool:
-    return any(x.op is Ops.STORE and x.src[1] is src and x.src[0].op is Ops.BUFFER for x in ret.toposort())
-
-  def test_external_param_skips_staging(self):
+  def test_write_only_custom_output_is_stable(self):
     devices = tuple(f"NULL:{i}" for i in range(4))
-    buf = UOp.param(0, dtypes.float, (4096,), device=devices)
-    with Context(ALL2ALL=2): ret = handle_allreduce(buf, buf.allreduce(Ops.ADD, devices))
-    assert ret is not None
-    self.assertFalse(self._has_staging_store(ret, buf))
-    self.assertTrue(any(x.op is Ops.AFTER and x.src[0].op is Ops.SLICE and buf in x.src[1:] for x in ret.toposort()))
+    out, inp = (UOp.param(i, dtypes.float, (4096,), device=devices) for i in range(2))
+    p0, p1, idx = UOp.param(0, dtypes.float, (4096,)), UOp.param(1, dtypes.float, (4096,)), UOp.const(0)
+    sink = UOp.sink(p0.index(idx).store(UOp.const(0, dtypes.float)), p1.index(idx).load(), arg=KernelInfo("opaque_write"))
+    produced = out.after(UOp(Ops.PROGRAM, src=(sink,)).call(out, inp))
+    self.assertTrue(_is_stable_custom_output(produced))
+    with Context(ALL2ALL=2): reduced = handle_allreduce(produced, produced.allreduce(Ops.ADD, devices))
+    assert reduced is not None
+    self.assertFalse(any(x.op is Ops.STORE and x.src[0].base.op is Ops.BUFFER for x in reduced.toposort()))
 
-  def test_computed_param_still_stages(self):
-    devices = tuple(f"NULL:{i}" for i in range(4))
-    buf = UOp.param(0, dtypes.float, (4096,), device=devices) + 1
-    with Context(ALL2ALL=2): ret = handle_allreduce(buf, buf.allreduce(Ops.ADD, devices))
-    assert ret is not None
-    self.assertTrue(self._has_staging_store(ret, buf))
-
-  def test_internal_buffer_still_stages(self):
-    devices = tuple(f"NULL:{i}" for i in range(4))
-    buf = UOp.new_buffer(devices, 4096, dtypes.float)
-    with Context(ALL2ALL=2): ret = handle_allreduce(buf, buf.allreduce(Ops.ADD, devices))
-    assert ret is not None
-    self.assertTrue(self._has_staging_store(ret, buf))
+    rw_sink = UOp.sink(p0.index(idx).store(p0.index(idx).load()), p1.index(idx).load(), arg=KernelInfo("opaque_readwrite"))
+    readwrite = out.after(UOp(Ops.PROGRAM, src=(rw_sink,)).call(out, inp))
+    self.assertFalse(_is_stable_custom_output(readwrite))
+    with Context(ALL2ALL=2): reduced = handle_allreduce(readwrite, readwrite.allreduce(Ops.ADD, devices))
+    assert reduced is not None
+    self.assertTrue(any(x.op is Ops.STORE and x.src[0].base.op is Ops.BUFFER for x in reduced.toposort()))
 
   def test_precompiled_input_staged_once(self):
     devices = tuple(f"NULL:{i}" for i in range(4))
@@ -63,8 +55,8 @@ class TestRingAllReduce(unittest.TestCase):
       copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       self.assertEqual(len(copies), 24)
-      # realized external source shards feed SDMA directly without a full-size staging copy
-      self.assertEqual(len(sinks), 22)
+      # source shards are staged once, then their physical slices feed SDMA directly
+      self.assertEqual(len(sinks), 23)
 
   def test_correct_all2all_direct_slices(self):
     with Context(ALL2ALL=2):

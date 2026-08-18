@@ -17,6 +17,22 @@ def _allreduce_chunk(buf:UOp, start:int, end:int, input_staged:bool) -> UOp:
   if not input_staged: chunks = [chunk.after(buf) for chunk in chunks]
   return UOp.mstack(*chunks)
 
+def _is_stable_custom_output(buf:UOp) -> bool:
+  """A write-only custom output already has stable call-argument storage and an explicit producer dependency."""
+  state = buf
+  while state.op in {Ops.RESHAPE, Ops.PERMUTE, Ops.EXPAND, Ops.PAD, Ops.SHRINK, Ops.FLIP, Ops.CAST, Ops.CONTIGUOUS}:
+    state = state.src[0]
+  if state.op is not Ops.AFTER: return False
+  base = state.src[0].buf_uop
+  calls = [x for x in state.src[1:] if x.op is Ops.CALL and x.src[0].op is Ops.PROGRAM]
+  if len(calls) != 1: return False
+  call, sink = calls[0], calls[0].src[0].src[0]
+  stores, loads = [x for x in sink.toposort() if x.op is Ops.STORE], [x for x in sink.toposort() if x.op is Ops.LOAD]
+  outs = {p.arg.slot for x in stores for p in x.src[0].toposort() if p.op is Ops.PARAM}
+  ins = {p.arg.slot for x in loads for p in x.src[0].toposort() if p.op is Ops.PARAM}
+  slots = [slot for slot in outs-ins if slot+1 < len(call.src) and call.src[slot+1].buf_uop is base]
+  return len(slots) == 1
+
 def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=False) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
   ndev, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
@@ -34,9 +50,8 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   buf = buf.pad_to(buf.max_shape)
   # SDMA reads can outlive the compute allocation that produced them, so reduce-scatter needs stable storage.
   # A precompiled allreduce's PARAM is already backed by the contiguous CALL argument below.
-  # An identity-preserving view of an external PARAM is already stable; _allreduce_chunk retains its producer dependency.
-  stable_param = buf.has_buffer_identity(after_ok=True) and buf.buf_uop.base.op is Ops.PARAM
-  if not input_staged and not stable_param:
+  stable_custom_output = _is_stable_custom_output(buf)
+  if not input_staged and not stable_custom_output:
     staged = buf.empty_like()
     buf = staged.after(staged.store(buf))
 
