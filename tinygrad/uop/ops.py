@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final, Iterator
+from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final, Iterator, ClassVar
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections, struct
 from dataclasses import dataclass, replace
 from enum import Enum, auto
@@ -241,6 +241,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
   tag:Any = None
+  # preserves Op metadata from being destroyed past isel for use in late codegen analysis
+  # caches ins opc -> equivalent IR operation
+  _ins_ir_cache: ClassVar[dict[any, Ops]] = {}
   def __del__(self):
     # NOTE: getattr because this object may be partially constructed (e.g. if __init__ raised, like the BEAM timeout SIGALRM)
     if Ops is not None and getattr(self, 'op', None) is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
@@ -275,6 +278,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def tagstr(self): return f", tag={self.tag}" if self.tag is not None else ""
 
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
+
+  @functools.cached_property
+  def equivalent_op(self:UOp) -> Ops: return UOp._ins_ir_cache.get(self.arg, self.op) if self.op is Ops.INS else self.op
 
   @functools.cached_property
   def backward_slice(self:UOp) -> dict[UOp, None]:
@@ -602,7 +608,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def without_after(self) -> UOp: return self.src[0] if self.op is Ops.AFTER else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
-  def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), arg, kwargs.pop("tag", self.tag))
+  def ins(self, arg, **kwargs):
+    UOp._ins_ir_cache[arg] = self.op
+    return UOp(Ops.INS, kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), arg, kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
