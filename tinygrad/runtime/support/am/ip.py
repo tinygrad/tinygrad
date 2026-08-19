@@ -61,9 +61,8 @@ class AM_GMC(AM_IP):
 
     self.paddr_base = self.xgmi_phys_id * self.xgmi_seg_sz
 
-    # compute fb_end like the kernel does (vram_start + vram_size), MMMC_VM_FB_LOCATION_TOP is not reliable on all SKUs
     self.fb_base = (self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
-    self.fb_end = self.fb_base + self.adev.vram_size
+    self.fb_end = (self.adev.regMMMC_VM_FB_LOCATION_TOP.read() & 0xFFFFFF) << 24
 
     # Memory controller aperture
     self.mc_base = self.fb_base + self.paddr_base
@@ -319,8 +318,8 @@ class AM_GFX(AM_IP):
 
     self._enable_mec()
 
-    # Set 1 partition (skip on MP0 13.0.15 (MI350P): the XCP transition is firmware-owned there)
-    if self.xccs > 1 and self.adev.ip_ver[am.MP0_HWIP] != (13,0,15): self.adev.psp._spatial_partition_cmd(1)
+    # Set 1 partition
+    if self.xccs > 1: self.adev.psp._spatial_partition_cmd(1)
 
   def fini_hw(self): self._dequeue_hqds()
 
@@ -336,9 +335,7 @@ class AM_GFX(AM_IP):
     self._enable_mec()
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool) -> int:
-    # aqua (NBIO 7.9) uses DOORBELL_LAYOUT1 (see aqua_vanjaram_doorbell_index_init): its mec ring0 starts at 8, not 3
-    pipe, queue, doorbell = idx // 4, idx % 4, (am.AMDGPU_DOORBELL_LAYOUT1_MEC_RING_START if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}
-      else am.AMDGPU_NAVI10_DOORBELL_MEC_RING0)
+    pipe, queue, doorbell = idx // 4, idx % 4, am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
 
     for xcc in range(self.xccs if aql else 1):
       self._grbm_select(me=1, pipe=pipe, queue=queue, inst=xcc)
@@ -575,14 +572,11 @@ class AM_SDMA(AM_IP):
     self.adev.wreg_pair(f"{reg}_RB_BASE", "", "_HI", ring_addr >> 8, inst=inst)
     self.adev.wreg_pair(f"{reg}_RB_RPTR_ADDR", "_LO", "_HI", rptr_addr, inst=inst)
     self.adev.wreg_pair(f"{reg}_RB_WPTR_POLL_ADDR", "_LO", "_HI", wptr_addr, inst=inst)
-    # aqua (NBIO 7.9): kernel leaves SDMA doorbell regs 0 and submits via the WPTR register
-    if self.adev.ip_ver[am.NBIO_HWIP] not in {(7,9,0), (7,9,1)}:
-      self.adev.reg(f"{reg}_DOORBELL_OFFSET").update(offset=doorbell * 2, inst=inst)
-      self.adev.reg(f"{reg}_DOORBELL").update(enable=1, inst=inst)
+    self.adev.reg(f"{reg}_DOORBELL_OFFSET").update(offset=doorbell * 2, inst=inst)
+    self.adev.reg(f"{reg}_DOORBELL").update(enable=1, inst=inst)
     self.adev.reg(f"{reg}_MINOR_PTR_UPDATE").write(0x0, inst=inst)
     self.adev.reg(f"{reg}_RB_CNTL").write(**({f'{self.sdma_name.lower()}_wptr_poll_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP][:2]!=(4,4) else {}),
-      rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4, rb_enable=1,
-      rb_priv=1 if self.adev.ip_ver[am.NBIO_HWIP] not in {(7,9,0), (7,9,1)} else 0, rb_size=(ring_size//4).bit_length()-1, inst=inst)
+      rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4, rb_enable=1, rb_priv=1, rb_size=(ring_size//4).bit_length()-1, inst=inst)
     self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=1, inst=inst)
     return doorbell
 
