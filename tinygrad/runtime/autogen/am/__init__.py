@@ -57,8 +57,13 @@ def __getattr__(nm):
                                     "smu14_driver_if_v14_0"]]+[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, srcs=am_src)
     # firmware hashes
     case "fw":
-      def genfw(name, files, **kwargs): return "\n".join(["hashes = {"] + [f"  {p.name!r}: {hashlib.sha256(p.read_bytes()).hexdigest()!r},"
-                                                                           for f in files if (p:=pathlib.Path(f)).is_file()] + ["}"])
+      def genfw(name, files, **kwargs):
+        from tinygrad.helpers import fetch
+        # psp_13_0_15_sos.bin is newer than the pinned linux-firmware ref; hash the blob from the commit that added it
+        extra = fetch("https://gitlab.com/kernel-firmware/linux-firmware/-/raw/23e6cdf0409383e29d681c8c14cd6ffd0f394f02/amdgpu/psp_13_0_15_sos.bin")
+        return "\n".join(["hashes = {"] + [f"  {p.name!r}: {hashlib.sha256(p.read_bytes()).hexdigest()!r},"
+                                             for f in files if (p:=pathlib.Path(f)).is_file()] +
+                                         [f"  {extra.name!r}: {hashlib.sha256(extra.read_bytes()).hexdigest()!r},"] + ["}"])
       return load("am/fw", ["{}/amdgpu/psp_*_sos.bin", "{}/amdgpu/smu_*.bin", "{}/amdgpu/sdma_*.bin"] +
                            [f"{{}}/amdgpu/gc_*_{x}.bin" for x in ["pfp", "me", "mec", "imu", "rlc"]], srcs=fw_src, gen=genfw)
     case "navi_offsets": return load("am/navi_offsets", [f"{AMD}/include/sienna_cichlid_ip_offset.h"], srcs=am_src)
