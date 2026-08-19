@@ -157,19 +157,10 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
   return x.replace(tag=(vr,))
 
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
-# TODO: batch param loading? ex. s_load_b128
-# NOTE: codegen doesnt know to place param s_loads early, delay lowering like load/store
-# - dont overwrite PARAM?, how to know when its been processed?
 def abi(ctx, x:UOp) -> UOp|None:
-  if x.op is Ops.SPECIAL:
-    dim = int(x.arg[-1])
-    if x.arg[0] == 'g': return vmov(x.replace(tag=(WGIDS[dim],), dtype=dtypes.uint32)).rtag()
-    else: # granulated work item ids, packed into 3 10 bit fields in v0, extract with bfe
-      return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(x.replace(tag=WIIDS), const(10 * dim), const(10)))
-  offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:ctx.func_args.index(x)])
-  addr = (kernarg_ptr, const(offs))
-  if x.addrspace is AddrSpace.ALU: return vmov(x.replace(src=addr, tag=ctx.vreg(GP_SGPRS)))
-  return x.replace(dtype=dtypes.ulong, src=addr, tag=ctx.vreg(GP_SGPRS, width=2, alignment=2),)
+  offs = const(sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:ctx.func_args.index(x)]))
+  if x.addrspace is AddrSpace.ALU: return vmov(x.ins(RDNA3Ops.s_load_b32, src=(kernarg_ptr, offs), tag=(ctx.vreg(GP_SGPRS),)))
+  return x.ins(RDNA3Ops.s_load_b64, dtype=dtypes.ulong, src=(kernarg_ptr, offs), tag=(ctx.vreg(GP_SGPRS, width=2, alignment=2),))
 
 # ----- memory access ----
 # GLOBAL_ADDR = VADDR_U64 + IMMOFFS_u16
@@ -492,8 +483,9 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(allow_any_len=True, name="x"), load),
   # --- other ---
-  (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x)
-    if not any(isinstance(v,(VRegister, Register)) for v in rdefs(x)) else None),
+  (UPat(Ops.SPECIAL, name="x"), lambda x: vmov(def_reg(dtypes.uint32, WGIDS[int(x.arg[-1])])) if x.arg[0] == 'g' else
+    x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(def_reg(dtypes.uint32, WIIDS), const(10*int(x.arg[-1])), const(10)))),
+  (UPat(Ops.PARAM, name="x"), abi),
   (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
@@ -502,7 +494,6 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
 ])
 
 pre_regalloc_matcher = PatternMatcher([
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ((nx := x.ins(RDNA3Ops.s_load_b32 if x.addrspace is AddrSpace.ALU else RDNA3Ops.s_load_b64)), [nx])),
   # Lower a gated load as one adjacent sequence after linearization so the alt initialization cannot escape its CFG block.
   (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"), UPat.var("alt"), UPat.var("gate")), name="x"), lower_gated_load),
   (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"),), name="x"), lambda x,addr: ((nx := x.ins(addr.arg).replace(src=addr.src)), [nx])),
@@ -528,46 +519,48 @@ def encode(ctx, x:UOp):
   import tinygrad.renderer.amd.dsl as dsl
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  }
-  def _immorreg(x:UOp):
+  def encfield(x:UOp):
+    # fold immediate
     while x.op is Ops.AFTER: x=x.src[0]
-    return (x.val if x.op is Ops.CONST else x.src[0].val) if is_const(x) else encreg(x)
-  def encreg(x:UOp):
+    # NOTE: should this support old form? (no cast)
+    if is_const(x): return x.val if x.op is Ops.CONST else x.src[0].val
+    # encode register(s) as dsl class slices
     r, rs = rdef(x), rdefs(x)
     assert isinstance(r, Register), f"expect Register to encode, got {rs[0]}"
     for i,g in enumerate(rs[1:]): assert g.index == rs[i].index+1, "wide registers must be contiguous"
-    base = dmap[r.name] if r.name in dmap else dmap[r.name[0]]
+    base = next(v for k,v in dmap.items() if k in r.name)
     return base[r.index] if len(rs) == 1 else base[r.index:r.index+len(rs)-1]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.args[0].name.lower(), x.src
   kw = args = None
 
-  if group is RDNA3Ops.SMEM: kw = dict(sdata=encreg(x), sbase=encreg(oprs[0]), soffset=dsl.NULL, offset=_immorreg(oprs[-1]))
+  if group is RDNA3Ops.SMEM: kw = dict(sdata=encfield(x), sbase=encfield(oprs[0]), offset=encfield(oprs[1]))
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
   elif group is RDNA3Ops.SCRATCH:
-    kw = dict(offset=_immorreg(oprs[0]))
-    if rdef(x) is not None: kw["vdst"] = encreg(x)
-    else: kw["data"] = encreg(oprs[1])
+    kw = dict(offset=encfield(oprs[0]))
+    if rdef(x) is not None: kw["vdst"] = encfield(x)
+    else: kw["data"] = encfield(oprs[1])
   elif group is RDNA3Ops.GLOBAL:
-    kw = dict(addr=_immorreg(oprs[0]))#,  offset=_immorreg(oprs[1]))
-    if is_const(oprs[1]): kw["offset"] = _immorreg(oprs[1])
-    else: kw["saddr"] = encreg(oprs[1])
-    if rdef(x) is None: kw["data"]=encreg(oprs[2])
-    else: kw["vdst"]=encreg(x)
+    kw = dict(addr=encfield(oprs[0]))
+    if is_const(oprs[1]): kw["offset"] = encfield(oprs[1])
+    else: kw["saddr"] = encfield(oprs[1])
+    if rdef(x) is None: kw["data"]=encfield(oprs[2])
+    else: kw["vdst"]=encfield(x)
   elif group is RDNA3Ops.DS:
-    offs = _immorreg(oprs[1])
-    kw = dict(addr=_immorreg(oprs[0]), offset0=offs&0xFF, offset1=offs>>8)
-    if rdef(x) is None: kw["data0"]=encreg(oprs[3])
-    else: kw["vdst"]=encreg(x)
-  elif group is RDNA3Ops.VOP3SD: kw = dict(sdst=_immorreg(vccop), vdst=encreg(x), **{f"src{i}":_immorreg(u) for i,u in enumerate(oprs[:3])})
-  elif group is RDNA3Ops.VOPC: args = [_immorreg(u) for u in oprs]
+    offs = encfield(oprs[1])
+    kw = dict(addr=encfield(oprs[0]), offset0=offs&0xFF, offset1=offs>>8)
+    if rdef(x) is None: kw["data0"]=encfield(oprs[3])
+    else: kw["vdst"]=encfield(x)
+  elif group is RDNA3Ops.VOP3SD: kw = dict(sdst=encfield(vccop), vdst=encfield(x), **{f"src{i}":encfield(u) for i,u in enumerate(oprs[:3])})
+  elif group is RDNA3Ops.VOPC: args = [encfield(u) for u in oprs]
   elif group is RDNA3Ops.VOP3P:
-    kw = {f"src{i}":_immorreg(oprs[i]) for i in range(3)}
-    kw["vdst"] = encreg(x)
+    kw = {f"src{i}":encfield(oprs[i]) for i in range(3)}
+    kw["vdst"] = encfield(x)
     def _signed(dt:DType): return not (dtypes.is_unsigned(dt) or dtypes.is_float(dt))
     kw["neg"] = _signed(oprs[0].dtype) | (_signed(oprs[1].dtype) << 1)
   elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
     if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: oprs = oprs[:1]
     if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: oprs = oprs[:2]
-    args = [encreg(x)] + [_immorreg(u) for u in oprs]
+    args = [encfield(x)] + [encfield(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (oprs[0].val,) if len(oprs) > 0 and oprs[0].op is Ops.CONST else (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
   return x.replace(arg=(enc(**kw) if kw is not None else enc(*args)))
