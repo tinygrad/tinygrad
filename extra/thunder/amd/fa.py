@@ -174,7 +174,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     delta_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
     if use_asm_bwd and getenv("ASM_FA_BWD_PRE", 1):
       # AITER's main kernel atomically accumulates dQ, so its workspace must be zero before launch.
-      dq = dq.zeros_like()
+      dq = dq.zeros_like().contiguous() if getenv("FA_FORCE_DQ_CONTIG", 0) else dq.zeros_like()
       delta_vec = Tensor.custom_kernel(attn, do, delta_vec,
         fxn=functools.partial(custom_asm_fa_backward_pre, B=B_local, N=N, H=H_local, D=D))[2]
     else:
