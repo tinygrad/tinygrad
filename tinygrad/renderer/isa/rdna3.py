@@ -334,7 +334,7 @@ def f64_to_int64(y:UOp, tdt:DType):
   lo_f = UOp(Ops.ADD, dtypes.float64, src=(tr, UOp(Ops.MUL, dtypes.float64, src=(lo_f, const(-1., dtypes.float64)))))
   return UOp.group(lo_f.cast(dtypes.uint32), hi_f.cast(hi_dt), dtype=tdt)
 
-# TODO: currently only 53 bit precision (f64 mantissa), could do better
+# NOTE: currently only 53 bit precision (f64 mantissa), how does LLVM do it
 def long2double(x:UOp):
   lo = gep(x, 0).replace(dtype=dtypes.uint32).cast(dtypes.float64)
   hi = gep(x, 1).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(dtypes.float64)
@@ -368,7 +368,8 @@ def lower_end(ctx, x:UOp, acc:UOp):
 
 # ---- lowering passes ----
 extra_matcher = PatternMatcher([
-  (UPat.cvar("x").cast(dtypes.bfloat16), lambda x: const(x.val if isinstance(x.val, InvalidType) else to_storage_scalar(x.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
+  # NOTE: runs before casted const
+  (UPat.cvar("c", dtypes.bfloat16), lambda c: UOp.const(c.val if isinstance(c.val, InvalidType) else to_storage_scalar(c.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
@@ -476,7 +477,8 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
     _vop3(x.ins(RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16, src=(b,a,pred)))),
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
-  (UPat.var("y").cast(name="x"), lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e32")) if not is_const(y) else None),
+  # dont realize weak cast?
+  (UPat.var("y", dtype=dtypes.ints+dtypes.floats).cast(name="x"), lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e32"))),
   # --- mem ops ---
   (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
   (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(allow_any_len=True, name="x"), load),
@@ -527,7 +529,7 @@ def encode(ctx, x:UOp):
     dmap = { "vcc":dsl.VCC, "exec_lo":dsl.EXEC_LO, "v":dsl.v, "s":dsl.s  }
     base = next(v for k,v in dmap.items() if k in r.name)
     return base[r.index] if len(rs) == 1 else base[r.index:r.index+len(rs)-1]
-  enc, group, opc, oprs, kw, args = x.arg, x.arg.func, x.arg.args[0].name.lower(), x.src, None, None
+  group, oprs, kw, args = x.arg.func, x.src, None, None
 
   if group is RDNA3Ops.SMEM: kw = dict(sdata=encfield(x), sbase=encfield(oprs[0]), offset=encfield(oprs[1]))
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
@@ -558,9 +560,9 @@ def encode(ctx, x:UOp):
     if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: oprs = oprs[:2]
     args = [encfield(x)] + [encfield(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (oprs[0].val,) if len(oprs) > 0 and oprs[0].op is Ops.CONST else (0,)
-  else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
+  else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={x.arg.args[0].name.lower()}")
 
-  return x.replace(arg=(enc(**kw) if kw is not None else enc(*args)))
+  return x.replace(arg=(x.arg(**kw) if kw is not None else x.arg(*args)))
 
 class CntType(Enum):
   DS_CNT = auto(); LOAD_CNT = auto(); STORE_CNT = auto()
