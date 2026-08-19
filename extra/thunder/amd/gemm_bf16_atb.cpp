@@ -73,24 +73,6 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
     const int warp_col = warp_id % WARPS_N;
     const int num_tiles = K / K_STEP;
 
-    const bf16 *a_base = (bf16*)&A[{0, 0, 0, 0}];
-    const bf16 *b_base = (bf16*)&B[{0, 0, 0, 0}];
-    const int a_row_stride = A.template stride<2>() * sizeof(bf16);
-    const int b_row_stride = B.template stride<2>() * sizeof(bf16);
-    i32x4 a_srsrc_base = make_srsrc(a_base, K * a_row_stride, a_row_stride);
-    i32x4 b_srsrc_base = make_srsrc(b_base, K * b_row_stride, b_row_stride);
-
-    const int wid = warpid() % NUM_WARPS;
-    constexpr int elem_per_warp = (16 / sizeof(bf16)) * kittens::WARP_THREADS;
-    uint32_t a_lds_00 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t a_lds_01 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[0][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t a_lds_10 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t a_lds_11 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&As[1][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t b_lds_00 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t b_lds_01 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[0][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t b_lds_10 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][0].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-    uint32_t b_lds_11 = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&Bs[1][1].data[0]) + wid * elem_per_warp * sizeof(bf16)));
-
     int tic = 0;
     int toc = 1;
 
@@ -103,10 +85,12 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
     G::prefill_swizzled_offsets(As[0][0], A, swizzled_offsets_A);
     G::prefill_swizzled_offsets(Bs[0][0], B, swizzled_offsets_B);
 
-    G::load(As[tic][0], A, {0, 0, 0, row * 2}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds_00);
-    G::load(Bs[tic][0], B, {0, 0, 0, col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds_00);
-    G::load(As[tic][1], A, {0, 0, 0, row * 2 + 1}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds_01);
-    G::load(Bs[tic][1], B, {0, 0, 0, col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds_01);
+    // Use tile-local buffer resources from the generic loader. The whole-matrix SRD fast path corrupts
+    // the second 128 output rows once K reaches 8192, while this path has indistinguishable throughput.
+    G::load(As[tic][0], A, {0, 0, 0, row * 2}, swizzled_offsets_A);
+    G::load(Bs[tic][0], B, {0, 0, 0, col * 2}, swizzled_offsets_B);
+    G::load(As[tic][1], A, {0, 0, 0, row * 2 + 1}, swizzled_offsets_A);
+    G::load(Bs[tic][1], B, {0, 0, 0, col * 2 + 1}, swizzled_offsets_B);
 
     if (warp_row == 1) {
         __builtin_amdgcn_s_barrier();
@@ -115,9 +99,9 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
     asm volatile("s_waitcnt vmcnt(4)");
     __builtin_amdgcn_s_barrier();
 
-    G::load(As[toc][0], A, {0, 0, 1, row * 2}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds_10);
-    G::load(Bs[toc][0], B, {0, 0, 1, col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds_10);
-    G::load(Bs[toc][1], B, {0, 0, 1, col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds_11);
+    G::load(As[toc][0], A, {0, 0, 1, row * 2}, swizzled_offsets_A);
+    G::load(Bs[toc][0], B, {0, 0, 1, col * 2}, swizzled_offsets_B);
+    G::load(Bs[toc][1], B, {0, 0, 1, col * 2 + 1}, swizzled_offsets_B);
 
     asm volatile("s_waitcnt vmcnt(6)");
     __builtin_amdgcn_s_barrier();
@@ -128,7 +112,7 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
         load(B_tile_0, st_subtile_b);
         auto st_subtile_a = subtile_inplace<K_STEP, HALF_REG_BLOCK_M>(As[0][0], {0, warp_row});
         load(A_tile, st_subtile_a);
-        G::load(As[1][1], A, {0, 0, tile + 1, row * 2 + 1}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds_11);
+        G::load(As[1][1], A, {0, 0, tile + 1, row * 2 + 1}, swizzled_offsets_A);
         asm volatile("s_waitcnt lgkmcnt(8)");
         __builtin_amdgcn_s_barrier();
 
@@ -141,7 +125,7 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
 
         st_subtile_b = subtile_inplace<K_STEP, HALF_REG_BLOCK_N>(Bs[0][1], {0, warp_col});
         load(B_tile_1, st_subtile_b);
-        G::load(Bs[0][0], B, {0, 0, tile + 2, col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds_00);
+        G::load(Bs[0][0], B, {0, 0, tile + 2, col * 2}, swizzled_offsets_B);
         __builtin_amdgcn_s_barrier();
 
         asm volatile("s_waitcnt lgkmcnt(0)");
@@ -152,7 +136,7 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
 
         st_subtile_a = subtile_inplace<K_STEP, HALF_REG_BLOCK_M>(As[0][1], {0, warp_row});
         load(A_tile, st_subtile_a);
-        G::load(As[0][0], A, {0, 0, tile + 2, row * 2}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds_00);
+        G::load(As[0][0], A, {0, 0, tile + 2, row * 2}, swizzled_offsets_A);
         __builtin_amdgcn_s_barrier();
 
         asm volatile("s_waitcnt lgkmcnt(0)");
@@ -164,7 +148,7 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
 
         st_subtile_b = subtile_inplace<K_STEP, HALF_REG_BLOCK_N>(Bs[1][0], {0, warp_col});
         load(B_tile_0, st_subtile_b);
-        G::load(Bs[0][1], B, {0, 0, tile + 2, col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds_01);
+        G::load(Bs[0][1], B, {0, 0, tile + 2, col * 2 + 1}, swizzled_offsets_B);
         asm volatile("s_waitcnt vmcnt(6)");
         __builtin_amdgcn_s_barrier();
 
@@ -175,7 +159,7 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
 
         st_subtile_a = subtile_inplace<K_STEP, HALF_REG_BLOCK_M>(As[1][0], {0, warp_row});
         load(A_tile, st_subtile_a);
-        G::load(As[0][1], A, {0, 0, tile + 2, row * 2 + 1}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds_01);
+        G::load(As[0][1], A, {0, 0, tile + 2, row * 2 + 1}, swizzled_offsets_A);
         asm volatile("s_waitcnt lgkmcnt(8)");
         __builtin_amdgcn_s_barrier();
 
@@ -188,7 +172,7 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
 
         st_subtile_b = subtile_inplace<K_STEP, HALF_REG_BLOCK_N>(Bs[1][1], {0, warp_col});
         load(B_tile_1, st_subtile_b);
-        G::load(Bs[1][0], B, {0, 0, tile + 3, col * 2}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds_10);
+        G::load(Bs[1][0], B, {0, 0, tile + 3, col * 2}, swizzled_offsets_B);
         __builtin_amdgcn_s_barrier();
 
         asm volatile("s_waitcnt lgkmcnt(0)");
@@ -199,7 +183,7 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
 
         st_subtile_a = subtile_inplace<K_STEP, HALF_REG_BLOCK_M>(As[1][1], {0, warp_row});
         load(A_tile, st_subtile_a);
-        G::load(As[1][0], A, {0, 0, tile + 3, row * 2}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds_10);
+        G::load(As[1][0], A, {0, 0, tile + 3, row * 2}, swizzled_offsets_A);
         __builtin_amdgcn_s_barrier();
 
         asm volatile("s_waitcnt lgkmcnt(0)");
@@ -209,7 +193,7 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
 
-        G::load(Bs[1][1], B, {0, 0, tile + 3, col * 2 + 1}, swizzled_offsets_B, b_srsrc_base, b_base, b_lds_11);
+        G::load(Bs[1][1], B, {0, 0, tile + 3, col * 2 + 1}, swizzled_offsets_B);
         asm volatile("s_waitcnt vmcnt(6)");
         __builtin_amdgcn_s_barrier();
 
@@ -225,7 +209,7 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
         load(B_tile_0, st_subtile_b);
         auto st_subtile_a = subtile_inplace<K_STEP, HALF_REG_BLOCK_M>(As[tic][0], {0, warp_row});
         load(A_tile, st_subtile_a);
-        G::load(As[toc][1], A, {0, 0, tile + 1, row * 2 + 1}, swizzled_offsets_A, a_srsrc_base, a_base, a_lds_11);
+        G::load(As[toc][1], A, {0, 0, tile + 1, row * 2 + 1}, swizzled_offsets_A);
         __builtin_amdgcn_s_barrier();
         asm volatile("s_waitcnt lgkmcnt(0)");
 
