@@ -2164,6 +2164,10 @@ class TestOps(unittest.TestCase):
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))
     helper_test_op([(2, 4)], lambda x: x.roll((1,)))
+    helper_test_op([(0,)], lambda x: x.roll(1, 0))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1, 0))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1, 1))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1))
     self.helper_test_exception([(2, 4)], lambda x: x.roll((1, 2)), expected=RuntimeError)
     helper_test_op([(2, 4)], lambda x: x.roll(1, 0))
     helper_test_op([(2, 4)], lambda x: x.roll(-1, 0))
