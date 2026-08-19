@@ -7,6 +7,8 @@ from tinygrad.runtime.support.system import System
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 
+def rm_err(status:int) -> str: return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
+
 @dataclasses.dataclass(frozen=True)
 class GRBufDesc: size:int; virt:bool; phys:bool; local:bool=False # noqa: E702
 
@@ -91,14 +93,17 @@ class NVRpcQueue:
     raise RuntimeError(f"Timeout waiting for RPC response for command {cmd}")
 
 class NV_FLCN(NV_IP):
+  falcon, sec2 = 0x00110000, 0x00840000
+
   def wait_for_reset(self):
+    if self.nvdev.fw_name == "tu102": return
     wait_cond(lambda _: self.nvdev.NV_PGC6_AON_SECURE_SCRATCH_GROUP_05_PRIV_LEVEL_MASK.read_bitfields()['read_protection_level0'] == 1 and
                         self.nvdev.NV_PGC6_AON_SECURE_SCRATCH_GROUP_05[0].read() & 0xff == 0xff, "waiting for reset")
 
   def init_sw(self):
     self.nvdev.include("dev_gsp", "ga102")
     self.nvdev.include("dev_falcon_v4", "ga102")
-    self.nvdev.include("dev_riscv_pri", "ga102")
+    self.nvdev.include("dev_riscv_pri", "tu102" if self.nvdev.fw_name == "tu102" else "ga102")
     self.nvdev.include("dev_fbif_v4", "ga102")
     self.nvdev.include("dev_falcon_second_pri", "ga102")
     self.nvdev.include("dev_sec_pri", "ga102")
@@ -135,12 +140,20 @@ class NV_FLCN(NV_IP):
         ucode_desc_hdr = nv.FALCON_UCODE_DESC_HEADER.from_buffer_copy(vbios_bytes[expansion_rom_off + ucode_entry.DescPtr:])
         ucode_desc_off = expansion_rom_off + ucode_entry.DescPtr
         ucode_desc_size = ucode_desc_hdr.vDesc >> 16
+        ucode_desc_ver = (ucode_desc_hdr.vDesc >> 8) & 0xff
 
-    self.desc_v3 = nv.FALCON_UCODE_DESC_V3.from_buffer_copy(vbios_bytes[ucode_desc_off:ucode_desc_off + ucode_desc_size])
+    needs_bootloader = self.nvdev.fw_name == "tu102"
+    if (ucode_desc_ver == nv.NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V2) != needs_bootloader:
+      raise RuntimeError(f"unexpected FWSEC ucode descriptor version {ucode_desc_ver} for {self.nvdev.chip_name}")
 
-    sig_total_size = ucode_desc_size - nv.FALCON_UCODE_DESC_V3_SIZE_44
-    signature = vbios_bytes[ucode_desc_off + nv.FALCON_UCODE_DESC_V3_SIZE_44:][:sig_total_size]
-    image = vbios_bytes[ucode_desc_off + ucode_desc_size:][:round_up(self.desc_v3.StoredSize, 256)]
+    if needs_bootloader:
+      self.desc_v2 = nv.FALCON_UCODE_DESC_V2.from_buffer_copy(vbios_bytes[ucode_desc_off:ucode_desc_off + ucode_desc_size])
+      image = vbios_bytes[ucode_desc_off + ucode_desc_size:][:round_up(self.desc_v2.StoredSize, 256)]
+    else:
+      self.desc_v3 = nv.FALCON_UCODE_DESC_V3.from_buffer_copy(vbios_bytes[ucode_desc_off:ucode_desc_off + ucode_desc_size])
+      image = vbios_bytes[ucode_desc_off + ucode_desc_size:][:round_up(self.desc_v3.StoredSize, 256)]
+      sig_total_size = ucode_desc_size - nv.FALCON_UCODE_DESC_V3_SIZE_44
+      signature = vbios_bytes[ucode_desc_off + nv.FALCON_UCODE_DESC_V3_SIZE_44:][:sig_total_size]
 
     self.frts_offset = self.nvdev.vram_size - 0x100000 - 0x100000
     read_vbios_desc = nv.FWSECLIC_READ_VBIOS_DESC(version=0x1, size=ctypes.sizeof(nv.FWSECLIC_READ_VBIOS_DESC), flags=2)
@@ -148,30 +161,59 @@ class NV_FLCN(NV_IP):
       frtsRegionOffset4K=self.frts_offset >> 12, frtsRegionSize=0x100, frtsRegionMediaType=2)
     frts_cmd = nv.FWSECLIC_FRTS_CMD(readVbiosDesc=read_vbios_desc, frtsRegionDesc=frst_reg_desc)
 
-    def __patch(cmd_id, cmd):
+    def __patch(cmd_id, cmd, imem_load_size, interface_offset, pkc_data_offset):
       patched_image = bytearray(image)
 
       dmem_offset = 0
-      hdr = nv.FALCON_APPLICATION_INTERFACE_HEADER_V1.from_buffer_copy(image[(app_hdr_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.InterfaceOffset):])
+      hdr = nv.FALCON_APPLICATION_INTERFACE_HEADER_V1.from_buffer_copy(image[(app_hdr_off:=imem_load_size+interface_offset):])
       ents = (nv.FALCON_APPLICATION_INTERFACE_ENTRY_V1 * hdr.entryCount).from_buffer_copy(image[app_hdr_off + ctypes.sizeof(hdr):])
       for i in range(hdr.entryCount):
         if ents[i].id == nv.FALCON_APPLICATION_INTERFACE_ENTRY_ID_DMEMMAPPER: dmem_offset = ents[i].dmemOffset
 
       # Patch image
-      dmem = nv.FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3.from_buffer_copy(image[(dmem_mapper_offset:=self.desc_v3.IMEMLoadSize+dmem_offset):])
+      dmem = nv.FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3.from_buffer_copy(image[(dmem_mapper_offset:=imem_load_size+dmem_offset):])
       dmem.init_cmd = cmd_id
       patched_image[dmem_mapper_offset : dmem_mapper_offset+len(bytes(dmem))] = bytes(dmem)
-      patched_image[(cmd_off:=self.desc_v3.IMEMLoadSize+dmem.cmd_in_buffer_offset) : cmd_off+len(cmd)] = cmd
-      patched_image[(sig_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.PKCDataOffset) : sig_off+0x180] = signature[-0x180:]
+      patched_image[(cmd_off:=imem_load_size+dmem.cmd_in_buffer_offset) : cmd_off+len(cmd)] = cmd
+      if pkc_data_offset is not None:
+        patched_image[(sig_off:=imem_load_size+pkc_data_offset) : sig_off+0x180] = signature[-0x180:]
 
-      return self.nvdev._alloc_boot_mem(len(patched_image), data=patched_image, sysmem=False)
+      return bytes(patched_image)
 
-    _, self.frts_image_paddr, _ = __patch(0x15, bytes(frts_cmd))
+    if needs_bootloader:
+      patched_image = __patch(0x15, bytes(frts_cmd), self.desc_v2.IMEMLoadSize, self.desc_v2.InterfaceOffset, None)
+      self.prep_frts_bootloader(patched_image)
+    else:
+      patched_image = __patch(0x15, bytes(frts_cmd), self.desc_v3.IMEMLoadSize, self.desc_v3.InterfaceOffset, self.desc_v3.PKCDataOffset)
+      _, self.frts_image_paddr, _ = self.nvdev._alloc_boot_mem(len(patched_image), data=patched_image, sysmem=False)
 
-  def prep_booter(self):
-    sha = {"ga102":"4497e3eff7e95c774b8a569d17b27c08c9650158d10b229d2be81cdcad9a085b",
-           "ad102":"8b293e19b637c5e22c87a2428d1c71bb13e0904e8a88ac6b3c6c1f2679c6e37a"}[self.nvdev.fw_name]
-    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{self.nvdev.fw_name}/gsp", "booter_load-570.144.bin", sha))
+  def prep_frts_bootloader(self, image:bytes):
+    assert self.desc_v2.DMEMPhysBase == 0, "generic bootloader always loads DMEM at destination offset 0"
+
+    gen_bl_fw_name = self.nvdev.fw_name
+    sha = {"tu102": "b37776a511b4a00901e4e3ac568db917086d3bf439f85bc9b3e4adc7338a0aff"}[gen_bl_fw_name]
+    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{gen_bl_fw_name}/gsp", "gen_bootloader-570.144.bin", sha))
+    bl_desc = nv.RM_FLCN_BL_DESC.from_buffer_copy(b, h.header_offset)
+    self.bl_ucode = bytes(b[h.data_offset:h.data_offset + bl_desc.blCodeSize]).ljust(round_up(bl_desc.blCodeSize, 0x100), b'\x00')
+    self.bl_start_tag = bl_desc.blStartTag
+
+    align_padding = self.desc_v2.IMEMPhysBase
+    _, _, sysaddrs = self.nvdev._alloc_boot_mem(align_padding + len(image), data=bytes(align_padding) + image, contiguous=True, sysmem=True)
+    code_dma_base = sysaddrs[0]
+    data_dma_base = code_dma_base + align_padding + self.desc_v2.DMEMOffset
+
+    self.dmem_desc = bytes(nv.RM_FLCN_BL_DMEM_DESC(ctxDma=4,
+      codeDmaBaseLo=lo32(code_dma_base), codeDmaBaseHi=hi32(code_dma_base),
+      nonSecureCodeOff=self.desc_v2.IMEMPhysBase, nonSecureCodeSize=self.desc_v2.IMEMLoadSize - self.desc_v2.IMEMSecSize,
+      secureCodeOff=self.desc_v2.IMEMPhysBase + (self.desc_v2.IMEMSecBase - self.desc_v2.IMEMVirtBase), secureCodeSize=self.desc_v2.IMEMSecSize,
+      codeEntryPoint=0, dataDmaBaseLo=lo32(data_dma_base), dataDmaBaseHi=hi32(data_dma_base), dataSize=self.desc_v2.DMEMLoadSize, argc=0, argv=0))
+
+  def _prep_booter_image(self, which:str) -> tuple[bytes, tuple[int, int, int, int, int, int]]:
+    sha = {"load": {"ga102":"4497e3eff7e95c774b8a569d17b27c08c9650158d10b229d2be81cdcad9a085b",
+                    "ad102":"8b293e19b637c5e22c87a2428d1c71bb13e0904e8a88ac6b3c6c1f2679c6e37a",
+                    "tu102":"7bb181f544a942299bbf4642da6d9bb58bfed8459725094e2ace56647cd3ec8c"},
+           }[which][self.nvdev.fw_name]
+    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{self.nvdev.fw_name}/gsp", f"booter_{which}-570.144.bin", sha))
     lh = nv.struct_nvfw_hs_load_header_v2.from_buffer_copy(b, (hs:=nv.struct_nvfw_hs_header_v2.from_buffer_copy(b, h.header_offset)).header_offset)
     app = nv.struct_nvfw_hs_load_header_v2_app.from_buffer_copy(b, hs.header_offset + ctypes.sizeof(nv.struct_nvfw_hs_load_header_v2))
 
@@ -179,18 +221,27 @@ class NV_FLCN(NV_IP):
     sig = b[(sig_off:=hs.sig_prod_offset + patch_sig):sig_off + (sig_len:=hs.sig_prod_size // struct.unpack_from("<I", b, hs.num_sig)[0])]
 
     (patched_image:=bytearray(b[h.data_offset:h.data_offset + h.data_size]))[patch_loc:patch_loc+sig_len] = sig
+    return bytes(patched_image), (lh.os_code_offset, lh.os_code_size, app.offset, app.size, lh.os_data_offset, lh.os_data_size)
+
+  def prep_booter(self):
+    patched_image, offs = self._prep_booter_image("load")
+
+    if self.nvdev.fw_name == "tu102":
+      self.booter_image, self.booter_offs = patched_image, offs
+      return
 
     _, self.booter_image_paddr, _ = self.nvdev._alloc_boot_mem(len(patched_image), data=patched_image, sysmem=False)
-    self.booter_data_off, self.booter_data_sz, self.booter_code_off, self.booter_code_sz = lh.os_data_offset, lh.os_data_size, app.offset, app.size
+    self.booter_data_off, self.booter_data_sz, self.booter_code_off, self.booter_code_sz = offs[4], offs[5], offs[2], offs[3]
 
   def init_hw(self):
-    self.falcon, self.sec2 = 0x00110000, 0x00840000
-
     self.reset(self.falcon)
-    self.execute_hs(self.falcon, self.frts_image_paddr, code_off=0x0, data_off=self.desc_v3.IMEMLoadSize,
-      imemPa=self.desc_v3.IMEMPhysBase, imemVa=self.desc_v3.IMEMVirtBase, imemSz=self.desc_v3.IMEMLoadSize,
-      dmemPa=self.desc_v3.DMEMPhysBase, dmemVa=0x0, dmemSz=self.desc_v3.DMEMLoadSize,
-      pkc_off=self.desc_v3.PKCDataOffset, engid=self.desc_v3.EngineIdMask, ucodeid=self.desc_v3.UcodeId)
+    if self.nvdev.fw_name == "tu102":
+      self.execute_bootloader(self.falcon, self.bl_ucode, self.bl_start_tag, self.dmem_desc, ctx_dma=4)
+    else:
+      self.execute_hs(self.falcon, self.frts_image_paddr, code_off=0x0, data_off=self.desc_v3.IMEMLoadSize,
+        imemPa=self.desc_v3.IMEMPhysBase, imemVa=self.desc_v3.IMEMVirtBase, imemSz=self.desc_v3.IMEMLoadSize,
+        dmemPa=self.desc_v3.DMEMPhysBase, dmemVa=0x0, dmemSz=self.desc_v3.DMEMLoadSize,
+        pkc_off=self.desc_v3.PKCDataOffset, engid=self.desc_v3.EngineIdMask, ucodeid=self.desc_v3.UcodeId)
     assert self.nvdev.NV_PFB_PRI_MMU_WPR2_ADDR_HI.read() != 0, "WPR2 is not initialized"
 
     self.reset(self.falcon, riscv=True)
@@ -201,13 +252,66 @@ class NV_FLCN(NV_IP):
 
     # booter
     self.reset(self.sec2)
-    mbx = self.execute_hs(self.sec2, self.booter_image_paddr, code_off=self.booter_code_off, data_off=self.booter_data_off,
-      imemPa=0x0, imemVa=self.booter_code_off, imemSz=self.booter_code_sz, dmemPa=0x0, dmemVa=0x0, dmemSz=self.booter_data_sz,
-      pkc_off=0x10, engid=1, ucodeid=3, mailbox=self.nvdev.gsp.wpr_meta_sysmem)
+    if self.nvdev.fw_name == "tu102":
+      mbx = self.execute_direct(self.sec2, self.booter_image, *self.booter_offs, mailbox=self.nvdev.gsp.wpr_meta_sysmem)
+    else:
+      mbx = self.execute_hs(self.sec2, self.booter_image_paddr, code_off=self.booter_code_off, data_off=self.booter_data_off,
+        imemPa=0x0, imemVa=self.booter_code_off, imemSz=self.booter_code_sz, dmemPa=0x0, dmemVa=0x0, dmemSz=self.booter_data_sz,
+        pkc_off=0x10, engid=1, ucodeid=3, mailbox=self.nvdev.gsp.wpr_meta_sysmem)
     assert mbx[0] == 0x0, f"Booter failed to execute, mailbox is {mbx[0]:08x}, {mbx[1]:08x}"
 
     self.nvdev.NV_PFALCON_FALCON_OS.with_base(self.falcon).write(0x0)
-    assert self.nvdev.NV_PRISCV_RISCV_CPUCTL.with_base(self.falcon).read_bitfields()['active_stat'] == 1, "GSP Core is not active"
+    if self.nvdev.fw_name == "tu102":
+      assert self.nvdev.NV_PRISCV_RISCV_CORE_SWITCH_RISCV_STATUS.with_base(self.falcon).read_bitfields()['active_stat'] == 1, \
+        "GSP Core is not active"
+    else:
+      assert self.nvdev.NV_PRISCV_RISCV_CPUCTL.with_base(self.falcon).read_bitfields()['active_stat'] == 1, "GSP Core is not active"
+
+  def dmem_copy_direct(self, base:int, dest:int, data:bytes):
+    blk = dest >> 8
+    assert blk < 0x100, f"DMEM block {blk:#x} out of range for TU10x/GA100's 8-bit DMEMC_BLK field"
+    self.nvdev.NV_PFALCON_FALCON_DMEMC.with_base(base)[0].write(offs=(dest >> 2) & 0x3f, blk=blk, aincw=1)
+    for i in range(0, len(data), 4):
+      self.nvdev.NV_PFALCON_FALCON_DMEMD.with_base(base)[0].write(data=int.from_bytes(data[i:i+4].ljust(4, b'\x00'), 'little'))
+
+  def imem_copy_direct(self, base:int, dest:int, data:bytes, secure:bool, tag:int):
+    blk = dest >> 8
+    assert blk < 0x100, f"IMEM block {blk:#x} out of range for TU10x/GA100's 8-bit IMEMC_BLK field"
+    self.nvdev.NV_PFALCON_FALCON_IMEMC.with_base(base)[0].write(offs=(dest >> 2) & 0x3f, blk=blk, aincw=1, secure=int(secure))
+    tag >>= 8
+    for i in range(0, len(data), 4):
+      if (i // 4) % 64 == 0:
+        self.nvdev.NV_PFALCON_FALCON_IMEMT.with_base(base)[0].write(tag=tag)
+        tag += 1
+      self.nvdev.NV_PFALCON_FALCON_IMEMD.with_base(base)[0].write(data=int.from_bytes(data[i:i+4].ljust(4, b'\x00'), 'little'))
+
+  def _run_and_read_mailbox(self, base:int, mailbox=None):
+    if mailbox is not None:
+      self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).write(lo32(mailbox))
+      self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).write(hi32(mailbox))
+
+    self.start_cpu(base)
+    self.wait_cpu_halted(base)
+
+    if mailbox is not None:
+      return self.nvdev.NV_PFALCON_FALCON_MAILBOX0.with_base(base).read(), self.nvdev.NV_PFALCON_FALCON_MAILBOX1.with_base(base).read()
+
+  def execute_direct(self, base:int, image:bytes, ns_off:int, ns_sz:int, sec_off:int, sec_sz:int, dmem_off:int, dmem_sz:int, mailbox=None):
+    self.disable_ctx_req(base)
+    self.imem_copy_direct(base, 0, image[ns_off:ns_off+ns_sz], secure=False, tag=ns_off)
+    self.imem_copy_direct(base, round_up(ns_sz, 0x100), image[sec_off:sec_off+sec_sz], secure=True, tag=sec_off)
+    self.dmem_copy_direct(base, 0, image[dmem_off:dmem_off+dmem_sz])
+    self.nvdev.NV_PFALCON_FALCON_BOOTVEC.with_base(base).write(0)
+    return self._run_and_read_mailbox(base, mailbox)
+
+  def execute_bootloader(self, base:int, ucode:bytes, start_tag:int, dmem_desc:bytes, ctx_dma:int, mailbox=None):
+    self.disable_ctx_req(base)
+    self.imem_copy_direct(base, 0x10000 - len(ucode), ucode, secure=False, tag=start_tag << 8)
+    self.dmem_copy_direct(base, 0, dmem_desc)
+    self.nvdev.NV_PFALCON_FBIF_TRANSCFG.with_base(base)[ctx_dma].update(target=self.nvdev.NV_PFALCON_FBIF_TRANSCFG_TARGET_COHERENT_SYSMEM,
+      mem_type=self.nvdev.NV_PFALCON_FBIF_TRANSCFG_MEM_TYPE_PHYSICAL)
+    self.nvdev.NV_PFALCON_FALCON_BOOTVEC.with_base(base).write(start_tag << 8)
+    return self._run_and_read_mailbox(base, mailbox)
 
   def execute_dma(self, base:int, cmd:int, dest:int, mem_off:int, src:int, size:int):
     wait_cond(lambda: self.nvdev.NV_PFALCON_FALCON_DMATRFCMD.with_base(base).read_bitfields()['full'], value=0, msg="DMA does not progress")
@@ -274,7 +378,13 @@ class NV_FLCN(NV_IP):
     time.sleep(0.1)
     engine_reg.write(reset=0)
 
-    wait_cond(lambda: self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(base).read_bitfields()['mem_scrubbing'], value=0, msg="Scrubbing not completed")
+    scrub_reg, scrub_fields = ((self.nvdev.NV_PFALCON_FALCON_DMACTL, ('dmem_scrubbing', 'imem_scrubbing')) if self.nvdev.fw_name == "tu102"
+                               else (self.nvdev.NV_PFALCON_FALCON_HWCFG2, ('mem_scrubbing',)))
+    wait_cond(lambda: any(scrub_reg.with_base(base).read_bitfields()[f] for f in scrub_fields), value=False, msg="Scrubbing not completed")
+
+    if self.nvdev.fw_name == "tu102":
+      self.nvdev.NV_PFALCON_FALCON_RM.with_base(base).write(self.nvdev.chip_id)
+      return
 
     if riscv: self.nvdev.NV_PRISCV_RISCV_BCR_CTRL.with_base(base).write(core_select=1, valid=0, brfetch=1)
     elif self.nvdev.NV_PFALCON_FALCON_HWCFG2.with_base(base).read_bitfields()['riscv'] == 1:
@@ -346,6 +456,7 @@ class NV_FLCN_COT(NV_IP):
 class NV_GSP(NV_IP):
   def init_sw(self):
     self.handle_gen = itertools.count(0xcf000000)
+    self.subdevice:int = 0
     self.init_rm_args()
     self.init_libos_args()
     self.init_wpr_meta()
@@ -355,10 +466,15 @@ class NV_GSP(NV_IP):
     self.rpc_set_registry_table()
 
     self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.AMPERE_COMPUTE_B, nv_gpu.AMPERE_DMA_COPY_B
+    self.threed_class = nv_gpu.AMPERE_B
     match self.nvdev.chip_name[:2]:
-      case "AD": self.compute_class = nv_gpu.ADA_COMPUTE_A
+      case "AD": self.compute_class, self.threed_class = nv_gpu.ADA_COMPUTE_A, nv_gpu.ADA_A
       case "GB":
         self.gpfifo_class,self.compute_class,self.dma_class=nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A,nv_gpu.BLACKWELL_COMPUTE_B,nv_gpu.BLACKWELL_DMA_COPY_B
+        self.threed_class = nv_gpu.BLACKWELL_A
+      case "TU":
+        self.gpfifo_class,self.compute_class,self.dma_class=nv_gpu.TURING_CHANNEL_GPFIFO_A,nv_gpu.TURING_COMPUTE_A,nv_gpu.TURING_DMA_COPY_A
+        self.threed_class = nv_gpu.TURING_A
 
   def init_rm_args(self, queue_size=0x40000):
     # Alloc queues
@@ -386,19 +502,22 @@ class NV_GSP(NV_IP):
     self.cmd_q = NVRpcQueue(self, self.cmd_q_view, None)
 
   def init_libos_args(self):
-    _, _, logbuf_addrs = self.nvdev._alloc_boot_mem(2 << 20)
+    self.logbuf_view, _, logbuf_addrs = self.nvdev._alloc_boot_mem(2 << 20)
     libos_args_view, _, libos_addrs = self.nvdev._alloc_boot_mem(0x1000)
     self.libos_args_sysmem = libos_addrs[0]
 
+    logs = ["INIT", "RM"] if self.nvdev.fw_name == "tu102" else ["INIT", "INTR", "RM", "MNOC", "KRNL"]
     libos_structs = [nv.LibosMemoryRegionInitArgument(kind=nv.LIBOS_MEMORY_REGION_CONTIGUOUS, loc=nv.LIBOS_MEMORY_REGION_LOC_SYSMEM, size=0x10000,
-        id8=int.from_bytes(bytes(f"LOG{name}", 'utf-8'), 'big'), pa=logbuf_addrs[0] + 0x10000 * i)
-        for i, name in enumerate(["INIT", "INTR", "RM", "MNOC", "KRNL"])]
+        id8=int.from_bytes(bytes(f"LOG{name}", 'utf-8'), 'big'), pa=logbuf_addrs[0] + 0x10000 * i) for i, name in enumerate(logs)]
     libos_structs.append(nv.LibosMemoryRegionInitArgument(kind=nv.LIBOS_MEMORY_REGION_CONTIGUOUS, loc=nv.LIBOS_MEMORY_REGION_LOC_SYSMEM, size=0x1000,
         id8=int.from_bytes(bytes("RMARGS", 'utf-8'), 'big'), pa=self.rm_args_sysmem))
     libos_args_view[:sum(ctypes.sizeof(s) for s in libos_structs)] = b''.join(bytes(s) for s in libos_structs)
 
   def init_gsp_image(self):
-    _, sections, _ = elf_loader(fetch_fw("nvidia/ga102/gsp", "gsp-570.144.bin", "a8c3ebeed280323aedb51c061f321e73379cce7a9ae643a33dd03915df027f7f"))
+    gsp_fw_name = "tu102" if self.nvdev.fw_name == "tu102" else "ga102"
+    sha = {"ga102": "a8c3ebeed280323aedb51c061f321e73379cce7a9ae643a33dd03915df027f7f",
+           "tu102": "3052aee2872182a14d8d7c069e3a14fe4642405894b24692c4aca4101dfb1809"}[gsp_fw_name]
+    _, sections, _ = elf_loader(fetch_fw(f"nvidia/{gsp_fw_name}/gsp", "gsp-570.144.bin", sha))
     self.gsp_image = next((sh.content for sh in sections if sh.name == ".fwimage"))
     signature = next((sh.content for sh in sections if sh.name == (f".fwsignature_{self.nvdev.chip_name[:4].lower()}x")))
 
@@ -422,13 +541,20 @@ class NV_GSP(NV_IP):
     self.gsp_signature_bar1 = gsp_sig_addrs[0]
 
   def init_boot_binary_image(self):
+    boot_fw_name = self.nvdev.fw_name
     sha = {"ga102":"82428f532240727e95bb3083fbaaba9b2cc7b937314323f2d546ce7245f27fad",
            "ad102":"65ab2e6b6e0fca95365c4deac79a34582abcfeb15b6ae234138f22e7183118a8",
-           "gb202":"d40b48e431d1707dc77af3605db358ed7a32ebfc2830eb74de2eddb4d3025071"}[self.nvdev.fw_name]
-    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{self.nvdev.fw_name}/gsp", "bootloader-570.144.bin", sha))
+           "gb202":"d40b48e431d1707dc77af3605db358ed7a32ebfc2830eb74de2eddb4d3025071",
+           "tu102":"12e987b636c2f00fa40f42fd95097515c0817b158119c584049a37faf38f8f96"}[boot_fw_name]
+    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{boot_fw_name}/gsp", "bootloader-570.144.bin", sha))
     self.booter_image, self.booter_desc = b[h.data_offset:h.data_offset+h.data_size], nv.RM_RISCV_UCODE_DESC.from_buffer_copy(b, h.header_offset)
     _, _, booter_addrs = self.nvdev._alloc_boot_mem(len(self.booter_image), data=self.booter_image)
     self.booter_bar1 = booter_addrs[0]
+
+  def wpr_heap_size(self) -> int:
+    if self.nvdev.fw_name != "tu102": return 0x8100000
+    heap_sz = (8 << 20) + round_up(0x18000 * ceildiv(self.nvdev.vram_size, 1 << 30), 1 << 20) + round_up(0xc000 * 2048, 1 << 20)
+    return min(max(heap_sz, 64 << 20), 256 << 20)
 
   def init_wpr_meta(self):
     self.init_gsp_image()
@@ -444,9 +570,10 @@ class NV_GSP(NV_IP):
       m = nv.GspFwWprMeta(**common, vgaWorkspaceSize=0x20000, pmuReservedSize=0x1820000, nonWprHeapSize=0x220000, gspFwHeapSize=0x8700000,
         frtsSize=0x100000)
     else:
+      gsp_heap_sz = self.wpr_heap_size()
       m = nv.GspFwWprMeta(**common, vgaWorkspaceSize=(vga_sz:=0x100000), vgaWorkspaceOffset=(vga_off:=self.nvdev.vram_size-vga_sz),
         gspFwWprEnd=vga_off, frtsSize=(frts_sz:=0x100000), frtsOffset=(frts_off:=vga_off-frts_sz), bootBinOffset=(boot_off:=frts_off-boot_sz),
-        gspFwOffset=(gsp_off:=round_down(boot_off-radix3_sz, 0x10000)), gspFwHeapSize=(gsp_heap_sz:=0x8100000), fbSize=self.nvdev.vram_size,
+        gspFwOffset=(gsp_off:=round_down(boot_off-radix3_sz, 0x10000)), gspFwHeapSize=gsp_heap_sz, fbSize=self.nvdev.vram_size,
         gspFwHeapOffset=(gsp_heap_off:=round_down(gsp_off-gsp_heap_sz, 0x100000)), gspFwWprStart=(wpr_st:=round_down(gsp_heap_off-0x1000, 0x100000)),
         nonWprHeapSize=(non_wpr_sz:=0x100000), nonWprHeapOffset=(non_wpr_off:=round_down(wpr_st-non_wpr_sz, 0x100000)), gspFwRsvdStart=non_wpr_off)
       assert self.nvdev.flcn.frts_offset == m.frtsOffset, f"FRTS mismatch: {self.nvdev.flcn.frts_offset} != {m.frtsOffset}"
@@ -457,7 +584,7 @@ class NV_GSP(NV_IP):
     res, prom = {}, nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(ctxbufs), engineType=0x1, hChanClient=client, hObject=obj)
     for i,(buf,desc) in enumerate(ctxbufs.items()):
       use_v, use_p = (desc.virt if virt is None else virt), (desc.phys if phys is None else phys)
-      x = (bufs or {}).get(buf, self.nvdev.mm.valloc(desc.size, contiguous=True)) # allocate buffers
+      x = (bufs or {}).get(buf, self.nvdev.mm.valloc(desc.size, contiguous=True, privileged=True)) # allocate buffers
       prom.promoteEntry[i] = nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY(bufferId=buf, gpuVirtAddr=x.va_addr if use_v else 0, bInitialize=use_p,
         gpuPhysAddr=x.paddrs[0][0] if use_p else 0, size=desc.size if use_p else 0, physAttr=0x4 if use_p else 0, bNonmapped=(use_p and not use_v))
       res[buf] = x
@@ -468,6 +595,9 @@ class NV_GSP(NV_IP):
     self.rpc_rm_alloc(hParent=0x0, hClass=0x0, params=nv_gpu.NV0000_ALLOC_PARAMETERS())
     dev = self.rpc_rm_alloc(hParent=self.priv_root, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(hClientShare=self.priv_root))
     subdev = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS())
+    self.mthdbuf_size = self.rpc_rm_control(hObject=subdev, cmd=nv_gpu.NV2080_CTRL_CMD_CE_GET_FAULT_METHOD_BUFFER_SIZE,
+      params=nv_gpu.NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS()).size
+    if DEBUG >= 2: print(f"nv {self.nvdev.devfmt}: fault method buffer size {self.mthdbuf_size:#x}")
     vaspace = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
 
     # reserve 512MB for the reserved PDES
@@ -498,10 +628,12 @@ class NV_GSP(NV_IP):
       2: GRBufDesc(patch_size, phys=True, virt=True), **{x: GRBufDesc(cfgs_sizes[x], phys=False, virt=True) for x in range(3, 7)},
       9: GRBufDesc(cfgs_sizes[9], phys=True, virt=True), 10: GRBufDesc(cfgs_sizes[10], phys=True, virt=False),
       11: GRBufDesc(cfgs_sizes[10], phys=True, virt=True)} # NOTE: 11 reuses cfgs_sizes[10]
-    self.promote_ctx(self.priv_root, subdev, ch_gpfifo, {k:v for k, v in self.grctx_bufs.items() if not v.local})
+    self._golden_ctxbufs = self.promote_ctx(self.priv_root, subdev, ch_gpfifo, {k:v for k, v in self.grctx_bufs.items() if not v.local})
 
+    self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=self.threed_class, params=None)
     self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=self.compute_class, params=None)
     self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=self.dma_class, params=None)
+    self.rpc_free(ch_gpfifo)
 
   def init_hw(self):
     self.stat_q = NVRpcQueue(self, self.stat_q_view, self.cmd_q_view)
@@ -519,6 +651,12 @@ class NV_GSP(NV_IP):
 
   ### RPCs
 
+  def rpc_free(self, hObject:int, client=None) -> None:
+    free_args = nv.rpc_free_v(params=nv.NVOS00_PARAMETERS_v03_00(hRoot=(client:=client or self.priv_root), hObjectParent=0,
+      hObjectOld=hObject, status=0))
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_FREE, bytes(free_args))
+    self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_FREE)
+
   def rpc_alloc_memory(self, hDevice:int, hClass:int, paddrs:list[tuple[int,int]], length:int, flags:int, client:int|None=None) -> int:
     assert all(sz == 0x1000 for _, sz in paddrs), f"all pages must be 4KB, got {[(hex(p), hex(sz)) for p, sz in paddrs]}"
 
@@ -531,31 +669,37 @@ class NV_GSP(NV_IP):
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY)
     return handle
 
-  def rpc_rm_alloc(self, hParent:int, hClass:int, params:Any, client=None) -> int:
+  def rpc_rm_alloc(self, hParent:int, hClass:int, params:Any, client=None, handle:int|None=None) -> int:
+    if hClass == self.compute_class and (client or self.priv_root) != self.priv_root:
+      chan_bufs:dict[int, GRBufDesc] = {k:self.grctx_bufs[k] for k in (0, 2) if k in self.grctx_bufs}
+      glob_bufs:dict[int, GRBufDesc] = {k:dataclasses.replace(self.grctx_bufs[k], phys=False, virt=True) for k in (3, 4, 5, 6, 9, 10)
+                                        if k in self.grctx_bufs}
+      self.promote_ctx(client or self.priv_root, self.subdevice, hParent, {**chan_bufs, **glob_bufs},
+                       bufs={k:v for k,v in self._golden_ctxbufs.items() if k in glob_bufs})
+
     if hClass == self.gpfifo_class:
       ramfc_alloc = self.nvdev.mm.valloc(0x1000, contiguous=True)
       params.ramfcMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x200, addressSpace=2, cacheAttrib=0)
       params.instanceMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x1000, addressSpace=2, cacheAttrib=0)
 
-      _, method_paddr, _ = self.nvdev._alloc_boot_mem(0x5000, sysmem=False)
-      params.mthdbufMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_paddr, size=0x5000, addressSpace=2, cacheAttrib=0)
+      _, _, method_sysaddrs = self.nvdev._alloc_boot_mem(self.mthdbuf_size, contiguous=True, sysmem=True)
+      params.mthdbufMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_sysaddrs[0], size=self.mthdbuf_size, addressSpace=1, cacheAttrib=0)
 
-      if client is not None and client != self.priv_root and params.hObjectError != 0:
-        params.errorNotifierMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=0, size=0xecc, addressSpace=0, cacheAttrib=0)
-        params.userdMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=params.hUserdMemory[0] + params.userdOffset[0], size=0x400, addressSpace=2, cacheAttrib=0)
+      if client is not None and client != self.priv_root:
+        params.userdMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=params.hUserdMemory[0] + params.userdOffset[0], size=0x200, addressSpace=2, cacheAttrib=0)
+        params.hObjectError, params.errorNotifierMem = 0, nv_gpu.NV_MEMORY_DESC_PARAMS()
+        params.internalFlags = (0 << 0) | (1 << 2) | (1 << 4)
 
-    alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=(client:=client or self.priv_root), hParent=hParent, hObject=(obj:=next(self.handle_gen)),
+    alloc_args = nv.rpc_gsp_rm_alloc_v(hClient=(client:=client or self.priv_root), hParent=hParent, hObject=(obj:=handle or next(self.handle_gen)),
       hClass=hClass, flags=0x0, paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC, bytes(alloc_args) + (bytes(params) if params is not None else b''))
-    self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC)
+    res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC)
+    if (st:=nv.rpc_gsp_rm_alloc_v.from_buffer_copy(res).status) != 0: raise RuntimeError(f"rm_alloc of {hClass:#x} returned {rm_err(st)}")
 
     if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_root:
       self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr, client=client)
     if hClass == nv_gpu.NV01_DEVICE_0 and client != self.priv_root: self.device = obj # save user device handle
     if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
-    if hClass == self.compute_class and client != self.priv_root:
-      phys_gr_ctx = self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
-      self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
     return obj if hClass != nv_gpu.NV1_ROOT else client
 
   def rpc_rm_control(self, hObject:int, cmd:int, params:Any, client=None, extra=None):
@@ -573,6 +717,8 @@ class NV_GSP(NV_IP):
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
     res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
+    if (status:=nv.rpc_gsp_rm_control_v.from_buffer_copy(res).status) != 0:
+      raise RuntimeError(f"rm_control {cmd:#x} on {hObject:#x} returned {rm_err(status)}")
     st = type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
 
     # NOTE: gb20x requires the enable bit for token submission. Patch workSubmitToken here to maintain userspace compatibility.

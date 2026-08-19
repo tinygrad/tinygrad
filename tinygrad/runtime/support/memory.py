@@ -196,7 +196,8 @@ class MemoryManager:
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True)
     for _ in ctx.next(size, paddr=0): return [pt for pt, _, _ in ctx.pt_stack]
 
-  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], aspace:AddrSpace, uncached=False, snooped=False, boot=False) -> VirtMapping:
+  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], aspace:AddrSpace, uncached=False, snooped=False, boot=False,
+                privileged=False) -> VirtMapping:
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
 
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
@@ -210,7 +211,7 @@ class MemoryManager:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize, paddr=paddr):
         for pte_off in range(pte_cnt):
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, aspace=aspace, snooped=snooped,
-                       frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
+                       frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True, **({'privileged': True} if privileged else {}))
 
     self.on_range_mapped()
     return VirtMapping(vaddr, size, paddrs, aspace=aspace, uncached=uncached, snooped=snooped)
@@ -236,7 +237,7 @@ class MemoryManager:
     self.map_range(va:=self.alloc_vaddr(self.vram_size, self.vram_size), self.vram_size, [(0, self.vram_size)], AddrSpace.PHYS, uncached=uncached)
     return va
 
-  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> VirtMapping:
+  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False, privileged=False) -> VirtMapping:
     if not getenv("GMMU", 1):
       paddr = self.palloc(size:=round_up(size, 0x1000), align, zero=False)
       return VirtMapping(self.identity_va(uncached) + paddr, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
@@ -261,7 +262,7 @@ class MemoryManager:
           continue
         rem_size -= self.palloc_ranges[nxt_range][0]
 
-    return self.map_range(va, size, paddrs, aspace=AddrSpace.PHYS, uncached=uncached)
+    return self.map_range(va, size, paddrs, aspace=AddrSpace.PHYS, uncached=uncached, privileged=privileged)
 
   def vfree(self, vm:VirtMapping):
     if not getenv("GMMU", 1): return self.pfree(vm.paddrs[0][0])

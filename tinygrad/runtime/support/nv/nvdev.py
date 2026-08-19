@@ -35,10 +35,11 @@ class NVPageTableEntry:
 
   def _is_dual_pde(self) -> bool: return self.lv == self.nvdev.mm.level_cnt - 2
 
-  def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, aspace=AddrSpace.PHYS, snooped=False, frag=0, valid=True):
+  def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, aspace=AddrSpace.PHYS, snooped=False, frag=0, valid=True,
+                privileged=False):
     if not table:
       x = self.nvdev.pte_t.encode(valid=valid, address_sys=paddr >> 12, aperture=2 if aspace is AddrSpace.SYS else 0, kind=6,
-        **({'pcf': int(uncached)} if self.nvdev.mmu_ver == 3 else {'vol': uncached}))
+        **({'pcf': int(uncached)} if self.nvdev.mmu_ver == 3 else {'vol': uncached, 'privilege': int(privileged)}))
     else:
       pde = self.nvdev.dual_pde_t if self._is_dual_pde() else self.nvdev.pde_t
       small, sys = ("_small" if self._is_dual_pde() else ""), "" if self.nvdev.mmu_ver == 3 else "_sys"
@@ -102,6 +103,18 @@ class NVDev:
     self.include("dev_fb", "tu102")
     self.include("dev_gc6_island", "ga102")
 
+    self.chip_id = self.reg("NV_PMC_BOOT_0").read()
+    self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
+    arch = self.chip_details['architecture']
+    self.chip_name = {0x16: "TU1", 0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}[arch] + f"{self.chip_details['implementation']:02d}"
+    self.fw_name = {"TU1": "tu102", "GA1": "ga102", "AD1": "ad102", "GB2": "gb202"}[self.chip_name[:3]]
+
+    if self.fw_name == "tu102":
+      self.include("dev_fb", "gp102")
+      f = self.reg("NV_PFB_PRI_MMU_LOCAL_MEMORY_RANGE").read_bitfields()
+      self.vram_size = f['lower_mag'] << (f['lower_scale'] + 20)
+      if f['ecc_mode'] == 1: self.vram_size = self.vram_size // 16 * 15
+
     if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
       if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
@@ -109,10 +122,6 @@ class NVDev:
       time.sleep(0.1) # wait until device can respond again
 
     self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
-    self.chip_id = self.reg("NV_PMC_BOOT_0").read()
-    self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
-    self.chip_name = {0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}[self.chip_details['architecture']] + f"{self.chip_details['implementation']:02d}"
-    self.fw_name = {"GB2": "gb202", "AD1": "ad102", "GA1": "ga102"}[self.chip_name[:3]]
     self.mmu_ver, self.fmc_boot = (3, True) if self.chip_details['architecture'] >= 0x1a else (2, False)
 
     self.flcn:NV_FLCN|NV_FLCN_COT = NV_FLCN_COT(self) if self.fmc_boot else NV_FLCN(self)
@@ -128,7 +137,8 @@ class NVDev:
     self.pte_t, self.pde_t, self.dual_pde_t = [self.__dict__[name] for name in [f'NV_MMU_VER{self.mmu_ver}_PTE', f'NV_MMU_VER{self.mmu_ver}_PDE',
                                                                                 f'NV_MMU_VER{self.mmu_ver}_DUAL_PDE']]
 
-    self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
+    if self.fw_name != "tu102": self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
+    assert self.vram_size > 0, "failed to read the fb size"
 
     self.vram, self.mmio = self.pci_dev.map_bar(1), self.pci_dev.map_bar(0, fmt='I')
     self.large_bar = self.vram.nbytes >= self.vram_size
@@ -149,7 +159,7 @@ class NVDev:
   def _alloc_boot_mem(self, size:int, data:bytes|None=None, contiguous:bool=False, sysmem:bool|None=None) -> tuple[MMIOInterface,int|None,list[int]]:
     sz = round_up(size, 0x1000)
     if sysmem is True or (sysmem is None and not self.large_bar):
-      view, sysaddr = self.pci_dev.alloc_sysmem(size, 0, contiguous=contiguous)
+      view, sysaddr = self.pci_dev.alloc_sysmem(sz, 0, contiguous=contiguous)
       paddr = None
     else:
       paddr = self.mm.palloc(sz, boot=False)

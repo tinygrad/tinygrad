@@ -3,16 +3,16 @@ from tinygrad.runtime.autogen import load, nv_src
 
 swref_path, hwref_path = "{}/src/common/inc/swref/published", "{}/kernel-open/nvidia-uvm/hwref"
 swref = {
-  "dev_therm": ["gb202"], "dev_vm": ["tu102", "gh100"], **{k:["tu102"] for k in ["dev_fb", "dev_bus"]},
-  **{k:["ga102"] for k in ["dev_gc6_island", "dev_gsp", "dev_riscv_pri", "dev_fbif_v4", "dev_falcon_second_pri", "dev_sec_pri"]},
-  "dev_falcon_v4": ["ga102", "gh100"], "dev_fsp_pri": ["gh100"]
+  "dev_therm": ["gb202"], "dev_vm": ["tu102", "gh100"], "dev_fb": ["tu102", "gp102"], "dev_bus": ["tu102"],
+  **{k:["ga102"] for k in ["dev_gc6_island", "dev_gsp", "dev_fbif_v4", "dev_falcon_second_pri", "dev_sec_pri"]},
+  "dev_riscv_pri": ["ga102", "tu102"], "dev_falcon_v4": ["ga102", "gh100"], "dev_fsp_pri": ["gh100"]
 }
 hwref = {"dev_mmu": ["tu102", "gh100"]}
 __all__ = ["nv_ref", *swref.keys(), *hwref.keys()]
 has_addendum = (("ga102", "dev_gc6_island"), ("ga102", "dev_falcon_v4"))
 
 def __getattr__(nm):
-  arch_map = {"tu102":"turing", "ga102":"ampere", "gh100":"hopper", "gb202":"blackwell"}
+  arch_map = {"tu102":"turing", "ga102":"ampere", "gh100":"hopper", "gb202":"blackwell", "gp102":"pascal"}
   regs_off = {'NV_PFALCON_FALCON': 0x0, 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': 0x1000, 'NV_PGC6_AON': 0x0, 'NV_PFSP': 0x0,
     'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': 0x600, 'NV_PFALCON2_FALCON': 0x1000, 'NV_PBUS': 0x0, 'NV_PFB': 0x0, 'NV_PMC': 0x0, 'NV_PGSP_QUEUE': 0x0,
     'NV_VIRTUAL_FUNCTION':0xb80000, "NV_THERM": 0x0}
