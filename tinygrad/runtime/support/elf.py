@@ -1,4 +1,4 @@
-import struct, ctypes, ctypes.util
+import struct, ctypes
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, i2u, unwrap
 from tinygrad.runtime.autogen import libc
@@ -6,13 +6,13 @@ from tinygrad.runtime.autogen import libc
 @dataclass(frozen=True)
 class ElfSection: name:str; header:libc.Elf64_Shdr|libc.Elf32_Shdr; content:bytes # noqa: E702
 
-def link_sym(sym:str, libs:list[str]) -> int:
+def link_sym(sym:str, libs:list[ctypes.CDLL]) -> int:
   for lib in libs:
-    try: return unwrap(ctypes.cast(getattr(ctypes.CDLL(ctypes.util.find_library(lib)), sym), ctypes.c_void_p).value)
+    try: return unwrap(ctypes.cast(getattr(lib, sym), ctypes.c_void_p).value)
     except (OSError, AttributeError): pass
   raise RuntimeError(f'Attempting to relocate against an undefined symbol {sym}')
 
-def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[str]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
+def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[ctypes.CDLL]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
   assert blob[:4] == libc.ELFMAG.encode(), "blob is not an ELF, missing magic bytes"
   ecls = {libc.ELFCLASS32: "Elf32", libc.ELFCLASS64: "Elf64"}[blob[libc.EI_CLASS]]
 
@@ -49,7 +49,7 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[str]|None=N
 
   return memoryview(image), sections, relocs
 
-def jit_loader(obj: bytes, base:int=0, link_libs:list[str]|None=None) -> bytes:
+def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None) -> bytes:
   image_, _, relocs = elf_loader(obj, link_libs=link_libs)
   image = bytearray(image_)
 
