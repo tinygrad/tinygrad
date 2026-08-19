@@ -35,9 +35,7 @@ class AM_SOC(AM_IP):
         self.adev.indirect_wreg_pcie(self.adev.regXCC_DOORBELL_FENCE.addr[0], self.adev.regXCC_DOORBELL_FENCE.encode(shub_slv_mode=1), aid=aid)
       self.adev.regBIFC_GFX_INT_MONITOR_MASK.write(0x7ff)
       self.adev.regBIFC_DOORBELL_ACCESS_EN_PF.write(0xfffff)
-      # program the HDP flush doorbell remapping to a valid hole (like nbio_v7_9 in the kernel): the silicon default
-      # is bogus and flushing HDP without this hangs the chip (flush_hdp writes to address read from this register).
-      self.adev.regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL.write(0x1A000)
+
     else: self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
   def set_clockgating_state(self):
