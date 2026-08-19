@@ -19,16 +19,33 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None
 @functools.cache
 def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
                                   device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
-  code = (pathlib.Path(__file__).parent / "fused_qkv_rope.cpp").read_text()
-  threads = 256
-  thread_idx = UOp.special(threads, "lidx0")
-  block_idx_x, block_idx_y = UOp.special(B, "gidx0"), UOp.special(N, "gidx1")
-  sink = UOp.sink(q.base, k.base, v.base, xqkv.base, freqs_cis.base, thread_idx, block_idx_x, block_idx_y,
-                  arg=KernelInfo(name="fused_qkv_rope_forward"))
-  compile_args = ["-std=c++20", "-ffast-math", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
-                  f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DTHREADS_PER_BLOCK={threads}"]
-  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+  group_size = H // H_KV
+  q, k, v = q.reshape(B, N, H, D), k.reshape(B, N, H_KV, D), v.reshape(B, N, H_KV, D)
+  xqkv = xqkv.reshape(B, N, H_KV, group_size + 2, D)
+  b, n = UOp.range(B, 0), UOp.range(N, 1)
+  pair = UOp.range(D // 2, 2)
+  even = pair * 2
+  c = freqs_cis[0, n, 0, pair, 0].cast(dtypes.float)
+  s = freqs_cis[0, n, 0, pair, 1].cast(dtypes.float)
+  ordered:UOp|None = None
+  for kvh in range(H_KV):
+    q_out, k_out, v_out = (x.after(ordered) if ordered is not None else x for x in (q, k, v))
+    x_in = xqkv.after(ordered) if ordered is not None else xqkv
+    stores:list[UOp] = []
+    for rep in range(group_size):
+      a = x_in[b, n, kvh, rep, even].cast(dtypes.float)
+      bb = x_in[b, n, kvh, rep, even + 1].cast(dtypes.float)
+      h = kvh * group_size + rep
+      stores += [q_out[b, n, h, even].store((a * c - bb * s).cast(q.dtype)), q_out[b, n, h, even + 1].store((a * s + bb * c).cast(q.dtype))]
+    a = x_in[b, n, kvh, group_size, even].cast(dtypes.float)
+    bb = x_in[b, n, kvh, group_size, even + 1].cast(dtypes.float)
+    stores += [k_out[b, n, kvh, even].store((a * c - bb * s).cast(k.dtype)),
+               k_out[b, n, kvh, even + 1].store((a * s + bb * c).cast(k.dtype)),
+               v_out[b, n, kvh, even].store(x_in[b, n, kvh, group_size + 1, even]),
+               v_out[b, n, kvh, even + 1].store(x_in[b, n, kvh, group_size + 1, even + 1])]
+    ordered = UOp.group(*stores)
+  assert ordered is not None
+  return ordered.end(pair, n, b).sink(arg=KernelInfo(name="fused_qkv_rope_forward"))
 
 @functools.cache
 def custom_fused_qkv_rope_backward(dxqkv:UOp, dq:UOp, dk:UOp, dv:UOp, freqs_cis:UOp,
