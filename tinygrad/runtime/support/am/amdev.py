@@ -152,9 +152,6 @@ class AMDev:
     self._run_discovery()
     self._build_regs()
 
-    # on NBIO 7.9 the HDP flush doorbell remap register must be programmed before any flush (nbio_v7_9_remap_hdp_registers).
-    # the silicon default is bogus and flushing without this hangs the chip. flush_hdp is used before SOC init (by the PSP).
-    if self.ip_ver[am.NBIO_HWIP][:2] == (7,9): self.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").write(0x1A000)
     # The GPU being passed can be in one of several states: 1. Not initialized. 2. Initialized by amdgpu. 3. Initialized by AM.
     # The 1st and 2nd states require a full GPU setup since their states are unknown. The 2nd state also requires a mode1 reset to
     # reinitialize all components.
