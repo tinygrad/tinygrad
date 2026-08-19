@@ -23,6 +23,12 @@ class TestWeakConstFolding(unittest.TestCase):
     self.assertTrue(UOp.invalid().alu(Ops.CDIV, UOp.const(0)).simplify().is_invalid)
 
 class TestBitcastConstFolding(unittest.TestCase):
+  def test_out_of_range_source_value(self):
+    for val, src_dt, dst_dt, bits in ((3000000000, dtypes.int32, dtypes.uint32, 3000000000),
+                                      (70000, dtypes.int16, dtypes.uint16, 4464),
+                                      (-5, dtypes.uint32, dtypes.int32, -5)):
+      self.assertEqual(UOp.const(val, src_dt).bitcast(dst_dt).simplify().val, bits)
+
   def test_scalar_bitcast(self):
     def t(cases: dict[DType, ConstType]):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
