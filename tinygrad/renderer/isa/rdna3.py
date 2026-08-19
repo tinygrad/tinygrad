@@ -159,8 +159,8 @@ def abi(ctx, x:UOp) -> UOp|None:
   if x.tag is True: return None
   # NOTE: carries PARAM op through meta src edge to preserve program info
   offs = const(sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:ctx.func_args.index(x)]))
-  if x.addrspace is AddrSpace.ALU: return vmov(UOp(Ops.INS, arg=RDNA3Ops.s_load_b32, src=(kernarg_ptr, offs, x.rtag()), tag=(ctx.vreg(GP_SGPRS),)))
-  return UOp(Ops.INS, arg=RDNA3Ops.s_load_b64, dtype=dtypes.ulong, src=(kernarg_ptr, offs, x.rtag()), tag=(ctx.vreg(GP_SGPRS, width=2, alignment=2),))
+  if x.addrspace is AddrSpace.ALU: return vmov(UOp(Ops.INS, x.dtype, (kernarg_ptr, offs, x.rtag()), RDNA3Ops.s_load_b32, (ctx.vreg(GP_SGPRS),)))
+  return UOp(Ops.INS, dtypes.ulong, (kernarg_ptr, offs, x.rtag()), RDNA3Ops.s_load_b64, (ctx.vreg(GP_SGPRS, width=2, alignment=2),))
 
 # ----- memory access ----
 # GLOBAL_ADDR = VADDR_U64 + IMMOFFS_u16
@@ -516,7 +516,6 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(GroupOp.All - {Ops.INS}, name="x"), lambda x: (x, [])),
 ])
 
-# NOTE: hacky fixes, find cleaner way to conform to isa
 def encode(ctx, x:UOp):
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   def encfield(x:UOp):
