@@ -22,13 +22,11 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
   group_size = H // H_KV
   q, k, v = q.reshape(B, N, H, D), k.reshape(B, N, H_KV, D), v.reshape(B, N, H_KV, D)
   xqkv = xqkv.reshape(B, N, H_KV, group_size + 2, D)
-
   b, n = UOp.range(B, 0), UOp.range(N, 1)
   pair = UOp.range(D // 2, 2)
   even = pair * 2
   c = freqs_cis[0, n, 0, pair, 0].cast(dtypes.float)
   s = freqs_cis[0, n, 0, pair, 1].cast(dtypes.float)
-
   ordered:UOp|None = None
   for kvh in range(H_KV):
     q_out, k_out, v_out = (x.after(ordered) if ordered is not None else x for x in (q, k, v))
@@ -38,9 +36,7 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
       a = x_in[b, n, kvh, rep, even].cast(dtypes.float)
       bb = x_in[b, n, kvh, rep, even + 1].cast(dtypes.float)
       h = kvh * group_size + rep
-      stores += [q_out[b, n, h, even].store((a * c - bb * s).cast(q.dtype)),
-                 q_out[b, n, h, even + 1].store((a * s + bb * c).cast(q.dtype))]
-
+      stores += [q_out[b, n, h, even].store((a * c - bb * s).cast(q.dtype)), q_out[b, n, h, even + 1].store((a * s + bb * c).cast(q.dtype))]
     a = x_in[b, n, kvh, group_size, even].cast(dtypes.float)
     bb = x_in[b, n, kvh, group_size, even + 1].cast(dtypes.float)
     stores += [k_out[b, n, kvh, even].store((a * c - bb * s).cast(k.dtype)),
