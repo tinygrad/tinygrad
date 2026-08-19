@@ -29,8 +29,9 @@ class AM_SOC(AM_IP):
 
   def init_hw(self):
     if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
-      # kernel programs regXCC_DOORBELL_FENCE = 0xff & ~xcc_mask; on this PF 4 of 8 XCCs are harvested, so fence xcc4-7
-      self.adev.regXCC_DOORBELL_FENCE.write(0xF0)
+      # fence doorbells for harvested xccs (0xff & ~xcc_mask in the kernel); a fully-unharvested chip keeps the previous 0x0
+      live_xccs = sum(1 << i for i in self.adev.regs_offset[am.GC_HWIP] if i not in self.adev.harvested[am.GC_HWIP] and i < 8)
+      self.adev.regXCC_DOORBELL_FENCE.write(0xff & ~live_xccs)
       for aid in range(1, self.adev.gmc.vmhubs):
         self.adev.indirect_wreg_pcie(self.adev.regXCC_DOORBELL_FENCE.addr[0], self.adev.regXCC_DOORBELL_FENCE.encode(shub_slv_mode=1), aid=aid)
       self.adev.regBIFC_GFX_INT_MONITOR_MASK.write(0x7ff)

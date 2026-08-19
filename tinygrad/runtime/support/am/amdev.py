@@ -174,21 +174,19 @@ class AMDev:
 
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
-      fw_is_ours = False
+      fw_reusable = False
       if self.psp.is_sos_alive() and self.smu.is_smu_alive():
         self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
         if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
-        # mode1 reset is only needed for foreign/unknown firmware state. If the running firmware was set up by AM itself
-        # (SCRATCH_REG7 is ours), a full AM re-init can run on top of it; SMU mode1 leaves the PSP/BL dead on some chips.
-        fw_is_ours = self.reg("regSCRATCH_REG7").read() == AMDev.Version
-        if not fw_is_ours: self.smu.mode1_reset()
+        # mode1 leaves MP0 unrecoverable on MP0 13.0.15 (PSP/BL never re-POST). AM's own firmware (based on SCRATCH_REG7
+        # matching our version) can be reused instead, re-initializing all host-side IP blocks; the PSP stage must be
+        # skipped since a live sOS does not service a new ring between sessions.
+        fw_reusable = self.reg("regSCRATCH_REG7").read() == AMDev.Version and self.ip_ver[am.MP0_HWIP] == (13,0,15)
+        if not fw_reusable: self.smu.mode1_reset()
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
-      # when the firmware is AM's own and still running, skip the PSP stage: PSP ring commands over a live sOS are not
-      # serviced between sessions, and its firmware is already loaded.
-      self.init_hw(*([self.soc, self.gmc, self.ih, self.smu] if (self.psp.is_sos_alive() and self.smu.is_smu_alive() and fw_is_ours) else
-                      [self.soc, self.gmc, self.ih, self.psp, self.smu]))
+      self.init_hw(*([self.soc, self.gmc, self.ih, self.smu] if fw_reusable else [self.soc, self.gmc, self.ih, self.psp, self.smu]))
 
     # Booting done
     self.is_booting = False
