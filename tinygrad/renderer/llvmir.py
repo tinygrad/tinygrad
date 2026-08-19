@@ -146,7 +146,6 @@ base_rewrite = PatternMatcher([
 ])
 
 class LLVMRenderer(Renderer):
-  casted_consts = True
   abi: str | None
   string_rewrite: PatternMatcher
   code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}

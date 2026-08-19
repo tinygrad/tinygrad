@@ -200,11 +200,13 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
+  # a literal is CAST(dt, CONST(value)), so its inner CONST is the one weak node a program may contain
+  (UPat(Ops.CONST, dtype=dtypes.weaks, name="x"), lambda x: x.dtype is dtypes.from_py(x.val)),
   # index and weak dtypes are not allowed in programs
   (UPat(GroupOp.All, (dtypes.weakint, dtypes.weakfloat)), lambda: False),
 
   # allow special SHRINK
-  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
+  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST).or_casted())), lambda: True),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),
@@ -222,12 +224,6 @@ spec_program = PatternMatcher([
   # SPECIAL is int32 after index lowering
   (UPat(Ops.SPECIAL, src=(UPat.var("x", dtypes.int32),), name="s"), lambda s,x: matches_dtype(x, s.dtype) and isinstance(s.arg, str)),
 ])+spec_shared
-
-# migration: on a casted_consts renderer every literal is CAST(dt, CONST(value)) with a weak inner CONST
-spec_program_casted_consts = PatternMatcher([
-  (UPat(Ops.CONST, dtype=dtypes.weaks, name="x"), lambda x: x.dtype is dtypes.from_py(x.val)),
-  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CAST, src=(UPat(Ops.CONST),)))), lambda: True),
-])+spec_program
 
 spec_hcq = PatternMatcher([
   (UPat(Ops.GETADDR, dtypes.uint64, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),), name="x"), lambda x: is_device(x.arg)),
