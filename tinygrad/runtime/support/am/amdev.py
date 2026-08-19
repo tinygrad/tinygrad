@@ -194,9 +194,7 @@ class AMDev:
     # Re-initialize main blocks
     self.init_hw(self.gfx, self.sdma)
 
-    # TODO: MP0 13.0.15 PMFW doesn't answer DPM clock msgs without the full amdgpu pptable/DPM setup, skip clock programming
-    if self.ip_ver[am.MP0_HWIP] == (13,0,15) and (max_power:=0.0) == 0.0: pass
-    elif (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
+    if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
       self.smu.set_power_limit(max_power)
       self.smu.set_clocks(level=None)
     else: self.smu.set_clocks(level=-1) # last level, max perf.
