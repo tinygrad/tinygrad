@@ -235,6 +235,16 @@ class FlatTransformer:
                                                                   next_grad_amax_state=next_grad_amax_xqkv, next_amax_x=next_amax_xqkv,
                                                                   mxfp4_w=mxfp4_wqkv)
     saves.extend([x_normed, rrms, *s, xqkv])
+    out, out_saves = self.attention_from_qkv(xqkv, freqs_cis, wo=wo, amax_xo=amax_xo, s_o=s_o,
+                                              next_amax_xo=next_amax_xo, grad_amax_xo=grad_amax_xo,
+                                              next_grad_amax_xo=next_grad_amax_xo, mxfp4_wo=mxfp4_wo)
+    saves.extend(out_saves)
+    return out, saves
+
+  def attention_from_qkv(self, xqkv:Tensor, freqs_cis:Tensor, *, wo:Tensor, amax_xo:Tensor|None, s_o:Tensor,
+                         next_amax_xo:Tensor|None, grad_amax_xo:Tensor|None, next_grad_amax_xo:Tensor|None, mxfp4_wo=None):
+    bsz, seqlen, _ = xqkv.shape
+    saves = []
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention, fused_qkv_rope
       xq, xk, xv = fused_qkv_rope(xqkv, freqs_cis, self.n_heads, self.n_kv_heads, self.head_dim,
@@ -257,6 +267,15 @@ class FlatTransformer:
                                save_original_input=bool(MXFP4))
     saves.extend([*s, out])
     return out, saves
+
+  def prepare_next_layer(self, h:Tensor, ffn:Tensor, attn_kwargs:dict):
+    xqkv, x, x_normed, rrms, s = add_norm_quantize_matmul(h, ffn, attn_kwargs["attention_norm"], attn_kwargs["wqkv"],
+                                                           attn_kwargs["s_qkv"], self.norm_eps,
+                                                           amax_x=attn_kwargs["amax_xqkv"], next_amax_x=attn_kwargs["next_amax_xqkv"],
+                                                           grad_amax_state=attn_kwargs["grad_amax_xqkv"],
+                                                           next_grad_amax_state=attn_kwargs["next_grad_amax_xqkv"],
+                                                           mxfp4_w=attn_kwargs.get("mxfp4_wqkv"))
+    return x, xqkv, [x, x_normed, rrms, *s, xqkv]
 
   def feed_forward(self, x:Tensor, residual:Tensor, **kwargs):
     saves = []
@@ -305,7 +324,32 @@ class FlatTransformer:
     return out, h, saves
 
   @function(precompile=True, precompile_backward=True)
-  def run_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict, save:bool=True):
+  def run_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict, next_attn_kwargs:dict, save:bool=True):
+    attn, attn_saves = self.attention(x, freqs_cis, **attn_kwargs)
+    ffn, h, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
+    x, xqkv, next_attn_saves = self.prepare_next_layer(h, ffn, next_attn_kwargs)
+    if save: return (x, xqkv, *attn_saves, *ffn_saves, *next_attn_saves[1:-1])
+    else: return x, xqkv
+
+  @function(precompile=True, precompile_backward=True)
+  def run_layer_precomputed(self, x:Tensor, xqkv:Tensor, freqs_cis:Tensor, attn_out_kwargs:dict,
+                            ffn_kwargs:dict, next_attn_kwargs:dict, save:bool=True):
+    attn, attn_saves = self.attention_from_qkv(xqkv, freqs_cis, **attn_out_kwargs)
+    ffn, h, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
+    x, xqkv, next_attn_saves = self.prepare_next_layer(h, ffn, next_attn_kwargs)
+    if save: return (x, xqkv, *attn_saves, *ffn_saves, *next_attn_saves[1:-1])
+    else: return x, xqkv
+
+  @function(precompile=True, precompile_backward=True)
+  def run_last_layer(self, x:Tensor, xqkv:Tensor, freqs_cis:Tensor, attn_out_kwargs:dict, ffn_kwargs:dict, save:bool=True):
+    attn, attn_saves = self.attention_from_qkv(xqkv, freqs_cis, **attn_out_kwargs)
+    ffn, h, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
+    h = h + ffn
+    if save: return (h, *attn_saves, *ffn_saves)
+    else: return (h,)
+
+  @function(precompile=True, precompile_backward=True)
+  def run_only_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict, save:bool=True):
     attn, attn_saves = self.attention(x, freqs_cis, **attn_kwargs)
     ffn, h, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
     h = h + ffn
@@ -387,6 +431,7 @@ class FlatTransformer:
       specs = (("amax_", a, act_names), ("next_amax_", na, act_names), ("grad_amax_", ga, grad_names), ("next_grad_amax_", nga, grad_names))
       if MXFP4: return dict.fromkeys(f"{prefix}{name}" for prefix, _, names in specs for name in names)
       return {f"{prefix}{name}":val[name][i] for prefix, val, names in specs for name in names}
+    layer_kwargs = []
     for i in range(self.n_layers):
       attn_kwargs = dict(attention_norm=self.attention_norm[i], wqkv=self.wqkv[i], wo=self.wo[i], s_qkv=s["wqkv"][i], s_o=s["wo"][i],
                          **amax_kwargs(i, ("xqkv", "xo"), ("xqkv", "xo")))
@@ -400,7 +445,18 @@ class FlatTransformer:
       else:
         ffn_kwargs.update(w13=self.w13[i], s_13=s["w13"][i], **amax_kwargs(i, ("x13",), ("xw13",)))
         if mxfp4_weights is not None: ffn_kwargs.update(mxfp4_w13=mxfp4_weights["w13"][i])
-      h, *_ = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, save=save)
+      attn_out_kwargs = {k:attn_kwargs[k] for k in ("wo", "amax_xo", "s_o", "next_amax_xo", "grad_amax_xo", "next_grad_amax_xo")}
+      if "mxfp4_wo" in attn_kwargs: attn_out_kwargs["mxfp4_wo"] = attn_kwargs["mxfp4_wo"]
+      layer_kwargs.append((attn_kwargs, attn_out_kwargs, ffn_kwargs))
+
+    if self.n_layers == 1:
+      h, *_ = self.run_only_layer(h, freqs_cis, layer_kwargs[0][0], layer_kwargs[0][2], save=save)
+    else:
+      h, xqkv, *_ = self.run_layer(h, freqs_cis, layer_kwargs[0][0], layer_kwargs[0][2], layer_kwargs[1][0], save=save)
+      for i in range(1, self.n_layers-1):
+        h, xqkv, *_ = self.run_layer_precomputed(h, xqkv, freqs_cis, layer_kwargs[i][1], layer_kwargs[i][2],
+                                                 layer_kwargs[i+1][0], save=save)
+      h, *_ = self.run_last_layer(h, xqkv, freqs_cis, layer_kwargs[-1][1], layer_kwargs[-1][2], save=save)
 
     logits = matmul(self.norm(h), self.output[0], fp8=False)[0]
     return logits
