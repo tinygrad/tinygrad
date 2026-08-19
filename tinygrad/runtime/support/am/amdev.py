@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, collections, dataclasses, functools, hashlib, array
-from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw
+from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw, to_mv
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
@@ -152,6 +152,7 @@ class AMDev:
     self._run_discovery()
     self._build_regs()
 
+    # AM boot Process:
     # The GPU being passed can be in one of several states: 1. Not initialized. 2. Initialized by amdgpu. 3. Initialized by AM.
     # The 1st and 2nd states require a full GPU setup since their states are unknown. The 2nd state also requires a mode1 reset to
     # reinitialize all components.
@@ -321,16 +322,13 @@ class AMDev:
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
 
     # HARV(EST) table: harvested instances must be excluded (like amdgpu_discovery_harvest_ip)
+    # layout: u32 signature, u16 version, u16 size, then 32 entries of {hw_id:u16, inst:u8, rsv:u8}
     self.harvested:dict[int, set[int]] = collections.defaultdict(set)
-    if (harv_off:=self.bhdr.table_list[am.HARVEST_INFO].offset) != 0:
-      hv = ctypes.c_uint32.from_address(ctypes.addressof(self.bhdr) + harv_off).value
-      if hv == am.HARVEST_TABLE_SIGNATURE:
-        for i in range(32):
-          hw_id = ctypes.c_uint16.from_address(ctypes.addressof(self.bhdr) + harv_off + 8 + i*4).value
-          if hw_id == 0: continue
-          inst = ctypes.c_uint8.from_address(ctypes.addressof(self.bhdr) + harv_off + 8 + i*4 + 2).value
-          for hw_ip in am.hw_id_map:
-            if am.hw_id_map[hw_ip] == hw_id: self.harvested[hw_ip].add(inst)
+    if (harv_off:=self.bhdr.table_list[am.HARVEST_INFO].offset) != 0 and \
+       (blob:=to_mv(ctypes.addressof(self.bhdr) + harv_off, 8 + 32*4).cast('I'))[0] == am.HARVEST_TABLE_SIGNATURE:
+      inv_hw_id = {hw_id: hw_ip for hw_ip, hw_id in am.hw_id_map.items()}
+      for ent in blob[2:]:
+        if (hw_ip:=inv_hw_id.get(ent & 0xffff)) is not None: self.harvested[hw_ip].add((ent >> 16) & 0xff)
 
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
