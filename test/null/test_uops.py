@@ -129,7 +129,7 @@ class TestConstFloatEq(unittest.TestCase):
     self.assertFalse(Invalid != HoldsInvalid())
 
   def test_matchers_agree_on_nan(self):
-    n = UOp.const(math.nan, dtypes.float32)
+    n = UOp.const(math.nan)
     for compiled in (False, True):
       pm = PatternMatcher([(UPat(Ops.CONST, arg=math.nan), lambda: True)], compiled=compiled)
       self.assertTrue(pm.rewrite(n), f"{compiled=}")
