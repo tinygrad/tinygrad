@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 import itertools
 from tinygrad.dtype import AddrSpace, Invalid, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
-from tinygrad.uop.ops import graph_rewrite, AxisType, rewrite_group, identity_element, remove_all_tags
+from tinygrad.uop.ops import graph_rewrite, AxisType, rewrite_group, identity_element, remove_all_tags, resolve
 from tinygrad.helpers import all_int, VIZ, SPEC, Context, panic
 from tinygrad.schedule.indexing import BufferizeOpts, apply_movement_op
 from tinygrad.schedule.multi import multi_pm
@@ -12,6 +12,12 @@ def walk_mop(u:UOp, non_after_okay=False):
   if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD}: return u.src[0]
   assert u.op == Ops.AFTER or non_after_okay
   return u
+
+fix_mselect_mstack = PatternMatcher([
+  # move RESHAPEs through MSELECT/MSTACK
+  (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
+   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src])).reshape(m.shape)),
+])
 
 # *** preparation ***
 
@@ -56,6 +62,15 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   return c.src[0].substitute(dict_map, walk=True)
 
+def fix_store_hazard(target:UOp, src:UOp):
+  if (base:=target.base) not in src.toposort(enter_calls=False): return None
+  # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
+  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
+  reaches_base: dict[UOp, bool] = {}
+  for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
+    reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
+    if reaches_base[s] and s.op in unsafe and not (s is target and s.op is Ops.SHRINK): return target.store(src.contiguous())
+
 pm_prepare_graph = PatternMatcher([
   # CALL inputs need buffer identity (and to be flat)
   (UPat(Ops.CALL, name="c"),
@@ -82,6 +97,8 @@ pm_prepare_graph = PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if 0 in x.shape and 0 not in reduce.shape else None),
   # size 0 STORE is NOOP
   (UPat(Ops.STORE, name="s"), lambda s: UOp(Ops.NOOP) if 0 in s.shape else None),
+  # fix store hazard (dest is in used in src) by adding contiguous: TestAssign.test_post_flipped_assignment
+  (UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
 ])
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
@@ -102,7 +119,7 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
 pm_copy_to_store = PatternMatcher([
   (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),
   (UPat((Ops.COPY, Ops.CONTIGUOUS), name="copy"), convert_copy_to_store),
-])
+])+fix_mselect_mstack
 
 # *** RANGE creation ***
 
@@ -213,7 +230,7 @@ def _renumber_range(ctx:SplitCtx, u:UOp) -> UOp|None:
   ctx.range_number += 1
   return u.replace(arg=(ctx.range_number, u.arg[-1])).rtag()
 
-pm_split_graph = PatternMatcher([
+pm_split_graph = pm_range_migration+PatternMatcher([
   (UPat((Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK), name="u"), _split_graph),
   (UPat(Ops.RANGE, name="u"), _renumber_range),
 ])
@@ -225,6 +242,32 @@ def split_store(x:UOp) -> UOp:
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
+])
+
+# cleanups
+
+def strip_zero_offset_shrink(x:UOp) -> UOp:
+  return x.src[0] if x.op is Ops.SHRINK and all(resolve(start == 0, False) for start,_ in x.marg) else x
+
+def no_indexing_calls(u:UOp):
+  new_srcs = []
+  for x in u.src:
+    if x.op is Ops.INDEX:
+      # sometimes if call srcs have children the call will get an INDEX. we remove it here.
+      # TODO: we should add safety checks here for contiguous
+      new_srcs.append(x.src[0])
+    elif x.op is Ops.SHRINK:
+      # SHRINK with offset 0 is fine
+      new_srcs.append(strip_zero_offset_shrink(x))
+    elif x.op is Ops.MSTACK:
+      new_srcs.append(x.replace(src=tuple(strip_zero_offset_shrink(s) for s in x.src)))
+    else:
+      # everything else we pass through
+      new_srcs.append(x)
+  return u.replace(src=tuple(new_srcs))
+
+pm_no_indexing_calls = PatternMatcher([
+  (UPat(Ops.CALL, name="u"), no_indexing_calls),
 ])
 
 # *** main rangeify ***
@@ -239,10 +282,7 @@ def remove_stage(ctx, x:UOp) -> UOp:
 
 pm_remove_stage = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), remove_stage),
-  # move RESHAPEs through MSELECT/MSTACK
-  (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src])).reshape(m.shape)),
-])
+])+fix_mselect_mstack
 
 @rewrite_group(new_ctx=False)
 def get_kernel_graph(sink:UOp) -> UOp:
@@ -284,8 +324,8 @@ def get_kernel_graph(sink:UOp) -> UOp:
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
   tsink = graph_rewrite(tsink, pm_remove_stage, ctx=itertools.count(0), bottom_up=True, name="remove stage")
-
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
+  tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
   if SPEC:
