@@ -436,23 +436,15 @@ class AM_IH(AM_IP):
     def _alloc_ring(size): return (self.adev.mm.palloc(size, zero=False, boot=True), self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.rings = [(*_alloc_ring(self.ring_size), "", 0), (*_alloc_ring(self.ring_size), "_RING1", 1)]
     self.ring_view = self.adev.vram.view(offset=self.rings[0][0], size=self.ring_size, fmt='I')
-    # on gfx950 (aqua), the IH rings must live in host system memory (like use_bus_addr=true in amdgpu)
-    self.rings_in_sysmem = self.adev.ip_ver[am.GC_HWIP][:2] == (9,5) # scoped to gfx950 for now (validated symptom there)
-    if self.rings_in_sysmem:
-      # OSSSYS 4.4.2 (aqua): only one IH ring, the second one is skipped in amdgpu too
-      self.sysmem_rings = [self.adev.pci_dev.alloc_sysmem(self.ring_size + 0x1000) for _ in range(1)]
-      self.rings = [(sr[1][0], sr[1][self.ring_size // 0x1000], s, i) for sr, (_, _, s, i) in zip(self.sysmem_rings, self.rings)]
-      self.ring_view = self.sysmem_rings[0][0].view(0, self.ring_size, fmt='I')
 
   def init_hw(self):
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
-      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", ring_vm >> 8)
+      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", self.adev.paddr2mc(ring_vm) >> 8)
 
-      mc_space = 1 if self.rings_in_sysmem else 4
-      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=mc_space, wptr_overflow_clear=1, rb_size=((self.ring_size//4)-1).bit_length(),
+      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=((self.ring_size//4)-1).bit_length(),
         mc_snoop=1, mc_ro=0, mc_vmid=0, **({'wptr_overflow_enable': 1, 'rptr_rearm': 1} if ring_id == 0 else {'rb_full_drain_enable': 1}))
 
-      if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", (rwptr_vm if self.rings_in_sysmem else self.adev.paddr2mc(rwptr_vm)))
+      if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", self.adev.paddr2mc(rwptr_vm))
 
       self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
       self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
@@ -463,12 +455,6 @@ class AM_IH(AM_IP):
       self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
       self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
       self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
-
-    # aqua (OSSSYS 4.4.2): IH_CHICKEN.MC_SPACE_GPA_ENABLE + retry-int-cam must be set before RB_ENABLE (as in vega20_ih)
-    if self.rings_in_sysmem and hasattr(self.adev, 'regIH_CHICKEN'):
-      self.adev.regIH_CHICKEN.update(mc_space_gpa_enable=1)
-      oss_base = self.adev.regs_offset[am.OSSSYS_HWIP][0][0]
-      self.adev.wreg(oss_base + 0xEA, self.adev.rreg(oss_base + 0xEA) | 0x10000) # IH_RETRY_INT_CAM_CNTL_ALDEBARAN
 
     # toggle interrupts
     for _, rwptr_vm, suf, ring_id in self.rings:
