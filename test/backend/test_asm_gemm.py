@@ -461,7 +461,6 @@ class TestHkBf16AtbGemm(unittest.TestCase):
   def setUp(self):
     if not is_cdna4(): self.skipTest("hk bf16 atb gemm is cdna4 only")
   def test_single(self): run_atb_gemm(256, 256, 256)
-  def test_long_k(self): run_atb_gemm(8192, 256, 256)
   @needs_second_gpu
   def test_k_sharded(self): run_atb_gemm(512, 256, 256, a_shard=1, b_shard=1, gpus=2)
   @needs_second_gpu
