@@ -20,7 +20,7 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None
 def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
                                   device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
   code = (pathlib.Path(__file__).parent / "fused_qkv_rope.cpp").read_text()
-  threads = 256
+  threads = max(64, D // 2)
   thread_idx = UOp.special(threads, "lidx0")
   block_idx_x, block_idx_y = UOp.special(B, "gidx0"), UOp.special(N, "gidx1")
   sink = UOp.sink(q.base, k.base, v.base, xqkv.base, freqs_cis.base, thread_idx, block_idx_x, block_idx_y,

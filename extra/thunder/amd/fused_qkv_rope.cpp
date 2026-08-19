@@ -17,7 +17,7 @@
 #define ATTN_D 128
 #endif
 #ifndef THREADS_PER_BLOCK
-#define THREADS_PER_BLOCK 256
+#define THREADS_PER_BLOCK 64
 #endif
 
 constexpr int GROUP_SIZE = ATTN_H / ATTN_H_KV;
