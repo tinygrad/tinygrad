@@ -156,9 +156,11 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
 
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
 def abi(ctx, x:UOp) -> UOp|None:
+  if x.tag is True: return None
+  # NOTE: carries PARAM op through meta src edge to preserve program info
   offs = const(sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:ctx.func_args.index(x)]))
-  if x.addrspace is AddrSpace.ALU: return vmov(x.ins(RDNA3Ops.s_load_b32, src=(kernarg_ptr, offs), tag=(ctx.vreg(GP_SGPRS),)))
-  return x.ins(RDNA3Ops.s_load_b64, dtype=dtypes.ulong, src=(kernarg_ptr, offs), tag=(ctx.vreg(GP_SGPRS, width=2, alignment=2),))
+  if x.addrspace is AddrSpace.ALU: return vmov(UOp(Ops.INS, arg=RDNA3Ops.s_load_b32, src=(kernarg_ptr, offs, x.rtag()), tag=(ctx.vreg(GP_SGPRS),)))
+  return UOp(Ops.INS, arg=RDNA3Ops.s_load_b64, dtype=dtypes.ulong, src=(kernarg_ptr, offs, x.rtag()), tag=(ctx.vreg(GP_SGPRS, width=2, alignment=2),))
 
 # ----- memory access ----
 # GLOBAL_ADDR = VADDR_U64 + IMMOFFS_u16
