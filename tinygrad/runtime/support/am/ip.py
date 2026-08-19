@@ -35,7 +35,6 @@ class AM_SOC(AM_IP):
         self.adev.indirect_wreg_pcie(self.adev.regXCC_DOORBELL_FENCE.addr[0], self.adev.regXCC_DOORBELL_FENCE.encode(shub_slv_mode=1), aid=aid)
       self.adev.regBIFC_GFX_INT_MONITOR_MASK.write(0x7ff)
       self.adev.regBIFC_DOORBELL_ACCESS_EN_PF.write(0xfffff)
-
     else: self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
   def set_clockgating_state(self):
@@ -444,7 +443,6 @@ class AM_IH(AM_IP):
       self.sysmem_rings = [self.adev.pci_dev.alloc_sysmem(self.ring_size + 0x1000) for _ in range(1)]
       self.rings = [(sr[1][0], sr[1][self.ring_size // 0x1000], s, i) for sr, (_, _, s, i) in zip(self.sysmem_rings, self.rings)]
       self.ring_view = self.sysmem_rings[0][0].view(0, self.ring_size, fmt='I')
-      self.sys_irq_views = [sr[0].view(0x40000, 0x1000, fmt='I') for sr in self.sysmem_rings]
 
   def init_hw(self):
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
