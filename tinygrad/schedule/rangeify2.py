@@ -98,6 +98,8 @@ pm_prepare_graph = PatternMatcher([
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if 0 in x.shape and 0 not in reduce.shape else None),
+  # STORE to () is reshaped to (1,)
+  (UPat(Ops.STORE, name="s"), lambda s: s.src[0].reshape((1,)).store(s.src[1].reshape((1,))) if s.shape == () else None),
   # size 0 STORE is NOOP
   (UPat(Ops.STORE, name="s"), lambda s: UOp(Ops.NOOP) if 0 in s.shape else None),
   # fix store hazard (dest is in used in src) by adding contiguous: TestAssign.test_post_flipped_assignment
@@ -185,8 +187,6 @@ def index_on_stack(stack:UOp, idx:UOp):
   return ret
 
 pm_range_migration = PatternMatcher([
-  # INDEX without src is nothing
-  (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
   # STAGE on shape () is nothing
   (UPat(Ops.STAGE, src=(UPat.var('x'),)), lambda x: x if x.shape == () else None),
   # if INDEX is on STAGE with the same ranges, remove the pair
@@ -206,6 +206,8 @@ pm_range_migration = PatternMatcher([
   # pass index through elementwise
   (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
    lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
+  # INDEX without src is nothing (must be at the bottom)
+  (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
 ])
 
 # *** split into kernels ***
