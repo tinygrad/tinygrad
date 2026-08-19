@@ -328,7 +328,7 @@ class AMDev:
        (blob:=to_mv(ctypes.addressof(self.bhdr) + harv_off, 8 + 32*4).cast('I'))[0] == am.HARVEST_TABLE_SIGNATURE:
       inv_hw_id = {hw_id: hw_ip for hw_ip, hw_id in am.hw_id_map.items()}
       for ent in blob[2:]:
-        if (hw_ip:=inv_hw_id.get(ent & 0xffff)) is not None: self.harvested[hw_ip].add((ent >> 16) & 0xff)
+        if (ip_:=inv_hw_id.get(ent & 0xffff)) is not None: self.harvested[ip_].add((ent >> 16) & 0xff)
 
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
