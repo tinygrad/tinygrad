@@ -18,7 +18,8 @@ _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtype
 
 # quant types {ggml_type: (number of elements, number of bytes)}
 _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
-               12:(256,144), 13:(256,176), 14:(256,210), 18:(256,98), 21:(256,110), 22:(256,82), 23:(256,136), 39:(32,17), 41:(128,18)}
+               12:(256,144), 13:(256,176), 14:(256,210), 18:(256,98), 21:(256,110), 22:(256,82), 23:(256,136), 39:(32,17),
+               41:(128,18), 42:(64,18), 142:(128,34)}
 
 def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
@@ -28,7 +29,8 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   int16 (id: 25), int32 (id: 26), int64 (id: 27), float64 (id: 28), bfloat16 (id: 30)
   Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q5_0 (id: 6),
   Q5_1 (id: 7), Q8_0 (id: 8), Q4_K (id: 12), Q5_K (id: 13),
-  Q6_K (id: 14), IQ3_XXS (id: 18), IQ3_S (id: 21), IQ2_S (id: 22), IQ4_XS (id: 23), MXFP4 (id: 39), Q1_0 (id: 41)
+  Q6_K (id: 14), IQ3_XXS (id: 18), IQ3_S (id: 21), IQ2_S (id: 22), IQ4_XS (id: 23), MXFP4 (id: 39),
+  Q1_0 (id: 41), Q2_0 g64 (id: 42), Q2_0 g128 (id: 142)
   """
   # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
 
@@ -42,7 +44,10 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
 
   if (nelements_nbytes := _GGML_QUANT.get(ggml_type)) is not None:
     from tinygrad.runtime.autogen import ggml_common as _ggml
-    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1])).contiguous()
+    if n % nelements_nbytes[0]: raise ValueError(f"GGML type '{ggml_type}' requires a multiple of {nelements_nbytes[0]} elements, got {n}")
+    nbytes = (n//nelements_nbytes[0]) * nelements_nbytes[1]
+    if t.numel() < nbytes: raise ValueError(f"GGML type '{ggml_type}' requires {nbytes} bytes, got {t.numel()}")
+    blocks = t[:nbytes].reshape((-1, nelements_nbytes[1])).contiguous()
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
       d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
@@ -116,6 +121,10 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       d = blocks[:,:2].bitcast(dtypes.float16)
       bits = q_to_uint8(blocks[:,2:], 1).reshape(-1, 8, 16).transpose(-1, -2).flatten(-2).bitcast(dtypes.int8)
       return d * (bits * 2 - 1)
+    if ggml_type in (42, 142):
+      d = blocks[:,:2].bitcast(dtypes.float16)
+      q = q_to_uint8(blocks[:,2:], 2).reshape(-1, 4, nelements_nbytes[1]-2).transpose(-1, -2).flatten(-2).bitcast(dtypes.int8)
+      return d * (q - 1)
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
 def _read_unpack(fmt: str, n: int, r:io.BufferedIOBase): return struct.unpack(fmt, r.read(n))[0]
@@ -129,7 +138,7 @@ readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_
     [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
+def _gguf_parse(tensor: Tensor, q2_type:int|None=None) -> tuple[dict, dict[str, Tensor], int|None]:
   # TODO: remove the need for copy to default device
   tensor = tensor.to(None).realize()
   r = io.BufferedReader(TensorIO(tensor), 1_000_000)
@@ -143,10 +152,32 @@ def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
 
   t_infos = [ (read_str(r), tuple(read_uint64(r) for _ in range(read_uint32(r))), read_int32(r), read_uint64(r)) for _ in range(n_tensors) ]
   alignment, pos = kv_data.get("general.alignment", 32), r.tell()
+  if alignment <= 0 or alignment & (alignment-1): raise ValueError(f"Invalid GGUF alignment {alignment}")
   data_start = round_up(pos, alignment)
 
+  ordered, data_size = sorted(t_infos, key=lambda x:x[3]), tensor.numel()-data_start
+  if data_size < 0 or any(off % alignment or off >= data_size for _, _, _, off in ordered) \
+     or any(a[3] >= b[3] for a, b in zip(ordered, ordered[1:])): raise ValueError("Invalid GGUF tensor offsets")
+  spans = {info[3]: ((ordered[i+1][3] if i+1 < len(ordered) else data_size) - info[3], i+1 == len(ordered))
+           for i, info in enumerate(ordered)}
+  def matches_layout(dims:tuple[int, ...], off:int, block_size:int, type_size:int) -> bool:
+    if not dims or dims[0] % block_size: return False
+    span, is_last = spans[off]
+    nbytes = prod(dims) // block_size * type_size
+    return span in ({nbytes, round_up(nbytes, alignment)} if is_last else {round_up(nbytes, alignment)})
+  for name, dims, typ, off in t_infos:
+    if typ in (41, 142) and not matches_layout(dims, off, *_GGML_QUANT[typ]):
+      raise ValueError(f"GGML type {typ} tensor {name!r} has an invalid block layout")
+  if any(typ == 42 for _, _, typ, _ in t_infos):
+    layouts = {qtype for qtype in (42, 142) if all(typ != 42 or matches_layout(dims, off, *_GGML_QUANT[qtype])
+               for _, dims, typ, off in t_infos)}
+    if q2_type is not None: layouts &= {q2_type}
+    if len(layouts) != 1: raise ValueError(f"GGML type 42 has an {'ambiguous' if layouts else 'invalid'} block layout")
+    q2_type = layouts.pop()
+    t_infos = [(name, dims, q2_type if typ == 42 else typ, off) for name, dims, typ, off in t_infos]
+
   state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
-  return kv_data, state_dict
+  return kv_data, state_dict, q2_type
 
 def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
   if (total := kv.get('split.count', 1)) <= 1: return [path]
@@ -169,8 +200,10 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
 
   NOTE: The provided tensor must be on a device that supports execution.
   """
-  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)))
+  kv, sd, q2_type = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)))
   if kv.get('split.count', 1) <= 1: return kv, sd
   if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
-  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp))[1])
+  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]:
+    _, part_sd, q2_type = _gguf_parse(Tensor(pp), q2_type)
+    sd.update(part_sd)
   return kv, sd

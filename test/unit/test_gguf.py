@@ -1,7 +1,8 @@
 import os, struct, unittest, tempfile, pathlib, sys
 from tinygrad import dtypes, Tensor, fetch, Device
-from tinygrad.helpers import disable_gc
+from tinygrad.helpers import disable_gc, round_up
 from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
+from tinygrad.llm.model import Transformer
 from tinygrad.runtime.autogen import ggml_common as _ggml
 import numpy as np
 from gguf import GGUFReader, GGUFValueType, GGMLQuantizationType, GGML_QUANT_SIZES, dequantize, quantize
@@ -106,10 +107,32 @@ class TestGGUF(unittest.TestCase):
 
   def test_dequantization_q1_0(self):
     # Q1_0: 2 bytes fp16 scale + 16 bytes (128 1-bit values)
-    block = np.frombuffer(np.float16(2.0).tobytes() + np.packbits(np.random.choice([0, 1], size=128)).tobytes(), dtype=np.uint8).copy()
+    block = np.frombuffer(np.float16(2.0).tobytes() + bytes(range(16)), dtype=np.uint8).copy()
     expected = np.float16(2.0) * (np.unpackbits(block[2:], bitorder="little").astype(np.int8) * 2 - 1)
     # TODO: replace 41 with GGMLQuantizationType.Q1_0.value on next gguf-py release
     np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 128, 41).numpy().flatten(), expected)
+
+  @staticmethod
+  def _q2_blocks(block_size, scales):
+    codes = np.arange(block_size, dtype=np.uint8) % 4
+    packed = (codes.reshape(-1, 4) * np.array([1, 4, 16, 64], dtype=np.uint8)).sum(1, dtype=np.uint8)
+    blocks = [np.frombuffer(np.float16(scale).tobytes() + packed.tobytes(), dtype=np.uint8) for scale in scales]
+    expected = np.concatenate([(codes.astype(np.int8) - 1) * scale for scale in scales]).astype(np.float32)
+    return np.concatenate(blocks), expected
+
+  def test_dequantization_q2_0(self):
+    for qtype, block_size in ((42, 64), (142, 128)):
+      with self.subTest(qtype=qtype):
+        blocks, expected = self._q2_blocks(block_size, (0.5, 2.0))
+        np.testing.assert_equal(ggml_data_to_tensor(Tensor(blocks), expected.size, qtype).numpy().flatten(), expected)
+
+  def test_q2_invalid_block_count(self):
+    with self.assertRaisesRegex(ValueError, "multiple of 64 elements"):
+      ggml_data_to_tensor(Tensor.empty(18, dtype=dtypes.uint8), 65, 42)
+    with self.assertRaisesRegex(ValueError, "multiple of 128 elements"):
+      ggml_data_to_tensor(Tensor.empty(34, dtype=dtypes.uint8), 64, 142)
+    with self.assertRaisesRegex(ValueError, "requires 18 bytes, got 17"):
+      ggml_data_to_tensor(Tensor.empty(17, dtype=dtypes.uint8), 64, 42)
 
   def test_expected_failure_unknown_type(self):
     with self.assertRaises(ValueError):
@@ -118,25 +141,87 @@ class TestGGUF(unittest.TestCase):
   @staticmethod
   def _build_gguf(tensors, kvs):
     # [header] [kv_data] [tensor_infos] [padding] [tensor_data_blob]
-    buf = bytearray()
+    buf, data_blob = bytearray(), bytearray()
+    alignment = next((v for k, v in kvs if k == "general.alignment"), 32)
+    infos = []
+    for name, dims, qtype, data in tensors:
+      data_off = round_up(len(data_blob), alignment)
+      data_blob += b"\x00" * (data_off - len(data_blob)) + data
+      infos.append((name, dims, qtype, data_off))
+    data_blob += b"\x00" * (round_up(len(data_blob), alignment) - len(data_blob))
     # Header: magic "GGUF" + version=3 + n_tensors + n_kv
     buf += struct.pack("<4siqq", b"GGUF", 3, len(tensors), len(kvs))
     # KV entries: [key_len: uint64][key bytes][type: int32][value]
     for k, v in kvs:
       kb = k.encode()
-      if isinstance(v, str): buf += struct.pack("<Q", len(kb)) + kb + struct.pack("<i", 8) + struct.pack("<Q", len(v)) + v.encode()
-      else: buf += struct.pack("<Q", len(kb)) + kb + struct.pack("<i", 4) + struct.pack("<I", v)
-    data_off = 0
+      buf += struct.pack("<Q", len(kb)) + kb
+      if isinstance(v, str): buf += struct.pack("<iQ", 8, len(v)) + v.encode()
+      elif isinstance(v, float): buf += struct.pack("<if", 6, v)
+      elif isinstance(v, list):
+        buf += struct.pack("<iiQ", 9, 8, len(v))
+        for x in v: buf += struct.pack("<Q", len(x)) + x.encode()
+      else: buf += struct.pack("<iI", 4, v)
     # Tensor infos: [name_len][name][ndims][dims reversed][qtype][offset_into_data_blob]
-    for name, dims, qtype, data in tensors:
+    for name, dims, qtype, data_off in infos:
       nb = name.encode()
       buf += struct.pack("<Q", len(nb)) + nb + struct.pack("<I", len(dims))
       for d in reversed(dims): buf += struct.pack("<Q", d)
-      buf += struct.pack("<i", qtype) + struct.pack("<Q", data_off)
-      data_off += len(data)
-    buf += b"\x00" * ((32 - len(buf) % 32) % 32)
-    for _, _, _, data in tensors: buf += data
+      buf += struct.pack("<iQ", qtype, data_off)
+    buf += b"\x00" * (round_up(len(buf), alignment) - len(buf)) + data_blob
     return bytes(buf)
+
+  def test_q2_legacy_g128_layout_inference(self):
+    large, large_expected = self._q2_blocks(128, [0.5] * 16)
+    small, small_expected = self._q2_blocks(128, [2.0])
+    blob = self._build_gguf([
+      ("large", (1, 2048), 42, large.tobytes()), ("small", (1, 128), 42, small.tobytes()),
+      ("tail", (1,), 0, np.array([1.0], dtype=np.float32).tobytes())], [])
+    _, tensors = gguf_load(Tensor(np.frombuffer(blob, dtype=np.uint8)))
+    np.testing.assert_equal(tensors["large"].numpy().flatten(), large_expected)
+    np.testing.assert_equal(tensors["small"].numpy().flatten(), small_expected)
+    pq2 = self._build_gguf([("pq2", (1, 128), 142, small.tobytes())], [])
+    np.testing.assert_equal(gguf_load(Tensor(np.frombuffer(pq2, dtype=np.uint8)))[1]["pq2"].numpy().flatten(), small_expected)
+
+  def test_q2_ambiguous_and_malformed_layouts(self):
+    q2, _ = self._q2_blocks(128, [1.0])
+    ambiguous = self._build_gguf([
+      ("q2", (1, 128), 42, q2.tobytes()), ("tail", (1,), 0, np.array([1.0], dtype=np.float32).tobytes())], [])
+    with self.assertRaisesRegex(ValueError, "type 42 has an ambiguous block layout"): gguf_load(Tensor(np.frombuffer(ambiguous, dtype=np.uint8)))
+    malformed = self._build_gguf([("q2", (1, 64), 142, q2[:18].tobytes())], [])
+    with self.assertRaisesRegex(ValueError, "type 142 tensor 'q2' has an invalid block layout"):
+      gguf_load(Tensor(np.frombuffer(malformed, dtype=np.uint8)))
+    bad_offset = bytearray(self._build_gguf([("x", (1,), 0, np.array([1.0], dtype=np.float32).tobytes())], []))
+    struct.pack_into("<Q", bad_offset, 49, 1)
+    with self.assertRaisesRegex(ValueError, "Invalid GGUF tensor offsets"): gguf_load(Tensor(np.frombuffer(bad_offset, dtype=np.uint8)))
+    bad_alignment = self._build_gguf([("x", (1,), 0, np.array([1.0], dtype=np.float32).tobytes())], [("general.alignment", 3)])
+    with self.assertRaisesRegex(ValueError, "Invalid GGUF alignment 3"): gguf_load(Tensor(np.frombuffer(bad_alignment, dtype=np.uint8)))
+
+  def test_prismml_qwen3_generation(self):
+    dim, hidden_dim, vocab_size = 128, 128, 16
+    def f16(shape, fill=0): return np.full(shape, fill, dtype=np.float16).tobytes()
+    tensors = [("token_embd.weight", (vocab_size, dim), 1, f16((vocab_size, dim))),
+      ("output_norm.weight", (dim,), 1, f16((dim,), 1)),
+      ("blk.0.attn_norm.weight", (dim,), 1, f16((dim,), 1)), ("blk.0.ffn_norm.weight", (dim,), 1, f16((dim,), 1)),
+      ("blk.0.attn_q.weight", (dim, dim), 1, f16((dim, dim))), ("blk.0.attn_k.weight", (dim, dim), 1, f16((dim, dim))),
+      ("blk.0.attn_v.weight", (dim, dim), 1, f16((dim, dim))), ("blk.0.attn_output.weight", (dim, dim), 1, f16((dim, dim))),
+      ("blk.0.ffn_gate.weight", (hidden_dim, dim), 1, f16((hidden_dim, dim))),
+      ("blk.0.ffn_up.weight", (hidden_dim, dim), 1, f16((hidden_dim, dim))),
+      ("blk.0.ffn_down.weight", (dim, hidden_dim), 1, f16((dim, hidden_dim)))]
+    kvs = [("general.architecture", "qwen3"), ("qwen3.context_length", 4), ("qwen3.block_count", 1),
+      ("qwen3.embedding_length", dim), ("qwen3.feed_forward_length", hidden_dim), ("qwen3.attention.head_count", 4),
+      ("qwen3.attention.head_count_kv", 4), ("qwen3.attention.layer_norm_rms_epsilon", 1e-5),
+      ("qwen3.rope.freq_base", 10000.0), ("tokenizer.ggml.tokens", [str(x) for x in range(vocab_size)])]
+    for label, qtype, block_size in (("binary", 41, 128), ("ternary", 42, 64)):
+      with self.subTest(label=label):
+        n = vocab_size * dim
+        if qtype == 41: quant = (np.float16(1).tobytes() + bytes([0xAA] * 16)) * (n // block_size)
+        else: quant = self._q2_blocks(block_size, [1.0] * (n // block_size))[0].tobytes()
+        blob = self._build_gguf(tensors + [("output.weight", (vocab_size, dim), qtype, quant)], kvs)
+        model, _ = Transformer.from_gguf(Tensor(np.frombuffer(blob, dtype=np.uint8)), max_context=4)
+        self.assertFalse(model.output.weight.uop.is_realized)
+        token = next(model.generate([0], chunk_size=1))
+        self.assertIsInstance(token, int)
+        self.assertIn(token, range(vocab_size))
 
   def test_multi_part_load(self):
     with tempfile.TemporaryDirectory() as d:
