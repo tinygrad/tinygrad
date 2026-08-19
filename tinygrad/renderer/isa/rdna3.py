@@ -159,6 +159,7 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
 # TODO: batch param loading? ex. s_load_b128
 # NOTE: codegen doesnt know to place param s_loads early, delay lowering like load/store
+# - dont overwrite PARAM?, how to know when its been processed?
 def abi(ctx, x:UOp) -> UOp|None:
   if x.op is Ops.SPECIAL:
     dim = int(x.arg[-1])
@@ -200,8 +201,6 @@ def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace
 def load(ctx, x:UOp, idx:UOp):
   if idx.addrspace is AddrSpace.REG:
     return x.replace(tag=ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4)) if x.tag is None else None
-  oidx = idx
-  while idx.op is Ops.AFTER: idx=idx.src[0]
   n = idx.src[-1].src[0].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.src[0].dtype.itemsize
   suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
@@ -209,7 +208,6 @@ def load(ctx, x:UOp, idx:UOp):
   opc = getattr(RDNA3Ops, f"{prefix}_load_{suffix}{sz*8}")
   vp = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
   addr = UOp(Ops.NOOP, src=fold_address(idx), arg=opc)
-  if oidx.op is Ops.AFTER: addr = addr.replace(src=(addr.src[0].after(*oidx.src[1:]),) + addr.src[1:])
   return x.replace(src=(addr, *x.src[1:]), tag=(vp,))
 
 def lower_gated_load(ctx, x:UOp, addr:UOp, alt:UOp, gate:UOp):
@@ -225,14 +223,11 @@ def store(ctx, x:UOp, idx:UOp, val:UOp):
       if idx.dtype.itemsize == 8: return ctx.ren.copy(UOp.group(val.src[i*2], val.src[i*2+1], dtype=idx.dtype), vregs[i])
       else: return ctx.ren.copy(val.src[idx.src[1].val].after(val, idx), vregs[i])
     else: return ctx.ren.copy(val.after(idx).replace(dtype=idx.dtype), *vregs)
-  oidx = idx
-  while idx.op is Ops.AFTER: idx = idx.src[0]
   n = idx.src[-1].src[0].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.dtype.itemsize
   prefix = "global" if idx.addrspace is AddrSpace.GLOBAL else "ds"
   opc = getattr(RDNA3Ops, f"{prefix}_store_b{sz*8}")
   addr = UOp(Ops.NOOP, src=fold_address(idx), arg=opc)
-  if oidx.op is Ops.AFTER: addr = addr.replace(src=(addr.src[0].after(*oidx.src[1:]),) + addr.src[1:])
   return UOp(Ops.STORE, src=(addr, to_vgpr(val)) + x.src[2:])
 
 # ------ ALU ------
@@ -494,8 +489,8 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
   (UPat.var("y").cast(name="x"), lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e32")) if not is_const(y) else None),
   # --- mem ops ---
-  (UPat((Ops.INDEX, Ops.SHRINK)).or_after("idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
-  (UPat((Ops.INDEX, Ops.SHRINK)).or_after("idx").load(allow_any_len=True, name="x"), load),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(allow_any_len=True, name="x"), load),
   # --- other ---
   (UPat((Ops.SPECIAL, Ops.PARAM), name="x"), lambda ctx,x: abi(ctx,x)
     if not any(isinstance(v,(VRegister, Register)) for v in rdefs(x)) else None),

@@ -21,6 +21,10 @@ def linearize(sink:UOp) -> list[UOp]:
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     extra = None
+    # how to access the frozen UOp that semantically represents the higher form of a machine code Ops.INS?
+    # - need to maintain a map UOp -> UOp, that is robust to rewrites?
+    # - opc -> IR op type is not enough for Estimates and u arg slot
+    # - actually we only need u.arg.slot for param here... can we easily preserve that?
     match u.op:
       # the order and placement of these defines is important
       case Ops.PARAM: priority, extra = -20, u.arg.slot
