@@ -1,8 +1,11 @@
 import unittest
 import numpy as np
 from dataclasses import replace
-from tinygrad import Tensor
-from tinygrad.llm.model import ExpertGating, TransformerBlock, TransformerConfig
+from types import SimpleNamespace
+from unittest.mock import patch
+from tinygrad import dtypes, GlobalCounters, Tensor, UOp
+from tinygrad.llm.gguf import ggml_data_to_tensor
+from tinygrad.llm.model import _attach_quantized_experts, ExpertGating, ExpertWeights, TransformerBlock, TransformerConfig
 
 def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=2):
   return TransformerConfig(
@@ -10,6 +13,15 @@ def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=
     norm_eps=1e-5, vocab_size=100, head_dim=dim//n_heads, rope_theta=10000,
     rope_dim=dim//n_heads, v_head_dim=dim//n_heads, max_context=16,
     num_experts=num_experts, num_experts_per_tok=num_experts_per_tok)
+
+def _q8_expert_layer(num_experts=4, dim=32):
+  raw = np.empty((num_experts, dim, 34), dtype=np.uint8)
+  raw[:, :, :2] = np.frombuffer(np.float16(1).tobytes(), dtype=np.uint8)
+  for expert in range(num_experts): raw[expert, :, 2:] = expert + 1
+  packed = Tensor(raw.flatten()).realize()
+  layer = ExpertWeights(num_experts, dim, dim)
+  layer.set_quantized(ggml_data_to_tensor(packed, num_experts * dim * dim, 8).reshape(num_experts, dim, dim), packed, 8)
+  return layer
 
 class TestMoEFeedForward(unittest.TestCase):
   def test_moe_feed_forward(self):
@@ -32,6 +44,46 @@ class TestMoEFeedForward(unittest.TestCase):
     # expected moe_output ≈ avg(silu(1), silu(3))
     expected = (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
     np.testing.assert_allclose(out.numpy()[0, 0, 0], expected, rtol=1e-2)
+
+  def test_quantized_expert_selection(self):
+    dim = 32
+    out = _q8_expert_layer()(Tensor([[[1, 3]]]), Tensor.ones(1, 1, 1, dim)).numpy()
+    expected = np.array([2, 4], dtype=np.float32).reshape(1, 1, 2, 1).repeat(dim, axis=-1) * dim
+    np.testing.assert_allclose(out, expected)
+
+  def test_quantized_expert_selection_symbolic_prefill(self):
+    dim, layer = 32, _q8_expert_layer()
+    sel_np = np.array([[[1, 3], [0, 2]]], dtype=np.int32)
+    toks = UOp.variable("toks", 1, 4).bind(2)
+    with patch("tinygrad.llm.model.ggml_data_to_tensor", wraps=ggml_data_to_tensor) as dequant:
+      out = layer(Tensor(sel_np)[:, :toks], Tensor.ones(1, 2, 1, dim)[:, :toks])[:, :2].numpy()
+    self.assertEqual(dequant.call_args.args[1], layer.num_experts * dim * dim)
+    expected = (sel_np + 1)[..., None].repeat(dim, axis=-1) * dim
+    np.testing.assert_allclose(out, expected)
+
+  def test_attach_quantized_experts_skips_unsupported_blocks(self):
+    expert = ExpertWeights(2, 32, 32)
+    blocks = [SimpleNamespace(ffn_gate_exps=expert)]
+    weight, packed = Tensor.zeros(2, 32, 32), Tensor.zeros(2 * 32 * 34, dtype=dtypes.uint8)
+    state_dict = {"blk.0.ffn_gate_exps.weight":weight, "blk.1.ffn_gate_exps.weight":weight, "blk.0.fake_exps.weight":weight}
+    with patch("tinygrad.llm.model.get_ggml_quantization", return_value=(packed, 8)):
+      packed_weights = _attach_quantized_experts(blocks, state_dict)
+    self.assertEqual(packed_weights, {"blk.0.ffn_gate_exps.weight"})
+    self.assertIs(state_dict["blk.0.ffn_gate_exps.weight"], expert.weight)
+    self.assertIs(state_dict["blk.1.ffn_gate_exps.weight"], weight)
+    self.assertIs(state_dict["blk.0.fake_exps.weight"], weight)
+
+  def test_iq3_xxs_expert_selection_ops(self):
+    num_experts, dim = 64, 256
+    packed = Tensor.zeros(num_experts * dim * dim // 256 * 98, dtype=dtypes.uint8).contiguous().realize()
+    layer = ExpertWeights(num_experts, dim, dim)
+    layer.set_quantized(ggml_data_to_tensor(packed, num_experts * dim * dim, 18).reshape(num_experts, dim, dim), packed, 18)
+    sel, x = Tensor([[[0, 63]]]).realize(), Tensor.ones(1, 1, 1, dim).realize()
+
+    GlobalCounters.reset()
+    out = layer(sel, x).realize()
+    self.assertLess(GlobalCounters.global_ops, 5_000_000)
+    np.testing.assert_equal(out.numpy(), 0)
 
   def test_moe_feed_forward_batched(self):
     dim, hidden, n_heads = 8, 16, 2

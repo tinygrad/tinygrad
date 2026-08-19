@@ -3,7 +3,8 @@ import enum, functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
 from tinygrad.nn import Linear
-from tinygrad.llm.gguf import gguf_load
+from tinygrad.llm.gguf import _GGML_QUANT, get_ggml_quantization, ggml_data_to_tensor, gguf_load
+from tinygrad.helpers import all_int
 from tinygrad.uop.ops import resolve
 
 class ExpertGating(enum.IntEnum):
@@ -21,10 +22,40 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, device:str|
 class ExpertWeights:
   """Like Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
   def __init__(self, num_experts:int, in_features:int, out_features:int):
+    self.num_experts, self.in_features, self.out_features = num_experts, in_features, out_features
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
+    self.ggml_type:int|None = None
+  def set_quantized(self, weight:Tensor, packed:Tensor, ggml_type:int):
+    assert weight.shape == (self.num_experts, self.out_features, self.in_features)
+    assert self.out_features * self.in_features % _GGML_QUANT[ggml_type][0] == 0
+    self.weight, self.ggml_type = packed.flatten(), ggml_type
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
-    return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
+    if self.ggml_type is None: weight = self.weight[sel]
+    elif all_int(sel.shape) or resolve(sel.shape[1] == 1):
+      packed = self.weight.reshape(self.num_experts, -1)[sel].flatten()
+      weight = ggml_data_to_tensor(packed, int(sel.numel()) * self.out_features * self.in_features, self.ggml_type).reshape(
+        *sel.shape, self.out_features, self.in_features)
+      if getenv("HALF", 1): weight = weight.cast('float16')
+    else:
+      weight = ggml_data_to_tensor(self.weight, self.num_experts * self.out_features * self.in_features, self.ggml_type).reshape(
+        self.num_experts, self.out_features, self.in_features)
+      if getenv("HALF", 1): weight = weight.cast('float16')
+      weight = weight[sel]
+    return (x.unsqueeze(-2) @ weight.transpose(-1, -2)).contiguous().squeeze(-2)
+
+def _attach_quantized_experts(blocks, state_dict:dict[str, Tensor]) -> set[str]:
+  packed_weights:set[str] = set()
+  for name, weight in state_dict.items():
+    parts = name.split('.')
+    if len(parts) != 4 or parts[0] != "blk" or parts[3] != "weight": continue
+    block_idx = int(parts[1])
+    if not 0 <= block_idx < len(blocks): continue
+    expert_weights = getattr(blocks[block_idx], parts[2], None)
+    if isinstance(expert_weights, ExpertWeights) and (quantization:=get_ggml_quantization(weight)) is not None:
+      expert_weights.set_quantized(weight, *quantization)
+      state_dict[name], packed_weights = expert_weights.weight, packed_weights | {name}
+  return packed_weights
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   assert x.shape[-1] % 2 == 0
@@ -372,9 +403,6 @@ class Transformer:
     # TODO: remove the need for copy to default device
     kv, state_dict = gguf_load(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
 
-    # all state items should be float16, not float32
-    state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
-
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
 
@@ -443,6 +471,8 @@ class Transformer:
       qkv_bias='blk.0.attn_q.bias' in state_dict,
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict)
     model = Transformer(config)
+    packed_weights = _attach_quantized_experts(model.blk, state_dict)
+    state_dict = {k:v if k in packed_weights else v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:

@@ -1,7 +1,7 @@
 import os, struct, unittest, tempfile, pathlib, sys
 from tinygrad import dtypes, Tensor, fetch, Device
 from tinygrad.helpers import disable_gc
-from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
+from tinygrad.llm.gguf import _ggml_iq_grid, get_ggml_quantization, ggml_data_to_tensor, gguf_load
 from tinygrad.runtime.autogen import ggml_common as _ggml
 import numpy as np
 from gguf import GGUFReader, GGUFValueType, GGMLQuantizationType, GGML_QUANT_SIZES, dequantize, quantize
@@ -137,6 +137,16 @@ class TestGGUF(unittest.TestCase):
     buf += b"\x00" * ((32 - len(buf) % 32) % 32)
     for _, _, _, data in tensors: buf += data
     return bytes(buf)
+
+  def test_quantized_metadata(self):
+    qtype = GGMLQuantizationType.IQ3_XXS
+    block_size, type_size = GGML_QUANT_SIZES[qtype]
+    raw = np.zeros(type_size, dtype=np.uint8)
+    buf = self._build_gguf([("weight", (block_size,), qtype.value, raw.tobytes())], [])
+    _, tensors = gguf_load(Tensor(np.frombuffer(buf, dtype=np.uint8)).to(None))
+    packed, ggml_type = get_ggml_quantization(tensors["weight"]) or (None, None)
+    self.assertEqual(ggml_type, qtype.value)
+    np.testing.assert_equal(packed.numpy(), raw)
 
   def test_multi_part_load(self):
     with tempfile.TemporaryDirectory() as d:
