@@ -528,46 +528,46 @@ def encode(ctx, x:UOp):
   import tinygrad.renderer.amd.dsl as dsl
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  }
-  def _route(r:Register):
-    assert isinstance(r, Register)
-    return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
   def _immorreg(x:UOp):
     while x.op is Ops.AFTER: x=x.src[0]
-    return (x.val if x.op is Ops.CONST else x.src[0].val) if is_const(x) else _fuse(rdefs(x))
-  def _fuse(rr:tuple[Register,...]):
-    r = _route(rr[0])
-    return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
+    return (x.val if x.op is Ops.CONST else x.src[0].val) if is_const(x) else encreg(x)
+  def encreg(x:UOp):
+    r, rs = rdef(x), rdefs(x)
+    assert isinstance(r, Register), f"expect Register to encode, got {rs[0]}"
+    for i,g in enumerate(rs[1:]): assert g.index == rs[i].index+1, "wide registers must be contiguous"
+    base = dmap[r.name] if r.name in dmap else dmap[r.name[0]]
+    return base[r.index] if len(rs) == 1 else base[r.index:r.index+len(rs)-1]
   enc, group, opc, oprs = x.arg, x.arg.func, x.arg.args[0].name.lower(), x.src
   kw = args = None
 
-  if group is RDNA3Ops.SMEM: kw = dict(sdata=_fuse(rdefs(x)), sbase=_fuse(rdefs(oprs[0])), soffset=dsl.NULL, offset=_immorreg(oprs[-1]))
+  if group is RDNA3Ops.SMEM: kw = dict(sdata=encreg(x), sbase=encreg(oprs[0]), soffset=dsl.NULL, offset=_immorreg(oprs[-1]))
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
   elif group is RDNA3Ops.SCRATCH:
     kw = dict(offset=_immorreg(oprs[0]))
-    if rdef(x) is not None: kw["vdst"] = _fuse(rdefs(x))
-    else: kw["data"] = _fuse(rdefs(oprs[1]))
+    if rdef(x) is not None: kw["vdst"] = encreg(x)
+    else: kw["data"] = encreg(oprs[1])
   elif group is RDNA3Ops.GLOBAL:
     kw = dict(addr=_immorreg(oprs[0]))#,  offset=_immorreg(oprs[1]))
     if is_const(oprs[1]): kw["offset"] = _immorreg(oprs[1])
-    else: kw["saddr"] = _fuse(rdefs(oprs[1]))
-    if rdef(x) is None: kw["data"]=_fuse(rdefs(oprs[2]))
-    else: kw["vdst"]=_fuse(rdefs(x))
+    else: kw["saddr"] = encreg(oprs[1])
+    if rdef(x) is None: kw["data"]=encreg(oprs[2])
+    else: kw["vdst"]=encreg(x)
   elif group is RDNA3Ops.DS:
     offs = _immorreg(oprs[1])
     kw = dict(addr=_immorreg(oprs[0]), offset0=offs&0xFF, offset1=offs>>8)
-    if rdef(x) is None: kw["data0"]=_fuse(rdefs(oprs[3]))
-    else: kw["vdst"]=_fuse(rdefs(x))
-  elif group is RDNA3Ops.VOP3SD: kw = dict(sdst=_immorreg(vccop), vdst=_fuse(rdefs(x)), **{f"src{i}":_immorreg(u) for i,u in enumerate(oprs[:3])})
+    if rdef(x) is None: kw["data0"]=encreg(oprs[3])
+    else: kw["vdst"]=encreg(x)
+  elif group is RDNA3Ops.VOP3SD: kw = dict(sdst=_immorreg(vccop), vdst=encreg(x), **{f"src{i}":_immorreg(u) for i,u in enumerate(oprs[:3])})
   elif group is RDNA3Ops.VOPC: args = [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.VOP3P:
     kw = {f"src{i}":_immorreg(oprs[i]) for i in range(3)}
-    kw["vdst"] = _fuse(rdefs(x))
+    kw["vdst"] = encreg(x)
     def _signed(dt:DType): return not (dtypes.is_unsigned(dt) or dtypes.is_float(dt))
     kw["neg"] = _signed(oprs[0].dtype) | (_signed(oprs[1].dtype) << 1)
   elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
     if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: oprs = oprs[:1]
     if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: oprs = oprs[:2]
-    args = [_fuse(rdefs(x))] + [_immorreg(u) for u in oprs]
+    args = [encreg(x)] + [_immorreg(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (oprs[0].val,) if len(oprs) > 0 and oprs[0].op is Ops.CONST else (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
   return x.replace(arg=(enc(**kw) if kw is not None else enc(*args)))
