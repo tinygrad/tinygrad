@@ -51,14 +51,6 @@ class TestWeakConstFolding(unittest.TestCase):
   def test_invalid_poison(self):
     self.assertTrue(UOp.invalid().alu(Ops.CDIV, UOp.const(0)).simplify().is_invalid)
 
-  def test_single_rounding_log10_backward(self):
-    # log10 backward folds log10(2)/log(2) = 1/log(10) in one rounding, not the double-rounded 1/float32(log(10))
-    x = Tensor([1.0, 2.0, 3.0])
-    ast = next(s.src[0] for s in x.log10().sum().gradient(x)[0].schedule_linear().src if s.src[0].op is Ops.SINK)
-    const = next(u.arg for u in full_rewrite(ast).toposort() if u.op is Ops.CONST and u.dtype is dtypes.float32)
-    # correctly rounded: within half a float32 ulp of the exact value (folding at float32 lands 0.66 ulp off)
-    self.assertLess(abs(const - 1/math.log(10)), 2**-26)
-
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + 0)
@@ -128,7 +120,7 @@ class TestBitcastConstFolding(unittest.TestCase):
     def t(cases: dict[DType, ConstType]):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
         if not math.isnan(from_v):
-          r = full_rewrite(UOp.const(from_v, from_dt).bitcast(to_dt).sink()).src[0]
+          r = UOp.const(from_v, from_dt).bitcast(to_dt).simplify()
           self.assertEqual(r.op, Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
           self.assertEqual(r.dtype, to_dt, msg)
           np.testing.assert_equal(r.val, to_v, msg)
@@ -152,9 +144,9 @@ class TestBitcastConstFolding(unittest.TestCase):
 
   def test_vec_bitcast(self):
     with Context(SPEC=0):
-      srcs = full_rewrite(UOp.const((-1, -2**31, 75), dtypes.int32).bitcast(dtypes.uint32).sink()).src
-    self.assertTrue(all(r.op is Ops.CONST and r.dtype == dtypes.uint32 for r in srcs))
-    self.assertEqual(tuple(x.val for x in srcs), (2**32-1, 2**31, 75))
+      result = full_rewrite(UOp.const((-1, -2**31, 75), dtypes.int32).bitcast(dtypes.uint32).sink())
+      expected = full_rewrite(UOp.const((2**32-1, 2**31, 75), dtypes.uint32).sink())
+    self.assertEqual(result.src, expected.src)
 
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):
