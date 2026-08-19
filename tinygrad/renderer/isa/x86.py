@@ -806,7 +806,6 @@ encodings = {
 }
 
 class X86Renderer(ISARenderer):
-  casted_consts = True
   device = "CPU"
   has_local = False
   has_threads = bool(getenv("THREADS", 1))

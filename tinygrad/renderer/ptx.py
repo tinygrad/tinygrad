@@ -136,7 +136,6 @@ string_rewrite = PatternMatcher([
 
 class PTXRenderer(Renderer):
   suffix = "PTX"
-  casted_consts = True
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   tc_sm80 = [x for x in tc.cuda_sm80 if x.dtype_in in [dtypes.half, dtypes.float]]
   code_for_op = asm_for_op

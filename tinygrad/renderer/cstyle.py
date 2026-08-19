@@ -114,7 +114,6 @@ def wmma_args(uops:list[UOp]):
               for uop in uops if uop.op is Ops.WMMA)
 
 class CStyleLanguage(Renderer):
-  casted_consts = True
   abi: str = ""
   kernel_typedef: str = "void"
   buffer_prefix: str = ""
