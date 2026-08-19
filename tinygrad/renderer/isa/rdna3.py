@@ -55,6 +55,7 @@ V_ASHR = { 4:RDNA3Ops.v_ashrrev_i32_e32, 8:RDNA3Ops.v_ashrrev_i64 }
 lane_ctr = itertools.count()
 def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
 def const(v, dt:DType=dtypes.uint32) -> UOp: return UOp.cconst((v if isinstance(v, InvalidType) else truncate[dt](v)), dt).rtag()
+def gep(u:UOp, i:int) -> UOp: return u.index(UOp.cconst(i, dtypes.uint32))
 def is_const(x:UOp): return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER} else x.op is Ops.CONST
 def to_vgpr(x:UOp) -> UOp: return vmov(x) if is_const(x) else x
 def getsign(u:UOp, nbits):
@@ -178,7 +179,7 @@ def fold_global(base:UOp, idx:UOp): # (voff, ioffs)
   shft = const(disp_scale.bit_length() - 1, dtypes.int32)
   vaddr, offs = idx, const(0, dtypes.uint16)
   def foldable(v:int) -> bool: return -(1 << 12) <= v < (1 << 12)
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST and foldable((_offs := idx.src[1].val * disp_scale)):
+  if idx.op is Ops.ADD and is_const(idx.src[1]) and foldable((_offs := idx.src[1].src[0].val * disp_scale)):
     vaddr, offs = idx.src[0], const(_offs, dtypes.int16)
     vaddr = int_to_int64(vaddr << shft, dtypes.uint64)
     return (UOp(Ops.ADD, dtype=dtypes.uint64, src=(vaddr, base.bitcast(dtype=dtypes.uint64))), offs)
@@ -189,8 +190,8 @@ def fold_global(base:UOp, idx:UOp): # (voff, ioffs)
 # TODO: actually calculate lds offset per seperate BUFFER, (ctx.func_args)
 def fold_lds(base:UOp, idx:UOp): # (vaddr, ioffs)
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
-  if idx.op is Ops.CONST: return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),)), const(idx.arg * scale, dtypes.uint16), base)
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0].cast(dtypes.uint32), const(idx.src[1].arg * scale, dtypes.uint16), base)
+  if is_const(idx): return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),)), const(idx.src[0].val * scale, dtypes.uint16), base)
+  if idx.op is Ops.ADD and is_const(idx.src[1]): return (idx.src[0].cast(dtypes.uint32), const(idx.src[1].src[0].val * scale, dtypes.uint16), base)
   shft = const(scale.bit_length() - 1)
   offs = UOp(Ops.SHL, dtypes.uint32, src=(idx,shft))
   return (offs, const(0, dtypes.uint16), base)
@@ -251,8 +252,8 @@ def arith64(ctx, x:UOp):
   ins_hi = RDNA3Ops.v_add_co_ci_u32 if x.op is Ops.ADD else RDNA3Ops.v_sub_co_ci_u32
   narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   vreg = ctx.vreg(GP_VGPRS, width=2) # NOTE: after causes a problem for auto allocating group reg?
-  lo = UOp(Ops.INS, dtype=dtypes.uint32, arg=ins_lo, src=(a.index(0), b.index(0)), tag=(vreg.sub(0),))
-  hi = UOp(Ops.INS, dtype=narrow, arg=ins_hi, src=(a.index(1), b.index(1), vccop, lo), tag=(vreg.sub(1),)).after(lo)
+  lo = UOp(Ops.INS, dtype=dtypes.uint32, arg=ins_lo, src=(gep(a,0), gep(b,0)), tag=(vreg.sub(0),))
+  hi = UOp(Ops.INS, dtype=narrow, arg=ins_hi, src=(gep(a, 1), gep(b,1), vccop, lo), tag=(vreg.sub(1),)).after(lo)
   return UOp.group(lo, hi, dtype=x.dtype).replace(tag=(vreg,))
 
 # a64 * b64 = (a_hi * 2^32 + a_lo) * (b_hi * 2^32 + b_lo) =  a_hi * 2^32 * b_lo + b_hi * 2^32 * a_hi + a_lo * b_lo
@@ -260,16 +261,16 @@ def mul64(ctx, x:UOp):
   def _mad(a:UOp, b:UOp, c:UOp=cconst(0, x.dtype)): return UOp(Ops.INS, x.dtype, arg=RDNA3Ops.v_mad_u64_u32, src=(a,b,c))
   def _up(x:UOp): return x.ins(RDNA3Ops.v_lshlrev_b64, src=(const(32, dtypes.int32),x))
   a, b = x.src
-  p1 = _up(_mad(a.index(1), b.index(0)))
-  p2 = _up(_mad(a.index(0), b.index(1)))
+  p1 = _up(_mad(gep(a,1), gep(b,0)))
+  p2 = _up(_mad(gep(a,0), gep(b,1)))
   p3 = arith64(ctx, UOp(Ops.ADD, x.dtype, src=(p1,p2)))
-  return _mad(a.index(0), b.index(0), p3)
+  return _mad(gep(a,0), gep(b,0), p3)
 
 # TODO: fold const 64 as imms here?, shift hi, mask lo
 def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
-  lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.index(0), b.index(0)))
-  hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(a.index(1), b.index(1)))
+  lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(gep(a,0), gep(b,0)))
+  hi = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(gep(a,1), gep(b,1)))
   return UOp.group(lo, hi, dtype=x.dtype)
 
 # Allows embedding special alu instructions ex. mul_hi without introducing
@@ -489,7 +490,7 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
     _vop3(x.ins(RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16, src=(b,a,pred)))),
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
-  (UPat.var("y").cast(name="x"), lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e32")) if y.max_numel() > 1 else None),
+  (UPat.var("y").cast(name="x"), lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e32")) if not is_const(y) else None),
   # --- mem ops ---
   (UPat((Ops.INDEX, Ops.SHRINK)).or_after("idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
   (UPat((Ops.INDEX, Ops.SHRINK)).or_after("idx").load(allow_any_len=True, name="x"), load),
@@ -535,7 +536,7 @@ def encode(ctx, x:UOp):
     return dmap[r.name] if r.name in dmap else dmap[r.name[0]]
   def _immorreg(x:UOp):
     while x.op is Ops.AFTER: x=x.src[0]
-    return x.src[0].val if x.op is Ops.CAST and x.src[0].op is Ops.CONST else _fuse(rdefs(x))
+    return (x.val if x.op is Ops.CONST else x.src[0].val) if is_const(x) else _fuse(rdefs(x))
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     return r[rr[0].index:rr[0].index+len(rr)-1] if len(rr) > 1 else r[rr[0].index]
@@ -550,7 +551,7 @@ def encode(ctx, x:UOp):
     else: kw["data"] = _fuse(rdefs(oprs[1]))
   elif group is RDNA3Ops.GLOBAL:
     kw = dict(addr=_immorreg(oprs[0]))#,  offset=_immorreg(oprs[1]))
-    if oprs[1].op is Ops.CONST: kw["offset"] = _immorreg(oprs[1])
+    if is_const(oprs[1]): kw["offset"] = _immorreg(oprs[1])
     else: kw["saddr"] = _fuse(rdefs(oprs[1]))
     if rdef(x) is None: kw["data"]=_fuse(rdefs(oprs[2]))
     else: kw["vdst"]=_fuse(rdefs(x))
