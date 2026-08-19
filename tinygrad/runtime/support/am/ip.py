@@ -256,11 +256,9 @@ class AM_GFX(AM_IP):
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
 
   def init_hw(self):
-    # Wait for RLC autoload to complete. On gc 9.4.x the PSP bootloads the RLC synchronously (kernel does no wait there),
-    # gfx10+ has RLCS_BOOTLOAD_STATUS
-    if hasattr(self.adev, 'regRLC_RLCS_BOOTLOAD_STATUS'):
-      wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0,
-                value=True, msg="RLC autoload timeout")
+    # Wait for RLC autoload to complete
+    wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0,
+              value=True, msg="RLC autoload timeout")
 
     self.adev.gmc.init_hub("GC", inst_cnt=self.xccs)
     if self.adev.partial_boot: return self.reset_mec()
