@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import time, random, itertools, math, weakref, array
+import random, itertools, math, weakref, array, decimal
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.dtype import dtypes
@@ -17,12 +17,19 @@ def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call
 def get_call_var_uops(call:UOp, prg:UOp) -> list[UOp]:
   bound = {s.src[0].expr: s.src[1].src[1] for s in call.src[1:] if s.is_bound_var}
   return [bound.get(v.expr, v) for v in prg.arg.vars]
+
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.src[0]
   if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
   if ast.op is Ops.COPY: return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
+
+def get_call_kernels(call:UOp) -> list[tuple[str, UOp]]:
+  if (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return [(d, k) for devs, k, _ in call.arg.aux.kernels for d in devs]
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call)]
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "validate": return []
+  return [(d, call) for d in to_tuple(call.src[1].device)]
 
 def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|None=None) -> str:
   def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(sym_infer(prod(uop.shape) * uop.dtype.itemsize, var_vals or {}))
@@ -46,36 +53,30 @@ def estimate_uop(call:UOp) -> Estimates:
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return call.arg.aux.estimates
   return Estimates()
 
-def get_call_kernels(call:UOp) -> list[tuple[str, UOp]]: # (device, a call with the name and estimates) of every launch the call stands for
-  if (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return [(d, k) for devs, k, _ in call.arg.aux.kernels for d in devs]
-  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call)]
-  if ast.op in (Ops.PROGRAM, Ops.COPY) or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec"): return [(d, call) for d in to_tuple(call.src[1].device)]
-  return []
-
 first_run_cache:set[bytes] = set()
-def track_stats(ctx:ExecContext, call:UOp, st:float, ets:list[float|None]|None):
+def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|None]|None):
   if ctx.update_stats:
-    hcq = (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq"
-    estimates, n = estimate_uop(call), 1 if hcq else len(get_call_kernels(call)) # lanes a generic call runs, hcq estimates are already batch sums
-    GlobalCounters.kernel_count += len(call.arg.aux.kernels) if hcq else n # an hcq call counts every kernel of its batch
+    is_hcq = (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq"
+    estimates, n = estimate_uop(call), 1 if is_hcq else len(get_call_kernels(call))
+    GlobalCounters.kernel_count += len(call.arg.aux.kernels) if is_hcq else n
     GlobalCounters.global_ops += n*sym_infer(estimates.ops, ctx.var_vals)
     GlobalCounters.global_mem += n*sym_infer(estimates.mem, ctx.var_vals)
     GlobalCounters.time_sum_s += sum(et for et in ets or [] if et is not None)
-  if not (DEBUG >= 2 or PROFILE): return
+  if DEBUG < 2 and not PROFILE: return
 
   kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
   args = resolve_params(call, ctx.input_uops) if kernels and kernels[0][1] is call else []
   lanes = list(unwrap_multi(call, [args[g] for g in call.src[0].arg.globals] if call.src[0].op is Ops.PROGRAM else args)) if args else []
   for i, (device, kcall) in enumerate(kernels):
-    et, bufs = ets[i] if ets is not None and i < len(ets) else None, lanes[i][0] if i < len(lanes) else cast(list, [])
-    if PROFILE:
+    et, bufs = ets[i] if ets is not None and i < len(ets) else None, lanes[i][0] if i < len(lanes) else []
+    if PROFILE: # backdate the event to the start of the call, the viz matches a device range with the exec event before it
       outputs, inputs = get_call_outs_ins(kcall)
       cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": ctx.var_vals,
-        "bufs": [b.trace_num for b in bufs], "name": get_call_name(kcall, bufs, ctx.var_vals), "outputs": outputs, "inputs": inputs}))
+        "bufs": [b.trace_num for b in bufs], "name": get_call_name(kcall, bufs, ctx.var_vals), "outputs": outputs, "inputs": inputs}, ts=st))
     if DEBUG < 2 or not ctx.update_stats: continue
     if et is None:
       Device[device].synchronize()
-      et, st = time.perf_counter() - st, time.perf_counter()
+      et, st = float(perf_counter_us() - st)*1e-6, perf_counter_us()
       GlobalCounters.time_sum_s += et
 
     estimates = estimate_uop(kcall)
@@ -223,7 +224,7 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     d.synchronize(timeout=ctx.timeout)
     st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
     return float(en-st)/d.timestamp_divider/1e6
-  return [_prof_tm(device, k, prof) for devices, k, prof in info.kernels for device in devices] if info.kernels and info.kernels[0][2] else None
+  return [_prof_tm(device, k, prof) for devices, k, prof in info.kernels if prof for device in devices]
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
@@ -278,7 +279,7 @@ def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequenc
   inputs = list(input_uops)
   if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs))
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
-  for call in linear.src: track_stats(ctx, call, time.perf_counter(), pm_exec.rewrite(call, ctx))
+  for call in linear.src: track_stats(ctx, call, perf_counter_us(), pm_exec.rewrite(call, ctx))
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> float:
   if clear_l2:
