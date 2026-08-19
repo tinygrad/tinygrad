@@ -3,6 +3,7 @@ hashes = {
   'psp_13_0_10_sos.bin': '0bcaaad9cd8578d3841ae69155a6bd4fc3ceae8f4fb5a6ba4f576e7ace94d1d9',
   'psp_13_0_12_sos.bin': '89da90bf4286b38678b1fd175c78462a426afa3d258d15872cd14072d7098b9b',
   'psp_13_0_14_sos.bin': 'a4f0d5f76d27b77409ec0b71d7cc6a848ddfd29f8c84f3003edf74ad3999fb7d',
+  'psp_13_0_15_sos.bin': '3b28d53e75a88131155e3931378ac8434eca4880ada9211d3b4e8915b6289583',
   'psp_13_0_6_sos.bin': '27657daa0f91ad8095d3610224a7de748b8b348a4cb211ecb5fccabe47369716',
   'psp_13_0_7_sos.bin': 'ef1af0ecea38abbac6f85cce71789f19848c498d0cb8ef13748dab2d65b23c31',
   'psp_14_0_2_sos.bin': '7b538448b57d4f9dd06b2eea90d4f86a16e65e3027cdecee8db71c2c5f1fa243',

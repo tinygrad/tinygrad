@@ -842,7 +842,7 @@ class KFDIface:
 
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0)),), vram_bar=0,
+    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0,0x75a8)),), vram_bar=0,
       va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
     self._compute_props()
 
@@ -880,6 +880,11 @@ class PCIIface(PCIIfaceBase):
       doorbell_index = self.dev_impl.gfx.setup_ring(*(rcvr_params:=(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr,
         eop_buffer.va_addr, eop_buffer.size, is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
 
+    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA and self.dev_impl.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
+      # aqua (NBIO 7.9): kernel submits SDMA queues by writing the RB_WPTR register directly (SDMA 4.4.4 doorbell regs are firmware-managed)
+      doorbell = self.dev_impl.mmio.view(self.dev_impl.reg('regSDMA_GFX_RB_WPTR').addr[idx] * 4, 8, fmt='Q')
+      return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=doorbell, put_value=0, params=rcvr_params,
+        read_ptr=gart.cpu_view().view(offset=rptr, size=8, fmt='Q'), write_ptr=gart.cpu_view().view(offset=wptr, size=8, fmt='Q'))
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q'), put_value=0,
       read_ptr=gart.cpu_view().view(offset=rptr, size=8, fmt='Q'), write_ptr=gart.cpu_view().view(offset=wptr, size=8, fmt='Q'), params=rcvr_params)
 

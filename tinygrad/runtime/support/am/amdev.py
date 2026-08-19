@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, collections, dataclasses, functools, hashlib, array
-from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw
+from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw, _ensure_downloads_dir
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
@@ -152,7 +152,9 @@ class AMDev:
     self._run_discovery()
     self._build_regs()
 
-    # AM boot Process:
+    # on NBIO 7.9 the HDP flush doorbell remap register must be programmed before any flush (nbio_v7_9_remap_hdp_registers).
+    # the silicon default is bogus and flushing without this hangs the chip. flush_hdp is used before SOC init (by the PSP).
+    if self.ip_ver[am.NBIO_HWIP][:2] == (7,9): self.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").write(0x1A000)
     # The GPU being passed can be in one of several states: 1. Not initialized. 2. Initialized by amdgpu. 3. Initialized by AM.
     # The 1st and 2nd states require a full GPU setup since their states are unknown. The 2nd state also requires a mode1 reset to
     # reinitialize all components.
@@ -172,6 +174,9 @@ class AMDev:
 
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
+      # wait for the PSP mailbox to be stable (BL ready or sOS alive): the MP0 SMN window reads garbage (0xffffffff)
+      # for the first ~2s after power-on, and any state checks or register programming during that window are bogus
+      self.psp._wait_ready()
       if self.psp.is_sos_alive() and self.smu.is_smu_alive():
         self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
         if self.is_hive():
@@ -179,7 +184,9 @@ class AMDev:
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
         self.smu.mode1_reset()
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
-      self.init_hw(self.soc, self.gmc, self.ih, self.psp, self.smu)
+      if not self.psp.is_sos_alive(): self.psp._wait_ready() # after a mode1 reset the BL restarts, wait for steady state again
+      # psp first: its rings/firmware loads must complete before GMC reprograms the VM apertures (MI350P hangs otherwise)
+      self.init_hw(self.psp, self.soc, self.gmc, self.ih, self.smu)
 
     # Booting done
     self.is_booting = False
@@ -187,7 +194,9 @@ class AMDev:
     # Re-initialize main blocks
     self.init_hw(self.gfx, self.sdma)
 
-    if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
+    # TODO: MP0 13.0.15 PMFW doesn't answer DPM clock msgs without the full amdgpu pptable/DPM setup, skip clock programming
+    if self.ip_ver[am.MP0_HWIP] == (13,0,15) and (max_power:=0.0) == 0.0: pass
+    elif (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
       self.smu.set_power_limit(max_power)
       self.smu.set_clocks(level=None)
     else: self.smu.set_clocks(level=-1) # last level, max perf.
@@ -238,7 +247,8 @@ class AMDev:
     if DEBUG >= 3: print(f"am {self.devfmt}: Recovery complete")
     return True
 
-  def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0
+  # a hive has multiple XGMI regions; single-node parts (like MI350P) may still program LFB_SIZE with region 0 only
+  def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0 and self.gmc.xgmi_max_region > 0
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
   def paddr2xgmi(self, paddr:int) -> int: return self.gmc.paddr_base + paddr
@@ -285,6 +295,12 @@ class AMDev:
       res.append(self.rreg(0x01))
     return bytes(array.array('I', res))
 
+  @staticmethod
+  def _valid_discovery(tbl:bytes) -> int:
+    if len(tbl) < ctypes.sizeof(am.struct_binary_header): return -1
+    bh = am.struct_binary_header.from_buffer(bytearray(tbl))
+    return 0 if bh.binary_signature == am.BINARY_SIGNATURE else -1
+
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
@@ -293,7 +309,15 @@ class AMDev:
     self.large_bar = self.vram.nbytes >= self.vram_size
     tmr_offset, tmr_size = self.vram_size - (64 << 10), (10 << 10)
 
-    disc_tbl = self.vram.view(tmr_offset, tmr_size)[:] if self.large_bar else self._read_vram(tmr_offset, tmr_size)
+    disc_tbl = bytes(self.vram.view(tmr_offset, tmr_size)[:] if self.large_bar else self._read_vram(tmr_offset, tmr_size))
+    # NOTE: the discovery table is immutable, but it becomes inaccessible once the firmware reserves the top of VRAM for
+    #       its secure region (e.g. after a previous boot). Cache it per-device so the driver can re-attach in that state.
+    cache_file = _ensure_downloads_dir() / "discovery" / f"{self.pci_dev.pcibus}"
+    if (vd:=self._valid_discovery(disc_tbl)) != 0 and cache_file.is_file() and self._valid_discovery(cd:=cache_file.read_bytes()) == 0:
+      disc_tbl = cd
+    elif vd == 0:
+      cache_file.parent.mkdir(parents=True, exist_ok=True)
+      cache_file.write_bytes(disc_tbl)
     self.bhdr = am.struct_binary_header.from_buffer(bytearray(disc_tbl))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert self.bhdr.binary_signature == am.BINARY_SIGNATURE and ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE, "discovery signatures mismatch"
@@ -314,6 +338,18 @@ class AMDev:
             self.ip_ver[hw_ip] = (ip.major, ip.minor, ip.revision)
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
+
+    # HARV(EST) table: harvested instances must be excluded (like amdgpu_discovery_harvest_ip)
+    self.harvested:dict[int, set[int]] = collections.defaultdict(set)
+    if (harv_off:=self.bhdr.table_list[am.HARVEST_INFO].offset) != 0:
+      hv = ctypes.c_uint32.from_address(ctypes.addressof(self.bhdr) + harv_off).value
+      if hv == am.HARVEST_TABLE_SIGNATURE:
+        for i in range(32):
+          hw_id = ctypes.c_uint16.from_address(ctypes.addressof(self.bhdr) + harv_off + 8 + i*4).value
+          if hw_id == 0: continue
+          inst = ctypes.c_uint8.from_address(ctypes.addressof(self.bhdr) + harv_off + 8 + i*4 + 2).value
+          for hw_ip in am.hw_id_map:
+            if am.hw_id_map[hw_ip] == hw_id: self.harvested[hw_ip].add(inst)
 
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)

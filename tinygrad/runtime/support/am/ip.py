@@ -29,11 +29,15 @@ class AM_SOC(AM_IP):
 
   def init_hw(self):
     if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
-      self.adev.regXCC_DOORBELL_FENCE.write(0x0)
+      # kernel programs regXCC_DOORBELL_FENCE = 0xff & ~xcc_mask; on this PF 4 of 8 XCCs are harvested, so fence xcc4-7
+      self.adev.regXCC_DOORBELL_FENCE.write(0xF0)
       for aid in range(1, self.adev.gmc.vmhubs):
         self.adev.indirect_wreg_pcie(self.adev.regXCC_DOORBELL_FENCE.addr[0], self.adev.regXCC_DOORBELL_FENCE.encode(shub_slv_mode=1), aid=aid)
       self.adev.regBIFC_GFX_INT_MONITOR_MASK.write(0x7ff)
       self.adev.regBIFC_DOORBELL_ACCESS_EN_PF.write(0xfffff)
+      # program the HDP flush doorbell remapping to a valid hole (like nbio_v7_9 in the kernel): the silicon default
+      # is bogus and flushing HDP without this hangs the chip (flush_hdp writes to address read from this register).
+      self.adev.regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL.write(0x1A000)
     else: self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
   def set_clockgating_state(self):
@@ -50,15 +54,19 @@ class AM_SOC(AM_IP):
 class AM_GMC(AM_IP):
   def init_sw(self):
     self.vmhubs = len(self.adev.regs_offset[am.MMHUB_HWIP])
+    # aqua (NBIO 7.9): only the first 2 mmhubs exist in the host window, instances 2+ are phantom layouts (like amdgpu's aid_mask)
+    if self.adev.ip_ver[am.NBIO_HWIP][:2] == (7,9): self.vmhubs = min(self.vmhubs, 2)
 
     # XGMI (for supported systems)
-    self.xgmi_phys_id = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields()['pf_lfb_region'] if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_CNTL') else 0
+    xgmi_lfb_cntl = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields() if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_CNTL') else {}
+    self.xgmi_phys_id, self.xgmi_max_region = xgmi_lfb_cntl.get('pf_lfb_region', 0), xgmi_lfb_cntl.get('pf_max_region', 0)
     self.xgmi_seg_sz = self.adev.regMMMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size']<<24 if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_SIZE') else 0
 
     self.paddr_base = self.xgmi_phys_id * self.xgmi_seg_sz
 
+    # compute fb_end like the kernel does (vram_start + vram_size), MMMC_VM_FB_LOCATION_TOP is not reliable on all SKUs
     self.fb_base = (self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
-    self.fb_end = (self.adev.regMMMC_VM_FB_LOCATION_TOP.read() & 0xFFFFFF) << 24
+    self.fb_end = self.fb_base + self.adev.vram_size
 
     # Memory controller aperture
     self.mc_base = self.fb_base + self.paddr_base
@@ -74,6 +82,10 @@ class AM_GMC(AM_IP):
 
     self.memscratch_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.dummy_page_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
+    # kernel routes L2 protection faults to a host-RAM dummy page (gmc.sys_pages), vram pages can wedge the fabric here
+    if self.adev.ip_ver[am.NBIO_HWIP][:2] == (7,9):
+      self.sys_dummy_view, sys_paddrs = self.adev.pci_dev.alloc_sysmem(0x1000)
+    self.sys_dummy_paddr = sys_paddrs[0] if self.adev.ip_ver[am.NBIO_HWIP][:2] == (7,9) else self.dummy_page_xgmi_paddr
 
     # MM hub is inited before any tlb flushes and is still valid during partial_boot, so set it to true
     self.hub_initted = {"MM": True, "GC": False}
@@ -117,6 +129,7 @@ class AM_GMC(AM_IP):
   def init_hub(self, ip:Literal["MM", "GC"], inst_cnt:int):
     # Init system apertures
     for inst in range(inst_cnt):
+
       self.adev.reg(f"reg{ip}MC_VM_AGP_BASE").write(0, inst=inst)
       self.adev.reg(f"reg{ip}MC_VM_AGP_BOT").write(0xffffffffffff >> 24, inst=inst) # disable AGP
       self.adev.reg(f"reg{ip}MC_VM_AGP_TOP").write(0, inst=inst)
@@ -124,13 +137,13 @@ class AM_GMC(AM_IP):
       self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_LOW_ADDR").write(self.fb_base >> 18, inst=inst)
       self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_HIGH_ADDR").write(self.fb_end >> 18, inst=inst)
       self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.memscratch_xgmi_paddr >> 12, inst=inst)
-      self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.dummy_page_xgmi_paddr >> 12, inst=inst)
+      self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.sys_dummy_paddr >> 12, inst=inst)
 
       self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_CNTL2").update(active_page_migration_pte_read_retry=1, inst=inst)
 
       # Init TLB and cache
       self.adev.reg(f"reg{ip}MC_VM_MX_L1_TLB_CNTL").update(enable_l1_tlb=1, system_access_mode=3, enable_advanced_driver_model=1,
-        system_aperture_unmapped_access=0, mtype=self.adev.soc.module.MTYPE_UC, inst=inst)
+        system_aperture_unmapped_access=0, mtype=self.adev.soc.module.MTYPE_UC, atc_en=1, inst=inst)
 
       self.adev.reg(f"reg{ip}VM_L2_CNTL").update(enable_l2_cache=1, enable_default_page_out_to_system_memory=1,
         l2_pde0_cache_tag_generation_mode=0, pde_fault_classification=0, context1_identity_access_mode=1, identity_mode_fragment_size=0,
@@ -176,10 +189,22 @@ class AM_SMU(AM_IP):
     self.smu_mod = self.adev._ip_module("smu", am.MP1_HWIP)
     self.driver_table_paddr = self.adev.mm.palloc(0x4000, zero=False, boot=True)
 
+  def wait_alive(self):
+    # poll until the SMU mailbox starts ACKing GetSmuVersion (single-shot attempts, mirroring amdgpu which issues one check)
+    t0 = time.time()
+    while time.time() - t0 < 60:
+      if self.is_smu_alive(): return
+      time.sleep(0.5)
+    raise TimeoutError("SMU not alive")
+
   def init_hw(self):
-    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)))
-    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)))
-    self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
+    self.wait_alive()
+    # MP0 13.0.15 PMFW answers the dram addr msgs with an error response (as seen in amdgpu logs), tolerate any nonzero resp
+    dram_tolerant = self.adev.ip_ver[am.MP0_HWIP] == (13,0,15)
+    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)), any_resp=dram_tolerant)
+    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)), any_resp=dram_tolerant)
+    # not valid on smu_v13_0_12-family pmfw
+    if self.adev.ip_ver[am.MP0_HWIP] != (13,0,15): self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0, any_resp=dram_tolerant)
 
   def is_smu_alive(self):
     with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
@@ -189,13 +214,13 @@ class AM_SMU(AM_IP):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
     if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) or self.adev.ip_ver[am.MP0_HWIP] in {(13,0,0), (13,0,7), (13,0,10)}:
       self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
-    elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
+    elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12), (13,0,15)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
 
     if not self.adev.is_hive(): time.sleep(0.5) # 500ms
 
   def read_table(self, table_t, arg):
-    if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6),(13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GetMetricsTable, arg)
+    if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6),(13,0,12),(13,0,15)}: self._send_msg(self.smu_mod.PPSMC_MSG_GetMetricsTable, arg)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, arg)
     return table_t.from_buffer(bytearray(self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(table_t))[:]))
 
@@ -206,7 +231,7 @@ class AM_SMU(AM_IP):
 
   def set_clocks(self, level:int|None):
     clks = tuple([self.smu_mod.PPCLK_UCLK, self.smu_mod.PPCLK_FCLK, self.smu_mod.PPCLK_SOCCLK])
-    if self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,12)}: clks += (self.smu_mod.PPCLK_GFXCLK,)
+    if self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,12), (13,0,15)}: clks += (self.smu_mod.PPCLK_GFXCLK,)
 
     if level is None:
       for clck in clks:
@@ -238,22 +263,27 @@ class AM_SMU(AM_IP):
     (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).write(param)
     (self.adev.mmMP1_SMN_C2PMSG_66 if not debug else self.adev.mmMP1_SMN_C2PMSG_75).write(msg)
 
-  def _send_msg(self, msg:int, param:int, read_back_arg=False, timeout=10000, debug=False): # default timeout is 10 seconds
+  def _send_msg(self, msg:int, param:int, read_back_arg=False, timeout=10000, debug=False, any_resp=False): # default timeout is 10 seconds
     self._smu_cmn_send_msg(msg, param, debug=debug)
-    wait_cond((self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).read, value=1, timeout_ms=timeout,
-      msg=f"SMU msg {msg:#x} timeout")
+    rc = self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54
+    # amdgpu tolerates any nonzero resp
+    cond, val = (lambda: rc.read() != 0, True) if any_resp else (rc.read, 1)
+    wait_cond(cond, value=val, timeout_ms=timeout, msg=f"SMU msg {msg:#x} timeout")
     return (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).read() if read_back_arg else None
 
 class AM_GFX(AM_IP):
   def init_sw(self):
-    self.xccs = len(self.adev.regs_offset[am.GC_HWIP])
+    self.xccs = sum(1 for i in self.adev.regs_offset[am.GC_HWIP] if i not in self.adev.harvested[am.GC_HWIP])
     self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(2)]
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
 
   def init_hw(self):
     # Wait for RLC autoload to complete
-    wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0,
-              value=True, msg="RLC autoload timeout")
+    # regRLC_RLCS_BOOTLOAD_STATUS doesn't exist on gc 9.4.3 (used for gfx942/gfx950), gate on it only if present
+    def bootload_done():
+      return getattr(self.adev, 'regRLC_RLCS_BOOTLOAD_STATUS', None) is None or \
+        self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0
+    wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or bootload_done(), value=True, msg="RLC autoload timeout")
 
     self.adev.gmc.init_hub("GC", inst_cnt=self.xccs)
     if self.adev.partial_boot: return self.reset_mec()
@@ -297,9 +327,6 @@ class AM_GFX(AM_IP):
 
     self._enable_mec()
 
-    # Set 1 partition
-    if self.xccs > 1: self.adev.psp._spatial_partition_cmd(1)
-
   def fini_hw(self): self._dequeue_hqds()
 
   def reset_mec(self):
@@ -314,7 +341,9 @@ class AM_GFX(AM_IP):
     self._enable_mec()
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool) -> int:
-    pipe, queue, doorbell = idx // 4, idx % 4, am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
+    # aqua (NBIO 7.9) uses DOORBELL_LAYOUT1 (see aqua_vanjaram_doorbell_index_init): its mec ring0 starts at 8, not 3
+    pipe, queue, doorbell = idx // 4, idx % 4, (am.AMDGPU_DOORBELL_LAYOUT1_MEC_RING_START if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}
+      else am.AMDGPU_NAVI10_DOORBELL_MEC_RING0)
 
     for xcc in range(self.xccs if aql else 1):
       self._grbm_select(me=1, pipe=pipe, queue=queue, inst=xcc)
@@ -342,7 +371,6 @@ class AM_GFX(AM_IP):
       for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
         self.adev.wreg(reg, mqd_st_mv[0x80 + i])
       self.adev.regCP_HQD_ACTIVE.write(0x1, inst=xcc)
-
       self.adev.gmc.flush_hdp()
       self._grbm_select(inst=xcc)
     return doorbell
@@ -412,15 +440,24 @@ class AM_IH(AM_IP):
     def _alloc_ring(size): return (self.adev.mm.palloc(size, zero=False, boot=True), self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.rings = [(*_alloc_ring(self.ring_size), "", 0), (*_alloc_ring(self.ring_size), "_RING1", 1)]
     self.ring_view = self.adev.vram.view(offset=self.rings[0][0], size=self.ring_size, fmt='I')
+    # on gfx950 (aqua), the IH rings must live in host system memory (like use_bus_addr=true in amdgpu)
+    self.rings_in_sysmem = self.adev.ip_ver[am.GC_HWIP][:2] == (9,5) # scoped to gfx950 for now (validated symptom there)
+    if self.rings_in_sysmem:
+      # OSSSYS 4.4.2 (aqua): only one IH ring, the second one is skipped in amdgpu too
+      self.sysmem_rings = [self.adev.pci_dev.alloc_sysmem(self.ring_size + 0x1000) for _ in range(1)]
+      self.rings = [(sr[1][0], sr[1][self.ring_size // 0x1000], s, i) for sr, (_, _, s, i) in zip(self.sysmem_rings, self.rings)]
+      self.ring_view = self.sysmem_rings[0][0].view(0, self.ring_size, fmt='I')
+      self.sys_irq_views = [sr[0].view(0x40000, 0x1000, fmt='I') for sr in self.sysmem_rings]
 
   def init_hw(self):
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
-      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", self.adev.paddr2mc(ring_vm) >> 8)
+      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", ring_vm >> 8)
 
-      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=((self.ring_size//4)-1).bit_length(),
+      mc_space = 1 if self.rings_in_sysmem else 4
+      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=mc_space, wptr_overflow_clear=1, rb_size=((self.ring_size//4)-1).bit_length(),
         mc_snoop=1, mc_ro=0, mc_vmid=0, **({'wptr_overflow_enable': 1, 'rptr_rearm': 1} if ring_id == 0 else {'rb_full_drain_enable': 1}))
 
-      if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", self.adev.paddr2mc(rwptr_vm))
+      if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", (rwptr_vm if self.rings_in_sysmem else self.adev.paddr2mc(rwptr_vm)))
 
       self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
       self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
@@ -431,6 +468,12 @@ class AM_IH(AM_IP):
       self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
       self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
       self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
+
+    # aqua (OSSSYS 4.4.2): IH_CHICKEN.MC_SPACE_GPA_ENABLE + retry-int-cam must be set before RB_ENABLE (as in vega20_ih)
+    if self.rings_in_sysmem and hasattr(self.adev, 'regIH_CHICKEN'):
+      self.adev.regIH_CHICKEN.update(mc_space_gpa_enable=1)
+      oss_base = self.adev.regs_offset[am.OSSSYS_HWIP][0][0]
+      self.adev.wreg(oss_base + 0xEA, self.adev.rreg(oss_base + 0xEA) | 0x10000) # IH_RETRY_INT_CAM_CNTL_ALDEBARAN
 
     # toggle interrupts
     for _, rwptr_vm, suf, ring_id in self.rings:
@@ -498,6 +541,9 @@ class AM_IH(AM_IP):
 class AM_SDMA(AM_IP):
   def init_sw(self): self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
   def init_hw(self):
+    # aqua (NBIO 7.9): SDMA doorbell routing/trap config is firmware/RLC-managed; host programming here tears the fabric
+    # (~40ms later: RAS_ATHUB_ERR_EVENT and host BAR0 access to VRAM dies until the next cold boot).
+    if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}: return
     for pipe_id in range(16 if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else 1):
       pipe, inst = ("", pipe_id) if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else (str(pipe_id), 0)
 
@@ -539,7 +585,8 @@ class AM_SDMA(AM_IP):
 
     pipe, queue = idx // 4, idx % 4
     reg, inst = ("regSDMA_GFX", pipe+queue*4) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
-    doorbell = am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (pipe+queue*4) * 0xA
+    doorbell = (am.AMDGPU_DOORBELL_LAYOUT1_sDMA_ENGINE_START if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}
+                else am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0) + (pipe+queue*4) * 0xA
     self.sdma_reginst.append((reg, inst))
 
     self.adev.reg(f"{reg}_MINOR_PTR_UPDATE").write(0x1, inst=inst)
@@ -548,11 +595,14 @@ class AM_SDMA(AM_IP):
     self.adev.wreg_pair(f"{reg}_RB_BASE", "", "_HI", ring_addr >> 8, inst=inst)
     self.adev.wreg_pair(f"{reg}_RB_RPTR_ADDR", "_LO", "_HI", rptr_addr, inst=inst)
     self.adev.wreg_pair(f"{reg}_RB_WPTR_POLL_ADDR", "_LO", "_HI", wptr_addr, inst=inst)
-    self.adev.reg(f"{reg}_DOORBELL_OFFSET").update(offset=doorbell * 2, inst=inst)
-    self.adev.reg(f"{reg}_DOORBELL").update(enable=1, inst=inst)
+    # aqua (NBIO 7.9): kernel leaves SDMA doorbell regs 0 and submits via the WPTR register
+    if self.adev.ip_ver[am.NBIO_HWIP] not in {(7,9,0), (7,9,1)}:
+      self.adev.reg(f"{reg}_DOORBELL_OFFSET").update(offset=doorbell * 2, inst=inst)
+      self.adev.reg(f"{reg}_DOORBELL").update(enable=1, inst=inst)
     self.adev.reg(f"{reg}_MINOR_PTR_UPDATE").write(0x0, inst=inst)
     self.adev.reg(f"{reg}_RB_CNTL").write(**({f'{self.sdma_name.lower()}_wptr_poll_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP][:2]!=(4,4) else {}),
-      rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4, rb_enable=1, rb_priv=1, rb_size=(ring_size//4).bit_length()-1, inst=inst)
+      rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4, rb_enable=1,
+      rb_priv=1 if self.adev.ip_ver[am.NBIO_HWIP] not in {(7,9,0), (7,9,1)} else 0, rb_size=(ring_size//4).bit_length()-1, inst=inst)
     self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=1, inst=inst)
     return doorbell
 
@@ -575,18 +625,21 @@ class AM_PSP(AM_IP):
     self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=False, boot=True)
 
     self.max_tmr_size, self.tmr_size = 0x1300000, 0
-    self.boot_time_tmr = self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,14), (14,0,2), (14,0,3)}
-    self.autoload_tmr = self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,14)}
+    self.boot_time_tmr = self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,14), (13,0,15), (14,0,2), (14,0,3)}
+    self.autoload_tmr = self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,14), (13,0,15)}
     self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True) if not self.boot_time_tmr else 0
 
   def init_hw(self):
     spl_key = am.PSP_FW_TYPE_PSP_SPL if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) else am.PSP_FW_TYPE_PSP_KDB
-    sos_components = [(am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE), (spl_key, am.PSP_BL__LOAD_TOS_SPL_TABLE),
+    # SPL is preloaded on MP0 13.0.15
+    sos_components = [] if self.adev.ip_ver[am.MP0_HWIP] == (13,0,15) else [(spl_key, am.PSP_BL__LOAD_TOS_SPL_TABLE)]
+    sos_components += [(am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE),
       (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV), (am.PSP_FW_TYPE_PSP_SOC_DRV, am.PSP_BL__LOAD_SOCDRV),
       (am.PSP_FW_TYPE_PSP_INTF_DRV, am.PSP_BL__LOAD_INTFDRV), (am.PSP_FW_TYPE_PSP_DBG_DRV, am.PSP_BL__LOAD_DBGDRV),
       (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
 
     if not self.is_sos_alive():
+      self._wait_ready() # tolerate the early-boot garbage window before trusting the BL/sOS state
       for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
       wait_cond(self.is_sos_alive, value=True, msg="sOS failed to start")
 
@@ -602,9 +655,28 @@ class AM_PSP(AM_IP):
     if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0): self._rlc_autoload_cmd()
     else: self._load_ip_fw_cmd([am.GFX_FW_TYPE_REG_LIST], self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_RL])
 
-  def is_sos_alive(self): return self.adev.reg(f"{self.reg_pref}_81").read() != 0x0
+    # XCP single partition: must be requested while the mailbox/FB path is known-good (psp stage), otherwise the command
+    # either isn't serviced or severs host FB access (observed on MI350P).
+    # MP0 13.0.15 (MI350P): do not re-partition, the XCP transition is firmware-owned there.
+    if len(self.adev.regs_offset[am.GC_HWIP]) > 1 and self.adev.ip_ver[am.MP0_HWIP] != (13,0,15): self._spatial_partition_cmd(1)
 
-  def _wait_for_bootloader(self): wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_35").read() & 0x80000000, value=0x80000000, msg="BL not ready")
+  def is_sos_alive(self):
+    # r81 (sign-of-life) is only updated by the sOS during early init, so the ring register (if set by a previous
+    # session) is used as a second indication that sOS has already booted
+    return self.adev.reg(f"{self.reg_pref}_81").read() != 0x0 or self.adev.reg(f"{self.reg_pref}_71").read() != 0x0
+
+  def _wait_ready(self):
+    # NOTE: the MP0 SMN window transiently reads 0xffffffff during early boot, ignore those reads. Ready means the
+    #       bootloader accepts commands (exact 0x80000000, as in the kernel) or the sOS is already running.
+    def ready():
+      if (v35:=self.adev.reg(f"{self.reg_pref}_35").read()) == 0xffffffff: return False
+      return v35 == 0x80000000 or self.is_sos_alive()
+    wait_cond(ready, value=True, timeout_ms=120000, msg="psp not ready") # BL re-POST can take a while after resets (kernel allows ~300s)
+
+  def _wait_for_bootloader(self):
+    # NOTE: the BL may report error codes in the low bits (cleared by the next command) and the MP0 SMN window
+    #       transiently reads garbage during boot, so only an exact 0x80000000 match means ready (as in the kernel)
+    wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_35").read(), value=0x80000000, timeout_ms=60000, msg="BL not ready")
 
   def _prep_msg1(self, data:memoryview):
     assert len(data) <= self.msg1_view.nbytes, f"msg1 buffer is too small {len(data):#x} > {self.msg1_view.nbytes:#x}"
@@ -652,7 +724,13 @@ class AM_PSP(AM_IP):
     wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_64").read() & 0x8000FFFF, value=0x80000000, msg="sOS ring not created")
 
   def _ring_submit(self, cmd:am.struct_psp_gfx_cmd_resp) -> am.struct_psp_gfx_cmd_resp:
-    msg = am.struct_psp_gfx_rb_frame(fence_value=(prev_wptr:=self.adev.reg(f"{self.reg_pref}_67").read()) + 1,
+    def _wptr():
+      t0 = time.time()
+      while (v:=self.adev.reg(f"{self.reg_pref}_67").read()) == 0xffffffff: # mailbox can be briefly inaccessible during XCP transitions
+        if time.time() - t0 > 10: raise TimeoutError(f"psp mailbox read stuck at {v:#x}")
+        time.sleep(0.01)
+      return v
+    msg = am.struct_psp_gfx_rb_frame(fence_value=(prev_wptr:=_wptr()) + 1,
       cmd_buf_addr_lo=lo32(self.adev.paddr2mc(self.cmd_paddr)), cmd_buf_addr_hi=hi32(self.adev.paddr2mc(self.cmd_paddr)),
       fence_addr_lo=lo32(self.adev.paddr2mc(self.fence_paddr)), fence_addr_hi=hi32(self.adev.paddr2mc(self.fence_paddr)))
 
