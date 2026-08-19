@@ -75,6 +75,9 @@ pm_prepare_graph = PatternMatcher([
   # CALL inputs need buffer identity (and to be flat)
   (UPat(Ops.CALL, name="c"),
    lambda c: c.replace(src=c.src[0:1]+tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src[1:]))),
+  # MSTACK inputs need buffer identity
+  (UPat(Ops.MSTACK, name="c"),
+   lambda c: c.replace(src=tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src))),
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
   # resolve allreduce (must be bottom up)
