@@ -70,9 +70,6 @@ class ISARenderer(Renderer):
   post_regalloc_ctx: any|None = None
   spill_size: int = 0
 
-  # custom graph rewrites, perform arbitrary arch specific analysis passes/optimizations
-  # that require custom context/belong outside isel
-  def early(self, full_sink:UOp) -> UOp: return full_sink
   def is_two_address(self, x:UOp) -> bool: return False
   def stack_alloc(self, uops:list[UOp]) -> list[UOp]: return uops
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")

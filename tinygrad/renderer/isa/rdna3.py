@@ -384,34 +384,6 @@ def lower_end(ctx, x:UOp, acc:UOp):
   return inc, [inc, pred, jmp, loop_end, restoreexec(ctx.exec_mask[acc])]
 
 # ---- lowering passes ----
-# TODO: cleanup and put in codegen (ISA backends only? most good compilers already optimize this in the renderer ex. LLVM, probably HIP)
-class BiasMemoryCtx:
-  def __init__(self, sink:UOp):
-    # shared base op -> idx and optional const arg
-    self.mgroups: dict[ParamArg, list[tuple[UOp|None, int|None]]] = {}
-    for u in sink.toposort():
-      if u.op in {Ops.LOAD, Ops.STORE} and u.src[0].addrspace is not AddrSpace.REG:
-        base,idx,arg = (*u.src[0].src[:2], None)
-        if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: arg = idx.src[1].val
-        self.mgroups.setdefault(base.arg, []).append((idx,arg or 0))
-
-    self.normalized: dict[tuple[ParamArg,UOp], UOp] = {}
-    for b, uses in self.mgroups.items():
-      if len(args := [v[1] for v in uses if v[1] is not None]) == 0: continue
-      if (mean := sum(args) // len(args)) == 0: continue
-      for idx,v in uses:
-        if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST:
-          # propagate the normalize addition down sum edges to hint hoist outside range?
-          # this is where this starts to belong in codegen optimizations maybe
-          self.normalized[(b,idx)] = idx.replace(src=(idx.src[0] + const(mean, idx.dtype), const(idx.src[1].val - mean, idx.dtype)))
-        else: # dynamic base no ioffs
-          self.normalized[(b,idx)] = (idx + const(mean, idx.dtype)) + const(-mean, idx.dtype)
-
-pm_bias_memory_addrs = PatternMatcher([
-  (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x: x.replace(src=(x.src[0], ctx.normalized[(x.src[0].arg,x.src[1])], *x.src[2:]))
-    if (x.src[0].arg,x.src[1]) in ctx.normalized else None),
-])
-
 extra_matcher = PatternMatcher([
   (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(x.val if isinstance(x.val, InvalidType) else to_storage_scalar(x.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
@@ -635,9 +607,6 @@ class RDNA3Renderer(ISARenderer):
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
-
-  def early(self, full_sink:UOp) -> UOp:
-    return graph_rewrite(full_sink, pm_bias_memory_addrs, ctx=BiasMemoryCtx(full_sink), name="bias mem offsets")
 
   # use scratch memory space for spilling thread local memory, addressed as:
   # SCRATCH_BASE + Swizzle(addr, tid) 12 bit ioffs, ensure no overflow!
