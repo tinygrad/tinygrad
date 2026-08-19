@@ -6,6 +6,7 @@ from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.renderer.amd.elf import assemble_linear
+import tinygrad.renderer.amd.dsl as dsl
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 import itertools, functools
 from dataclasses import dataclass, field
@@ -113,16 +114,13 @@ def stack2regs(x:UOp):
     else: mvs.append(vmov(x.src[i]))
   return UOp.group(*mvs, dtype=x.dtype) if len(mvs) > 1 else mvs[0].replace(dtype=x.dtype)
 
-# NOTE: should this just be triggered in to_vgpr??
 def gethalf(x:UOp, buf:UOp, idx:UOp):
+  # TODO: move the BUFFER condition to pattern
   bb = buf
   while bb.op is Ops.AFTER: bb = bb.src[0]
-  # only trigger on value uses, ex. b16 alu stack inputs/outputs
-  # NOT index into memory/buffers
   if bb.op is Ops.BUFFER: return None
-  b32 = buf.index(const(idx.val // 2, dtypes.int32)).replace(dtype=dtypes.uint32)
-  # NOTE: manual construction, needs to be cleaned
-  if idx.val % 2 != 0: return UOp(Ops.BITCAST, src=(UOp(Ops.SHR, src=(b32, const(16))),), arg=x.dtype)
+  b32 = buf.index(const(idx.val // 2, dtypes.int32), dtype=dtypes.uint32)
+  if idx.val % 2 != 0: return (b32 >> 16).bitcast(x.dtype)
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
 
 # ---- operand legalization wrappers ----
@@ -370,7 +368,7 @@ def lower_end(ctx, x:UOp, acc:UOp):
 
 # ---- lowering passes ----
 extra_matcher = PatternMatcher([
-  (UPat.cvar("x", dtype=dtypes.bfloat16).cast(), lambda x: const(x.val if isinstance(x.val, InvalidType) else to_storage_scalar(x.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
+  (UPat.cvar("x").cast(dtypes.bfloat16), lambda x: const(x.val if isinstance(x.val, InvalidType) else to_storage_scalar(x.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
@@ -488,7 +486,7 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   (UPat(Ops.PARAM, name="x"), abi),
   (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
-  (UPat(Ops.INDEX, (dtypes.half,) + dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), gethalf),
+  (UPat(Ops.INDEX, (dtypes.half,)+dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx").cast()), name="x"), gethalf),
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
   (UPat(name="x").bitcast().named("y"), lambda x,y: x if y.tag is None else x.replace(tag=y.tag)),
 ])
@@ -516,9 +514,7 @@ post_regalloc_matcher = PatternMatcher([
 
 # NOTE: hacky fixes, find cleaner way to conform to isa
 def encode(ctx, x:UOp):
-  import tinygrad.renderer.amd.dsl as dsl
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
-  dmap = { "vcc" : dsl.VCC, "exec_lo" : dsl.EXEC_LO, "v" : dsl.v, "s" : dsl.s  }
   def encfield(x:UOp):
     # fold immediate
     while x.op is Ops.AFTER: x=x.src[0]
@@ -528,10 +524,10 @@ def encode(ctx, x:UOp):
     r, rs = rdef(x), rdefs(x)
     assert isinstance(r, Register), f"expect Register to encode, got {rs[0]}"
     for i,g in enumerate(rs[1:]): assert g.index == rs[i].index+1, "wide registers must be contiguous"
+    dmap = { "vcc":dsl.VCC, "exec_lo":dsl.EXEC_LO, "v":dsl.v, "s":dsl.s  }
     base = next(v for k,v in dmap.items() if k in r.name)
     return base[r.index] if len(rs) == 1 else base[r.index:r.index+len(rs)-1]
-  enc, group, opc, oprs = x.arg, x.arg.func, x.arg.args[0].name.lower(), x.src
-  kw = args = None
+  enc, group, opc, oprs, kw, args = x.arg, x.arg.func, x.arg.args[0].name.lower(), x.src, None, None
 
   if group is RDNA3Ops.SMEM: kw = dict(sdata=encfield(x), sbase=encfield(oprs[0]), offset=encfield(oprs[1]))
   elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
@@ -563,6 +559,7 @@ def encode(ctx, x:UOp):
     args = [encfield(x)] + [encfield(u) for u in oprs]
   elif group is RDNA3Ops.SOPP: args = (oprs[0].val,) if len(oprs) > 0 and oprs[0].op is Ops.CONST else (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={opc}")
+
   return x.replace(arg=(enc(**kw) if kw is not None else enc(*args)))
 
 class CntType(Enum):
