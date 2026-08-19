@@ -1,6 +1,7 @@
-#include <hip/hip_runtime.h>
-#include <hip/hip_bf16.h>
+#include "kittens.cuh"
 #include "quantize_mxfp4_device.h"
+
+using namespace kittens;
 
 #if !defined(KERNEL_NAME) || !defined(M_DIM) || !defined(N_DIM)
 #error kernel dimensions and name must be defined
@@ -12,10 +13,12 @@ constexpr int M = M_DIM;
 constexpr int N = N_DIM;
 constexpr int HIDDEN = N / 2;
 constexpr int BLOCK = 32;
-constexpr int TILE_M = 128;
+constexpr int TILE_M = 256;
+constexpr int NUM_WARPS = 8;
 constexpr int THREADS_PER_ROW = 8;
 constexpr int VALUES_PER_THREAD = 4;
-constexpr int SMEM_STRIDE = BLOCK + 2;
+
+using Tile = st_bf<BLOCK, BLOCK, st_32x32_s>;
 
 static_assert(M % TILE_M == 0 && HIDDEN % BLOCK == 0);
 
@@ -23,70 +26,87 @@ __device__ __forceinline__ float sigmoidf(const float x) {
   return __frcp_rn(1.0f + __expf(-x));
 }
 
-__device__ __forceinline__ void swiglu_grads(const __hip_bfloat16* packed, const __hip_bfloat16* grad,
-                                             int row, int col, float& dact, float& dgate) {
-  const float act = static_cast<float>(packed[row * N + col]);
-  const float gate = static_cast<float>(packed[row * N + HIDDEN + col]);
-  const float upstream = static_cast<float>(grad[row * HIDDEN + col]);
-  const float sigmoid = sigmoidf(act);
-  const float silu = act * sigmoid;
-  dact = upstream * (sigmoid + silu * (1.0f - sigmoid)) * gate;
-  dgate = upstream * silu;
+__device__ __forceinline__ float bf16_to_float(uint16_t x) {
+  return __uint_as_float(static_cast<uint32_t>(x) << 16);
 }
 
-__device__ __forceinline__ void store_quantized_tile(
-    uint16_t* tile,
-    uint8_t* row_fp4, uint8_t* row_scale, uint8_t* col_fp4, uint8_t* col_scale,
-    const __hip_bfloat16 (&values)[VALUES_PER_THREAD], int row, int col, int line, int lane) {
-  #pragma unroll
-  for (int j = 0; j < VALUES_PER_THREAD; j++) {
-    tile[line * SMEM_STRIDE + lane * VALUES_PER_THREAD + j] = *reinterpret_cast<const uint16_t*>(&values[j]);
-  }
-  __syncthreads();
+__device__ __forceinline__ uint16_t* tile_at(Tile& tile, int row, int col) {
+  return reinterpret_cast<uint16_t*>(tile.data) + Tile::swizzle(make_int2(row, col)) / sizeof(bf16);
+}
 
-  const mxfp4::Quantized4 row_result = mxfp4::quantize(
-    mxfp4::load_bf16x4(tile + line * SMEM_STRIDE + lane * VALUES_PER_THREAD), lane);
-  mxfp4::store_fp4<false>(row_fp4, row, col / 2, N / 2, row_result.fp4);
-  if (lane == 0) mxfp4::store_scale(row_scale, row, col / BLOCK, N / BLOCK, row_result.scale);
-
-  const int row_lane = lane * VALUES_PER_THREAD;
-  const int col_line = col - lane * VALUES_PER_THREAD + line;
-  const mxfp4::Quantized4 col_result = mxfp4::quantize(make_float4(
-    __uint_as_float(static_cast<uint32_t>(tile[(row_lane + 0) * SMEM_STRIDE + line]) << 16),
-    __uint_as_float(static_cast<uint32_t>(tile[(row_lane + 1) * SMEM_STRIDE + line]) << 16),
-    __uint_as_float(static_cast<uint32_t>(tile[(row_lane + 2) * SMEM_STRIDE + line]) << 16),
-    __uint_as_float(static_cast<uint32_t>(tile[(row_lane + 3) * SMEM_STRIDE + line]) << 16)), lane);
-  mxfp4::store_fp4<false>(col_fp4, col_line, (row - line + row_lane) / 2, M / 2, col_result.fp4);
-  if (lane == 0) mxfp4::store_scale(col_scale, col_line, (row - line) / BLOCK, M / BLOCK, col_result.scale);
-  __syncthreads();
+__device__ __forceinline__ float4 load_col4(Tile& tile, int row, int col) {
+  return make_float4(bf16_to_float(*tile_at(tile, row + 0, col)), bf16_to_float(*tile_at(tile, row + 1, col)),
+                     bf16_to_float(*tile_at(tile, row + 2, col)), bf16_to_float(*tile_at(tile, row + 3, col)));
 }
 
 } // namespace
 
-extern "C" __global__ __launch_bounds__(256, 8)
+extern "C" __global__ __launch_bounds__(512, 2)
 void KERNEL_NAME(__hip_bfloat16* __restrict__ grad_out,
                  uint8_t* __restrict__ row_fp4, uint8_t* __restrict__ row_scale,
                  uint8_t* __restrict__ col_fp4, uint8_t* __restrict__ col_scale,
                  const __hip_bfloat16* __restrict__ packed, const __hip_bfloat16* __restrict__ grad) {
-  __shared__ uint16_t tile[BLOCK * SMEM_STRIDE];
-  const int line = threadIdx.x / THREADS_PER_ROW;
-  const int lane = threadIdx.x % THREADS_PER_ROW;
-  const int block_m = blockIdx.x * TILE_M;
+  __shared__ Tile dact_tiles[NUM_WARPS];
+  __shared__ Tile dgate_tiles[NUM_WARPS];
+  const int warp = warpid();
+  const int lane = laneid();
+  const int line = lane / THREADS_PER_ROW;
+  const int quant_lane = lane % THREADS_PER_ROW;
+  const int block_m = blockIdx.x * TILE_M + warp * BLOCK;
   const int block_col = blockIdx.y * BLOCK;
+  Tile& dact_tile = dact_tiles[warp];
+  Tile& dgate_tile = dgate_tiles[warp];
 
   #pragma unroll
-  for (int chunk_m = 0; chunk_m < TILE_M / BLOCK; chunk_m++) {
-    const int row = block_m + chunk_m * BLOCK + line;
-    const int col = block_col + lane * VALUES_PER_THREAD;
+  for (int row_chunk = 0; row_chunk < BLOCK / THREADS_PER_ROW; row_chunk++) {
+    const int local_row = row_chunk * THREADS_PER_ROW + line;
+    const int row = block_m + local_row;
+    const int local_col = quant_lane * VALUES_PER_THREAD;
+    const int col = block_col + local_col;
+    const uint64_t acts = *reinterpret_cast<const uint64_t*>(packed + row * N + col);
+    const uint64_t gates = *reinterpret_cast<const uint64_t*>(packed + row * N + HIDDEN + col);
+    const uint64_t upstreams = *reinterpret_cast<const uint64_t*>(grad + row * HIDDEN + col);
     __hip_bfloat16 dact[VALUES_PER_THREAD], dgate[VALUES_PER_THREAD];
     #pragma unroll
     for (int j = 0; j < VALUES_PER_THREAD; j++) {
-      float dact_f, dgate_f;
-      swiglu_grads(packed, grad, row, col + j, dact_f, dgate_f);
-      dact[j] = __hip_bfloat16(dact_f);
-      dgate[j] = __hip_bfloat16(dgate_f);
+      const float act = bf16_to_float(static_cast<uint16_t>(acts >> (16 * j)));
+      const float gate = bf16_to_float(static_cast<uint16_t>(gates >> (16 * j)));
+      const float upstream = bf16_to_float(static_cast<uint16_t>(upstreams >> (16 * j)));
+      const float sigmoid = sigmoidf(act);
+      const float silu = act * sigmoid;
+      dact[j] = __hip_bfloat16(upstream * (sigmoid + silu * (1.0f - sigmoid)) * gate);
+      dgate[j] = __hip_bfloat16(upstream * silu);
     }
-    store_quantized_tile(tile, row_fp4, row_scale, col_fp4, col_scale, dact, row, col, line, lane);
-    store_quantized_tile(tile, row_fp4, row_scale, col_fp4, col_scale, dgate, row, HIDDEN + col, line, lane);
+    *reinterpret_cast<uint64_t*>(tile_at(dact_tile, local_row, local_col)) = *reinterpret_cast<uint64_t*>(dact);
+    *reinterpret_cast<uint64_t*>(tile_at(dgate_tile, local_row, local_col)) = *reinterpret_cast<uint64_t*>(dgate);
+    mxfp4::Quantized4 dact_result, dgate_result;
+    mxfp4::quantize_pair(make_float4(static_cast<float>(dact[0]), static_cast<float>(dact[1]),
+                                    static_cast<float>(dact[2]), static_cast<float>(dact[3])),
+                         make_float4(static_cast<float>(dgate[0]), static_cast<float>(dgate[1]),
+                                    static_cast<float>(dgate[2]), static_cast<float>(dgate[3])),
+                         quant_lane, dact_result, dgate_result);
+    mxfp4::store_fp4<false>(row_fp4, row, col / 2, N / 2, dact_result.fp4);
+    mxfp4::store_fp4<false>(row_fp4, row, (HIDDEN + col) / 2, N / 2, dgate_result.fp4);
+    if (quant_lane == 0) {
+      mxfp4::store_scale(row_scale, row, col / BLOCK, N / BLOCK, dact_result.scale);
+      mxfp4::store_scale(row_scale, row, (HIDDEN + col) / BLOCK, N / BLOCK, dgate_result.scale);
+    }
+  }
+
+  asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory");
+  #pragma unroll
+  for (int col_chunk = 0; col_chunk < BLOCK / THREADS_PER_ROW; col_chunk++) {
+    const int local_col = col_chunk * THREADS_PER_ROW + line;
+    const int col = block_col + local_col;
+    const int local_row = quant_lane * VALUES_PER_THREAD;
+    mxfp4::Quantized4 dact_result, dgate_result;
+    mxfp4::quantize_pair(load_col4(dact_tile, local_row, local_col), load_col4(dgate_tile, local_row, local_col),
+                         quant_lane, dact_result, dgate_result);
+    mxfp4::store_fp4<false>(col_fp4, col, (block_m + local_row) / 2, M / 2, dact_result.fp4);
+    mxfp4::store_fp4<false>(col_fp4, HIDDEN + col, (block_m + local_row) / 2, M / 2, dgate_result.fp4);
+    if (quant_lane == 0) {
+      mxfp4::store_scale(col_scale, col, block_m / BLOCK, M / BLOCK, dact_result.scale);
+      mxfp4::store_scale(col_scale, HIDDEN + col, block_m / BLOCK, M / BLOCK, dgate_result.scale);
+    }
   }
 }

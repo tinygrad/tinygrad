@@ -22,12 +22,13 @@ def _custom_swiglu(out:UOp, x_w13:UOp) -> UOp:
 def _custom_swiglu_mxfp4(out:UOp, row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UOp, x_w13:UOp) -> UOp:
   M, N = math.prod(out.shape[:-1]), out.shape[-1]
   name = f"swiglu_fwd_mxfp4_{M}_{N}"
-  threads, gidx0, gidx1 = UOp.special(256, "lidx0"), UOp.special(M//128, "gidx0"), UOp.special(N//64, "gidx1")
+  threads, gidx0, gidx1 = UOp.special(256, "lidx0"), UOp.special(M//128, "gidx0"), UOp.special(N//32, "gidx1")
   sink = UOp.sink(out.base, row_fp4.base, row_scale.base, col_fp4.base, col_scale.base, x_w13.base,
                   threads, gidx0, gidx1, arg=KernelInfo(name))
   src = (pathlib.Path(__file__).parent/"swiglu_fwd_mxfp4.cpp").read_text()
   inc = pathlib.Path(__file__).parent.parent/"quantize_mxfp4"
-  lib = compile_hip(src, [f"-I{inc}", f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}"])
+  kittens = pathlib.Path(__file__).parents[2]/"thunder"/"amd"/"include"
+  lib = compile_hip(src, [f"-I{inc}", f"-I{kittens}", "-DKITTENS_CDNA4", f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}"])
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
@@ -50,12 +51,13 @@ def _custom_swiglu_bwd_mxfp4(grad_out:UOp, row_fp4:UOp, row_scale:UOp, col_fp4:U
                               x_w13:UOp, grad_act:UOp) -> UOp:
   M, N = math.prod(x_w13.shape[:-1]), x_w13.shape[-1]
   name = f"swiglu_bwd_mxfp4_{M}_{N}"
-  threads, gidx0, gidx1 = UOp.special(256, "lidx0"), UOp.special(M//128, "gidx0"), UOp.special(N//64, "gidx1")
+  threads, gidx0, gidx1 = UOp.special(512, "lidx0"), UOp.special(M//256, "gidx0"), UOp.special(N//64, "gidx1")
   sink = UOp.sink(grad_out.base, row_fp4.base, row_scale.base, col_fp4.base, col_scale.base,
                   x_w13.base, grad_act.base, threads, gidx0, gidx1, arg=KernelInfo(name))
   src = (pathlib.Path(__file__).parent/"swiglu_bwd_mxfp4.cpp").read_text()
   inc = pathlib.Path(__file__).parent.parent/"quantize_mxfp4"
-  lib = compile_hip(src, [f"-I{inc}", f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}"])
+  kittens = pathlib.Path(__file__).parents[2]/"thunder"/"amd"/"include"
+  lib = compile_hip(src, [f"-I{inc}", f"-I{kittens}", "-DKITTENS_CDNA4", f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}"])
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def _swiglu_bwd(gradient:UOp, kernel:UOp, *, prequantize_mxfp4:bool=False):
