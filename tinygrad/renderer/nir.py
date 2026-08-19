@@ -138,7 +138,7 @@ class NIRRenderer(Renderer):
     # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
     (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
       src=(buf,UOp.const(off.val, dtypes.long) if off.op is Ops.CONST else off.cast(dtypes.long))+x.src[2:])
-      if buf.addrspace != AddrSpace.REG and not is_image_shape(buf._shape) else None),
+      if buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) and not is_image_shape(buf._shape) else None),
     # images need index to be int for nir (coordinates only: the INDEX keeps its access dtype)
     (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x"), name="x"),
      lambda x,buf,idx_y,idx_x: x.replace(src=(buf, idx_y.cast(dtypes.int), idx_x.cast(dtypes.int)))),

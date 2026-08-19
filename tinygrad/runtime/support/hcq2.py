@@ -71,8 +71,8 @@ def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
 def make_cmdbuf(lin, devs, buf:UOp|None=None):
   blob, patches = bytearray(), []
   for s in (s for ins in lin.src for s in ins.src):
-    if s.op is not Ops.CONST: patches.append((len(blob), s))
-    blob.extend(struct.pack(f'<{s.dtype.fmt}', s.val if s.op is Ops.CONST else 0x0))
+    if not (lit:=(s.op is Ops.CAST and s.src[0].op is Ops.CONST)): patches.append((len(blob), s))
+    blob.extend(struct.pack(f'<{s.dtype.fmt}', s.src[0].val if lit else 0x0))
   cmdbuf = buf if buf is not None else UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
   return cmdbuf.after(make_binary_patch(cmdbuf, bytes(blob)), *make_patches(cmdbuf, patches))
 
@@ -332,8 +332,9 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[UOp, dict[UOp
   return table, reads, fills, {g:slots[bare[g]] for g in gaddrs}
 
 def make_gather_loop(patches:list[UOp], table:UOp, slots:dict[UOp, int], lt_patches:list[UOp]) -> dict[UOp, UOp]:
-  (dst,), words = dedup(p.buf_uop for p in patches), [(unwrap_view(p.src[0].src[0])[1] + off.val*(val.dtype.itemsize//p.buf_uop.dtype.itemsize),
-                                                       slots[val]) for p in patches for off,val in zip(p.src[0].src[1].src, p.src[1].src)]
+  (dst,), words = dedup(p.buf_uop for p in patches), \
+    [(unwrap_view(p.src[0].src[0])[1] + (off.src[0] if off.op is Ops.CAST and off.src[0].op is Ops.CONST else off).val
+      *(val.dtype.itemsize//p.buf_uop.dtype.itemsize), slots[val]) for p in patches for off,val in zip(p.src[0].src[1].src, p.src[1].src)]
 
   # build a runtime loop that writes every input address
   pairs = UOp.placeholder((2*len(words),), dtypes.uint32, next(UOp.unique_num), device=dst.device).rtag("systems")
@@ -508,7 +509,7 @@ def fold_const_store(view:UOp, off:UOp, val:UOp) -> UOp:
   for off,val in zip(off.src, val.src):
     for b,v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
       data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype]((v.src[0] if v.op is Ops.CAST else v).val))
-      bo = start*buf.dtype.itemsize + off.val*val.dtype.itemsize
+      bo = start*buf.dtype.itemsize + (off.src[0] if off.op is Ops.CAST and off.src[0].op is Ops.CONST else off).val*val.dtype.itemsize
       b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[bo:bo+len(data)] = data
   return UOp(Ops.NOOP)
 
