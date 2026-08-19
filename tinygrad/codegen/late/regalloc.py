@@ -4,7 +4,6 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register, greg
 from tinygrad.dtype import dtypes
 
-# instruction selection turns every real op into an INS, so a CAST left in the list is half of a literal, not a conversion
 PSEUDO_OPS = {Ops.CONST, Ops.CAST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
 
 class LinearScanRegallocContext:

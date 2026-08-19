@@ -226,7 +226,7 @@ def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtyp
 def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, dt, arg=X86Ops.DEFINE, tag=None if reg is None else (reg,))
 def imm(dt:DType, v:int) -> UOp: return UOp.cconst(truncate[dt](v), dt).rtag()
 def to_imm(c:UOp) -> UOp|None:
-  if c.op is not Ops.CAST or (v:=c.src[0]).op is not Ops.CONST: return None
+  if not (c.op is Ops.CAST and (v:=c.src[0]).op is Ops.CONST): return None
   if c.dtype is dtypes.int64: return imm(dtypes.int32, v.val) if not v.overflows(dtypes.int32) else None
   if c.dtype is dtypes.uint64: return imm(dtypes.uint32, v.val) if not v.overflows(dtypes.uint32) else None
   if c.dtype in dtypes.ints+(dtypes.bool,): return imm(c.dtype, v.val)
