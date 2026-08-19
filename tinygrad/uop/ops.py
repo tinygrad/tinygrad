@@ -615,6 +615,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
     return UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
+  # weak CONST with width on the CAST. TODO: this is the final const
+  @staticmethod
+  def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, dtype, src=(UOp.const(b),), arg=dtype)
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.WEAK, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
