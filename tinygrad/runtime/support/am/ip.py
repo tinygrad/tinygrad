@@ -129,7 +129,6 @@ class AM_GMC(AM_IP):
   def init_hub(self, ip:Literal["MM", "GC"], inst_cnt:int):
     # Init system apertures
     for inst in range(inst_cnt):
-
       self.adev.reg(f"reg{ip}MC_VM_AGP_BASE").write(0, inst=inst)
       self.adev.reg(f"reg{ip}MC_VM_AGP_BOT").write(0xffffffffffff >> 24, inst=inst) # disable AGP
       self.adev.reg(f"reg{ip}MC_VM_AGP_TOP").write(0, inst=inst)
@@ -327,6 +326,9 @@ class AM_GFX(AM_IP):
 
     self._enable_mec()
 
+    # Set 1 partition (skip on MP0 13.0.15 (MI350P): the XCP transition is firmware-owned there)
+    if self.xccs > 1 and self.adev.ip_ver[am.MP0_HWIP] != (13,0,15): self.adev.psp._spatial_partition_cmd(1)
+
   def fini_hw(self): self._dequeue_hqds()
 
   def reset_mec(self):
@@ -371,6 +373,7 @@ class AM_GFX(AM_IP):
       for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
         self.adev.wreg(reg, mqd_st_mv[0x80 + i])
       self.adev.regCP_HQD_ACTIVE.write(0x1, inst=xcc)
+
       self.adev.gmc.flush_hdp()
       self._grbm_select(inst=xcc)
     return doorbell
@@ -643,23 +646,17 @@ class AM_PSP(AM_IP):
       for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
       wait_cond(self.is_sos_alive, value=True, msg="sOS failed to start")
 
-    ring_reused = self._ring_create()
-    if not ring_reused:
-      if am.PSP_FW_TYPE_PSP_TOC in self.adev.fw.sos_fw: self._tmr_init()
+    self._ring_create()
+    if am.PSP_FW_TYPE_PSP_TOC in self.adev.fw.sos_fw: self._tmr_init()
 
-      # SMU fw should be loaded before TMR.
-      if hasattr(self.adev.fw, 'smu_psp_desc'): self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
-      if not self.boot_time_tmr or not self.autoload_tmr: self._tmr_load_cmd()
+    # SMU fw should be loaded before TMR.
+    if hasattr(self.adev.fw, 'smu_psp_desc'): self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
+    if not self.boot_time_tmr or not self.autoload_tmr: self._tmr_load_cmd()
 
     for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
 
     if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0): self._rlc_autoload_cmd()
     else: self._load_ip_fw_cmd([am.GFX_FW_TYPE_REG_LIST], self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_RL])
-
-    # XCP single partition: must be requested while the mailbox/FB path is known-good (psp stage), otherwise the command
-    # either isn't serviced or severs host FB access (observed on MI350P).
-    # MP0 13.0.15 (MI350P): do not re-partition, the XCP transition is firmware-owned there.
-    if len(self.adev.regs_offset[am.GC_HWIP]) > 1 and self.adev.ip_ver[am.MP0_HWIP] != (13,0,15): self._spatial_partition_cmd(1)
 
   def is_sos_alive(self):
     # r81 (sign-of-life) is only updated by the sOS during early init, so the ring register (if set by a previous
@@ -705,9 +702,12 @@ class AM_PSP(AM_IP):
     assert self.tmr_size <= self.max_tmr_size
 
   def _ring_create(self):
-    # If the ring was already created (by a previous AM session whose firmware is still running), reuse it instead of
-    # destroying/recreating (sOS-ready is a boot-only flag and TMR must not be re-loaded over a live TMR).
-    if self.adev.reg(f"{self.reg_pref}_71").read() != 0: return True
+    # If the ring is already created, destroy it
+    if self.adev.reg(f"{self.reg_pref}_71").read() != 0:
+      self.adev.reg(f"{self.reg_pref}_64").write(am.GFX_CTRL_CMD_ID_DESTROY_RINGS)
+
+      # There might be handshake issue with hardware which needs delay
+      time.sleep(0.02)
 
     # Wait until the sOS is ready
     wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_64").read() & 0x80000000, value=0x80000000, msg="sOS not ready")
@@ -720,7 +720,6 @@ class AM_PSP(AM_IP):
     time.sleep(0.02)
 
     wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_64").read() & 0x8000FFFF, value=0x80000000, msg="sOS ring not created")
-    return False
 
   def _ring_submit(self, cmd:am.struct_psp_gfx_cmd_resp) -> am.struct_psp_gfx_cmd_resp:
     def _wptr():
