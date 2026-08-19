@@ -16,8 +16,6 @@ from test.helpers import replace_opts, check_schedule
 from test.backend.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
 
-from tinygrad.uop.render import print_uops # noqa: F401 # pylint: disable=unused-import
-
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "isa backends don't preserve the op spec when lowering")
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -248,7 +246,6 @@ class TestLinearizer(unittest.TestCase):
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     begin_range = [i for i, x in enumerate(uops) if x.op is Ops.RANGE][-1]
     end_range = [i for i, x in enumerate(uops) if x.op is Ops.END][0]
-    for i,u in enumerate(uops): print(i, u.op, [uops.index(s) for s in u.src], u.arg, u.dtype)
     for u in uops:
       if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.REG:
         if uops.index(u) < begin_range:

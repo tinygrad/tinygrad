@@ -591,7 +591,7 @@ class HCQ2Compiled(Compiled):
 
   def new_buffer(self, b:UOp, cache:bool) -> Buffer:
     if cache or b.tag in HCQ_CACHE_TAGS:
-      return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=b.tag != "program", cpu_access=True, nolru=True))
+      return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=b.tag not in ("program","kernargs"), cpu_access=True,nolru=True))
     return self.rt_buffer.view(b.max_numel(), b.dtype, self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
 
   @functools.cache

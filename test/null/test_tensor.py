@@ -171,6 +171,11 @@ class TestTensorConstLike(unittest.TestCase):
     t = Tensor.ones(8, 4).shard(("NULL:0", "NULL:1"), axis=0)
     with self.assertRaises(RuntimeError): t.full_like(5, device="NULL")
 
+class TestTensorShape(unittest.TestCase):
+  def test_float_shape_raises(self):
+    for dim in (2.0, 2.5):
+      with self.subTest(dim=dim), self.assertRaisesRegex(RuntimeError, "shape must be int"): Tensor.ones(dim)
+
 class TestTensorDevice(unittest.TestCase):
   def test_create_from_single_device_tuple(self):
     (Tensor([1.0], device=(Device.DEFAULT,)) + Tensor([2.0])).realize()
