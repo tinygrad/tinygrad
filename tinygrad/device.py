@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
-import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal
+import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct
 from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up
@@ -133,7 +133,7 @@ class Buffer:
   # check if the underlying buffer is allocated, possibly from the base object
   def is_allocated(self) -> bool: return self.base.is_allocated() if self._base is not None else self.device in self._bufs
   def get_buf(self, device: str) -> Any:
-    if (device:=Device.canonicalize(device)) not in self._bufs:
+    if device not in self._bufs and (device:=Device.canonicalize(device)) not in self._bufs:
       allocator = Device[device].allocator
       if device == self.device: self.ensure_allocated()
       elif self._base is not None: self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
@@ -310,6 +310,14 @@ class Compiler:
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
   def disassemble(self, lib:bytes): pass
+  def server(self, cmd:str, arch:str, *args) -> subprocess.Popen:
+    argv = f"{cmd} {pathlib.Path(__file__).parent}/runtime/support/compileserver.py {type(self).__module__}:{type(self).__name__} {arch}"
+    return subprocess.Popen(argv.split() + [str(a) for a in args], stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
+  def compile_server(self, src:str, proc:subprocess.Popen) -> bytes:
+    unwrap(proc.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
+    if (lib:=unwrap(proc.stdout).read(struct.unpack("I", unwrap(proc.stdout).read(4))[0])): return lib
+    raise CompileError("Compilation Error")
+
 
 @dataclass
 class TinyELF:

@@ -59,7 +59,7 @@ class PreRegallocContext:
   def regptr(self, idx:UOp, cons:tuple[Register, ...], **kwargs) -> tuple[VRegister,...]:
     buf = idx.src[0]
     while buf.op is Ops.AFTER: buf = buf.src[0]
-    idxs = (idx.src[1].val,) if idx.op is Ops.INDEX else range(idx.src[-1].val)
+    idxs = (idx.src[1].src[0].val,) if idx.op is Ops.INDEX else range(idx.src[-1].src[0].val)
     return tuple(self.regbufs.setdefault((buf,i), self.vreg(cons, **kwargs)) for i in idxs)
 
 class ISARenderer(Renderer):

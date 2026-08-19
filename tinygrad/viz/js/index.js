@@ -886,7 +886,7 @@ const evtSources = [];
 // context: collection of steps
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set(), expandedNodes:new Set()};
 function setState(ns) {
-  saveToHistory(state);
+  if (["currentCtx", "currentStep", "currentRewrite"].some(k => k in ns && state[k] !== ns[k])) saveToHistory(state);
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
   const prevRewrite = state.currentRewrite;
   Object.assign(state, ns);
