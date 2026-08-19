@@ -256,12 +256,9 @@ class AM_GFX(AM_IP):
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
 
   def init_hw(self):
-    # Wait for RLC autoload to complete
-    # regRLC_RLCS_BOOTLOAD_STATUS doesn't exist on gc 9.4.3 (used for gfx942/gfx950), gate on it only if present
-    def bootload_done():
-      return getattr(self.adev, 'regRLC_RLCS_BOOTLOAD_STATUS', None) is None or \
-        self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0
-    wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or bootload_done(), value=True, msg="RLC autoload timeout")
+    # Wait for RLC autoload to complete (RLCS_BOOTLOAD_STATUS exists only from gfx10 on; gc 9.4.x bootloads the RLC via the PSP)
+    wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or (hasattr(self.adev, 'regRLC_RLCS_BOOTLOAD_STATUS')
+              and self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0), value=True, msg="RLC autoload timeout")
 
     self.adev.gmc.init_hub("GC", inst_cnt=self.xccs)
     if self.adev.partial_boot: return self.reset_mec()
