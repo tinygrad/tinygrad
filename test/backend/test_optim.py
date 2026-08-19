@@ -77,21 +77,6 @@ class TestMLPerfAdamWKernel(unittest.TestCase):
     np.testing.assert_allclose(master.numpy(), expected_w.numpy(), rtol=2e-7, atol=2e-7)
     np.testing.assert_array_equal(param.numpy(), expected_w.cast(dtypes.bfloat16).numpy())
 
-  def test_master_weight_transition_updates_transpose_cache(self):
-    from examples.mlperf.optim import _adamw_master_step
-    rng = np.random.default_rng(8)
-    shape = (16, 32)
-    param = Tensor(rng.standard_normal(shape, dtype=np.float32), dtype=dtypes.bfloat16).realize()
-    param._transpose_cache = param.T.contiguous().realize()
-    grad = Tensor(rng.standard_normal(shape, dtype=np.float32), dtype=dtypes.bfloat16).realize()
-    m, v = Tensor.randn(*shape, dtype=dtypes.bfloat16).realize(), Tensor.rand(*shape, dtype=dtypes.bfloat16).realize()
-    master = param.float().contiguous().realize()
-    lr, b1_t, b2_t = Tensor([1e-3]).realize(), Tensor([0.9]).realize(), Tensor([0.95]).realize()
-
-    _adamw_master_step(param, grad, m, v, master, lr, b1_t, b2_t, b1=0.9, b2=0.95, eps=1e-5, wd=0.1)
-    Tensor.realize(param, param._transpose_cache)
-    np.testing.assert_array_equal(param._transpose_cache.numpy(), param.numpy().T)
-
 @slow
 class TestOptim(unittest.TestCase):
   def setUp(self): self.enterContext(Context(TRAINING=1))

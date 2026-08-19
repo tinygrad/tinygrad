@@ -1467,17 +1467,12 @@ def train_llama3():
   Tensor.realize(*[x for o in optim.optimizers for x in o.m + o.v + o.param_shards])
   loss_acc = Tensor.zeros(1, dtype=dtypes.float32, device=device)
   Tensor.realize(loss_acc, *optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
-  # The output backward GEMM consumes weight.T. Maintain that layout in the
-  # output weight's Adam kernel instead of transposing 1 GiB once per minibatch.
-  model.output._transpose_cache = model.output[0].T.contiguous().realize()
   mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
   if mxfp4_weights is not None:
     Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
 
-  grad_acc_flags = [Tensor([i], dtype=dtypes.bfloat16, device=device).contiguous().realize() for i in range(2)]
-
   @TinyJit
-  def minibatch(tokens:Tensor, accumulate:Tensor):
+  def minibatch(tokens:Tensor):
     model.reset_amax()
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
@@ -1490,7 +1485,7 @@ def train_llama3():
       loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
 
     for g, new_g in zip(grads, loss.gradient(*optim.params)):
-      apply_grad(g, new_g.uop, accumulate=accumulate)
+      apply_grad(g, new_g.uop)
 
     loss_acc.assign(loss_acc + loss.flatten().float())
     return loss_acc.realize(*grads, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
@@ -1501,6 +1496,7 @@ def train_llama3():
     optim.fstep(grads, grad_norm, clip_coeff)
     scheduler.step()
 
+    for g in grads: g.assign(0)
     model.update_amax()
     refreshed_mxfp4 = model.refresh_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
 
@@ -1566,7 +1562,7 @@ def train_llama3():
 
       stopped = False
       data_time, dev_time = 0, 0
-      for mb in range(grad_acc):
+      for _ in range(grad_acc):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
@@ -1574,7 +1570,7 @@ def train_llama3():
           break
         mst = time.perf_counter()
         data_time += mst - ist
-        minibatch(tokens, grad_acc_flags[mb != 0])
+        minibatch(tokens)
         dev_time += time.perf_counter() - mst
       if stopped: break
 

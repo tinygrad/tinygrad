@@ -40,8 +40,7 @@ def clip_grads(grads:list[Tensor], grad_acc, clip_norm) -> tuple[Tensor, Tensor]
 
 @functools.cache
 def _adamw_master_kernel(m:UOp, v:UOp, master:UOp, param:UOp, grad:UOp, lr:UOp, b1_t:UOp, b2_t:UOp, clip_coeff:UOp,
-                         transpose_cache:UOp|None=None, *, b1:float, b2:float, eps:float, wd:float, grad_acc:int,
-                         transpose_cols:int=0) -> UOp:
+                         *, b1:float, b2:float, eps:float, wd:float, grad_acc:int) -> UOp:
   m, v, master, param, grad = (x.flatten() for x in (m, v, master, param, grad))
   assert m.shape == v.shape == master.shape == param.shape and grad.numel() % m.numel() == 0
   idx = UOp.range(m.numel(), 0)
@@ -56,22 +55,14 @@ def _adamw_master_kernel(m:UOp, v:UOp, master:UOp, param:UOp, grad:UOp, lr:UOp, 
   new_w = old_w - lr.flatten()[0] * (update + wd * old_w)
   stores = (m[idx].store(new_m.cast(m.dtype)), v[idx].store(new_v.cast(v.dtype)), master[idx].store(new_w.cast(master.dtype)),
             param[idx].store(new_w.cast(param.dtype)))
-  if transpose_cache is not None:
-    transpose_cache = transpose_cache.flatten()
-    transpose_idx = idx % transpose_cols * (param.numel() // transpose_cols) + idx // transpose_cols
-    stores += (transpose_cache[transpose_idx].store(new_w.cast(transpose_cache.dtype)),)
   return UOp.group(*stores).end(idx).sink(arg=KernelInfo(f"adamw_master_{m.numel()}"))
 
 def _adamw_master_step(param:Tensor, grad:Tensor, m:Tensor, v:Tensor, master:Tensor, lr:Tensor, b1_t:Tensor, b2_t:Tensor,
                        *, b1:float, b2:float, eps:float, wd:float, clip_coeff:Tensor|None=None, grad_acc:int=1) -> None:
   if clip_coeff is None: clip_coeff = Tensor.ones(1, dtype=grad.dtype, device=grad.device).contiguous()
-  transpose_cache = getattr(param, "_transpose_cache", None)
-  fxn = functools.partial(_adamw_master_kernel, b1=b1, b2=b2, eps=eps, wd=wd, grad_acc=grad_acc,
-                          transpose_cols=param.shape[-1] if transpose_cache is not None else 0)
-  updated = Tensor.custom_kernel(m, v, master, param, grad, lr, b1_t, b2_t, clip_coeff,
-                                 *([transpose_cache] if transpose_cache is not None else []), fxn=fxn)
+  fxn = functools.partial(_adamw_master_kernel, b1=b1, b2=b2, eps=eps, wd=wd, grad_acc=grad_acc)
+  updated = Tensor.custom_kernel(m, v, master, param, grad, lr, b1_t, b2_t, clip_coeff, fxn=fxn)
   for dst, src in zip((m, v, master, param), updated): dst.replace(src)
-  if transpose_cache is not None: transpose_cache.replace(updated[-1])
 
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):

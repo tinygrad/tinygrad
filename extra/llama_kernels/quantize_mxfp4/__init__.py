@@ -26,9 +26,8 @@ def alloc_mxfp4_outputs(x:Tensor, *, flatten_row:bool=False) -> tuple[Tensor, Te
 
 @functools.cache
 def _custom_quantize_mxfp4(row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UOp, x:UOp, *,
-                           shape:tuple[int, ...], source_offset:int, shuffle_row:bool, shuffle_col:bool,
-                           write_row:bool, write_col:bool) -> UOp:
-  M, N = math.prod(shape[:-1]), shape[-1]
+                           shuffle_row:bool, shuffle_col:bool, write_row:bool, write_col:bool) -> UOp:
+  M, N = math.prod(x.shape[:-1]), x.shape[-1]
   assert M % 256 == 0 and N % 256 == 0, f"MXFP4 quantization requires multiples of 256, got {x.shape}"
   direction = "dual" if write_row and write_col else "row" if write_row else "col"
   name = f"quantize_mxfp4_{direction}_{M}_{N}"
@@ -41,14 +40,12 @@ def _custom_quantize_mxfp4(row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UO
   src = (pathlib.Path(__file__).parent/"quantize_mxfp4.cpp").read_text()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
     UOp(Ops.BINARY, arg=compile_hip(src, [f"-I{pathlib.Path(__file__).parent}", f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}",
-                                             f"-DINPUT_OFFSET={source_offset}",
                                              f"-DWRITE_ROWWISE_VALUE={int(write_row)}", f"-DWRITE_COLWISE_VALUE={int(write_col)}",
                                              f"-DSHUFFLE_ROWWISE_FP4_VALUE={int(shuffle_row)}",
                                              f"-DSHUFFLE_COLWISE_FP4_VALUE={int(shuffle_col)}"]))))
 
 def quantize_mxfp4(x:Tensor, *, shuffle_row:bool=False, shuffle_col:bool=False, flatten_row:bool=False,
-                   out:tuple[Tensor, Tensor, Tensor, Tensor]|None=None, row:bool=True, col:bool=True,
-                   source:Tensor|None=None, source_offset:int=0) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+                   out:tuple[Tensor, Tensor, Tensor, Tensor]|None=None, row:bool=True, col:bool=True) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   assert x.dtype == dtypes.bfloat16 and x.ndim >= 2, f"expected BF16 matrix, got {x.dtype} {x.shape}"
   assert row or col, "at least one MXFP4 direction must be requested"
   assert out is None or (row and col), "cached output refresh requires both MXFP4 directions"
@@ -66,11 +63,6 @@ def quantize_mxfp4(x:Tensor, *, shuffle_row:bool=False, shuffle_col:bool=False, 
                  alloc_like((1,), dtypes.uint8, x.device, None),
                alloc_like((N, M//2), dtypes.uint8, x.device, col_axis) if col else alloc_like((1,), dtypes.uint8, x.device, None),
                alloc_like((N, M//32), dtypes.uint8, x.device, col_axis) if col else alloc_like((1,), dtypes.uint8, x.device, None))
-  if source is not None:
-    assert source.dtype == x.dtype and source.device == x.device and source_offset + x.numel() <= source.numel()
-  else:
-    source, source_offset = x, 0
-  fxn = functools.partial(_custom_quantize_mxfp4, shape=tuple(x.uop.shard_shape), source_offset=source_offset,
-                          shuffle_row=shuffle_row, shuffle_col=shuffle_col, write_row=row, write_col=col)
-  ret = Tensor.custom_kernel(*outputs, source, fxn=fxn)
+  fxn = functools.partial(_custom_quantize_mxfp4, shuffle_row=shuffle_row, shuffle_col=shuffle_col, write_row=row, write_col=col)
+  ret = Tensor.custom_kernel(*outputs, x, fxn=fxn)
   return ret[0], ret[1], ret[2], ret[3]
