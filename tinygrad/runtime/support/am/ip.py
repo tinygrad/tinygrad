@@ -638,7 +638,6 @@ class AM_PSP(AM_IP):
       (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV), (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV)]
 
     if not self.is_sos_alive():
-      self._wait_ready() # tolerate the early-boot garbage window before trusting the BL/sOS state
       for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
       wait_cond(self.is_sos_alive, value=True, msg="sOS failed to start")
 
@@ -655,14 +654,6 @@ class AM_PSP(AM_IP):
     else: self._load_ip_fw_cmd([am.GFX_FW_TYPE_REG_LIST], self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_RL])
 
   def is_sos_alive(self): return self.adev.reg(f"{self.reg_pref}_81").read() != 0x0
-
-  def _wait_ready(self):
-    # NOTE: the MP0 SMN window transiently reads 0xffffffff during early boot, ignore those reads. Ready means the
-    #       bootloader accepts commands (exact 0x80000000, as in the kernel) or the sOS is already running.
-    def ready():
-      if (v35:=self.adev.reg(f"{self.reg_pref}_35").read()) == 0xffffffff: return False
-      return v35 == 0x80000000 or self.is_sos_alive()
-    wait_cond(ready, value=True, timeout_ms=120000, msg="psp not ready") # BL re-POST can take a while after resets (kernel allows ~300s)
 
   def _wait_for_bootloader(self): wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_35").read() & 0x80000000, value=0x80000000, msg="BL not ready")
 

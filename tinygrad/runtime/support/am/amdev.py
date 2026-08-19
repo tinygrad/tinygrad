@@ -174,9 +174,6 @@ class AMDev:
 
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
-      # wait for the PSP mailbox to be stable (BL ready or sOS alive): the MP0 SMN window reads garbage (0xffffffff)
-      # for the first ~2s after power-on, and any state checks or register programming during that window are bogus
-      self.psp._wait_ready()
       fw_is_ours = False
       if self.psp.is_sos_alive() and self.smu.is_smu_alive():
         self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
@@ -188,7 +185,7 @@ class AMDev:
         fw_is_ours = self.reg("regSCRATCH_REG7").read() == AMDev.Version
         if not fw_is_ours: self.smu.mode1_reset()
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
-      if not self.psp.is_sos_alive(): self.psp._wait_ready() # after a mode1 reset the BL restarts, wait for steady state again
+      if not self.psp.is_sos_alive(): self.psp._wait_for_bootloader() # after a mode1 reset the BL restarts, wait for steady state again
       # psp first: its rings/firmware loads must complete before GMC reprograms the VM apertures (MI350P hangs otherwise).
       # When the firmware is AM's own and still running, skip the PSP stage: PSP ring commands over a live sOS are not
       # serviced between sessions, and its firmware is already loaded.
