@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, collections, dataclasses, functools, hashlib, array
-from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw, _ensure_downloads_dir
+from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
@@ -299,12 +299,6 @@ class AMDev:
       res.append(self.rreg(0x01))
     return bytes(array.array('I', res))
 
-  @staticmethod
-  def _valid_discovery(tbl:bytes) -> int:
-    if len(tbl) < ctypes.sizeof(am.struct_binary_header): return -1
-    bh = am.struct_binary_header.from_buffer(bytearray(tbl))
-    return 0 if bh.binary_signature == am.BINARY_SIGNATURE else -1
-
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
@@ -313,15 +307,7 @@ class AMDev:
     self.large_bar = self.vram.nbytes >= self.vram_size
     tmr_offset, tmr_size = self.vram_size - (64 << 10), (10 << 10)
 
-    disc_tbl = bytes(self.vram.view(tmr_offset, tmr_size)[:] if self.large_bar else self._read_vram(tmr_offset, tmr_size))
-    # NOTE: the discovery table is immutable, but it becomes inaccessible once the firmware reserves the top of VRAM for
-    #       its secure region (e.g. after a previous boot). Cache it per-device so the driver can re-attach in that state.
-    cache_file = _ensure_downloads_dir() / "discovery" / f"{self.pci_dev.pcibus}"
-    if (vd:=self._valid_discovery(disc_tbl)) != 0 and cache_file.is_file() and self._valid_discovery(cd:=cache_file.read_bytes()) == 0:
-      disc_tbl = cd
-    elif vd == 0:
-      cache_file.parent.mkdir(parents=True, exist_ok=True)
-      cache_file.write_bytes(disc_tbl)
+    disc_tbl = self.vram.view(tmr_offset, tmr_size)[:] if self.large_bar else self._read_vram(tmr_offset, tmr_size)
     self.bhdr = am.struct_binary_header.from_buffer(bytearray(disc_tbl))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert self.bhdr.binary_signature == am.BINARY_SIGNATURE and ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE, "discovery signatures mismatch"
