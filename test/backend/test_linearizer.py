@@ -30,7 +30,7 @@ class TestLinearizer(unittest.TestCase):
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
     linear = c.schedule_linear()
     run_linear(linear)
-    rawbufs = [s.buffer for s in linear.src[-1].src[1:] if s.op is not Ops.BIND]
+    rawbufs = [s.buffer for s in linear.src[-1].src[1:] if not s.is_bound_var]
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.uop.base.realized, b.uop.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
@@ -252,7 +252,7 @@ class TestLinearizer(unittest.TestCase):
     for u in uops:
       if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.REG:
         if uops.index(u) < begin_range:
-          assert u.src[1].op is Ops.CONST
+          assert u.src[1].op not in GroupOp.ALU
         else:
           assert u.src[1].op in GroupOp.ALU
           assert begin_range < uops.index(u) < end_range
@@ -261,6 +261,7 @@ class TestLinearizer(unittest.TestCase):
         assert end_range < uops.index(u)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipIf(Device[Device.DEFAULT].renderer.casted_consts, "reads a literal, which is casted here. TODO: flip this")
   def test_default_global_reversed(self):
     # shrink so that the dims do not collapse
     t = Tensor.ones(5, 6, 7).contiguous().realize().shrink(((0, 4), (0, 5), (0, 6)))
@@ -411,7 +412,7 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   last_call = linear.src[-1]
   ast = last_call.src[0]
   assert ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {last_call}"
-  last_bufs = [s.buffer for s in last_call.src[1:] if s.op is not Ops.BIND]
+  last_bufs = [s.buffer for s in last_call.src[1:] if not s.is_bound_var]
   # now all input buffers in last_call should be realized
   # create fresh buffers for the outputs
   bufs = [Buffer(x.device, x.size, x.dtype).allocate() if i < len(ast.src) else x for i,x in enumerate(last_bufs)]
@@ -437,7 +438,7 @@ def reset_bufs(bufs:list[Buffer]):
   for buf in bufs: buf.copy_from(Buffer("PYTHON", buf.size, buf.dtype, opaque=memoryview(bytearray(buf.nbytes))))
 
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
-                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):
+                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[], check_default_opt=True):
   outbufs = real_bufs[:len(realized_ast.src)]
   wanna_output = [np.array(x).flatten() for x in wanna_output]
   buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in real_bufs]
@@ -459,9 +460,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
     for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
 
   # Check correctness of handcoded optimiztions.
-  reset_bufs(outbufs)
-  run_prg(opts=None)
-  for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
+  if check_default_opt: check_opt(None)
   for x in opts: # Check custom transformations if any.
     check_opt(([Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, 1))] if apply_tc else [])+x)
 

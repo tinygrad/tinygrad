@@ -57,7 +57,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
 
   # get the idxs
   ki: KernelInfo = s.arg
-  if ctx.has_threads: idxs = [UOp.variable("core_id", 0, int(global_shape[0])-1, dtypes.int).cast(dtypes.weakint)]
+  if ctx.has_threads: idxs = [UOp.variable("core_id", 0, int(global_shape[0])-1, dtypes.int, param=True).cast(dtypes.weakint)]
   elif ki.dont_use_locals:
     assert not local_dims, "can't use locals if there's no local dims"
     idxs = get_grouped_dims("idx", global_shape, ctx.global_max, reverse=True)
@@ -89,7 +89,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
 
 pm_device_to_var = PatternMatcher([
   # the DEVICE axis is not a program axis, it's bound per device at launch. lower it to the _device_num variable (like SPECIAL for devices)
-  (UPat(Ops.RANGE, name="r"), lambda r: UOp.variable("_device_num", 0, r.vmax, dtype=r.dtype) if r.arg[-1] is AxisType.DEVICE else None),
+  (UPat(Ops.RANGE, name="r"), lambda r: UOp.variable("_device_num", 0, r.vmax, dtype=r.dtype, param=True) if r.arg[-1] is AxisType.DEVICE else None),
   # ENDs that closed a DEVICE range no longer close it
   (UPat(Ops.END, name="e"), lambda e: e.replace(src=(e.src[0],)+tuple(s for s in e.src[1:] if s.op is not Ops.PARAM))
    if any(s.op is Ops.PARAM and s.arg.name == '_device_num' for s in e.src[1:]) else None),

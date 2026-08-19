@@ -33,7 +33,8 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
       return (lo:=uops[0].cast(l2i_dt[dt])), (uops[0] / 2**32).cast(l2i_dt[dt]) - ((uops[0] < 0) & lo.ne(0))
     case Ops.CAST if dt in dtypes.floats:
       small = (a1.eq(0) & (a0 >= 0)) | (a1.eq(-1) & (a0 < 0))
-      return small.where(a0.cast(dt), ((a1.cast(dtypes.float32) * (2**32)) + a0.bitcast(dtypes.uint).cast(dtypes.float32)).cast(dt))
+      cdt = dt if dt == dtypes.float64 else dtypes.float32
+      return small.where(a0.cast(dt), ((a1.cast(cdt) * (2**32)) + a0.bitcast(dtypes.uint).cast(cdt)).cast(dt))
     case Ops.CAST: return a0.bitcast(dtypes.uint).cast(dt)
     case Ops.BITCAST: return a0.bitcast(dt), a1.bitcast(dt)
     case Ops.SHL:

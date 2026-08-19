@@ -41,12 +41,12 @@ inputs:
     description: "Install LLVM?"
     required: false
     default: 'false'
-  tinydreno:
-    description: "Install tinydreno"
+  qemu:
+    description: "Install qemu?"
     required: false
     default: 'false'
-  qemu:
-    description: "Install qemu"
+  ninja:
+    description: "Install ninja?"
     required: false
     default: 'false'
 runs:
@@ -134,7 +134,7 @@ runs:
 
     # ******************* apt *******************
     - name: Setup apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true')
       shell: bash
       run: |
         sudo mkdir -p /var/cache/apt/archives
@@ -162,7 +162,7 @@ runs:
         echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
     - name: Compute Package List + Hash
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true')
       id: apt-pkgs
       shell: bash
       run: |
@@ -187,25 +187,29 @@ runs:
         if [[ "${{ inputs.qemu }}" == "true" ]]; then
           pkgs+=" qemu-user-static"
         fi
+        # **** ninja ****
+        if [[ "${{ inputs.ninja }}" == "true" ]]; then
+          pkgs+=" ninja-build"
+        fi
 
         echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
         echo "hash=$(echo -n "$pkgs" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
     - name: Cache apt (PR)
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true') && github.event_name == 'pull_request'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true') && github.event_name == 'pull_request'
       uses: actions/cache/restore@v5
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
     - name: Cache apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true') && github.event_name != 'pull_request'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true') && github.event_name != 'pull_request'
       uses: actions/cache@v5
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
 
     - name: Run apt Update + Install
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true')
       shell: bash
       run: |
         sudo apt -qq update || true
@@ -276,12 +280,6 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: brew install llvm@20
-
-    # *** tinydreno ***
-    - name: Install tinydreno (linux)
-      if: inputs.tinydreno == 'true' && runner.os == 'Linux'
-      shell: bash
-      run: sudo curl -fL https://github.com/sirhcm/tinydreno/raw/refs/heads/master/libllvm-qcom.so -o /usr/lib/libllvm-qcom.so
 
     # *** OpenCL ***
     - name: Install rusticl

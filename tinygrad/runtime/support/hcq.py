@@ -1,10 +1,9 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any
-import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools, itertools
-from dataclasses import replace
+import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, itertools
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import DEV, PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, select_by_name, unwrap
+from tinygrad.helpers import DEV, PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, unwrap
 from tinygrad.helpers import suppress_finalizing, pluralize, TracingKey
 from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, Program, TinyELF
 from tinygrad.uop.ops import sym_infer, sint, UOp
@@ -393,8 +392,6 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:list[type[Renderer]], runtime:type[Program]|None,
                signal_t:Type[SignalType]|None=None, comp_queue_t:Callable[..., HWQueue]|None=None, copy_queue_t:Callable[..., HWQueue]|None=None,
                kernargs_size=(16 << 20), sigalloc_size=0x1000, can_recover:bool=False, arch=None):
-    self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
-
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, compilers, runtime, HCQGraph, arch=arch)
 
@@ -423,8 +420,6 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.error_state:Exception|None = None # Exception if error is unrecoverable and sync will always fail
 
     if self._is_cpu(): HCQCompiled.cpu_devices.append(self)
-
-  def count(self) -> int: return self.iface.count if hasattr(self, 'iface') else 1
 
   def synchronize(self, timeout:int|None=None):
     if self.error_state is not None: raise self.error_state
@@ -491,16 +486,6 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
     return buf, realloced
 
-  def _select_iface(self):
-    assert (v:=getenv(k:=f'{type(self).__name__[:-6].upper()}_IFACE', "")) == "",  \
-      f"{k}={v} is deprecated, use DEV={replace(DEV.target(type(self).__name__[:-6]), interface=v)} instead"
-    assert hasattr(self, "ifaces"), "must have ifaces to select an iface"
-    t = DEV.target(dev:=type(self).__name__[:-6])
-    filtered = select_by_name(self.ifaces, lambda i: i.__name__[:-5], t.interface, f"{dev} has no interface {t.interface!r}")
-    filtered = [i for i in filtered if t.interface.startswith("MOCK") or not i.__name__[:-5].startswith("MOCK")] # never fallback to mock ifaces
-    return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in filtered],
-                               f"No interface for {dev}:{self.device_id} is available")
-
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
   def rdma_dev(self):
@@ -512,13 +497,10 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   def finalize(self):
     try: self.synchronize() # Try to finalize device in any case.
     except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
-
-    # If the device has an interface, call its device_fini method to clean up resources.
-    if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
+    super().finalize()
 
 class HCQBuffer:
-  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQBuffer|None=None, view:MMIOInterface|None=None,
-               owner:HCQCompiled|None=None):
+  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQBuffer|None=None, view:MMIOInterface|None=None, owner:Any=None):
     self.va_addr, self.size, self.meta, self._base, self.view = va_addr, size, meta, _base, view
     self._devs, self.owner = ([owner] if owner is not None else []), owner
     self._mappings:dict[HCQCompiled, HCQBuffer] = {} # mapping to the other devices

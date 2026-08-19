@@ -239,6 +239,15 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(a.sum().exp(), [[Opt(OptOps.PADTO, 0, 32)],])
     helper_linearizer_opt(a.sum(0).exp(), [[Opt(OptOps.PADTO, 1, 32)],])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.expectedFailure
+  def test_padto_group_full_unroll_sum(self):
+    a = Tensor.ones(2, 28, 4096, dtype=dtypes.bfloat16).realize()
+    out = ((a * 0.5).float().square()).sum(axis=(0, 2))
+    opts_to_apply = [Opt(OptOps.GROUPTOP, 1, 256), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.UNROLL, 2, 0), Opt(OptOps.UPCAST, 0, 7)]
+    helper_linearizer_opt(out, [opts_to_apply], check_default_opt=False)
+
   def test_padto_sum(self):
     N = 18
     # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension

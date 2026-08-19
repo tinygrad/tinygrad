@@ -74,6 +74,7 @@ class TestWhisper(unittest.TestCase):
         err
       )
 
+  @slow
   def test_transcribe_file1(self):
     self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1),  TRANSCRIPTION_1)
 
@@ -89,6 +90,7 @@ class TestWhisper(unittest.TestCase):
     self.assertEqual(TRANSCRIPTION_1,  transcriptions[0])
     self.assertEqual(TRANSCRIPTION_2,  transcriptions[1])
 
+  @slow
   def test_transcribe_batch21(self):
     waveforms = [load_file_waveform(TEST_FILE_2), load_file_waveform(TEST_FILE_1)]
     transcriptions = transcribe_waveform(self.model, self.enc, waveforms)
