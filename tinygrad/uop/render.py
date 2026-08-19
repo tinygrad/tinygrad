@@ -39,6 +39,8 @@ renderer = PatternMatcher([
   (UPat(Ops.RANGE, dtypes.void, name="x"), lambda x: f"loop{x.arg[0]}"),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat(Ops.CONST, name="x"), lambda x: str(x.val)),
+  # CAST states the width, the weak CONST carries the value
+  (UPat.cvar("c", dtypes.weaks+(dtypes.bool,)).cast(), lambda c: str(c.val)),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"),
   (UPat(Ops.NEG, name="x"), lambda ctx,x: f"(-{ctx[x.src[0]]})"),
   (UPat(Ops.RECIPROCAL, name="x"), lambda ctx,x: f"(1/{ctx[x.src[0]]})"),
