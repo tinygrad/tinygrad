@@ -138,7 +138,7 @@ class AM_GMC(AM_IP):
 
       # Init TLB and cache
       self.adev.reg(f"reg{ip}MC_VM_MX_L1_TLB_CNTL").update(enable_l1_tlb=1, system_access_mode=3, enable_advanced_driver_model=1,
-        system_aperture_unmapped_access=0, mtype=self.adev.soc.module.MTYPE_UC, atc_en=1, inst=inst)
+        system_aperture_unmapped_access=0, mtype=self.adev.soc.module.MTYPE_UC, inst=inst)
 
       self.adev.reg(f"reg{ip}VM_L2_CNTL").update(enable_l2_cache=1, enable_default_page_out_to_system_memory=1,
         l2_pde0_cache_tag_generation_mode=0, pde_fault_classification=0, context1_identity_access_mode=1, identity_mode_fragment_size=0,
@@ -584,8 +584,7 @@ class AM_SDMA(AM_IP):
 
     pipe, queue = idx // 4, idx % 4
     reg, inst = ("regSDMA_GFX", pipe+queue*4) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
-    doorbell = (am.AMDGPU_DOORBELL_LAYOUT1_sDMA_ENGINE_START if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}
-                else am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0) + (pipe+queue*4) * 0xA
+    doorbell = am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (pipe+queue*4) * 0xA
     self.sdma_reginst.append((reg, inst))
 
     self.adev.reg(f"{reg}_MINOR_PTR_UPDATE").write(0x1, inst=inst)
