@@ -18,6 +18,9 @@ w_mxfp4 = quantize_mxfp4(w, shuffle_row=True, shuffle_col=True)
 Tensor.realize(a, w, *a_mxfp4, *w_mxfp4)
 
 for tile in MXFP4_TILES:
+  if M % tile[0] != 0 or N % tile[1] != 0:
+    print(f"{M}x{N}x{K} {tile[0]}x{tile[1]}: skipped (shape is not tile-aligned)")
+    continue
   times = []
   out = None
   for i in range(WARMUP + CNT):

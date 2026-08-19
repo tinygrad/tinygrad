@@ -112,11 +112,17 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
 # ** MXFP4 GEMM custom kernel
 
 MXFP4_TILES = ((256, 256), (192, 256), (128, 512))
-MXFP4_128X512_SHAPES = {(4096, 14336, 16384), (16384, 28672, 4096)}
+MXFP4_TILE_OVERRIDES = {(4096, 14336, 16384):(128, 512), (6144, 4096, 16384):(192, 256)}
 
 def _select_mxfp4_tile(M:int, N:int, K:int) -> tuple[int, int]:
-  if (M, N, K) in MXFP4_128X512_SHAPES: return (128, 512)
+  if (tile:=MXFP4_TILE_OVERRIDES.get((M, N, K))) is not None: return tile
   return next((tile_m, tile_n) for tile_m, tile_n in MXFP4_TILES if M % tile_m == N % tile_n == 0)
+
+def _select_mxfp4_tile_quantized(a_q:Tensor, b_q:Tensor) -> tuple[int, int]:
+  # Multi-device Tensor shapes are logical, while the custom kernel runs on one physical shard.
+  # Select against the per-device dimensions used by custom_mxfp4_gemm itself.
+  a_shape, b_shape = a_q.uop.shard_shape, b_q.uop.shard_shape
+  return _select_mxfp4_tile(math.prod(a_shape[:-1]), math.prod(b_shape[:-1]), a_shape[-1]*2)
 
 @functools.cache
 def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp, tile_m:int, tile_n:int) -> UOp:
@@ -149,7 +155,7 @@ def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor
   elif b_q.uop.axis == 0:
     out = Tensor(Tensor.invalids(1, M, N//len(a_q.device), dtype=dtypes.bfloat16, device=a_q.device).uop.unshard(2), device=a_q.device)
   else: out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a_q.device)
-  tile_m, tile_n = _select_mxfp4_tile(M, N, half_k*2)
+  tile_m, tile_n = _select_mxfp4_tile_quantized(a_q, b_q)
   out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b,
                              fxn=functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n))[0]
   if reduce_out: out = out.sum(0)
@@ -499,8 +505,6 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
     if mxfp4:
       assert mxfp4_x is None or not save_original_input, "prequantized MXFP4 input already supplies its column representation"
-      tile_m, tile_n = _select_mxfp4_tile(batch*M, N, K) if mxfp4_tile is None else mxfp4_tile
-      fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
       w = b.T
       if mxfp4_x is not None:
         a_q, scale_a, a_col, scale_a_col = mxfp4_x
@@ -513,6 +517,8 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
         a_col = scale_a_col = None
       else: a_q, scale_a, a_col, scale_a_col = quantize_mxfp4(a, shuffle_col=True)
       b_q, scale_b, b_col, scale_b_col = quantize_mxfp4(w, shuffle_row=True, shuffle_col=True) if mxfp4_w is None else mxfp4_w
+      tile_m, tile_n = _select_mxfp4_tile_quantized(a_q, b_q) if mxfp4_tile is None else mxfp4_tile
+      fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
       if save_original_input: saved = [b_col, scale_b_col]
       else:
         assert a_col is not None and scale_a_col is not None

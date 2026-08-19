@@ -251,11 +251,12 @@ class TestMXFP4(unittest.TestCase):
   def test_gemm_llama2(self): self.run_empty(16384, 4096, 28672, (256, 256))
   def test_gemm_llama3(self): self.run_empty(16384, 4096, 14336, (256, 256))
   def test_gemm_llama4(self): self.run_empty(4096, 14336, 16384, (128, 512))
-  def test_gemm_llama5(self): self.run_empty(16384, 28672, 4096, (128, 512))
+  def test_gemm_llama5(self): self.run_empty(16384, 28672, 4096, (256, 256))
   def test_gemm_llama6(self): self.run_empty(4096, 4096, 16384, (256, 256))
   def test_gemm_llama7(self): self.run_empty(16384, 6144, 4096, (256, 256))
   def test_gemm_llama8(self): self.run_empty(16384, 4096, 4096, (256, 256))
   def test_gemm_llama9(self): self.run_empty(16384, 14336, 4096, (256, 256))
+  def test_gemm_llama10(self): self.run_empty(6144, 4096, 16384, (192, 256))
 
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
 
