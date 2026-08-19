@@ -82,10 +82,6 @@ class AM_GMC(AM_IP):
 
     self.memscratch_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.dummy_page_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
-    # kernel routes L2 protection faults to a host-RAM dummy page (gmc.sys_pages), vram pages can wedge the fabric here
-    if self.adev.ip_ver[am.NBIO_HWIP][:2] == (7,9):
-      self.sys_dummy_view, sys_paddrs = self.adev.pci_dev.alloc_sysmem(0x1000)
-    self.sys_dummy_paddr = sys_paddrs[0] if self.adev.ip_ver[am.NBIO_HWIP][:2] == (7,9) else self.dummy_page_xgmi_paddr
 
     # MM hub is inited before any tlb flushes and is still valid during partial_boot, so set it to true
     self.hub_initted = {"MM": True, "GC": False}
@@ -136,7 +132,7 @@ class AM_GMC(AM_IP):
       self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_LOW_ADDR").write(self.fb_base >> 18, inst=inst)
       self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_HIGH_ADDR").write(self.fb_end >> 18, inst=inst)
       self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.memscratch_xgmi_paddr >> 12, inst=inst)
-      self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.sys_dummy_paddr >> 12, inst=inst)
+      self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.dummy_page_xgmi_paddr >> 12, inst=inst)
 
       self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_CNTL2").update(active_page_migration_pte_read_retry=1, inst=inst)
 
@@ -716,13 +712,7 @@ class AM_PSP(AM_IP):
     wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_64").read() & 0x8000FFFF, value=0x80000000, msg="sOS ring not created")
 
   def _ring_submit(self, cmd:am.struct_psp_gfx_cmd_resp) -> am.struct_psp_gfx_cmd_resp:
-    def _wptr():
-      t0 = time.time()
-      while (v:=self.adev.reg(f"{self.reg_pref}_67").read()) == 0xffffffff: # mailbox can be briefly inaccessible during XCP transitions
-        if time.time() - t0 > 10: raise TimeoutError(f"psp mailbox read stuck at {v:#x}")
-        time.sleep(0.01)
-      return v
-    msg = am.struct_psp_gfx_rb_frame(fence_value=(prev_wptr:=_wptr()) + 1,
+    msg = am.struct_psp_gfx_rb_frame(fence_value=(prev_wptr:=self.adev.reg(f"{self.reg_pref}_67").read()) + 1,
       cmd_buf_addr_lo=lo32(self.adev.paddr2mc(self.cmd_paddr)), cmd_buf_addr_hi=hi32(self.adev.paddr2mc(self.cmd_paddr)),
       fence_addr_lo=lo32(self.adev.paddr2mc(self.fence_paddr)), fence_addr_hi=hi32(self.adev.paddr2mc(self.fence_paddr)))
 
