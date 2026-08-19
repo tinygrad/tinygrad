@@ -21,7 +21,7 @@ def linearize(sink:UOp) -> list[UOp]:
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     extra = None
-    match u.or_raise_ins:
+    match u.op:
       # the order and placement of these defines is important
       case Ops.PARAM: priority, extra = -20, u.arg.slot
       case Ops.BUFFER: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18

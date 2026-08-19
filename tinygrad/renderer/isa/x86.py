@@ -594,7 +594,7 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   # rewrite FRAME_INDEX to IMM now that the stack size is known
-  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, src=(UPat.cvar("disp"),), name="x"), lambda ctx,x,disp:
+  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, src=(UPat.cvar("disp").cast(),), name="x"), lambda ctx,x,disp:
     (nx:=UOp.cconst(ctx.ren.spill_size + disp.val, x.dtype), [nx])),
   # expand the cmp here so we can preserve rng src edge to get label from ctx
   (UPat(Ops.INS, arg=X86Ops.LOOP_CMP, name="x"), lower_loop),
@@ -671,7 +671,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
       inst += struct.pack(unwrap(disp_uop.dtype.fmt), disp_uop.src[0].val)
     # IMM byte
     if imm_uop is not None:
-      if imm_uop.op is Ops.CAST: inst += struct.pack(unwrap(imm_uop.dtype.fmt), imm_uop.val)
+      if imm_uop.op is Ops.CAST: inst += struct.pack(unwrap(imm_uop.dtype.fmt), imm_uop.src[0].val)
       elif isinstance(rdef(imm_uop), Register): inst += bytes([(rdef(imm_uop).index & 0b1111) << 4 | 0b0000])
     return inst
 
@@ -860,7 +860,7 @@ class X86Renderer(ISARenderer):
         uops[i] = self.isel_matcher.rewrite(sp.index(UOp.cconst(self.spill_size, dtypes.uint32), tag=u.tag))
         self.spill_size += u.max_numel() * u.dtype.itemsize
     if self.spill_size > 0:
-      sz = UOp.const(self.spill_size, sp.dtype)
+      sz = UOp.cconst(self.spill_size, sp.dtype)
       uops.insert(0, self.isel_matcher.rewrite(UOp(Ops.SUB, src=(sp, sz), tag=sp.tag)))
       uops.insert(len(uops) - 2, self.isel_matcher.rewrite(UOp(Ops.ADD, src=(sp, sz), tag=sp.tag)))
     return uops
