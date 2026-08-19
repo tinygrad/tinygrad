@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, dataclasses, functools, hashlib, array
+import ctypes, collections, dataclasses, functools, hashlib, array, time, contextlib
 from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
@@ -149,6 +149,14 @@ class AMDev:
     self.pci_dev, self.devfmt = pci_dev, pci_dev.pcibus
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
+    # MI350X VFs start with most MMIO and VRAM access gated by the host PF. Ask the PF for full access only when discovery isn't readable yet.
+    self.is_vf = bool(self.mmio[0xde5] & 1) # RCC_IOV_FUNC_IDENTIFIER.FUNC_IDENTIFIER
+    self.vf_access_acquired, self.vf_initialized = False, False
+    if self.is_vf:
+      self._vf_mailbox_request(6, 7, data2=2, retries=5, event_timeout=2) # IDH_REQ_GPU_INIT_DATA -> IDH_REQ_GPU_INIT_DATA_READY
+      self._vf_mailbox_request(1, 1, retries=5, event_timeout=2) # IDH_REQ_GPU_INIT_ACCESS -> IDH_READY_TO_ACCESS_GPU
+      self.vf_access_acquired = True
+
     self._run_discovery()
     self._build_regs()
 
@@ -165,21 +173,21 @@ class AMDev:
     self.is_booting = True # During boot only boot memory can be allocated. This flag is to validate this.
     self.init_sw(smi_dev=False)
 
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
+    self.partial_boot = not self.is_vf and (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
     if self.partial_boot and (self.reg("regSCRATCH_REG6").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
 
-    # Init hw for IP blocks where it is needed
+    # Init hw for IP blocks where it is needed. PSP and SMU are PF-owned on a VF and must not be reset or reloaded by the guest.
     if not self.partial_boot:
-      if self.psp.is_sos_alive() and self.smu.is_smu_alive():
+      if not self.is_vf and self.psp.is_sos_alive() and self.smu.is_smu_alive():
         self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
         if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
         self.smu.mode1_reset()
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
-      self.init_hw(self.soc, self.gmc, self.ih, self.psp, self.smu)
+      self.init_hw(self.soc, self.gmc, self.ih, *(() if self.is_vf else (self.psp, self.smu)))
 
     # Booting done
     self.is_booting = False
@@ -187,13 +195,17 @@ class AMDev:
     # Re-initialize main blocks
     self.init_hw(self.gfx, self.sdma)
 
-    if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
-      self.smu.set_power_limit(max_power)
-      self.smu.set_clocks(level=None)
-    else: self.smu.set_clocks(level=-1) # last level, max perf.
-    for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
-    self.reg("regSCRATCH_REG7").write(AMDev.Version)
-    self.reg("regSCRATCH_REG6").write(1) # set initialized state.
+    if not self.is_vf:
+      if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
+        self.smu.set_power_limit(max_power)
+        self.smu.set_clocks(level=None)
+      else: self.smu.set_clocks(level=-1) # last level, max perf.
+    if not self.is_vf:
+      for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
+    if not self.is_vf:
+      self.reg("regSCRATCH_REG7").write(AMDev.Version)
+      self.reg("regSCRATCH_REG6").write(1) # set initialized state.
+    self.vf_initialized = self.is_vf
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def init_sw(self, smi_dev=False):
@@ -202,7 +214,8 @@ class AMDev:
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size - self.reserved_vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39],
       va_bits=48, first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base, reserve_ptable=not self.large_bar,
-      palloc_ranges=[(1 << (i + 12), (2 << 20) if i >= 9 else 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
+      palloc_ranges=[(1 << (i + 12), (2 << 20) if i >= 9 else 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)],
+      paddr_base=(1 << 20) if self.is_vf else 0)
     self.fw = AMFirmware(self)
 
     # Initialize IP blocks
@@ -224,10 +237,52 @@ class AMDev:
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
-    for ip in [self.sdma, self.gfx]: ip.fini_hw()
-    self.smu.set_clocks(level=0)
-    self.ih.interrupt_handler()
-    self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
+    try:
+      for ip in [self.sdma, self.gfx]: ip.fini_hw()
+      if not self.is_vf: self.smu.set_clocks(level=0)
+      self.ih.interrupt_handler()
+      if not self.is_vf: self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
+    finally: self.release_vf_access()
+
+  def release_vf_access(self):
+    if not getattr(self, "vf_access_acquired", False): return
+    # tinygrad retains IDH_REQ_GPU_INIT_ACCESS for direct MMIO/VRAM access, so always release that same lease.
+    with contextlib.suppress(Exception): self._vf_mailbox_request(2, None) # IDH_REL_GPU_INIT_ACCESS
+    self.vf_access_acquired = False
+
+  def __del__(self):
+    # Constructor failures do not reach HCQ finalization; return a partially acquired VF init lease to the PF.
+    self.release_vf_access()
+
+  def _vf_mailbox_request(self, req:int, event:int|None, data1=0, data2=0, data3=0, retries=1, event_timeout=2.0):
+    # Navi VF/PF mailbox protocol from the kernel's mxgpu_nv driver. This requests access only; it never requests a GPU or PCI reset.
+    mmio8, control, trn, rcv = self.mmio.view(fmt='B'), 0xe5e * 4, 0xe56, 0xe5a
+    if mmio8[control+1] & 1: mmio8[control+1] = 2 # acknowledge a stale PF event before transmitting a new request
+    for retry in range(retries):
+      deadline = time.monotonic() + 1
+      while True:
+        mmio8[control] = 0 # clear TRN_MSG_VALID and wait for the old PF acknowledgement to drop
+        if not (mmio8[control] & 2): break
+        if time.monotonic() > deadline: raise TimeoutError("VF mailbox acknowledgement did not clear")
+        time.sleep(0.001)
+
+      for i, val in enumerate((req, data1, data2, data3)): self.mmio[trn+i] = val
+      mmio8[control] = 1
+      deadline = time.monotonic() + 0.5
+      while not (mmio8[control] & 2):
+        if time.monotonic() > deadline: raise TimeoutError(f"VF mailbox request {req:#x} was not acknowledged")
+        time.sleep(0.005)
+      mmio8[control] = 0
+
+      if event is None: return
+      deadline = time.monotonic() + event_timeout
+      while time.monotonic() <= deadline:
+        if self.mmio[rcv] == event:
+          mmio8[control+1] = 2 # acknowledge RCV_MSG_VALID
+          return
+        time.sleep(0.01)
+      if DEBUG >= 2 and retry+1 < retries: print(f"am {self.devfmt}: retrying VF mailbox request {req:#x} ({retry+1}/{retries})")
+    raise TimeoutError(f"VF mailbox request {req:#x} did not receive event {event:#x}")
 
   def recover(self, force=False) -> bool:
     if not force and not self.is_err_state: return False

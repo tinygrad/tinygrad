@@ -251,9 +251,10 @@ class AM_GFX(AM_IP):
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
 
   def init_hw(self):
-    # Wait for RLC autoload to complete
-    wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0,
-              value=True, msg="RLC autoload timeout")
+    # Wait for RLC autoload to complete on architectures that expose the bootload status register.
+    if hasattr(self.adev, "regRLC_RLCS_BOOTLOAD_STATUS"):
+      wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0,
+                value=True, msg="RLC autoload timeout")
 
     self.adev.gmc.init_hub("GC", inst_cnt=self.xccs)
     if self.adev.partial_boot: return self.reset_mec()
@@ -297,8 +298,8 @@ class AM_GFX(AM_IP):
 
     self._enable_mec()
 
-    # Set 1 partition
-    if self.xccs > 1: self.adev.psp._spatial_partition_cmd(1)
+    # Set 1 partition on bare metal. A VF must use the spatial partition assigned by its host PF.
+    if self.xccs > 1 and not self.adev.is_vf: self.adev.psp._spatial_partition_cmd(1)
 
   def fini_hw(self): self._dequeue_hqds()
 
@@ -486,7 +487,7 @@ class AM_IH(AM_IP):
     if athub_err or cntlr_err:
       print(f"am {self.adev.devfmt}: fatal hardware error detected: {'RAS_ATHUB_ERR_EVENT ' if athub_err else ''}{'RAS_CNTLR' if cntlr_err else ''}")
 
-      acas = self.adev.smu._aca_read_banks(ue=True) + self.adev.smu._aca_read_banks(ue=False)
+      acas = [] if self.adev.is_vf else self.adev.smu._aca_read_banks(ue=True) + self.adev.smu._aca_read_banks(ue=False)
       for regs in acas:
         acatyp = 'Uncorrectable' if (regs[1] >> 61) & 1 and (regs[1] >> 57) & 1 else 'Correctable'
         hwname = f'{self.adev.hwid_names.get((regs[5] >> 32) & 0xFFF, "")} ({(regs[5] >> 32) & 0xFFF:#03x})'

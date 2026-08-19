@@ -842,7 +842,7 @@ class KFDIface:
 
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0)),), vram_bar=0,
+    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0,0x75b0)),), vram_bar=0,
       va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
     self._compute_props()
 
@@ -1093,6 +1093,11 @@ class AMDDevice(HCQCompiled):
     if self.is_am() and not self.is_usb() and self.error_state is None: self.iface._collect_interrupts(reset=False, drain_only=True)
 
   def on_device_hang(self): self.iface.on_device_hang()
+
+  def finalize(self):
+    try: super().finalize()
+    finally:
+      if self.is_am(): self.iface.dev_impl.release_vf_access()
 
   def device_props(self): return self.iface.props
 
