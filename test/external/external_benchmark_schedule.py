@@ -4,7 +4,7 @@ from tinygrad.helpers import Profiling, Timing, getenv
 from tinygrad.uop.ops import Ops
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.codegen.late.linearizer import linearize
-from tinygrad.uop.spec import type_verify, spec_program
+from tinygrad.uop.spec import type_verify, spec_program, spec_program_casted_consts
 
 if __name__ == "__main__":
   mdl = ResNet50()
@@ -41,5 +41,7 @@ if __name__ == "__main__":
             for u in rewritten_uops:
               uops_line.append(linearize(u))
           with Timing("***** model verify in    "):
-            for u in uops_line: type_verify(u, spec_program)
+            # TODO: clean up after migration
+            spec = spec_program_casted_consts if Device.default.renderer.casted_consts else spec_program
+            for u in uops_line: type_verify(u, spec)
           print(sum(len(u) for u in uops_line))

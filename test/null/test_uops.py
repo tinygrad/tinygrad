@@ -348,10 +348,9 @@ class TestFastIdiv(unittest.TestCase):
   def test_fast_idiv_remove_powers_of_two(self):
     ridx = UOp.range(2**20, 0)
     uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
-    ops = [x.op for x in uops]
     # this requires shifting out the powers of two before doing fast_idiv
     # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
-    self.assertNotIn(Ops.CAST, ops)
+    self.assertNotIn(dtypes.long, [x.dtype for x in uops])
 
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):
