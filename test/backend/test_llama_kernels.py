@@ -144,9 +144,31 @@ class TestRMSNormMul(unittest.TestCase):
       self.assertTrue(dr.allclose(ref_dr, atol=0.1, rtol=0.03).item(), "residual gradient mismatch")
       self.assertTrue(dw.allclose(ref_dw, atol=0.3, rtol=0.03).item(), "weight gradient mismatch")
 
-@unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
+def run_fused_qkv_rope_forward(test:unittest.TestCase, shape:tuple[int, int, int, int, int]) -> None:
+  Tensor.manual_seed(0)
+  B, N, H, H_KV, D = shape
+  GROUP = H // H_KV
+  x = (Tensor.randn(B, N, H_KV * (GROUP + 2) * D) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
+  freqs_cis = (Tensor.randn(1, N * 2, 1, D // 2, 2) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
+
+  q, k, v = fused_qkv_rope(x, freqs_cis, H, H_KV, D)
+  packed_ref = x.reshape(B, N, H_KV, GROUP + 2, D)
+  q_ref = packed_ref[:, :, :, :GROUP].reshape(B, N, H, D)
+  k_ref, v_ref = packed_ref[:, :, :, GROUP], packed_ref[:, :, :, GROUP+1]
+  q_ref, k_ref = apply_rotary_emb(q_ref, k_ref, freqs_cis[:, :N])
+  q_ref, k_ref, v_ref = q_ref.cast(dtypes.bfloat16), k_ref.cast(dtypes.bfloat16), v_ref.cast(dtypes.bfloat16)
+  Tensor.realize(q, k, v, q_ref, k_ref, v_ref)
+
+  with Context(DEBUG=0):
+    test.assertTrue(q.allclose(q_ref, atol=2e-2, rtol=0).item(), "Q forward mismatch")
+    test.assertTrue(k.allclose(k_ref, atol=2e-2, rtol=0).item(), "K forward mismatch")
+    test.assertTrue(v.allclose(v_ref, atol=0, rtol=0).item(), "V forward mismatch")
+
 class TestFusedQKVRoPE(unittest.TestCase):
   SHAPE = (2, 8192, 32, 8, 128)
+
+  def setUp(self):
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
 
   def rand_bf16(self, *shape:int) -> Tensor:
     return (Tensor.randn(*shape) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
@@ -155,27 +177,13 @@ class TestFusedQKVRoPE(unittest.TestCase):
     _, N, _, _, D = self.SHAPE
     return precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone().realize()
 
-  def test_llama31_8b_forward(self):
-    Tensor.manual_seed(0)
-    B, N, H, H_KV, D = self.SHAPE
-    GROUP = H // H_KV
-    freqs_cis = self.freqs_cis()
+  def test_forward(self): run_fused_qkv_rope_forward(self, (1, 32, 8, 2, 16))
 
-    x = self.rand_bf16(B, N, H_KV * (GROUP + 2) * D)
-    q, k, v = fused_qkv_rope(x, freqs_cis, H, H_KV, D)
-    Tensor.realize(q, k, v)
-    packed_ref = x.reshape(B, N, H_KV, GROUP + 2, D)
-    q_ref = packed_ref[:, :, :, :GROUP].reshape(B, N, H, D)
-    k_ref, v_ref = packed_ref[:, :, :, GROUP], packed_ref[:, :, :, GROUP+1]
-    q_ref, k_ref = apply_rotary_emb(q_ref, k_ref, freqs_cis[:, :N])
-    q_ref, k_ref, v_ref = q_ref.cast(dtypes.bfloat16), k_ref.cast(dtypes.bfloat16), v_ref.cast(dtypes.bfloat16)
-    Tensor.realize(q_ref, k_ref, v_ref)
+  @unittest.skipUnless(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950"),
+                       "only run production shape on gfx950 for speed")
+  def test_llama31_8b_forward(self): run_fused_qkv_rope_forward(self, self.SHAPE)
 
-    with Context(DEBUG=0):
-      self.assertTrue(q.allclose(q_ref, atol=2e-2, rtol=0).item(), "Q forward mismatch")
-      self.assertTrue(k.allclose(k_ref, atol=2e-2, rtol=0).item(), "K forward mismatch")
-      self.assertTrue(v.allclose(v_ref, atol=0, rtol=0).item(), "V forward mismatch")
-
+  @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
   def test_llama31_8b_backward(self):
     Tensor.manual_seed(1)
     B, N, H, H_KV, D = self.SHAPE
@@ -207,6 +215,7 @@ class TestFusedQKVRoPE(unittest.TestCase):
     ref = Tensor.cat(dq_ref, dk_ref, dv_ref, dim=3).reshape(*dx.shape).realize()
     with Context(DEBUG=0): self.assertTrue(dx.allclose(ref, atol=2e-2, rtol=2e-2).item(), "backward mismatch")
 
+  @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
   def test_llama31_8b_backward_expanded_gqa(self):
     Tensor.manual_seed(2)
     B, N, H, H_KV, D = self.SHAPE
