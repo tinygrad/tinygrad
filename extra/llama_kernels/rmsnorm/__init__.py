@@ -117,13 +117,20 @@ def _rmsnorm_add_mul_gradient(*args, **kwargs) -> tuple:
   else:
     gradient, call = args
     grads = (gradient,)
-  assert len(grads) == 2, "rmsnorm_add_mul requires gradients for normalized output and residual state"
-  dout, dh_direct = grads
   src = call.src[1:]
   _, h_u, rrms_u, x_u, residual_u, weight_u = src[:6]
   axis = x_u.axis if isinstance(x_u.device, tuple) else None
   dh = alloc_like(x_u.shape, dtypes.bfloat16, x_u.device, axis)
   partial = alloc_local((RMS_MUL_BWD_GROUPS, x_u.shape[-1]), dtypes.float32, x_u.device, axis)
+  if len(grads) == 1:
+    # The summed state is not consumed after the model's final RMSNorm. Reuse the plain RMSNorm backward kernel and
+    # return its gradient to both addends, avoiding both a direct-gradient zero buffer and a standalone gradient add.
+    dh, partial, *_ = Tensor.custom_kernel(dh, partial, Tensor(grads[0], device=x_u.device).cast(dtypes.bfloat16),
+                                            Tensor(h_u.after(call), device=x_u.device), Tensor(rrms_u.after(call), device=x_u.device),
+                                            Tensor(weight_u, device=x_u.device), fxn=_rmsnorm_mul_bwd)
+    return (None, None, None, dh.uop, dh.uop, partial.sum(axis=0).cast(dtypes.bfloat16).uop) + (None,) * (len(src)-6)
+  assert len(grads) == 2, "rmsnorm_add_mul requires gradients for normalized output and optional residual state"
+  dout, dh_direct = grads
   inputs = (Tensor(dout, device=x_u.device).cast(dtypes.bfloat16), Tensor(dh_direct, device=x_u.device).cast(dtypes.bfloat16),
             Tensor(h_u.after(call), device=x_u.device), Tensor(rrms_u.after(call), device=x_u.device), Tensor(weight_u, device=x_u.device))
   if len(src) > 6:
