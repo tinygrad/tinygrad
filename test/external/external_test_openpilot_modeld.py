@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-# End-to-end test of openpilot's real modeld compile entrypoint.
+# End-to-end test of openpilot's modeld compile entrypoint.
 # Unlike examples/openpilot/compile3.py, this downloads the openpilot model and runs
 # openpilot/selfdrive/modeld/compile_modeld.py (same script openpilot's SCons build runs),
 # which builds the warp + policy JITs and asserts jit/pickle-roundtrip correctness internally.
-import os, sys, hashlib, argparse, subprocess
+# Additionally this checks exact kernel counts per jit and numerics vs onnxruntime (SELFTEST in compile3).
+import os, sys, runpy, hashlib, argparse
 from pathlib import Path
+
+import numpy as np
 
 TINYGRAD_ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,6 +21,12 @@ COMPILE_ARGS = ["--model-size", "512x256",
                 "--camera-resolutions", "1928x1208", "1344x760",
                 "--frame-skip", "4"]
 
+# exact kernel counts per jit (backend/codegen specific, measured with DEV=NV).
+# override any of them with EXPECTED_KERNELS_{TAG}, -1 skips the check
+EXPECTED_KERNELS = {"NV": {"run_policy": 166, "(1928, 1208)": 7, "(1344, 760)": 7}}
+EXPECTED_KERNELS_TAGS = {"run_policy": "RUN_POLICY", (1928, 1208): "WARP_1928_1208", (1344, 760): "WARP_1344_760"}
+TOL = 0.05  # both pipelines are fp16 with different reduction orders; measured diff/threshold margin is ~0.5
+
 def download_model() -> Path:
   from tinygrad import fetch
   path = fetch(MODEL_URL, name="driving_supercombo.onnx")
@@ -26,7 +35,49 @@ def download_model() -> Path:
   print(f"downloaded model {path} ({path.stat().st_size/1e6:.2f} MB), sha256 verified")
   return path
 
+def count_kernels(jit) -> int:
+  from tinygrad.uop.ops import Ops
+  return sum(1 for u in jit.captured.linear.toposort(gate=lambda x: x.op is not Ops.PROGRAM)
+             if u.op is Ops.CALL and u.src[0].op is Ops.PROGRAM)
+
+def test_kernel_counts(out):
+  from tinygrad import Device, getenv
+  counts = {k: count_kernels(out[k]) for k in EXPECTED_KERNELS_TAGS}
+  print(f"kernel counts on {Device.DEFAULT}: {counts}")
+  expected = EXPECTED_KERNELS.get(Device.DEFAULT, {})
+  for key, tag in EXPECTED_KERNELS_TAGS.items():
+    want = getenv(f"EXPECTED_KERNELS_{tag}", expected.get(key, -1))
+    if want != -1: assert counts[key] == want, f"different kernels in {key}! {counts[key]=}, {want=}"
+
+def test_vs_onnx(out, model_runner, onnx_file, tol):
+  import onnx, onnxruntime as ort
+  rng = np.random.default_rng(42)
+  input_shapes = {k: tuple(s if isinstance(s, int) else 1 for s in shp) for k, shp in out['metadata']['input_shapes'].items()}
+  inputs = {k: rng.standard_normal(shp).astype(np.float32) for k, shp in input_shapes.items()}
+
+  from tinygrad import Tensor
+  from tinygrad.dtype import _to_np_dtype as to_np_dtype
+  dtypes = {name: spec.dtype for name, spec in model_runner.graph_inputs.items()}
+  tinygrad_out = next(iter(model_runner({k: Tensor(inputs[k].astype(to_np_dtype(dtypes[k]))) for k in sorted(inputs)}).values()))
+
+  onnx_model = onnx.load(onnx_file)
+  session = ort.InferenceSession(onnx_file)
+  ort_dtypes = {x.name: np.dtype(x.type.replace('tensor(', '').replace(')', '')) for x in session.get_inputs()}
+  ort_out = session.run([onnx_model.graph.output[0].name], {k: inputs[k].astype(ort_dtypes[k]) for k in inputs})
+
+  tg_np = tinygrad_out.cast('float32').numpy()
+  diff = np.abs(ort_out[0].reshape(tg_np.shape) - tg_np)
+  print(f"max diff vs onnxruntime: {diff.max():.6f} (mean {diff.mean():.6f})")
+  flat = np.argsort(diff.flatten())[::-1][:4]
+  print(f"worst diffs (idx, ort, tinygrad): {[(int(i), float(ort_out[0].flat[i]), float(tg_np.flat[i])) for i in flat]}")
+  margin = diff / (tol + tol * np.abs(ort_out[0].reshape(diff.shape)))
+  i = int(np.argmax(margin))
+  print(f"worst diff/threshold: {margin.max():.2f} (must be < 1), at {i}: ort={float(ort_out[0].flat[i])}, tinygrad={float(tg_np.flat[i])}")
+  np.testing.assert_allclose(ort_out[0].reshape(tg_np.shape), tg_np, atol=tol, rtol=tol)
+  print("test vs onnx passed")
+
 def main():
+  from tinygrad import getenv
   p = argparse.ArgumentParser()
   p.add_argument("--openpilot-root", type=Path,
                  default=Path(os.getenv("OPENPILOT_ROOT", TINYGRAD_ROOT.parent)),
@@ -39,19 +90,20 @@ def main():
 
   model = download_model()
 
-  env = os.environ.copy()
-  env.setdefault("DEV", "CPU")
-  env["PYTHONPATH"] = f"{args.openpilot_root}:{TINYGRAD_ROOT}:{env.get('PYTHONPATH', '')}"
-  cmd = [sys.executable, str(compile_script), "--onnx", str(model), "--output", str(args.output), *COMPILE_ARGS]
-  print(f"running: DEV={env['DEV']} {' '.join(cmd)}")
-  ret = subprocess.run(cmd, cwd=args.openpilot_root, env=env)
-  assert ret.returncode == 0, f"compile_modeld.py failed with exit code {ret.returncode}"
+  # run the production entrypoint in-process so the compiled JITs can be introspected below
+  sys.path.insert(0, str(args.openpilot_root))
+  argv, sys.argv = sys.argv, [str(compile_script), "--onnx", str(model), "--output", str(args.output), *COMPILE_ARGS]
+  try: ns = runpy.run_path(str(compile_script), run_name="__main__")
+  finally: sys.argv = argv
+  out, model_runner = ns['out'], ns['model_runner']
+
+  test_kernel_counts(out)
+  if getenv("SELFTEST", 1): test_vs_onnx(out, model_runner, model, TOL)
 
   assert args.output.is_file() and args.output.stat().st_size > 0, f"missing output {args.output}"
-  sys.path.insert(0, str(args.openpilot_root))
   from openpilot.selfdrive.modeld.helpers import load_oob
-  with open(args.output, "rb") as f: out = load_oob(f)
-  assert {'metadata', 'run_policy', (1928, 1208), (1344, 760)} <= set(out), f"unexpected pickle keys: {set(out)}"
+  with open(args.output, "rb") as f: out_loaded = load_oob(f)
+  assert {'metadata', 'run_policy', (1928, 1208), (1344, 760)} <= set(out_loaded), f"unexpected pickle keys: {set(out_loaded)}"
   print(f"PASS: compiled pickle at {args.output} ({args.output.stat().st_size/1e6:.2f} MB), "
         f"model output {out['metadata']['output_shapes']}")
 
