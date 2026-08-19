@@ -185,12 +185,10 @@ class AMDev:
         fw_is_ours = self.reg("regSCRATCH_REG7").read() == AMDev.Version
         if not fw_is_ours: self.smu.mode1_reset()
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
-      if not self.psp.is_sos_alive(): self.psp._wait_for_bootloader() # after a mode1 reset the BL restarts, wait for steady state again
-      # psp first: its rings/firmware loads must complete before GMC reprograms the VM apertures (MI350P hangs otherwise).
-      # When the firmware is AM's own and still running, skip the PSP stage: PSP ring commands over a live sOS are not
+      # when the firmware is AM's own and still running, skip the PSP stage: PSP ring commands over a live sOS are not
       # serviced between sessions, and its firmware is already loaded.
       self.init_hw(*([self.soc, self.gmc, self.ih, self.smu] if (self.psp.is_sos_alive() and self.smu.is_smu_alive() and fw_is_ours) else
-                      [self.psp, self.soc, self.gmc, self.ih, self.smu]))
+                      [self.soc, self.gmc, self.ih, self.psp, self.smu]))
 
     # Booting done
     self.is_booting = False
