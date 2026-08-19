@@ -658,10 +658,7 @@ class AM_PSP(AM_IP):
     if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0): self._rlc_autoload_cmd()
     else: self._load_ip_fw_cmd([am.GFX_FW_TYPE_REG_LIST], self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_RL])
 
-  def is_sos_alive(self):
-    # r81 (sign-of-life) is only updated by the sOS during early init, so the ring register (if set by a previous
-    # session) is used as a second indication that sOS has already booted
-    return self.adev.reg(f"{self.reg_pref}_81").read() != 0x0 or self.adev.reg(f"{self.reg_pref}_71").read() != 0x0
+  def is_sos_alive(self): return self.adev.reg(f"{self.reg_pref}_81").read() != 0x0
 
   def _wait_ready(self):
     # NOTE: the MP0 SMN window transiently reads 0xffffffff during early boot, ignore those reads. Ready means the
@@ -671,10 +668,7 @@ class AM_PSP(AM_IP):
       return v35 == 0x80000000 or self.is_sos_alive()
     wait_cond(ready, value=True, timeout_ms=120000, msg="psp not ready") # BL re-POST can take a while after resets (kernel allows ~300s)
 
-  def _wait_for_bootloader(self):
-    # NOTE: the BL may report error codes in the low bits (cleared by the next command) and the MP0 SMN window
-    #       transiently reads garbage during boot, so only an exact 0x80000000 match means ready (as in the kernel)
-    wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_35").read(), value=0x80000000, timeout_ms=60000, msg="BL not ready")
+  def _wait_for_bootloader(self): wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_35").read() & 0x80000000, value=0x80000000, msg="BL not ready")
 
   def _prep_msg1(self, data:memoryview):
     assert len(data) <= self.msg1_view.nbytes, f"msg1 buffer is too small {len(data):#x} > {self.msg1_view.nbytes:#x}"

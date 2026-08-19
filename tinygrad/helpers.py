@@ -490,7 +490,8 @@ def fetch_fw(path:str, name:str, sha256:str) -> bytes:
   if sys.version_info >= (3,14) and (p:=pathlib.Path(f"/lib/firmware/{path}/{name}.zst")).is_file():
     from compression.zstd import decompress
     if hashlib.sha256(b:=decompress(p.read_bytes())).hexdigest() == sha256: return b
-  for ref in ("1e2c15348485939baf1b6d1f5a7a3b799d80703d", "main"): # not all firmware exists at the pinned ref, fall back to main
+  # not all firmware exists at the pinned ref; fall back to the later commit that added the newer firmware files
+  for ref in ("1e2c15348485939baf1b6d1f5a7a3b799d80703d", "23e6cdf0409383e29d681c8c14cd6ffd0f394f02"):
     try: return fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/{ref}/{path}/{name}", subdir="fw", sha256=sha256).read_bytes()
     except urllib.error.HTTPError as e:
       if e.code != 404: raise
