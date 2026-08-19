@@ -16,7 +16,6 @@ dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dty
 isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 
 # (uop, prefix, opcodes, support 32 and 64 bit encoding (e32/e64 branches with keys))
-# TODO: fold MAX, MIN, GT, GE etcw.. ins patterns where possible in isel
 insdefs = [
   (Ops.MAX, "v_max", ["f32_e32", "i32_e32", "u32_e32", "f64", "f16_e32"], False),
   (Ops.ADD, "v_add", ["f16_e32", "f32_e32", "f64", "nc_i32", "nc_u32_e32", "nc_u16", "nc_i16"], False),
@@ -258,7 +257,7 @@ def arith64(ctx, x:UOp):
 
 # a64 * b64 = (a_hi * 2^32 + a_lo) * (b_hi * 2^32 + b_lo) =  a_hi * 2^32 * b_lo + b_hi * 2^32 * a_hi + a_lo * b_lo
 def mul64(ctx, x:UOp):
-  def _mad(a:UOp, b:UOp, c:UOp=cconst(0, x.dtype)): return UOp(Ops.INS, x.dtype, arg=RDNA3Ops.v_mad_u64_u32, src=(a,b,c))
+  def _mad(a:UOp, b:UOp, c:UOp=const(0, x.dtype)): return UOp(Ops.INS, x.dtype, arg=RDNA3Ops.v_mad_u64_u32, src=(a,b,c))
   def _up(x:UOp): return x.ins(RDNA3Ops.v_lshlrev_b64, src=(const(32, dtypes.int32),x))
   a, b = x.src
   p1 = _up(_mad(gep(a,1), gep(b,0)))
@@ -353,13 +352,13 @@ def f64_to_int64(y:UOp, tdt:DType):
 
 # TODO: currently only 53 bit precision (f64 mantissa), could do better
 def long2double(x:UOp):
-  lo = x.index(0).replace(dtype=dtypes.uint32).cast(dtypes.float64)
-  hi = x.index(1).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(dtypes.float64)
+  lo = gep(x, 0).replace(dtype=dtypes.uint32).cast(dtypes.float64)
+  hi = gep(x, 1).replace(dtype=dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32).cast(dtypes.float64)
   hi = hi.ins(RDNA3Ops.v_ldexp_f64, src=(hi,const(32, dtypes.int16)))
   return UOp(Ops.ADD, dtype=dtypes.float64, src=(lo,hi))
 
-def const64(x:UOp):
-  v = x.val.bits if dtypes.is_float(x.dtype) else x.val
+def const64(x:UOp, c:UOp):
+  v = c.val.bits if dtypes.is_float(x.dtype) else c.val
   hi_dt = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
   return UOp.group(vmov(const(v)), vmov(const(v >> 32, hi_dt)), dtype=x.dtype)
 
@@ -385,7 +384,7 @@ def lower_end(ctx, x:UOp, acc:UOp):
 
 # ---- lowering passes ----
 extra_matcher = PatternMatcher([
-  (UPat.cvar("x", dtype=dtypes.bfloat16), lambda x: const(x.val if isinstance(x.val, InvalidType) else to_storage_scalar(x.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
+  (UPat.cvar("x", dtype=dtypes.bfloat16).cast(), lambda x: const(x.val if isinstance(x.val, InvalidType) else to_storage_scalar(x.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
@@ -417,7 +416,7 @@ pre_isel_matcher = PatternMatcher([
     lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint32)) + x.src[2:])),
   (UPat(Ops.LOAD, dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != 0),
   (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
-  (UPat.cvar("x", dtypes.bool).cast(), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.val else 0),), tag=GP_SGPRS)),
+  (UPat.cvar("x").cast(dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.val else 0),), tag=GP_SGPRS)),
   # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
   (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(1, x.dtype), const(0, x.dtype))),
   # --- int8 alu is int16 ---
@@ -427,14 +426,15 @@ pre_isel_matcher = PatternMatcher([
   # -- int -> int casts ---
   (UPat.var("y", dtypes.int8s+dtypes.int16s+dtypes.int32s).cast(dtypes.int64s, name="x"), lambda y,x: int_to_int64(y, x.dtype)),
   (UPat.var("y", dtypes.int64s).cast(dtypes.int16s+dtypes.int8s+dtypes.int32s, name="x"),
-    lambda y,x: y.index(0).replace(dtype=smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
+    lambda y,x: gep(y, 0).replace(dtype=smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   (UPat.var("y", dtypes.ints).cast(dtypes.ints).named("x"), intcast),
   # narrowing long goes through b32
   (UPat(Ops.MUL, dtypes.int16, name="x"), lambda x: x.replace(dtype=dtypes.int32)),
   # --- 64 bit semantics ---
-  (UPat.cvar("x").cast((dtypes.float64,)+dtypes.int64s), const64),
+  # NOTE: does this break casted const spec? problem is we rely on sub-register indexes on GROUP
+  (UPat.cvar("c").cast((dtypes.float64,)+dtypes.int64s, name="x"), const64),
   (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=(dtypes.ulong,dtypes.long,dtypes.float64)), UPat.var("b"))),
-    lambda pred,a,b: UOp.group(pred.where(a.index(0),b.index(0)), pred.where(a.index(1), b.index(1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
+    lambda pred,a,b: UOp.group(pred.where(gep(a,0),gep(b,0)), pred.where(gep(a,1), gep(b,1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
   (UPat((Ops.SHR, Ops.SHL), dtypes.int64s+(dtypes.float64,), src=(UPat(), UPat.cvar("y").cast()), name="x"), # prevent 64 bit immediate from being realized into 2 regs for shift
     lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
   # shift distance must be in single vgpr
@@ -463,6 +463,8 @@ pm_alu_fusion = PatternMatcher([
 ])
 
 isel_matcher = pm_alu_fusion + PatternMatcher([
+  # renderer lowering can synthesize bare bool constants after the canonical CAST(CONST) pass
+  (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.val else 0),), tag=GP_SGPRS)),
   # TODO: make this general
   (UPat(Ops.STACK, dtypes.int16s+(dtypes.half,dtypes.bfloat16), src=UPat(Ops.LOAD), name="x"), load_into_stack),
   # --- control flow ---
@@ -627,7 +629,7 @@ class RDNA3Renderer(ISARenderer):
 
   def copy(self, u:UOp, r:VRegister|Register) -> UOp:
     if u.dtype.itemsize == 8:
-      return UOp.group(vmov(u.index(0), r.sub(0)), vmov(u.index(1), r.sub(1)), dtype=u.dtype, tag=(r,))
+      return UOp.group(vmov(gep(u,0), r.sub(0)), vmov(gep(u,1), r.sub(1)), dtype=u.dtype, tag=(r,))
     return vmov(u,r)
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
