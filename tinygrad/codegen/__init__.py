@@ -3,7 +3,7 @@ import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, NUM_CPU_THREADS, TC_SELECT, TC_OPT, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
-from tinygrad.uop.weak import pm_lower_index_dtype, pm_commit_weak, pm_cast_weak
+from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
@@ -282,10 +282,6 @@ pm_implicit_barriers = PatternMatcher([
   (UPat(Ops.END, name="end"), add_war_barrier),
 ])
 
-pm_casted_consts = PatternMatcher([
-  (UPat(Ops.CONST, dtypes.all, name="c"), lambda c: UOp.cconst(c.val, c.dtype)),
-])
-
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -347,11 +343,13 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # extra symbolic before decomp. crashes without this?
   # NOTE: also run indexing_simplify here, while the index is still weakint and (x+y)*c -> x*c+y*c applies
-  sink = graph_rewrite(sink, sym+indexing_simplify, name="extra symbolic")
+  # commit widths minted in this fixpoint before optimization inspects RANGE/INDEX shapes
+  sink = graph_rewrite(sink, sym+indexing_simplify+pm_commit_weak, name="extra symbolic")
 
-  # lower index dtype
+  # THE BOUNDARY: required compute widths settle here; derivable literal edges may stay bare
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
-  sink = graph_rewrite(sink, symbolic_simple+pm_lower_index_dtype+indexing_simplify, ctx={}, name="lower all index dtypes")
+  # NOTE: symbolic must NOT be composed here -- its cast collapse eats the weak CAST a lowered node wears, and it cycles
+  sink = graph_rewrite(sink, pm_lower_weak+indexing_simplify, name="lower all index dtypes")
 
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
@@ -375,15 +373,12 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_commit_weak+pm_cast_weak+pm_decomp+extra_matcher+pm_split_ends
+  pm_final_rewrite = pm_commit_weak+pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
-  # spell every literal as a casted const CAST(dt, CONST(value))
-  # TODO: remove once consts are always weak
-  sink = graph_rewrite(sink, pm_casted_consts, name="casted consts", walk=True)
-
-  # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
-  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
+  # wrap every const still riding bare so no renderer reads one, and add implicit barriers (stores/loads through LOCAL
+  # memory ordered by AFTER or across loop iterations need workgroup barriers). neither matcher undoes the other
+  sink = graph_rewrite(sink, pm_cast_const+pm_implicit_barriers, name="state literal widths, add implicit barriers")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)

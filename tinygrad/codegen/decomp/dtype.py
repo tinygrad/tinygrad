@@ -3,6 +3,7 @@ from tinygrad.dtype import dtypes, DType, truncate
 from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
+from tinygrad.uop.weak import commit_weak_sibling
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.decomp.transcendental import exponent_bias, shl, shr
 
@@ -137,6 +138,8 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
 
 # tag is the 32-bit word this node becomes - (0 for the low word, 1 for the high, the dtype the consumer wants)
 pm_long_decomp: PatternMatcher = PatternMatcher([
+  # word splitting needs a bare literal committed at its long sibling's width
+  (UPat(GroupOp.All, name='x'), lambda x: commit_weak_sibling(x, next((s.dtype for s in x.src if s.dtype in l2i_dt), None))),
   (UPat(GroupOp.Defines, tuple(l2i_dt.keys()), src=(UPat.var("sz"),), name="x"), lambda x,sz:
    UOp(x.op, src=(sz*2,), arg=replace(x.arg, dtype=l2i_dt[x.dtype]), tag=x.tag)),
   (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x:
@@ -148,6 +151,9 @@ pm_long_decomp: PatternMatcher = PatternMatcher([
    split_l2i(ctx, x.op, dt:=l2i_dt[a.dtype], *flatten((s.rtag((0, dt)), s.rtag((1, dt))) for s in x.src))),
   (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda ctx,a,x:
    split_l2i(ctx, Ops.BITCAST, l2i_dt[x.dtype], a.rtag((0, dt:=l2i_dt[a.dtype])), a.rtag((1, dt)))[x.tag[0]]),
+  # a literal splits by value; the general CAST arm below would drop its high word
+  (UPat(Ops.CAST, src=(UPat(Ops.CONST, name='c'),), tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'),
+   lambda x,c: UOp.const(truncate[x.tag[1]](c.val >> (32*x.tag[0])), x.tag[1])),
   (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda ctx,a,x:
    split_l2i(ctx, x.op, x.dtype, a)[x.tag[0]] if x.tag is not None else None),
   (UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda ctx,a,x:
@@ -161,13 +167,13 @@ pm_long_decomp: PatternMatcher = PatternMatcher([
    split_l2i(ctx, x.op, l2i_dt[x.dtype], *flatten((a.rtag((0, l2i_dt[x.dtype])), a.rtag((1, l2i_dt[x.dtype]))) for a in x.src))[x.tag[0]]
    if x.tag is not None else None),
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda ctx,x,idx:
-   reindex(graph_rewrite(idx, pm_long_decomp, ctx=ctx, bottom_up=True), x.tag[0]).replace(tag=None).load() if x.tag is not None else None),
-  (UPat(Ops.CONST, tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'), lambda x:
-   UOp.const(truncate[x.tag[1]]((x.val >> 32) if x.tag[0] == 1 else (x.val & 0xFFFFFFFF)), x.tag[1]))
+   reindex(graph_rewrite(idx, pm_long_decomp, ctx=ctx, bottom_up=True), x.tag[0]).replace(tag=None).load() if x.tag is not None else None)
 ])
 
 # float decomposition patterns - ctx is (fr, to) tuple
 pm_float_decomp: PatternMatcher = PatternMatcher([
+  # emulation needs a bare literal committed at its emulated sibling's width
+  (UPat(GroupOp.All, name='x'), lambda ctx,x: commit_weak_sibling(x, next((s.dtype for s in x.src if s.dtype == ctx[0]), None))),
   (UPat(GroupOp.Defines, name="x"), lambda ctx,x:
    UOp(x.op, src=x.src, arg=replace(x.arg, dtype=f2f_dt[ctx[0]]), tag=ctx[0]) if x.dtype == ctx[0] else None),
   # INDEX into a LOAD/STACK selects a lane of an already converted value, the load rules below own those

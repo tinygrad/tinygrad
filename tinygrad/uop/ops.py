@@ -188,7 +188,8 @@ class UOpMetaClass(type):
   def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
-    # CONST derives its dtype by value only when the constructor omits one
+    # re-mint concrete CAST literals on their grid; derived targets keep the CAST as the conversion
+    if op is Ops.CAST and src[0].op is Ops.CONST and (c:=UOp(Ops.CONST, arg=dtype.const(src[0].arg))).dtype is not dtype: src = (c,)
     # TODO: delete this once the dtype field is removed, for now it just re-implements spec.py
     if SPEC == 2 and op is not Ops.CONST and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
@@ -611,7 +612,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.cast(dtype)
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
-    return UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
+    # .cast folds away at exactly the dtypes a CONST derives (bool/weakint/weakfloat): bare there, the pair everywhere else
+    return UOp(Ops.CONST, arg=dtype.const(b), src=()).cast(dtype)
   # weak CONST with width on the CAST. TODO: this is the final const
   @staticmethod
   def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, dtype, src=(UOp.const(b),), arg=dtype)
@@ -987,7 +989,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return unwrap(self.arg.name)
   def bind(self, val:int|UOp):
     assert self.is_variable, f"op is {self.op}, need Variable"
-    uval = self.const_like(val) if isinstance(val, int) else val
+    # the Variable states the width, so the bound value stays BARE: is_bound_var tests for a CONST there, unbind reads .val
+    uval = UOp.const(val) if isinstance(val, int) else val
     assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
     assert uval.divides(self.arg.multiple_of) is not None, f"bind {val} not divisible by {self.arg.multiple_of}"
     return self.after(self.store(uval))
