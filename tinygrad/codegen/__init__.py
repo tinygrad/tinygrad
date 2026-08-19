@@ -282,7 +282,7 @@ pm_implicit_barriers = PatternMatcher([
 ])
 
 pm_casted_consts = PatternMatcher([
-  (UPat(Ops.CONST, dtypes.all, name="c"), lambda c: UOp(Ops.CAST, c.dtype, src=(UOp.const(c.val),), arg=c.dtype)),
+  (UPat(Ops.CONST, dtypes.all, name="c"), lambda c: UOp.cconst(c.val, c.dtype)),
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
