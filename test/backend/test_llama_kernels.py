@@ -131,6 +131,9 @@ class TestFusedQKVRoPE(unittest.TestCase):
 
   def test_forward(self): self._test_fused_qkv_fw((1, 32, 8, 2, 16))
 
+  def test_llama31_8b_forward(self): self._test_fused_qkv_fw(self.SHAPE)
+
+  @unittest.skipUnless(has_hipcc(), "backward kernel requires hipcc to compile")
   def test_llama31_8b_backward(self):
     Tensor.manual_seed(1)
     B, N, H, H_KV, D = self.SHAPE
