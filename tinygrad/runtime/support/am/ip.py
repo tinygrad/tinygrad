@@ -181,22 +181,10 @@ class AM_SMU(AM_IP):
     self.smu_mod = self.adev._ip_module("smu", am.MP1_HWIP)
     self.driver_table_paddr = self.adev.mm.palloc(0x4000, zero=False, boot=True)
 
-  def wait_alive(self):
-    # poll until the SMU mailbox starts ACKing GetSmuVersion (single-shot attempts, mirroring amdgpu which issues one check)
-    t0 = time.time()
-    while time.time() - t0 < 60:
-      if self.is_smu_alive(): return
-      time.sleep(0.5)
-    raise TimeoutError("SMU not alive")
-
   def init_hw(self):
-    self.wait_alive()
-    # MP0 13.0.15 PMFW answers the dram addr msgs with an error response (as seen in amdgpu logs), tolerate any nonzero resp
-    dram_tolerant = self.adev.ip_ver[am.MP0_HWIP] == (13,0,15)
-    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)), any_resp=dram_tolerant)
-    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)), any_resp=dram_tolerant)
-    # not valid on smu_v13_0_12-family pmfw
-    if self.adev.ip_ver[am.MP0_HWIP] != (13,0,15): self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0, any_resp=dram_tolerant)
+    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)))
+    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)))
+    self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
 
   def is_smu_alive(self):
     with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
@@ -255,12 +243,10 @@ class AM_SMU(AM_IP):
     (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).write(param)
     (self.adev.mmMP1_SMN_C2PMSG_66 if not debug else self.adev.mmMP1_SMN_C2PMSG_75).write(msg)
 
-  def _send_msg(self, msg:int, param:int, read_back_arg=False, timeout=10000, debug=False, any_resp=False): # default timeout is 10 seconds
+  def _send_msg(self, msg:int, param:int, read_back_arg=False, timeout=10000, debug=False): # default timeout is 10 seconds
     self._smu_cmn_send_msg(msg, param, debug=debug)
     rc = self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54
-    # amdgpu tolerates any nonzero resp
-    cond, val = (lambda: rc.read() != 0, True) if any_resp else (rc.read, 1)
-    wait_cond(cond, value=val, timeout_ms=timeout, msg=f"SMU msg {msg:#x} timeout")
+    wait_cond(rc.read, value=1, timeout_ms=timeout, msg=f"SMU msg {msg:#x} timeout")
     return (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).read() if read_back_arg else None
 
 class AM_GFX(AM_IP):
