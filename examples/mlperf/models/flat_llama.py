@@ -362,8 +362,7 @@ class FlatTransformer:
     for name in names:
       weights = getattr(self, name)
       ret[name] = [quantize_mxfp4(w, shuffle_row=True, shuffle_col=True,
-                                  **({"source":weights, "source_offset":i*w.numel()}
-                                     if getenv("MXFP4_DIRECT_SOURCE", 1) and weights.uop.axis is None else {}))
+                                  **({"source":weights, "source_offset":i*w.numel()} if weights.uop.axis is None else {}))
                    for i, w in enumerate(weights)]
     return ret
 
@@ -374,8 +373,7 @@ class FlatTransformer:
       weights = getattr(self, name)
       for i, (weight, outputs) in enumerate(zip(weights, layers)):
         refreshed.extend(quantize_mxfp4(weight, shuffle_row=True, shuffle_col=True, out=outputs,
-                         **({"source":weights, "source_offset":i*weight.numel()}
-                            if getenv("MXFP4_DIRECT_SOURCE", 1) and weights.uop.axis is None else {})))
+                         **({"source":weights, "source_offset":i*weight.numel()} if weights.uop.axis is None else {})))
     return refreshed
 
   def reset_amax(self):

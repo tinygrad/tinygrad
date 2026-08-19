@@ -1490,7 +1490,7 @@ def train_llama3():
       loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
 
     for g, new_g in zip(grads, loss.gradient(*optim.params)):
-      apply_grad(g, new_g.uop, accumulate=accumulate if getenv("GRAD_FIRST_OVERWRITE", 1) else True)
+      apply_grad(g, new_g.uop, accumulate=accumulate)
 
     loss_acc.assign(loss_acc + loss.flatten().float())
     return loss_acc.realize(*grads, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
@@ -1501,8 +1501,6 @@ def train_llama3():
     optim.fstep(grads, grad_norm, clip_coeff)
     scheduler.step()
 
-    if not getenv("GRAD_FIRST_OVERWRITE", 1):
-      for g in grads: g.assign(0)
     model.update_amax()
     refreshed_mxfp4 = model.refresh_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
 
@@ -1654,8 +1652,6 @@ def train_llama3():
         eval_losses += eval_step(tokens).tolist()
 
         if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
-          if getenv("BENCHMARK_EVAL_LOSS", 0):
-            tqdm.write(f"benchmark eval log perplexity: {sum(eval_losses) / len(eval_losses):.4f}")
           if MLLOGGER and INITMLPERF:
             MLLOGGER.end(key=mllog_constants.INIT_STOP, value=None)
           return

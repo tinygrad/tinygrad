@@ -251,15 +251,9 @@ def custom_asm_bf16_mlperf_gemm1_bw(gradient:UOp, kernel:UOp):
     drange = UOp.range(len(g.device), -1, AxisType.DEVICE)
     g = Tensor(g.uop._shard(0, drange).unshard(0))
   b_t = Tensor(b_phys, device=b_phys.device).reshape(-1, 4096)
-  if not getenv("MLPERF_OUTPUT_ATB", 1):
-    a_t = Tensor(a_phys, device=a_phys.device)
-    grad_a = asm_gemm(g.T, b_t)
-    grad_b = asm_gemm(g, a_t).reshape(b_phys.shape)
-    return None, None, grad_a.uop, grad_b.uop, None, None, None
   # g.T @ b is A.T @ B with both operands already contiguous in their natural
   # [K, *] layouts. Keep it that way instead of materializing the multi-GiB g.T.
-  grad_a = (hk_bf16_atb_gemm(b_t.unsqueeze(0), g.unsqueeze(0)).T if getenv("MLPERF_OUTPUT_ATB_FLIPPED", 0)
-            else hk_bf16_atb_gemm(g.unsqueeze(0), b_t.unsqueeze(0)))
+  grad_a = hk_bf16_atb_gemm(g.unsqueeze(0), b_t.unsqueeze(0))
   # The optimizer maintains this transpose while it updates the output weight,
   # so both accumulation minibatches can consume it without a standalone copy.
   w_t = Tensor(w_t_phys, device=w_t_phys.device)
