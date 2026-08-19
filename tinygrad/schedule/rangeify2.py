@@ -212,21 +212,16 @@ pm_range_migration = PatternMatcher([
 
 @dataclass
 class SplitCtx:
-  # TODO: params and args should be able to be in any order
   call_args:list = field(default_factory=list)
-  call_params:list = field(default_factory=list)
   range_number:int = -1
+  addrspace:AddrSpace = AddrSpace.GLOBAL
 
 def _split_graph(ctx:SplitCtx, u:UOp) -> UOp|None:
   if u.tag is not None: return None
-  if u.addrspace == AddrSpace.ALU:
-    ctx.call_params.append(u)
-    return u.param_like(1000+len(ctx.call_params)-1).rtag()
-  elif u.addrspace == AddrSpace.GLOBAL:
-    ctx.call_args.append(u.flatten())
-    return u.flatten().param_like(len(ctx.call_args)-1).rtag().reshape(u.shape)
-  else:
-    raise RuntimeError(f"invalid address space {u.addrspace}")
+  if u.addrspace != ctx.addrspace: return None
+  us = u.flatten() if u.addrspace == AddrSpace.GLOBAL else u
+  ctx.call_args.append(us)
+  return us.param_like(len(ctx.call_args)-1).rtag().reshape(u.shape)
 
 def _renumber_range(ctx:SplitCtx, u:UOp) -> UOp|None:
   if u.tag is not None: return None
@@ -240,8 +235,11 @@ pm_split_graph = pm_range_migration+PatternMatcher([
 
 def split_store(x:UOp) -> UOp:
   ret = graph_rewrite(x, pm_split_graph, ctx:=SplitCtx(), name="split kernel", bottom_up=True)
+  # TODO: params and args should be able to be in any order
+  ctx.addrspace = AddrSpace.ALU
+  ret = graph_rewrite(ret, pm_split_graph, ctx, name="split kernel (vars)", bottom_up=True)
   ret = graph_rewrite(ret, remove_all_tags, name="remove split tags", bottom_up=True)
-  return ret.sink(arg=KernelInfo()).call(*ctx.call_args, *ctx.call_params)
+  return ret.sink(arg=KernelInfo()).call(*ctx.call_args)
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
