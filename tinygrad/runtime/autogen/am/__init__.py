@@ -60,7 +60,8 @@ def __getattr__(nm):
       def genfw(name, files, **kwargs):
         from tinygrad.helpers import fetch
         # psp_13_0_15_sos.bin is newer than the pinned linux-firmware ref; hash the blob from the commit that added it
-        extra = fetch("https://gitlab.com/kernel-firmware/linux-firmware/-/raw/23e6cdf0409383e29d681c8c14cd6ffd0f394f02/amdgpu/psp_13_0_15_sos.bin")
+        extra = fetch("https://gitlab.com/kernel-firmware/linux-firmware/-/raw/23e6cdf0409383e29d681c8c14cd6ffd0f394f02/amdgpu/psp_13_0_15_sos.bin",
+                      name="psp_13_0_15_sos.bin")
         return "\n".join(["hashes = {"] + [f"  {p.name!r}: {hashlib.sha256(p.read_bytes()).hexdigest()!r},"
                                              for f in files if (p:=pathlib.Path(f)).is_file()] +
                                          [f"  {extra.name!r}: {hashlib.sha256(extra.read_bytes()).hexdigest()!r},"] + ["}"])
