@@ -52,8 +52,11 @@ class AM_SOC(AM_IP):
 class AM_GMC(AM_IP):
   def init_sw(self):
     self.vmhubs = len(self.adev.regs_offset[am.MMHUB_HWIP])
-    # aqua (NBIO 7.9): only the first 2 mmhubs exist in the host window, instances 2+ are phantom layouts (like amdgpu's aid_mask)
-    if self.adev.ip_ver[am.NBIO_HWIP][:2] == (7,9): self.vmhubs = min(self.vmhubs, 2)
+    # aqua: an AID (mmhub) exists in the host window per complete group of 4 non-harvested sdma instances (kernel: aid_mask~
+    # derived from sdma_mask, 4 inst/aid in aqua_vanjaram.c)
+    if self.adev.ip_ver[am.NBIO_HWIP][:2] == (7,9):
+      live = sum(1 << i for i in self.adev.regs_offset[am.SDMA0_HWIP] if i not in self.adev.harvested[am.SDMA0_HWIP])
+      self.vmhubs = min(self.vmhubs, sum(1 for g in range(0, len(self.adev.regs_offset[am.SDMA0_HWIP]), 4) if ((live >> g) & 0xf) in (0xf,0x3,0xc)))
 
     # XGMI (for supported systems)
     xgmi_lfb_cntl = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields() if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_CNTL') else {}
