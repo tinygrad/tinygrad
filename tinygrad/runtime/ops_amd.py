@@ -881,7 +881,8 @@ class PCIIface(PCIIfaceBase):
         eop_buffer.va_addr, eop_buffer.size, is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
 
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA and self.dev_impl.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
-      # aqua (NBIO 7.9): kernel submits SDMA queues by writing the RB_WPTR register directly (SDMA 4.4.4 doorbell regs are firmware-managed)
+      # aqua (NBIO 7.9): doorbell-bar writes don't wake SDMA user queues on this PF (queue hangs); submit by writing the
+      # RB_WPTR register directly, the same channel the sdma engine polls for ring updates
       doorbell = self.dev_impl.mmio.view(self.dev_impl.reg('regSDMA_GFX_RB_WPTR').addr[idx] * 4, 8, fmt='Q')
       return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=doorbell, put_value=0, params=rcvr_params,
         read_ptr=gart.cpu_view().view(offset=rptr, size=8, fmt='Q'), write_ptr=gart.cpu_view().view(offset=wptr, size=8, fmt='Q'))
