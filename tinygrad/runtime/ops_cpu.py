@@ -6,6 +6,7 @@ from tinygrad.helpers import to_mv, from_mv, OSX, WIN, Context, mv_address, supp
 from tinygrad.device import Buffer, BufferSpec, TinyELF, Program, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_cmdbuf, make_signal
+from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
@@ -111,9 +112,9 @@ def encode_queue(q:UOp) -> UOp:
 MAP_JIT = 0x0800
 
 class CPUProgram(Program['CPUDevice']):
-  rt_lib = None
-  try: rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
-  except OSError: pass
+  rt_lib, libm = DLL('rt', 'System' if OSX else 'kernel' if WIN else 'gcc_s'), DLL('m', 'm')
+
+  def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=[self.libm, self.rt_lib])
 
   def __init__(self, dev:CPUDevice, obj:TinyELF):
     self.dev, self.name, self.signature = dev, obj.name, obj.signature
@@ -125,10 +126,10 @@ class CPUProgram(Program['CPUDevice']):
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
       self.addr = ctypes.windll.kernel32.VirtualAlloc(ctypes.c_void_p(0), ctypes.c_size_t(len(obj.lib)), MEM_COMMIT | MEM_RESERVE,
                                                       PAGE_EXECUTE_READWRITE)
-      ctypes.memmove(self.addr, obj.lib, len(obj.lib))
+      ctypes.memmove(self.addr, (loaded:=self._load(obj.lib, self.addr)), len(loaded))
       ctypes.windll.kernel32.GetCurrentProcess.restype = ctypes.c_void_p
       proc = ctypes.windll.kernel32.GetCurrentProcess()
-      ctypes.windll.kernel32.FlushInstructionCache(ctypes.c_void_p(proc), ctypes.c_void_p(self.addr), ctypes.c_size_t(len(obj.lib)))
+      ctypes.windll.kernel32.FlushInstructionCache(ctypes.c_void_p(proc), ctypes.c_void_p(self.addr), ctypes.c_size_t(len(loaded)))
       self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if self.lvp else ctypes.CFUNCTYPE(None)(self.addr)
     else:
       # On apple silicon with SPRR enabled (it always is in macos) RWX pages are unrepresentable: https://blog.svenpeter.dev/posts/m1_sprr_gxf/
@@ -137,18 +138,17 @@ class CPUProgram(Program['CPUDevice']):
       self.addr = mv_address(self.mem)
 
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
-      lib = jit_loader(obj.lib, base=ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem)), link_libs=['m']) if self.lvp else obj.lib
-      self.mem.write(lib)
+      self.mem.write(loaded:=self._load(obj.lib, mv_address(self.mem)))
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
 
       # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
       # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
       # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
       # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
-      if CPUProgram.rt_lib is not None: CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(self.addr), ctypes.c_void_p(self.addr + len(lib)))
+      if 'rt' in DLL._loaded_: CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(self.addr), ctypes.c_void_p(self.addr + len(loaded)))
       else:
         # msync should be a universal POSIX way to do this
-        libc.msync(ctypes.c_void_p(self.addr), len(lib), libc.MS_SYNC | libc.MS_INVALIDATE)
+        libc.msync(ctypes.c_void_p(self.addr), len(loaded), libc.MS_SYNC | libc.MS_INVALIDATE)
 
       self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if self.lvp else ctypes.CFUNCTYPE(None)(self.addr)
 
