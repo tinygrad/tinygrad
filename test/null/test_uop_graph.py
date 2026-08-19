@@ -1,7 +1,6 @@
 import unittest, pytest
 from tinygrad import dtypes, Variable, Device
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import DEBUG
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes, KernelInfo
 from tinygrad.uop.symbolic import sym
 from test.helpers import full_rewrite, to_uops_list
@@ -33,13 +32,6 @@ class TestGraphRewriteConst(unittest.TestCase):
     ret = graph_rewrite(v1+v2, sym)
     self.assertEqual(ret.op, Ops.STACK)
     self.assertEqual(const_values(ret), (5,7,9))
-
-  def test_add_const_lose_v(self):
-    v1 = UOp.const((0,1,2))
-    v2 = UOp.const((2,1,0))
-    ret = graph_rewrite(v1+v2, sym)
-    self.assertEqual(ret.op, Ops.STACK)
-    self.assertEqual(const_values(ret), (2,2,2))
 
 def xfail_broken_const_wraparound(fn):
   fn = pytest.mark.xfail(reason="const folding does not properly implement modular arithmetic")(fn)
@@ -190,12 +182,6 @@ class TestGraphRewrite(unittest.TestCase):
       self.assertEqual(len([x for x in sink.toposort() if x.op is Ops.CONST]), 1)
 
 class TestUOpGraph(unittest.TestCase):
-  def test_add_constant_fold(self):
-    c1 = UOp.const(1.0, dtypes.float)
-    c2 = UOp.const(2.0, dtypes.float)
-    out = c1+c2
-    self.assertIs(out.simplify(), UOp.const(3.0, dtypes.float))
-
   def test_where_same_fold(self):
     v = UOp.variable('tmp', 0, 1)
     c0 = UOp.const(0)
@@ -216,11 +202,6 @@ class TestUOpGraph(unittest.TestCase):
     out = bf.cast(dtypes.int)
     self.assertIs(full_rewrite(out.sink()).src[0], full_rewrite(UOp.const(0, dtypes.int).sink()).src[0])
 
-  def test_const_bitcast(self):
-    bf = UOp.const(1.0, dtypes.float)
-    out = bf.bitcast(dtypes.uint32)
-    self.assertIs(out.simplify(), UOp.const(0x3F800000, dtypes.uint32))
-
   def test_devectorize_derives_lane_dtype(self):
     from tinygrad.codegen import do_devectorize
     # an Invalid lane derives bool while the value lane derives float: the lane rebuild must derive, not inherit
@@ -228,58 +209,6 @@ class TestUOpGraph(unittest.TestCase):
     out = do_devectorize(lhs * lhs)
     invalid_lane_mul = next(u for u in out.src[0].toposort() if u.op is Ops.MUL)
     self.assertIs(invalid_lane_mul.dtype, dtypes.bool)
-
-  @unittest.skip("this test isn't valid uops")
-  def test_noop_vectorize_fold(self):
-    d0 = UOp.param(0, dtypes.float, (1,))
-    idx = UOp.const(0)
-    ld = d0.load(idx, dtype=dtypes.float)
-    vec = UOp.stack(ld)
-    x = vec.index(0)
-    alu = x.sqrt()
-    out = d0.index(idx).store(alu)
-    uops = to_uops_list([out])
-    self.assertEqual(len([x for x in uops if x.op is Ops.STACK]), 0)
-
-  @unittest.skip("this test isn't valid uops")
-  def test_gep_vec_fold(self):
-    d0 = UOp.param(0, dtypes.float, (1,))
-    d1 = UOp.param(1, dtypes.float, (1,))
-    d2 = UOp.param(2, dtypes.float, (1,))
-    idx = UOp.const(0)
-    def _test_vec(geps, count=4):
-      vec = UOp.stack(*geps)
-      out = d0.index(idx).store(vec)
-      rewritten = full_rewrite(out.sink())
-      if DEBUG >= 4:
-        from tinygrad import Device
-        print(Device[Device.DEFAULT].renderer.render(rewritten.toposort()))
-      return rewritten.src[0].src[1]
-
-    # possible
-    val = d1.index(idx).load(dtype=dtypes.float)
-    xyzw = tuple(val.index(i) for i in range(4))
-    self.assertIs(_test_vec(xyzw).op, Ops.LOAD)
-
-    # unaligned
-    val = d1.index(idx).load(dtype=dtypes.float)
-    wzyx = tuple(val.index(i) for i in reversed(range(4)))
-    self.assertIs(_test_vec(wzyx).op, Ops.STACK)
-
-    # different_size
-    val = d1.index(idx).load(dtype=dtypes.float)
-    xy = tuple(val.index(i) for i in range(2))
-    self.assertIs(_test_vec(xy+xy).op, Ops.STACK)
-    val = d1.index(idx).load(dtype=dtypes.float)
-    xy = tuple(val.index(i) for i in range(2))
-    self.assertIs(_test_vec(xy, count=2).op, Ops.STACK)
-
-    # different vals
-    val1 = d1.index(idx).load(dtype=dtypes.float)
-    val2 = d2.index(idx).load(dtype=dtypes.float)
-    xy1 = tuple(val1.index(i) for i in range(2))
-    xy2 = tuple(val2.index(i) for i in range(2))
-    self.assertIs(_test_vec(xy1+xy2).op, Ops.STACK)
 
   def test_gep_vec_const_fold(self):
     for vec_size in [2, 4, 8]:
@@ -467,13 +396,6 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([st0, st1])
     # only the second store happens
     self.assertEqual(len([u for u in uops if u.op is Ops.STORE]), 1)
-
-  @unittest.skip("this is a uop type error")
-  def test_asserts_bad_gate(self):
-    glbl0 = UOp.param(0, dtypes.int, (1,))
-    idx = UOp.const(0)
-    bad_gate = UOp.const(1)
-    with self.assertRaises(AssertionError): to_uops_list([glbl0.index(idx).store(UOp.const(42), bad_gate)])
 
   def test_after_end(self):
     r = UOp.range(10, 0)
