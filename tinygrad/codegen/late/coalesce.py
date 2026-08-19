@@ -26,7 +26,7 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
     # check if idx is out of bound when X is on the wrong side of the bound: X in [c+1, vmax] or [vmin, c-1]
     lo, hi = (c + 1, X.vmax) if is_upper_bound else (X.vmin, c - 1)
     if lo <= hi:
-      fake = UOp.variable(f"fake{i}", lo, hi, X.dtype)
+      fake = UOp.variable(f"fake{i}", lo, hi, X.dtype, param=True)
       subs = [{X: fake}]
       # idx may not have X itself, so also substitute a term of X: v -> fake - (X - v)
       terms = list(X.split_uop(Ops.ADD))
@@ -149,7 +149,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
         grp = full_grp[:length]
         # NOTE: we apply the valid again after we determine the length
         offset = offset.valid(valid) if valid is not None else offset
-        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(len(grp)))) if len(grp) > 1 else buf.index(offset)
+        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(len(grp)))) if len(grp) > 1 else buf.index(offset, dtype=offsets[grp[0]][0].src[0].dtype)
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):

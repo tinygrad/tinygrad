@@ -1742,8 +1742,8 @@ def train_gptoss():
   )
 
   for p in optim.params:
-    grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
-    p.grad = p.zeros_like(dtype=grad_dtype).contiguous()
+    p.grad = p.zeros_like(dtype=dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype).contiguous()
+    if getattr(p, "_zero2", False): p.grad = optim.optimizers[0]._zero_shard(p.grad)
   grads = [p.grad for p in optim.params]
 
   from extra.gemm.cdna_asm_gemm import _mx_block_scale

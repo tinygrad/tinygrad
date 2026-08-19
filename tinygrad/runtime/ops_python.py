@@ -3,10 +3,10 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Any, TYPE_CHECKING
-import pickle, base64, itertools, time, sys, functools
+import pickle, base64, itertools, time, sys, functools, ctypes
 from dataclasses import replace
 from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile
+from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile, mv_address
 from tinygrad.device import Buffer, Compiled, Compiler, Allocator, Program, TinyELF
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
@@ -23,7 +23,9 @@ def load(inp, j, dtype: DType):
 
 def _store(m, i, v, dtype: DType):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
-  m[i] = to_storage_scalar(v, dtype)
+  if (w:=m.nbytes // len(m)) >= dtype.itemsize: m[i] = to_storage_scalar(v, dtype)
+  else:
+    for k in range(dtype.itemsize // w): m[i+k] = (v >> 8*w*k) & ((1 << 8*w) - 1)
 
 # here are the models for the WMMA instruction on the different hardware
 def generic_wmma_helper(inp, warp_size, WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
@@ -134,6 +136,13 @@ class PythonProgram(Program['PythonDevice']):
                                for k in range(len(src_values))], j, u.dtype) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
+        elif u.op is Ops.CALL:
+          assert u.dtype is dtypes.void
+          cfunc = ctypes.CFUNCTYPE(None, *[ctypes.c_uint64] * (len(src_values)-1))
+          values[u] = []
+          for args,gate in zip(zip(*src_values), exec_masks[-1]):
+            call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]
+            values[u].append(cfunc(call_args[0])(*call_args[1:]) if gate else None)
         elif u.op is Ops.WMMA:
           first_src_dtype = u.src[0].dtype
           assert isinstance(first_src_dtype, DType) # mypy

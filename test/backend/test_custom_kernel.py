@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.renderer.ptx import PTXRenderer
-from test.helpers import assert_kernel_count
+from test.helpers import assert_kernel_count, KernelCountException
 
 # **** kernels ****
 
@@ -422,9 +422,8 @@ class TestCustomKernel(unittest.TestCase):
       return Tensor.custom_kernel(y, x, fxn=custom_add_one_kernel)[0]
     GlobalCounters.reset()
     y = run(x[0]).realize()
-    # it's copying the input and the output
-    # TODO: subbuffer usage has runtime specific behavior, this will be fixed after the removal of SLICE.
-    assert_kernel_count(2 if y.device in ("CL", "WEBGPU") else 1)
+    # backends that support contiguous views don't launch extra kernels
+    assert_kernel_count(2 if x[0].uop.contiguous_view() is None else 1)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
   @Context(DEV="CPU")
@@ -475,7 +474,7 @@ class TestCustomKernelInput(unittest.TestCase):
     y.realize()
     kernel_count = GlobalCounters.kernel_count
     self.assertEqual(y.tolist(), x.add(1).tolist())
-    self.assertLessEqual(kernel_count, max_kernels)
+    if kernel_count > max_kernels: raise KernelCountException(max_kernels, kernel_count)
     # same test with @function, input is PARAM
     from tinygrad import function
     x0 = Tensor.arange(32).clone("CPU").realize()
@@ -488,7 +487,7 @@ class TestCustomKernelInput(unittest.TestCase):
     y = run(x0).realize()
     kernel_count = GlobalCounters.kernel_count
     self.assertEqual(y.tolist(), mop_fxn(x0).add(1).tolist())
-    self.assertLessEqual(kernel_count, max_kernels)
+    if kernel_count > max_kernels: raise KernelCountException(max_kernels, kernel_count)
 
   def test_reshape(self): self._test_mop(lambda x: x.reshape(16, 2), max_kernels=2)
   def test_permute(self): self._test_mop(lambda x: x.reshape(4, 8).T, max_kernels=3)
