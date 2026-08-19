@@ -2,10 +2,11 @@ import heapq
 from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
+from tinygrad.renderer.isa import ISARenderer
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
-def linearize(sink:UOp) -> list[UOp]:
+def linearize(sink:UOp, ren:Renderer) -> list[UOp]:
   # this is a toposort with priority
   lst = list(sink.toposort())
   out_degree:defaultdict[UOp, int] = defaultdict(int)
@@ -21,7 +22,8 @@ def linearize(sink:UOp) -> list[UOp]:
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     extra = None
-    match u.op:
+    effective_op = ren.semantic_op.get(u.arg, u.op) if isinstance(ren, ISARenderer) and u.op is Ops.INS else u.op
+    match effective_op:
       # the order and placement of these defines is important
       case Ops.PARAM: priority, extra = -20, u.arg.slot
       case Ops.BUFFER: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18

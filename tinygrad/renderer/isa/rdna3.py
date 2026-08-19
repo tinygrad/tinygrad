@@ -64,6 +64,11 @@ def vmov(x:UOp, r:VRegister|Register|None=None) -> UOp:
   nx = x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
   return nx.rtag() if r is None else nx.replace(tag=(r,))
 def smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
+def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
+def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
+def rafter(x:UOp) -> UOp:
+  while x.op is Ops.AFTER: x = x.src[0]
+  return x
 
 # ---- register classes/kernel init state ----
 VGPRS = tuple(Register(f"v{i}", i, size=4) for i in range(256))
@@ -114,11 +119,9 @@ def stack2regs(x:UOp):
     else: mvs.append(vmov(x.src[i]))
   return UOp.group(*mvs, dtype=x.dtype) if len(mvs) > 1 else mvs[0].replace(dtype=x.dtype)
 
+# TODO: move the BUFFER condition to pattern
 def gethalf(x:UOp, buf:UOp, idx:UOp):
-  # TODO: move the BUFFER condition to pattern
-  bb = buf
-  while bb.op is Ops.AFTER: bb = bb.src[0]
-  if bb.op is Ops.BUFFER: return None
+  if rafter(buf).op is Ops.BUFFER: return None
   b32 = buf.index(const(idx.val // 2, dtypes.int32), dtype=dtypes.uint32)
   if idx.val % 2 != 0: return (b32 >> 16).bitcast(x.dtype)
   else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
@@ -197,15 +200,8 @@ def load(ctx, x:UOp, idx:UOp):
   suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
   prefix = "global" if idx.addrspace is AddrSpace.GLOBAL else "ds"
   opc = getattr(RDNA3Ops, f"{prefix}_load_{suffix}{sz*8}")
-  vp = ctx.vreg(GP_VGPRS, width=(sz+3)//4)
-  addr = UOp(Ops.NOOP, src=fold_address(idx), arg=opc)
-  return x.replace(src=(addr, *x.src[1:]), tag=(vp,))
-
-def lower_gated_load(ctx, x:UOp, addr:UOp, alt:UOp, gate:UOp):
-  init = [ctx.ren.copy(s, rdef(x).sub(i)) for i,s in enumerate(alt.src)] if alt.op is Ops.GROUP else [ctx.ren.copy(alt, rdef(x))]
-  load = UOp(Ops.INS, x.dtype, arg=addr.arg, src=addr.src, tag=x.tag)
-  mif = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=ctx.vreg(GP_SGPRS))
-  return load, init + [mif, load, UOp(Ops.ENDIF, src=(mif,))]
+  ctx.ren.semantic_op[opc]=Ops.LOAD
+  return x.ins(opc, src=fold_address(idx)+x.src[1:], tag=(ctx.vreg(GP_VGPRS, width=(sz+3)//4),))
 
 def store(ctx, x:UOp, idx:UOp, val:UOp):
   if idx.addrspace is AddrSpace.REG:
@@ -218,8 +214,20 @@ def store(ctx, x:UOp, idx:UOp, val:UOp):
   sz = n * idx.dtype.itemsize
   prefix = "global" if idx.addrspace is AddrSpace.GLOBAL else "ds"
   opc = getattr(RDNA3Ops, f"{prefix}_store_b{sz*8}")
-  addr = UOp(Ops.NOOP, src=fold_address(idx), arg=opc)
-  return UOp(Ops.STORE, src=(addr, to_vgpr(val)) + x.src[2:])
+  ctx.ren.semantic_op[opc]=Ops.STORE
+  return x.ins(opc, src=fold_address(idx)+(to_vgpr(val),*x.src[2:]))
+
+def lower_gated_load(ctx, x:UOp):
+  alt, gate = x.src[-2:]
+  init = [ctx.ren.copy(s, rdef(x).sub(i)) for i,s in enumerate(alt.src)] if alt.op is Ops.GROUP else [ctx.ren.copy(alt, rdef(x))]
+  mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=(ctx.vreg(GP_SGPRS),))
+  x = x.replace(src=x.src[:-2])
+  return x, init + [mask, x, restoreexec(mask)]
+
+def lower_gated_store(ctx, x:UOp):
+  mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(x.src[-1],), tag=(ctx.vreg(GP_SGPRS),))
+  x = x.replace(src=x.src[:-1])
+  return x, [mask, x, restoreexec(mask)]
 
 # ------ ALU ------
 def cmp(ctx, x:UOp):
@@ -251,7 +259,6 @@ def mul64(ctx, x:UOp):
   p3 = arith64(ctx, UOp(Ops.ADD, x.dtype, src=(p1,p2)))
   return _mad(gep(a,0), gep(b,0), p3)
 
-# TODO: fold const 64 as imms here?, shift hi, mask lo
 def bitwise64(ctx, x:UOp, ins):
   a, b = x.src
   lo = UOp(Ops.INS, dtypes.uint32, arg=ins, src=(gep(a,0), gep(b,0)))
@@ -349,9 +356,6 @@ def const64(x:UOp, c:UOp):
   return UOp.group(vmov(const(v)), vmov(const(v >> 32, hi_dt)), dtype=x.dtype)
 
 # ---- control flow ----
-def restoreexec(mask:UOp) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_or_b32, src=(execop,mask), tag=(EXEC,))
-def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=RDNA3Ops.s_nop, tag=name)
-
 def lower_range(ctx, x:UOp):
   bnd, mask = x.src[0], x.src[-1]
   acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),))
@@ -371,10 +375,11 @@ def lower_end(ctx, x:UOp, acc:UOp):
 # ---- lowering passes ----
 extra_matcher = PatternMatcher([
   # NOTE: runs before casted const
-  (UPat.cvar("c", dtypes.bfloat16), lambda c: UOp.const(c.val if isinstance(c.val, InvalidType) else to_storage_scalar(c.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
+  (UPat.cvar("c", dtypes.bfloat16), lambda c: UOp.const(c.val if isinstance(c.val, InvalidType) else
+    to_storage_scalar(c.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
-  (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)), # hack from x86
+  (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)),
 ]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,)) + tc.pm_validate_wmma_rdna3
 
 pm_float_to_int = PatternMatcher([
@@ -462,17 +467,17 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   # add exec mask edge to src
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), \
     lambda x,rng: x.replace(src=(x.src[0],rng,rng.src[-1])) if rng.src[-1].op is Ops.INS else None),
-  # --- double precis bit alu ---
+  # --- double precision alu ---
   (UPat(Ops.MUL, dtypes.int64s, name="x"), mul64),
   (UPat((Ops.ADD, Ops.SUB), dtypes.int64s, name="x"), arith64),
+  (UPat((Ops.AND, Ops.OR, Ops.XOR), dtypes.int64s+(dtypes.float64,), name="x"),
+    lambda ctx,x: bitwise64(ctx, x, getattr(RDNA3Ops, f"v_{x.op.name.lower()}_b32_e32"))),
   # --- general alu ---
   (UPat(Ops.SHR, name="x"), lambda ctx,x: _vop2(ctx, x.ins(V_LSHR[max(2, x.dtype.itemsize)] \
     if dtypes.is_unsigned(x.dtype) else V_ASHR[max(4, x.dtype.itemsize)]))),
   (UPat(Ops.SHL, name="x"), lambda ctx,x: _vop2(ctx, x.ins(V_LSHL[max(2, x.dtype.itemsize)]))),
   (UPat(GroupOp.Comparison|{Ops.XOR, Ops.AND, Ops.OR}, dtypes.bool, name="x"), cmp),
-  (UPat((Ops.AND, Ops.OR, Ops.XOR), name="x"), lambda ctx,x: \
-    _vop2(ctx, x.ins(getattr(RDNA3Ops, f"v_{x.op.name.lower()}_b32_e32"))) \
-    if x.dtype.itemsize < 8 else bitwise64(ctx, x, getattr(RDNA3Ops, f"v_{x.op.name.lower()}_b32_e32"))),
+  (UPat((Ops.AND, Ops.OR, Ops.XOR), name="x"), lambda ctx,x: _vop2(ctx, x.ins(getattr(RDNA3Ops, f"v_{x.op.name.lower()}_b32_e32")))),
   (UPat(Ops.WHERE, dtypes.bool, src=(UPat.var("mask"), UPat.var("a"), UPat.var("b")), name="x"),
     lambda mask,a,b,x: (mask & a) | (~mask & b)),
   (UPat.var("pred").where(UPat.var("a"), UPat.var("b")).named("x"), lambda pred,a,b,x:
@@ -482,45 +487,46 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   # dont realize weak cast?
   (UPat.var("y", dtype=dtypes.ints+dtypes.floats).cast(name="x"), lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e32"))),
   # --- mem ops ---
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="idx").load(allow_any_len=True, name="x"), load),
+  (UPat.var("idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
+  (UPat.var("idx").load(name="x", allow_any_len=True), load),
   # --- other ---
   (UPat(Ops.SPECIAL, name="x"), lambda x: vmov(def_reg(dtypes.uint32, WGIDS[int(x.arg[-1])])) if x.arg[0] == 'g' else
     x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(def_reg(dtypes.uint32, WIIDS), const(10*int(x.arg[-1])), const(10)))),
   (UPat(Ops.PARAM, name="x"), abi),
   (UPat((Ops.INS, Ops.GROUP, Ops.RANGE), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
+  # TODO: this probably should go in pre
   (UPat(Ops.INDEX, (dtypes.half,)+dtypes.int16s, src=(UPat.var("buf"), UPat.cvar("idx").cast()), name="x"), gethalf),
   (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
+  # TODO: FIX THIS, why is the tag added to the cast?
   (UPat(name="x").bitcast().named("y"), lambda x,y: x if y.tag is None else x.replace(tag=y.tag)),
 ])
 
+# NOTE: could also match these by tag tuples (all valid load/store instructions) instead of using more ctx
 pre_regalloc_matcher = PatternMatcher([
   # Lower a gated load as one adjacent sequence after linearization so the alt initialization cannot escape its CFG block.
-  (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"), UPat.var("alt"), UPat.var("gate")), name="x"), lower_gated_load),
-  (UPat(Ops.LOAD, src=(UPat(Ops.NOOP, name="addr"),), name="x"), lambda x,addr: ((nx := x.ins(addr.arg).replace(src=addr.src)), [nx])),
-  (UPat(Ops.STORE, src=(UPat(Ops.NOOP, name="addr"), UPat.var("val")), name="x"), lambda addr,x,val: ((nx := x.ins(addr.arg).replace(src=addr.src + (val,))), [nx])),
-  # assign SGPRS exec masks to the linearized graph now that gated store (IF/ENDIFS) are present
-  (UPat(Ops.IF, src=(UPat.var("gate"),), allow_any_len=True, name="x"), lambda ctx,x,gate: \
-    ((nx := UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=ctx.vreg(GP_SGPRS))), [nx])),
+  (UPat(Ops.INS, name="x"), lambda ctx,x: lower_gated_load(ctx,x) if ctx.ren.semantic_op.get(x.arg,x.op)
+    is Ops.LOAD and x.src[-1].dtype is dtypes.bool and rafter(x.src[-1]).op is not Ops.BUFFER else None),
+  (UPat(Ops.INS, name="x"), lambda ctx,x: lower_gated_store(ctx,x) if ctx.ren.semantic_op.get(x.arg,x.op)
+    is Ops.STORE and x.src[-1].dtype is dtypes.bool else None),
 ])
 
 post_regalloc_matcher = PatternMatcher([
+  # NOTE: rewrite subregister references In tags, belongs in regalloc arch agnostic
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("c").cast()), name="x"), lambda x,buf,c:
     (x.replace(tag=(rdefs(buf)[c.val],)), []) if c.val < len(rdefs(buf)) else None),
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("acc"), UPat()), name="x"), lower_end),
-  (UPat(Ops.ENDIF, src=(UPat.var("mif"),)), lambda mif: ((nx := restoreexec(mif)), [nx])),
-  # slightly hacky, forces do_assemble in codegen but might hide incomplete lowering
+  # hacky, forces do_assemble in codegen but might hide incomplete lowering
   (UPat(GroupOp.All - {Ops.INS}, name="x"), lambda x: (x, [])),
 ])
 
 def encode(ctx, x:UOp):
   if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   def encfield(x:UOp):
+    x = rafter(x)
     # fold immediate
-    while x.op is Ops.AFTER: x=x.src[0]
     # NOTE: should this support old form? (no cast)
     if is_const(x): return x.val if x.op is Ops.CONST else x.src[0].val
     # encode register(s) as dsl class slices

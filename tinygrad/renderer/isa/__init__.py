@@ -69,6 +69,9 @@ class ISARenderer(Renderer):
   post_regalloc_matcher: PatternMatcher
   post_regalloc_ctx: any|None = None
   spill_size: int = 0
+  # NOTE: would be nice for this to be cached automatically like in UOp.ins() or something?
+  # instead of needing to manually register important instructions in each renderer impl
+  semantic_op: dict[any, UOp] = {} # preserve IR metadata post-isel
 
   def is_two_address(self, x:UOp) -> bool: return False
   def stack_alloc(self, uops:list[UOp]) -> list[UOp]: return uops
