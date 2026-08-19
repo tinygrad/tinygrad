@@ -54,21 +54,21 @@ def estimate_uop(call:UOp) -> Estimates:
   return Estimates()
 
 first_run_cache:set[bytes] = set()
-def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|None]|None):
+def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|None]):
   if ctx.update_stats:
     is_hcq = (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq"
     estimates, n = estimate_uop(call), 1 if is_hcq else len(get_call_kernels(call))
     GlobalCounters.kernel_count += len(call.arg.aux.kernels) if is_hcq else n
     GlobalCounters.global_ops += n*sym_infer(estimates.ops, ctx.var_vals)
     GlobalCounters.global_mem += n*sym_infer(estimates.mem, ctx.var_vals)
-    GlobalCounters.time_sum_s += sum(et for et in ets or [] if et is not None)
+    GlobalCounters.time_sum_s += sum(et for et in ets if et is not None)
   if DEBUG < 2 and not PROFILE: return
 
   kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
   args = resolve_params(call, ctx.input_uops) if kernels and kernels[0][1] is call else []
   lanes = list(unwrap_multi(call, [args[g] for g in call.src[0].arg.globals] if call.src[0].op is Ops.PROGRAM else args)) if args else []
   for i, (device, kcall) in enumerate(kernels):
-    et, bufs = ets[i] if ets is not None and i < len(ets) else None, lanes[i][0] if i < len(lanes) else []
+    et, bufs = ets[i] if i < len(ets) else None, lanes[i][0] if i < len(lanes) else []
     if PROFILE: # backdate the event to the start of the call, the viz matches a device range with the exec event before it
       outputs, inputs = get_call_outs_ins(kcall)
       cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": ctx.var_vals,
@@ -164,7 +164,7 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
                    for x in call.src[0].toposort())
     for j, per_dev in enumerate(zip(*[cast(MultiBuffer, b).bufs for b in bufs])): yield list(per_dev), {"_device_num": j} if has_dnum else {}
 
-def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> None:
+def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
     if hasattr(dest.allocator,'_transfer') and dest.allocator.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:
@@ -174,6 +174,7 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> None:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
     elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
     else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
+  return []
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   ets:list[float|None] = []
@@ -187,7 +188,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
                   wait=ctx.wait, timeout=ctx.timeout))
   return ets
 
-def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
+def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
@@ -196,12 +197,13 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
     global_size, local_size = prg.arg.launch_dims(var_vals)
     cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
     for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
-  return None
+  return []
 
-def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> None:
+def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
   shape, pos_var = tuple(s.val for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
   bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
+  return []
 
 def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return [get_graph_runtime(ast, ctx.input_uops)(ctx.input_uops, ctx.var_vals, wait=ctx.wait)]
@@ -224,7 +226,7 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     d.synchronize(timeout=ctx.timeout)
     st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
     return float(en-st)/d.timestamp_divider/1e6
-  return [_prof_tm(device, k, prof) for devices, k, prof in info.kernels if prof for device in devices]
+  return [_prof_tm(device, k, prof) for devices, k, prof in info.kernels if prof for device in devices] if PROFILE or ctx.wait else []
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
