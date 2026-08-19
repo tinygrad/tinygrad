@@ -8,9 +8,8 @@ from tinygrad.schedule.indexing import BufferizeOpts, apply_movement_op
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.allreduce import create_allreduce_function
 
-def walk_mop(u:UOp, non_after_okay=False):
-  if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD}: return u.src[0]
-  assert u.op == Ops.AFTER or non_after_okay
+def walk_mop(u:UOp):
+  if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD}: return walk_mop(u.src[0])
   return u
 
 fix_mselect_mstack = PatternMatcher([
@@ -93,8 +92,7 @@ pm_prepare_graph = PatternMatcher([
    lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
   # remove movement ops from SINK/AFTER. TODO: should be generic
   (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src if u.op is not Ops.NOOP))),
-  (UPat(Ops.AFTER, name="s"),
-   lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u, non_after_okay=True) for u in s.src[1:] if u.op is not Ops.NOOP))),
+  (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u) for u in s.src[1:] if u.op is not Ops.NOOP))),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if 0 in x.shape and 0 not in reduce.shape else None),
