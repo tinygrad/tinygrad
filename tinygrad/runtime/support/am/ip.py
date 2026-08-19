@@ -643,12 +643,13 @@ class AM_PSP(AM_IP):
       for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
       wait_cond(self.is_sos_alive, value=True, msg="sOS failed to start")
 
-    self._ring_create()
-    if am.PSP_FW_TYPE_PSP_TOC in self.adev.fw.sos_fw: self._tmr_init()
+    ring_reused = self._ring_create()
+    if not ring_reused:
+      if am.PSP_FW_TYPE_PSP_TOC in self.adev.fw.sos_fw: self._tmr_init()
 
-    # SMU fw should be loaded before TMR.
-    if hasattr(self.adev.fw, 'smu_psp_desc'): self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
-    if not self.boot_time_tmr or not self.autoload_tmr: self._tmr_load_cmd()
+      # SMU fw should be loaded before TMR.
+      if hasattr(self.adev.fw, 'smu_psp_desc'): self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
+      if not self.boot_time_tmr or not self.autoload_tmr: self._tmr_load_cmd()
 
     for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
 
@@ -704,12 +705,9 @@ class AM_PSP(AM_IP):
     assert self.tmr_size <= self.max_tmr_size
 
   def _ring_create(self):
-    # If the ring is already created, destroy it
-    if self.adev.reg(f"{self.reg_pref}_71").read() != 0:
-      self.adev.reg(f"{self.reg_pref}_64").write(am.GFX_CTRL_CMD_ID_DESTROY_RINGS)
-
-      # There might be handshake issue with hardware which needs delay
-      time.sleep(0.02)
+    # If the ring was already created (by a previous AM session whose firmware is still running), reuse it instead of
+    # destroying/recreating (sOS-ready is a boot-only flag and TMR must not be re-loaded over a live TMR).
+    if self.adev.reg(f"{self.reg_pref}_71").read() != 0: return True
 
     # Wait until the sOS is ready
     wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_64").read() & 0x80000000, value=0x80000000, msg="sOS not ready")
@@ -722,6 +720,7 @@ class AM_PSP(AM_IP):
     time.sleep(0.02)
 
     wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_64").read() & 0x8000FFFF, value=0x80000000, msg="sOS ring not created")
+    return False
 
   def _ring_submit(self, cmd:am.struct_psp_gfx_cmd_resp) -> am.struct_psp_gfx_cmd_resp:
     def _wptr():

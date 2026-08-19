@@ -22,5 +22,6 @@ Side-channel watcher (separate root process polling sysfs BAR0 (VRAM) + BAR5 (MM
 ## Known limits / TODO
 - RLCS clock programming skipped for MP0 13.0.15 (default clocks; perf tuning would need the full SMU DPM/pptable dance from smu_v13_0_12_ppt.c).
 - `IH_CHICKEN`/retry-int-cam writes are aqua-specific (OSSSYS 4.4.2) gated by (9,5) + reg presence.
-- mode1 reset path exists but BL doesn't recover it on this chip (must power-cycle); `is_hive` tightened to `seg_sz>0 and pf_max_region>0` to avoid misdetecting single-node parts.
+- AM_RESET/mode1: SMU `GfxDriverReset` leaves the PSP/BL permanently dead on this chip (mailbox registers read 0x0, only power cycle recovers). A full AM re-init therefore distinguishes firmware state: foreign/unknown firmware gets the mode1 attempt (unchanged behavior), while AM-own firmware (SCRATCH_REG7 matches) is re-initialized *without* any reset - the PSP stage is skipped (a live sOS one-shots its ring between sessions - commands written to it are never serviced), and the host-side IP blocks (SOC/GMC/IH/SMU/GFX/SDMA) are fully re-programmed on top of the running firmware. AM_RESET=1 is verified working (also repeatedly).
+- `is_hive` tightened to `seg_sz>0 and pf_max_region>0` to avoid misdetecting single-node parts.
 - Discovery table is cached per-bus (`~/.cache/tinygrad/downloads/discovery/`) because the top-of-VRAM table becomes firmware-reserved/unreadable after the first boot.
