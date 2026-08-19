@@ -1648,6 +1648,8 @@ def train_llama3():
         eval_losses += eval_step(tokens).tolist()
 
         if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
+          if getenv("BENCHMARK_EVAL_LOSS", 0):
+            tqdm.write(f"benchmark eval log perplexity: {sum(eval_losses) / len(eval_losses):.4f}")
           if MLLOGGER and INITMLPERF:
             MLLOGGER.end(key=mllog_constants.INIT_STOP, value=None)
           return
