@@ -354,7 +354,7 @@ isel_matcher = PatternMatcher([
   # cast of void is a noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if y.dtype == dtypes.void else None),
   # range is lowered to acc, cmp, jmp after regalloc
-  (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
+  (UPat(Ops.RANGE, src=(UPat.ccvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
   # really all a backedge END is is an IF with a tag referencing the RANGE start label
   (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
@@ -368,9 +368,9 @@ isel_matcher = PatternMatcher([
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
   # constants that can't be immediates, move them to registers
-  (UPat.cvar("c").cast(dtypes.int64s, name="x"), lambda c,x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, c.val),)) if not x.tag else None),
-  (UPat.cvar("c").cast(dtypes.ints+(dtypes.bool,), name="x"), lambda c,x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, c.val),)) if not x.tag else None),
-  (UPat.cvar("c").cast(dtypes.floats, name="x"), lambda c,x:
+  (UPat.ccvar("c", dtypes.int64s, "x"), lambda c,x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, c.val),)) if not x.tag else None),
+  (UPat.ccvar("c", dtypes.ints+(dtypes.bool,), "x"), lambda c,x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, c.val),)) if not x.tag else None),
+  (UPat.ccvar("c", dtypes.floats, "x"), lambda c,x:
    UOp.cconst(struct.unpack((dt:=to_int(x.dtype)).fmt, struct.pack(x.dtype.fmt, c.val))[0], dt).bitcast(x.dtype) if not x.tag else None),
   # conditional moves that use masks NOTE: these currently assume a mask producing cmp exists
   (UPat.var("m").where(UPat.var("a", dtypes.int8s+dtypes.int16s+dtypes.int32s+(dtypes.int64,)), UPat.var("b")), lambda m,a,b:
@@ -421,15 +421,15 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.STACK, dtypes.float32, name="x"), vinsertps),
   (UPat(Ops.STACK, dtypes.ints+(dtypes.bool,), name="x"), vpins),
   # INDEX on a vector register value extracts a single element
-  (UPat.var("y", dtypes.int8s+(dtypes.bool,)).index(UPat.cvar("c").cast(), name="x"),
+  (UPat.var("y", dtypes.int8s+(dtypes.bool,)).index(UPat.ccvar("c"), name="x"),
    lambda y,c,x: x.ins(X86Ops.VPEXTRB, src=(y, imm(dtypes.uint8, c.val))) if _is_vec_xmm(y) else None),
-  (UPat.var("y", dtypes.int16s).index(UPat.cvar("c").cast(), name="x"),
+  (UPat.var("y", dtypes.int16s).index(UPat.ccvar("c"), name="x"),
    lambda y,c,x: x.ins(X86Ops.VPEXTRW, src=(y, imm(dtypes.uint8, c.val))) if _is_vec_xmm(y) else None),
-  (UPat.var("y", dtypes.int32s).index(UPat.cvar("c").cast(), name="x"),
+  (UPat.var("y", dtypes.int32s).index(UPat.ccvar("c"), name="x"),
    lambda y,c,x: x.ins(X86Ops.VPEXTRD, src=(y, imm(dtypes.uint8, c.val))) if _is_vec_xmm(y) else None),
-  (UPat.var("y", dtypes.int64s).index(UPat.cvar("c").cast(), name="x"),
+  (UPat.var("y", dtypes.int64s).index(UPat.ccvar("c"), name="x"),
    lambda y,c,x: x.ins(X86Ops.VPEXTRQ, src=(y, imm(dtypes.uint8, c.val))) if _is_vec_xmm(y) else None),
-  (UPat.var("y", dtypes.floats).index(UPat.cvar("c").cast(), name="x"),
+  (UPat.var("y", dtypes.floats).index(UPat.ccvar("c"), name="x"),
    lambda y,c,x: x.ins(X86Ops.VPSRLDQ, src=(y, imm(dtypes.uint8, c.val * x.dtype.itemsize))) if _is_vec_xmm(y) else None),
   # packed bitwise
   ((UPat() & UPat()).named("x"), lambda x: x.ins(X86Ops.VPAND) if x.max_numel() > 1 else None),
@@ -454,11 +454,11 @@ isel_matcher = PatternMatcher([
   # scalar int binary
   ((UPat(dtype=dtypes.ints).alu(Ops.CDIV, UPat())).named("x"), idiv),
   # scalar int binary with immediate
-  (UPat.var("a", dtypes.ints) << UPat.cvar("c").cast(), lambda a,c: a.ins(X86Ops.SHLi, src=(a, imm(dtypes.uint8, c.val)))),
-  (UPat.var("a", dtypes.uints) >> UPat.cvar("c").cast(), lambda a,c: a.ins(X86Ops.SHRi, src=(a, imm(dtypes.uint8, c.val)))),
-  (UPat.var("a", dtypes.sints) >> UPat.cvar("c").cast(), lambda a,c: a.ins(X86Ops.SARi, src=(a, imm(dtypes.uint8, c.val)))),
-  (UPat.var("a", dtypes.ints) + UPat.cvar().cast(name="c"), lambda a,c: a.ins(X86Ops.ADDi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
-  (UPat.var("a", dtypes.ints) * UPat.cvar().cast(name="c"), lambda a,c: a.ins(X86Ops.IMULi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
+  (UPat.var("a", dtypes.ints) << UPat.ccvar("c"), lambda a,c: a.ins(X86Ops.SHLi, src=(a, imm(dtypes.uint8, c.val)))),
+  (UPat.var("a", dtypes.uints) >> UPat.ccvar("c"), lambda a,c: a.ins(X86Ops.SHRi, src=(a, imm(dtypes.uint8, c.val)))),
+  (UPat.var("a", dtypes.sints) >> UPat.ccvar("c"), lambda a,c: a.ins(X86Ops.SARi, src=(a, imm(dtypes.uint8, c.val)))),
+  (UPat.var("a", dtypes.ints) + UPat.ccvar(name2="c"), lambda a,c: a.ins(X86Ops.ADDi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
+  (UPat.var("a", dtypes.ints) * UPat.ccvar(name2="c"), lambda a,c: a.ins(X86Ops.IMULi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
   (UPat.var("a", dtypes.ints+(dtypes.bool,)) & UPat.cvar().cast(name="c"),
    lambda a,c: a.ins(X86Ops.ANDi, src=(a, i)) if (i:=to_imm(c)) is not None else None),
   (UPat.var("a", dtypes.ints+(dtypes.bool,)) | UPat.cvar().cast(name="c"),

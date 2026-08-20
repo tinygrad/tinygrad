@@ -1367,6 +1367,9 @@ class UPat(OpMixin):
   @staticmethod
   @functools.cache
   def cvar(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None, arg=None): return UPat(Ops.CONST, dtype, name=name, arg=arg)
+  @functools.cache
+  def ccvar(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None, name2:str|None=None, arg=None):
+    return UPat(Ops.CONST, name=name, arg=arg).cast(dtype, name=name2)
   @staticmethod
   def const(b:ConstType, dtype:DType|tuple[DType, ...]|None=None): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
