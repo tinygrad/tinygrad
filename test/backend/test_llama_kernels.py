@@ -108,9 +108,9 @@ class TestFusedQKVRoPE(unittest.TestCase):
   def rand_bf16(self, *shape:int) -> Tensor:
     return (Tensor.randn(*shape) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
 
-  def _test_fused_qkv_fw(self, shape:tuple[int, int, int, int, int]):
+  def test_forward(self):
     Tensor.manual_seed(0)
-    B, N, H, H_KV, D = shape
+    B, N, H, H_KV, D = 1, 32, 8, 2, 16
     GROUP = H // H_KV
     freqs_cis = (Tensor.randn(1, N * 2, 1, D // 2, 2) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
 
@@ -128,8 +128,6 @@ class TestFusedQKVRoPE(unittest.TestCase):
       self.assertTrue(q.allclose(q_ref, atol=2e-2, rtol=0).item(), "Q forward mismatch")
       self.assertTrue(k.allclose(k_ref, atol=2e-2, rtol=0).item(), "K forward mismatch")
       self.assertTrue(v.allclose(v_ref, atol=0, rtol=0).item(), "V forward mismatch")
-
-  def test_forward(self): self._test_fused_qkv_fw((1, 32, 8, 2, 16))
 
   @unittest.skipUnless(has_hipcc(), "backward kernel requires hipcc to compile")
   def test_llama31_8b(self):
