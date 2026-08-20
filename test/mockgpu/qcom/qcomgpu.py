@@ -109,7 +109,7 @@ class QCOMGPU:
         if mode != mesa.RM6_COMPUTE: raise NotImplementedError(f'unsupported CP_SET_MARKER mode {mode}')
       elif packet_type == 7 and key == mesa.CP_EXEC_CS:
         if len(payload) != 4: raise ValueError('invalid CP_EXEC_CS payload')
-        if payload[0] != 0: raise NotImplementedError('indirect CP_EXEC_CS is unsupported')
+        if payload[0] != 0: raise NotImplementedError('unsupported CP_EXEC_CS control word')
         grid = (payload[1] & mesa.CP_EXEC_CS_1_NGROUPS_X__MASK,
           payload[2] & mesa.CP_EXEC_CS_2_NGROUPS_Y__MASK,
           payload[3] & mesa.CP_EXEC_CS_3_NGROUPS_Z__MASK)

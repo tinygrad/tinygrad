@@ -33,8 +33,10 @@ def _reject_unsupported_modifiers(fields, name):
     raise NotImplementedError('unsupported IR3 modifier HALF')
 
 def _reg(value, half=False):
-  kind = ('hc' if value & 0x1000 else 'hr') if half else ('c' if value & 0x1000 else 'r')
+  constant = bool(value & 0x1000)
   value &= 0xfff
+  if not constant and value // 4 in (61, 62): raise NotImplementedError('unsupported IR3 special register')
+  kind = ('hc' if constant else 'hr') if half else ('c' if constant else 'r')
   return kind, value // 4, value % 4
 
 def _decode_fields(fields):
@@ -72,11 +74,14 @@ def _decode_fields(fields):
       tuple(_reg(_field(fields, src)) for src in ('SRC1', 'SRC2', 'SRC3')),
       bool(_field(fields, 'SY')), _field_or(fields, 'NOP', 0))
   if name == 'add.u':
-    src2 = _field(fields, 'IMMED') if any(field == 'IMMED' for field, _ in fields) else _reg(_field(fields, 'SRC2'))
+    repeat = _field_or(fields, 'REPEAT', 0)
+    immediate = any(field == 'IMMED' for field, _ in fields)
+    if repeat and immediate: raise NotImplementedError('repeated add.u immediate is unsupported')
+    src2 = _field(fields, 'IMMED') if immediate else _reg(_field(fields, 'SRC2'))
     repeat_srcs = tuple(bool(value) for field, value in fields if field == 'SRC_R')
     if len(repeat_srcs) != 2: raise ValueError('invalid add.u repeat fields')
     return IR3Instruction(name, _reg(_field(fields, 'DST')), (_reg(_field(fields, 'SRC1')), src2),
-      bool(_field(fields, 'SY')), 0, _field_or(fields, 'REPEAT', 0), repeat_srcs)
+      bool(_field(fields, 'SY')), 0, repeat, repeat_srcs)
   if name == 'cmps.u':
     if _field(fields, 'COND') != mesa.IR3_COND_LT: raise NotImplementedError('unsupported cmps.u condition')
     return IR3Instruction('cmps.u.lt', _reg(_field(fields, 'DST'), bool(_field(fields, 'DST_HALF'))),
