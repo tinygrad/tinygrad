@@ -236,8 +236,8 @@ class TestViz(unittest.TestCase):
   def test_const_node_visibility(self):
     with save_viz() as viz:
       a = UOp.variable("a", 0, 10, dtype=dtypes.int)
-      z = UOp.const(0, a.dtype)
-      y = UOp.const(math.pi, dtypes.float)
+      z = UOp.const(0)
+      y = UOp.const(math.pi)
       alu = a*z
       ret = exec_rewrite(sink:=UOp.sink(alu, y), [sym])
     lst = viz.list_items()
@@ -249,7 +249,7 @@ class TestViz(unittest.TestCase):
     self.assertTrue(graphs[0][id(y)]["exclude"])
     self.assertFalse(graphs[0][id(alu)]["exclude"])
     self.assertEqual(graphs[0][id(y)]["label"].split("\n")[:2], ["CONST", "3.14159"])
-    self.assertEqual(list(graphs[1]), [id(z), id(y), id(ret)])
+    self.assertEqual(list(graphs[1]), [id(u) for u in ret.toposort()])  # rewrite graph keys follow the rewritten sink's toposort
 
   def test_const_reshape_expand_folded(self):
     # CONST->EXPAND should be folded into the ALU node, not shown as separate EXPAND nodes
