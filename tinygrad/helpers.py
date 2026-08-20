@@ -261,10 +261,11 @@ def _get_cpu_count() -> int:
   # fall back to affinity (respects taskset but not cgroup quota)
   return max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1))
 NUM_CPU_THREADS = ContextVar("NUM_CPU_THREADS", _get_cpu_count())
-PARALLEL = ContextVar("PARALLEL", NUM_CPU_THREADS.value) # this PARALLEL is for BEAM and compilation
 NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
+# this PARALLEL is for BEAM and compilation, it's currently disabled if you are using VIZ
+PARALLEL = ContextVar("PARALLEL", NUM_CPU_THREADS.value if VIZ == 0 else 0)
 PROFILE = ContextVar("PROFILE", abs(VIZ.value))
 SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed

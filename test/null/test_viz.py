@@ -43,7 +43,7 @@ def save_viz():
   Buffer.profile_events.clear()
   cpu_events.clear()
   viz = VizTrace()
-  with Context(VIZ=-1, TRACK_MATCH_STATS=2, PROFILE=1):
+  with Context(VIZ=-1, TRACK_MATCH_STATS=2, PROFILE=1, PARALLEL=0):
     yield viz
   viz.set_data()
 
