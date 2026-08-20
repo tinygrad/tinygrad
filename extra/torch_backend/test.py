@@ -83,6 +83,12 @@ class TestTorchBackend(unittest.TestCase):
     torch.add(torch.ones(5, device=device), torch.ones(5, device=device), out=a)
     self.assertEqual(a.detach().storage_offset(), 3)
 
+  def test_out_refreshes_views_of_base(self):
+    a = torch.zeros(4, device=device)
+    v = a[2:]
+    torch.add(torch.ones(4, device=device), torch.ones(4, device=device), out=a)
+    np.testing.assert_equal(v.cpu().numpy(), [2., 2.])
+
   @unittest.expectedFailure  # TODO: storage offset assumes a contiguous source, use UOp.contiguous_view_offset
   def test_storage_offset_non_contiguous_source(self):
     a = torch.arange(12., device=device).reshape(3,4)
@@ -165,6 +171,15 @@ class TestTorchBackend(unittest.TestCase):
     y3 = torch.amin(x, dim=2)
     expected = np.array([[1.5, 5.2, 9.0], [13.2, 17.1, 18.4]], dtype=np.float32)
     np.testing.assert_equal(y3.cpu().numpy(), expected)
+
+  def test_argmax_argmin(self):
+    a = torch.arange(12, dtype=torch.float32, device=device).reshape(3, 4)
+    c = a.cpu()
+    for got, want in [(a.argmax(), c.argmax()), (a.argmin(0), c.argmin(0)), (a.argmax(1, keepdim=True), c.argmax(1, keepdim=True)),
+                      (torch.min(a, 1).indices, torch.min(c, 1).indices), (torch.max(a, 1).indices, torch.max(c, 1).indices),
+                      (torch.min(a, 1).values, torch.min(c, 1).values), (torch.min(a, 1, keepdim=True).indices, torch.min(c, 1, keepdim=True).indices)]:
+      self.assertEqual(got.dtype, want.dtype)  # torch's arg reduces are int64, tinygrad's are int32
+      np.testing.assert_equal(got.cpu().numpy(), want.numpy())
 
   def test_isfinite(self):
     a = torch.ones(4, device=device)
@@ -373,6 +388,22 @@ class TestTorchBackend(unittest.TestCase):
     for bwd_eps in [1e-5, 0.3]:
       for got, want in zip(run(device, bwd_eps), run("cpu", bwd_eps)): np.testing.assert_allclose(got, want, atol=1e-4, rtol=1e-3)
 
+  def test_groupnorm_backward(self):
+    def run(dev):
+      x = torch.arange(24., device=dev).reshape(2, 4, 3).requires_grad_()
+      w = torch.linspace(0.5, 2.0, 4).to(dev).requires_grad_()
+      torch.nn.functional.group_norm(x, 2, w, torch.zeros(4, device=dev)).square().sum().backward()
+      return x.grad.cpu().numpy(), w.grad.cpu().numpy()
+    for got, want in zip(run(device), run("cpu")): np.testing.assert_allclose(got, want, atol=1e-4, rtol=1e-3)
+
+  def test_mse_smooth_l1_loss_backward(self):
+    def run(dev, loss):
+      x = torch.arange(4., device=dev).requires_grad_()
+      loss(x, torch.ones(4, device=dev)).backward()
+      return x.grad.cpu().numpy()
+    for loss in [torch.nn.functional.mse_loss, torch.nn.functional.smooth_l1_loss]:
+      np.testing.assert_allclose(run(device, loss), run("cpu", loss), atol=1e-6)
+
   def test_batchnorm_unsqueeze(self):
     bn = torch.nn.BatchNorm2d(4).to(device)
     x = torch.randn(8, 4, 3, 3, device=device)
@@ -515,6 +546,15 @@ class TestTorchBackend(unittest.TestCase):
     torch_res = a[::2][1:4].cpu().numpy()
     cpu_res = torch.arange(20, dtype=torch.float32)[::2][1:4].numpy()
     np.testing.assert_equal(torch_res, cpu_res)
+
+  def test_select_out_of_range_dim(self):
+    a = torch.arange(12, dtype=torch.int32, device=device).reshape(3, 4)
+    with self.assertRaises(IndexError): a.select(5, 0)
+
+  def test_select_collapses_the_only_dim(self):
+    a = torch.arange(3, dtype=torch.int32, device=device)
+    self.assertEqual(a.select(0, 1).shape, ())
+    np.testing.assert_equal(a.select(0, 1).cpu().numpy(), 1)
 
   def test_slice_negative_dim(self):
     a = torch.arange(13, dtype=torch.int32, device=device).repeat(8, 1)
@@ -796,6 +836,86 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_allclose(w_tiny.grad.cpu().numpy(), w_cpu.grad.numpy(), atol=1e-4, rtol=1e-3)
     np.testing.assert_allclose(b_tiny.grad.cpu().numpy(), b_cpu.grad.numpy(), atol=1e-4, rtol=1e-3)
 
+  def test_write_through_detach_of_unrealized(self):
+    a = torch.empty(4, device=device)
+    a.detach().fill_(3)
+    np.testing.assert_equal(a.cpu().numpy(), [3, 3, 3, 3])
+
+  def test_square_transpose_inplace(self):
+    # a same-shape transpose is not a reshape: writing the transposed values straight back would scramble the base
+    a = torch.tensor([[0., 1., 2.], [3., 4., 5.], [6., 7., 8.]], device=device)
+    a.transpose(0, 1).add_(100)
+    np.testing.assert_equal(a.cpu().numpy(), [[100., 101., 102.], [103., 104., 105.], [106., 107., 108.]])
+
+  def test_interpolate(self):
+    a = torch.arange(4, dtype=torch.float32, device=device).reshape(1, 1, 2, 2)
+    nearest = torch.nn.functional.interpolate(a, scale_factor=2.0)
+    np.testing.assert_equal(nearest.cpu().numpy()[0, 0], [[0, 0, 1, 1], [0, 0, 1, 1], [2, 2, 3, 3], [2, 2, 3, 3]])
+    linear = torch.nn.functional.interpolate(a, size=(4, 4), mode="bilinear", align_corners=False)
+    ref = torch.nn.functional.interpolate(a.cpu(), size=(4, 4), mode="bilinear", align_corners=False)
+    np.testing.assert_allclose(linear.cpu().numpy(), ref.numpy(), rtol=1e-5)
+
+  def test_interpolate_bicubic_area(self):
+    a = torch.arange(32, dtype=torch.float32, device=device).reshape(1, 2, 4, 4)
+    for mode, scale in [("bicubic", 2.0), ("area", 0.5)]:
+      ref = torch.nn.functional.interpolate(a.cpu(), scale_factor=scale, mode=mode)
+      np.testing.assert_allclose(torch.nn.functional.interpolate(a, scale_factor=scale, mode=mode).cpu().numpy(), ref.numpy(), atol=1e-4)
+
+  @unittest.expectedFailure
+  def test_interpolate_bicubic_backward(self):
+    # the forward comes from a decomposition, but aten::upsample_bicubic2d_backward has none (nor does
+    # aten::_adaptive_avg_pool2d_backward, for area), so training through these modes needs a real kernel
+    x = torch.arange(32., dtype=torch.float32, device=device).reshape(1, 2, 4, 4).requires_grad_()
+    torch.nn.functional.interpolate(x, scale_factor=2.0, mode="bicubic").sum().backward()
+
+  @unittest.expectedFailure
+  def test_interpolate_inexact_scale(self):
+    # torch forwards the raw scale_factor, Tensor.interpolate recomputes it from output_size, and they disagree here
+    a = torch.arange(6, dtype=torch.float32, device=device).reshape(1, 1, 2, 3)
+    tiny = torch.nn.functional.interpolate(a, scale_factor=2.5, mode="bilinear")
+    ref = torch.nn.functional.interpolate(a.cpu(), scale_factor=2.5, mode="bilinear")
+    np.testing.assert_allclose(tiny.cpu().numpy(), ref.numpy(), rtol=1e-5)
+
+  def test_logical_or_xor(self):
+    a = torch.tensor([True, True, False, False], device=device)
+    b = torch.tensor([True, False, True, False], device=device)
+    np.testing.assert_equal(torch.logical_or(a, b).cpu().numpy(), [True, True, True, False])
+    np.testing.assert_equal(torch.logical_xor(a, b).cpu().numpy(), [False, True, True, False])
+    # bool-valued whatever the input dtype, so this is not | and ^
+    i, j = torch.tensor([2, 0, 5, 0], device=device), torch.tensor([0, 0, 1, 1], device=device)
+    np.testing.assert_equal(torch.logical_or(i, j).cpu().numpy(), [True, False, True, True])
+    np.testing.assert_equal(torch.logical_xor(i, j).cpu().numpy(), [True, False, False, True])
+
+  def test_slice_scatter(self):
+    # the scatters are functional: they return a new tensor and must leave the one they were given alone
+    a = torch.arange(12, dtype=torch.float32, device=device).reshape(3, 4)
+    out = torch.slice_scatter(a, torch.ones(1, 4, device=device), 0, 0, 1)
+    np.testing.assert_equal(out.cpu().numpy(), [[1, 1, 1, 1], [4, 5, 6, 7], [8, 9, 10, 11]])
+    np.testing.assert_equal(a.cpu().numpy(), np.arange(12, dtype=np.float32).reshape(3, 4))
+
+  def test_slice_scatter_casts_src(self):
+    a = torch.zeros(3, 4, device=device)
+    out = torch.slice_scatter(a, torch.ones(1, 4, dtype=torch.int32, device=device), 0, 0, 1)
+    self.assertEqual(out.dtype, torch.float32)
+    np.testing.assert_equal(out.cpu().numpy()[0], np.ones(4, dtype=np.float32))
+
+  def test_select_scatter(self):
+    a = torch.arange(12, dtype=torch.float32, device=device).reshape(3, 4)
+    out = torch.select_scatter(a, torch.ones(4, device=device), 0, 1)
+    np.testing.assert_equal(out.cpu().numpy(), [[0, 1, 2, 3], [1, 1, 1, 1], [8, 9, 10, 11]])
+
+  def test_diagonal_scatter(self):
+    a = torch.zeros(3, 3, device=device)
+    out = torch.diagonal_scatter(a, torch.arange(3, dtype=torch.float32, device=device))
+    np.testing.assert_equal(out.cpu().numpy(), np.diag([0., 1., 2.]))
+    np.testing.assert_equal(a.cpu().numpy(), np.zeros((3, 3), dtype=np.float32))
+
+  def test_copy_functional(self):
+    # without an impl this segfaults rather than fails: a regression here takes the whole run down
+    a = torch.arange(4, dtype=torch.float32, device=device)
+    out = torch.ops.aten.copy(a, torch.zeros(4, device=device))
+    np.testing.assert_equal(out.cpu().numpy(), [0., 0., 0., 0.])
+    np.testing.assert_equal(a.cpu().numpy(), [0., 1., 2., 3.])
 
 from tinygrad import Tensor
 class TestBackendHelpers(unittest.TestCase):

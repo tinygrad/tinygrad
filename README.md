@@ -140,7 +140,7 @@ Documentation along with a quick start guide can be found on the [docs website](
 ```python
 from tinygrad import Tensor
 
-x = Tensor.eye(3)
+x = Tensor.eye(3).clone()  # clone to make it a buffer
 y = Tensor([[2.0,0,-2.0]])
 z = y.matmul(x).sum()
 z.backward()

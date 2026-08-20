@@ -1,7 +1,6 @@
 import ctypes
 from tinygrad.device import Compiler, CompileError
-from tinygrad.helpers import getenv, capstone_flatdump, amdgpu_disassemble, unwrap, DEBUG
-from tinygrad.runtime.support.elf import jit_loader
+from tinygrad.helpers import getenv, cpu_objdump, amdgpu_disassemble, unwrap, DEBUG
 from tinygrad.runtime.autogen import llvm
 
 def cerr(): return ctypes.pointer(ctypes.pointer(ctypes.c_char()))
@@ -11,7 +10,6 @@ def expect(x, err, ret=None):
   return ret
 
 class LLVMCompiler(Compiler):
-  jit = True
   def __init__(self, arch:str, processor:str, feats:str, cache_key=None):
     for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter']:
       getattr(llvm, "LLVMInitialize" + {'arm64': 'AArch64', 'x86_64': 'X86', 'riscv64': 'riscv64'}.get(arch, "AMDGPU") + component)()
@@ -43,13 +41,13 @@ class LLVMCompiler(Compiler):
         self.diag_msgs.append(msg)
     self.handle_diag = handle_diag
     llvm.LLVMContextSetDiagnosticHandler(self.context, handle_diag, None)
-    super().__init__(cache_key or f"compile_llvm_{processor}_{feats}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
+    super().__init__(cache_key or f"compile_llvm_{processor}_{feats}{'_opt' if opt else ''}")
 
   def __del__(self):
     if hasattr(self, 'pbo'): llvm.LLVMDisposePassBuilderOptions(self.pbo)
     if hasattr(self, 'context'): llvm.LLVMContextDispose(self.context)
 
-  def compile_to_obj(self, src:str) -> bytes:
+  def compile(self, src:str) -> bytes:
     self.diag_msgs.clear()
     src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes:=src.encode()), len(src_bytes), b'src')
     mod = expect(llvm.LLVMParseIRInContext(self.context, src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
@@ -64,9 +62,6 @@ class LLVMCompiler(Compiler):
     if self.diag_msgs: raise RuntimeError("llvm diagnostic: " + "\n".join(self.diag_msgs))
     return obj
 
-  def compile(self, src:str) -> bytes: return jit_loader(self.compile_to_obj(src)) if self.jit else self.compile_to_obj(src)
-
-
 class CPULLVMCompiler(LLVMCompiler):
   def __init__(self, arch:list[str], cache_key=None):
     assert len(arch) >= 2, f"invalid arch string: {','.join(arch)!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
@@ -78,10 +73,9 @@ class CPULLVMCompiler(LLVMCompiler):
     # +reserve-x18 here does the same thing as -ffixed-x18 in ClangCompiler, see comments there for why it's needed on arm osx
     super().__init__(self.arch, cpu, ('+reserve-x18,' if self.arch == "arm64" else '') + featstr, cache_key)
 
-  def disassemble(self, lib:bytes): capstone_flatdump(lib, self.arch)
+  def disassemble(self, lib: bytes): cpu_objdump(lib)
 
 class AMDLLVMCompiler(LLVMCompiler):
-  jit = False
   def __init__(self, arch: str):
     self.arch = arch
     super().__init__("AMDGPU", self.arch, "+cumode")

@@ -6,7 +6,7 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import run_linear, compile_linear, pm_beam, pm_compile
 import numpy as np
 from hypothesis import given, strategies as strat, settings
-from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph, check_schedule, assert_kernel_count
+from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph, check_schedule, assert_kernel_count, KernelCountException
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -395,7 +395,7 @@ class TestMultiBufferView(unittest.TestCase):
     linear, var_vals = b_multi.linear_with_vars()
     if all(not d.startswith(("WEBGPU", "CL")) for d in b_multi.device):
       compiled = [call for call in linear.src if call.src[0].op is Ops.SINK]
-      self.assertEqual(len(compiled), 0, f"expected zero compiled kernels, got {len(compiled)}")
+      if len(compiled) != 0: raise KernelCountException(0, len(compiled))
     run_linear(linear, var_vals)
     np.testing.assert_equal(b_multi.numpy(), b_ref.numpy())
 

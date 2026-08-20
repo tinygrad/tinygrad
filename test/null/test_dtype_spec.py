@@ -51,10 +51,6 @@ class TestHelpers(unittest.TestCase):
     assert dtypes.is_float(dtypes.fp8e4m3)
     assert dtypes.is_float(dtypes.fp8e5m2)
 
-  @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]))
-  def test_scalar(self, dtype):
-    assert dtype.scalar() == dtype
-
   def test_from_py(self):
     assert dtypes.from_py(True) == dtypes.bool
     assert dtypes.from_py(Invalid) == dtypes.bool

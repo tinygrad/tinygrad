@@ -3,6 +3,7 @@ import numpy as np
 from tinygrad import Tensor, Device, TinyJit, Variable, dtypes
 from tinygrad.helpers import GlobalCounters, ContextVar, Context, DEV
 from tinygrad.uop.ops import PatternMatcher, UPat, UOp, deconstruct_function
+from test.helpers import KernelCountException
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
@@ -41,7 +42,7 @@ class TestPickle(unittest.TestCase):
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t_values, t2.numpy())
     # expect at most one COPY kernel
-    self.assertLessEqual(GlobalCounters.kernel_count, 1)
+    if GlobalCounters.kernel_count > 1: raise KernelCountException(1, GlobalCounters.kernel_count)
 
   def test_pickle_realized_tensor_alt(self):
     print("** init")
