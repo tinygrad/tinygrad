@@ -10,7 +10,7 @@ CUDA_PATH = getenv("CUDA_PATH", "")
 def osx_compiler_cmd(compiler:str, *args) -> list[str]:
   root = pathlib.Path(__file__).parents[3]
   return (f"docker run --rm -i -v {root}:{root} -e PYTHONPATH={root} ghcr.io/tinygrad/cuda-arm64:v2.3 "
-          f"python3 {pathlib.Path(__file__).parent}/compileonce.py {compiler}").split() + [str(a) for a in args]
+          f"{pathlib.Path(__file__).parent}/compileonce.py {compiler}").split() + [str(a) for a in args]
 
 def _get_bytes(arg, get_str, get_sz, check) -> bytes:
   x = ctypes.create_string_buffer(init_c_var(ctypes.c_size_t, lambda x: check(get_sz(arg, ctypes.byref(x)))).value)
