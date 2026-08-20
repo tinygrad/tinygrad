@@ -108,10 +108,6 @@ jobs:
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
-    - name: Symlink models and datasets
-      run: |
-        mkdir -p weights
-        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -129,10 +125,6 @@ jobs:
       # just metal for now
       if: ${{ matrix.dev == 'METAL' }}
       run: BENCHMARK_LOG=olmoe JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m olmoe --benchmark --warmup
-    - name: Run LLaMA-3 8B on 4 GPUs with BEAM
-      # only run on machines with multiple gpus
-      if: ${{ matrix.dev != 'METAL' }}
-      run: BENCHMARK_LOG=llama3_beam_4gpu JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -182,10 +174,6 @@ jobs:
       # slow on metal
       if: ${{ matrix.dev != 'METAL' }}
       run: time BENCHMARK_LOG=cifar DEFAULT_FLOAT=HALF STEPS=1000 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
-    - name: Run full CIFAR training steps w 6 GPUS
-      # only run on machines with multiple gpus
-      if: ${{ matrix.dev != 'METAL' }}
-      run: time BENCHMARK_LOG=cifar_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -231,11 +219,6 @@ jobs:
       run: time BENCHMARK_LOG=resnet_eval MODEL=resnet python3 examples/mlperf/model_eval.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
       run: BENCHMARK_LOG=resnet_10steps DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py
-    - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
-      run: BENCHMARK_LOG=resnet_10steps_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py
-    - name: Run 10 MLPerf Bert training steps (6 gpu)
-      # TODO: remove BERT_LAYERS once scheduler is fast
-      run: BENCHMARK_LOG=bert_10steps_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=72 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -282,6 +265,58 @@ jobs:
       env:
         ASSERT_MIN_STEP_TIME: ${{ matrix.dev == 'METAL' && '5000' || matrix.dev == 'AMD' && '3200' || '2000' }}
       run: BENCHMARK_LOG=stable_diffusion_xl CAPTURE_PROCESS_REPLAY=0 python3 examples/sdxl.py --seed 0 --noshow --timing
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
+  multigpubenchmark:
+    name: Multi-GPU Benchmarks (DEV=${{ matrix.dev }})
+    runs-on: [self-hosted, "${{ matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
+    strategy:
+      fail-fast: false
+      matrix:
+        dev: ['AMD', 'NV']
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    env:
+      DEV: ${{ matrix.dev }}
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup (AMD)
+      if: ${{ matrix.dev == 'AMD' }}
+      run: |
+        ./extra/amdpci/setup_python_cap.sh
+        ./extra/hcq/hcq_smi.py amd rmmod
+        ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Setup (NV)
+      if: ${{ matrix.dev == 'NV' }}
+      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+    - name: Symlink models and datasets
+      run: |
+        mkdir -p weights
+        mkdir -p extra/datasets
+        ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
+        ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: setup staging db
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset process replay
+      run: python3 test/external/process_replay/reset.py
+    - name: Run LLaMA-3 8B on 4 GPUs with BEAM
+      run: BENCHMARK_LOG=llama3_beam_4gpu JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0
+    - name: Run full CIFAR training steps w 6 GPUS
+      run: time BENCHMARK_LOG=cifar_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
+    - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
+      run: BENCHMARK_LOG=resnet_10steps_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py
+    - name: Run 10 MLPerf Bert training steps (6 gpu)
+      # TODO: remove BERT_LAYERS once scheduler is fast
+      run: BENCHMARK_LOG=bert_10steps_6gpu CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=72 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
