@@ -77,6 +77,6 @@ class ISARenderer(Renderer):
   def stack_alloc(self, uops:list[UOp]) -> list[UOp]: return uops
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
-  def spill(self, spill_offset:int, x:UOp) -> UOp: raise NotImplementedError("arch specific")
-  def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> UOp: raise NotImplementedError("arch specific")
+  def spill(self, spill_offset:int, x:UOp) -> list[UOp]: raise NotImplementedError("arch specific")
+  def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
