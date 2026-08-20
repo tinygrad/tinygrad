@@ -68,14 +68,13 @@ class TestMultiTensor(unittest.TestCase):
   # TODO: fix this to not copy on the src device
   @unittest.expectedFailure
   def test_shard_no_recompile(self):
-    with Context(PARALLEL=0):
-      X = Tensor.ones(256).contiguous().realize()
-      X.shard_(devices_2, 0)
-      out = (X + X)
-      linear = compile_linear(out.schedule_linear())
-      names = [call.src[0].src[0].arg.name for call in linear.src if call.src[0].op is Ops.PROGRAM]
-      run_linear(linear)
-      self.assertEqual(len(set(names)), 1, "function was relinearized")
+    X = Tensor.ones(256).contiguous().realize()
+    X.shard_(devices_2, 0)
+    out = (X + X)
+    linear = compile_linear(out.schedule_linear())
+    names = [call.src[0].src[0].arg.name for call in linear.src if call.src[0].op is Ops.PROGRAM]
+    run_linear(linear)
+    self.assertEqual(len(set(names)), 1, "function was relinearized")
 
   def test_shard_beam(self):
     cpu_2 = ("CPU:1", "CPU:2")

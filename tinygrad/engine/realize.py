@@ -271,7 +271,7 @@ def lower_and_compile(linear:UOp) -> UOp:
   if len(todo):
     # kernels that beam search must compile in the parent, beam needs device access to time candidates
 
-    pool = None if len(todo) == 1 or any(getattr(c.src[0].arg, "beam", 0) for c in calls) or PARALLEL == 0 else get_worker_pool()
+    pool = None if len(todo) == 1 or any(getattr(c.src[0].arg, "beam", 0) for c in calls) else get_worker_pool()
     ctx = {v.key: v.value for v in to_program_config}
     tasks = ((i, ast_ren, ctx) for i, (_, ast_ren) in enumerate(todo))
     with tqdm(total=len(todo), desc="compiling", disable=DEBUG<1) as pbar:

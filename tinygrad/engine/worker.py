@@ -11,8 +11,8 @@ def _init_worker():
 worker_pool = None
 def get_worker_pool():
   global worker_pool
-  if multiprocessing.current_process().daemon: return None  # workers can't have children
-  if worker_pool is None and PARALLEL > 0:
+  if multiprocessing.current_process().daemon or PARALLEL == 0: return None
+  if worker_pool is None:
     worker_pool = multiprocessing.get_context("spawn").Pool(PARALLEL.value, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
     @atexit.register
     def close_pool(pool=worker_pool): pool.close()
