@@ -8,9 +8,9 @@ from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.dtype import dtypes
 from tinygrad.renderer import Estimates, Renderer
-from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_config
+from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.codegen.opt.postrange import args_from_ast
-from tinygrad.engine.worker import get_worker_pool
+from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 # **************** Helpers ****************
 
@@ -272,13 +272,17 @@ def lower_and_compile(linear:UOp) -> UOp:
     # kernels that beam search must compile in the parent, beam needs device access to time candidates
 
     pool = None if len(todo) == 1 or any(getattr(c.src[0].arg, "beam", 0) for c in calls) else get_worker_pool()
-    ctx = {v.key: v.value for v in to_program_config}
+    ctx = {v.key: v.value for v in to_program_context}
     tasks = ((i, ast_ren, ctx) for i, (_, ast_ren) in enumerate(todo))
-    with tqdm(total=len(todo), desc="compiling", disable=DEBUG<1) as pbar:
-      for i, prg in (map if pool is None else pool.imap_unordered)(_compile_kernel, tasks):
-        pbar.set_description(f"compiling {ansipad(prg.src[0].arg.name, 40)}")
-        to_program_cache[todo[i][0]] = prg
-        pbar.update(1)
+    try:
+      with tqdm(total=len(todo), desc="compiling", disable=DEBUG<1) as pbar:
+        for i, prg in (map if pool is None else pool.imap_unordered)(_compile_kernel, tasks):
+          pbar.set_description(f"compiling {ansipad(prg.src[0].arg.name, 40)}")
+          to_program_cache[todo[i][0]] = prg
+          pbar.update(1)
+    except KeyboardInterrupt:
+      if pool is not None: terminate_worker_pool()
+      raise
 
   # swap the compiled PROGRAMs into the calls
   return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in calls}, name="precompile kernels")
