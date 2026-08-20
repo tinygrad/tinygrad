@@ -129,6 +129,7 @@ def decode_ir3(code:bytes, gpu_id:int=630) -> list[IR3Instruction]:
     mesa.ir3_isa_disasm(code, len(code), out, opts)
     libc.fflush(fp)
   if errors: raise errors[0]
+  if len(raw) != len(code) // 8: raise ValueError('invalid IR3 instruction encoding')
   return raw
 
 def _as_f32(bits): return ctypes.c_float.from_buffer_copy(ctypes.c_uint32(bits)).value
@@ -157,10 +158,12 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
     if inst.name == 'end': break
     if inst.name == 'ashr.b':
       src, shift = inst.srcs
+      shift &= 31
       regs[inst.dst] = [(ctypes.c_int32(value).value >> shift) & 0xffffffff for value in regs[src]]
       continue
     if inst.name == 'shl.b':
       src, shift = inst.srcs
+      shift &= 31
       regs[inst.dst] = [(value << shift) & 0xffffffff for value in regs[src]]
       continue
     if inst.name == 'shrg':

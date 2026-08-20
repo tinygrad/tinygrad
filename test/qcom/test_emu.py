@@ -25,6 +25,10 @@ def test_saturated_add_f_is_rejected():
   with pytest.raises(NotImplementedError, match='unsupported IR3 modifier SAT'):
     decode_ir3(bytes.fromhex('0b0010000b0c1850'))
 
+def test_invalid_instruction_is_rejected():
+  with pytest.raises(ValueError, match='invalid IR3 instruction encoding'):
+    decode_ir3(bytes.fromhex('ffffffffffffffff'))
+
 def test_decode_nop():
   inst = decode_ir3(bytes(8), gpu_id=630)[0]
   assert inst.name == 'nop'
@@ -84,6 +88,12 @@ def test_execute_shl_b():
   regs = {('r', 0, 3): [0, 1, 0x40000000, 0xffffffff]}
   emu.execute_ir3(bytes.fromhex('030002200308d846'), regs)
   assert regs[('r', 0, 3)] == [0, 4, 0, 0xfffffffc]
+
+def test_execute_shift_count_is_masked():
+  regs = {('r', 0, 0): [1, 0x80000000, 0xffffffff], ('r', 0, 3): [1, 0x80000000, 0xffffffff]}
+  emu.execute_ir3(bytes.fromhex('0000202003081847'), regs)
+  emu.execute_ir3(bytes.fromhex('030020200308d846'), regs)
+  assert regs[('r', 0, 3)] == [1, 0x80000000, 0xffffffff]
 
 def test_decode_shrg():
   inst = decode_ir3(bytes.fromhex('1e30030003040065'))[0]
