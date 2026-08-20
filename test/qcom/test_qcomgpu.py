@@ -6,38 +6,54 @@ from test.mockgpu.qcom.qcomgpu import QCOMGPU, decode_pm4
 def test_wait_for_idle_packet():
   packets = decode_pm4([pkt7_hdr(mesa.CP_WAIT_FOR_IDLE, 0)])
   assert packets == [(7, mesa.CP_WAIT_FOR_IDLE, ())]
-  
+
 def test_register_packet():
   packets = decode_pm4([pkt4_hdr(mesa.REG_A6XX_SP_UPDATE_CNTL, 2), 1, 2])
   assert packets == [(4, mesa.REG_A6XX_SP_UPDATE_CNTL, (1, 2))]
-  
+
 def test_register_write():
   gpu = QCOMGPU()
   reg = mesa.REG_A6XX_SP_UPDATE_CNTL
   gpu.execute([pkt4_hdr(reg, 2), 10, 20])
   assert gpu.regs == {reg: 10, reg + 1: 20}
-  
+
 def test_wait_reg_mem_ready():
   value = ctypes.c_uint32(5)
+  checked = []
   payload = (qreg.cp_wait_reg_mem_0(function=mesa.WRITE_GE, poll=mesa.POLL_MEMORY),
     *data64_le(ctypes.addressof(value)), qreg.cp_wait_reg_mem_3(ref=4),
     qreg.cp_wait_reg_mem_4(mask=0xffffffff), qreg.cp_wait_reg_mem_5(delay_loop_cycles=32))
-  QCOMGPU().execute([pkt7_hdr(mesa.CP_WAIT_REG_MEM, len(payload)), *payload])
-  
+  QCOMGPU(check_range=lambda address, size: checked.append((address, size))).execute(
+    [pkt7_hdr(mesa.CP_WAIT_REG_MEM, len(payload)), *payload])
+  assert checked == [(ctypes.addressof(value), 4)]
+
 def test_event_write():
   value = ctypes.c_uint32()
+  checked = []
   payload = (qreg.cp_event_write_0(event=mesa.CACHE_FLUSH_TS),
     *data64_le(ctypes.addressof(value)), 7)
-  QCOMGPU().execute([pkt7_hdr(mesa.CP_EVENT_WRITE, len(payload)), *payload])
+  QCOMGPU(check_range=lambda address, size: checked.append((address, size))).execute(
+    [pkt7_hdr(mesa.CP_EVENT_WRITE, len(payload)), *payload])
   assert value.value == 7
+  assert checked == [(ctypes.addressof(value), 4)]
+
+def test_reg_to_mem():
+  value = ctypes.c_uint64()
+  checked = []
+  payload = (qreg.cp_reg_to_mem_0(reg=mesa.REG_A6XX_CP_ALWAYS_ON_COUNTER, cnt=2, _64b=True),
+    *data64_le(ctypes.addressof(value)))
+  QCOMGPU(check_range=lambda address, size: checked.append((address, size))).execute(
+    [pkt7_hdr(mesa.CP_REG_TO_MEM, len(payload)), *payload])
+  assert value.value > 0
+  assert checked == [(ctypes.addressof(value), 8)]
 
 def test_wait_mem_writes():
   QCOMGPU().execute([pkt7_hdr(mesa.CP_WAIT_MEM_WRITES, 0)])
-  
+
 def test_set_compute_marker():
   payload = (qreg.a6xx_cp_set_marker_0(mode=mesa.RM6_COMPUTE),)
   QCOMGPU().execute([pkt7_hdr(mesa.CP_SET_MARKER, len(payload)), *payload])
-  
+
 def test_load_state6():
   address = ctypes.addressof(ctypes.c_uint32())
   control = qreg.cp_load_state6_0(state_type=mesa.ST_CONSTANTS,
@@ -45,14 +61,15 @@ def test_load_state6():
   gpu = QCOMGPU()
   gpu.execute([pkt7_hdr(mesa.CP_LOAD_STATE6_FRAG, 3), control, *data64_le(address)])
   assert gpu.state[(mesa.SB6_CS_SHADER, mesa.ST_CONSTANTS)] == address
-  
+  assert gpu.state_units[(mesa.SB6_CS_SHADER, mesa.ST_CONSTANTS)] == 1
+
 def test_exec_cs():
   image = (ctypes.c_ubyte * 128)(*range(128))
   calls = []
   gpu = QCOMGPU(lambda code, grid, local, regs, state: calls.append((code, grid, local, regs, state)))
   gpu.state[(mesa.SB6_CS_SHADER, mesa.ST_SHADER)] = ctypes.addressof(image)
   gpu.regs[mesa.REG_A6XX_SP_CS_NDRANGE_0] = qreg.a6xx_sp_cs_ndrange_0(
-    kerneldim=3, localsizex=5, localsizey=6, localsizez=7)
+    kerneldim=3, localsizex=4, localsizey=5, localsizez=6)
   gpu.regs[mesa.REG_A6XX_SP_CS_INSTR_SIZE] = qreg.a6xx_sp_cs_instr_size(1)
   payload = (0, qreg.cp_exec_cs_1(ngroups_x=2),
     qreg.cp_exec_cs_2(ngroups_y=3), qreg.cp_exec_cs_3(_ngroups_z=4))
@@ -65,9 +82,53 @@ def test_shader_image():
   gpu.state[(mesa.SB6_CS_SHADER, mesa.ST_SHADER)] = ctypes.addressof(image)
   gpu.regs[mesa.REG_A6XX_SP_CS_INSTR_SIZE] = qreg.a6xx_sp_cs_instr_size(1)
   assert gpu.shader_image() == bytes(image)
-  
+
+def test_shader_image_checks_range():
+  checked = []
+  image = (ctypes.c_ubyte * 128)(*range(128))
+  gpu = QCOMGPU(check_range=lambda address, size: checked.append((address, size)))
+  gpu.state[(mesa.SB6_CS_SHADER, mesa.ST_SHADER)] = ctypes.addressof(image)
+  gpu.regs[mesa.REG_A6XX_SP_CS_INSTR_SIZE] = 1
+
+  gpu.shader_image()
+
+  assert checked == [(ctypes.addressof(image), 128)]
+
 def test_local_size():
   gpu = QCOMGPU()
   gpu.regs[mesa.REG_A6XX_SP_CS_NDRANGE_0] = qreg.a6xx_sp_cs_ndrange_0(
-    kerneldim=3, localsizex=2, localsizey=3, localsizez=4)
-  assert gpu.local_size() == (2, 3, 4)
+    kerneldim=3, localsizex=2, localsizey=0, localsizez=0)
+  assert gpu.local_size() == (3, 1, 1)
+
+def test_constant_regs():
+  args = (ctypes.c_uint64 * 4)(0x1000, 0x2000, 0x3000, 0)
+  gpu = QCOMGPU()
+  key = (mesa.SB6_CS_SHADER, mesa.ST_CONSTANTS)
+  gpu.state[key], gpu.state_units[key] = ctypes.addressof(args), 2
+  regs = gpu.constant_regs(3)
+  assert regs[('c', 0, 0)] == [0x1000, 0x1000, 0x1000]
+  assert regs[('c', 0, 2)] == [0x2000, 0x2000, 0x2000]
+  assert regs[('c', 1, 0)] == [0x3000, 0x3000, 0x3000]
+
+def test_constant_regs_checks_range():
+  checked = []
+  constants = (ctypes.c_uint32 * 4)(1, 2, 3, 4)
+  gpu = QCOMGPU(check_range=lambda address, size: checked.append((address, size)))
+  key = (mesa.SB6_CS_SHADER, mesa.ST_CONSTANTS)
+  gpu.state[key], gpu.state_units[key] = ctypes.addressof(constants), 1
+
+  gpu.constant_regs(1)
+
+  assert checked == [(ctypes.addressof(constants), 16)]
+
+def test_local_id_register():
+  gpu = QCOMGPU()
+  gpu.regs[mesa.REG_A6XX_SP_CS_CONST_CONFIG_0] = qreg.a6xx_sp_cs_const_config_0(
+    wgidconstid=0xfc, wgsizeconstid=0xfc, wgoffsetconstid=0xfc, localidregid=7 * 4)
+  assert gpu.local_id_register() == 7
+
+def test_workgroup_id_register():
+  gpu = QCOMGPU()
+  gpu.regs[mesa.REG_A6XX_SP_CS_CONST_CONFIG_0] = qreg.a6xx_sp_cs_const_config_0(
+    wgidconstid=48 * 4, wgsizeconstid=0xfc, wgoffsetconstid=0xfc, localidregid=7 * 4)
+  assert gpu.workgroup_id_register() == 48
