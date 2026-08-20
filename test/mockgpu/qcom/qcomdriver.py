@@ -1,6 +1,7 @@
 import ctypes, functools, mmap
 from tinygrad.runtime.autogen import kgsl, libc
 from test.mockgpu.driver import VirtDriver, VirtFile, VirtFileDesc
+from test.mockgpu.qcom.qcomgpu import QCOMGPU
 
 class KGSLFileDesc(VirtFileDesc):
   def __init__(self, fd, driver):
@@ -21,6 +22,8 @@ class QCOMDriver(VirtDriver):
     self.next_obj, self.gpuobjs = 1, {}
     self.gpuaddrs = {}
     self.next_ctx, self.contexts = 1, set()
+    self.gpu = QCOMGPU()
+    self.timestamps = {}
 
   def kgsl_ioctl(self, request, argp):
     nr = request & 0xff
@@ -41,6 +44,7 @@ class QCOMDriver(VirtDriver):
       ctx = kgsl.struct_kgsl_drawctxt_create.from_address(argp)
       ctx.drawctxt_id = self.next_ctx
       self.contexts.add(self.next_ctx)
+      self.timestamps[self.next_ctx] = 0
       self.next_ctx += 1
       return 0
     if nr == 0x32:
@@ -52,6 +56,20 @@ class QCOMDriver(VirtDriver):
       if constraint.type != kgsl.KGSL_CONSTRAINT_PWRLEVEL: raise NotImplementedError(f'unsupported KGSL constraint {constraint.type:#x}')
       level = kgsl.struct_kgsl_device_constraint_pwrlevel.from_address(constraint.data)
       if level.level != kgsl.KGSL_CONSTRAINT_PWR_MAX: raise NotImplementedError(f'unsupported KGSL power level {level.level}')
+      return 0
+    if nr == 0x4a:
+      cmd = kgsl.struct_kgsl_gpu_command.from_address(argp)
+      if cmd.context_id not in self.contexts: raise ValueError(f'invalid KGSL context {cmd.context_id}')
+      if cmd.numcmds != 1 or cmd.cmdsize != ctypes.sizeof(kgsl.struct_kgsl_command_object):
+        raise NotImplementedError('unsupported KGSL command list')
+      obj = kgsl.struct_kgsl_command_object.from_address(cmd.cmdlist)
+      if obj.flags != kgsl.KGSL_CMDLIST_IB or obj.size % 4: raise ValueError('invalid KGSL command object')
+      mapped = any(base <= obj.gpuaddr and obj.gpuaddr + obj.size <= base + self.gpuobjs[obj_id]
+                   for obj_id, base in self.gpuaddrs.items())
+      if not mapped: raise ValueError('KGSL command object is not mapped')
+      self.gpu.execute((ctypes.c_uint32 * (obj.size // 4)).from_address(obj.gpuaddr))
+      self.timestamps[cmd.context_id] += 1
+      cmd.timestamp = self.timestamps[cmd.context_id]
       return 0
     raise NotImplementedError(f'unsupported KGSL ioctl {nr:#x}')
   

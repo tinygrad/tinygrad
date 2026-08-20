@@ -1,5 +1,6 @@
 import ctypes, mmap, pytest
-from tinygrad.runtime.autogen import kgsl, libc
+from tinygrad.runtime.autogen import kgsl, libc, mesa
+from tinygrad.runtime.ops_qcom import pkt7_hdr
 from test.mockgpu.qcom.qcomdriver import QCOMDriver
 
 def test_open():
@@ -58,3 +59,17 @@ def test_power_constraint():
   prop = kgsl.struct_kgsl_device_getproperty(type=kgsl.KGSL_PROP_PWR_CONSTRAINT,
     value=ctypes.addressof(constraint), sizebytes=ctypes.sizeof(constraint))
   assert driver.kgsl_ioctl(0x32, ctypes.addressof(prop)) == 0
+
+def test_gpu_command():
+  driver = QCOMDriver()
+  ctx = kgsl.struct_kgsl_drawctxt_create()
+  driver.kgsl_ioctl(0x13, ctypes.addressof(ctx))
+  alloc = kgsl.struct_kgsl_gpuobj_alloc(size=0x1000)
+  driver.kgsl_ioctl(0x45, ctypes.addressof(alloc))
+  addr = driver.kgsl_mmap(0, alloc.mmapsize, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, alloc.id * 0x1000)
+  ctypes.c_uint32.from_address(addr).value = pkt7_hdr(mesa.CP_WAIT_FOR_IDLE, 0)
+  obj = kgsl.struct_kgsl_command_object(gpuaddr=addr, size=4, flags=kgsl.KGSL_CMDLIST_IB)
+  cmd = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), cmdsize=ctypes.sizeof(obj), numcmds=1, context_id=ctx.drawctxt_id)
+  driver.kgsl_ioctl(0x4a, ctypes.addressof(cmd))
+  assert cmd.timestamp == 1
+  libc.munmap(addr, alloc.mmapsize)
