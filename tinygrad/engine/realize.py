@@ -3,7 +3,7 @@ from typing import cast, Iterator, Any, Sequence
 import random, itertools, math, weakref, array, decimal
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, ansipad, all_int, prod, flatten, Context, getenv, to_tuple, tqdm
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, PARALLEL
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.dtype import dtypes
@@ -270,7 +270,8 @@ def lower_and_compile(linear:UOp) -> UOp:
   todo = list({keys[c]: (c.src[0], rens[c]) for c in calls if keys[c] not in to_program_cache}.items())
   if len(todo):
     # kernels that beam search must compile in the parent, beam needs device access to time candidates
-    pool = None if len(todo) == 1 or any(getattr(c.src[0].arg, "beam", 0) for c in calls) else get_worker_pool(todo[0][1][1].target.device)
+
+    pool = None if len(todo) == 1 or any(getattr(c.src[0].arg, "beam", 0) for c in calls) or PARALLEL == 0 else get_worker_pool()
     ctx = {v.key: v.value for v in to_program_config}
     tasks = ((i, ast_ren, ctx) for i, (_, ast_ren) in enumerate(todo))
     with tqdm(total=len(todo), desc="compiling", disable=DEBUG<1) as pbar:
