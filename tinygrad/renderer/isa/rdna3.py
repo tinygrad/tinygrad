@@ -265,6 +265,7 @@ def _mulhi(a:UOp, b:UOp, signed:bool) -> UOp:
 # use explicit SUBs (not x + y*-1): this runs post-decomp so nothing repairs the weak -1, and weak consts break isel vreg sizing
 def _sub(x:UOp, y:UOp) -> UOp: return UOp(Ops.SUB, x.dtype, src=(x, y))
 
+# NOTE: can this be expanded at a higher level ex. codegen, reusable and less verbose
 def idiv(ctx, x:UOp):
   signed = not dtypes.is_unsigned(x.dtype)
   dt = dtypes.uint32 if x.dtype.itemsize <= 4 else dtypes.uint64
@@ -383,16 +384,15 @@ pm_int_to_float = PatternMatcher([
 
 pre_isel_matcher = PatternMatcher([
   (UPat(Ops.STACK, name="x"), lambda x: stack2regs(x) if len(x.src) and not (x.dtype.itemsize == 2 and all(s.op is Ops.LOAD for s in x.src)) else None),
-  # --- bool repr ---
+  # --- bools are lane masks ---
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), \
     lambda buf,val,x: x.replace(src=(buf,val.cast(dtypes.uint32)) + x.src[2:])),
   (UPat(Ops.LOAD, dtypes.bool, allow_any_len=True, name="x"), lambda x: x.replace(dtype=dtypes.uint32) != 0),
   (UPat(Ops.BUFFER, dtypes.bool, name="x"), lambda x: x.replace(dtype=dtypes.uint8) if x.addrspace is AddrSpace.REG else None),
   (UPat.cvar("x").cast(dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.val else 0),), tag=GP_SGPRS)),
-  # TODO: use bfe/bi to unpack/pack once we have batched loads/stores
   (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(1, x.dtype), const(0, x.dtype))),
-  # --- int8 alu is int16 ---
+  # --- int8 alu is int16 for now ---
   (UPat(GroupOp.ALU, dtypes.int8s, name="x"), lambda x: x.replace(dtype=smux(x.dtype, dtypes.int16, dtypes.uint16))),
   (UPat(GroupOp.Comparison, src=(UPat.var("y", dtype=dtypes.int8s), UPat()), name="x"),
     lambda x,y: x.replace(src=(y.bitcast(smux(y.dtype, dtypes.int16, dtypes.uint16)), x.src[1]))),
@@ -402,29 +402,17 @@ pre_isel_matcher = PatternMatcher([
     lambda y,x: gep(y, 0).replace(dtype=smux(y.dtype, dtypes.int32, dtypes.uint32)).cast(x.dtype)),
   (UPat.var("y", dtypes.ints).cast(dtypes.ints).named("x"), lambda y,x: y.bitcast(x.dtype) if y.dtype.itemsize == x.dtype.itemsize else
     (const((1 << y.dtype.itemsize*8)-1, y.dtype) & y).bitcast(x.dtype)),
-  # narrowing long goes through b32
-  (UPat(Ops.MUL, dtypes.int16, name="x"), lambda x: x.replace(dtype=dtypes.int32)),
   # --- 64 bit semantics ---
-  # NOTE: does this break casted const spec? problem is we rely on sub-register indexes on GROUP
   (UPat.cvar("c").cast((dtypes.float64,)+dtypes.int64s, name="x"), const64),
-  (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=(dtypes.ulong,dtypes.long,dtypes.float64)), UPat.var("b"))),
+  (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=dtypes.int64s+(dtypes.float64,)), UPat.var("b"))),
     lambda pred,a,b: UOp.group(pred.where(gep(a,0),gep(b,0)), pred.where(gep(a,1), gep(b,1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
-  (UPat((Ops.SHR, Ops.SHL), dtypes.int64s+(dtypes.float64,), src=(UPat(), UPat.cvar("y").cast()), name="x"), # prevent 64 bit immediate from being realized into 2 regs for shift
-    lambda y,x: x.replace(src=(x.src[0], y.replace(dtype=dtypes.uint32)))),
-  # shift distance must be in single vgpr
-  (UPat((Ops.SHR, Ops.SHL), dtypes.int64s, src=(UPat.var("val"), UPat.var("shft")), name="x"),
-    lambda x,val,shft: x.replace(src=(val, shft.cast(dtypes.uint32)))),
+  # prevent 64 bit immediate from being realized into 2 regs for shift
+  (UPat((Ops.SHR, Ops.SHL), dtypes.int64s+(dtypes.float64,), src=(UPat.var("val"), UPat.cvar("c").cast()), name="x"),
+    lambda val,c,x: x.replace(src=(val, const(c.val, dtypes.uint32)))),
   # --- other ---
   (UPat(Ops.CDIV, name="x"), idiv),
-  # NOTE: this exposes issues with vgpr value representation invariants, if a value takes up less than 32 bits either we dont care about
-  # what else is in there, could be garbage, or it has to be masked at boundaries and sign extended carefully etc... so it can be operated on
-  (UPat((Ops.CAST, Ops.BITCAST), dtypes.uchar, src=(UPat.var("y", dtype=dtypes.int8),)), \
-    lambda y: (y & const((1 << 8) - 1, dtypes.uint8)).replace(dtype=dtypes.uint8)),
-  (UPat((Ops.CAST, Ops.BITCAST), dtypes.ushort, src=(UPat.var("y", dtype=dtypes.int16),)), \
-    lambda y: (y & const((1 << 16) - 1, dtypes.uint16)).replace(dtype=dtypes.uint16)),
-  # hack?
+  (UPat(Ops.MUL, (dtypes.int16,dtypes.int32), name="x"), lambda x: x.replace(dtype=dtypes.uint32).bitcast(x.dtype)),
   (UPat(Ops.MAX, dtypes.int64s, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda a,b,x: (a < b).where(b, a).replace(dtype=x.dtype)),
-  (UPat(Ops.MUL, dtypes.int32, name="x"), lambda x: x.replace(dtype=dtypes.uint32).bitcast(dtypes.int32)),
   (UPat(Ops.MAX, dtypes.int16s, name="x"), lambda x: x.replace(dtype=smux(x.dtype, dtypes.int32, dtypes.uint32)).bitcast(x.dtype)),
 ]) + pm_float_to_int + pm_int_to_float
 
@@ -466,8 +454,9 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
     _vop3(x.ins(RDNA3Ops.v_cndmask_b32_e64 if x.dtype.itemsize >= 4 else RDNA3Ops.v_cndmask_b16, src=(b,a,pred)))),
   (UPat(GroupOp.Binary|GroupOp.Unary, name="x"), alu),
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
-  # dont realize weak cast?
-  (UPat.var("y", dtype=dtypes.ints+dtypes.floats).cast(name="x"), lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e32"))),
+  # NOTE: dont realize weak casts
+  (UPat.var("y", dtype=dtypes.ints+dtypes.floats).cast(name="x"),
+    lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e32"))),
   # --- mem ops ---
   (UPat.var("idx").store(UPat.var("val"), allow_any_len=True).named("x"), lambda ctx,x,idx,val: reg_store(ctx,x,idx,val) if
     idx.addrspace is AddrSpace.REG else store(ctx,x,idx,val)),
@@ -592,14 +581,12 @@ class RDNA3Renderer(ISARenderer):
   # use scratch memory space for spilling thread local memory, addressed as:
   # SCRATCH_BASE + Swizzle(addr, tid) 12 bit ioffs, ensure no overflow!
   def spill(self, spill_offset:int, x:UOp) -> UOp:
-    raise NotImplementedError()
     sz = x.dtype.itemsize # TODO: handle GROUP case
     opc = getattr(RDNA3Ops, f"scratch_store_b{sz*8}")
     ioffs = const(spill_offset, dtypes.uint32)
     return UOp(Ops.INS, arg=opc, src=(ioffs,x))
 
   def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> UOp:
-    raise NotImplementedError()
     ioffs = const(spill_offset, dtypes.uint32)
     sz = x.dtype.itemsize
     suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
