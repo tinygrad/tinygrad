@@ -8,6 +8,9 @@ def custom_set0_kernel(A:UOp, num:int) -> UOp:
   return A[0].set(num).sink(arg=KernelInfo(f"custom_set0_{num}"))
 
 class TestScheduleCache(unittest.TestCase):
+  def setUp(self):
+    schedule_cache.clear()
+
   def test_bound_variable_reuses_cache(self):
     schedule_cache.clear()
     v = Variable('v', 1, 100)
@@ -31,7 +34,6 @@ class TestScheduleCache(unittest.TestCase):
       self.assertEqual(a.item(), i)
 
   def test_same_custom_function_reuses_cache(self):
-    schedule_cache.clear()
     fxn = functools.partial(custom_set0_kernel, num=10)
 
     # first run
@@ -47,6 +49,16 @@ class TestScheduleCache(unittest.TestCase):
     b.realize()
     self.assertEqual(b.item(), 10)
     self.assertEqual(len(schedule_cache), cache_size_after_first)
+
+  def test_fresh_gradient_callback_reuses_cache(self):
+    cache_size_after_first = None
+    for _ in range(2):
+      a = Tensor.empty(1)
+      a = Tensor.custom_kernel(a, fxn=functools.partial(custom_set0_kernel, num=10), grad_fxn=lambda grad,call: (grad,))[0]
+      a.realize()
+      self.assertEqual(a.item(), 10)
+      if cache_size_after_first is None: cache_size_after_first = len(schedule_cache)
+      else: self.assertEqual(len(schedule_cache), cache_size_after_first)
 
   def test_simple(self):
     a = Tensor.ones(10).contiguous()

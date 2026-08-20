@@ -1,6 +1,7 @@
 import time, inspect, functools
+from dataclasses import replace
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo, CallInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup
 from tinygrad.schedule.allreduce import is_allreduce_linear_output
@@ -141,19 +142,67 @@ pm_resolve_linear_call = PatternMatcher([
 ])+pm_flatten_linear
 
 schedule_cache: dict[bytes, UOp] = {}
+schedule_cache_param_maps: dict[bytes, dict[int, int]] = {}
+
+def remap_paramarg_slots(root:UOp, param_map:dict[int, int], buffer_map:dict[int, int]|None=None) -> UOp:
+  """Simultaneously rename direct PARAM/BUFFER slots without fixed-point substitution cycling on permutations."""
+  rebuilt:dict[UOp, UOp] = {}
+  for x in root.toposort(enter_calls=False):
+    src = tuple(rebuilt.get(s, s) for s in x.src)
+    mapping = param_map if x.op is Ops.PARAM else buffer_map if x.op is Ops.BUFFER else None
+    arg = replace(x.arg, slot=mapping[x.arg.slot]) if mapping is not None and isinstance(x.arg, ParamArg) and x.arg.slot in mapping else x.arg
+    rebuilt[x] = x.replace(src=src, arg=arg)
+  return rebuilt[root]
+
+def canonicalize_call_for_schedule_cache(call:UOp) -> UOp|None:
+  body = call.src[0]
+  if body.op not in {Ops.SINK, Ops.LINEAR}: return None
+  nodes = body.toposort(enter_calls=False)
+  params = [x for x in nodes if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
+  param_slots = list(dict.fromkeys(x.arg.slot for x in params))
+  if any(slot+1 >= len(call.src) for slot in param_slots): return None
+  bufs = [x for x in nodes if x.op is Ops.BUFFER and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
+  buf_slots = list(dict.fromkeys(x.arg.slot for x in bufs))
+  pmap, bmap = ({slot:i for i,slot in enumerate(param_slots)},
+                {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)})
+  body = remap_paramarg_slots(body, pmap, bmap)
+  arg = replace(call.arg, grad_fxn=None) if isinstance(call.arg, CallInfo) and call.arg.grad_fxn is not None else call.arg
+  return call.replace(src=(body,)+tuple(call.src[1+slot] for slot in param_slots), arg=arg)
+
+pm_schedule_cache_key = PatternMatcher([
+  (UPat((Ops.CALL, Ops.FUNCTION), name="call", allow_any_len=True), canonicalize_call_for_schedule_cache),
+])
+
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(function:UOp) -> UOp|None:
   st = time.perf_counter()
   if isinstance(function.arg, KernelInfo): return None
-  cache_key = function.key
+  # Gradient callbacks have been consumed before scheduling, and opaque CALL parameter numbering is local to each
+  # body. Canonicalize each body together with its arguments, then alpha-rename this enclosing function's inputs.
+  canonical = graph_rewrite(function, pm_schedule_cache_key, name="canonicalize schedule cache calls", walk=True)
+  nodes = canonical.toposort(enter_calls=False)
+  params = [x for x in nodes if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
+  bufs = [x for x in nodes if x.op is Ops.BUFFER and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
+  param_slots, buf_slots = (list(dict.fromkeys(x.arg.slot for x in xs)) for xs in (params, bufs))
+  pmap, bmap = ({slot:i for i,slot in enumerate(param_slots)}, {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)})
+  canonical = remap_paramarg_slots(canonical, pmap, bmap)
+  param_map = {pmap[x.arg.slot]:x.arg.slot for x in params}
+  cache_key = canonical.key
+  sc_ret = None
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
     if SPEC: type_verify(function, spec_tensor)
     # support recursive CALLs
     linear = create_schedule(get_kernel_graph(function))
-    if SCACHE: schedule_cache[cache_key] = linear
+    if SCACHE:
+      schedule_cache[cache_key] = linear
+      schedule_cache_param_maps[cache_key] = param_map
   else:
     # schedule cache hit
     linear = sc_ret
+    old_map = schedule_cache_param_maps[cache_key]
+    assert old_map.keys() == param_map.keys(), "canonical schedule cache hit has mismatched parameters"
+    remap = {old_slot:param_map[canonical_slot] for canonical_slot,old_slot in old_map.items()}
+    linear = remap_paramarg_slots(linear, remap)
   if (DEBUG >= 1 and len(linear.src) > 1) or DEBUG >= 3:
     for frm in inspect.stack():
       if frm.filename == "<string>": continue
