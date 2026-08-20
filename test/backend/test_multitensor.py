@@ -72,9 +72,9 @@ class TestMultiTensor(unittest.TestCase):
     X.shard_(devices_2, 0)
     out = (X + X)
     linear = compile_linear(out.schedule_linear())
-    names = [call.src[0].src[0].arg.name for call in linear.src if call.src[0].op is Ops.PROGRAM]
+    uops = [call.src[0].src[0] for call in linear.src if call.src[0].op is Ops.PROGRAM]
     run_linear(linear)
-    self.assertEqual(len(set(names)), 1, "function was relinearized")
+    self.assertEqual(len(set(uops)), 1, "function was relinearized")
 
   def test_shard_beam(self):
     cpu_2 = ("CPU:1", "CPU:2")

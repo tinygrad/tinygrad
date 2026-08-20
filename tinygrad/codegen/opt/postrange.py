@@ -1,12 +1,11 @@
 from __future__ import annotations
 import math, itertools
-from collections import defaultdict
-from typing import cast, Final
+from typing import cast
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, remove_all_tags
 from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, Invalid
-from tinygrad.helpers import colored, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
+from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
@@ -48,7 +47,6 @@ class Scheduler:
     if hasattr(self, 'tensor_core'): ret.tensor_core = self.tensor_core
     return ret
 
-  kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
   def get_optimized_ast(self, name_override:str|None=None) -> UOp:
     if name_override is not None: name = name_override
     else:
@@ -56,9 +54,6 @@ class Scheduler:
       special_uops = sorted([x for x in self.ast.toposort() if x.op is Ops.SPECIAL], key=lambda x: x.arg)
       special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
-      Scheduler.kernel_cnt[(function_name := to_function_name(name))] += 1
-      num = f"n{Scheduler.kernel_cnt[function_name]-1}" if Scheduler.kernel_cnt[function_name] > 1 else ""
-      name += colored(num, 'BLACK')
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
