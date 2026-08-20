@@ -879,13 +879,6 @@ class PCIIface(PCIIfaceBase):
     else:
       doorbell_index = self.dev_impl.gfx.setup_ring(*(rcvr_params:=(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr,
         eop_buffer.va_addr, eop_buffer.size, is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
-
-    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA and self.dev_impl.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
-      # aqua (NBIO 7.9): doorbell-bar writes don't wake SDMA user queues on this PF (queue hangs); submit by writing the
-      # RB_WPTR register directly, the same channel the sdma engine polls for ring updates
-      doorbell = self.dev_impl.mmio.view(self.dev_impl.reg('regSDMA_GFX_RB_WPTR').addr[idx] * 4, 8, fmt='Q')
-      return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=doorbell, put_value=0, params=rcvr_params,
-        read_ptr=gart.cpu_view().view(offset=rptr, size=8, fmt='Q'), write_ptr=gart.cpu_view().view(offset=wptr, size=8, fmt='Q'))
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q'), put_value=0,
       read_ptr=gart.cpu_view().view(offset=rptr, size=8, fmt='Q'), write_ptr=gart.cpu_view().view(offset=wptr, size=8, fmt='Q'), params=rcvr_params)
 
