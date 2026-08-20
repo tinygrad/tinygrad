@@ -6,10 +6,9 @@ from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.dtype import dtypes
 from bisect import bisect_left
 
-REG_OPS = {Ops.LOAD, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.IF, Ops.ENDIF}
+REG_OPS = {Ops.LOAD, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL}
 
 class LinearScanRegallocContext:
-  # NOTE: wrong for fill regs
   def vdef(self, v:VRegister) -> UOp: return self.uops[self.live_intervals[v][0]]
   def __init__(self, uops:list[UOp], ren:ISARenderer):
     self.uops, self.ren, self.idx = [u for u in uops if u.op in REG_OPS], ren, itertools.count()
@@ -52,17 +51,17 @@ class LinearScanRegallocContext:
       return block
 
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
-    def fill(v:VRegister, i:int, cons:tuple[Register, ...]|None=None) -> tuple[Register,...]:
+    def fill(v:VRegister, i:int, cons:tuple[Register, ...]|None=None, pos:int|None=None) -> tuple[Register,...]:
       if v not in self.spills:
         # the value of an x86 BUFFER is its 64bit address
         # RDNA3 does not assign directly to BUFFERs
         sz = 8 if self.vdef(v).op is Ops.BUFFER else v.cons[0].size
-        sz *= v.width
+        if pos is None: sz *= v.width
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
         self.spills[v] = offset
         self.stack_size = offset + sz
       rs = alloc(v, [cons] if cons is not None else None, i)
-      self.insert_before.setdefault(i, []).append((v, rs))
+      self.insert_before.setdefault(i, []).append((v, (rs[pos],) if pos is not None else rs))
       return rs
 
     for i,u in enumerate(self.uops):
@@ -72,8 +71,9 @@ class LinearScanRegallocContext:
         if u.op is Ops.END: continue
         if not isinstance(v:=rdef(s), VRegister): continue
         vv = v.parent if v.is_sub() else v
-        if vv not in live: live[vv] = fill(vv,i)
-        self.reals.setdefault(i, {})[v] = (live[v.parent][v.pos],) if v.is_sub() else live[v]
+        # fill at sub-register level, contiguous constraint only needed for the parent register
+        if vv not in live: live[vv] = fill(vv,i,pos=v.pos)
+        self.reals.setdefault(i, {})[v] = (live[vv][v.pos],) if v.is_sub() else live[vv]
 
       # allocate defs
       for j,v in enumerate(rdefs(u)):
@@ -114,11 +114,25 @@ class LinearScanRegallocContext:
           if v not in live or live[v] != rs: live[v] = fill(v, i, rs)
     self.ren.spill_size = self.stack_size
 
+    for vr in self.spills.keys():
+      u = self.vdef(vr)
+      print(vr, u.op, u.arg)
+
+
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i, nsrc, = next(ctx.idx), []
   for j,s in enumerate(x.src):
-    if i in ctx.reals and (v := rdef(ctx.uops[i].src[j])) in ctx.spills: nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]))
-    else: nsrc.append(s)
+    if i in ctx.reals and (v := rdef(ctx.uops[i].src[j])) in ctx.spills:
+      # NOTE: INDEX hack..., handle this ahead of time
+      while s.op is Ops.AFTER: s=s.src[0]
+      regs = ctx.reals[i][v] if s.op is not Ops.INDEX else (ctx.reals[i][v][s.src[1].src[0].val],)
+      nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), regs)[0])
+    elif s.op is Ops.INDEX and rdefs(s.src[0]) and (c := s.src[1].src[0].val) < len(rdefs(s.src[0])):
+      # NOTE: should these be rewritten to subregs pre-regalloc?
+      # tagless INDEX gets rewritten to indexed register block element of buf
+      nsrc.append(s.replace(tag=(rdefs(s.src[0])[c],)))
+    else:
+      nsrc.append(s)
 
   ndefs = []
   for v in rdefs(x):
@@ -126,8 +140,12 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     else: ndefs.append(v)
   nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
 
-  after = [ctx.ren.spill(ctx.spills[v],nx) for v in rdefs(x) if v in ctx.spills]
-  before = [ctx.ren.fill(ctx.spills[v],ctx.vdef(v),rs) for v,rs in ctx.insert_before.get(i, [])]
+  after, before = [], []
+  for v in rdefs(x):
+    if v in ctx.spills: after.extend(ctx.ren.spill(ctx.spills[v],nx))
+  for v,rs in ctx.insert_before.get(i, []):
+    before.extend(ctx.ren.fill(ctx.spills[v], ctx.vdef(v),rs)[1])
+
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([

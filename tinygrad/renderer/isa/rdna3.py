@@ -195,12 +195,15 @@ def load(ctx, x:UOp, idx:UOp):
   ctx.ren.semantic_op[opc]=Ops.LOAD
   return x.ins(opc, src=fold_address(idx)+x.src[1:], tag=(ctx.vreg(GP_VGPRS, width=(sz+3)//4),))
 
+# this needs to be fixed, any way to not break SSA without PHI nodes/large refactor?
 def reg_store(ctx, x:UOp, idx:UOp, val:UOp):
   vregs, i = ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4), idx.src[1].src[0].val
   if val.op is Ops.GROUP:
     if idx.dtype.itemsize == 8: return ctx.ren.copy(UOp.group(val.src[i*2], val.src[i*2+1], dtype=idx.dtype), vregs[i])
-    else: return ctx.ren.copy(val.src[idx.src[1].val].after(val, idx), vregs[i])
-  else: return ctx.ren.copy(val.after(idx).replace(dtype=idx.dtype), *vregs)
+    else: return ctx.ren.copy(val.src[i].after(val, idx), vregs[i])
+  else:
+    assert len(vregs) == 1
+    return ctx.ren.copy(val.after(idx).bitcast(val.dtype), *vregs)
 
 def store(ctx, x:UOp, idx:UOp, val:UOp):
   n = idx.src[-1].src[0].val if idx.op is Ops.SHRINK else 1
@@ -307,9 +310,10 @@ def alu(ctx, x:UOp): # alu arg used for machine instruction overrides, ex. mul_h
 def render_wmma(ctx, wmma:UOp):
   a,b,acc = wmma.src
   srcdt = dt_to_isa[wmma.arg[1]]
+  if rdef(acc) is None: return None
   if wmma.arg[1] in dtypes.int8s: srcdt = "iu8"
   ins = getattr(RDNA3Ops, f"v_wmma_{dt_to_isa[wmma.dtype]}_16x16x16_{srcdt}")
-  return UOp(Ops.INS, arg=ins, dtype=wmma.dtype, src=(a,b,acc), tag=(ctx.vreg(GP_VGPRS, width=8),))
+  return UOp(Ops.INS, arg=ins, dtype=wmma.dtype, src=(a,b,acc), tag=acc.tag)
 
 # ---- casting utilities -----
 def int_to_int64(y:UOp, tdt:DType):
@@ -424,6 +428,7 @@ pm_alu_fusion = PatternMatcher([
     lambda ctx,x,y,b: _vop3(x.ins(RDNA3Ops.v_add3_u32, src=y.src + (b,)))),
 ])
 
+# TODO: INDEX into wide register should be heuristically rewritten to SubVRegister pre-regalloc?
 isel_matcher = pm_alu_fusion + PatternMatcher([
   # renderer lowering can synthesize bare bool constants after the canonical CAST(CONST) pass
   (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.val else 0),), tag=GP_SGPRS)),
@@ -460,6 +465,7 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   # --- mem ops ---
   (UPat.var("idx").store(UPat.var("val"), allow_any_len=True).named("x"), lambda ctx,x,idx,val: reg_store(ctx,x,idx,val) if
     idx.addrspace is AddrSpace.REG else store(ctx,x,idx,val)),
+  # THIS IS VERY BAD, breaks SSA... do we need phi nodes? even if we route load references to previous stores multiple stores breaks...
   (UPat.var("idx").load(name="x", allow_any_len=True), lambda ctx,x,idx:
     (x.replace(tag=ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4)) if x.tag is None else None)
     if idx.addrspace is AddrSpace.REG else load(ctx,x,idx)),
@@ -486,61 +492,59 @@ pre_regalloc_matcher = PatternMatcher([
 ])
 
 post_regalloc_matcher = PatternMatcher([
-  # NOTE: rewrite subregister references In tags, belongs in regalloc arch agnostic
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("c").cast()), name="x"), lambda x,buf,c:
-    (x.replace(tag=(rdefs(buf)[c.val],)), []) if c.val < len(rdefs(buf)) else None),
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, src=(UPat(), UPat.var("acc"), UPat()), name="x"), lower_end),
-  # hacky, forces do_assemble in codegen but might hide incomplete lowering
+  # TODO: figure out what Ops stay in graph this long and remove them?
+  # NOTE: hacky, forces do_assemble in codegen but might hide incomplete lowering
   (UPat(GroupOp.All - {Ops.INS}, name="x"), lambda x: (x, [])),
 ])
 
 def encode(ctx, x:UOp):
-  if x.arg in [RDNA3Ops.s_nop, RDNA3Ops.s_endpgm]: return x.replace(arg=x.arg())
   def encfield(x:UOp):
     x = rafter(x)
-    # fold immediate
-    # NOTE: should this support old form? (no cast)
     if is_const(x): return x.val if x.op is Ops.CONST else x.src[0].val
-    # encode register(s) as dsl class slices
     r, rs = rdef(x), rdefs(x)
     assert isinstance(r, Register), f"expect Register to encode, got {rs[0]}"
     for i,g in enumerate(rs[1:]): assert g.index == rs[i].index+1, "wide registers must be contiguous"
-    dmap = { "vcc":dsl.VCC, "exec_lo":dsl.EXEC_LO, "v":dsl.v, "s":dsl.s  }
+    dmap = { "vcc":dsl.VCC, "exec_lo":dsl.EXEC_LO, "v":dsl.v, "s":dsl.s }
     base = next(v for k,v in dmap.items() if k in r.name)
     return base[r.index] if len(rs) == 1 else base[r.index:r.index+len(rs)-1]
-  group, oprs, kw, args = x.arg.func, x.src, None, None
+  group, kw, args = x.arg.func, None, None
 
-  if group is RDNA3Ops.SMEM: kw = dict(sdata=encfield(x), sbase=encfield(oprs[0]), offset=encfield(oprs[1]))
-  elif group is RDNA3Ops.SOPK: args = [dsl.NULL, oprs[0].arg]
+  # print("encoding", x.arg.args[0].name.lower(), rdefs(x), [(s.op,s.arg,rdefs(s)) for s in x.src])
+
+  # TODO: use match, clean up
+  if group is RDNA3Ops.SMEM: kw = dict(sdata=encfield(x), sbase=encfield(x.src[0]), offset=encfield(x.src[1]))
+  elif group is RDNA3Ops.SOPK: args = [dsl.NULL, x.src[0].arg]
   elif group is RDNA3Ops.SCRATCH:
-    kw = dict(offset=encfield(oprs[0]))
+    kw = dict(offset=encfield(x.src[0]))
     if rdef(x) is not None: kw["vdst"] = encfield(x)
-    else: kw["data"] = encfield(oprs[1])
+    else: kw["data"] = encfield(x.src[1])
   elif group is RDNA3Ops.GLOBAL:
-    kw = dict(addr=encfield(oprs[0]))
-    if is_const(oprs[1]): kw["offset"] = encfield(oprs[1])
-    else: kw["saddr"] = encfield(oprs[1])
-    if rdef(x) is None: kw["data"]=encfield(oprs[2])
+    kw = dict(addr=encfield(x.src[0]))
+    if is_const(x.src[1]): kw["offset"] = encfield(x.src[1])
+    else: kw["saddr"] = encfield(x.src[1])
+    if rdef(x) is None: kw["data"]=encfield(x.src[2])
     else: kw["vdst"]=encfield(x)
   elif group is RDNA3Ops.DS:
-    offs = encfield(oprs[1])
-    kw = dict(addr=encfield(oprs[0]), offset0=offs&0xFF, offset1=offs>>8)
-    if rdef(x) is None: kw["data0"]=encfield(oprs[3])
+    offs = encfield(x.src[1])
+    kw = dict(addr=encfield(x.src[0]), offset0=offs&0xFF, offset1=offs>>8)
+    if rdef(x) is None: kw["data0"]=encfield(x.src[3])
     else: kw["vdst"]=encfield(x)
-  elif group is RDNA3Ops.VOP3SD: kw = dict(sdst=encfield(vccop), vdst=encfield(x), **{f"src{i}":encfield(u) for i,u in enumerate(oprs[:3])})
-  elif group is RDNA3Ops.VOPC: args = [encfield(u) for u in oprs]
+  elif group is RDNA3Ops.VOP3SD: kw = dict(sdst=encfield(vccop), vdst=encfield(x), **{f"src{i}":encfield(u) for i,u in enumerate(x.src[:3])})
+  elif group is RDNA3Ops.VOPC: args = [encfield(u) for u in x.src]
   elif group is RDNA3Ops.VOP3P:
-    kw = {f"src{i}":encfield(oprs[i]) for i in range(3)}
+    kw = {f"src{i}":encfield(x.src[i]) for i in range(3)}
     kw["vdst"] = encfield(x)
     def _signed(dt:DType): return not (dtypes.is_unsigned(dt) or dtypes.is_float(dt))
-    kw["neg"] = _signed(oprs[0].dtype) | (_signed(oprs[1].dtype) << 1)
-  elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]: # alu
-    if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: oprs = oprs[:1]
-    if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: oprs = oprs[:2]
-    args = [encfield(x)] + [encfield(u) for u in oprs]
-  elif group is RDNA3Ops.SOPP: args = (oprs[0].val,) if len(oprs) > 0 and oprs[0].op is Ops.CONST else (0,)
+    kw["neg"] = _signed(x.src[0].dtype) | (_signed(x.src[1].dtype) << 1)
+  elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]:
+    n = None
+    if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: n = 1
+    if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: n = 2
+    args = [encfield(x)] + [encfield(u) for u in (x.src[:n] if n is not None else x.src)]
+  elif group is RDNA3Ops.SOPP: args = (x.src[0].val,) if len(x.src) > 0 and x.src[0].op is Ops.CONST else (0,)
   else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={x.arg.args[0].name.lower()}")
 
   return x.replace(arg=(x.arg(**kw) if kw is not None else x.arg(*args)))
@@ -579,19 +583,21 @@ class RDNA3Renderer(ISARenderer):
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
 
   # use scratch memory space for spilling thread local memory, addressed as:
-  # SCRATCH_BASE + Swizzle(addr, tid) 12 bit ioffs, ensure no overflow!
-  def spill(self, spill_offset:int, x:UOp) -> UOp:
-    sz = x.dtype.itemsize # TODO: handle GROUP case
-    opc = getattr(RDNA3Ops, f"scratch_store_b{sz*8}")
-    ioffs = const(spill_offset, dtypes.uint32)
-    return UOp(Ops.INS, arg=opc, src=(ioffs,x))
+  def spill(self, spill_offset:int, x:UOp) -> list[UOp]:
+    rs, ops = rdefs(x), []
+    rsz = rs[0].size*8
+    for i in range((len(rs)*rsz + 127)//128):
+      block = rs[i:i+(128//rsz)]
+      subset = def_reg(x.dtype, block)
+      ops.append(UOp(Ops.INS, arg=getattr(RDNA3Ops, f"scratch_store_b{len(block)*rsz}"), src=(const(spill_offset+i*128//rsz),subset)))
+    return ops
 
-  def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> UOp:
-    ioffs = const(spill_offset, dtypes.uint32)
-    sz = x.dtype.itemsize
-    suffix = "b" if sz > 2 else "u" if dtypes.is_unsigned(x.dtype) or dtypes.is_float(x.dtype) else "i"
-    opc = getattr(RDNA3Ops, f"scratch_load_{suffix}{sz*8}")
-    return UOp(Ops.INS, x.dtype, arg=opc, src=(ioffs,), tag=regs)
+  def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
+    ops, rsz = [], regs[0].size*8
+    for i in range((len(regs)*rsz + 127)//128):
+      block = regs[i:i+(128//rsz)]
+      ops.append(UOp(Ops.INS, arg=getattr(RDNA3Ops, f"scratch_load_b{len(block)*rsz}"), src=(const(spill_offset+i*128//rsz),), tag=block))
+    return UOp.group(*ops, tag=regs), ops
 
   def copy(self, u:UOp, r:VRegister|Register) -> UOp:
     if u.dtype.itemsize == 8:
