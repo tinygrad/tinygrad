@@ -12,7 +12,7 @@ from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.schedule.allreduce import create_allreduce_function
+from tinygrad.schedule.allreduce import create_allreduce_function, is_allreduce_linear_output
 
 # creation can recurse a lot
 import sys
@@ -128,7 +128,15 @@ def forward_assembled_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
   """Retarget a complete set of disjoint slice writes to an already allocated output buffer."""
   while target.op is Ops.RESHAPE: target = target.src[0]
   while src.op in {Ops.RESHAPE, Ops.CONTIGUOUS, Ops.CAST}: src = src.src[0]
-  if target is not output or output.dtype != src.dtype or output.numel() != src.numel() or output.device != src.device: return None
+  if target.dtype != src.dtype or target.numel() != src.numel() or target.device != src.device: return None
+  # The destination may be a contiguous view into a larger allocation. This is the form produced by slice-wise
+  # overwrite of packed gradients. Preserve `output` as the dependency state, but retarget the assembled producer
+  # to the view itself. Non-contiguous or unrelated targets still take the ordinary materialize-and-copy path.
+  if target is not output:
+    if target.base is not output.base or target.contiguous_view_offset() is None: return None
+    destination = target
+  else: destination = output
+
   # A replicated MSTACK often consists of COPYs of one freshly produced buffer. Produce directly into shard zero,
   # then transfer from that stable shard into the other output buffers. This removes both the producer temporary and
   # the final identity assembly kernels without duplicating the producer computation.
@@ -138,14 +146,40 @@ def forward_assembled_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
     if all(s is origins[0] for s in origins) and origins[0].op is Ops.AFTER:
       origin, base = origins[0], origins[0].src[0].base
       if all(d.op is Ops.STORE and d.src[0].base is base and base not in d.src[1].toposort(enter_calls=False) for d in origin.src[1:]):
-        targets = [UOp(Ops.SLICE, output.dtype, (output.mselect(i).buf_uop, UOp.const(0, dtypes.weakint)), output.numel(), tag=("allreduce",))
+        targets = [UOp(Ops.SLICE, destination.dtype, (destination.mselect(i).buf_uop, UOp.const(0, dtypes.weakint)),
+                       destination.numel(), tag=("allreduce",))
                    for i in range(len(src.src))]
         produced = targets[0].after(*(d.substitute({base:targets[0]}) for d in origin.src[1:]))
         states = [produced] + [t.after(t.store(produced.copy_to_device(s.device))) for t,s in zip(targets[1:], src.src[1:])]
         return output.after(*states)
   if src.op is not Ops.AFTER or src.src[0].base.op not in {Ops.BUFFER, Ops.PARAM}: return None
   if not any(s.op is Ops.AFTER and s.src[0].op is Ops.SLICE and s.src[0].tag == ("allreduce",) for s in src.src[1:]): return None
-  return output.after(*(s.substitute({src.src[0].base:output}) for s in src.src[1:]))
+  return output.after(*(s.substitute({src.src[0].base:destination}) for s in src.src[1:]))
+
+def forward_linear_store(ctx:dict[UOp, UOp], output:UOp, target:UOp, src:UOp) -> UOp|None:
+  """Collect caller-provided allreduce outputs so each shared LINEAR invocation is redirected exactly once."""
+  while target.op is Ops.RESHAPE: target = target.src[0]
+  while src.op in {Ops.RESHAPE, Ops.CONTIGUOUS, Ops.CAST}: src = src.src[0]
+  if target.dtype != src.dtype or target.numel() != src.numel() or target.device != src.device: return None
+  if target is output: destination = output
+  elif target.base is output.base and target.contiguous_view_offset() is not None: destination = target
+  else: return None
+  linear_calls = [x for x in src.src[1:] if x.op is Ops.CALL and x.src[0].op is Ops.LINEAR] if src.op is Ops.AFTER else []
+  if len(linear_calls) != 1 or len(src.src) != 2 or (offset:=destination.contiguous_view_offset()) is None: return None
+  call, old_output = linear_calls[0], src.src[0].buf_uop
+  arg_idxs = [i for i,x in enumerate(call.src[1:], start=1) if x.buf_uop is old_output]
+  if len(arg_idxs) != 1 or not is_allreduce_linear_output(call.src[0], arg_idxs[0]-1): return None
+  arg_idx, prior = arg_idxs[0], ctx.get(call, call)
+  physical = UOp(Ops.SLICE, destination.dtype, (destination.buf_uop, UOp.const(offset, dtypes.weakint)),
+                 destination.numel(), tag=("allreduce",)).reshape(call.src[arg_idx].shape)
+  ctx[call] = prior.replace(src=prior.src[:arg_idx]+(physical,)+prior.src[arg_idx+1:])
+  # Keep the original call as a token until every store has been visited. get_kernel_graph substitutes the single,
+  # fully redirected call afterward, avoiding one producer clone per returned gradient.
+  return output.after(call)
+
+pm_forward_linear_store = PatternMatcher([
+  (UPat(Ops.AFTER, src=(UPat.var("output"), UPat(Ops.STORE, src=(UPat.var("target"), UPat.var("src"))))), forward_linear_store),
+])
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve FUNCTION calls (inline the body)
@@ -639,6 +673,9 @@ pm_copy_to_store = PatternMatcher([
 def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
+  linear_outputs:dict[UOp, UOp] = {}
+  tsink = graph_rewrite(tsink, pm_forward_linear_store, ctx=linear_outputs, bottom_up=True, name="forward linear outputs")
+  tsink = tsink.substitute(linear_outputs, name="merge forwarded linear outputs")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")

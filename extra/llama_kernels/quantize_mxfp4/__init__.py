@@ -51,6 +51,12 @@ def quantize_mxfp4(x:Tensor, *, shuffle_row:bool=False, shuffle_col:bool=False, 
   assert out is None or (row and col), "cached output refresh requires both MXFP4 directions"
   M, N = math.prod(x.shape[:-1]), x.shape[-1]
   assert M % 256 == 0 and N % 256 == 0, f"MXFP4 quantization requires multiples of 256, got {x.shape}"
+  # Updated flat-model weights are contiguous slices of one packed allocation. Pass the physical view (including its
+  # byte offset and producer state) to the opaque quantizer instead of materializing one temporary per layer.
+  if (offset:=x.uop.contiguous_view_offset()) is not None and x.uop.numel() != x.uop.base.numel():
+    physical = UOp(Ops.SLICE, x.dtype, (x.uop.buf_uop, UOp.const(offset)), x.uop.numel(), tag=("allreduce",))
+    if x.uop.base.op is Ops.AFTER: physical = physical.after(x.uop.base)
+    x = Tensor(physical.reshape(x.shape))
   if out is not None: outputs = out
   elif row and col: outputs = alloc_mxfp4_outputs(x, flatten_row=flatten_row)
   else:
