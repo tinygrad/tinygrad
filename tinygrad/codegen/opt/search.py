@@ -42,9 +42,9 @@ def _time_program(prg:UOp, var_vals:dict[str, int], rawbufs:list[Buffer], early_
     global_size, factor = get_test_global_size(prg.arg.global_size, max_global_size, var_vals)
     prg = prg.replace(arg=replace(prg.arg, global_size=tuple(global_size)))
   call = prg.call(*[UOp.from_buffer(b) for b in rawbufs])
-  tms = []
+  tms, timer = [], time_call(call, var_vals, timeout=timeout, clear_l2=clear_l2)
   for _ in range(cnt):
-    try: tms.append(time_call(call, var_vals, timeout=timeout, clear_l2=clear_l2) * factor)
+    try: tms.append(next(timer) * factor)
     except AssertionError: return [math.inf] * cnt
     if early_stop is not None and early_stop < min(tms): break
   return tms

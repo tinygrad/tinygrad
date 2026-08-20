@@ -585,14 +585,15 @@ class HCQ2Compiled(Compiled):
       tdiffs.append((st+perf_counter_us())/2 - gpu)
     Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
 
-  @functools.cached_property
-  def rt_buffer(self) -> Buffer:
-    return Buffer(self.device, self.rt_allocator.size, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True), preallocate=True)
+  @functools.cache
+  def rt_buffer(self, uncached:bool=True) -> Buffer:
+    return Buffer(self.device, self.rt_allocator.size, dtypes.uint8, options=BufferSpec(uncached=uncached, cpu_access=True), preallocate=True)
 
   def new_buffer(self, b:UOp, cache:bool) -> Buffer:
     if cache or b.tag in HCQ_CACHE_TAGS:
       return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=b.tag not in ("program","kernargs"), cpu_access=True,nolru=True))
-    return self.rt_buffer.view(b.max_numel(), b.dtype, self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
+    return self.rt_buffer(uncached=b.tag!="kernargs").view(b.max_numel(), b.dtype,
+      self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
 
   @functools.cache
   def signal(self, name:str|int, init_value:int=0) -> Buffer:
