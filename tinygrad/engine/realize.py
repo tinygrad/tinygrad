@@ -1,14 +1,14 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import random, itertools, math, weakref, array, decimal
+import random, itertools, math, weakref, array, decimal, multiprocessing, atexit, signal
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple, tqdm
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.dtype import dtypes
-from tinygrad.renderer import Estimates
-from tinygrad.codegen import to_program
+from tinygrad.renderer import Estimates, Renderer
+from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_config
 from tinygrad.codegen.opt.postrange import args_from_ast
 
 # **************** Helpers ****************
@@ -252,6 +252,59 @@ pm_compile = PatternMatcher([
     call.replace(src=(to_program(ast, Device[call.device if isinstance(call.device, str) else call.device[0]].renderer), *call.src[1:]))),
 ])
 
+# **************** parallel lowering + compilation (pool shared with BEAM search) ****************
+
+# workers should not open devices and should ignore ctrl c and should not launch VIZ
+def _init_worker():
+  Context(ALLOW_DEVICE_USAGE=0, VIZ=0, TRACK_MATCH_STATS=0).__enter__()
+  signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+worker_pool = None
+def get_worker_pool(device:str):
+  global worker_pool
+  if multiprocessing.current_process().daemon: return None  # workers can't have children
+  default_parallel = multiprocessing.cpu_count() if device.split(":")[0] in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
+  if worker_pool is None and (workers := getenv("PARALLEL", default_parallel)):
+    worker_pool = multiprocessing.get_context("spawn").Pool(workers, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
+    @atexit.register
+    def close_pool(): worker_pool.close()
+  return worker_pool
+
+def terminate_worker_pool():
+  global worker_pool
+  if worker_pool is not None: worker_pool.terminate()
+  worker_pool = None
+
+def _compile_kernel(x:tuple[int, tuple[UOp, Renderer], dict]) -> tuple[int, UOp]:
+  with Context(**x[2]): return x[0], to_program(*x[1])
+
+def _needs_compile(c:UOp) -> bool:
+  if c.op is not Ops.CALL: return False
+  if c.src[0].op is Ops.SINK: return True
+  # a PROGRAM with a ProgramInfo and a BINARY is already compiled
+  return c.src[0].op is Ops.PROGRAM and not (isinstance(c.src[0].arg, ProgramInfo) and c.src[0].src[-1].op is Ops.BINARY)
+
+def lower_and_compile(linear:UOp) -> UOp:
+  # collect the kernels to lower and compile, deduped by their compile cache key
+  calls = [c for c in linear.toposort() if _needs_compile(c)]
+  rens = {c: Device[c.device if isinstance(c.device, str) else c.device[0]].renderer for c in calls}
+  keys = {c: to_program_key(c.src[0], rens[c]) for c in calls}
+  if not len(calls): return linear
+
+  # lower and compile what's not cached, in parallel if there's a worker pool
+  todo = list({keys[c]: (c.src[0], rens[c]) for c in calls if keys[c] not in to_program_cache}.items())
+  if len(todo):
+    # kernels that beam search must compile in the parent, beam needs device access to time candidates
+    pool = None if len(todo) == 1 or any(getattr(c.src[0].arg, "beam", 0) for c in calls) else get_worker_pool(todo[0][1][1].target.device)
+    ctx = {v.key: v.value for v in to_program_config}
+    tasks = ((i, ast_ren, ctx) for i, (_, ast_ren) in enumerate(todo))
+    for i, prg in tqdm((map if pool is None else pool.imap_unordered)(_compile_kernel, tasks),
+                       desc="lowering and compiling", total=len(todo), disable=DEBUG<1):
+      to_program_cache[todo[i][0]] = prg
+
+  # swap the compiled PROGRAMs into the calls
+  return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in calls}, name="precompile kernels")
+
 pm_optimize_local_size = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), optimize_local_size),
 ])
@@ -270,7 +323,7 @@ if getenv("HCQ2"): from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_li
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-  linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
+  linear = lower_and_compile(linear)
   linear = graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
   if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
   return linear
