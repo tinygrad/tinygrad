@@ -39,7 +39,7 @@ if __name__ == "__main__":
           with Timing("***** model linearize in "):
             uops_line = []
             for u in rewritten_uops:
-              uops_line.append(linearize(u), Device.default.renderer)
+              uops_line.append(linearize(u, Device.default.renderer))
           with Timing("***** model verify in    "):
             for u in uops_line: type_verify(u, spec_program)
           print(sum(len(u) for u in uops_line))
