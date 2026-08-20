@@ -1,12 +1,13 @@
 import functools, math, pathlib
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.mixin.gradient import gradient_auxiliary_mailbox
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import alloc_like, compile_hip
 
 # A backward producer may create the exact row/column representations consumed by
 # MXFP4 GEMM backward. The BF16 gradient remains the autograd value and is the key.
-_grad_mxfp4_mailbox:dict[UOp, tuple[UOp|None, UOp|None, UOp|None, UOp|None]] = {}
+_grad_mxfp4_mailbox = gradient_auxiliary_mailbox("mxfp4")
 
 def alloc_mxfp4_row_outputs(x:Tensor, *, flatten_row:bool=False) -> tuple[Tensor, Tensor]:
   M, N = math.prod(x.shape[:-1]), x.shape[-1]

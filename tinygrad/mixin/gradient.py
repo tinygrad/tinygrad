@@ -5,6 +5,14 @@ from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
 from tinygrad.function import renumber_invalid_outputs
 
+# Gradient producers can attach auxiliary representations that are valid only for that exact gradient value (for
+# example a quantized row/column pair emitted by the same kernel). Function boundaries replace a gradient body with a
+# GETTUPLE of the compiled backward function, so carry registered auxiliaries through that output at the same time.
+gradient_auxiliary_mailboxes:dict[str, dict[UOp, tuple[UOp|None, ...]]] = {}
+
+def gradient_auxiliary_mailbox(name:str) -> dict[UOp, tuple[UOp|None, ...]]:
+  return gradient_auxiliary_mailboxes.setdefault(name, {})
+
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   if op == Ops.ADD: return (ctx._broadcast_to(ret.src[0].shape),)
   if op == Ops.MAX: return (((mask:=ret.src[0].eq(ret).cast(ctx.dtype))/mask._rop(Ops.ADD, tuple(range(ret.arg[1])))) * ctx,)
@@ -32,19 +40,47 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   grad_args = ctx.src
-  root_grad = UOp(Ops.TUPLE, src=tuple(UOp(Ops.NOOP) if g.op is Ops.NOOP else
-    g if g.base.op is Ops.CONST else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
-  grads = compute_gradient(fxn, root_grad, set(params.values()))
-  # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
+  # Precompiled forward outputs and gradient auxiliaries are additional backward-function inputs.
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}
   fwd_outs = tuple(k.gettuple(i) for i in range(len(fxn.src))) if k.arg.precompile else ()
+  root_grads = [UOp(Ops.NOOP) if g.op is Ops.NOOP else g if g.base.op is Ops.CONST else g.param_like(len(args)+i)
+                for i,g in enumerate(grad_args)]
+  aux_args:list[UOp] = []
+  for grad_arg, root in zip(grad_args, root_grads):
+    for mailbox in gradient_auxiliary_mailboxes.values():
+      if (aux:=mailbox.pop(grad_arg, None)) is None: continue
+      aux_params:list[UOp|None] = []
+      for value in aux:
+        if value is None: aux_params.append(None)
+        else:
+          aux_params.append(value.param_like(len(args)+len(grad_args)+len(fwd_outs)+len(aux_args)))
+          aux_args.append(value)
+      mailbox[root] = tuple(aux_params)
+  root_grad = UOp(Ops.TUPLE, src=tuple(root_grads))
+  grads = compute_gradient(fxn, root_grad, set(params.values()))
+  # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   # collect needed gradient bodies, compact unused params, create a single backward CALL
   grad_bodies = [(i, grads[p]) for i in needed if (p:=params.get(i)) is not None and p in grads]
-  bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies)).substitute(fwd_subs, walk=True)
+  aux_bodies:list[UOp] = []
+  aux_returns:list[tuple[int, dict[UOp, tuple[UOp|None, ...]], tuple[int|None, ...]]] = []
+  for arg_idx, grad_body in grad_bodies:
+    for mailbox in gradient_auxiliary_mailboxes.values():
+      if (aux:=mailbox.pop(grad_body, None)) is None: continue
+      slots:list[int|None] = []
+      for value in aux:
+        if value is None: slots.append(None)
+        else:
+          slots.append(len(grad_bodies)+len(aux_bodies))
+          aux_bodies.append(value)
+      aux_returns.append((arg_idx, mailbox, tuple(slots)))
+  bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies), *aux_bodies).substitute(fwd_subs, walk=True)
   bwd_body = renumber_invalid_outputs(bwd_body)
-  bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))
+  bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs, *aux_args))
   bwd_call = bwd_body.call(*compact_args, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
   gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
+  for arg_idx, mailbox, returned_slots in aux_returns:
+    returned_grad = bwd_call.gettuple(gb_map[arg_idx])
+    mailbox[returned_grad] = tuple(None if slot is None else bwd_call.gettuple(slot) for slot in returned_slots)
   return (None,) + tuple(bwd_call.gettuple(gb_map[i]) if i in gb_map else None for i in range(len(args)))
 
 # ctx is grad_output

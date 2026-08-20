@@ -671,6 +671,42 @@ class TestFunctionTuple(unittest.TestCase):
   def test_custom_kernel_precompile_further_compute_multi(self): self.test_custom_kernel_precompile_further_compute(multi=True, kernel_count=4)
 
 class TestFunctionGrad(unittest.TestCase):
+  def test_gradient_auxiliary_crosses_precompiled_function_boundaries(self):
+    from tinygrad.mixin.gradient import gradient_auxiliary_mailbox, gradient_auxiliary_mailboxes
+    mailbox_name = "test_function_gradient_auxiliary"
+    mailbox = gradient_auxiliary_mailbox(mailbox_name)
+    hits = []
+
+    def attach_aux(grad:UOp, _call:UOp):
+      mailbox[grad] = (grad * 2, None)
+      return (grad,)
+
+    def consume_aux(grad:UOp, _call:UOp):
+      aux = mailbox.pop(grad, None)
+      hits.append(aux)
+      assert aux is not None and aux[0] is not None and aux[1] is None
+      return (grad,)
+
+    @function(grad_fxn=consume_aux)
+    def earlier(x:Tensor): return x * 2
+
+    @function(grad_fxn=attach_aux)
+    def later(x:Tensor): return x + 1
+
+    @function(precompile=True, precompile_backward=True)
+    def earlier_boundary(x:Tensor): return earlier(x)
+
+    @function(precompile=True, precompile_backward=True)
+    def later_boundary(x:Tensor): return later(x)
+
+    try:
+      x = Tensor([1.0, 2.0, 3.0]).contiguous().realize()
+      np.testing.assert_allclose(later_boundary(earlier_boundary(x)).sum().gradient(x)[0].numpy(), np.ones(3))
+      self.assertEqual(len(hits), 1)
+      self.assertEqual(mailbox, {})
+    finally:
+      gradient_auxiliary_mailboxes.pop(mailbox_name, None)
+
   def test_function_grad_ops(self, precompile=False, precompile_backward=False):
     N = 64
     x = Tensor.ones(N,N).contiguous()
