@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import random, itertools, math, weakref, array, decimal
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple, tqdm
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, ansipad, all_int, prod, flatten, Context, getenv, to_tuple, tqdm
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
@@ -275,7 +275,7 @@ def lower_and_compile(linear:UOp) -> UOp:
     tasks = ((i, ast_ren, ctx) for i, (_, ast_ren) in enumerate(todo))
     with tqdm(total=len(todo), desc="compiling", disable=DEBUG<1) as pbar:
       for i, prg in (map if pool is None else pool.imap_unordered)(_compile_kernel, tasks):
-        pbar.set_description(f"compiling {prg.src[0].arg.name}")
+        pbar.set_description(f"compiling {ansipad(prg.src[0].arg.name, 40)}")
         to_program_cache[todo[i][0]] = prg
         pbar.update(1)
 

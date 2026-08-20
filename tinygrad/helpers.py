@@ -44,6 +44,7 @@ def time_to_str(t:float, w=8) -> str: return next((f"{t * d:{w}.2f}{pr}" for d,p
 def size_to_str(s:int) -> str: return next((f"{s / d:.2f} {pr}" for d,pr in [(1<<30, "GB"),(1<<20, "MB"),(1<<10, "KB")] if s >= d), f"{s} B")
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
+def ansipad(s:str, w:int): return s+' '*max(w-ansilen(s), 0)
 def make_tuple(x:int|Sequence[int], cnt:int) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else tuple(x)
 def to_tuple(x:T|tuple[T, ...]) -> tuple[T, ...]: return x if isinstance(x, tuple) else (x,)
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
