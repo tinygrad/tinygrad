@@ -1,9 +1,8 @@
-import time, inspect, functools
+import time, inspect
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup
-from tinygrad.schedule.allreduce import is_allreduce_linear_output
 
 # **** schedule linearizer
 
@@ -48,11 +47,6 @@ def _call_buf_uop(s:UOp) -> UOp:
   if s.op is Ops.AFTER and s.src[0].op is Ops.SLICE and s.src[0].tag == ("allreduce",): return s.src[0]
   return s.buf_uop
 
-@functools.cache
-def _call_overwrite_outputs(call:UOp) -> tuple[UOp, ...]:
-  if call.src[0].op is not Ops.LINEAR: return ()
-  return tuple(x for i,x in enumerate(call.src[1:]) if is_allreduce_linear_output(call.src[0], i))
-
 def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # build kernel dependency graph: edges from producer kernel to consumer kernels
@@ -69,7 +63,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       for k in kernels:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
-        kernel_deps = k.src[0].src[1:] if k.op is Ops.END else tuple(x for x in k.src[1:] if x not in _call_overwrite_outputs(k))
+        kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
         read_states = [(st, s) for s in kernel_deps for st in _states(s)]
         reads += [(u, k, st, access) for st,access in read_states]
         # RAW deps: a kernel runs after the kernels that produced the states it reads or joins
@@ -86,9 +80,8 @@ def create_schedule(sched_sink:UOp) -> UOp:
         for t in write_kernels:
           call = t.src[0] if t.op is Ops.END else t
           # Disjoint physical intervals do not alias and therefore need no WAR edge.
-          write_accesses = _call_overwrite_outputs(call) or call.src[1:2]
-          if ((rr:=_slice_region(access)) is not None and write_accesses and
-              all((wr:=_slice_region(w)) is not None and (rr[0] is not wr[0] or rr[2] <= wr[1] or wr[2] <= rr[1]) for w in write_accesses)): continue
+          if ((rr:=_slice_region(access)) is not None and len(call.src) > 1 and (wr:=_slice_region(call.src[1])) is not None
+              and (rr[0] is not wr[0] or rr[2] <= wr[1] or wr[2] <= rr[1])): continue
           if t is not k and t not in k.backward_slice:
             children.setdefault(k, []).append(t)
             in_degree[t] += 1
