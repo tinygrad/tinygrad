@@ -303,20 +303,19 @@ jobs:
         with:
           key: openpilot-compile
           deps: testing
-          opencl: 'true'
           llvm: 'true'
-      - name: Test openpilot model kernel count and gate usage
-        run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1361 ALLOWED_GATED_READ_IMAGE=38 FLOAT16=1 DEV="CL::IMAGE_PITCH_ALIGNMENT=64" IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
-          # IMAGE_PITCH_ALIGNMENT=64 matches adreno 630
-      - name: Test openpilot CL compile fp32 (test correctness)
-        run: |
-          DEV=CL IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
-          DEV=CL IMAGE=1 SELFTEST=1 RUN_PICKLE=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
-      - name: Test openpilot LLVM compile fp16
-        run: IMAGE=1 FLOAT16=1 DEV=CPU:LLVM python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          pydeps: pycapnp zstandard opendbc requests onnxruntime==1.29.0
+      - name: Checkout openpilot
+        uses: actions/checkout@v6
+        with:
+          repository: commaai/openpilot
+          ref: 17150b6db01e6669644d7c78440c10e66f86777f
+          path: openpilot
+      - name: Test openpilot modeld compile (kernel counts, numerics vs onnxruntime)
+        run: DEV=CPU:LLVM python test/external/external_test_openpilot_modeld.py --openpilot-root openpilot
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
+        if: false  # new test has no master baseline to replay against
 
 # ****** ONNX Tests ******
 
