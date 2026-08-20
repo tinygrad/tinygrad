@@ -13,25 +13,17 @@ simple_pm = PatternMatcher([
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.val+c2.val)),
 ])
 
-def const_values(u:UOp):
-  if u.op is Ops.CONST: return (u.val,)
-  if u.op is Ops.STACK: return tuple(x.val for x in u.src)
-  raise AssertionError(f"expected const-like UOp, got {u.op}")
-
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
     v1 = UOp.const((0,1,2), dtypes.int)
     v2 = v1.index(1)
     ret = graph_rewrite(v2, sym)
-    self.assertEqual(ret.dtype, dtypes.int)
-    self.assertEqual(ret.val, 1)
+    self.assertIs(ret, UOp.const(1, dtypes.int))
 
   def test_add_const(self):
     v1 = UOp.const((0,1,2))
     v2 = UOp.const((5,6,7))
-    ret = graph_rewrite(v1+v2, sym)
-    self.assertEqual(ret.op, Ops.STACK)
-    self.assertEqual(const_values(ret), (5,7,9))
+    self.assertIs(graph_rewrite(v1+v2, sym), UOp.const((5,7,9)))
 
 def xfail_broken_const_wraparound(fn):
   fn = pytest.mark.xfail(reason="const folding does not properly implement modular arithmetic")(fn)

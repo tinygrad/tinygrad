@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import time, random, itertools, math, contextlib, weakref, array
+import random, itertools, math, weakref, array, decimal
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.dtype import dtypes
@@ -17,12 +17,19 @@ def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call
 def get_call_var_uops(call:UOp, prg:UOp) -> list[UOp]:
   bound = {s.src[0].expr: s.src[1].src[1] for s in call.src[1:] if s.is_bound_var}
   return [bound.get(v.expr, v) for v in prg.arg.vars]
+
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.src[0]
   if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
   if ast.op is Ops.COPY: return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
+
+def get_call_kernels(call:UOp) -> list[tuple[str, UOp]]:
+  if (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return [(d, k) for devs, k, _ in call.arg.aux.kernels for d in devs]
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call)]
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "validate": return []
+  return [(d, call) for d in to_tuple(call.src[1].device)]
 
 def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|None=None) -> str:
   def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(sym_infer(prod(uop.shape) * uop.dtype.itemsize, var_vals or {}))
@@ -39,49 +46,52 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
 # **************** Stat ****************
 
 def estimate_uop(call:UOp) -> Estimates:
-  ast = call.src[0]
-  if ast.op is Ops.PROGRAM: return ast.src[0].arg.estimates or Estimates()
+  if (ast:=call.src[0]).op is Ops.PROGRAM: return ast.src[0].arg.estimates or Estimates()
   if ast.op is Ops.COPY or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec"):
-    nbytes = prod(call.src[1].shape) * call.src[1].dtype.itemsize
-    return Estimates(lds=nbytes, mem=nbytes)
+    return Estimates(lds=(nbytes:=prod(call.src[1].shape) * call.src[1].dtype.itemsize), mem=nbytes)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return get_graph_runtime(ast).estimates
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return call.arg.aux.estimates
   return Estimates()
 
 first_run_cache:set[bytes] = set()
-@contextlib.contextmanager
-def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_vals:dict[str, int]):
-  if PROFILE:
-    outputs, inputs = get_call_outs_ins(call)
-    cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": var_vals,
-      "bufs": [b.trace_num for b in bufs], "name": get_call_name(call, bufs, var_vals), "outputs": outputs, "inputs": inputs}))
-  et: list[float|None] = [None]
-  if DEBUG >= 2: st = time.perf_counter()
-  yield et
-  if not ctx.update_stats: return
+def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|None]):
+  if ctx.update_stats:
+    is_hcq = (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq"
+    estimates, n = estimate_uop(call), 1 if is_hcq else len(get_call_kernels(call))
+    GlobalCounters.kernel_count += len(call.arg.aux.kernels) if is_hcq else n
+    GlobalCounters.global_ops += n*sym_infer(estimates.ops, ctx.var_vals)
+    GlobalCounters.global_mem += n*sym_infer(estimates.mem, ctx.var_vals)
+    GlobalCounters.time_sum_s += sum(et for et in ets if et is not None)
+  if DEBUG < 2 and not PROFILE: return
 
-  if DEBUG >= 2 and et[0] is None:
-    Device[device].synchronize()
-    et[0] = time.perf_counter() - st
+  kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
+  args = resolve_params(call, ctx.input_uops) if kernels and kernels[0][1] is call else []
+  lanes = list(unwrap_multi(call, [args[g] for g in call.src[0].arg.globals] if call.src[0].op is Ops.PROGRAM else args)) if args else []
+  for i, (device, kcall) in enumerate(kernels):
+    et, bufs = ets[i] if i < len(ets) else None, lanes[i][0] if i < len(lanes) else []
+    if PROFILE: # backdate the event to the start of the call, the viz matches a device range with the exec event before it
+      outputs, inputs = get_call_outs_ins(kcall)
+      cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": ctx.var_vals,
+        "bufs": [b.trace_num for b in bufs], "name": get_call_name(kcall, bufs, ctx.var_vals), "outputs": outputs, "inputs": inputs}, ts=st))
+    if DEBUG < 2 or not ctx.update_stats: continue
+    if et is None:
+      Device[device].synchronize()
+      et, st = float(perf_counter_us() - st)*1e-6, perf_counter_us()
+      GlobalCounters.time_sum_s += et
 
-  estimates = estimate_uop(call)
-  GlobalCounters.kernel_count += 1
-  GlobalCounters.global_ops += (op_est:=sym_infer(estimates.ops, var_vals))
-  GlobalCounters.global_mem += (mem_est:=sym_infer(estimates.mem, var_vals))
-  if et[0] is not None: GlobalCounters.time_sum_s += et[0]
-  if DEBUG >= 2:
-    display_name = get_call_name(call, bufs, var_vals)
-    lds_est = sym_infer(estimates.lds, var_vals)
-    header_color = 'magenta' if ctx.jit else ('green' if call.src[0].key not in first_run_cache else None)
-    ptm = colored(time_to_str(et[0], w=9), "yellow" if et[0] > 0.01 else None) if et[0] is not None else ""
-    flops, membw, ldsbw = op_est/(et[0] or 1e-20), mem_est/(et[0] or 1e-20), lds_est/(et[0] or 1e-20)
+    estimates = estimate_uop(kcall)
+    display_name = get_call_name(kcall, bufs, ctx.var_vals)
+    op_est, mem_est, lds_est = (sym_infer(x, ctx.var_vals) for x in (estimates.ops, estimates.mem, estimates.lds))
+    header_color = 'magenta' if ctx.jit else ('green' if kcall.src[0].key not in first_run_cache else None)
+    ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
+    flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
     flops_str = f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:7.0f} TFLOPS", 'green')
     mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
       colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
       f" {display_name+' '*(46-ansilen(display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
-      ("" if et[0] is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})"))
-    first_run_cache.add(call.src[0].key)
+      ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})"))
+    first_run_cache.add(kcall.src[0].key)
 
 local_size_cache: dict[bytes, tuple[int, ...]] = {}
 def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
@@ -154,33 +164,31 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
                    for x in call.src[0].toposort())
     for j, per_dev in enumerate(zip(*[cast(MultiBuffer, b).bufs for b in bufs])): yield list(per_dev), {"_device_num": j} if has_dnum else {}
 
-def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
+def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
-    with track_stats(ctx, call, dest.device, [dest, src], ctx.var_vals):
-      if hasattr(dest.allocator,'_transfer') and dest.allocator.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:
-        dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev)
-      elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
-           and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
-        dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-      elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
-      else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
-  return None
+    if hasattr(dest.allocator,'_transfer') and dest.allocator.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:
+      dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev)
+    elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
+         and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
+      dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
+    elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
+    else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
+  return []
 
-def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  et = None
+def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
+  ets:list[float|None] = []
   resolved = resolve_params(call, ctx.input_uops)
   for device, (bufs, device_vars) in zip(to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
     global_size, local_size = ast.arg.launch_dims(var_vals)
-    with track_stats(ctx, call, device, prg_bufs, var_vals) as tm:
-      et = tm[0] = rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals),
-                       wait=ctx.wait, timeout=ctx.timeout)
-  return et
+    ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals),
+                  wait=ctx.wait, timeout=ctx.timeout))
+  return ets
 
-def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
+def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
@@ -189,43 +197,36 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
     global_size, local_size = prg.arg.launch_dims(var_vals)
     cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
     for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
-  return None
+  return []
 
-def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
+def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
   shape, pos_var = tuple(s.val for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
-  with track_stats(ctx, call, bufs[0].device, bufs, ctx.var_vals):
-    bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
-  return None
+  bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
+  return []
 
-def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
-  rt = get_graph_runtime(ast, ctx.input_uops)
-  with track_stats(ctx, call, rt.device, [], ctx.var_vals) as t: t[0] = rt(ctx.input_uops, ctx.var_vals, wait=ctx.wait)
-  return t[0]
+def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
+  return [get_graph_runtime(ast, ctx.input_uops)(ctx.input_uops, ctx.var_vals, wait=ctx.wait)]
 
-def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
+def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   dev = cast(Any, Device[(info:= call.arg.aux).device[0]])
   addrs = [(b.bufs[j] if isinstance(b:=_resolve(ctx.input_uops[k], ctx.input_uops).buffer, MultiBuffer) else b).get_buf(dev_name).va_addr
            for devs, idxs in info.input_idxs for j, dev_name in enumerate(devs) for k in idxs]
   dev.rt_buffer._buf.cpu_view().view(offset=(base:=dev.rt_allocator.alloc(len(addrs) * 8)), fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
-  tables = [UOp.from_buffer(dev.rt_buffer.view(len(idxs), dtypes.uint64, base + j*len(idxs)*8), HCQ_RUNTIME_DEV.value)
-            for devs, idxs in info.input_idxs for j in range(len(devs))]
-  if info.inputs is not None: call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*tables)})
-  exec_kernel(replace(ctx, update_stats=DEBUG>=3, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer._buf.va_addr + base}), call, ast)
+  if info.inputs is not None:
+    tables = [UOp.from_buffer(dev.rt_buffer.view(len(idxs), dtypes.uint64, base + j*len(idxs)*8), HCQ_RUNTIME_DEV.value)
+              for devs, idxs in info.input_idxs for j in range(len(devs))]
+    call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*tables)})
+  exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer._buf.va_addr + base}), call, ast)
 
-  tms = []
-  for devices, stat_call, prof in info.kernels:
-    for device in devices:
-      tm = None
-      if prof:
-        (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, *prof)
-        if ctx.wait:
-          d.synchronize(timeout=ctx.timeout)
-          st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
-          tms.append(tm:=float(en-st)/d.timestamp_divider/1e6)
-      with track_stats(ctx, stat_call, device, [], ctx.var_vals) as et: et[0] = tm
-  return max(tms) if tms else None
+  def _prof_tm(device:str, stat_call:UOp, prof:tuple[int, ...]) -> float|None:
+    (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, *prof)
+    if not ctx.wait: return None
+    d.synchronize(timeout=ctx.timeout)
+    st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
+    return float(en-st)/d.timestamp_divider/1e6
+  return [_prof_tm(device, k, prof) for devices, k, prof in info.kernels if prof for device in devices] if PROFILE or ctx.wait else []
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
@@ -280,7 +281,7 @@ def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequenc
   inputs = list(input_uops)
   if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs))
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
-  for call in linear.src: pm_exec.rewrite(call, ctx)
+  for call in linear.src: track_stats(ctx, call, perf_counter_us(), pm_exec.rewrite(call, ctx))
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> float:
   if clear_l2:
@@ -290,4 +291,4 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
   linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True), cache=ctx.cache)
-  return max(pm_exec.rewrite(c, ctx) or 0.0 for c in linear.src)
+  return max(et for c in linear.src for et in pm_exec.rewrite(c, ctx) or [0.0])

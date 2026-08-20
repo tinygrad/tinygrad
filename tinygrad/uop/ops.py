@@ -94,11 +94,10 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
   return ret
 
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
-  for x in arg:
-    if isinstance(x, UOp) and not dtypes.is_int(x.dtype): raise RuntimeError(f"shape must be int, got {x.dtype} in {arg}")
-  if len(arg) == 0: return UOp(Ops.STACK)
-  elif len(arg) == 1: return UOp.const(arg[0], dtypes.weakint)
-  else: return UOp(Ops.STACK, src=tuple(UOp.const(x) if isinstance(x, int) else x for x in arg))
+  src = tuple(x if isinstance(x, UOp) else UOp.const(x) for x in arg)
+  for x in src:
+    if not dtypes.is_int(x.dtype): raise RuntimeError(f"shape must be int, got {x.dtype} in {arg}")
+  return src[0] if len(src) == 1 else UOp(Ops.STACK, src=src)
 
 def consumer_map_from_toposort(lst:Iterable[UOp]):
   ret: dict[UOp, dict[UOp, None]] = {}
