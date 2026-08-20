@@ -1020,6 +1020,14 @@ class TestSymbolic(unittest.TestCase):
     self.assertIs(graph_rewrite(cond.where(a, uconst(2)).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.const(2, dtypes.half)))
     self.assertIs(graph_rewrite(cond.where(a, UOp.invalid()).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.invalid()))
 
+  def test_where_const_gate_keeps_stated_width(self):
+    a = Variable("a", 0, 3, dtypes.half)
+    self.assertIs(graph_rewrite(UOp.const(True, dtypes.bool).where(uconst(0.0), a), sym), UOp.const(0.0, dtypes.half))
+    self.assertIs(graph_rewrite(UOp.const(True, dtypes.bool).where(uconst(0), Variable("i", 0, 3, dtypes.int)), sym), UOp.const(0, dtypes.int))
+    self.assertIs(graph_rewrite(UOp.const(False, dtypes.bool).where(uconst(0.0), a), sym), a)
+    self.assertIs(graph_rewrite(UOp.const(False, dtypes.bool).where(uconst(0.0), UOp.invalid()), sym), UOp.invalid())
+    self.assertIs(graph_rewrite(UOp.const(True, dtypes.bool).where(uconst(0.0), uconst(1)), sym), uconst(0.0))
+
   def test_where_merge_branches(self):
     cond1 = Variable("s", 0, 10) < 6
     cond2 = Variable("s", 0, 10) > 2

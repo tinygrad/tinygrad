@@ -101,6 +101,11 @@ pm_remove_invalid = PatternMatcher([
    if any(x.is_invalid for x in s.src) else None),
 ])
 
+def fold_const_where(gate:UOp, c0:UOp, c1:UOp, w:UOp) -> UOp:
+  # folding a strong dtype WHERE to a weak const branch keeps the strong dtype
+  ret = c0 if gate.val else c1
+  return commit_weak(ret, w.dtype) if ret.op is Ops.CONST and ret.dtype in dtypes.weaks and w.dtype not in dtypes.weaks else ret
+
 symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
@@ -175,7 +180,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** simple where folding **
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
-  (UPat.cvar("gate").where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.val else c1),
+  (UPat.cvar("gate").where(UPat.var("c0"), UPat.var("c1")).named("w"), fold_const_where),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
   # a.where(c, b.where(c, d)) -> (a | b).where(c, d)
