@@ -1,6 +1,7 @@
-import ctypes, struct, platform, pathlib, shutil, tarfile, tempfile
+import ctypes, os, struct, platform, pathlib, shutil, tarfile, tempfile
 from tinygrad.device import Compiler
 from tinygrad.helpers import DEBUG, system, fetch
+from tinygrad.runtime.support.compileonce import compile_once
 from tinygrad.runtime.support.compiler_mesa import disas_adreno
 # see https://github.com/sirhcm/tinydreno
 from tinygrad.runtime.autogen import llvm_qcom
@@ -10,16 +11,24 @@ def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 class QCOMCompiler(Compiler):
   def __init__(self, arch:str):
     assert arch.split(',')[0] == "a630", "only a630 supported"
-    if platform.machine() == "aarch64": self.arch, self.chip_id, self.llvm_inst = arch, 0x6030001, llvm_qcom.cl_compiler_create_llvm_instance()
+    self.arch, self.chip_id = arch, 0x6030001
+    if platform.machine() == "aarch64": self.llvm_inst = llvm_qcom.cl_compiler_create_llvm_instance()
     else:
-      self.arch, self.chip_id, self.fs, root = arch, 0x6030001, tempfile.TemporaryDirectory(), pathlib.Path(__file__).parents[3]
-      with tarfile.open(fetch('https://git.tinygrad.win/sirhcm/images/releases/download/v2/qcomcl.tar.gz')) as t: t.extractall(fs:=self.fs.name)
-      self.compiler_process = self.server(f"{qemu} -cpu max,pauth=off -L {fs} {fs}/usr/bin/python3" if (qemu:=shutil.which("qemu-aarch64-static"))
-                                          else (f"docker run --rm -i --platform linux/aarch64 -v {fs}/usr:/usr -v {root}:{root} "
-                                                f"-e PYTHONPATH={root} -e QEMU_CPU=max,pauth=off gcr.io/distroless/static python3"), arch)
+      self.fs, root = tempfile.TemporaryDirectory(), pathlib.Path(__file__).parents[3]
+      with tarfile.open(fetch('https://git.tinygrad.win/sirhcm/images/releases/download/v2/qcomcl.tar.gz')) as t: t.extractall(self.fs.name)
+      once = f"{pathlib.Path(__file__).parent}/compileonce.py {QCOMCompiler.__module__}:QCOMCompiler {arch}"
+      self.compiler_env = None
+      # the compiler is aarch64 only, run it emulated. for qemu user mode PYTHONPATH must point at the tinygrad on the host
+      if (qemu:=shutil.which("qemu-aarch64-static")):
+        self.compiler_cmd = f"{qemu} -cpu max,pauth=off -L {self.fs.name} {self.fs.name}/usr/bin/python3 {once}".split()
+        self.compiler_env = {**os.environ, "PYTHONPATH": str(root)}
+      else:
+        self.compiler_cmd = (f"docker run --rm -i --platform linux/aarch64 -v {self.fs.name}/usr:/usr -v {root}:{root} "
+                             f"-e PYTHONPATH={root} -e QEMU_CPU=max,pauth=off gcr.io/distroless/static python3 {once}").split()
     super().__init__(f"compile_qcomcl_{arch}")
 
-  def __del__(self): llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst) if platform.machine() == "aarch64" else self.compiler_process.kill()
+  def __del__(self):
+    if platform.machine() == "aarch64": llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst)
 
   def __reduce__(self): return QCOMCompiler, (self.arch,)
 
@@ -31,7 +40,7 @@ class QCOMCompiler(Compiler):
     return handle
 
   def compile(self, src) -> bytes:
-    if platform.machine() != "aarch64": return self.compile_server(src, self.compiler_process)
+    if platform.machine() != "aarch64": return compile_once(self.compiler_cmd, src, self.compiler_env)
     ch = self.checked(llvm_qcom.cl_compiler_compile_source(self.llvm_inst, self.chip_id, llvm_qcom.CL_MODE_64BIT, b"", 0, 0, 0, src.encode(), 0,
                                                            llvm_qcom.CL_SRC_STR, None))
     if DEBUG >= 8: print(system("llvm-dis", input=ctypes.string_at((comp:=ch.contents.compiled.contents).llvm_bitcode, comp.llvm_bitcode_size)))
@@ -43,4 +52,3 @@ class QCOMCompiler(Compiler):
     return ret
 
   def disassemble(self, lib: bytes): disas_adreno(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)], self.chip_id)
-
