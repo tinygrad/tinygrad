@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
-import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct
+import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, multiprocessing
 from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up
@@ -301,7 +301,6 @@ class DepsTracker:
 class CompileError(Exception): pass
 
 class Compiler:
-  compiler_process: subprocess.Popen
   def __init__(self, cachekey:str|None=None): self.cachekey = cachekey if CCACHE else None
   def compile(self, src:str) -> bytes: return src.encode()   # NOTE: empty compiler is the default
   def compile_cached(self, src:str) -> bytes:
@@ -313,17 +312,13 @@ class Compiler:
   def disassemble(self, lib:bytes): pass
   def server(self, cmd:str, arch:str, *args) -> subprocess.Popen:
     argv = f"{cmd} {pathlib.Path(__file__).parent}/runtime/support/compileserver.py {type(self).__module__}:{type(self).__name__} {arch}"
-    self.compile_server_argv, self.compile_server_pid = argv.split() + [str(a) for a in args], os.getpid()
-    return self.spawn_compile_server()
-  def spawn_compile_server(self) -> subprocess.Popen:
-    return subprocess.Popen(self.compile_server_argv, stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
+    # the lock is created with the server and travels with the process in a spawn/fork, so compiles to the server stay serialized
+    self.compile_server_lock = multiprocessing.Lock()
+    return subprocess.Popen(argv.split() + [str(a) for a in args], stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
   def compile_server(self, src:str, proc:subprocess.Popen) -> bytes:
-    # the compile server is per-process. if the pid changed (this process forked after starting it), start a new one for this process
-    if self.compile_server_pid != os.getpid():
-      self.compile_server_pid, self.compiler_process = os.getpid(), self.spawn_compile_server()
-      proc = self.compiler_process
-    unwrap(proc.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
-    if (lib:=unwrap(proc.stdout).read(struct.unpack("I", unwrap(proc.stdout).read(4))[0])): return lib
+    with self.compile_server_lock:
+      unwrap(proc.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
+      if (lib:=unwrap(proc.stdout).read(struct.unpack("I", unwrap(proc.stdout).read(4))[0])): return lib
     raise CompileError("Compilation Error")
 
 
