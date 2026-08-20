@@ -471,7 +471,9 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
   else:
     hh = "_"+hashlib.md5(("\n".join(f"{k.strip()}:{v.strip()}" for k,v in sorted(headers.items()))).encode("utf-8")).hexdigest() if headers else ""
     fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + hh + (".gunzip" if gunzip else ""))
+  extract_dir = fp.parent / f"{fp.name}.extract"
   if not fp.is_file() or not allow_caching or (sha256 and hashlib.sha256(fp.read_bytes()).hexdigest() != sha256):
+    if extract: shutil.rmtree(extract_dir, ignore_errors=True)
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
     with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.13.0", **headers}), timeout=10) as r:
       assert r.status in {200, 206}, r.status
@@ -489,12 +491,15 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
       progress_bar.update(close=True)
       if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
   if extract:
-    if not (extract_dir := fp.parent / f"{fp.name}.extract").is_dir():
-      import tarfile, shutil
+    if not extract_dir.is_dir():
+      import tarfile
       tmpdir = tempfile.mkdtemp(dir=fp.parent)
-      with tarfile.open(fp) as t: t.extractall(tmpdir)
-      try: os.rename(tmpdir, extract_dir)  # rename is atomic, so concurrent fetches can't see a partial extraction
-      except OSError: shutil.rmtree(tmpdir, ignore_errors=True)  # another process extracted first, use theirs
+      try:
+        with tarfile.open(fp) as t: t.extractall(tmpdir, filter="data")
+        try: os.rename(tmpdir, extract_dir)  # rename is atomic, so concurrent fetches can't see a partial extraction
+        except OSError:
+          if not extract_dir.is_dir(): raise
+      finally: shutil.rmtree(tmpdir, ignore_errors=True)
     return extract_dir
   return fp
 
