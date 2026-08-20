@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import random, itertools, math, weakref, array, decimal, multiprocessing, atexit, signal
+import random, itertools, math, weakref, array, decimal
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple, tqdm
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
@@ -10,6 +10,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_config
 from tinygrad.codegen.opt.postrange import args_from_ast
+from tinygrad.engine.worker import get_worker_pool
 
 # **************** Helpers ****************
 
@@ -247,33 +248,7 @@ pm_beam = PatternMatcher([
    lambda ctx,call,sink: call.replace(src=(sink.replace(arg=replace(sink.arg, beam=ctx)), *call.src[1:])) if sink.arg.beam == 0 else None),
 ])
 
-pm_compile = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True), lambda call,ast:
-    call.replace(src=(to_program(ast, Device[call.device if isinstance(call.device, str) else call.device[0]].renderer), *call.src[1:]))),
-])
-
-# **************** parallel lowering + compilation (pool shared with BEAM search) ****************
-
-# workers should not open devices and should ignore ctrl c and should not launch VIZ
-def _init_worker():
-  Context(ALLOW_DEVICE_USAGE=0, VIZ=0, TRACK_MATCH_STATS=0).__enter__()
-  signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-worker_pool = None
-def get_worker_pool(device:str):
-  global worker_pool
-  if multiprocessing.current_process().daemon: return None  # workers can't have children
-  default_parallel = multiprocessing.cpu_count() if device.split(":")[0] in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
-  if worker_pool is None and (workers := getenv("PARALLEL", default_parallel)):
-    worker_pool = multiprocessing.get_context("spawn").Pool(workers, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
-    @atexit.register
-    def close_pool(): worker_pool.close()
-  return worker_pool
-
-def terminate_worker_pool():
-  global worker_pool
-  if worker_pool is not None: worker_pool.terminate()
-  worker_pool = None
+# **************** parallel lowering + compilation ****************
 
 def _compile_kernel(x:tuple[int, tuple[UOp, Renderer], dict]) -> tuple[int, UOp]:
   with Context(**x[2]): return x[0], to_program(*x[1])
@@ -298,9 +273,11 @@ def lower_and_compile(linear:UOp) -> UOp:
     pool = None if len(todo) == 1 or any(getattr(c.src[0].arg, "beam", 0) for c in calls) else get_worker_pool(todo[0][1][1].target.device)
     ctx = {v.key: v.value for v in to_program_config}
     tasks = ((i, ast_ren, ctx) for i, (_, ast_ren) in enumerate(todo))
-    for i, prg in tqdm((map if pool is None else pool.imap_unordered)(_compile_kernel, tasks),
-                       desc="lowering and compiling", total=len(todo), disable=DEBUG<1):
-      to_program_cache[todo[i][0]] = prg
+    with tqdm(total=len(todo), desc="compiling", disable=DEBUG<1) as pbar:
+      for i, prg in (map if pool is None else pool.imap_unordered)(_compile_kernel, tasks):
+        pbar.set_description(f"compiling {prg.src[0].arg.name}")
+        to_program_cache[todo[i][0]] = prg
+        pbar.update(1)
 
   # swap the compiled PROGRAMs into the calls
   return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in calls}, name="precompile kernels")

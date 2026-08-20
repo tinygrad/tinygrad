@@ -6,7 +6,8 @@ from tinygrad.device import Device, Buffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.engine.realize import time_call, get_worker_pool, terminate_worker_pool
+from tinygrad.engine.realize import time_call
+from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import Scheduler
 

@@ -585,9 +585,9 @@ class tqdm(Generic[T]):
     est_text = f'<{HMS(elapsed/prog-elapsed) if self.n else "?"}' if self.t else ''
     it_text = (SI(self.n/elapsed) if self.unit_scale else f"{self.n/elapsed:5.2f}") if self.n else "?"
     suf = f'{prog_text} [{HMS(elapsed)}{est_text}, {it_text}{self.unit}/s]'
-    sz = max(ncols-len(self.desc)-3-2-2-len(suf), 1)
+    sz = max(ncols-ansilen(self.desc)-3-2-2-len(suf), 1)
     bar = '\r' + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
-    print(bar[:ncols+1], flush=True, end='\n'*close, file=sys.stderr)
+    print(bar, flush=True, end='\n'*close, file=sys.stderr)
   @classmethod
   def write(cls, s:str): print(f"\r\033[K{s}", flush=True, file=sys.stderr)
 
