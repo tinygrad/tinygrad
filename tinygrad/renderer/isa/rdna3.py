@@ -610,31 +610,6 @@ class RDNA3Renderer(ISARenderer):
         deps.update(rdefs(u))
       nuops.append(u)
 
-    # s_clause
-    # NOTE: do the grouped instructions need to share src?
-    loads: dict[int, UOp] = {}
-    stores: dict[int, UOp] = {}
-    for i,u in enumerate(nuops):
-      if u.arg.func is RDNA3Ops.GLOBAL:
-        if u.dtype is dtypes.void: stores[i] = u
-        else: loads[i] = u
-
-    def gather(instances:dict[int, UOp]) -> dict[int, int]:
-      clauses: dict[int, int] = {}
-      start, last = None, None
-      for k in sorted(instances.keys()):
-        if last is not None and k > last+1: last, start = None, None
-        if start is None: start = k
-        last = k
-        clauses[start] = clauses.setdefault(start, 0) + 1
-      return clauses
-
-    dp = 0
-    for p,l in (gather(loads) | gather(stores)).items():
-      if l > 1:
-        nuops.insert(p+dp, UOp(Ops.INS, arg=RDNA3Ops.s_clause, src=(const(l-1),)))
-        dp += 1
-
     pc = 0
     targets: dict[str, int] = {}
     upc: dict[UOp, int] = {}
