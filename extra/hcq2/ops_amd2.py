@@ -261,10 +261,11 @@ class AMDProgramData:
   private_segment_size:int; kernargs_segment_size:int; kernargs_alloc_size:int
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int
 
-_amd_program_cache:dict[tuple[bytes,str], tuple[AMDProgramData,bytes]] = {}
+_amd_program_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
 def amd_build_program(prg:UOp) -> UOp:
   dev = Device[to_tuple(prg.device)[0]] # TODO: rm this
-  if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, dev.device))) is None:
+  # key on the full device tuple: the same lib can be built for different device sets, each needs its own program buffer
+  if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, to_tuple(prg.device)))) is None:
     image, sections, relocs = elf_loader(lib)
     rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
     for off, sym, typ, addent in relocs:
