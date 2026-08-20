@@ -82,7 +82,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
   t[0:8].bitcast(dtypes.int64).assign([len(j)])
   t[8:8+len(j)].assign(list(j.encode('utf-8')))
-  for k,v in safe_load(t).items(): v.assign(tensors[k])
+  for k,v in safe_load(t).items(): v.assign(tensors[k]).realize()
 
 # tinyfs
 

@@ -353,6 +353,7 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
   while (data:=queue_in.get()) is not None:
     idx, img, tgt = data
     img = image_load(base_dir, img["subset"], img["file_name"])
+    writes:list[Tensor] = []
 
     if val:
       img = resize(img)[0]
@@ -369,12 +370,11 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
       clipped_match_idxs = np.clip(match_idxs, 0, None)
       clipped_boxes, clipped_labels = tgt["boxes"][clipped_match_idxs], tgt["labels"][clipped_match_idxs]
 
-      boxes[idx].flatten().assign(clipped_boxes.tobytes())
-      labels[idx].flatten().assign(clipped_labels.tobytes())
-      matches[idx].flatten().assign(match_idxs.tobytes())
-      anchors[idx].flatten().assign(anchor.tobytes())
+      writes += [boxes[idx].flatten().assign(clipped_boxes.tobytes()), labels[idx].flatten().assign(clipped_labels.tobytes()),
+                 matches[idx].flatten().assign(match_idxs.tobytes()), anchors[idx].flatten().assign(anchor.tobytes())]
 
-    imgs[idx].flatten().assign(img.tobytes())
+    writes.append(imgs[idx].flatten().assign(img.tobytes()))
+    Tensor.realize(*writes)
 
     queue_out.put(idx)
   queue_out.put(None)

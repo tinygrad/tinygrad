@@ -33,10 +33,11 @@ def tag_uop(ctx:AllocCtx, x:UOp):
 def disk_like(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS"))
 
 def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
-  # copies to disk are replaced with the disk buffer
+  # copies to disk are replaced with an explicit write to the disk buffer
   if disk_like(u) and u.tag is None:
-    ctx.buffer_map[u] = u.empty_like()
-    return u.rtag(())
+    ctx.buffer_map[u] = buf = u.empty_like()
+    src = u.src[0] if u.src[0].has_buffer_identity(after_ok=True) else u.src[0].contiguous()
+    return buf.after(buf.store(src)).rtag(())
   # all copies from disk/numpy are realized into a real buffer
   from_creation = isinstance(u.src[0].device, str) and u.src[0].device.startswith(("NPY", "DISK", "PYTHON", "TINYFS"))
   if from_creation: return tag_uop(ctx, u)
@@ -46,7 +47,8 @@ add_tags = PatternMatcher([
   (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
   # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
-   lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
+   lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag)
+   if a.tag and c.tag and not disk_like(dest) else None),
   (UPat((Ops.CONTIGUOUS, Ops.AFTER), name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx.bases else None),
 ])
@@ -151,7 +153,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
-  (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
+  (UPat(Ops.STORE, src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"), UPat()), name="c", allow_any_len=True),
+   lambda ctx,c,src: contiguous_mops_to_view(ctx, c, src) if src.op is Ops.BITCAST or disk_like(src) else None),
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, name="copy"), lambda x,copy:
@@ -446,18 +449,30 @@ class Tensor(RandMixin):
       raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
     if isinstance(self.device, tuple) and x.uop.device is not None and self.uop.axis != x.uop.axis:
       raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
-
-    # TODO: this is a hack for writing to DISK. remove with working assign
-    if is_disk:
+    if isinstance(self.device, str) and self.device.startswith("TINYFS"):
+      # TINYFS writes are RPCs that return content hashes, not schedulable stores.
       (b:=self._buffer()).copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=x._data()))
       return self
+    xb = x.uop
+    while xb.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: xb = xb.src[0]
+    if is_disk and xb.op is Ops.AFTER:
+      # snapshot pending source state before taking a DISK subbuffer, which would otherwise alias the source file
+      Tensor(xb).realize()
+      x = x.contiguous()
+    elif is_disk and not x.uop.has_buffer_identity(after_ok=True): x = x.clone("CPU") if x.uop.is_virtual else x.contiguous()
+    if is_disk:
+      base = self.uop
+      while base.op in GroupOp.Movement|{Ops.BITCAST}: base = base.src[0]
+      check_uop = self.uop.substitute({base:base.empty_like()}, walk=True) if base.op is Ops.COPY and disk_like(base) else self.uop
+      if check_uop.contiguous_view() is None: raise RuntimeError("non-contiguous view is not supported")
+
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
     ib = self.uop
     while not ib.has_buffer_identity() and ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: ib = ib.src[0]
-    if ib is not self.uop and ib.has_buffer_identity(after_ok=True):
+    if ib is not self.uop and (ib.has_buffer_identity(after_ok=True) or disk_like(ib)):
       # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
-      _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign")
+      _apply_map_to_tensors({ib: ib.after(assign.src[1] if disk_like(ib) else assign)}, name="Embed View Assign")
     else:
       # simple assign
       self.uop = assign

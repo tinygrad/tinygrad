@@ -316,6 +316,14 @@ class TestDiskTensor(TempDirTestCase):
     dt.assign(Tensor.full((4,), 42, dtype=dtypes.int32)).realize()
     np.testing.assert_array_equal(dt.numpy(), [42, 42, 42, 42])
 
+  def test_assign_to_disk_is_lazy(self):
+    fn = pathlib.Path(self.tmp("dt_assign_lazy"))
+    dt = Tensor.empty(4, device=f"disk:{fn}", dtype=dtypes.int32)
+    dt.assign(42)
+    self.assertFalse(fn.exists())
+    dt.realize()
+    np.testing.assert_array_equal(dt.numpy(), [42, 42, 42, 42])
+
   def test_assign_slice_from_const(self):
     # slice assign from CONST to disk - tests size calculation when no RANGE ops
     dt = Tensor([0, 1, 2, 3], dtype=dtypes.int32).to(f"disk:{self.tmp('dt_slice_const')}")
@@ -323,11 +331,21 @@ class TestDiskTensor(TempDirTestCase):
     np.testing.assert_array_equal(dt.numpy(), [0, 99, 99, 3])
 
   def test_disk_to_disk_copy(self):
-    # disk-to-disk copy needs to go through CPU
     src = Tensor([1, 2, 3, 4], dtype=dtypes.int32).to(f"disk:{self.tmp('dt_d2d_src')}")
     dst = Tensor.empty(4, device=f"disk:{self.tmp('dt_d2d_dst')}", dtype=dtypes.int32)
-    dst.assign(src.to("CPU")).realize()
+    dst.assign(src).realize()
     np.testing.assert_array_equal(dst.numpy(), [1, 2, 3, 4])
+
+    sliced_dst = Tensor.empty(2, device=f"disk:{self.tmp('dt_d2d_sliced_dst')}", dtype=dtypes.int32)
+    sliced_dst.assign(src[1:3]).realize()
+    np.testing.assert_array_equal(sliced_dst.numpy(), [2, 3])
+    np.testing.assert_array_equal(src.numpy(), [1, 2, 3, 4])
+
+    pending_src = Tensor.empty(4, device=f"disk:{self.tmp('dt_d2d_pending_src')}", dtype=dtypes.int32).assign([1, 2, 3, 4])
+    pending_dst = Tensor.empty(2, device=f"disk:{self.tmp('dt_d2d_pending_dst')}", dtype=dtypes.int32)
+    pending_dst.assign(pending_src[1:3]).realize()
+    np.testing.assert_array_equal(pending_dst.numpy(), [2, 3])
+    np.testing.assert_array_equal(pending_src.numpy(), [1, 2, 3, 4])
 
   def test_assign_slice(self):
     def assign(x,s,y): x[s] = y
