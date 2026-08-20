@@ -212,13 +212,13 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   dev = cast(Any, Device[(info:= call.arg.aux).device[0]])
   addrs = [(b.bufs[j] if isinstance(b:=_resolve(ctx.input_uops[k], ctx.input_uops).buffer, MultiBuffer) else b).get_buf(dev_name).va_addr
            for devs, idxs in info.input_idxs for j, dev_name in enumerate(devs) for k in idxs]
-  dev.rt_buffer._buf.cpu_view().view(offset=(base:=dev.rt_allocator.alloc(len(addrs) * 8)), fmt='Q')[:len(addrs)] = array.array('Q', addrs)
+  dev.rt_buffer()._buf.cpu_view().view(offset=(base:=dev.rt_allocator.alloc(len(addrs) * 8)), fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
   if info.inputs is not None:
-    tables = [UOp.from_buffer(dev.rt_buffer.view(len(idxs), dtypes.uint64, base + j*len(idxs)*8), HCQ_RUNTIME_DEV.value)
+    tables = [UOp.from_buffer(dev.rt_buffer().view(len(idxs), dtypes.uint64, base + j*len(idxs)*8), HCQ_RUNTIME_DEV.value)
               for devs, idxs in info.input_idxs for j in range(len(devs))]
     call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*tables)})
-  exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer._buf.va_addr + base}), call, ast)
+  exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer()._buf.va_addr + base}), call, ast)
 
   def _prof_tm(device:str, stat_call:UOp, prof:tuple[int, ...]) -> float|None:
     (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, *prof)
@@ -283,12 +283,13 @@ def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequenc
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: track_stats(ctx, call, perf_counter_us(), pm_exec.rewrite(call, ctx))
 
-def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> float:
-  if clear_l2:
-    if hasattr(dev:=Device[call.src[1].device], 'invalidate_caches'): dev.invalidate_caches()
-    else:
-      from tinygrad.tensor import Tensor
-      with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
+def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
   linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True), cache=ctx.cache)
-  return max(et for c in linear.src for et in pm_exec.rewrite(c, ctx) or [0.0])
+  while True:
+    if clear_l2:
+      if hasattr(dev:=Device[call.src[1].device], 'invalidate_caches'): dev.invalidate_caches()
+      else:
+        from tinygrad.tensor import Tensor
+        with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
+    yield max(et for c in linear.src for et in pm_exec.rewrite(c, ctx) or [0.0])
