@@ -322,7 +322,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
-    return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
+    return (self.op.value, True if self.op is Ops.INS else self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
 
   # *** uop shape stuff ***
 

@@ -4,7 +4,7 @@ from tinygrad import Device
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
 from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
-from tinygrad.renderer.isa import IselContext
+from tinygrad.renderer.isa import PreRegallocContext
 
 # INDEX on a register value with a constant index extracts a single element (the old GEP)
 def lane(y:UOp, i:int) -> UOp: return y.index(UOp.cconst(i, dtypes.int), dtype=y.dtype)
@@ -12,7 +12,8 @@ def lane(y:UOp, i:int) -> UOp: return y.index(UOp.cconst(i, dtypes.int), dtype=y
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only x86")
 class TestIselX86(unittest.TestCase):
   def isel_rewrite(self, x:UOp):
-    return graph_rewrite(x, cast(X86Renderer, Device[Device.DEFAULT].renderer).isel_matcher, IselContext(x), bottom_up=True)
+    ren = cast(X86Renderer, Device[Device.DEFAULT].renderer)
+    return graph_rewrite(x, ren.isel_matcher, PreRegallocContext(x, ren), bottom_up=True)
 
   def _check_op(self, dt_op, expr):
     nargs = expr.__code__.co_argcount
