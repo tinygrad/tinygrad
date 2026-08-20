@@ -464,7 +464,7 @@ def _ensure_downloads_dir() -> pathlib.Path:
   return pathlib.Path(cache_dir) / "downloads"
 
 def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip:bool=False, allow_caching=not getenv("DISABLE_HTTP_CACHE"),
-          headers:dict[str, str]={}, sha256:str|None=None) -> pathlib.Path:
+          headers:dict[str, str]={}, sha256:str|None=None, extract:bool=False) -> pathlib.Path:
   import urllib.request
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
@@ -488,6 +488,14 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
         pathlib.Path(f.name).rename(fp)
       progress_bar.update(close=True)
       if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
+  if extract:
+    if not (extract_dir := fp.parent / f"{fp.name}.extract").is_dir():
+      import tarfile, shutil
+      tmpdir = tempfile.mkdtemp(dir=fp.parent)
+      with tarfile.open(fp) as t: t.extractall(tmpdir)
+      try: os.rename(tmpdir, extract_dir)  # rename is atomic, so concurrent fetches can't see a partial extraction
+      except OSError: shutil.rmtree(tmpdir, ignore_errors=True)  # another process extracted first, use theirs
+    return extract_dir
   return fp
 
 def fetch_fw(path:str, name:str, sha256:str) -> bytes:

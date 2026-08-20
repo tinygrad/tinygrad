@@ -1,4 +1,4 @@
-import ctypes, os, struct, platform, pathlib, shutil, tarfile, tempfile
+import ctypes, os, struct, platform, pathlib, shutil
 from tinygrad.device import Compiler
 from tinygrad.helpers import DEBUG, system, fetch
 from tinygrad.runtime.support.compileonce import compile_once
@@ -14,16 +14,16 @@ class QCOMCompiler(Compiler):
     self.arch, self.chip_id = arch, 0x6030001
     if platform.machine() == "aarch64": self.llvm_inst = llvm_qcom.cl_compiler_create_llvm_instance()
     else:
-      self.fs, root = tempfile.TemporaryDirectory(), pathlib.Path(__file__).parents[3]
-      with tarfile.open(fetch('https://git.tinygrad.win/sirhcm/images/releases/download/v2/qcomcl.tar.gz')) as t: t.extractall(self.fs.name)
+      # extract once into the download cache, all processes share the rootfs (extract=True)
+      fs, root = fetch('https://git.tinygrad.win/sirhcm/images/releases/download/v2/qcomcl.tar.gz', extract=True), pathlib.Path(__file__).parents[3]
       once = f"{pathlib.Path(__file__).parent}/compileonce.py {QCOMCompiler.__module__}:QCOMCompiler {arch}"
       self.compiler_env = None
       # the compiler is aarch64 only, run it emulated. for qemu user mode PYTHONPATH must point at the tinygrad on the host
       if (qemu:=shutil.which("qemu-aarch64-static")):
-        self.compiler_cmd = f"{qemu} -cpu max,pauth=off -L {self.fs.name} {self.fs.name}/usr/bin/python3 {once}".split()
+        self.compiler_cmd = f"{qemu} -cpu max,pauth=off -L {fs} {fs}/usr/bin/python3 {once}".split()
         self.compiler_env = {**os.environ, "PYTHONPATH": str(root)}
       else:
-        self.compiler_cmd = (f"docker run --rm -i --platform linux/aarch64 -v {self.fs.name}/usr:/usr -v {root}:{root} "
+        self.compiler_cmd = (f"docker run --rm -i --platform linux/aarch64 -v {fs}/usr:/usr -v {root}:{root} "
                              f"-e PYTHONPATH={root} -e QEMU_CPU=max,pauth=off gcr.io/distroless/static python3 {once}").split()
     super().__init__(f"compile_qcomcl_{arch}")
 
