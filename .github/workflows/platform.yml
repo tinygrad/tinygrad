@@ -166,6 +166,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: windows-${{ matrix.dev }}-minimal
+          deps: testing_minimal
           pydeps: ${{ matrix.dev == 'WEBGPU' && 'dawn-python' || '' }}
       - name: Set env
         shell: bash
@@ -177,4 +178,4 @@ jobs:
           DEBUG=4 python test/test_tiny.py TestTiny.test_plus
       - name: Run test_tiny
         shell: bash
-        run: python test/test_tiny.py
+        run: python -m pytest -n=auto test/test_tiny.py --durations=20
