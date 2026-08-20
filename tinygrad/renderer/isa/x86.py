@@ -638,9 +638,10 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
       # bit signaling 64 bit variant of instruction
       w = sz == 8
       # REX byte is required when 64 bit or an extended reg is used (index 8 - 15) or lower 8 bits of (rsp, rbp, rsi, rdi) are accessed
-      if w | r | _x | b | (reg_sz == 1 & reg >> 2) | (rm_sz == 1 & rm >> 2): inst += bytes([0b0100 << 4 | w << 3 | r << 2 | _x << 1 | b])
+      byte_op = reg_sz == 1 or rm_sz == 1
+      if w | r | _x | b | (byte_op and (reg >> 2 or rm >> 2)): inst += bytes([0b0100 << 4 | w << 3 | r << 2 | _x << 1 | b])
       # legacy 8bit opcode is 1 less than 16-64bit variants
-      if (rm_sz == 1 or reg_sz == 1) and x.arg not in X86GroupOp.ReadFlags | {X86Ops.LEA}: opc -= 1
+      if byte_op and x.arg not in X86GroupOp.ReadFlags | {X86Ops.LEA}: opc -= 1
     # OPCODE byte
     inst += opc.to_bytes((opc.bit_length() + 7) // 8, 'big')
     # MODRM byte
