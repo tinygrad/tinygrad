@@ -2,9 +2,18 @@ import unittest
 from tinygrad import Tensor, UOp, dtypes
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, KernelInfo
-from tinygrad.schedule.allreduce import create_allreduce_function, handle_allreduce, _is_stable_custom_output
+from tinygrad.schedule.allreduce import create_allreduce_function, handle_allreduce, _is_stable_custom_output, is_allreduce_linear_output
 
 class TestRingAllReduce(unittest.TestCase):
+  def test_classify_linear_allreduce_output(self):
+    devices = ("NULL", "NULL:1")
+    out = UOp.param(0, dtypes.float, (8,), device=devices)
+    slices = [UOp(Ops.SLICE, dtypes.float, (out.mselect(i), UOp.const(4*i)), 4, tag=("allreduce",)) for i in range(2)]
+    linear = UOp(Ops.LINEAR, src=tuple(UOp(Ops.CALL, src=(UOp(Ops.SINK), x)) for x in slices))
+    self.assertTrue(is_allreduce_linear_output(linear, 0))
+    ordinary = UOp(Ops.LINEAR, src=(UOp(Ops.CALL, src=(UOp(Ops.SINK), out)),))
+    self.assertFalse(is_allreduce_linear_output(ordinary, 0))
+
   def test_write_only_custom_output_is_stable(self):
     devices = tuple(f"NULL:{i}" for i in range(4))
     out, inp = (UOp.param(i, dtypes.float, (4096,), device=devices) for i in range(2))

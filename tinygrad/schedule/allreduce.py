@@ -1,6 +1,6 @@
 import functools, itertools
 from tinygrad.helpers import all_int, all_same, prod, DEBUG, RING, ALL2ALL, getenv
-from tinygrad.uop.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp, ParamArg
 from tinygrad.dtype import dtypes
 
 # *** allreduce implementation ***
@@ -32,6 +32,21 @@ def _is_stable_custom_output(buf:UOp) -> bool:
   ins = {p.arg.slot for x in loads for p in x.src[0].toposort() if p.op is Ops.PARAM}
   slots = [slot for slot in outs-ins if slot+1 < len(call.src) and call.src[slot+1].buf_uop is base]
   return len(slots) == 1
+
+@functools.cache
+def is_allreduce_linear_output(linear:UOp, slot:int) -> bool:
+  """Check that a LINEAR parameter is used exclusively as the sliced output storage of an allreduce."""
+  nodes = linear.toposort()
+  params = [x for x in nodes if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot == slot]
+  if len(params) != 1: return False
+  consumers:dict[UOp, list[UOp]] = {}
+  for x in nodes:
+    for s in x.src: consumers.setdefault(s, []).append(x)
+  selects = consumers.get(params[0], [])
+  if not selects or any(x.op is not Ops.MSELECT for x in selects): return False
+  slices = [y for x in selects for y in consumers.get(x, [])]
+  return bool(slices) and all(x.op is Ops.SLICE and x.tag == ("allreduce",) and
+                              consumers.get(x) and all(y.op is Ops.CALL for y in consumers[x]) for x in slices)
 
 def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=False) -> UOp|None:
   if not isinstance(buf.device, tuple): return None

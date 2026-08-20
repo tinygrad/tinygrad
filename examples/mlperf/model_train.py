@@ -1471,8 +1471,7 @@ def train_llama3():
   if mxfp4_weights is not None:
     Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
 
-  @TinyJit
-  def minibatch(tokens:Tensor):
+  def minibatch_impl(tokens:Tensor, accumulate:bool):
     model.reset_amax()
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
@@ -1485,10 +1484,14 @@ def train_llama3():
       loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
 
     for g, new_g in zip(grads, loss.gradient(*optim.params)):
-      apply_grad(g, new_g.uop)
+      apply_grad(g, new_g.uop, accumulate)
 
     loss_acc.assign(loss_acc + loss.flatten().float())
     return loss_acc.realize(*grads, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
+
+  @TinyJit
+  def minibatches(tokens:list[Tensor]):
+    for grad_acc_idx, batch_tokens in enumerate(tokens): minibatch_impl(batch_tokens, grad_acc_idx != 0)
 
   @TinyJit
   def optim_step():
@@ -1496,14 +1499,13 @@ def train_llama3():
     optim.fstep(grads, grad_norm, clip_coeff)
     scheduler.step()
 
-    for g in grads: g.assign(0)
     model.update_amax()
     refreshed_mxfp4 = model.refresh_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
     loss_cpu = loss_acc.to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_acc.assign(0), *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax,
+    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_acc.assign(0), *fp8_inv_scales, *fp8_amax, *fp8_grad_amax,
                    *refreshed_mxfp4)
 
     return lr_cpu, grad_norm_cpu, loss_cpu
@@ -1562,6 +1564,7 @@ def train_llama3():
 
       stopped = False
       data_time, dev_time = 0, 0
+      batch_tokens = []
       for _ in range(grad_acc):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
@@ -1570,9 +1573,11 @@ def train_llama3():
           break
         mst = time.perf_counter()
         data_time += mst - ist
-        minibatch(tokens)
-        dev_time += time.perf_counter() - mst
+        batch_tokens.append(tokens)
       if stopped: break
+      mst = time.perf_counter()
+      minibatches(batch_tokens)
+      dev_time += time.perf_counter() - mst
 
       gt = time.perf_counter()
       ret = optim_step()
