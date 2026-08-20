@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, TypeVar, Generic, Any, Sequence, Iterable
 import struct, functools, time, collections, itertools, decimal, statistics
 from dataclasses import replace, dataclass
-from tinygrad.helpers import suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
+from tinygrad.helpers import suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE, ALL2ALL, getenv
 from tinygrad.helpers import to_tuple, round_up, partition, panic, ContextVar, perf_counter_us, Context
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphEvent
@@ -127,6 +127,12 @@ def _get_enqueue_devs(call:UOp) -> Any|None:
   devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
   return devs if all_devices_in(devs, HCQ_DEVS) else None
 
+def _get_queue(call:UOp, copy_devices:tuple[str, ...]) -> str:
+  if call.src[0].op is Ops.PROGRAM: return "COMPUTE:0"
+  num_copy_queues = getenv("HCQ_NUM_SDMA", min(len(copy_devices), 8) if ALL2ALL >= 1 else 1)
+  dst = to_tuple(call.src[1].device)[0]
+  return f"COPY:{copy_devices.index(dst) % num_copy_queues}" if dst in copy_devices else "COPY:0"
+
 def kernel_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if (devs:=_get_enqueue_devs(call)) is None or Device[(dev:=to_tuple(devs)[0])].has_copy_queue: return None
   d, s = (UOp.param(i, dst.dtype, (n:=dst.max_numel(),), device=devs) for i in range(2))
@@ -144,11 +150,17 @@ pm_insert_copy_staging = PatternMatcher([
 class HCQDepsTracker(DepsTracker):
   @staticmethod
   def _key(buf:Any) -> tuple[Any, int, int]:
-    return (buf.arg.slot, 0, buf.max_numel() * buf.dtype.itemsize) if isinstance(buf, UOp) else DepsTracker._key(buf)
+    if not isinstance(buf, UOp): return DepsTracker._key(buf)
+    param, lane = (buf.src[0], buf.arg) if buf.op is Ops.MSELECT else (buf, None)
+    return ((param.arg.slot, lane), 0, buf.max_numel() * buf.dtype.itemsize)
 
 def _get_call_bufs_by_lane(call:UOp, devices:tuple[str, ...]) -> list[list[Any]]:
   refs = get_call_arg_uops(call)
-  return [[b if b.op is Ops.PARAM else mb.bufs[lane] if isinstance(mb:=b.buffer, MultiBuffer) else mb for b in refs] for lane in range(len(devices))]
+  def _get_lane_buf(b:UOp, lane:int) -> Any:
+    if (base:=b.buf_uop).op is Ops.PARAM or (base.op is Ops.MSELECT and base.src[0].op is Ops.PARAM): return base
+    if base.op is Ops.MSTACK and base.src[lane].op is Ops.PARAM: return base.src[lane]
+    return mb.bufs[lane] if isinstance(mb:=b.buffer, MultiBuffer) else mb
+  return [[_get_lane_buf(b, lane) for b in refs] for lane in range(len(devices))]
 
 def _get_deps(ctx:DepsTracker, bufs_by_lane:list[list[Any]], write, key:tuple[tuple[str, ...], str, int]) -> list[tuple[tuple, int, int]]:
   dep_lanes:list[tuple[tuple, int, int]] = []
@@ -209,7 +221,8 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
   return fences + resets, fins, signal_tags
 
 def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]], profile:bool) -> list[UOp]:
-  batch_info = [(devices, "COMPUTE:0" if call.src[0].op is Ops.PROGRAM else "COPY:0") for call, devices in batch]
+  copy_devices = tuple(dedup(to_tuple(call.src[1].device)[0] for call,_ in batch if call.src[0].op is Ops.COPY))
+  batch_info = [(devices, _get_queue(call, copy_devices)) for call, devices in batch]
 
   # schedule deps
   signal_tags:set[int] = set()

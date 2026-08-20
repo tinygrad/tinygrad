@@ -210,13 +210,13 @@ pm_sdma_opsel = PatternMatcher([
   (UPat(Ops.INS, arg="store", src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val")), name="ins"), sdma_store),
 ])
 
-def sdma_submit(cmdbuf, devs):
+def sdma_submit(cmdbuf, devs, queue_idx:int):
   # the cmdbuf to submit + the patch writes that fill it
   size_dw, zero = cmdbuf.nbytes() // dtypes.uint32.itemsize, UOp.const(0, dtypes.int)
 
   # the sdma queue's ring and its host-side ring/write/put pointers
-  for d in devs: q = Device[d].sdma_queue(0)
-  ring, wptr, doorbell, put_ptr = (UOp.placeholder((b.size,), b.dtype, 0, device=devs).rtag(f"COPY:0_{name}")
+  for d in devs: q = Device[d].sdma_queue(queue_idx)
+  ring, wptr, doorbell, put_ptr = (UOp.placeholder((b.size,), b.dtype, 0, device=devs).rtag(f"COPY:{queue_idx}_{name}")
     for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
   # sdma needs the cmdbuf contiguous: if it won't fit before the ring end, restart at 0 and zero the tail
@@ -242,16 +242,17 @@ def sdma_submit(cmdbuf, devs):
   return doorbell.after(flush).index(zero).store(next_put_b)
 
 pm_sdma_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
-  lambda ctx, lin: sdma_submit(make_cmdbuf(lin, ctx.devs), ctx.devs))])
+  lambda ctx, lin: sdma_submit(make_cmdbuf(lin, ctx.devs), ctx.devs, ctx.queue_idx))])
 
 @dataclass(frozen=True)
 class AMDEncodeCtx:  # encode-time constants for one queue: devs (every cmdbuf address resolves into these) + gfx version + packet/ip modules
-  devs: tuple[str, ...]; target: tuple[int, ...]; pm4: Any; sdma: Any; soc: Any  # noqa: E702
+  devs: tuple[str, ...]; target: tuple[int, ...]; pm4: Any; sdma: Any; soc: Any; queue_idx: int  # noqa: E702
   gc: AMDIP; nbio: AMDIP; xccs: int; max_copy_size: int; tmpring_size: Callable  # noqa: E702
 
 def encode_queue(q:UOp) -> UOp|None:
   d = Device[(devs:=to_tuple(q.arg[0]))[0]]
-  ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size)
+  queue_idx = int(q.arg[1].split(":", 1)[1])
+  ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, queue_idx, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size)
   opsel, submit = (pm_pm4_opsel, pm_pm4_submit) if q.arg[1].startswith("COMPUTE") else (pm_sdma_opsel, pm_sdma_submit)
   return submit.rewrite(graph_rewrite(q, opsel + pm_flatten_linear, walk=True, ctx=ctx, name=f"{q.arg[1]} opsel"), ctx)
 
