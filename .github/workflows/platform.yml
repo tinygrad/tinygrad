@@ -144,6 +144,33 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
+  testmacoscompile:
+    strategy:
+      fail-fast: false
+      matrix:
+        dev:
+          - 'NULL:CUDA:sm_120'
+    name: Compile-only (DEV=${{ matrix.dev }}, macos)
+    runs-on: macos-26
+    timeout-minutes: 15
+    env:
+      NULL_ALLOW_COPYOUT: 1
+      DEV: ${{ matrix.dev }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: compile-${{ matrix.backend }}
+          deps: "testing_unit"
+      - name: Run test_ops
+        shell: bash
+        run: |
+          python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
+          DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
+          python -m pytest -n=auto test/backend/test_ops.py --durations=20
+
 # ****** Windows Tests ******
 
   testwindows:

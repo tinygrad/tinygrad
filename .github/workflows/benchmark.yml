@@ -452,10 +452,8 @@ jobs:
       run: PYTHONPATH=. sh extra/setup_tinygpu_osx.sh
     - name: UsbGPU (USB4/TB) boot time
       run: PYTHONPATH=. DEBUG=3 DEV=PCI+NV:NAK time python3.11 test/test_tiny.py TestTiny.test_plus
-    - name: UsbGPU (USB4/TB) tiny tests (NAK)
+    - name: UsbGPU (USB4/TB) tiny tests
       run: PYTHONPATH=. DEV=PCI+NV:NAK python3.11 test/test_tiny.py
-    - name: UsbGPU (USB4/TB) tiny tests (NVRTC)
-      run: PYTHONPATH=. DEV=PCI+NV:CUDA python3.11 test/test_tiny.py
 
   testcommalatest:
     name: comma Benchmark (0.11.2)
