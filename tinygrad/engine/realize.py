@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import random, itertools, math, weakref, array, decimal
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, ansipad, all_int, prod, flatten, Context, getenv, to_tuple, tqdm
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, all_int, prod, flatten, Context, getenv, to_tuple, tqdm
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
@@ -90,7 +90,7 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
     mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
       colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
-      f" {display_name+' '*(46-ansilen(display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
+      f" {ansipad(display_name, 46)} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
       ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})"))
     first_run_cache.add(kcall.src[0].key)
 
