@@ -88,21 +88,6 @@ def packb16(lo:UOp, hi:UOp):
   lo = lo & const(0xFFFF) # mask off upper half
   return _vop3(UOp(Ops.INS, arg=RDNA3Ops.v_lshl_or_b32, src=(hi, const(16, dtypes.int32), lo)))
 
-# TODO: replicate this for b8
-# stack of 16 bit loads -> load directly into high/low halfs
-def load_into_stack(ctx, x:UOp) -> UOp:
-  if x.src[0].src[0].addrspace is not AddrSpace.GLOBAL: return None
-  out = []
-  vp = ctx.vreg(GP_VGPRS, width=len(x.src)//2)
-  for l in range(0, len(x.src), 2):
-    vr = vp.sub(l//2)
-    lo,hi = x.src[l], x.src[l+1]
-    lo,hi = load(ctx, lo, lo.src[0]), load(ctx, hi, hi.src[0])
-    def _mopc(u:UOp, opc) -> UOp: return u.replace(src=(u.src[0].replace(arg=opc),) + u.src[1:])
-    lo,hi = _mopc(lo, RDNA3Ops.global_load_d16_b16).replace(tag=(vr,)), _mopc(hi, RDNA3Ops.global_load_d16_hi_b16).replace(tag=(vr,))
-    out.append(hi.after(lo))
-  return UOp.group(*out, dtype=x.dtype, tag=(vp,))
-
 def stack2regs(x:UOp):
   nregs, mvs = ((len(x.src) * x.dtype.itemsize) + 3) // 4, []
   for i in range(nregs):
@@ -117,6 +102,7 @@ def stack2regs(x:UOp):
       for j in range(3): out = out | _pk(j+1)
       mvs.append(out)
     else: mvs.append(vmov(x.src[i]))
+  # NOTE: why doesnt bitcast work here?
   return UOp.group(*mvs, dtype=x.dtype) if len(mvs) > 1 else mvs[0].replace(dtype=x.dtype)
 
 # TODO: move the BUFFER condition to pattern
@@ -387,7 +373,6 @@ pm_int_to_float = PatternMatcher([
 ])
 
 pre_isel_matcher = PatternMatcher([
-  (UPat(Ops.STACK, name="x"), lambda x: stack2regs(x) if len(x.src) and not (x.dtype.itemsize == 2 and all(s.op is Ops.LOAD for s in x.src)) else None),
   # --- bools are lane masks ---
   # NOTE: booleans get passed around as sgpr masks in between loads and stores, but are converted / realized at mem ops to u8
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), \
@@ -410,11 +395,13 @@ pre_isel_matcher = PatternMatcher([
   (UPat.cvar("c").cast((dtypes.float64,)+dtypes.int64s, name="x"), const64),
   (UPat(Ops.WHERE, src=(UPat.var("pred"), UPat.var("a", dtype=dtypes.int64s+(dtypes.float64,)), UPat.var("b"))),
     lambda pred,a,b: UOp.group(pred.where(gep(a,0),gep(b,0)), pred.where(gep(a,1), gep(b,1)), dtype=a.dtype) if a.op is not Ops.INDEX else None),
-  # prevent 64 bit immediate from being realized into 2 regs for shift
-  (UPat((Ops.SHR, Ops.SHL), dtypes.int64s+(dtypes.float64,), src=(UPat.var("val"), UPat.cvar("c").cast()), name="x"),
-    lambda val,c,x: x.replace(src=(val, const(c.val, dtypes.uint32)))),
+  # prevent 64 bit shift from being realized into 2 regs
+  (UPat((Ops.SHR, Ops.SHL), src=(UPat.var("val"), UPat.var("n", dtypes.int64s+(dtypes.float64,))), name="x"),
+    lambda val,x,n: x.replace(src=(val, n.cast(dtypes.uint32)))),
   # --- other ---
+  (UPat(Ops.STACK, name="x"), lambda x: stack2regs(x) if len(x.src) else None),
   (UPat(Ops.CDIV, name="x"), idiv),
+  # this breaks spec...
   (UPat(Ops.MUL, (dtypes.int16,dtypes.int32), name="x"), lambda x: x.replace(dtype=dtypes.uint32).bitcast(x.dtype)),
   (UPat(Ops.MAX, dtypes.int64s, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda a,b,x: (a < b).where(b, a).replace(dtype=x.dtype)),
   (UPat(Ops.MAX, dtypes.int16s, name="x"), lambda x: x.replace(dtype=smux(x.dtype, dtypes.int32, dtypes.uint32)).bitcast(x.dtype)),
@@ -432,8 +419,6 @@ pm_alu_fusion = PatternMatcher([
 isel_matcher = pm_alu_fusion + PatternMatcher([
   # renderer lowering can synthesize bare bool constants after the canonical CAST(CONST) pass
   (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.val else 0),), tag=GP_SGPRS)),
-  # TODO: make this general
-  (UPat(Ops.STACK, dtypes.int16s+(dtypes.half,dtypes.bfloat16), src=UPat(Ops.LOAD), name="x"), load_into_stack),
   # --- control flow ---
   # how to remove positional arg contracts, make inter-lowering semantics explicit so its clear what src edges represent
   (UPat(Ops.RANGE, name="x"), \
@@ -511,8 +496,6 @@ def encode(ctx, x:UOp):
     base = next(v for k,v in dmap.items() if k in r.name)
     return base[r.index] if len(rs) == 1 else base[r.index:r.index+len(rs)-1]
   group, kw, args = x.arg.func, None, None
-
-  # print("encoding", x.arg.args[0].name.lower(), rdefs(x), [(s.op,s.arg,rdefs(s)) for s in x.src])
 
   # TODO: use match, clean up
   if group is RDNA3Ops.SMEM: kw = dict(sdata=encfield(x), sbase=encfield(x.src[0]), offset=encfield(x.src[1]))
