@@ -465,20 +465,32 @@ def _get_pads(uop:UOp) -> list[UOp]:
   if uop.op == Ops.ADD: return _get_pads(uop.src[0]) + _get_pads(uop.src[1])
   return [uop]
 
-def apply_grad(grad_buf:Tensor, new_grad:UOp):
+def apply_grad(grad_buf:Tensor, new_grad:UOp, accumulate:bool=True):
   pads = _get_pads(new_grad)
   if len(pads) <= 1:
     new_grad = new_grad.cast(grad_buf.dtype)
-    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad))
+    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad if accumulate else new_grad))
     return
+  if not accumulate:
+    # Slice-wise overwrite is only valid when the PADs are a complete, disjoint partition of the packed gradient.
+    # Fall back to defining the whole buffer for gradients that don't have that structure.
+    slices = [tuple((m[0], m[0]+s) for s,m in zip(p.src[0].shape, p.marg)) for p in pads if p.op == Ops.PAD]
+    disjoint = all(any(a1 <= b0 or b1 <= a0 for (a0, a1), (b0, b1) in zip(a, b)) for i,a in enumerate(slices) for b in slices[i+1:])
+    complete = len(slices) == len(pads) and sum(math.prod(p.src[0].shape) for p in pads) == grad_buf.numel()
+    if not (disjoint and complete):
+      new_grad = new_grad.cast(grad_buf.dtype)
+      grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(new_grad))
+      return
   cur = grad_buf.uop
   for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
     if pad.op == Ops.PAD:
       grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg)])
       buf_slice = cur.shrink(grad_shrink)
-      cur = cur.after(buf_slice.store(buf_slice + pad.src[0].cast(cur.dtype)))
+      new_slice = pad.src[0].cast(cur.dtype)
+      cur = cur.after(buf_slice.store(buf_slice + new_slice if accumulate else new_slice))
     else:
-      cur = cur.after(cur.store(cur + pad.cast(cur.dtype)))
+      new_value = pad.cast(cur.dtype)
+      cur = cur.after(cur.store(cur + new_value if accumulate else new_value))
   grad_buf.uop = cur
 
 if __name__ == "__main__":
