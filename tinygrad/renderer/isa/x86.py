@@ -227,8 +227,7 @@ def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, dt, ar
 def imm(dt:DType, v:int) -> UOp: return UOp.cconst(truncate[dt](v), dt).rtag()
 def to_imm(c:UOp) -> UOp|None:
   if not (c.op is Ops.CAST and (v:=c.src[0]).op is Ops.CONST): return None
-  if c.dtype is dtypes.int64: return imm(dtypes.int32, v.val) if not v.overflows(dtypes.int32) else None
-  if c.dtype is dtypes.uint64: return imm(dtypes.uint32, v.val) if not v.overflows(dtypes.uint32) else None
+  if c.dtype in dtypes.int64s: return imm(dtypes.int32, v.val) if not v.overflows(dtypes.int32) else None
   if c.dtype in dtypes.ints+(dtypes.bool,): return imm(c.dtype, v.val)
   return None
 def cmp(x:UOp) -> UOp:
