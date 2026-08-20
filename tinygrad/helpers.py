@@ -490,7 +490,7 @@ def fetch_fw(path:str, name:str, sha256:str) -> bytes:
   if sys.version_info >= (3,14) and (p:=pathlib.Path(f"/lib/firmware/{path}/{name}.zst")).is_file():
     from compression.zstd import decompress
     if hashlib.sha256(b:=decompress(p.read_bytes())).hexdigest() == sha256: return b
-  return fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/1e2c15348485939baf1b6d1f5a7a3b799d80703d/{path}/{name}",
+  return fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/0a6871b19abf5d6e024b5d208b101ae53e7fa0de/{path}/{name}",
                subdir="fw", sha256=sha256).read_bytes()
 
 # *** Exec helpers
