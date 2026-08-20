@@ -99,22 +99,20 @@ class TestLocalAmax(unittest.TestCase):
     assert_kernel_count(2)
     self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
 
-@unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
 class TestFusedQKVRoPE(unittest.TestCase):
   SHAPE = (2, 8192, 32, 8, 128)
+
+  def setUp(self):
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("test uses bf16 inputs")
 
   def rand_bf16(self, *shape:int) -> Tensor:
     return (Tensor.randn(*shape) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
 
-  def freqs_cis(self) -> Tensor:
-    _, N, _, _, D = self.SHAPE
-    return precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone().realize()
-
-  def test_llama31_8b_forward(self):
+  def test_forward(self):
     Tensor.manual_seed(0)
-    B, N, H, H_KV, D = self.SHAPE
+    B, N, H, H_KV, D = 1, 32, 8, 2, 16
     GROUP = H // H_KV
-    freqs_cis = self.freqs_cis()
+    freqs_cis = (Tensor.randn(1, N * 2, 1, D // 2, 2) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
 
     x = self.rand_bf16(B, N, H_KV * (GROUP + 2) * D)
     q, k, v = fused_qkv_rope(x, freqs_cis, H, H_KV, D)
@@ -131,12 +129,13 @@ class TestFusedQKVRoPE(unittest.TestCase):
       self.assertTrue(k.allclose(k_ref, atol=2e-2, rtol=0).item(), "K forward mismatch")
       self.assertTrue(v.allclose(v_ref, atol=0, rtol=0).item(), "V forward mismatch")
 
-  def test_llama31_8b_backward(self):
+  @unittest.skipUnless(has_hipcc(), "backward kernel requires hipcc to compile")
+  def test_llama31_8b(self):
     Tensor.manual_seed(1)
     B, N, H, H_KV, D = self.SHAPE
     PARTIALS = 2
     GROUP = H // H_KV
-    freqs_cis = self.freqs_cis()
+    freqs_cis = precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone().realize()
     dq = self.rand_bf16(B, N, H, D)
     dk_partial = self.rand_bf16(B * PARTIALS, N, H_KV, D)
     dv_partial = self.rand_bf16(B * PARTIALS, N, H_KV, D)
