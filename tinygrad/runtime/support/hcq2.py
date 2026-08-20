@@ -100,19 +100,32 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_
 # *****************
 # 1.1. prep: staging copies
 
+STAGING_SIZE, STAGING_SLOTS = 128 << 20, 2
+
+@functools.cache
+def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
+
 def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_DEVS)
+
+def stage_copy(dst:UOp, src:UOp) -> UOp|None:
+  if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
+
+  assert src.dtype.itemsize == dst.dtype.itemsize, "staged copies must be dtype-size matched"
+  base, it, copies = UOp.from_buffer(_staging()), src.dtype.itemsize, []
+  chunk = (STAGING_SIZE // STAGING_SLOTS) // it
+  for i, off in enumerate(range(0, src.max_numel(), chunk)):
+    stage = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it]
+    copies += [src[off:off+n].copy_to_device("CPU").call(stage, src[off:off+n]), stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
+  return UOp(Ops.LINEAR, src=tuple(copies))
+
+# *****************
+# 1.2. prep: kernel copies
 
 def _get_enqueue_devs(call:UOp) -> Any|None:
   if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
   devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
   return devs if all_devices_in(devs, HCQ_DEVS) else None
-
-def stage_copy(dst:UOp, src:UOp) -> UOp|None:
-  if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
-
-  stage = UOp.new_buffer("CPU", src.max_numel() * src.dtype.itemsize, dtypes.uint8)
-  return UOp(Ops.LINEAR, src=(src.copy_to_device("CPU").call(stage, src), stage.copy_to_device(dst.device).call(dst, stage)))
 
 def kernel_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if (devs:=_get_enqueue_devs(call)) is None or Device[(dev:=to_tuple(devs)[0])].has_copy_queue: return None
@@ -336,7 +349,9 @@ def split_patches(call:UOp) -> UOp|None:
   runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbuf"} for x in unwrap_mstack(g.buf_uop)))
   tables = [make_addr_table(call, gs, n) for gs,n in ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems"))]
   reads, fills = {k:v for _,r,_,_ in tables for k,v in r.items()}, [f for t in tables[1:] for f in t[2]] # inputs table is filled by exec
-  gathers = make_gather_loop(ipathces, tables[0][0], tables[0][3], lt_patches) if (ipathces:=[p for p in rt_patches if p.tag == "inputs"]) else {}
+
+  ipatches = [p for p in rt_patches if p.tag == "inputs" and all(v in tables[0][3] for v in p.src[1].src)] # only getaddrs go to the table
+  gathers = make_gather_loop(ipatches, tables[0][0], tables[0][3], lt_patches) if ipatches else {}
   body = body.substitute({p:p.substitute(gathers | reads) for p in rt_patches})
 
   lt_srcs = collections.defaultdict(list)
