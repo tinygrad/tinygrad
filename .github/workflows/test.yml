@@ -674,19 +674,8 @@ jobs:
         shell: bash
         if: contains(matrix.dev, 'a630')
         run: DEBUG=7 python3 test/backend/test_ops.py TestOps.test_gemm | grep isam
-      - name: Run selected test_ops (QCOMCL)
-        shell: bash
-        if: contains(matrix.dev, 'QCOMCL')
-        run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
-          DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
-          python -m pytest -n=auto test/backend/test_ops.py --durations=20 -k "test_tiny_add or test_add or test_sub or test_mul or \
-            test_div or test_pow or test_sin or test_exp or test_log or test_sqrt or test_relu or test_sigmoid or test_sum or test_mean or \
-            test_max or test_min or test_softmax or test_transpose or test_permute or test_reshape or test_cat or test_stack or test_gemm or \
-            test_matmul_simple or test_simple_conv2d or test_conv2d or test_max_pool2d or test_avg_pool2d"
       - name: Run test_ops
         shell: bash
-        if: ${{ !contains(matrix.dev, 'QCOMCL') }}
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
