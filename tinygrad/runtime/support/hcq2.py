@@ -8,7 +8,7 @@ from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.dtype import dtypes, truncate
+from tinygrad.dtype import dtypes, truncate, DType
 from tinygrad.runtime.support.hcq import MMIOInterface, HCQBuffer
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer, Estimates
@@ -51,18 +51,17 @@ def is_value_known_at_link(val:UOp) -> bool:
   return not val.variables() and not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
 
 def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> tuple[UOp, ...]:
-  def _key(p:tuple[sint, UOp]): return (p[1].dtype, p[0] % p[1].dtype.itemsize)
-  def _mk_store(ps:list[tuple[sint, UOp]], tag:str|None) -> UOp:
-    (dt, r), bit = _key(ps[0]), buf.dtype.itemsize
-    view = buf if dt == buf.dtype else buf.shrink(((r // bit, (max(off for off,_ in ps) + dt.itemsize) // bit),)).bitcast(dt)
-    offs = UOp(Ops.STACK, dtypes.int, tuple(UOp.const((off - r) // dt.itemsize, dtypes.int) for off,_ in ps))
-    return view.index(offs).store(UOp(Ops.STACK, dt, tuple(val for _,val in ps))).rtag(tag)
+  groups:dict[tuple[str|None, DType, sint], list[tuple[sint, UOp]]] = collections.defaultdict(list)
+  for off, val in patches:
+    tag = "link" if is_value_known_at_link(val) else "inputs" if val.op is Ops.GETADDR else None
+    groups[(tag, val.dtype, off % val.dtype.itemsize)].append((off, val))
 
-  patches = [(off, val.cast(buf.dtype) if val.dtype.itemsize == buf.dtype.itemsize else val) for off, val in patches]
-  link, runtime = partition(patches, lambda p: is_value_known_at_link(p[1]))
-  inputs, runtime = partition(runtime, lambda p: p[1].op is Ops.GETADDR)
-  return tuple(_mk_store(list(ps), tag) for cls, tag in ((link, "link"), (inputs, "inputs"), (runtime, None))
-               for _, ps in itertools.groupby(sorted(cls, key=_key), key=_key))
+  ret, bit = [], buf.dtype.itemsize
+  for (tag, dt, r), ps in groups.items():
+    view = buf.shrink(((r // bit, (max(off for off,_ in ps) + dt.itemsize) // bit),)).bitcast(dt)
+    offs = UOp(Ops.STACK, dtypes.int, tuple(UOp.const((off - r) // dt.itemsize, dtypes.int) for off,_ in ps))
+    ret.append(view.index(offs).store(UOp(Ops.STACK, dt, tuple(val for _,val in ps))).rtag(tag))
+  return tuple(ret)
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   data = UOp(Ops.BINARY, src=(), arg=blob).bitcast(buf.dtype)
