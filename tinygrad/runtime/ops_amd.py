@@ -326,7 +326,7 @@ class AMDComputeQueue(HWQueue):
     if prg.enable_private_segment_sgpr:
       assert self.dev.xccs == 1, "Only architected flat scratch is supported on multi-xcc"
       scratch_hilo = data64_le(prg.dev.scratch.va_addr)
-      # sgpr word1 bit31 enables swizzle
+      # sgpr word1 bit31 enables swizzle (HW adds the per-lane scratch interleaving)
       # sgpr word3 = 0x14 << 12 | 2 << 28 | 2 << 21 | 1 << 23
       user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000]
 
@@ -1058,15 +1058,17 @@ class AMDDevice(HCQCompiled):
     if self.max_private_segment_size >= private_segment_size: return
 
     lanes_per_wave = 64 # wave64
-    mem_alignment_size = 256 if self.target[0] != 9 else 1024
+    # scratch WAVESIZE unit is 1KB on gfx9/gfx10, 256B on gfx11+ (matches ROCm runtime)
+    mem_alignment_size = 256 if self.target[0] >= 11 else 1024
     size_per_thread = round_up(private_segment_size, mem_alignment_size // lanes_per_wave)
     size_per_xcc = size_per_thread * lanes_per_wave * self.iface.props['max_slots_scratch_cu'] * self.cu_cnt
     self.scratch, ok = self._realloc(getattr(self, 'scratch', None), size_per_xcc * self.xccs)
     if ok:
-      # NOTE: xcc logic is correct only for GFX9.
       max_scratch_waves = self.cu_cnt * self.iface.props['max_slots_scratch_cu'] * self.xccs
       wave_scratch = ceildiv(lanes_per_wave * size_per_thread, mem_alignment_size)
-      num_waves = (size_per_xcc // (wave_scratch * mem_alignment_size)) // (self.se_cnt if self.target[0] != 9 else 1)
+      # NOTE: xcc logic is correct only for GFX9. GFX11+ specifies WAVES per engine (NumShaderBanks),
+      # while GFX9/GFX10 use the total across the device.
+      num_waves = (size_per_xcc // (wave_scratch * mem_alignment_size)) // (self.se_cnt if self.target[0] >= 11 else 1)
 
       tmpring_t = getattr(hsa, f'union_COMPUTE_TMPRING_SIZE{"_GFX"+str(self.target[0]) if self.target[0] != 9 else ""}_bitfields')
       self.tmpring_size = int.from_bytes(tmpring_t(WAVES=min(num_waves, max_scratch_waves), WAVESIZE=wave_scratch), 'little')
