@@ -11,7 +11,7 @@ inc, kern_rules = ["-include", "stdint.h"], [(r'le32_to_cpu', ''),]
 fw_src="https://gitlab.com/kernel-firmware/linux-firmware/-/archive/0a6871b19abf5d6e024b5d208b101ae53e7fa0de/0a6871b19abf5d6e024b5d208b101ae53e7fa0de.tar.gz"
 pmc_src="https://raw.githubusercontent.com/ROCm/rocm-systems/cccc350dc620e61ae2554978b62ab3532dc10bd9/projects/rocprofiler-compute/src/rocprof_compute_soc/profile_configs/counter_defs.yaml"
 
-reg_files = {
+reg_files: dict[str, list[tuple[int, ...]]] = {
   "gc": [(9,4,3), (10,3,0), (11,0,0), (11,0,3), (11,5,0), (12,0,0)],
   "mmhub": [(1,8,0), (3,0,0), (3,0,1), (3,0,2), (3,3,0), (4,1,0)],
   "nbio": [(2,3,0), (2,3,1), (2,3,2), (4,3,0), (7,2,0), (7,4), (7,7,0), (7,9,0), (7,11,0)], "nbif": [(6,3,1)],
@@ -82,7 +82,7 @@ def __getattr__(nm):
 
           regs = {reg: (off, defs[f"{reg}_BASE_IDX"], fields.get(split_name(reg)[1], {})) for reg,off in defs.items() if f"{reg}_BASE_IDX" in defs}
           print(f"defined {len(regs)} registers for {nm}")
-          out.extend([f"{nm} = {{"] + [f"  {k!r}: {v!r}," for k,v in regs.items()] + ["}"])
+          out.extend([f"{nm}: dict = {{"] + [f"  {k!r}: {v!r}," for k,v in regs.items()] + ["}"])
         return "\n".join(out)
       return load("am/regs", [AMDINC + "/asic_reg/" + {"osssys":"oss"}.get(pre, pre) + f"/{pre}_{'_'.join(map(str, ver))}"
                               for pre in reg_files for ver in sorted(reg_files[pre])], srcs=am_src, gen=genreg)
