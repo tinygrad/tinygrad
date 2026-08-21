@@ -70,11 +70,6 @@ runs:
       with:
         enable-cache: 'false' # see below for manual caching
 
-    - name: Set up Python ${{ inputs.python-version }}
-      uses: actions/setup-python@v6
-      with:
-        python-version: ${{ inputs.python-version }}
-
     # **** Caching packages ****
 
     - name: Cache Python packages (PR)
