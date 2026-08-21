@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast
-import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
+import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
@@ -649,6 +649,56 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 
   def _do_map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
+  def _copyin(self, dest:HCQBuffer, src:memoryview):
+    if not self.dev.is_usb(): return super()._copyin(dest, src)
+    from tinygrad.runtime.support.usb import alloc_cbuffer
+    # Pipelined copyin over the 0xF2 engine. 240KB chunks stream into two alternating 256KB SRAM bounce windows; the
+    # engine can't signal data landing, so each chunk ends in a 512B sentinel sector tagged with its sequence number.
+    # A prebuilt SDMA ring polls each chunk's sentinel before copying it to VRAM, then bumps a drain fence; the host
+    # waits on that fence before re-arming a window. No timing is assumed in either direction.
+    dev, usb, ts, sdma = self.dev, self.dev.iface.pci_dev.usb, self.dev.timeline_signal, self.dev.sdma
+    CHUNK, src_mv = 0x3C000, src.cast('B')  # 15 16KB slots: the wire image must end mid-window (full windows corrupt)
+    nchunks = ceildiv(src.nbytes, CHUNK)
+    FENCE = 0xA800  # drain fence: the GPU writes it via sys_buf (PCIe 0x820800), the host reads it here (xdata)
+    if not hasattr(self, '_usb_seq'):  # one-time: clear the fence and zero both windows so garbage can't match a sentinel
+      self._usb_seq, self._usb_stage = 0, [alloc_cbuffer(0x40000) for _ in range(2)]  # (backing array, memoryview) pairs
+      self._usb_wins = (self.b[0].offset(0, 0x40000), self.b[0].offset(0x40000, 0x40000))  # two windows, engine slots 0/16
+      usb.write(FENCE, bytes(8))
+      for bi in range(2): usb.scsi_write(bytes(0x40000), slot_start=bi * 16)
+
+    def wait_drain(count):  # spin until the drain fence reaches count, i.e. chunks 0..count-1 are fully in VRAM
+      t0 = time.monotonic()
+      while int.from_bytes(usb.read(FENCE, 8), 'little') < count:
+        if time.monotonic() - t0 > 10: raise RuntimeError(f"GPU failed to drain USB copyin chunk {count - 1} (10s, hung GPU?)")
+
+    # build the whole ring upfront: per chunk, poll the sentinel, copy SRAM->VRAM, bump the fence; then one doorbell
+    POLL_EQ = sdma.SDMA_OP_POLL_REGMEM | sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(3) | sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
+    POLL_DW5 = sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)
+    q = dev.hw_copy_queue_t().wait(ts, dev.timeline_value - 1)
+    for c in range(nchunks):
+      seq, size = self._usb_seq + c, min(CHUNK, src.nbytes - c * CHUNK)
+      q.q(POLL_EQ, *data64_le(self._usb_wins[seq & 1].va_addr + round_up(size, 512)), 0x51000000 | (seq & 0xFFFFFF), 0xFFFFFFFF, POLL_DW5)
+      q.copy(dest.offset(c * CHUNK), self._usb_wins[seq & 1], size)
+      q.write(dev.iface.sys_buf.offset(0x800, 8), seq + 1, b64=True)
+    q.signal(ts, dev.next_timeline()).submit(dev)
+
+    # stream the chunks: stage the wire image [payload][sentinel], arm the window, send. A window is reusable once
+    # its previous occupant (seq-2) is both fully sent (tag reaped) and fully drained to VRAM (the fence).
+    inflight = [None, None]
+    for c in range(nchunks):
+      seq, size = self._usb_seq + c, min(CHUNK, src.nbytes - c * CHUNK)
+      if inflight[seq & 1] is not None: usb.usb.bulk_wait(inflight[seq & 1])
+      buf = self._usb_stage[seq & 1][1]
+      buf[:size] = src_mv[c * CHUNK : c * CHUNK + size]
+      struct.pack_into('<I', buf, round_up(size, 512), 0x51000000 | (seq & 0xFFFFFF))  # the sentinel sector
+      wait_drain(seq - 1)
+      wire = round_up(size, 512) + 512  # payload padded to 512B sectors, plus the sentinel sector
+      usb.usb.control_write(0xF2, wire // 512, (seq & 1) * 16 | (ceildiv(wire, 0x4000) << 8))  # wValue=sectors, wIndex=slot|count
+      inflight[seq & 1] = usb.usb.bulk_write_async(buf[:wire])
+    for tag in inflight: usb.usb.bulk_wait(tag)
+    self._usb_seq += nchunks
+    wait_drain(self._usb_seq)  # copyin is synchronous: everything must be in VRAM before returning
+
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     if not self.dev.is_usb(): return super()._copyout(dest, src)
     self.dev.synchronize()
@@ -926,9 +976,8 @@ class USBIface(PCIIface):
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
     # usb allocates uncached and cpu_access in vram. vram writes are faster than sram writes
-    if host and self.sys_next_off + size < self.sys_buf.size:
-      self.sys_next_off += size
-      return self.sys_buf.offset(self.sys_next_off - size, size)
+    # NOTE: host allocs deliberately do NOT use sys_buf (the 0x820000 NVMe SQ region): the GPU's signal writes there
+    # collide with the 0xF2 engine mid-stream. Signals in VRAM are read back via 0xF0 streaming reads instead.
 
     # force devmem
     return super().alloc(size, host=False, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, force_devmem=True, **kwargs)
@@ -1048,7 +1097,8 @@ class AMDDevice(HCQCompiled):
     if getenv("AMD_DISABLE_SDMA"): return None
     if idx in self.sdma_queues: return self.sdma_queues[idx]
     with contextlib.suppress(OSError):
-      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+      # USB: a copyin submits its whole ring at once (3 packets per 240KB chunk), so it needs more than the 0x200 default
+      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, (1 << 20) if self.is_usb() else (16 << 20), idx=idx)
     return self.sdma_queues.get(idx, None)
 
   def _ensure_has_local_memory(self, private_segment_size):
