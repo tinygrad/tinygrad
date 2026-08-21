@@ -61,6 +61,7 @@ runs:
         echo "MAX_BUFFER_SIZE=300000000" >> "$GITHUB_ENV"
         if [[ "$RUNNER_OS" == "Linux" ]]; then
           echo "VIRTUAL_ENV=/opt/venv/${{ inputs.python-version }}" >> "$GITHUB_ENV"
+          echo "UV_PYTHON_INSTALL_DIR=/opt/python" >> "$GITHUB_ENV"
         else
           echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
         fi
