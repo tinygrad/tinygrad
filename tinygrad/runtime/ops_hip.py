@@ -48,7 +48,7 @@ class HIPProgram(Program[HIPDevice]):
           fields.append((f'f{bi}', hip.hipDeviceptr_t,off:=round_up(off, 8)))
           ordered.append(args[bi]); bi += 1; off += 8
         else:
-          fields.append((f'v{vi}', getattr(ctypes, f"c_int{dt.bitsize}"), round_up(off:=off, dt.itemsize)))
+          fields.append((f'v{vi}', getattr(ctypes, f"c_int{dt.bitsize}"), off:=round_up(off, dt.itemsize)))
           ordered.append(vals[vi]); vi += 1; off += dt.itemsize
       self.c_args = init_c_struct_t(off if fields else 0, tuple(fields))(*ordered)
       self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
