@@ -75,7 +75,11 @@ powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
 @functools.cache
 def get_simplifying_rewrite_patterns(ops:tuple[Ops, ...]) -> PatternMatcher:
   # these are rewrites that make things simpler
-  pat: list[tuple[UPat, Callable]] = [(UPat.var("a")//UPat.var("b"), floordiv_to_idiv)]
+  pat: list[tuple[UPat, Callable]] = []
+  # FLOORDIV by 2**y -> x >> y (an arithmetic shift is exactly floor division for any sign); fires before floordiv_to_idiv
+  if Ops.SHR in ops: pat.append((UPat.var("x", dtypes.ints)//UPat.cvar("c"),
+    lambda x,c: x >> v if (v:=powers_of_two.get(c.val, 0)) else None))
+  pat.append((UPat.var("a")//UPat.var("b"), floordiv_to_idiv))
   # FLOORMOD by 2**y -> x & (2**y-1) (correct floor mod for any sign in two's complement); fires before floormod_to_mod
   if Ops.AND in ops: pat.append((UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.val-1) if c.val in powers_of_two else None))
   pat.append((UPat.var("a")%UPat.var("b"), floormod_to_mod))
