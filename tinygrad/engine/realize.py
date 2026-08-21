@@ -2,14 +2,15 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import random, itertools, math, weakref, array, decimal
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, prod, flatten, Context, getenv, to_tuple
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, all_int, prod, flatten, Context, getenv, to_tuple, tqdm
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.dtype import dtypes
-from tinygrad.renderer import Estimates
-from tinygrad.codegen import to_program
+from tinygrad.renderer import Estimates, Renderer
+from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.codegen.opt.postrange import args_from_ast
+from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 # **************** Helpers ****************
 
@@ -89,7 +90,7 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
     mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
       colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
-      f" {display_name+' '*(46-ansilen(display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
+      f" {ansipad(display_name, 46)} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
       ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})"))
     first_run_cache.add(kcall.src[0].key)
 
@@ -212,16 +213,16 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   dev = cast(Any, Device[(info:= call.arg.aux).device[0]])
   addrs = [(b.bufs[j] if isinstance(b:=_resolve(ctx.input_uops[k], ctx.input_uops).buffer, MultiBuffer) else b).get_buf(dev_name).va_addr
            for devs, idxs in info.input_idxs for j, dev_name in enumerate(devs) for k in idxs]
-  dev.rt_buffer._buf.cpu_view().view(offset=(base:=dev.rt_allocator.alloc(len(addrs) * 8)), fmt='Q')[:len(addrs)] = array.array('Q', addrs)
+  dev.rt_buffer()._buf.cpu_view().view(offset=(base:=dev.rt_allocator.alloc(len(addrs) * 8)), fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
   if info.inputs is not None:
-    tables = [UOp.from_buffer(dev.rt_buffer.view(len(idxs), dtypes.uint64, base + j*len(idxs)*8), HCQ_RUNTIME_DEV.value)
+    tables = [UOp.from_buffer(dev.rt_buffer().view(len(idxs), dtypes.uint64, base + j*len(idxs)*8), HCQ_RUNTIME_DEV.value)
               for devs, idxs in info.input_idxs for j in range(len(devs))]
     call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*tables)})
-  exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer._buf.va_addr + base}), call, ast)
+  exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer()._buf.va_addr + base}), call, ast)
 
   def _prof_tm(device:str, stat_call:UOp, prof:tuple[int, ...]) -> float|None:
-    (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, *prof)
+    (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, prof[0], prof[1], stat_call.key)
     if not ctx.wait: return None
     d.synchronize(timeout=ctx.timeout)
     st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
@@ -247,10 +248,44 @@ pm_beam = PatternMatcher([
    lambda ctx,call,sink: call.replace(src=(sink.replace(arg=replace(sink.arg, beam=ctx)), *call.src[1:])) if sink.arg.beam == 0 else None),
 ])
 
-pm_compile = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True), lambda call,ast:
-    call.replace(src=(to_program(ast, Device[call.device if isinstance(call.device, str) else call.device[0]].renderer), *call.src[1:]))),
-])
+# **************** parallel lowering + compilation ****************
+
+def _compile_kernel(x:tuple[int, tuple[UOp, Renderer], dict]) -> tuple[int, UOp]:
+  with Context(**x[2]): return x[0], to_program(*x[1])
+
+def _needs_compile(c:UOp) -> bool:
+  if c.op is not Ops.CALL: return False
+  if c.src[0].op is Ops.SINK: return True
+  # a PROGRAM with a ProgramInfo and a BINARY is already compiled
+  return c.src[0].op is Ops.PROGRAM and not (isinstance(c.src[0].arg, ProgramInfo) and c.src[0].src[-1].op is Ops.BINARY)
+
+def lower_and_compile(linear:UOp) -> UOp:
+  # collect the kernels to lower and compile, deduped by their compile cache key
+  calls = [c for c in linear.toposort() if _needs_compile(c)]
+  rens = {c: Device[c.device if isinstance(c.device, str) else c.device[0]].renderer for c in calls}
+  keys = {c: to_program_key(c.src[0], rens[c]) for c in calls}
+  if not len(calls): return linear
+
+  # lower and compile what's not cached, in parallel if there's a worker pool
+  todo = list({keys[c]: (c.src[0], rens[c]) for c in calls if keys[c] not in to_program_cache}.items())
+  if len(todo):
+    # kernels that beam search must compile in the parent, beam needs device access to time candidates
+
+    pool = None if len(todo) == 1 or any(getattr(c.src[0].arg, "beam", 0) for c in calls) else get_worker_pool()
+    ctx = {v.key: v.value for v in to_program_context}
+    tasks = ((i, ast_ren, ctx) for i, (_, ast_ren) in enumerate(todo))
+    try:
+      with tqdm(total=len(todo), desc="compiling", disable=DEBUG<1) as pbar:
+        for i, prg in (map if pool is None else pool.imap_unordered)(_compile_kernel, tasks):
+          pbar.set_description(f"compiling {ansipad(prg.src[0].arg.name, 40)}")
+          to_program_cache[todo[i][0]] = prg
+          pbar.update(1)
+    except KeyboardInterrupt:
+      if pool is not None: terminate_worker_pool()
+      raise
+
+  # swap the compiled PROGRAMs into the calls
+  return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in calls}, name="precompile kernels")
 
 pm_optimize_local_size = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), optimize_local_size),
@@ -270,7 +305,7 @@ if getenv("HCQ2"): from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_li
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-  linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
+  linear = lower_and_compile(linear)
   linear = graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
   if getenv("HCQ2"): linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
   return linear
@@ -283,12 +318,13 @@ def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequenc
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: track_stats(ctx, call, perf_counter_us(), pm_exec.rewrite(call, ctx))
 
-def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> float:
-  if clear_l2:
-    if hasattr(dev:=Device[call.src[1].device], 'invalidate_caches'): dev.invalidate_caches()
-    else:
-      from tinygrad.tensor import Tensor
-      with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
+def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
   linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True), cache=ctx.cache)
-  return max(et for c in linear.src for et in pm_exec.rewrite(c, ctx) or [0.0])
+  while True:
+    if clear_l2:
+      if hasattr(dev:=Device[call.src[1].device], 'invalidate_caches'): dev.invalidate_caches()
+      else:
+        from tinygrad.tensor import Tensor
+        with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
+    yield max(et for c in linear.src for et in pm_exec.rewrite(c, ctx) or [0.0])

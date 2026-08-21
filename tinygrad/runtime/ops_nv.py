@@ -22,7 +22,7 @@ nv_gpu = nv_570 # default to 570
 PMA = ContextVar("PMA", abs(VIZ.value)>=2)
 
 @dataclass(frozen=True)
-class ProfilePMAEvent(ProfileEvent): device:str; kern:str; blob:bytes; exec_tag:int # noqa: E702
+class ProfilePMAEvent(ProfileEvent): device:str; kern:str; blob:bytes; exec_tag:int; profile_key:bytes|None=None # noqa: E702
 
 class NVSignal(HCQSignal):
   def _sleep(self, time_spent_since_last_sleep_ms:int):
@@ -335,7 +335,7 @@ class NVProgram(HCQProgram['NVDevice']):
     if self.dev.pma_enabled:
       self.dev.synchronize()
       if pma_blob:=self.dev._prof_readback():
-        Compiled.profile_events += [ProfilePMAEvent(self.dev.device, self.name, pma_blob, self.dev.prof_exec_counter)]
+        Compiled.profile_events += [ProfilePMAEvent(self.dev.device, self.name, pma_blob, self.dev.prof_exec_counter, self.profile_key)]
     return res
 
 class NVAllocator(HCQAllocator['NVDevice']):

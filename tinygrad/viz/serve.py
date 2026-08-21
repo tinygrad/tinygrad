@@ -231,10 +231,11 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
   ei:ProfilePointEvent|None = None
   for st,et,dur,e in dev_events:
     if isinstance(e, ProfilePointEvent) and e.name == "exec": ei = e
-    if dur == 0: continue
+    # only visualize range events with an end timestamp
+    if dur == 0 or isinstance(e, ProfilePointEvent): continue
     name, key = e.name, None
     fmt:dict = {}
-    if (ref:=data.ref_map.get(name)) is not None and ref < len(data.ctxs):
+    if (ref:=data.ref_map.get(e.profile_key)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
       if (ki:=data.ctxs[ref].get("ki")) is not None and ki.estimates is not None and ei is not None:
         for est_key,est_val in (("FLOPS", ki.estimates.ops), ("B/s mem", ki.estimates.mem), ("B/s lds", ki.estimates.lds)):
@@ -333,14 +334,14 @@ def unpack_pmc(e) -> dict:
 
 def load_amd_counters(data:VizData, profile:list) -> None:
   counter_events:dict[tuple[int, int], dict] = {}
-  durations:dict[str, list[float]] = {}
+  durations:dict[bytes|str, list[float]] = {}
   prg_events:dict[int, ProfileProgramEvent] = {}
   arch = ""
   for e in profile:
     if type(e).__name__ in {"ProfilePMCEvent", "ProfileSQTTEvent"}:
       counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e).__name__, []).append(e)
-    if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
-      durations.setdefault(str(e.name), []).append(float(e.en-e.st))
+    if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None and e.profile_key is not None:
+      durations.setdefault(e.profile_key, []).append(float(e.en-e.st))
     if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD") and e.tag is not None: prg_events[e.tag] = e
     if isinstance(e, ProfileDeviceEvent) and e.device.startswith("AMD"): arch = f"gfx{unwrap(e.props)['gfx_target_version']//1000}"
   if len(counter_events) == 0: return None
@@ -348,12 +349,12 @@ def load_amd_counters(data:VizData, profile:list) -> None:
   run_number = {n:0 for n,_ in counter_events}
   for (k, tag),v in counter_events.items():
     # use the colored name if it exists
-    name = data.ctxs[r]["ki"].name if (r:=data.ref_map.get(pname:=prg_events[k].name)) is not None else pname
+    name = data.ctxs[r]["ki"].name if (r:=data.ref_map.get(unwrap(prg_events[k].profile_key))) is not None else prg_events[k].name
     run_number[k] += 1
     steps:list[dict] = []
     if (pmc:=v.get("ProfilePMCEvent")):
       steps.append(create_step("PMC", ("/prg-pmc", len(data.ctxs), len(steps)), pmc[0]))
-      all_counters[(name, run_number[k], pname)] = pmc[0]
+      all_counters[(name, run_number[k], unwrap(prg_events[k].profile_key))] = pmc[0]
     # to decode a SQTT trace, we need the raw stream, program binary and device properties
     if (sqtt:=v.get("ProfileSQTTEvent")):
       for e in sqtt:
@@ -496,10 +497,10 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
 def load_nv_counters(data:VizData, profile:list) -> None:
   steps:list[dict] = []
   sm_version = {e.device:e.props.get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.props is not None}
-  run_number:dict[str, int] = {}
+  run_number:dict[bytes, int] = {}
   for e in profile:
     if type(e).__name__ == "ProfilePMAEvent":
-      run_number[e.kern] = run_num = run_number.get(e.kern, 0)+1
+      run_number[profile_key] = run_num = run_number.get(profile_key:=unwrap(e.profile_key), 0)+1
       steps.append(create_step(f"PMA {e.kern}"+(f"n{run_num}" if run_num>1 else ""), ("/prg-pma-pkts", len(data.ctxs), len(steps)),
                                data=(e.blob, sm_version[e.device])))
   if steps: data.ctxs.append({"name":"All Counters", "steps":steps})

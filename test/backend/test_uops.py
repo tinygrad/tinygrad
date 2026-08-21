@@ -2,7 +2,7 @@ from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, ceildiv
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType, buffers
@@ -193,15 +193,16 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local memory size for packed data types")
   def test_packed_smem_size(self):
     _dtypes = [dtypes.char, dtypes.uchar, dtypes.short, dtypes.ushort, dtypes.half]
-    size = 16
-    for dtype in _dtypes:
-      temp = UOp.placeholder((size,), dtype, slot=0, addrspace=AddrSpace.LOCAL)
-      uops = to_uops_list([temp], ren=Device[Device.DEFAULT].renderer)
-      out = Device[Device.DEFAULT].renderer.render(uops)
-      # half is supported in wgsl, so it doesn't have to be packed
-      corrected_size = size//(4//dtype.itemsize) if dtype != dtypes.half else size
-      # temp0: array<{Device[Device.DEFAULT].renderer.buf_map(dtype)},{corrected_size}>;
-      self.assertIn(f",{corrected_size}>;", out)
+    # a partial word still needs a whole word, so sizes that don't fill one must round up
+    for size in (16, 5):
+      for dtype in _dtypes:
+        temp = UOp.placeholder((size,), dtype, slot=0, addrspace=AddrSpace.LOCAL)
+        uops = to_uops_list([temp], ren=Device[Device.DEFAULT].renderer)
+        out = Device[Device.DEFAULT].renderer.render(uops)
+        # half is supported in wgsl, so it doesn't have to be packed
+        corrected_size = ceildiv(size, 4//dtype.itemsize) if dtype != dtypes.half else size
+        # temp0: array<{Device[Device.DEFAULT].renderer.buf_map(dtype)},{corrected_size}>;
+        self.assertIn(f",{corrected_size}>;", out)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   @unittest.skip("tinygrad doesn't support this behavior")

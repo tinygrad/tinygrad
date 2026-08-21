@@ -24,8 +24,8 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   if c.dtype.fmt is None or root.dtype.fmt is None or c.dtype.itemsize != root.dtype.itemsize: return None
   return root.const_like(bitcast(truncate[c.dtype](c.val), c.dtype, root.dtype))
 
-# const folding works for CONST, STACK, and casted CONST
-const_folding_pat = UPat.any(UPat((Ops.CONST, Ops.STACK)), UPat(Ops.CAST, src=(UPat(Ops.CONST),)))
+# const folding works for CONST and STACK
+const_folding_pat = UPat((Ops.CONST, Ops.STACK))
 
 def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
   if u.op is Ops.CONST: return u.val
@@ -101,6 +101,11 @@ pm_remove_invalid = PatternMatcher([
    if any(x.is_invalid for x in s.src) else None),
 ])
 
+def fold_const_where(gate:UOp, c0:UOp, c1:UOp, w:UOp) -> UOp:
+  # folding a strong dtype WHERE to a weak const branch keeps the strong dtype
+  ret = c0 if gate.val else c1
+  return commit_weak(ret, w.dtype) if ret.op is Ops.CONST and ret.dtype in dtypes.weaks and w.dtype not in dtypes.weaks else ret
+
 symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
@@ -137,6 +142,9 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
+  # a CAST to a concrete dtype over a CONST is a value conversion: evaluate it once, at the width the CAST states
+  # TODO: delete this once CONST has no dtype
+  (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
   (UPat(GroupOp.Unary, src=(const_folding_pat,), name="a"), fold_const_alu),
   # NOTE: THREEFRY(const,const) folds via its decomposition
   (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(const_folding_pat,)*2, name="a"), fold_const_alu),
@@ -175,7 +183,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** simple where folding **
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
-  (UPat.cvar("gate").where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.val else c1),
+  (UPat.cvar("gate").where(UPat.var("c0"), UPat.var("c1")).named("w"), fold_const_where),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
   # a.where(c, b.where(c, d)) -> (a | b).where(c, d)
