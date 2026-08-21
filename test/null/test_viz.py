@@ -522,12 +522,16 @@ class TestVizIntegration(unittest.TestCase):
     def one(A:UOp): return A[0].store(UOp.const(1.0, dtypes.float)).sink(arg=KernelInfo(kernel_name))
     def zero(A:UOp): return A[0].store(UOp.const(0.0, dtypes.float)).sink(arg=KernelInfo(kernel_name))
     with save_viz() as viz:
-      Tensor.custom_kernel(Tensor.empty(4, device="NULL"), fxn=one)[0].realize()
-      Tensor.custom_kernel(Tensor.empty(4, device="NULL"), fxn=zero)[0].realize()
-    ctx_refs = [i for i,c in enumerate(viz.list_items()) if c["name"] == kernel_name]
+      @TinyJit
+      def f(a:Tensor, b:Tensor): return Tensor.custom_kernel(a, fxn=one)[0], Tensor.custom_kernel(b, fxn=zero)[0]
+      a, b = Tensor.empty(4, device="NULL"), Tensor.empty(4, device="NULL")
+      # warmup
+      for _ in range(2): Tensor.realize(*f(a, b))
+      Tensor.realize(*f(a, b))
+    kernels = {i for i,c in enumerate(viz.list_items()) if c["name"] == kernel_name}
     profile = decode_profile(unwrap(get_profile(viz.data, cpu_events)))
     events = [e for e in profile["layout"]["NULL"]["events"] if e["name"] == kernel_name]
-    self.assertEqual([e["ref"] for e in events], ctx_refs)
+    self.assertEqual({e["ref"] for e in events}, kernels)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
