@@ -232,7 +232,7 @@ class TestCallSchedule(unittest.TestCase):
     def store(x:Tensor, sp:UOp) -> Tensor:
       # update a cache at a symbolic offset, like an attention KV cache update
       return Tensor(cache.uop.after(cache[sp:sp+x.shape[0]].uop.store(x.uop)))[:sp+x.shape[0]].sum()
-    sp_v, nt_v = UOp.variable("sp", 0, 15), UOp.variable("nt", 1, 8)
+    sp_v, nt_v = UOp.variable("sp", 0, 8), UOp.variable("nt", 1, 8)
     t = Tensor.arange(16).float().realize()
     sp, nt = sp_v.bind(0), nt_v.bind(8)
     store(t[sp:sp+nt].clone().realize(), sp).realize()

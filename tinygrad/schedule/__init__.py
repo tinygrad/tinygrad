@@ -97,16 +97,16 @@ pm_post_sched_cache = PatternMatcher([
    create_new_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
 ])
 
-def resolve_linear_call(linear_call:UOp):
+def resolve_linear_call(linear_call:UOp, outer_binds:dict[str, UOp]|None=None):
   linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
-  # map the call body params back to the original Variables stored in the call args
-  binds = {f"p{i}":x.src[0].replace(op=Ops.PARAM) for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}
-  # NOTE: don't substitute into nested calls that carry their own bound Variable args: those are independent scopes
-  # with their own p{slot} param names (which collide with this scope's) and are resolved by their own match of this
-  # pattern. calls without bound Variable args (e.g. precompiled allreduce) lexically reuse this scope's param names
+  # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
+  # scalar args (e.g. precompiled allreduce) inherit it
+  binds = {**(outer_binds or {}),
+           **{f"p{i}":x.src[0].replace(op=Ops.PARAM) for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}}
   def apply_binds(si:UOp) -> UOp:
-    if si.op is Ops.CALL and si.src[0].op is Ops.LINEAR and any(x.is_bound_var for x in si.src[1:]): return si
-    return si.substitute({v:binds[v.expr] for v in si.variables() if v.expr in binds}, enter_calls=True, name="resolve scalar params")
+    if si.op is Ops.CALL and si.src[0].op is Ops.LINEAR: return resolve_linear_call(si, binds)
+    subs = {v:binds[v.expr] for v in si.variables() if v.expr in binds}
+    return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
   return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
 
 pm_resolve_linear_call = PatternMatcher([
