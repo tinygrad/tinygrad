@@ -644,6 +644,24 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
+  testqcommock:
+    name: Linux (MOCK+QCOM:IR3)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: qcom-mock
+          deps: "testing_unit mesa"
+      - name: Run QCOM add
+        run: |
+          DEV=MOCK+QCOM:IR3 CACHELEVEL=0 python -m pytest \
+            test/test_tiny.py::TestTiny::test_plus \
+            test/backend/test_ops.py::TestOps::test_add -q
+
 # ****** Compile-only Tests ******
 
   compiletests:
