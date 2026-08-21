@@ -775,19 +775,23 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       return x[tuple(idx)]
 
     def _interleave(even:Self, odd:Self, n:int) -> Self:
-      if odd.shape[axis] == 0: return even
-      paired = _slice(even, 0, odd.shape[axis]).stack(odd, dim=axis+1).flatten(axis, axis+1)
-      return paired if n%2 == 0 else paired.cat(_slice(even, odd.shape[axis], odd.shape[axis]+1), dim=axis)
+      odd_len = odd.shape[axis]
+      assert isinstance(odd_len, int)
+      if odd_len == 0: return even
+      paired = _slice(even, 0, odd_len).stack(odd, dim=axis+1).flatten(axis, axis+1)
+      return paired if n%2 == 0 else paired.cat(_slice(even, odd_len, odd_len+1), dim=axis)
 
     def _scan(x:Self) -> Self:
       n = x.shape[axis]
       assert isinstance(n, int), "associative_scan requires a static scan axis"
       if n <= 1: return x
       even, odd = _slice(x, 0, None, 2), _slice(x, 1, None, 2)
-      pairs = fn(_slice(even, 0, odd.shape[axis]), odd)
+      even_len, odd_len = even.shape[axis], odd.shape[axis]
+      assert isinstance(even_len, int) and isinstance(odd_len, int)
+      pairs = fn(_slice(even, 0, odd_len), odd)
       scanned_pairs = _scan(pairs)
       even_out = _slice(even, 0, 1)
-      if even.shape[axis] > 1: even_out = even_out.cat(fn(_slice(scanned_pairs, 0, even.shape[axis]-1), _slice(even, 1, None)), dim=axis)
+      if even_len > 1: even_out = even_out.cat(fn(_slice(scanned_pairs, 0, even_len-1), _slice(even, 1, None)), dim=axis)
       return _interleave(even_out, scanned_pairs, n)
 
     return _scan(self)

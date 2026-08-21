@@ -1148,12 +1148,13 @@ class TestOps(unittest.TestCase):
                    lambda x: x.associative_scan(lambda a,b: a.maximum(b), axis=0), forward_only=True)
 
   def test_associative_scan_matmul(self):
-    vals = np.linspace(-1.0, 1.0, 20, dtype=np.float32).reshape(5, 2, 2)
-    expected, acc = [], vals[0]
-    for i in range(vals.shape[0]):
-      if i: acc = acc @ vals[i]
-      expected.append(acc.copy())
-    np.testing.assert_allclose(Tensor(vals).associative_scan(lambda a,b: a@b, axis=0).numpy(), np.stack(expected), atol=1e-6, rtol=1e-6)
+    def torch_scan(x):
+      expected, acc = [], x[0]
+      for i in range(x.shape[0]):
+        if i: acc = acc @ x[i]
+        expected.append(acc)
+      return torch.stack(expected)
+    helper_test_op([(5, 2, 2)], torch_scan, lambda x: x.associative_scan(lambda a,b: a@b, axis=0), forward_only=True)
 
   def test_small_cumprod(self):
     helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
