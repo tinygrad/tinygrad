@@ -4,7 +4,7 @@ import numpy as np
 
 from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_device, needs_second_gpu, KernelCountException
 from test.unit.test_jit import _simple_test
-from tinygrad import Tensor, Variable, TinyJit, Device, dtypes
+from tinygrad import Tensor, Variable, TinyJit, Device, dtypes, UOp
 from tinygrad.engine.jit import graph_class
 from tinygrad.helpers import JIT, DEV, GlobalCounters
 from tinygrad.uop.ops import Ops
@@ -15,6 +15,44 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def add(a, b): return (a+b).realize()
     _simple_test(add)
+
+  def test_jit_arg_order_pos_kwargs(self):
+    # capture positional, replay as kwargs
+    @TinyJit
+    def sub(first, second): return (first - second).realize()
+    a, b = Tensor.randn(10, 10, device=Device.DEFAULT).realize(), Tensor.randn(10, 10, device=Device.DEFAULT).realize()
+    sub(a, b)
+    sub(a, b)
+    np.testing.assert_allclose(sub(first=a, second=b).numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(sub, 1)
+
+  def test_jit_arg_order_kwargs_pos(self):
+    # capture as kwargs, replay positionally
+    @TinyJit
+    def sub(first, second): return (first - second).realize()
+    a, b = Tensor.randn(10, 10, device=Device.DEFAULT).realize(), Tensor.randn(10, 10, device=Device.DEFAULT).realize()
+    sub(first=a, second=b)
+    sub(first=a, second=b)
+    np.testing.assert_allclose(sub(a, b).numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(sub, 1)
+
+  def test_jit_arg_swap_kwargs(self):
+    @TinyJit
+    def sub(first, second): return (first - second).realize()
+    a, b = Tensor.randn(10, 10, device=Device.DEFAULT).realize(), Tensor.randn(10, 10, device=Device.DEFAULT).realize()
+    sub(first=a, second=b)
+    sub(first=a, second=b)
+    np.testing.assert_allclose(sub(first=b, second=a).numpy(), b.numpy()-a.numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(sub, 1)
+
+  def test_jit_raw_buffer_input(self):
+    @TinyJit
+    def f(b): return (Tensor(UOp.from_buffer(b), device=b.device) * 2).realize()
+    from tinygrad.device import Buffer
+    for i in range(4):
+      buf = Buffer(Device.DEFAULT, 3, dtypes.float32, initial_value=np.array([i+1]*3, dtype=np.float32).tobytes())
+      np.testing.assert_allclose(f(buf).numpy(), [2*(i+1)]*3, atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(f, 1)
 
   @unittest.skipUnless(Device.DEFAULT == "CPU", "core_id is a CPU runtimevar")
   def test_hcq_core_id_runtimevar_merge(self):
