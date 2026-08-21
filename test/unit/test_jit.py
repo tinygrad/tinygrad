@@ -1,6 +1,7 @@
 import unittest, numpy as np
 from test.helpers import assert_jit_cache_len
-from tinygrad import Tensor, TinyJit, Context, UOp, dtypes
+from tinygrad import Tensor, TinyJit, Context, UOp, dtypes, Device
+from tinygrad.device import Buffer
 from tinygrad.engine.jit import JitError
 
 def _simple_test(add, extract=lambda x: x, N=10):
@@ -139,6 +140,60 @@ class TestJit(unittest.TestCase):
       c = add_kwargs(first=a, second=b)
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(add_kwargs, 1)
+
+  def test_jit_pos_then_kwargs(self):
+    # capture with positional args, then replay with keyword args (same conceptual order)
+    @TinyJit
+    def sub(first, second): return (first - second).realize()
+    a, b = Tensor.randn(10, 10).realize(), Tensor.randn(10, 10).realize()
+    sub(a, b)
+    sub(a, b)  # capture, names=[0, 1]
+    out = sub(first=a, second=b)
+    np.testing.assert_allclose(out.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(sub, 1)
+
+  def test_jit_kwargs_then_pos(self):
+    # capture: keyword args, then replay with positional args
+    @TinyJit
+    def sub(first, second): return (first - second).realize()
+    a, b = Tensor.randn(10, 10).realize(), Tensor.randn(10, 10).realize()
+    sub(first=a, second=b)
+    sub(first=a, second=b)  # capture, names=['first', 'second']
+    out = sub(a, b)
+    np.testing.assert_allclose(out.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(sub, 1)
+
+  def test_jit_swapped_kwargs(self):
+    # swapped keyword values must map to the right slots, not raise
+    @TinyJit
+    def sub(first, second): return (first - second).realize()
+    a, b = Tensor.randn(10, 10).realize(), Tensor.randn(10, 10).realize()
+    sub(first=a, second=b)
+    sub(first=a, second=b)  # capture
+    out = sub(first=b, second=a)
+    np.testing.assert_allclose(out.numpy(), b.numpy()-a.numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(sub, 1)
+
+  def test_jit_swapped_pos(self):
+    # swapped positional values must map to the right slots
+    @TinyJit
+    def sub(first, second): return (first - second).realize()
+    a, b = Tensor.randn(10, 10).realize(), Tensor.randn(10, 10).realize()
+    sub(a, b)
+    sub(a, b)  # capture
+    out = sub(b, a)
+    np.testing.assert_allclose(out.numpy(), b.numpy()-a.numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(sub, 1)
+
+  def test_jit_raw_buffer_input(self):
+    # a raw Buffer must be usable as a JIT input (not silently dropped / stale)
+    @TinyJit
+    def f(b):
+      return (Tensor(UOp.from_buffer(b), device=b.device) * 2).realize()
+    for i in range(4):
+      buf = Buffer(Device.DEFAULT, 3, dtypes.float32, initial_value=np.array([i+1]*3, dtype=np.float32).tobytes())
+      np.testing.assert_allclose(f(buf).numpy(), [2*(i+1)]*3, atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(f, 1)
 
   def test_array_jit(self):
     @TinyJit
