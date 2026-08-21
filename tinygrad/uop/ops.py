@@ -904,6 +904,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
                           not (s.op is Ops.SLICE and s.tag == ("allreduce",) and s.src[0].op is not Ops.INDEX)): s = s.src[0]
     return s
 
+  @functools.cache
   def contiguous_view_offset(self) -> int|None:
     """If movement ops on a BUFFER collapse to a contiguous range, return `offset` in elements. Otherwise None."""
     from tinygrad.schedule.rangeify import pm_mops
