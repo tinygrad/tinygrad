@@ -230,14 +230,12 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
   events:list[bytes] = []
   ei:ProfilePointEvent|None = None
   for st,et,dur,e in dev_events:
-    if isinstance(e, ProfilePointEvent):
-      if e.name == "exec": ei = e
-      continue
-    if dur == 0: continue
+    if isinstance(e, ProfilePointEvent) and e.name == "exec": ei = e
+    # only visualize range events with an end timestamp
+    if dur == 0 or isinstance(e, ProfilePointEvent): continue
     name, key = e.name, None
     fmt:dict = {}
-    ref = data.ref_map.get(e.profile_key) if e.profile_key is not None else None
-    if ref is not None and ref < len(data.ctxs):
+    if (ref:=data.ref_map.get(e.profile_key)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
       if (ki:=data.ctxs[ref].get("ki")) is not None and ki.estimates is not None and ei is not None:
         for est_key,est_val in (("FLOPS", ki.estimates.ops), ("B/s mem", ki.estimates.mem), ("B/s lds", ki.estimates.lds)):
