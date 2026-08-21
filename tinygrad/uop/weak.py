@@ -72,9 +72,6 @@ def lower_weak_srcs(ctx:dict[UOp, UOp]|None, u:UOp) -> UOp|None:
   return None if ret is u else ret
 
 pm_lower_index_dtype = pm_commit_weak+pm_cast_weak+PatternMatcher([
-  # a CAST between two concrete dtypes over a CONST is a value conversion: evaluate it once, at the width the CAST states
-  # TODO: delete this once CONST has no dtype
-  (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat.cvar("c", dtypes.all),)), lambda root, c: root.const_like(c.val)),
   (UPat(GroupOp.All, name="u"),
    lambda ctx,u: lower_weak_srcs(ctx, u) if u.dtype not in dtypes.weaks and any(s.dtype in dtypes.weaks for s in u.src) else None),
   # a valid index into an n-element buffer lives in [0,n): a gated long index narrows when n-1 fits int32 (out-of-gate wraps, discarded)
