@@ -3,37 +3,36 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite
 from tinygrad.helpers import strip_parens, ceildiv
 
-def _mask(dt:DType): return 0xFF if dt.itemsize == 1 else 0xFFFF
-
 def sign_extend(val:UOp, sext_am:int):
-  return (UOp.where((val >> (sext_am - 1)) > 0, UOp.const(0xffffffff << sext_am, dtypes.uint32), UOp.const(0, dtypes.uint32)) \
+  return (((val >> (sext_am - 1)) > 0).where(UOp.const(0xffffffff << sext_am, dtypes.uint32), UOp.const(0, dtypes.uint32)) \
         | val.bitcast(dtypes.uint32)).bitcast(dtypes.int)
 
+# a packed field of dt: the word it lives in, its offset in that word, and its mask. width is 8*itemsize, bool is one bit in a byte
+def packed_field(bidx:UOp, dt:DType) -> tuple[UOp, UOp, int]:
+  elems, width = 4//dt.itemsize, 8*dt.itemsize
+  return bidx.src[0].index(bidx.src[1] // elems), (bidx.src[1].cast(dtypes.uint32) % elems) * width, (1 << width)-1
+
 # store for char: buf[idx/4] <- (var << (idx%4)*8))
-def packed_store(bidx:UOp, var:UOp, gate:UOp|None=None):
-  elems, mask = 4//var.dtype.itemsize, _mask(var.dtype)
-  shift_am, div_idx = (bidx.src[1].cast(dtypes.uint32) % elems) * (8*var.dtype.itemsize), bidx.src[1] // elems
+def packed_store(s:UOp):
+  bidx, var, *gate = s.src
+  idx, shift_am, mask = packed_field(bidx, var.dtype)
   # bool does its mask math at int32: renderer rewrites run after weak dtypes are lowered, and bool & 0xFF would create a weakint const
   if var.dtype == dtypes.bool: var = var.cast(dtypes.int32)
   new_v, wmask = (var & mask).cast(dtypes.uint32) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
-  idx = UOp(Ops.INDEX, src=(bidx.src[0], div_idx))
-  buf = UOp.load(idx, *((UOp.const(0, dtypes.uint32), gate) if gate is not None else ()), dtype=dtypes.uint32)
-  return UOp.store(idx, (buf & wmask) | new_v, *((gate,) if gate is not None else ()))
+  buf = idx.load(*((UOp.const(0, dtypes.uint32), *gate) if gate else ()), dtype=dtypes.uint32)
+  return idx.store((buf & wmask) | new_v, *gate)
 
 # load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))
-def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None, gate:UOp|None=None):
-  elems, mask = 4//dtype.itemsize, _mask(dtype)
-  shift_am, div_idx = (bidx.src[1].cast(dtypes.uint32) % elems) * (8*dtype.itemsize), bidx.src[1] // elems
-  idx = UOp(Ops.INDEX, src=(bidx.src[0], div_idx))
-  load = UOp.load(idx, *((var, gate) if var is not None and gate is not None else root.src[1:]), dtype=dtypes.uint32, arg=root.arg)
-  val = (load.cast(dtypes.uint32) >> shift_am) & mask
+def packed_load(root:UOp):
+  bidx, *alt = root.src
+  idx, shift_am, mask = packed_field(bidx, dtype:=root.dtype)
+  load = idx.load(*((alt[0].cast(dtypes.uint32), *alt[1:]) if alt else ()), dtype=dtypes.uint32, arg=root.arg)
+  val = (load >> shift_am) & mask
   return sign_extend(val, 8*dtype.itemsize).cast(dtype) if dtype in [dtypes.char, dtypes.short] else val.cast(dtype)
 
 def is_packed(x:UOp):
-  if x.op is Ops.LOAD: dt, addrspace = x.dtype, x.src[0].addrspace
-  elif x.op is Ops.STORE: dt, addrspace = x.src[1].dtype, x.src[0].addrspace
-  else: dt, addrspace = x.dtype, x.addrspace
-  return dt.itemsize < 4 and dt != dtypes.half and addrspace != AddrSpace.REG
+  dt = x.src[1].dtype if x.op is Ops.STORE else x.dtype
+  return dt.itemsize < 4 and dt != dtypes.half and x.buf_uop.addrspace != AddrSpace.REG
 def _packed_size(u:UOp): return ceildiv(u.max_numel(), 4//u.dtype.itemsize) if is_packed(u) else u.max_numel()
 def is_nan(a):
   bs, (exp, mant) = a.dtype.bitsize, dtypes.finfo(a.dtype)
@@ -42,12 +41,8 @@ def is_nan(a):
 wgsl_matcher = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.XOR), src=(UPat(name="a", dtype=dtypes.bool), UPat.var("b")), name="c"),
    lambda a,b,c: a.cast(dtypes.int).alu(c.op, b.cast(dtypes.int)).cast(dtypes.bool)),
-  (UPat.load(UPat.var("b"), UPat.var("c"), UPat.var("gate"), name="l"),
-   lambda l,b,c,gate: packed_load(l,b,l.dtype,c.cast(dtypes.uint32),gate) if is_packed(l) else None),
-  (UPat.load(UPat.var("b"), name='l'), lambda l,b: packed_load(l,b,l.dtype) if is_packed(l) else None),
-  (UPat.store(UPat.var("b"), UPat.var("var"), UPat.var("gate"), name="s"),
-   lambda b,var,gate,s: packed_store(b,var,gate) if is_packed(s) else None),
-  (UPat.store(UPat.var("b"), UPat.var("var"), name="s"), lambda b,var,s: packed_store(b,var) if is_packed(s) else None),
+  (UPat(Ops.LOAD, name="l"), lambda l: packed_load(l) if is_packed(l) else None),
+  (UPat(Ops.STORE, name="s"), lambda s: packed_store(s) if is_packed(s) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
   # fix nan check: 'a != a -> is_nan()'. the decomp rewrites (a != a).logical_not() to CMPEQ, so match both forms
