@@ -89,7 +89,7 @@ class PythonProgram(Program['PythonDevice']):
               if g: _store(m, o+j, v, src_dtypes[1])
           i += 1
           continue
-        if u.op is Ops.AFTER: values[u] = src_values[0]
+        if u.op is Ops.AFTER or (u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]
         elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pvals.pop(0)] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
           storage_fmt = storage_fmt_for_dtype(u.dtype)
@@ -127,7 +127,6 @@ class PythonProgram(Program['PythonDevice']):
             i = self.loop_ends[u] + 1
             continue
         elif u.op is Ops.STACK: values[u] = src_values
-        elif u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL): values[u] = src_values[0]
         elif u.op is Ops.BITCAST: values[u] = [bitcast(x, src_dtypes[0], u.dtype) for x in src_values[0]]
         elif u.op is Ops.CAST:
           values[u] = [truncate.get(u.dtype, lambda dt: dt)(u.dtype.const(x)) for x in src_values[0]]
