@@ -118,7 +118,6 @@ def _init_sqtt_encoder():
   _FLAT = (ir2.FLAT, ir3.FLAT, ir4.VFLAT, irc.FLAT)
   _SCRATCH = (ir2.SCRATCH, ir3.SCRATCH, ir4.VSCRATCH, irc.SCRATCH)
 
-
   # SOPP classification sets
   _SOPP_SKIP = {SOPPOp3.S_ENDPGM.value, SOPPOp3.S_ENDPGM_SAVED.value, SOPPOp3.S_ENDPGM_ORDERED_PS_DONE.value,
                 SOPPOp3.S_DELAY_ALU.value}
