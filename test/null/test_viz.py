@@ -516,6 +516,19 @@ class TestVizIntegration(unittest.TestCase):
     src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
     self.assertEqual(src, src_render)
 
+  @unittest.expectedFailure
+  def test_profiler_duplicate_name(self):
+    kernel_name = "duplicate_name"
+    def one(A:UOp): return A[0].store(UOp.const(1.0, dtypes.float)).sink(arg=KernelInfo(kernel_name))
+    def zero(A:UOp): return A[0].store(UOp.const(0.0, dtypes.float)).sink(arg=KernelInfo(kernel_name))
+    with save_viz() as viz:
+      Tensor.custom_kernel(Tensor.empty(4, device="NULL"), fxn=one)[0].realize()
+      Tensor.custom_kernel(Tensor.empty(4, device="NULL"), fxn=zero)[0].realize()
+    ctx_refs = [i for i,c in enumerate(viz.list_items()) if c["name"] == kernel_name]
+    profile = decode_profile(unwrap(get_profile(viz.data, cpu_events)))
+    events = [e for e in profile["layout"]["NULL"]["events"] if e["name"] == kernel_name]
+    self.assertEqual([e["ref"] for e in events], ctx_refs)
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 from tinygrad.viz.cli import decode_profile
