@@ -9,7 +9,7 @@ from extra.llama_kernels.swiglu import swiglu
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
 from test.helpers import needs_second_gpu, assert_kernel_count
-from test.backend.test_asm_gemm import has_hipcc
+from test.backend.test_asm_gemm import has_hipcc, is_cdna4
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
   Tensor.manual_seed(0)
@@ -129,7 +129,7 @@ class TestFusedQKVRoPE(unittest.TestCase):
       self.assertTrue(k.allclose(k_ref, atol=2e-2, rtol=0).item(), "K forward mismatch")
       self.assertTrue(v.allclose(v_ref, atol=0, rtol=0).item(), "V forward mismatch")
 
-  @unittest.skipUnless(has_hipcc(), "backward kernel requires hipcc to compile")
+  @unittest.skipUnless(has_hipcc() and is_cdna4(), "backward kernel requires hipcc to compile")
   def test_llama31_8b(self):
     Tensor.manual_seed(1)
     B, N, H, H_KV, D = self.SHAPE
