@@ -154,7 +154,6 @@ class TestTransformerGenerate(unittest.TestCase):
     # 4 tokens, chunk_size=4 -> 1 prefill chunk
     self.assertEqual(get_prefill_flags(list(range(4)), 4), [True, False, False])
 
-  @unittest.expectedFailure
   def test_chunked_prefill_kv_cache_matches_single_chunk(self):
     config = TransformerConfig(num_blocks=1, dim=8, hidden_dim=16, n_heads=1, n_kv_heads=1, norm_eps=1e-5,
       vocab_size=32, head_dim=4, rope_theta=1000000, rope_dim=4, qk_norm=4, v_head_dim=4, max_context=16)
