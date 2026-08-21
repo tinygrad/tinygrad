@@ -924,14 +924,14 @@ class USBIface(PCIIface):
     region = self.dev_impl.mm.map_range(vaddr:=self.dev_impl.mm.alloc_vaddr(size=size), size, [(sys_addr, size)], aspace=AddrSpace.SYS, uncached=True)
     return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(region, has_cpu_mapping=False), view=self.pci_dev.dma_view(ctrl_addr, size), owner=self.dev)
 
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False, **kwargs) -> HCQBuffer:
     # usb allocates uncached and cpu_access in vram. vram writes are faster than sram writes
-    if host and self.sys_next_off + size < self.sys_buf.size:
+    if host and not zero and self.sys_next_off + size < self.sys_buf.size: # this carves out of sys_buf, which nothing zeroes
       self.sys_next_off += size
       return self.sys_buf.offset(self.sys_next_off - size, size)
 
     # force devmem
-    return super().alloc(size, host=False, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, force_devmem=True, **kwargs)
+    return super().alloc(size, host=False, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, force_devmem=True, zero=zero, **kwargs)
 
   def sleep(self, timeout): pass
 

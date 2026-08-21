@@ -340,7 +340,7 @@ class NVProgram(HCQProgram['NVDevice']):
 
 class NVAllocator(HCQAllocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host)
+    return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host, zero=options.zero)
 
   def _do_free(self, opaque:HCQBuffer, options:BufferSpec): self.dev.iface.free(opaque)
 
@@ -710,22 +710,22 @@ class NVDevice(HCQCompiled[NVSignal]):
   def _ensure_has_vid_hw(self, w, h):
     if self.iface.viddec_class is None: raise RuntimeError(f"{self.device} Video decoder class not available.")
 
-    coloc_size = round_up((round_up(h, 64) * round_up(h, 64)) + (round_up(w, 64) * round_up(h, 64) // 16), 2 << 20)
+    coloc_sz = round_up((round_up(h, 64) * round_up(h, 64)) + (round_up(w, 64) * round_up(h, 64) // 16), 2 << 20)
     self.intra_top_off = round_up(h, 64) * (608 + 4864 + 152 + 2000)
     intra_unk_size = ((2 << 20) if self.iface.viddec_class >= nv_gpu.NVCFB0_VIDEO_DECODER else 0)
     self.intra_unk_off = (round_up(self.intra_top_off, 0x10000) + (64 << 10)) if intra_unk_size > 0 else None
-    filter_size = round_up(round_up(self.intra_top_off, 0x10000) + (64 << 10) + intra_unk_size, 2 << 20)
+    filter_sz = round_up(round_up(self.intra_top_off, 0x10000) + (64 << 10) + intra_unk_size, 2 << 20)
 
     if not hasattr(self, 'vid_gpfifo'):
       self.vid_gpfifo = self._new_gpu_fifo(self.gpfifo_area, 0, self.nvdevice, offset=0x200000, entries=2048, compute=False, video=True)
-      self.vid_coloc_buf, self.vid_filter_buf = self.allocator.alloc(coloc_size), self.allocator.alloc(filter_size)
-      self.vid_stat_buf = self.allocator.alloc(0x1000)
+      self.vid_coloc_buf, self.vid_filter_buf = (self.allocator.alloc(sz, BufferSpec(zero=True)) for sz in [coloc_sz, filter_sz])
+      self.vid_stat_buf = self.allocator.alloc(0x1000, BufferSpec(zero=True))
       NVVideoQueue().wait(self.timeline_signal, self.timeline_value - 1) \
                     .setup(copy_class=self.iface.viddec_class) \
                     .signal(self.timeline_signal, self.next_timeline()).submit(self)
     else:
-      if coloc_size > self.vid_coloc_buf.size: self.vid_coloc_buf, _ = self._realloc(self.vid_coloc_buf, coloc_size, force=True)
-      if filter_size > self.vid_filter_buf.size: self.vid_filter_buf, _ = self._realloc(self.vid_filter_buf, filter_size, force=True)
+      if coloc_sz > self.vid_coloc_buf.size: self.vid_coloc_buf,_= self._realloc(self.vid_coloc_buf, coloc_sz, BufferSpec(zero=True), force=True)
+      if filter_sz > self.vid_filter_buf.size: self.vid_filter_buf,_= self._realloc(self.vid_filter_buf, filter_sz, BufferSpec(zero=True), force=True)
 
   def hw_copy_queues(self): return super().hw_copy_queues() + ([("NVDEC:0", NVVideoQueue)] if hasattr(self, 'vid_gpfifo') else [])
 
