@@ -27,10 +27,10 @@ def encode_args(args, vals, signature) -> tuple[ctypes.Structure, ctypes.Array]:
   fields, ordered, bi, vi, off = [], [], 0, 0, 0
   for *_, dt, shape in signature:
     if shape != ():
-      fields.append((f'f{bi}', cuda.CUdeviceptr_v2, round_up(off, 8)))
+      fields.append((f'f{bi}', cuda.CUdeviceptr_v2, off:=round_up(off, 8)))
       ordered.append(args[bi]); bi += 1; off += 8
     else:
-      fields.append((f'v{vi}', getattr(ctypes, f"c_int{dt.bitsize}"), round_up(off, dt.itemsize)))
+      fields.append((f'v{vi}', getattr(ctypes, f"c_int{dt.bitsize}"), round_up(off:=off, dt.itemsize)))
       ordered.append(vals[vi]); vi += 1; off += dt.itemsize
   c_args = init_c_struct_t(off if fields else 0, tuple(fields))(*ordered)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),

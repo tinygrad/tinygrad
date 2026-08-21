@@ -1,5 +1,5 @@
 import ctypes
-from tinygrad.helpers import mv_address, getenv, suppress_finalizing
+from tinygrad.helpers import mv_address, getenv, suppress_finalizing, round_up
 from tinygrad.device import Compiled, LRUAllocator, BufferSpec, Program, TinyELF
 from tinygrad.runtime.autogen import hip
 from tinygrad.renderer.cstyle import HIPRenderer
@@ -45,12 +45,14 @@ class HIPProgram(Program[HIPDevice]):
       fields, ordered, bi, vi, off = [], [], 0, 0, 0
       for *_, dt, shape in self.signature:
         if shape != ():
-          fields.append((f'f{bi}', hip.hipDeviceptr_t,round_up(off, 8)))
+          fields.append((f'f{bi}', hip.hipDeviceptr_t,off:=round_up(off, 8)))
           ordered.append(args[bi]); bi += 1; off += 8
         else:
-          fields.append((f'v{vi}', getattr(ctypes, f"c_int{dt.bitsize}"), round_up(off, dt.itemsize)))
+          fields.append((f'v{vi}', getattr(ctypes, f"c_int{dt.bitsize}"), round_up(off:=off, dt.itemsize)))
           ordered.append(vals[vi]); vi += 1; off += dt.itemsize
       self.c_args = init_c_struct_t(off if fields else 0, tuple(fields))(*ordered)
+      self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
+                                         ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)
 
     for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
     for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
