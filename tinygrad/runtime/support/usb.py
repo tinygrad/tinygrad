@@ -1,6 +1,6 @@
 import ctypes, struct, time, functools, itertools
 from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG, DEV, to_mv, round_up, ceildiv
+from tinygrad.helpers import DEBUG, DEV, to_mv, from_mv, round_up, ceildiv
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support import c
 
@@ -35,6 +35,11 @@ class USB3:
     self._tags, self._transferred = itertools.count(1), ctypes.c_int(0)
     self._bulk_buf, self._bulk_mv = alloc_cbuffer(4 << 20)
     self._ctrl_buf, self._ctrl_mv = alloc_cbuffer(0x1000)
+    # async bulk OUT state: tag -> (pooled transfer, keepalive payload mv); transfer errors latch into _async_err
+    self._async_seq, self._async_err = itertools.count(1), 0
+    self._async_pending: dict = {}
+    self._async_pool: list = []
+    self._async_cb = libusb.libusb_transfer_cb_fn(self._on_bulk_done)
 
     self.handle = c.init_c_var(c.POINTER[libusb.struct_libusb_device_handle], lambda x: checked(libusb.libusb_open)(dev, x))
 
@@ -72,6 +77,40 @@ class USB3:
     checked(libusb.libusb_bulk_transfer, "bulk OUT 0x02 failed") \
       (self.handle, 0x02, self._bulk_buf, len(payload), self._transferred, timeout)
     assert self._transferred.value == len(payload), f"bulk OUT short write: {self._transferred.value}/{len(payload)} bytes"
+
+  def _on_bulk_done(self, xfer):  # runs in libusb event handling; latch errors (exceptions here are unraisable)
+    exp = xfer.contents.length - 8 if xfer.contents.type == libusb.LIBUSB_TRANSFER_TYPE_CONTROL else xfer.contents.length
+    if xfer.contents.status != 0 or xfer.contents.actual_length != exp: self._async_err = xfer.contents.status or -1
+    self._async_pool.append(self._async_pending.pop(int(xfer.contents.user_data or 0))[0])
+
+  def _submit_async(self, endpoint:int, xtype:int, payload:bytes|bytearray|memoryview, timeout:int) -> int:  # payload kept alive till bulk_wait
+    tr = self._async_pool.pop() if self._async_pool else libusb.libusb_alloc_transfer(0)
+    tr.contents.dev_handle, tr.contents.endpoint, tr.contents.type = self.handle, endpoint, xtype
+    tr.contents.timeout, tr.contents.length = timeout, len(payload)
+    tr.contents.buffer = ctypes.cast(from_mv(memoryview(payload), ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte))
+    tr.contents.callback, tr.contents.user_data = self._async_cb, (tag := next(self._async_seq))
+    self._async_pending[tag] = (tr, payload)
+    checked(libusb.libusb_submit_transfer, "async submit failed")(tr)
+    return tag
+
+  def bulk_write_async(self, payload:memoryview, timeout:int=10000) -> int:
+    """Queue a bulk OUT transfer without blocking; payload is kept alive until bulk_wait(tag)."""
+    return self._submit_async(0x02, libusb.LIBUSB_TRANSFER_TYPE_BULK, payload, timeout)
+
+  def control_write_async(self, request:int, value:int=0, index:int=0, data:bytes=b"", timeout:int=1000) -> int:
+    """Queue a vendor control OUT without blocking; completes via bulk_wait(tag) like bulk_write_async."""
+    setup = bytearray(struct.pack('<BBHHH', 0x40, request, value, index, len(data)) + data)
+    return self._submit_async(0, libusb.LIBUSB_TRANSFER_TYPE_CONTROL, setup, timeout)
+
+  def control_read_async(self, request:int, length:int, value:int=0, index:int=0, timeout:int=1000) -> tuple[int, memoryview]:
+    """Queue a vendor control IN without blocking; the data lands in the returned buffer by bulk_wait(tag)."""
+    buf = bytearray(struct.pack('<BBHHH', 0xC0, request, value, index, length)) + bytearray(length)
+    return self._submit_async(0, libusb.LIBUSB_TRANSFER_TYPE_CONTROL, buf, timeout), memoryview(buf)[8:]
+
+  def bulk_wait(self, tag:int):
+    """Block until the tagged transfer completes; raises if any async transfer failed."""
+    while tag in self._async_pending: checked(libusb.libusb_handle_events)(None)
+    if self._async_err: raise RuntimeError(f"async bulk OUT failed: status={self._async_err}")
 
   def bulk_read(self, length:int, timeout:int=1000) -> memoryview:
     if length > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(length)
@@ -160,13 +199,10 @@ class CustomASM24Controller:
     """Write to chip XDATA via vendor control OUT (bRequest=0xE5). wValue=addr, wIndex=val."""
     for off, val in enumerate(data): self.usb.control_write(0xE5, value=base_addr + off, index=val)
 
-  def scsi_write(self, buf:bytes):
+  def scsi_write(self, buf:bytes, slot_start:int=0):
     """Write to SRAM via 0xF2 vendor command + bulk OUT."""
     buf_padded = buf + b'\x00' * (round_up(len(buf), 512) - len(buf))
-    sectors = len(buf_padded) // 512
-    num_slots = ceildiv(len(buf_padded), 0x4000)  # 16KB per slot
-    windex = (num_slots & 0xFF) << 8
-    self.usb.control_write(0xF2, value=sectors, index=windex)
+    self.usb.control_write(0xF2, value=len(buf_padded) // 512, index=(slot_start & 0xFF) | (ceildiv(len(buf_padded), 0x4000) << 8))
     self.usb.bulk_write(buf_padded)
 
   def scsi_read_arm(self, size:int):
@@ -189,7 +225,7 @@ class USBMMIOInterface(MMIOInterface):
       assert sz % 4 == 0 and off % 4 == 0, f"pcie_mem_read requires 4-byte aligned access, got off={off}, sz={sz}"
       data = self.usb.pcie_mem_read(self.addr + off, sz)
     else: data = self.usb.scsi_read(sz) if self.addr == 0xf000 else self.usb.read(self.addr + off, sz)
-    return int.from_bytes(data, "little") if sz == self.el_sz else data
+    return data if isinstance(index, slice) else int.from_bytes(data, "little")
 
   def __setitem__(self, index, data):
     off, _ = self._off_from_index(index)
