@@ -253,25 +253,24 @@ pm_beam = PatternMatcher([
 def _compile_kernel(x:tuple[int, tuple[UOp, Renderer], dict]) -> tuple[int, UOp]:
   with Context(**x[2]): return x[0], to_program(*x[1])
 
-def _needs_compile(c:UOp) -> bool:
-  if c.op is not Ops.CALL: return False
-  if c.src[0].op is Ops.SINK: return True
+def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
+  ast = a0.src[0] if (a0:=c.src[0]).op is Ops.CUSTOM_FUNCTION and a0.arg == "hcq" else a0
   # a PROGRAM with a ProgramInfo and a BINARY is already compiled
-  return c.src[0].op is Ops.PROGRAM and not (isinstance(c.src[0].arg, ProgramInfo) and c.src[0].src[-1].op is Ops.BINARY)
+  if ast.op is Ops.SINK or (ast.op is Ops.PROGRAM and not (isinstance(ast.arg, ProgramInfo) and ast.src[-1].op is Ops.BINARY)):
+    return ast, Device[c.device if isinstance(c.device, str) else c.device[0]].renderer
+  return None
 
 def lower_and_compile(linear:UOp) -> UOp:
   # collect the kernels to lower and compile, deduped by their compile cache key
-  calls = [c for c in linear.toposort() if _needs_compile(c)]
-  rens = {c: Device[c.device if isinstance(c.device, str) else c.device[0]].renderer for c in calls}
-  keys = {c: to_program_key(c.src[0], rens[c]) for c in calls}
-  if not len(calls): return linear
+  if not len(ar:={c: a for c in linear.toposort() if c.op is Ops.CALL and (a:=_get_call_to_compile(c)) is not None}): return linear
 
   # lower and compile what's not cached, in parallel if there's a worker pool
-  todo = list({keys[c]: (c.src[0], rens[c]) for c in calls if keys[c] not in to_program_cache}.items())
+  keys = {c: to_program_key(*a) for c, a in ar.items()}
+  todo = list({keys[c]: a for c, a in ar.items() if keys[c] not in to_program_cache}.items())
   if len(todo):
     # kernels that beam search must compile in the parent, beam needs device access to time candidates
 
-    pool = None if len(todo) == 1 or any(getattr(c.src[0].arg, "beam", 0) for c in calls) else get_worker_pool()
+    pool = None if len(todo) == 1 or any(getattr(c.src[0].arg, "beam", 0) for c in ar) else get_worker_pool()
     ctx = {v.key: v.value for v in to_program_context}
     tasks = ((i, ast_ren, ctx) for i, (_, ast_ren) in enumerate(todo))
     try:
@@ -285,7 +284,8 @@ def lower_and_compile(linear:UOp) -> UOp:
       raise
 
   # swap the compiled PROGRAMs into the calls
-  return linear.substitute({c: c.replace(src=(to_program_cache[keys[c]], *c.src[1:])) for c in calls}, name="precompile kernels")
+  return linear.substitute({c: c.replace(src=(c.src[0].substitute({a[0]: to_program_cache[keys[c]]}), *c.src[1:])) for c, a in ar.items()},
+                           name="precompile kernels")
 
 pm_optimize_local_size = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), optimize_local_size),
