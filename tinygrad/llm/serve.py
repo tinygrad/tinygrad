@@ -126,22 +126,36 @@ class Handler(HTTPRequestHandler):
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      # render and tokenize
-      normalize_messages(body["messages"])
-      rendered = self.server.template.render(messages=body["messages"], tools=body.get("tools"), add_generation_prompt=True, preserve_thinking=True)
-      ids: list[int] = self.server.tok.encode(rendered)
-      stderr_log(f"prep:{(time.perf_counter()-request_st)*1e3:5.0f} ms  {colored('--', 'BLACK')}  ")
-      if len(ids) >= self.server.model.max_context:
-        stderr_log(f"{colored('context length exceeded', 'red')}  in:{len(ids):5d}  max:{self.server.model.max_context:5d}\n")
-        return self.send_data(json.dumps({"error":{"message":f"prompt has {len(ids)} tokens, but the model context is "
-          f"{self.server.model.max_context}", "type":"invalid_request_error", "param":"messages", "code":"context_length_exceeded"}}).encode(),
-          status_code=400)
+      tok = self.server.tok
+      ids = ([] if tok.bos_id is None else [tok.bos_id]) + (tok.encode("<sop>") if tok.preset == 'glm4' else [])
+      for i, msg in enumerate(body["messages"]):
+        content = msg["content"]
+        text = []
+        if isinstance(content, str): text.append(content)
+        elif isinstance(content, list):
+          for c in content:
+            # https://developers.openai.com/api/docs/guides/images-vision?format=base64-encoded
+            if c["type"] == "text": text.append(c["text"])
+            elif c["type"] == "image_url":
+              ids.extend([0] * (self.server.model.vis.toks_per_img + self.server.model.vis.prefix.shape[0] + self.server.model.vis.suffix.shape[0]))
+              if i == len(body["messages"]) - 1:
+                import base64
+                from tinygrad import Variable
+                self.server.model.vis(lang=self.server.model, image=base64.b64decode(c["image_url"]["url"].split(',')[1]), start_pos=\
+                Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)), end_turn=i>0)
+            else: raise RuntimeError(f"unhandled type: {c['type']}")
+        else: raise RuntimeError(f"unknown content type: {type(content)}")
+        ids += tok.role(msg["role"])
+        for t in text: ids += tok.encode(t)
+        if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
+        ids += tok.end_turn()
+      else: ids += tok.role("assistant")
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
                               max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)),
-                              reasoning=rendered.rstrip().endswith("<think>"))
+                              reasoning=False)
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, reasoning, tool_calls, finish_reason = [], [], [], "stop"

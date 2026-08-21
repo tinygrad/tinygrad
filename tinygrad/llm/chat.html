@@ -5,17 +5,24 @@
   #chat { flex: 1; overflow-y: auto; padding: 20px }
   .msg { padding: 10px 16px; margin: 8px 0; white-space: pre-wrap; border-radius: 18px }
   .user { background: #2f2f2f; margin-left: auto; width: fit-content; max-width: 70% }
-  #input { max-width: 768px; width: 100%; margin: 20px auto; padding: 14px 20px;
+  #input { flex: 1; padding: 14px 20px;
            background: #2f2f2f; color: inherit; font: inherit;
            border: none; outline: none; resize: none; border-radius: 24px; field-sizing: content }
 </style></head><body><div id="chat"></div>
-<textarea id="input" rows="1" placeholder="Ask anything" autofocus></textarea>
+<div style="display:flex;gap:8px;max-width:768px;margin:20px auto;width:100%">
+<button onclick="img.click()">img</button><input type="file" id="img" accept="image/*" style="display:none">
+<textarea id="input" rows="1" placeholder="Ask anything" autofocus></textarea></div>
 <script>
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
   const msgs = [];
+  let imgData = null;
+  img.onchange = (e) => { const f = e.target.files[0]; const r = new FileReader();
+    r.onload = () => { imgData = r.result.split(',')[1]; img.value = '' }; r.readAsDataURL(f) }
   async function send() {
     if (!input.value.trim()) return;
-    msgs.push({role: 'user', content: input.value.trim()});
+    const content = [{type:'text', text: input.value.trim()}];
+    if (imgData) { content.push({type:'image_url', image_url:{url:'data:image/jpeg;base64,'+imgData}}); imgData = null }
+    msgs.push({role: 'user', content});
     chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
     input.value = '';
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
