@@ -1,7 +1,7 @@
 import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platform
 from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
-from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
+from tinygrad.device import Compiled, Compiler, CompileError, Program, TinyELF, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
@@ -34,6 +34,7 @@ class MetalDevice(Compiled):
     self.mtl_queue = self.sysdevice.newCommandQueueWithMaxCommandBufferCount(1024)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
     self.mtl_buffers_in_flight: list[metal.MTLCommandBuffer] = []
+    self.mtl_profile_keys: dict[int, bytes] = {}
     self.timeline_signal = self.sysdevice.newSharedEvent()
     self.timeline_value = 0
 
@@ -45,9 +46,9 @@ class MetalDevice(Compiled):
     from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
     # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
-    super().__init__(device, MetalAllocator(self), [MetalRenderer],
-      functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(self.sysdevice.name()).lower() else None,
-      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
+    super().__init__(device, MetalAllocator(self), [MetalRenderer], MetalProgram,
+                     MetalGraph if 'virtual' not in from_ns_str(self.sysdevice.name()).lower() else None,
+                     arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
@@ -55,7 +56,7 @@ class MetalDevice(Compiled):
       st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000
       # NOTE: command buffers from MetalGraph are not profiled here
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
-        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en)]
+        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, self.mtl_profile_keys.pop(id(cbuf), None))]
     self.mtl_buffers_in_flight.clear()
 
 class MetalCompiler(Compiler):
@@ -111,13 +112,13 @@ class MetalCompiler(Compiler):
       ret = proc.wait()
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
-class MetalProgram:
-  def __init__(self, dev:MetalDevice, name:str, lib:bytes, **kwargs):
-    self.dev, self.name, self.lib = dev, name, lib
-    data = objc.dispatch_data_create(lib, len(lib), None, None)
+class MetalProgram(Program[MetalDevice]):
+  def __init__(self, dev:MetalDevice, obj:TinyELF):
+    self.dev, self.name, self.lib, self.signature, self.profile_key = dev, obj.name, obj.lib, obj.signature, obj.profile_key
+    data = objc.dispatch_data_create(obj.lib, len(obj.lib), None, None)
     self.library = self.dev.sysdevice.newLibraryWithData_error(data, ctypes.byref(error_lib:=metal.NSError().retained())).retained()
     error_check(error_lib)
-    self.fxn = self.library.newFunctionWithName(to_ns_str(name)).retained()
+    self.fxn = self.library.newFunctionWithName(to_ns_str(obj.name)).retained()
     descriptor = metal.MTLComputePipelineDescriptor.new()
     descriptor.setComputeFunction(self.fxn)
     descriptor.setSupportIndirectCommandBuffers(True)
@@ -138,12 +139,14 @@ class MetalProgram:
     encoder = command_buffer.computeCommandEncoder().retained()
     encoder.setComputePipelineState(self.pipeline_state)
     for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
-    for i,a in enumerate(vals, start=len(bufs)): encoder.setBytes_length_atIndex(bytes(ctypes.c_int(a)), 4, i)
+    for a,(_,i,dt,_) in zip(vals, self.signature[len(bufs):]):
+      encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{dt.bitsize}")(a)), dt.itemsize, i)
     encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?
     command_buffer.commit()
     self.dev.mtl_buffers_in_flight.append(command_buffer)
+    if PROFILE and self.profile_key is not None: self.dev.mtl_profile_keys[id(command_buffer)] = self.profile_key
     if wait:
       wait_check(command_buffer)
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
@@ -183,10 +186,9 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     # There is no real metal multidevice support for now, so transfer is used only for tests.
     src_dev.synchronize()
   def _cp_mv(self, dst, src, prof_desc):
-    with cpu_profile(prof_desc, f"{self.dev.device}:COPY"): dst[:] = src
-  def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
-    return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]
+    with cpu_profile(prof_desc, f"{self.dev.device}:COPY"): dst[:] = src
+  def _as_buffer(self, src:MetalBuffer) -> memoryview: return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]
   def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "TINY -> METAL")
   def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> TINY")
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)

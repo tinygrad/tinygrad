@@ -5,7 +5,7 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
 from tinygrad import Tensor, Device, GlobalCounters, dtypes, Variable
 from tinygrad.helpers import Context
-from test.helpers import slow, jit_cache_count
+from test.helpers import slow, jit_cache_count, KernelCountException
 from extra.lr_scheduler import OneCycleLR
 from test.helpers import derandomize_model
 
@@ -35,8 +35,9 @@ def helper_test(nm, gen, model, max_memory_allowed, max_kernels_allowed, all_jit
     assert mem_used < max_memory_allowed, f"{nm} used more than {max_memory_allowed:.3f} GB - {mem_used:.3} GB used"
     assert (max_memory_allowed - mem_used) / max_memory_allowed < 0.2, f"{max_memory_allowed:.3f} GB is too far from {mem_used:.3} GB used"
     if kernels_used:
-      assert kernels_used <= max_kernels_allowed, f"{nm} used more than {max_kernels_allowed} kernels, it used {kernels_used}"
-      assert (max_kernels_allowed - kernels_used) / max_kernels_allowed < 0.2, f"{max_kernels_allowed=} is too far from {kernels_used=} used"
+      if kernels_used > max_kernels_allowed: raise KernelCountException(max_kernels_allowed, kernels_used)
+      if (max_kernels_allowed - kernels_used) / max_kernels_allowed >= 0.2:
+        raise KernelCountException(max_kernels_allowed, kernels_used)
     if all_jitted:
       assert kernels_used > 0 and kernels_used == GlobalCounters.kernel_count or (kernels_used <= GlobalCounters.kernel_count and getattr(Device[Device.DEFAULT], "graph", None)), f"only {kernels_used} out of {GlobalCounters.kernel_count} were jitted"  # noqa: E501
 
@@ -47,11 +48,7 @@ class TestRealWorld(unittest.TestCase):
     gc.collect()
     global global_mem_used
     global_mem_used = GlobalCounters.mem_used
-    self.old_float = dtypes.default_float
     np.random.seed(2002)
-
-  def tearDown(self):
-    dtypes.default_float = self.old_float
 
   @slow
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
@@ -81,7 +78,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
   def test_llama(self):
-    dtypes.default_float = dtypes.float16
+    self.enterContext(Context(DEFAULT_FLOAT=dtypes.float16))
 
     args_tiny = {"dim": 1024, "hidden_dim": 2048, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
     model = LLaMaTransformer(**args_tiny)
@@ -93,7 +90,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
   def test_gpt2(self):
-    dtypes.default_float = dtypes.float16
+    self.enterContext(Context(DEFAULT_FLOAT=dtypes.float16))
 
     args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
     model = GPT2Transformer(**args_tiny)
@@ -150,7 +147,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, "need dtypes.float16")
   def test_train_cifar_hyp(self):
-    dtypes.default_float = dtypes.float16
+    self.enterContext(Context(DEFAULT_FLOAT=dtypes.float16))
     with Context(TRAINING=1):
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
       optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])

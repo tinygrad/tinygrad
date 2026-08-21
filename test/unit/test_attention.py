@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, nn
 from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
@@ -45,10 +45,10 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     return Tensor.linspace(start, stop, int(np.prod(shape)), dtype=dtypes.float32).reshape(*shape)
 
   def _make_config(self, **kwargs):
-    return TransformerConfig(**({"num_blocks":1, "dim":4, "hidden_dim":8, "n_heads":1, "n_kv_heads":1,
-                                 "norm_eps":1e-5, "vocab_size":32, "head_dim":4, "rope_theta":10000.0,
-                                 "rope_dim":4, "v_head_dim":4, "max_context":4, "full_attention_interval":2,
-                                 "ssm":SSMConfig(conv_kernel=2, state_size=2, group_count=1, time_step_rank=1, inner_size=2)} | kwargs))
+    return TransformerConfig(**({"num_blocks":1, "dim":32, "hidden_dim":64, "n_heads":1, "n_kv_heads":1,
+                                 "norm_eps":1e-5, "vocab_size":32, "head_dim":32, "rope_theta":10000.0,
+                                 "rope_dim":32, "v_head_dim":32, "max_context":4, "ssm_layers":(True,),
+                                 "ssm":SSMConfig(conv_kernel=2, state_size=32, group_count=1, time_step_rank=1, inner_size=32)} | kwargs))
 
   def _make_block(self, config:TransformerConfig) -> GatedDeltaNetBlock:
     block = GatedDeltaNetBlock(config, config.ssm)
@@ -79,6 +79,10 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       recurrent_state = cache[:, conv_flat:].reshape(cache.shape[0], block.num_v_heads, block.head_v_dim, block.head_v_dim)
       return conv_state, recurrent_state
 
+  def _reset_state(self, block:GatedDeltaNetBlock):
+    Tensor.realize(block.conv_state.assign(block.conv_state.const_like(0)),
+                   block.recurrent_state.assign(block.recurrent_state.const_like(0)))
+
   def _linear_np(self, x:np.ndarray, weight:np.ndarray) -> np.ndarray:
     return x.astype(np.float32) @ weight.T.astype(np.float32)
 
@@ -86,7 +90,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     x_float = x.astype(np.float32)
     return (x_float / np.sqrt((x_float * x_float).mean(axis=-1, keepdims=True) + eps)) * weight.astype(np.float32)
 
-  def _normalize_np(self, x:np.ndarray, eps:float=1e-12) -> np.ndarray:
+  def _normalize_np(self, x:np.ndarray, eps:float=1e-6) -> np.ndarray:
     return x / np.maximum(np.sqrt((x * x).sum(axis=-1, keepdims=True)), eps)
 
   def _softplus_np(self, x:np.ndarray) -> np.ndarray:
@@ -148,6 +152,12 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     x = Tensor.linspace(-1.0, 1.0, 3 * config.dim, dtype=dtypes.float32).reshape(1, 3, config.dim)
 
     expected_outs, expected_conv, expected_recurrent = self._naive_attention(block, x)
+    out = self._run_attention(block, x, 0)
+    conv_state, recurrent_state = self._cache_views(block)
+    np.testing.assert_allclose(out, np.concatenate(expected_outs, axis=1), rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(conv_state, expected_conv[-1], rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(recurrent_state, expected_recurrent[-1], rtol=1e-3, atol=1e-3)
+    self._reset_state(block)
 
     for step in range(x.shape[1]):
       out = self._run_attention(block, x[:, step:step+1], step)
@@ -163,7 +173,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     prompt = Tensor.linspace(0.75, -0.75, 2 * config.dim, dtype=dtypes.float32).reshape(1, 2, config.dim)
 
     for i in range(warmup.shape[1]): self._run_attention(block, warmup[:, i:i+1], i)
-    Tensor.realize(*block._state_reset_ops())
+    self._reset_state(block)
     expected_outs, expected_conv, expected_recurrent = self._naive_attention(block, prompt)
 
     for step in range(prompt.shape[1]):
@@ -175,6 +185,66 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
                                  err_msg=f"GatedDeltaNet reset conv cache mismatch at step {step}")
       np.testing.assert_allclose(recurrent_state, expected_recurrent[step], rtol=1e-3, atol=1e-3,
                                  err_msg=f"GatedDeltaNet reset recurrent cache mismatch at step {step}")
+
+  def test_kda_channel_decay(self):
+    config = self._make_config(dim=4, hidden_dim=8, n_heads=2, head_dim=4, rope_dim=4, v_head_dim=4,
+      ssm=SSMConfig(conv_kernel=2, state_size=2, group_count=2, time_step_rank=2, inner_size=4, kda=True))
+    block, x = GatedDeltaNetBlock(config, config.ssm), Tensor([[[1., 2., 0., 0.], [2., 1., 0., 0.]]])
+    block.ssm_f_a.weight = Tensor([[1., 0., 0., 0.], [0., 1., 0., 0.]])
+    block.ssm_f_b.weight = Tensor([[1., 0.], [0., 1.], [1., 1.], [2., 1.]])
+    block._init_state(x)
+    initial_state = Tensor.arange(8, dtype=dtypes.float32).reshape(1, 2, 2, 2)
+    block.recurrent_state.assign(initial_state).realize()
+    block.ssm_a = Tensor([[-1.], [-1.]])
+    block._attention(x, x.shape[1]).realize()
+    alpha = np.exp(-self._softplus_np(np.array([[1, 2, 3, 4], [2, 1, 3, 5]])).reshape(2, 2, 2)).prod(0)
+    np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha[..., None], rtol=1e-5, atol=1e-5)
+
+  def test_kda_prefill_matches_decode(self):
+    config = self._make_config(ssm=SSMConfig(conv_kernel=2, state_size=32, group_count=1, time_step_rank=1, inner_size=32, kda=True))
+    block = GatedDeltaNetBlock(config, config.ssm)
+    for p in nn.state.get_parameters(block):
+      p.replace(self._tensor_linspace(-0.05, 0.05, p.shape) if len(p.shape) > 1 else self._tensor_linspace(0.05, 0.1, p.shape))
+    x = self._tensor_linspace(-0.5, 0.5, (1, 3, config.dim))
+    prefill = self._run_attention(block, x, 0)
+    prefill_conv, prefill_recurrent = self._cache_views(block)
+    self._reset_state(block)
+    decode = np.concatenate([self._run_attention(block, x[:, i:i+1], i) for i in range(3)], axis=1)
+    decode_conv, decode_recurrent = self._cache_views(block)
+    np.testing.assert_allclose(prefill, decode, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(prefill_conv, decode_conv, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(prefill_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3)
+
+  def test_varied_chunk_sizes_match_decode(self):
+    for kda in (False, True):
+      ssm = SSMConfig(conv_kernel=2, state_size=32, group_count=1, time_step_rank=1, inner_size=32, kda=kda)
+      config = self._make_config(ssm=ssm)
+      if kda:
+        block = GatedDeltaNetBlock(config, config.ssm)
+        for p in nn.state.get_parameters(block):
+          p.replace(self._tensor_linspace(-0.05, 0.05, p.shape) if len(p.shape) > 1 else self._tensor_linspace(0.05, 0.1, p.shape))
+      else: block = self._make_block(config)
+      x = self._tensor_linspace(-0.5, 0.5, (1, 4, config.dim))
+      decode = np.concatenate([self._run_attention(block, x[:, i:i+1], i) for i in range(4)], axis=1)
+      decode_conv, decode_recurrent = self._cache_views(block)
+      for chunking in ([4], [2, 2], [1, 3], [3, 1], [2, 1, 1]):
+        self._reset_state(block)
+        outs, start = [], 0
+        for size in chunking:
+          outs.append(self._run_attention(block, x[:, start:start+size], start))
+          start += size
+        chunked_conv, chunked_recurrent = self._cache_views(block)
+        np.testing.assert_allclose(np.concatenate(outs, axis=1), decode, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
+        np.testing.assert_allclose(chunked_conv, decode_conv, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
+        np.testing.assert_allclose(chunked_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
+
+  def test_start_zero_resets_realized_state(self):
+    config, x = self._make_config(max_context=3), self._tensor_linspace(-1, 1, (1, 3, 32))
+    block = self._make_block(config)
+    self._run_attention(block, x, 0)
+    restarted = self._run_attention(block, x[:, :2], 0)
+    fresh = self._run_attention(self._make_block(config), x[:, :2], 0)
+    np.testing.assert_allclose(restarted, fresh, rtol=1e-3, atol=1e-3)
 
 class TestPairwiseTopk(unittest.TestCase):
   def test_basic_topk(self):

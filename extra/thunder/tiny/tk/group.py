@@ -1,7 +1,6 @@
 import math
 from typing import cast, Callable
-from tinygrad import dtypes
-from tinygrad.uop.ops import AxisType, UOp, Ops
+from tinygrad.uop.ops import AxisType, UOp
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import prod
 
@@ -75,24 +74,24 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 16)
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 32)
     else: raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
         for inner in self.ker.range(a.shape[-2], axis_type=AxisType.REDUCE, track=False):
           if a_base_shape.cols == 16:
-            a_in = UOp.vectorize(*[a[height, inner, i] for i in range(4)])
-            b_in = UOp.vectorize(*[b[inner, width, i] for i in range(4)])
+            a_in = UOp.stack(*[a[height, inner, i] for i in range(4)])
+            b_in = UOp.stack(*[b[inner, width, i] for i in range(4)])
           elif a_base_shape.cols == 32:
-            a_in = UOp.vectorize(*[a[height, inner, i] for i in range(8)])
-            b_in = UOp.vectorize(*[b[inner, width, i] for i in range(8)])
+            a_in = UOp.stack(*[a[height, inner, i] for i in range(8)])
+            b_in = UOp.stack(*[b[inner, width, i] for i in range(8)])
           else: raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
-          d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
+          d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp.wmma(a_in, b_in, d_in, wmma_dims, 'AMD', 64)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -105,24 +104,24 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 16)
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 32)
     else: raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
         for inner in self.ker.range(a.shape[-2], axis_type=AxisType.REDUCE, track=False):
           if a_base_shape.cols == 16:
-            a_in = UOp.vectorize(*[a[height, inner, i] for i in range(4)])
-            b_in = UOp.vectorize(*[b[width, inner, i] for i in range(4)])
+            a_in = UOp.stack(*[a[height, inner, i] for i in range(4)])
+            b_in = UOp.stack(*[b[width, inner, i] for i in range(4)])
           elif a_base_shape.cols == 32:
-            a_in = UOp.vectorize(*[a[height, inner, i] for i in range(8)])
-            b_in = UOp.vectorize(*[b[width, inner, i] for i in range(8)])
+            a_in = UOp.stack(*[a[height, inner, i] for i in range(8)])
+            b_in = UOp.stack(*[b[width, inner, i] for i in range(8)])
           else: raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
-          d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
+          d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp.wmma(a_in, b_in, d_in, wmma_dims, 'AMD', 64)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -135,24 +134,24 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 16)
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 32)
     else: raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
         for inner in self.ker.range(a.shape[-3], axis_type=AxisType.REDUCE, track=False):
           if a_base_shape.cols == 16:
-            a_in = UOp.vectorize(*[a[inner, height, i] for i in range(4)])
-            b_in = UOp.vectorize(*[b[inner, width, i] for i in range(4)])
+            a_in = UOp.stack(*[a[inner, height, i] for i in range(4)])
+            b_in = UOp.stack(*[b[inner, width, i] for i in range(4)])
           elif a_base_shape.cols == 32:
-            a_in = UOp.vectorize(*[a[inner, height, i] for i in range(8)])
-            b_in = UOp.vectorize(*[b[inner, width, i] for i in range(8)])
+            a_in = UOp.stack(*[a[inner, height, i] for i in range(8)])
+            b_in = UOp.stack(*[b[inner, width, i] for i in range(8)])
           else: raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
-          d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
+          d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp.wmma(a_in, b_in, d_in, wmma_dims, 'AMD', 64)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -165,24 +164,24 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 16)
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+      wmma_dims = (16, 16, 32)
     else: raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
         for inner in self.ker.range(a.shape[-3], axis_type=AxisType.REDUCE, track=False):
           if a_base_shape.cols == 16:
-            a_in = UOp.vectorize(*[a[inner, height, i] for i in range(4)])
-            b_in = UOp.vectorize(*[b[width, inner, i] for i in range(4)])
+            a_in = UOp.stack(*[a[inner, height, i] for i in range(4)])
+            b_in = UOp.stack(*[b[width, inner, i] for i in range(4)])
           elif a_base_shape.cols == 32:
-            a_in = UOp.vectorize(*[a[inner, height, i] for i in range(8)])
-            b_in = UOp.vectorize(*[b[width, inner, i] for i in range(8)])
+            a_in = UOp.stack(*[a[inner, height, i] for i in range(8)])
+            b_in = UOp.stack(*[b[width, inner, i] for i in range(8)])
           else: raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
-          d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
+          d_in = UOp.stack(*[c[height, width, i] for i in range(4)])
 
-          out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+          out = UOp.wmma(a_in, b_in, d_in, wmma_dims, 'AMD', 64)
           c_i = [c[height, width, i].store(out.index(i)) for i in range(4)]
           c_store = UOp.group(*c_i).end(height, width, inner)
 
@@ -225,7 +224,7 @@ class Group:
 
       # store to shared memory
       red_local_store = red_local[self.laneid].store(red_reg[0])
-      red_local = red_local.after(red_local_store.barrier()).reshape(red_local.shape)
+      red_local = red_local.after(red_local_store).reshape(red_local.shape)
 
       # reduce from shared memory
       for inner in self.ker.range(3, axis_type=AxisType.REDUCE, track=False):
@@ -259,7 +258,7 @@ class Group:
 
       # store to shared memory
       red_local_store = red_local[self.laneid].store(red_reg[0])
-      red_local = red_local.after(red_local_store.barrier()).reshape(red_local.shape)
+      red_local = red_local.after(red_local_store).reshape(red_local.shape)
 
       # reduce from shared memory
       for inner in self.ker.range(3, axis_type=AxisType.REDUCE, track=False):
@@ -343,7 +342,7 @@ class Group:
           if src.dtype != dst.dtype:
             src_load = src_load.cast(dst.dtype)
           dst_store = dst[*dst_idxs, height, width, srow, scol].store(src_load)
-          dst_store = dst_store.end(height, width, outer, inner).barrier()
+          dst_store = dst_store.end(height, width, outer, inner)
     elif dst.addrspace == AddrSpace.REG and src.addrspace == AddrSpace.GLOBAL and isinstance(dst, RT):
       srcf = src.flatten()
       row_stride = prod(src.shape[axis+1:])

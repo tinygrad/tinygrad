@@ -1,4 +1,5 @@
 import unittest
+import functools
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
 from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm
@@ -9,6 +10,7 @@ from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 # Use DEV=NULL:HIP:gfx950 to also test the assembly
 def is_cdna4(): return Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950")
 
+@functools.cache
 def has_hipcc():
   try: system("hipcc --version")
   except Exception: return False
@@ -30,8 +32,9 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
     b_rand, w_scale, _ = quantize_fp8(b_rand.T.contiguous())
     if multi: b_rand, w_scale = b_rand.shard(devs, axis=None if b_shard is None else 1-b_shard), w_scale.to(devs).contiguous()
     grad_amax_state = Tensor.full((), FP8_MAX, dtype=dtypes.float32, device=devs).contiguous()
+    next_grad_amax_state = Tensor.empty((), dtype=dtypes.float32, device=devs)
     with Context(DEBUG=0):
-      Tensor.realize(a_rand, x_scale, b_rand, w_scale, grad_amax_state)
+      Tensor.realize(a_rand, x_scale, b_rand, w_scale, grad_amax_state, next_grad_amax_state)
 
   # clone all inputs before any backward: a clone copies the source's current .grad
   a, b = a_rand.clone(), b_rand.clone()
@@ -41,7 +44,8 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
     a_ref, b_ref = a_rand.clone(), b_rand.clone()
   if multi and isinstance(a.device, str): a, b = a.shard(devs, axis=a_shard), b.shard(devs, axis=b_shard)
   if dtype == FP8_DTYPE:
-    tst = asm_gemm(a, b.T, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state)
+    tst = asm_gemm(a, b.T, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state,
+                   next_grad_amax_state=next_grad_amax_state)
   else:
     tst = asm_gemm(a, b)
   tst.sum().backward()
@@ -148,6 +152,44 @@ class TestAsmGEMM(unittest.TestCase):
     with self.assertRaisesRegex(AssertionError, "not a multiple"):
       verify_asm_gemm(1, 256, 1000, 256)
 
+class TestMXFP4(unittest.TestCase):
+  def setUp(self):
+    if not is_cdna4() or DEV.interface.startswith("MOCK"):
+      self.skipTest("requires real amd machine")
+
+  def test_quantize(self):
+    import numpy as np
+    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+    rng = np.random.default_rng(0)
+    x = np.triu(rng.standard_normal((256, 256), dtype=np.float32))
+    x += np.triu(x, 1).T
+    x[:32, :32] = 0
+    row, row_scale, col, col_scale = quantize_mxfp4(Tensor(x, dtype=dtypes.bfloat16))
+    Tensor.realize(row, row_scale, col, col_scale)
+    row, row_scale = row.numpy(), row_scale.numpy()
+    col, col_scale = col.numpy(), col_scale.numpy()
+    np.testing.assert_array_equal(row, col)
+    np.testing.assert_array_equal(row_scale, col_scale)
+    self.assertTrue(row.any())
+    self.assertTrue((row_scale == 127).any())
+    self.assertTrue((row_scale != 127).any())
+
+  def test_correctness(self):
+    import numpy as np
+    M = N = K = 256
+    rng = np.random.default_rng(1)
+    a = Tensor(rng.standard_normal((M, K), dtype=np.float32), dtype=dtypes.bfloat16)
+    b = Tensor(rng.standard_normal((N, K), dtype=np.float32), dtype=dtypes.bfloat16)
+    out = asm_gemm(a, b.T, mxfp4=True).realize().numpy().astype(np.float32)
+    ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32).T
+    self.assertLess(np.linalg.norm(out-ref) / np.linalg.norm(ref), 0.2)
+
+  def test_empty(self):
+    M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
+    a = Tensor.empty(M, K, dtype=dtypes.bfloat16)
+    b = Tensor.empty(N, K, dtype=dtypes.bfloat16)
+    asm_gemm(a, b.T, mxfp4=True).realize()
+
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
 
 @unittest.skipUnless(has_hipcc(), "requires hipcc to compile")
@@ -167,7 +209,9 @@ class TestGemmLlama(unittest.TestCase):
       x_scale = Tensor.empty((), dtype=dtypes.float32)
       w_scale = Tensor.empty((), dtype=dtypes.float32)
       grad_amax_state = Tensor.empty((), dtype=dtypes.float32).contiguous()
-      z = asm_gemm(x, y, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state)
+      next_grad_amax_state = Tensor.empty((), dtype=dtypes.float32)
+      z = asm_gemm(x, y, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state,
+                   next_grad_amax_state=next_grad_amax_state)
     else:
       z = asm_gemm(x, y)
     z.sum().backward()

@@ -1,5 +1,5 @@
 import gc, unittest
-from tinygrad import Tensor, GlobalCounters, dtypes
+from tinygrad import Tensor, UOp, GlobalCounters, dtypes
 from tinygrad.engine.jit import TinyJit
 from tinygrad.helpers import Context
 
@@ -181,7 +181,7 @@ class TestMultiScalarALU(unittest.TestCase):
     @functools.cache
     def _fxn(x_p, device):
       t = Tensor(x_p, device=device)
-      inner = Tensor(t.uop.src[0]) if t.uop.op is Ops.MULTI else t
+      inner = Tensor(t.uop.src[0]) if t.uop.op is Ops.UNSHARD else t
       return (inner.sum(),)
     param = x.as_param(0)
     fxn = _fxn(param.uop, x.device)
@@ -217,6 +217,11 @@ class TestMultiAxis(unittest.TestCase):
     self.assertEqual(e.device, t.device)
     self.assertEqual(e.uop.axis, 0)
     self.assertTrue(e.uop.has_buffer_identity())
+
+  def test_symbolic_reshape_shard_axis(self):
+    rows = UOp.variable("rows", 1, 4).bind(3)
+    x = Tensor.empty(4, 2).shard(("NULL:1", "NULL:2"), axis=1)[:rows]
+    self.assertEqual(x.reshape(rows, 1, 2).uop.axis, 2)
 
 if __name__ == '__main__':
   unittest.main()

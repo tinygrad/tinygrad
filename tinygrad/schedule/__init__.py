@@ -1,21 +1,20 @@
 import time, inspect
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup
 
 # **** schedule linearizer
 
 # unwrap VIEW/CAST/etc to find the actual data source (kernel output, buffer, or multi-device op)
 def _unwrap_src(s: UOp) -> UOp:
-  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.BIND}: s = s.src[0]
+  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}: s = s.src[0]
   return s
 
-# a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states, BIND is not a buffer dependency
+# a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
-  if s.op is Ops.BIND: return []
   assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
 
@@ -71,7 +70,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       else:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
+        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
         linearized.append(k.src[0].call(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
@@ -98,10 +97,21 @@ pm_post_sched_cache = PatternMatcher([
    create_new_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
 ])
 
+def resolve_linear_call(linear_call:UOp, outer_binds:dict[str, UOp]|None=None):
+  linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
+  # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
+  # scalar args (e.g. precompiled allreduce) inherit it
+  binds = {**(outer_binds or {}),
+           **{f"p{i}":x.src[0].replace(op=Ops.PARAM) for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}}
+  def apply_binds(si:UOp) -> UOp:
+    if si.op is Ops.CALL and si.src[0].op is Ops.LINEAR: return resolve_linear_call(si, binds)
+    subs = {v:binds[v.expr] for v in si.variables() if v.expr in binds}
+    return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
+  return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
+
 pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
-  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), lambda linear_call:
-   graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")),
+  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), resolve_linear_call),
 ])+pm_flatten_linear
 
 schedule_cache: dict[bytes, UOp] = {}
@@ -134,7 +144,40 @@ pm_schedule = PatternMatcher([
   (UPat(Ops.SINK, name="function"), lower_sink_to_linear),
 ])
 
-@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
+def assert_all_same_devices(ast:UOp):
+  devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
+  if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
+
+def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
+  if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
+  return call.replace(src=(UOp(Ops.COPY, src=(src,), arg=dst.device),) + call.src[1:])
+
+def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
+  # NOTE: this is a codegen for SDMA devices
+  if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
+  from tinygrad.codegen.simplify import pm_flatten_range, pm_simplify_ranges
+  from tinygrad.schedule.rangeify import pm_mops
+  from tinygrad.uop.symbolic import sym
+  sink = graph_rewrite(ast, sym+pm_mops+pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges in copy")
+  return call.replace(src=(sink,) + call.src[1:])
+
+pm_copy_from_store = PatternMatcher([
+  # simplify copy kernels
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
+
+  # replace this with a copy if it's a copy
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
+                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
+                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+
+  # if it wasn't copy, it currently can't be cross device
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
+])
+
+@rewrite_group(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   # big_sink srcs are all the Tensors
   linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
@@ -142,15 +185,18 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   # this recursively resolves the linear_call and allocates buffers
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
+  # create copies
+  linear = graph_rewrite(linear, pm_copy_from_store, name="create COPY kernels for SDMA")
+
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
-  # get var_vals
+  # get var_vals from the bound Variables in the call args
   var_vals: dict[str, int] = {}
   for b in big_sink.src[1:]:
-    if b.op is Ops.BIND:
-      nm = b.src[0].expr
+    if b.is_bound_var:
+      v, val = b.unbind()
+      nm = v.expr
       if nm not in used_vars: continue
-      val = b.src[1].arg
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
 

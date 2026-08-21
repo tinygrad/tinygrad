@@ -1,10 +1,12 @@
-import atexit, functools, pathlib
+import atexit, functools, math, pathlib
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
-from tinygrad.helpers import getenv, all_same, DEBUG
+from tinygrad.helpers import getenv, all_same, DEBUG, ceildiv
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
+from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
 
 TILE_M, TILE_N, TILE_K = 256, 256, 64
 
@@ -32,6 +34,58 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)))
 
+# ** FP8 AtB GEMM custom kernel
+
+@functools.cache
+def custom_hk_fp8_atb_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int=5) -> UOp:
+  # C = A.T @ B, A and B are physically [K, M] and [K, N].
+  n_scales = (1 if scale_mode & 1 else 0) + (1 if scale_mode & 2 else 0) + (1 if scale_mode & 4 else 0)
+  scales = args[:n_scales]
+  K, M = A.shape[0]*A.shape[1], A.shape[2]
+  K2, N = B.shape[0]*B.shape[1], B.shape[2]
+  assert K == K2, f"{A.shape} {B.shape}"
+  block_m, block_n, block_k, num_warps = 256, 256, 128, 8
+  assert M % block_m == 0 and N % block_n == 0 and K % block_k == 0, f"invalid fp8 atb tile {(block_m, block_n, block_k)} for {(M, N, K)}"
+  threads = UOp.special(64 * num_warps, "lidx0")
+  workgroups = UOp.special((M // block_m) * (N // block_n), "gidx0")
+  sink_inputs = (C.base, A.base, B.base) + tuple(s.base for s in scales) + (threads, workgroups)
+  sink = UOp.sink(*sink_inputs,
+                  arg=KernelInfo(f"hk_fp8_atb_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
+  kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
+  src = (kittens_path/"gemm_fp8_atb.cpp").read_text()
+  lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
+                                 f"-DSCALE_MODE={scale_mode}"]).compile_cached(src)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                               UOp(Ops.BINARY, arg=lib)))
+
+def hk_fp8_atb_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, g_amax:Tensor|None=None) -> Tensor:
+  assert a.dtype == b.dtype == FP8_DTYPE, f"expected fp8, got {a.dtype} {b.dtype}"
+  assert a.ndim == b.ndim == 3 and a.shape[:2] == b.shape[:2], f"{a.shape} {b.shape}"
+  batch, rows, M = a.shape
+  N = b.shape[2]
+  assert M % TILE_M == 0 and N % TILE_N == 0 and (batch * rows) % 128 == 0, \
+    f"fp8 atb shape {a.shape} {b.shape} must produce (M,N,K) multiples of ({TILE_M},{TILE_N},128)"
+  is_multi = isinstance(a.device, tuple)
+  reduce_out = False
+  if is_multi:
+    ndev = len(a.device)
+    if a.uop.axis in (0, 1) or b.uop.axis in (0, 1): inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device), 0, True
+    elif b.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M, N // ndev, dtype=dtypes.bfloat16, device=a.device), 2
+    elif a.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M // ndev, N, dtype=dtypes.bfloat16, device=a.device), 1
+    else: inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device), 0, True
+    out = Tensor(inv.uop.unshard(out_axis), device=a.device)
+    dname = a.device[0]
+  else:
+    out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device)
+    dname = a.device
+  dname = dname.split(":")[0]
+  scales = tuple(s for s in (x_scale, g_amax) if s is not None)
+  scale_mode = (1 if x_scale is not None else 0) | (4 if g_amax is not None else 0)
+  out = Tensor.custom_kernel(out, a, b, *scales, fxn=functools.partial(custom_hk_fp8_atb_gemm, dname=dname, scale_mode=scale_mode))[0]
+  if reduce_out: out = out.sum(0)
+  return out.squeeze(0) if out.ndim == 3 else out
+
 # ** MXFP8 GEMM custom kernel
 
 @functools.cache
@@ -55,6 +109,43 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)))
 
+# ** MXFP4 GEMM custom kernel
+
+@functools.cache
+def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp, tile_m:int, tile_n:int) -> UOp:
+  from extra.gemm.gemm_mxfp4 import build_kernel
+  M, half_k = math.prod(A.shape[:-1]), A.shape[-1]
+  N, half_k_b = math.prod(B.shape[:-1]), B.shape[-1]
+  K = half_k * 2
+  assert half_k == half_k_b and math.prod(C.shape[:-1]) == M and C.shape[-1] == N
+  threads = UOp.special(256, "lidx0")
+  groups_x, groups_y = UOp.special(ceildiv(N, tile_n), "gidx0"), UOp.special(ceildiv(M, tile_m), "gidx1")
+  lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  sink = UOp.sink(C.base, A.base, B.base, scale_a.base, scale_b.base, *(x.base for x in extra), lds, threads, groups_x, groups_y,
+                  arg=KernelInfo(f"mxfp4_gemm_{M}_{N}_{K}",
+                                 estimates=Estimates(ops=2*M*N*K, mem=(M*half_k+N*half_k)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
+  insts = build_kernel(M, N, K, tile_m, tile_n)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in insts))))
+
+def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor) -> Tensor:
+  M, half_k = a_q.shape
+  N, half_k_b = b_q.shape
+  assert half_k == half_k_b
+  is_multi = isinstance(a_q.device, tuple)
+  reduce_out = is_multi and (a_q.uop.axis == 1 or b_q.uop.axis == 1)
+  if not is_multi: out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a_q.device)
+  elif reduce_out: out = Tensor(Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a_q.device).uop.unshard(0), device=a_q.device)
+  elif a_q.uop.axis == 0:
+    out = Tensor(Tensor.invalids(1, M//len(a_q.device), N, dtype=dtypes.bfloat16, device=a_q.device).uop.unshard(1), device=a_q.device)
+  elif b_q.uop.axis == 0:
+    out = Tensor(Tensor.invalids(1, M, N//len(a_q.device), dtype=dtypes.bfloat16, device=a_q.device).uop.unshard(2), device=a_q.device)
+  else: out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a_q.device)
+  tile_m, tile_n = next((tm, tn) for tm, tn in ((256, 256), (192, 256), (128, 512)) if M % tm == N % tn == 0)
+  out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b,
+                             fxn=functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n))[0]
+  if reduce_out: out = out.sum(0)
+  return out.squeeze(0)
+
 def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   # 1x32 block scaling along the last axis
   *batch, K = x.shape
@@ -75,6 +166,11 @@ def _mx_block_scale(e8:Tensor) -> Tensor:
   # dequant scale 2^(e8-127) broadcast back to element shape
   rows, scale_K = e8.shape
   return (e8.cast(dtypes.float32) - 127.0).exp2().reshape(rows, scale_K, 1).expand(rows, scale_K, 32).reshape(rows, scale_K*32)
+
+def _mx_block_scale_3d(e8:Tensor) -> Tensor:
+  # batched (E, rows, scale_K) dequant scale 2^(e8-127) broadcast to (E, rows, scale_K*32)
+  E, rows, scale_K = e8.shape
+  return (e8.cast(dtypes.float32) - 127.0).exp2().reshape(E, rows, scale_K, 1).expand(E, rows, scale_K, 32).reshape(E, rows, scale_K*32)
 
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
@@ -114,13 +210,13 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   K2, N = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2
-  m = UOp.range(M, 1, AxisType.LOOP)
-  n = UOp.range(N, 2, AxisType.LOOP)
+  m = UOp.range(M, 1)
+  n = UOp.range(N, 2)
   k = UOp.range(K, 0, AxisType.REDUCE)
-  mul = (A.flatten().index((m*UOp.const(dtypes.index, K)+k))*
-         B.flatten().index((k*UOp.const(dtypes.index, N)+n))).cast(dtypes.float32)
+  mul = (A.flatten().index((m*UOp.const(K)+k))*
+         B.flatten().index((k*UOp.const(N)+n))).cast(dtypes.float32)
   red = mul.reduce(k, arg=Ops.ADD, dtype=dtypes.float32).cast(C.dtype)
-  store = C.flatten().index((m*UOp.const(dtypes.index, N)+n)).store(red).end(m, n)
+  store = C.flatten().index((m*UOp.const(N)+n)).store(red).end(m, n)
   return store.sink(arg=KernelInfo(name=f'uop_gemm_{M}_{N}_{K}'))
 
 # ** bf16 A @ B.T kernel in C
@@ -177,7 +273,7 @@ def hk_bf16_atb_gemm(a:Tensor, b:Tensor) -> Tensor:
     elif b.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M, N // ndev, dtype=a.dtype, device=a.device), 2
     elif a.uop.axis == 2: inv, out_axis = Tensor.invalids(1, M // ndev, N, dtype=a.dtype, device=a.device), 1
     else: inv, out_axis, reduce_out = Tensor.invalids(1, M, N, dtype=a.dtype, device=a.device), 0, True
-    out = Tensor(inv.uop.multi(out_axis), device=a.device)
+    out = Tensor(inv.uop.unshard(out_axis), device=a.device)
     dname = a.device[0]
   else:
     out = Tensor.invalids(1, M, N, dtype=a.dtype, device=a.device)
@@ -186,7 +282,6 @@ def hk_bf16_atb_gemm(a:Tensor, b:Tensor) -> Tensor:
   out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_hk_bf16_atb_gemm, dname=dname))[0]
   if reduce_out: out = out.sum(0)
   return out.squeeze(0) if out.ndim == 3 else out
-
 
 # ** backward gemm, might use the asm gemm
 
@@ -198,13 +293,14 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     s_x = inputs[i]; i += 1
     has_w = n_scales >= 2
     s_w = inputs[i] if has_w else None; i += has_w
-    s_g = inputs[i] if n_scales == 3 else None; i += (n_scales == 3)
+    s_g_amax = inputs[i] if n_scales == 3 else None; i += (n_scales == 3)
     grad_amax_state = inputs[i] if has_grad_amax else None; i += has_grad_amax
+    next_grad_amax_state = inputs[i] if has_grad_amax else None; i += has_grad_amax
     w_post = inputs[i] if has_w_post else None
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
     s_x_t = Tensor(s_x, device=a.device)
     s_w_t = Tensor(s_w, device=a.device) if has_w else None
-    s_g_t = Tensor(s_g, device=a.device) if s_g is not None else None
+    s_g_amax_t = Tensor(s_g_amax, device=a.device) if s_g_amax is not None else None
     w_post_t = Tensor(w_post, device=a.device) if has_w_post else None
     g_t = g_t[:a.shape[0]]
     from extra.llama_kernels.cast_amax import _grad_fp8_mailbox
@@ -212,28 +308,28 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     gbase = gradient.base if hasattr(gradient, "base") else gradient
     mailbox_entry = _grad_fp8_mailbox.pop(gbase, None) or _grad_fp8_mailbox.pop(gradient, None)
     if mailbox_entry is not None:
-      g_fp8_u, inv_scale_u = mailbox_entry
+      g_fp8_u, grad_amax_u = mailbox_entry
       g_fp8 = Tensor(g_fp8_u, device=a.device)[:a.shape[0]]
-      g_scale = Tensor(inv_scale_u, device=a.device)
+      g_amax = Tensor(grad_amax_u, device=a.device)
     else:
       assert grad_amax_state is not None, "fp8 matmul bwd needs either a mailbox entry or a grad_amax_state"
       if getenv("CURRENT_GRAD_SCALE", 0):
-        g_fp8, g_scale, _ = quantize_fp8(g_t, amax_state=None)
+        g_fp8, _, g_amax = quantize_fp8(g_t, amax_state=None)
       elif getenv("FUSED_GRAD_QUANTIZE", 0):
-        g_fp8, g_scale, _, store_effect = quantize_fp8_delayed(g_t, Tensor(grad_amax_state, device=a.device))
-        assert g_fp8.uop.op is Ops.AFTER, f"expected AFTER, got {g_fp8.uop.op}"
-        g_fp8 = Tensor(g_fp8.uop.replace(src=g_fp8.uop.src + (store_effect,)), device=a.device)
+        grad_amax_t = Tensor(grad_amax_state, device=a.device)
+        g_amax = grad_amax_t
+        g_fp8, _ = quantize_fp8_delayed(g_t, g_amax, Tensor(next_grad_amax_state, device=a.device))
       else:
         grad_amax_t = Tensor(grad_amax_state, device=a.device)
-        g_fp8, g_scale, new_grad_amax = quantize_fp8(g_t, amax_state=grad_amax_t)
-        store_effect = grad_amax_state.store(new_grad_amax.uop)
+        g_amax = grad_amax_t
+        g_fp8, _, new_grad_amax = quantize_fp8(g_t, amax_state=g_amax)
+        store_effect = next_grad_amax_state.store(new_grad_amax.uop)
         g_fp8 = Tensor(g_fp8.contiguous().uop.after(store_effect), device=a.device)
-    # dgrad: uses g_scale * x_scale * w_scale (only when scalar)
-    if s_g_t is not None: g_scale = g_scale * s_g_t
-    grad_a = asm_gemm(g_fp8, b_t, x_scale=s_x_t, w_scale=s_w_t, g_scale=g_scale) if has_w else asm_gemm(g_fp8, b_t, x_scale=s_x_t, w_scale=g_scale)
+    # dgrad: applies grad/activation amax scales in the GEMM epilogue; w_scale is already inverse.
+    assert s_g_amax_t is None, "fp8 GEMM bwd through g_amax scaling is unsupported"
+    grad_a = asm_gemm(g_fp8, b_t, x_scale=s_x_t, w_scale=s_w_t, g_amax=g_amax) if has_w else asm_gemm(g_fp8, b_t, x_scale=s_x_t, g_amax=g_amax)
     # wgrad: no w_scale
-    g_fp8_T = g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1)
-    grad_b = asm_gemm(g_fp8_T, a_t.reshape(-1, a_t.shape[-1]), x_scale=s_x_t, w_scale=g_scale)
+    grad_b = hk_fp8_atb_gemm(g_fp8, a_t, x_scale=s_x_t, g_amax=g_amax)
     # wgrad: rescale if not scalar
     if w_post_t is not None:
       grad_b = grad_b / w_post_t.reshape(*w_post_t.shape, *([1]*(grad_b.ndim - w_post_t.ndim)))
@@ -283,12 +379,30 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=F
   if wp is not None: grad_b = grad_b / wp.reshape(-1, 1)
   return (None, grad_a.uop, grad_b.uop) + tuple(None for _ in inputs[3:])
 
+# ** mxfp4 gemm backward
+
+def custom_mxfp4_gemm_bw(gradient:UOp, kernel:UOp):
+  inputs = kernel.src[1:]  # out, row operands/scales, BF16 operands, column operands/scales
+  assert len(inputs) == 11
+  a, w = Tensor(inputs[5], device=inputs[5].device), Tensor(inputs[6], device=inputs[6].device)
+  a_col, scale_a_col = Tensor(inputs[7], device=a.device), Tensor(inputs[8], device=a.device)
+  w_col, scale_w_col = Tensor(inputs[9], device=a.device), Tensor(inputs[10], device=a.device)
+  g = Tensor(gradient, device=a.device)[:a.shape[0]].cast(dtypes.bfloat16)
+  g_row, scale_g_row, g_col, scale_g_col = quantize_mxfp4(g, flatten_row=True)
+  grad_a = _mxfp4_gemm_quantized(g_row, w_col, scale_g_row, scale_w_col).reshape(*a.shape[:-1], w.shape[-1])
+  grad_w = _mxfp4_gemm_quantized(g_col, a_col, scale_g_col, scale_a_col).reshape(w.shape)
+  return (None, None, None, None, None, grad_a.uop, grad_w.uop, None, None, None, None)
+
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
-             w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_scale:Tensor|None=None,
-             a_pretranspose:Tensor|None=None) -> Tensor:
+             next_grad_amax_state:Tensor|None=None,
+             w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_amax:Tensor|None=None,
+             a_pretranspose:Tensor|None=None, mxfp4:bool=False) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
+  if mxfp4:
+    assert not mx and mx_scales is None, "mxfp4 owns quantization; mx/mx_scales are for mxfp8"
+    assert a.dtype == dtypes.bfloat16, f"cannot quantize {a.dtype} to mxfp4"
   counters["used"] += 1
   unfold_batch = a.ndim == 3 and isinstance(a.device, tuple) and a.uop.axis == 2 and b.uop.axis == 0
   if unfold_batch:
@@ -296,7 +410,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
     a = a.reshape(a.shape[0]*a.shape[1], a.shape[2])
   squeeze = a.ndim == 2
   if squeeze: a = a.unsqueeze(0)
-  out_dtype = dtypes.bfloat16 if a.dtype == FP8_DTYPE else a.dtype
+  out_dtype = dtypes.bfloat16 if a.dtype == FP8_DTYPE or mxfp4 else a.dtype
 
   batch, M, K = a.shape
   N = b.shape[1]
@@ -307,11 +421,11 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
 
   if is_multi:
     if n_sharded:
-      out = Tensor(Tensor.invalids(batch, M, N//len(a.device), dtype=out_dtype, device=a.device).uop.multi(2), device=a.device)
+      out = Tensor(Tensor.invalids(batch, M, N//len(a.device), dtype=out_dtype, device=a.device).uop.unshard(2), device=a.device)
     elif m_sharded:
-      out = Tensor(Tensor.invalids(batch, M, N, dtype=out_dtype, device=a.device).uop.multi(1), device=a.device)
+      out = Tensor(Tensor.invalids(batch, M, N, dtype=out_dtype, device=a.device).uop.unshard(1), device=a.device)
     else:
-      out = Tensor(Tensor.invalids(batch//len(a.device) if a.uop.axis==0 else batch, M, N, dtype=out_dtype, device=a.device).uop.multi(0),
+      out = Tensor(Tensor.invalids(batch//len(a.device) if a.uop.axis==0 else batch, M, N, dtype=out_dtype, device=a.device).uop.unshard(0),
                    device=a.device)
   else:
     out = Tensor.invalids(batch, M, N, dtype=out_dtype, device=a.device)
@@ -319,7 +433,15 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   renderer = Device[dname:=(a.device[0] if is_multi else a.device)].renderer
   dname, arch = dname.split(":")[0], renderer.target.arch
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
-    if mx:
+    if mxfp4:
+      tile_m, tile_n = next((tm, tn) for tm, tn in ((256, 256), (192, 256), (128, 512)) if (batch*M) % tm == N % tn == 0)
+      fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
+      w = b.T
+      a_q, scale_a, a_col, scale_a_col = quantize_mxfp4(a, shuffle_col=True)
+      b_q, scale_b, b_col, scale_b_col = quantize_mxfp4(w, shuffle_row=True, shuffle_col=True)
+      out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b, a, w,
+                                 a_col, scale_a_col, b_col, scale_b_col, fxn=fxn, grad_fxn=custom_mxfp4_gemm_bw)[0]
+    elif mx:
       # mxfp8 1x32 block scaling
       if mx_scales is not None:
         a_si, a_e8, b_si, b_e8 = mx_scales
@@ -339,9 +461,10 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       out = Tensor.custom_kernel(out, a_q.reshape(a.shape), b_q, a_si, b_si, a_e8, b_e8, *extra, fxn=fxn, grad_fxn=grad_fxn)[0]
     # fp8 gemm computes a@b.T, kernel multiplies output by x_scale * w_scale before bf16 store
     elif a.dtype == FP8_DTYPE:
-      scales = tuple(s for s in (x_scale, w_scale, g_scale) if s is not None)
-      scale_mode = (1 if x_scale is not None else 0) | (2 if w_scale is not None else 0) | (4 if g_scale is not None else 0)
-      extra = ([grad_amax_state] if grad_amax_state is not None else []) + ([w_post_scale] if w_post_scale is not None else [])
+      scales = tuple(s for s in (x_scale, w_scale, g_amax) if s is not None)
+      scale_mode = (1 if x_scale is not None else 0) | (2 if w_scale is not None else 0) | (4 if g_amax is not None else 0)
+      assert (grad_amax_state is None) == (next_grad_amax_state is None)
+      extra = ([grad_amax_state, next_grad_amax_state] if grad_amax_state is not None else []) + ([w_post_scale] if w_post_scale is not None else [])
       fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode)
       bw = functools.partial(custom_gemm_bw, n_scales=len(scales), has_grad_amax=grad_amax_state is not None, has_w_post=w_post_scale is not None)
       out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, fxn=fxn, grad_fxn=bw)[0]

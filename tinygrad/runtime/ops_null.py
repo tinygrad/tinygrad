@@ -1,5 +1,5 @@
-import inspect, functools, math
-from tinygrad.device import Compiled, Allocator, ProfileGraphEntry, ProfileGraphEvent
+import inspect, math
+from tinygrad.device import Compiled, Allocator, ProfileGraphEntry, ProfileGraphEvent, Program, TinyELF
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -16,10 +16,10 @@ class NullRenderer(CStyleLanguage):
     from tinygrad.renderer.amd.elf import assemble_linear
     return assemble_linear(prg, lin, self.target.arch)
 
-class NullProgram:
-  def __init__(self, device:str, name:str, lib:bytes, *args, **kwargs): self.device, self.name = device, name
+class NullProgram(Program['NullDevice']):
+  def __init__(self, dev:'NullDevice', obj:TinyELF): self.device, self.name, self.profile_key = dev.device, obj.name, obj.profile_key
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
-    with cpu_profile(self.name, self.device): return 1e-3
+    with cpu_profile(self.name, self.device, profile_key=self.profile_key): return 1e-3
 
 class NullAllocator(Allocator['NullDevice']):
   def _alloc(self, size, options): pass
@@ -28,7 +28,7 @@ class NullAllocator(Allocator['NullDevice']):
     if not NULL_ALLOW_COPYOUT: raise RuntimeError("no copyout on NULL")
   def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
     with cpu_profile(f"{src_dev.device} -> {dest_dev.device}", f"{src_dev.device}:SDMA:0"): pass
-  def _offset(self, buf, offset:int, size:int): pass
+  def _offset(self, buf, size:int, offset:int): pass
 
 class NullGraph(MultiGraphRunner):
   def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None:
@@ -38,13 +38,14 @@ class NullGraph(MultiGraphRunner):
       for (_,_,bufs,_),runtime in zip(self.calls, self.runtimes):
         # description based on command, copied from HCQ graph
         device = runtime.device if runtime is not None else f"{bufs[1].device}:SDMA:0"
-        descs.append((device, runtime.name if runtime is not None else f"{bufs[1].device} -> {bufs[0].device}", count:=event_count.get(device, 0)))
+        descs.append((device, runtime.name if runtime is not None else f"{bufs[1].device} -> {bufs[0].device}",
+                      runtime.profile_key if runtime is not None else None, count:=event_count.get(device, 0)))
         event_count[device] = count+1
       # pack events evenly per device
       dur, sigs, ents = max(1, math.ceil((perf_counter_us()-st)/max(event_count.values()))), [], []
-      for i,(device,name,count) in enumerate(descs):
+      for i,(device,name,profile_key,count) in enumerate(descs):
         sigs += [st+count*dur, st+(count+1)*dur]
-        ents.append(ProfileGraphEntry(device, name, 2*i, 2*i+1))
+        ents.append(ProfileGraphEntry(device, name, 2*i, 2*i+1, profile_key))
       cpu_events.append(ProfileGraphEvent(ents, [], sigs))
     return 1e-1
 
@@ -54,4 +55,4 @@ class NullDevice(Compiled):
       "EMULATE is deprecated, use DEV=NULL:HIP:"+{"AMD":"gfx1100", "AMD_RDNA4":"gfx1201", "AMD_CDNA4":"gfx950"}.get(emu, "<arch>")
     renderers = [NullRenderer] + [r for m in [cstyle, nir, ptx, llvmir, wgsl] for r in m.__dict__.values()
                                   if inspect.isclass(r) and issubclass(r, Renderer)]
-    super().__init__(device, NullAllocator(self), dedup(renderers), functools.partial(NullProgram, device), NullGraph)
+    super().__init__(device, NullAllocator(self), dedup(renderers), NullProgram, NullGraph)

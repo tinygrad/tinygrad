@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Device, Tensor, dtypes
+from tinygrad import Device, Tensor, Variable, dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
@@ -10,12 +10,12 @@ from test.helpers import replace_opts
 class TestFloat4(unittest.TestCase):
   @staticmethod
   def count_float4(uops: list[UOp], n=4):
-    return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype.scalar() == dtypes.float and uop.shape == (4,)]),
-            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[1].dtype.scalar() == dtypes.float and uop.shape == (4,)]))
+    return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.float and uop.shape == (4,)]),
+            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[1].dtype == dtypes.float and uop.shape == (4,)]))
   @staticmethod
   def count_half4(uops: list[UOp]):
-    return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype.scalar() == dtypes.half and uop.shape == (4,)]),
-            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[1].dtype.scalar() == dtypes.half and uop.shape == (4,)]))
+    return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.half and uop.shape == (4,)]),
+            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[1].dtype == dtypes.half and uop.shape == (4,)]))
 
   def test_float4_basic(self):
     a = Tensor.empty(2, 8).realize()
@@ -110,6 +110,32 @@ class TestFloat4(unittest.TestCase):
     # should float4 b but not a
 
     s = c.schedule_linear().src[0]
+    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=4)]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+
+    assert TestFloat4.count_float4(uops) == (1, 1)
+
+  def test_float4_aligned_variable(self):
+    x = Variable('x', 0, 4, multiple_of=4).bind(4)
+    a = Tensor.empty(4).realize()
+    b = Tensor.empty(12).realize().shrink(((x, x+4),))
+    c = a + b
+
+    # should float4 both
+
+    s = c.linear_with_vars()[0].src[0]
+    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=4)]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+
+    assert TestFloat4.count_float4(uops) == (2, 1)
+
+  def test_float4_unaligned_variable(self):
+    x = Variable('x', 0, 4, multiple_of=2).bind(4)
+    a = Tensor.empty(4).realize()
+    b = Tensor.empty(12).realize().shrink(((x, x+4),))
+    c = a + b
+
+    # should float4 a but not b
+
+    s = c.linear_with_vars()[0].src[0]
     uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=4)]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
     assert TestFloat4.count_float4(uops) == (1, 1)

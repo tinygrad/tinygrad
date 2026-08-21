@@ -180,11 +180,15 @@ class TestSafetensors(TempDirTestCase):
 
   def test_save_all_dtypes(self):
     for dtype in dedup(DTYPES_DICT.values()):
-      if dtype in [dtypes.bfloat16]: continue # not supported in numpy
+      if dtype in dtypes.fp8_fnuz: continue # not supported by safetensors
       path = self.tmp(f"ones.{dtype}.safetensors")
       ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
-      np.testing.assert_equal(ones.numpy(), list(safe_load(path).values())[0].numpy())
+      loaded = list(safe_load(path).values())[0]
+      # numpy has no fp8 or bfloat16, compare the stored bytes
+      if dtype == dtypes.bfloat16 or dtype in dtypes.fp8s:
+        np.testing.assert_equal(ones.bitcast(dtypes.uint8).numpy(), loaded.bitcast(dtypes.uint8).numpy())
+      else: np.testing.assert_equal(ones.numpy(), loaded.numpy())
 
   def test_load_supported_types(self):
     import torch

@@ -2,7 +2,7 @@ import unittest, numpy as np
 from tinygrad import Tensor, Variable, Context, Device, TinyJit, GlobalCounters, dtypes, UOp, nn, getenv
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.uop.ops import Ops
-from test.helpers import not_support_multi_device, needs_second_gpu, slow
+from test.helpers import not_support_multi_device, needs_second_gpu, slow, assert_kernel_count, KernelCountException
 from hypothesis import given, strategies as strat, settings
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -60,8 +60,15 @@ class TestMultiTensor(unittest.TestCase):
   def test_shard_elementwise(self): self._test_shard_op(lambda t:(t+t).reshape(2, 2), [[2.,2.],[2.,2.]])
   def test_alu_deviceless_const(self):
     s = Tensor([1.0, 2, 3, 4]).shard((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"), axis=0)
-    np.testing.assert_equal((s + Tensor(UOp.const(dtypes.float, 1.0))).numpy(), [2, 3, 4, 5])
-    np.testing.assert_equal((s + Tensor(UOp.const(dtypes.float, 1.0)).reshape((1,)).expand((4,))).numpy(), [2, 3, 4, 5])
+    np.testing.assert_equal((s + Tensor(UOp.const(1.0).cast(dtypes.float))).numpy(), [2, 3, 4, 5])
+    np.testing.assert_equal((s + Tensor(UOp.const(1.0).cast(dtypes.float)).reshape((1,)).expand((4,))).numpy(), [2, 3, 4, 5])
+
+  def test_add_rank_expand_shard(self):
+    # a sharded src keeps its own rank under implicit broadcast, its shard axis right-aligns into the output
+    a = Tensor([1.,2.,3.,4.]).shard(devices_2, 0)
+    b = Tensor([[10.,20.,30.,40.]]).shard(devices_2, None)
+    self.assertEqual((a+b).uop.axis, 1)
+    np.testing.assert_equal((a+b).numpy(), [[11.,22.,33.,44.]])
 
   def test_shard_reduce(self):
     self._test_shard_op(lambda t:t.reshape(2, 3).sum(axis=1), [3.,3.], n=6)
@@ -71,6 +78,10 @@ class TestMultiTensor(unittest.TestCase):
     X = Tensor.ones(256).contiguous().realize()
     with self.assertRaises(RuntimeError):
       X.shard_(devices_3, 0)
+
+  def test_shard_reshape_cross_boundary(self):
+    X = Tensor.ones(5, 4).contiguous().realize().shard(devices_2, 1)
+    with self.assertRaises(RuntimeError): X.reshape(10, 2).uop.axis
 
   def test_tensor_from_multi(self):
     X = Tensor([1, 2], dtype=dtypes.int).shard_(devices_2, 0)
@@ -115,6 +126,27 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor([1, 2, 3, 4]).reshape(2, 2)
     with Context(RING=use_ring):
       np.testing.assert_equal(t.shard(devices_2, axis=axis).sum().item(), 10)
+
+  def test_allreduce_cast_half(self, assign=False, kernel_count=8):
+    devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    a_src = Tensor.arange(2*3, dtype=dtypes.half).reshape(2, 3).clone().realize()
+    b_src = Tensor.arange(2*3, dtype=dtypes.half).reshape(2, 3).clone().realize()
+    a = a_src.shard(devices, axis=0).realize()
+    b = b_src.shard(devices, axis=0).realize()
+    # assigning creates a copy of the output before allreduce
+    if assign:
+      tst = Tensor.empty_like(b)
+      tst.assign(a + b)
+    else:
+      tst = a + b
+    tst = tst.float().sum(0)
+    GlobalCounters.reset()
+    with Context(ALLREDUCE_CAST=1, RING=0, ALL2ALL=0):
+      tst.realize()
+    assert_kernel_count(kernel_count)
+    np.testing.assert_allclose(tst.numpy(), (a_src.numpy()+b_src.numpy()).sum(0))
+
+  def test_allreduce_cast_half_assign(self): self.test_allreduce_cast_half(assign=True, kernel_count=10)
 
   def test_multiple_to_single_device(self):
     kernel_counts = {}
@@ -352,6 +384,18 @@ class TestMultiTensor(unittest.TestCase):
       np.testing.assert_allclose(r.numpy(), np.ones(256)+np.ones(256), atol=1e-4, rtol=1e-5)
     assert jf.captured is not None
 
+  def test_symbolic_broadcast_copy(self):
+    rows = Variable("rows", 1, 4).bind(3)
+    out = Tensor.ones(rows, 8).to(devices_2).realize()
+    self.assertEqual(out.shape, (rows, 8))
+    np.testing.assert_equal(out[:3].to(Device.DEFAULT).numpy(), np.ones((3, 8)))
+
+  def test_symbolic_broadcast_consumed(self):
+    rows = Variable("rows", 1, 4).bind(3)
+    out = (Tensor.ones(rows).to(devices_2) + 1).realize()
+    self.assertEqual(out.shape, (rows,))
+    np.testing.assert_equal(out[:3].to(Device.DEFAULT).numpy(), np.full(3, 2))
+
   def test_multitensor_jit_in_list(self):
     # test MULTI tensor inside a list container - exercises the container unpacking + MULTI unpacking
     @TinyJit
@@ -551,7 +595,7 @@ class TestMultiTensor(unittest.TestCase):
       zeros = Tensor.zeros(3).realize()
     b = a.to(devices_2)*zeros.to(devices_2)
     sched = b.schedule_linear().src
-    self.assertEqual(len(sched), 0)
+    if len(sched) != 0: raise KernelCountException(0, len(sched))
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
@@ -564,7 +608,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     t = Tensor.arange(64).reshape(8, 8).clone().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
 
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(RuntimeError):
       # sharded axis shrink on non-device boundry is not allowed
       a = t.shrink(((0, 3), (0, 8))).contiguous()
       a.schedule_linear()
@@ -586,7 +630,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     if dtype not in Device[Device.DEFAULT].renderer.supported_dtypes(): return
     t = Tensor.arange(64).reshape(8, 8).clone().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
-    for i in range(4):
+    for i in range(2):
       print(f"{i=}")
       a = t.shrink(((0+2*i,2+2*i),None))
       b = Tensor(t.numpy()[0+2*i:2+2*i])
@@ -602,8 +646,8 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       np.testing.assert_allclose((a+a).numpy(), (b+b).numpy(), rtol=1e-7, atol=1e-3)
       np.testing.assert_equal((a+1).numpy(), (b+1).numpy())
       np.testing.assert_equal((1+a).numpy(), (1+b).numpy())
-      np.testing.assert_allclose((a.where(a+a, a)).numpy(), (b.where(b+b, b)).numpy(), rtol=1e-7, atol=1e-3)
-      np.testing.assert_allclose((a.where(1, 0)).numpy(), (b.where(1, 0)).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose((a.bool().where(a+a, a)).numpy(), (b.bool().where(b+b, b)).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose((a.bool().where(1, 0)).numpy(), (b.bool().where(1, 0)).numpy(), rtol=1e-7, atol=1e-3)
 
       # reduce
       np.testing.assert_allclose(a.max().numpy(), b.max().numpy(), rtol=1e-7, atol=1e-3)

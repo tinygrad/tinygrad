@@ -5,7 +5,9 @@ from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, 
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
-from tinygrad.helpers import prod, Target, CPU_COUNT, getenv, OSX
+from tinygrad.helpers import prod, Target, NUM_CPU_THREADS, getenv, OSX
+
+def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
 
 def ldt(dt:DType, count=1, ptr=False):
   if ptr: return ldt(dt, count) + "*"
@@ -33,20 +35,36 @@ def lcast(input_type:DType, output_type:DType):
     if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
-def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
+def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
   dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.ushort: "bf16.1k" if cdna else "bf16", dtypes.bfloat16: "bf16.1k" if cdna else "bf16",
-            dtypes.fp8e4m3: ".fp8.fp8", dtypes.fp8e5m2: ".bf8.bf8"}
+            dtypes.fp8e4m3: ".fp8.fp8", dtypes.fp8e5m2: ".bf8.bf8", dtypes.int8: "iu8", dtypes.int32: "i32"}
   # https://github.com/llvm/llvm-project/blob/main/clang/test/CodeGenOpenCL/builtins-amdgcn-mfma.cl
-  N,M,K = wmma.arg[1]
+  N,M,K = wmma.arg[0]
   if cdna:
     if K == 32: dt_map.update({dtypes.half: ".f16", dtypes.bfloat16: ".bf16"})
-    return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{dt_map[wmma.src[-1].dtype]}" + \
-           f".{N}x{M}x{K}{dt_map[wmma.arg[2]]}(" + ", ".join([f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]) + ", i32 0, i32 0, i32 0)"
+    scaled = K == 128
+    args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]
+    # scaled mfma call require E8M0 scale args, byte = 0x7F = 127, scale = 2^(127 - 127) = 1.0
+    if scaled:
+      _fmt = { dtypes.fp8e5m2:1, dtypes.fp8e4m3:0 }
+      # (a_fp8_fmt, b_fp8_fmt, opsel, scale_a, opsel, scale_b)
+      args.extend([f"i32 {_fmt[wmma.arg[1]]}", f"i32 {_fmt[wmma.arg[1]]}", "i32 0", "i32 127", "i32 0", "i32 127"])
+    else: args.extend(["i32 0", "i32 0", "i32 0"]) # (cbsz, blgp, ?)
+
+    scale = "scale." if scaled else ""
+    dt_in = dt_map[wmma.arg[1]] if not scaled else ".f8f6f4"
+    return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{scale}{dt_map[wmma.src[-1].dtype]}" + \
+           f".{N}x{M}x{K}{dt_in}(" + ", ".join(args) + ")"
   # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
   # example: %wmma0 = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16(<16 x half> %v99,<16 x half> %v100,<8 x float> %v101)
-  return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
-    f"{dt_map[wmma.src[0].dtype]}(" + ", ".join([f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]) + (", i1 false)" \
-      if wmma.dtype != dtypes.float else ")")
+  args = [f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]
+  if wmma.arg[1] == dtypes.int8: args = ["i1 true", args[0], "i1 true", args[1], args[2]]  # iu8 flags A/B signed
+  if wmma.dtype != dtypes.float: args.append("i1 false") # opsel
+  def _bf16(dt:DType): return dtypes.ushort if dt is dtypes.bfloat16 else dt
+  suffix = f".v{wmma.max_numel()}{dt_map[_bf16(wmma.dtype)]}.v{wmma.src[0].max_numel()}{dt_map[_bf16(wmma.arg[1])]}" if rdna4 else ""
+  # bfloat treated as i16 in LLVM call
+  return f"  {ctx[wmma]} = call {ldt(_bf16(wmma.dtype), wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype]}.16x16x16." + \
+    f"{dt_map[wmma.arg[1]]}{suffix}(" + ", ".join(args) + ")"
 
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.CDIV: "udiv", Ops.CMOD: "urem",
@@ -63,21 +81,24 @@ base_rewrite = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.AFTER)),), allow_any_len=True, name="x"), lambda ctx,x:
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype)}, {ldt(x.dtype, ptr=True)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
   # register index
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("idx")), name="x"), lambda ctx,buf,idx,x:
-   f"  {ctx[x]} = extractelement {ldt(buf.dtype, buf.max_numel())} {ctx[buf]}, i32 {idx.arg}" if buf.addrspace == AddrSpace.ALU else None),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.cvar("c").cast()), name="x"), lambda ctx,buf,c,x:
+   f"  {ctx[x]} = extractelement {ldt(buf.dtype, buf.max_numel())} {ctx[buf]}, i32 {c.val}" if buf.addrspace == AddrSpace.ALU else None),
 
   # load/store
   (UPat(Ops.LOAD, src=(UPat.var("idx"), UPat.var("alt"), UPat.var("mask")), name="x"),
    lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
-   f"  {ctx[x]}_yes = load {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
+   f"  {ctx[x]}_yes = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
   (UPat.var('idx').load(name="x"), lambda ctx,x,idx:
-   f"  {ctx[x]} = load {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"  {ctx[x]} = load {'volatile ' if is_volatile(idx) else ''}{ldt(idx.dtype, idx.max_numel())}, "
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
   (UPat.var('idx').store(UPat.var("var")), lambda ctx,idx,var:
-   f"  store {ldt(var.dtype, idx.max_numel())} {ctx[var]}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
+   f"  store {'volatile ' if is_volatile(idx) else ''}{ldt(var.dtype, idx.max_numel())} {ctx[var]}, "
+   f"{ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
 
   # GEP/VECTORIZE/CAST for float4 support
   (UPat(Ops.STACK, name="x"), lambda ctx,x:
@@ -94,6 +115,11 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
+
+  # loop (a RANGE with no src is an unbounded loop header)
+  (UPat(Ops.RANGE, dtypes.void, name="l"), lambda ctx,l: f"  br label %loop_{ctx[l][1:]}\nloop_{ctx[l][1:]}:"),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx,l,c:
+    f"  br i1 {ctx[c]}, label %loop_{ctx[l][1:]}, label %loop_exit_{ctx[l][1:]}\nloop_exit_{ctx[l][1:]}:"),
 
   # range
   (UPat(Ops.RANGE, name="r"), lambda ctx,r:
@@ -116,11 +142,10 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 
-  (UPat(Ops.BARRIER), lambda ctx: "")
+  (UPat(Ops.BARRIER), lambda ctx: "  fence seq_cst")
 ])
 
 class LLVMRenderer(Renderer):
-  supports_float4 = True
   abi: str | None
   string_rewrite: PatternMatcher
   code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
@@ -140,7 +165,7 @@ class LLVMRenderer(Renderer):
     local_args: list[str] = []
     name = "test"
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP}: continue
+      if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST}: continue
       if u.op is Ops.AFTER:
         r[u] = r[u.src[0]]
         continue
@@ -160,7 +185,7 @@ class LLVMRenderer(Renderer):
           kernel.append(f"  {r[u]} = addrspacecast [{size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{size} x {ldt(u.dtype)}]*")
         else:
           kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}], align 16")
-      elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
+      elif u.op is Ops.CAST and u.src[0].op is Ops.CONST: r[u] = lconst(u.src[0].val, u.dtype)
       elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
       else:
@@ -179,14 +204,15 @@ class LLVMRenderer(Renderer):
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (CPU_COUNT.value, 0, 0)
+  @property
+  def global_max(self): return (NUM_CPU_THREADS.value, 0, 0)  # type: ignore[override]
   abi = 'win64cc' if sys.platform == 'win32' else None
   string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
   def __init__(self, target:Target):
     super().__init__(target)
-    from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
+    from tinygrad.runtime.support.compiler_llvm import CPULLVMCompiler
     self.compiler = CPULLVMCompiler(target.arch.split(","))
 
   # FIXME: fp16 works on non-osx, but only if the cpu supports it
@@ -200,7 +226,6 @@ code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{c
 # https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#llvm-ir-intrinsics
 llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
 class AMDLLVMRenderer(LLVMRenderer):
-  has_local = True
   shared_max = HIPRenderer.shared_max
   global_max = HIPRenderer.global_max
   global_prod_max = HIPRenderer.global_prod_max
@@ -214,8 +239,8 @@ class AMDLLVMRenderer(LLVMRenderer):
     (UPat(Ops.CAST, dtypes.fp8s, (UPat(dtype=dtypes.float),), name="x",), lambda ctx,x:
       f"  {ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {'1' if x.dtype == dtypes.fp8e5m2 else '0'})"),
     (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",), lambda ctx,x,y:
-      f"  {ctx[x.src[0]]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
-      f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x.src[0]]}_i32, i32 0)"),
+      f"  {ctx[x]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
+      f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x]}_i32, i32 0)"),
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
     # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
@@ -245,39 +270,19 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     attributes = ["alwaysinline", "nounwind", '"no-builtins"',
                   f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
     return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
+  @staticmethod
+  def is_rdna4(arch): return arch.split(':')[0] in {'gfx1200', 'gfx1201'}
   def __init__(self, target:Target):
     super().__init__(target)
-    from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
+    from tinygrad.runtime.support.compiler_llvm import AMDLLVMCompiler
     self.compiler, self.tensor_cores, self.is_cdna = AMDLLVMCompiler(target.arch), tc.get_amd(target.arch), HIPRenderer.is_cdna(target.arch)
-    self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
-    if self.is_cdna:
-      self.extra_matcher += PatternMatcher([
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-          lambda x: UOp(Ops.WMMA, src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]), arg=x.arg)
-          if x.max_numel() == 4 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 4 else None),
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-          lambda x: UOp(Ops.WMMA, src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64),
-            x.src[2]), arg=x.arg) if x.max_numel() == 4 and x.src[0].dtype in dtypes.fp8_ocp and x.src[0].max_numel() == 8 else None),
-      ])
-    if target.arch in {"gfx1100", "gfx1151"}:
-      self.extra_matcher += PatternMatcher([
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(UOp(Ops.WMMA,
-          src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(j//2) if j%2 == 0 else UOp.const(x.src[2].dtype, 0.0)
-            for j in range(x.max_numel()*2)))), arg=(*x.arg[:6], (*x.arg[6][:2], ((0, x.max_numel()*2),)), *x.arg[7:])).index(i*2)
-          for i in range(x.max_numel()))) if x.max_numel() == 8 else None),
-        (UPat(Ops.WMMA, name="x"), lambda x: UOp(Ops.WMMA,
-          src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]), arg=x.arg)
-          if x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 16 else None),
-      ])
-    if target.arch in {"gfx1200", "gfx1201"}:
-      self.extra_matcher += PatternMatcher([
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16), lambda x: UOp(Ops.WMMA,
-          src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2].bitcast(dtypes.uint16)), arg=x.arg)
-            .bitcast(dtypes.bfloat16) if x.max_numel() == 8 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None),
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-          lambda x: UOp(Ops.WMMA, src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]), arg=x.arg)
-          if x.max_numel() == 8 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None)
-      ])
+    self.string_rewrite += PatternMatcher([
+      (UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, rdna4=AMDLLVMRenderer.is_rdna4(target.arch), cdna=self.is_cdna:
+        render_wmma_amd(ctx, wmma, cdna, rdna4))
+    ])
+    if self.is_cdna: self.extra_matcher += tc.pm_validate_wmma_cdna
+    if target.arch in {"gfx1100", "gfx1151"}: self.extra_matcher += tc.pm_validate_wmma_rdna3
+    if target.arch in {"gfx1200", "gfx1201"}: self.extra_matcher += tc.pm_validate_wmma_rdna4
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes()
                                       if (d not in dtypes.fp8_ocp or self.target.arch == "gfx950") and d not in dtypes.fp8_fnuz}

@@ -19,7 +19,7 @@ def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
   run_linear(UOp(Ops.LINEAR, src=(UOp.sink(*uops_list, arg=KernelInfo()).call(*buf_uops),)))
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
-  if op is Ops.CONST: uops.append(UOp.const(dtype, arg))
+  if op is Ops.CONST: uops.append(UOp.const(arg).cast(dtype))
   elif op is Ops.PARAM: uops.append(UOp.param(arg, dtype, shape=(1,)))
   else: uops.append(UOp(op, dtype, tuple(src), arg))
   return uops[-1]
@@ -33,11 +33,9 @@ def _test_single_value(vals, op, dts):
   alu = uop(uops, op, output_dtype, loads)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
+  buf2 = [Buffer(Device.DEFAULT, 1, dtype, initial_value=np.array([a], dtype=_to_np_dtype(dtype)).tobytes()) for a,dtype in zip(vals, dts)]
   run_uops([out], [buf]+buf2)
-  ret = np.empty(1, _to_np_dtype(output_dtype))
-  buf.copyout(ret.data)
-  return ret[0]
+  return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
 def _test_single_value_const(vals, op, dts):
   uops = []
@@ -45,12 +43,10 @@ def _test_single_value_const(vals, op, dts):
   buf_store = uop(uops, Ops.PARAM, output_dtype, (), 0)
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, op, output_dtype, loads)
-  out = buf_store[UOp.const(dtypes.int32, 0)].store(alu)
+  out = buf_store[UOp.const(0).cast(dtypes.int32)].store(alu)
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   run_uops([out], [buf])
-  ret = np.empty(1, _to_np_dtype(output_dtype))
-  buf.copyout(ret.data)
-  return ret[0]
+  return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
 def _test_uops_result(output_dtype, uops, res):
   # uops = []
@@ -59,9 +55,7 @@ def _test_uops_result(output_dtype, uops, res):
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   run_uops([out], [buf])
-  ret = np.empty(1, _to_np_dtype(output_dtype))
-  buf.copyout(ret.data)
-  return ret[0]
+  return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
@@ -227,12 +221,12 @@ class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
     g1 = UOp.param(0, dtypes.int32, shape=(3,))
     out = UOp.param(1, dtypes.int32, shape=(2,))
-    c1 = UOp.const(dtypes.int, 2)
-    c2 = UOp.const(dtypes.int, 3)
+    c1 = UOp.const(2)
+    c2 = UOp.const(3)
     l1 = g1.index(c1)
     a1 = UOp(Ops.MUL, src=(l1, c1))
     a2 = UOp(Ops.MUL, src=(l1, c2))
-    uops = to_uops_list([out.index(UOp.const(dtypes.int, 0)).store(a1), out.index(UOp.const(dtypes.int, 1)).store(a2)],
+    uops = to_uops_list([out.index(UOp.const(0)).store(a1), out.index(UOp.const(1)).store(a2)],
                         ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
@@ -255,16 +249,16 @@ class TestAssembly(unittest.TestCase):
 
   def test_mulacc_shl(self):
     g1 = UOp.param(0, dtypes.int32, shape=(2,))
-    c1 = UOp.const(dtypes.int, 0)
-    c2 = UOp.const(dtypes.int, 1)
-    expr = g1.index(c1) * UOp.const(dtypes.int, 4096) + g1.index(c2)
+    c1 = UOp.const(0)
+    c2 = UOp.const(1)
+    expr = g1.index(c1) * UOp.const(4096) + g1.index(c2)
     uops = to_uops_list([expr], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     self.assertIn(Ops.MULACC, [x.op for x in uops])
 
   def test_use_cmpeq(self):
     g = UOp.param(0, dtypes.uint32, shape=(8,))
-    c = UOp.const(dtypes.uint, 7)
+    c = UOp.const(7)
     comp = g.index(c).ne(c).ne(True)
     uops = to_uops_list([comp], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)

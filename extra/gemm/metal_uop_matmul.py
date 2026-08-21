@@ -1,5 +1,5 @@
 from tinygrad import UOp, dtypes
-from tinygrad.uop.ops import AxisType, Ops, KernelInfo, AddrSpace
+from tinygrad.uop.ops import AxisType, KernelInfo, AddrSpace
 from extra.gemm.amd_uop_matmul import test_matmul
 
 N = 2048
@@ -20,18 +20,15 @@ def hand_spec_tc_cores():
 
   gk = UOp.range(N // 8, 0, AxisType.REDUCE)
 
-  a_tc = UOp.vectorize(*[mat_idx(a, gx, gk, warp, i) for i in range(2)])
-  b_tc = UOp.vectorize(*[mat_idx(b, gk, gy, warp, i) for i in range(2)])
+  a_tc = UOp.stack(*[mat_idx(a, gx, gk, warp, i) for i in range(2)])
+  b_tc = UOp.stack(*[mat_idx(b, gk, gy, warp, i) for i in range(2)])
 
   acc = UOp.placeholder((2,), dtypes.float, slot=0, addrspace=AddrSpace.REG)
   acc = acc[0].set(0.0)
   acc = acc[1].set(0.0)
 
-  # TODO: make this simple
-  wmma_arg = ('WMMA_8_8_8_float_float', (8, 8, 8), dtypes.float, dtypes.float, 'METAL', 32, (((3, 2),), ((3, 2),), ((3, 2),)), ())
-
-  acc_load = UOp.vectorize(acc.after(gk)[0], acc.after(gk)[1])
-  out = UOp(Ops.WMMA, dtypes.float.vec(2), (a_tc, b_tc, acc_load), arg=wmma_arg)
+  acc_load = UOp.stack(acc.after(gk)[0], acc.after(gk)[1])
+  out = UOp.wmma(a_tc, b_tc, acc_load, (8, 8, 8), 'METAL', 32)
 
   end_loop = UOp.group(*[acc[i].store(out.index(i)) for i in range(2)]).end(gk)
 

@@ -13,9 +13,6 @@ class FastEnum(IntEnum):
 class Ops(FastEnum):
   # ** 1 -- defines/special **
 
-  # BIND pairs a symbolic PARAM with a concrete value
-  BIND = auto()
-
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
 
@@ -93,11 +90,11 @@ class Ops(FastEnum):
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
   # buffer ops
-  STAGE = auto(); COPY = auto(); SLICE = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
+  STAGE = auto(); COPY = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
 
   # the core 6 movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); FLIP = auto()
-  MULTI = auto()  # MULTI is really a movement op
+  UNSHARD = auto()  # UNSHARD is really a movement op
 
   # reduce
   REDUCE = auto(); ALLREDUCE = auto()

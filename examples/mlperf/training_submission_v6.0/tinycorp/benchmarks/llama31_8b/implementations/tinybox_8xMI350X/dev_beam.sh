@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 export PYTHONPATH="."
-export PATH="/opt/rocm-7.1.1/bin:$PATH"
-export ROCM_PATH="/opt/rocm-7.1.1"
+export ROCM_PATH=${ROCM_PATH:-/opt/rocm-7.1.1}
+export PATH="$ROCM_PATH/bin:$PATH"
 export DEV=${DEV:-AMD}
 export CHECK_OOB=0
 export REWRITE_STACK_LIMIT=5000000 HCQDEV_WAIT_TIMEOUT_MS=240000
@@ -16,7 +16,7 @@ export USE_ATOMICS=${USE_ATOMICS:-1}
 export ASM_GEMM=${ASM_GEMM:-1}
 export WQKV=${WQKV:-1}
 export MASTER_WEIGHTS=${MASTER_WEIGHTS:-1}
-export FP8=${FP8:-1}
+export MXFP4=${MXFP4:-1}
 export ALLREDUCE_CAST=${ALLREDUCE_CAST:-1}
 export FAST_CE=${FAST_CE:-1}
 export FUSED_INPUT_QUANTIZE=${FUSED_INPUT_QUANTIZE:-1}
@@ -26,7 +26,7 @@ export FUSED_SILU_W13=${FUSED_SILU_W13:-1}
 export SPLIT_W13=${SPLIT_W13:-0}
 export OFFLOAD_OPTIM=${OFFLOAD_OPTIM:-0}
 
-export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="bfloat16"
+export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="float32"
 export DP=${DP:-8} MP=${MP:-1} BS=${BS:-16} EVAL_BS=${EVAL_BS:-8} GRADIENT_ACC_STEPS=${GRADIENT_ACC_STEPS:-2}
 export GBS=$((BS * GRADIENT_ACC_STEPS))
 
@@ -46,7 +46,7 @@ export DATA_SEED=${DATA_SEED:-5760}
 export JITBEAM=${JITBEAM:-3}
 export BEAM_UOPS_MAX=6000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5 BEAM_PADTO=1
 
-export FAKEDATA=${FAKEDATA:-1} BENCHMARK=${BENCHMARK:-10}
+export FAKEDATA=${FAKEDATA:-$([[ "$DEV" == NULL:* ]] && echo 1 || echo 0)} BENCHMARK=${BENCHMARK:-10}
 if [ -z "$FULL_LAYERS" ]; then
   export LLAMA_LAYERS=${LLAMA_LAYERS:-2}
 fi

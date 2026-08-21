@@ -91,13 +91,13 @@ class DLL(ctypes.CDLL):
 
   @staticmethod
   def findlib(nm:str, paths:list[str], extra_paths=[]):
-    if nm == 'libc' and OSX: return '/usr/lib/libc.dylib'
+    if nm in ('libc', 'm') and OSX: return f'/usr/lib/lib{nm.removeprefix("lib")}.dylib'
     if pathlib.Path(path:=getenv(nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
     for p in paths:
       libpaths = {"posix": [d for d in os.environ.get('LD_LIBRARY_PATH', '').split(os.pathsep) if d] + ["/usr/lib64", "/usr/lib", "/usr/local/lib"],
                   "nt": os.environ['PATH'].split(os.pathsep),
                   "darwin": ["/opt/homebrew/lib", f"/System/Library/Frameworks/{p}.framework", f"/System/Library/PrivateFrameworks/{p}.framework"],
-                  'linux': ['/lib', '/lib64', f"/lib/{sysconfig.get_config_var('MULTIARCH')}", "/usr/lib/wsl/lib/"]}
+                  'linux': ["/usr/lib/wsl/lib/", '/lib', '/lib64', f"/lib/{sysconfig.get_config_var('MULTIARCH')}"]}
       if (pth:=pathlib.Path(p)).is_absolute():
         if pth.is_file(): return p
         else: continue

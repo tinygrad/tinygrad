@@ -1,0 +1,181 @@
+name: Platform Tests
+env:
+  # increment this when downloads substantially change to avoid the internet
+  CACHE_VERSION: '19'
+  CAPTURE_PROCESS_REPLAY: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.title, '[pr]') && '1' || '0' }}
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  PYTHONPATH: ${{ github.workspace }}
+  CHECK_OOB: 1
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: platform-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+
+# ****** OSX Tests ******
+
+  unittestmacos:
+    name: MacOS (unit)
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: unittest-macos
+        deps: testing_unit
+    - name: Run unit tests
+      run: DEV=METAL python -m pytest -n=auto test/unit/ --durations=20
+    - name: Test tensor core ops (fake)
+      run: DEV=METAL DEBUG=3 TC=2 python test/backend/test_ops.py TestOps.test_gemm
+    - name: Test tensor core ops (real)
+      run: DEV=METAL DEBUG=3 python test/backend/test_ops.py TestOps.test_big_gemm
+    - name: Test Beam Search
+      run: DEV=METAL IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
+    - name: Test Device Specific
+      run: DEV=METAL python3 -m pytest test/device/test_metal.py
+    #- name: Fuzz Test linearizer
+    #  run: DEV=METAL DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
+  unittestmacosmock:
+    name: MacOS (unit, mock)
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: unittest-macos-mock
+        deps: testing_unit
+        amd: 'true'
+        ocelot: 'true'
+    - name: Run NULL backend tests
+      run: SPEC=2 DEV=NULL python -m pytest -n=auto test/null/ --durations=20
+    - name: Run pytest (amd)
+      env:
+        DEV: MOCKKFD+AMD
+        FORWARD_ONLY: 1
+      run: |
+        python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py --durations=20
+    - name: Run pytest (ptx)
+      env:
+        DEV: "MOCK+NV:PTX"
+        FORWARD_ONLY: 1
+        # TODO: failing due to library loading error
+        CAPTURE_PROCESS_REPLAY: 0
+      run: |
+        python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py \
+          test/testextra/test_hevc.py::TestHevc::test_hevc_decode_compile --durations=20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
+  testmetal:
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2]
+    name: MacOS (DEV=METAL) (${{ matrix.group }})
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      DEV: METAL
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: macos-metal
+        deps: testing_unit
+    - name: Check Device.DEFAULT and print some source
+      run: |
+        python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL'"
+        DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+    - name: Run backend tests
+      run: python -m pytest -n=auto test/backend --durations=20 --splits 2 --group ${{ matrix.group }}
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
+  testmacos:
+    strategy:
+      fail-fast: false
+      matrix:
+        dev:
+          - 'CPU:CLANG'
+          - 'CPU:LLVM'
+          - 'CPU:LVP'
+          - 'WEBGPU'
+
+    name: MacOS (DEV=${{ matrix.dev }})
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: macos-${{ matrix.dev }}
+        deps: "testing_unit${{ contains(matrix.dev, 'LVP') && ' mesa' || '' }}"
+        llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') }}
+        webgpu: ${{ matrix.dev == 'WEBGPU' }}
+    - name: Set env
+      run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
+    - name: Check Device.DEFAULT and print some source
+      run: |
+        python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
+        DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+    - name: Run test_tiny
+      run: python -m pytest -n=auto test/test_tiny.py --durations=20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
+# ****** Windows Tests ******
+
+  testwindows:
+    strategy:
+      fail-fast: false
+      matrix:
+        dev:
+          - 'CPU:CLANG'
+          - 'CPU:LLVM'
+          - 'CPU:X86'
+          - 'WEBGPU'
+
+    name: Windows (DEV=${{ matrix.dev }})
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: windows-${{ matrix.dev }}-minimal
+          deps: testing_minimal
+          pydeps: ${{ matrix.dev == 'WEBGPU' && 'dawn-python' || '' }}
+      - name: Set env
+        shell: bash
+        run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
+      - name: Check Device.DEFAULT and print some source
+        shell: bash
+        run: |
+          python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
+          DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+      - name: Run test_tiny
+        shell: bash
+        run: python -m pytest -n=auto test/test_tiny.py --durations=20

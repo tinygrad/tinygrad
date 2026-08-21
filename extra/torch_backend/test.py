@@ -71,6 +71,54 @@ class TestTorchBackend(unittest.TestCase):
     a = a.as_strided((1,1,5,5), (50,50,7,1), storage_offset=21)
     np.testing.assert_equal(a.cpu().numpy().sum(-1), [[[115,150,185,220,255]]])
 
+  def test_storage_offset_of_computed_tensor(self):
+    # a computed result owns its storage, so a slice anywhere in its history must not shift the offset
+    a = torch.arange(8., device=device)
+    self.assertEqual((a[3:]+1).storage_offset(), 0)
+
+  def test_storage_offset_through_aliases(self):
+    a = torch.arange(8., device=device)[3:]
+    self.assertEqual(a.detach().storage_offset(), 3)
+    self.assertEqual(a.view(torch.int32).storage_offset(), 3)
+    torch.add(torch.ones(5, device=device), torch.ones(5, device=device), out=a)
+    self.assertEqual(a.detach().storage_offset(), 3)
+
+  def test_out_refreshes_views_of_base(self):
+    a = torch.zeros(4, device=device)
+    v = a[2:]
+    torch.add(torch.ones(4, device=device), torch.ones(4, device=device), out=a)
+    np.testing.assert_equal(v.cpu().numpy(), [2., 2.])
+
+  @unittest.expectedFailure  # TODO: storage offset assumes a contiguous source, use UOp.contiguous_view_offset
+  def test_storage_offset_non_contiguous_source(self):
+    a = torch.arange(12., device=device).reshape(3,4)
+    self.assertEqual(a.permute(1,0)[1:].storage_offset(), 1)
+    self.assertEqual(a.flatten()[3:].flip(0).storage_offset(), 0)
+
+  def test_as_strided_explicit_zero_offset(self):
+    # storage_offset=0 is a real offset, not "unspecified": it must not fall back to the input's own offset
+    a = torch.arange(6., device=device)
+    np.testing.assert_equal(a[3:].as_strided((2,), (1,), 0).cpu().numpy(), [0,1])
+    np.testing.assert_equal(a[3:].as_strided((2,), (1,)).cpu().numpy(), [3,4])
+
+  def test_empty_strided_default_dtype(self):
+    self.assertEqual(torch.empty_strided((2,3), (1,2), device=device).dtype, torch.get_default_dtype())
+
+  @unittest.expectedFailure  # TODO: empty_strided ignores the requested strides, the backend treats everything as contiguous
+  def test_empty_strided_honors_strides(self):
+    self.assertEqual(tuple(torch.empty_strided((2,3), (1,2), device=device).stride()), (1,2))
+
+  @unittest.expectedFailure  # TODO: torch refuses an out= that overlaps an input, we compute silently
+  def test_out_overlapping_input_is_rejected(self):
+    x = torch.arange(6., device=device)
+    with self.assertRaises(RuntimeError): torch.add(x[:-1], 10, out=x[1:])
+
+  def test_out_disjoint_input_is_allowed(self):
+    # torch permits an out= that shares a base with an input as long as they do not overlap
+    x, xc = torch.arange(6., device=device), torch.arange(6.)
+    torch.add(x[:3], 10, out=x[3:]); torch.add(xc[:3], 10, out=xc[3:])
+    np.testing.assert_equal(x.cpu().numpy(), xc.numpy())
+
   def test_plus_inplace(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
@@ -123,6 +171,15 @@ class TestTorchBackend(unittest.TestCase):
     y3 = torch.amin(x, dim=2)
     expected = np.array([[1.5, 5.2, 9.0], [13.2, 17.1, 18.4]], dtype=np.float32)
     np.testing.assert_equal(y3.cpu().numpy(), expected)
+
+  def test_argmax_argmin(self):
+    a = torch.arange(12, dtype=torch.float32, device=device).reshape(3, 4)
+    c = a.cpu()
+    for got, want in [(a.argmax(), c.argmax()), (a.argmin(0), c.argmin(0)), (a.argmax(1, keepdim=True), c.argmax(1, keepdim=True)),
+                      (torch.min(a, 1).indices, torch.min(c, 1).indices), (torch.max(a, 1).indices, torch.max(c, 1).indices),
+                      (torch.min(a, 1).values, torch.min(c, 1).values), (torch.min(a, 1, keepdim=True).indices, torch.min(c, 1, keepdim=True).indices)]:
+      self.assertEqual(got.dtype, want.dtype)  # torch's arg reduces are int64, tinygrad's are int32
+      np.testing.assert_equal(got.cpu().numpy(), want.numpy())
 
   def test_isfinite(self):
     a = torch.ones(4, device=device)
@@ -316,6 +373,37 @@ class TestTorchBackend(unittest.TestCase):
     assert b.shape == (4, 2, 3)
     np.testing.assert_equal(b.cpu().numpy(), a.cpu().numpy().transpose(2, 0, 1))
 
+  def test_batchnorm_backward_realized_stats(self):
+    # the saved stats are a function of input in training, so grad_input must flow through them even when handed in realized.
+    # the backward eps is unused in training: torch differentiates the save_invstd it was given
+    x0, g0 = torch.randn(8, 4, 3, 3), torch.randn(8, 4, 3, 3)
+    def run(dev, bwd_eps):
+      x, go = x0.to(dev), g0.to(dev)
+      w, b = torch.linspace(0.5, 2.0, 4).to(dev), torch.zeros(4, device=dev)
+      rm, rv = torch.zeros(4, device=dev), torch.ones(4, device=dev)
+      out, sm, si = torch.ops.aten.native_batch_norm(x, w, b, rm, rv, True, 0.1, 1e-5)
+      grads = torch.ops.aten.native_batch_norm_backward(go, x, w, rm, rv, sm.clone().detach(), si.clone().detach(),
+                                                        True, bwd_eps, [True,True,True])
+      return [t.cpu().numpy() for t in grads]
+    for bwd_eps in [1e-5, 0.3]:
+      for got, want in zip(run(device, bwd_eps), run("cpu", bwd_eps)): np.testing.assert_allclose(got, want, atol=1e-4, rtol=1e-3)
+
+  def test_groupnorm_backward(self):
+    def run(dev):
+      x = torch.arange(24., device=dev).reshape(2, 4, 3).requires_grad_()
+      w = torch.linspace(0.5, 2.0, 4).to(dev).requires_grad_()
+      torch.nn.functional.group_norm(x, 2, w, torch.zeros(4, device=dev)).square().sum().backward()
+      return x.grad.cpu().numpy(), w.grad.cpu().numpy()
+    for got, want in zip(run(device), run("cpu")): np.testing.assert_allclose(got, want, atol=1e-4, rtol=1e-3)
+
+  def test_mse_smooth_l1_loss_backward(self):
+    def run(dev, loss):
+      x = torch.arange(4., device=dev).requires_grad_()
+      loss(x, torch.ones(4, device=dev)).backward()
+      return x.grad.cpu().numpy()
+    for loss in [torch.nn.functional.mse_loss, torch.nn.functional.smooth_l1_loss]:
+      np.testing.assert_allclose(run(device, loss), run("cpu", loss), atol=1e-6)
+
   def test_batchnorm_unsqueeze(self):
     bn = torch.nn.BatchNorm2d(4).to(device)
     x = torch.randn(8, 4, 3, 3, device=device)
@@ -458,6 +546,15 @@ class TestTorchBackend(unittest.TestCase):
     torch_res = a[::2][1:4].cpu().numpy()
     cpu_res = torch.arange(20, dtype=torch.float32)[::2][1:4].numpy()
     np.testing.assert_equal(torch_res, cpu_res)
+
+  def test_select_out_of_range_dim(self):
+    a = torch.arange(12, dtype=torch.int32, device=device).reshape(3, 4)
+    with self.assertRaises(IndexError): a.select(5, 0)
+
+  def test_select_collapses_the_only_dim(self):
+    a = torch.arange(3, dtype=torch.int32, device=device)
+    self.assertEqual(a.select(0, 1).shape, ())
+    np.testing.assert_equal(a.select(0, 1).cpu().numpy(), 1)
 
   def test_slice_negative_dim(self):
     a = torch.arange(13, dtype=torch.int32, device=device).repeat(8, 1)
@@ -739,9 +836,103 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_allclose(w_tiny.grad.cpu().numpy(), w_cpu.grad.numpy(), atol=1e-4, rtol=1e-3)
     np.testing.assert_allclose(b_tiny.grad.cpu().numpy(), b_cpu.grad.numpy(), atol=1e-4, rtol=1e-3)
 
+  def test_write_through_detach_of_unrealized(self):
+    a = torch.empty(4, device=device)
+    a.detach().fill_(3)
+    np.testing.assert_equal(a.cpu().numpy(), [3, 3, 3, 3])
+
+  def test_square_transpose_inplace(self):
+    # a same-shape transpose is not a reshape: writing the transposed values straight back would scramble the base
+    a = torch.tensor([[0., 1., 2.], [3., 4., 5.], [6., 7., 8.]], device=device)
+    a.transpose(0, 1).add_(100)
+    np.testing.assert_equal(a.cpu().numpy(), [[100., 101., 102.], [103., 104., 105.], [106., 107., 108.]])
+
+  def test_interpolate(self):
+    a = torch.arange(4, dtype=torch.float32, device=device).reshape(1, 1, 2, 2)
+    nearest = torch.nn.functional.interpolate(a, scale_factor=2.0)
+    np.testing.assert_equal(nearest.cpu().numpy()[0, 0], [[0, 0, 1, 1], [0, 0, 1, 1], [2, 2, 3, 3], [2, 2, 3, 3]])
+    linear = torch.nn.functional.interpolate(a, size=(4, 4), mode="bilinear", align_corners=False)
+    ref = torch.nn.functional.interpolate(a.cpu(), size=(4, 4), mode="bilinear", align_corners=False)
+    np.testing.assert_allclose(linear.cpu().numpy(), ref.numpy(), rtol=1e-5)
+
+  def test_interpolate_bicubic_area(self):
+    a = torch.arange(32, dtype=torch.float32, device=device).reshape(1, 2, 4, 4)
+    for mode, scale in [("bicubic", 2.0), ("area", 0.5)]:
+      ref = torch.nn.functional.interpolate(a.cpu(), scale_factor=scale, mode=mode)
+      np.testing.assert_allclose(torch.nn.functional.interpolate(a, scale_factor=scale, mode=mode).cpu().numpy(), ref.numpy(), atol=1e-4)
+
+  @unittest.expectedFailure
+  def test_interpolate_bicubic_backward(self):
+    # the forward comes from a decomposition, but aten::upsample_bicubic2d_backward has none (nor does
+    # aten::_adaptive_avg_pool2d_backward, for area), so training through these modes needs a real kernel
+    x = torch.arange(32., dtype=torch.float32, device=device).reshape(1, 2, 4, 4).requires_grad_()
+    torch.nn.functional.interpolate(x, scale_factor=2.0, mode="bicubic").sum().backward()
+
+  @unittest.expectedFailure
+  def test_interpolate_inexact_scale(self):
+    # torch forwards the raw scale_factor, Tensor.interpolate recomputes it from output_size, and they disagree here
+    a = torch.arange(6, dtype=torch.float32, device=device).reshape(1, 1, 2, 3)
+    tiny = torch.nn.functional.interpolate(a, scale_factor=2.5, mode="bilinear")
+    ref = torch.nn.functional.interpolate(a.cpu(), scale_factor=2.5, mode="bilinear")
+    np.testing.assert_allclose(tiny.cpu().numpy(), ref.numpy(), rtol=1e-5)
+
+  def test_logical_or_xor(self):
+    a = torch.tensor([True, True, False, False], device=device)
+    b = torch.tensor([True, False, True, False], device=device)
+    np.testing.assert_equal(torch.logical_or(a, b).cpu().numpy(), [True, True, True, False])
+    np.testing.assert_equal(torch.logical_xor(a, b).cpu().numpy(), [False, True, True, False])
+    # bool-valued whatever the input dtype, so this is not | and ^
+    i, j = torch.tensor([2, 0, 5, 0], device=device), torch.tensor([0, 0, 1, 1], device=device)
+    np.testing.assert_equal(torch.logical_or(i, j).cpu().numpy(), [True, False, True, True])
+    np.testing.assert_equal(torch.logical_xor(i, j).cpu().numpy(), [True, False, False, True])
+
+  def test_slice_scatter(self):
+    # the scatters are functional: they return a new tensor and must leave the one they were given alone
+    a = torch.arange(12, dtype=torch.float32, device=device).reshape(3, 4)
+    out = torch.slice_scatter(a, torch.ones(1, 4, device=device), 0, 0, 1)
+    np.testing.assert_equal(out.cpu().numpy(), [[1, 1, 1, 1], [4, 5, 6, 7], [8, 9, 10, 11]])
+    np.testing.assert_equal(a.cpu().numpy(), np.arange(12, dtype=np.float32).reshape(3, 4))
+
+  def test_slice_scatter_casts_src(self):
+    a = torch.zeros(3, 4, device=device)
+    out = torch.slice_scatter(a, torch.ones(1, 4, dtype=torch.int32, device=device), 0, 0, 1)
+    self.assertEqual(out.dtype, torch.float32)
+    np.testing.assert_equal(out.cpu().numpy()[0], np.ones(4, dtype=np.float32))
+
+  def test_select_scatter(self):
+    a = torch.arange(12, dtype=torch.float32, device=device).reshape(3, 4)
+    out = torch.select_scatter(a, torch.ones(4, device=device), 0, 1)
+    np.testing.assert_equal(out.cpu().numpy(), [[0, 1, 2, 3], [1, 1, 1, 1], [8, 9, 10, 11]])
+
+  def test_diagonal_scatter(self):
+    a = torch.zeros(3, 3, device=device)
+    out = torch.diagonal_scatter(a, torch.arange(3, dtype=torch.float32, device=device))
+    np.testing.assert_equal(out.cpu().numpy(), np.diag([0., 1., 2.]))
+    np.testing.assert_equal(a.cpu().numpy(), np.zeros((3, 3), dtype=np.float32))
+
+  def test_copy_functional(self):
+    # without an impl this segfaults rather than fails: a regression here takes the whole run down
+    a = torch.arange(4, dtype=torch.float32, device=device)
+    out = torch.ops.aten.copy(a, torch.zeros(4, device=device))
+    np.testing.assert_equal(out.cpu().numpy(), [0., 0., 0., 0.])
+    np.testing.assert_equal(a.cpu().numpy(), [0., 1., 2., 3.])
 
 from tinygrad import Tensor
 class TestBackendHelpers(unittest.TestCase):
+  def test_unwrap_rejects_foreign_tensor(self):
+    # unwrap casts to the tiny impl, so a tensor from another backend must be refused rather than reinterpreted
+    with self.assertRaises(RuntimeError): extra.torch_backend.backend.unwrap(torch.ones(4))
+
+  def test_update_metadata_rejects_foreign_tensor(self):
+    # resizing a tensor we don't own would expose memory past its allocation
+    t = torch.ones(4)
+    with self.assertRaises(RuntimeError): extra.torch_backend.backend.mod.update_metadata(t, [8], [1], 0)
+    self.assertEqual(t.shape, (4,))
+
+  def test_unwrap_parameter_and_detached(self):
+    # nn.Parameter and detach rebuild the base OpaqueTensorImpl, which unwrap still has to accept
+    extra.torch_backend.backend.unwrap(torch.nn.Parameter(torch.ones(4, device="tiny")))
+    extra.torch_backend.backend.unwrap(torch.ones(4, device="tiny").detach())
 
   def test_calculate_storage_offset_no_shrink(self):
     t = Tensor.ones(3, 4)

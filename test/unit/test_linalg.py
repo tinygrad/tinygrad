@@ -17,6 +17,7 @@ class TestLinAlg(unittest.TestCase):
     for size in sizes:
       a = Tensor.randn(size).realize()
       U,S,V = a.svd()
+      Tensor.realize(U,S,V)
       b_shape,m,n = size[0:-2],size[-2],size[-1]
       k = min(m,n)
       s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape) + (k,k)))
@@ -29,6 +30,7 @@ class TestLinAlg(unittest.TestCase):
     with Context(CHECK_OOB=0):  # sometimes this is slow in CI
       a = Tensor.randn(size).realize()
       U,S,V = a.svd(full_matrices=False)
+      Tensor.realize(U,S,V)
       b_shape,m,n = size[0:-2],size[-2],size[-1]
       k = min(m,n)
       s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape) + (k,k)).expand(b_shape + (k,k)))
@@ -61,6 +63,7 @@ class TestLinAlg(unittest.TestCase):
     for size in sizes:
       a = Tensor.randn(size).realize()
       Q,R = a.qr()
+      Tensor.realize(Q,R)
       orthogonality_helper(Q)
       reconstruction_helper([Q,R],a)
 
@@ -73,9 +76,10 @@ class TestLinAlg(unittest.TestCase):
     reconstruction_helper([Q,R], a)
 
   def test_svd_identity(self):
-    for a in (Tensor.eye(2), Tensor.zeros(2, 2)):
+    for a in (Tensor.eye(2).clone(), Tensor.zeros(2, 2)):
       a = a.realize()
       U,S,V = a.svd()
+      Tensor.realize(U,S,V)
       assert not np.isnan(U.numpy()).any()
       assert not np.isnan(S.numpy()).any()
       assert not np.isnan(V.numpy()).any()
@@ -85,6 +89,7 @@ class TestLinAlg(unittest.TestCase):
   def test_svd_identity_4x4(self):
     a = Tensor.eye(4).clone()
     U,S,V = a.svd()
+    Tensor.realize(U,S,V)
     assert not np.isnan(U.numpy()).any()
     assert not np.isnan(S.numpy()).any()
     assert not np.isnan(V.numpy()).any()

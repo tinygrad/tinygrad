@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Self, Sequence
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv, round_up, all_int
-from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape
+from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape, broadcast_axes
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint
@@ -45,6 +45,16 @@ class MovementMixin:
     ```
     """
     return prod(self.shape)
+
+  @property
+  def max_shape(self) -> tuple[int, ...]:
+    """The shape with every symbolic dimension replaced by its maximum."""
+    from tinygrad.uop.ops import to_max_shape  # deferred: ops.py imports the mixins
+    return to_max_shape(self.shape)
+
+  def max_numel(self) -> int:
+    """The number of elements in `max_shape`."""
+    return prod(self.max_shape)
 
   def size(self, dim:int|None=None) -> sint|tuple[sint, ...]:
     """
@@ -90,8 +100,11 @@ class MovementMixin:
         if resolve(index.step == 0, False): raise ValueError(f"{index=} cannot have 0 as step")
         start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
         step = 1 if index.step is None else index.step
+        # resolve negative int bounds against the (possibly symbolic) size, like slice.indices
+        if isinstance(start, int) and start < 0: start = start + size
+        if isinstance(stop, int) and stop < 0: stop = stop + size
         if all_int((start, stop, step)):
-          # handle int slicing (resolve negative bounds, clamp, stride)
+          # handle int slicing (clamp, stride)
           *bound, stride = index.indices(int(size.vmax) if isinstance(size, UOp) else size)
           bound = [0, 0] if stride * (bound[1] - bound[0]) < 0 else ([bound[1]+1, bound[0]+1] if stride < 0 else bound)
           return {"size":ceildiv(bound[1]-bound[0], abs(stride)), "boundary":tuple(bound), "stride":stride, "collapse_dim":False}
@@ -125,7 +138,7 @@ class MovementMixin:
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
     # EXPAND only adds dims on the left. squeeze 1s that need expanding, EXPAND on left, permute back.
     n_left = len(new_shape) - len(self.shape)
-    expand_at = tuple(i for i, s in enumerate(self.shape) if resolve(s == 1, default=False) and resolve(new_shape[n_left+i] != 1))
+    expand_at = tuple(i-n_left for i in broadcast_axes(self.shape, new_shape) if i >= n_left)
     kept = tuple(i for i in range(len(self.shape)) if i not in expand_at)
     squeezed = self.reshape(tuple(self.shape[i] for i in kept))
     expanded = squeezed._mop(Ops.EXPAND, arg=new_shape[:n_left] + tuple(new_shape[n_left+i] for i in expand_at))
@@ -241,13 +254,32 @@ class MovementMixin:
     flip_arg = tuple([i in axis_arg for i in range(len(self.shape))])
     return self._mop(Ops.FLIP, arg=flip_arg) if any(flip_arg) else self
 
+  def stack(self, *args: Self, dim: int = 0) -> Self:
+    """
+    Concatenates self with other tensors in `args` along a new dimension specified by `dim`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t0, t1, t2 = Tensor([1, 2]), Tensor([3, 4]), Tensor([5, 6])
+    print(t0.stack(t1, t2, dim=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t0.stack(t1, t2, dim=1).numpy())
+    ```
+    """
+    tensors = argfix(self, *args)
+    dim = tensors[0]._resolve_dim(dim, extra=True)
+    assert all(t.shape == tensors[0].shape for t in tensors), f"all shapes must match for stack, got {[t.shape for t in tensors]}"
+    ret = tensors[0]._mop(Ops.STACK, arg=tuple(t._uop for t in tensors[1:]))
+    return ret if dim == 0 else ret.permute(tuple(range(1, dim+1)) + (0,) + tuple(range(dim+1, ret.ndim)))
+
   # **** high level ****
 
   def shrink_to(self, shape, *args) -> Self:
     return self.shrink(tuple([None if ns is None else (0, ns) for ns in argfix(shape, *args)]))
 
   def pad_to(self, shape, *args) -> Self:
-    return self._mop(Ops.PAD, tuple((0, s if ns is None else ns) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)))
+    ret = self._mop(Ops.PAD, tuple((0, s if ns is None else ns) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)))
+    return self if ret.shape == self.shape else ret
 
   def view(self, shape, *args) -> Self:
     """`.view` is an alias for `.reshape`."""
@@ -518,6 +550,7 @@ class MovementMixin:
     if dims is None: return self.flatten().roll(shifts, 0).reshape(self.shape)
     dims, shifts = tuple(self._resolve_dim(d) for d in make_tuple(dims, 1)), make_tuple(shifts, 1)
     if len(dims) != len(shifts): raise RuntimeError(f"{len(dims)=} != {len(shifts)=}")
+    if 0 in self.shape: return self
     shrink_arg: list[tuple[sint, sint]|None] = [None] * self.ndim
     for d, s in zip(dims, shifts): shrink_arg[d] = (delta:=self.shape[d]-s%self.shape[d], delta+self.shape[d])
     return self.repeat(*tuple(2 if i in dims else 1 for i in range(self.ndim))).shrink(tuple(shrink_arg))

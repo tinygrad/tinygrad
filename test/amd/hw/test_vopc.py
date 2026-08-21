@@ -471,6 +471,20 @@ class TestCmpFloat(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 1, "Expected vcc=1 (1.0 != 2.0)")
 
+  def test_v_cmp_eq_f16_src0_hi(self):
+    """v_cmp_eq_f16 with src0 from high half (true16 384+n encoding)."""
+    cmp = v_cmp_eq_f16_e32(v[0], v[1])
+    cmp._raw += 128  # src0 v[0] -> v[0].h, the dsl can't encode hi-half src0 yet
+    instructions = [
+      s_mov_b32(s[0], 0x42003c00),  # hi=3.0, lo=1.0
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x47004200),  # hi=7.0, lo=3.0
+      v_mov_b32_e32(v[1], s[0]),
+      cmp,
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Expected vcc=1 (v0.hi 3.0 == v1.lo 3.0)")
+
   def test_v_cmp_nge_f16_inf_self(self):
     """v_cmp_nge_f16 comparing -inf with itself (unordered less than).
 

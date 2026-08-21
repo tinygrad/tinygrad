@@ -9,6 +9,7 @@ class Register:
   name: str
   index: int
   _cons: tuple[Register, ...] = field(default_factory=tuple)
+  size: int = 8
   @property
   def cons(self): return self._cons or (self,)
   def __repr__(self): return self.name

@@ -102,7 +102,7 @@ class NVDev:
     self.include("dev_fb", "tu102")
     self.include("dev_gc6_island", "ga102")
 
-    if (needs_reset:=self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0):
+    if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
       if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
       self.pci_dev.reset()
@@ -118,7 +118,7 @@ class NVDev:
     self.flcn:NV_FLCN|NV_FLCN_COT = NV_FLCN_COT(self) if self.fmc_boot else NV_FLCN(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
-    if needs_reset: self.flcn.wait_for_reset()
+    self.flcn.wait_for_reset()
 
   def _early_mmu_init(self):
     self.include("dev_vm", "tu102")

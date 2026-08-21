@@ -1,12 +1,13 @@
-import math, time, multiprocessing, traceback, signal, atexit
+import math, time, traceback, signal
 from dataclasses import replace
-from tinygrad.uop.ops import sym_infer, AxisType, UOp
+from tinygrad.uop.ops import sym_infer, AxisType, UOp, Ops
 from tinygrad.uop.render import pyrender
 from tinygrad.device import Device, Buffer
-from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
+from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.engine.realize import time_call
+from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import Scheduler
 
@@ -42,9 +43,9 @@ def _time_program(prg:UOp, var_vals:dict[str, int], rawbufs:list[Buffer], early_
     global_size, factor = get_test_global_size(prg.arg.global_size, max_global_size, var_vals)
     prg = prg.replace(arg=replace(prg.arg, global_size=tuple(global_size)))
   call = prg.call(*[UOp.from_buffer(b) for b in rawbufs])
-  tms = []
+  tms, timer = [], time_call(call, var_vals, timeout=timeout, clear_l2=clear_l2)
   for _ in range(cnt):
-    try: tms.append(time_call(call, var_vals, timeout=timeout, clear_l2=clear_l2) * factor)
+    try: tms.append(next(timer) * factor)
     except AssertionError: return [math.inf] * cnt
     if early_stop is not None and early_stop < min(tms): break
   return tms
@@ -62,7 +63,8 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
   ret = None
   try:
     st = time.perf_counter()
-    prg = to_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].ren)
+    ast, dev = x[1].copy().get_optimized_ast(name_override="test"), x[1].ren.target.device
+    prg = to_program(ast.substitute({p: p.replace(arg=replace(p.arg, device=dev)) for p in ast.toposort() if p.op is Ops.PARAM}), x[1].ren)
     et = time.perf_counter() - st
     uops = prg.src[1].src
     if len(uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
@@ -76,11 +78,6 @@ def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
   finally:
     if hasattr(signal, "alarm"): signal.alarm(0)
   return x[0], ret
-
-# workers should not open devices and should ignore ctrl c and should not launch VIZ
-def _init_worker():
-  Context(ALLOW_DEVICE_USAGE=0, VIZ=0, TRACK_MATCH_STATS=0).__enter__()
-  signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_allocated() if buf is not None else buf for buf in bufs]
 
@@ -110,9 +107,8 @@ def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dic
     except KernelOptError: pass
   return acted
 
-beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
-def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
-  global beam_pool
+BEAM_DEBUG = getenv("BEAM_DEBUG")
+def beam_search(s:Scheduler, rawbufs:list[Buffer], var_vals:dict[str,int], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   key = {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": s.ren.target.device, "suffix": s.ren.suffix}
   if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
     ret = s.copy()
@@ -122,11 +118,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
   beam: list[tuple[Scheduler, float]] = [(s, float("inf"))]
   seen_libs = set()
 
-  default_parallel = multiprocessing.cpu_count() if s.ren.target.device in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
-  if beam_pool is None and (workers := getenv("PARALLEL", default_parallel)):
-    beam_pool = multiprocessing.get_context("spawn").Pool(workers, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
-    @atexit.register
-    def close_pool(): beam_pool.close()
+  pool = get_worker_pool()
 
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
   if BEAM_DEBUG:
@@ -136,14 +128,13 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in s.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[s.ren.target.device]
     while not exiting:
       candidates: list[Scheduler] = flatten([get_kernel_actions(si, include_0=False).values() for si,_ in beam])
       timed: list[tuple[Scheduler, float]] = []
       least_compute_ops = math.inf
-      for i, proc in ((map if beam_pool is None else beam_pool.imap_unordered)(_try_compile, enumerate(candidates))):
+      for i, proc in ((map if pool is None else pool.imap_unordered)(_try_compile, enumerate(candidates))):
         if proc is None: continue
         prg, compile_et = proc
         if (lib:=prg.src[3].arg) in seen_libs: continue
@@ -179,7 +170,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
         print(f"\r{time.perf_counter() - st:7.2f}s:", colored(time_to_str(beam[0][1], w=12), "green" if exiting else None),
               f"from {len(candidates):3d} -> {len(opts):3d} actions\033[K", beam[0][0].colored_shape())
   except KeyboardInterrupt as e:
-    if beam_pool is not None: beam_pool.terminate()
+    terminate_worker_pool()
     raise e
 
   if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)

@@ -3,13 +3,13 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Any, TYPE_CHECKING
-import pickle, base64, itertools, time, sys, functools
+import pickle, base64, itertools, time, sys, functools, ctypes
 from dataclasses import replace
-from tinygrad.dtype import DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape
-from tinygrad.device import Compiled, Compiler, Allocator
+from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
+from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile, mv_address
+from tinygrad.device import Buffer, Compiled, Compiler, Allocator, Program, TinyELF
 from tinygrad.codegen.opt import tc
-from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
+from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 
 def _load(m, i, dtype: DType):
@@ -23,7 +23,9 @@ def load(inp, j, dtype: DType):
 
 def _store(m, i, v, dtype: DType):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
-  m[i] = to_storage_scalar(v, dtype)
+  if (w:=m.nbytes // len(m)) >= dtype.itemsize: m[i] = to_storage_scalar(v, dtype)
+  else:
+    for k in range(dtype.itemsize // w): m[i+k] = (v >> 8*w*k) & ((1 << 8*w) - 1)
 
 # here are the models for the WMMA instruction on the different hardware
 def generic_wmma_helper(inp, warp_size, WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
@@ -39,16 +41,15 @@ def generic_wmma_helper(inp, warp_size, WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_
         out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
   return out
 
-class PythonProgram:
-  def __init__(self, name:str, lib:bytes, **kwargs):
-    self.uops: list[UOp] = pickle.loads(lib)
+class PythonProgram(Program['PythonDevice']):
+  def __init__(self, dev:'PythonDevice', obj:TinyELF):
+    self.uops: list[UOp] = pickle.loads(obj.lib)
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
     self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op == Ops.END}
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
-    void_ops = {Ops.END, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.STORE}
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
       values: dict[UOp, Any] = {}
       pbufs: list[memoryview] = list(bufs)
@@ -57,11 +58,15 @@ class PythonProgram:
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values[v] for v in u.src if v.op not in void_ops]
-        src_dtypes = [v.dtype for v in u.src if v.op not in void_ops]
+        src_values = [values[v] for v in u.src if v.dtype is not dtypes.void]
+        src_dtypes = [v.dtype for v in u.src if v.dtype is not dtypes.void]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
         if u.op is Ops.END:
-          i = self.uop_to_index[u.src[1]]
+          if len(u.src) == 3:
+            # conditional backedge on a loop: jump back while the condition is true
+            if values[u.src[2]][0]: i = self.uop_to_index[u.src[1]]
+            else: i += 1
+          else: i = self.uop_to_index[u.src[1]]
           continue
         if u.op is Ops.IF:
           exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])
@@ -71,7 +76,7 @@ class PythonProgram:
           exec_masks.pop()
           i += 1
           continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP):
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP) or (u.op is Ops.RANGE and u.dtype == dtypes.void):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -99,7 +104,7 @@ class PythonProgram:
         elif u.op is Ops.SPECIAL:
           if u.arg[0] == 'g': values[u] = [idxs[2-int(u.arg[-1])]] * warp_size
           elif u.arg[0] == 'l': values[u] = [x[2-int(u.arg[-1])] for x in warp]
-        elif u.op is Ops.CONST: values[u] = [u.arg] * warp_size
+        elif u.op is Ops.CONST: values[u] = [u.val] * warp_size
         elif u.op in {Ops.INDEX, Ops.SHRINK}:
           ret:list = []
           if u.src[0].addrspace == AddrSpace.ALU:
@@ -131,10 +136,17 @@ class PythonProgram:
                                for k in range(len(src_values))], j, u.dtype) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
+        elif u.op is Ops.CALL:
+          assert u.dtype is dtypes.void
+          cfunc = ctypes.CFUNCTYPE(None, *[ctypes.c_uint64] * (len(src_values)-1))
+          values[u] = []
+          for args,gate in zip(zip(*src_values), exec_masks[-1]):
+            call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]
+            values[u].append(cfunc(call_args[0])(*call_args[1:]) if gate else None)
         elif u.op is Ops.WMMA:
           first_src_dtype = u.src[0].dtype
           assert isinstance(first_src_dtype, DType) # mypy
-          dims, dtype_in, device, threads = u.arg[1], first_src_dtype, u.arg[4], u.arg[5]
+          dims, dtype_in, device, threads = u.arg[0], first_src_dtype, u.arg[2], u.arg[3]
           wmma_helper = functools.partial(generic_wmma_helper, src_values, warp_size)
           # TODO: refactor these to a shared TensorCoreLayout
           if device == "METAL":
@@ -223,8 +235,13 @@ class PythonRenderer(Renderer):
 
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
-  def _copyin(self, dest, src:memoryview): dest[:] = src
-  def _copyout(self, dest:memoryview, src): dest[:] = src
+  def _as_buffer(self, src) -> memoryview: return src
+  def _copyin(self, dest, src:memoryview):
+    with cpu_profile("TINY -> PYTHON", f"{self.dev.device}:COPY"): dest[:] = src
+  def _copyout(self, dest:memoryview, src):
+    with cpu_profile("PYTHON -> TINY", f"{self.dev.device}:COPY"): dest[:] = src
+  def map(self, buf:Buffer): return buf.as_memoryview(force_zero_copy=True)
+  def _offset(self, buf:memoryview, size:int, offset:int): return buf[offset:offset+size]
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):

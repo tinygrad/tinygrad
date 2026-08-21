@@ -29,10 +29,10 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   if self.match_dtype is not None:
     if len(self.match_dtype) > 1:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(self.match_dtype))),
-                            arg="({0}.dtype in {1} or {0}.dtype._scalar in {1})"))
+                            arg="{0}.dtype in {1}"))
     else:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=self.match_dtype[0])),
-                            arg="({0}.dtype == {1} or {0}.dtype._scalar == {1})"))
+                            arg="{0}.dtype == {1}"))
   if self.match_tag is not None:
     if len(self.match_tag) > 1:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.PYLITERAL, arg=tuple(self.match_tag))), arg="{0}.tag in {1}"))
@@ -118,7 +118,7 @@ pm_renderer = PatternMatcher([
     lambda r,x: r.replace(src=(UOp(Ops.CUSTOMI, arg="(" + ' and '.join(y.arg for y in x.src) + ")"),)+r.src[1:])),
 
   (UPat(Ops.CUSTOM, src=UPat(Ops.CUSTOMI), name="x"), lambda x: UOp(Ops.CUSTOMI, arg=x.arg.format(*[y.arg for y in x.src]))),
-  (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c")), name="g"), lambda x,c,g: x.replace(arg=x.arg+f".src[{c.arg}]"))
+  (UPat(Ops.INDEX, src=(UPat(Ops.CUSTOMI, name="x"), UPat(Ops.CONST, name="c")), name="g"), lambda x,c,g: x.replace(arg=x.arg+f".src[{c.val}]"))
 ], compiled=False)
 
 def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:

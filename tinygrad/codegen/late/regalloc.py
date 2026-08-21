@@ -4,7 +4,7 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register, greg
 from tinygrad.dtype import dtypes
 
-PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
+PSEUDO_OPS = {Ops.CONST, Ops.CAST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
 
 class LinearScanRegallocContext:
   # returns the uop that defines the virtual register
@@ -49,11 +49,10 @@ class LinearScanRegallocContext:
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
       if v not in self.spills:
-        # the value of a BUFFER is its 64bit address
-        dt = self.vdef(v).dtype
-        sz = 8 if self.vdef(v).op is Ops.BUFFER else dt.itemsize
+        # the value of a BUFFER is its 64bit address, XMM registers need 16 bytes
+        sz = 16 if v.cons[0].size == 16 else (8 if self.vdef(v).op is Ops.BUFFER else self.vdef(v).dtype.itemsize)
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
-        self.spills[v] = UOp.const(dtypes.int32, offset)
+        self.spills[v] = UOp.cconst(offset, dtypes.int32)
         self.stack_size = offset + sz
       r = alloc(cons if cons is not None else v.cons, i)
       self.insert_before.setdefault(i, []).append((v, r))
@@ -85,7 +84,7 @@ class LinearScanRegallocContext:
 
       # allocate stack array
       if u.op is Ops.BUFFER:
-        self.locals[u] = UOp.const(dtypes.int32, self.stack_size)
+        self.locals[u] = UOp.cconst(self.stack_size, dtypes.int32)
         self.stack_size += u.max_numel() * u.dtype.itemsize
 
       # loop prologue, avoid loading inside the loop
@@ -126,7 +125,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   # alloc/dealloc stack
   if ctx.stack_size > 0:
     sp = ctx.ren.stack_pointer()
-    offset = UOp(Ops.CONST, sp.dtype, arg=ctx.stack_size)
+    offset = UOp.cconst(ctx.stack_size, sp.dtype)
     if i == 0: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, src=(sp, offset), tag=sp.tag))] + before
     elif i == len(ctx.uops) - 2: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, src=(sp, offset), tag=sp.tag))]
 

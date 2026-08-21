@@ -1,18 +1,18 @@
 from typing import cast
 import math, dataclasses
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes
 from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
+from tinygrad.function import renumber_invalid_outputs
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
-  def broadcast_to_input(x:UOp) -> UOp: return x._broadcast_to(ret.src[0].shape)
-  if op == Ops.ADD: return (broadcast_to_input(ctx),)
-  if op == Ops.MAX:
-    assert ret.op is Ops.REDUCE, "only works on REDUCE"
-    mask = ret.src[0].eq(broadcast_to_input(ret)).cast(ctx.dtype)
-    count = mask._rop(Ops.ADD, tuple(range(ret.arg[1])))
-    return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
-  if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
+  if op == Ops.ADD: return (ctx._broadcast_to(ret.src[0].shape),)
+  if op == Ops.MAX: return (((mask:=ret.src[0].eq(ret).cast(ctx.dtype))/mask._rop(Ops.ADD, tuple(range(ret.arg[1])))) * ctx,)
+  if op == Ops.MUL:
+    # d(prod x)/dx_j = prod_{i!=j} x_i: ret/x_j whenever x_j != 0 (any zero makes ret 0), else the product of the others
+    safe_x, axes = (is_zero:=(x:=ret.src[0]).eq(0)).where(1, x), tuple(range(ret.arg[1]))
+    zero_count = is_zero.cast(sum_acc_dtype(is_zero.dtype))._rop(Ops.ADD, axes)
+    return (ctx * is_zero.where(zero_count.eq(1).where(safe_x._rop(Ops.MUL, axes), 0), ret/safe_x),)
 
 def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp, ...]]:
   """Remove unused PARAMs from body and return compacted (body, args)."""
@@ -33,7 +33,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   grad_args = ctx.src
   root_grad = UOp(Ops.TUPLE, src=tuple(UOp(Ops.NOOP) if g.op is Ops.NOOP else
-    g if g.base.op is Ops.CONST else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
+    g if g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
   grads = compute_gradient(fxn, root_grad, set(params.values()))
   # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}
@@ -41,6 +41,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   # collect needed gradient bodies, compact unused params, create a single backward CALL
   grad_bodies = [(i, grads[p]) for i in needed if (p:=params.get(i)) is not None and p in grads]
   bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies)).substitute(fwd_subs, walk=True)
+  bwd_body = renumber_invalid_outputs(bwd_body)
   bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))
   bwd_call = bwd_body.call(*compact_args, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
   gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
@@ -58,7 +59,7 @@ pm_gradient = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.CMPNE)), lambda: (None, None)),
   (UPat(Ops.ADD), lambda ctx: (ctx, ctx)),
   (UPat(Ops.POW, name="ret", src=(UPat.var("b"), UPat.var("e"))), lambda ctx, ret, b, e:
-    (ctx * (b.eq(0)&e.eq(0)).where(e, e*b.pow(e-1)), ctx * b.eq(0).where((e<0).where(ret.const_like(-math.inf), 0), ret*b.log2()*math.log(2.0)))),
+    (ctx * e.eq(0).where(e, e*b.pow(e-1)), ctx * b.eq(0).where((e<0).where(ret.const_like(-math.inf), 0), ret*b.log2()*math.log(2.0)))),
   (UPat(Ops.MAX, src=(UPat.var("x"), UPat.var("y"))), lambda ctx, x, y:
     ((x>y).where(ctx, (x.eq(y)).where(ctx * 0.5, 0)), (x<y).where(ctx, (x.eq(y)).where(ctx * 0.5, 0)))),
   (UPat(Ops.MUL, name="ret"), lambda ctx, ret: (ret.src[1]*ctx, ret.src[0]*ctx)),
@@ -67,15 +68,14 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.CONTIGUOUS), lambda ctx: (ctx,)),
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),
   (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape), None)),
-  (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret:
-    (ctx.cast(sum_acc_dtype(ctx.dtype))._rop(Ops.ADD, tuple(range(len(ret.marg))))
-     .reshape(ret.src[0].shape).cast(ctx.dtype), None)),
+  (UPat(Ops.EXPAND), lambda ctx: (ctx, None)),
   (UPat(Ops.PAD, name="ret"), lambda ctx, ret: (ctx.shrink(tuple([(p[0], s+p[0]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
   (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx.pad(tuple([(p[0], s-p[0]-p[1]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
   (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.marg)),)),
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip([i for i,x in enumerate(ret.marg) if x]),)),
+  (UPat(Ops.STACK, name="ret"), lambda ctx, ret: tuple(ctx[i] for i in range(len(ret.src)))),
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),)),
-  (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
+  (UPat(Ops.UNSHARD, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   (UPat(Ops.TUPLE), lambda ctx: ctx.src),
   (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
     (ctx, UOp.maketuple(*(ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1))))),
@@ -118,6 +118,9 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
       if v is None: continue
+      # a shaped edge's gradient is summed to its source's shape
+      if k._shape is not None and v._shape is not None and k._shape != v._shape:
+        v = v.cast(sum_acc_dtype(v.dtype))._rop(Ops.ADD, broadcast_axes(k.shape, v.shape)).reshape(k.shape).cast(v.dtype)
       if k in grads and grads[k].op is not Ops.NOOP:
         if v.op is Ops.TUPLE and grads[k].op is Ops.TUPLE:
           grads[k] = UOp.maketuple(*(p + n if (p.op is not Ops.NOOP and n.op is not Ops.NOOP) else

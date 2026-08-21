@@ -24,13 +24,13 @@ class TestTinygrad(unittest.TestCase):
     self.assertEqual(Tensor(3.14).shape, ())
 
   def test_deviceless_const_construct_device_repr(self):
-    t = Tensor(UOp.const(dtypes.float, 2.0))
+    t = Tensor(UOp.const(2.0).cast(dtypes.float))
     self.assertIsNone(t.uop.device)
     self.assertIsNone(t.device)
     self.assertIn("<UOp None", repr(t))
 
   def test_deviceless_const_realize_noop(self):
-    t = Tensor(UOp.const(dtypes.float, 2.0))
+    t = Tensor(UOp.const(2.0).cast(dtypes.float))
     uop = t.uop
     t.realize()
     self.assertIs(t.uop, uop)
@@ -464,6 +464,7 @@ class TestTinygrad(unittest.TestCase):
     data = data + [-x for x in data]
     np.testing.assert_allclose(Tensor(data, dtype=dtypes.int32).numpy(), np.array(data).astype(np.int32))
 
+  @unittest.skip("list elements are python scalars: numpy values in a list have no inferred dtype, use Tensor(np.array(data))")
   def test_tensor_list_ndarray(self):
     data = [np.array([1, 2, 3]), np.array([1, 2, 3]), np.array([1, 2, 3])]
     np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
@@ -652,8 +653,18 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(Tensor([[1, 2]]).pad_to(2, 3).numpy(), [[1, 2, 0], [0, 0, 0]])
     np.testing.assert_equal(Tensor([[1, 2]]).pad_to(1, 3).numpy(), [[1, 2, 0]])
     np.testing.assert_equal(Tensor([[1, 2]]).pad_to(None, 3).numpy(), [[1, 2, 0]])
+    np.testing.assert_equal(Tensor([1, 2]).pad_to(4, value=2).numpy(), [1, 2, 2, 2])
+    np.testing.assert_equal(Tensor([[1, 2]]).pad_to(2, 3, value=-1).numpy(), [[1, 2, -1], [-1, -1, -1]])
+    np.testing.assert_equal(Tensor([1, 2]).pad_to(None, value=5).numpy(), [1, 2])  # no-op pad ignores the fill
     with self.assertRaises(ValueError): Tensor([1, 2]).pad_to(2, 3)
     with self.assertRaises(ValueError): Tensor([[1, 2]]).pad_to(3)
+
+  def test_max_shape(self):
+    from tinygrad import UOp
+    t = Tensor.empty(2, UOp.variable('v', 1, 32), 4)
+    self.assertEqual(t.max_shape, (2, 32, 4))
+    self.assertEqual(t.max_numel(), 2*32*4)
+    self.assertEqual(Tensor.empty(2, 3).max_shape, (2, 3))
 
   def test_shrink_into_zero(self):
     t = Tensor.rand(3, 4).realize()
@@ -727,12 +738,12 @@ class TestZeroShapeTensor(unittest.TestCase):
     self.assertIsNot(a.uop.base.buffer, b.uop.base.buffer)
 
   def test_clone_deviceless_const(self):
-    t = Tensor(UOp.const(dtypes.float, 2.0)).clone()
+    t = Tensor(UOp.const(2.0).cast(dtypes.float)).clone()
     np.testing.assert_equal(t.numpy(), 2.0)
     self.assertTrue(t.uop.has_buffer_identity())
 
   def test_numpy_deviceless_const(self):
-    np.testing.assert_equal(Tensor(UOp.const(dtypes.float, 2.0)).numpy(), 2.0)
+    np.testing.assert_equal(Tensor(UOp.const(2.0).cast(dtypes.float)).numpy(), 2.0)
 
   def test_clone_with_shrink(self):
     a = Tensor.rand(16, 16)
@@ -755,7 +766,7 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_allclose(a.grad.numpy(), b.grad.numpy())
 
   def test_clone_deviceless_const_to_cpu(self):
-    t = Tensor(UOp.const(dtypes.float, 2.0)).clone(device="CPU")
+    t = Tensor(UOp.const(2.0).cast(dtypes.float)).clone(device="CPU")
     self.assertEqual(t.device, "CPU")
     np.testing.assert_equal(t.numpy(), 2.0)
 

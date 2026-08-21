@@ -28,6 +28,7 @@ constexpr int ATTN_H_KV = 8; // number of key/value heads (for GQA)
 #endif
 
 constexpr int GROUP_SIZE = ATTN_H / ATTN_H_KV; // queries per KV head group
+constexpr int HEADS_PER_WG = (ATTN_D == 128 && GROUP_SIZE % 2 == 0) ? 2 : 1;
 
 #ifndef ATTN_N
 constexpr int ATTN_N = 1024; // sequence length
@@ -42,6 +43,10 @@ constexpr int SLICE_QO = 32;
 constexpr int DOT_SLICE_QO = 16;
 constexpr int WARP_SIZE_KV = 64; // warp size for KV
 constexpr bool causal = true;
+// WINDOW>0: sliding-window backward (query i sees keys in [i-WINDOW+1, i])
+#ifndef WINDOW
+#define WINDOW 0
+#endif
 
 #define NUM_WARPS 4
 #define NUM_THREADS (kittens::WARP_THREADS * NUM_WARPS)
@@ -53,7 +58,7 @@ using namespace kittens;
 using _gl_QdO  = gl<bf16, ATTN_B, ATTN_N, ATTN_H, ATTN_D>;
 using _gl_KV   = gl<bf16, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D>;
 using _gl_dQ   = gl<bf16, ATTN_B, ATTN_H, ATTN_N, ATTN_D>;
-using _gl_dKV  = gl<bf16, ATTN_B * GROUP_SIZE, ATTN_N, ATTN_H_KV, ATTN_D>;
+using _gl_dKV  = gl<bf16, ATTN_B * (GROUP_SIZE / HEADS_PER_WG), ATTN_N, ATTN_H_KV, ATTN_D>;
 using _gl_Lvec = gl<float, ATTN_B, ATTN_H, 1, ATTN_N>;
 
 template<int D> struct attn_bwd_combined_globals {
@@ -63,7 +68,7 @@ template<int D> struct attn_bwd_combined_globals {
   _gl_dQ dQg;
   _gl_dKV dKg, dVg;
   _gl_Lvec L_vec, delta_vec;
-  dim3 grid() { return dim3(ATTN_H, (ATTN_N / BLOCK_SIZE_KV), ATTN_B); }
+  dim3 grid() { return dim3(ATTN_H / HEADS_PER_WG, (ATTN_N / BLOCK_SIZE_KV), ATTN_B); }
   dim3 block() { return dim3(NUM_THREADS); }
   size_t dynamic_shared_memory() { return MAX_SHARED_MEMORY; }
 };
@@ -71,7 +76,7 @@ template<int D> struct attn_bwd_combined_globals {
 template<int D> __launch_bounds__(NUM_THREADS, 1)
 __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr, bf16 *dO_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr, float *L_vec_ptr, float *delta_vec_ptr) {
 
-  const int q_head_idx_fixed = blockIdx.x;  // This is the query head index [0, ATTN_H)
+  const int q_head_idx_fixed = blockIdx.x * HEADS_PER_WG;  // First query head handled by this workgroup.
   const int kv_head_idx = q_head_idx_fixed / GROUP_SIZE;
   const int q_head_in_group = q_head_idx_fixed % GROUP_SIZE;
   const int seq_idx = blockIdx.y;
@@ -87,8 +92,13 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   const int k_start_min = j_min * WARP_SIZE_KV;
   // first Q step that can overlap this K_span:
   const int first_step = max(0, k_start_min / STEP_QO);
+#if WINDOW
+  // cap the Q loop, padded by 2 masked steps: the epilogue's deferred dq path miscomputes in-window tail queries
+  const int num_steps_per_head = min(total_steps_per_head - first_step, (BLOCK_SIZE_KV + WINDOW) / STEP_QO + 2);
+#else
   const int num_steps_per_head = total_steps_per_head - first_step;
-  const int num_steps = num_steps_per_head;
+#endif
+  const int num_steps = num_steps_per_head * HEADS_PER_WG;
   const int k_pos = j * WARP_SIZE_KV;
 
   constexpr float L_SCALE_FACTOR = 1.44269504089f;
@@ -270,12 +280,12 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   if (num_steps > 1) {
     // Prologue
     {
-      const int q_head_idx = (0) / num_steps_per_head + first_q_head;
-      const int q_seq_idx = ((0) % num_steps_per_head) + first_step;
+      const int q_head_idx = first_q_head;
+      const int q_seq_idx = first_step;
       const int q_pos = q_seq_idx * STEP_QO;
 
-      const int next_q_head_idx = (0 + 1) / num_steps_per_head + first_q_head;
-      const int next_q_seq_idx = ((0 + 1) % num_steps_per_head) + first_step;
+      const int next_q_head_idx = first_q_head;
+      const int next_q_seq_idx = first_step + 1;
 
       // dot slice 0
       {
@@ -379,6 +389,13 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
             mov<0, 1, neg_inf_v>(P_ij);
             mov<0, 2, neg_inf_v>(P_ij);
             mov<0, 3, neg_inf_v>(P_ij);
+#if WINDOW
+          // window lower boundary, mirror of the causal edge
+          } else if (q_pos - k_pos == WINDOW) {
+            make_window<0, 0, neg_inf_v>(P_ij, P_ij);
+          } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
           }
         }
         mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -532,6 +549,8 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        if constexpr (D == 64) asm volatile("s_nop 15");
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
@@ -637,6 +656,13 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
             make_causal<0, 1, neg_inf_v>(P_ij, P_ij);
             mov<0, 2, neg_inf_v>(P_ij);
             mov<0, 3, neg_inf_v>(P_ij);
+#if WINDOW
+          } else if (q_pos - k_pos == WINDOW) {
+            mov<0, 0, neg_inf_v>(P_ij);
+            make_window<0, 1, neg_inf_v>(P_ij, P_ij);
+          } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
           }
         }
         mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -790,6 +816,8 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        if constexpr (D == 64) asm volatile("s_nop 15");
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
@@ -894,6 +922,14 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
             // Apply the causal mask to [0, 2] and set [0, 3:4] to -inf
             make_causal<0, 2, neg_inf_v>(P_ij, P_ij);
             mov<0, 3, neg_inf_v>(P_ij);
+#if WINDOW
+          } else if (q_pos - k_pos == WINDOW) {
+            mov<0, 0, neg_inf_v>(P_ij);
+            mov<0, 1, neg_inf_v>(P_ij);
+            make_window<0, 2, neg_inf_v>(P_ij, P_ij);
+          } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
           }
         }
         mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -1047,6 +1083,8 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        if constexpr (D == 64) asm volatile("s_nop 15");
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
@@ -1150,6 +1188,15 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
           } else if (q_pos == k_pos) {
             // Apply the causal mask to [0, 3]
             make_causal<0, 3, neg_inf_v>(P_ij, P_ij);
+#if WINDOW
+          } else if (q_pos - k_pos == WINDOW) {
+            mov<0, 0, neg_inf_v>(P_ij);
+            mov<0, 1, neg_inf_v>(P_ij);
+            mov<0, 2, neg_inf_v>(P_ij);
+            make_window<0, 3, neg_inf_v>(P_ij, P_ij);
+          } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
           }
         }
         mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -1302,6 +1349,8 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        if constexpr (D == 64) asm volatile("s_nop 15");
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
@@ -1332,15 +1381,18 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
 
     // 9. for 1 <= i <= T_r (1024 / 32 = 32)  
     for (int i = 1; i < num_steps - 1; ++i, tic ^= 1, toc ^= 1) {
-      const int last_q_head_idx = (i - 1) / num_steps_per_head + first_q_head;
-      const int last_q_seq_idx = ((i - 1) % num_steps_per_head) + first_step;
+      const int last_head_offset = (i - 1) >= num_steps_per_head;
+      const int last_q_head_idx = last_head_offset + first_q_head;
+      const int last_q_seq_idx = i - 1 - last_head_offset * num_steps_per_head + first_step;
 
-      const int q_head_idx = i / num_steps_per_head + first_q_head;
-      const int q_seq_idx = (i % num_steps_per_head) + first_step;
+      const int head_offset = i >= num_steps_per_head;
+      const int q_head_idx = head_offset + first_q_head;
+      const int q_seq_idx = i - head_offset * num_steps_per_head + first_step;
       const int q_pos = q_seq_idx * STEP_QO;
 
-      const int next_q_head_idx = (i + 1) / num_steps_per_head + first_q_head;
-      const int next_q_seq_idx = ((i + 1) % num_steps_per_head) + first_step;
+      const int next_head_offset = (i + 1) >= num_steps_per_head;
+      const int next_q_head_idx = next_head_offset + first_q_head;
+      const int next_q_seq_idx = i + 1 - next_head_offset * num_steps_per_head + first_step;
 
       // dot slice 0
       {
@@ -1424,6 +1476,13 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
             mov<0, 1, neg_inf_v>(P_ij);
             mov<0, 2, neg_inf_v>(P_ij);
             mov<0, 3, neg_inf_v>(P_ij);
+#if WINDOW
+          // window lower boundary, mirror of the causal edge
+          } else if (q_pos - k_pos == WINDOW) {
+            make_window<0, 0, neg_inf_v>(P_ij, P_ij);
+          } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
           }
         }
         mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -1578,6 +1637,8 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        if constexpr (D == 64) asm volatile("s_nop 15");
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
@@ -1685,6 +1746,13 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
             make_causal<0, 1, neg_inf_v>(P_ij, P_ij);
             mov<0, 2, neg_inf_v>(P_ij);
             mov<0, 3, neg_inf_v>(P_ij);
+#if WINDOW
+          } else if (q_pos - k_pos == WINDOW) {
+            mov<0, 0, neg_inf_v>(P_ij);
+            make_window<0, 1, neg_inf_v>(P_ij, P_ij);
+          } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
           }
         }
         mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -1838,6 +1906,8 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        if constexpr (D == 64) asm volatile("s_nop 15");
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
@@ -1942,6 +2012,14 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
             // Apply the causal mask to [0, 2] and set [0, 3:4] to -inf
             make_causal<0, 2, neg_inf_v>(P_ij, P_ij);
             mov<0, 3, neg_inf_v>(P_ij);
+#if WINDOW
+          } else if (q_pos - k_pos == WINDOW) {
+            mov<0, 0, neg_inf_v>(P_ij);
+            mov<0, 1, neg_inf_v>(P_ij);
+            make_window<0, 2, neg_inf_v>(P_ij, P_ij);
+          } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
           }
         }
         mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -2095,6 +2173,8 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[tic][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        if constexpr (D == 64) asm volatile("s_nop 15");
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
@@ -2198,6 +2278,15 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
           } else if (q_pos == k_pos) {
             // Apply the causal mask to [0, 3]
             make_causal<0, 3, neg_inf_v>(P_ij, P_ij);
+#if WINDOW
+          } else if (q_pos - k_pos == WINDOW) {
+            mov<0, 0, neg_inf_v>(P_ij);
+            mov<0, 1, neg_inf_v>(P_ij);
+            mov<0, 2, neg_inf_v>(P_ij);
+            make_window<0, 3, neg_inf_v>(P_ij, P_ij);
+          } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
           }
         }
         mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -2350,6 +2439,8 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         if constexpr (D == 128) load<0, 2>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         if constexpr (D == 128) load<0, 3>(Q_i, subtile_inplace<DOT_SLICE_QO, D>(Q_i_smem[toc][0], {0, 0}), Q_i_addr);
         mma_AtB<0, 0, 7>(dQ_i_T, K_j_col, dP_ij_bf16_col_T, dQ_i_T);
+        // D=64: wait out MFMA->VALU accumulator hazard on dQ_i_T
+        if constexpr (D == 64) asm volatile("s_nop 15");
         if constexpr (D == 128) mma_AtB<1, 0, 0>(dQ_i_T, K_j_col, dP_ij_bf16_col_T);
         // Load K_j from shared memory to registers
         // load(K_j, subtile_inplace<WARP_SIZE_KV, D>(K_j_smem, {warpid, 0}));
@@ -2378,11 +2469,11 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
     }
   }
 
-  const int last_q_head_idx = (num_steps - 2) / num_steps_per_head + first_q_head;
-  const int last_q_seq_idx = ((num_steps - 2) % num_steps_per_head) + first_step;
+  const int last_q_head_idx = first_q_head + HEADS_PER_WG - 1;
+  const int last_q_seq_idx = first_step + num_steps_per_head - 2;
 
-  const int q_head_idx = (num_steps - 1) / num_steps_per_head + first_q_head;
-  const int q_seq_idx = ((num_steps - 1) % num_steps_per_head) + first_step;
+  const int q_head_idx = first_q_head + HEADS_PER_WG - 1;
+  const int q_seq_idx = first_step + num_steps_per_head - 1;
   const int q_pos = q_seq_idx * STEP_QO;
   // Epilogue
   {
@@ -2467,6 +2558,12 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
             mov<0, 1, neg_inf_v>(P_ij);
             mov<0, 2, neg_inf_v>(P_ij);
             mov<0, 3, neg_inf_v>(P_ij);
+#if WINDOW
+        } else if (q_pos - k_pos == WINDOW) {
+            make_window<0, 0, neg_inf_v>(P_ij, P_ij);
+        } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
         }
       }
       mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -2728,6 +2825,13 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
             make_causal<0, 1, neg_inf_v>(P_ij, P_ij);
             mov<0, 2, neg_inf_v>(P_ij);
             mov<0, 3, neg_inf_v>(P_ij);
+#if WINDOW
+        } else if (q_pos - k_pos == WINDOW) {
+            mov<0, 0, neg_inf_v>(P_ij);
+            make_window<0, 1, neg_inf_v>(P_ij, P_ij);
+        } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
         }
       }
       mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -2984,6 +3088,14 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
             // Apply the causal mask to [0, 2] and set [0, 3:4] to -inf
             make_causal<0, 2, neg_inf_v>(P_ij, P_ij);
             mov<0, 3, neg_inf_v>(P_ij);
+#if WINDOW
+        } else if (q_pos - k_pos == WINDOW) {
+            mov<0, 0, neg_inf_v>(P_ij);
+            mov<0, 1, neg_inf_v>(P_ij);
+            make_window<0, 2, neg_inf_v>(P_ij, P_ij);
+        } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
         }
       }
       mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -3240,6 +3352,15 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
         } else if (q_pos == k_pos) {
             // Apply the causal mask to [0, 3]
             make_causal<0, 3, neg_inf_v>(P_ij, P_ij);
+#if WINDOW
+        } else if (q_pos - k_pos == WINDOW) {
+            mov<0, 0, neg_inf_v>(P_ij);
+            mov<0, 1, neg_inf_v>(P_ij);
+            mov<0, 2, neg_inf_v>(P_ij);
+            make_window<0, 3, neg_inf_v>(P_ij, P_ij);
+        } else if (q_pos - k_pos > WINDOW) {
+            mov<neg_inf_v>(P_ij);
+#endif
         }
       }
       mul<0, 2>(P_ij, P_ij, P_SCALE_FACTOR);
@@ -3407,14 +3528,14 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
     }
   }
 
-  store<1>(g.dVg, dV_j, {batch_idx * GROUP_SIZE + q_head_in_group, 0, kv_head_idx, 0}, {0, j, 0, 0});
+  store<1>(g.dVg, dV_j, {batch_idx * (GROUP_SIZE / HEADS_PER_WG) + q_head_in_group / HEADS_PER_WG, 0, kv_head_idx, 0}, {0, j, 0, 0});
   __builtin_amdgcn_s_waitcnt(0);
   __builtin_amdgcn_s_barrier();
 
   // We first copy dV_j_T from accumulator GPRs to vector GPRs and then perform the store
   accvgpr_read(dV_j_T, dK_j_T);
   mul(dV_j_T, dV_j_T, dP_SCALE_FACTOR);
-  store<1>(g.dKg, dV_j, {batch_idx * GROUP_SIZE + q_head_in_group, 0, kv_head_idx, 0}, {0, j, 0, 0});
+  store<1>(g.dKg, dV_j, {batch_idx * (GROUP_SIZE / HEADS_PER_WG) + q_head_in_group / HEADS_PER_WG, 0, kv_head_idx, 0}, {0, j, 0, 0});
 
   // Write out final dQ_i slice
   mul(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
@@ -3422,6 +3543,3 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
 }
 
 template __global__ void attend_bwd_combined_ker<ATTN_D>(bf16*, bf16*, bf16*, bf16*, bf16*, bf16*, bf16*, float*, float*);
-
-
-

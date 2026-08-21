@@ -1,12 +1,11 @@
 from __future__ import annotations
 import math, itertools
-from collections import defaultdict
-from typing import cast, Final
+from typing import cast
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, remove_all_tags
 from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, Invalid
-from tinygrad.helpers import colored, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
+from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
@@ -21,8 +20,9 @@ class Scheduler:
 
   @property
   def rngs(self):
-    # always in order by axistype
-    return sorted([u for u in self.ast.backward_slice if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
+    # always in order by axistype. void RANGEs are loops, not opt axes. the DEVICE axis is launched, not an opt axis
+    return sorted([u for u in self.ast.backward_slice if u.op is Ops.RANGE and u.dtype is not dtypes.void and u.vmax > 0
+                   and u.arg[-1] is not AxisType.DEVICE], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
   @property
   def shape_len(self) -> int: return len(self.rngs)
   @property
@@ -47,7 +47,6 @@ class Scheduler:
     if hasattr(self, 'tensor_core'): ret.tensor_core = self.tensor_core
     return ret
 
-  kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
   def get_optimized_ast(self, name_override:str|None=None) -> UOp:
     if name_override is not None: name = name_override
     else:
@@ -55,16 +54,13 @@ class Scheduler:
       special_uops = sorted([x for x in self.ast.toposort() if x.op is Ops.SPECIAL], key=lambda x: x.arg)
       special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
-      Scheduler.kernel_cnt[(function_name := to_function_name(name))] += 1
-      num = f"n{Scheduler.kernel_cnt[function_name]-1}" if Scheduler.kernel_cnt[function_name] > 1 else ""
-      name += colored(num, 'BLACK')
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
   def _output_rngs(self) -> list[UOp]:
     return flatten([[r for r in UOp.sink(*s.src[1:]).ranges if r.arg[-1] != AxisType.REDUCE] for s in self.ast.src if s.op is Ops.END])
   def _globalizable_rngs(self) -> list[UOp]:
-    ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.LOOP]
+    ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.WEAK]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
     for x in self.ast.toposort():
       if x.op is Ops.STAGE:
@@ -85,8 +81,8 @@ class Scheduler:
     ret = []
     for x,r in zip(self.axis_types, self.rngs):
       if self.dont_use_locals and x == AxisType.GLOBAL: ret.append("BLUE")
-      elif r not in output_rngs and x == AxisType.LOOP: ret.append("BLACK")
-      elif r not in globalizible_rngs and x == AxisType.LOOP: ret.append("white")
+      elif r not in output_rngs and x == AxisType.WEAK: ret.append("BLACK")
+      elif r not in globalizible_rngs and x == AxisType.WEAK: ret.append("white")
       else: ret.append(axis_colors[x])
     return ret
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
@@ -94,7 +90,7 @@ class Scheduler:
   def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False, input_new_rng:UOp|None=None):
     if (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
-    new_rng = UOp.range(amount, next(self.opt_range), new_type) if input_new_rng is None else input_new_rng
+    new_rng = UOp.range(amount, next(self.opt_range), new_type, dtype=rng.dtype) if input_new_rng is None else input_new_rng
     replaced_rng = rng.replace(src=(old_sz,))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
@@ -107,7 +103,7 @@ class Scheduler:
 
   # copied from kernel.py
   @property
-  def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP) \
+  def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK) \
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
   @property
   def unrollable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE) \
@@ -160,10 +156,10 @@ class Scheduler:
         check(rng.arg[-1] in {AxisType.GROUP_REDUCE, AxisType.REDUCE}, "unroll is for GROUP_REDUCE/REDUCE")
       if opt.op is OptOps.UPCAST:
         check((self.ren is not None and self.ren.target.device == "DSP") or amt <= 16, "don't upcast more than 16")
-        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP}, f"upcast is for GLOBAL/LOCAL/LOOP, not {rng.arg[-1]}")
+        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK}, f"upcast is for GLOBAL/LOCAL/LOOP, not {rng.arg[-1]}")
       if opt.op is OptOps.LOCAL:
         check(not self.dont_use_locals, "can't use locals")
-        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOOP}, "local is for globals")
+        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.WEAK}, "local is for globals")
       if opt.op is OptOps.THREAD:
         check(self.ren is not None and self.ren.has_threads, "target does not support threads")
         check(self.ren is not None and self.ren.global_max is not None and amt <= self.ren.global_max[0], "too many threads")
@@ -190,14 +186,14 @@ class Scheduler:
       check(rng.arg[-1] is not AxisType.THREAD, "cannot pad thread")
       new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
-      replaced_rng = UOp.range(new_sz, *rng.arg)
+      replaced_rng = UOp.range(new_sz, *rng.arg, dtype=rng.dtype)
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
       store_targets = {s.src[0] for s in self.ast.backward_slice_with_self if s.op is Ops.STORE}
       for b in self.bufs:
         if rng in (i:=b.src[1].get_idx()).backward_slice_with_self:
           nb = b.replace(src=(b.src[0], i.valid(valid&b.src[1].get_valid())))
-          replaces[b] = nb if b in store_targets else valid.where(nb, UOp.const(b.dtype, Invalid))
+          replaces[b] = nb if b in store_targets else valid.where(nb, UOp.const(Invalid, b.dtype))
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
       try:
@@ -243,6 +239,8 @@ class Scheduler:
           axis_choices = list(itertools.product(in1_ranges, in0_ranges, red_ranges))
           if not (axis < len(axis_choices)): continue
           axes = list(axis_choices[axis])
+
+          if any(a.arg[-1] is AxisType.REDUCE for a in axes[:2]): raise KernelOptError("tensor core X/Y axes can't be REDUCE")
 
           # tag the reduceop
           self.ast = self.ast.substitute({reduceop: reduceop.replace(tag="TC")})
@@ -301,9 +299,8 @@ class Scheduler:
             # TODO: remove tc_upcast_axes from the arg
             # do the reduce_axes always disappear? i think they don't
             # they need to be moved into the WMMA srcs
-            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.ren.target.device, tc.threads, tc_upcast_axes, ()) #, tc_reduce_axes)
-            tc_uop = UOp(Ops.WMMA, src=(
-              srcs[0], srcs[1], UOp.const(tc.dtype_out, (0.0,)*tc.elements_per_thread[2])), arg=wmma_arg, tag=1)
+            tc_uop = UOp.wmma(srcs[0], srcs[1], UOp.const((0.0,)*tc.elements_per_thread[2], tc.dtype_out),
+                              tc.dims, self.ren.target.device, tc.threads, tc_upcast_axes=tc_upcast_axes)
 
             # preserve extra reduces
             reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
@@ -330,9 +327,9 @@ class Scheduler:
   @property
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
 
-def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
+def args_from_ast(ast:UOp, dname:str) -> tuple[list[Buffer], dict[str, int]]:
   glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM and x.arg.slot >= 0], key=lambda x: x.arg.slot)
-  return [Buffer(dname, x.max_numel(), x.dtype) for x in glbls]
+  return [Buffer(dname, x.max_numel(), x.dtype) for x in glbls], {k.expr:int(k.vmax+k.vmin)//2 for k in ast.variables()}
 
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.tag is not None: return ast
@@ -342,10 +339,10 @@ def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
     for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
   elif beam >= 1:
     from tinygrad.codegen.opt.search import beam_search
-    rawbufs = bufs_from_ast(ast, ren.target.device)
+    rawbufs, var_vals = args_from_ast(ast, ren.target.device)
     # beam search may open devices
     with Context(ALLOW_DEVICE_USAGE=1):
-      k = beam_search(k, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
+      k = beam_search(k, rawbufs, var_vals, beam, bool(getenv("BEAM_ESTIMATE", 1)))
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet

@@ -1,5 +1,5 @@
 import functools, struct
-from tinygrad.device import Compiled, Allocator, BufferSpec
+from tinygrad.device import Compiled, Allocator, BufferSpec, Program, TinyELF
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up, suppress_finalizing, getenv, to_mv
 from tinygrad.runtime.autogen import webgpu
@@ -49,12 +49,12 @@ InstanceRequestAdapter = synchronous(webgpu.enum_WGPURequestAdapterStatus, True)
 AdapterRequestDevice = synchronous(webgpu.enum_WGPURequestDeviceStatus, True)(webgpu.wgpuAdapterRequestDevice2)
 QueueOnSubmittedWorkDone = synchronous(webgpu.enum_WGPUQueueWorkDoneStatus)(webgpu.wgpuQueueOnSubmittedWorkDone2)
 
-class WebGPUProgram:
-  def __init__(self, dev:'WebGpuDevice', name:str, lib:bytes, **kwargs):
-    self.dev, self.name = dev, to_wgpu_str(name)
+class WebGPUProgram(Program['WebGpuDevice']):
+  def __init__(self, dev:'WebGpuDevice', obj:TinyELF):
+    self.dev, self.name = dev, to_wgpu_str(obj.name)
 
     # Creating shader module
-    shader = webgpu.WGPUShaderModuleWGSLDescriptor(code=to_wgpu_str(lib.decode()),
+    shader = webgpu.WGPUShaderModuleWGSLDescriptor(code=to_wgpu_str(obj.lib.decode()),
                                                    chain=webgpu.WGPUChainedStruct(sType=webgpu.WGPUSType_ShaderSourceWGSL))
     module = webgpu.WGPUShaderModuleDescriptor(nextInChain=ctypes.cast(ctypes.pointer(shader), ctypes.POINTER(webgpu.struct_WGPUChainedStruct)))
 
@@ -186,7 +186,7 @@ class WebGpuDevice(Compiled):
 
     webgpu.wgpuAdapterRelease(adapter_res)
 
-    super().__init__(device, WebGpuAllocator(self), [WGSLRenderer], functools.partial(WebGPUProgram, self),
+    super().__init__(device, WebGpuAllocator(self), [WGSLRenderer], WebGPUProgram,
                      arch="shader-f16" * (webgpu.WGPUFeatureName_ShaderF16 in self.features))
 
   def synchronize(self): QueueOnSubmittedWorkDone(self.queue)
