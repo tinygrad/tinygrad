@@ -3,9 +3,8 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite
 from tinygrad.helpers import strip_parens, ceildiv
 
-def sign_extend(val:UOp, sext_am:int):
-  return (((val >> (sext_am - 1)) > 0).where(UOp.const(0xffffffff << sext_am, dtypes.uint32), UOp.const(0, dtypes.uint32)) \
-        | val.bitcast(dtypes.uint32)).bitcast(dtypes.int)
+# a field of `width` bits sitting in the low bits of val: shift it up to the sign bit, then let the arithmetic shift fill
+def sign_extend(val:UOp, width:int): return (val << (32-width)).bitcast(dtypes.int) >> (32-width)
 
 # a packed field of dt: the word it lives in, its offset in that word, and its mask. width is 8*itemsize, bool is one bit in a byte
 def packed_field(bidx:UOp, dt:DType) -> tuple[UOp, UOp, int]:
