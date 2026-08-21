@@ -32,7 +32,7 @@ class QCOMDriver(VirtDriver):
                  for obj_id, base in self.gpuaddrs.items())
     if not mapped: raise ValueError(f'unmapped KGSL range {address:#x}+{size:#x}')
 
-  def execute_shader(self, code, grid_size, local_size, _regs, _state):
+  def execute_shader(self, code, grid_size, local_size):
     lanes = local_size[0] * local_size[1] * local_size[2]
     return execute_dispatch(code, grid_size, local_size, self.gpu.local_id_register(), self.gpu.constant_regs(lanes),
                             check_range=self.check_gpu_range, workgroup_id_register=self.gpu.workgroup_id_register())

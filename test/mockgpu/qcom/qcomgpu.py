@@ -114,7 +114,7 @@ class QCOMGPU:
           payload[2] & mesa.CP_EXEC_CS_2_NGROUPS_Y__MASK,
           payload[3] & mesa.CP_EXEC_CS_3_NGROUPS_Z__MASK)
         if self.executor is None: raise RuntimeError('IR3 executor is not connected')
-        self.executor(self.shader_image(), grid, self.local_size(), self.regs, self.state)
+        self.executor(self.shader_image(), grid, self.local_size())
       elif packet_type == 7 and key in (mesa.CP_WAIT_FOR_IDLE, mesa.CP_WAIT_MEM_WRITES):
         if payload: raise ValueError(f'invalid PM4 wait payload for opcode {key:#x}')
       else:
