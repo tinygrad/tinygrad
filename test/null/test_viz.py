@@ -1,5 +1,5 @@
-import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, math
-from pathlib import Path
+import unittest
+import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib
 from dataclasses import dataclass
 from typing import Generator
 
@@ -835,8 +835,6 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 @needs_tracked_pm
 class TestCfg(unittest.TestCase):
-  def setUp(self): self.arch = "gfx1100"
-
   def get_cfg(self, name:str, k:Kernel):
     insts = k.finalize()
     def fxn(out:UOp) -> UOp:
@@ -845,7 +843,7 @@ class TestCfg(unittest.TestCase):
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
     with save_viz() as viz:
-      with Context(DEV=f"NULL::{self.arch}"):
+      with Context(DEV="NULL::gfx1100"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
         _ = do_to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
     codegen_rewrites = next(s for s in viz.list_items() if s["name"] == name)
@@ -1027,8 +1025,8 @@ def run_cli(*cli_args) -> list[dict]:
 @contextlib.contextmanager
 def write_files(viz) -> list[str]:
   with tempfile.TemporaryDirectory() as tmpdir:
-    (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
-    (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+    (r:=pathlib.Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
+    (p:=pathlib.Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
     yield ["--rewrites-path", str(r), "--profile-path", str(p)]
 
 class TestCLI(unittest.TestCase):
