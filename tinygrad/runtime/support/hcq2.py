@@ -54,7 +54,7 @@ def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> tuple[UOp, ...]
   groups:dict[tuple[str|None, DType, sint], list[tuple[sint, UOp]]] = collections.defaultdict(list)
   for off, val in patches:
     tag = "link" if is_value_known_at_link(val) else "inputs" if val.op is Ops.GETADDR else None
-    groups[(tag, val.dtype, off % val.dtype.itemsize)].append((off, val))
+    groups[(tag, (v:=(val.bitcast(buf.dtype) if val.dtype.itemsize == buf.dtype.itemsize else val)).dtype, off % v.dtype.itemsize)].append((off, v))
 
   ret, bit = [], buf.dtype.itemsize
   for (tag, dt, r), ps in groups.items():
