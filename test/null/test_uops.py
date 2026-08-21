@@ -301,9 +301,9 @@ class TestFastIdiv(unittest.TestCase):
       self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORMOD by pow2 left a MOD")
       self.assertNotIn(Ops.FLOORMOD, ops, f"For dtype={dt} FLOORMOD survived past late rewrite")
 
-  def test_floordiv_power_of_two_uint(self):
-    # uint FLOORDIV by a power of two lowers to a shift, leaving no IDIV/FLOORDIV in the kernel
-    for dt in (dtypes.uint32, dtypes.uint64):
+  def test_floordiv_power_of_two(self):
+    # FLOORDIV by a power of two lowers to a shift, with no round toward zero correction (a shift is exactly floor division)
+    for dt in (dtypes.int32, dtypes.uint32, dtypes.int64, dtypes.uint64):
       g = UOp.param(0, dt, (3,))
       c = UOp.const(2).cast(dt)
       a = UOp(Ops.FLOORDIV, dt, (g.index(c), c))
@@ -311,6 +311,7 @@ class TestFastIdiv(unittest.TestCase):
       ops = [x.op for x in uops]
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
       self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORDIV by pow2 kept the round toward zero correction")
       self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
 
   @Context(DISABLE_FAST_IDIV=0)
