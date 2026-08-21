@@ -329,9 +329,13 @@ class TinyELF:
 
   @staticmethod
   def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
-    for _,_,dt,_ in signature:
-      yield (offset:=round_up(offset, dt.itemsize)), dt
-      offset += dt.itemsize
+    for *_,dt,s in signature:
+      yield (offset:=round_up(offset, sz:=8 if s!=() else dt.itemsize)), dt, s
+      offset += sz
+
+    #for _,_,dt,_ in signature:
+    #  yield (offset:=round_up(offset, dt.itemsize)), dt
+    #  offset += dt.itemsize
 
 class Program(Generic[DeviceType]):
   def __init__(self, dev:DeviceType, obj:TinyELF): pass
