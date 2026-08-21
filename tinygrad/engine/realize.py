@@ -225,8 +225,10 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, prof[0], prof[1], stat_call.key)
     if not ctx.wait: return None
     d.synchronize(timeout=ctx.timeout)
-    st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
-    return float(en-st)/d.timestamp_divider/1e6
+    if (tab:=tabs.get(k:=(device, *prof[0][:2]))) is None:
+      tab = tabs[k] = memoryview(bytes(d.signal(prof[0][0], size=prof[0][1])._buf.cpu_view().view(fmt='B')[:])).cast('Q')
+    return float(tab[prof[1][2]] - tab[prof[0][2]])/d.timestamp_divider/1e6
+  tabs:dict[tuple, memoryview] = {} # timestamps of one batch share a table, read it back once
   return [_prof_tm(device, k, prof) for devices, k, prof in info.kernels if prof for device in devices] if PROFILE or ctx.wait else []
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
