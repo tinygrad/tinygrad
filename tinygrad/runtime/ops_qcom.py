@@ -212,8 +212,12 @@ class QCOMArgsState(HCQArgsState):
     if prg.samp_cnt > 0: to_mv(int(self.buf.va_addr) + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     if prg.NIR:
       self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)
-      for v,(o,dt) in zip(vals, TinyELF.iter_sig(prg.signature[len(bufs):], len(ubos)*8)):
-        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_off + o)
+      #for v,(o,dt) in zip(vals, TinyELF.iter_sig(prg.signature[len(bufs):], len(ubos)*8)):
+      #  self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_off + o)
+      it = [iter(vals), iter(ubos)]
+      for o,dt,s in TinyELF.iter_sig(prg.signature):
+        self.bind_sints_to_buf((x:=next(it[s!=()])).va_addr if s!=() else x, buf=self.buf, fmt='Q' if s!=() else dt.fmt, offset=prg.buf_off+o)
+
     else:
       for i, b in enumerate(ubos): self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=prg.buf_offs[i])
       for i,(v,(_,_,dt,_)) in enumerate(zip(vals, prg.signature[len(bufs):])):
