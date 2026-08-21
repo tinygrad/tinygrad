@@ -355,7 +355,7 @@ class NV_GSP(NV_IP):
     self.rpc_set_registry_table()
 
     self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.AMPERE_COMPUTE_B, nv_gpu.AMPERE_DMA_COPY_B
-    self.viddec_class = {"GA":nv_gpu.NVC7B0_VIDEO_DECODER,"AD":nv_gpu.NVC9B0_VIDEO_DECODER,"GB":nv_gpu.NVCFB0_VIDEO_DECODER}[self.nvdev.chip_name[:2]]
+    self.viddec_class = {"AD":nv_gpu.NVC9B0_VIDEO_DECODER, "GB":nv_gpu.NVCFB0_VIDEO_DECODER}.get(self.nvdev.chip_name[:2]) # nvdec: ada and blackwell
     match self.nvdev.chip_name[:2]:
       case "AD": self.compute_class = nv_gpu.ADA_COMPUTE_A
       case "GB":
