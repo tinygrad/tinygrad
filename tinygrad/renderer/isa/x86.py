@@ -227,8 +227,7 @@ def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, dt, ar
 def imm(dt:DType, v:int) -> UOp: return UOp.cconst(truncate[dt](v), dt).rtag()
 def to_imm(c:UOp) -> UOp|None:
   if not (c.op is Ops.CAST and (v:=c.src[0]).op is Ops.CONST): return None
-  if c.dtype is dtypes.int64: return imm(dtypes.int32, v.val) if not v.overflows(dtypes.int32) else None
-  if c.dtype is dtypes.uint64: return imm(dtypes.uint32, v.val) if not v.overflows(dtypes.uint32) else None
+  if c.dtype in dtypes.int64s: return imm(dtypes.int32, v.val) if not v.overflows(dtypes.int32) else None
   if c.dtype in dtypes.ints+(dtypes.bool,): return imm(c.dtype, v.val)
   return None
 def cmp(x:UOp) -> UOp:
@@ -638,10 +637,12 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
       if sz == 2: inst += bytes([0x66])
       # bit signaling 64 bit variant of instruction
       w = sz == 8
-      # REX byte is required when 64 bit or an extended reg is used (index 8 - 15) or lower 8 bits of (rsp, rbp, rsi, rdi) are accessed
-      if w | r | _x | b | (reg_sz == 1 & reg >> 2) | (rm_sz == 1 & rm >> 2): inst += bytes([0b0100 << 4 | w << 3 | r << 2 | _x << 1 | b])
       # legacy 8bit opcode is 1 less than 16-64bit variants
-      if (rm_sz == 1 or reg_sz == 1) and x.arg not in X86GroupOp.ReadFlags | {X86Ops.LEA}: opc -= 1
+      demote = (rm_sz == 1 or reg_sz == 1) and x.arg not in X86GroupOp.ReadFlags | {X86Ops.LEA}
+      # REX byte is required when 64 bit or an extended reg is used (index 8 - 15) or lower 8 bits of (rsp, rbp, rsi, rdi) are accessed
+      if w | r | _x | b | (reg_sz == 1 & reg >> 2) | (rm_sz == 1 & rm >> 2) | (demote and disp_uop is None and rm >= 4):
+        inst += bytes([0b0100 << 4 | w << 3 | r << 2 | _x << 1 | b])
+      if demote: opc -= 1
     # OPCODE byte
     inst += opc.to_bytes((opc.bit_length() + 7) // 8, 'big')
     # MODRM byte
@@ -809,7 +810,8 @@ class X86Renderer(ISARenderer):
   device = "CPU"
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (NUM_CPU_THREADS.value, 0, 0)
+  @property
+  def global_max(self): return (NUM_CPU_THREADS.value, 0, 0)  # type: ignore[override]
   extra_matcher = extra_matcher
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher

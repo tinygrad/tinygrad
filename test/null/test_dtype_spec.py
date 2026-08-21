@@ -106,7 +106,8 @@ class TestHelpers(unittest.TestCase):
 
   def test_float_to_bf16(self):
     max_bf16 = torch.finfo(torch.bfloat16).max
-    for a in [1, 1.1, 1234, 23456, -777.777, max_bf16, max_bf16 * 1.00001, -max_bf16, -max_bf16 * 1.00001, math.inf, -math.inf]:
+    for a in [1, 1.1, 1234, 23456, -777.777, max_bf16, max_bf16 * 1.00001, -max_bf16, -max_bf16 * 1.00001,
+              max_bf16 * 2, -max_bf16 * 2, math.inf, -math.inf]:
       self.assertEqual(float_to_bf16(a), torch.tensor([a], dtype=torch.bfloat16).item())
     self.assertTrue(math.isnan(float_to_bf16(math.nan)))
 

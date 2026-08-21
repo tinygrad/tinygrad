@@ -17,9 +17,9 @@ class NullRenderer(CStyleLanguage):
     return assemble_linear(prg, lin, self.target.arch)
 
 class NullProgram(Program['NullDevice']):
-  def __init__(self, dev:'NullDevice', obj:TinyELF): self.device, self.name = dev.device, obj.name
+  def __init__(self, dev:'NullDevice', obj:TinyELF): self.device, self.name, self.profile_key = dev.device, obj.name, obj.profile_key
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
-    with cpu_profile(self.name, self.device): return 1e-3
+    with cpu_profile(self.name, self.device, profile_key=self.profile_key): return 1e-3
 
 class NullAllocator(Allocator['NullDevice']):
   def _alloc(self, size, options): pass
@@ -38,13 +38,14 @@ class NullGraph(MultiGraphRunner):
       for (_,_,bufs,_),runtime in zip(self.calls, self.runtimes):
         # description based on command, copied from HCQ graph
         device = runtime.device if runtime is not None else f"{bufs[1].device}:SDMA:0"
-        descs.append((device, runtime.name if runtime is not None else f"{bufs[1].device} -> {bufs[0].device}", count:=event_count.get(device, 0)))
+        descs.append((device, runtime.name if runtime is not None else f"{bufs[1].device} -> {bufs[0].device}",
+                      runtime.profile_key if runtime is not None else None, count:=event_count.get(device, 0)))
         event_count[device] = count+1
       # pack events evenly per device
       dur, sigs, ents = max(1, math.ceil((perf_counter_us()-st)/max(event_count.values()))), [], []
-      for i,(device,name,count) in enumerate(descs):
+      for i,(device,name,profile_key,count) in enumerate(descs):
         sigs += [st+count*dur, st+(count+1)*dur]
-        ents.append(ProfileGraphEntry(device, name, 2*i, 2*i+1))
+        ents.append(ProfileGraphEntry(device, name, 2*i, 2*i+1, profile_key))
       cpu_events.append(ProfileGraphEvent(ents, [], sigs))
     return 1e-1
 

@@ -504,7 +504,7 @@ jobs:
       - name: Run AMD renderer tests (AMD:LLVM)
         run: DEV=MOCKKFD+AMD:LLVM python -m pytest -n=auto test/amd/ --durations 20
       - name: Run SQTT profiling tests
-        run: PROFILE=1 SQTT=1 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
+        run: VIZ=-2 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
       - name: Run AMD emulated tests on NULL backend
         env:
           AMD: 0
@@ -679,4 +679,5 @@ jobs:
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
-          python -m pytest -n=auto test/backend/test_ops.py --durations=20
+          # QCOMCL compiles in qemu, too slow for parallel workers
+          ${{ contains(matrix.dev, 'QCOMCL') && 'PARALLEL=0' || '' }} python -m pytest -n=auto test/backend/test_ops.py --durations=20

@@ -100,19 +100,32 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_
 # *****************
 # 1.1. prep: staging copies
 
+STAGING_SIZE, STAGING_SLOTS = 128 << 20, 2
+
+@functools.cache
+def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
+
 def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_DEVS)
+
+def stage_copy(dst:UOp, src:UOp) -> UOp|None:
+  if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
+
+  assert src.dtype.itemsize == dst.dtype.itemsize, "staged copies must be dtype-size matched"
+  base, it, copies = UOp.from_buffer(_staging()), src.dtype.itemsize, []
+  chunk = (STAGING_SIZE // STAGING_SLOTS) // it
+  for i, off in enumerate(range(0, src.max_numel(), chunk)):
+    stage = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it]
+    copies += [src[off:off+n].copy_to_device("CPU").call(stage, src[off:off+n]), stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
+  return UOp(Ops.LINEAR, src=tuple(copies))
+
+# *****************
+# 1.2. prep: kernel copies
 
 def _get_enqueue_devs(call:UOp) -> Any|None:
   if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
   devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
   return devs if all_devices_in(devs, HCQ_DEVS) else None
-
-def stage_copy(dst:UOp, src:UOp) -> UOp|None:
-  if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
-
-  stage = UOp.new_buffer("CPU", src.max_numel() * src.dtype.itemsize, dtypes.uint8)
-  return UOp(Ops.LINEAR, src=(src.copy_to_device("CPU").call(stage, src), stage.copy_to_device(dst.device).call(dst, stage)))
 
 def kernel_copy(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if (devs:=_get_enqueue_devs(call)) is None or Device[(dev:=to_tuple(devs)[0])].has_copy_queue: return None
@@ -252,7 +265,7 @@ def _merged_hcq_call(calls:list[UOp]) -> UOp: # TODO: simplify?
   devs, queue = get_submit(calls[0]).src[0].arg
   body = make_submit(*[cmd for c in calls for cmd in get_submit(c).src[0].src], devs=devs, queue=queue).sink()
   return make_call(f"submit {queue} ({len(calls)})", body,
-    replace(calls[0].arg.aux, estimates=sum((c.arg.aux.estimates for c in calls), start=Estimates())))
+    replace(calls[0].arg.aux, estimates=sum((c.arg.aux.estimates for c in calls), start=Estimates()).simplify()))
 
 def merge_queues(linear:UOp) -> UOp:
   new_src:list[UOp] = []
@@ -336,7 +349,9 @@ def split_patches(call:UOp) -> UOp|None:
   runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbuf"} for x in unwrap_mstack(g.buf_uop)))
   tables = [make_addr_table(call, gs, n) for gs,n in ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems"))]
   reads, fills = {k:v for _,r,_,_ in tables for k,v in r.items()}, [f for t in tables[1:] for f in t[2]] # inputs table is filled by exec
-  gathers = make_gather_loop(ipathces, tables[0][0], tables[0][3], lt_patches) if (ipathces:=[p for p in rt_patches if p.tag == "inputs"]) else {}
+
+  ipatches = [p for p in rt_patches if p.tag == "inputs" and all(v in tables[0][3] for v in p.src[1].src)] # only getaddrs go to the table
+  gathers = make_gather_loop(ipatches, tables[0][0], tables[0][3], lt_patches) if ipatches else {}
   body = body.substitute({p:p.substitute(gathers | reads) for p in rt_patches})
 
   lt_srcs = collections.defaultdict(list)
@@ -426,7 +441,7 @@ def merge_batch(batch:list[UOp]) -> UOp:
   cmds = [c.src[0].src[0].call(*[_lane_arg(a.without_after, j, tables + off) for a in c.src[1:]], UOp.variable("_device_num", 0, 1 << 30).bind(j))
           for (c, j, _), off in zip(lanes, offs)]
 
-  info = HCQInfo((HCQ_RUNTIME_DEV.value,), sum((c.arg.aux.estimates for c in batch), start=Estimates()),
+  info = HCQInfo((HCQ_RUNTIME_DEV.value,), sum((c.arg.aux.estimates for c in batch), start=Estimates()).simplify(),
                  input_idxs=tuple(x for c in batch for x in c.arg.aux.input_idxs), kernels=tuple(k for c in batch for k in c.arg.aux.kernels))
   body = UOp.custom_function("hcq", make_submit(*cmds, devs=HCQ_RUNTIME_DEV.value, queue="SUBMIT:0").sink())
   return body.call(*[s for c in batch for s in c.src[1:] if s.without_after.tag != "inputs"], name=f"hcq_submitter ({len(batch)})", aux=info)
@@ -585,14 +600,15 @@ class HCQ2Compiled(Compiled):
       tdiffs.append((st+perf_counter_us())/2 - gpu)
     Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
 
-  @functools.cached_property
-  def rt_buffer(self) -> Buffer:
-    return Buffer(self.device, self.rt_allocator.size, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True), preallocate=True)
+  @functools.cache
+  def rt_buffer(self, uncached:bool=True) -> Buffer:
+    return Buffer(self.device, self.rt_allocator.size, dtypes.uint8, options=BufferSpec(uncached=uncached, cpu_access=True), preallocate=True)
 
   def new_buffer(self, b:UOp, cache:bool) -> Buffer:
     if cache or b.tag in HCQ_CACHE_TAGS:
-      return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=b.tag != "program", cpu_access=True, nolru=True))
-    return self.rt_buffer.view(b.max_numel(), b.dtype, self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
+      return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=b.tag not in ("program","kernargs"), cpu_access=True,nolru=True))
+    return self.rt_buffer(uncached=b.tag!="kernargs").view(b.max_numel(), b.dtype,
+      self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
 
   @functools.cache
   def signal(self, name:str|int, init_value:int=0) -> Buffer:

@@ -822,6 +822,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor0&tor1, lambda: ten0&ten1, forward_only=True)
 
     helper_test_op(None, lambda x: (1 < x) & (x < 2), forward_only=True, vals=[[1.2, 1.2, 1.2, 3.2]])
+    helper_test_op([(3000,)]*10, lambda *xs: (sum(xs[1:], xs[0]) > 5) & (xs[0] < 0.9), forward_only=True)
+
+    if not COMPILE_ONLY:
+      np.testing.assert_equal((Tensor(2**64-1, dtype=dtypes.uint64) & 0xFFFFFFFF).numpy(), 0xFFFFFFFF)
 
   def test_or(self):
     data = [[1,-8,1],[32,1,6]]
@@ -2164,6 +2168,10 @@ class TestOps(unittest.TestCase):
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))
     helper_test_op([(2, 4)], lambda x: x.roll((1,)))
+    helper_test_op([(0,)], lambda x: x.roll(1, 0))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1, 0))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1, 1))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1))
     self.helper_test_exception([(2, 4)], lambda x: x.roll((1, 2)), expected=RuntimeError)
     helper_test_op([(2, 4)], lambda x: x.roll(1, 0))
     helper_test_op([(2, 4)], lambda x: x.roll(-1, 0))
