@@ -48,16 +48,16 @@ def is_value_known_at_link(val:UOp) -> bool:
   return not val.variables() and not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
 
 def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> tuple[UOp, ...]:
-  def _mk_store(ps:list[tuple[sint, UOp]], tag:str|None) -> UOp:
-    offs = UOp(Ops.STACK, dtypes.int, tuple(UOp.const(off // buf.dtype.itemsize, dtypes.int) for off,_ in ps))
-    vals = UOp(Ops.STACK, ps[0][1].dtype, tuple(val for _,val in ps))
-    return buf.index(offs, dtype=vals.dtype).store(vals).rtag(tag)
+  def _mk_store(p:tuple[sint, UOp], tag:str|None) -> UOp:
+    off, val = p
+    size = round_up(val.dtype.itemsize, buf.dtype.itemsize) // buf.dtype.itemsize
+    view = buf.shrink(((off//buf.dtype.itemsize, off//buf.dtype.itemsize+size),)).bitcast(val.dtype)
+    return view.index(UOp.stack(UOp.const(0, dtypes.int))).store(UOp.stack(val)).rtag(tag)
 
   patches = [(off, val.cast(buf.dtype) if val.dtype.itemsize == buf.dtype.itemsize else val) for off, val in patches]
   link, runtime = partition(patches, lambda p: is_value_known_at_link(p[1]))
   inputs, runtime = partition(runtime, lambda p: p[1].op is Ops.GETADDR)
-  return tuple(_mk_store(list(ps), tag) for cls, tag in ((link, "link"), (inputs, "inputs"), (runtime, None))
-               for _, ps in itertools.groupby(sorted(cls, key=lambda p: p[1].dtype), key=lambda p: p[1].dtype))
+  return tuple(_mk_store(p, tag) for cls, tag in ((link, "link"), (inputs, "inputs"), (runtime, None)) for p in cls)
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp:
   data = UOp(Ops.BINARY, src=(), arg=blob).bitcast(buf.dtype)
@@ -328,14 +328,19 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[UOp, dict[UOp
   return table, reads, fills, {g:slots[bare[g]] for g in gaddrs}
 
 def make_gather_loop(patches:list[UOp], table:UOp, slots:dict[UOp, int], lt_patches:list[UOp]) -> dict[UOp, UOp]:
-  (dst,), words = dedup(p.buf_uop for p in patches), [(off.val, slots[val]) for p in patches for off, val in zip(p.src[0].src[1].src, p.src[1].src)]
+  (dst,), words = dedup(p.buf_uop for p in patches), []
+  for p in patches:
+    view, offs = p.src[0].src[:2]
+    start, stride = (view.src[0].src[1].val, table.dtype.itemsize//dst.dtype.itemsize) if view.op is Ops.BITCAST else (0, 1)
+    words += [(start + off.val*stride, slots[val]) for off,val in zip(offs.src, p.src[1].src)]
 
   # build a runtime loop that writes every input address
   pairs = UOp.placeholder((2*len(words),), dtypes.uint32, next(UOp.unique_num), device=dst.device).rtag("systems")
   lt_patches.append(make_binary_patch(pairs, struct.pack(f'<{2*len(words)}I', *itertools.chain(*words))))
   r = UOp.range(len(words), next(UOp.unique_num), dtype=dtypes.int, src=(pairs, dst))
   off, slot = ((pairs.index(2*r+i).load() % bound).cast(dtypes.int) for i, bound in ((0, dst.max_numel()-1), (1, table.max_numel())))
-  return {p: UOp(Ops.NOOP) for p in patches} | {patches[0]: dst.index(off, dtype=table.dtype).store(table.index(slot).load()).end(r)}
+  patch = dst.shrink(((off, off+table.dtype.itemsize//dst.dtype.itemsize),)).bitcast(table.dtype).index(0).store(table.index(slot).load()).end(r)
+  return {p: UOp(Ops.NOOP) for p in patches} | {patches[0]: patch}
 
 def is_input_addr(g:UOp) -> bool: return all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop))
 
@@ -507,11 +512,12 @@ def fold_binary(buf:UOp, blob:UOp) -> UOp:
     b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
-def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
+def fold_const_store(buf:UOp, off:UOp, val:UOp, start:UOp|None=None) -> UOp:
   for off,val in zip(off.src, val.src):
     for b,v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
       data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype]((v.src[0] if v.op is Ops.CAST else v).val))
-      b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[(bo:=off.val*buf.dtype.itemsize):bo+len(data)] = data
+      bo = (start.val*buf.dtype.itemsize if start is not None else 0) + off.val*val.dtype.itemsize
+      b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[bo:bo+len(data)] = data
   return UOp(Ops.NOOP)
 
 def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
@@ -535,6 +541,8 @@ pm_resolve_patches = PatternMatcher([
   (UPat(name="buf").index(UPat(Ops.RANGE), allow_any_len=True)
     .store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast()).index(UPat(Ops.RANGE), allow_any_len=True).load())
     .end(UPat(Ops.RANGE)), fold_binary),
+  (UPat(Ops.BITCAST, src=(UPat(Ops.SHRINK, src=(UPat({Ops.BUFFER, Ops.MSTACK}, name="buf"), UPat(name="start"), UPat())),))
+    .index(UPat(Ops.STACK, name="off")).store(UPat(Ops.STACK, name="val")), fold_const_store),
   (UPat({Ops.BUFFER, Ops.MSTACK}, name="buf").index(UPat(Ops.STACK, name="off")).store(UPat(Ops.STACK, name="val")), fold_const_store),
 ])
 
