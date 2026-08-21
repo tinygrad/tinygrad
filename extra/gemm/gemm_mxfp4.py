@@ -24,14 +24,11 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_and_b32(s[1], s[1], LIT, 65535))
     k.emit(s_mov_b32(s[47], s[2]))
     k.emit(s_mov_b32(s[48], s[3]))
-    k.emit(s_mov_b32(s[64], s[4]))
     k.emit(s_load_dwordx2(s[4:5], s[0:1], s[0], 0, 0, 0, 0, 1))
     k.emit(s_mov_b32(s[8], 0))
     k.emit(s_mov_b32(s[9], 0))
     k.emit(s_load_dwordx2(s[12:13], s[0:1], s[0], 8, 0, 0, 0, 1))
     k.emit(s_load_dwordx2(s[16:17], s[0:1], s[0], 16, 0, 0, 0, 1))
-    k.emit(s_mov_b32(s[41], 1.0))
-    k.emit(s_mov_b32(s[42], 0))
     k.emit(s_mov_b32(s[36], N))
     k.emit(s_mov_b32(s[37], K))
     k.emit(s_mov_b32(s[38], K))
@@ -42,7 +39,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_load_dwordx2(s[24:25], s[0:1], s[0], 32, 0, 0, 0, 1))
     k.emit(s_mov_b32(s[39], scale_k))
     k.emit(s_mov_b32(s[40], scale_k))
-    k.emit(s_mov_b32(s[65], 0))
     k.emit(v_lshrrev_b32_e32(v[1], 10))
     k.emit(v_lshrrev_b32_e32(v[2], 10, v[1]))
     k.emit(v_and_b32_e32(v[2], LIT, v[2], 1023))
@@ -68,17 +64,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
       k.emit(s_or_b32(s[5 + i * 8], s[5 + i * 8], LIT, 262144))
       k.emit(s_or_b32(s[9 + i * 12], s[9 + i * 12], LIT, 262144))
       k.emit(s_or_b32(s[17 + i * 8], s[17 + i * 8], LIT, 262144))
-    k.emit(s_cmp_gt_i32(s[65], 0))
-    k.emit(s_cbranch_scc0(9), target='L0_0194')
-    k.emit(s_lshr_b32(s[66], s[45], s[65]))
-    k.emit(s_add_u32(s[66], s[66], LIT, 255))
-    k.emit(s_lshr_b32(s[66], s[66], 8))
-    k.emit(s_lshl_b32(s[66], s[66], 8))
-    k.emit(s_mul_i32(s[63], s[66], s[64]))
-    k.emit(s_sub_i32(s[62], s[45], s[63]))
-    k.emit(s_cmp_lt_i32(s[62], s[66]))
-    k.emit(s_cselect_b32(s[45], s[62], s[66]))
-    k.label('L0_0194')
     k.emit(s_lshr_b32(s[37], s[37], 1))
     k.emit(s_mul_i32(s[62], s[48], LIT, 128))
     k.emit(s_mul_hi_u32(s[63], s[37], s[62]))
@@ -92,14 +77,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_mul_i32(s[63], s[37], s[62]))
     k.emit(s_mov_b32(s[14], s[63]))
     k.emit(s_mov_b32(s[15], LIT, 131072))
-    k.emit(s_cmp_gt_i32(s[65], 0))
-    k.emit(s_cbranch_scc0(5), target='L0_01F4')
-    k.emit(s_mul_i32(s[63], s[66], s[64]))
-    k.emit(s_lshr_b32(s[62], s[63], 1))
-    k.emit(s_add_u32(s[12], s[12], s[62]))
-    k.emit(s_addc_u32(s[13], s[13], 0))
-    k.emit(s_sub_u32(s[14], s[14], s[62]))
-    k.label('L0_01F4')
     k.emit(v_lshrrev_b32_e32(v[4], 3))
     k.emit(v_lshrrev_b32_e32(v[5], 2, v[4]))
     k.emit(v_lshlrev_b32_e32(v[5], 4, v[5]))
@@ -161,13 +138,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_mul_i32(s[63], s[39], s[62]))
     k.emit(s_mov_b32(s[22], s[63]))
     k.emit(s_mov_b32(s[23], LIT, 131072))
-    k.emit(s_cmp_gt_i32(s[65], 0))
-    k.emit(s_cbranch_scc0(4), target='L0_0334')
-    k.emit(s_mul_i32(s[63], s[66], s[64]))
-    k.emit(s_add_u32(s[20], s[20], s[63]))
-    k.emit(s_addc_u32(s[21], s[21], 0))
-    k.emit(s_sub_u32(s[22], s[22], s[63]))
-    k.label('L0_0334')
     k.emit(v_lshlrev_b32_e32(v[218], 2))
     k.emit(s_mul_i32(s[63], s[46], 32))
     k.emit(s_mul_i32(s[63], s[63], s[39]))
@@ -189,15 +159,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_mul_i32(s[63], s[38], s[62]))
     k.emit(s_mov_b32(s[18], s[63]))
     k.emit(s_mov_b32(s[19], LIT, 131072))
-    k.emit(s_cmp_gt_i32(s[65], 0))
-    k.emit(s_cbranch_scc0(6), target='L0_03BC')
-    k.emit(s_mul_i32(s[63], s[66], s[64]))
-    k.emit(s_lshr_b32(s[62], s[63], 1))
-    k.emit(s_mul_i32(s[62], s[62], 16))
-    k.emit(s_add_u32(s[16], s[16], s[62]))
-    k.emit(s_addc_u32(s[17], s[17], 0))
-    k.emit(s_sub_u32(s[18], s[18], s[62]))
-    k.label('L0_03BC')
     k.emit(v_lshlrev_b32_e32(v[220], 4))
     k.emit(s_mul_i32(s[63], s[46], LIT, 128))
     k.emit(s_mul_i32(s[62], s[63], s[38]))
@@ -223,13 +184,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_mul_i32(s[63], s[40], s[62]))
     k.emit(s_mov_b32(s[26], s[63]))
     k.emit(s_mov_b32(s[27], LIT, 131072))
-    k.emit(s_cmp_gt_i32(s[65], 0))
-    k.emit(s_cbranch_scc0(4), target='L0_047C')
-    k.emit(s_mul_i32(s[63], s[66], s[64]))
-    k.emit(s_add_u32(s[24], s[24], s[63]))
-    k.emit(s_addc_u32(s[25], s[25], 0))
-    k.emit(s_sub_u32(s[26], s[26], s[63]))
-    k.label('L0_047C')
     k.emit(v_lshlrev_b32_e32(v[236], 2))
     k.emit(s_mul_i32(s[63], s[46], LIT, 128))
     k.emit(s_mul_i32(s[63], s[63], s[40]))
@@ -342,17 +296,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_sub_i32(s[62], s[62], s[63]))
     k.emit(s_mov_b32(s[6], s[62]))
     k.emit(s_mov_b32(s[7], LIT, 131072))
-    k.emit(s_cmp_gt_i32(s[65], 0))
-    k.emit(s_cbranch_scc0(11), target='L0_0F54')
-    k.emit(v_mul_i32_i24_e64(v[4], v[0], 4))
-    k.emit(s_mul_i32(s[62], s[46], LIT, 256))
-    k.emit(v_add_u32_e32(v[240], s[62], v[4]))
-    k.emit(v_add_u32_e32(v[241], LIT, v[240], 128))
-    k.emit(s_mul_i32(s[62], s[36], 64))
-    k.emit(v_add_u32_e32(v[242], s[62], v[240]))
-    k.emit(v_add_u32_e32(v[243], s[62], v[241]))
-    k.emit(s_branch(22), target='L0_0FAC')
-    k.label('L0_0F54')
     k.emit(v_and_b32_e64(v[4], v[0], 15))
     k.emit(v_mul_lo_u32(v[240], s[36], v[4]))
     k.emit(v_lshrrev_b32_e32(v[4], 5))
@@ -1018,242 +961,14 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.label('L0_37CC')
     k.emit(s_waitcnt())
     k.emit(s_barrier())
-    k.emit(s_cmp_eq_u32(s[65], 0))
-    k.emit(s_cbranch_scc1(2149), target='L0_5970')
-    k.emit(v_lshrrev_b32_e32(v[4], 4))
-    k.emit(v_mul_i32_i24_e64(v[4], v[4], 8))
-    k.emit(v_and_b32_e64(v[5], v[0], 15))
-    k.emit(v_lshlrev_b32_e32(v[5], 8, v[5]))
-    k.emit(v_add_i32(v[4], v[4], v[5]))
-    k.emit(s_mul_i32(s[62], s[46], LIT, 16384))
-    k.emit(s_add_i32(s[62], s[62], 0))
-    k.emit(v_add_i32(v[4], v[4], s[62]))
-    for i in range(2):
-      for j9 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j9 * 1 + i * 4], v[0 + j9 * 1 + i * 16]))
-        k.emit(v_mul_f32_e32(v[8 + j9 * 1 + i * 4], s[41], v[8 + j9 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(ds_write_b64(v[0], v[4], v[16:17]))
-    k.emit(ds_write_b64(v[0], v[4], v[18:19], v[0], 0, 32))
-    for i in range(2):
-      for j10 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j10 * 1 + i * 4], v[32 + j10 * 1 + i * 16]))
-        k.emit(v_mul_f32_e32(v[8 + j10 * 1 + i * 4], s[41], v[8 + j10 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(ds_write_b64(v[0], v[4], v[16:17], v[0], 0, 64))
-    k.emit(ds_write_b64(v[0], v[4], v[18:19], v[0], 0, 96))
-    for i in range(3):
-      for j11 in range(2):
-        k.emit(v_accvgpr_read(v[8], v[4 + j11 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[8], s[41], v[8]))
-        k.emit(v_accvgpr_read(v[9], v[5 + j11 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[9], s[41], v[9]))
-        k.emit(v_accvgpr_read(v[10], v[6 + j11 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[10], s[41], v[10]))
-        k.emit(v_accvgpr_read(v[11], v[7 + j11 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[11], s[41], v[11]))
-        k.emit(v_accvgpr_read(v[12], v[20 + j11 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[12], s[41], v[12]))
-        k.emit(v_accvgpr_read(v[13], v[21 + j11 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[13], s[41], v[13]))
-        k.emit(v_accvgpr_read(v[14], v[22 + j11 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[14], s[41], v[14]))
-        k.emit(v_accvgpr_read(v[15], v[23 + j11 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[15], s[41], v[15]))
-        k.emit(v_cvt_pk_bf16_f32(v[16], v[8], v[9]))
-        k.emit(v_cvt_pk_bf16_f32(v[17], v[10], v[11]))
-        k.emit(v_cvt_pk_bf16_f32(v[18], v[12], v[13]))
-        k.emit(v_cvt_pk_bf16_f32(v[19], v[14], v[15]))
-        k.emit(ds_write_b64(v[0], v[4], v[16:17], v[0], 0, 0 + j11 * 64, 16 + i * 16))
-        k.emit(ds_write_b64(v[0], v[4], v[18:19], v[0], 0, 32 + j11 * 64, 16 + i * 16))
-    for i in range(2):
-      for j12 in range(2):
-        k.emit(v_accvgpr_read(v[8 + j12 * 4], v[64 + j12 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j12 * 4], s[41], v[8 + j12 * 4]))
-        k.emit(v_accvgpr_read(v[9 + j12 * 4], v[65 + j12 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j12 * 4], s[41], v[9 + j12 * 4]))
-        k.emit(v_accvgpr_read(v[10 + j12 * 4], v[66 + j12 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j12 * 4], s[41], v[10 + j12 * 4]))
-        k.emit(v_accvgpr_read(v[11 + j12 * 4], v[67 + j12 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j12 * 4], s[41], v[11 + j12 * 4]))
-      for j13 in range(4):
-        k.emit(v_cvt_pk_bf16_f32(v[16 + j13 * 1], v[8 + j13 * 2], v[9 + j13 * 2]))
-      k.emit(ds_write_b64(v[0], v[4], v[16:17], v[0], 0, 128 + i * 64))
-      k.emit(ds_write_b64(v[0], v[4], v[18:19], v[0], 0, 160 + i * 64))
-    for i in range(3):
-      for j14 in range(2):
-        k.emit(v_accvgpr_read(v[8], v[68 + j14 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[8], s[41], v[8]))
-        k.emit(v_accvgpr_read(v[9], v[69 + j14 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[9], s[41], v[9]))
-        k.emit(v_accvgpr_read(v[10], v[70 + j14 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[10], s[41], v[10]))
-        k.emit(v_accvgpr_read(v[11], v[71 + j14 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[11], s[41], v[11]))
-        k.emit(v_accvgpr_read(v[12], v[84 + j14 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[12], s[41], v[12]))
-        k.emit(v_accvgpr_read(v[13], v[85 + j14 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[13], s[41], v[13]))
-        k.emit(v_accvgpr_read(v[14], v[86 + j14 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[14], s[41], v[14]))
-        k.emit(v_accvgpr_read(v[15], v[87 + j14 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[15], s[41], v[15]))
-        k.emit(v_cvt_pk_bf16_f32(v[16], v[8], v[9]))
-        k.emit(v_cvt_pk_bf16_f32(v[17], v[10], v[11]))
-        k.emit(v_cvt_pk_bf16_f32(v[18], v[12], v[13]))
-        k.emit(v_cvt_pk_bf16_f32(v[19], v[14], v[15]))
-        k.emit(ds_write_b64(v[0], v[4], v[16:17], v[0], 0, 128 + j14 * 64, 16 + i * 16))
-        k.emit(ds_write_b64(v[0], v[4], v[18:19], v[0], 0, 160 + j14 * 64, 16 + i * 16))
-    k.emit(s_waitcnt(49279))
-    k.emit(v_mul_i32_i24_e64(v[4], v[0], 4))
-    k.emit(v_add_i32(v[4], v[4], s[62]))
-    k.emit(s_mul_i32(s[63], s[36], 0))
-    k.emit(v_add_u32_e32(v[244], s[63], v[240]))
-    k.emit(ds_read_b32(v[16], v[4]))
-    for i in range(15):
-      k.emit(ds_read_b32(v[17], v[4], v[0], v[0], 0, 0, 1 + i * 4))
-      k.emit(ds_read_b32(v[18], v[4], v[0], v[0], 0, 0, 2 + i * 4))
-      k.emit(ds_read_b32(v[19], v[4], v[0], v[0], 0, 0, 3 + i * 4))
-      for j15 in range(4):
-        k.emit(s_waitcnt(50047 + j15 * -256))
-        k.emit(buffer_atomic_pk_add_bf16(v[16 + j15 * 1], v[244], s[4:7], 0, 0, 1))
-        k.emit(v_add_u32_e64(v[244], v[244], s[36]))
-      k.emit(s_mul_i32(s[63], s[36], 4 + i * 4))
-      k.emit(v_add_u32_e32(v[244], s[63], v[240]))
-      k.emit(ds_read_b32(v[16], v[4], v[0], v[0], 0, 0, 4 + i * 4))
-    k.emit(ds_read_b32(v[17], v[4], v[0], v[0], 0, 0, 61))
-    k.emit(ds_read_b32(v[18], v[4], v[0], v[0], 0, 0, 62))
-    k.emit(ds_read_b32(v[19], v[4], v[0], v[0], 0, 0, 63))
-    for i in range(4):
-      k.emit(s_waitcnt(50047 + i * -256))
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[244], s[4:7], 0, 0, 1))
-      k.emit(v_add_u32_e64(v[244], v[244], s[36]))
-    k.emit(v_lshrrev_b32_e32(v[4], 4))
-    k.emit(v_mul_i32_i24_e64(v[4], v[4], 8))
-    k.emit(v_and_b32_e64(v[5], v[0], 15))
-    k.emit(v_lshlrev_b32_e32(v[5], 8, v[5]))
-    k.emit(v_add_i32(v[4], v[4], v[5]))
-    k.emit(s_mul_i32(s[62], s[46], LIT, 16384))
-    k.emit(s_add_i32(s[62], s[62], 0))
-    k.emit(v_add_i32(v[4], v[4], s[62]))
-    for i in range(2):
-      for j16 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j16 * 1 + i * 4], v[128 + j16 * 1 + i * 16]))
-        k.emit(v_mul_f32_e32(v[8 + j16 * 1 + i * 4], s[41], v[8 + j16 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(ds_write_b64(v[0], v[4], v[16:17]))
-    k.emit(ds_write_b64(v[0], v[4], v[18:19], v[0], 0, 32))
-    for i in range(2):
-      for j17 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j17 * 1 + i * 4], v[160 + j17 * 1 + i * 16]))
-        k.emit(v_mul_f32_e32(v[8 + j17 * 1 + i * 4], s[41], v[8 + j17 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(ds_write_b64(v[0], v[4], v[16:17], v[0], 0, 64))
-    k.emit(ds_write_b64(v[0], v[4], v[18:19], v[0], 0, 96))
-    for i in range(3):
-      for j18 in range(2):
-        k.emit(v_accvgpr_read(v[8], v[132 + j18 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[8], s[41], v[8]))
-        k.emit(v_accvgpr_read(v[9], v[133 + j18 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[9], s[41], v[9]))
-        k.emit(v_accvgpr_read(v[10], v[134 + j18 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[10], s[41], v[10]))
-        k.emit(v_accvgpr_read(v[11], v[135 + j18 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[11], s[41], v[11]))
-        k.emit(v_accvgpr_read(v[12], v[148 + j18 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[12], s[41], v[12]))
-        k.emit(v_accvgpr_read(v[13], v[149 + j18 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[13], s[41], v[13]))
-        k.emit(v_accvgpr_read(v[14], v[150 + j18 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[14], s[41], v[14]))
-        k.emit(v_accvgpr_read(v[15], v[151 + j18 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[15], s[41], v[15]))
-        k.emit(v_cvt_pk_bf16_f32(v[16], v[8], v[9]))
-        k.emit(v_cvt_pk_bf16_f32(v[17], v[10], v[11]))
-        k.emit(v_cvt_pk_bf16_f32(v[18], v[12], v[13]))
-        k.emit(v_cvt_pk_bf16_f32(v[19], v[14], v[15]))
-        k.emit(ds_write_b64(v[0], v[4], v[16:17], v[0], 0, 0 + j18 * 64, 16 + i * 16))
-        k.emit(ds_write_b64(v[0], v[4], v[18:19], v[0], 0, 32 + j18 * 64, 16 + i * 16))
-    for i in range(2):
-      for j19 in range(2):
-        k.emit(v_accvgpr_read(v[8 + j19 * 4], v[192 + j19 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j19 * 4], s[41], v[8 + j19 * 4]))
-        k.emit(v_accvgpr_read(v[9 + j19 * 4], v[193 + j19 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j19 * 4], s[41], v[9 + j19 * 4]))
-        k.emit(v_accvgpr_read(v[10 + j19 * 4], v[194 + j19 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j19 * 4], s[41], v[10 + j19 * 4]))
-        k.emit(v_accvgpr_read(v[11 + j19 * 4], v[195 + j19 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j19 * 4], s[41], v[11 + j19 * 4]))
-      for j20 in range(4):
-        k.emit(v_cvt_pk_bf16_f32(v[16 + j20 * 1], v[8 + j20 * 2], v[9 + j20 * 2]))
-      k.emit(ds_write_b64(v[0], v[4], v[16:17], v[0], 0, 128 + i * 64))
-      k.emit(ds_write_b64(v[0], v[4], v[18:19], v[0], 0, 160 + i * 64))
-    for i in range(3):
-      for j21 in range(2):
-        k.emit(v_accvgpr_read(v[8], v[196 + j21 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[8], s[41], v[8]))
-        k.emit(v_accvgpr_read(v[9], v[197 + j21 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[9], s[41], v[9]))
-        k.emit(v_accvgpr_read(v[10], v[198 + j21 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[10], s[41], v[10]))
-        k.emit(v_accvgpr_read(v[11], v[199 + j21 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[11], s[41], v[11]))
-        k.emit(v_accvgpr_read(v[12], v[212 + j21 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[12], s[41], v[12]))
-        k.emit(v_accvgpr_read(v[13], v[213 + j21 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[13], s[41], v[13]))
-        k.emit(v_accvgpr_read(v[14], v[214 + j21 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[14], s[41], v[14]))
-        k.emit(v_accvgpr_read(v[15], v[215 + j21 * 32 + i * 4]))
-        k.emit(v_mul_f32_e32(v[15], s[41], v[15]))
-        k.emit(v_cvt_pk_bf16_f32(v[16], v[8], v[9]))
-        k.emit(v_cvt_pk_bf16_f32(v[17], v[10], v[11]))
-        k.emit(v_cvt_pk_bf16_f32(v[18], v[12], v[13]))
-        k.emit(v_cvt_pk_bf16_f32(v[19], v[14], v[15]))
-        k.emit(ds_write_b64(v[0], v[4], v[16:17], v[0], 0, 128 + j21 * 64, 16 + i * 16))
-        k.emit(ds_write_b64(v[0], v[4], v[18:19], v[0], 0, 160 + j21 * 64, 16 + i * 16))
-    k.emit(s_waitcnt(49279))
-    k.emit(v_mul_i32_i24_e64(v[4], v[0], 4))
-    k.emit(v_add_i32(v[4], v[4], s[62]))
-    k.emit(s_mul_i32(s[63], s[36], 0))
-    k.emit(v_add_u32_e32(v[244], s[63], v[242]))
-    k.emit(ds_read_b32(v[16], v[4]))
-    for i in range(15):
-      k.emit(ds_read_b32(v[17], v[4], v[0], v[0], 0, 0, 1 + i * 4))
-      k.emit(ds_read_b32(v[18], v[4], v[0], v[0], 0, 0, 2 + i * 4))
-      k.emit(ds_read_b32(v[19], v[4], v[0], v[0], 0, 0, 3 + i * 4))
-      for j22 in range(4):
-        k.emit(s_waitcnt(50047 + j22 * -256))
-        k.emit(buffer_atomic_pk_add_bf16(v[16 + j22 * 1], v[244], s[4:7], 0, 0, 1))
-        k.emit(v_add_u32_e64(v[244], v[244], s[36]))
-      k.emit(s_mul_i32(s[63], s[36], 4 + i * 4))
-      k.emit(v_add_u32_e32(v[244], s[63], v[242]))
-      k.emit(ds_read_b32(v[16], v[4], v[0], v[0], 0, 0, 4 + i * 4))
-    k.emit(ds_read_b32(v[17], v[4], v[0], v[0], 0, 0, 61))
-    k.emit(ds_read_b32(v[18], v[4], v[0], v[0], 0, 0, 62))
-    k.emit(ds_read_b32(v[19], v[4], v[0], v[0], 0, 0, 63))
-    for i in range(4):
-      k.emit(s_waitcnt(50047 + i * -256))
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[244], s[4:7], 0, 0, 1))
-      k.emit(v_add_u32_e64(v[244], v[244], s[36]))
-    k.emit(s_branch(1344), target='L0_6E70')
-    k.label('L0_5970')
     k.emit(s_mul_i32(s[62], s[36], 0))
     k.emit(v_add_u32_e32(v[244], s[62], v[240]))
     for i in range(2):
       for j23 in range(2):
         k.emit(v_accvgpr_read(v[8 + j23 * 4], v[0 + j23 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j23 * 4], s[41], v[8 + j23 * 4]))
         k.emit(v_accvgpr_read(v[9 + j23 * 4], v[1 + j23 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j23 * 4], s[41], v[9 + j23 * 4]))
         k.emit(v_accvgpr_read(v[10 + j23 * 4], v[2 + j23 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j23 * 4], s[41], v[10 + j23 * 4]))
         k.emit(v_accvgpr_read(v[11 + j23 * 4], v[3 + j23 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j23 * 4], s[41], v[11 + j23 * 4]))
       for j24 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j24 * 1], v[8 + j24 * 2], v[9 + j24 * 2]))
       k.emit(s_nop(1))
@@ -1268,13 +983,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j25 in range(2):
         k.emit(v_accvgpr_read(v[8 + j25 * 4], v[4 + j25 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j25 * 4], s[41], v[8 + j25 * 4]))
         k.emit(v_accvgpr_read(v[9 + j25 * 4], v[5 + j25 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j25 * 4], s[41], v[9 + j25 * 4]))
         k.emit(v_accvgpr_read(v[10 + j25 * 4], v[6 + j25 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j25 * 4], s[41], v[10 + j25 * 4]))
         k.emit(v_accvgpr_read(v[11 + j25 * 4], v[7 + j25 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j25 * 4], s[41], v[11 + j25 * 4]))
       for j26 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j26 * 1], v[8 + j26 * 2], v[9 + j26 * 2]))
       k.emit(s_nop(1))
@@ -1289,13 +1000,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j27 in range(2):
         k.emit(v_accvgpr_read(v[8 + j27 * 4], v[8 + j27 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j27 * 4], s[41], v[8 + j27 * 4]))
         k.emit(v_accvgpr_read(v[9 + j27 * 4], v[9 + j27 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j27 * 4], s[41], v[9 + j27 * 4]))
         k.emit(v_accvgpr_read(v[10 + j27 * 4], v[10 + j27 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j27 * 4], s[41], v[10 + j27 * 4]))
         k.emit(v_accvgpr_read(v[11 + j27 * 4], v[11 + j27 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j27 * 4], s[41], v[11 + j27 * 4]))
       for j28 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j28 * 1], v[8 + j28 * 2], v[9 + j28 * 2]))
       k.emit(s_nop(1))
@@ -1310,13 +1017,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j29 in range(2):
         k.emit(v_accvgpr_read(v[8 + j29 * 4], v[12 + j29 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j29 * 4], s[41], v[8 + j29 * 4]))
         k.emit(v_accvgpr_read(v[9 + j29 * 4], v[13 + j29 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j29 * 4], s[41], v[9 + j29 * 4]))
         k.emit(v_accvgpr_read(v[10 + j29 * 4], v[14 + j29 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j29 * 4], s[41], v[10 + j29 * 4]))
         k.emit(v_accvgpr_read(v[11 + j29 * 4], v[15 + j29 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j29 * 4], s[41], v[11 + j29 * 4]))
       for j30 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j30 * 1], v[8 + j30 * 2], v[9 + j30 * 2]))
       k.emit(s_nop(1))
@@ -1331,13 +1034,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j31 in range(2):
         k.emit(v_accvgpr_read(v[8 + j31 * 4], v[64 + j31 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j31 * 4], s[41], v[8 + j31 * 4]))
         k.emit(v_accvgpr_read(v[9 + j31 * 4], v[65 + j31 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j31 * 4], s[41], v[9 + j31 * 4]))
         k.emit(v_accvgpr_read(v[10 + j31 * 4], v[66 + j31 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j31 * 4], s[41], v[10 + j31 * 4]))
         k.emit(v_accvgpr_read(v[11 + j31 * 4], v[67 + j31 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j31 * 4], s[41], v[11 + j31 * 4]))
       for j32 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j32 * 1], v[8 + j32 * 2], v[9 + j32 * 2]))
       k.emit(s_nop(1))
@@ -1352,13 +1051,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j33 in range(2):
         k.emit(v_accvgpr_read(v[8 + j33 * 4], v[68 + j33 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j33 * 4], s[41], v[8 + j33 * 4]))
         k.emit(v_accvgpr_read(v[9 + j33 * 4], v[69 + j33 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j33 * 4], s[41], v[9 + j33 * 4]))
         k.emit(v_accvgpr_read(v[10 + j33 * 4], v[70 + j33 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j33 * 4], s[41], v[10 + j33 * 4]))
         k.emit(v_accvgpr_read(v[11 + j33 * 4], v[71 + j33 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j33 * 4], s[41], v[11 + j33 * 4]))
       for j34 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j34 * 1], v[8 + j34 * 2], v[9 + j34 * 2]))
       k.emit(s_nop(1))
@@ -1373,13 +1068,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j35 in range(2):
         k.emit(v_accvgpr_read(v[8 + j35 * 4], v[72 + j35 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j35 * 4], s[41], v[8 + j35 * 4]))
         k.emit(v_accvgpr_read(v[9 + j35 * 4], v[73 + j35 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j35 * 4], s[41], v[9 + j35 * 4]))
         k.emit(v_accvgpr_read(v[10 + j35 * 4], v[74 + j35 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j35 * 4], s[41], v[10 + j35 * 4]))
         k.emit(v_accvgpr_read(v[11 + j35 * 4], v[75 + j35 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j35 * 4], s[41], v[11 + j35 * 4]))
       for j36 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j36 * 1], v[8 + j36 * 2], v[9 + j36 * 2]))
       k.emit(s_nop(1))
@@ -1394,13 +1085,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j37 in range(2):
         k.emit(v_accvgpr_read(v[8 + j37 * 4], v[76 + j37 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j37 * 4], s[41], v[8 + j37 * 4]))
         k.emit(v_accvgpr_read(v[9 + j37 * 4], v[77 + j37 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j37 * 4], s[41], v[9 + j37 * 4]))
         k.emit(v_accvgpr_read(v[10 + j37 * 4], v[78 + j37 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j37 * 4], s[41], v[10 + j37 * 4]))
         k.emit(v_accvgpr_read(v[11 + j37 * 4], v[79 + j37 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j37 * 4], s[41], v[11 + j37 * 4]))
       for j38 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j38 * 1], v[8 + j38 * 2], v[9 + j38 * 2]))
       k.emit(s_nop(1))
@@ -1415,13 +1102,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j39 in range(2):
         k.emit(v_accvgpr_read(v[8 + j39 * 4], v[128 + j39 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j39 * 4], s[41], v[8 + j39 * 4]))
         k.emit(v_accvgpr_read(v[9 + j39 * 4], v[129 + j39 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j39 * 4], s[41], v[9 + j39 * 4]))
         k.emit(v_accvgpr_read(v[10 + j39 * 4], v[130 + j39 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j39 * 4], s[41], v[10 + j39 * 4]))
         k.emit(v_accvgpr_read(v[11 + j39 * 4], v[131 + j39 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j39 * 4], s[41], v[11 + j39 * 4]))
       for j40 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j40 * 1], v[8 + j40 * 2], v[9 + j40 * 2]))
       k.emit(s_nop(1))
@@ -1436,13 +1119,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j41 in range(2):
         k.emit(v_accvgpr_read(v[8 + j41 * 4], v[132 + j41 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j41 * 4], s[41], v[8 + j41 * 4]))
         k.emit(v_accvgpr_read(v[9 + j41 * 4], v[133 + j41 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j41 * 4], s[41], v[9 + j41 * 4]))
         k.emit(v_accvgpr_read(v[10 + j41 * 4], v[134 + j41 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j41 * 4], s[41], v[10 + j41 * 4]))
         k.emit(v_accvgpr_read(v[11 + j41 * 4], v[135 + j41 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j41 * 4], s[41], v[11 + j41 * 4]))
       for j42 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j42 * 1], v[8 + j42 * 2], v[9 + j42 * 2]))
       k.emit(s_nop(1))
@@ -1457,21 +1136,13 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
       k.emit(v_add_u32_e32(v[244], s[62], v[242 + i * 1]))
       for j43 in range(2):
         k.emit(v_accvgpr_read(v[8], v[136 + j43 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[8], s[41], v[8]))
         k.emit(v_accvgpr_read(v[9], v[137 + j43 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[9], s[41], v[9]))
         k.emit(v_accvgpr_read(v[10], v[138 + j43 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[10], s[41], v[10]))
         k.emit(v_accvgpr_read(v[11], v[139 + j43 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[11], s[41], v[11]))
         k.emit(v_accvgpr_read(v[12], v[152 + j43 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[12], s[41], v[12]))
         k.emit(v_accvgpr_read(v[13], v[153 + j43 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[13], s[41], v[13]))
         k.emit(v_accvgpr_read(v[14], v[154 + j43 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[14], s[41], v[14]))
         k.emit(v_accvgpr_read(v[15], v[155 + j43 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[15], s[41], v[15]))
         k.emit(v_cvt_pk_bf16_f32(v[16], v[8], v[9]))
         k.emit(v_cvt_pk_bf16_f32(v[17], v[10], v[11]))
         k.emit(v_cvt_pk_bf16_f32(v[18], v[12], v[13]))
@@ -1487,21 +1158,13 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
       k.emit(v_add_u32_e32(v[244], s[62], v[242 + i * 1]))
       for j44 in range(2):
         k.emit(v_accvgpr_read(v[8], v[140 + j44 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[8], s[41], v[8]))
         k.emit(v_accvgpr_read(v[9], v[141 + j44 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[9], s[41], v[9]))
         k.emit(v_accvgpr_read(v[10], v[142 + j44 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[10], s[41], v[10]))
         k.emit(v_accvgpr_read(v[11], v[143 + j44 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[11], s[41], v[11]))
         k.emit(v_accvgpr_read(v[12], v[156 + j44 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[12], s[41], v[12]))
         k.emit(v_accvgpr_read(v[13], v[157 + j44 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[13], s[41], v[13]))
         k.emit(v_accvgpr_read(v[14], v[158 + j44 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[14], s[41], v[14]))
         k.emit(v_accvgpr_read(v[15], v[159 + j44 * 32 + i * 56]))
-        k.emit(v_mul_f32_e32(v[15], s[41], v[15]))
         k.emit(v_cvt_pk_bf16_f32(v[16], v[8], v[9]))
         k.emit(v_cvt_pk_bf16_f32(v[17], v[10], v[11]))
         k.emit(v_cvt_pk_bf16_f32(v[18], v[12], v[13]))
@@ -1518,13 +1181,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j45 in range(2):
         k.emit(v_accvgpr_read(v[8 + j45 * 4], v[200 + j45 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j45 * 4], s[41], v[8 + j45 * 4]))
         k.emit(v_accvgpr_read(v[9 + j45 * 4], v[201 + j45 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j45 * 4], s[41], v[9 + j45 * 4]))
         k.emit(v_accvgpr_read(v[10 + j45 * 4], v[202 + j45 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j45 * 4], s[41], v[10 + j45 * 4]))
         k.emit(v_accvgpr_read(v[11 + j45 * 4], v[203 + j45 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j45 * 4], s[41], v[11 + j45 * 4]))
       for j46 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j46 * 1], v[8 + j46 * 2], v[9 + j46 * 2]))
       k.emit(s_nop(1))
@@ -1539,13 +1198,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j47 in range(2):
         k.emit(v_accvgpr_read(v[8 + j47 * 4], v[204 + j47 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j47 * 4], s[41], v[8 + j47 * 4]))
         k.emit(v_accvgpr_read(v[9 + j47 * 4], v[205 + j47 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[9 + j47 * 4], s[41], v[9 + j47 * 4]))
         k.emit(v_accvgpr_read(v[10 + j47 * 4], v[206 + j47 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[10 + j47 * 4], s[41], v[10 + j47 * 4]))
         k.emit(v_accvgpr_read(v[11 + j47 * 4], v[207 + j47 * 16 + i * 32]))
-        k.emit(v_mul_f32_e32(v[11 + j47 * 4], s[41], v[11 + j47 * 4]))
       for j48 in range(4):
         k.emit(v_cvt_pk_bf16_f32(v[16 + j48 * 1], v[8 + j48 * 2], v[9 + j48 * 2]))
       k.emit(s_nop(1))
@@ -1555,7 +1210,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
       k.emit(s_nop(1))
       k.emit(buffer_store_dwordx4(v[16:19], v[244], s[4:7], 0, 0, 1))
       k.emit(v_add_i32(v[244], v[244], 64))
-    k.label('L0_6E70')
     k.emit(s_waitcnt())
     k.emit(s_endpgm())
   elif (tile_m, tile_n) == (192, 256):
@@ -1565,8 +1219,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_mov_b32(s[9], 0))
     k.emit(s_load_dwordx2(s[12:13], s[0:1], s[0], 8, 0, 0, 0, 1))
     k.emit(s_load_dwordx2(s[16:17], s[0:1], s[0], 16, 0, 0, 0, 1))
-    k.emit(s_mov_b32(s[41], 1.0))
-    k.emit(s_mov_b32(s[42], 0))
     k.emit(s_mov_b32(s[36], N))
     k.emit(s_mov_b32(s[37], K))
     k.emit(s_mov_b32(s[38], K))
@@ -2583,14 +2235,11 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_endpgm())
   elif (tile_m, tile_n) == (256, 256):
     k.emit(s_and_b32(s[1], s[1], LIT, 65535))
-    k.emit(s_mov_b32(s[56], s[4]))
     k.emit(s_load_dwordx2(s[4:5], s[0:1], s[0], 0, 0, 0, 0, 1))
     k.emit(s_mov_b32(s[8], 0))
     k.emit(s_mov_b32(s[9], 0))
     k.emit(s_load_dwordx2(s[12:13], s[0:1], s[0], 8, 0, 0, 0, 1))
     k.emit(s_load_dwordx2(s[16:17], s[0:1], s[0], 16, 0, 0, 0, 1))
-    k.emit(s_mov_b32(s[38], 1.0))
-    k.emit(s_mov_b32(s[39], 0))
     k.emit(s_mov_b32(s[40], N))
     k.emit(s_mov_b32(s[41], K))
     k.emit(s_mov_b32(s[42], K))
@@ -2601,7 +2250,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_load_dwordx2(s[24:25], s[0:1], s[0], 32, 0, 0, 0, 1))
     k.emit(s_mov_b32(s[36], scale_k))
     k.emit(s_mov_b32(s[37], scale_k))
-    k.emit(s_mov_b32(s[57], 0))
     k.emit(v_lshrrev_b32_e32(v[1], 10))
     k.emit(v_lshrrev_b32_e32(v[2], 10, v[1]))
     k.emit(v_and_b32_e32(v[2], LIT, v[2], 1023))
@@ -2680,28 +2328,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_or_b32(s[9], s[9], LIT, 262144))
     k.emit(s_or_b32(s[17], s[17], LIT, 262144))
     k.emit(s_or_b32(s[13], s[13], LIT, 262144))
-    k.emit(s_cmp_gt_u32(s[57], 0))
-    k.emit(s_cbranch_scc0(9), target='L2_0234')
-    k.emit(s_lshr_b32(s[58], s[45], s[57]))
-    k.emit(s_add_u32(s[58], s[58], LIT, 255))
-    k.emit(s_lshr_b32(s[58], s[58], 8))
-    k.emit(s_lshl_b32(s[58], s[58], 8))
-    k.emit(s_mul_i32(s[53], s[58], s[56]))
-    k.emit(s_sub_i32(s[52], s[45], s[53]))
-    k.emit(s_cmp_lt_i32(s[52], s[58]))
-    k.emit(s_cselect_b32(s[45], s[52], s[58]))
-    k.label('L2_0234')
     k.emit(s_lshr_b32(s[41], s[41], 1))
     k.emit(s_mul_i32(s[52], s[41], s[43]))
     k.emit(s_mov_b32(s[14], s[52]))
-    k.emit(s_cmp_gt_u32(s[57], 0))
-    k.emit(s_cbranch_scc0(5), target='L2_025C')
-    k.emit(s_mul_i32(s[53], s[58], s[56]))
-    k.emit(s_lshr_b32(s[52], s[53], 1))
-    k.emit(s_add_u32(s[12], s[12], s[52]))
-    k.emit(s_addc_u32(s[13], s[13], 0))
-    k.emit(s_sub_u32(s[14], s[14], s[52]))
-    k.label('L2_025C')
     k.emit(s_lshr_b32(s[42], s[42], 1))
     k.emit(s_mul_i32(s[52], s[42], s[44]))
     k.emit(s_mov_b32(s[18], s[52]))
@@ -2765,13 +2394,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_mov_b32(s[52], LIT, 4096))
     k.emit(v_add_u32_e64(v[220], v[220], s[52]))
     k.emit(v_add_u32_e32(v[221], LIT, v[220], 33792))
-    k.emit(s_cmp_gt_u32(s[57], 0))
-    k.emit(s_cbranch_scc0(4), target='L2_03C4')
-    k.emit(s_mul_i32(s[53], s[58], s[56]))
-    k.emit(s_add_u32(s[20], s[20], s[53]))
-    k.emit(s_addc_u32(s[21], s[21], 0))
-    k.emit(s_sub_u32(s[22], s[22], s[53]))
-    k.label('L2_03C4')
     k.emit(v_lshlrev_b32_e32(v[222], 2))
     k.emit(s_mul_i32(s[52], s[47], LIT, 256))
     k.emit(s_mul_i32(s[53], s[49], 32))
@@ -2784,15 +2406,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_add_i32(s[60], s[60], 0))
     k.emit(v_lshlrev_b32_e32(v[224], 2))
     k.emit(v_add_u32_e32(v[224], 0, v[224]))
-    k.emit(s_cmp_gt_u32(s[57], 0))
-    k.emit(s_cbranch_scc0(6), target='L2_0420')
-    k.emit(s_mul_i32(s[53], s[58], s[56]))
-    k.emit(s_lshr_b32(s[52], s[53], 1))
-    k.emit(s_mul_i32(s[52], s[52], 16))
-    k.emit(s_add_u32(s[16], s[16], s[52]))
-    k.emit(s_addc_u32(s[17], s[17], 0))
-    k.emit(s_sub_u32(s[18], s[18], s[52]))
-    k.label('L2_0420')
     k.emit(v_lshlrev_b32_e32(v[225], 4))
     k.emit(s_mul_i32(s[52], s[46], LIT, 256))
     k.emit(s_mul_i32(s[53], s[49], 64))
@@ -2805,13 +2418,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(v_add_u32_e32(v[228], s[52], v[227]))
     for i in range(4):
       k.emit(v_add_u32_e32(v[229 + i * 1], LIT, v[225 + i * 1], 1024))
-    k.emit(s_cmp_gt_u32(s[57], 0))
-    k.emit(s_cbranch_scc0(4), target='L2_0484')
-    k.emit(s_mul_i32(s[53], s[58], s[56]))
-    k.emit(s_add_u32(s[24], s[24], s[53]))
-    k.emit(s_addc_u32(s[25], s[25], 0))
-    k.emit(s_sub_u32(s[26], s[26], s[53]))
-    k.label('L2_0484')
     k.emit(v_lshlrev_b32_e32(v[233], 2))
     k.emit(s_mul_i32(s[52], s[46], LIT, 256))
     k.emit(s_mul_i32(s[53], s[49], 64))
@@ -3619,270 +3225,9 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.label('L2_3B10')
     k.emit(s_waitcnt(112))
     k.emit(s_barrier())
-    k.emit(s_cmp_eq_u32(s[57], 0))
-    k.emit(s_cbranch_scc1(1505), target='L2_52A4')
-    for i in range(2):
-      for j77 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j77 * 1 + i * 4], v[0 + j77 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j77 * 1 + i * 4], s[38], v[8 + j77 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[235], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[235], v[235], 64))
-    for i in range(2):
-      for j78 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j78 * 1 + i * 4], v[64 + j78 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j78 * 1 + i * 4], s[38], v[8 + j78 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[235], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[235], v[235], 64))
-    for i in range(2):
-      for j79 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j79 * 1 + i * 4], v[4 + j79 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j79 * 1 + i * 4], s[38], v[8 + j79 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[236], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[236], v[236], 64))
-    for i in range(2):
-      for j80 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j80 * 1 + i * 4], v[68 + j80 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j80 * 1 + i * 4], s[38], v[8 + j80 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[236], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[236], v[236], 64))
-    for i in range(2):
-      for j81 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j81 * 1 + i * 4], v[8 + j81 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j81 * 1 + i * 4], s[38], v[8 + j81 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[237], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[237], v[237], 64))
-    for i in range(2):
-      for j82 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j82 * 1 + i * 4], v[72 + j82 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j82 * 1 + i * 4], s[38], v[8 + j82 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[237], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[237], v[237], 64))
-    for i in range(2):
-      for j83 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j83 * 1 + i * 4], v[12 + j83 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j83 * 1 + i * 4], s[38], v[8 + j83 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[238], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[238], v[238], 64))
-    for i in range(2):
-      for j84 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j84 * 1 + i * 4], v[76 + j84 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j84 * 1 + i * 4], s[38], v[8 + j84 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[238], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[238], v[238], 64))
-    for i in range(2):
-      for j85 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j85 * 1 + i * 4], v[16 + j85 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j85 * 1 + i * 4], s[38], v[8 + j85 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[239], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[239], v[239], 64))
-    for i in range(2):
-      for j86 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j86 * 1 + i * 4], v[80 + j86 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j86 * 1 + i * 4], s[38], v[8 + j86 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[239], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[239], v[239], 64))
-    for i in range(2):
-      for j87 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j87 * 1 + i * 4], v[20 + j87 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j87 * 1 + i * 4], s[38], v[8 + j87 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[240], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[240], v[240], 64))
-    for i in range(2):
-      for j88 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j88 * 1 + i * 4], v[84 + j88 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j88 * 1 + i * 4], s[38], v[8 + j88 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[240], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[240], v[240], 64))
-    for i in range(2):
-      for j89 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j89 * 1 + i * 4], v[24 + j89 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j89 * 1 + i * 4], s[38], v[8 + j89 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[241], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[241], v[241], 64))
-    for i in range(2):
-      for j90 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j90 * 1 + i * 4], v[88 + j90 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j90 * 1 + i * 4], s[38], v[8 + j90 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[241], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[241], v[241], 64))
-    for i in range(2):
-      for j91 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j91 * 1 + i * 4], v[28 + j91 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j91 * 1 + i * 4], s[38], v[8 + j91 * 1 + i * 4]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[242], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[242], v[242], 64))
-    for i in range(2):
-      for j92 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j92 * 1 + i * 4], v[92 + j92 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j92 * 1 + i * 4], s[38], v[8 + j92 * 1 + i * 4]))
-    for i in range(8):
-      for j93 in range(2):
-        k.emit(v_cvt_pk_bf16_f32(v[16], v[8], v[9]))
-        k.emit(v_cvt_pk_bf16_f32(v[17], v[10], v[11]))
-        k.emit(v_cvt_pk_bf16_f32(v[18], v[12], v[13]))
-        k.emit(v_cvt_pk_bf16_f32(v[19], v[14], v[15]))
-        k.emit(s_nop(1))
-        k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-        k.emit(s_nop(1))
-        k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-        k.emit(s_nop(1))
-        k.emit(buffer_atomic_pk_add_bf16(v[16], v[242 + j93 * 1 + i * 1], s[4:7], 0, 0, 1))
-        k.emit(buffer_atomic_pk_add_bf16(v[17], v[242 + j93 * 1 + i * 1], s[4:7], 0, 4, 1))
-        k.emit(buffer_atomic_pk_add_bf16(v[18], v[242 + j93 * 1 + i * 1], s[4:7], 0, 8, 1))
-        k.emit(buffer_atomic_pk_add_bf16(v[19], v[242 + j93 * 1 + i * 1], s[4:7], 0, 12, 1))
-        k.emit(v_add_i32(v[242 + j93 * 1 + i * 1], v[242 + j93 * 1 + i * 1], 64))
-        k.emit(v_accvgpr_read(v[8], v[128 + j93 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[8], s[38], v[8]))
-        k.emit(v_accvgpr_read(v[9], v[129 + j93 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[9], s[38], v[9]))
-        k.emit(v_accvgpr_read(v[10], v[130 + j93 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[10], s[38], v[10]))
-        k.emit(v_accvgpr_read(v[11], v[131 + j93 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[11], s[38], v[11]))
-        k.emit(v_accvgpr_read(v[12], v[160 + j93 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[12], s[38], v[12]))
-        k.emit(v_accvgpr_read(v[13], v[161 + j93 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[13], s[38], v[13]))
-        k.emit(v_accvgpr_read(v[14], v[162 + j93 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[14], s[38], v[14]))
-        k.emit(v_accvgpr_read(v[15], v[163 + j93 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[15], s[38], v[15]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    for i in range(4):
-      k.emit(buffer_atomic_pk_add_bf16(v[16 + i * 1], v[250], s[4:7], 0, 0 + i * 4, 1))
-    k.emit(v_add_i32(v[250], v[250], 64))
-    k.emit(s_branch(1312), target='L2_6724')
-    k.label('L2_52A4')
     for i in range(2):
       for j94 in range(4):
         k.emit(v_accvgpr_read(v[8 + j94 * 1 + i * 4], v[0 + j94 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j94 * 1 + i * 4], s[38], v[8 + j94 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -3895,7 +3240,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j95 in range(4):
         k.emit(v_accvgpr_read(v[8 + j95 * 1 + i * 4], v[64 + j95 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j95 * 1 + i * 4], s[38], v[8 + j95 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -3908,7 +3252,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j96 in range(4):
         k.emit(v_accvgpr_read(v[8 + j96 * 1 + i * 4], v[4 + j96 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j96 * 1 + i * 4], s[38], v[8 + j96 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -3921,7 +3264,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j97 in range(4):
         k.emit(v_accvgpr_read(v[8 + j97 * 1 + i * 4], v[68 + j97 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j97 * 1 + i * 4], s[38], v[8 + j97 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -3934,7 +3276,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j98 in range(4):
         k.emit(v_accvgpr_read(v[8 + j98 * 1 + i * 4], v[8 + j98 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j98 * 1 + i * 4], s[38], v[8 + j98 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -3947,7 +3288,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j99 in range(4):
         k.emit(v_accvgpr_read(v[8 + j99 * 1 + i * 4], v[72 + j99 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j99 * 1 + i * 4], s[38], v[8 + j99 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -3960,7 +3300,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j100 in range(4):
         k.emit(v_accvgpr_read(v[8 + j100 * 1 + i * 4], v[12 + j100 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j100 * 1 + i * 4], s[38], v[8 + j100 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -3973,7 +3312,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j101 in range(4):
         k.emit(v_accvgpr_read(v[8 + j101 * 1 + i * 4], v[76 + j101 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j101 * 1 + i * 4], s[38], v[8 + j101 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -3986,7 +3324,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j102 in range(4):
         k.emit(v_accvgpr_read(v[8 + j102 * 1 + i * 4], v[16 + j102 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j102 * 1 + i * 4], s[38], v[8 + j102 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -3999,7 +3336,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j103 in range(4):
         k.emit(v_accvgpr_read(v[8 + j103 * 1 + i * 4], v[80 + j103 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j103 * 1 + i * 4], s[38], v[8 + j103 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -4012,7 +3348,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j104 in range(4):
         k.emit(v_accvgpr_read(v[8 + j104 * 1 + i * 4], v[20 + j104 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j104 * 1 + i * 4], s[38], v[8 + j104 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -4025,7 +3360,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j105 in range(4):
         k.emit(v_accvgpr_read(v[8 + j105 * 1 + i * 4], v[84 + j105 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j105 * 1 + i * 4], s[38], v[8 + j105 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -4038,7 +3372,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j106 in range(4):
         k.emit(v_accvgpr_read(v[8 + j106 * 1 + i * 4], v[24 + j106 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j106 * 1 + i * 4], s[38], v[8 + j106 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -4051,7 +3384,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j107 in range(4):
         k.emit(v_accvgpr_read(v[8 + j107 * 1 + i * 4], v[88 + j107 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j107 * 1 + i * 4], s[38], v[8 + j107 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -4064,7 +3396,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j108 in range(4):
         k.emit(v_accvgpr_read(v[8 + j108 * 1 + i * 4], v[28 + j108 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j108 * 1 + i * 4], s[38], v[8 + j108 * 1 + i * 4]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -4077,7 +3408,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     for i in range(2):
       for j109 in range(4):
         k.emit(v_accvgpr_read(v[8 + j109 * 1 + i * 4], v[92 + j109 * 1 + i * 32]))
-        k.emit(v_mul_f32_e32(v[8 + j109 * 1 + i * 4], s[38], v[8 + j109 * 1 + i * 4]))
     for i in range(8):
       for j110 in range(2):
         k.emit(v_cvt_pk_bf16_f32(v[16], v[8], v[9]))
@@ -4092,21 +3422,13 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
         k.emit(buffer_store_dwordx4(v[16:19], v[242 + j110 * 1 + i * 1], s[4:7], 0, 0, 1))
         k.emit(v_add_i32(v[242 + j110 * 1 + i * 1], v[242 + j110 * 1 + i * 1], 64))
         k.emit(v_accvgpr_read(v[8], v[128 + j110 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[8], s[38], v[8]))
         k.emit(v_accvgpr_read(v[9], v[129 + j110 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[9], s[38], v[9]))
         k.emit(v_accvgpr_read(v[10], v[130 + j110 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[10], s[38], v[10]))
         k.emit(v_accvgpr_read(v[11], v[131 + j110 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[11], s[38], v[11]))
         k.emit(v_accvgpr_read(v[12], v[160 + j110 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[12], s[38], v[12]))
         k.emit(v_accvgpr_read(v[13], v[161 + j110 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[13], s[38], v[13]))
         k.emit(v_accvgpr_read(v[14], v[162 + j110 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[14], s[38], v[14]))
         k.emit(v_accvgpr_read(v[15], v[163 + j110 * 64 + i * 4]))
-        k.emit(v_mul_f32_e32(v[15], s[38], v[15]))
     for i in range(4):
       k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
     k.emit(s_nop(1))
@@ -4116,7 +3438,6 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_nop(1))
     k.emit(buffer_store_dwordx4(v[16:19], v[250], s[4:7], 0, 0, 1))
     k.emit(v_add_i32(v[250], v[250], 64))
-    k.label('L2_6724')
     k.emit(s_waitcnt())
     k.emit(s_endpgm())
   else:

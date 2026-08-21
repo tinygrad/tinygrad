@@ -34,6 +34,7 @@ class MetalDevice(Compiled):
     self.mtl_queue = self.sysdevice.newCommandQueueWithMaxCommandBufferCount(1024)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
     self.mtl_buffers_in_flight: list[metal.MTLCommandBuffer] = []
+    self.mtl_profile_keys: dict[int, bytes] = {}
     self.timeline_signal = self.sysdevice.newSharedEvent()
     self.timeline_value = 0
 
@@ -55,7 +56,7 @@ class MetalDevice(Compiled):
       st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000
       # NOTE: command buffers from MetalGraph are not profiled here
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
-        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en)]
+        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, self.mtl_profile_keys.pop(id(cbuf), None))]
     self.mtl_buffers_in_flight.clear()
 
 class MetalCompiler(Compiler):
@@ -113,7 +114,7 @@ class MetalCompiler(Compiler):
 
 class MetalProgram(Program[MetalDevice]):
   def __init__(self, dev:MetalDevice, obj:TinyELF):
-    self.dev, self.name, self.lib, self.signature = dev, obj.name, obj.lib, obj.signature
+    self.dev, self.name, self.lib, self.signature, self.profile_key = dev, obj.name, obj.lib, obj.signature, obj.profile_key
     data = objc.dispatch_data_create(obj.lib, len(obj.lib), None, None)
     self.library = self.dev.sysdevice.newLibraryWithData_error(data, ctypes.byref(error_lib:=metal.NSError().retained())).retained()
     error_check(error_lib)
@@ -145,6 +146,7 @@ class MetalProgram(Program[MetalDevice]):
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?
     command_buffer.commit()
     self.dev.mtl_buffers_in_flight.append(command_buffer)
+    if PROFILE and self.profile_key is not None: self.dev.mtl_profile_keys[id(command_buffer)] = self.profile_key
     if wait:
       wait_check(command_buffer)
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
