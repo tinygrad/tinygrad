@@ -137,10 +137,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
   # NOTE: must use resolved shapes from the FUNCTION (which substitutes PARAMs with external args), not raw body shapes
-  # resolve the body's positional params back to the call args; p{slot} names are scoped to this call and must not leak out
-  param_subs = {p: a.src[0] for p in new_call.src[0].toposort(enter_calls=False)
-                if p.op is Ops.PARAM and p.arg.slot >= 0 and (a:=new_call.src[1+p.arg.slot]).is_bound_var}
-  rets = tuple(r.shrink_to(tuple(s.substitute(param_subs) if isinstance(s, UOp) else s for s in rs.shape)) for r,rs in zip(rets, resolved))
+  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, resolved))
 
   return UOp.maketuple(*rets)
 
