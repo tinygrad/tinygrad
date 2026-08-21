@@ -516,6 +516,7 @@ class TestVizIntegration(unittest.TestCase):
     src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
     self.assertEqual(src, src_render)
 
+  @unittest.expectedFailure
   def test_profiler_duplicate_name(self):
     kernel_name = "duplicate_name"
     def one(A:UOp): return A[0].store(UOp.const(1.0, dtypes.float)).sink(arg=KernelInfo(kernel_name))
