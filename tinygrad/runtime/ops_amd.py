@@ -691,9 +691,9 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
       buf = self._usb_stage[seq & 1][1]
       buf[:size] = src_mv[c * CHUNK : c * CHUNK + size]
       struct.pack_into('<I', buf, round_up(size, 512), 0x51000000 | (seq & 0xFFFFFF))  # the sentinel sector
-      wait_drain(seq - 1)
       wire = round_up(size, 512) + 512  # payload padded to 512B sectors, plus the sentinel sector
-      usb.usb.control_write(0xF2, wire // 512, (seq & 1) * 16 | (ceildiv(wire, 0x4000) << 8))  # wValue=sectors, wIndex=slot|count
+      usb.usb.control_write(0xF2, wire // 512, (seq & 1) * 16 | (ceildiv(wire, 0x4000) << 8))  # arm: wValue=sectors, wIndex=slot|count
+      wait_drain(seq - 1)  # after the arm's round trip, so the drain usually passes on the first read
       inflight[seq & 1] = usb.usb.bulk_write_async(buf[:wire])
     for tag in inflight: usb.usb.bulk_wait(tag)
     self._usb_seq += nchunks
