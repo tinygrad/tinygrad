@@ -38,6 +38,9 @@ def is_nan(a):
   bs, (exp, mant) = a.dtype.bitsize, dtypes.finfo(a.dtype)
   return (a.bitcast(getattr(dtypes, f"uint{bs}")) & ((1 << (bs - 1)) - 1)) > (((1 << exp) - 1) << mant)
 
+# the read-modify-write packed_store emits: a load of the very index being stored to, masked (a gated store loads with 3 srcs)
+packed_rmw = UPat(Ops.LOAD, src=(UPat.var("b"),), allow_any_len=True) & UPat.var("wmask")
+
 wgsl_matcher = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.XOR), src=(UPat(name="a", dtype=dtypes.bool), UPat.var("b")), name="c"),
    lambda a,b,c: a.cast(dtypes.int).alu(c.op, b.cast(dtypes.int)).cast(dtypes.bool)),
@@ -82,10 +85,10 @@ class WGSLRenderer(CStyleLanguage):
     (UPat.load(UPat.var("b"), UPat.var("v"), UPat.var("gate")),
       lambda ctx,b,v,gate: f"select({ctx[v]}, {ctx.render_load(ctx[b], b.src[0])}, {ctx[gate]})"),
     (UPat.load(UPat.var("b")), lambda ctx, b: ctx.render_load(ctx[b], b)),
-    (UPat.store(UPat.var("b"), UPat.var("v")), lambda ctx,b,v:\
-     # (load & mask) | var -> mask = v.src[0].src[1], var = v.src[1]
-     f"atomicAnd(&{ctx[b]},{ctx[v.src[0].src[1]]});\n  atomicAdd(&{ctx[b]},{ctx[v.src[1]]});" if is_packed(b) \
-      else f"{ctx[b]} = {ctx[v]};"),
+    # packed_store writes (load & wmask) | new_v: atomicAnd clears the field, atomicAdd sets it. new_v is gone when it is 0
+    (UPat.store(UPat.var("b"), UPat.any(packed_rmw, packed_rmw | UPat.var("nv"))), lambda ctx,b,wmask,nv=None:
+     f"atomicAnd(&{ctx[b]},{ctx[wmask]});"+(f"\n  atomicAdd(&{ctx[b]},{ctx[nv]});" if nv is not None else "") if is_packed(b) else None),
+    (UPat.store(UPat.var("b"), UPat.var("v")), lambda ctx,b,v: f"{ctx[b]} = {ctx[v]};"),
     (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"))),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
   ]) + base_rewrite
