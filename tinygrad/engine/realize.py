@@ -284,7 +284,8 @@ def lower_and_compile(linear:UOp) -> UOp:
       raise
 
   # swap the compiled PROGRAMs into the calls
-  return linear.substitute({a[0]: to_program_cache[keys[c]] for c, a in ar.items()}, name="precompile kernels", enter_calls=True)
+  return linear.substitute({c: c.replace(src=(c.src[0].substitute({a[0]: to_program_cache[keys[c]]}), *c.src[1:])) for c, a in ar.items()},
+                           name="precompile kernels")
 
 pm_optimize_local_size = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), optimize_local_size),
