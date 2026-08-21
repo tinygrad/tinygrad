@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
+from tinygrad.uop.ops import Ops, AxisType, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.uop.weak import pm_lower_index_dtype
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
@@ -457,6 +457,14 @@ class TestUopsObject(unittest.TestCase):
     self.assertEqual(a.device, Device.DEFAULT)
 
 class TestUOpRender(unittest.TestCase):
+  def test_render_ssimplified_marg_outside_toposort(self):
+    r = UOp.range(UOp.const(16, dtypes.int), 2, AxisType.WEAK, dtype=dtypes.int)
+    offset = (r * 2) + (r * 2)
+    shrink = UOp(Ops.SHRINK, src=(UOp.param(0, dtypes.uint, (32,)), offset, UOp.const(2, dtypes.int)))
+    self.assertIsNot(shrink.src[1], shrink.marg[0][0])
+    self.assertEqual(shrink.render(simplify=False), "p0.shrink((((r2*4), 2),))")
+    self.assertEqual(UOp.range(1, 0, src=(shrink,), dtype=dtypes.int).render(simplify=False), "r0")
+
   def test_render_vectorize_empty(self):
     u = UOp(Ops.STACK, dtype=dtypes.void, src=())
     self.assertEqual(u.render(simplify=False), "{}")
