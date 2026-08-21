@@ -41,9 +41,13 @@ class DSPRenderer(ClangRenderer):
     msrc += [f'{self._render_dtype(b[1][0].dtype) if b[1][0].addrspace == AddrSpace.ALU else "int"} sz_or_val_{i} = '
              f'*({self._render_dtype(b[1][0].dtype) if b[1][0].addrspace == AddrSpace.ALU else "int"}*)((char*)pra[0].buf.pv+{i*8});'
              for i,b in enumerate(bufs)]
-    msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if b[1][0].addrspace == AddrSpace.GLOBAL]
-    msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};'
-             for i,b in enumerate(bufs) if b[1][0].addrspace == AddrSpace.GLOBAL]
+
+    msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{sum(bb[1][0].addrspace==AddrSpace.GLOBAL for bb in bufs[:i])}];' for i,b in enumerate(bufs) if b[1][0].addrspace == AddrSpace.GLOBAL]
+    msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{sum(bb[1][0].addrspace==AddrSpace.GLOBAL for bb in bufs[:i])+3}].dma.fd,0)+off{i};'
+          for i,b in enumerate(bufs) if b[1][0].addrspace == AddrSpace.GLOBAL]
+    #msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if b[1][0].addrspace == AddrSpace.GLOBAL]
+    #msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};'
+    #         for i,b in enumerate(bufs) if b[1][0].addrspace == AddrSpace.GLOBAL]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
     fbufs = [(f'buf_{i}' if b[1][0].addrspace == AddrSpace.GLOBAL else f'sz_or_val_{i}') for i,b in enumerate(bufs)]
     msrc += [f"{function_name}({', '.join(fbufs)});"]
@@ -73,8 +77,10 @@ class DSPProgram(Program['DSPDevice']):
 
     pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs)+len(vals))*8)), off_mv:=memoryview(bytearray(len(bufs)*4))],
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
-    for i,b in enumerate(bufs): struct.pack_into('i', var_vals_mv, i*8, b.size)
-    for i,(v,(_,_,dt,_)) in enumerate(zip(vals, self.signature[len(bufs):]), start=len(bufs)): struct.pack_into(unwrap(dt.fmt), var_vals_mv, i*8, v)
+    #for i,b in enumerate(bufs): struct.pack_into('i', var_vals_mv, i*8, b.size)
+    #for i,(v,(_,_,dt,_)) in enumerate(zip(vals, self.signature[len(bufs):]), start=len(bufs)): struct.pack_into(unwrap(dt.fmt), var_vals_mv, i*8, v)
+    it = [iter(vals), iter(bufs)]
+    for i,(_,_,dt,s) in enumerate(self.signature): struct.pack_into('i' if s!=() else unwrap(dt.fmt), var_vals_mv, i*8, (x:=next(it[s!=()])).size if s!=() else x)
     off_mv.cast('I')[:] = array.array('I', tuple(b.offset for b in bufs))
     self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
     return timer[0] / 1e6
@@ -286,8 +292,10 @@ class MockDSPProgram(Program[DSPDevice]):
       dsp_lib.flush()
       os.chmod(dsp_lib.name, 0o0777)
       proc = subprocess.run(["qemu-hexagon-static", *(['-strace'] if DEBUG >= 5 else []), dsp_lib.name],
-        input=b''.join([bytes(to_mv(x.va_addr, x.size)) for x in bufs] +
-                       [struct.pack(unwrap(dt.fmt), x) for x,(_,_,dt,_) in zip(vals, self.signature[len(bufs):])]),
+        #input=b''.join([bytes(to_mv(x.va_addr, x.size)) for x in bufs] +
+        #               [struct.pack(unwrap(dt.fmt), x) for x,(_,_,dt,_) in zip(vals, self.signature[len(bufs):])]),
+        input=b''.join([(bytes(to_mv(x.va_addr, x.size)) if s!=() else struct.pack(unwrap(dt.fmt), x))
+              for it in [[iter(vals), iter(bufs)]] for *_,dt,s in self.signature for x in [next(it[s!=()])]]),
         stdout=subprocess.PIPE, check=True)
     offset = 4
     for x in bufs:
