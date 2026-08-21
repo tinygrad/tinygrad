@@ -17,7 +17,6 @@ class TestJit(unittest.TestCase):
     _simple_test(add)
 
   def test_jit_arg_order_pos_kwargs(self):
-    # capture positional, replay as kwargs
     @TinyJit
     def sub(first, second): return (first - second).realize()
     a, b = Tensor.randn(10, 10, device=Device.DEFAULT).realize(), Tensor.randn(10, 10, device=Device.DEFAULT).realize()
@@ -27,7 +26,6 @@ class TestJit(unittest.TestCase):
     assert_jit_cache_len(sub, 1)
 
   def test_jit_arg_order_kwargs_pos(self):
-    # capture as kwargs, replay positionally
     @TinyJit
     def sub(first, second): return (first - second).realize()
     a, b = Tensor.randn(10, 10, device=Device.DEFAULT).realize(), Tensor.randn(10, 10, device=Device.DEFAULT).realize()
@@ -43,6 +41,15 @@ class TestJit(unittest.TestCase):
     sub(first=a, second=b)
     sub(first=a, second=b)
     np.testing.assert_allclose(sub(first=b, second=a).numpy(), b.numpy()-a.numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(sub, 1)
+
+  def test_jit_arg_swap_pos(self):
+    @TinyJit
+    def sub(first, second): return (first - second).realize()
+    a, b = Tensor.randn(10, 10, device=Device.DEFAULT).realize(), Tensor.randn(10, 10, device=Device.DEFAULT).realize()
+    sub(a, b)
+    sub(a, b)
+    np.testing.assert_allclose(sub(b, a).numpy(), b.numpy()-a.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(sub, 1)
 
   def test_jit_raw_buffer_input(self):

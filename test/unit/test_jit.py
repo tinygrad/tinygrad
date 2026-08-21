@@ -141,52 +141,7 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(add_kwargs, 1)
 
-  def test_jit_pos_then_kwargs(self):
-    # capture with positional args, then replay with keyword args (same conceptual order)
-    @TinyJit
-    def sub(first, second): return (first - second).realize()
-    a, b = Tensor.randn(10, 10).realize(), Tensor.randn(10, 10).realize()
-    sub(a, b)
-    sub(a, b)  # capture, names=[0, 1]
-    out = sub(first=a, second=b)
-    np.testing.assert_allclose(out.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
-    assert_jit_cache_len(sub, 1)
-
-  def test_jit_kwargs_then_pos(self):
-    # capture: keyword args, then replay with positional args
-    @TinyJit
-    def sub(first, second): return (first - second).realize()
-    a, b = Tensor.randn(10, 10).realize(), Tensor.randn(10, 10).realize()
-    sub(first=a, second=b)
-    sub(first=a, second=b)  # capture, names=['first', 'second']
-    out = sub(a, b)
-    np.testing.assert_allclose(out.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
-    assert_jit_cache_len(sub, 1)
-
-  def test_jit_swapped_kwargs(self):
-    # swapped keyword values must map to the right slots, not raise
-    @TinyJit
-    def sub(first, second): return (first - second).realize()
-    a, b = Tensor.randn(10, 10).realize(), Tensor.randn(10, 10).realize()
-    sub(first=a, second=b)
-    sub(first=a, second=b)  # capture
-    out = sub(first=b, second=a)
-    np.testing.assert_allclose(out.numpy(), b.numpy()-a.numpy(), atol=1e-4, rtol=1e-5)
-    assert_jit_cache_len(sub, 1)
-
-  def test_jit_swapped_pos(self):
-    # swapped positional values must map to the right slots
-    @TinyJit
-    def sub(first, second): return (first - second).realize()
-    a, b = Tensor.randn(10, 10).realize(), Tensor.randn(10, 10).realize()
-    sub(a, b)
-    sub(a, b)  # capture
-    out = sub(b, a)
-    np.testing.assert_allclose(out.numpy(), b.numpy()-a.numpy(), atol=1e-4, rtol=1e-5)
-    assert_jit_cache_len(sub, 1)
-
   def test_jit_raw_buffer_input(self):
-    # a raw Buffer must be usable as a JIT input (not silently dropped / stale)
     @TinyJit
     def f(b):
       return (Tensor(UOp.from_buffer(b), device=b.device) * 2).realize()
