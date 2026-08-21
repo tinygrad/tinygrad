@@ -667,9 +667,9 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
       for bi in range(2): usb.scsi_write(bytes(0x40000), slot_start=bi * 16)
 
     def wait_drain(count):  # spin until the drain fence reaches count, i.e. chunks 0..count-1 are fully in VRAM
-      t0 = time.monotonic()
+      t0 = time.perf_counter()
       while int.from_bytes(usb.read(FENCE, 8), 'little') < count:
-        if time.monotonic() - t0 > 10: raise RuntimeError(f"GPU failed to drain USB copyin chunk {count - 1} (10s, hung GPU?)")
+        if time.perf_counter() - t0 > 10: raise RuntimeError(f"GPU failed to drain USB copyin chunk {count - 1} (10s, hung GPU?)")
 
     # build the whole ring upfront: per chunk, poll the sentinel, copy SRAM->VRAM, bump the fence; then one doorbell
     POLL_EQ = sdma.SDMA_OP_POLL_REGMEM | sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(3) | sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
