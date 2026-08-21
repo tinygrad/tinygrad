@@ -204,6 +204,13 @@ class MockUSB3:
     self.bulk_write(bytes(payload), timeout)
     return 0
 
+  def control_write_async(self, request:int, value:int=0, index:int=0, data:bytes=b"", timeout:int=1000) -> int:
+    self.control_write(request, value, index, data, timeout)
+    return 0
+
+  def control_read_async(self, request:int, length:int, value:int=0, index:int=0, timeout:int=1000) -> tuple[int, memoryview]:
+    return 0, self.control_read(request, length, value, index, timeout)
+
   def bulk_wait(self, tag:int): pass
 
   def bulk_read(self, length:int, timeout:int=1000) -> memoryview:

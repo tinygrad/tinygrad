@@ -652,12 +652,12 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
   def _copyin(self, dest:HCQBuffer, src:memoryview):
     if not self.dev.is_usb(): return super()._copyin(dest, src)
     from tinygrad.runtime.support.usb import alloc_cbuffer
-    # Pipelined copyin over the 0xF2 engine. 240KB chunks stream into two alternating 256KB SRAM bounce windows; the
-    # engine can't signal data landing, so each chunk ends in a 512B sentinel sector tagged with its sequence number.
+    # Pipelined copyin over the 0xF2 engine. ~256KB chunks stream into two alternating 256KB SRAM bounce windows; the
+    # engine can't signal data landing, so each chunk's wire image ends in a 4B sentinel tagged with its sequence number.
     # A prebuilt SDMA ring polls each chunk's sentinel before copying it to VRAM, then bumps a drain fence; the host
     # waits on that fence before re-arming a window. No timing is assumed in either direction.
     dev, usb, ts, sdma = self.dev, self.dev.iface.pci_dev.usb, self.dev.timeline_signal, self.dev.sdma
-    CHUNK, src_mv = 0x3C000, src.cast('B')  # 15 16KB slots: the wire image must end mid-window (full windows corrupt)
+    CHUNK, src_mv = 0x40000 - 4, src.cast('B')  # payload per chunk: the 256KB window minus the 4B trailing sentinel
     nchunks = ceildiv(src.nbytes, CHUNK)
     FENCE = 0xA800  # drain fence: the GPU writes it via sys_buf (PCIe 0x820800), the host reads it here (xdata)
     if not hasattr(self, '_usb_seq'):  # one-time: clear the fence and zero both windows so garbage can't match a sentinel
@@ -667,9 +667,9 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
       for bi in range(2): usb.scsi_write(bytes(0x40000), slot_start=bi * 16)
 
     def wait_drain(count):  # spin until the drain fence reaches count, i.e. chunks 0..count-1 are fully in VRAM
-      t0 = time.monotonic()
+      t0 = time.perf_counter()
       while int.from_bytes(usb.read(FENCE, 8), 'little') < count:
-        if time.monotonic() - t0 > 10: raise RuntimeError(f"GPU failed to drain USB copyin chunk {count - 1} (10s, hung GPU?)")
+        if time.perf_counter() - t0 > 10: raise RuntimeError(f"GPU failed to drain USB copyin chunk {count - 1} (10s, hung GPU?)")
 
     # build the whole ring upfront: per chunk, poll the sentinel, copy SRAM->VRAM, bump the fence; then one doorbell
     POLL_EQ = sdma.SDMA_OP_POLL_REGMEM | sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(3) | sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
@@ -677,7 +677,7 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
     q = dev.hw_copy_queue_t().wait(ts, dev.timeline_value - 1)
     for c in range(nchunks):
       seq, size = self._usb_seq + c, min(CHUNK, src.nbytes - c * CHUNK)
-      q.q(POLL_EQ, *data64_le(self._usb_wins[seq & 1].va_addr + round_up(size, 512)), 0x51000000 | (seq & 0xFFFFFF), 0xFFFFFFFF, POLL_DW5)
+      q.q(POLL_EQ, *data64_le(self._usb_wins[seq & 1].va_addr + round_up(size + 4, 512) - 4), 0x51000000 | (seq & 0xFFFFFF), 0xFFFFFFFF, POLL_DW5)
       q.copy(dest.offset(c * CHUNK), self._usb_wins[seq & 1], size)
       q.write(dev.iface.sys_buf.offset(0x800, 8), seq + 1, b64=True)
     q.signal(ts, dev.next_timeline()).submit(dev)
@@ -690,10 +690,13 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
       if inflight[seq & 1] is not None: usb.usb.bulk_wait(inflight[seq & 1])
       buf = self._usb_stage[seq & 1][1]
       buf[:size] = src_mv[c * CHUNK : c * CHUNK + size]
-      struct.pack_into('<I', buf, round_up(size, 512), 0x51000000 | (seq & 0xFFFFFF))  # the sentinel sector
-      wait_drain(seq - 1)
-      wire = round_up(size, 512) + 512  # payload padded to 512B sectors, plus the sentinel sector
-      usb.usb.control_write(0xF2, wire // 512, (seq & 1) * 16 | (ceildiv(wire, 0x4000) << 8))  # wValue=sectors, wIndex=slot|count
+      wire = round_up(size + 4, 512)  # payload plus the sentinel, padded to 512B sectors (full window for max chunks)
+      struct.pack_into('<I', buf, wire - 4, 0x51000000 | (seq & 0xFFFFFF))  # the sentinel is the last dword of the wire
+      arm_tag = usb.usb.control_write_async(0xF2, wire // 512, (seq & 1) * 16 | (ceildiv(wire, 0x4000) << 8))  # wValue=sectors, wIndex=slot|count
+      rd_tag, rd_mv = usb.usb.control_read_async(0xE4, 8, value=FENCE)  # arm and fence read fly in one round-trip window
+      usb.usb.bulk_wait(arm_tag)
+      usb.usb.bulk_wait(rd_tag)
+      if int.from_bytes(rd_mv, 'little') < seq - 1: wait_drain(seq - 1)  # rare: the drain lagged; spin on fresh reads
       inflight[seq & 1] = usb.usb.bulk_write_async(buf[:wire])
     for tag in inflight: usb.usb.bulk_wait(tag)
     self._usb_seq += nchunks

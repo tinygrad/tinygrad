@@ -79,19 +79,33 @@ class USB3:
     assert self._transferred.value == len(payload), f"bulk OUT short write: {self._transferred.value}/{len(payload)} bytes"
 
   def _on_bulk_done(self, xfer):  # runs in libusb event handling; latch errors (exceptions here are unraisable)
-    if xfer.contents.status != 0 or xfer.contents.actual_length != xfer.contents.length: self._async_err = xfer.contents.status or -1
+    exp = xfer.contents.length - 8 if xfer.contents.type == libusb.LIBUSB_TRANSFER_TYPE_CONTROL else xfer.contents.length
+    if xfer.contents.status != 0 or xfer.contents.actual_length != exp: self._async_err = xfer.contents.status or -1
     self._async_pool.append(self._async_pending.pop(int(xfer.contents.user_data or 0))[0])
+
+  def _submit_async(self, endpoint:int, xtype:int, payload:bytes|bytearray|memoryview, timeout:int) -> int:  # payload kept alive till bulk_wait
+    tr = self._async_pool.pop() if self._async_pool else libusb.libusb_alloc_transfer(0)
+    tr.contents.dev_handle, tr.contents.endpoint, tr.contents.type = self.handle, endpoint, xtype
+    tr.contents.timeout, tr.contents.length = timeout, len(payload)
+    tr.contents.buffer = ctypes.cast(from_mv(memoryview(payload), ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte))
+    tr.contents.callback, tr.contents.user_data = self._async_cb, (tag := next(self._async_seq))
+    self._async_pending[tag] = (tr, payload)
+    checked(libusb.libusb_submit_transfer, "async submit failed")(tr)
+    return tag
 
   def bulk_write_async(self, payload:memoryview, timeout:int=10000) -> int:
     """Queue a bulk OUT transfer without blocking; payload is kept alive until bulk_wait(tag)."""
-    tr = self._async_pool.pop() if self._async_pool else libusb.libusb_alloc_transfer(0)
-    tr.contents.dev_handle, tr.contents.endpoint, tr.contents.type = self.handle, 0x02, libusb.LIBUSB_TRANSFER_TYPE_BULK
-    tr.contents.timeout, tr.contents.length = timeout, len(payload)
-    tr.contents.buffer = ctypes.cast(from_mv(payload, ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte))
-    tr.contents.callback, tr.contents.user_data = self._async_cb, (tag := next(self._async_seq))
-    self._async_pending[tag] = (tr, payload)
-    checked(libusb.libusb_submit_transfer, "async bulk OUT submit failed")(tr)
-    return tag
+    return self._submit_async(0x02, libusb.LIBUSB_TRANSFER_TYPE_BULK, payload, timeout)
+
+  def control_write_async(self, request:int, value:int=0, index:int=0, data:bytes=b"", timeout:int=1000) -> int:
+    """Queue a vendor control OUT without blocking; completes via bulk_wait(tag) like bulk_write_async."""
+    setup = bytearray(struct.pack('<BBHHH', 0x40, request, value, index, len(data)) + data)
+    return self._submit_async(0, libusb.LIBUSB_TRANSFER_TYPE_CONTROL, setup, timeout)
+
+  def control_read_async(self, request:int, length:int, value:int=0, index:int=0, timeout:int=1000) -> tuple[int, memoryview]:
+    """Queue a vendor control IN without blocking; the data lands in the returned buffer by bulk_wait(tag)."""
+    buf = bytearray(struct.pack('<BBHHH', 0xC0, request, value, index, length)) + bytearray(length)
+    return self._submit_async(0, libusb.LIBUSB_TRANSFER_TYPE_CONTROL, buf, timeout), memoryview(buf)[8:]
 
   def bulk_wait(self, tag:int):
     """Block until the tagged transfer completes; raises if any async transfer failed."""
