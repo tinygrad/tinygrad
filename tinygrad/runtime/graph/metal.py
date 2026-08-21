@@ -35,11 +35,13 @@ class MetalGraph(GraphRunner):
       icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
       icb_command.setComputePipelineState(runtime.pipeline_state)
       all_pipelines.append(runtime.pipeline_state)
-      for i, b in enumerate(bufs):
+      #for i, b in enumerate(bufs):
+      for b, (_, i, _, _) in zip(bufs, [s for s in runtime.signature if s[3] != ()]):
         if not any(pos == i for pos, _ in replace):
           icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
-      for nm,i,dt,_ in runtime.signature[len(bufs):]:
+      for nm, i, dt, _ in [s for s in runtime.signature if s[3] == ()]:
+      #for nm,i,dt,_ in runtime.signature[len(bufs):]:
         icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, var_buf_offset, i)
         self.var_bind_data.append((nm, var_buf_offset, dt.fmt))
         var_buf_offset += dt.itemsize
