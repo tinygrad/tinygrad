@@ -1,5 +1,5 @@
-import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, math
-from pathlib import Path
+import unittest
+import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib
 from dataclasses import dataclass
 from typing import Generator
 
@@ -1025,8 +1025,8 @@ def run_cli(*cli_args) -> list[dict]:
 @contextlib.contextmanager
 def write_files(viz) -> list[str]:
   with tempfile.TemporaryDirectory() as tmpdir:
-    (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
-    (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+    (r:=pathlib.Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
+    (p:=pathlib.Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
     yield ["--rewrites-path", str(r), "--profile-path", str(p)]
 
 class TestCLI(unittest.TestCase):
