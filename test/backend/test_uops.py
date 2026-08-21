@@ -82,8 +82,9 @@ class TestBitcastBufferView(unittest.TestCase):
     val = 0x1122334455667788
     dst = UOp.param(0, dtypes.uint32, (6,))
     buf = Buffer(Device.DEFAULT, 6, dtypes.uint32, initial_value=bytes(24))
-    run_uops([dst.shrink(((1, 5),)).bitcast(dtypes.uint64).index(1).store(val)], [buf])
-    self.assertEqual(np.frombuffer(buf.as_memoryview(), dtype=np.uint64, count=1, offset=12)[0], val)
+    view = dst.shrink(((1, 5),)).bitcast(dtypes.uint64)  # two stores through one view: it must inline, not get a declared vector-pointer
+    run_uops([view.index(0).store(val ^ 0xff), view.index(1).store(val)], [buf])
+    self.assertEqual(np.frombuffer(buf.as_memoryview(), dtype=np.uint64, count=2, offset=4).tolist(), [val ^ 0xff, val])
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
