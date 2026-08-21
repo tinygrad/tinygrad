@@ -222,7 +222,7 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer()._buf.va_addr + base}), call, ast)
 
   def _prof_tm(device:str, stat_call:UOp, prof:tuple[int, ...]) -> float|None:
-    (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, *prof)
+    (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, prof[0], prof[1], stat_call.key)
     if not ctx.wait: return None
     d.synchronize(timeout=ctx.timeout)
     st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)

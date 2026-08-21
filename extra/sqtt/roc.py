@@ -192,7 +192,7 @@ def unpack_insts(viz_data, i:int, j:int, data:dict) -> dict:
     prev_instr = max(prev_instr, e.time + e.dur)
   summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
              {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-  return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "ref":viz_data.ref_map.get(data["prg"].name)}
+  return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary],"ref":viz_data.ref_map.get(data["prg"].profile_key)}
 
 def print_data(data:dict) -> None:
   from tabulate import tabulate
