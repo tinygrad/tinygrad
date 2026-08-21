@@ -9,7 +9,7 @@ from tinygrad.runtime.autogen import kgsl, mesa
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing, is_image_shape
-from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE
+from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE, DEV
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
@@ -260,6 +260,11 @@ class QCOMProgram(HCQProgram['QCOMDevice']):
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))
     to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
+    if DEV.target("QCOM").interface.startswith("MOCK"):
+      from test.mockgpu.qcom.emu import CapturedProgram, bind_program
+      if not isinstance(captured_program:=getattr(obj, "_qcom_mock_program", None), CapturedProgram):
+        raise RuntimeError("QCOM mock program was not captured before loading")
+      bind_program(int(self.lib_gpu.va_addr), captured_program)
 
     self.pvtmem_size_per_item: int = round_up(self.pvtmem, 512) >> 9
     self.pvtmem_size_total: int = self.pvtmem_size_per_item * 128 * 2
@@ -275,7 +280,7 @@ class QCOMProgram(HCQProgram['QCOMDevice']):
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int|None, ...]=(), wait=False, **kw):
     if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
-    if any(g*l>mx for g,l,mx in zip(global_size, local_size, [65536, 65536, 65536])) and any(l>mx for l,mx in zip(local_size, [1024, 1024, 1024])):
+    if any(g*l>mx for g,l,mx in zip(global_size, local_size, [65536, 65536, 65536])) or any(l>mx for l,mx in zip(local_size, [1024, 1024, 1024])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
 
@@ -388,7 +393,8 @@ class QCOMDevice(HCQCompiled):
 
   def _gpu_map(self, ptr:int, size:int) -> HCQBuffer:
     ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
-    dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ceildiv(ptr + size - ptr_line_aligned, 64))
+    if not DEV.target("QCOM").interface.startswith("MOCK"):
+      dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ceildiv(ptr + size - ptr_line_aligned, 64))
     try:
       mi = kgsl.IOCTL_KGSL_MAP_USER_MEM(self.fd, hostptr=ptr_aligned, len=size_aligned, memtype=kgsl.KGSL_USER_MEM_TYPE_ADDR)
       return HCQBuffer(mi.gpuaddr + (ptr - ptr_aligned), size=size, meta=(mi, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self)

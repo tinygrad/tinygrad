@@ -5,10 +5,22 @@ from tinygrad.runtime.autogen import libc
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
 from test.mockgpu.am.amdriver import AMDriver, AMUSBDriver
+from test.mockgpu.qcom.qcomdriver import QCOMDriver
 start = time.perf_counter()
 
 drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCK+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
-                                              "MOCK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]
+                                              "MOCK+NV": NVDriver, "MOCK+QCOM": QCOMDriver}.get(f"{t.interface}+{t.device}"))]
+
+if any(isinstance(driver, QCOMDriver) for driver in drivers):
+  from tinygrad.uop.ops import UOp
+  from test.mockgpu.qcom.emu import capture_program
+  if not hasattr(UOp, "_qcom_mock_original_to_elf"):
+    UOp._qcom_mock_original_to_elf = UOp.to_elf  # type: ignore[attr-defined]
+    def _qcom_mock_to_elf(self):
+      obj = UOp._qcom_mock_original_to_elf(self)  # type: ignore[attr-defined]
+      if obj.target.device == "QCOM": capture_program(obj, self)
+      return obj
+    setattr(UOp, "to_elf", _qcom_mock_to_elf)
 tracked_fds: dict[int, typing.Any] = {}
 
 original_memoryview = builtins.memoryview
