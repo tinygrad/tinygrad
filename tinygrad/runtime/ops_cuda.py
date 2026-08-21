@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from tinygrad.helpers import DEBUG, DEV, getenv, mv_address, suppress_finalizing
+from tinygrad.helpers import DEBUG, DEV, getenv, mv_address, suppress_finalizing, round_up
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator, Program, TinyELF
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
@@ -15,10 +15,24 @@ def check(status):
     error = ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
+#def encode_args(args, vals, signature) -> tuple[ctypes.Structure, ctypes.Array]:
+#  fields = ([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
+#            [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), off) for i,(off,dt) in enumerate(TinyELF.iter_sig(signature[len(args):], len(args)*8))])
+#  c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
+#  vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
+#                                ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
+#  return c_args, vargs
+
 def encode_args(args, vals, signature) -> tuple[ctypes.Structure, ctypes.Array]:
-  fields = ([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
-            [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), off) for i,(off,dt) in enumerate(TinyELF.iter_sig(signature[len(args):], len(args)*8))])
-  c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
+  fields, ordered, bi, vi, off = [], [], 0, 0, 0
+  for *_, dt, shape in signature:
+    if shape != ():
+      fields.append((f'f{bi}', cuda.CUdeviceptr_v2, round_up(off, 8)))
+      ordered.append(args[bi]); bi += 1; off += 8
+    else:
+      fields.append((f'v{vi}', getattr(ctypes, f"c_int{dt.bitsize}"), round_up(off, dt.itemsize)))
+      ordered.append(vals[vi]); vi += 1; off += dt.itemsize
+  c_args = init_c_struct_t(off if fields else 0, tuple(fields))(*ordered)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
   return c_args, vargs
