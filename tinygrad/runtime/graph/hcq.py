@@ -139,7 +139,8 @@ class HCQGraph(MultiGraphRunner):
         prof_ji_desc = runtime.name if runtime is not None else TracingKey(f"{bufs[1].device} -> {bufs[0].device}", ret=bufs[0].nbytes)
 
         prof_name = enqueue_dev.device if runtime is not None else f"{enqueue_dev.device}:SDMA:{queue_idx}"
-        self.prof_graph_entries.append(ProfileGraphEntry(prof_name, prof_ji_desc, sig_st, j * 2 + 1))
+        self.prof_graph_entries.append(ProfileGraphEntry(prof_name, prof_ji_desc, sig_st, j * 2 + 1,
+                                                         runtime.profile_key if runtime is not None else None))
         self.prof_graph_deps.append([d - 1 for _, d in rdeps])
 
       self.last_j[enqueue_queue] = j

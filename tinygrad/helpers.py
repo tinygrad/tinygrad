@@ -364,7 +364,8 @@ class TracingKey:
 class ProfileEvent: pass
 
 @dataclass
-class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None # noqa: E702
+class ProfileRangeEvent(ProfileEvent):
+  device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; profile_key:bytes|None=None # noqa: E702
 
 @dataclass(frozen=True)
 class ProfilePointEvent(ProfileEvent):
@@ -372,8 +373,8 @@ class ProfilePointEvent(ProfileEvent):
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
-def cpu_profile(name:str|TracingKey, device="TINY", display=True) -> Generator[ProfileRangeEvent, None, None]:
-  res = ProfileRangeEvent(device, name, perf_counter_us())
+def cpu_profile(name:str|TracingKey, device="TINY", display=True, profile_key:bytes|None=None) -> Generator[ProfileRangeEvent, None, None]:
+  res = ProfileRangeEvent(device, name, perf_counter_us(), profile_key=profile_key)
   try: yield res
   finally:
     res.en = perf_counter_us()
