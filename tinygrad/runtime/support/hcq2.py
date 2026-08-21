@@ -47,12 +47,18 @@ def is_value_known_at_link(val:UOp) -> bool:
   # addr of input params is not known at link time
   return not val.variables() and not runtime_reads and all(b.op is not Ops.PARAM or b.tag is not None for b in addressed_bufs)
 
+def unwrap_view(view:UOp) -> tuple[UOp, int]:
+  src = view.src[0] if view.op is Ops.BITCAST else view
+  return (src.src[0], src.src[1].val) if src.op is Ops.SHRINK else (src, 0)
+
 def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> tuple[UOp, ...]:
   def _mk_store(p:tuple[sint, UOp], tag:str|None) -> UOp:
     off, val = p
-    size = round_up(val.dtype.itemsize, buf.dtype.itemsize) // buf.dtype.itemsize
-    view = buf.shrink(((off//buf.dtype.itemsize, off//buf.dtype.itemsize+size),)).bitcast(val.dtype)
-    return view.index(UOp.stack(UOp.const(0, dtypes.int))).store(UOp.stack(val)).rtag(tag)
+    if val.dtype == buf.dtype: view, idx = buf, off // buf.dtype.itemsize
+    else:
+      size = round_up(val.dtype.itemsize, buf.dtype.itemsize) // buf.dtype.itemsize
+      view, idx = buf.shrink(((off//buf.dtype.itemsize, off//buf.dtype.itemsize+size),)).bitcast(val.dtype), 0
+    return view.index(UOp.stack(UOp.const(idx, dtypes.int))).store(UOp.stack(val)).rtag(tag)
 
   patches = [(off, val.cast(buf.dtype) if val.dtype.itemsize == buf.dtype.itemsize else val) for off, val in patches]
   link, runtime = partition(patches, lambda p: is_value_known_at_link(p[1]))
@@ -331,8 +337,8 @@ def make_gather_loop(patches:list[UOp], table:UOp, slots:dict[UOp, int], lt_patc
   (dst,), words = dedup(p.buf_uop for p in patches), []
   for p in patches:
     view, offs = p.src[0].src[:2]
-    start, stride = (view.src[0].src[1].val, table.dtype.itemsize//dst.dtype.itemsize) if view.op is Ops.BITCAST else (0, 1)
-    words += [(start + off.val*stride, slots[val]) for off,val in zip(offs.src, p.src[1].src)]
+    start = unwrap_view(view)[1]
+    words += [(start + off.val*(view.dtype.itemsize//dst.dtype.itemsize), slots[val]) for off,val in zip(offs.src, p.src[1].src)]
 
   # build a runtime loop that writes every input address
   pairs = UOp.placeholder((2*len(words),), dtypes.uint32, next(UOp.unique_num), device=dst.device).rtag("systems")
@@ -404,6 +410,9 @@ pm_early_simplify = PatternMatcher([
   (UPat(Ops.GETADDR, src=(UPat((Ops.SHRINK, Ops.BITCAST), name="bv").or_after(),), name="g"), resolve_getaddr_view),
   (UPat(Ops.INDEX, src=(UPat(Ops.SHRINK, name="bv"),), allow_any_len=True, name="x"),
    lambda bv,x: x.replace(src=(bv.src[0], x.src[1] + bv.src[1].cast(x.src[1].dtype), *x.src[2:]))),
+  # packing placeholders puts a shrink under a patch's shrink.bitcast view: compose them
+  (UPat(Ops.SHRINK, src=(UPat(Ops.SHRINK, name="bv"), UPat(), UPat()), name="x"),
+   lambda bv,x: bv.src[0].shrink(((start:=bv.src[1]+x.src[1], start+x.src[2]),))),
 ])
 
 # *****************
@@ -512,11 +521,13 @@ def fold_binary(buf:UOp, blob:UOp) -> UOp:
     b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
-def fold_const_store(buf:UOp, off:UOp, val:UOp, start:UOp|None=None) -> UOp:
+def fold_const_store(view:UOp, off:UOp, val:UOp) -> UOp|None:
+  buf, start = unwrap_view(view)
+  if buf.op not in {Ops.BUFFER, Ops.MSTACK}: return None
   for off,val in zip(off.src, val.src):
     for b,v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
       data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype]((v.src[0] if v.op is Ops.CAST else v).val))
-      bo = (start.val*buf.dtype.itemsize if start is not None else 0) + off.val*val.dtype.itemsize
+      bo = start*buf.dtype.itemsize + off.val*val.dtype.itemsize
       b.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True).cast('B')[bo:bo+len(data)] = data
   return UOp(Ops.NOOP)
 
@@ -541,9 +552,8 @@ pm_resolve_patches = PatternMatcher([
   (UPat(name="buf").index(UPat(Ops.RANGE), allow_any_len=True)
     .store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast()).index(UPat(Ops.RANGE), allow_any_len=True).load())
     .end(UPat(Ops.RANGE)), fold_binary),
-  (UPat(Ops.BITCAST, src=(UPat(Ops.SHRINK, src=(UPat({Ops.BUFFER, Ops.MSTACK}, name="buf"), UPat(name="start"), UPat())),))
+  (UPat((Ops.BITCAST, Ops.SHRINK, Ops.BUFFER, Ops.MSTACK), name="view")
     .index(UPat(Ops.STACK, name="off")).store(UPat(Ops.STACK, name="val")), fold_const_store),
-  (UPat({Ops.BUFFER, Ops.MSTACK}, name="buf").index(UPat(Ops.STACK, name="off")).store(UPat(Ops.STACK, name="val")), fold_const_store),
 ])
 
 pm_assert_no_afters = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: panic(RuntimeError, f"AFTER left at hcq_link: {a.src[0].op}"))])

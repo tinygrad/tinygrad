@@ -114,7 +114,9 @@ class PythonProgram(Program['PythonDevice']):
               if ox < 0 or ox >= u.src[0]._shape[1] or oy < 0 or oy >= u.src[0]._shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*u.src[0]._shape[1]*4))
           else:
-            for m,o in zip(src_values[0], src_values[1]): ret.append((m,o))
+            # a bitcast view keeps the source buffer's element units, so scale the index by the itemsize ratio
+            scale = u.src[0].dtype.itemsize // u.src[0].src[0].dtype.itemsize if u.src[0].op is Ops.BITCAST else 1
+            for m,o in zip(src_values[0], src_values[1]): ret.append((m[0], m[1]+o*scale) if isinstance(m, tuple) else (m, o*scale))
           values[u] = ret
         elif u.op is Ops.RANGE:
           if u not in values: values[u] = [0] * warp_size
@@ -126,6 +128,7 @@ class PythonProgram(Program['PythonDevice']):
             i = self.loop_ends[u] + 1
             continue
         elif u.op is Ops.STACK: values[u] = src_values
+        elif u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL): values[u] = src_values[0]
         elif u.op is Ops.BITCAST: values[u] = [bitcast(x, src_dtypes[0], u.dtype) for x in src_values[0]]
         elif u.op is Ops.CAST:
           values[u] = [truncate.get(u.dtype, lambda dt: dt)(u.dtype.const(x)) for x in src_values[0]]

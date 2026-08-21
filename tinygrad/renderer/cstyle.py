@@ -319,7 +319,8 @@ class OpenCLRenderer(CStyleLanguage):
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
 
   string_rewrite = PatternMatcher([
-    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_dtype(x.dtype)}(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
+    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_dtype(x.dtype)}(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"
+     if x.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
     # bfloat16 constants need to be rendered as their bit pattern since bf16 is stored as ushort
     (UPat.cvar("c").cast(dtypes.bfloat16), lambda ctx,c: f"{(struct.unpack('I', struct.pack('f', float_to_bf16(c.val)))[0] >> 16)}u"),
     # load/store image (OpenCL)
@@ -370,7 +371,8 @@ class MetalRenderer(CStyleLanguage):
   ]) + pm_manual_bf16_cast
 
   string_rewrite = PatternMatcher([
-    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_type<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
+    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_type<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"
+     if x.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
   ]) + base_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
@@ -426,7 +428,8 @@ class CUDARenderer(CStyleLanguage):
     (UPat(Ops.CAST, dtypes.fp8s, UPat.var("x", dtypes.fp8s), name='y'), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=y.dtype else None),
   ])
   string_rewrite = PatternMatcher([
-    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"tg_bitcast<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
+    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"tg_bitcast<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"
+     if x.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
   ]) + base_rewrite
 
   def render_vector_prefix(self, dt:DType, count:int) -> str:
