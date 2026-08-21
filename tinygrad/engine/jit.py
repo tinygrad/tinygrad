@@ -163,13 +163,12 @@ ReturnType = TypeVar('ReturnType')
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
   _linear: UOp
-  expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
 
   @functools.cached_property
   def linear(self) -> UOp: return link_linear(self._linear)
 
-  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
+  def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_input_info)
 
   @functools.cached_property
   def _written_uops(self) -> set[UOp]:
@@ -199,11 +198,12 @@ class CapturedJit(Generic[ReturnType]):
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
-  names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
+  tensors = [t for _,t in input_tensors]
   # extract tensors from containers (shallow, not recursive to avoid grabbing model weights)
   for x in args + tuple(kwargs.values()):
     it = x if isinstance(x, (tuple,list)) else x.values() if isinstance(x, dict) else []
     tensors += [t for t in it if t.__class__ is Tensor and not any(t is y for y in tensors)]
+  tensors += [Tensor(u, device=u.device) for u in [UOp.from_buffer(x) for x in args+tuple(kwargs.values()) if isinstance(x, Buffer)]] #coverage for buffers
   def get_input_uops() -> list[UOp]: return flatten([[t.uop.src[0]] if t.uop.op is Ops.UNSHARD else [t.uop] for t in tensors])
   if any(u.is_virtual for u in get_input_uops()): raise JitError("JIT inputs must be real buffers; use .clone()")
   if len(unrealized_tensors := [x for x in tensors if not x.uop.is_realized]): Tensor.realize(*unrealized_tensors)
@@ -215,7 +215,7 @@ def _prepare_jit_inputs(args, kwargs):
   _var_vals = merge_dicts([x[1] for x in inputs] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   var_vals = {k.expr:v for k,v in _var_vals.items()}
   expected_input_info = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in inputs]
-  return input_buf_uops, var_vals, names, expected_input_info
+  return input_buf_uops, var_vals, expected_input_info
 
 class _TinyJit(Generic[ReturnType]):
   def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False):
@@ -240,7 +240,7 @@ class _TinyJit(Generic[ReturnType]):
 
   @disable_gc()
   def __call__(self, *args, **kwargs) -> ReturnType:
-    input_buf_uops, var_vals, names, expected_input_info = _prepare_jit_inputs(args, kwargs)
+    input_buf_uops, var_vals, expected_input_info = _prepare_jit_inputs(args, kwargs)
     if not JIT or self.cnt == 0:
       # jit ignore
       assert self.fxn is not None
@@ -277,12 +277,11 @@ class _TinyJit(Generic[ReturnType]):
       # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
       # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec
       del big_linear, held_bufs
-      self.captured = CapturedJit(ret, linear, names, expected_input_info)
+      self.captured = CapturedJit(ret, linear, expected_input_info)
       ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
-      if self.captured.expected_names != names: raise JitError(f"args mismatch in JIT: {self.captured.expected_names=} != {names}")
       if self.captured.expected_input_info != expected_input_info:
         raise JitError(f"args mismatch in JIT: {self.captured.expected_input_info=} != {expected_input_info=}")
       ret = self.captured(input_buf_uops, var_vals)
