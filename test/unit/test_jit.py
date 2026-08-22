@@ -141,6 +141,15 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(add_kwargs, 1)
 
+  def test_jit_arg_order_pos_kwargs(self):
+    @TinyJit
+    def sub(first, second): return (first - second).realize()
+    a, b = Tensor.randn(10, 10).realize(), Tensor.randn(10, 10).realize()
+    sub(a, b)
+    sub(a, b)
+    np.testing.assert_allclose(sub(first=a, second=b).numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(sub, 1)
+
   def test_jit_raw_buffer_input(self):
     @TinyJit
     def f(b):

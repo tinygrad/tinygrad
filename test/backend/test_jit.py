@@ -5,25 +5,19 @@ import numpy as np
 from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_device, needs_second_gpu, KernelCountException
 from test.unit.test_jit import _simple_test
 from tinygrad import Tensor, Variable, TinyJit, Device, dtypes, UOp
+from tinygrad.device import Buffer
 from tinygrad.engine.jit import graph_class
 from tinygrad.helpers import JIT, DEV, GlobalCounters
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer.isa.x86 import X86Renderer
+
+def _mkbuf(v): return Buffer(Device.DEFAULT, 3, dtypes.float32, initial_value=np.full(3, v, dtype=np.float32).tobytes())
 
 class TestJit(unittest.TestCase):
   def test_simple_jit(self):
     @TinyJit
     def add(a, b): return (a+b).realize()
     _simple_test(add)
-
-  def test_jit_arg_order_pos_kwargs(self):
-    @TinyJit
-    def sub(first, second): return (first - second).realize()
-    a, b = Tensor.randn(10, 10, device=Device.DEFAULT).realize(), Tensor.randn(10, 10, device=Device.DEFAULT).realize()
-    sub(a, b)
-    sub(a, b)
-    np.testing.assert_allclose(sub(first=a, second=b).numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
-    assert_jit_cache_len(sub, 1)
 
   def test_jit_arg_order_kwargs_pos(self):
     @TinyJit
@@ -52,13 +46,63 @@ class TestJit(unittest.TestCase):
     np.testing.assert_allclose(sub(b, a).numpy(), b.numpy()-a.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(sub, 1)
 
+  def test_jit_arg_order_mixed(self):
+    @TinyJit
+    def f(x, y, z): return (x - y + z).realize()
+    a, b, c = (Tensor.randn(10, 10, device=Device.DEFAULT).realize() for _ in range(3))
+    f(a, b, c)
+    f(a, b, c)
+    np.testing.assert_allclose(f(a, c, z=b).numpy(), (a-c+b).numpy(), atol=1e-4, rtol=1e-5)
+    np.testing.assert_allclose(f(c, y=b, z=a).numpy(), (c-b+a).numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(f, 1)
+
+  def test_jit_raw_buffer_mixed_order(self):
+    @TinyJit
+    def f(buf, first, second):
+      return (Tensor(UOp.from_buffer(buf), device=buf.device) + first - second).realize()
+    a, b = Tensor.randn(3, device=Device.DEFAULT).realize(), Tensor.randn(3, device=Device.DEFAULT).realize()
+    b1, b2 = _mkbuf(10.0), _mkbuf(20.0)
+    f(b1, a, b)
+    f(b1, a, b)
+    np.testing.assert_allclose(f(b2, b, a).numpy(), (Tensor(UOp.from_buffer(b2), device=b2.device) + b - a).numpy(), atol=1e-4, rtol=1e-5)
+    np.testing.assert_allclose(f(b2, b, second=a).numpy(), (Tensor(UOp.from_buffer(b2), device=b2.device) + b - a).numpy(), atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(f, 1)
+
   def test_jit_raw_buffer_input(self):
     @TinyJit
     def f(b): return (Tensor(UOp.from_buffer(b), device=b.device) * 2).realize()
-    from tinygrad.device import Buffer
     for i in range(4):
       buf = Buffer(Device.DEFAULT, 3, dtypes.float32, initial_value=np.array([i+1]*3, dtype=np.float32).tobytes())
       np.testing.assert_allclose(f(buf).numpy(), [2*(i+1)]*3, atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(f, 1)
+
+  def test_jit_raw_buffer_nested_list(self):
+    @TinyJit
+    def f(items):
+      return (Tensor(UOp.from_buffer(items[0]), device=items[0].device) * 2).realize()
+    for i, v in enumerate([1.0, 5.0, 9.0]):
+      np.testing.assert_allclose(f([_mkbuf(v)]).numpy(), [v*2]*3, atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(f, 1)
+
+  def test_jit_raw_buffer_nested_multiple(self):
+    @TinyJit
+    def f(items):
+      t0 = Tensor(UOp.from_buffer(items[0]), device=items[0].device)
+      t1 = Tensor(UOp.from_buffer(items[1]), device=items[1].device)
+      return (t0 + t1).realize()
+    for a, b in [(1.0, 2.0), (5.0, 6.0), (9.0, 10.0)]:
+      np.testing.assert_allclose(f([_mkbuf(a), _mkbuf(b)]).numpy(), [a+b]*3, atol=1e-4, rtol=1e-5)
+    assert_jit_cache_len(f, 1)
+
+  def test_jit_raw_buffer_middle_slot(self):
+    @TinyJit
+    def f(x, buf, y):
+      return (Tensor(UOp.from_buffer(buf), device=buf.device) + x - y).realize()
+    a, c = Tensor.randn(3, device=Device.DEFAULT).realize(), Tensor.randn(3, device=Device.DEFAULT).realize()
+    b1, b2 = _mkbuf(10.0), _mkbuf(20.0)
+    f(a, b1, c)
+    f(a, b1, c)
+    np.testing.assert_allclose(f(a, b2, c).numpy(), (Tensor(UOp.from_buffer(b2), device=b2.device) + a - c).numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(f, 1)
 
   @unittest.skipUnless(Device.DEFAULT == "CPU", "core_id is a CPU runtimevar")
