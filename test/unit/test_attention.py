@@ -264,6 +264,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
         np.testing.assert_allclose(np.concatenate(outs, axis=1), decode, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
         np.testing.assert_allclose(chunked_conv, decode_conv, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
         np.testing.assert_allclose(chunked_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
+
   def test_start_zero_resets_realized_state(self):
     config, x = self._make_config(max_context=3), self._tensor_linspace(-1, 1, (1, 3, 32))
     block = self._make_block(config)
