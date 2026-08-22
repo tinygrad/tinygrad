@@ -28,12 +28,6 @@ class NVASM24Controller(CustomASM24Controller):
     self._f0_out(fmt_type, 0x0F, address, nbytes // 4, mode=2)
     return self.usb.bulk_read(nbytes, timeout=30000)
 
-  def scsi_write(self, buf:bytes, start_slot:int=0):
-    buf_padded = buf + b'\x00' * (round_up(len(buf), 512) - len(buf))
-    sectors, num_slots = len(buf_padded) // 512, ceildiv(len(buf_padded), 0x4000)
-    self.usb.control_write(0xF2, value=sectors, index=start_slot | (num_slots << 8))
-    self.usb.bulk_write(buf_padded)
-
 class NVUSBMMIOInterface(USBMMIOInterface):
   def __init__(self, usb, addr, size, fmt, pcimem=True, sram_start_slot:int=0):
     super().__init__(usb, addr, size, fmt, pcimem)
@@ -52,7 +46,7 @@ class NVUSBMMIOInterface(USBMMIOInterface):
   def __setitem__(self, index, data):
     off, _ = self._off_from_index(index)
     data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
-    if not self.pcimem: self.usb.scsi_write(data, start_slot=self.sram_start_slot) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)
+    if not self.pcimem: self.usb.scsi_write(data, slot_start=self.sram_start_slot) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)
     else:
       start, end = self.addr + off, self.addr + off + len(data)
       aligned_start, aligned_end = start & ~0x3, round_up(end, 4)
@@ -71,13 +65,10 @@ class ASM24GSPQueueInterface(MMIOInterface):
   PAGE_PADDRS = (0x213000, 0x27F000, 0x27B000, 0x27C000, 0x27D000, 0x27E000,
                  0x828000, 0x820000, 0x200000, 0x820000, 0x200000)
 
-  def __init__(self, usb, size:int=0xB000, fmt='B', offset:int=0, root:ASM24GSPQueueInterface|None=None):
+  def __init__(self, usb, size:int, fmt='B', offset:int=0, root:ASM24GSPQueueInterface|None=None):
     self.usb, self.offset, self.nbytes, self.fmt, self.el_sz = usb, offset, size, fmt, struct.calcsize(fmt)
-    if root is None:
-      self._root, self._mirror = self, bytearray(self.SRAM_SIZE)
-    else: self._root = root
+    self._mirror:bytearray = bytearray(self.SRAM_SIZE) if root is None else root._mirror
 
-  def paddrs(self) -> list[int]: return list(self.PAGE_PADDRS)
   def __len__(self): return self.nbytes // self.el_sz
 
   def _off_from_index(self, index):
@@ -88,7 +79,7 @@ class ASM24GSPQueueInterface(MMIOInterface):
 
   def _page_mapping(self, logical_page:int) -> tuple[str, int]:
     paddr = self.PAGE_PADDRS[logical_page]
-    if logical_page > 6 and paddr == 0x200000: return "xdata", 0xF000
+    if paddr == 0x200000: return "xdata", 0xF000
     if 0x200000 <= paddr < 0x280000: return "sram", paddr - 0x200000
     return "xdata", {0x820000: 0xA000, 0x828000: 0xB800}[paddr]
 
@@ -105,7 +96,7 @@ class ASM24GSPQueueInterface(MMIOInterface):
     off, size = self._off_from_index(index)
     out = bytearray()
     for kind, mapped, chunk in self._pieces(self.offset + off, size):
-      out += self.usb.read(mapped, chunk) if kind == "xdata" else self._root._mirror[mapped:mapped+chunk]
+      out += self.usb.read(mapped, chunk) if kind == "xdata" else self._mirror[mapped:mapped+chunk]
     if isinstance(index, slice): return bytes(out) if self.fmt == 'B' else memoryview(out).cast(self.fmt).tolist()
     return int.from_bytes(out, "little")
 
@@ -117,17 +108,17 @@ class ASM24GSPQueueInterface(MMIOInterface):
     for kind, mapped, chunk in self._pieces(self.offset + off, size):
       if kind == "xdata": self.usb.write(mapped, raw[pos:pos+chunk])
       else:
-        self._root._mirror[mapped:mapped+chunk] = raw[pos:pos+chunk]
+        self._mirror[mapped:mapped+chunk] = raw[pos:pos+chunk]
         for slot in range(mapped // self.SLOT_SIZE, ceildiv(mapped + chunk, self.SLOT_SIZE)):
           dirty_slots[slot] = max(dirty_slots.get(slot, 0), min(mapped + chunk, (slot + 1) * self.SLOT_SIZE))
       pos += chunk
 
     for slot, hi in sorted(dirty_slots.items()):
       slot_base = slot * self.SLOT_SIZE
-      self.usb.scsi_write(bytes(self._root._mirror[slot_base:round_up(hi, 512)]), start_slot=slot)
+      self.usb.scsi_write(bytes(self._mirror[slot_base:round_up(hi, 512)]), slot_start=slot)
 
   def view(self, offset:int=0, size:int|None=None, fmt=None):
-    return ASM24GSPQueueInterface(self.usb, self.nbytes-offset if size is None else size, fmt or self.fmt, self.offset+offset, self._root)
+    return ASM24GSPQueueInterface(self.usb, self.nbytes-offset if size is None else size, fmt or self.fmt, self.offset+offset, self)
 
 class NVUSBPCIDevice(USBPCIDevice):
   def __init__(self, dev, pcibus):
@@ -151,7 +142,7 @@ class NVUSBPCIDevice(USBPCIDevice):
 
   def alloc_gsp_queues(self, size:int) -> tuple[MMIOInterface, list[int]]:
     self.gsp_queues = ASM24GSPQueueInterface(self.usb, size)
-    return self.gsp_queues, self.gsp_queues.paddrs()
+    return self.gsp_queues, list(self.gsp_queues.PAGE_PADDRS)
 
   def stage_gsp_args(self, data:bytes, offset:int) -> int:
     page = data + bytes(0x100 - len(data))
@@ -159,7 +150,7 @@ class NVUSBPCIDevice(USBPCIDevice):
     self.usb.write(0xB800 + offset, page)
     return 0x828000 + offset
 
-  def _retrain_pcie(self, generation:int):
+  def retrain_pcie(self, generation:int):
     for bus, cap in ((self.gpu_bus - 1, 0x80), (self.gpu_bus, 0x78)):
       ctl2 = self.usb.pcie_cfg_req(cap + 0x30, bus=bus, size=2)
       self.usb.pcie_cfg_req(cap + 0x30, bus=bus, value=(ctl2 & ~0xF) | generation, size=2)
@@ -169,28 +160,19 @@ class NVUSBPCIDevice(USBPCIDevice):
     self.usb.pcie_cfg_req(0x90, bus=self.gpu_bus - 1, value=linkctl | 0x20, size=2)
     time.sleep(0.1)
 
-  def stage_gsp_boot(self, data:bytes):
-    self._retrain_pcie(1)
-    self.usb.scsi_write(data)
-
-  def restore_pcie_after_gsp_boot(self): self._retrain_pcie(3)
-
-  @staticmethod
-  def _wait_until(deadline:float):
-    while time.perf_counter() < deadline: pass
-
   def stream_gsp_boot(self, image:bytes, launched_at:float):
     ring_page, ring_pages, batch_pages = 44, 84, 28
     ring_size, batch_size = ring_pages * 0x1000, batch_pages * 0x1000
     for i, off in enumerate(range(ring_size, len(image), batch_size)):
       deadline = launched_at + 0.003 + (off-ring_size) / ring_size * 0.0014
-      if i == 0: self._wait_until(deadline)
+      if i == 0:
+        while time.perf_counter() < deadline: pass
       slot = ring_page // 4 + i % (ring_pages // batch_pages) * batch_pages // 4
       self.usb.usb.control_write(0xF2, value=batch_size // 512, index=slot | (batch_pages // 4 << 8))
-      self._wait_until(deadline)
+      while time.perf_counter() < deadline: pass
       self.usb.usb.bulk_write(image[off:off+batch_size].ljust(batch_size, b'\x00'))
     # Restore queues and arguments after SEC2 verifies the image.
-    self._wait_until(launched_at + 0.270)
+    while time.perf_counter() < launched_at + 0.270: pass
     self.usb.scsi_write(bytes(self.gsp_queues._mirror))
     for offset, page in self._gsp_args.items(): self.usb.write(0xB800 + offset, page)
 

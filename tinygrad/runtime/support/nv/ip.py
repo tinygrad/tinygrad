@@ -194,7 +194,9 @@ class NV_FLCN(NV_IP):
 
   def init_hw(self):
     self.falcon, self.sec2 = 0x00110000, 0x00840000
-    if self.nvdev.is_usb: self.nvdev.pci_dev.stage_gsp_boot(self.nvdev.gsp._boot_sram)
+    if self.nvdev.is_usb:
+      self.nvdev.pci_dev.retrain_pcie(1)
+      self.nvdev.pci_dev.usb.scsi_write(self.nvdev.gsp._boot_sram)
 
     self.reset(self.falcon)
     self.execute_hs(self.falcon, self.frts_image_paddr, code_off=0x0, data_off=self.desc_v3.IMEMLoadSize,
@@ -218,7 +220,7 @@ class NV_FLCN(NV_IP):
 
     self.nvdev.NV_PFALCON_FALCON_OS.with_base(self.falcon).write(0x0)
     assert self.nvdev.NV_PRISCV_RISCV_CPUCTL.with_base(self.falcon).read_bitfields()['active_stat'] == 1, "GSP Core is not active"
-    if self.nvdev.is_usb: self.nvdev.pci_dev.restore_pcie_after_gsp_boot()
+    if self.nvdev.is_usb: self.nvdev.pci_dev.retrain_pcie(3)
 
   def shutdown_booter(self):
     self.reset(self.sec2)
