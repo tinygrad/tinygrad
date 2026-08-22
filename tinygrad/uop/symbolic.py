@@ -15,23 +15,22 @@ from tinygrad.codegen.decomp.transcendental import xpow
 
 def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   if c.val < 0: return x.reciprocal().pow(-c.val)
-  if c.val == 0: return UOp.const(x.dtype.const(1))
+  if c.val == 0: return x.const_like(1)
   if int(c.val-0.5)+0.5 == c.val: return x.pow(c.val-0.5) * x.sqrt()
   if int(c.val) == c.val: return (y := x.pow(c.val//2)) * y * (x if c.val%2 == 1 else 1)
   return None
 
-def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
+def fold_bitcast(root:UOp) -> UOp|None:
+  c = root.src[0]
+  if not (c.op is Ops.CONST and c.dtype is dtypes.bool or c.op is Ops.CAST and c.src[0].op is Ops.CONST): return None
   if c.dtype.fmt is None or root.dtype.fmt is None or c.dtype.itemsize != root.dtype.itemsize: return None
   # the value is MATHEMATICAL and may not fit: reading it as bits is the emission that pins it to the stated width
-  return root.const_like(bitcast(truncate[c.dtype](c.src[0].val if c.op is Ops.CAST else c.val), c.dtype, root.dtype))
+  return root.const_like(bitcast(truncate[c.dtype](c.val), c.dtype, root.dtype))
 
-# no truncate: ints stay mathematical past the fold (emission truncates); exact floats remain values until demanded
-def fold_const_alu(a:UOp) -> UOp:
-  ret = exec_alu(a.op, a.dtype, [lit_arg(s) for s in a.src], False)
-  vals = ret if isinstance(ret, tuple) else (ret,)
-  if dtypes.is_float(a.dtype) and all(isinstance(v, float) and (not math.isfinite(v) or all(dt.const(v) == v for dt in
-     (dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64))) for v in vals): return UOp.const(ret)
-  return a.const_like(ret)
+# no truncate: ints stay mathematical past the fold (emission truncates); floats re-round in the mint
+def fold_const_alu(a:UOp) -> UOp|None:
+  vals = [lit_arg(s) for s in a.src]
+  return None if any(v is None for v in vals) else a.const_like(exec_alu(a.op, a.dtype, vals, False))
 
 def _quotient_base(q:UOp, base:UOp, div:int) -> UOp|None:
   # the B with q == B//div and B%div == base%div, or None. only such congruence is needed to recombine, and canonicalization
@@ -68,12 +67,11 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
 invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
 invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 
-# the two literal spellings: Invalid carries no width, so it rides bare inside either
-bare_lit = UPat.any(UPat(Ops.CONST), UPat(Ops.STACK, src=UPat(Ops.CONST)))
-pair_lit = UPat.any(p:=UPat(Ops.CAST, src=(UPat(Ops.CONST),)), UPat(Ops.STACK, src=UPat.any(p, UPat(Ops.CONST, arg=Invalid))))
 def lit_arg(u:UOp):
-  if u.op is Ops.STACK: return tuple(lit_arg(s) for s in u.src)
-  return u.src[0].val if u.op is Ops.CAST and u.src[0].op is Ops.CONST else u.val
+  if u.op is Ops.STACK:
+    vals = tuple(lit_arg(s) for s in u.src)
+    return None if any(v is None for v in vals) else vals
+  return u.val if u.op is Ops.CONST or (u.op is Ops.CAST and u.src[0].op is Ops.CONST) else None
 pm_data_invalid = PatternMatcher([
   (invalid_pat.broadcast(), lambda i: i),
   (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_pat,)), lambda i: i),
@@ -111,9 +109,12 @@ def fold_const_where(gate:UOp, c0:UOp, c1:UOp, w:UOp) -> UOp:
 
 symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** self folding **
-  (UPat({Ops.ADD, Ops.XOR, Ops.OR}, src=[UPat.var("x"), UPat.const(0)]), lambda x: x),  # x+0 / x^0 / x|0 -> x
+  # a literal identity folds in either spelling: the pair's CAST is a width statement, the value is still 0/1
+  (UPat({Ops.ADD, Ops.XOR, Ops.OR}, src=[UPat.var("x"), UPat.const(0).or_casted()], name="u"),
+   lambda u,x: x if x.dtype == u.dtype else x.cast(u.dtype)),  # x+0 / x^0 / x|0 -> x
   (UPat({Ops.SHL, Ops.SHR}, src=(UPat.var("x"), UPat.const(0))), lambda x: x),          # x<<0 / x>>0 -> x
-  (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
+  (UPat(Ops.MUL, src=[UPat.var("x"), UPat.const(1).or_casted()], name="u"),
+   lambda u,x: x if x.dtype == u.dtype else x.cast(u.dtype)),  # x*1 -> x
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
@@ -148,14 +149,9 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   # a CAST to a concrete dtype over a CONST is a value conversion: evaluate it once, at the width the CAST states
   # TODO: delete this once CONST has no dtype
   (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
-  # One rule per spelling combination: bare has no width, pair evaluates at its stated width, and mixed first
-  # commits the bare operand to the promotion. `symbolic` below removes any newly redundant pair.
   # NOTE: THREEFRY(const,const) folds via its decomposition
-  (UPat(GroupOp.ALU-{Ops.THREEFRY}, src=bare_lit, name="a"), fold_const_alu),
-  (UPat(GroupOp.ALU-{Ops.THREEFRY}, src=pair_lit, name="a"), fold_const_alu),
-  (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=[pair_lit, bare_lit], name="a"), lambda a:
-   a.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in a.src))
-   if (dt:=promo_dtype(a.src)) not in dtypes.weaks else None),
+  # Constant evaluation probes values, not spellings. The ALU's dtype supplies the evaluation width for mixed inputs.
+  (UPat(GroupOp.ALU-{Ops.THREEFRY}, name="a"), fold_const_alu),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
@@ -174,8 +170,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   # *** cast/bitcast ***
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
   # a BITCAST reads its operand at the width it STATES, so a weak const is nonsense here: the bare arm is bool only
-  (UPat(Ops.BITCAST, name="root", src=(UPat.any(UPat(Ops.CONST, dtypes.bool, name="c"), UPat(Ops.CAST, src=(UPat(Ops.CONST),), name="c")),)),
-   fold_bitcast),
+  (UPat(Ops.BITCAST, name="root"), fold_bitcast),
   # b.cast(a).cast(b) -> b if a preserves all values in b
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_lossless_cast(b.dtype, a.dtype) else None),
   # bitcast twice
@@ -235,22 +230,24 @@ def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
   return cond.where(t.substitute({cond: cond.const_like(True)}), f.substitute({cond: cond.const_like(False)}))
 
 def push_where_cast(s:UOp, a:UOp, b:UOp, cast:UOp) -> UOp:
-  def bare(x:UOp, other:UOp) -> UOp:
-    if x.op is Ops.CONST and x.dtype in dtypes.weaks and other.dtype not in dtypes.weaks: return UOp.const(cast.dtype.const(x.val))
-    return commit_weak(x, cast.dtype)
-  return s.where(bare(a, b), bare(b, a))
-
-def mul_same_dtype(x:UOp, c:UOp) -> UOp:
-  return x.alu(Ops.MUL, c) if promo_dtype((x, c)) == x.dtype else x*c
+  # Apply the conversion to both values, but let WHERE state a converted literal's width when another branch can.
+  src = [UOp.const(cast.dtype.const(x.val)) if x.op is Ops.CONST and x.dtype in dtypes.weaks else commit_weak(x, cast.dtype) for x in (a,b)]
+  if promo_dtype(tuple(src)) in dtypes.weaks:
+    # Two bare values cannot state the result width. One pair is sufficient; the other derives from the WHERE edge.
+    for i,x in enumerate((a,b)):
+      if x.op is Ops.CONST and not x.is_invalid:
+        src[i] = commit_weak(x, cast.dtype)
+        break
+  return s.where(*src)
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
   # TODO: make a more general or folder like simplify_valid
   (UPat.var("x", dtype=dtypes.bool) | UPat.var("x", dtype=dtypes.bool).logical_not(), lambda x: x.const_like(True)),  # x|!x -> True
   # ** combine terms **
-  (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: mul_same_dtype(x, c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
+  (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x.alu(Ops.MUL, c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
   ((UPat.var("y") + UPat.var("x") * UPat.cvar("c0")) + UPat.var("x") * UPat.cvar("c1"), lambda x,y,c0,c1: y+x*(c0+c1)),
-  (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: mul_same_dtype(x, c+1)), # (x+x*c)-> x*(c+1)
+  (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x.alu(Ops.MUL, c+1)), # (x+x*c)-> x*(c+1)
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: y+x*(c+1)),
   ((UPat.var("y") + UPat.var("x") * UPat.cvar("c")) + UPat.var("x"), lambda x,y,c: y+x*(c+1)),
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
@@ -328,8 +325,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
   # a CAST over a typed literal is a value conversion: evaluate at the stated width, keep the outer cast.
   # keep out of symbolic_simple: create_non_native_float_pats re-expands the pair and cycles on bf16
-  (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat(Ops.CAST, dtypes.all, src=(UPat(Ops.CONST, name="c"),)),)),
-   lambda root,c: root.const_like(c.val)),
+  (UPat(Ops.CAST, dtypes.all, name="root"),
+   lambda root: root.const_like(root.src[0].val) if root.src[0].op is Ops.CAST and root.src[0].src[0].op is Ops.CONST else None),
 ])+div_and_mod_symbolic
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********

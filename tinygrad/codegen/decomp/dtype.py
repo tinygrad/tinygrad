@@ -138,7 +138,7 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
 
 # tag is the 32-bit word this node becomes - (0 for the low word, 1 for the high, the dtype the consumer wants)
 pm_long_decomp: PatternMatcher = PatternMatcher([
-  # word splitting needs a bare literal committed at its long sibling's width
+  # the decomp's own bottom-up rewrite can mint bare literals mid-flight: word splitting commits them at the long sibling's width
   (UPat(GroupOp.All, name='x'), lambda x: commit_weak_sibling(x, next((s.dtype for s in x.src if s.dtype in l2i_dt), None))),
   (UPat(GroupOp.Defines, tuple(l2i_dt.keys()), src=(UPat.var("sz"),), name="x"), lambda x,sz:
    UOp(x.op, src=(sz*2,), arg=replace(x.arg, dtype=l2i_dt[x.dtype]), tag=x.tag)),
@@ -172,8 +172,6 @@ pm_long_decomp: PatternMatcher = PatternMatcher([
 
 # float decomposition patterns - ctx is (fr, to) tuple
 pm_float_decomp: PatternMatcher = PatternMatcher([
-  # emulation needs a bare literal committed at its emulated sibling's width
-  (UPat(GroupOp.All, name='x'), lambda ctx,x: commit_weak_sibling(x, next((s.dtype for s in x.src if s.dtype == ctx[0]), None))),
   (UPat(GroupOp.Defines, name="x"), lambda ctx,x:
    UOp(x.op, src=x.src, arg=replace(x.arg, dtype=f2f_dt[ctx[0]]), tag=ctx[0]) if x.dtype == ctx[0] else None),
   # INDEX into a LOAD/STACK selects a lane of an already converted value, the load rules below own those

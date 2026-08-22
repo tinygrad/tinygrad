@@ -96,12 +96,6 @@ pm_reduce_unparented = PatternMatcher([
   (UPat(Ops.REDUCE, name="red"), reduce_unparented),
 ])
 
-def collapse_gated_reduce(r:UOp, val:UOp, lower:UOp|None=None, upper:UOp|None=None) -> UOp|None:
-  if not no_range(val): return None
-  count = ((upper.minimum(r.src[0]) if upper is not None else r.src[0]) -
-           (lower.maximum(0) if lower is not None else r.const_like(0))).maximum(0).minimum(r.src[0])
-  return count.cast(val.dtype) if val.vmin == val.vmax == 1 else count * val
-
 pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   # lift x+y out of reduce on lt
   ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
@@ -113,7 +107,9 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
     (UPat(Ops.RANGE, name="r") < UPat.var("upper")).where(UPat.var("val"), 0),
     (UPat(Ops.RANGE, name="r") < UPat.var("lower")).where(0, UPat.var("val")),
     ((UPat.var("r")<UPat.var("lower")).logical_not()&(UPat(Ops.RANGE, name="r")<UPat.var("upper"))).where(UPat.var("val"), 0),
-  ).reduce(UPat.var("r"), arg=Ops.ADD), collapse_gated_reduce),
+  ).reduce(UPat.var("r"), arg=Ops.ADD), lambda r,val,lower=None,upper=None:
+    ((upper.minimum(r.src[0]) if upper is not None else r.src[0]) -
+     (lower.maximum(0) if lower is not None else r.const_like(0))).maximum(0).minimum(r.src[0]) * val if no_range(val) else None),
   (invalid_gate.reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
    lambda cond,x,i,r: cond.where(x.reduce(*r.src[1:], arg=Ops.ADD), i) if no_range(cond) else None),
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),

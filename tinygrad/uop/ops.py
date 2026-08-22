@@ -257,8 +257,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def rtag(self, tag=True): return self.replace(tag=tag)
   @property
   def val(self):
-    assert self.op is Ops.CONST, f"val is only for CONST, got {self.op}"
-    return self.arg
+    if self.op is Ops.CONST: return self.arg
+    # CAST(dt, CONST(v)) is one literal: evaluation sees its mathematical value through the width statement
+    assert self.op is Ops.CAST and self.src[0].op is Ops.CONST, f"val is only for literals, got {self.op}"
+    return self.src[0].val
   @property
   def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
   @recursive_property

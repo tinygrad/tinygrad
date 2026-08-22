@@ -22,30 +22,27 @@ def derived_widths(u:UOp, src:tuple[UOp, ...]) -> tuple[DType, DType]|None:
      or (result:=unwrap(dtype_from_uop(u.op, src, u.arg))) in dtypes.weaks: return None
   return meet, result
 
-def commit_srcs_at(u:UOp, dt:DType) -> UOp|None:
-  # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
+def commit_weak_srcs(u:UOp, dt:DType|None=None) -> UOp|None:
+  # Broadcastable nodes commit weak expressions where their operands concretely meet. A forced floor (from an outer
+  # CAST) uses the same operation; derivable bare literals stay bare because the node already states their width.
   widths = derived_widths(u, u.src)
+  if dt is None:
+    if (dt:=promo_dtype(u.src)) in dtypes.weaks: return None
   ret = u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks and
                                         not (s.op is Ops.CONST and widths is not None) else s for s in u.src))
   return None if ret is u else ret
-
-def commit_weak_srcs(u:UOp) -> UOp|None:
-  if not any(s.dtype in dtypes.weaks for s in u.src) or (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
-  return commit_srcs_at(u, dt)
 
 # a concrete CAST over a weak node states the width the value will live at. that width is a floor, never a narrowing
 def cast_weak_srcs(c:UOp, u:UOp) -> UOp|None:
   # only within the kind: an int cast of a weakfloat node is a value conversion, not a statement about the node's width
   if c.dtype in dtypes.weaks or weak_dtype(c.dtype) is not u.dtype: return None
-  return None if (ret:=commit_srcs_at(u, least_upper_dtype(c.dtype, default_dtype(u)))) is None else ret.cast(c.dtype)
+  return None if (ret:=commit_weak_srcs(u, least_upper_dtype(c.dtype, default_dtype(u)))) is None else ret.cast(c.dtype)
 
 # rides every round that can mint a weak const, and must reach fixpoint before pm_lower_weak below hands one its own default
 pm_commit_weak = PatternMatcher([
   (UPat(GroupOp.Broadcastable, name="u"), commit_weak_srcs),
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
    lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.src[0].dtype), *u.src[2:]))),
-  (UPat(Ops.LOAD, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
-   lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.dtype), *u.src[2:]))),
   # NOTE: no CONST arm. a concrete CAST over a weak CONST is already the committed pair, minted that way by UOp.const
   (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.ALU, dtype=dtypes.weaks, name="u"),)), cast_weak_srcs),
 ])

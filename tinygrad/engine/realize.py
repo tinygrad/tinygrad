@@ -202,7 +202,7 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
-  shape, pos_var = tuple(s.src[0].val for s in ast.src if s.op is Ops.CAST and s.src[0].op is Ops.CONST), ast.variables()[0].expr
+  shape, pos_var = tuple(s.val for s in ast.src if s.op is Ops.CAST and s.src[0].op is Ops.CONST), ast.variables()[0].expr
   bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
   return []
 

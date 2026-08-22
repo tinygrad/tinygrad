@@ -834,8 +834,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       for i in range(-len(sizes), 0):
         reshape, index = [1] * X.ndim, indexes[i]
         reshape[i] = expand[i] = sizes[i]
-        low, high = index.floor().int(), index.ceil().int()
-        low, high, perc = [y.reshape(reshape).expand(expand) for y in (low, high, index - low)]
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
         X = X.gather(i, low).lerp(X.gather(i, high), perc)
 
     if mode == "cubic":
