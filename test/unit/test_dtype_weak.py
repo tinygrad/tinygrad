@@ -118,13 +118,13 @@ class TestWeakPromotion(unittest.TestCase):
     with Context(DEFAULT_FLOAT=dtypes.float16):
       dst = UOp.param(0, dtypes.bfloat16, (1,)).index(UOp.const(0).cast(dtypes.int32))
       gate = UOp.const(True)
-      out = graph_rewrite(dst.store(UOp.const(5.0), gate), pm_lower_index_dtype, ctx={})
+      out = graph_rewrite(dst.store(UOp.const(5.0), gate), pm_commit_weak)
     # a bare weak CONST commits directly: the pass runs without symbolic, so a CAST here would survive it
     self.assertEqual((out.src[1], out.src[2]), (UOp.const(5.0, dtypes.bfloat16), gate))
 
   def test_weak_srcs_commit_only_at_a_concrete_lub(self):
     weak_lub = UOp(Ops.ADD, src=(UOp.const(1), UOp.const(1.0)))
-    self.assertIs(graph_rewrite(weak_lub, pm_lower_index_dtype, ctx={}), weak_lub)
+    self.assertIs(graph_rewrite(weak_lub, pm_commit_weak), weak_lub)
     concrete = UOp.const(2.0).cast(dtypes.float16)
     where = graph_rewrite(UOp(Ops.WHERE, src=(UOp.const(True), concrete, UOp.const(1.0))), pm_lower_index_dtype, ctx={})
     self.assertEqual(tuple(x.dtype for x in where.src), (dtypes.bool, dtypes.float16, dtypes.float16))

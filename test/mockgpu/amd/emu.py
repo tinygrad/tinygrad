@@ -572,7 +572,7 @@ class _Ctx:
     for dest, val in assigns:
       # VGPR bit-slice assignment: VGPR[lane][reg][hi:lo] -> read-modify-write with optional condition
       if dest.startswith('VGPR[') and re.search(r'\[\d+:\d+\]', dest):
-        hi_bit, lo_bit = int(val[2].val), int(val[3].val)
+        hi_bit, lo_bit = int(val[2]), int(val[3])
         new_val = _set_bits(self.vgpr.index(val[0]).load(), _val_to_bits(val[1]), hi_bit - lo_bit + 1, lo_bit).cast(dtypes.uint32)
         active = _lane_active(exec_mask, lane) & _to_bool(val[4]) if len(val) > 4 else _lane_active(exec_mask, lane)
         lane_stores.append(self.vgpr.index(val[0].valid(active)).store(new_val))
