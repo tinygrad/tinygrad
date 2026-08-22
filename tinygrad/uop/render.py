@@ -1,6 +1,6 @@
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, multirange_str, range_str, consumer_map_from_toposort
+from tinygrad.uop.ops import ParamArg, UOp, PatternMatcher, UPat, multirange_str, range_str, consumer_map_from_toposort, sint
 from tinygrad.helpers import strip_parens
 
 def pretty_print(x:UOp, cache=None, d=0)->str:
@@ -69,14 +69,15 @@ renderer_infer = PatternMatcher([
 # *** pyrender ***
 
 def srcs(ctx, src): return f"({ctx[src[0]]},)" if len(src) == 1 else f"({', '.join([ctx[x] for x in src])})"
+# marg is ssimplify'd, so a bound can be a node this graph never contained
+def marg_str(ctx, a:sint) -> str: return str(a) if not isinstance(a, UOp) else ctx[a] if a in ctx else a.render()
+
 def render_marg(ctx,x:UOp):
   if x.op is Ops.PERMUTE: return str(x.marg)
   if x.op is Ops.FLIP: return str(tuple([i for i,x in enumerate(x.marg) if x]))
   pieces = []
-  if x.op in {Ops.RESHAPE, Ops.EXPAND}:
-    pieces = [f"{ctx[a] if isinstance(a, UOp) else str(a)}" for a in x.marg]
-  if x.op in {Ops.PAD, Ops.SHRINK}:
-    pieces = [f"({ctx[a[0]] if isinstance(a[0], UOp) else str(a[0])}, {ctx[a[1]] if isinstance(a[1], UOp) else str(a[1])})" for a in x.marg]
+  if x.op in {Ops.RESHAPE, Ops.EXPAND}: pieces = [marg_str(ctx, a) for a in x.marg]
+  if x.op in {Ops.PAD, Ops.SHRINK}: pieces = [f"({marg_str(ctx, a[0])}, {marg_str(ctx, a[1])})" for a in x.marg]
   return f"({','.join(pieces)})" if len(pieces) != 1 else f"({pieces[0]},)"
 
 sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,

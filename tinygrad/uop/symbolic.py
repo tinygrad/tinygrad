@@ -24,8 +24,8 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   if c.dtype.fmt is None or root.dtype.fmt is None or c.dtype.itemsize != root.dtype.itemsize: return None
   return root.const_like(bitcast(truncate[c.dtype](c.val), c.dtype, root.dtype))
 
-# const folding works for CONST, STACK, and casted CONST
-const_folding_pat = UPat.any(UPat((Ops.CONST, Ops.STACK)), UPat(Ops.CAST, src=(UPat(Ops.CONST),)))
+# const folding works for CONST and STACK
+const_folding_pat = UPat((Ops.CONST, Ops.STACK))
 
 def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
   if u.op is Ops.CONST: return u.val
@@ -108,9 +108,9 @@ def fold_const_where(gate:UOp, c0:UOp, c1:UOp, w:UOp) -> UOp:
 
 symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** self folding **
-  (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
+  (UPat({Ops.ADD, Ops.XOR, Ops.OR}, src=[UPat.var("x"), UPat.const(0)]), lambda x: x),  # x+0 / x^0 / x|0 -> x
+  (UPat({Ops.SHL, Ops.SHR}, src=(UPat.var("x"), UPat.const(0))), lambda x: x),          # x<<0 / x>>0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
-  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) ^ 0, lambda x: x), # x^0 -> x
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
@@ -142,6 +142,9 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
+  # a CAST to a concrete dtype over a CONST is a value conversion: evaluate it once, at the width the CAST states
+  # TODO: delete this once CONST has no dtype
+  (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
   (UPat(GroupOp.Unary, src=(const_folding_pat,), name="a"), fold_const_alu),
   # NOTE: THREEFRY(const,const) folds via its decomposition
   (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(const_folding_pat,)*2, name="a"), fold_const_alu),

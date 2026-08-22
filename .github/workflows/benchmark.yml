@@ -94,7 +94,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: "0"
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -141,7 +141,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: "0"
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -190,7 +190,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: "0"
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -233,7 +233,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: "0"
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -279,7 +279,7 @@ jobs:
         shell: bash -e -o pipefail {0}
     env:
       DEV: ${{ matrix.dev }}
-      HCQ2: "0"
+      HCQ2: ${{ matrix.dev == 'AMD' && '1' || '0' }}
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
@@ -634,6 +634,9 @@ jobs:
       run: |
         GRAPH_ONE_KERNEL=1 NSZ=8192 python3 test/speed/external_test_copy_speed.py TestCopySpeed.testCopyDefaulttoCPUJit
         GRAPH_ONE_KERNEL=1 NSZ=8192 python3 test/speed/external_test_copy_speed.py TestCopySpeed.testCopyCPUtoDefaultJit
+    - name: HEVC Decode Benchmark
+      if: ${{ matrix.dev == 'NV' }}
+      run: VALIDATE=1 MAX_FRAMES=100 ASSERT_FPS=1400 JITBEAM=1 PYTHONPATH=. python3 extra/hevc/decode.py
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
       if: ${{ matrix.dev == 'NV' }}
       run: BENCHMARK_LOG=resnet_10steps MNISTMOCK=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py
