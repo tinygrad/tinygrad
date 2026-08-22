@@ -16,9 +16,12 @@ def check(status):
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
 def encode_args(args, vals, signature) -> tuple[ctypes.Structure, ctypes.Array]:
-  fields = ([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
-            [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), off) for i,(off,dt) in enumerate(TinyELF.iter_sig(signature[len(args):], len(args)*8))])
-  c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
+  fields, ordered, end = [], [], 0
+  for o, dt, is_buf, idx in TinyELF.iter_sig(signature):
+    fields.append((f'f{idx}', cuda.CUdeviceptr_v2, o) if is_buf else (f'v{idx}', getattr(ctypes, f"c_int{dt.bitsize}"), o))
+    ordered.append(args[idx] if is_buf else vals[idx])
+    end = o + (8 if is_buf else dt.itemsize)
+  c_args = init_c_struct_t(end, tuple(fields))(*ordered)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
   return c_args, vargs

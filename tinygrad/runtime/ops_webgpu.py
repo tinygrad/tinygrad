@@ -51,7 +51,7 @@ QueueOnSubmittedWorkDone = synchronous(webgpu.enum_WGPUQueueWorkDoneStatus)(webg
 
 class WebGPUProgram(Program['WebGpuDevice']):
   def __init__(self, dev:'WebGpuDevice', obj:TinyELF):
-    self.dev, self.name = dev, to_wgpu_str(obj.name)
+    self.dev, self.name, self.signature = dev, to_wgpu_str(obj.name), obj.signature
 
     # Creating shader module
     shader = webgpu.WGPUShaderModuleWGSLDescriptor(code=to_wgpu_str(obj.lib.decode()),
@@ -74,8 +74,9 @@ class WebGPUProgram(Program['WebGpuDevice']):
     def bgl_entry(n:int, ty:str):
       return webgpu.WGPUBindGroupLayoutEntry(binding=n, visibility=webgpu.WGPUShaderStage_Compute,
                                              buffer=webgpu.WGPUBufferBindingLayout(type=getattr(webgpu, f'WGPUBufferBindingType_{ty}')))
-    bind_entries = (webgpu.WGPUBindGroupLayoutEntry * (1+len(bufs)+len(vals)))(
-      bgl_entry(0, 'Uniform'), *(bgl_entry(i+1, 'Uniform' if i >= len(bufs) else 'Storage') for i in range(len(bufs)+len(vals))))
+    xs = [bufs[idx] if is_buf else vals[idx] for *_,_,is_buf,idx in self.signature]
+    bind_entries = (webgpu.WGPUBindGroupLayoutEntry * (1+len(xs)))(bgl_entry(0, 'Uniform'),
+            *(bgl_entry(i+1, 'Storage' if is_buf else 'Uniform') for i,(*_,_,is_buf,_) in enumerate(self.signature)))
 
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)
     bind_layout = webgpu.wgpuDeviceCreateBindGroupLayout(self.dev.device_res,
@@ -94,7 +95,7 @@ class WebGPUProgram(Program['WebGpuDevice']):
     def bg_entry(n:int, x:webgpu.WGPUBuffer|int|float):
       buf = x if isinstance(x, webgpu.WGPUBuffer) else self.dev.create_uniform(x)
       return webgpu.WGPUBindGroupEntry(binding=n, buffer=buf, offset=0, size=webgpu.wgpuBufferGetSize(buf))
-    bindings = (webgpu.WGPUBindGroupEntry * (1+len(bufs)+len(vals)))(bg_entry(0, float('inf')), *(bg_entry(i+1, x) for i,x in enumerate(bufs+vals)))
+    bindings = (webgpu.WGPUBindGroupEntry * (1+len(xs)))(bg_entry(0, float('inf')), *(bg_entry(i+1, x) for i,x in enumerate(xs)))
 
     bind_group_desc = webgpu.WGPUBindGroupDescriptor(layout=bind_layout, entryCount=len(bindings), entries=bindings)
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)

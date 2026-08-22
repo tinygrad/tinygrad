@@ -326,10 +326,12 @@ class CLikeArgsState(HCQArgsState[ProgramType]):
 
     if prefix is not None: self.buf.cpu_view().view(size=len(prefix) * 4, fmt='I')[:] = array.array('I', prefix)
 
-    self.bind_sints_to_buf(*[b.va_addr for b in bufs], buf=self.buf, fmt='Q', offset=len(prefix or []) * 4)
-    for v,(val_offset,dt) in zip(vals, TinyELF.iter_sig(prg.signature[-len(vals):], len(bufs) * 8)):
-      assert v is not None
-      self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=len(prefix or []) * 4 + val_offset)
+    for o,dt,is_buf,idx in TinyELF.iter_sig(prg.signature):
+      if is_buf: self.bind_sints_to_buf(bufs[idx].va_addr, buf=self.buf, fmt='Q', offset=len(prefix or [])*4+o)
+      else:
+        v = vals[idx]
+        assert v is not None
+        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=len(prefix or [])*4+o)
 
 class HCQProgram(Program[HCQDeviceType]):
   def __init__(self, args_state_t:Type[HCQArgsState], dev:HCQDeviceType, obj:TinyELF, kernargs_alloc_size:int, base:int|None=None):
