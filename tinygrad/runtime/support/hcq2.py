@@ -635,7 +635,7 @@ class HCQ2Compiled(Compiled):
     buf._buf.cpu_view().view(fmt='Q')[0] = init_value
     return buf
 
-  def _wait_signal(self, sig:memoryview, value:int, timeout:int|None=None):
+  def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
     timeout = timeout if timeout is not None and self.can_recover else None
     st, done = time.perf_counter(), sig[0]
     while done < value:
