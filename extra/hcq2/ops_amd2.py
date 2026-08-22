@@ -164,8 +164,7 @@ def pm4_submit(ctx, lin):
 
   # the ring itself only carries a packet pointing at the ib, wrapping the ring
   put = put_ptr.index(zero:=UOp.const(0, dtypes.int))
-  pkt = (ctx.pm4.PACKET3(ctx.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(cmdbuf.getaddr(devs)),
-         size_dw | ctx.pm4.INDIRECT_BUFFER_VALID)
+  pkt = (ctx.pm4.PACKET3(ctx.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(cmdbuf.getaddr(devs)), size_dw | ctx.pm4.INDIRECT_BUFFER_VALID)
   write_pkt = UOp.barrier(*[ring.index(((put + off) % q.ring.size).cast(dtypes.int)).store(UOp.const(x, dtypes.uint32)) for off,x in enumerate(pkt)])
 
   # advance the put/write pointers past the packet
@@ -609,7 +608,6 @@ class AMDDevice(HCQ2Compiled):
   def __init__(self, device:str=""):
     self.iface = self._select_iface(device)
     self.is_usb = isinstance(self.iface, USBIface)
-    # before super() sizes rt_allocator from it: a big cpu accessible alloc doesn't fit through the bridge
     if self.is_usb: self.rt_nbytes = 4 << 20
 
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)

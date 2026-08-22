@@ -32,7 +32,7 @@ class HCQInfo:
 
   input_idxs:tuple[tuple[tuple[str, ...], tuple[int, ...]], ...] = () # per inputs table: (devices, indexes into input_uops)
   inputs:int|None = None # index of the inputs table in call.src
-  kernels:tuple[tuple[tuple[str, ...], UOp, tuple[int, ...]], ...] = () # per kernel: (devices, a call with its name and estimates, timestamps)
+  kernels:tuple[tuple[tuple[str, ...], UOp, tuple[int, ...]], ...] = () # per kernel: (devices, a call carrying its name and estimates, timestamps)
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -220,10 +220,8 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
     wait_device_epoch = (done:=tl_signal.after(loop:=UOp.loop(0)).index(0).load()).end(loop, done < sched_epoch.index(0).load())
     fences.append(make_call("hcq_fence", UOp.sink(wait_device_epoch), HCQInfo(devs)))
 
-    # queues of other groups wait on these signals, so reset them only after every group reached its epoch. the resets are chained:
-    # stores in a sink have no order of their own, and a transport that turns each into a transfer needs one
-    rst:tuple[UOp, ...] = ()
-    for q in qs: rst += (make_buf(devs, slots[q]).after(*rst[-1:]).index(0).store(0),)
+    # queues of other groups wait on these signals, reset them after every group reached its epoch
+    rst = functools.reduce(lambda a,q: a+(make_buf(devs, slots[q]).after(*a[-1:]).index(0).store(0),), qs, cast(tuple[UOp, ...], ()))
     if rst: resets.append(make_call("hcq_reset", UOp.sink(*rst), HCQInfo(devs)))
     fins.append(make_call("hcq_finalizer", UOp.sink(epoch_slot.store(epoch + 1), sched_epoch.after(fin_submit).index(0).store(epoch)), HCQInfo(devs)))
   return fences + resets, fins, signal_tags
@@ -516,7 +514,6 @@ def push_stack(op, s): return UOp(Ops.STACK,
   src=tuple(op.replace(dtype=op.dtype, src=tuple(x if y is s else y for y in op.src)) for x in s.src))
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
-  # cpu_view goes through the device's host mapping, which may be a link
   for b in (m.bufs if isinstance(m:=buf.buffer, MultiBuffer) else (m,)):
     b.ensure_allocated()._buf.cpu_view().view(fmt='B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
@@ -628,7 +625,6 @@ class HCQ2Compiled(Compiled):
     return self.rt_buffer(uncached=b.tag!="kernargs").view(b.max_numel(), b.dtype,
       self.rt_allocator.alloc(b.max_numel() * b.dtype.itemsize, alignment=128))
 
-  # a device="CPU" signal is a host-only counter the gpu never sees
   @functools.cache
   def signal(self, name:str|int, init_value:int=0, device:str|None=None) -> Buffer:
     buf = Buffer(device or self.device, 1, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
@@ -643,7 +639,6 @@ class HCQ2Compiled(Compiled):
       elif time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
 
   def synchronize(self, timeout:int|None=None):
-    # submits run on the runtime device, drain it first or the timeline below is still in the past
     if HCQ_RUNTIME_DEV.value != self.device: Device[HCQ_RUNTIME_DEV.value].synchronize()
 
     sig = self.signal("timeline")._buf.cpu_view().view(fmt='Q')
