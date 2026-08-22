@@ -4,7 +4,7 @@ from tinygrad.function import function
 from tinygrad import Tensor, GlobalCounters, Device
 from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
-from test.helpers import assert_kernel_count
+from test.helpers import assert_kernel_count, KernelCountException
 
 class TestFunction(unittest.TestCase):
   def test_simple(self):
@@ -516,7 +516,7 @@ class TestFunctionTuple(unittest.TestCase):
     Tensor.realize(a)
     c = f(a)
 
-    self.assertEqual(count_kernels(c), 1)
+    if count_kernels(c) != 1: raise KernelCountException(1, count_kernels(c))
 
     c.sum().backward()
     Tensor.realize(a.grad)

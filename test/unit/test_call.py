@@ -224,6 +224,21 @@ class TestCallSchedule(unittest.TestCase):
     np.testing.assert_equal(x.numpy(), [2, 2, 2])
     np.testing.assert_equal(y.numpy(), [3, 3, 3])
 
+  def test_precompile_nested_scope_collision(self):
+    # a precompiled function body gets its own positional p{slot} params; they must not be renumbered when the call is
+    # scheduled inside an enclosing realize with a different slot ordering. the store must use this call's Variable
+    cache = Tensor.zeros(16)
+    @function(precompile=True, allow_implicit=True)
+    def store(x:Tensor, sp:UOp) -> Tensor:
+      # update a cache at a symbolic offset, like an attention KV cache update
+      return Tensor(cache.uop.after(cache[sp:sp+x.shape[0]].uop.store(x.uop)))[:sp+x.shape[0]].sum()
+    sp_v, nt_v = UOp.variable("sp", 0, 8), UOp.variable("nt", 1, 8)
+    t = Tensor.arange(16).float().realize()
+    sp, nt = sp_v.bind(0), nt_v.bind(8)
+    store(t[sp:sp+nt].clone().realize(), sp).realize()
+    np.testing.assert_equal(cache.numpy()[:8], t[:8].numpy())
+    np.testing.assert_equal(cache.numpy()[8:], np.zeros(8))
+
   def test_precompile_schedule_cache_hit(self):
     """two instances of the same @function should produce identical function body keys (schedule cache hit)"""
     @function(precompile=True)

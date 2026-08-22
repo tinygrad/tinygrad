@@ -15,17 +15,13 @@ def simplify_valid_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move
 def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+indexing_simplify, name="simplify_image_idx")
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
-  return UOp(Ops.LOAD, src=(
-    UOp.param(0, dtypes.float, (1024,)).index(idx.valid(valid)),
-  ))
+  return UOp.param(0, dtypes.float, (1024,)).index(idx.valid(valid)).load()
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
-  return UOp(Ops.LOAD, src=(
-    UOp.param(0, dtypes.float, image_shape).index(idx[1].valid(valid), idx[0].valid(valid)),
-  ))
+  return UOp.param(0, dtypes.float, image_shape).index(idx[1].valid(valid), idx[0].valid(valid)).load()
 
-def Special(expr, nmax): return UOp(Ops.SPECIAL, src=(UOp.const(nmax),), arg=expr)
-def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
+def Special(expr, nmax): return UOp.special(nmax, expr)
+def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax, param=True)
 def Range(n, nmax): return UOp.range(nmax, n)
 
 class TestValidIdxSimplification(unittest.TestCase):
@@ -512,7 +508,7 @@ class TestDropTrueGate(unittest.TestCase):
     buf = UOp.param(0, dtypes.int, (1,))
     idx = UOp.const(0)
     true_gate = UOp.const(True)
-    index_with_gate = UOp(Ops.INDEX, src=(buf, idx.valid(true_gate)))
+    index_with_gate = buf.index(idx.valid(true_gate))
     # apply the optimization
     result = graph_rewrite(index_with_gate, sym+indexing_simplify)
     # the True valid should be dropped (INDEX should only have 2 sources)
@@ -524,13 +520,17 @@ class TestRangeShrink(unittest.TestCase):
       result = full_rewrite(sink)
     return [u for u in result.toposort() if u.op is Ops.RANGE]
 
+  def assert_range_end(self, ranges:list[UOp], end:int):
+    self.assertEqual(len(ranges), 1)
+    with Context(NOOPT=1, SPEC=0): expected = full_rewrite(UOp.const(end, dtypes.int).sink()).src[0]
+    self.assertIs(ranges[0].src[0], expected)
+
   def test_range_shrink_single_guard(self):
     # range 0..203 guarded by r < 4 everywhere -> shrink to 0..3
     r = Range(0, 204)
     load = get_gated_load_uop(r < UOp.const(4), r)
     ranges = self.get_ranges(load.sink())
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].val, 4)
+    self.assert_range_end(ranges, 4)
 
   def test_range_shrink_picks_max_guard(self):
     # two loads guard the same range with r < 4 and r < 8 -> shrink to max(4, 8) = 8
@@ -538,25 +538,22 @@ class TestRangeShrink(unittest.TestCase):
     load1 = get_gated_load_uop(r < UOp.const(4), r)
     load2 = get_gated_load_uop(r < UOp.const(8), r)
     ranges = self.get_ranges(UOp.sink(load1, load2))
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].val, 8)
+    self.assert_range_end(ranges, 8)
 
   def test_range_no_shrink_guard_ge_max(self):
     # guard r < 300 with range max 204 -> no shrink (guard doesn't constrain)
     r = Range(0, 204)
     load = get_gated_load_uop(r < UOp.const(300), r)
     ranges = self.get_ranges(load.sink())
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].val, 204)
+    self.assert_range_end(ranges, 204)
 
   def test_range_no_shrink_when_unguarded_elsewhere(self):
     # one load guards r < 4, but another load uses r without a gate -> no shrink
     r = Range(0, 204)
     load1 = get_gated_load_uop(r < UOp.const(4), r)
-    load2 = UOp(Ops.LOAD, src=(UOp.param(1, dtypes.float, (204,)).index(r),))
+    load2 = UOp.param(1, dtypes.float, (204,)).index(r).load()
     ranges = self.get_ranges(UOp.sink(load1, load2))
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].val, 204)
+    self.assert_range_end(ranges, 204)
 
   def test_range_no_shrink_when_used_in_reduce(self):
     # range used in both a gated load AND directly in the reduce expression -> no shrink
@@ -564,8 +561,7 @@ class TestRangeShrink(unittest.TestCase):
     gated_load = get_gated_load_uop(r < UOp.const(4), r)
     red = (r.cast(dtypes.float) + gated_load).reduce(r, arg=Ops.ADD)
     ranges = self.get_ranges(red.sink())
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].val, 204)
+    self.assert_range_end(ranges, 204)
 
   def test_range_shrink_to_single_iteration(self):
     # guard r < 1 shrinks range to 1 -> single iteration, range eliminated entirely
@@ -580,8 +576,7 @@ class TestRangeShrink(unittest.TestCase):
     r = Range(0, 204)
     x = (r < 4).where(UOp.const(1.0), Invalid)
     ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r < 4).where(x, Invalid)).sink())
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].val, 4)
+    self.assert_range_end(ranges, 4)
 
   def test_range_shrink_store_where_invalid_flipped(self):
     # above, but flipped
@@ -589,8 +584,7 @@ class TestRangeShrink(unittest.TestCase):
     r = Range(0, 204)
     x = (r < 4).where(UOp.const(1.0), Invalid)
     ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r >= 4).where(Invalid, x)).sink())
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].val, 4)
+    self.assert_range_end(ranges, 4)
 
 if __name__ == '__main__':
   unittest.main()

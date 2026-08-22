@@ -10,7 +10,7 @@ concurrency:
 jobs:
   checkbranch:
     name: Check PR Branch status
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       branchstat: ${{ steps.brstat.outputs.stat}}
     steps:
@@ -44,7 +44,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: checkbranch
     if: needs.checkbranch.outputs.branchstat == 'false'
     steps:
@@ -87,7 +87,7 @@ jobs:
     name: Core Library Line Difference
     permissions:
       pull-requests: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: checkbranch
     if: needs.checkbranch.outputs.branchstat == 'true'
     steps:

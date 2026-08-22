@@ -720,10 +720,11 @@ class TestOps(unittest.TestCase):
       return torch.autograd.grad(t ** c, t)[0].item()
     for x in [-math.inf, 0, 1, math.inf]:
       for c in [-1, 0, 0.3, 1, 2]:
-        tiny_out = get_tiny_gradient(x, c)
         torch_out = get_torch_gradient(x, c)
+        # the pow backward routes through exp2/log2, whose 0/inf behavior is undefined on WEBGPU
+        if Device.DEFAULT == "WEBGPU" and not math.isfinite(torch_out): continue
+        tiny_out = get_tiny_gradient(x, c)
         if math.isnan(tiny_out):
-          if Device.DEFAULT == "WEBGPU": continue # TODO: WEBGPU issue with nan
           assert math.isnan(torch_out)
         else:
           self.assertAlmostEqual(tiny_out, torch_out, msg=f"{x}, {c}")
@@ -749,6 +750,7 @@ class TestOps(unittest.TestCase):
   def test_exp2_log2_zero_times_negative(self):
     # gallivm's exp2/log2 have "undefined behavior with infs, 0s and nans", so exp2(log2(0)*y) returns 0 instead of inf
     helper_test_op(None, lambda x,y: (x.log2()*y).exp2(), lambda x,y: (x.log2()*y).exp2(), vals=[[0.0], [-0.7]], forward_only=True)
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "pow at 0 routes through exp2/log2, whose 0/inf behavior is undefined on WEBGPU")
   def test_pow_zero_const(self):
     helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
     helper_test_op(None, lambda x: x**0.0, vals=[[0.0]])
@@ -820,6 +822,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor0&tor1, lambda: ten0&ten1, forward_only=True)
 
     helper_test_op(None, lambda x: (1 < x) & (x < 2), forward_only=True, vals=[[1.2, 1.2, 1.2, 3.2]])
+    helper_test_op([(3000,)]*10, lambda *xs: (sum(xs[1:], xs[0]) > 5) & (xs[0] < 0.9), forward_only=True)
+
+    if not COMPILE_ONLY:
+      np.testing.assert_equal((Tensor(2**64-1, dtype=dtypes.uint64) & 0xFFFFFFFF).numpy(), 0xFFFFFFFF)
 
   def test_or(self):
     data = [[1,-8,1],[32,1,6]]
@@ -2162,6 +2168,10 @@ class TestOps(unittest.TestCase):
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))
     helper_test_op([(2, 4)], lambda x: x.roll((1,)))
+    helper_test_op([(0,)], lambda x: x.roll(1, 0))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1, 0))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1, 1))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1))
     self.helper_test_exception([(2, 4)], lambda x: x.roll((1, 2)), expected=RuntimeError)
     helper_test_op([(2, 4)], lambda x: x.roll(1, 0))
     helper_test_op([(2, 4)], lambda x: x.roll(-1, 0))

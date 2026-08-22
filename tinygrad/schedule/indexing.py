@@ -12,8 +12,6 @@ class IndexingContext:
   realize_map: dict[UOp, None|list[int]] = field(default_factory=dict)
   non_removable: dict[UOp, None] = field(default_factory=dict)
   range_map: dict[UOp, tuple[tuple[UOp, ...], tuple[UOp, ...]]] = field(default_factory=dict)
-  # loads reachable from each UOp memoized across matches
-  buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
@@ -24,7 +22,7 @@ class IndexingContext:
 
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER,
-                      Ops.CONST, Ops.BIND, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
+                      Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
                       Ops.LOAD, Ops.CALL, Ops.FUNCTION}
 
 def realize(ctx:IndexingContext, tr:UOp) -> None: ctx.realize_map[tr] = None
@@ -35,7 +33,7 @@ def realize_srcs(ctx:IndexingContext, rb:UOp) -> None:
 
 def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
-  if dest.base in src.backward_slice_with_self: ctx.realize_map[src] = None
+  if dest.base in src.toposort(enter_calls=False): ctx.realize_map[src] = None
 
 def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
   for s in c.src[1:]:
@@ -69,7 +67,9 @@ def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
 
 # TODO: srcs contain (real data srcs, something else, ranges) and the boundary is confusing. see range_start
 def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
-  if op in {Ops.PARAM, Ops.BUFFER, Ops.RANGE, Ops.SPECIAL, Ops.BIND}: return ()
+  if op in {Ops.PARAM, Ops.BUFFER, Ops.RANGE, Ops.SPECIAL}: return ()
+  # the store of a bound Variable only carries the input value, it has no data srcs
+  if op is Ops.STORE and src[0].is_variable: return ()
   if op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END}: return src[:1]
   return src
 
@@ -185,7 +185,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
   return rngs
 
 @rewrite_group(new_ctx=False)
-def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
+def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
   if debug: print("**************************")
   rctx = IndexingContext()
 
@@ -320,7 +320,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
   # if a deviceless value must materialize, place it on the sink device
   tsink = graph_rewrite(tsink, pm_fix_deviceless, ctx=tsink.device, name="add device to deviceless")
-  return tsink, rctx
+  return tsink
 
 def render_ranges(*rngs_list, realized) -> str:
   disp = []

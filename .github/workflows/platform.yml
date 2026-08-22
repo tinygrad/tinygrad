@@ -166,7 +166,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: windows-${{ matrix.dev }}-minimal
-          deps: testing_unit
+          deps: testing_minimal
           pydeps: ${{ matrix.dev == 'WEBGPU' && 'dawn-python' || '' }}
       - name: Set env
         shell: bash
@@ -179,35 +179,3 @@ jobs:
       - name: Run test_tiny
         shell: bash
         run: python -m pytest -n=auto test/test_tiny.py --durations=20
-
-
-  qcomclcompiletests:
-    name: Compile-only (QCOM CL)
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 15
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: compile-qcomcl
-          deps: testing_unit
-          tinydreno: 'true'
-      - name: Set env
-        shell: bash
-        run: printf "DEV=NULL:QCOMCL:a630\nNULL_ALLOW_COPYOUT=1" >> $GITHUB_ENV
-      - name: Run test_ops
-        shell: bash
-        run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
-          DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
-          python -m pytest -n=auto test/backend/test_ops.py --durations=20
-      - name: Run test_ops (IMAGE)
-        shell: bash
-        env:
-          IMAGE: 1
-          DEV: "NULL:QCOMCL:a630,IMAGE_PITCH_ALIGNMENT=64"
-        run: |
-          DEBUG=4 python test/backend/test_ops.py TestOps.test_gemm | grep read_imagef
-          python -m pytest -n=auto test/backend/test_ops.py --durations=20

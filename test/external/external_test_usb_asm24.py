@@ -6,7 +6,7 @@ import numpy as np
 class TestDevCopySpeeds(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.sz = getenv("SIZE", 2e6)
+    cls.sz = getenv("SIZE", 2000000)
     cls.dev = Device["AMD"]
     if not cls.dev.is_usb(): raise unittest.SkipTest("only test this on USB devices")
 

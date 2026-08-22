@@ -69,7 +69,7 @@ class TestIdxUpcast(unittest.TestCase):
     if not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)):
       assert idx.op is Ops.INDEX
       idx_val = idx.src[1]
-      self.assertFalse(idx_val.overflows(idx_val.dtype.scalar()))
+      self.assertFalse(idx_val.overflows(idx_val.dtype))
 
   # use expand to generate kernel that uses large idx
   def do_op_then_assert(self, dtype: DType, dim1, dim2, dim3):
@@ -170,6 +170,11 @@ class TestTensorConstLike(unittest.TestCase):
   def test_full_like_device_on_multi_raises(self):
     t = Tensor.ones(8, 4).shard(("NULL:0", "NULL:1"), axis=0)
     with self.assertRaises(RuntimeError): t.full_like(5, device="NULL")
+
+class TestTensorShape(unittest.TestCase):
+  def test_float_shape_raises(self):
+    for dim in (2.0, 2.5):
+      with self.subTest(dim=dim), self.assertRaisesRegex(RuntimeError, "shape must be int"): Tensor.ones(dim)
 
 class TestTensorDevice(unittest.TestCase):
   def test_create_from_single_device_tuple(self):

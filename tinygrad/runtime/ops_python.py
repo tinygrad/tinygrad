@@ -3,10 +3,10 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Any, TYPE_CHECKING
-import pickle, base64, itertools, time, sys, functools
+import pickle, base64, itertools, time, sys, functools, ctypes
 from dataclasses import replace
 from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile
+from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile, mv_address
 from tinygrad.device import Buffer, Compiled, Compiler, Allocator, Program, TinyELF
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
@@ -23,7 +23,9 @@ def load(inp, j, dtype: DType):
 
 def _store(m, i, v, dtype: DType):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
-  m[i] = to_storage_scalar(v, dtype)
+  if (w:=m.nbytes // len(m)) >= dtype.itemsize: m[i] = to_storage_scalar(v, dtype)
+  else:
+    for k in range(dtype.itemsize // w): m[i+k] = (v >> 8*w*k) & ((1 << 8*w) - 1)
 
 # here are the models for the WMMA instruction on the different hardware
 def generic_wmma_helper(inp, warp_size, WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
@@ -87,7 +89,7 @@ class PythonProgram(Program['PythonDevice']):
               if g: _store(m, o+j, v, src_dtypes[1])
           i += 1
           continue
-        if u.op is Ops.AFTER: values[u] = src_values[0]
+        if u.op is Ops.AFTER or (u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]
         elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pvals.pop(0)] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
           storage_fmt = storage_fmt_for_dtype(u.dtype)
@@ -112,7 +114,8 @@ class PythonProgram(Program['PythonDevice']):
               if ox < 0 or ox >= u.src[0]._shape[1] or oy < 0 or oy >= u.src[0]._shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*u.src[0]._shape[1]*4))
           else:
-            for m,o in zip(src_values[0], src_values[1]): ret.append((m,o))
+            scale = u.src[0].dtype.itemsize // u.src[0].src[0].dtype.itemsize if u.src[0].op is Ops.BITCAST else 1
+            for m,o in zip(src_values[0], src_values[1]): ret.append((m[0], m[1]+o*scale) if isinstance(m, tuple) else (m, o*scale))
           values[u] = ret
         elif u.op is Ops.RANGE:
           if u not in values: values[u] = [0] * warp_size
@@ -134,6 +137,13 @@ class PythonProgram(Program['PythonDevice']):
                                for k in range(len(src_values))], j, u.dtype) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
+        elif u.op is Ops.CALL:
+          assert u.dtype is dtypes.void
+          cfunc = ctypes.CFUNCTYPE(None, *[ctypes.c_uint64] * (len(src_values)-1))
+          values[u] = []
+          for args,gate in zip(zip(*src_values), exec_masks[-1]):
+            call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]
+            values[u].append(cfunc(call_args[0])(*call_args[1:]) if gate else None)
         elif u.op is Ops.WMMA:
           first_src_dtype = u.src[0].dtype
           assert isinstance(first_src_dtype, DType) # mypy
