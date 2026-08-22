@@ -107,8 +107,8 @@ class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState'])
 
   def bind(self, dev:NVDevice):
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True))
-    hw_view = self.hw_page.cpu_view().view(fmt='I')
+    self.hw_page = dev.allocator.alloc(size:=len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True))
+    hw_view = self.hw_page.cpu_view().view(size=size, fmt='I')
     for i, value in enumerate(self._q): hw_view[i] = value
 
     # From now on, the queue is on the device for faster submission.
@@ -698,7 +698,6 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], NVProgram, NVSignal, NVComputeQueue,
                      NVCopyQueue, arch=self.arch)
-    if self.is_usb(): self.graph = None
 
     self.pma_enabled = PMA.value > 0 and PROFILE >= 1
     if self.pma_enabled: self._prof_init()
