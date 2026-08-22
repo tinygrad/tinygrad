@@ -9,6 +9,7 @@ def default_dtype(u:UOp):
 
 def commit_weak(s:UOp, dt:DType) -> UOp:
   # a CONST re-mints, never takes a cast: at bool/weakint/weakfloat a CAST would be a second spelling of one literal
+  if s.op is Ops.STACK: return s.replace(dtype=None, src=tuple(commit_weak(x, dt) for x in s.src))
   return UOp.const(s.val, dt) if s.op is Ops.CONST else s.cast(dt)
 
 # the decomps and non-native-float emulation ask this with the width a sibling src states: a bare literal commits there
@@ -23,9 +24,10 @@ def derived_widths(u:UOp, src:tuple[UOp, ...]) -> tuple[DType, DType]|None:
 
 def commit_srcs_at(u:UOp, dt:DType) -> UOp|None:
   # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
-  widths = derived_widths(u, u.src)
+  src = tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks and s.op is not Ops.CONST else s for s in u.src)
+  widths = derived_widths(u, src)
   ret = u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks and
-                                        not (s.op is Ops.CONST and widths is not None) else s for s in u.src))
+                                        (s.op is not Ops.CONST or widths is None) else s for s in u.src))
   return None if ret is u else ret
 
 def commit_weak_srcs(u:UOp) -> UOp|None:
@@ -43,6 +45,8 @@ pm_commit_weak = PatternMatcher([
   (UPat(GroupOp.Broadcastable, name="u"), commit_weak_srcs),
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
    lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.src[0].dtype), *u.src[2:]))),
+  (UPat(Ops.LOAD, src=(UPat(), UPat(dtype=dtypes.weaks)), allow_any_len=True, name="u"),
+   lambda u: u.replace(src=(u.src[0], commit_weak(u.src[1], u.dtype), *u.src[2:]))),
   # NOTE: no CONST arm. a concrete CAST over a weak CONST is already the committed pair, minted that way by UOp.const
   (UPat(Ops.CAST, name="c", src=(UPat(GroupOp.ALU, dtype=dtypes.weaks, name="u"),)), cast_weak_srcs),
 ])
@@ -80,19 +84,6 @@ pm_lower_weak = PatternMatcher([
     lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=default_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
   (UPat(GroupOp.All, name="u"), lower_weak_node),
 ])
-
-# drop a CAST over a weak const where the consumer restores the width anyway, so bare-CONST rules keep matching. two
-# statements must survive the drop: the width the operands MEET at, and the node's own DERIVED dtype
-def uncast_const(u:UOp) -> UOp|None:
-  # only a strong CAST is a width statement; a weak CAST over a const is a kind conversion, still resolving
-  src = tuple(s.src[0] if s.op is Ops.CAST and s.dtype not in dtypes.weaks and s.src[0].op is Ops.CONST
-              and s.src[0].dtype in dtypes.weaks else s for s in u.src)
-  if src == u.src or (widths:=derived_widths(u, src)) is None or widths[0] != promo_dtype(u.src) or widths[1] is not u.dtype: return None
-  return u.replace(src=src)
-
-# the inverse of pm_cast_const: drop a width statement the consumer re-derives, so bare-keyed rules keep matching.
-# composes into symbolic and never symbolic_simple: the widths it drops are first stated by the round above it
-pm_uncast_const = PatternMatcher([(UPat(GroupOp.Broadcastable, name="u"), uncast_const)])
 
 def cast_const(u:UOp, s:UOp) -> UOp:
   if s.op is not Ops.CONST or s.is_invalid: return s  # Invalid carries no width: the door never wraps it
