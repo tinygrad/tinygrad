@@ -150,9 +150,10 @@ extra_matcher = PatternMatcher([
   # no cmpne for packed ints, y != x => !(y==x)
   (UPat(Ops.CMPNE, src=(UPat.var("y", dtypes.ints), UPat.var("x")), name="cmp"),
    lambda y,x,cmp: UOp(Ops.CMPEQ, src=(y,x))^True if y.max_numel() > 1 else None),
-  # float where expects a mask
-  (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats), UPat.var("b")),
-   lambda m,a,b: m.cast(a.dtype).ne(0).where(a, b) if m.src[0].dtype not in dtypes.floats else None),
+  # float WHERE needs a mask unless its comparison already has a float operand
+  (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats+(dtypes.weakfloat,)), UPat.var("b")).named("w"),
+   lambda m,a,b,w: m.cast(a.dtype if a.dtype in dtypes.floats else w.dtype).ne(0).where(a, b)
+   if w.dtype in dtypes.floats and m.src[0].dtype not in dtypes.floats+(dtypes.weakfloat,) else None),
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(0),) + x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction

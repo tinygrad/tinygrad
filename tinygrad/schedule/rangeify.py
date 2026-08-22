@@ -304,10 +304,12 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
   (UPat(Ops.INDEX, src=(UPat(Ops.STAGE),), allow_any_len=True, name="idx").f(Ops.NOOP).f(Ops.STAGE, allow_any_len=True, name="b2"),
    remove_noop_bufferize),
-  # no buffers for const (ranges don't matter for const - it's the same value everywhere)
-  (UPat(Ops.CONST, name='c').f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.val)),
+  # no buffers for const; STAGE can receive either legal above-boundary spelling
+  (UPat(Ops.CONST, name='c').f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: UOp.const(b.dtype.const(c.val)).expand(b.shape)),
+  (UPat.cvar('c').cast().f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: UOp.const(b.dtype.const(c.val)).expand(b.shape)),
   # indexing a const is a const
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
+  (UPat(Ops.INDEX, src=(UPat.cvar().cast(name="c"),),), lambda c: c),
   # indexing an after with all fully invalid stores is invalid
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
@@ -391,7 +393,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 
 def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   size = prod(x.shape)
-  dtype = strong_dtype(x.dtype)  # a BUFFER is never weak: store at the concrete dtype, the .cast(x.dtype) on the result keeps readers unchanged
+  dtype = strong_dtype(x.dtype)  # a BUFFER is never weak: storage commits weak values to their default concrete dtype
   rngs = sorted(idx.ranges, key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
@@ -414,13 +416,13 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   if x.arg.addrspace == AddrSpace.GLOBAL:
     buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(next(ctx), dtype, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
     do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
-    return buf.after(do_store).cast(x.dtype)
+    return buf.after(do_store) if x.dtype in dtypes.weaks else buf.after(do_store).cast(x.dtype)
 
   if allow_locals:
     # handle locals
     buf = UOp.placeholder((size,), dtype, next(ctx), AddrSpace.LOCAL)
     do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
-    return buf.after(do_store).cast(x.dtype)
+    return buf.after(do_store) if x.dtype in dtypes.weaks else buf.after(do_store).cast(x.dtype)
 
 # collapse any BUFFERIZE to single input BUFFERIZE
 def flatten_bufferize(x:UOp):
