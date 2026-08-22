@@ -1,6 +1,6 @@
 # model based off https://medium.com/data-science/going-beyond-99-mnist-handwritten-digits-recognition-cfff96337392
 from typing import Callable
-from tinygrad import Tensor, TinyJit, nn, GlobalCounters, function, Context
+from tinygrad import Tensor, TinyJit, nn, GlobalCounters, Context
 from tinygrad.helpers import getenv, colored, trange
 from tinygrad.nn.datasets import mnist
 
@@ -15,7 +15,6 @@ class Model:
       nn.BatchNorm(64), Tensor.max_pool2d,
       lambda x: x.flatten(1), nn.Linear(576, 10)]
 
-  @function
   def __call__(self, x:Tensor) -> Tensor: return x.sequential(self.layers)
 
   @TinyJit
