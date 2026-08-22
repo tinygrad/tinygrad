@@ -199,11 +199,12 @@ class CapturedJit(Generic[ReturnType]):
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   tensors = [t for _,t in input_tensors]
-  # extract tensors from containers (shallow, not recursive to avoid grabbing model weights)
+  # extract tensors and raw Buffers from containers (shallow, not recursive to avoid grabbing model weights)
   for x in args + tuple(kwargs.values()):
     it = x if isinstance(x, (tuple,list)) else x.values() if isinstance(x, dict) else []
     tensors += [t for t in it if t.__class__ is Tensor and not any(t is y for y in tensors)]
-  tensors += [Tensor(u, device=u.device) for u in [UOp.from_buffer(x) for x in args+tuple(kwargs.values()) if isinstance(x, Buffer)]] #coverage for buffers
+    tensors += [Tensor(UOp.from_buffer(b), device=b.device) for b in it if isinstance(b, Buffer)]
+  tensors += [Tensor(UOp.from_buffer(x), device=x.device) for x in args + tuple(kwargs.values()) if isinstance(x, Buffer)]
   def get_input_uops() -> list[UOp]: return flatten([[t.uop.src[0]] if t.uop.op is Ops.UNSHARD else [t.uop] for t in tensors])
   if any(u.is_virtual for u in get_input_uops()): raise JitError("JIT inputs must be real buffers; use .clone()")
   if len(unrealized_tensors := [x for x in tensors if not x.uop.is_realized]): Tensor.realize(*unrealized_tensors)
