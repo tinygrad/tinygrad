@@ -19,7 +19,7 @@ from tinygrad.runtime.support.hcq import FileIOInterface, HCQBuffer, MMIOInterfa
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
-from tinygrad.runtime.support.usb import USB3, usb_ib, usb_push, pm_usb_stage, pm_usb_signals, pm_usb_bufferize
+from tinygrad.runtime.support.usb import USB3, usb_ib, usb_push, pm_usb_stage, pm_usb_hostio, pm_usb_bufferize
 from tinygrad.runtime.support.memory import AddrSpace, BumpAllocator
 from tinygrad.runtime.ops_amd import SQTT, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE, PMC
 from tinygrad.runtime.ops_amd import EVENT_INDEX_PARTIAL_FLUSH, WAIT_REG_MEM_FUNCTION_EQ, WAIT_REG_MEM_FUNCTION_NEQ, WAIT_REG_MEM_FUNCTION_GEQ
@@ -251,15 +251,14 @@ pm_sdma_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
 # USB submit
 
 def amd_usb_submit(ctx, lin):
-  for d in ctx.devs: q = Device[d].compute_queue if (compute:=ctx.qname.startswith("COMPUTE")) else Device[d].sdma_queue(0)
-  # a copyout submit ends with a write of the completion dword, which releases the bulk read usb_ib armed
+  for d in ctx.devs: q = Device[d].compute_queue if (comp:=ctx.qname.startswith("COMPUTE")) else Device[d].sdma_queue(0)
+
   if lin.arg[2] is not None: lin = lin.replace(src=lin.src + (UOp(Ops.INS, arg="poke", src=tuple(UOp.const(x, dtypes.uint32)
     for x in (ctx.sdma.SDMA_OP_WRITE, *data64_le(Device[ctx.devs[0]].iface.cq_buf.va_addr + 12), 0, 0))),))
-  # sdma indirect buffers aren't reliable, so its packets go into the ring itself, padded to a slot the ring size divides
-  ib_host, ib_gpu, pkt_dw = usb_ib(ctx.devs, lin, 32 if compute else 0x100)
-  if compute: pkt = (ctx.pm4.PACKET3(ctx.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(ib_gpu.getaddr(ctx.devs)), pkt_dw | ctx.pm4.INDIRECT_BUFFER_VALID)
-  else: pkt = ()  # the slot is zero-filled past the packets, and a zero dword is an sdma nop
-  return usb_push(ctx.devs, *queue_ptrs(ctx.devs, ctx.qname, q), ib_host, ib_gpu, pkt, 4 if compute else 1)
+
+  ib_host, ib_gpu, pkt_dw = usb_ib(ctx.devs, lin, 32 if comp else 0x100)
+  pkt = (ctx.pm4.PACKET3(ctx.pm4.PACKET3_INDIRECT_BUFFER,2),*data64_le(ib_gpu.getaddr(ctx.devs)),pkt_dw|ctx.pm4.INDIRECT_BUFFER_VALID) if comp else ()
+  return usb_push(ctx.devs, *queue_ptrs(ctx.devs, ctx.qname, q), ib_host, ib_gpu, pkt, 4 if comp else 1)
 
 pm_usb_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"), amd_usb_submit)])
 
@@ -271,8 +270,8 @@ class AMDEncodeCtx:  # encode-time constants for one queue: devs (every cmdbuf a
 def encode_queue(q:UOp) -> UOp|None:
   d = Device[(devs:=to_tuple(q.arg[0]))[0]]
   ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size, q.arg[1])
-  opsel = pm_pm4_opsel if (compute:=q.arg[1].startswith("COMPUTE")) else pm_sdma_opsel
-  submit = d.pm_submit if d.pm_submit is not None else (pm_pm4_submit if compute else pm_sdma_submit)
+  opsel = pm_pm4_opsel if (comp:=q.arg[1].startswith("COMPUTE")) else pm_sdma_opsel
+  submit = d.pm_submit if d.pm_submit is not None else (pm_pm4_submit if comp else pm_sdma_submit)
   return submit.rewrite(graph_rewrite(q, opsel + pm_flatten_linear, walk=True, ctx=ctx, name=f"{q.arg[1]} opsel"), ctx)
 
 @dataclass(frozen=True)
@@ -302,8 +301,9 @@ def amd_build_program(prg:UOp) -> UOp:
       wave32=bool(desc.kernel_code_properties & 0x400), private_segment_size=desc.private_segment_fixed_size, kernargs_segment_size=desc.kernarg_size,
       kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0), enable_dispatch_ptr=edp,
       enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)
+    image = bytes(image).ljust(round_up(len(image), 4), b"\x00") # the program is uploaded as whole dwords
     buf = UOp.placeholder((len(image),), dtypes.uint8, next(UOp.unique_num), device=prg.device).rtag("program")
-    cached = _amd_program_cache[key] = prg.replace(src=(buf.after(make_binary_patch(buf, bytes(image))),), arg=(data, prg.arg))
+    cached = _amd_program_cache[key] = prg.replace(src=(buf.after(make_binary_patch(buf, image)),), arg=(data, prg.arg))
   return cached
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
@@ -594,10 +594,10 @@ class AMDDevice(HCQ2Compiled):
     # encoding of cmdbuf
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue),
   ])
+  pm_submit: PatternMatcher|None = None
 
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
   max_scratch_psize = 0
-  pm_submit: PatternMatcher|None = None # transport seam, see hcq2
 
   ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]
 
@@ -646,9 +646,10 @@ class AMDDevice(HCQ2Compiled):
     # Scratch setup
     self.max_private_segment_size = 0
     self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, tag="scratch", name="b"), lambda ctx, b: ctx[0].scratch_buffer(b.max_numel()))]) + self.pm_bufferize
+
     if self.is_usb:
       self.pm_bufferize = pm_usb_bufferize + self.pm_bufferize
-      self.pm_stage_copy, self.pm_host_lower, self.pm_submit = pm_usb_stage, pm_usb_signals, pm_usb_submit
+      self.pm_stage_copy, self.pm_host_lower, self.pm_submit = pm_usb_stage, pm_usb_hostio, pm_usb_submit
 
     self.pmc_enabled:bool = PROFILE > 0 and PMC > 0
     if self.pmc_enabled:
@@ -710,7 +711,7 @@ class AMDDevice(HCQ2Compiled):
     wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * self.cu_cnt, mmap.PAGESIZE)
     ctl_stack_size = round_up((12 if self.target[0] != 9 else 8) * self.wave_cnt + 8 + 40, mmap.PAGESIZE)
     return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
-      0x10000 if self.is_usb else (16 << 20), eop_buffer_size=0x1000,
+      0x2000 if self.is_usb else (16 << 20), eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size,
       debug_memory_size=round_up(self.wave_cnt * 32, 64))
 
@@ -718,7 +719,7 @@ class AMDDevice(HCQ2Compiled):
     if getenv("AMD_DISABLE_SDMA"): return None
     if idx in self.sdma_queues: return self.sdma_queues[idx]
     with contextlib.suppress(OSError):
-      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x10000 if self.is_usb else (16 << 20), idx=idx)
+      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x2000 if self.is_usb else (16 << 20), idx=idx)
     return self.sdma_queues.get(idx, None)
 
   def tmpring_size(self, private_segment_size):
