@@ -305,8 +305,8 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.STAGE),), allow_any_len=True, name="idx").f(Ops.NOOP).f(Ops.STAGE, allow_any_len=True, name="b2"),
    remove_noop_bufferize),
   # no buffers for const; STAGE can receive either legal above-boundary spelling
-  (UPat(Ops.CONST, name='c').f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: UOp.const(b.dtype.const(c.val)).expand(b.shape)),
-  (UPat.cvar('c').cast().f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: UOp.const(b.dtype.const(c.val)).expand(b.shape)),
+  (UPat(Ops.CONST, name='c').f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.val)),
+  (UPat.cvar('c').cast().f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.val)),
   # indexing a const is a const
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
   (UPat(Ops.INDEX, src=(UPat.cvar().cast(name="c"),),), lambda c: c),

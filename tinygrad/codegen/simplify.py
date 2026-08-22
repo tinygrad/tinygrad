@@ -141,12 +141,11 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
     for u in included:
       for s in u.src:
         if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.BUFFER}: continue
-        replaces[s] = s.const_like(s.vmin) if dtypes.is_int(s.dtype) and s.vmin == s.vmax else \
-          UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype, param=True)
+        replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype, param=True)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
     sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")
     if not no_range(sink): return None
-    u = sink.substitute({v:k for k,v in replaces.items() if v.op is not Ops.CONST})
+    u = sink.substitute({v:k for k,v in replaces.items()})
   return u
 
 def reduce_load_collapse(red:UOp, u:UOp) -> UOp|None: return reduce_collapse(red, u, pm=pm_reduce_load_collapse)

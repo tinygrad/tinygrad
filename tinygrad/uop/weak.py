@@ -24,10 +24,9 @@ def derived_widths(u:UOp, src:tuple[UOp, ...]) -> tuple[DType, DType]|None:
 
 def commit_srcs_at(u:UOp, dt:DType) -> UOp|None:
   # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
-  src = tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks and s.op is not Ops.CONST else s for s in u.src)
-  widths = derived_widths(u, src)
+  widths = derived_widths(u, u.src)
   ret = u.replace(dtype=None, src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks and
-                                        (s.op is not Ops.CONST or widths is None) else s for s in u.src))
+                                        not (s.op is Ops.CONST and widths is not None) else s for s in u.src))
   return None if ret is u else ret
 
 def commit_weak_srcs(u:UOp) -> UOp|None:

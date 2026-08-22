@@ -32,7 +32,7 @@ def fast_idiv(ren: Renderer, x: UOp, d: int, dont_cast=False) -> UOp|None:
   # before we try casting to a larger dtype (slow), we see if there are powers of two in d we can shift to make x smaller
   # use explicit Ops.CDIV (trunc) since the recursion assumes trunc semantics throughout
   if (largest_factor_of_two_in_d := (d & -d)) > 1:
-    if (ret:=fast_idiv(ren, x.alu(Ops.CDIV, UOp.const(largest_factor_of_two_in_d)),
+    if (ret:=fast_idiv(ren, x.alu(Ops.CDIV, x.const_like(largest_factor_of_two_in_d)),
                        d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
   if dont_cast: return None
   # the next integer width that holds x*m
