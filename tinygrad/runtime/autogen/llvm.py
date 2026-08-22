@@ -4,8 +4,14 @@ import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
-from tinygrad.helpers import WIN, OSX
-dll = c.DLL('llvm', 'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else ['/opt/homebrew/opt/llvm@21/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@19/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@18/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@17/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@16/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@15/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@14/lib/libLLVM.dylib'] if OSX else ['LLVM', 'LLVM-21', 'LLVM-20', 'LLVM-19', 'LLVM-18', 'LLVM-17', 'LLVM-16', 'LLVM-15', 'LLVM-14'])
+from tinygrad.helpers import WIN, OSX, DEV
+if DEV.renderer == 'LVP':
+  # This is to fix the order mismatch problem while importing mesa and llvm. If llvm loads the dynamic lib first then there
+  # is an issue with the weak symbols that are required for mesa. Forcing Mesa to load first fixes this
+  from tinygrad.runtime.autogen import mesa
+  dll = mesa.dll
+else:
+  dll = c.DLL('llvm', 'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else ['/opt/homebrew/opt/llvm@21/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@19/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@18/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@17/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@16/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@15/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@14/lib/libLLVM.dylib'] if OSX else ['LLVM', 'LLVM-21', 'LLVM-20', 'LLVM-19', 'LLVM-18', 'LLVM-17', 'LLVM-16', 'LLVM-15', 'LLVM-14'])
 intmax_t: TypeAlias = ctypes.c_int64
 @dll.bind(intmax_t, intmax_t)
 def imaxabs(__n:intmax_t) -> intmax_t: ...
