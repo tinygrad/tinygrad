@@ -73,8 +73,8 @@ from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to
 
 MASK32 = 0xFFFFFFFF
 
-# SQTT encoder lives with the decoder in sqtt.py; traces are consumed by amdgpu.py
-from tinygrad.renderer.amd.sqtt import make_encoder as _make_sqtt_encoder
+# SQTT encoder lives in sqtt_enc.py; traces are consumed by amdgpu.py
+from test.mockgpu.amd.sqtt_enc import make_encoder as _make_sqtt_encoder
 sqtt_traces: list[bytes] = []
 
 def _c(val, dtype=dtypes.uint32): return UOp.const(val, dtype)
@@ -627,7 +627,7 @@ class _Ctx:
 # INSTRUCTION HANDLERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _compile_sopp(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   simm16 = ctx.inst_field_signed(type(inst).simm16).cast(dtypes.int16)
   if inst.op in (ir3.SOPPOp.S_ENDPGM, ir4.SOPPOp.S_ENDPGM, irc.SOPPOp.S_ENDPGM):
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(0xFFFFFFFF, dtypes.uint32)),
@@ -650,7 +650,7 @@ def _compile_sopp(inst: Inst, ctx: _Ctx) -> UOp:
         return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), lo), ctx.wsgpr_dyn(_c(PC_HI_IDX), hi))
   return UOp.sink(*ctx.inc_pc())
 
-def _compile_smem(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
   if '_INV' in inst.op.name: return UOp.sink(*ctx.inc_pc())
   # Dynamic sbase field (bits 5:0) - SGPR pair, field value * 2 = register offset
@@ -681,7 +681,7 @@ def _compile_smem(inst: Inst, ctx: _Ctx) -> UOp:
   stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), vals[i]) for i in range(ndwords)]
   return UOp.sink(*stores, *ctx.inc_pc())
 
-def _compile_sop(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4.SOPC|ir4.SOPK|irc.SOP1|irc.SOP2|irc.SOPC|irc.SOPK, ctx: _Ctx) -> UOp:
   bits = inst.canonical_op_bits
   literal = ctx.optional_field(inst, 'literal')
 
@@ -808,7 +808,7 @@ def _load_dpp16_src0(ctx: _Ctx, inst, lane: UOp, fallback: UOp) -> UOp:
   invalid = UOp.const(0, fallback.dtype) if _iattr(inst, 'bc') else fallback
   return enabled.where(valid.where(swizzled, invalid), fallback)
 
-def _compile_sdwa(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc.VOPC_SDWA_SDST, ctx: _Ctx) -> UOp:
   """Compile CDNA SDWA (Sub-Dword Access) VOP1/VOP2/VOPC instructions."""
   is_vopc = isinstance(inst, irc.VOPC_SDWA_SDST)
   exec_mask = ctx.rexec()
@@ -885,8 +885,10 @@ def _compile_sdwa(inst: Inst, ctx: _Ctx) -> UOp:
     return UOp.sink(UOp.sink(*stores).end(lane), *ctx.inc_pc())
   return UOp.sink(*ctx.inc_pc())
 
-def _load_vsrc0(ctx: _Ctx, inst: Inst, lane: UOp, bits: dict, literal: UOp | None, is_f64: bool, is_float: bool,
-                fallback: UOp) -> tuple[UOp, UOp | None]:
+def _load_vsrc0(ctx: _Ctx, inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3.VOP2 | ir3.VOP2_DPP16 |
+                ir4.VOP1 | ir4.VOP1_SDST | ir4.VOP1_DPP16 | ir4.VOP2 | ir4.VOP2_DPP16 |
+                irc.VOP1 | irc.VOP1_DPP16 | irc.VOP2 | irc.VOP2_DPP16,
+                lane: UOp, bits: dict, literal: UOp | None, is_f64: bool, is_float: bool, fallback: UOp) -> tuple[UOp, UOp | None]:
   """Load VOP src0: DPP16 swizzle (with abs/neg mods for floats), 16-bit VGPR hi-half (src0 >= 384), or plain operand.
   Returns (value, src0_offset) - offset is None for DPP16."""
   if hasattr(type(inst), 'dpp') and hasattr(type(inst), 'vsrc0'):
@@ -900,7 +902,9 @@ def _load_vsrc0(ctx: _Ctx, inst: Inst, lane: UOp, bits: dict, literal: UOp | Non
     s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_hi.where(src0_off - _c(384), _c(0)), lane)), s0)
   return s0, src0_off
 
-def _compile_vop12(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP1_DPP16 | ir3.VOP2 | ir3.VOP2_DPP16 |
+                   ir4.VOP1 | ir4.VOP1_SDST | ir4.VOP1_DPP16 | ir4.VOP2 | ir4.VOP2_DPP16 |
+                   irc.VOP1 | irc.VOP1_DPP16 | irc.VOP2 | irc.VOP2_DPP16, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if op_name in ('V_READFIRSTLANE_B32_E32', 'V_PERMLANE64_B32_E32'): return ctx.compile_lane_pcode(inst.op, inst)
   # v_accvgpr_mov_b32: ACCVGPR[vdst] = ACCVGPR[src0] (VOP1 encoding, no pcode)
@@ -942,7 +946,8 @@ def _compile_vop12(inst: Inst, ctx: _Ctx) -> UOp:
       srcs['SIMM32'] = literal
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half, src0_off=src0_off)
 
-def _compile_vopc(inst: Inst, ctx: _Ctx, opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> UOp:
+def _compile_vopc(inst: ir3.VOPC|ir3.VOPC_DPP16|ir3.VOP3|ir4.VOPC|ir4.VOPC_DPP16|ir4.VOP3|irc.VOPC|irc.VOP3, ctx: _Ctx,
+                  opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> UOp:
   exec_mask, op_name, bits = ctx.rexec(), _op_name(inst), inst.canonical_op_bits
   is_cmpx, is_vopc = 'CMPX' in op_name, hasattr(inst, 'vsrc1')  # is_vopc: e32 vs e64
   is_dpp16 = hasattr(type(inst), 'dpp') and hasattr(type(inst), 'vsrc0')
@@ -1018,7 +1023,7 @@ def _compile_bitop3(inst, ctx: _Ctx, exec_mask: UOp, bits: dict, op_name: str) -
     result = result | ((s0 if i & 4 else bnot(s0)) & (s1 if i & 2 else bnot(s1)) & (s2 if i & 1 else bnot(s2)))
   return UOp.sink(ctx.wvgpr_dyn(vdst_reg, lane, result.cast(dtypes.uint32), exec_mask).end(lane), *ctx.inc_pc())
 
-def _compile_vop3(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rexec()
   bits = inst.canonical_op_bits
   opsel, op_name = _iattr(inst, 'opsel'), _op_name(inst)
@@ -1072,7 +1077,7 @@ def _compile_vop3(inst: Inst, ctx: _Ctx) -> UOp:
   opsel_dst_hi = bool(opsel & 0b1000) and bits['d'] == 16
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=opsel_dst_hi, clmp=_iattr(inst, 'clmp'))
 
-def _compile_vinterp(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_vinterp(inst: ir3.VINTERP | ir4.VINTERP, ctx: _Ctx) -> UOp:
   lane, exec_mask = ctx.range(), ctx.rexec()
   inst_type = type(inst)
   vdst_reg = ctx.inst_field(inst_type.vdst)
@@ -1085,7 +1090,7 @@ def _compile_vinterp(inst: Inst, ctx: _Ctx) -> UOp:
   }
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask)
 
-def _compile_vop3sd(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD | irc.VOP3SD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rexec()
   bits, pcode, ops = inst.canonical_op_bits, get_pcode(inst.op), inst.canonical_operands
 
@@ -1147,7 +1152,7 @@ def _compile_vop3sd(inst: Inst, ctx: _Ctx) -> UOp:
 # MFMA shape -> (lanes per group, lane groups, output regs per lane)
 _MFMA_SHAPES = {(16, 16): (16, 4, 4), (32, 32): (32, 2, 16), (4, 4): (4, 16, 4)}
 
-def _compile_mfma(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
   """CDNA MFMA matrix multiply-accumulate. Inputs are unpacked/converted into a local temp array (uint32 bit patterns,
   avoiding aliasing when vdst overlaps src0/src1), then phase 2 computes the dot products and writes outputs.
   wave64 register layout: 16x16 = 4 groups of 16 lanes (K split across groups), 32x32 = 2 groups of 32 lanes,
@@ -1159,6 +1164,7 @@ def _compile_mfma(inst: Inst, ctx: _Ctx) -> UOp:
 
   scaled = isinstance(inst, irc.VOP3PX2)
   if scaled:
+    assert isinstance(inst, irc.VOP3PX2)
     # F8F6F4 input formats: 0=FP8(E4M3), 1=BF8(E5M2). FP6/FP4 (2-4) not emulated.
     if int(inst.cbsz) > 1 or int(inst.blgp) > 1: raise RuntimeError(f"unsupported scaled MFMA formats cbsz={inst.cbsz} blgp={inst.blgp}")
     # scale_src0/scale_src1 are source operands pointing at 32-bit registers holding 4 packed E8M0 scale exponents.
@@ -1277,7 +1283,7 @@ def _compile_mfma(inst: Inst, ctx: _Ctx) -> UOp:
   compute_phase = UOp.group(*compute_stores).end(compute_lane)
   return UOp.sink(read_phase, compute_phase, *ctx.inc_pc())
 
-def _compile_wmma(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   """RDNA3/4 WMMA: D = A@B + C on 16x16 tiles. A/B are unpacked to flat f32/i32 arrays, then all 256 outputs are
   computed directly with scalar ops (no lane loop - the wave32 lane structure is baked into the index maps)."""
   op_name, exec_mask = _op_name(inst), ctx.rexec()
@@ -1339,7 +1345,7 @@ def _compile_wmma(inst: Inst, ctx: _Ctx) -> UOp:
     stores = [w_store(m, n, mat_d[m*16+n].bitcast(dtypes.uint32), d_map(m, n)[1]) for m in range(16) for n in range(16)]
   return UOp.sink(*stores, *ctx.inc_pc())
 
-def _compile_vop3p(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P | irc.VOP3PX2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if 'WMMA' in op_name:
     assert not isinstance(inst, irc.VOP3PX2)
@@ -1447,7 +1453,7 @@ def _compile_vop3p(inst: Inst, ctx: _Ctx) -> UOp:
     if is_dot_iu: srcs['NEG'] = UOp.const(neg, dtypes.uint32)
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask)
 
-def _compile_vopd(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_vopd(inst: ir3.VOPD | ir4.VOPD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rexec()
   # Read operands dynamically - use type(inst) to get correct field descriptors
   inst_type = type(inst)
@@ -1482,7 +1488,8 @@ def _compile_vopd(inst: Inst, ctx: _Ctx) -> UOp:
       if dest.startswith('D0'): all_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask, after=srcy1))
   return UOp.sink(UOp.group(*all_stores).end(lane), *ctx.inc_pc())
 
-def _compile_mem_op(inst: Inst, ctx: _Ctx) -> UOp:
+def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLAT|ir4.VGLOBAL|ir4.VSCRATCH
+                    |irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH, ctx: _Ctx) -> UOp:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rexec(), _op_name(inst)
   pcode = get_pcode(inst.op)
@@ -1505,7 +1512,7 @@ def _compile_mem_op(inst: Inst, ctx: _Ctx) -> UOp:
   addr_reg = ctx.inst_field(getattr(type(inst), addr_field))
   vdata_reg, vdst_reg = ctx.inst_field(getattr(type(inst), data_field)), ctx.inst_field(type(inst).vdst)
   if is_lds:
-    offset0, offset1 = ctx.inst_field(type(inst).offset0), ctx.inst_field(type(inst).offset1)
+    offset0, offset1 = ctx.inst_field(type(inst).offset0), ctx.inst_field(type(inst).offset1)  # type: ignore[union-attr]
     offset, saddr_reg = (offset1 << _c(8)) | offset0, None  # DS offset is 16-bit: (offset1 << 8) | offset0
   else:
     offset0, offset1, saddr_reg = _c(0), _c(0), ctx.optional_field(inst, 'saddr')
