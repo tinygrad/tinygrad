@@ -264,16 +264,18 @@ def usb_stream(devs, dep:tuple[UOp, ...], addr:UOp, data:UOp, nbytes:int, write:
 def usb_writes(devs, ws:list[tuple[UOp, UOp, int]]) -> tuple[UOp, ...]:
   return functools.reduce(lambda dep, w: (usb_stream(devs, dep, w[0], w[1], w[2], True),), ws, ())
 
-def usb_load(devs, dep:tuple[UOp, ...], addr:UOp, dtype) -> UOp:
-  got = UOp.placeholder((1,), dtype, device=devs, tag="usb_scratch")
-  return got.after(usb_stream(devs, dep, addr, got.index(0), dtype.itemsize, False)).index(0).load()
+def usb_load(b:UOp, idx:UOp, dt) -> UOp:
+  got = UOp.placeholder((1,), dt, device=(devs:=to_tuple(b.device)), tag="usb_scratch")
+  addr = b.getaddr((HCQ_RUNTIME_DEV.value,)) + (idx*dt.itemsize).cast(dtypes.uint64)
+  return got.after(usb_stream(devs, b.src[1:] if b.op is Ops.AFTER else (), addr, got.index(0), dt.itemsize, False)).index(0).load()
 
-def usb_write(devs, dep:tuple[UOp, ...], addr:UOp, v:UOp) -> UOp:
-  val = (s:=UOp.placeholder((1,), v.dtype, device=devs, tag="usb_scratch")).after(s.index(0).store(v))
-  return usb_stream(devs, dep, addr, val.index(0), v.dtype.itemsize, True)
+def usb_write(b:UOp, idx:UOp, v:UOp) -> UOp:
+  val = (s:=UOp.placeholder((1,), v.dtype, device=(devs:=to_tuple(b.device)), tag="usb_scratch")).after(s.index(0).store(v))
+  addr = b.getaddr((HCQ_RUNTIME_DEV.value,)) + (idx*v.dtype.itemsize).cast(dtypes.uint64)
+  return usb_stream(devs, b.src[1:] if b.op is Ops.AFTER else (), addr, val.index(0), v.dtype.itemsize, True)
 
 def usb_idle(devs) -> UOp:
-  v = usb_load(devs, (loop:=UOp.loop(0),), make_buf(devs, tag="timeline_signal").getaddr((HCQ_RUNTIME_DEV.value,)), dtypes.uint64)
+  v = usb_load(make_buf(devs, tag="timeline_signal").after(loop:=UOp.loop(0)), UOp.const(0, dtypes.int), dtypes.uint64)
   return v.end(loop, v + 1 < make_buf(devs, tag="timeline_value").index(0).load())
 
 def usb_scsi(devs, read:bool, nbytes:int) -> UOp:
@@ -328,20 +330,11 @@ def usb_push(devs, ring:UOp, wptr:UOp, doorbell:UOp, put_ptr:UOp, ib_host:UOp, i
   writes += [(p.getaddr((HCQ_RUNTIME_DEV.value,)), st.index(n), 8) for p in (wptr, doorbell)]
   return put_ptr.after(*usb_writes(devs, writes)).index(zero).store(put + step)
 
-# the signal tags are the ones that bind to device memory (hcq2 binds every other one to a host buffer), so a host load of them
-# becomes a streaming read and a store a streaming write. values, arithmetic and loops stay on the host, and the param's AFTER
-# srcs carry the order the transfers have to keep
-def usb_host_load(b:UOp, idx:UOp, ld:UOp) -> UOp:
-  return usb_load(to_tuple(b.device), b.after_srcs, b.getaddr((HCQ_RUNTIME_DEV.value,)) + (idx*ld.dtype.itemsize).cast(dtypes.uint64), ld.dtype)
-
-def usb_host_store(b:UOp, idx:UOp, v:UOp) -> UOp:
-  return usb_write(to_tuple(b.device), b.after_srcs, b.getaddr((HCQ_RUNTIME_DEV.value,)) + (idx*v.dtype.itemsize).cast(dtypes.uint64), v)
-
+USB_HOST_TAGS = {"signal", "timeline_signal"}
 pm_usb_hostio = PatternMatcher([
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(Ops.PARAM, tag={"signal", "timeline_signal"}).or_after(name="b"), UPat(name="idx"))),),
-        name="ld"), usb_host_load),
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.PARAM, tag={"signal", "timeline_signal"}).or_after(name="b"), UPat(name="idx"))),
-        UPat(name="v"))), usb_host_store)])
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(Ops.PARAM, tag=USB_HOST_TAGS).or_after(name="b"), UPat(name="idx"))),),
+        name="ld"), lambda b, idx, ld: usb_load(b, idx, ld.dtype)),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.PARAM, tag=USB_HOST_TAGS).or_after(name="b"), UPat(name="idx"))), UPat(name="v"))), usb_write)])
 
 pm_usb_bufferize = PatternMatcher([
   (UPat(Ops.PARAM, tag={"systems", "runtime", "inputs", "usb_scratch"}, name="b"),

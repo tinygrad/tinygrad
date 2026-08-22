@@ -598,8 +598,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, src=(self,)+src, **kwargs) if len(src) else self
   @property
   def without_after(self) -> UOp: return self.src[0] if self.op is Ops.AFTER else self
-  @property
-  def after_srcs(self) -> tuple[UOp, ...]: return self.src[1:] if self.op is Ops.AFTER else ()
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), arg, kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):

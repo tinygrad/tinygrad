@@ -342,7 +342,7 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[UOp, dict[UOp
   slots = {g:i for i,g in enumerate(order)}
   table = UOp.placeholder((len(order),), dtypes.uint64, next(UOp.unique_num), device=call.arg.aux.device).rtag(name)
 
-  reads = {g: table.after(*g.src[0].after_srcs).index(UOp.const(slots[bare[g]], dtypes.int)).load() for g in gaddrs}
+  reads = {g: table.after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ()).index(UOp.const(slots[bare[g]], dtypes.int)).load() for g in gaddrs}
   fills = (table.after(*make_patches(table, [(i*table.dtype.itemsize, addr) for addr, i in slots.items()])),) if slots else ()
   return table, reads, fills, {g:slots[bare[g]] for g in gaddrs}
 
