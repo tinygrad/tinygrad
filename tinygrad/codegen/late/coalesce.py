@@ -137,10 +137,8 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     elif is_image_shape(buf._shape):
       lengths = [4]
     elif ctx.target.device == "AMD":
-      must_divide = False
-      lengths = [4,2]
-      if buf.dtype == dtypes.half: lengths.extend([8,6])
-      elif buf.dtype.itemsize == 4: lengths.append(3)
+      must_divide, sz = False, buf.dtype.itemsize*8
+      lengths = [b//sz for b in [128,96,64,32,16] if b>=sz]
     elif ctx is not None and ctx.supports_float4:
       # TODO: a better way to get this than ctx
       lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]
