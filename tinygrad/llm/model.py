@@ -1,6 +1,7 @@
 from __future__ import annotations
 import enum, functools, itertools, pathlib
 from dataclasses import dataclass, replace
+from typing import Any, cast
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context, dtypes
 from tinygrad.llm.kernels import Linear, gated_delta_prefill, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_load
@@ -25,6 +26,9 @@ class ExpertWeights:
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
+
+# prefill chunk sizes for recurrent models, largest first: long prompts use big chunks, short prompts stay cheap
+RECURRENT_PREFILL_CHUNKS = (128, 32)
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   assert x.shape[-1] % 2 == 0
@@ -341,8 +345,9 @@ class Transformer:
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
-    # we specialize the JIT for prefill and rollout
+    # we specialize the JIT for prefill and rollout; recurrent models prefill at static chunk sizes, one graph per size
     self.prefill_jit = TinyJit(self.forward)
+    self.prefill_jits: dict[int, Any] = {}
     self.rollout_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
@@ -354,8 +359,12 @@ class Transformer:
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
-
+    T = tokens.shape[1]
+    if resolve(T == 1): return self.rollout_jit(tokens.contiguous(), start_pos, temperature)
+    if not self.has_recurrent_block: return self.prefill_jit(tokens.contiguous(), start_pos, temperature)  # symbolic toks
+    T = cast(int, T)  # recurrent prefill is always a static chunk size
+    if T not in self.prefill_jits: self.prefill_jits[T] = TinyJit(self.forward)
+    return self.prefill_jits[T](tokens.contiguous(), start_pos, temperature)
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
                 realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
@@ -448,19 +457,24 @@ class Transformer:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
-  def warmup(self, chunk_size:int=32):
-    prompt = [0] * (min(chunk_size, 256, self.max_context-1) if self.has_recurrent_block else 1)
+  def warmup(self, chunk_size:int|None=None):
+    # capture every prefill chunk size generate can pick; the captured JIT rejects sizes it hasn't seen
+    sizes = (chunk_size,) if chunk_size is not None else (RECURRENT_PREFILL_CHUNKS if self.has_recurrent_block else (32,))
     if self.has_recurrent_block:
       x = Tensor.empty(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
       for block in self.blk: block._init_state(x)
-    for _ in range(2):
-      # NOTE: chunk_size must match what generate uses at serve time, otherwise the captured JIT rejects the new toks range
-      warm = self.generate(prompt, chunk_size=chunk_size)
-      with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
-      with Context(JIT_BATCH_SIZE=0): next(warm)
-      self._cached_tokens = []
+    for size in sizes:
+      prompt = [0] * (min(size, 256, self.max_context-1) if self.has_recurrent_block else 1)
+      for _ in range(2):
+        warm = self.generate(prompt, chunk_size=size)
+        with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
+        with Context(JIT_BATCH_SIZE=0): next(warm)
+        self._cached_tokens = []
 
-  def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
+  def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
+    # recurrent blocks prefill full chunks with a static shape (one JIT graph per size), the prompt tail decodes
+    chunk_sizes = RECURRENT_PREFILL_CHUNKS if chunk_size is None else (chunk_size,)
+    chunk_size = chunk_size or 32
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
@@ -471,9 +485,9 @@ class Transformer:
     start_pos = self.get_start_pos(tokens)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
-      # recurrent blocks prefill full chunks with a static shape, the tail of the prompt goes through the decode graph
+      # largest captured chunk that fits; the tail below the smallest chunk decodes token by token
       remaining = len(tokens)-start_pos
-      n_toks = 1 if self.has_recurrent_block and remaining < chunk_size else min(chunk_size, remaining)
+      n_toks = next((s for s in chunk_sizes if remaining >= s), 1) if self.has_recurrent_block else min(chunk_size, remaining)
       sp, nt = v_start_pos.bind(start_pos), n_toks if self.has_recurrent_block else v_toks.bind(n_toks)
       out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
       start_pos += n_toks
