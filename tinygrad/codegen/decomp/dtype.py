@@ -25,15 +25,16 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
   match op:
     case Ops.NEG: return l2i(Ops.SUB, dt, zero, zero, *uops)
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong) and uops[0].dtype not in dtypes.floats:
-      # the high word is the sign extension; bool has no sign, test the already-cast low word instead (bool < 0 would promote to weakint)
+      # the high word is the sign extension, and unsigned and bool sources zero extend
       x, lo = uops[0], uops[0].cast(l2i_dt[dt])
-      sign = lo if x.dtype is dtypes.bool else x
-      return lo, (sign < sign.const_like(0)).where(lo.const_like(-1), lo.const_like(0))
+      if x.dtype is dtypes.bool or x.dtype in dtypes.uints: return lo, lo.const_like(0)
+      return lo, (x < x.const_like(0)).where(lo.const_like(-1), lo.const_like(0))
     case Ops.CAST if dt in (dtypes.long, dtypes.ulong):
       return (lo:=uops[0].cast(l2i_dt[dt])), (uops[0] / 2**32).cast(l2i_dt[dt]) - ((uops[0] < 0) & lo.ne(0))
     case Ops.CAST if dt in dtypes.floats:
       small = (a1.eq(0) & (a0 >= 0)) | (a1.eq(-1) & (a0 < 0))
-      return small.where(a0.cast(dt), ((a1.cast(dtypes.float32) * (2**32)) + a0.bitcast(dtypes.uint).cast(dtypes.float32)).cast(dt))
+      cdt = dt if dt == dtypes.float64 else dtypes.float32
+      return small.where(a0.cast(dt), ((a1.cast(cdt) * (2**32)) + a0.bitcast(dtypes.uint).cast(cdt)).cast(dt))
     case Ops.CAST: return a0.bitcast(dtypes.uint).cast(dt)
     case Ops.BITCAST: return a0.bitcast(dt), a1.bitcast(dt)
     case Ops.SHL:
@@ -138,7 +139,7 @@ pm_long_decomp = PatternMatcher([
   (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:
    x.replace(dtype=l2i_dt[x.dtype], arg=replace(x.arg, dtype=l2i_dt[x.dtype]), src=(sz*2,)) if x.dtype in l2i_dt else None),
   (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x:
-   reindex(x, x.tag[0]).replace(dtype=x.tag[1], tag=None) if x.tag is not None else None),
+   reindex(x, x.tag[0]).replace(tag=None) if x.tag is not None else None),
   (UPat(Ops.STORE, src=(UPat.var('idx', tuple(l2i_dt.keys())), UPat.var('val')), name='st'), lambda st,idx,val:
    st.replace(src=(idx.rtag((0, dt:=l2i_dt[idx.dtype])), val.rtag((0, dt)))).group(
      st.replace(src=(idx.rtag((1, dt)), val.rtag((1, dt))))) if val.tag is None else None),
@@ -159,7 +160,7 @@ pm_long_decomp = PatternMatcher([
    split_l2i(ctx, x.op, l2i_dt[x.dtype], *flatten((a.rtag((0, l2i_dt[x.dtype])), a.rtag((1, l2i_dt[x.dtype]))) for a in x.src))[x.tag[0]]
    if x.tag is not None else None),
   (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
-   x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag[0]).replace(dtype=l2i_dt[x.dtype], tag=None),), tag=None) if x.tag is not None else None),
+   x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag[0]).replace(tag=None),), tag=None) if x.tag is not None else None),
   (UPat(Ops.CONST, tag={(w, dt) for w in (0, 1) for dt in l2i_dt.values()}, name='x'), lambda x:
    UOp.const(truncate[x.tag[1]]((x.val >> 32) if x.tag[0] == 1 else (x.val & 0xFFFFFFFF)), x.tag[1]))
 ])

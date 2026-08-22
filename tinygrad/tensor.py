@@ -665,13 +665,13 @@ class Tensor(RandMixin):
     ```
     """
     all_uops = self.uop.toposort()
-    # backward fills .grad for every in-scope non-CONST float tensor
+    # backward fills .grad for every in-scope float tensor with a device
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
-                                       t.uop in all_uops and t.is_floating_point() and t.uop.op is not Ops.CONST]
+                                       t.uop in all_uops and t.is_floating_point() and t.device is not None]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
-      if g.device is None and t.device is not None: g = g.clone(device=t.device)
+      if g.device is None: g = g.clone(device=t.device)
       if t.grad is None: t.grad = g
       else: t.grad.assign(t.grad + g.to(t.grad.device))
     return self

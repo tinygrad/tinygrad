@@ -51,6 +51,10 @@ class TestTensorGradient(unittest.TestCase):
     with self.assertRaises(RuntimeError): x.sum().gradient(x)
     with self.assertRaises(RuntimeError): x.float().sum().gradient(x)
 
+  def test_const_target_raise(self):
+    t = Tensor(2.0)
+    with self.assertRaises(RuntimeError): (t * 2.0).gradient(t)
+
   def test_copy_to_device_gradient(self):
     t = Tensor([1.0, 2, 3]).realize()
     t.to("CPU:1").square().sum().backward()
@@ -100,7 +104,7 @@ class TestTensorGradient(unittest.TestCase):
 
   def test_implicit_broadcast_where_gradient(self):
     # WHERE with a bare ()-shape branch: the scalar's gradient counts the positions where it is selected
-    cond, x, w = Tensor([True, False, True]), Tensor([1.0, 2.0, 3.0]), Tensor(4.0)
+    cond, x, w = Tensor([True, False, True]), Tensor([1.0, 2.0, 3.0]), Tensor(4.0, dtype=dtypes.float32)
     dw = Tensor(cond.uop.alu(Ops.WHERE, x.uop, w.uop)).sum().gradient(w)[0]
     self.assertEqual(dw.shape, ())
     self.assertEqual(dw.item(), 1.0)
@@ -109,7 +113,7 @@ class TestTensorGradient(unittest.TestCase):
 
   def test_implicit_broadcast_alu_gradient(self):
     # MUL with a bare ()-shape src, no EXPAND in the graph
-    x, w = Tensor([1.0, 2.0, 3.0]), Tensor(2.0)
+    x, w = Tensor([1.0, 2.0, 3.0]), Tensor(2.0, dtype=dtypes.float32)
     m = x.uop.alu(Ops.MUL, w.uop)
     self.assertIs(m.src[1], w.uop)
     dw = Tensor(m).sum().gradient(w)[0]
@@ -118,7 +122,7 @@ class TestTensorGradient(unittest.TestCase):
 
   def test_implicit_broadcast_intermediate_accumulation(self):
     # s is used directly and through an implicit broadcast edge, each edge's gradient reduces to s's shape before they sum
-    x, p = Tensor([1.0, 2.0, 3.0]), Tensor(0.5)
+    x, p = Tensor([1.0, 2.0, 3.0]), Tensor(0.5, dtype=dtypes.float32)
     s = p.sin()
     z = Tensor(x.uop.alu(Ops.MUL, s.uop)).sum() + s
     dp = z.gradient(p)[0]

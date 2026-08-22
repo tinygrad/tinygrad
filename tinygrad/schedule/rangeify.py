@@ -4,13 +4,13 @@ import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, to_dtype, strong_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group, identity_element
-from tinygrad.uop.symbolic import symbolic, pm_fold_cast_const
+from tinygrad.uop.symbolic import symbolic
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
-from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op
+from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, apply_movement_op
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.allreduce import create_allreduce_function
 
@@ -39,12 +39,12 @@ pm_fold_moved_after = PatternMatcher([
 def _mop_index(r:UOp, idx:UOp):
   idxs = idx.src[1:]
   if len(idxs) == len(r.shape):
-    return r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), dtype=idx.dtype, arg=idx.arg)
+    return r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), arg=idx.arg)
   if r.op is Ops.RESHAPE:
     src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
     if src_prefix >= 0 and r.src[0].shape[src_prefix:] == r.shape[len(idxs):]:
       if src_prefix == 0: return r.src[0] if r.src[0].dtype == idx.dtype else None
-      ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs), dtype=idx.dtype, arg=idx.arg)
+      ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs), arg=idx.arg)
       return ret if ret.shape == idx.shape else None
 
 pm_mops = PatternMatcher([
@@ -79,7 +79,7 @@ def split_reduceop(reduce:UOp, x:UOp):
 
   # get expanded by rangeifying the UOp x
   indexed = x.index(*[UOp.range(s, i) if resolve(s>1) else 0 for i,s in enumerate(x.shape)])
-  range_nums = [y.arg[0] for y in indexed.substitute({x.base:UOp(Ops.NOOP, x.base.dtype)}, extra_pm=pm_mops).ranges]
+  range_nums = [y.arg[0] for y in indexed.substitute({x.base:UOp(Ops.NOOP)}, extra_pm=pm_mops).ranges]
   is_expanded = [i not in range_nums for i in range(len(x.shape))]
 
   if not (split_candidates:=[(i,d) for i in range(reduce.arg[1])
@@ -313,9 +313,9 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
   # hack if a noop turned to a const
   (UPat(Ops.NOOP, src=(UPat.cvar("c"),)), lambda c: c),
-  # mstack on CONST is CONST
-  (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
-   lambda s: c if (c:=s.base).op is Ops.CONST else None),
+  # a deviceless MSTACK src is the same value on every device, so indexing the stack is just indexing that value
+  (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True, name="idx"),
+   lambda s,idx: idx.replace(src=(s,)+idx.src[1:]) if s.device is None else None),
 ])
 
 pm_remove_bufferize = PatternMatcher([
@@ -327,6 +327,9 @@ pm_remove_bufferize = PatternMatcher([
   (UPat(Ops.END, src=(UPat(Ops.NOOP, name="x"),), allow_any_len=True), lambda x: x),
 ])
 
+def strip_zero_offset_shrink(x:UOp) -> UOp:
+  return x.src[0] if x.op is Ops.SHRINK and all(resolve(start == 0, False) for start,_ in x.marg) else x
+
 def no_indexing_calls(u:UOp):
   new_srcs = []
   for x in u.src:
@@ -336,8 +339,9 @@ def no_indexing_calls(u:UOp):
       new_srcs.append(x.src[0])
     elif x.op is Ops.SHRINK:
       # SHRINK with offset 0 is fine
-      # TODO: check offset
-      new_srcs.append(x.src[0])
+      new_srcs.append(strip_zero_offset_shrink(x))
+    elif x.op is Ops.MSTACK:
+      new_srcs.append(x.replace(src=tuple(strip_zero_offset_shrink(s) for s in x.src)))
     else:
       # everything else we pass through
       new_srcs.append(x)
@@ -348,7 +352,12 @@ pm_no_indexing_calls = PatternMatcher([
 ])
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8, "CPU": 31} # TODO: get from device?
-def limit_bufs(ctx:IndexingContext, root:UOp):
+@dataclass
+class LimitBufsContext:
+  buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
+  range_idx: itertools.count = field(default_factory=itertools.count)
+
+def _limit_bufs(ctx:LimitBufsContext, root:UOp):
   if (device:=root.device) is None: return None # no device, index related calculations
   device = device if isinstance(device, str) else device[0].split(":")[0]
   if not (MAX_BUFS:=MAX_KERNEL_BUFFERS.value or DEVICE_MAX_BUFS.get(device, 0)): return None
@@ -370,7 +379,7 @@ def limit_bufs(ctx:IndexingContext, root:UOp):
         s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*orig_ranges)
       srcs.append(s)
     return root.replace(src=tuple(srcs))
-pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs)])
+pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), _limit_bufs)])
 
 # *****************
 # 4. put in buffers for bufferize
@@ -574,20 +583,21 @@ pm_copy_to_store = PatternMatcher([
 
 @rewrite_group(new_ctx=False)
 def get_kernel_graph(sink:UOp) -> UOp:
+  # prepare for rangeify
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
-
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
   # convert movement ops to ranges
-  tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
+  tsink = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
 
+  # cleanups for speed and runability
   tsink = graph_rewrite(tsink,
-                        symbolic+pm_fold_cast_const+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize+pm_no_indexing_calls,
+                        symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize,
                         name="symbolic+reduce_collapse+debuf")
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
-
+  next_range = max((x.arg[0] for x in tsink.toposort() if x.op is Ops.RANGE), default=-1) + 1
+  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=LimitBufsContext(range_idx=itertools.count(next_range)), name="limit buffers")
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
   # bufferize -> store
@@ -595,6 +605,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   paramarg_start: int = max([-1]+slots) + 1
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_param_range_tags, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
+  tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
   if SPEC:

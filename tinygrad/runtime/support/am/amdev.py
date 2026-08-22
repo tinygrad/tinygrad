@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, collections, dataclasses, functools, hashlib, array
-from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw
+from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw, to_mv
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
@@ -238,7 +238,8 @@ class AMDev:
     if DEBUG >= 3: print(f"am {self.devfmt}: Recovery complete")
     return True
 
-  def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0
+  # a hive has multiple XGMI regions; single-node parts (like MI350P) may still program LFB_SIZE with region 0 only
+  def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0 and self.gmc.xgmi_max_region > 0
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
   def paddr2xgmi(self, paddr:int) -> int: return self.gmc.paddr_base + paddr
@@ -314,6 +315,15 @@ class AMDev:
             self.ip_ver[hw_ip] = (ip.major, ip.minor, ip.revision)
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * ip.num_base_address
+
+    # HARV(EST) table: harvested instances must be excluded (like amdgpu_discovery_harvest_ip)
+    # layout: u32 signature, u16 version, u16 size, then 32 entries of {hw_id:u16, inst:u8, rsv:u8}
+    self.harvested:dict[int, set[int]] = collections.defaultdict(set)
+    if (harv_off:=self.bhdr.table_list[am.HARVEST_INFO].offset) != 0 and \
+       (blob:=to_mv(ctypes.addressof(self.bhdr) + harv_off, 8 + 32*4).cast('I'))[0] == am.HARVEST_TABLE_SIGNATURE:
+      inv_hw_id = {hw_id: hw_ip for hw_ip, hw_id in am.hw_id_map.items()}
+      for ent in blob[2:]:
+        if (ip_:=inv_hw_id.get(ent & 0xffff)) is not None: self.harvested[ip_].add((ent >> 16) & 0xff)
 
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)

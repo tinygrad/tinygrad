@@ -1,6 +1,8 @@
 import unittest
+import numpy as np
 from unittest.mock import patch
 from tinygrad import Tensor, UOp
+from tinygrad.nn.state import get_state_dict
 from tinygrad.schedule import schedule_cache
 from tinygrad.llm.model import Transformer, TransformerConfig
 from tinygrad.llm.serve import StreamRouter
@@ -151,6 +153,22 @@ class TestTransformerGenerate(unittest.TestCase):
     self.assertEqual(get_prefill_flags(list(range(9)), 4), [True, True, True, False, False])
     # 4 tokens, chunk_size=4 -> 1 prefill chunk
     self.assertEqual(get_prefill_flags(list(range(4)), 4), [True, False, False])
+
+  def test_chunked_prefill_kv_cache_matches_single_chunk(self):
+    config = TransformerConfig(num_blocks=1, dim=8, hidden_dim=16, n_heads=1, n_kv_heads=1, norm_eps=1e-5,
+      vocab_size=32, head_dim=4, rope_theta=1000000, rope_dim=4, qk_norm=4, v_head_dim=4, max_context=16)
+    def model():
+      m = Transformer(config)
+      rng = np.random.RandomState(1234)
+      for t in get_state_dict(m).values():
+        t.assign(Tensor(rng.uniform(-1, 1, t.shape).astype(np.float32))).realize()
+      return m
+    def prefill(m, chunk_size):
+      gen = m.generate(list(range(1, 9)), chunk_size=chunk_size, temperature=0.0)
+      next(gen)
+      return [b.cache_kv.numpy() for b in m.blk]
+    for g, r in zip(prefill(model(), 4), prefill(model(), 8)):
+      np.testing.assert_allclose(g[:, :, :, :8, :], r[:, :, :, :8, :], atol=1e-5)
 
   def test_kv_cache_resume_matches_fresh(self):
     model = Transformer(TEST_CONFIG)

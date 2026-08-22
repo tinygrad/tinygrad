@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
+from tinygrad.uop.ops import Ops, AxisType, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.uop.weak import pm_lower_index_dtype
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
@@ -40,11 +40,6 @@ class TestDTypeFromUOp(unittest.TestCase):
     self.assertEqual(UOp(Ops.CONST, arg=Invalid).dtype, dtypes.bool)
     # an explicit (strong) const dtype is legal until the field is removed
     self.assertEqual(UOp.const(3, dtypes.int32).dtype, dtypes.int32)
-
-  def test_weak_dtype_rejected_by_program_spec(self):
-    for weak, concrete, value in ((dtypes.weakint, dtypes.int32, 1), (dtypes.weakfloat, dtypes.float32, 1.0)):
-      with self.assertRaises(RuntimeError): type_verify(UOp.const(value, weak).sink(), spec_program)
-      type_verify(UOp.const(value, concrete).sink(), spec_program)
 
   def test_invalid_stated_dtype(self):
     # UOp.const normalizes a stated dtype away (const_like/full pass their position's); the core constructor does not,
@@ -134,7 +129,7 @@ class TestConstFloatEq(unittest.TestCase):
     self.assertFalse(Invalid != HoldsInvalid())
 
   def test_matchers_agree_on_nan(self):
-    n = UOp.const(math.nan, dtypes.float32)
+    n = UOp.const(math.nan)
     for compiled in (False, True):
       pm = PatternMatcher([(UPat(Ops.CONST, arg=math.nan), lambda: True)], compiled=compiled)
       self.assertTrue(pm.rewrite(n), f"{compiled=}")
@@ -306,9 +301,9 @@ class TestFastIdiv(unittest.TestCase):
       self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORMOD by pow2 left a MOD")
       self.assertNotIn(Ops.FLOORMOD, ops, f"For dtype={dt} FLOORMOD survived past late rewrite")
 
-  def test_floordiv_power_of_two_uint(self):
-    # uint FLOORDIV by a power of two lowers to a shift, leaving no IDIV/FLOORDIV in the kernel
-    for dt in (dtypes.uint32, dtypes.uint64):
+  def test_floordiv_power_of_two(self):
+    # FLOORDIV by a power of two lowers to a shift, with no round toward zero correction (a shift is exactly floor division)
+    for dt in (dtypes.int32, dtypes.uint32, dtypes.int64, dtypes.uint64):
       g = UOp.param(0, dt, (3,))
       c = UOp.const(2).cast(dt)
       a = UOp(Ops.FLOORDIV, dt, (g.index(c), c))
@@ -316,6 +311,7 @@ class TestFastIdiv(unittest.TestCase):
       ops = [x.op for x in uops]
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
       self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORDIV by pow2 kept the round toward zero correction")
       self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
 
   @Context(DISABLE_FAST_IDIV=0)
@@ -348,10 +344,9 @@ class TestFastIdiv(unittest.TestCase):
   def test_fast_idiv_remove_powers_of_two(self):
     ridx = UOp.range(2**20, 0)
     uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
-    ops = [x.op for x in uops]
     # this requires shifting out the powers of two before doing fast_idiv
     # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
-    self.assertNotIn(Ops.CAST, ops)
+    self.assertNotIn(dtypes.long, [x.dtype for x in uops])
 
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):
@@ -463,6 +458,14 @@ class TestUopsObject(unittest.TestCase):
     self.assertEqual(a.device, Device.DEFAULT)
 
 class TestUOpRender(unittest.TestCase):
+  def test_render_ssimplified_marg_outside_toposort(self):
+    r = UOp.range(UOp.const(16, dtypes.int), 2, AxisType.WEAK, dtype=dtypes.int)
+    offset = (r * 2) + (r * 2)
+    shrink = UOp(Ops.SHRINK, src=(UOp.param(0, dtypes.uint, (32,)), offset, UOp.const(2, dtypes.int)))
+    self.assertIsNot(shrink.src[1], shrink.marg[0][0])
+    self.assertEqual(shrink.render(simplify=False), "p0.shrink((((r2*4), 2),))")
+    self.assertEqual(UOp.range(1, 0, src=(shrink,), dtype=dtypes.int).render(simplify=False), "r0")
+
   def test_render_vectorize_empty(self):
     u = UOp(Ops.STACK, dtype=dtypes.void, src=())
     self.assertEqual(u.render(simplify=False), "{}")

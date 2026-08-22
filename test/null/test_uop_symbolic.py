@@ -5,7 +5,8 @@ import z3
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.spec import spec_shared, type_verify
-from tinygrad.uop.symbolic import sym, pm_fold_cast_const, commutative, pm_simplify_valid, pm_move_where_on_load
+from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load
+from tinygrad.uop.weak import pm_cast_weak
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
@@ -35,7 +36,7 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(solver.check(expr1 != expr2), z3.unsat, "simplified expression not equal to original")
 
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
-    v_simplified = graph_rewrite(v, sym+pm_fold_cast_const, name="simplify symbolic uop")
+    v_simplified = graph_rewrite(v, sym+pm_cast_weak, name="simplify symbolic uop")
     if test_z3: self.check_equal_z3(v, v_simplified)
     nmin, nmax = v_simplified.vmin, v_simplified.vmax
     check_uop_against_string(self, v_simplified, s)
@@ -147,6 +148,13 @@ class TestSymbolic(unittest.TestCase):
 
   def test_xor_0(self):
     self.helper_test_variable(Variable("a", 0, 8, dtypes.int) ^ 0, 0, 8, "a", test_z3=False)
+
+  def test_or_0(self):
+    self.helper_test_variable(Variable("a", 0, 8, dtypes.int) | 0, 0, 8, "a", test_z3=False)
+
+  def test_shift_0(self):
+    self.helper_test_variable(Variable("a", 0, 8, dtypes.int) << 0, 0, 8, "a")
+    self.helper_test_variable(Variable("a", 0, 8, dtypes.int) >> 0, 0, 8, "a")
 
   def test_xor_self_inverse(self):
     self.helper_test_variable((Variable("a", 0, 8, dtypes.int) ^ 5) ^ 5, 0, 8, "a", test_z3=False)
@@ -1011,6 +1019,21 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 3)
     b = Variable("b", 0, 3)
     self.helper_test_variable(-a<-b, False, True, "(b<a)")
+
+  def test_where_cast(self):
+    cond = Variable("s", 0, 3, dtypes.int) < 2
+    a = Variable("a", 0, 3, dtypes.int)
+    self.assertIs(graph_rewrite(cond.where(a, a+1).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), (a+1).cast(dtypes.half)))
+    self.assertIs(graph_rewrite(cond.where(a, uconst(2)).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.const(2, dtypes.half)))
+    self.assertIs(graph_rewrite(cond.where(a, UOp.invalid()).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.invalid()))
+
+  def test_where_const_gate_keeps_stated_width(self):
+    a = Variable("a", 0, 3, dtypes.half)
+    self.assertIs(graph_rewrite(UOp.const(True, dtypes.bool).where(uconst(0.0), a), sym), UOp.const(0.0, dtypes.half))
+    self.assertIs(graph_rewrite(UOp.const(True, dtypes.bool).where(uconst(0), Variable("i", 0, 3, dtypes.int)), sym), UOp.const(0, dtypes.int))
+    self.assertIs(graph_rewrite(UOp.const(False, dtypes.bool).where(uconst(0.0), a), sym), a)
+    self.assertIs(graph_rewrite(UOp.const(False, dtypes.bool).where(uconst(0.0), UOp.invalid()), sym), UOp.invalid())
+    self.assertIs(graph_rewrite(UOp.const(True, dtypes.bool).where(uconst(0.0), uconst(1)), sym), uconst(0.0))
 
   def test_where_merge_branches(self):
     cond1 = Variable("s", 0, 10) < 6

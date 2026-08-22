@@ -111,6 +111,10 @@ docs = [
   "numpy",
 ]
 mesa = ["tinymesa==25.2.7.2"]
+autogen = [
+  "pyyaml",
+  "mako",
+]
 
 
 [tool.mutmut]

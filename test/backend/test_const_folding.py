@@ -1,7 +1,7 @@
 import unittest, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DTYPES_DICT
-from tinygrad.uop.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp, GroupOp
 from tinygrad.codegen.decomp.op import threefry2x32
 import numpy as np
 from test.helpers import not_support_multi_device
@@ -17,7 +17,7 @@ def _check_ast_count(desired_count:int, t:Tensor):
 class TestMovedConstFolding(unittest.TestCase):
   def test_contiguous_deviceless_const(self):
     t = Tensor(UOp.const(2.0, dtypes.float)).contiguous()
-    self.assertIs(t.uop.op, Ops.CONST)
+    self.assertIs(t.uop, UOp.const(2.0, dtypes.float))
     self.assertIsNone(t.uop.device)
 
   def test_add_shrunk_zero(self):
@@ -169,8 +169,8 @@ class TestMultiConstFolding(unittest.TestCase):
 class TestThreefryConstFolding(unittest.TestCase):
   def test_threefry(self):
     # THREEFRY(const,const) folds to a const once decomposed
-    x = threefry2x32(UOp.const(5, dtypes.uint64), UOp.const(10, dtypes.uint64))
-    self.assertIs(x.simplify().op, Ops.CONST)
+    x = threefry2x32(UOp.const(5, dtypes.uint64), UOp.const(10, dtypes.uint64)).simplify()
+    self.assertEqual([u.op for u in x.toposort() if u.op in GroupOp.ALU], [])
 
 class TestTautologicalCompare(unittest.TestCase):
   # without const folding, these would have triggered -Wtautological-compare in clang
@@ -188,7 +188,6 @@ class TestTautologicalCompare(unittest.TestCase):
     np.testing.assert_equal((Tensor(True) < Tensor(False)).numpy(), False)
     np.testing.assert_equal((Tensor(True) < Tensor(True)).numpy(), False)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support NaN comparison correctly")
   def test_a_eq_a(self):
     # self eq is always true for int or bool
     a = Tensor([1, 2, 3])

@@ -211,7 +211,7 @@ def _prepare_jit_inputs(args, kwargs):
   # collect buffer UOps (including MultiBuffer)
   input_buf_uops: list[UOp] = [u.base for u in input_uops if u.base.realized is not None]
   if len(set(input_buf_uops)) != len(input_buf_uops): raise JitError("duplicate inputs to JIT")
-  inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP, u.base.dtype)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device) for u in input_uops]
+  inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device) for u in input_uops]
   _var_vals = merge_dicts([x[1] for x in inputs] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   var_vals = {k.expr:v for k,v in _var_vals.items()}
   expected_input_info = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in inputs]
@@ -269,10 +269,14 @@ class _TinyJit(Generic[ReturnType]):
         big_linear, onetime_linear = prune_linear(big_linear, set(input_buf_uops))
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
         run_linear(onetime_linear, var_vals)
+        del onetime_linear
 
       # hold all buffers reachable from live Tensors (e.g. lazy .grad created during capture), the memory planner can't suballocate those
       held_bufs = set(buffers) | {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if u.op is Ops.BUFFER}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops)
+      # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
+      # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec
+      del big_linear, held_bufs
       self.captured = CapturedJit(ret, linear, names, expected_input_info)
       ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
