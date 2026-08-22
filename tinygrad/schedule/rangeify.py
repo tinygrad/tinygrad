@@ -285,7 +285,16 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # this is the ranges replaced
   # NOTE: if buf src is a const, we don't replace it. if idx is Invalid (dead load), don't replace it either
   replaced = {k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST and not (v.op is Ops.CONST and v.val is Invalid)}
-  return src.substitute(replaced, extra_pm=pm_gate_substitute)
+  ret = src.substitute(replaced, extra_pm=pm_gate_substitute)
+  # avoid duplicating large computations inside consumer reduction loops, while preserving loop-invariant fusion.
+  # materialization is only worthwhile when the saved ALU work also exceeds the buffer's element count.
+  fused_topo = ret.toposort(gate=lambda x: x.op not in {Ops.AFTER, Ops.STORE, Ops.MSTACK} and not
+                            (x.op is Ops.STAGE and x.arg.addrspace == AddrSpace.GLOBAL))
+  fused_cost, max_cost = 0, max(getenv("FUSE_REDUCE_MAX_OPS", 2**18), buf.max_numel())
+  for u in fused_topo:
+    if u.op in GroupOp.ALU: fused_cost += prod(int(r.src[0].vmax) for r in u.ranges if r.arg[-1] is AxisType.REDUCE)
+    if fused_cost > max_cost: return None
+  return ret
 
 def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:]: return None
