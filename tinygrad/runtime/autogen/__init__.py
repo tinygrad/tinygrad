@@ -17,6 +17,7 @@ opencl_src = "https://github.com/KhronosGroup/OpenCL-Headers/archive/2e30669d487
 macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 
 llvm_lib = (
+  ("mesa.dll._name if DEV.renderer == 'LVP' else ") +
   (win_llvm:=r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else ") +
   (mac_llvm:=repr([f'/opt/homebrew/opt/llvm@{i}/lib/libLLVM.dylib' for i in reversed(range(14, 21+1))]) + " if OSX else ") +
   (other_llvm:=repr(['LLVM'] + [f'LLVM-{i}' for i in reversed(range(14, 21+1))])))
@@ -102,7 +103,11 @@ def __getattr__(nm):
                   args=["-I{}/usr/include"], srcs=[linux_headers_deb, liburing_src], rules=[('__NR', 'NR')],
                   preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
     case "llvm": return load("llvm", lambda: [system("llvm-config-20 --includedir")+"/llvm-c/**/*.h"], dll=llvm_lib,
-                             args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX"])
+                             args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX, DEV",
+                                                  # This is to fix the order mismatch problem while importing mesa and llvm. If llvm loads the
+                                                  # dynamic lib first then there is an issue with the weak symbols that are required for mesa.
+                                                  # Forcing Mesa to load first and reuse that dylib here fixes that issue
+                                                  "if DEV.renderer == 'LVP': from tinygrad.runtime.autogen import mesa"])
     case "pci": return load("pci", ["{}/usr/include/linux/pci_regs.h"], srcs=linux_headers_deb,
                              preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
     case "vfio": return load("vfio", ["{}/usr/include/linux/vfio.h"], args=["-I{}/usr/include"], srcs=linux_headers_deb,

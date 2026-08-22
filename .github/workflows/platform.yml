@@ -60,7 +60,8 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-macos-mock
-        deps: testing_unit
+        deps: testing_unit mesa
+        llvm: true
         amd: 'true'
         ocelot: 'true'
     - name: Run NULL backend tests
