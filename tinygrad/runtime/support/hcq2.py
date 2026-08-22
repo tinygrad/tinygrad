@@ -32,7 +32,8 @@ class HCQInfo:
 
   input_idxs:tuple[tuple[tuple[str, ...], tuple[int, ...]], ...] = () # per inputs table: (devices, indexes into input_uops)
   inputs:int|None = None # index of the inputs table in call.src
-  kernels:tuple[tuple[tuple[str, ...], UOp, tuple[int, ...]], ...] = () # per kernel: (devices, a call carrying its name and estimates, timestamps)
+  # per kernel: (devices, a call carrying its name and estimates, the two timestamps, each a (slot, size, index) into a signal table)
+  kernels:tuple[tuple[tuple[str, ...], UOp, tuple[tuple[int, ...], ...]], ...] = ()
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -101,8 +102,6 @@ def replace_call_buffers(ctx:tuple[list[UOp], dict[UOp, int]], call:UOp) -> UOp|
 pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_buffers)])
 
 # *****************
-# 1.0. transports: a device the host can't reach by pointer carries its own pattern matchers, dispatched like encode_cmdbuf:
-# pm_stage_copy from the copy's device at staging, pm_host_lower over the host call bodies at encode. see support/usb.py
 
 def stage_copy_ext(call:UOp) -> UOp|None:
   if (d:=next((d for b in call.src[1:] for d in to_tuple(b.device) if not d.startswith("CPU")), None)) is None: return None
@@ -138,9 +137,9 @@ def stage_copy(dst:UOp, src:UOp) -> UOp|None:
 # 1.2. prep: kernel copies
 
 def _get_enqueue_devs(call:UOp) -> Any|None:
-  # a call that isn't a kernel or a copy runs on the host, it can't join a queue batch
-  if call.src[0].op not in (Ops.COPY, Ops.PROGRAM) or not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs):
-    return None
+  if (call.arg.name or "").startswith("hcq_"): return None # host exec is not any device
+
+  if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
   devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
   return devs if all_devices_in(devs, HCQ_DEVS) else None
@@ -222,8 +221,11 @@ def _build_finalizers(batch:list[tuple[UOp, tuple[str, ...]]], batch_info:list[t
     wait_device_epoch = (done:=tl_signal.after(loop:=UOp.loop(0)).index(0).load()).end(loop, done < sched_epoch.index(0).load())
     fences.append(make_call("hcq_fence", UOp.sink(wait_device_epoch), HCQInfo(devs)))
 
-    # queues of other groups wait on these signals, so reset them only after every group reached its epoch
-    if qs: resets.append(make_call("hcq_reset", UOp.sink(*[make_buf(devs, slots[q]).index(0).store(0) for q in qs]), HCQInfo(devs)))
+    # queues of other groups wait on these signals, so reset them only after every group reached its epoch. the resets are chained:
+    # stores in a sink have no order of their own, and a transport that turns each into a transfer needs one
+    rst:tuple[UOp, ...] = ()
+    for q in qs: rst += (make_buf(devs, slots[q]).after(*rst[-1:]).index(0).store(0),)
+    if rst: resets.append(make_call("hcq_reset", UOp.sink(*rst), HCQInfo(devs)))
     fins.append(make_call("hcq_finalizer", UOp.sink(epoch_slot.store(epoch + 1), sched_epoch.after(fin_submit).index(0).store(epoch)), HCQInfo(devs)))
   return fences + resets, fins, signal_tags
 
@@ -348,7 +350,7 @@ def make_addr_table(call:UOp, gaddrs:list[UOp], name:str) -> tuple[UOp, dict[UOp
   slots = {g:i for i,g in enumerate(order)}
   table = UOp.placeholder((len(order),), dtypes.uint64, next(UOp.unique_num), device=call.arg.aux.device).rtag(name)
 
-  reads = {g: table.after(*g.src[0].src[1:] if g.src[0].op is Ops.AFTER else ()).index(UOp.const(slots[bare[g]], dtypes.int)).load() for g in gaddrs}
+  reads = {g: table.after(*g.src[0].after_srcs).index(UOp.const(slots[bare[g]], dtypes.int)).load() for g in gaddrs}
   fills = (table.after(*make_patches(table, [(i*table.dtype.itemsize, addr) for addr, i in slots.items()])),) if slots else ()
   return table, reads, fills, {g:slots[bare[g]] for g in gaddrs}
 
@@ -383,7 +385,6 @@ def split_patches(call:UOp) -> UOp|None:
 
   lt_srcs = collections.defaultdict(list)
   for p in lt_patches: lt_srcs[p.buf_uop].append(p)
-  # input addresses resolve for the device the getaddrs name, not the call's device
   return call.replace(src=(body, *call.src[1:], *[b.after(*ps) for b,ps in lt_srcs.items()], *fills),
     arg=replace(call.arg, aux=replace(call.arg.aux, input_idxs=((to_tuple(inputs[0].arg),
       tuple(sorted(dedup(b.arg.slot for g in inputs for b in unwrap_mstack(g.buf_uop))))),) if inputs else call.arg.aux.input_idxs)))
@@ -601,15 +602,14 @@ class HCQ2Compiled(Compiled):
     super().__init__(device, allocator, compilers, runtime, None, arch=arch)
 
     self.rt_allocator = BumpAllocator(self.rt_nbytes)
-    self.prof_ents:dict[int, ProfileGraphEntry] = {}
-    self._synced = -1
+    self.prof_ents:dict[tuple, ProfileGraphEntry] = {} # keyed by the timestamps, the entry ids are their index in the emitted event
 
   def collect_prof(self):
     if PROFILE:
-      es = list(self.prof_ents.values())
-      tabs = {e.st_id[:2]: memoryview(bytes(self.signal(e.st_id[0], size=e.st_id[1])._buf.cpu_view().view(fmt='B')[:])).cast('Q') for e in es}
-      sigs = [int(tabs[i[:2]][i[2]])/decimal.Decimal(self.timestamp_divider) for e in es for i in (e.st_id, e.en_id)]
-      Compiled.profile_events.append(ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,e in enumerate(es)], [], sigs))
+      es = list(self.prof_ents.items())
+      tabs = {t[:2]: memoryview(bytes(self.signal(t[0], size=t[1])._buf.cpu_view().view(fmt='B')[:])).cast('Q') for ts,_ in es for t in ts}
+      sigs = [int(tabs[t[:2]][t[2]])/decimal.Decimal(self.timestamp_divider) for ts,_ in es for t in ts]
+      Compiled.profile_events.append(ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,(_,e) in enumerate(es)], [], sigs))
     self.prof_ents.clear()
 
   def _at_profile_finalize(self):
@@ -617,12 +617,11 @@ class HCQ2Compiled(Compiled):
     tdiffs = []
     for _ in range(5):
       with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
-      if not (ents:=list(self.prof_ents.values())): return
+      if not (ents:=list(self.prof_ents)): return
       self.prof_ents.clear()
       st = perf_counter_us()
       self.synchronize()
-      gpu = max(self.signal(e.en_id[0], size=e.en_id[1])._buf.cpu_view().view(fmt='Q')[e.en_id[2]] for e in ents)/ \
-            decimal.Decimal(self.timestamp_divider)
+      gpu = max(self.signal(en[0], size=en[1])._buf.cpu_view().view(fmt='Q')[en[2]] for _,en in ents)/decimal.Decimal(self.timestamp_divider)
       tdiffs.append((st+perf_counter_us())/2 - gpu)
     Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
 
@@ -654,10 +653,9 @@ class HCQ2Compiled(Compiled):
     # submits run on the runtime device, drain it first or the timeline below is still in the past
     if HCQ_RUNTIME_DEV.value != self.device: Device[HCQ_RUNTIME_DEV.value].synchronize()
 
-    # the timeline only moves forward: once a target is seen reached, later syncs on the same target skip the device read
-    if self._synced != (target:=int(self.signal("value", 1, device="CPU")._buf.cpu_view().view(fmt='Q')[0]) - 1):
-      self._wait_signal(self.signal("timeline")._buf.cpu_view().view(fmt='Q'), target, timeout)
-      self._synced = target
+    sig = self.signal("timeline")._buf.cpu_view().view(fmt='Q')
+    tl = self.signal("value", 1, device="CPU")._buf.cpu_view().view(fmt='Q')
+    self._wait_signal(sig, tl[0] - 1, timeout)
     if self.prof_ents: self.collect_prof()
 
   def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
