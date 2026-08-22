@@ -137,8 +137,8 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
 
 # tag is the 32-bit word this node becomes - (0 for the low word, 1 for the high, the dtype the consumer wants)
 pm_long_decomp: PatternMatcher = PatternMatcher([
-  (UPat(GroupOp.Defines, src=(UPat.var("sz"),), name="x"), lambda x,sz:
-   UOp(x.op, src=(sz*2,), arg=replace(x.arg, dtype=l2i_dt[x.dtype]), tag=x.tag) if x.dtype in l2i_dt else None),
+  (UPat(GroupOp.Defines, tuple(l2i_dt.keys()), src=(UPat.var("sz"),), name="x"), lambda x,sz:
+   UOp(x.op, src=(sz*2,), arg=replace(x.arg, dtype=l2i_dt[x.dtype]), tag=x.tag)),
   (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x:
    reindex(x, x.tag[0]).replace(tag=None) if x.tag is not None else None),
   (UPat(Ops.STORE, src=(UPat.var('idx', tuple(l2i_dt.keys())), UPat.var('val')), name='st'), lambda st,idx,val:
@@ -170,9 +170,10 @@ pm_long_decomp: PatternMatcher = PatternMatcher([
 pm_float_decomp: PatternMatcher = PatternMatcher([
   (UPat(GroupOp.Defines, name="x"), lambda ctx,x:
    UOp(x.op, src=x.src, arg=replace(x.arg, dtype=f2f_dt[ctx[0]]), tag=ctx[0]) if x.dtype == ctx[0] else None),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda ctx,x:
-   UOp(x.op, src=(graph_rewrite(x.src[0], pm_float_decomp, ctx=ctx, bottom_up=True), *x.src[1:]), arg=x.arg, tag=ctx[0]) if
-   x.dtype == ctx[0] and (x.op is not Ops.INDEX or x.src[0].op not in {Ops.LOAD, Ops.STACK}) else None),
+  # INDEX into a LOAD/STACK selects a lane of an already converted value, the load rules below own those
+  (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(GroupOp.All-{Ops.LOAD, Ops.STACK}),), allow_any_len=True, name="x"), lambda ctx,x:
+   UOp(x.op, src=(graph_rewrite(x.src[0], pm_float_decomp, ctx=ctx, bottom_up=True), *x.src[1:]), arg=x.arg, tag=ctx[0])
+   if x.dtype == ctx[0] else None),
   (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, *ctx) if x.dtype == ctx[0] else None),
   # bitcasted load should just replace load
   (UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"), lambda ctx,bc,ld:
@@ -191,8 +192,8 @@ pm_float_decomp: PatternMatcher = PatternMatcher([
    UOp(x.op, src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src), arg=x.arg, tag=x.tag) if x.dtype == ctx[0] else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
    st.replace(src=(idx, val.src[0].bitcast(f2f_dt[ctx[0]]))) if val.dtype == ctx[0] and idx.tag == ctx[0] else None),
-  (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:
-   f2f_store(st, idx, val, *ctx) if val.dtype == ctx[1] and (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == ctx[0] else None),
+  (UPat(Ops.STORE, src=(UPat.var("idx").or_casted(), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:
+   f2f_store(st, idx, val, *ctx) if val.dtype == ctx[1] and idx.tag == ctx[0] else None),
 ])
 
 def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Renderer]) -> UOp:
