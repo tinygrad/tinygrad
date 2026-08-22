@@ -1687,10 +1687,14 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   # ***** loss ops *****
 
-  def _do_reduction(self, reduction:ReductionStr="mean") -> Self:
+  def _do_reduction(self, reduction:ReductionStr="mean", weight:Self|None=None) -> Self:
     if reduction == "none": return self
     if reduction == "sum": return self.sum()
-    if reduction == "mean": return self.mean()
+    if reduction == "mean":
+      if weight is None: return self.mean()
+      # weighted mean: the sum and the weight total can overflow half for n > 65504, so the divide happens at the acc dtype
+      acc_dtype = sum_acc_dtype(self.dtype)
+      return (self.sum(dtype=acc_dtype) / weight.sum(dtype=acc_dtype)).cast(self.dtype)
     raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
 
   def binary_crossentropy(self, Y:Self, reduction:ReductionStr="mean") -> Self:
@@ -1742,10 +1746,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       raise RuntimeError(f"expected Y and self on the same device, {Y.device=}, {self.device=}")
     log_probs = self.log_softmax()
     loss_mask = Y.ne(ignore_index) if ignore_index != -1 else Y.const_like(True, dtypes.bool)
-    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
-    smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
-    unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
-    return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)
+    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1)
+    unreduced = -((1 - label_smoothing) * (log_probs * y).sum(-1) + label_smoothing * log_probs.mean(-1)) * loss_mask
+    return unreduced._do_reduction(reduction, weight=loss_mask)
 
   def cross_entropy(self, Y:Self, reduction:ReductionStr="mean", label_smoothing:float=0.0) -> Self:
     """
@@ -1796,7 +1799,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     weight = Y.const_like(1) if weight is None else weight.gather(0, Y.flatten()).reshape(Y.shape)
     masked_weight = weight if ignore_index is None else weight * Y.ne(ignore_index)
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
-    return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
+    return nll._do_reduction(reduction, weight=masked_weight)
 
   # ***** matrix ops *****
 
