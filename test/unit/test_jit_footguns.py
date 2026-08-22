@@ -260,16 +260,16 @@ class TestJitFootguns(unittest.TestCase):
     result = f(Tensor([3]), True)  # passing True but False branch runs
     self.assertEqual(result.item(), 6)  # should be 9!
 
-  def test_positional_kwargs_cannot_mix(self):
-    """Must use same calling convention after capture."""
+  def test_positional_kwargs_can_mix(self):
+    """Calling convention can change after capture."""
     @TinyJit
     def f(a, b): return (a + b).realize()
 
     f(Tensor([1]), Tensor([2]))  # warmup with positional
     f(Tensor([1]), Tensor([2]))  # capture with positional
 
-    with self.assertRaises(JitError):
-      f(a=Tensor([3]), b=Tensor([4]))  # kwargs fail
+    result = f(a=Tensor([3]), b=Tensor([4]))  # kwargs on replay
+    self.assertEqual(result.item(), 7)
 
   def test_class_method_shared_across_instances(self):
     """JIT on instance methods is shared at class level."""

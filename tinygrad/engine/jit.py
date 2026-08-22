@@ -199,8 +199,7 @@ class CapturedJit(Generic[ReturnType]):
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
-  names = [name for name,_ in input_tensors]
-  tensors = [t for _,t in input_tensors]
+  names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
   # extract tensors and raw Buffers from containers (shallow, not recursive to avoid grabbing model weights)
   for x in args + tuple(kwargs.values()):
     it = x if isinstance(x, (tuple,list)) else x.values() if isinstance(x, dict) else []
