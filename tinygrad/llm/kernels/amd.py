@@ -1,10 +1,51 @@
 from __future__ import annotations
 import functools, math
 from typing import Callable, cast
-from tinygrad import Tensor, UOp
-from tinygrad.llm.kernels import Linear, kernel_var
-from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
+from tinygrad import Tensor, UOp, nn, Device, Context
+from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
+from tinygrad.helpers import prod
+from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
+
+def kernel_var(x:UOp) -> UOp:
+  # a Variable is a 0-d ALU BUFFER in the tensor graph; inside kernels it takes the ALU PARAM form (same name keeps the value binding)
+  return x.substitute({v: UOp.variable(v.expr, v.vmin, v.vmax, dtype=v.dtype, multiple_of=v.arg.multiple_of, param=True)
+                       for v in x.toposort() if v.is_variable})
+
+def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
+  # the custom kernels are tuned for RDNA3 (gfx11): the WMMA register layouts don't match gfx12 (RDNA4)
+  # or CDNA (MFMA-only, wave64), and the dp4a builtins and 32-lane wave ops aren't portable either.
+  if isinstance(device, tuple): device = device[0]
+  if device is None or device.split(":")[0] != "AMD": return False
+  # Device[...] trips ALLOW_DEVICE_USAGE=0 in function contexts, the device is always open here anyway
+  with Context(ALLOW_DEVICE_USAGE=1):
+    return (t:=getattr(Device[device], "target", None)) is not None and t[0] == 11
+
+class Linear(nn.Linear):
+  ggml_type:int|None = None
+  def __init__(self, in_features:int, out_features:int, bias=True):
+    super().__init__(in_features, out_features, bias)
+    self.in_features, self.out_features = in_features, out_features
+    self.use_custom_quant = True
+  def set_quantized(self, decoded:Tensor):
+    packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in ((13, 176), (14, 210), (23, 136))}
+    raw = next((u for u in decoded.uop.toposort() if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
+    if raw is None: return
+    raw_offset = raw.contiguous_view_offset()
+    assert raw_offset is not None and raw_offset % 4 == 0 and raw.buf_uop.dtype == dtypes.uint8
+    self.ggml_type = packed_sizes[prod(raw.shape)]
+    # Q5_K and IQ4_XS kernels consume words. Store a typed buffer view directly: a lazy BITCAST is decomposed into
+    # byte-combining ALU before custom-kernel scheduling and would copy the entire packed weight on every JIT graph.
+    packed_dtype = dtypes.uint8 if self.ggml_type == 14 else dtypes.uint32
+    self.weight = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer).view(raw.max_numel() * raw.dtype.itemsize // packed_dtype.itemsize,
+                                                                              packed_dtype, raw_offset)))
+  def __call__(self, x:Tensor) -> Tensor:
+    static = isinstance(x.numel(), int)
+    supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
+    if self.ggml_type is None and not static: supported = self.use_custom_quant = False
+    if self.ggml_type is None and supported: self.set_quantized(self.weight)
+    if self.ggml_type in (13, 14, 23) and supported: return q8_linear(self, x)
+    return super().__call__(x)
 
 BLOCK_M, BLOCK_N, DECODE_HEAD_TILE, WARP_SIZE = 32, 32, 8, 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
@@ -274,6 +315,21 @@ def _gated_delta_prefill_kernel(core:UOp, q:UOp, k:UOp, v:UOp, beta:UOp, alpha:U
   state_stores = (state[bh, row, col].store(current.after(step)[row_idx*key_dim//32+i].load().cast(state.dtype))
                   for row_idx,row in enumerate(rows) for i,col in enumerate(cols))
   return UOp.group(*state_stores).end(lane, bh_row).sink(arg=KernelInfo(name="gated_delta_prefill", opts_to_apply=()))
+
+def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor, state:Tensor, start_pos:Tensor|None=None) -> Tensor:
+  batch, heads, tokens, key_dim = q.shape
+  value_dim = v.shape[-1]
+  assert q.shape == k.shape and v.shape[:3] == q.shape[:3] and beta.shape == (batch, heads, tokens)
+  assert alpha.shape[:3] == (batch, heads, tokens) and (len(alpha.shape) == 3 or alpha.shape[-1] in (1, value_dim))
+  assert state.shape == (batch, heads, value_dim, key_dim) and key_dim % 32 == 0 and value_dim % 4 == 0
+  core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
+  srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
+  if start_pos is None: return Tensor.custom_kernel(*srcs, fxn=_gated_delta_prefill_kernel)[0]
+  contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
+  params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
+  assert start_pos.uop.is_bound_var
+  call = _gated_delta_prefill_kernel(*params, kernel_var(start_pos.uop.src[0])).call(*contig, start_pos.uop)
+  return Tensor(contig[0].after(call))
 
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1

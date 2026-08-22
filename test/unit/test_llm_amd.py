@@ -1,8 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn
-from tinygrad.llm.kernels import Linear, amd_custom_kernels_supported
-from tinygrad.llm.kernels.amd import q8_quantize, quantized_attention
+from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, quantized_attention
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 class TestQ8Quantize(unittest.TestCase):

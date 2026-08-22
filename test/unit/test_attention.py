@@ -5,7 +5,7 @@ from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
 )
-from tinygrad.llm.kernels import Linear, gated_delta_prefill
+from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, amd_custom_kernels_supported
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 def apply_rope(x:Tensor, start_pos:int):
@@ -53,6 +53,7 @@ class TestAttention(unittest.TestCase):
 
 class TestGatedDeltaNetBlock(unittest.TestCase):
   def test_gated_delta_rectangular_state_and_row_decay(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
     q, k = (rng.normal(size=(1, 1, 3, 32)).astype(np.float32) for _ in range(2))
     v, beta = rng.normal(size=(1, 1, 3, 4)).astype(np.float32), rng.uniform(size=(1, 1, 3)).astype(np.float32)

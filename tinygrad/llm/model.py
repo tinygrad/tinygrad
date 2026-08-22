@@ -1,9 +1,8 @@
 from __future__ import annotations
 import enum, functools, itertools, pathlib
 from dataclasses import dataclass, replace
-from typing import Any, cast
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context, dtypes
-from tinygrad.llm.kernels import Linear, gated_delta_prefill, amd_custom_kernels_supported
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context, Device, dtypes
+from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
 
@@ -26,9 +25,6 @@ class ExpertWeights:
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).contiguous().squeeze(-2)
-
-# prefill chunk sizes for recurrent models, largest first: long prompts use big chunks, short prompts stay cheap
-RECURRENT_PREFILL_CHUNKS = (128, 32)
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   assert x.shape[-1] % 2 == 0
@@ -287,12 +283,16 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_dt = {"bias": Tensor.zeros(ssm.inner_size if ssm.kda else self.num_v_heads)}
     self.ssm_a = Tensor.zeros(self.num_v_heads, 1) if ssm.kda else Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), Linear(ssm.inner_size, config.dim, bias=False)
+    self.fast_scan = self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(Device.DEFAULT)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
     # bind ints to a variable so the reset flag stays a runtime value (it toggles when generation restarts at position 0)
     start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos", 0, self.config.max_context-1).bind(start_pos)
+    initial = Tensor(start_pos).eq(0)
     is_kda = hasattr(self, "ssm_g_a")
+    symbolic = isinstance(T, UOp)
+    T_pad = x.max_shape[1]  # symbolic chunks are padded to their max size: one graph serves every size
 
     # input processing
     x = x.half()
@@ -300,34 +300,58 @@ class GatedDeltaNetBlock(FFNBlock):
     out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
     alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
-    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) * self.ssm_a).squeeze(-1) \
-      if is_kda else ((alpha.float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, T, self.num_v_heads)
+    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) *
+                 self.ssm_a.reshape(self.num_v_heads, -1))
 
     # qkv conv, conv_state is reset when starting from position 0
-    conv_state = Tensor(start_pos).eq(0).where(0, self.conv_state)
-    conv_window = conv_state.cat(self.attn_qkv(x), dim=1)
-    conv_out = ((conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1) if is_kda and resolve(T == 1) else functools.reduce(lambda a,b: a+b,
-      (conv_window[:, i:i+T] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel)))).silu()
-    # materialize the conv output: fusing the conv reduce into the normalize below miscompiles for chunked
-    # prefill (T>1) when the conv_state reset select is live at start_pos>0
-    if resolve(T != 1): conv_out = conv_out.contiguous()
+    conv_state = initial.where(0, self.conv_state)
+    # assemble the conv window in a static-size buffer: [conv_state | qkv rows | zero-pad].
+    # padded steps are exact no-ops: beta=0 (delta rule off), log_alpha=0 (decay 1 after exp)
+    win = Tensor.zeros(B, self.ssm_conv_kernel-1 + T_pad, self.conv_channels).uop
+    win = win.after(win[:, :self.ssm_conv_kernel-1].store(conv_state.cast(win.dtype).uop))
+    win = win.after(win[:, self.ssm_conv_kernel-1:self.ssm_conv_kernel-1+T].store(self.attn_qkv(x).cast(win.dtype).uop))
+    conv_window = Tensor(win)
+    # the last conv_kernel-1 columns of the window become the next conv state
+    conv_state_store = self.conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).uop)
+
+    conv_out = functools.reduce(lambda a,b: a+b,
+      (conv_window[:, i:i+T_pad] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel))).silu()
+    if symbolic:
+      out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
+      beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, *log_alpha.shape[2:]))
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
-    q = q.reshape(B, T, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=1e-12 if is_kda else 1e-6)
-    k = k.reshape(B, T, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=1e-12 if is_kda else 1e-6)
-    q, k = q.repeat(1, 1, self.num_v_heads//self.num_k_heads, 1), k.repeat(1, 1, self.num_v_heads//self.num_k_heads, 1)
-    v = v.reshape(B, T, self.num_v_heads, self.head_v_dim)
-    q, k, v, beta = [z.transpose(1, 2).float() for z in (q, k, v, beta)]
-    alpha = log_alpha.transpose(1, 2).exp()
+    qk_eps = 1e-12 if is_kda else 1e-6
+    q, k = (z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=qk_eps)
+            .repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
+    v = v.reshape(B, T_pad, self.num_v_heads, self.head_v_dim)
+    # layout the per-step operands to broadcast against the (B, H, V, K) state
+    q, k, v, beta = (z.transpose(1, 2).float() for z in (q, k, v, beta))
+    alpha = log_alpha.transpose(1, 2).exp()  # per-channel decay for kda, per-head otherwise (B, H, T, V|1)
 
-    # recurrent, the conv and recurrent states are updated in place
-    conv_state = conv_window[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).contiguous()
-    state = Tensor(self.recurrent_state.uop.after(self.conv_state.uop.store(conv_state.uop)))
-    core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, state, Tensor(start_pos)).transpose(1, 2)
+    # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
+    state = Tensor(self.recurrent_state.uop.after(conv_state_store))  # carry the conv write into this graph
+    if not symbolic and self.fast_scan:
+      # one fused kernel for the whole scan; it resets and updates the recurrent state in place (RDNA3)
+      core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, state, Tensor(start_pos)).transpose(1, 2)
+    else:
+      q, k, v, beta = q.unsqueeze(-2) * self.head_k_dim**-0.5, k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
+      alpha = alpha.unsqueeze(-1)
+      state = initial.where(0, state.float())
+      outs = []
+      for t in range(T_pad):
+        s1 = state * alpha[:, :, t]  # decay the state
+        delta = (v[:, :, t] - (s1*k[:, :, t]).sum(-1, keepdim=True)) * beta[:, :, t]  # the delta rule update
+        state = s1 + delta * k[:, :, t]
+        outs.append((state * q[:, :, t]).sum(-1))
 
-    # output
-    core_attn_out = self.ssm_norm(core)
-    out_gate = out_gate.sigmoid() if is_kda else out_gate.silu()
-    return self.ssm_out((core_attn_out * out_gate).reshape(B, T, -1).cast(x.dtype)).contiguous()
+      # store the updated recurrent state in place, then read the stacked outputs after the write
+      state_store = self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop)
+      core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(state_store))
+
+    # output; undo the padding before the output projection
+    z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
+    if symbolic: z = z[:, :T]
+    return self.ssm_out(z.reshape(B, T, -1))
 
   def _init_state(self, x):
     if not hasattr(self, "conv_state"):
@@ -347,10 +371,10 @@ class Transformer:
     self.output = Linear(config.dim, config.vocab_size, bias=False)
     self.max_context = config.max_context
     self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
+    self.fast_recurrent = any(getattr(b, "fast_scan", False) for b in self.blk)
     self._cached_tokens: list[int] = []
-    # we specialize the JIT for prefill and rollout; recurrent models prefill at static chunk sizes, one graph per size
+    # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
-    self.prefill_jits: dict[int, Any] = {}
     self.rollout_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
@@ -362,12 +386,7 @@ class Transformer:
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    T = tokens.shape[1]
-    if resolve(T == 1): return self.rollout_jit(tokens.contiguous(), start_pos, temperature)
-    if not self.has_recurrent_block: return self.prefill_jit(tokens.contiguous(), start_pos, temperature)  # symbolic toks
-    T = cast(int, T)  # recurrent prefill is always a static chunk size
-    if T not in self.prefill_jits: self.prefill_jits[T] = TinyJit(self.forward)
-    return self.prefill_jits[T](tokens.contiguous(), start_pos, temperature)
+    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
@@ -453,6 +472,20 @@ class Transformer:
       Tensor.realize(*params)
     return model, kv
 
+  def warmup(self, chunk_size:int=32):
+    if not self.fast_recurrent:
+      for _ in range(2): list(zip(range(2), self.generate([0])))
+      return
+    # capture the static prefill chunk graph with kernel batching; chunk_size must match what generate uses at serve time
+    prompt = [0] * min(chunk_size, 256, self.max_context-1)
+    x = Tensor.empty(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
+    for block in self.blk: block._init_state(x)
+    for _ in range(2):
+      warm = self.generate(prompt, chunk_size=chunk_size)
+      with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512)): next(warm)
+      with Context(JIT_BATCH_SIZE=0): next(warm)
+      self._cached_tokens = []
+
   def get_start_pos(self, tokens:list[int]) -> int:
     # recurrent state can't be partially reused after divergence: reuse it only when tokens extend the cached prefix
     if self.has_recurrent_block:
@@ -461,24 +494,8 @@ class Transformer:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
-  def warmup(self, chunk_size:int|None=None):
-    # capture every prefill chunk size generate can pick; the captured JIT rejects sizes it hasn't seen
-    sizes = (chunk_size,) if chunk_size is not None else (RECURRENT_PREFILL_CHUNKS if self.has_recurrent_block else (32,))
-    if self.has_recurrent_block:
-      x = Tensor.empty(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
-      for block in self.blk: block._init_state(x)
-    for size in sizes:
-      prompt = [0] * (min(size, 256, self.max_context-1) if self.has_recurrent_block else 1)
-      for _ in range(2):
-        warm = self.generate(prompt, chunk_size=size)
-        with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
-        with Context(JIT_BATCH_SIZE=0): next(warm)
-        self._cached_tokens = []
-
-  def generate(self, tokens:list[int], chunk_size:int|None=None, temperature:float=0.0):
-    # recurrent blocks prefill full chunks with a static shape (one JIT graph per size), the prompt tail decodes
-    chunk_sizes = RECURRENT_PREFILL_CHUNKS if chunk_size is None else (chunk_size,)
-    chunk_size = chunk_size or 32
+  def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
+    if self.has_recurrent_block and not self.fast_recurrent: chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
@@ -489,10 +506,9 @@ class Transformer:
     start_pos = self.get_start_pos(tokens)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
-      # largest captured chunk that fits; the tail below the smallest chunk decodes token by token
-      remaining = len(tokens)-start_pos
-      n_toks = next((s for s in chunk_sizes if remaining >= s), 1) if self.has_recurrent_block else min(chunk_size, remaining)
-      sp, nt = v_start_pos.bind(start_pos), n_toks if self.has_recurrent_block else v_toks.bind(n_toks)
+      n_toks = min(chunk_size, len(tokens) - start_pos)
+      if self.fast_recurrent and n_toks < chunk_size: n_toks = 1  # full static chunks for the fused scan, the tail decodes
+      sp, nt = v_start_pos.bind(start_pos), n_toks if self.fast_recurrent else v_toks.bind(n_toks)
       out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
