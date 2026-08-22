@@ -6,8 +6,9 @@ from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 from tinygrad.helpers import WIN, OSX, DEV
 if DEV.renderer == 'LVP':
-  # This is to fix the order mismatch problem while importing mesa and llvm. If llvm loads the dynamic lib first then there
-  # is an issue with the weak symbols that are required for mesa. Forcing Mesa to load first fixes this
+  # This is to fix the order mismatch problem while importing mesa and llvm. If llvm loads the
+  # dynamic lib first then there is an issue with the weak symbols that are required for mesa.
+  # Forcing Mesa to load first and reuse that dylib here fixes that issue
   from tinygrad.runtime.autogen import mesa
   dll = mesa.dll
 else:
@@ -3195,3 +3196,4 @@ LLVM_BLAKE3_BLOCK_LEN = 64
 LLVM_BLAKE3_CHUNK_LEN = 1024
 LLVM_BLAKE3_MAX_DEPTH = 54
 LTO_API_VERSION = 29
+

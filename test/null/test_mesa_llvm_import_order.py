@@ -35,4 +35,3 @@ def test_mesa_llvm_import_order(imports):
   )
 
   assert proc.returncode == 0, proc.stderr
-
