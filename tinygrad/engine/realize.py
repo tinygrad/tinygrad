@@ -221,11 +221,11 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*tables)})
   exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer()._buf.va_addr + base}), call, ast)
 
-  def _prof_tm(device:str, stat_call:UOp, prof:tuple[int, ...]) -> float|None:
-    (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, prof[0], prof[1], stat_call.key)
+  def _prof_tm(device:str, stat_call:UOp, prof:tuple[tuple[int, ...], ...]) -> float|None:
+    (d:=cast(Any, Device[device])).prof_ents[prof] = ProfileGraphEntry(device, stat_call.arg.name, prof[0][2], prof[1][2], stat_call.key)
     if not ctx.wait: return None
     d.synchronize(timeout=ctx.timeout)
-    st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
+    st, en = (d.signal(x[0], size=x[1])._buf.cpu_view().view(fmt='Q')[x[2]] for x in prof)
     return float(en-st)/d.timestamp_divider/1e6
   return [_prof_tm(device, k, prof) for devices, k, prof in info.kernels if prof for device in devices] if PROFILE or ctx.wait else []
 
