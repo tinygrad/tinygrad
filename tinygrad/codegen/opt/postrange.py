@@ -16,6 +16,7 @@ class Scheduler:
     self.ast, self.ren = ast, ren
     self.dont_use_locals = self.ast.arg.dont_use_locals if self.ast.arg is not None else False
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
+    self.pad_bound:dict[int, int] = {}
     self.opt_range = count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
 
   @property
@@ -44,6 +45,7 @@ class Scheduler:
     ret = Scheduler(self.ast, self.ren)
     ret.dont_use_locals = self.dont_use_locals
     ret.applied_opts = self.applied_opts[:]
+    ret.pad_bound = self.pad_bound.copy()
     if hasattr(self, 'tensor_core'): ret.tensor_core = self.tensor_core
     return ret
 
@@ -94,6 +96,11 @@ class Scheduler:
     replaced_rng = rng.replace(src=(old_sz,))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
+    if (bound:=self.pad_bound.get(rng.arg[0])) is not None:
+      if top: self.pad_bound[new_rng.arg[0]] = bound//int(old_sz) if bound%int(old_sz) == 0 else 1
+      else:
+        self.pad_bound[rng.arg[0]] = bound//amount if bound%amount == 0 else 1
+        self.pad_bound[new_rng.arg[0]] = bound
     return replaced_rng, new_rng
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
@@ -154,6 +161,7 @@ class Scheduler:
       if opt.op is OptOps.UNROLL:
         check(amt <= 32, "don't unroll more than 32")
         check(rng.arg[-1] in {AxisType.GROUP_REDUCE, AxisType.REDUCE}, "unroll is for GROUP_REDUCE/REDUCE")
+        if (bound:=self.pad_bound.get(rng.arg[0])) is not None: check(bound % amt == 0, "cannot unroll across padding")
       if opt.op is OptOps.UPCAST:
         check((self.ren is not None and self.ren.target.device == "DSP") or amt <= 16, "don't upcast more than 16")
         check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK}, f"upcast is for GLOBAL/LOCAL/LOOP, not {rng.arg[-1]}")
@@ -186,6 +194,8 @@ class Scheduler:
       check(rng.arg[-1] is not AxisType.THREAD, "cannot pad thread")
       new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
+      if new_sz > rng.vmax+1 and rng.arg[-1] in {AxisType.GROUP_REDUCE, AxisType.REDUCE}:
+        self.pad_bound[rng.arg[0]] = math.gcd(self.pad_bound.get(rng.arg[0], 0), int(rng.vmax+1))
       replaced_rng = UOp.range(new_sz, *rng.arg, dtype=rng.dtype)
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
