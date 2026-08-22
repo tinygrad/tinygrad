@@ -8,12 +8,15 @@ from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, hcq_fil
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, BufferSpec, TinyELF
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, hi32, lo32, PROFILE, ContextVar, VIZ, ProfileEvent
+from tinygrad.helpers import TracingKey
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.runtime.autogen import nv_570, nv_580, nv_610, mesa
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
-from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
+from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager, NVUSBPCIDevice
+from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, MAP_FIXED
+from tinygrad.runtime.support.usb import USB3
+from tinygrad.runtime.support.memory import AddrSpace
 from tinygrad.renderer.nir import NAKRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
@@ -204,6 +207,13 @@ class NVCopyQueue(NVCommandQueue):
                nv_flags("NVC6B5_LAUNCH_DMA", data_transfer_type="non_pipelined", src_memory_layout="pitch", dst_memory_layout="pitch"))
     return self
 
+  def write(self, b:HCQBuffer, val:sint, b64:bool=False):
+    if b64: raise NotImplementedError("64-bit copy queue writes are not supported")
+    self.nvm(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, *data64(b.va_addr), val)
+    self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA,
+             nv_flags("NVC6B5_LAUNCH_DMA", flush_enable="true", semaphore_type="release_one_word_semaphore"))
+    return self
+
   def signal(self, signal:HCQSignal, value:sint=0):
     self.nvm(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, *data64(signal.value_addr), value)
     self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, nv_flags("NVC6B5_LAUNCH_DMA", flush_enable="true", semaphore_type="release_four_word_semaphore"))
@@ -339,12 +349,36 @@ class NVProgram(HCQProgram['NVDevice']):
     return res
 
 class NVAllocator(HCQAllocator['NVDevice']):
+  def __init__(self, dev:NVDevice):
+    super().__init__(dev, copy_bufs=dev.iface.copy_bufs if dev.is_usb() else None,
+                     supports_transfer=not dev.is_usb())
+
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host, zero=options.zero)
 
   def _do_free(self, opaque:HCQBuffer, options:BufferSpec): self.dev.iface.free(opaque)
 
   def _do_map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
+
+  # ASM2464 F2 downloads are completion-coupled: an ordered GPU PCIe write releases bulk IN after the copy queue stages VRAM in slot 5.
+  # Reads release from slot 0, so the five-slot prefix is transferred and discarded.
+  def _copyout(self, dest:memoryview, src:HCQBuffer):
+    if not self.dev.is_usb(): return super()._copyout(dest, src)
+    prefix_size = USBIface.TRANSFER_PADDR - USBIface.SRAM_PADDR
+    release_word = self.dev.iface.cq_buf.offset(12, 4)
+
+    with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=TracingKey(f"{self.dev.device} -> TINY", ret=dest.nbytes), enabled=PROFILE,
+                     dev_suff="SDMA:0"):
+      for i in range(0, dest.nbytes, self.b[0].size):
+        queue = NVCopyQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
+                             .copy(self.b[0], src.offset(i), lsize:=min(self.b[0].size, dest.nbytes - i)) \
+                             .write(release_word, 0)
+
+        read_size = prefix_size + lsize
+        self.dev.iface.pci_dev.usb.scsi_read_arm(read_size)
+        queue.submit(self.dev)
+        sram_window = self.dev.iface.pci_dev.usb.usb.bulk_read(round_up(read_size, 512))
+        dest.cast('B')[i:i+lsize] = sram_window[prefix_size:read_size]
 
   def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, desc_buf:HCQBuffer, hist:list[HCQBuffer], shape:tuple[int,...], frame_pos:int):
     assert all(h.va_addr % 0x100 == 0 for h in hist + [bufin, bufout, desc_buf]), "all buffers must be 0x100 aligned"
@@ -560,6 +594,9 @@ class PCIIface(PCIIfaceBase):
     super().__init__(dev, dev_id, vendor=0x10de, devices=((0xff00, (0x2200,0x2400,0x2500,0x2600,0x2700,0x2800,0x2b00,0x2c00,0x2d00,0x2f00)),),
       base_class=0x03, vram_bar=1, va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size, dev_impl_t=NVDev)
 
+    self._init_nvd()
+
+  def _init_nvd(self):
     self.root, self.gpu_instance = 0xc1000000, 0
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 
@@ -580,12 +617,40 @@ class PCIIface(PCIIfaceBase):
     for _ in self.dev_impl.gsp.stat_q.read_resp(): pass
     if self.dev_impl.is_err_state: raise RuntimeError("Device fault detected")
 
+class USBIface(PCIIface):
+  SRAM_PADDR, SLOT_SIZE = 0x200000, 0x4000
+  TRANSFER_START_SLOT, TRANSFER_SLOT_COUNT = 5, 25
+  TRANSFER_PADDR, TRANSFER_SIZE = SRAM_PADDR + TRANSFER_START_SLOT * SLOT_SIZE, TRANSFER_SLOT_COUNT * SLOT_SIZE
+
+  def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
+    visible = hcq_filter_visible_devices(USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001), "NV")
+    self.dev, self.pci_dev, self.vram_bar, self.count = dev, NVUSBPCIDevice(*visible[dev_id]), 1, len(visible)
+    self.dev_impl = NVDev(self.pci_dev)
+    self._init_nvd()
+
+    # SRAM slots 5:30 avoid the fixed GSP queue aliases in slots 0, 4, 30, and 31.
+    self.copy_bufs = [self._dma_region(ctrl_addr=0xf000, sys_addr=self.TRANSFER_PADDR, size=self.TRANSFER_SIZE)]
+    self.cq_buf = self._dma_region(ctrl_addr=0xb800, sys_addr=0x828000, size=0x1000)
+
+  def _dma_region(self, ctrl_addr, sys_addr, size):
+    region = self.dev_impl.mm.map_range(vaddr:=self.dev_impl.mm.alloc_vaddr(size=size), size, [(sys_addr, size)], aspace=AddrSpace.SYS, uncached=True)
+    start_slot = (sys_addr - self.SRAM_PADDR) // self.SLOT_SIZE if ctrl_addr == 0xf000 else 0
+    return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(region, has_cpu_mapping=False),
+                     view=self.pci_dev.dma_view(ctrl_addr, size, start_slot=start_slot), owner=self.dev)
+
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False, **kwargs) -> HCQBuffer:
+    if not host and not cpu_access: return super().alloc(size, uncached=uncached, zero=zero, **kwargs)
+    mapping = self.dev_impl.mm.valloc_cpu_visible(size:=round_up(size, 0x1000), uncached=uncached, zero=zero)
+    barview = self.pci_dev.map_bar(self.vram_bar, off=mapping.paddrs[0][0], size=mapping.size)
+    return HCQBuffer(mapping.va_addr, size, view=barview, meta=PCIAllocationMeta(mapping, False, hMemory=mapping.paddrs[0][0]), owner=self.dev)
+
 class MOCKIface(NVKIface): count = 1
 
 class NVDevice(HCQCompiled[NVSignal]):
-  ifaces = [NVKIface, PCIIface, MOCKIface]
+  ifaces = [NVKIface, PCIIface, USBIface, MOCKIface]
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
+  def is_usb(self) -> bool: return isinstance(self.iface, USBIface)
 
   def __init__(self, device:str=""):
     self.iface = self._select_iface(device)
@@ -633,6 +698,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], NVProgram, NVSignal, NVComputeQueue,
                      NVCopyQueue, arch=self.arch)
+    if self.is_usb(): self.graph = None
 
     self.pma_enabled = PMA.value > 0 and PROFILE >= 1
     if self.pma_enabled: self._prof_init()

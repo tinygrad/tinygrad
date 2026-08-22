@@ -224,21 +224,22 @@ class PCIDevice:
     except OSError as e: raise RuntimeError(f"Cannot resize BAR {bar_idx}: {e}. Ensure the resizable BAR option is enabled.") from e
 
 class USBPCIDevice(PCIDevice):
-  def __init__(self, devpref:str, dev, pcibus):
+  def __init__(self, devpref:str, dev, pcibus, controller_t=CustomASM24Controller, gpu_bus:int=4):
     self.pcibus, self.peer_group = pcibus, f"USBPCIDevice_{pcibus}"
+    self.gpu_bus = gpu_bus
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     usb = USB3(dev)
-    if DEBUG >= 1: print(f"am {self.pcibus}: product string: {usb.product!r}")
-    self.usb: CustomASM24Controller = CustomASM24Controller(usb)
-    self._bar_info = System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
+    if DEBUG >= 1: print(f"{devpref.lower()} {self.pcibus}: product string: {usb.product!r}")
+    self.usb: CustomASM24Controller = controller_t(usb)
+    self._bar_info = System.pci_setup_usb_bars(self.usb, self.gpu_bus, mem_base=0x10000000, pref_mem_base=(32 << 30))
     self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
 
   def dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     return self.dma_view(0xf000 + (off:=self.sram.alloc(size)), size), [0x200000 + off]
 
-  def read_config(self, offset:int, size:int): return self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, size=size)
-  def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, value=value, size=size)
+  def read_config(self, offset:int, size:int): return self.usb.pcie_cfg_req(offset, bus=self.gpu_bus, dev=0, fn=0, size=size)
+  def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=self.gpu_bus, dev=0, fn=0, value=value, size=size)
 
   def bar_info(self, bar_idx:int) -> tuple[int, int]: return self._bar_info[bar_idx]  # type: ignore[override]
   def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):

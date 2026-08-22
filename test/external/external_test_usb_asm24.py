@@ -7,7 +7,7 @@ class TestDevCopySpeeds(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.sz = getenv("SIZE", 2000000)
-    cls.dev = Device["AMD"]
+    cls.dev = Device[Device.DEFAULT]
     if not cls.dev.is_usb(): raise unittest.SkipTest("only test this on USB devices")
 
   def testCopyCPUtoDefault(self):
