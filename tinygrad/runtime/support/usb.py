@@ -239,7 +239,8 @@ class USBMMIOInterface(MMIOInterface):
     data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
     if not self.pcimem: self.usb.scsi_write(data) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)
     else:
-      assert len(data) % 4 == 0 and off % 4 == 0, f"pcie_mem_write requires 4-byte aligned access, got off={off}, sz={len(data)}" # writes are whole dwords
+      # writes are whole dwords
+      assert len(data) % 4 == 0 and off % 4 == 0, f"pcie_mem_write requires 4-byte aligned access, got off={off}, sz={len(data)}"
       self.usb.pcie_mem_write(self.addr+off, data)
 
   def view(self, offset:int=0, size:int|None=None, fmt=None):
