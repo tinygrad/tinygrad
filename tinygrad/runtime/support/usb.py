@@ -292,14 +292,18 @@ def usb_stage_copy(dst:UOp, src:UOp) -> UOp|None:
               sram.copy_to_device(d.device).call(d, sram)]
     else:
       pad = UOp.new_buffer("CPU", round_up(nb, 512), dtypes.uint8)[0:nb]
-      submit = make_submit(UOp(Ops.CALL, dtypes.void, (UOp(Ops.COPY, dtypes.void, ()), sram, s)), devs=devs, queue="COPY:0", aux=nb)
+      submit = make_submit(UOp(Ops.CALL, dtypes.void, (UOp(Ops.COPY, dtypes.void, ()), sram, s)), devs=devs, queue="COPY:0")
       pull = usb_bulk(devs, (submit,), 0x81, pad.getaddr((HCQ_RUNTIME_DEV.value,)), round_up(nb, 512), 10000)
       ops += [UOp.custom_function("hcq", pull.sink()).call(pad, sram, s, name="hcq_copyout", aux=HCQInfo(devs)),
               pad.copy_to_device("CPU").call(d, pad)]
   return UOp(Ops.LINEAR, src=tuple(ops))
 pm_usb_stage = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), usb_stage_copy)])
 
-def usb_ib(devs, lin:UOp, align:int) -> tuple[UOp, UOp, int]:
+def usb_arm_bytes(lin:UOp, sram:Buffer) -> int:
+  dsts = [c.src[1] for c in lin.src if c.op is Ops.CALL and c.src[0].op is Ops.COPY] # the rest of a linear is INS, some with no srcs
+  return next((d.nbytes() for d in dsts if d.base.op is Ops.BUFFER and d.base.buffer is sram), 0)
+
+def usb_ib(devs, lin:UOp, align:int, arm:int=0) -> tuple[UOp, UOp, int]:
   pkt_dw = sum(s.dtype.itemsize for ins in lin.src for s in ins.src) // 4 # by bytes: sdma packs 64-bit addresses as single srcs
   kargs = dedup([b for b in lin.toposort() if b.op is Ops.PARAM and b.tag == "kernargs"])
   offs, up_dw = {}, round_up(pkt_dw, align)
@@ -309,8 +313,7 @@ def usb_ib(devs, lin:UOp, align:int) -> tuple[UOp, UOp, int]:
   gsubs = {g: g.replace(src=(d if a.op is not Ops.AFTER else d.after(*a.src[1:]),)) for g in lin.toposort() if g.op is Ops.GETADDR
            for a in [g.src[0]] if (k:=a.src[0] if a.op is Ops.AFTER else a) in offs for d in [ib_gpu[offs[k]:offs[k] + k.max_numel()]]}
   lin = lin.substitute(gsubs, walk=True).substitute({k: ib_host[offs[k]:offs[k] + k.max_numel()] for k in kargs}, walk=True)
-  dep = (usb_scsi(devs, True, nb),) if (nb:=lin.arg[2]) is not None else ()
-  return make_cmdbuf(lin, devs, buf=ib_host, dep=dep), ib_gpu, pkt_dw
+  return make_cmdbuf(lin, devs, buf=ib_host, dep=(usb_scsi(devs, True, arm),) if arm else ()), ib_gpu, pkt_dw
 
 def usb_push(devs, ring:UOp, wptr:UOp, doorbell:UOp, put_ptr:UOp, ib_host:UOp, ib_gpu:UOp, pkt:tuple, unit:int) -> UOp:
   stage = UOp.placeholder(((n:=round_up(len(pkt), 4)) + 2,), dtypes.uint32, device=devs, tag="usb_scratch")

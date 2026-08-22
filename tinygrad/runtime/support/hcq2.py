@@ -78,8 +78,8 @@ def make_cmdbuf(lin, devs, buf:UOp|None=None, dep:tuple[UOp, ...]=()):
   cmdbuf = buf if buf is not None else UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
   return cmdbuf.after(*dep, make_binary_patch(cmdbuf, bytes(blob)), *make_patches(cmdbuf, patches))
 
-def make_submit(*cmds, devs:str|tuple[str, ...], queue:str, aux=None) -> UOp: # aux goes to the device's submit encoder untouched
-  return UOp.custom_function("submit_cmdbuf", UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue, aux)))
+def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
+  return UOp.custom_function("submit_cmdbuf", UOp(Ops.LINEAR, src=tuple(cmds), arg=(to_tuple(devs), queue)))
 def get_submit(ast:UOp) -> UOp: return next(u for u in ast.toposort() if u.op is Ops.CUSTOM_FUNCTION and u.arg == "submit_cmdbuf")
 
 def make_call(name:str, body:UOp, info:HCQInfo) -> UOp: return UOp.custom_function("hcq", body).call(name=name, aux=info)
@@ -282,8 +282,8 @@ def sched_hcq_batches(l:UOp, profile:bool) -> UOp:
 
 def _merged_hcq_call(calls:list[UOp]) -> UOp: # TODO: simplify?
   if len(calls) == 1: return calls[0]
-  devs, queue, aux = get_submit(calls[0]).src[0].arg
-  body = make_submit(*[cmd for c in calls for cmd in get_submit(c).src[0].src], devs=devs, queue=queue, aux=aux).sink()
+  devs, queue = get_submit(calls[0]).src[0].arg
+  body = make_submit(*[cmd for c in calls for cmd in get_submit(c).src[0].src], devs=devs, queue=queue).sink()
   return make_call(f"submit {queue} ({len(calls)})", body,
     replace(calls[0].arg.aux, estimates=sum((c.arg.aux.estimates for c in calls), start=Estimates()).simplify()))
 
@@ -298,7 +298,7 @@ def merge_queues(linear:UOp) -> UOp:
       new_src += [_merged_hcq_call(opened_qs.pop(k)) for k in list(opened_qs)] + [call]
       continue
 
-    devs, queue = get_submit(call).src[0].arg[:2]
+    devs, queue = get_submit(call).src[0].arg
     if (old:=opened_qs.pop(key:=(devs, queue), None)) is not None:
       if limits[key] and len(old) >= limits[key]: new_src, old, limits[key] = new_src + [_merged_hcq_call(old)], [], limits[key] * 2
       new_rec = old + [call]

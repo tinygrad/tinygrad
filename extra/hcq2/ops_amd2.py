@@ -19,7 +19,7 @@ from tinygrad.runtime.support.hcq import FileIOInterface, HCQBuffer, MMIOInterfa
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
-from tinygrad.runtime.support.usb import USB3, usb_ib, usb_push, pm_usb_stage, pm_usb_hostio, pm_usb_bufferize
+from tinygrad.runtime.support.usb import USB3, usb_ib, usb_push, usb_arm_bytes, pm_usb_stage, pm_usb_hostio, pm_usb_bufferize
 from tinygrad.runtime.support.memory import AddrSpace, BumpAllocator
 from tinygrad.runtime.ops_amd import SQTT, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE, PMC
 from tinygrad.runtime.ops_amd import EVENT_INDEX_PARTIAL_FLUSH, WAIT_REG_MEM_FUNCTION_EQ, WAIT_REG_MEM_FUNCTION_NEQ, WAIT_REG_MEM_FUNCTION_GEQ
@@ -253,10 +253,11 @@ pm_sdma_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
 def amd_usb_submit(ctx, lin):
   for d in ctx.devs: q = Device[d].compute_queue if (comp:=ctx.qname.startswith("COMPUTE")) else Device[d].sdma_queue(0)
 
-  if lin.arg[2] is not None: lin = lin.replace(src=lin.src + (UOp(Ops.INS, arg="poke", src=tuple(UOp.const(x, dtypes.uint32)
-    for x in (ctx.sdma.SDMA_OP_WRITE, *data64_le(Device[ctx.devs[0]].iface.cq_buf.va_addr + 12), 0, 0))),))
+  if nb:=usb_arm_bytes(ctx.pre, Device[ctx.devs[0]].iface.usb_sram):
+    poke = (ctx.sdma.SDMA_OP_WRITE, *data64_le(Device[ctx.devs[0]].iface.cq_buf.va_addr + 12), 0, 0)
+    lin = lin.replace(src=lin.src + (UOp(Ops.INS, arg="poke", src=tuple(UOp.const(x, dtypes.uint32) for x in poke)),))
 
-  ib_host, ib_gpu, pkt_dw = usb_ib(ctx.devs, lin, 32 if comp else 0x100)
+  ib_host, ib_gpu, pkt_dw = usb_ib(ctx.devs, lin, 32 if comp else 0x100, nb)
   pkt = (ctx.pm4.PACKET3(ctx.pm4.PACKET3_INDIRECT_BUFFER,2),*data64_le(ib_gpu.getaddr(ctx.devs)),pkt_dw|ctx.pm4.INDIRECT_BUFFER_VALID) if comp else ()
   return usb_push(ctx.devs, *queue_ptrs(ctx.devs, ctx.qname, q), ib_host, ib_gpu, pkt, 4 if comp else 1)
 
@@ -265,11 +266,11 @@ pm_usb_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"), amd_usb_submit)])
 @dataclass(frozen=True)
 class AMDEncodeCtx:  # encode-time constants for one queue: devs (every cmdbuf address resolves into these) + gfx version + packet/ip modules
   devs: tuple[str, ...]; target: tuple[int, ...]; pm4: Any; sdma: Any; soc: Any  # noqa: E702
-  gc: AMDIP; nbio: AMDIP; xccs: int; max_copy_size: int; tmpring_size: Callable; qname: str  # noqa: E702
+  gc: AMDIP; nbio: AMDIP; xccs: int; max_copy_size: int; tmpring_size: Callable; qname: str; pre: UOp # pre: the queue before opsel
 
 def encode_queue(q:UOp) -> UOp|None:
   d = Device[(devs:=to_tuple(q.arg[0]))[0]]
-  ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size, q.arg[1])
+  ctx = AMDEncodeCtx(devs, d.target, d.pm4, d.sdma, d.soc, d.gc, d.nbio, d.xccs, d.max_copy_size, d.tmpring_size, q.arg[1], q)
   opsel = pm_pm4_opsel if (comp:=q.arg[1].startswith("COMPUTE")) else pm_sdma_opsel
   submit = d.pm_submit if d.pm_submit is not None else (pm_pm4_submit if comp else pm_sdma_submit)
   return submit.rewrite(graph_rewrite(q, opsel + pm_flatten_linear, walk=True, ctx=ctx, name=f"{q.arg[1]} opsel"), ctx)
