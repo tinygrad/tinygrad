@@ -1,5 +1,20 @@
 # Tokenizer-based expression parser for AMD pcode
+import ast, itertools, operator, re
 from typing import Any, Callable
+
+_BINOPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.FloorDiv: operator.floordiv,
+           ast.Mod: operator.mod, ast.LShift: operator.lshift, ast.RShift: operator.rshift,
+           ast.BitAnd: operator.and_, ast.BitOr: operator.or_, ast.BitXor: operator.xor}
+def _const_int(expr: str) -> int:
+  """Evaluate a compile-time integer expression (integer literals and basic arithmetic only)."""
+  def ev(node: ast.AST) -> int:
+    if isinstance(node, ast.Expression): return ev(node.body)
+    if isinstance(node, ast.Constant) and isinstance(node.value, int): return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+      return (-1 if isinstance(node.op, ast.USub) else 1) * ev(node.operand)
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS: return _BINOPS[type(node.op)](ev(node.left), ev(node.right))
+    raise ValueError(f"not a constant integer expression: {expr!r}")
+  return ev(ast.parse(expr.strip(), mode='eval'))
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen.decomp.dtype import f2f
@@ -360,22 +375,13 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'fp8_to_f32': _fp8_to_f32, 'bf8_to_f32': _bf8_to_f32, 'f32_to_fp8': _f32_to_fp8, 'f32_to_bf8': _f32_to_bf8,
   'f32_to_bf16': _f32_to_bf16, 'f32_to_bf16_SR': _f32_to_bf16_sr, 'f32_to_bf16_sr': _f32_to_bf16_sr,
 }
-for is_max, name in [(False, 'min'), (True, 'max')]:
-  for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
-    _FUNCS[f'v_{name}_{sfx}'] = lambda *a, im=is_max, d=dt: _minmax_reduce(im, d, *a)
-    _FUNCS[f'v_{name}3_{sfx}'] = lambda *a, im=is_max, d=dt: _minmax_reduce(im, d, *a)
-# f16 min/max/min3/max3/med3
-for is_max, name in [(False, 'min'), (True, 'max')]:
-  _FUNCS[f'v_{name}_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
-  _FUNCS[f'v_{name}3_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
-  _FUNCS[f'v_{name}_num_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
-  _FUNCS[f'v_{name}_num_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
-  _FUNCS[f'v_{name}3_num_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
-  _FUNCS[f'v_{name}3_num_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
-  _FUNCS[f'v_{name}imum_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
-  _FUNCS[f'v_{name}imum_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
-  _FUNCS[f'v_{name}imum3_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
-  _FUNCS[f'v_{name}imum3_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
+# min/max family: min/max + 3-input (x3), IEEE num variants (f16/f32 only), and long names minimum/maximum (f16/f32 only)
+for is_max, name, full in [(False, 'min', 'minimum'), (True, 'max', 'maximum')]:
+  for dt, sfx, pre in [(dtypes.float32, 'f32', None), (dtypes.int, 'i32', None), (dtypes.uint32, 'u32', None),
+                       (dtypes.int16, 'i16', None), (dtypes.uint16, 'u16', None), (dtypes.half, 'f16', _f16_extract)]:
+    def mm(*a, im=is_max, d=dt, p=pre): return _minmax_reduce(im, d, *(a if p is None else [p(x) for x in a]))
+    extra = (f'v_{name}_num_{sfx}', f'v_{name}3_num_{sfx}', f'v_{full}_{sfx}', f'v_{full}3_{sfx}') if dt in (dtypes.float32, dtypes.half) else ()
+    for fn in (f'v_{name}_{sfx}', f'v_{name}3_{sfx}', *extra): _FUNCS[fn] = mm
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TOKENIZER/PARSER
@@ -890,6 +896,8 @@ class Parser:
       return result & _isnan(l).logical_not() & _isnan(r).logical_not()
     return result
 
+_break_var_ids = itertools.count()  # unique names for per-loop break-tracking variables
+
 def _match_bracket(toks: list[Token], start: int) -> tuple[int, list[Token]]:
   """Match brackets from start, return (end_idx, inner_tokens)."""
   j, depth = start + 1, 1
@@ -987,7 +995,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         i += 1
       # Execute loop with break support
       has_break = any('break' in bl.lower() for bl in body_lines)
-      found_var = f'_found_{id(body_lines)}' if has_break else None
+      found_var = f'_found_{next(_break_var_ids)}' if has_break else None
       if found_var: env[found_var] = block_assigns[found_var] = _const(dtypes.bool, False)
       for loop_i in range(start_val, end_val + 1):
         subst_lines = [_subst_loop_var(bl, loop_var, loop_i) for bl in body_lines if not (has_break and bl.strip().lower() == 'break')]
@@ -1087,7 +1095,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           j, slice_toks = _match_bracket(toks, j)
           slice_str = _tok_str(slice_toks)
           hi_str, lo_str = slice_str.split(':')
-          hi_val, lo_val = int(eval(hi_str.strip())), int(eval(lo_str.strip()))
+          hi_val, lo_val = _const_int(hi_str), _const_int(lo_str)
           if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix
           if j < len(toks) and toks[j].type == 'EQUALS': j += 1
           ln = parse_tokens(lane_toks, env, funcs)
@@ -1145,7 +1153,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         hi_str = ' '.join(t.val for t in toks[bracket_start:colon_pos] if t.type != 'EOF')
         lo_str = ' '.join(t.val for t in toks[colon_pos+1:j] if t.type != 'EOF')
         try:
-          hi_val, lo_val = int(eval(hi_str)), int(eval(lo_str))
+          hi_val, lo_val = _const_int(hi_str), _const_int(lo_str)
           hi, lo = max(hi_val, lo_val), min(hi_val, lo_val)
           j += 1
           if j < len(toks) and toks[j].type == 'DOT': j += 2
@@ -1159,7 +1167,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           block_assigns[var] = env[var] = _set_bits(old, _val_to_bits(val), hi - lo + 1, lo)
           i += 1
           continue
-        except Exception: pass
+        except (ValueError, SyntaxError): pass  # non-constant slice bounds - fall through to other statement forms
       elif toks[1].type == 'LBRACKET':  # bit index: var[expr] (only for var[...], not var.type[...])
         existing = block_assigns.get(var, env.get(var))
         if existing is not None and isinstance(existing, UOp) and \
@@ -1360,3 +1368,25 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
 
 def parse_expr(expr: str, env: dict[str, VarVal], funcs: dict | None = None) -> UOp:
   return parse_tokens(tokenize(expr.strip().rstrip(';')), env, funcs)
+
+def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None) -> tuple[dict, list]:
+  env: dict = srcs.copy() if srcs else {}
+  assigns: list[tuple[str, UOp]] = []
+  raw_lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
+  # TODO: pcode.py should tokenize full pcode string instead of line-by-line, then this hack can be removed
+  lines: list[str] = []
+  for l in raw_lines:
+    if lines and re.search(r'(&&|\|\||[&|+\-*/^])\s*$', lines[-1]): lines[-1] = lines[-1] + ' ' + l
+    else: lines.append(l)
+  _, final, _ = parse_block(lines, 0, env, assigns=assigns)
+  sliced = set(d.split('[')[0] for d, _ in assigns if '[' in d)
+  for var, val in final.items():
+    if var in ['D0', 'S0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA'] and isinstance(val, UOp):
+      if var in sliced and not any(re.match(rf'{var}\.\w+\s*=', l) for l in lines): continue
+      for l in lines:
+        if (m := re.match(rf'{var}\.(\w+(?:\[\w+\])?)', l)):
+          assigns.append((f'{var}.{m.group(1)}', val))
+          break
+      else: assigns.append((var, val))
+  return env, assigns
+

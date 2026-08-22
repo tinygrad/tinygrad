@@ -236,7 +236,7 @@ class MemoryManager:
     self.map_range(va:=self.alloc_vaddr(self.vram_size, self.vram_size), self.vram_size, [(0, self.vram_size)], AddrSpace.PHYS, uncached=uncached)
     return va
 
-  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> VirtMapping:
+  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False, zero=False) -> VirtMapping:
     if not getenv("GMMU", 1):
       paddr = self.palloc(size:=round_up(size, 0x1000), align, zero=False)
       return VirtMapping(self.identity_va(uncached) + paddr, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
@@ -251,7 +251,7 @@ class MemoryManager:
       while rem_size > 0:
         while self.palloc_ranges[nxt_range][0] > rem_size: nxt_range += 1
 
-        try: paddrs += [(self.palloc(try_sz:=self.palloc_ranges[nxt_range][0], self.palloc_ranges[nxt_range][1], zero=False), try_sz)]
+        try: paddrs += [(self.palloc(try_sz:=self.palloc_ranges[nxt_range][0], self.palloc_ranges[nxt_range][1], zero=zero), try_sz)]
         except MemoryError:
           # Move to a smaller size and try again.
           nxt_range += 1
