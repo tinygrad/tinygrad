@@ -341,7 +341,8 @@ def make_gather_loop(patches:list[UOp], table:UOp, slots:dict[UOp, int], lt_patc
   lt_patches.append(make_binary_patch(pairs, struct.pack(f'<{2*len(words)}I', *itertools.chain(*words))))
   r = UOp.range(len(words), next(UOp.unique_num), dtype=dtypes.int, src=(pairs, dst))
   off, slot = ((pairs.index(2*r+i).load() % bound).cast(dtypes.int) for i, bound in ((0, dst.max_numel()-1), (1, table.max_numel())))
-  patch = dst.shrink(((off, off+table.dtype.itemsize//dst.dtype.itemsize),)).bitcast(table.dtype).index(0).store(table.index(slot).load()).end(r)
+  patch = UOp(Ops.SHRINK, src=(dst, off, off.const_like(table.dtype.itemsize//dst.dtype.itemsize))).bitcast(table.dtype).index(0) \
+    .store(table.index(slot).load()).end(r)
   return {p: UOp(Ops.NOOP) for p in patches} | {patches[0]: patch}
 
 def is_input_addr(g:UOp) -> bool: return all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop))

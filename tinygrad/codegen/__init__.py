@@ -105,9 +105,13 @@ def broadcast_and_devec_wmma(b:UOp):
     src.append(b.replace(src=tuple([x.index(*idx) for x in src_expanded])))
   return UOp.stack(*src).reshape(b.shape)
 
+def add_wmma_acc(wmma:UOp, add:UOp) -> UOp:
+  acc = wmma.src[2]
+  return wmma.replace(src=(wmma.src[0], wmma.src[1], add if acc.vmin == acc.vmax == 0 else acc.alu(Ops.ADD, add)))
+
 pm_wmma_add = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
-   lambda add, wmma: UOp(wmma.op, src=(wmma.src[0], wmma.src[1], wmma.src[2]+add), arg=wmma.arg)),
+   add_wmma_acc),
   # push permute/reshape to the other side of the add
   (UPat(Ops.PERMUTE, src=(UPat(Ops.WMMA, name="wmma"),), name="permute") + UPat.var("add"),
     lambda wmma,permute,add: (wmma + add.permute(argsort(permute.arg))).permute(permute.arg)),

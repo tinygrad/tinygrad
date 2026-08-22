@@ -230,11 +230,11 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_depth_2_const_fold(self):
     v = UOp.variable("tmp", 0, 1, dtypes.int, param=True)
-    c2 = UOp.const(2, dtypes.int)
-    c4 = UOp.const(4, dtypes.int)
+    c2 = UOp.const(2)
+    c4 = UOp.const(4)
     vc = v+c2
     out = vc+c4
-    self.assertIs(out.simplify(), (v+UOp.const(6, dtypes.int)).simplify())
+    self.assertIs(out.simplify(), (v+UOp.const(6)).simplify())
 
   def test_bitcast_to_same_dtype_fold(self):
     for dt in dtypes.ints + dtypes.floats + (dtypes.bool,):
@@ -245,7 +245,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_sub_with_cast_folds(self):
     a = Variable("a", 0, 5)
-    out = a.cast(dtypes.int)+(-a).cast(dtypes.int)
+    out = a+(-a)
     self.assertIs(full_rewrite(out.sink()).src[0], full_rewrite(UOp.const(0, dtypes.int).sink()).src[0])
 
   def test_where_on_gated_load_fold(self):

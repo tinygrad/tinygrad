@@ -96,6 +96,12 @@ pm_reduce_unparented = PatternMatcher([
   (UPat(Ops.REDUCE, name="red"), reduce_unparented),
 ])
 
+def collapse_gated_reduce(r:UOp, val:UOp, lower:UOp|None=None, upper:UOp|None=None) -> UOp|None:
+  if not no_range(val): return None
+  count = ((upper.minimum(r.src[0]) if upper is not None else r.src[0]) -
+           (lower.maximum(0) if lower is not None else r.const_like(0))).maximum(0).minimum(r.src[0])
+  return count.cast(val.dtype) if val.vmin == val.vmax == 1 else count * val
+
 pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   # lift x+y out of reduce on lt
   ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"), lambda x,y,c: (x < (c-y)) if no_range(y) and no_range(c) else None),
@@ -107,9 +113,7 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
     (UPat(Ops.RANGE, name="r") < UPat.var("upper")).where(UPat.var("val"), 0),
     (UPat(Ops.RANGE, name="r") < UPat.var("lower")).where(0, UPat.var("val")),
     ((UPat.var("r")<UPat.var("lower")).logical_not()&(UPat(Ops.RANGE, name="r")<UPat.var("upper"))).where(UPat.var("val"), 0),
-  ).reduce(UPat.var("r"), arg=Ops.ADD), lambda r,val,lower=None,upper=None:
-    ((upper.minimum(r.src[0]) if upper is not None else r.src[0]) -
-     (lower.maximum(0) if lower is not None else r.const_like(0))).maximum(0).minimum(r.src[0]) * val if no_range(val) else None),
+  ).reduce(UPat.var("r"), arg=Ops.ADD), collapse_gated_reduce),
   (invalid_gate.reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
    lambda cond,x,i,r: cond.where(x.reduce(*r.src[1:], arg=Ops.ADD), i) if no_range(cond) else None),
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
@@ -137,11 +141,12 @@ def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp
     for u in included:
       for s in u.src:
         if s in included or s in replaces or s.op in {Ops.CONST, Ops.PARAM, Ops.BUFFER}: continue
-        replaces[s] = UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype, param=True)
+        replaces[s] = s.const_like(s.vmin) if dtypes.is_int(s.dtype) and s.vmin == s.vmax else \
+          UOp.variable(f'in{len(replaces)}', s.vmin, s.vmax, s.dtype, param=True)
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
     sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")
     if not no_range(sink): return None
-    u = sink.substitute({v:k for k,v in replaces.items()})
+    u = sink.substitute({v:k for k,v in replaces.items() if v.op is not Ops.CONST})
   return u
 
 def reduce_load_collapse(red:UOp, u:UOp) -> UOp|None: return reduce_collapse(red, u, pm=pm_reduce_load_collapse)

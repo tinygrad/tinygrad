@@ -3,7 +3,7 @@ import math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
-from tinygrad.uop.weak import commit_weak_sibling
+from tinygrad.uop.weak import commit_weak
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, NUM_CPU_THREADS, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
@@ -74,14 +74,20 @@ base_rewrite = PatternMatcher([
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg.format(*[ctx[y] for y in x.src])),
 ])
 
+def commit_non_identity_weak(x:UOp, dts:tuple[DType, ...]) -> UOp|None:
+  if (dt:=next((s.dtype for s in x.src if s.dtype in dts), None)) is None: return None
+  identity = 0 if x.op in {Ops.ADD, Ops.WMMA} else 1 if x.op is Ops.MUL else None
+  src = tuple(commit_weak(s, dt) if s.op is Ops.CONST and s.dtype in dtypes.weaks and s.val != identity else s for s in x.src)
+  return x.replace(src=src) if src != x.src else None
+
 def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
   patterns = PatternMatcher([
-    # a weak CONST states no width and cannot be restated: commit it at the emulated dtype a sibling src states
-    (UPat(GroupOp.ALU, name="x"), lambda x, dts=dts: commit_weak_sibling(x, next((s.dtype for s in x.src if s.dtype in dts), None))),
+    # only ADD/WMMA zero and MUL one stay weak/foldable; every other literal commits at the emulated dtype before the float surrogate
+    (UPat(GroupOp.ALU, name="x"), lambda x,dts=dts: commit_non_identity_weak(x, dts)),
     (UPat(Ops.WHERE, dtype=dts, src=(UPat.var("b"), UPat.var("x"), UPat.var("y")), name="w"),
      lambda w,b,x,y: b.where(x.cast(dtypes.float), y.cast(dtypes.float)).cast(w.dtype)),
     (UPat(GroupOp.ALU-{Ops.WHERE}, dtype=dts, name="x"),
-     lambda x: UOp(x.op, src=tuple(vv.cast(dtypes.float) for vv in x.src), arg=x.arg).cast(x.dtype)),
+     lambda x: UOp(x.op, src=tuple(vv if vv.dtype in dtypes.weaks else vv.cast(dtypes.float) for vv in x.src), arg=x.arg).cast(x.dtype)),
     (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dts), UPat.var("y", dtype=dts))),
      lambda alu,x,y: UOp(alu.op, src=(x.cast(dtypes.float), y.cast(dtypes.float)), arg=alu.arg))])
   if casting:
