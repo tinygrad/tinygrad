@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn
-from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, quantized_attention
+from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, flash_attention
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 class TestQ8Quantize(unittest.TestCase):
@@ -66,9 +66,9 @@ class TestQ8Quantize(unittest.TestCase):
   def test_attention_uses_physical_cache_length(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     q, k, v = Tensor.zeros(1, 2, 1, 32), Tensor.randn(1, 1, 1, 32), Tensor.randn(1, 1, 1, 32)
-    cache = Tensor.empty(2, 1, 1, 256, 32, dtype=dtypes.int8).contiguous()
-    scale = Tensor.empty(2, 1, 1, 256, dtype=dtypes.float16).contiguous()
-    out = quantized_attention(q, Tensor.stack(k, v), cache, scale, 0).realize()
+    cache = Tensor.empty(2, 1, 1, 256, 32, dtype=dtypes.half).contiguous()
+    assigned = Tensor(cache.uop.after(cache[:, :, :, 0:1, :].uop.store(Tensor.stack(k, v).cast(dtypes.half).uop)))
+    out = flash_attention(q, assigned, 1).realize()
     np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
 
   def test_prefill_attention_unaligned_start(self):
@@ -78,14 +78,12 @@ class TestQ8Quantize(unittest.TestCase):
     q = Tensor.zeros(1, 8, 32, 128)
     old_kv = rng.normal(size=(2, 1, 1, start_pos, 128)).astype(np.float32)
     new_kv = rng.normal(size=(2, 1, 1, 32, 128)).astype(np.float32)
-    cache = Tensor.empty(2, 1, 1, 2048, 128, dtype=dtypes.int8).contiguous()
-    scale = Tensor.zeros(2, 1, 1, 2048, dtype=dtypes.float16).contiguous()
-    old_scale = np.maximum(np.max(np.abs(old_kv), axis=-1, keepdims=True) / 127, 1e-8).astype(np.float16)
-    Tensor.realize(cache[:, :, :, :start_pos].assign(Tensor(np.rint(old_kv / old_scale).astype(np.int8))),
-                   scale[:, :, :, :start_pos].assign(Tensor(old_scale.squeeze(-1))))
-    out = quantized_attention(q, Tensor(new_kv), cache, scale, UOp.variable("start_pos", 0, 2047).bind(start_pos)).realize()
-    values = cache[1, 0, 0, :start_pos+32].numpy().astype(np.float32) * \
-      scale[1, 0, 0, :start_pos+32].numpy().astype(np.float32)[:, None]
+    cache = Tensor.zeros(2, 1, 1, 2048, 128, dtype=dtypes.half).contiguous()
+    Tensor.realize(cache[:, :, :, :start_pos].assign(Tensor(old_kv).cast(dtypes.half)))
+    sp = UOp.variable("start_pos", 0, 2047).bind(start_pos)
+    assigned = Tensor(cache.uop.after(cache[:, :, :, sp:sp+32, :].uop.store(Tensor(new_kv).cast(dtypes.half).uop)))
+    out = flash_attention(q, assigned, sp+32).realize()
+    values = np.concatenate([old_kv[1, 0, 0], new_kv[1, 0, 0]]).astype(np.float16).astype(np.float32)
     expected = np.stack([values[:start_pos+i+1].mean(0) for i in range(32)])[None, None].repeat(8, axis=1)
     np.testing.assert_allclose(out.numpy(), expected, rtol=2e-3, atol=2e-3)
 

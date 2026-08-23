@@ -2,7 +2,7 @@ from __future__ import annotations
 import enum, functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
-from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, quantized_attention, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, flash_attention, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
 
@@ -180,14 +180,14 @@ class TransformerBlock(FFNBlock):
     q = apply_rope(q[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(q[..., self.config.rope_dim:], dim=-1)
     k = apply_rope(k[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., self.config.rope_dim:], dim=-1)
 
-    # on RDNA3, hybrid models use a quantized KV cache with custom attention kernels
-    if hasattr(self, "cache_kv_scale"):
-      attn = quantized_attention(q, Tensor.stack(k, v), self.cache_kv, self.cache_kv_scale, start_pos)
+    # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
+    store = self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).cast(dtypes.half).uop)
+    assigned_kv = Tensor(self.cache_kv.uop.after(store))
+    # on RDNA3, hybrid models use custom flash attention kernels on the KV cache
+    if amd_custom_kernels_supported(x.device) and self.config.ssm is not None:
+      attn = flash_attention(q, assigned_kv, start_pos+T)
       attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
       return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
-
-    # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
-    assigned_kv = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).uop)))
     k = assigned_kv[0, :, :, 0:start_pos+T, :]
     v = assigned_kv[1, :, :, 0:start_pos+T, :]
 
@@ -205,15 +205,8 @@ class TransformerBlock(FFNBlock):
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
-      # hybrid models use a quantized KV cache on AMD, sized in flash decode blocks of 256
-      quantize = amd_custom_kernels_supported(x.device) and self.config.ssm is not None
-      assert not quantize or self.config.max_context % 256 == 0, \
-        f"quantized KV cache needs max_context to be a multiple of 256, got {self.config.max_context}"
       self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
-                                   dtype=dtypes.int8 if quantize else dtypes.default_float, device=x.device)
-      if quantize:
-        self.cache_kv_scale = Tensor.zeros(2, x.shape[0], self.config.n_kv_heads, self.config.max_context,
-                                           dtype=dtypes.float16, device=x.device)
+                                   dtype=dtypes.half, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
 
 class MLATransformerBlock(FFNBlock):
