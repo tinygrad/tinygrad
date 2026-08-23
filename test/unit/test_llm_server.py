@@ -152,8 +152,8 @@ class TestTransformerGenerate(unittest.TestCase):
 
     # 8 tokens, chunk_size=4 -> 2 prefill chunks
     self.assertEqual(get_prefill_flags(list(range(8)), 4), [True, True, False, False])
-    # 9 tokens, chunk_size=4 -> 2 prefill chunks + the 1-token tail goes through the decode graph
-    self.assertEqual(get_prefill_flags(list(range(9)), 4), [True, True, False, False, False])
+    # 9 tokens, chunk_size=4 -> 3 prefill chunks (4+4+1)
+    self.assertEqual(get_prefill_flags(list(range(9)), 4), [True, True, True, False, False])
     # 4 tokens, chunk_size=4 -> 1 prefill chunk
     self.assertEqual(get_prefill_flags(list(range(4)), 4), [True, False, False])
 
