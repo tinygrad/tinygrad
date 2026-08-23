@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
+from typing import Any, Callable, Generic, TypeVar, Iterable, Iterator, Generator, Self, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct
 from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
@@ -326,14 +326,15 @@ class TinyELF:
   name: str
   target: Target
   # tuple of (name, slot, dtype, shape)
-  signature: tuple[tuple[str|None, int, DType, tuple], ...]
+  signature: tuple[tuple[str|None, int, DType, tuple, bool, int], ...]
   profile_key: bytes|None = None
 
   @staticmethod
-  def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
-    for _,_,dt,_ in signature:
-      yield (offset:=round_up(offset, dt.itemsize)), dt
-      offset += dt.itemsize
+  def iter_sig(signature:Iterable[tuple[str|None, int, DType, tuple, bool, int]],
+               offset:int=0) -> Generator[tuple[int, DType, bool, int], None, None]:
+    for *_, dt, s, is_buf, idx in signature:
+      yield (offset:=round_up(offset, 8 if is_buf else dt.itemsize)), dt, is_buf, idx
+      offset += 8 if is_buf else dt.itemsize
 
 class Program(Generic[DeviceType]):
   def __init__(self, dev:DeviceType, obj:TinyELF): pass

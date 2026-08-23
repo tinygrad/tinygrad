@@ -481,7 +481,11 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     # instruction selection
     if isinstance(renderer, ISARenderer):
       full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
-      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
+    param_order = list(dict.fromkeys(u for u in linearize(full_sink) if u.op is Ops.PARAM))
+    prog_info = replace(prog_info, params=tuple(param_order))
+    if isinstance(renderer, ISARenderer):
+      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink,param_order=param_order),
+                                name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))

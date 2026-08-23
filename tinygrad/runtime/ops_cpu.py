@@ -156,13 +156,13 @@ class CPUProgram(Program['CPUDevice']):
                vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
     st = time.perf_counter()
     if self.lvp:
-      lvp_args = bytearray(12 + (len(bufs) + len(vals)) * 8)
-      addr = mv_address(lvp_args)
-      struct.pack_into(f'<3I{len(bufs)}Q', lvp_args, 0, *data64_le(addr+12), (len(bufs)+len(vals))*2, *[b.va_addr for b in bufs])
-      for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs)*8)): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, v)
+      addr = mv_address(lvp_args:=bytearray(12 + (len(bufs)+len(vals))*8))
+      struct.pack_into('<3I', lvp_args, 0, *data64_le(addr+12), (len(bufs)+len(vals))*2)
+      for o, dt, is_buf, idx in TinyELF.iter_sig(self.signature):
+        struct.pack_into('<Q' if is_buf else f'<{dt.fmt}', lvp_args, 12+o, bufs[idx].va_addr if is_buf else vals[idx])
       self.fxn(addr)
     else:
-      args = [*[cast(int, b.va_addr) for b in bufs], *cast(tuple[int, ...], vals)]
+      args = [cast(int,bufs[idx].va_addr if is_buf else vals[idx]) for *_,_,is_buf,idx in self.signature]
       assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(args)}"
       for tid in range(global_size[0]):
         if 'core_id' in self.runtimevars: args[self.runtimevars['core_id']] = tid

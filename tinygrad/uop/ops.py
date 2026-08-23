@@ -1195,8 +1195,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape)
-                for u in tuple(filter(lambda u: u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU, self.src[1].src)) + self.arg.vars)
+    bc, vc = itertools.count(), itertools.count()
+    params = self.arg.params or [u for u in self.src[1].src if u.op is Ops.PARAM] or [u for u in self.src[0].src if u.op is Ops.PARAM]
+    sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape, (is_buf:=u.addrspace!=AddrSpace.ALU), next(bc if is_buf else vc))
+            for u in params if u.op is Ops.PARAM)
     return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig, self.key)
 
 @dataclass(frozen=True)
@@ -1221,6 +1223,7 @@ class ProgramInfo:
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
   target: Target = Target()
+  params: tuple[UOp, ...] = ()
 
   @property
   def function_name(self): return to_function_name(self.name)

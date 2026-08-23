@@ -37,11 +37,14 @@ class HIPProgram(Program[HIPDevice]):
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     check(hip.hipSetDevice(self.dev.device_id))
     if not hasattr(self, "vargs"):
-      fields = ([(f'f{i}', hip.hipDeviceptr_t, i*8) for i in range(len(args))] +
-        [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), o) for i,(o,dt) in enumerate(TinyELF.iter_sig(self.signature[len(args):], len(args)*8))])
-      self.c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
+      fields, ordered, end = [], [], 0
+      for o, dt, is_buf, idx in TinyELF.iter_sig(self.signature):
+        fields.append((f'f{idx}', hip.hipDeviceptr_t, o) if is_buf else (f'v{idx}', getattr(ctypes, f"c_int{dt.bitsize}"), o))
+        ordered.append(args[idx] if is_buf else vals[idx])
+        end = o + (8 if is_buf else dt.itemsize)
+      self.c_args = init_c_struct_t(end, tuple(fields))(*ordered)
       self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
-                                         ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)
+                                        ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)
 
     for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
     for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])

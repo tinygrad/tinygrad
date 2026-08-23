@@ -202,22 +202,20 @@ class QCOMArgsState(HCQArgsState):
     super().__init__(buf, prg, bufs, vals=vals)
     ctypes.memset(int(self.buf.va_addr), 0, prg.kernargs_alloc_size)
 
-    ubos = [bufs[slot] for _,slot,_,shape in prg.signature if slot < len(bufs) and not is_image_shape(shape)]
-    uavs = [(dt,shape,bufs[slot]) for _,slot,dt,shape in prg.signature if slot < len(bufs) and is_image_shape(shape)]
+    uavs = [(dt, s, bufs[idx]) for *_, dt, s, is_buf, idx in prg.signature if is_buf and is_image_shape(s)]
     # NIR can reorder images to different texture slots
     ibos, texs = uavs[:prg.ibo_cnt], [uavs[prg.ibo_cnt + (prg.tex_to_image[i] if prg.NIR else i)] for i in range(prg.tex_cnt)]
     for cnst_val,cnst_off,cnst_sz in prg.consts_info:
       to_mv(cast(int, self.buf.va_addr) + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(int(self.buf.va_addr) + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
+    non_img = [x for x in prg.signature if not is_image_shape(x[3])]
     if prg.NIR:
-      self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)
-      for v,(o,dt) in zip(vals, TinyELF.iter_sig(prg.signature[len(bufs):], len(ubos)*8)):
-        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_off + o)
+      for o,dt,is_buf,idx in TinyELF.iter_sig(non_img):
+        self.bind_sints_to_buf(bufs[idx].va_addr if is_buf else vals[idx], buf=self.buf, fmt='Q' if is_buf else dt.fmt, offset=prg.buf_off+o)
     else:
-      for i, b in enumerate(ubos): self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=prg.buf_offs[i])
-      for i,(v,(_,_,dt,_)) in enumerate(zip(vals, prg.signature[len(bufs):])):
-        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_offs[i+len(ubos)])
+      for i, (*_, dt, s, is_buf, idx) in enumerate(non_img):
+        self.bind_sints_to_buf(bufs[idx].va_addr if is_buf else vals[idx], buf=self.buf, fmt='Q' if is_buf else dt.fmt, offset=prg.buf_offs[i])
 
     def _tex(b, ibo=False):
       imgdt, shape, buf = b

@@ -26,7 +26,7 @@ class MetalGraph(GraphRunner):
 
     self.var_bind_data = []
     if len(self.vars):
-      self.var_buf = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s) in unwrap(r).signature if s == ()))
+      self.var_buf = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for *_, dt, _, is_buf, _ in unwrap(r).signature if not is_buf))
       self.var_buf_view, var_buf_offset = cast(MetalAllocator, self.dev.allocator)._as_buffer(self.var_buf), 0
 
     all_pipelines, all_resources = [], [self.var_buf.buf] if len(self.vars) else []
@@ -35,14 +35,15 @@ class MetalGraph(GraphRunner):
       icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
       icb_command.setComputePipelineState(runtime.pipeline_state)
       all_pipelines.append(runtime.pipeline_state)
-      for i, b in enumerate(bufs):
-        if not any(pos == i for pos, _ in replace):
-          icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
-          all_resources.append(b._buf.buf)
-      for nm,i,dt,_ in runtime.signature[len(bufs):]:
-        icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, var_buf_offset, i)
-        self.var_bind_data.append((nm, var_buf_offset, dt.fmt))
-        var_buf_offset += dt.itemsize
+      for nm, slot, dt, shape, is_buf, idx in runtime.signature:
+        if is_buf:
+          if not any(pos == idx for pos, _ in replace):
+            icb_command.setKernelBuffer_offset_atIndex(bufs[idx]._buf.buf, bufs[idx]._buf.offset, slot)
+            all_resources.append(bufs[idx]._buf.buf)
+        else:
+          icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, var_buf_offset, slot)
+          self.var_bind_data.append((nm, var_buf_offset, dt.fmt))
+          var_buf_offset += dt.itemsize
       global_size, local_size = ast.arg.launch_dims({v: 0 for v in self.vars})
       icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
       icb_command.setBarrier()
@@ -63,7 +64,8 @@ class MetalGraph(GraphRunner):
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
       for pos, iidx in self.uop_replace[j]:
         buf = cast(Buffer, input_uops[iidx].buffer)
-        computeCommand.setKernelBuffer_offset_atIndex(buf._buf.buf, buf._buf.offset, pos)
+        slot = next(slot for (_, slot, _, _, is_buf, idx) in unwrap(self.runtimes[j]).signature if is_buf and idx == pos)
+        computeCommand.setKernelBuffer_offset_atIndex(buf._buf.buf, buf._buf.offset, slot)
         updated_bufs.append(buf._buf.buf)
 
     all_resources = dedup(self.all_resources + updated_bufs)
