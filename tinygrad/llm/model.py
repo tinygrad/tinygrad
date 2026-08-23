@@ -200,7 +200,7 @@ class TransformerBlock(FFNBlock):
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
       self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
-                                   dtype=dtypes.default_float, device=x.device)
+                                   dtype=dtypes.half, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
 
 class MLATransformerBlock(FFNBlock):
