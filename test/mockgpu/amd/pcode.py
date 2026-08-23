@@ -200,7 +200,20 @@ def _abs(val: UOp) -> UOp:
 def _f_to_u(f, dt):
   clamped = (f < _const(f.dtype, 0.0)).where(_const(f.dtype, 0.0), f)
   truncated = UOp(Ops.TRUNC, src=(clamped,))
-  return (truncated >= _const(f.dtype, 2**(dt.itemsize*8))).where(_const(dt, dt.max), truncated.cast(dt))
+  res = (truncated >= _const(f.dtype, 2**(dt.itemsize*8))).where(_const(dt, dt.max), truncated.cast(dt))
+  return _isnan(f).where(_const(dt, 0), res)  # float->uint conversion of NaN is 0 on hardware
+
+def _f_to_i32(a: UOp) -> UOp:
+  """v_cvt_i32_f32/f64: truncate toward zero, saturate to [INT_MIN, INT_MAX], NaN -> 0.
+  (x86 cvttss2si returns 0x80000000 for all of these, which matches hardware only for negative overflow.)"""
+  res = (a >= _const(a.dtype, 2147483648.0)).where(_const(dtypes.int, 0x7FFFFFFF), UOp(Ops.TRUNC, src=(a,)).cast(dtypes.int))
+  return _isnan(a).where(_const(dtypes.int, 0), res)
+
+def _ftz_f32(v: UOp) -> UOp:
+  """Flush f32 denormals to signed zero (RDNA default float mode flushes denormal f32 inputs on select-style ops)."""
+  bits = v.bitcast(dtypes.uint32) if v.dtype == dtypes.float32 else v
+  return ((bits & _u32(0x7FFFFFFF)) < _u32(0x00800000)).where((bits & _u32(0x80000000)).bitcast(dtypes.float32),
+                                                              v if v.dtype == dtypes.float32 else v.bitcast(dtypes.float32))
 
 def _cvt_quiet(val: UOp) -> UOp:
   bits, _, _, qb, _ = _float_info(val)
@@ -245,18 +258,51 @@ def _ldexp(val: UOp, exp: UOp) -> UOp:
   if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
   elif val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
   if exp.dtype in (dtypes.uint32, dtypes.uint64): exp = exp.cast(dtypes.int if exp.dtype == dtypes.uint32 else dtypes.int64)
-  return val * UOp(Ops.EXP2, src=(exp.cast(val.dtype),))
+  bits = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val.bitcast(dtypes.uint64)
+  abs_max = _const(bits.dtype, 0x7F800000 if val.dtype == dtypes.float32 else 0x7FF0000000000000)
+  sign_mask = _const(bits.dtype, 0x80000000 if val.dtype == dtypes.float32 else 0x8000000000000000)
+  # hardware flushes denormal inputs to signed zero
+  magn_mask = _const(bits.dtype, 0x7FFFFFFF if val.dtype == dtypes.float32 else 0x7FFFFFFFFFFFFFFF)
+  is_denorm = ((bits & abs_max).eq(_const(bits.dtype, 0))) & ((bits & magn_mask).ne(_const(bits.dtype, 0)))
+  val = is_denorm.where((bits & sign_mask).bitcast(val.dtype), val)
+  # hardware propagates 0/+-inf/NaN unchanged (avoids 0*inf = NaN on the host)
+  res = val * UOp(Ops.EXP2, src=(exp.cast(val.dtype),))
+  is_special = (bits & abs_max).eq(_const(bits.dtype, 0)) | ((bits & abs_max) >= abs_max)
+  return is_special.where(val, res)
 
 def _frexp_mant(val: UOp) -> UOp:
   val = val.bitcast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float64) if val.dtype == dtypes.uint64 else val
-  if val.dtype == dtypes.float32: return ((val.bitcast(dtypes.uint32) & _u32(0x807FFFFF)) | _u32(0x3f000000)).bitcast(dtypes.float32)
-  return ((val.bitcast(dtypes.uint64) & _const(dtypes.uint64, 0x800FFFFFFFFFFFFF)) |
-    _const(dtypes.uint64, 0x3fe0000000000000)).bitcast(dtypes.float64)
+  if val.dtype == dtypes.float32:
+    bits = val.bitcast(dtypes.uint32)
+    # denormal/zero inputs (exponent field == 0) return signed zero on hardware
+    return ((bits & _u32(0x7F800000)).ne(_u32(0))).where(((bits & _u32(0x807FFFFF)) | _u32(0x3F000000)).bitcast(dtypes.float32),
+                                                          (bits & _u32(0x80000000)).bitcast(dtypes.float32))
+  bits = val.bitcast(dtypes.uint64)
+  return ((bits & _const(dtypes.uint64, 0x7FF0000000000000)).ne(_const(dtypes.uint64, 0))).where(
+    ((bits & _const(dtypes.uint64, 0x800FFFFFFFFFFFFF)) | _const(dtypes.uint64, 0x3fe0000000000000)).bitcast(dtypes.float64),
+    (bits & _const(dtypes.uint64, 0x8000000000000000)).bitcast(dtypes.float64))
+
+def _msb(val: UOp, bits: int) -> UOp:
+  """Index of the highest set bit, or -1 if val == 0."""
+  dt = dtypes.uint64 if bits > 32 else dtypes.uint32
+  val = val.cast(dt) if val.dtype != dt else val
+  result = _const(dtypes.int, -1)
+  for i in range(bits - 1, -1, -1):
+    cond = ((val >> _const(dt, i)) & _const(dt, 1)).ne(_const(dt, 0)) & result.eq(_const(dtypes.int, -1))
+    result = cond.where(_const(dtypes.int, i), result)
+  return result
 
 def _frexp_exp(val: UOp) -> UOp:
   val = val.bitcast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float64) if val.dtype == dtypes.uint64 else val
-  if val.dtype == dtypes.float32: return ((val.bitcast(dtypes.uint32) >> _u32(23)) & _u32(0xFF)).cast(dtypes.int) - _const(dtypes.int, 126)
-  return ((val.bitcast(dtypes.uint64) >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)).cast(dtypes.int) - _const(dtypes.int, 1022)
+  if val.dtype == dtypes.float32:
+    e = (val.bitcast(dtypes.uint32) >> _u32(23)) & _u32(0xFF)
+    return e.ne(_u32(0)).where(e.cast(dtypes.int) - _const(dtypes.int, 126), _const(dtypes.int, 0))  # f32 denormals -> 0 (hardware verified)
+  bits = val.bitcast(dtypes.uint64)
+  e = (bits >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)
+  mant = bits & _const(dtypes.uint64, 0xFFFFFFFFFFFFF)
+  # f64 denormals: normalized exponent = highest set mantissa bit - 1073, zero -> 0 (hardware verified)
+  denorm = mant.ne(_const(dtypes.uint64, 0)).where(_msb(mant, 52) - _const(dtypes.int, 1073), _const(dtypes.int, 0))
+  return e.ne(_const(dtypes.uint64, 0)).where(e.cast(dtypes.int) - _const(dtypes.int, 1022), denorm)
 
 TWO_OVER_PI = int(
   "0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd"
@@ -314,9 +360,9 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'fma': lambda a, b, c: a * b + c,
   'i32_to_f32': lambda a: a.cast(dtypes.int).cast(dtypes.float32),
   'u32_to_f32': lambda a: a.cast(dtypes.uint32).cast(dtypes.float32),
-  'f32_to_i32': lambda a: UOp(Ops.TRUNC, src=(a.bitcast(dtypes.float32),)).cast(dtypes.int),
+  'f32_to_i32': lambda a: _f_to_i32(a.bitcast(dtypes.float32)),
   'f32_to_u32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint32),
-  'f64_to_i32': lambda a: UOp(Ops.TRUNC, src=(a.bitcast(dtypes.float64),)).cast(dtypes.int),
+  'f64_to_i32': lambda a: _f_to_i32(a.bitcast(dtypes.float64)),
   'f64_to_u32': lambda a: _f_to_u(a.bitcast(dtypes.float64), dtypes.uint32),
   'f16_to_f32': lambda a: _f16_extract(a).cast(dtypes.float32),
   'f32_to_f16': lambda a: a.cast(dtypes.half),
