@@ -162,11 +162,12 @@ def cuFuncSetAttribute(hfunc, attrib: int, value: int) -> int:
 def cuStreamWaitEvent(stream: Any, event, flags: int) -> int: return orig_cuda.CUDA_SUCCESS
 def cuCtxSynchronize() -> int: return orig_cuda.CUDA_SUCCESS
 
+_ERRSTR: dict[int, ctypes.Array] = {}
 def cuGetErrorString(error: int, pStr) -> int:
-  error_str = orig_cuda.enum_cudaError_enum.get(error, "Unknown CUDA error").encode()
-  buf = ctypes.create_string_buffer(error_str)
-  # Set the pointer to point to our error string buffer
-  pStr._obj.value = ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))
+  # CUDA returns a pointer to a constant string; keep ours alive
+  if error not in _ERRSTR:
+    _ERRSTR[error] = ctypes.create_string_buffer(orig_cuda.enum_cudaError_enum.get(error, "Unknown CUDA error").encode())
+  pStr._obj.value = ctypes.addressof(_ERRSTR[error])
   return orig_cuda.CUDA_SUCCESS
 
 def cuDeviceGetCount(count) -> int:
