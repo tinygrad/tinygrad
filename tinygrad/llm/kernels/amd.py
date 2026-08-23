@@ -12,6 +12,7 @@ def kernel_var(x:UOp) -> UOp:
   return x.substitute({v: UOp.variable(v.expr, v.vmin, v.vmax, dtype=v.dtype, multiple_of=v.arg.multiple_of, param=True)
                        for v in x.toposort() if v.is_variable})
 
+@functools.cache
 def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   # the custom kernels are tuned for RDNA3 (gfx11): the WMMA register layouts don't match gfx12 (RDNA4)
   # or CDNA (MFMA-only, wave64), and the dp4a builtins and 32-lane wave ops aren't portable either.
