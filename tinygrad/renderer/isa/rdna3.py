@@ -50,6 +50,7 @@ V_FMA = { dtypes.float16:RDNA3Ops.v_fma_f16, dtypes.float32:RDNA3Ops.v_fma_f32, 
 V_LSHL = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_lshlrev_b64 }
 V_LSHR = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
 V_ASHR = { 4:RDNA3Ops.v_ashrrev_i32_e32, 8:RDNA3Ops.v_ashrrev_i64 }
+S_CMP = { Ops.CMPNE:RDNA3Ops.s_xor_b32, Ops.XOR:RDNA3Ops.s_xor_b32, Ops.OR: RDNA3Ops.s_or_b32, Ops.AND:RDNA3Ops.s_and_b32, Ops.CMPLT: RDNA3Ops.s_and_not1_b32, Ops.CMPEQ:RDNA3Ops.s_xnor_b32 }
 
 # ---- helpers ----
 lane_ctr = itertools.count()
@@ -201,14 +202,6 @@ def lower_gated_store(ctx, x:UOp):
   return x, [mask, x, restoreexec(mask)]
 
 # ------ ALU ------
-def cmp(ctx, x:UOp):
-  _mask_cmp = { Ops.CMPNE:RDNA3Ops.s_xor_b32, Ops.XOR:RDNA3Ops.s_xor_b32, Ops.OR: RDNA3Ops.s_or_b32, Ops.AND:RDNA3Ops.s_and_b32, Ops.CMPLT: RDNA3Ops.s_and_not1_b32, Ops.CMPEQ:RDNA3Ops.s_xnor_b32 }
-  scmp = x.src[0].dtype is dtypes.bool and x.src[1].dtype is dtypes.bool
-  ins = _mask_cmp[x.op] if scmp else OP_INS[x.op][64][rafter(x.src[0]).dtype]
-  if scmp and x.op is Ops.CMPLT: x=x.replace(src=(x.src[1], x.src[0]))
-  x = x.ins(ins, tag=GP_SGPRS)
-  return x if scmp else _vop3(x)
-
 def arith64(ctx, x:UOp):
   a, b = x.src
   ins_lo = RDNA3Ops.v_add_co_u32 if x.op is Ops.ADD else RDNA3Ops.v_sub_co_u32
@@ -425,7 +418,10 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   (UPat(Ops.SHR, name="x"), lambda ctx,x: _vop2(ctx, x.ins(V_LSHR[max(2, x.dtype.itemsize)] \
     if dtypes.is_unsigned(x.dtype) else V_ASHR[max(4, x.dtype.itemsize)]))),
   (UPat(Ops.SHL, name="x"), lambda ctx,x: _vop2(ctx, x.ins(V_LSHL[max(2, x.dtype.itemsize)]))),
-  (UPat(GroupOp.Comparison|{Ops.XOR, Ops.AND, Ops.OR}, dtypes.bool, name="x"), cmp),
+  (UPat(GroupOp.Comparison|{Ops.XOR, Ops.AND, Ops.OR}, dtypes.bool, src=(UPat.var("a", dtypes.bool), UPat.var("b")), name="x"),
+    lambda a,b,x: x.ins(S_CMP[x.op], src=(b,a) if x.op is Ops.CMPLT else (a,b), tag=GP_SGPRS)),
+  (UPat(GroupOp.Comparison|{Ops.XOR, Ops.AND, Ops.OR}, dtypes.bool, name="x"), lambda x:
+    _vop3(x.ins(OP_INS[x.op][64][rafter(x.src[0]).dtype], tag=GP_SGPRS))),
   (UPat((Ops.AND, Ops.OR, Ops.XOR), name="x"), lambda ctx,x: _vop2(ctx, x.ins(getattr(RDNA3Ops, f"v_{x.op.name.lower()}_b32_e32")))),
   (UPat(Ops.WHERE, dtypes.bool, src=(UPat.var("mask"), UPat.var("a"), UPat.var("b")), name="x"),
     lambda mask,a,b,x: (mask & a) | (~mask & b)),
