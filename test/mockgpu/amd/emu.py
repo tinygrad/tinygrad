@@ -69,8 +69,7 @@ from tinygrad.runtime.autogen.amd.cdna import ins as irc
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp, Inst
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
-from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits, _ftz_f32, \
-  _f32_nan_prio, _fract_limit
+from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits, _ftz_f32
 
 MASK32 = 0xFFFFFFFF
 
@@ -159,59 +158,47 @@ _pcode_fixes = {
   'V_DIV_FIXUP_F64': ('D0.f64 = sign_out ? -abs(S0.f64) : abs(S0.f64)',
     'D0.f64 = isNAN(S0.f64) ? (sign_out ? -INF : +INF) : (sign_out ? -abs(S0.f64) : abs(S0.f64))'),
   'V_TRIG_PREOP_F64': ("result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff)", "result = trig_preop_result(shift)"),
+  # exponent() returns 0 for denormals; frexp_exp handles them per hardware (f32: 0, f64: normalized)
+  'V_FREXP_EXP_I32_F32': ('D0.i32 = exponent(S0.f32) - 127 + 1', 'D0.i32 = frexp_exp(S0.f32)'),
+  'V_FREXP_EXP_I32_F64': ('D0.i32 = exponent(S0.f64) - 1023 + 1', 'D0.i32 = frexp_exp(S0.f64)'),
+  # route through ldexp() which propagates 0/inf/NaN inputs instead of computing val * 2**exp (0*inf = NaN on the host)
+  'V_LDEXP_F32': ('D0.f32 = S0.f32 * 2.0F ** S1.i32', 'D0.f32 = ldexp(S0.f32, S1.i32)'),
+  'V_LDEXP_F64': ('D0.f64 = S0.f64 * 2.0 ** S1.i32', 'D0.f64 = ldexp(S0.f64, S1.i32)'),
+  # hardware sets SCC only on STRICT inequality for S_MAX (equal operands -> SCC=0)
+  'S_MAX_I32': ('SCC = S0.i32 >= S1.i32', 'SCC = S0.i32 > S1.i32'),
+  'S_MAX_U32': ('SCC = S0.u32 >= S1.u32', 'SCC = S0.u32 > S1.u32'),
+  # hardware computes abs on the WRAPPED 32-bit difference; the i32 pcode overflows into UB on the host (e.g. |45 - -2147483647|),
+  # so compute in u32 with a UB-free two's-complement negate
+  'S_ABSDIFF_I32': ('D0.i32 = S0.i32 - S1.i32;\nif D0.i32 < 0 then\nD0.i32 = -D0.i32\nendif',
+                    'D0.u32 = S0.u32 - S1.u32;\nif D0.i32 < 0 then\nD0.u32 = -D0.u32\nendif'),
+  # NaN propagation of f32 arithmetic follows the first-NaN operand (x86 follows the second); route through helpers
+  'V_MUL_F32': ('D0.f32 = S0.f32 * S1.f32', 'D0.f32 = f32_mul(S0.f32, S1.f32)'),
+  'V_ADD_F32': ('D0.f32 = S0.f32 + S1.f32', 'D0.f32 = f32_add(S0.f32, S1.f32)'),
+  'V_SUB_F32': ('D0.f32 = S0.f32 - S1.f32', 'D0.f32 = f32_add(S0.f32, -S1.f32)'),
+  'V_MAC_F32': ('D0.f32 = S0.f32 * S1.f32 + D0.f32', 'D0.f32 = f32_fma(S0.f32, S1.f32, D0.f32)'),
+  'V_FMA_F32': ('D0.f32 = fma(S0.f32, S1.f32, S2.f32)', 'D0.f32 = f32_fma(S0.f32, S1.f32, S2.f32)'),
+  # fract result is in [0, 1); a result of exactly 1.0 becomes largest-value-below-1 on hardware
+  'V_FRACT_F32': ('D0.f32 = S0.f32 + -floor(S0.f32)', 'D0.f32 = fract(S0.f32)'),
+  'V_FRACT_F64': ('D0.f64 = S0.f64 + -floor(S0.f64)', 'D0.f64 = fract(S0.f64)'),
+  # CLASS denormal test uses abs(x) > 0.0, which the host's DAZ flushes; use bit-domain test instead
+  'V_CMP_CLASS_F32': ('64\'F(abs(S0.f32)) > 0.0', '(64\'U(S0.u32 & 0x7FFFFFFF) != 0)'),
+  'V_CMP_CLASS_F16': ('64\'F(abs(S0.f16)) > 0.0', '(64\'U(S0.u32 & 0x7FFF) != 0)'),
+  'V_CMP_CLASS_F64': ('64\'F(abs(S0.f64)) > 0.0', '(64\'U(S0.u64 & 0x7FFFFFFFFFFFFFFF) != 0)'),
+}
+
+# RDNA4 (gfx12) sets the quiet bit when propagating NaN inputs; RDNA3 (gfx11) passes the payload through unchanged
+_pcode_fixes_rdna4 = {
+  'V_LDEXP_F32': ('D0.f32 = ldexp(S0.f32, S1.i32)', 'D0.f32 = ldexp_quiet(S0.f32, S1.i32)'),
+  'V_LDEXP_F64': ('D0.f64 = ldexp(S0.f64, S1.i32)', 'D0.f64 = ldexp_quiet(S0.f64, S1.i32)'),
+  'V_FREXP_MANT_F32': ("if ((64'F(S0.f32) == +INF) || (64'F(S0.f32) == -INF) || isNAN(64'F(S0.f32))) then",
+    "if isNAN(64'F(S0.f32)) then\nD0.f32 = quietNAN(S0.f32)\nelsif ((64'F(S0.f32) == +INF) || (64'F(S0.f32) == -INF)) then"),
+  'V_FREXP_MANT_F64': ("if ((S0.f64 == +INF) || (S0.f64 == -INF) || isNAN(S0.f64)) then",
+    "if isNAN(S0.f64) then\nD0.f64 = quietNAN(S0.f64)\nelsif ((S0.f64 == +INF) || (S0.f64 == -INF)) then"),
 }
 
 def _get_pcode_dict(op) -> dict:
   """Return the PCODE dictionary for the given opcode based on its architecture."""
   return PCODE_CDNA if 'cdna' in type(op).__module__ else PCODE_RDNA4 if 'rdna4' in type(op).__module__ else PCODE_RDNA3
-
-# ═══════════════ SEMANTIC FIXES (name-keyed, hardware-verified on gfx11/gfx1201) ═══════════════
-# These can't live in the autogen pcode text because they differ from what the doc-pcode says or from how the
-# host computes the same expression (x86 float conventions, C signed-overflow UB, host DAZ/NaN rules).
-# They rewrite the parsed assignments of only the differing parts, keyed by instruction name.
-
-def _nan_prop(fix_name: str) -> bool: return fix_name in ('V_MUL_F32', 'V_ADD_F32', 'V_SUB_F32', 'V_MAC_F32', 'V_FMA_F32')
-
-def _rewrite_assigns(fix_name: str, srcs: dict[str, UOp | int], assigns: list[tuple], is_rdna4: bool) -> list[tuple]:
-  """Apply name-keyed semantic fixes to parsed pcode assignments (all hardware-verified)."""
-  s0, s1, s2 = srcs.get('S0'), srcs.get('S1'), srcs.get('S2')
-  def is_d0(d: str) -> bool: return d == 'D0' or d.startswith('D0.')
-  def fix_d0(fn): return [(d, (fn(v) if is_d0(d) and isinstance(v, UOp) else v)) for d, v in assigns]
-  if _nan_prop(fix_name):
-    # NaN propagates from the FIRST NaN operand (x86 propagates the second); the parsed result is wrapped in the
-    # priority rule with the mod-applied operands in program order.
-    assert isinstance(s0, UOp) and isinstance(s1, UOp)
-    order: tuple = (s0, s1, srcs['D0']) if 'MAC' in fix_name else (s0, s1, s2) if 'FMA' in fix_name else (s0, s1)
-    ops = [x for x in order if isinstance(x, UOp)]
-    return fix_d0(lambda v: _f32_nan_prio(v, *ops))
-  # fract: result is in [0, 1); exactly 1.0 becomes largest-value-below-1
-  if fix_name in ('V_FRACT_F32', 'V_FRACT_F64'): return fix_d0(_fract_limit)
-  # LDEXP: propagates 0/+-inf/NaN unchanged (x86 computes 0*inf = NaN) and flushes denormal inputs to signed zero;
-  # gfx12 additionally quiets the NaN payload (gfx11 passes it through)
-  if fix_name in ('V_LDEXP_F32', 'V_LDEXP_F64'):
-    assert isinstance(s0, UOp) and isinstance(s1, UOp)
-    return fix_d0((lambda v: (_FUNCS['ldexp_quiet'] if is_rdna4 else _FUNCS['ldexp'])(s0, s1)))
-  # FREXP_MANT, gfx12: quiet the payload of NaN inputs (gfx11 passes them through)
-  if is_rdna4 and fix_name in ('V_FREXP_MANT_F32', 'V_FREXP_MANT_F64'):
-    assert isinstance(s0, UOp)
-    return fix_d0(lambda v: _FUNCS['isNAN'](s0).where(_FUNCS['quietNAN'](s0), v))
-  # FREXP_EXP: the doc's formula boundary-cases denormals incorrectly (f32 returns 0, f64 normalizes them)
-  if fix_name in ('V_FREXP_EXP_I32_F32', 'V_FREXP_EXP_I32_F64'):
-    assert isinstance(s0, UOp)
-    return fix_d0(lambda v: _FUNCS['frexp_exp'](s0))
-  # hardware sets SCC only on STRICT inequality for S_MAX (equal operands -> SCC=0)
-  if fix_name in ('S_MAX_I32', 'S_MAX_U32'):
-    assert isinstance(s0, UOp) and isinstance(s1, UOp)
-    # the doc-pcode's `.i32` suffix decides the comparison's signedness, so apply it explicitly here
-    gt = (s0.bitcast(dtypes.int) > s1.bitcast(dtypes.int)) if 'I32' in fix_name else (s0.cast(dtypes.uint32) > s1.cast(dtypes.uint32))
-    return [(d, (_to_bool(gt) if d == 'SCC' and isinstance(v, UOp) else v)) for d, v in assigns]
-  # hardware computes abs on the WRAPPED 32-bit difference; the doc's i32 arithmetic overflows into UB on the host
-  if fix_name == 'S_ABSDIFF_I32':
-    assert isinstance(s0, UOp) and isinstance(s1, UOp)
-    diff = s0.bitcast(dtypes.uint32) - s1.bitcast(dtypes.uint32)
-    d0 = (diff.bitcast(dtypes.int) < _c(0, dtypes.int)).where(_c(0) - diff, diff)
-    return [('D0', d0), ('SCC', d0.ne(_c(0)))]
-  return assigns
 
 # Pcode lookup with hardware errata fixes (the AMD-pdf pcode for these ops is subtly wrong)
 @functools.cache
@@ -227,6 +214,7 @@ def get_pcode(op) -> str:
   pcode = pcode_dict[op]
   fix_name = op_name.replace('_E64', '').replace('_E32', '')
   if fix_name in _pcode_fixes: pcode = pcode.replace(*_pcode_fixes[fix_name])
+  if fix_name in _pcode_fixes_rdna4 and pcode_dict is PCODE_RDNA4: pcode = pcode.replace(*_pcode_fixes_rdna4[fix_name])
   return _fix_div_scale(pcode, 'f32' if 'F32' in op_name else 'f64') if 'V_DIV_SCALE' in op_name else pcode
 
 def _fix_div_scale(pcode: str, dt: str) -> str:
@@ -577,7 +565,6 @@ class _Ctx:
     srcs.update(self.base_srcs(self.rexec()), VCC=self.rmask(_c(VCC_LO.offset)))
     if 'D0' not in srcs: srcs['D0'] = self.rsgpr_dyn(sdst_reg)  # D0 is current dest value for read-modify-write ops
     _, assigns = parse_pcode(pcode, srcs)
-    assigns = _rewrite_assigns(op.name.replace('_E64', '').replace('_E32', ''), srcs, assigns, 'rdna4' in type(op).__module__)
     return UOp.sink(*self.scalar_stores(assigns, sdst_reg, sdst_size), *self.inc_pc())
 
   def compile_lane_pcode(self, op, inst) -> UOp:
@@ -628,7 +615,6 @@ class _Ctx:
     if any(p in op.name for p in ('MIN_F32', 'MAX_F32', 'MIN3_F32', 'MAX3_F32', 'MED3_F32', 'MIN_NUM_F32', 'MAX_NUM_F32')):
       srcs = {k: _ftz_f32(v) if k in ('S0', 'S1', 'S2') and isinstance(v, UOp) else v for k, v in srcs.items()}
     _, assigns = parse_pcode(pcode, srcs)
-    assigns = _rewrite_assigns(op.name.replace('_E64', '').replace('_E32', ''), srcs, assigns, 'rdna4' in type(op).__module__)
 
     # For integer ops with clamp, pre-compute the saturated result; floats clamp to [0,1] at write time
     int_saturate = _int_clamp(op.name, srcs) if clmp else None
@@ -1056,9 +1042,7 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOPC_DPP16|ir3.VOP3|ir4.VOPC|ir4.VOPC_DPP16
     elif abs_bits or neg_bits:  # int compares also honor abs/neg, as bit-level sign clear/flip (not integer abs/negate)
       s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, bits['s0'])
       s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, bits['s1'])
-    # V_CMP_CLASS: classify from raw bits (host's DAZ would flush denormal inputs during float conversion)
-    funcs = {**_FUNCS, **({'abs': _FUNCS['abs_class']} if 'CLASS' in op_name else {})}
-    for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1, 'laneId': lc, 'D0': UOp.const(0, dtypes.uint64)}, funcs)[1]:
+    for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1, 'laneId': lc, 'D0': UOp.const(0, dtypes.uint64)})[1]:
       if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
     return _c(0)
 
