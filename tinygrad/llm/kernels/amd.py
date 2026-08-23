@@ -344,7 +344,8 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
   assert start_pos.uop.is_bound_var
-  call = _gated_delta_prefill_kernel(*params, kernel_var(start_pos.uop.src[0])).call(*contig, start_pos.uop)
+  # the bound start_pos reaches the graph through the state AFTER chain, like the flash kernels' valid_end
+  call = _gated_delta_prefill_kernel(*params, kernel_var(start_pos.uop.src[0])).call(*contig)
   return Tensor(contig[0].after(call))
 
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
