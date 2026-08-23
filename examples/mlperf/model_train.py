@@ -1538,9 +1538,7 @@ def train_llama3():
     eval_dataset = None
   else:
     from examples.mlperf.dataloader import get_llama3_dataset
-    # Megatron builds validation indices from the run seed as well; use the same
-    # seeded shuffle instead of always evaluating the first 1024 packed samples.
-    eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=True, small=bool(SMALL))
+    eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
 
   def get_eval_iter():
     if eval_dataset is None:

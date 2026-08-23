@@ -33,8 +33,8 @@ class TestCosineAnnealingLRWithWarmup(unittest.TestCase):
       tiny_lr.step()
     # reimplemented in python
     expected = []
-    for i in range(warmup_steps): expected.append(i/warmup_steps*base_lr)
-    for i in range(decay_steps): expected.append(end_lr+(base_lr-end_lr)*(1+math.cos(i/decay_steps*math.pi))/2)
+    for i in range(warmup_steps): expected.append((i+1)/warmup_steps*base_lr)
+    for i in range(decay_steps): expected.append(end_lr+(base_lr-end_lr)*(1+math.cos((i+1)/decay_steps*math.pi))/2)
     np.testing.assert_allclose(lr, expected, rtol=1e-5)
 
   def test_lr_0(self): self._test_lr(3e-4, 8e-5, 3, 5)

@@ -35,10 +35,8 @@ class CosineAnnealingLRWithWarmup(LR_Scheduler):
     self.optimizer.lr.assign(self.get_lr()).realize()
 
   def get_lr(self):
-    # Megatron initializes the schedule at step zero, so the first optimizer
-    # update has zero LR and the scheduler advances after that update.
-    warmup_lr = (self.epoch_counter / self.warmup_steps) * self.base_lr
-    decay_lr = self.end_lr + 0.5 * (self.base_lr-self.end_lr) * (1 + (((self.epoch_counter-self.warmup_steps)/self.decay_steps) * math.pi).cos())
+    warmup_lr = ((self.epoch_counter+1) / self.warmup_steps) * self.base_lr
+    decay_lr = self.end_lr + 0.5 * (self.base_lr-self.end_lr) * (1 + (((self.epoch_counter+1-self.warmup_steps)/self.decay_steps) * math.pi).cos())
     return (self.epoch_counter < self.warmup_steps).where(warmup_lr, decay_lr).cast(self.optimizer.lr.dtype)
 
 # Reference: https://github.com/mlcommons/training/blob/64b14a9abc74e08779a175abca7d291f8c957632/stable_diffusion/ldm/lr_scheduler.py, Lines 36-97
