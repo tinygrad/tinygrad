@@ -329,7 +329,7 @@ class GatedDeltaNetBlock(FFNBlock):
 
     # recurrent: scan over the (padded) tokens, updating the recurrent state. collect the per-step outputs
     state = Tensor(self.recurrent_state.uop.after(conv_state_store))  # carry the conv write into this graph
-    if not symbolic and self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(x.device):
+    if self.head_k_dim % 32 == 0 and self.head_v_dim % 4 == 0 and amd_custom_kernels_supported(x.device):
       # one fused kernel for the whole scan; it resets and updates the recurrent state in place (RDNA3)
       core = gated_delta_prefill(q * self.head_k_dim**-0.5, k, v, beta, alpha, state, Tensor(start_pos)).transpose(1, 2)
     else:
@@ -471,7 +471,7 @@ class Transformer:
     return model, kv
 
   def warmup(self, chunk_size:int=32):
-    # recurrent models prefill static chunks: capture that graph with kernel batching, the size must match serve time
+    # recurrent models prefill in chunks: capture that graph with kernel batching (one symbolic graph serves every size)
     prompt = [0] * (min(chunk_size, 256, self.max_context-1) if self.has_recurrent_block else 1)
     for _ in range(2):
       warm = self.generate(prompt, chunk_size=chunk_size)
@@ -498,10 +498,8 @@ class Transformer:
     start_pos = self.get_start_pos(tokens)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
-      # recurrent blocks prefill full chunks with a static shape, the tail of the prompt goes through the decode graph
       n_toks = min(chunk_size, len(tokens) - start_pos)
-      if self.has_recurrent_block and n_toks < chunk_size: n_toks = 1
-      sp, nt = v_start_pos.bind(start_pos), n_toks if self.has_recurrent_block else v_toks.bind(n_toks)
+      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n_toks)
       out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed

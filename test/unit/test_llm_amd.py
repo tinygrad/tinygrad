@@ -55,11 +55,13 @@ class TestQ8Quantize(unittest.TestCase):
     np.testing.assert_allclose(linear(Tensor(x)).numpy(), xq.reshape(3, in_features) @ weight.T, rtol=2e-3, atol=2e-2)
     self.assertEqual(linear.ggml_type, 14)
 
+    # symbolic token counts take the padded kernel path and give the same results
     generic = Linear(in_features, 16, bias=False)
     nn.state.load_state_dict(generic, {"weight":decoded}, verbose=False, realize=False)
-    generic(Tensor.randn(4, in_features)[:UOp.variable("tokens", 1, 4).bind(2)])
-    self.assertFalse(generic.use_custom_quant)
-    self.assertIsNone(generic.ggml_type)
+    sym = Tensor(np.concatenate([x, np.zeros((1, in_features), np.float32)])).contiguous()[:UOp.variable("tokens", 1, 4).bind(3)]
+    np.testing.assert_allclose(generic(sym)[:3].numpy(), xq.reshape(3, in_features) @ weight.T, rtol=2e-3, atol=2e-2)
+    self.assertTrue(generic.use_custom_quant)
+    self.assertEqual(generic.ggml_type, 14)
 
   def test_attention_uses_physical_cache_length(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
