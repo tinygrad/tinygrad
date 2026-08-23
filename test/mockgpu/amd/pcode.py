@@ -165,14 +165,6 @@ def _find_two_pi_mul(x):
       if len(vals) == 2 and abs(vals[0] * vals[1] - 6.283185307179586) < 1e-5: return (x.src[1-i], vals[0] * vals[1])
   return None
 
-def _fract_guard(a: UOp) -> UOp:
-  """fract(x) = x - floor(x), clamped to [0, 1); a result of exactly 1.0 becomes largest-value-below-1 on hardware."""
-  r = a - _floor(a)
-  if a.dtype == dtypes.float64: last = UOp.const(0x3FEFFFFFFFFFFFFF, dtypes.uint64).bitcast(dtypes.float64)
-  elif a.dtype == dtypes.half: last = UOp.const(0x3BFF, dtypes.uint16).bitcast(dtypes.half)
-  else: last = UOp.const(0x3F7FFFFF, dtypes.uint32).bitcast(dtypes.float32)
-  # take r when r is NaN or r < 1.0 (only r >= 1.0 clamps); NaN-unsafe comparisons avoided on purpose
-  return (_isnan(r) | (r < UOp.const(1.0, a.dtype))).where(r, last)
 
 def _trig_reduce(x, phase=0.0):
   match = _find_two_pi_mul(x)
@@ -205,6 +197,14 @@ def _abs(val: UOp) -> UOp:
   sign_mask = {10: 0x7FFF, 23: 0x7FFFFFFF, 52: 0x7FFFFFFFFFFFFFFF}[shift]
   bt, ft = {10: (dtypes.uint16, dtypes.half), 23: (dtypes.uint32, dtypes.float32), 52: (dtypes.uint64, dtypes.float64)}[shift]
   return (val.bitcast(bt) & _const(bt, sign_mask)).bitcast(ft)
+
+def _abs_class(val: UOp) -> UOp:
+  """abs for the float-class tree: class pcode only consumes abs through zero tests (==0/>0), so preserve
+  zero-ness as 0.0/1.0. Comparing actual denormal floats against 0.0 would be flushed by the host's DAZ."""
+  masks = {dtypes.half: (dtypes.uint16, 0x7FFF), dtypes.float32: (dtypes.uint32, 0x7FFFFFFF), dtypes.float64: (dtypes.uint64, 0x7FFFFFFFFFFFFFFF)}
+  if val.dtype not in masks: return val
+  bt, mask = masks[val.dtype]
+  return (val.bitcast(bt) & _const(bt, mask)).ne(_const(bt, 0)).cast(val.dtype)
 
 def _f_to_u(f, dt):
   clamped = (f < _const(f.dtype, 0.0)).where(_const(f.dtype, 0.0), f)
@@ -315,10 +315,12 @@ def _f32_nan_prio(res: UOp, *srcs: UOp) -> UOp:
   for s in reversed(srcs): out = _isnan(s).where(_quiet_nan(s), out)
   return _isnan(res).where(out, res)
 
-def _f32_add(a: UOp, b: UOp) -> UOp: return _f32_nan_prio(a + b, a, b)
-def _f32_fma(a: UOp, b: UOp, c: UOp) -> UOp: return _f32_nan_prio(a * b + c, a, b, c)
-
-def _f32_mul(a: UOp, b: UOp) -> UOp: return _f32_nan_prio(a * b, a, b)
+def _fract_limit(x: UOp) -> UOp:
+  """fract() result is in [0, 1); an exactly 1.0 result becomes largest-value-below-1 (hardware verified)."""
+  if x.dtype == dtypes.float64: last = UOp.const(0x3FEFFFFFFFFFFFFF, dtypes.uint64).bitcast(dtypes.float64)
+  elif x.dtype == dtypes.half: last = UOp.const(0x3BFF, dtypes.uint16).bitcast(dtypes.half)
+  else: last = UOp.const(0x3F7FFFFF, dtypes.uint32).bitcast(dtypes.float32)
+  return (_isnan(x) | (x < UOp.const(1.0, x.dtype))).where(x, last)
 
 def _msb(val: UOp, bits: int) -> UOp:
   """Index of the highest set bit, or -1 if val == 0."""
@@ -334,13 +336,15 @@ def _frexp_exp(val: UOp) -> UOp:
   val = val.bitcast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float64) if val.dtype == dtypes.uint64 else val
   if val.dtype == dtypes.float32:
     e = (val.bitcast(dtypes.uint32) >> _u32(23)) & _u32(0xFF)
-    return e.ne(_u32(0)).where(e.cast(dtypes.int) - _const(dtypes.int, 126), _const(dtypes.int, 0))  # f32 denormals -> 0 (hardware verified)
+    # f32 denormals, inf and nan -> 0 (hardware verified)
+    return (e.ne(_u32(0)) & e.ne(_u32(0xFF))).where(e.cast(dtypes.int) - _const(dtypes.int, 126), _const(dtypes.int, 0))
   bits = val.bitcast(dtypes.uint64)
   e = (bits >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)
   mant = bits & _const(dtypes.uint64, 0xFFFFFFFFFFFFF)
-  # f64 denormals: normalized exponent = highest set mantissa bit - 1073, zero -> 0 (hardware verified)
+  # f64 denormals: normalized exponent = highest set mantissa bit - 1073, zero/inf/nan -> 0 (hardware verified)
   denorm = mant.ne(_const(dtypes.uint64, 0)).where(_msb(mant, 52) - _const(dtypes.int, 1073), _const(dtypes.int, 0))
-  return e.ne(_const(dtypes.uint64, 0)).where(e.cast(dtypes.int) - _const(dtypes.int, 1022), denorm)
+  special = e.eq(_const(dtypes.uint64, 0x7FF)).where(_const(dtypes.int, 0), e.cast(dtypes.int) - _const(dtypes.int, 1022))
+  return e.eq(_const(dtypes.uint64, 0)).where(denorm, special)
 
 TWO_OVER_PI = int(
   "0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd"
@@ -389,14 +393,13 @@ def _sad_u8(a: UOp, b: UOp, acc: UOp, masked: bool = False) -> UOp:
 _FUNCS: dict[str, Callable[..., UOp]] = {
   'sqrt': lambda a: UOp(Ops.SQRT, src=(a,)), 'trunc': lambda a: UOp(Ops.TRUNC, src=(a,)),
   'log2': lambda a: UOp(Ops.LOG2, src=(a,)), 'sin': lambda a: _trig_reduce(a),
-  'cos': lambda a: _trig_reduce(a, 0.25), 'floor': _floor, 'fract': _fract_guard,
-  'f32_add': _f32_add, 'f32_fma': _f32_fma,
+  'cos': lambda a: _trig_reduce(a, 0.25), 'floor': _floor, 'fract': lambda a: a - _floor(a),
   'signext': _signext, 'abs': _abs,
   'isEven': lambda a: (UOp(Ops.TRUNC, src=(a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
   'max': lambda a, b: UOp(Ops.MAX, src=(a, b)),
   'min': lambda a, b: UOp(Ops.MAX, src=(a.neg(), b.neg())).neg(),
   'pow': lambda a, b: UOp(Ops.EXP2, src=(b.bitcast(dtypes.float32),)),
-  'fma': lambda a, b, c: a * b + c, 'f32_mul': _f32_mul,
+  'fma': lambda a, b, c: a * b + c,
   'i32_to_f32': lambda a: a.cast(dtypes.int).cast(dtypes.float32),
   'u32_to_f32': lambda a: a.cast(dtypes.uint32).cast(dtypes.float32),
   'f32_to_i32': lambda a: _f_to_i32(a.bitcast(dtypes.float32)),
@@ -413,6 +416,7 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'f16_to_u16': lambda a: UOp(Ops.TRUNC, src=(_f16_extract(a),)).cast(dtypes.uint16),
   'i16_to_f16': lambda a: a.cast(dtypes.int16).cast(dtypes.half),
   'u16_to_f16': lambda a: a.cast(dtypes.uint16).cast(dtypes.half),
+  'abs_class': _abs_class,
   'bf16_to_f32': lambda a: (((a.cast(dtypes.uint32) if a.dtype != dtypes.uint32 else a) & _u32(0xFFFF)) << _u32(16)).bitcast(dtypes.float32),
   'isNAN': _isnan, 'isSignalNAN': lambda a: _check_nan(a, False),
   'isQuietNAN': lambda a: _check_nan(a, True), 'cvtToQuietNAN': _cvt_quiet,
@@ -1459,7 +1463,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
 def parse_expr(expr: str, env: dict[str, VarVal], funcs: dict | None = None) -> UOp:
   return parse_tokens(tokenize(expr.strip().rstrip(';')), env, funcs)
 
-def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None) -> tuple[dict, list]:
+def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None, funcs: dict | None = None) -> tuple[dict, list]:
   env: dict = srcs.copy() if srcs else {}
   assigns: list[tuple[str, UOp]] = []
   raw_lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
@@ -1468,7 +1472,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None) -> tuple[d
   for l in raw_lines:
     if lines and re.search(r'(&&|\|\||[&|+\-*/^])\s*$', lines[-1]): lines[-1] = lines[-1] + ' ' + l
     else: lines.append(l)
-  _, final, _ = parse_block(lines, 0, env, assigns=assigns)
+  _, final, _ = parse_block(lines, 0, env, funcs, assigns=assigns)
   sliced = set(d.split('[')[0] for d, _ in assigns if '[' in d)
   for var, val in final.items():
     if var in ['D0', 'S0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA'] and isinstance(val, UOp):

@@ -1680,6 +1680,15 @@ class TestCvtFrexpRegressions(unittest.TestCase):
     st = run_program([v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], 0), v_frexp_exp_i32_f64_e32(v[2], v[0:1])], n_lanes=1)
     self.assertEqual(st.vgpr[0][2], 0)
 
+  def test_frexp_exp_inf_nan(self):
+    """v_frexp_exp of +/-inf and NaN is 0 on hardware (host frexp gives 129/1024), for both f32 and f64."""
+    for bits in (0x7F800000, 0xFF800000, 0x7FC00000):
+      st = run_program([v_mov_b32_e32(v[0], bits), v_frexp_exp_i32_f32_e32(v[1], v[0])], n_lanes=1)
+      self.assertEqual(st.vgpr[0][1] & 0xFFFFFFFF, 0, f"f32 bits=0x{bits:08x}")
+    for lo, hi in ((0, 0x7FF00000), (0, 0xFFF00000), (0, 0x7FF80000), (1, 0x7FF00000)):
+      st = run_program([v_mov_b32_e32(v[0], lo), v_mov_b32_e32(v[1], hi), v_frexp_exp_i32_f64_e32(v[2], v[0:1])], n_lanes=1)
+      self.assertEqual(st.vgpr[0][2] & 0xFFFFFFFF, 0, f"f64 bits=0x{hi:08x}{lo:08x}")
+
 
 if __name__ == '__main__':
   unittest.main()
