@@ -471,15 +471,14 @@ class Transformer:
     return model, kv
 
   def warmup(self, chunk_size:int=32):
-    # with the fused scan kernel, recurrent models prefill static chunks: capture that graph with kernel batching
-    fast = self.has_recurrent_block and amd_custom_kernels_supported(self.token_embd.weight.device)
-    prompt = [0] * (min(chunk_size, 256, self.max_context-1) if fast else 1)
+    # recurrent models prefill static chunks: capture that graph; the kernel batching only matters with custom kernels
+    prompt = [0] * (min(chunk_size, 256, self.max_context-1) if self.has_recurrent_block else 1)
     if self.has_recurrent_block:
       x = Tensor.empty(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
       for block in self.blk: block._init_state(x)
     for _ in range(2):
       warm = self.generate(prompt, chunk_size=chunk_size)
-      with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if fast else 0): next(warm)
+      with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
       with Context(JIT_BATCH_SIZE=0): next(warm)
       self._cached_tokens = []
 
@@ -492,9 +491,6 @@ class Transformer:
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
-    # with the fused scan kernel, recurrent blocks prefill full static chunks; elsewhere they go token by token
-    static_chunks = self.has_recurrent_block and amd_custom_kernels_supported(self.token_embd.weight.device)
-    if self.has_recurrent_block and not static_chunks: chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
@@ -505,9 +501,10 @@ class Transformer:
     start_pos = self.get_start_pos(tokens)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
+      # recurrent blocks prefill full chunks with a static shape, the tail of the prompt goes through the decode graph
       n_toks = min(chunk_size, len(tokens) - start_pos)
-      if static_chunks and n_toks < chunk_size: n_toks = 1  # full static chunks only, the tail decodes
-      sp, nt = v_start_pos.bind(start_pos), n_toks if static_chunks else v_toks.bind(n_toks)
+      if self.has_recurrent_block and n_toks < chunk_size: n_toks = 1
+      sp, nt = v_start_pos.bind(start_pos), n_toks if self.has_recurrent_block else v_toks.bind(n_toks)
       out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
