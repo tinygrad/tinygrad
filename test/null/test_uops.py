@@ -280,7 +280,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_division_power_of_two(self):
     for dt in (dtypes.int32, dtypes.uint32):
       g = UOp.param(0, dt, (3,))
-      c = UOp.const(2).cast(dt)
+      c = UOp.const(2)
       l = g.index(c)
       a = UOp(Ops.CDIV, dt, (l, c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -293,7 +293,7 @@ class TestFastIdiv(unittest.TestCase):
     # FLOORMOD by a power of two lowers to AND (correct floor mod for any sign in two's complement)
     for dt in (dtypes.int32, dtypes.uint32):
       g = UOp.param(0, dt, (9,))
-      c = UOp.const(8).cast(dt)
+      c = UOp.const(8)
       a = UOp(Ops.FLOORMOD, dt, (g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
@@ -305,7 +305,7 @@ class TestFastIdiv(unittest.TestCase):
     # FLOORDIV by a power of two lowers to a shift, with no round toward zero correction (a shift is exactly floor division)
     for dt in (dtypes.int32, dtypes.uint32, dtypes.int64, dtypes.uint64):
       g = UOp.param(0, dt, (3,))
-      c = UOp.const(2).cast(dt)
+      c = UOp.const(2)
       a = UOp(Ops.FLOORDIV, dt, (g.index(c), c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
@@ -318,7 +318,7 @@ class TestFastIdiv(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
   def test_fast_idiv_and_mod(self):
     g = UOp.param(0, dtypes.uint32, (4,))
-    c = UOp.const(3).cast(dtypes.uint)
+    c = UOp.const(3)
     l = g.index(c)
     a = UOp(Ops.CDIV, src=(l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -338,7 +338,7 @@ class TestFastIdiv(unittest.TestCase):
   def test_fast_idiv_bounded_numerator_zero(self):
     x = UOp.variable("x", 0, 1, dtype=dtypes.int32)
     for val in range(2):
-      self.assertEqual(eval_uop(x.alu(Ops.CDIV, UOp.const(3).cast(x.dtype)), vals=(val,)), cdiv(val, 3))
+      self.assertEqual(eval_uop(x.alu(Ops.CDIV, UOp.const(3)), vals=(val,)), cdiv(val, 3))
 
   @Context(DISABLE_FAST_IDIV=0)
   def test_fast_idiv_remove_powers_of_two(self):
@@ -363,7 +363,7 @@ class TestFastIdiv(unittest.TestCase):
 
   def test_disable_fast_idiv(self):
     g = UOp.param(0, dtypes.uint32, (4,))
-    c = UOp.const(3).cast(dtypes.uint)
+    c = UOp.const(3)
     l = g.index(c)
     a = UOp(Ops.CDIV, src=(l, c))
     with Context(DISABLE_FAST_IDIV=1):
