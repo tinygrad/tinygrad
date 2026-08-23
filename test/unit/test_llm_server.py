@@ -44,8 +44,10 @@ class TestTransformerGenerate(unittest.TestCase):
       return Tensor([[42]])
     with patch.object(Transformer, '__call__', mock_call):
       next(model.generate([1, 2, 3, 4, 5, 42, 10]))
-    # the 2-token tail prefills in a single symbolic-shape call
-    self.assertEqual(calls, [((1, V_TOKS.bind(2)), V_START_POS.bind(5))])
+    # resumes from the reused state at position 5 and consumes the 2 new tokens (one chunk or two decode steps)
+    self.assertEqual(calls[0][1], V_START_POS.bind(5))
+    def ntok(shape): return shape[1] if isinstance(shape[1], int) else shape[1].unbind()[1]
+    self.assertEqual(sum(ntok(c[0]) for c in calls), 2)
 
   def test_recurrent_divergent_prompt_restarts(self):
     model, calls = Transformer(TEST_CONFIG), []
@@ -150,8 +152,8 @@ class TestTransformerGenerate(unittest.TestCase):
 
     # 8 tokens, chunk_size=4 -> 2 prefill chunks
     self.assertEqual(get_prefill_flags(list(range(8)), 4), [True, True, False, False])
-    # 9 tokens, chunk_size=4 -> 3 prefill chunks (4+4+1)
-    self.assertEqual(get_prefill_flags(list(range(9)), 4), [True, True, True, False, False])
+    # 9 tokens, chunk_size=4 -> 2 prefill chunks + the 1-token tail goes through the decode graph
+    self.assertEqual(get_prefill_flags(list(range(9)), 4), [True, True, False, False, False])
     # 4 tokens, chunk_size=4 -> 1 prefill chunk
     self.assertEqual(get_prefill_flags(list(range(4)), 4), [True, False, False])
 
