@@ -1,7 +1,7 @@
 from __future__ import annotations
 import enum, functools, itertools, pathlib
 from dataclasses import dataclass, replace
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, Context, dtypes
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
 from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
@@ -470,14 +470,10 @@ class Transformer:
       Tensor.realize(*params)
     return model, kv
 
-  def warmup(self, chunk_size:int=32):
-    # recurrent models prefill in chunks: capture that graph with kernel batching (one symbolic graph serves every size)
-    prompt = [0] * (min(chunk_size, 256, self.max_context-1) if self.has_recurrent_block else 1)
+  def warmup(self):
     for _ in range(2):
-      warm = self.generate(prompt, chunk_size=chunk_size)
-      with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
-      with Context(JIT_BATCH_SIZE=0): next(warm)
-      self._cached_tokens = []
+      list(zip(range(2), self.generate([0])))
+      self._cached_tokens = []  # don't leave warmup's fake tokens in the prefix cache
 
   def get_start_pos(self, tokens:list[int]) -> int:
     # recurrent state can't be partially reused after divergence: reuse it only when tokens extend the cached prefix
