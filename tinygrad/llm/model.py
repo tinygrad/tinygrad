@@ -471,11 +471,8 @@ class Transformer:
     return model, kv
 
   def warmup(self, chunk_size:int=32):
-    # recurrent models prefill static chunks: capture that graph; the kernel batching only matters with custom kernels
+    # recurrent models prefill static chunks: capture that graph with kernel batching, the size must match serve time
     prompt = [0] * (min(chunk_size, 256, self.max_context-1) if self.has_recurrent_block else 1)
-    if self.has_recurrent_block:
-      x = Tensor.empty(1, 1, self.blk[0].config.dim, device=self.token_embd.weight.device)
-      for block in self.blk: block._init_state(x)
     for _ in range(2):
       warm = self.generate(prompt, chunk_size=chunk_size)
       with Context(JIT_BATCH_SIZE=getenv("PREFILL_JIT_BATCH_SIZE", 512) if self.has_recurrent_block else 0): next(warm)
