@@ -5,6 +5,7 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
+from tinygrad.codegen.late.regalloc import LinearScanRegallocContext
 from tinygrad.renderer.amd.elf import assemble_linear
 import tinygrad.renderer.amd.dsl as dsl
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
@@ -75,8 +76,12 @@ def rafter(x:UOp) -> UOp:
 # ---- register classes/kernel init state ----
 VGPRS = tuple(Register(f"v{i}", i, size=4) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i, size=4) for i in range(106))
+# reserve VGPRs ahead of time to be excluded from normal allocation to
+# prevent retroactive lifetime semantics and eviction cloberring when
+# spilling SGPRS to lanes. 5 vgprs x wave 32 = 160 SGPRs
+SPILL_VGPRS = VGPRS[-5:]
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
-GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:])
+GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:-5])
 VCC, EXEC = Register("vcc", 0, size=4), Register("exec_lo", 0, size=4)
 FLAT_SCRATCH_LO, FLAT_SCRATCH_HI = Register("flat_scratch_lo", 0, size=4), Register("flat_scratch_hi", 0, size=4)
 
@@ -543,23 +548,46 @@ class RDNA3Renderer(ISARenderer):
   def __init__(self, target:Target):
     super().__init__(target)
     self.tensor_cores = tc.get_amd(target.arch)
+    self.spill_vgprs: dict[Register, int] = {r:0 for r in SPILL_VGPRS}
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
 
-  # use scratch memory space for spilling thread local memory, addressed as:
-  def spill(self, spill_offset:int, x:UOp) -> list[UOp]:
-    regs = rdefs(x)
-    batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
-    return [UOp(Ops.INS, arg=getattr(RDNA3Ops, f"scratch_store_b{len(b)*32}"), \
-      src=(const(spill_offset+j*16), def_reg(x.dtype, b))) for j,b in enumerate(batches)]
+  # returns stack slot offset and new stack ptr
+  def assign_spill_slot(self, v:VRegister, vdef:UOp, pos:int|None) -> tuple[int, int]:
+    if v.cons[0].name[0] == 'v':
+      sz = v.cons[0].size
+      if pos is None: sz *= v.width
+      offset = self.spill_size + (sz - self.spill_size % sz)
+      return (offset, offset + sz)
+    else:
+      vgpr,lane = next(((r,l) for r,l in self.spill_vgprs.items() if 32 - l > v.width), (None, None))
+      assert vgpr is not None, "ran out of reserved SGPR spill lanes"
+      self.spill_vgprs[vgpr] += v.width
+      return ((vgpr,lane), self.spill_size)
 
-  def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
-    batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
-    ops = [UOp(Ops.INS, x.dtype, arg=getattr(RDNA3Ops, f"scratch_load_b{len(b)*32}"), \
-      src=(const(spill_offset+j*16),), tag=b) for j,b in enumerate(batches)]
-    return UOp.group(*ops, tag=regs), ops
+  # use scratch memory space for spilling thread local memory, addressed as:
+  def spill(self, spill_offset:any, x:UOp) -> list[UOp]:
+    regs = rdefs(x)
+    if regs[0].name[0] == 'v':
+      batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
+      return [UOp(Ops.INS, arg=getattr(RDNA3Ops, f"scratch_store_b{len(b)*32}"), \
+        src=(const(spill_offset+j*16), def_reg(x.dtype, b))) for j,b in enumerate(batches)]
+    else:
+      vgpr,lane = spill_offset
+      return [UOp(Ops.INS, arg=RDNA3Ops.v_writelane_b32, src=(def_reg(x.dtype, r), const(lane+i)), tag=vgpr) for i,r in enumerate(rdefs(x))]
+
+  def fill(self, spill_offset:any, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
+    if regs[0].name[0] == 'v':
+      batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
+      ops = [UOp(Ops.INS, x.dtype, arg=getattr(RDNA3Ops, f"scratch_load_b{len(b)*32}"), \
+        src=(const(spill_offset+j*16),), tag=b) for j,b in enumerate(batches)]
+      return UOp.group(*ops, tag=regs), ops
+    else:
+      vgpr,lane = spill_offset
+      movs = [UOp(Ops.INS, arg=RDNA3Ops.v_readlane_b32, src=(def_reg(x.dtype, vgpr), const(lane+i)), tag=(r,)) for i,r in enumerate(regs)]
+      return UOp.group(*movs, tag=regs), movs
 
   def vcopy(self, u:UOp, vr:VRegister) -> tuple[UOp, list[UOp]]:
     if vr.width == 1: return (mov := vmov(u,vr)), [mov]

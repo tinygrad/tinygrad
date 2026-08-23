@@ -853,6 +853,11 @@ class X86Renderer(ISARenderer):
     nx = UOp(Ops.INS, dt, fold_address(self.spill_pointer().index(disp)), X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, tag=regs)
     return nx, [nx]
 
+  def assign_spill_slot(self, v:VRegister, vdef:UOp) -> tuple[int, int]:
+    sz = 8 if vdef.op is Ops.BUFFER else v.cons[0].sz
+    offset = self.spill_size + (sz - self.spill_size % sz)
+    return (offset, offset + sz)
+
   # NOTE: kinda dirty, where does this belong in pipeline?
   # - buffers have to be rewritten/stack size updated before FRAME_INDEX in post_regalloc
   # - make this a seperate line rewrite pattern matcher?

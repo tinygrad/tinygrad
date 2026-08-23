@@ -67,6 +67,7 @@ class ISARenderer(Renderer):
     return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
 
   def is_two_address(self, x:UOp) -> bool: return False
+  def assign_spill_slot(self, v:VRegister, vdef:UOp) -> tuple[int, int]: raise NotImplementedError("arch specific")
   def stack_alloc(self, uops:list[UOp]) -> list[UOp]: return uops
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, x:UOp, regs:tuple[Register,...]) -> list[UOp]: raise NotImplementedError("arch specific")

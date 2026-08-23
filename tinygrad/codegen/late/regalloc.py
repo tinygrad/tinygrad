@@ -10,6 +10,7 @@ REG_OPS = {Ops.STORE, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PA
 
 class LinearScanRegallocContext:
   def vdef(self, v:VRegister) -> UOp: return self.uops[self.live_intervals[v][0]]
+
   def __init__(self, uops:list[UOp], ren:ISARenderer):
     self.uops, self.ren, self.idx = [u for u in uops if u.op in REG_OPS], ren, itertools.count()
     self.live_intervals: dict[VRegister, list[int]] = {}
@@ -26,27 +27,23 @@ class LinearScanRegallocContext:
         if (n := max((lr[rv][-1] for rv in range_vars if lr[rv][0] <= lr[v][-1] < lr[rv][-1]), default=None)): lr[v].append(n)
       if u.op is Ops.RANGE: range_vars.append(rdef(u))
 
-    # allocate registers
-    self.stack_size: int = 0
-    self.locals: dict[UOp, UOp] = {}
-    self.spills: dict[Register, int] = {} # mapping from virtual to stack slot
+    self.spills: dict[Register, any] = {} # mapping from virtual to generic stack placement information (arch specific)
     self.reals: dict[int, dict[VRegister, tuple[Register,...]]] = {} # mapping from virtual to real at each program point
     self.insert_before: dict[int, list[tuple[Register, tuple[Register,...]]]] = {} # fills to be inserted at each program point
     live: dict[VRegister, tuple[Register,...]] = {} # mapping from virtual to real that's currently assigned to it
-    live_ins: list[dict[VRegister, tuple[Register,...]]] = [] # mapping from virtual to real at loop entry
     phi_use: dict[VRegister, int] = {}
+    live_ins: list[dict[VRegister, tuple[Register,...]]] = [] # mapping from virtual to real at loop entry
 
     # allocate the best register. Registers not in live or not used again are free and have priority,
     # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
-    def alloc(v:VRegister, cons:list[tuple[Register, ...]], i:int) -> tuple[Register,...]:
+    def alloc(v:VRegister, cons:list[tuple[Register, ...]]|None, i:int) -> tuple[Register,...]:
       cons = cons or v.candidates()
       live_inv = {r:k for k,v in live.items() for r in v}
 
-      def next_use(v:VRegister, i:int):
-        p = bisect_left(lr[v], i)
-        return lr[v][p] if p < len(lr[v]) else len(uops)
+      block = max(cons, key=lambda b: min(next((j-i for j in lr[live_inv[r]] if j >= i), len(self.uops)) \
+        if r in live_inv else len(self.uops) for r in b))
 
-      block = max(cons, key=lambda b: min(next_use(live_inv[r], i) if r in live_inv else len(uops) for r in b))
+      pressure = len([b for b in cons if any(r in live_inv and lr[live_inv[r]][-1] > i for r in b)])
       for r in block:
         if r in live_inv and (v := live_inv.get(r)) in live:
           live.pop(v)
@@ -59,13 +56,7 @@ class LinearScanRegallocContext:
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:VRegister, i:int, cons:tuple[Register, ...]|None=None, pos:int|None=None) -> tuple[Register,...]:
       if v not in self.spills:
-        # the value of an x86 BUFFER is its 64bit address
-        # RDNA3 does not assign directly to BUFFERs
-        sz = 8 if self.vdef(v).op is Ops.BUFFER else v.cons[0].size
-        if pos is None: sz *= v.width
-        offset = self.stack_size + (sz - self.stack_size % sz) % sz
-        self.spills[v] = offset
-        self.stack_size = offset + sz
+        self.spills[v], self.ren.spill_size = self.ren.assign_spill_slot(v, self.vdef(v), pos)
       rs = alloc(v, [cons] if cons is not None else None, i)
       self.insert_before.setdefault(i, []).append((v, (rs[pos],) if pos is not None else rs))
       return rs
@@ -116,7 +107,6 @@ class LinearScanRegallocContext:
         # TODO: don't reload if first use in loop is a load
         for v,rs in live_ins.pop().items():
           if v not in live or live[v] != rs: live[v] = fill(v, i, rs)
-    self.ren.spill_size = self.stack_size
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i, nsrc, = next(ctx.idx), []
