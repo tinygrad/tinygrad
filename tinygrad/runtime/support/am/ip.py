@@ -29,7 +29,9 @@ class AM_SOC(AM_IP):
 
   def init_hw(self):
     if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
-      self.adev.regXCC_DOORBELL_FENCE.write(0x0)
+      # fence doorbells for harvested xccs (0xff & ~xcc_mask in the kernel); a fully-unharvested chip keeps the previous 0x0
+      live_xccs = sum(1 << i for i in self.adev.regs_offset[am.GC_HWIP] if i not in self.adev.harvested[am.GC_HWIP] and i < 8)
+      self.adev.regXCC_DOORBELL_FENCE.write(0xff & ~live_xccs)
       for aid in range(1, self.adev.gmc.vmhubs):
         self.adev.indirect_wreg_pcie(self.adev.regXCC_DOORBELL_FENCE.addr[0], self.adev.regXCC_DOORBELL_FENCE.encode(shub_slv_mode=1), aid=aid)
       self.adev.regBIFC_GFX_INT_MONITOR_MASK.write(0x7ff)
@@ -52,7 +54,8 @@ class AM_GMC(AM_IP):
     self.vmhubs = len(self.adev.regs_offset[am.MMHUB_HWIP])
 
     # XGMI (for supported systems)
-    self.xgmi_phys_id = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields()['pf_lfb_region'] if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_CNTL') else 0
+    xgmi_lfb_cntl = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields() if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_CNTL') else {}
+    self.xgmi_phys_id, self.xgmi_max_region = xgmi_lfb_cntl.get('pf_lfb_region', 0), xgmi_lfb_cntl.get('pf_max_region', 0)
     self.xgmi_seg_sz = self.adev.regMMMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size']<<24 if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_SIZE') else 0
 
     self.paddr_base = self.xgmi_phys_id * self.xgmi_seg_sz
@@ -189,13 +192,13 @@ class AM_SMU(AM_IP):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
     if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) or self.adev.ip_ver[am.MP0_HWIP] in {(13,0,0), (13,0,7), (13,0,10)}:
       self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
-    elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
+    elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12), (13,0,15)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
 
     if not self.adev.is_hive(): time.sleep(0.5) # 500ms
 
   def read_table(self, table_t, arg):
-    if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6),(13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GetMetricsTable, arg)
+    if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6),(13,0,12),(13,0,15)}: self._send_msg(self.smu_mod.PPSMC_MSG_GetMetricsTable, arg)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, arg)
     return table_t.from_buffer(bytearray(self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(table_t))[:]))
 
@@ -206,7 +209,7 @@ class AM_SMU(AM_IP):
 
   def set_clocks(self, level:int|None):
     clks = tuple([self.smu_mod.PPCLK_UCLK, self.smu_mod.PPCLK_FCLK, self.smu_mod.PPCLK_SOCCLK])
-    if self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,12)}: clks += (self.smu_mod.PPCLK_GFXCLK,)
+    if self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,12), (13,0,15)}: clks += (self.smu_mod.PPCLK_GFXCLK,)
 
     if level is None:
       for clck in clks:
@@ -246,7 +249,7 @@ class AM_SMU(AM_IP):
 
 class AM_GFX(AM_IP):
   def init_sw(self):
-    self.xccs = len(self.adev.regs_offset[am.GC_HWIP])
+    self.xccs = sum(1 for i in self.adev.regs_offset[am.GC_HWIP] if i not in self.adev.harvested[am.GC_HWIP])
     self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(2)]
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
 
@@ -514,7 +517,7 @@ class AM_SDMA(AM_IP):
         **({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}), inst=inst)
 
     if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
-      for aid_id in range(4):
+      for aid_id in range(self.adev.gmc.vmhubs):
         for dev_inst, (port, awid, offset, awaddr) in enumerate([(1, 0xe, 0xe, 0x1), (2, 0x8, 0x8, 0x2), (5, 0x9, 0x9, 0x8), (6, 0xa, 0xa, 0x9)]):
           entry = dev_inst + 1 + 4 * aid_id
           self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_{entry}").write(**{f"bif_doorbell{entry}_range_size_entry": 20,

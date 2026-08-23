@@ -5,7 +5,7 @@ from typing import cast, Callable
 from tinygrad.helpers import to_mv, from_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, to_tuple
 from tinygrad.device import Buffer, BufferSpec, TinyELF, Program, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_cmdbuf, make_signal
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_cmdbuf, make_buf
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
@@ -80,7 +80,7 @@ pm_cpu_opsel = PatternMatcher([
   (UPat(Ops.INS, arg="store", src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))),
    lambda ctx, dst, val: cpu_cmd(ctx, signal_prog, dst.getaddr(ctx), val.cast(dtypes.uint64))),
   (UPat(Ops.INS, arg="timestamp", src=(UPat(name="dst"),)),
-   lambda ctx, dst: cpu_cmd(ctx, timestamp_prog, dst.getaddr(ctx), *(() if WIN else (make_signal(ctx, tag="func:clock_gettime").getaddr(ctx),)))),
+   lambda ctx, dst: cpu_cmd(ctx, timestamp_prog, dst.getaddr(ctx), *(() if WIN else (make_buf(ctx, tag="func:clock_gettime").getaddr(ctx),)))),
 ])
 
 def encode_queue(q:UOp) -> UOp:
@@ -91,7 +91,7 @@ def encode_queue(q:UOp) -> UOp:
   assert cnt < RING_SLOTS, f"submit of {cnt} entries doesn't fit the ring"
   cmdbuf = make_cmdbuf(lin, devs, buf=UOp.placeholder((cnt*CMD_SIZE,), dtypes.uint64, next(UOp.unique_num), device=devs).rtag("cmdbuf"))
   ring = UOp.placeholder((ring_words:=RING_SLOTS*CMD_SIZE,), dtypes.uint64, 0, device=devs, volatile=True).rtag(f"{queue}_ring")
-  put, done, sem, sysbuf = (make_signal(devs, tag=f"{queue}_{name}") for name in ("put", "done", "sem", "sys"))
+  put, done, sem, sysbuf = (make_buf(devs, tag=f"{queue}_{name}") for name in ("put", "done", "sem", "sys"))
 
   # submits are serialized on the submitter, so they can bump put without atomics
   ran = done.after(l:=UOp.loop(next(UOp.unique_num))).index(0).load()
@@ -104,7 +104,7 @@ def encode_queue(q:UOp) -> UOp:
   if WIN: return sysbuf.after(bumped).index(0).store(put.after(bumped).index(0).load())
 
   e = UOp.range(cnt, next(UOp.unique_num), dtype=dtypes.int, src=(bumped,))
-  return make_signal(devs, tag="func:sem_post").after(e).index(0).load().call(sem.after(e).index(0), ret_dtype=dtypes.void).end(e)
+  return make_buf(devs, tag="func:sem_post").after(e).index(0).load().call(sem.after(e).index(0), ret_dtype=dtypes.void).end(e)
 
 # *****************
 

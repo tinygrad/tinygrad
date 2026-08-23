@@ -12,8 +12,6 @@ class IndexingContext:
   realize_map: dict[UOp, None|list[int]] = field(default_factory=dict)
   non_removable: dict[UOp, None] = field(default_factory=dict)
   range_map: dict[UOp, tuple[tuple[UOp, ...], tuple[UOp, ...]]] = field(default_factory=dict)
-  # loads reachable from each UOp memoized across matches
-  buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
@@ -187,7 +185,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
   return rngs
 
 @rewrite_group(new_ctx=False)
-def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
+def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
   if debug: print("**************************")
   rctx = IndexingContext()
 
@@ -322,7 +320,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
   # if a deviceless value must materialize, place it on the sink device
   tsink = graph_rewrite(tsink, pm_fix_deviceless, ctx=tsink.device, name="add device to deviceless")
-  return tsink, rctx
+  return tsink
 
 def render_ranges(*rngs_list, realized) -> str:
   disp = []
