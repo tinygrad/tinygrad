@@ -61,6 +61,7 @@ def to_vgpr(x:UOp) -> UOp: return vmov(x) if is_const(x) else x
 def getsign(u:UOp, nbits):
   return UOp(Ops.SHR, dtypes.int32 if nbits <= 32 else dtypes.int64, src=(u, const(31 if nbits <= 32 else 63, dtypes.uint16))).bitcast(u.dtype)
 def vmov(x:UOp, r:VRegister|Register|None=None) -> UOp:
+  if isinstance(r, VRegister): assert r.width == 1
   nx = x.ins(RDNA3Ops.v_mov_b16_e32 if x.dtype.itemsize == 2 and dtypes.is_float(x.dtype) else RDNA3Ops.v_mov_b32_e32, src=(x,))
   return nx.rtag() if r is None else nx.replace(tag=(r,))
 def smux(dt:DType, sdt:DType, udt:DType): return udt if dtypes.is_unsigned(dt) else sdt
@@ -110,7 +111,7 @@ def gethalf(x:UOp, buf:UOp, idx:UOp):
   if rafter(buf).op is Ops.BUFFER: return None
   b32 = buf.index(const(idx.val // 2, dtypes.int32), dtype=dtypes.uint32)
   if idx.val % 2 != 0: return (b32 >> 16).bitcast(x.dtype)
-  else: return x.ins(RDNA3Ops.v_mov_b16_e32, src=(b32,))
+  else: return x.ins(RDNA3Ops.v_mov_b16_e64, src=(b32,))
 
 # ---- operand legalization wrappers ----
 def _vop3(x:UOp):
@@ -131,15 +132,14 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
 
   if x.op is Ops.GROUP:
-    vreg = ctx.vreg(GP_VGPRS, width=len(x.src))
+    vreg = ctx.ren.vreg(GP_VGPRS, width=len(x.src))
     # TODO: replace all references to src edges to avoid duplicates because of tag changes
     return x.replace(tag=(vreg,), src=tuple(s.replace(tag=(vreg.sub(i),)) for i,s in enumerate(x.src)))
-
   elif isinstance(x.tag, tuple):
     cons, width = x.tag if isinstance(x.tag[0], tuple) else (x.tag, 1)
-    vr = ctx.vreg(cons, width=width)
+    vr = ctx.ren.vreg(cons, width=width)
   else:
-    vr = ctx.vreg(GP_VGPRS, width=max(x.dtype.itemsize // 4, 1))
+    vr = ctx.ren.vreg(GP_VGPRS, width=max(x.dtype.itemsize // 4, 1))
   return x.replace(tag=(vr,))
 
 # https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
@@ -147,8 +147,8 @@ def abi(ctx, x:UOp) -> UOp|None:
   if x.tag is True: return None
   # NOTE: carries PARAM op through meta src edge to preserve program info
   offs = const(sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:ctx.func_args.index(x)]))
-  if x.addrspace is AddrSpace.ALU: return vmov(UOp(Ops.INS, x.dtype, (kernarg_ptr, offs, x.rtag()), RDNA3Ops.s_load_b32, (ctx.vreg(GP_SGPRS),)))
-  return UOp(Ops.INS, dtypes.ulong, (kernarg_ptr, offs, x.rtag()), RDNA3Ops.s_load_b64, (ctx.vreg(GP_SGPRS, width=2, alignment=2),))
+  if x.addrspace is AddrSpace.ALU: return vmov(UOp(Ops.INS, x.dtype, (kernarg_ptr, offs, x.rtag()), RDNA3Ops.s_load_b32, (ctx.ren.vreg(GP_SGPRS),)))
+  return UOp(Ops.INS, dtypes.ulong, (kernarg_ptr, offs, x.rtag()), RDNA3Ops.s_load_b64, (ctx.ren.vreg(GP_SGPRS, width=2, alignment=2),))
 
 # ----- memory access ----
 def fold_global(base:UOp, idx:UOp):
@@ -179,17 +179,7 @@ def load(ctx, x:UOp, idx:UOp):
   prefix = "global" if idx.addrspace is AddrSpace.GLOBAL else "ds"
   opc = getattr(RDNA3Ops, f"{prefix}_load_{suffix}{sz*8}")
   ctx.ren.semantic_op[opc]=Ops.LOAD
-  return x.ins(opc, src=fold_address(idx)+x.src[1:], tag=(ctx.vreg(GP_VGPRS, width=(sz+3)//4),))
-
-# this needs to be fixed, any way to not break SSA without PHI nodes/large refactor?
-def reg_store(ctx, x:UOp, idx:UOp, val:UOp):
-  vregs, i = ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4), idx.src[1].src[0].val
-  if val.op is Ops.GROUP:
-    if idx.dtype.itemsize == 8: return ctx.ren.copy(UOp.group(val.src[i*2], val.src[i*2+1], dtype=idx.dtype), vregs[i])
-    else: return ctx.ren.copy(val.src[i].after(val, idx), vregs[i])
-  else:
-    assert len(vregs) == 1
-    return ctx.ren.copy(val.after(idx).bitcast(val.dtype), *vregs)
+  return x.ins(opc, src=fold_address(idx)+x.src[1:], tag=(ctx.ren.vreg(GP_VGPRS, width=(sz+3)//4),))
 
 def store(ctx, x:UOp, idx:UOp, val:UOp):
   n = idx.src[-1].src[0].val if idx.op is Ops.SHRINK else 1
@@ -201,13 +191,12 @@ def store(ctx, x:UOp, idx:UOp, val:UOp):
 
 def lower_gated_load(ctx, x:UOp):
   alt, gate = x.src[-2:]
-  init = [ctx.ren.copy(s, rdef(x).sub(i)) for i,s in enumerate(alt.src)] if alt.op is Ops.GROUP else [ctx.ren.copy(alt, rdef(x))]
-  mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=(ctx.vreg(GP_SGPRS),))
+  mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(gate,), tag=(ctx.ren.vreg(GP_SGPRS),))
   x = x.replace(src=x.src[:-2])
-  return x, init + [mask, x, restoreexec(mask)]
+  return x, ctx.ren.vcopy(alt, rdef(x))[1] + [mask, x, restoreexec(mask)]
 
 def lower_gated_store(ctx, x:UOp):
-  mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(x.src[-1],), tag=(ctx.vreg(GP_SGPRS),))
+  mask = UOp(Ops.INS, arg=RDNA3Ops.s_and_saveexec_b32, src=(x.src[-1],), tag=(ctx.ren.vreg(GP_SGPRS),))
   x = x.replace(src=x.src[:-1])
   return x, [mask, x, restoreexec(mask)]
 
@@ -225,7 +214,7 @@ def arith64(ctx, x:UOp):
   ins_lo = RDNA3Ops.v_add_co_u32 if x.op is Ops.ADD else RDNA3Ops.v_sub_co_u32
   ins_hi = RDNA3Ops.v_add_co_ci_u32 if x.op is Ops.ADD else RDNA3Ops.v_sub_co_ci_u32
   narrow = dtypes.uint32 if dtypes.is_unsigned(x.dtype) else dtypes.int32
-  vreg = ctx.vreg(GP_VGPRS, width=2) # NOTE: after causes a problem for auto allocating group reg?
+  vreg = ctx.ren.vreg(GP_VGPRS, width=2) # NOTE: after causes a problem for auto allocating group reg?
   lo = UOp(Ops.INS, dtype=dtypes.uint32, arg=ins_lo, src=(gep(a,0), gep(b,0)), tag=(vreg.sub(0),))
   hi = UOp(Ops.INS, dtype=narrow, arg=ins_hi, src=(gep(a, 1), gep(b,1), vccop, lo), tag=(vreg.sub(1),)).after(lo)
   return UOp.group(lo, hi, dtype=x.dtype).replace(tag=(vreg,))
@@ -422,7 +411,7 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   # --- control flow ---
   # how to remove positional arg contracts, make inter-lowering semantics explicit so its clear what src edges represent
   (UPat(Ops.RANGE, name="x"), \
-    lambda ctx,x: x.replace(src=x.src + (UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(execop,), tag=ctx.vreg(GP_SGPRS)),))
+    lambda ctx,x: x.replace(src=x.src + (UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(execop,), tag=ctx.ren.vreg(GP_SGPRS)),))
     if x.src[-1].op is not Ops.INS else None),
   # add exec mask edge to src
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), \
@@ -446,14 +435,14 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   (UPat(Ops.WMMA, name="wmma"), render_wmma),
   # NOTE: dont realize weak casts
   (UPat.var("y", dtype=dtypes.ints+dtypes.floats).cast(name="x"),
-    lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e32"))),
+    lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e64"))),
   # --- mem ops ---
-  (UPat.var("idx").store(UPat.var("val"), allow_any_len=True).named("x"), lambda ctx,x,idx,val: reg_store(ctx,x,idx,val) if
-    idx.addrspace is AddrSpace.REG else store(ctx,x,idx,val)),
+  (UPat.var("idx").store(UPat.var("val"), allow_any_len=True).named("x"), lambda ctx,x,idx,val:
+    store(ctx,x,idx,val) if idx.addrspace is not AddrSpace.REG else
+    x.replace(tag=(ctx.ren.vreg(GP_VGPRS, width=(idx.dtype.itemsize+3)//4),)) if x.tag is None else None),
   # THIS IS VERY BAD, breaks SSA... do we need phi nodes? even if we route load references to previous stores multiple stores breaks...
   (UPat.var("idx").load(name="x", allow_any_len=True), lambda ctx,x,idx:
-    (x.replace(tag=ctx.regptr(idx, GP_VGPRS, width=(idx.dtype.itemsize+3)//4)) if x.tag is None else None)
-    if idx.addrspace is AddrSpace.REG else load(ctx,x,idx)),
+    load(ctx,x,idx) if idx.addrspace is not AddrSpace.REG else None),
   # --- other ---
   (UPat(Ops.SPECIAL, name="x"), lambda x: vmov(def_reg(dtypes.uint32, WGIDS[int(x.arg[-1])])) if x.arg[0] == 'g' else
     x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(def_reg(dtypes.uint32, WIIDS), const(10*int(x.arg[-1])), const(10)))),
@@ -548,6 +537,7 @@ class RDNA3LinearCtx:
   exec_mask: dict[UOp, UOp] = field(default_factory=dict)
   range_bnd: dict[UOp, UOp] = field(default_factory=dict)
 
+
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
   pre_isel_matcher = pre_isel_matcher
@@ -567,25 +557,30 @@ class RDNA3Renderer(ISARenderer):
 
   # use scratch memory space for spilling thread local memory, addressed as:
   def spill(self, spill_offset:int, x:UOp) -> list[UOp]:
-    rs, ops = rdefs(x), []
-    rsz = rs[0].size*8
-    for i in range((len(rs)*rsz + 127)//128):
-      block = rs[i:i+(128//rsz)]
-      subset = def_reg(x.dtype, block)
-      ops.append(UOp(Ops.INS, arg=getattr(RDNA3Ops, f"scratch_store_b{len(block)*rsz}"), src=(const(spill_offset+i*128//rsz),subset)))
-    return ops
+    regs = rdefs(x)
+    batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
+    return [UOp(Ops.INS, arg=getattr(RDNA3Ops, f"scratch_store_b{len(b)*32}"), \
+      src=(const(spill_offset+j*16), def_reg(x.dtype, b))) for j,b in enumerate(batches)]
 
   def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
-    ops, rsz = [], regs[0].size*8
-    for i in range((len(regs)*rsz + 127)//128):
-      block = regs[i:i+(128//rsz)]
-      ops.append(UOp(Ops.INS, arg=getattr(RDNA3Ops, f"scratch_load_b{len(block)*rsz}"), src=(const(spill_offset+i*128//rsz),), tag=block))
+    batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
+    ops = [UOp(Ops.INS, x.dtype, arg=getattr(RDNA3Ops, f"scratch_load_b{len(b)*32}"), \
+      src=(const(spill_offset+j*16),), tag=b) for j,b in enumerate(batches)]
     return UOp.group(*ops, tag=regs), ops
 
-  def copy(self, u:UOp, r:VRegister|Register) -> UOp:
-    if u.dtype.itemsize == 8:
-      return UOp.group(vmov(gep(u,0), r.sub(0)), vmov(gep(u,1), r.sub(1)), dtype=u.dtype, tag=(r,))
-    return vmov(u,r)
+  def vcopy(self, u:UOp, vr:VRegister) -> tuple[UOp, list[UOp]]:
+    if vr.width == 1: return (mov := vmov(u,vr)), [mov]
+    # NOTE: should we need to decompose GROUP
+    movs = []
+    if u.op is Ops.GROUP: movs = [vmov(s, vr.sub(i)) for i,s in enumerate(u.src)]
+    else:
+      for i in range(vr.width): movs.extend([gep(u,i), vmov(gep(u,i), vr.sub(i))])
+    grp = UOp.group(*movs, dtype=u.dtype, tag=(vr,))
+    # NOTE: all the nodes inluding INDEX and GROUP have to be in the linearized graph
+    return grp, movs + [grp]
+
+  def copy(self, u:UOp, regs:tuple[Register,...]) -> list[UOp]:
+    return [vmov(def_reg(u.dtype, rs),rd) for rs,rd in zip(rdefs(u), regs)]
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     deps: set[Register] = set()

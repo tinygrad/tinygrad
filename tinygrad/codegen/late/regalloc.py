@@ -6,7 +6,7 @@ from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.dtype import dtypes
 from bisect import bisect_left
 
-REG_OPS = {Ops.LOAD, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL}
+REG_OPS = {Ops.STORE, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.INDEX}
 
 class LinearScanRegallocContext:
   def vdef(self, v:VRegister) -> UOp: return self.uops[self.live_intervals[v][0]]
@@ -34,6 +34,7 @@ class LinearScanRegallocContext:
     self.insert_before: dict[int, list[tuple[Register, tuple[Register,...]]]] = {} # fills to be inserted at each program point
     live: dict[VRegister, tuple[Register,...]] = {} # mapping from virtual to real that's currently assigned to it
     live_ins: list[dict[VRegister, tuple[Register,...]]] = [] # mapping from virtual to real at loop entry
+    phi_use: dict[VRegister, int] = {}
 
     # allocate the best register. Registers not in live or not used again are free and have priority,
     # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
@@ -47,7 +48,12 @@ class LinearScanRegallocContext:
 
       block = max(cons, key=lambda b: min(next_use(live_inv[r], i) if r in live_inv else len(uops) for r in b))
       for r in block:
-        if r in live_inv and (v := live_inv.get(r)) in live: live.pop(v)
+        if r in live_inv and (v := live_inv.get(r)) in live:
+          live.pop(v)
+          # phi evictions must be handled carefully to ensure loop carried
+          # use gets reloaded and not silently clobbered
+          if v.phi is not None and v not in self.spills and v in phi_use and i <= lr[v][-1]:
+            fill(v, phi_use[v], (r,))
       return block
 
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
@@ -71,6 +77,7 @@ class LinearScanRegallocContext:
         if u.op is Ops.END: continue
         if not isinstance(v:=rdef(s), VRegister): continue
         vv = v.parent if v.is_sub() else v
+        if vv.phi is not None: phi_use[vv] = i
         # fill at sub-register level, contiguous constraint only needed for the parent register
         if vv not in live: live[vv] = fill(vv,i,pos=v.pos)
         self.reals.setdefault(i, {})[v] = (live[vv][v.pos],) if v.is_sub() else live[vv]
@@ -78,9 +85,6 @@ class LinearScanRegallocContext:
       # allocate defs
       for j,v in enumerate(rdefs(u)):
         if not isinstance(v, VRegister): continue
-        if v.is_sub() and (vp := v.parent) in live:
-          self.reals.setdefault(i, {})[v] = (live[vp][v.pos],)
-          continue
         cons = None
         if ren.is_two_address(u) and j == 0:
           uses = []
@@ -96,7 +100,7 @@ class LinearScanRegallocContext:
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
         # we move to registers vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
-        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < lr[rdef(u)][-1] for l in lr[v])]
+        used_in_loop = [v for v in live.keys() | self.spills.keys() if v.phi is None and any(i <= l < lr[rdef(u)][-1] for l in lr[v])]
         sorted_uses = sorted(used_in_loop, key=lambda k: (next(l-i for l in lr[k] if l >= i), lr[k][0], k.name, k.cons[0].index))
         live_in: dict[VRegister, tuple[Register,...]] = {}
         for v in sorted_uses:
@@ -114,39 +118,33 @@ class LinearScanRegallocContext:
           if v not in live or live[v] != rs: live[v] = fill(v, i, rs)
     self.ren.spill_size = self.stack_size
 
-    for vr in self.spills.keys():
-      u = self.vdef(vr)
-      print(vr, u.op, u.arg)
-
-
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i, nsrc, = next(ctx.idx), []
   for j,s in enumerate(x.src):
     if i in ctx.reals and (v := rdef(ctx.uops[i].src[j])) in ctx.spills:
-      # NOTE: INDEX hack..., handle this ahead of time
-      while s.op is Ops.AFTER: s=s.src[0]
-      regs = ctx.reals[i][v] if s.op is not Ops.INDEX else (ctx.reals[i][v][s.src[1].src[0].val],)
-      nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), regs)[0])
-    elif s.op is Ops.INDEX and rdefs(s.src[0]) and (c := s.src[1].src[0].val) < len(rdefs(s.src[0])):
-      # NOTE: should these be rewritten to subregs pre-regalloc?
-      # tagless INDEX gets rewritten to indexed register block element of buf
-      nsrc.append(s.replace(tag=(rdefs(s.src[0])[c],)))
+      nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v])[0])
     else:
       nsrc.append(s)
 
-  ndefs = []
+  ndefs, after, before = [], [], []
   for v in rdefs(x):
     if isinstance(v, VRegister): ndefs.extend(ctx.reals[i][v])
     else: ndefs.append(v)
   nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
 
-  after, before = [], []
   for v in rdefs(x):
-    if v in ctx.spills: after.extend(ctx.ren.spill(ctx.spills[v],nx))
+    if v in ctx.spills and not (x.op is Ops.BUFFER and v.phi is not None):
+      after.extend(ctx.ren.spill(ctx.spills[v],nx))
   for v,rs in ctx.insert_before.get(i, []):
     before.extend(ctx.ren.fill(ctx.spills[v], ctx.vdef(v),rs)[1])
 
   return nx, before + [nx] + after
+
+# INDEX -> subregister, lifetimes simple
+pm_index_subregisters = PatternMatcher([
+  (UPat.var("buf").index(UPat.cvar("c").cast(), name="x", tag=None), lambda buf,c,x:
+    ((nx := x.replace(tag=(v.sub(c.val),))), [nx]) if (v := rdef(buf)) and c.val < v.width else None),
+])
 
 pm_regalloc_rewrite = PatternMatcher([
   (UPat(REG_OPS, name="x"), regalloc_rewrite),

@@ -12,7 +12,6 @@ class Register:
   def __repr__(self): return self.name
   def __hash__(self): return hash(self.name) * 256 + self.index
 
-# TODO: iter over subregisters
 @dataclass(frozen=True)
 class VRegister:
   name: str
@@ -21,11 +20,12 @@ class VRegister:
   alignment: int = 1
   parent: VRegister|None = None
   pos: int|None = None
+  phi: tuple[VRegister,...]|None = None
   def __repr__(self): return self.name
   def is_sub(self) -> bool: return self.parent is not None
   def sub(self, i:int) -> VRegister:
     assert i < self.width, f"sub-register index out of width range ({i} >= {self.width})"
-    return VRegister(f"{self.name}.{i}", self.cons, self.width, self.alignment, self, i)
+    return VRegister(f"{self.name}.{i}", self.cons, 1, self.alignment, self, i)
   @functools.cached_property
   def _hash(self): return hash((self.name, len(self.cons), self.width, self.alignment, self.pos, (self.parent.name if self.parent else None)))
   def __hash__(self): return self._hash
@@ -36,8 +36,6 @@ class VRegister:
 
 def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
   if u.op in {Ops.AFTER, Ops.NOOP} and len(u.src): return rdefs(u.src[0])
-  # pass through INDEXed op before regalloc unless overrided (tag on INDEX)
-  if u.op is Ops.INDEX and u.tag is None and isinstance(rdef(u.src[0]), VRegister): return rdefs(u.src[0])
   return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)))
 def rdef(u:UOp) -> None|tuple[VRegister|Register,...]: return rdefs(u)[0] if len(rdefs(u)) >= 1 else None
 
@@ -52,15 +50,6 @@ class PreRegallocContext:
       if u.op is Ops.SPECIAL: return (2, u.arg)
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
     self.func_args = sorted([u for u in self.uses if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
-    self.regbufs: dict[tuple[UOp, int], VRegister] = {} # maps regbuf ptr to cached vregister
-
-  def vreg(self, cons:tuple[Register, ...], **kwargs) -> VRegister:
-    return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
-  def regptr(self, idx:UOp, cons:tuple[Register, ...], **kwargs) -> tuple[VRegister,...]:
-    buf = idx.src[0]
-    while buf.op is Ops.AFTER: buf = buf.src[0]
-    idxs = (idx.src[1].src[0].val,) if idx.op is Ops.INDEX else range(idx.src[-1].src[0].val)
-    return tuple(self.regbufs.setdefault((buf,i), self.vreg(cons, **kwargs)) for i in idxs)
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
@@ -72,11 +61,15 @@ class ISARenderer(Renderer):
   # NOTE: would be nice for this to be cached automatically like in UOp.ins() or something?
   # instead of needing to manually register important instructions in each renderer impl
   semantic_op: dict[any, UOp] = {} # preserve IR metadata post-isel
+  reg_n = itertools.count()
+
+  def vreg(self, cons:tuple[Register, ...], **kwargs) -> VRegister:
+    return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
 
   def is_two_address(self, x:UOp) -> bool: return False
   def stack_alloc(self, uops:list[UOp]) -> list[UOp]: return uops
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
-  def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def copy(self, x:UOp, regs:tuple[Register,...]) -> list[UOp]: raise NotImplementedError("arch specific")
   def spill(self, spill_offset:int, x:UOp) -> list[UOp]: raise NotImplementedError("arch specific")
   def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")

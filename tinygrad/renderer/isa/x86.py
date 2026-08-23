@@ -6,7 +6,7 @@ from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
-from tinygrad.renderer.isa import ISARenderer, Register, PreRegallocContext, rdef, VRegister
+from tinygrad.renderer.isa import ISARenderer, Register, PreRegallocContext, rdef, rdefs, VRegister
 from tinygrad.helpers import getenv, NUM_CPU_THREADS, unwrap, Target
 from dataclasses import dataclass, field
 
@@ -257,7 +257,7 @@ def vpins(x:UOp) -> UOp:
   op = {1: X86Ops.VPINSRB, 2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD, 8: X86Ops.VPINSRQ}[x.dtype.itemsize]
   return functools.reduce(lambda ret,i: x.ins(op, src=(ret, x.src[i], imm(dtypes.uint8, i))), range(len(x.src)), def_reg(x.dtype))
 
-# we don't call ctx.vreg on the srcs to avoid duplicates, a rewrite will assign the tuple of valid registers to a vreg
+# we don't call ctx.ren.vreg on the srcs to avoid duplicates, a rewrite will assign the tuple of valid registers to a vreg
 def idiv(ctx:PreRegallocContext, x:UOp) -> UOp:
   op = X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV
   # for >8bit need to zero/sign extend rax to rdx
@@ -271,7 +271,7 @@ def idiv(ctx:PreRegallocContext, x:UOp) -> UOp:
   # divisor can't be in rax or rdx
   divisor = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
   # for >8bit both rax and rdx are written to
-  defs = (ctx.vreg(RAX),) if x.dtype in dtypes.int8s else (ctx.vreg(RAX), ctx.vreg(RDX))
+  defs = (ctx.ren.vreg(RAX),) if x.dtype in dtypes.int8s else (ctx.ren.vreg(RAX), ctx.ren.vreg(RDX))
   idiv = x.ins(op, src=(dividend, divisor) + tuple(ext), tag=defs)
   # this move "cleanses" the register constraints (rax/rdx) of idiv as that only applies on definition and not on the uses of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
@@ -337,12 +337,12 @@ def alloc_vregs(ctx:PreRegallocContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
   # allocate vreg definitions, the value of a BUFFER is its address so it lives in a gpr
   defs = []
-  if isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag)]
-  elif x.op is Ops.BUFFER: defs = [ctx.vreg(WGPR)]
-  elif x.dtype in dtypes.floats or (x.op is Ops.INS and x.arg in XMM_OPS) or x.max_numel() > 1: defs = [ctx.vreg(XMM)]
-  elif x.dtype in dtypes.ints+(dtypes.bool,): defs = [ctx.vreg(WGPR)]
+  if isinstance(x.tag, tuple): defs = [ctx.ren.vreg(x.tag)]
+  elif x.op is Ops.BUFFER: defs = [ctx.ren.vreg(WGPR)]
+  elif x.dtype in dtypes.floats or (x.op is Ops.INS and x.arg in XMM_OPS) or x.max_numel() > 1: defs = [ctx.ren.vreg(XMM)]
+  elif x.dtype in dtypes.ints+(dtypes.bool,): defs = [ctx.ren.vreg(WGPR)]
   # TODO: add this once the scheduler can track register pressure
-  # if x.arg in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
+  # if x.arg in X86GroupOp.WriteFlags: defs.append(ctx.ren.vreg(RFLAGS))
   # the size src of a BUFFER is not a value, tag it so it isn't materialized into a register
   if x.op is Ops.BUFFER: return x.replace(src=tuple(s.rtag() for s in x.src), tag=tuple(defs))
   return x.replace(tag=tuple(defs))
@@ -353,7 +353,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y").cast(name="x"), lambda y,x: y if y.dtype == dtypes.void else None),
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.ren.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
   # really all a backedge END is is an IF with a tag referencing the RANGE start label
   (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
     lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
@@ -604,7 +604,7 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.END, name="x"), lower_end),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
-   [ctx.ren.copy(x.src[0], rdef(x)), nx] if rdef(x) != rdef(x.src[0]) else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
+   [ctx.ren.copy(x.src[0], rdefs(x))[0], nx] if rdef(x) != rdef(x.src[0]) else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
 ])
 
 # ***** X86 instruction encoding *****
@@ -831,11 +831,12 @@ class X86Renderer(ISARenderer):
   def is_two_address(self, x:UOp) -> bool: return x.arg in X86GroupOp.TwoAddress
   def spill_pointer(self) -> UOp: return def_reg(dtypes.uint64, RSP)
   # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
-  def copy(self, x:UOp, reg:Register):
+  def copy(self, x:UOp, regs:tuple[Register,...]) -> list[UOp]:
     dt = dtypes.uint64 if x.op is Ops.BUFFER else x.dtype
-    ret = isel_matcher.rewrite(UOp(Ops.COPY, dt, (x,), tag=reg))
+    assert len(regs) == 1, "x86 is single reg values"
+    ret = isel_matcher.rewrite(UOp(Ops.COPY, dt, (x,), tag=regs[0]))
     assert ret is not None, f"failed to copy {x}"
-    return ret
+    return [ret]
 
   def spill(self, spill_offset:int, x:UOp) -> list[UOp]:
     disp = UOp.cconst(spill_offset, dtypes.uint32)
