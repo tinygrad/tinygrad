@@ -2,7 +2,7 @@ from __future__ import annotations
 import enum, functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
-from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, amd_custom_kernels_supported
+from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, quantized_attention, amd_custom_kernels_supported
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
 
@@ -182,7 +182,6 @@ class TransformerBlock(FFNBlock):
 
     # on RDNA3, hybrid models use a quantized KV cache with custom attention kernels
     if hasattr(self, "cache_kv_scale"):
-      from tinygrad.llm.kernels.amd import quantized_attention
       attn = quantized_attention(q, Tensor.stack(k, v), self.cache_kv, self.cache_kv_scale, start_pos)
       attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
       return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
