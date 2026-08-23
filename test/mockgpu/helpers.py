@@ -1,11 +1,19 @@
 import ctypes
+from tinygrad.helpers import getenv
 from tinygrad.runtime.support import c
 
 gpuocelot_lib = c.DLL("ocelot", "gpuocelot")
 @gpuocelot_lib.bind(None, ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int,
                     ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
-def ptx_run(source:bytes, n_args:int, args:c.POINTER[ctypes.c_void_p], blck_x:int, blck_y:int, blck_z:int,
-            grid_x:int, grid_y:int, grid_z:int, shared_mem_size:int): pass
+def _ocelot_ptx_run(source:bytes, n_args:int, args:c.POINTER[ctypes.c_void_p], blck_x:int, blck_y:int, blck_z:int,
+                    grid_x:int, grid_y:int, grid_z:int, shared_mem_size:int): pass
+
+def ptx_run(source, n_args:int, args, blck_x:int, blck_y:int, blck_z:int,
+            grid_x:int, grid_y:int, grid_z:int, shared_mem_size:int):
+  use_ocelot = "ocelot" in gpuocelot_lib._loaded_ and not getenv("PTX_EMU")
+  if use_ocelot: return _ocelot_ptx_run(source, n_args, args, blck_x, blck_y, blck_z, grid_x, grid_y, grid_z, shared_mem_size)
+  from test.mockgpu.ptx.emu import ptx_run as py_ptx_run
+  py_ptx_run(source, n_args, args, blck_x, blck_y, blck_z, grid_x, grid_y, grid_z, shared_mem_size)
 
 class PythonRemu:
   """Python RDNA3/RDNA4 emulator wrapper used by mockgpu."""
