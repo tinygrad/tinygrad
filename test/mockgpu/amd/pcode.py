@@ -1022,9 +1022,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           p.eat('NUM')
           p.eat('QUOTE')
         if p.at('NUM'): return int(p.eat('NUM').val.rstrip('UuLl'))
-        expr = p.parse().simplify()
-        assert expr.op == Ops.CONST, f"loop bound must be constant, got {expr}"
-        return int(expr.val)
+        return int(p.parse())
       start_val = parse_bound()
       p.eat('COLON')
       end_val = parse_bound()
