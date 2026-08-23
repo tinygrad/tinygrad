@@ -480,42 +480,40 @@ def encode(ctx, x:UOp):
     dmap = { "vcc":dsl.VCC, "exec_lo":dsl.EXEC_LO, "v":dsl.v, "s":dsl.s }
     base = next(v for k,v in dmap.items() if k in r.name)
     return base[r.index] if len(rs) == 1 else base[r.index:r.index+len(rs)-1]
-  group, kw, args = x.arg.func, None, None
 
-  # TODO: use match, clean up
-  if group is RDNA3Ops.SMEM: kw = dict(sdata=encfield(x), sbase=encfield(x.src[0]), offset=encfield(x.src[1]))
-  elif group is RDNA3Ops.SOPK: args = [dsl.NULL, x.src[0].arg]
-  elif group is RDNA3Ops.SCRATCH:
-    kw = dict(offset=encfield(x.src[0]))
-    if rdef(x) is not None: kw["vdst"] = encfield(x)
-    else: kw["data"] = encfield(x.src[1])
-  elif group is RDNA3Ops.GLOBAL:
-    kw = dict(addr=encfield(x.src[0]))
-    if is_const(x.src[1]): kw["offset"] = encfield(x.src[1])
-    else: kw["saddr"] = encfield(x.src[1])
-    if rdef(x) is None: kw["data"]=encfield(x.src[2])
-    else: kw["vdst"]=encfield(x)
-  elif group is RDNA3Ops.DS:
-    offs = encfield(x.src[1])
-    kw = dict(addr=encfield(x.src[0]), offset0=offs&0xFF, offset1=offs>>8)
-    if rdef(x) is None: kw["data0"]=encfield(x.src[3])
-    else: kw["vdst"]=encfield(x)
-  elif group is RDNA3Ops.VOP3SD: kw = dict(sdst=encfield(vccop), vdst=encfield(x), **{f"src{i}":encfield(u) for i,u in enumerate(x.src[:3])})
-  elif group is RDNA3Ops.VOPC: args = [encfield(u) for u in x.src]
-  elif group is RDNA3Ops.VOP3P:
-    kw = {f"src{i}":encfield(x.src[i]) for i in range(3)}
-    kw["vdst"] = encfield(x)
-    def _signed(dt:DType): return not (dtypes.is_unsigned(dt) or dtypes.is_float(dt))
-    kw["neg"] = _signed(x.src[0].dtype) | (_signed(x.src[1].dtype) << 1)
-  elif group in [RDNA3Ops.VOP3, RDNA3Ops.VOP2, RDNA3Ops.VOP1, RDNA3Ops.SOP1, RDNA3Ops.SOP2, RDNA3Ops.VOP3_SDST]:
-    n = None
-    if group in [RDNA3Ops.VOP1, RDNA3Ops.SOP1]: n = 1
-    if group in [RDNA3Ops.VOP2, RDNA3Ops.SOP2]: n = 2
-    args = [encfield(x)] + [encfield(u) for u in (x.src[:n] if n is not None else x.src)]
-  elif group is RDNA3Ops.SOPP: args = (x.src[0].val,) if len(x.src) > 0 and x.src[0].op is Ops.CONST else (0,)
-  else: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={x.arg.args[0].name.lower()}")
+  match (group := x.arg.func):
+    case RDNA3Ops.SCRATCH:
+      fields = dict(offset=encfield(x.src[0]))
+      if rdef(x) is None: fields["data"] = encfield(x.src[1])
+      else: fields["vdst"] = encfield(x)
+    case RDNA3Ops.GLOBAL:
+      fields = dict(addr=encfield(x.src[0]))
+      if is_const(x.src[1]): fields["offset"] = encfield(x.src[1])
+      else: fields["saddr"] = encfield(x.src[1])
+      if rdef(x) is None: fields["data"]=encfield(x.src[2])
+      else: fields["vdst"]=encfield(x)
+    case RDNA3Ops.DS:
+      offs = encfield(x.src[1])
+      fields = dict(addr=encfield(x.src[0]), offset0=offs&0xFF, offset1=offs>>8)
+      if rdef(x) is None: fields["data0"]=encfield(x.src[3])
+      else: fields["vdst"]=encfield(x)
+    case RDNA3Ops.SMEM: fields = dict(sdata=encfield(x), sbase=encfield(x.src[0]), offset=encfield(x.src[1]))
+    case RDNA3Ops.SOPK: fields = dict(simm16=x.src[1].arg)
+    case RDNA3Ops.SOPP: fields = dict(simm16=(x.src[0].val if len(x.src) > 0 and x.src[0].op is Ops.CONST else 0))
+    case RDNA3Ops.VOPC: fields = dict(src0=encfield(x.src[0]), vsrc1=encfield(x.src[1]))
+    case RDNA3Ops.VOP3SD: fields = dict(sdst=encfield(vccop), vdst=encfield(x), **{f"src{i}":encfield(u) for i,u in enumerate(x.src[:3])})
+    case RDNA3Ops.VOP3P:
+      def _signed(dt:DType): return not (dtypes.is_unsigned(dt) or dtypes.is_float(dt))
+      neg = _signed(x.src[0].dtype) | (_signed(x.src[1].dtype) << 1)
+      fields = dict(vdst=encfield(x), **{f"src{i}":encfield(x.src[i]) for i in range(3)}, neg=neg)
+    case RDNA3Ops.VOP2: fields = dict(vdst=encfield(x), src0=encfield(x.src[0]), vsrc1=encfield(x.src[1]))
+    case RDNA3Ops.VOP3 | RDNA3Ops.VOP1 | RDNA3Ops.VOP3_SDST:
+      fields = dict(vdst=encfield(x), **{f"src{i}":encfield(o) for i,o in enumerate(x.src)})
+    case RDNA3Ops.SOP1 | RDNA3Ops.SOP2:
+      fields = dict(sdst=encfield(x), **{f"ssrc{i}":encfield(o) for i,o in enumerate(x.src)})
+    case _: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={x.arg.args[0].name.lower()}")
 
-  return x.replace(arg=(x.arg(**kw) if kw is not None else x.arg(*args)))
+  return x.replace(arg=(x.arg(**fields) if fields is not None else x.arg(*args)))
 
 class CntType(Enum):
   DS_CNT = auto(); LOAD_CNT = auto(); STORE_CNT = auto()
@@ -532,7 +530,6 @@ class RDNA3LinearCtx:
   # TODO: remove these
   exec_mask: dict[UOp, UOp] = field(default_factory=dict)
   range_bnd: dict[UOp, UOp] = field(default_factory=dict)
-
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
