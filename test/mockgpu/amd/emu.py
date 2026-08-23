@@ -171,29 +171,10 @@ _pcode_fixes = {
   # so compute in u32 with a UB-free two's-complement negate
   'S_ABSDIFF_I32': ('D0.i32 = S0.i32 - S1.i32;\nif D0.i32 < 0 then\nD0.i32 = -D0.i32\nendif',
                     'D0.u32 = S0.u32 - S1.u32;\nif D0.i32 < 0 then\nD0.u32 = -D0.u32\nendif'),
-  # NaN propagation of f32 arithmetic follows the first-NaN operand (x86 follows the second); route through helpers
-  'V_MUL_F32': ('D0.f32 = S0.f32 * S1.f32', 'D0.f32 = f32_mul(S0.f32, S1.f32)'),
-  'V_ADD_F32': ('D0.f32 = S0.f32 + S1.f32', 'D0.f32 = f32_add(S0.f32, S1.f32)'),
-  'V_SUB_F32': ('D0.f32 = S0.f32 - S1.f32', 'D0.f32 = f32_add(S0.f32, -S1.f32)'),
-  'V_MAC_F32': ('D0.f32 = S0.f32 * S1.f32 + D0.f32', 'D0.f32 = f32_fma(S0.f32, S1.f32, D0.f32)'),
-  'V_FMA_F32': ('D0.f32 = fma(S0.f32, S1.f32, S2.f32)', 'D0.f32 = f32_fma(S0.f32, S1.f32, S2.f32)'),
-  # fract result is in [0, 1); a result of exactly 1.0 becomes largest-value-below-1 on hardware
-  'V_FRACT_F32': ('D0.f32 = S0.f32 + -floor(S0.f32)', 'D0.f32 = fract(S0.f32)'),
-  'V_FRACT_F64': ('D0.f64 = S0.f64 + -floor(S0.f64)', 'D0.f64 = fract(S0.f64)'),
   # CLASS denormal test uses abs(x) > 0.0, which the host's DAZ flushes; use bit-domain test instead
   'V_CMP_CLASS_F32': ('64\'F(abs(S0.f32)) > 0.0', '(64\'U(S0.u32 & 0x7FFFFFFF) != 0)'),
   'V_CMP_CLASS_F16': ('64\'F(abs(S0.f16)) > 0.0', '(64\'U(S0.u32 & 0x7FFF) != 0)'),
   'V_CMP_CLASS_F64': ('64\'F(abs(S0.f64)) > 0.0', '(64\'U(S0.u64 & 0x7FFFFFFFFFFFFFFF) != 0)'),
-}
-
-# RDNA4 (gfx12) sets the quiet bit when propagating NaN inputs; RDNA3 (gfx11) passes the payload through unchanged
-_pcode_fixes_rdna4 = {
-  'V_LDEXP_F32': ('D0.f32 = ldexp(S0.f32, S1.i32)', 'D0.f32 = ldexp_quiet(S0.f32, S1.i32)'),
-  'V_LDEXP_F64': ('D0.f64 = ldexp(S0.f64, S1.i32)', 'D0.f64 = ldexp_quiet(S0.f64, S1.i32)'),
-  'V_FREXP_MANT_F32': ("if ((64'F(S0.f32) == +INF) || (64'F(S0.f32) == -INF) || isNAN(64'F(S0.f32))) then",
-    "if isNAN(64'F(S0.f32)) then\nD0.f32 = quietNAN(S0.f32)\nelsif ((64'F(S0.f32) == +INF) || (64'F(S0.f32) == -INF)) then"),
-  'V_FREXP_MANT_F64': ("if ((S0.f64 == +INF) || (S0.f64 == -INF) || isNAN(S0.f64)) then",
-    "if isNAN(S0.f64) then\nD0.f64 = quietNAN(S0.f64)\nelsif ((S0.f64 == +INF) || (S0.f64 == -INF)) then"),
 }
 
 def _get_pcode_dict(op) -> dict:
@@ -214,7 +195,6 @@ def get_pcode(op) -> str:
   pcode = pcode_dict[op]
   fix_name = op_name.replace('_E64', '').replace('_E32', '')
   if fix_name in _pcode_fixes: pcode = pcode.replace(*_pcode_fixes[fix_name])
-  if fix_name in _pcode_fixes_rdna4 and pcode_dict is PCODE_RDNA4: pcode = pcode.replace(*_pcode_fixes_rdna4[fix_name])
   return _fix_div_scale(pcode, 'f32' if 'F32' in op_name else 'f64') if 'V_DIV_SCALE' in op_name else pcode
 
 def _fix_div_scale(pcode: str, dt: str) -> str:

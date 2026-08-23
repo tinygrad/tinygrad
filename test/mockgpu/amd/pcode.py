@@ -165,15 +165,6 @@ def _find_two_pi_mul(x):
       if len(vals) == 2 and abs(vals[0] * vals[1] - 6.283185307179586) < 1e-5: return (x.src[1-i], vals[0] * vals[1])
   return None
 
-def _fract_guard(a: UOp) -> UOp:
-  """fract(x) = x - floor(x), clamped to [0, 1); a result of exactly 1.0 becomes largest-value-below-1 on hardware."""
-  r = a - _floor(a)
-  if a.dtype == dtypes.float64: last = UOp.const(0x3FEFFFFFFFFFFFFF, dtypes.uint64).bitcast(dtypes.float64)
-  elif a.dtype == dtypes.half: last = UOp.const(0x3BFF, dtypes.uint16).bitcast(dtypes.half)
-  else: last = UOp.const(0x3F7FFFFF, dtypes.uint32).bitcast(dtypes.float32)
-  # take r when r is NaN or r < 1.0 (only r >= 1.0 clamps); NaN-unsafe comparisons avoided on purpose
-  return (_isnan(r) | (r < UOp.const(1.0, a.dtype))).where(r, last)
-
 def _trig_reduce(x, phase=0.0):
   match = _find_two_pi_mul(x)
   if match is not None:
@@ -263,13 +254,6 @@ def _signext_from_bit(val: UOp, w: UOp) -> UOp:
   ext_mask = ((one << w_val) - one) ^ mask_all
   return sign_bit.ne(_const(dt, 0)).where(val_u | ext_mask, val_u)
 
-def _quiet_nan(val: UOp) -> UOp:
-  """Set the quiet bit of a NaN value (RDNA4 hardware quiets NaNs on passthrough paths like FREXP_MANT)."""
-  if val.dtype == dtypes.half: return (val.bitcast(dtypes.uint16) | _const(dtypes.uint16, 0x0200)).bitcast(dtypes.half)
-  if val.dtype == dtypes.float64: return (val.bitcast(dtypes.uint64) | _const(dtypes.uint64, 0x0008000000000000)).bitcast(dtypes.float64)
-  b = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
-  return (b | _const(dtypes.uint32, 0x00400000)).bitcast(dtypes.float32)
-
 def _ldexp(val: UOp, exp: UOp) -> UOp:
   if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
   elif val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
@@ -297,28 +281,6 @@ def _frexp_mant(val: UOp) -> UOp:
   return ((bits & _const(dtypes.uint64, 0x7FF0000000000000)).ne(_const(dtypes.uint64, 0))).where(
     ((bits & _const(dtypes.uint64, 0x800FFFFFFFFFFFFF)) | _const(dtypes.uint64, 0x3fe0000000000000)).bitcast(dtypes.float64),
     (bits & _const(dtypes.uint64, 0x8000000000000000)).bitcast(dtypes.float64))
-
-def _ldexp_quiet(val: UOp, exp: UOp) -> UOp:
-  """LDEXP with RDNA4-style NaN quieting: NaN inputs are propagated with the quiet bit set."""
-  res = _ldexp(val, exp)
-  b = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val.bitcast(dtypes.uint64)
-  abs_max = _const(b.dtype, 0x7F800000 if b.dtype == dtypes.uint32 else 0x7FF0000000000000)
-  mant_mask = _const(b.dtype, 0x007FFFFF if b.dtype == dtypes.uint32 else 0x000FFFFFFFFFFFFF)
-  isnan = ((b & abs_max).eq(abs_max)) & ((b & mant_mask).ne(_const(b.dtype, 0)))
-  return isnan.where(_quiet_nan(val), res)
-
-
-def _f32_nan_prio(res: UOp, *srcs: UOp) -> UOp:
-  """Hardware NaN propagation for float arithmetic: if the result is NaN, take the FIRST NaN input (in src order),
-  quieted with its own sign/payload."""
-  out = res
-  for s in reversed(srcs): out = _isnan(s).where(_quiet_nan(s), out)
-  return _isnan(res).where(out, res)
-
-def _f32_add(a: UOp, b: UOp) -> UOp: return _f32_nan_prio(a + b, a, b)
-def _f32_fma(a: UOp, b: UOp, c: UOp) -> UOp: return _f32_nan_prio(a * b + c, a, b, c)
-
-def _f32_mul(a: UOp, b: UOp) -> UOp: return _f32_nan_prio(a * b, a, b)
 
 def _msb(val: UOp, bits: int) -> UOp:
   """Index of the highest set bit, or -1 if val == 0."""
@@ -389,14 +351,13 @@ def _sad_u8(a: UOp, b: UOp, acc: UOp, masked: bool = False) -> UOp:
 _FUNCS: dict[str, Callable[..., UOp]] = {
   'sqrt': lambda a: UOp(Ops.SQRT, src=(a,)), 'trunc': lambda a: UOp(Ops.TRUNC, src=(a,)),
   'log2': lambda a: UOp(Ops.LOG2, src=(a,)), 'sin': lambda a: _trig_reduce(a),
-  'cos': lambda a: _trig_reduce(a, 0.25), 'floor': _floor, 'fract': _fract_guard,
-  'f32_add': _f32_add, 'f32_fma': _f32_fma,
+  'cos': lambda a: _trig_reduce(a, 0.25), 'floor': _floor, 'fract': lambda a: a - _floor(a),
   'signext': _signext, 'abs': _abs,
   'isEven': lambda a: (UOp(Ops.TRUNC, src=(a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
   'max': lambda a, b: UOp(Ops.MAX, src=(a, b)),
   'min': lambda a, b: UOp(Ops.MAX, src=(a.neg(), b.neg())).neg(),
   'pow': lambda a, b: UOp(Ops.EXP2, src=(b.bitcast(dtypes.float32),)),
-  'fma': lambda a, b, c: a * b + c, 'f32_mul': _f32_mul,
+  'fma': lambda a, b, c: a * b + c,
   'i32_to_f32': lambda a: a.cast(dtypes.int).cast(dtypes.float32),
   'u32_to_f32': lambda a: a.cast(dtypes.uint32).cast(dtypes.float32),
   'f32_to_i32': lambda a: _f_to_i32(a.bitcast(dtypes.float32)),
@@ -417,8 +378,7 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'isNAN': _isnan, 'isSignalNAN': lambda a: _check_nan(a, False),
   'isQuietNAN': lambda a: _check_nan(a, True), 'cvtToQuietNAN': _cvt_quiet,
   'isDENORM': _is_denorm, 'exponent': _exponent, 'divWouldBeDenorm': _div_would_be_denorm, 'sign': _sign,
-  'signext_from_bit': _signext_from_bit, 'quietNAN': _quiet_nan, 'frexp_mant': _frexp_mant, 'mantissa': _frexp_mant,
-  'ldexp': _ldexp, 'ldexp_quiet': _ldexp_quiet,
+  'signext_from_bit': _signext_from_bit, 'ldexp': _ldexp, 'frexp_mant': _frexp_mant, 'mantissa': _frexp_mant,
   'frexp_exp': _frexp_exp, 'trig_preop_result': _trig_preop,
   's_ff1_i32_b32': lambda a: _ff1(a, 32), 's_ff1_i32_b64': lambda a: _ff1(a, 64),
   # Normalization conversions: map [-1,1] or [0,1] to integer range
@@ -743,17 +703,13 @@ class Parser:
         dt_name = self.eat('IDENT').val
         return result.cast(DTYPES.get(dt_name, dtypes.uint32))
       return result
-    if field == 'i4': return _signext_4bit(base)
-    if field == 'i24':
-      n = (base & _const(base.dtype, 0xFFFFFF)).cast(dtypes.int)
-      return (n & _const(dtypes.int, 0x800000)).ne(_const(dtypes.int, 0)).where(n - _const(dtypes.int, 0x1000000), n)
-    if field == 'u24': return base & _const(base.dtype, 0xFFFFFF)
     dt = DTYPES.get(field)
     if dt is None: return base
     if dt == base.dtype: return base
     if dt.itemsize == 2 and base.dtype.itemsize == 4:
       if dt == dtypes.uint16: return (base & _const(base.dtype, 0xFFFF)).cast(dtypes.uint16)
       return (base & _const(base.dtype, 0xFFFF)).cast(dtypes.uint16).bitcast(dt)
+    if field == 'i4': return _signext_4bit(base)
     return _cast_to(base, dt)
 
   def _handle_bracket(self, base, var_name: str | None = None) -> UOp:
