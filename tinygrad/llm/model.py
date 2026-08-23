@@ -471,9 +471,7 @@ class Transformer:
     return model, kv
 
   def warmup(self):
-    for _ in range(2):
-      list(zip(range(2), self.generate([0])))
-      self._cached_tokens = []  # don't leave warmup's fake tokens in the prefix cache
+    for _ in range(2): list(zip(range(2), self.generate([0])))
 
   def get_start_pos(self, tokens:list[int]) -> int:
     # recurrent state can't be partially reused after divergence: reuse it only when tokens extend the cached prefix
