@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, math
 from typing import Callable, cast
-from tinygrad import Tensor, UOp, nn, Device
+from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod
@@ -28,7 +28,9 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   # or CDNA (MFMA-only, wave64), and the dp4a builtins and 32-lane wave ops aren't portable either.
   if isinstance(device, tuple): device = device[0]
   if device is None or device.split(":")[0] != "AMD": return False
-  return (t:=getattr(Device[device], "target", None)) is not None and t[0] == 11
+  # @function contexts set ALLOW_DEVICE_USAGE=0 (scheduling must not open devices); the device is always open here
+  with Context(ALLOW_DEVICE_USAGE=1):
+    return (t:=getattr(Device[device], "target", None)) is not None and t[0] == 11
 
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):

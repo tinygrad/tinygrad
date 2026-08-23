@@ -488,7 +488,7 @@ class Transformer:
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       n_toks = min(chunk_size, len(tokens) - start_pos)
-      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n_toks)
+      sp, nt = v_start_pos.bind(start_pos), n_toks if n_toks == 1 else v_toks.bind(n_toks)
       out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
       start_pos += n_toks
       # chunked prefill: keep processing until all prompt tokens are consumed
