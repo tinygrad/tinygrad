@@ -120,6 +120,8 @@ class DSPCompiler(Compiler):
 
     super().__init__(None if mock else "compile_dsp")
 
+  def __del__(self): os.unlink(self.link_ld.name)
+
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as f:
