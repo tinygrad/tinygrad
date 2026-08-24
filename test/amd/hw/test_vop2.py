@@ -989,6 +989,53 @@ class TestCarryOps(unittest.TestCase):
     self.assertEqual(st.vgpr[0][0], 0)  # 0xFFFFFFFF + 1 + 0 = 0 (overflow)
     self.assertEqual(st.vcc, 0xDEADBEEF)  # VCC unchanged - carry was discarded
 
+class TestSelectFlushRegressions(unittest.TestCase):
+  """Regression tests: f32 MIN/MAX flush denormal inputs to signed zero (select-style ops propagate inputs bitwise)."""
+
+  def test_v_min_f32_denormal_flush(self):
+    """min(denormal, 1.0) is +0, min(-denormal, -1.0) is -0."""
+    st = run_program([v_mov_b32_e32(v[0], 0x00000001), v_mov_b32_e32(v[1], 0x3F800000), v_min_f32_e32(v[2], v[0], v[1])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x00000000)
+    # flush(-denormal) = -0.0 > -1.0, so the result is -1.0 (both operand orders)
+    st = run_program([v_mov_b32_e32(v[0], 0x80000001), v_mov_b32_e32(v[1], 0xBF800000), v_min_f32_e32(v[2], v[0], v[1])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xBF800000)
+    st = run_program([v_mov_b32_e32(v[1], 0xBF800000), v_mov_b32_e32(v[2], 0x80000001), v_min_f32_e32(v[3], v[1], v[2])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0xBF800000)
+
+  def test_v_max_f32_denormal_flush(self):
+    """max(-denormal, -1.0) is -0; max(+denormal, -0) is +0."""
+    st = run_program([v_mov_b32_e32(v[0], 0x80000001), v_mov_b32_e32(v[1], 0xBF800000), v_max_f32_e32(v[2], v[0], v[1])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x80000000)
+    st = run_program([v_mov_b32_e32(v[0], 0x00000001), v_mov_b32_e32(v[1], 0x80000000), v_max_f32_e32(v[2], v[0], v[1])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x00000000)
+
+
+class TestCarryExecRegressions(unittest.TestCase):
+  """Regression tests: per-lane VCC writes (carry ops) zero inactive lane bits - VCC = mask & EXEC, never preserved."""
+
+  def test_co_ci_e32_vcc_masked_by_exec(self):
+    """v_sub_co_ci_u32_e32 with EXEC=0xFFFF0000: hw clears inactive VCC bits instead of preserving them."""
+    instructions = [
+      s_mov_b32(EXEC_LO, 0xFFFF0000),
+      s_mov_b32(VCC_LO, 0xFFFFFFFF),  # preset all bits
+      v_mov_b32_e32(v[0], 0xFFFFFFFE), v_mov_b32_e32(v[1], 0x80000000),
+      v_sub_co_ci_u32_e32(v[2], v[0], v[1]),  # active lanes: no borrow
+    ]
+    st = run_program(instructions, n_lanes=32)
+    self.assertEqual(st.vcc, 0x00000000)
+
+  def test_co_ci_e32_vcc_masked_by_exec_ones(self):
+    """Same with all-ones carry: VCC = borrow_mask & EXEC."""
+    instructions = [
+      s_mov_b32(EXEC_LO, 0x0F0F0F0F),
+      s_mov_b32(VCC_LO, 0),
+      v_mov_b32_e32(v[0], 0xFFFFFFFF), v_mov_b32_e32(v[1], 1),
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # all lanes would carry if active
+    ]
+    st = run_program(instructions, n_lanes=32)
+    self.assertEqual(st.vcc, 0x0F0F0F0F)
+    self.assertEqual(st.vgpr[31][2], 0)  # 0xFFFFFFFF + 1 wraps to 0 in active lanes
+
 
 if __name__ == '__main__':
   unittest.main()

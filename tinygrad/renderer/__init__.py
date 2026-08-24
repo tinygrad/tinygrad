@@ -72,8 +72,6 @@ class Renderer:
   tensor_cores: list[TensorCore] = []
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
-  # migration: this renderer consumes every literal as a casted const CAST(dt, CONST(value))
-  casted_consts: bool = False
 
   compiler: Compiler = Compiler()
 

@@ -2,7 +2,7 @@ from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, ceildiv
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType, buffers
@@ -56,6 +56,35 @@ def _test_uops_result(output_dtype, uops, res):
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   run_uops([out], [buf])
   return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
+
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and
+                     dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires C-style pointer bitcast and 64-bit ints")
+class TestBitcastBufferView(unittest.TestCase):
+  @Context(SPEC=2)
+  def test_render(self):
+    buf = UOp.param(0, dtypes.uint32, (4,))
+    uops = to_uops_list([buf.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0).store(1)], ren=Device[Device.DEFAULT].renderer)
+    idx = next(u for u in uops if u.op is Ops.INDEX and u.src[0].op is Ops.BITCAST)
+    self.assertEqual(idx.src[0].src[0].op, Ops.SHRINK)
+    Device[Device.DEFAULT].renderer.render(uops)
+
+  @Context(SPEC=2)
+  def test_load(self):
+    val = 0x1122334455667788
+    src, out = UOp.param(0, dtypes.uint32, (4,)), UOp.param(1, dtypes.uint64, (1,))
+    ibuf = Buffer(Device.DEFAULT, 4, dtypes.uint32, initial_value=np.array([0, 0x55667788, 0x11223344, 0], dtype=np.uint32).tobytes())
+    obuf = Buffer(Device.DEFAULT, 1, dtypes.uint64).allocate()
+    run_uops([out.index(0).store(src.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0))], [ibuf, obuf])
+    self.assertEqual(np.frombuffer(obuf.as_memoryview(), dtype=np.uint64)[0], val)
+
+  @Context(SPEC=2)
+  def test_store(self):
+    val = 0x1122334455667788
+    dst = UOp.param(0, dtypes.uint32, (6,))
+    buf = Buffer(Device.DEFAULT, 6, dtypes.uint32, initial_value=bytes(24))
+    view = dst.shrink(((1, 5),)).bitcast(dtypes.uint64)  # two stores through one view: it must inline, not get a declared vector-pointer
+    run_uops([view.index(0).store(val ^ 0xff), view.index(1).store(val)], [buf])
+    self.assertEqual(np.frombuffer(buf.as_memoryview(), dtype=np.uint64, count=2, offset=4).tolist(), [val ^ 0xff, val])
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
@@ -193,15 +222,16 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local memory size for packed data types")
   def test_packed_smem_size(self):
     _dtypes = [dtypes.char, dtypes.uchar, dtypes.short, dtypes.ushort, dtypes.half]
-    size = 16
-    for dtype in _dtypes:
-      temp = UOp.placeholder((size,), dtype, slot=0, addrspace=AddrSpace.LOCAL)
-      uops = to_uops_list([temp], ren=Device[Device.DEFAULT].renderer)
-      out = Device[Device.DEFAULT].renderer.render(uops)
-      # half is supported in wgsl, so it doesn't have to be packed
-      corrected_size = size//(4//dtype.itemsize) if dtype != dtypes.half else size
-      # temp0: array<{Device[Device.DEFAULT].renderer.buf_map(dtype)},{corrected_size}>;
-      self.assertIn(f",{corrected_size}>;", out)
+    # a partial word still needs a whole word, so sizes that don't fill one must round up
+    for size in (16, 5):
+      for dtype in _dtypes:
+        temp = UOp.placeholder((size,), dtype, slot=0, addrspace=AddrSpace.LOCAL)
+        uops = to_uops_list([temp], ren=Device[Device.DEFAULT].renderer)
+        out = Device[Device.DEFAULT].renderer.render(uops)
+        # half is supported in wgsl, so it doesn't have to be packed
+        corrected_size = ceildiv(size, 4//dtype.itemsize) if dtype != dtypes.half else size
+        # temp0: array<{Device[Device.DEFAULT].renderer.buf_map(dtype)},{corrected_size}>;
+        self.assertIn(f",{corrected_size}>;", out)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   @unittest.skip("tinygrad doesn't support this behavior")

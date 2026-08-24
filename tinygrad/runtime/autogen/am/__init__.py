@@ -8,7 +8,7 @@ am_src="https://github.com/ROCm/ROCK-Kernel-Driver/archive/33970e1351f5e51102960
 rocm_src="https://github.com/ROCm/rocm-systems/archive/cccc350dc620e61ae2554978b62ab3532dc10bd9.tar.gz"
 AMD, AMDINC = "{}/drivers/gpu/drm/amd", "{}/drivers/gpu/drm/amd/include"
 inc, kern_rules = ["-include", "stdint.h"], [(r'le32_to_cpu', ''),]
-fw_src="https://gitlab.com/kernel-firmware/linux-firmware/-/archive/1e2c15348485939baf1b6d1f5a7a3b799d80703d/1e2c15348485939baf1b6d1f5a7a3b799d80703d.tar.gz"
+fw_src="https://gitlab.com/kernel-firmware/linux-firmware/-/archive/0a6871b19abf5d6e024b5d208b101ae53e7fa0de/0a6871b19abf5d6e024b5d208b101ae53e7fa0de.tar.gz"
 pmc_src="https://raw.githubusercontent.com/ROCm/rocm-systems/cccc350dc620e61ae2554978b62ab3532dc10bd9/projects/rocprofiler-compute/src/rocprof_compute_soc/profile_configs/counter_defs.yaml"
 
 reg_files = {

@@ -91,7 +91,7 @@ class DLL(ctypes.CDLL):
 
   @staticmethod
   def findlib(nm:str, paths:list[str], extra_paths=[]):
-    if nm == 'libc' and OSX: return '/usr/lib/libc.dylib'
+    if nm in ('libc', 'm') and OSX: return f'/usr/lib/lib{nm.removeprefix("lib")}.dylib'
     if pathlib.Path(path:=getenv(nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
     for p in paths:
       libpaths = {"posix": [d for d in os.environ.get('LD_LIBRARY_PATH', '').split(os.pathsep) if d] + ["/usr/lib64", "/usr/lib", "/usr/local/lib"],
