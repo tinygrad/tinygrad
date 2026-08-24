@@ -293,7 +293,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
 
   # prepare
-  tsink = graph_rewrite(tsink, pm_prepare_graph, ctx=itertools.count(0), bottom_up=True, name="prepare graph")
+  tsink = graph_rewrite(tsink, pm_prepare_graph, bottom_up=True, name="prepare graph")
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
   # add safe STAGEs to never duplicate compute
