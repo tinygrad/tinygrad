@@ -53,10 +53,9 @@ class AM_GMC(AM_IP):
   def init_sw(self):
     self.vmhubs = len(self.adev.regs_offset[am.MMHUB_HWIP])
 
-    # XGMI (for supported systems)
-    xgmi_lfb_cntl = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields() if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_CNTL') else {}
+    xgmi_lfb_cntl = self.adev.regGCMC_VM_XGMI_LFB_CNTL.read_bitfields() if hasattr(self.adev, 'regGCMC_VM_XGMI_LFB_CNTL') else {}
     self.xgmi_phys_id, self.xgmi_max_region = xgmi_lfb_cntl.get('pf_lfb_region', 0), xgmi_lfb_cntl.get('pf_max_region', 0)
-    self.xgmi_seg_sz = self.adev.regMMMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size']<<24 if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_SIZE') else 0
+    self.xgmi_seg_sz = self.adev.regGCMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size']<<24 if hasattr(self.adev, 'regGCMC_VM_XGMI_LFB_CNTL') else 0
 
     self.paddr_base = self.xgmi_phys_id * self.xgmi_seg_sz
 
