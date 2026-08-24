@@ -134,6 +134,7 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
   threads = UOp.special(256, "lidx0")
   groups_x, groups_y = UOp.special(ceildiv(N, tile_n), "gidx0"), UOp.special(ceildiv(M, tile_m), "gidx1")
   lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  # TODO: this is saving extra copies, why?
   zero = UOp.const(0)
   sink = UOp.sink(C.flatten().index(zero).store(UOp.const(0, C.dtype)), A.flatten().index(zero).load(), B.flatten().index(zero).load(),
                   scale_a.flatten().index(zero).load(), scale_b.flatten().index(zero).load(),
