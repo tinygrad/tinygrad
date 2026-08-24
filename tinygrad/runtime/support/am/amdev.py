@@ -145,8 +145,18 @@ class AMMemoryManager(MemoryManager):
 class AMDev:
   Version = 0xA0000008
 
+  def _disable_aspm(self):
+    # L1 across retimers makes reads oscillate to 0xffffffff; power on defaults it enabled. Clearing the GPU endpoint
+    # alone suffices: L1 only engages when both ends of the link enable it.
+    cap, seen = self.pci_dev.read_config(0x34, 1) & 0xfc, set() # bound the walk: a dead link can return 0xff pointers forever
+    while cap and cap not in seen and self.pci_dev.read_config(cap, 1) != 0x10:
+      seen.add(cap)
+      cap = self.pci_dev.read_config(cap + 1, 1) & 0xfc
+    if cap and cap not in seen: self.pci_dev.write_config_flush(cap + 0x10, self.pci_dev.read_config(cap + 0x10, 2) & ~3, 2) # PCIe cap lnkctl
+
   def __init__(self, pci_dev:PCIDevice, reset_mode=False):
     self.pci_dev, self.devfmt = pci_dev, pci_dev.pcibus
+    self._disable_aspm()
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
     self._run_discovery()
@@ -169,6 +179,9 @@ class AMDev:
     if self.partial_boot and (self.reg("regSCRATCH_REG6").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
+
+    # aqua (gc 9.5.0): full boot over live state can kill the fabric (power cycle recovers); partial boot+reset_mec is the deepest safe reset
+    if self.ip_ver[am.GC_HWIP] == (9,5,0) and self.reg("regSCRATCH_REG7").read() == AMDev.Version: self.partial_boot = True
 
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
@@ -342,3 +355,9 @@ class AMDev:
     for prefix, hwip in mods:
       self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip])))
     self.__dict__.update(import_asic_regs('mp', (11, 0, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP])))
+
+    # Live AIDs like the kernel: 4 SDMAs per AID; the AID lives iff its group's alive-mask is 0xf/0x3/0xc.
+    # Dead AIDs must never be touched via the indirect window: writes poison the whole fabric.
+    live_sdma = {k for k in self.regs_offset[am.SDMA0_HWIP] if k not in self.harvested[am.SDMA0_HWIP]}
+    max_aid = max((k >> 2 for k in self.regs_offset[am.SDMA0_HWIP]), default=0)
+    self.aids = [0] + [aid for aid in range(1, max_aid + 1) if sum(1 << (i & 3) for i in live_sdma if i >> 2 == aid) in {0xf, 0x3, 0xc}]
