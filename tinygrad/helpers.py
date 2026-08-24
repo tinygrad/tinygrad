@@ -398,12 +398,10 @@ cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Lib
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
 VERSION = 22
-_db_connection = None
-_db_lock = threading.RLock()
-def _db_locked(func):
-  @functools.wraps(func)
+_db_connection, _db_lock = None, threading.RLock()
+def _db_locked(f):
   def wrapper(*args, **kwargs):
-    with _db_lock: return func(*args, **kwargs)
+    with _db_lock: return f(*args, **kwargs)
   return wrapper
 
 @_db_locked
