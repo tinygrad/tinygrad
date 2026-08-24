@@ -844,7 +844,7 @@ class X86Renderer(ISARenderer):
     if x.op is Ops.BUFFER: x = x.replace(dtype=dtypes.uint64)
     is_xmm = x.tag[0].size == 16
     op = X86Ops.VMOVUPSm if is_xmm else X86Ops.MOVm
-    return [UOp(Ops.INS, fold_address(self.spill_pointer().index(disp)) + (x,), op, x.tag)]
+    return [UOp(Ops.INS, src=fold_address(self.spill_pointer().index(disp)) + (x,), op, x.tag)]
 
   def fill(self, spill_offset:int, sub_idx:int|None, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
     is_xmm = regs[0].size == 16
