@@ -78,16 +78,18 @@ VGPRS = tuple(Register(f"v{i}", i, size=4) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i, size=4) for i in range(106))
 # reserve VGPRs ahead of time to be excluded from normal allocation to
 # prevent retroactive lifetime semantics and eviction cloberring when
-# spilling SGPRS to lanes. 5 vgprs x wave 32 = 160 SGPRs
-SPILL_VGPRS = VGPRS[-5:]
+# spilling SGPRS to lanes. 8 vgprs x wave 32 = 256 SGPRs
+SPILL_VGPRS = VGPRS[-8:]
+SCRATCH_BASE = VGPRS[1]
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
-GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:-5])
+GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[2:-8])
 VCC, EXEC = Register("vcc", 0, size=4), Register("exec_lo", 0, size=4)
 FLAT_SCRATCH_LO, FLAT_SCRATCH_HI = Register("flat_scratch_lo", 0, size=4), Register("flat_scratch_hi", 0, size=4)
 
 kernarg_ptr = def_reg(dtypes.uint64, KERNARG_PTR)
 execop, vccop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, VCC)
 flat_scratch_ptr = (def_reg(dtypes.uint32, FLAT_SCRATCH_LO), def_reg(dtypes.uint32, FLAT_SCRATCH_HI))
+scratch_base = def_reg(dtypes.uint32, SCRATCH_BASE)
 
 # ---- register movement helpers ----
 def packb16(lo:UOp, hi:UOp):
@@ -441,7 +443,6 @@ isel_matcher = pm_alu_fusion + PatternMatcher([
   (UPat.var("idx").store(UPat.var("val"), allow_any_len=True).named("x"), lambda ctx,x,idx,val:
     store(ctx,x,idx,val) if idx.addrspace is not AddrSpace.REG else
     x.replace(tag=(ctx.ren.vreg(GP_VGPRS, width=(idx.dtype.itemsize+3)//4),)) if x.tag is None else None),
-  # THIS IS VERY BAD, breaks SSA... do we need phi nodes? even if we route load references to previous stores multiple stores breaks...
   (UPat.var("idx").load(name="x", allow_any_len=True), lambda ctx,x,idx:
     load(ctx,x,idx) if idx.addrspace is not AddrSpace.REG else None),
   # --- other ---
@@ -488,8 +489,8 @@ def encode(ctx, x:UOp):
 
   match (group := x.arg.func):
     case RDNA3Ops.SCRATCH:
-      fields = dict(offset=encfield(x.src[0]))
-      if rdef(x) is None: fields["data"] = encfield(x.src[1])
+      fields = dict(addr=encfield(x.src[0]), offset=encfield(x.src[1]), sve=1)
+      if rdef(x) is None: fields["data"] = encfield(x.src[2])
       else: fields["vdst"] = encfield(x)
     case RDNA3Ops.GLOBAL:
       fields = dict(addr=encfield(x.src[0]))
@@ -572,8 +573,8 @@ class RDNA3Renderer(ISARenderer):
     regs = rdefs(x)
     if regs[0].name[0] == 'v':
       batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
-      return [UOp(Ops.INS, arg=getattr(RDNA3Ops, f"scratch_store_b{len(b)*32}"), \
-        src=(const(spill_offset+j*16), def_reg(x.dtype, b))) for j,b in enumerate(batches)]
+      return [UOp(Ops.INS, x.dtype, arg=getattr(RDNA3Ops, f"scratch_store_b{len(b)*32}"), \
+        src=(scratch_base, const(spill_offset+j*16), def_reg(x.dtype, b))) for j,b in enumerate(batches)]
     else:
       vgpr,lane = spill_offset
       return [UOp(Ops.INS, arg=RDNA3Ops.v_writelane_b32, src=(def_reg(x.dtype, r), const(lane+i)), tag=vgpr) for i,r in enumerate(rdefs(x))]
@@ -582,7 +583,7 @@ class RDNA3Renderer(ISARenderer):
     if regs[0].name[0] == 'v':
       batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
       ops = [UOp(Ops.INS, x.dtype, arg=getattr(RDNA3Ops, f"scratch_load_b{len(b)*32}"), \
-        src=(const(spill_offset+j*16),), tag=b) for j,b in enumerate(batches)]
+        src=(scratch_base, const(spill_offset+j*16),), tag=b) for j,b in enumerate(batches)]
       return UOp.group(*ops, tag=regs), ops
     else:
       vgpr,lane = spill_offset
