@@ -301,9 +301,6 @@ multi_pm = PatternMatcher([
 
   # resolve TUPLE+GETTUPLE (needed in multi)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
-  # GETTUPLE on UNSHARD: passthrough UNSHARD (e.g. when FUNCTION was replaced by UNSHARD(GETTUPLE(...)))
-  (UPat(Ops.GETTUPLE, src=(UPat(Ops.UNSHARD, name="multi"),), name="g"),
-    lambda g, multi: multi.src[0].gettuple(g.arg).unshard(multi.arg, multi.src[1:]) if multi.src[0].op in {Ops.FUNCTION, Ops.TUPLE} else multi),
   # rewrite into FUNCTION calls explicitly for UNSHARD (value-producing)
   (UPat(Ops.FUNCTION, name="call"), rewrite_into_function),
   (UPat((Ops.CALL, Ops.FUNCTION, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
