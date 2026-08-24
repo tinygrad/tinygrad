@@ -6,7 +6,7 @@ from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, AxisType, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
-from tinygrad.uop.weak import pm_lower_index_dtype
+from tinygrad.uop.weak import pm_lower_weak
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
 from test.helpers import eval_uop, to_uops_list
@@ -76,16 +76,18 @@ class TestLowerIndexDtype(unittest.TestCase):
     buf = UOp.param(0, dtypes.float, (2**31+64,))
     i = UOp.variable("i", 0, 2**28)
     shrink = UOp(Ops.SHRINK, src=(buf, (i*24).valid(i < 2**28), UOp.const(4)))
-    lowered = graph_rewrite(shrink.sink(), pm_lower_index_dtype)
-    self.assertTrue(all(u.dtype != dtypes.weakint for u in lowered.backward_slice_with_self), "lowering must resolve all weakint")
+    lowered = graph_rewrite(shrink.sink(), pm_lower_weak)
+    self.assertTrue(all(u.op is Ops.CONST for u in lowered.backward_slice_with_self if u.dtype in dtypes.weaks),
+                    "lowering must resolve every weak width, except a typed literal's value half")
     sh = next(u for u in lowered.backward_slice_with_self if u.op is Ops.SHRINK)
     self.assertEqual(sh.src[1].dtype, dtypes.long)
 
   def test_reg_buffer_size_lowers(self):
     reg = UOp.placeholder((4,), dtypes.float, 0, addrspace=AddrSpace.REG)
     self.assertEqual(reg.src[0].dtype, dtypes.weakint)
-    lowered = graph_rewrite(reg.sink(), pm_lower_index_dtype)
-    self.assertTrue(all(u.dtype != dtypes.weakint for u in lowered.backward_slice_with_self), "lowering must resolve all weakint")
+    lowered = graph_rewrite(reg.sink(), pm_lower_weak)
+    self.assertTrue(all(u.op is Ops.CONST for u in lowered.backward_slice_with_self if u.dtype in dtypes.weaks),
+                    "lowering must resolve every weak width, except a typed literal's value half")
     self.assertEqual(next(u for u in lowered.backward_slice_with_self if u.op is Ops.BUFFER).src[0].dtype, dtypes.int)
 
 class TestSafeCast(unittest.TestCase):
