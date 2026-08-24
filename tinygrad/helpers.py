@@ -398,23 +398,34 @@ cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Lib
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
 VERSION = 22
-_db_connection = threading.local()
+_db_connection = None
+_db_lock = threading.RLock()
+def _db_locked(func):
+  @functools.wraps(func)
+  def wrapper(*args, **kwargs):
+    with _db_lock: return func(*args, **kwargs)
+  return wrapper
+
+@_db_locked
 def db_connection():
-  if (conn:=getattr(_db_connection, "conn", None)) is None:
+  global _db_connection
+  if _db_connection is None:
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
-    conn = _db_connection.conn = sqlite3.connect(CACHEDB, timeout=60, isolation_level="IMMEDIATE")
+    _db_connection = sqlite3.connect(CACHEDB, timeout=60, isolation_level="IMMEDIATE", check_same_thread=False)
     # another connection has set it already or is in the process of setting it
     # that connection will lock the database
-    with contextlib.suppress(sqlite3.OperationalError): conn.execute("PRAGMA journal_mode=WAL").fetchone()
-    conn.execute("PRAGMA synchronous=NORMAL")
-    if DEBUG >= 8: conn.set_trace_callback(print)
-  return conn
+    with contextlib.suppress(sqlite3.OperationalError): _db_connection.execute("PRAGMA journal_mode=WAL").fetchone()
+    _db_connection.execute("PRAGMA synchronous=NORMAL")
+    if DEBUG >= 8: _db_connection.set_trace_callback(print)
+  return _db_connection
 
+@_db_locked
 def diskcache_clear():
   cur = db_connection().cursor()
   drop_tables = cur.execute("SELECT 'DROP TABLE IF EXISTS ' || quote(name) || ';' FROM sqlite_master WHERE type = 'table';").fetchall()
   cur.executescript("\n".join([s[0] for s in drop_tables] + ["VACUUM;"]))
 
+@_db_locked
 def diskcache_get(table:str, key:dict|str|int) -> Any:
   if CACHELEVEL < 1: return None
   if isinstance(key, (str,int)): key = {"key": key}
@@ -427,6 +438,7 @@ def diskcache_get(table:str, key:dict|str|int) -> Any:
   return None
 
 _db_tables: set[str] = set()
+@_db_locked
 def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
   if CACHELEVEL < 1: return val
   if isinstance(key, (str,int)): key = {"key": key}
