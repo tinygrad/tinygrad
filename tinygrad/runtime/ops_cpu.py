@@ -61,20 +61,20 @@ class CPUWorker: ring:Buffer; put:Buffer; sem:Buffer; sys:Buffer; done:Buffer; t
 def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
   progs = [get_runtime(d, prog) if isinstance(prog, UOp) else cast(CPUDevice, Device[d]).prgs[prog] for d in devs]
   addrs = tuple(UOp.const(p.addr, dtypes.uint64) for p in progs)
-  words = ((addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, dtypes.uint64, addrs)),) + args
-  return UOp(Ops.INS, dtypes.void, words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)), arg="cmd")
+  words = ((addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, src=addrs)),) + args
+  return UOp(Ops.INS, src=words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)), arg="cmd")
 
 def cpu_exec(ctx:tuple[str, ...], call:UOp, prg:UOp) -> UOp:
   args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
   if (core:=prg.arg.runtimevars.get('core_id')) is None: return cpu_cmd(ctx, prg, *args)
 
   la = [cpu_cmd(ctx,prg,*args[:(cid:=(len(prg.arg.globals)+core))],UOp.const(t, dtypes.uint64),*args[cid+1:]) for t in range(prg.arg.global_size[0])]
-  return UOp(Ops.LINEAR, dtypes.void, tuple(la))
+  return UOp(Ops.LINEAR, src=tuple(la))
 
 pm_cpu_opsel = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), cpu_exec),
 
-  (UPat(Ops.INS, arg="barrier"), lambda: UOp(Ops.NOOP, dtypes.void, ())),
+  (UPat(Ops.INS, arg="barrier"), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.INS, arg="wait", src=(UPat(name="dst"), UPat(name="val"))),
    lambda ctx, dst, val: cpu_cmd(ctx, wait_prog, dst.getaddr(ctx), val.cast(dtypes.uint64))),
   (UPat(Ops.INS, arg="store", src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))),

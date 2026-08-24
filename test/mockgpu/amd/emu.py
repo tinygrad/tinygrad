@@ -69,7 +69,7 @@ from tinygrad.runtime.autogen.amd.cdna import ins as irc
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp, Inst
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
-from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits
+from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits, _ftz_f32
 
 MASK32 = 0xFFFFFFFF
 
@@ -96,7 +96,8 @@ def _apply_src_mods(val: UOp, mod_bit: int, abs_bits: int, neg_bits: int, bits: 
   ut, ft, mask = _SRC_MOD_TYPES[bits]
   fv = val.cast(ut).bitcast(ft) if bits == 16 else val.bitcast(ft) if val.dtype == ut else val
   if abs_bits & (1 << mod_bit): fv = (fv.bitcast(ut) & UOp.const(mask, ut)).bitcast(ft)
-  if neg_bits & (1 << mod_bit): fv = fv.neg()
+  # neg modifier is a pure sign-bit toggle (preserves NaN payloads), not an arithmetic negate
+  if neg_bits & (1 << mod_bit): fv = (fv.bitcast(ut) ^ UOp.const((mask + 1) & (1 << (bits - 1)), ut)).bitcast(ft)
   return fv.bitcast(ut).cast(dtypes.uint32) if bits == 16 else fv.bitcast(ut)
 
 # Map VOPD ops to VOP2/VOP1 ops for pcode lookup (both RDNA3 and RDNA4 share these targets)
@@ -157,6 +158,23 @@ _pcode_fixes = {
   'V_DIV_FIXUP_F64': ('D0.f64 = sign_out ? -abs(S0.f64) : abs(S0.f64)',
     'D0.f64 = isNAN(S0.f64) ? (sign_out ? -INF : +INF) : (sign_out ? -abs(S0.f64) : abs(S0.f64))'),
   'V_TRIG_PREOP_F64': ("result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff)", "result = trig_preop_result(shift)"),
+  # exponent() returns 0 for denormals; frexp_exp handles them per hardware (f32: 0, f64: normalized)
+  'V_FREXP_EXP_I32_F32': ('D0.i32 = exponent(S0.f32) - 127 + 1', 'D0.i32 = frexp_exp(S0.f32)'),
+  'V_FREXP_EXP_I32_F64': ('D0.i32 = exponent(S0.f64) - 1023 + 1', 'D0.i32 = frexp_exp(S0.f64)'),
+  # route through ldexp() which propagates 0/inf/NaN inputs instead of computing val * 2**exp (0*inf = NaN on the host)
+  'V_LDEXP_F32': ('D0.f32 = S0.f32 * 2.0F ** S1.i32', 'D0.f32 = ldexp(S0.f32, S1.i32)'),
+  'V_LDEXP_F64': ('D0.f64 = S0.f64 * 2.0 ** S1.i32', 'D0.f64 = ldexp(S0.f64, S1.i32)'),
+  # hardware sets SCC only on STRICT inequality for S_MAX (equal operands -> SCC=0)
+  'S_MAX_I32': ('SCC = S0.i32 >= S1.i32', 'SCC = S0.i32 > S1.i32'),
+  'S_MAX_U32': ('SCC = S0.u32 >= S1.u32', 'SCC = S0.u32 > S1.u32'),
+  # hardware computes abs on the WRAPPED 32-bit difference; the i32 pcode overflows into UB on the host (e.g. |45 - -2147483647|),
+  # so compute in u32 with a UB-free two's-complement negate
+  'S_ABSDIFF_I32': ('D0.i32 = S0.i32 - S1.i32;\nif D0.i32 < 0 then\nD0.i32 = -D0.i32\nendif',
+                    'D0.u32 = S0.u32 - S1.u32;\nif D0.i32 < 0 then\nD0.u32 = -D0.u32\nendif'),
+  # CLASS denormal test uses abs(x) > 0.0, which the host's DAZ flushes; use bit-domain test instead
+  'V_CMP_CLASS_F32': ('64\'F(abs(S0.f32)) > 0.0', '(64\'U(S0.u32 & 0x7FFFFFFF) != 0)'),
+  'V_CMP_CLASS_F16': ('64\'F(abs(S0.f16)) > 0.0', '(64\'U(S0.u32 & 0x7FFF) != 0)'),
+  'V_CMP_CLASS_F64': ('64\'F(abs(S0.f64)) > 0.0', '(64\'U(S0.u64 & 0x7FFFFFFFFFFFFFFF) != 0)'),
 }
 
 def _get_pcode_dict(op) -> dict:
@@ -274,14 +292,24 @@ def _int_clamp(op_name: str, srcs: dict) -> UOp | None:
   if not isinstance(s0, UOp) or not isinstance(s1, UOp): return None
   is_signed, is_16bit = '_I' in op_name and '_U' not in op_name, '16' in op_name
   if any(p in op_name for p in ('_NC_U', '_MAD_U', '_NC_I', '_MAD_I')):
-    if is_16bit and is_signed: return None  # skip 16-bit signed ops due to codegen issues
-    narrow_dt = dtypes.uint16 if is_16bit else (dtypes.int32 if is_signed else dtypes.uint32)
-    wide_dt = dtypes.int32 if is_16bit else dtypes.int64
-    narrow_max, narrow_min = (0xFFFF, 0) if is_16bit else ((0x7FFFFFFF, -0x80000000) if is_signed else (0xFFFFFFFF, 0))
+    op_bits = 16 if '16' in op_name else (24 if '24' in op_name else 32)
+    # D0 range: 16 for the *_U16/*_I16 result-narrow ops, else 32 (mad*32* D0 is u32/i32; mul operands have op-fmt width)
+    narrow_dt = dtypes.uint16 if is_16bit and '32' not in op_name else (dtypes.int32 if is_signed else dtypes.uint32)
+    wide_dt = dtypes.int64
+    narrow_max, narrow_min = ((0xFFFF, 0) if narrow_dt == dtypes.uint16 else
+                              ((0x7FFFFFFF, -0x80000000) if is_signed else (0xFFFFFFFF, 0)))
+    def to_mulin(x: UOp) -> UOp:  # mul-source: extract the op-fmt-width suboperand with sext for signed
+      mask = (1 << op_bits) - 1
+      if op_bits == 32: return x.bitcast(narrow_dt) if x.dtype.itemsize == 4 else x.cast(narrow_dt)
+      m = (x & _c(mask)).cast(dtypes.int)
+      if not is_signed: return m.cast(wide_dt)
+      sign = (m >> _c(op_bits - 1)) & _c(1)
+      return sign.ne(_c(0)).where(m - _c(1 << op_bits), m).cast(wide_dt)
     def to_wide(x: UOp) -> UOp: return (x.bitcast(narrow_dt) if x.dtype.itemsize == narrow_dt.itemsize else x.cast(narrow_dt)).cast(wide_dt)
-    full = (to_wide(s0) * to_wide(s1) + to_wide(s2)) if 'MAD' in op_name and isinstance(s2, UOp) else \
-           (to_wide(s1) - to_wide(s0)) if 'SUBREV' in op_name else \
-           (to_wide(s0) - to_wide(s1)) if 'SUB' in op_name else (to_wide(s0) + to_wide(s1))
+    if isinstance(s2, UOp) and 'MAD' in op_name: full = to_mulin(s0) * to_mulin(s1) + to_wide(s2)
+    elif 'SUBREV' in op_name: full = to_wide(s1) - to_wide(s0)
+    elif 'SUB' in op_name: full = to_wide(s0) - to_wide(s1)
+    else: full = to_wide(s0) + to_wide(s1)
     return full.clamp(narrow_min, narrow_max).cast(narrow_dt)
   # V_SUB_U32 / V_ADD_U32 with clamp: unsigned saturate (SUB underflow->0, ADD overflow->0xFFFFFFFF)
   if any(p in op_name for p in ('_SUB_U32', '_ADD_U32', '_SUB_U16', '_ADD_U16')):
@@ -562,6 +590,10 @@ class _Ctx:
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
     if 'VCC' not in srcs: srcs['VCC'] = self.rmask(_c(vcc_reg))
     srcs.update(self.base_srcs(exec_mask, lane), VDST=vdst_reg, MAX_FLOAT_F32=UOp.const(3.4028234663852886e38, dtypes.float32))
+    # f32 min/max/median ops flush denormal inputs to signed zero (select-style ops: results propagate inputs bitwise)
+    # (RDNA4 calls them _NUM_: V_MIN_NUM_F32 etc.)
+    if any(p in op.name for p in ('MIN_F32', 'MAX_F32', 'MIN3_F32', 'MAX3_F32', 'MED3_F32', 'MIN_NUM_F32', 'MAX_NUM_F32')):
+      srcs = {k: _ftz_f32(v) if k in ('S0', 'S1', 'S2') and isinstance(v, UOp) else v for k, v in srcs.items()}
     _, assigns = parse_pcode(pcode, srcs)
 
     # For integer ops with clamp, pre-compute the saturated result; floats clamp to [0,1] at write time
@@ -586,8 +618,8 @@ class _Ctx:
           continue
         if int_saturate is not None: val = int_saturate
         elif clmp and val.dtype in (dtypes.float32, dtypes.half, dtypes.float64):
-          clamped = val.maximum(UOp.const(0.0, val.dtype)).minimum(UOp.const(1.0, val.dtype))
-          val = _FUNCS['isNAN'](val).where(UOp.const(0.0, val.dtype), clamped)
+          # hardware clamp: -0 becomes +0 and NaN becomes 0 (hardware verified)
+          val = (val > UOp.const(0.0, val.dtype)).where(val.minimum(UOp.const(1.0, val.dtype)), UOp.const(0.0, val.dtype))
         if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
           lo, hi = _split64(val)
           lane_stores.extend([self.wvgpr_dyn(vdst_reg, lane, lo, exec_mask), self.wvgpr_dyn(vdst_reg + _c(1), lane, hi, exec_mask)])
@@ -613,8 +645,9 @@ class _Ctx:
     stores: list[UOp] = []
     for mask_val, reg in [(vcc_val, vcc_reg), (exec_val, EXEC_LO.offset)]:
       if mask_val is None: continue
+      # hardware zeroes the inactive lane bits of per-lane VCC writes (VCC = mask & EXEC), it never preserves them
       stores.extend(self.wmask(_c(reg), self.unroll_lanes(lambda l, v=mask_val: (_to_u32(v.substitute({lane: l})) & _c(1)).cast(dtypes.uint32),
-                                                          exec_mask, apply_exec=False)))
+                                                          exec_mask, apply_exec=reg != EXEC_LO.offset)))
     if slice_stores:  # merge D0[hi:lo] slices into one read-modify-write of the destination VGPR
       result = self.rvgpr_dyn(vdst_reg, lane)
       for lo_bit, width, val_bits in slice_stores: result = _set_bits(result, val_bits, width, lo_bit)
@@ -986,6 +1019,9 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOPC_DPP16|ir3.VOP3|ir4.VOPC|ir4.VOPC_DPP16
         s1 = _apply_src_mods(s1, 0, 1 if _iattr(inst, 'src1_abs') else 0, 1 if _iattr(inst, 'src1_neg') else 0, bits['s1'])
       s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, bits['s0'])
       s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, bits['s1'])
+    elif abs_bits or neg_bits:  # int compares also honor abs/neg, as bit-level sign clear/flip (not integer abs/negate)
+      s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, bits['s0'])
+      s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, bits['s1'])
     for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1, 'laneId': lc, 'D0': UOp.const(0, dtypes.uint64)})[1]:
       if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
     return _c(0)
@@ -994,12 +1030,9 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOPC_DPP16|ir3.VOP3|ir4.VOPC|ir4.VOPC_DPP16
   # Both VOPC and VOP3 clear inactive lane bits (hardware verified)
   new_result = new_bits & exec_mask
 
-  # CMPX e32: writes EXEC only; CMPX e64: writes both EXEC and SDST; non-CMPX: writes dst only
-  if is_cmpx:
-    stores = ctx.wmask(_c(EXEC_LO.offset), new_result)
-    if not is_vopc: stores.extend(ctx.wmask(dst_off, new_result))
-  else:
-    stores = ctx.wmask(dst_off, new_result) if not is_vopc else ctx.wmask(_c(VCC_LO.offset), new_result)
+  # CMPX writes EXEC only (hardware verified: e64 CMPX does not write SDST); non-CMPX writes SDST/VCC
+  if is_cmpx: stores = ctx.wmask(_c(EXEC_LO.offset), new_result)
+  else: stores = ctx.wmask(dst_off, new_result) if not is_vopc else ctx.wmask(_c(VCC_LO.offset), new_result)
   return UOp.sink(*stores, *ctx.inc_pc())
 
 

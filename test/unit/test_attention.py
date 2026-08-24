@@ -5,12 +5,23 @@ from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
 )
+from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, amd_custom_kernels_supported
+from tinygrad.llm.gguf import ggml_data_to_tensor
 
 def apply_rope(x:Tensor, start_pos:int):
   B, H, T, Hd = x.shape
   precompute_freqs_cis.cache_clear()
   freqs_cis = precompute_freqs_cis(Hd, start_pos+T)[start_pos:start_pos+T]
   return apply_rope_new(x, freqs_cis)
+
+class TestLinear(unittest.TestCase):
+  def test_recovers_packed_ggml_weight(self):
+    for ggml_type,packed_size,words in ((13, 176, 44), (14, 210, 210), (23, 136, 34)):
+      packed = Tensor.empty(packed_size+4, dtype=dtypes.uint8, device="CPU")[4:]
+      decoded = ggml_data_to_tensor(packed, 256, ggml_type).reshape(1, 256)
+      linear = Linear(256, 1, bias=False)
+      linear.set_quantized(decoded)
+      self.assertEqual((linear.ggml_type, linear.weight.numel()), (ggml_type, words))
 
 class TestAttention(unittest.TestCase):
   def test_apply_rope(self):
@@ -41,6 +52,23 @@ class TestAttention(unittest.TestCase):
     np.testing.assert_allclose(block.cache_kv[0, :, :, :seqlen, :].numpy(), expected.numpy(), rtol=1e-5, atol=1e-5)
 
 class TestGatedDeltaNetBlock(unittest.TestCase):
+  def test_gated_delta_rectangular_state_and_row_decay(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    rng = np.random.default_rng(42)
+    q, k = (rng.normal(size=(1, 1, 3, 32)).astype(np.float32) for _ in range(2))
+    v, beta = rng.normal(size=(1, 1, 3, 4)).astype(np.float32), rng.uniform(size=(1, 1, 3)).astype(np.float32)
+    alpha, initial = rng.uniform(0.8, 1, size=(1, 1, 3, 4)).astype(np.float32), rng.normal(size=(1, 1, 4, 32)).astype(np.float32)
+    expected_state, expected_out = initial.copy(), np.empty_like(v)
+    for t in range(3):
+      previous, av = expected_state.copy(), alpha[:, :, t, :, None]
+      delta = (v[:, :, t] - (previous*k[:, :, t, None]).sum(-1)*alpha[:, :, t]) * beta[:, :, t, None]
+      expected_state = previous*av + delta[..., None]*k[:, :, t, None, :]
+      expected_out[:, :, t] = (previous*q[:, :, t, None]).sum(-1)*alpha[:, :, t] + delta*(q[:, :, t]*k[:, :, t]).sum(-1)
+    state = Tensor(initial).contiguous().realize()
+    out = gated_delta_prefill(Tensor(q), Tensor(k), Tensor(v), Tensor(beta), Tensor(alpha), state).realize()
+    np.testing.assert_allclose(out.numpy(), expected_out, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(state.numpy(), expected_state, rtol=1e-4, atol=1e-4)
+
   def _tensor_linspace(self, start:float, stop:float, shape:tuple[int, ...]) -> Tensor:
     return Tensor.linspace(start, stop, int(np.prod(shape)), dtype=dtypes.float32).reshape(*shape)
 
