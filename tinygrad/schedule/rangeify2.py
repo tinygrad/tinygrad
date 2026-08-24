@@ -93,13 +93,15 @@ pm_prepare_graph = PatternMatcher([
   # remove movement ops from SINK/AFTER. TODO: should be generic
   (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src if u.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u) for u in s.src[1:] if u.op is not Ops.NOOP))),
+
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if 0 in x.shape and 0 not in reduce.shape else None),
+  # handle size 0
+  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and 0 in x.shape else None),
+
   # STORE to () is reshaped to (1,)
   (UPat(Ops.STORE, name="s"), lambda s: s.src[0].reshape((1,)).store(s.src[1].reshape((1,))) if s.shape == () else None),
-  # size 0 STORE is NOOP
-  (UPat(Ops.STORE, name="s"), lambda s: UOp(Ops.NOOP) if 0 in s.shape else None),
   # fix store hazard (dest is in used in src) by adding contiguous: TestAssign.test_post_flipped_assignment
   (UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
 ])
@@ -291,7 +293,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
 
   # prepare
-  tsink = graph_rewrite(tsink, pm_prepare_graph, bottom_up=True, name="prepare graph")
+  tsink = graph_rewrite(tsink, pm_prepare_graph, ctx=itertools.count(0), bottom_up=True, name="prepare graph")
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
 
   # add safe STAGEs to never duplicate compute
