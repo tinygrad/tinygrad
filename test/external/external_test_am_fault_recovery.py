@@ -17,8 +17,10 @@ def _run(code:str, timeout:float=15.0) -> subprocess.CompletedProcess:
 
 def _run_asm(asm_src:str) -> subprocess.CompletedProcess:
   return _run('from tinygrad.device import Device, TinyELF; from tinygrad.helpers import Target; '
-              'from tinygrad.runtime.support.compiler_amd import HIPCompiler; dev = Device["AMD"]; '
-              f'dev.runtime(TinyELF(HIPCompiler(dev.arch).compile("""{asm_src}"""), "test", Target("AMD", arch=dev.arch), ()))('
+              'from tinygrad.runtime.support.compiler_amd import HIPCompiler; from tinygrad.uop.ops import ParamArg; from tinygrad import dtypes; '
+              'dev = Device["AMD"]; '
+              f'dev.runtime(TinyELF(HIPCompiler(dev.arch).compile("""{asm_src}"""), "test", Target("AMD", arch=dev.arch), '
+              '((ParamArg(0, dtypes.uint8), ()),)))('
               'dev.allocator.alloc(64), global_size=(1,1,1), local_size=(1,1,1), wait=True)')
 
 def _verify_recovery() -> subprocess.CompletedProcess:

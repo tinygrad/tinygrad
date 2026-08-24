@@ -36,8 +36,10 @@ def _run_emu(instructions: list, out_reg: int = 2) -> list[int]:
   return list(out_buf)
 
 def _run_hw(instructions: list, out_reg: int = 2) -> list[int]:
+  from tinygrad import dtypes
   from tinygrad.device import Device, TinyELF
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
+  from tinygrad.uop.ops import ParamArg
 
   dev = Device['AMD']
   if not dev.arch.startswith('gfx12'): raise unittest.SkipTest('requires RDNA4 hardware')
@@ -84,7 +86,7 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
   lib = compiler.compile(asm_src)
-  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
+  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ((ParamArg(0, dtypes.uint8), ()),)))
   out_gpu = dev.allocator.alloc(LANES * 4)
   prg(out_gpu, global_size=(1, 1, 1), local_size=(LANES, 1, 1), wait=True)
   out = bytearray(LANES * 4)
