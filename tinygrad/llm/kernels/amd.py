@@ -44,7 +44,7 @@ def _reg(shape:tuple[int, ...], slot:int, value:float, dep:UOp|None=None) -> UOp
   ret = UOp.placeholder(shape, dtypes.float, slot=slot, addrspace=AddrSpace.REG)
   return ret.after((ret if dep is None else ret.after(dep)).store(ret.const_like(value)))
 
-# ******** quant linear: q8-activation kernels over packed ggml weights (Q5_K/Q6_K/IQ4_XS) ********
+# ******** quant linear: q8-activation kernels over packed ggml weights (Q4_K/Q5_K/Q6_K/IQ4_XS) ********
 
 class Linear(nn.Linear):
   ggml_type:int|None = None
