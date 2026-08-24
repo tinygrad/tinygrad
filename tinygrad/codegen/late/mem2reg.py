@@ -18,7 +18,7 @@ class Mem2regContext:
     self.ren = ren
     self.current: dict[UOp, UOp] = {}
     self.nl: dict[tuple[UOp, int], int] = {}
-    self.phi_copies: dict[VRegister, VRegister] = {}
+    self.phi_copies: dict[VRegister, list[VRegister]] = {}
 
     lane_ctr = itertools.count()
     rng_stack: list[UOp] = []
@@ -48,7 +48,8 @@ class Mem2regContext:
                 vr = ren.vreg(lin.cons, width=lin.width, alignment=lin.alignment, phi=(lin,rdef(carry)))
                 phi = UOp.placeholder((1,), ptr[0].dtype, next(lane_ctr), AddrSpace.REG).replace(tag=(vr,))
                 self.phis[(ptr, n)] = phi
-                self.phi_copies[lin] = self.phi_copies[rdef(carry)] = vr
+                self.phi_copies.setdefault(lin, []).append(vr)
+                self.phi_copies.setdefault(rdef(carry), []).append(vr)
 
   def try_phi(self, idx:UOp, x:UOp) -> UOp|None:
     ptr = bptr(idx)
@@ -56,11 +57,16 @@ class Mem2regContext:
     phi = self.phis.get((ptr, self.nl[ptr]), None)
     return (phi, [phi]) if phi is not None else None
 
-# 64 bit phis/BUFFER elements?
+  def try_merge_edge(self, x:UOp) -> tuple[UOp, list[UOp]]|None:
+    if (phis := self.phi_copies.get(rdef(x), None)):
+      copies = []
+      for p in phis: copies.extend(self.ren.vcopy(x.src[1], p)[1])
+      return x, [x] + copies
+    return None
+
 pm_insert_phis = PatternMatcher([
   (UPat.var("idx").load(name="x"), lambda ctx,idx,x: ctx.try_phi(idx, x)),
-  (UPat(Ops.STORE, name="x"), lambda ctx,x: (x, [x] + ctx.ren.vcopy(x.src[1], ctx.phi_copies[rdef(x)])[1])
-    if rdef(x) in ctx.phi_copies else None),
+  (UPat(Ops.STORE, name="x"), lambda ctx,x: ctx.try_merge_edge(x)),
 ])
 
 # REG store copy/coalesce is handled by regalloc PHI logic

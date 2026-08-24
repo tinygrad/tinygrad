@@ -25,7 +25,9 @@ class LinearScanRegallocContext:
         lr.setdefault(v, []).insert(0, len(self.uops) - i - 1)
       for v in defs: # if lifetime of v ends during range, pick latest range and add to lr
         if (n := max((lr[rv][-1] for rv in range_vars if lr[rv][0] <= lr[v][-1] < lr[rv][-1]), default=None)): lr[v].append(n)
-      if u.op is Ops.RANGE: range_vars.append(rdef(u))
+      if u.op is Ops.RANGE:
+        # NOTE: cant derive range lifetime like this because of boundless LOOP
+        range_vars.append(rdef(u))
 
     self.spills: dict[Register, any] = {} # mapping from virtual to generic stack placement information (arch specific)
     self.reals: dict[int, dict[VRegister, tuple[Register,...]]] = {} # mapping from virtual to real at each program point
