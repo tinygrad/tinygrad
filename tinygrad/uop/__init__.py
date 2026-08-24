@@ -135,4 +135,3 @@ class GroupOp:
   Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}
 
   All = set(Ops)
-
