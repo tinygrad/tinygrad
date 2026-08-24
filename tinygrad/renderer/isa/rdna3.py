@@ -244,6 +244,7 @@ def _mulhi(a:UOp, b:UOp, signed:bool) -> UOp:
 def _sub(x:UOp, y:UOp) -> UOp: return UOp(Ops.SUB, x.dtype, src=(x, y))
 
 # NOTE: can this be expanded at a higher level ex. codegen, reusable and less verbose
+# TODO: match LLVM, this is bad
 def idiv(ctx, x:UOp):
   signed = not dtypes.is_unsigned(x.dtype)
   dt = dtypes.uint32 if x.dtype.itemsize <= 4 else dtypes.uint64
@@ -556,10 +557,9 @@ class RDNA3Renderer(ISARenderer):
   def asm_str(self, uops:list[UOp], function_name:str) -> str: return ""
 
   # returns stack slot offset and new stack ptr
-  def assign_spill_slot(self, v:VRegister, vdef:UOp, pos:int|None) -> tuple[int, int]:
+  def assign_spill_slot(self, v:VRegister, vdef:UOp) -> tuple[int, int]:
     if v.cons[0].name[0] == 'v':
-      sz = v.cons[0].size
-      if pos is None: sz *= v.width
+      sz = v.cons[0].size * v.width
       offset = self.spill_size + (sz - self.spill_size % sz)
       return (offset, offset + sz)
     else:
@@ -569,25 +569,32 @@ class RDNA3Renderer(ISARenderer):
       return ((vgpr,lane), self.spill_size)
 
   # use scratch memory space for spilling thread local memory, addressed as:
-  def spill(self, spill_offset:any, x:UOp) -> list[UOp]:
+  def spill(self, spill_offset:any, sub_idx:int|None, x:UOp) -> list[UOp]:
     regs = rdefs(x)
     if regs[0].name[0] == 'v':
+      if sub_idx is not None:
+        return [UOp(Ops.INS, arg=RDNA3Ops.scratch_store_b32, src=(scratch_base, const(spill_offset+sub_idx*4), def_reg(x.dtype, regs[0])))]
       batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
-      return [UOp(Ops.INS, x.dtype, arg=getattr(RDNA3Ops, f"scratch_store_b{len(b)*32}"), \
+      return [UOp(Ops.INS, arg=getattr(RDNA3Ops, f"scratch_store_b{len(b)*32}"), \
         src=(scratch_base, const(spill_offset+j*16), def_reg(x.dtype, b))) for j,b in enumerate(batches)]
     else:
       vgpr,lane = spill_offset
-      return [UOp(Ops.INS, arg=RDNA3Ops.v_writelane_b32, src=(def_reg(x.dtype, r), const(lane+i)), tag=vgpr) for i,r in enumerate(rdefs(x))]
+      return [UOp(Ops.INS, arg=RDNA3Ops.v_writelane_b32, src=(def_reg(x.dtype, r),
+        const(lane+i+(sub_idx or 0))), tag=vgpr) for i,r in enumerate(rdefs(x))]
 
-  def fill(self, spill_offset:any, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
+  def fill(self, spill_offset:any, sub_idx:int|None, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
     if regs[0].name[0] == 'v':
+      if sub_idx is not None:
+        ld = UOp(Ops.INS, x.dtype, arg=RDNA3Ops.scratch_load_b32, src=(scratch_base, const(spill_offset+sub_idx*4)), tag=(regs[0],))
+        return ld, [ld]
       batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
       ops = [UOp(Ops.INS, x.dtype, arg=getattr(RDNA3Ops, f"scratch_load_b{len(b)*32}"), \
         src=(scratch_base, const(spill_offset+j*16),), tag=b) for j,b in enumerate(batches)]
       return UOp.group(*ops, tag=regs), ops
     else:
       vgpr,lane = spill_offset
-      movs = [UOp(Ops.INS, arg=RDNA3Ops.v_readlane_b32, src=(def_reg(x.dtype, vgpr), const(lane+i)), tag=(r,)) for i,r in enumerate(regs)]
+      movs = [UOp(Ops.INS, arg=RDNA3Ops.v_readlane_b32, src=(def_reg(x.dtype, vgpr),
+        const(lane+i+(sub_idx or 0))), tag=(r,)) for i,r in enumerate(regs)]
       return UOp.group(*movs, tag=regs), movs
 
   def vcopy(self, u:UOp, vr:VRegister) -> tuple[UOp, list[UOp]]:

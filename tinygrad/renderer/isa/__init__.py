@@ -23,6 +23,7 @@ class VRegister:
   phi: tuple[VRegister,...]|None = None
   def __repr__(self): return self.name
   def is_sub(self) -> bool: return self.parent is not None
+  def or_parent(self) -> VRegister: return self.parent if self.is_sub() else self
   def sub(self, i:int) -> VRegister:
     assert i < self.width, f"sub-register index out of width range ({i} >= {self.width})"
     return VRegister(f"{self.name}.{i}", self.cons, 1, self.alignment, self, i)
@@ -67,10 +68,10 @@ class ISARenderer(Renderer):
     return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
 
   def is_two_address(self, x:UOp) -> bool: return False
-  def assign_spill_slot(self, v:VRegister, vdef:UOp, pos:int|None) -> tuple[int, int]: raise NotImplementedError("arch specific")
+  def assign_spill_slot(self, v:VRegister, vdef:UOp) -> tuple[int, int]: raise NotImplementedError("arch specific")
   def stack_alloc(self, uops:list[UOp]) -> list[UOp]: return uops
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, x:UOp, regs:tuple[Register,...]) -> list[UOp]: raise NotImplementedError("arch specific")
-  def spill(self, spill_offset:int, x:UOp) -> list[UOp]: raise NotImplementedError("arch specific")
-  def fill(self, spill_offset:int, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
+  def spill(self, spill_offset:int, sub_idx:int|None, x:UOp) -> list[UOp]: raise NotImplementedError("arch specific")
+  def fill(self, spill_offset:int, sub_idx:int|None, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")

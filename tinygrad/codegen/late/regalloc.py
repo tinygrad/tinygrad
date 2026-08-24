@@ -9,7 +9,7 @@ from bisect import bisect_left
 REG_OPS = {Ops.STORE, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.INDEX}
 
 class LinearScanRegallocContext:
-  def vdef(self, v:VRegister) -> UOp: return self.uops[self.live_intervals[v][0]]
+  def vdef(self, v:VRegister) -> UOp: return self.uops[self.live_intervals[v.parent if v.is_sub() else v][0]]
 
   def __init__(self, uops:list[UOp], ren:ISARenderer):
     self.uops, self.ren, self.idx = [u for u in uops if u.op in REG_OPS], ren, itertools.count()
@@ -54,11 +54,11 @@ class LinearScanRegallocContext:
       return block
 
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
-    def fill(v:VRegister, i:int, cons:tuple[Register, ...]|None=None, pos:int|None=None) -> tuple[Register,...]:
+    def fill(v:VRegister, i:int, cons:tuple[Register, ...]|None=None) -> tuple[Register,...]:
       if v not in self.spills:
-        self.spills[v], self.ren.spill_size = self.ren.assign_spill_slot(v, self.vdef(v), pos)
+        self.spills[v], self.ren.spill_size = self.ren.assign_spill_slot(v, self.vdef(v))
       rs = alloc(v, [cons] if cons is not None else None, i)
-      self.insert_before.setdefault(i, []).append((v, (rs[pos],) if pos is not None else rs))
+      self.insert_before.setdefault(i, []).append((v, rs))
       return rs
 
     for i,u in enumerate(self.uops):
@@ -67,10 +67,8 @@ class LinearScanRegallocContext:
         # HACK: cause of later hacks to lower range
         if u.op is Ops.END: continue
         if not isinstance(v:=rdef(s), VRegister): continue
-        vv = v.parent if v.is_sub() else v
-        if vv.phi is not None: phi_use[vv] = i
-        # fill at sub-register level, contiguous constraint only needed for the parent register
-        if vv not in live: live[vv] = fill(vv,i,pos=v.pos)
+        if (vv := v.or_parent()).phi is not None: phi_use[vv] = i
+        if vv not in live: live[vv] = fill(vv,i)
         self.reals.setdefault(i, {})[v] = (live[vv][v.pos],) if v.is_sub() else live[vv]
 
       # allocate defs
@@ -82,9 +80,8 @@ class LinearScanRegallocContext:
           for s in u.src:
             if rdef(s) in live: uses.extend(live.get(rdef(s)))
           cons = ([(uses[0],)] if uses[0] in v.cons else []) + [r for r in v.candidates() if r[0] not in uses]
-        vv = v.parent if v.is_sub() else v
         # parents can be defined by premature subregister op ex. collect then store
-        if vv not in live:
+        if (vv := v.or_parent()) not in live:
           live[vv] = alloc(vv, cons, i+1 if u.op is not Ops.RANGE else i)
         self.reals.setdefault(i, {})[v] = (live[vv][v.pos],) if v.is_sub() else live[v]
 
@@ -111,8 +108,8 @@ class LinearScanRegallocContext:
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i, nsrc, = next(ctx.idx), []
   for j,s in enumerate(x.src):
-    if i in ctx.reals and (v := rdef(ctx.uops[i].src[j])) in ctx.spills:
-      nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v])[0])
+    if i in ctx.reals and isinstance((v := rdef(ctx.uops[i].src[j])), VRegister) and (vv := v.or_parent()) in ctx.spills:
+      nsrc.append(ctx.ren.fill(ctx.spills[vv], v.pos, ctx.vdef(v), ctx.reals[i][v])[0])
     else:
       nsrc.append(s)
 
@@ -123,10 +120,12 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nx = x.replace(src=tuple(nsrc), tag=tuple(ndefs))
 
   for v in rdefs(x):
-    if v in ctx.spills and not (x.op is Ops.BUFFER and v.phi is not None):
-      after.extend(ctx.ren.spill(ctx.spills[v],nx))
+    if not isinstance(v, VRegister): continue
+    vv = v.or_parent()
+    if vv in ctx.spills and not (x.op is Ops.BUFFER and vv.phi is not None):
+      after.extend(ctx.ren.spill(ctx.spills[vv], v.pos, nx))
   for v,rs in ctx.insert_before.get(i, []):
-    before.extend(ctx.ren.fill(ctx.spills[v], ctx.vdef(v),rs)[1])
+    before.extend(ctx.ren.fill(ctx.spills[v], None, ctx.vdef(v), rs)[1])
 
   return nx, before + [nx] + after
 

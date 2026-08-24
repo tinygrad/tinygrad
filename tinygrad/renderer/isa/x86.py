@@ -853,7 +853,7 @@ class X86Renderer(ISARenderer):
     nx = UOp(Ops.INS, dt, fold_address(self.spill_pointer().index(disp)), X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, tag=regs)
     return nx, [nx]
 
-  def assign_spill_slot(self, v:VRegister, vdef:UOp, pos:int|None) -> tuple[int, int]:
+  def assign_spill_slot(self, v:VRegister, vdef:UOp) -> tuple[int, int]:
     sz = 8 if vdef.op is Ops.BUFFER else v.cons[0].size
     offset = self.spill_size + (sz - self.spill_size % sz)
     return (offset, offset + sz)
