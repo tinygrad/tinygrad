@@ -4,8 +4,8 @@ from tinygrad.device import Device, Buffer
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
-from tinygrad.helpers import prod
-from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.helpers import prod, Target
+from tinygrad.renderer.cstyle import CStyleLanguage, ClangRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
 from test.helpers import check_schedule
@@ -50,6 +50,14 @@ class TestRendererFailures(unittest.TestCase):
     sink = UOp(Ops.SINK, src=(gated_alu_store,), arg=KernelInfo())
     ret = _test_uop_result([], sink, local_size=[4, 2, 1])[0]
     np.testing.assert_equal(ret, [0, 0, 0, 0, 0, 1, 1, 1])
+
+class TestClangRendererFailures(unittest.TestCase):
+  def test_bfloat16_uses_portable_storage(self):
+    linear = (Tensor.ones(4, dtype=dtypes.bfloat16) + Tensor.ones(4, dtype=dtypes.bfloat16)).schedule_linear()
+    src = to_program(linear.src[0].src[0], ClangRenderer(Target("CPU", "CLANG", "x86_64,native"))).src[2].arg
+    self.assertNotIn("__bf16", src)
+    self.assertIn("unsigned short", src)
+    self.assertIn("16256u", src)
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "uops are for cstyle")
 class TestCStyleFailures(unittest.TestCase):
