@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, re, ctypes, collections, dataclasses, functools, hashlib, array
+import ctypes, collections, dataclasses, functools, hashlib, array
 from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw, to_mv
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
@@ -146,17 +146,11 @@ class AMDev:
   Version = 0xA0000008
 
   def _disable_aspm(self):
-    # L1 across retimers makes reads oscillate to 0xffffffff; the GPU and the bridges above it power on with it enabled.
-    def clear(rd, wr):
-      cap = rd(0x34, 1) & 0xfc
-      while cap and rd(cap, 1) != 0x10: cap = rd(cap + 1, 1) & 0xfc
-      if cap: wr(cap + 0x10, rd(cap + 0x10, 2) & ~3, 2) # PCIe cap: lnkctl at +0x10
-    clear(self.pci_dev.read_config, self.pci_dev.write_config)
-    if os.path.isdir(f"/sys/bus/pci/devices/{self.devfmt}"): # bridges above (only knowable on native Linux PCI)
-      for bus in re.findall(r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]", os.path.dirname(os.path.realpath(f"/sys/bus/pci/devices/{self.devfmt}"))):
-        fd = os.open(f"/sys/bus/pci/devices/{bus}/config", os.O_RDWR)
-        clear(lambda off, sz: int.from_bytes(os.pread(fd, sz, off), 'little'), lambda off, val, sz: os.pwrite(fd, val.to_bytes(sz, 'little'), off))
-        os.close(fd)
+    # L1 across retimers makes reads oscillate to 0xffffffff; power on defaults it enabled. Clearing the GPU endpoint
+    # alone suffices: L1 only engages when both ends of the link enable it.
+    cap = self.pci_dev.read_config(0x34, 1) & 0xfc
+    while cap and self.pci_dev.read_config(cap, 1) != 0x10: cap = self.pci_dev.read_config(cap + 1, 1) & 0xfc
+    if cap: self.pci_dev.write_config_flush(cap + 0x10, self.pci_dev.read_config(cap + 0x10, 2) & ~3, 2) # PCIe cap lnkctl
 
   def __init__(self, pci_dev:PCIDevice, reset_mode=False):
     self.pci_dev, self.devfmt = pci_dev, pci_dev.pcibus
