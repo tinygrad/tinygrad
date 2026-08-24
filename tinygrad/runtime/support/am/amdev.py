@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, dataclasses, functools, hashlib, array
+import os, re, ctypes, collections, dataclasses, functools, hashlib, array
 from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw, to_mv
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
@@ -145,8 +145,22 @@ class AMMemoryManager(MemoryManager):
 class AMDev:
   Version = 0xA0000008
 
+  def _disable_aspm(self):
+    # L1 across retimers makes reads oscillate to 0xffffffff; the GPU and the bridges above it power on with it enabled.
+    def clear(rd, wr):
+      cap = rd(0x34, 1) & 0xfc
+      while cap and rd(cap, 1) != 0x10: cap = rd(cap + 1, 1) & 0xfc
+      if cap: wr(cap + 0x10, rd(cap + 0x10, 2) & ~3, 2) # PCIe cap: lnkctl at +0x10
+    clear(self.pci_dev.read_config, self.pci_dev.write_config)
+    if os.path.isdir(f"/sys/bus/pci/devices/{self.devfmt}"): # bridges above (only knowable on native Linux PCI)
+      for bus in re.findall(r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]", os.path.dirname(os.path.realpath(f"/sys/bus/pci/devices/{self.devfmt}"))):
+        fd = os.open(f"/sys/bus/pci/devices/{bus}/config", os.O_RDWR)
+        clear(lambda off, sz: int.from_bytes(os.pread(fd, sz, off), 'little'), lambda off, val, sz: os.pwrite(fd, val.to_bytes(sz, 'little'), off))
+        os.close(fd)
+
   def __init__(self, pci_dev:PCIDevice, reset_mode=False):
     self.pci_dev, self.devfmt = pci_dev, pci_dev.pcibus
+    self._disable_aspm()
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
     self._run_discovery()
@@ -169,6 +183,9 @@ class AMDev:
     if self.partial_boot and (self.reg("regSCRATCH_REG6").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
+
+    # aqua (gc 9.5.0): full boot over live state can kill the fabric (power cycle recovers); partial boot+reset_mec is the deepest safe reset
+    if self.ip_ver[am.GC_HWIP] == (9,5,0) and self.reg("regSCRATCH_REG7").read() == AMDev.Version: self.partial_boot = True
 
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
@@ -342,3 +359,9 @@ class AMDev:
     for prefix, hwip in mods:
       self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip])))
     self.__dict__.update(import_asic_regs('mp', (11, 0, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP])))
+
+    # Live AIDs like the kernel: 4 SDMAs per AID; the AID lives iff its group's alive-mask is 0xf/0x3/0xc.
+    # Dead AIDs must never be touched via the indirect window: writes poison the whole fabric.
+    live_sdma = {i for i in range(len(self.regs_offset[am.SDMA0_HWIP])) if i not in self.harvested[am.SDMA0_HWIP]}
+    def _group_ok(aid): return sum(1 << (i % 4) for i in live_sdma if i // 4 == aid) in {0xf, 0x3, 0xc}
+    self.aids = [aid for aid in range(len(self.regs_offset[am.SDMA0_HWIP]) // 4) if _group_ok(aid)] or [0]
