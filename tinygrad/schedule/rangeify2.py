@@ -293,8 +293,9 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
 
   # prepare
+  next_buffer_num = itertools.count(1000)
   tsink = graph_rewrite(tsink, pm_prepare_graph, bottom_up=True, name="prepare graph")
-  tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
+  tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=next_buffer_num, bottom_up=True, name="convert copy to store")
 
   # add safe STAGEs to never duplicate compute
   # we compute the number of times a buffer is consumed. if > 1, we realize
@@ -326,7 +327,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
-  tsink = graph_rewrite(tsink, pm_remove_stage, ctx=itertools.count(0), bottom_up=True, name="remove stage")
+  tsink = graph_rewrite(tsink, pm_remove_stage, ctx=next_buffer_num, bottom_up=True, name="remove stage")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
   tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
 
