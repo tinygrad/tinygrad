@@ -117,10 +117,10 @@ jobs:
       run: python3 test/external/process_replay/reset.py
     - name: Run llama3.2
       run: BENCHMARK_LOG=llama32_3b-f16 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m llama3.2:3b-f16 --benchmark --warmup
-    - name: Run qwen3.6
-      # qwen3.6:35b-a3b doesn't fit on mac
+    - name: Run qwen3.8
+      # qwen3.8:27b doesn't fit on mac
       if: ${{ matrix.dev != 'METAL' }}
-      run: BENCHMARK_LOG=qwen36_35b-a3b JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m qwen3.6:35b-a3b --benchmark --warmup
+      run: BENCHMARK_LOG=qwen38_27b JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m qwen3.8:27b --benchmark --warmup
     - name: Run olmoe
       # just metal for now
       if: ${{ matrix.dev == 'METAL' }}
