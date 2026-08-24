@@ -148,9 +148,11 @@ class AMDev:
   def _disable_aspm(self):
     # L1 across retimers makes reads oscillate to 0xffffffff; power on defaults it enabled. Clearing the GPU endpoint
     # alone suffices: L1 only engages when both ends of the link enable it.
-    cap = self.pci_dev.read_config(0x34, 1) & 0xfc
-    while cap and self.pci_dev.read_config(cap, 1) != 0x10: cap = self.pci_dev.read_config(cap + 1, 1) & 0xfc
-    if cap: self.pci_dev.write_config_flush(cap + 0x10, self.pci_dev.read_config(cap + 0x10, 2) & ~3, 2) # PCIe cap lnkctl
+    cap, seen = self.pci_dev.read_config(0x34, 1) & 0xfc, set() # bound the walk: a dead link can return 0xff pointers forever
+    while cap and cap not in seen and self.pci_dev.read_config(cap, 1) != 0x10:
+      seen.add(cap)
+      cap = self.pci_dev.read_config(cap + 1, 1) & 0xfc
+    if cap and cap not in seen: self.pci_dev.write_config_flush(cap + 0x10, self.pci_dev.read_config(cap + 0x10, 2) & ~3, 2) # PCIe cap lnkctl
 
   def __init__(self, pci_dev:PCIDevice, reset_mode=False):
     self.pci_dev, self.devfmt = pci_dev, pci_dev.pcibus
@@ -356,6 +358,6 @@ class AMDev:
 
     # Live AIDs like the kernel: 4 SDMAs per AID; the AID lives iff its group's alive-mask is 0xf/0x3/0xc.
     # Dead AIDs must never be touched via the indirect window: writes poison the whole fabric.
-    live_sdma = {i for i in range(len(self.regs_offset[am.SDMA0_HWIP])) if i not in self.harvested[am.SDMA0_HWIP]}
-    def _group_ok(aid): return sum(1 << (i % 4) for i in live_sdma if i // 4 == aid) in {0xf, 0x3, 0xc}
-    self.aids = [aid for aid in range(len(self.regs_offset[am.SDMA0_HWIP]) // 4) if _group_ok(aid)] or [0]
+    live_sdma = {k for k in self.regs_offset[am.SDMA0_HWIP] if k not in self.harvested[am.SDMA0_HWIP]}
+    max_aid = max((k >> 2 for k in self.regs_offset[am.SDMA0_HWIP]), default=0)
+    self.aids = [0] + [aid for aid in range(1, max_aid + 1) if sum(1 << (i & 3) for i in live_sdma if i >> 2 == aid) in {0xf, 0x3, 0xc}]
