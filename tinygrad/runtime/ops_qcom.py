@@ -9,12 +9,16 @@ from tinygrad.runtime.autogen import kgsl, mesa
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing, is_image_shape
-from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE
+from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE, DEV
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
+
+# Keep the existing QCOM:CL selector while exposing the explicit QCOMCL name
+# used by NULL:QCOMCL and MOCK+QCOM:QCOMCL.
+class QCOMQCOMCLRenderer(QCOMCLRenderer): pass
 
 @functools.cache
 def dcache_flush():
@@ -58,7 +62,7 @@ class QCOMSignal(HCQSignal):
       kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.owner.fd, context_id=self.owner.ctx, timestamp=self.owner.last_cmd, timeout=0xffffffff)
 
 class QCOMComputeQueue(HWQueue):
-  def __init__(self, dev:QCOMDevice):
+  def __init__(self, dev:QCOMDevice, **_kwargs):
     self.dev = dev
     super().__init__()
 
@@ -79,6 +83,17 @@ class QCOMComputeQueue(HWQueue):
 
   def memory_barrier(self):
     self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
+    return self
+
+  def copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):
+    if copy_size <= 0: raise ValueError('QCOM CP_MEMCPY size must be positive')
+    if DEV.target("QCOM").interface.startswith("MOCK"):
+      if copy_size >= 1 << 31: raise ValueError('mock QCOM byte copy is too large')
+      count = (1 << 31) | copy_size  # virtual byte-count marker; hardware uses dwords
+    else:
+      if copy_size % 4: raise ValueError('QCOM CP_MEMCPY size must be dword aligned')
+      count = copy_size // 4
+    self.cmd(mesa.CP_MEMCPY, count, *data64_le(src.va_addr), *data64_le(dest.va_addr))
     return self
 
   def signal(self, signal:QCOMSignal, value=0):
@@ -154,8 +169,12 @@ class QCOMComputeQueue(HWQueue):
     self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_CONSTANTS, state_src=mesa.SS6_INDIRECT,
                                                              state_block=mesa.SB6_CS_SHADER, num_unit=1024 // 4),
              *data64_le(args_state.buf.va_addr))
+    shader_units = ceildiv(prg.image_size, 128)
+    # Precise mock trig shaders can exceed the packet's 10-bit state-load count.
+    # The virtual command processor obtains the full length from SP_CS_INSTR_SIZE.
+    if DEV.target("QCOM").interface.startswith("MOCK"): shader_units = min(shader_units, 0x3ff)
     self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_SHADER, state_src=mesa.SS6_INDIRECT,
-                                                             state_block=mesa.SB6_CS_SHADER, num_unit=ceildiv(prg.image_size, 128)),
+                                                             state_block=mesa.SB6_CS_SHADER, num_unit=shader_units),
              *data64_le(prg.lib_gpu.va_addr))
 
     self.reg(mesa.REG_A6XX_SP_REG_PROG_ID_0, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc, qreg.a6xx_sp_cs_const_config(constlen=1024 // 4, enabled=True))
@@ -339,6 +358,9 @@ class QCOMAllocator(HCQAllocatorBase):
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview: return to_mv(src.cpu_view().addr, src.size)
 
+  def _do_map(self, buf:HCQBuffer) -> HCQBuffer: return self.dev._gpu_map(int(buf.base.va_addr), buf.base.size)
+  def _unmap(self, buf:HCQBuffer): self.dev._gpu_free(buf)
+
   def _do_free(self, opaque, options:BufferSpec): self.dev._gpu_free(opaque)
 
 def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, f"{nm}_MASK")
@@ -374,7 +396,9 @@ class QCOMDevice(HCQCompiled):
     if PROFILE and self.gpu_id[:2] < (7, 3):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    super().__init__(device, QCOMAllocator(self), [QCOMCLRenderer, IR3Renderer], QCOMProgram, QCOMSignal, functools.partial(QCOMComputeQueue, self),
+    queue_t = functools.partial(QCOMComputeQueue, self)
+    super().__init__(device, QCOMAllocator(self), [QCOMCLRenderer, QCOMQCOMCLRenderer, IR3Renderer], QCOMProgram, QCOMSignal, queue_t,
+                     queue_t if DEV.target("QCOM").interface.startswith("MOCK") else None,
                      arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
@@ -389,7 +413,8 @@ class QCOMDevice(HCQCompiled):
 
   def _gpu_map(self, ptr:int, size:int) -> HCQBuffer:
     ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
-    dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ceildiv(ptr + size - ptr_line_aligned, 64))
+    if not DEV.target("QCOM").interface.startswith("MOCK"):
+      dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ceildiv(ptr + size - ptr_line_aligned, 64))
     try:
       mi = kgsl.IOCTL_KGSL_MAP_USER_MEM(self.fd, hostptr=ptr_aligned, len=size_aligned, memtype=kgsl.KGSL_USER_MEM_TYPE_ADDR)
       return HCQBuffer(mi.gpuaddr + (ptr - ptr_aligned), size=size, meta=(mi, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self)
