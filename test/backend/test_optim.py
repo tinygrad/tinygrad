@@ -90,7 +90,7 @@ class TestOptim(unittest.TestCase):
   def test_muon_wd(self): self._test_muon(1, {'lr': 0.001, 'weight_decay': 0.01}, 1e-3, 3e-4)
   # TODO: disabled due to big atol
   # def test_muon_high_lr_wd(self): self._test_muon(1, {'lr': 10, 'weight_decay': 0.01}, 1e-6, 5e-4)
-  def test_muon_wd_has_effect(self):
+  def test_muon_applies_wd(self):
     for x,y in zip(step(Tensor, Muon, steps=1, weight_decay=0.0),
                    step(Tensor, Muon, steps=1, weight_decay=0.1)):
       self.assertFalse(np.allclose(x, y))
