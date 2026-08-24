@@ -308,7 +308,7 @@ def lower_range(ctx, x:UOp):
   return acc, [acc, label(ctx, f".LOOP_BODY_{range_str(x)}")]
 
 def lower_end(ctx, x:UOp):
-  if x.src[-2].op is Ops.INS: # loop, not const bnd
+  if x.src[-3].src[0].op is Ops.NOOP: # loop
     rng, pred, mask = x.src[-3:]
     jmp = UOp(Ops.INS, arg=RDNA3Ops.s_cbranch_execnz, tag=f".LOOP_BODY_{range_str(rng)}")
     pred = UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(pred,), tag=(EXEC,))
@@ -330,7 +330,7 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.CDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))),
     lambda ctx,x,d: fast_idiv(ctx, x, d.val) if x.vmin >= 0 or x.dtype in dtypes.uints else None),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)),
-  (UPat(Ops.CDIV, dtypes.int32s, (UPat.var("a"), UPat.var("b")), name="x"), xidiv32),
+  (UPat(Ops.CDIV, dtypes.int32s+dtypes.int16s+dtypes.int8s, (UPat.var("a"), UPat.var("b")), name="x"), xidiv32),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
 ]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,)) + tc.pm_validate_wmma_rdna3
