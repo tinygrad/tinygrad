@@ -43,7 +43,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   # Precompiled forward outputs and gradient auxiliaries are additional backward-function inputs.
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}
   fwd_outs = tuple(k.gettuple(i) for i in range(len(fxn.src))) if k.arg.precompile else ()
-  root_grads = [UOp(Ops.NOOP) if g.op is Ops.NOOP else g if g.base.op is Ops.CONST else g.param_like(len(args)+i)
+  root_grads = [UOp(Ops.NOOP) if g.op is Ops.NOOP else g if g.device is None else g.param_like(len(args)+i)
                 for i,g in enumerate(grad_args)]
   aux_args:list[UOp] = []
   for grad_arg, root in zip(grad_args, root_grads):

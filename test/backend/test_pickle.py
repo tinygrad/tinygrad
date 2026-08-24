@@ -2,7 +2,8 @@ import unittest, pickle, types, tracemalloc
 import numpy as np
 from tinygrad import Tensor, Device, TinyJit, Variable, dtypes
 from tinygrad.helpers import GlobalCounters, ContextVar, Context, DEV
-from tinygrad.uop.ops import PatternMatcher, UPat, UOp
+from tinygrad.uop.ops import PatternMatcher, UPat, UOp, deconstruct_function
+from test.helpers import KernelCountException
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
@@ -10,6 +11,11 @@ class TestPickle(unittest.TestCase):
     code_str = pickle.dumps(y.__code__)
     fxn = types.FunctionType(pickle.loads(code_str), globals())
     self.assertEqual(fxn(2), 4)
+
+  def test_deconstruct_function_nested_comprehension(self):
+    # pre PEP 709, each comprehension is its own code object, so dtypes here is referenced two code objects deep
+    def fxn(): return [[dtypes.int for _ in range(2)] for _ in range(2)]
+    self.assertEqual(types.FunctionType(*deconstruct_function(fxn))(), fxn())
 
   def test_pickle_pattern_matcher(self):
     pm = PatternMatcher([(UPat.cvar('x'), lambda x: x*2)])
@@ -36,7 +42,7 @@ class TestPickle(unittest.TestCase):
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t_values, t2.numpy())
     # expect at most one COPY kernel
-    self.assertLessEqual(GlobalCounters.kernel_count, 1)
+    if GlobalCounters.kernel_count > 1: raise KernelCountException(1, GlobalCounters.kernel_count)
 
   def test_pickle_realized_tensor_alt(self):
     print("** init")

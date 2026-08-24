@@ -10,16 +10,15 @@ from tinygrad.schedule.allreduce import is_allreduce_linear_output
 
 # unwrap VIEW/CAST/etc to find the actual data source (kernel output, buffer, or multi-device op)
 def _unwrap_src(s: UOp) -> UOp:
-  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.BIND} and \
-        not (s.op is Ops.SLICE and s.tag == ("allreduce",) and s.src[0].op is not Ops.INDEX): s = s.src[0]
+  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK} and \
+        not (s.op is Ops.SHRINK and s.tag == ("allreduce",) and s.src[0].op is not Ops.INDEX): s = s.src[0]
   return s
 
-# a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states, BIND is not a buffer dependency
+# a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
-  if s.op is Ops.SLICE and s.tag == ("allreduce",): return _states(s.src[0])
-  if s.op is Ops.BIND: return []
+  if s.op is Ops.SHRINK and s.tag == ("allreduce",): return _states(s.src[0])
   assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
 
@@ -29,9 +28,9 @@ def _slice_region(s:UOp) -> tuple[UOp, int, int]|None:
   while True:
     s = _unwrap_src(s)
     if s.op is Ops.AFTER: s = s.src[0]
-    elif s.op is Ops.SLICE and s.src[1].op is Ops.CONST:
+    elif s.op is Ops.SHRINK and s.tag == ("allreduce",) and s.src[1].op is Ops.CONST and s.src[2].op is Ops.CONST:
       offset += s.src[1].val * s.src[0].dtype.itemsize
-      if size is None: size = s.arg * s.dtype.itemsize
+      if size is None: size = s.src[2].val * s.dtype.itemsize
       s = s.src[0]
     else: break
   return (s.buf_uop, offset, offset+size) if size is not None else None
@@ -46,13 +45,19 @@ def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
 def _call_buf_uop(s:UOp) -> UOp:
   """Resolve a call argument's storage, preserving a dependency-wrapped hardware slice as the actual view."""
   s = _unwrap_src(s)
-  if s.op is Ops.AFTER and s.src[0].op is Ops.SLICE and s.src[0].tag == ("allreduce",): return s.src[0]
+  if s.op is Ops.AFTER and s.src[0].op is Ops.SHRINK and s.src[0].tag == ("allreduce",): return s.src[0]
   return s.buf_uop
 
 @functools.cache
 def _call_overwrite_outputs(call:UOp) -> tuple[UOp, ...]:
-  if call.src[0].op is not Ops.LINEAR: return ()
-  return tuple(x for i,x in enumerate(call.src[1:]) if is_allreduce_linear_output(call.src[0], i))
+  if call.src[0].op is Ops.LINEAR:
+    return tuple(x for i,x in enumerate(call.src[1:]) if is_allreduce_linear_output(call.src[0], i))
+  if call.src[0].op is Ops.SINK and any(_slice_region(x) is not None for x in call.src[1:]):
+    stores, loads = [x for x in call.src[0].toposort() if x.op is Ops.STORE], [x for x in call.src[0].toposort() if x.op is Ops.LOAD]
+    outs = {p.arg.slot for x in stores for p in x.src[0].toposort() if p.op is Ops.PARAM}
+    ins = {p.arg.slot for x in loads for p in x.src[0].toposort() if p.op is Ops.PARAM}
+    return tuple(call.src[slot+1] for slot in outs-ins if slot+1 < len(call.src))
+  return ()
 
 def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
@@ -104,7 +109,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       else:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_call_buf_uop(s) for s in k.src[1:] if s.op is not Ops.BIND)
+        buf_uops = tuple(_call_buf_uop(s) for s in k.src[1:] if not s.is_bound_var)
         linearized.append(k.src[0].call(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
@@ -131,10 +136,17 @@ pm_post_sched_cache = PatternMatcher([
    create_new_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
 ])
 
-def resolve_linear_call(linear_call:UOp):
+def resolve_linear_call(linear_call:UOp, outer_binds:dict[str, UOp]|None=None):
   linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
-  binds = {f"p{i}":x.src[0] for i,x in enumerate(linear_call.src[1:]) if x.op is Ops.BIND}
-  return linear.substitute({v:binds[v.expr] for v in linear.variables() if v.expr in binds}, enter_calls=True, name="resolve scalar params")
+  # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
+  # scalar args (e.g. precompiled allreduce) inherit it
+  binds = {**(outer_binds or {}),
+           **{f"p{i}":x.src[0].replace(op=Ops.PARAM) for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}}
+  def apply_binds(si:UOp) -> UOp:
+    if si.op is Ops.CALL and si.src[0].op is Ops.LINEAR: return resolve_linear_call(si, binds)
+    subs = {v:binds[v.expr] for v in si.variables() if v.expr in binds}
+    return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
+  return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
 
 pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
@@ -268,13 +280,13 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
-  # get var_vals
+  # get var_vals from the bound Variables in the call args
   var_vals: dict[str, int] = {}
   for b in big_sink.src[1:]:
-    if b.op is Ops.BIND:
-      nm = b.src[0].expr
+    if b.is_bound_var:
+      v, val = b.unbind()
+      nm = v.expr
       if nm not in used_vars: continue
-      val = b.src[1].val
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
 

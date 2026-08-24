@@ -12,8 +12,6 @@ class IndexingContext:
   realize_map: dict[UOp, None|list[int]] = field(default_factory=dict)
   non_removable: dict[UOp, None] = field(default_factory=dict)
   range_map: dict[UOp, tuple[tuple[UOp, ...], tuple[UOp, ...]]] = field(default_factory=dict)
-  # loads reachable from each UOp memoized across matches
-  buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
   store_srcs: tuple[UOp, ...] = ()
 
   # create ranges
@@ -24,8 +22,8 @@ class IndexingContext:
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(0)
 
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER, Ops.SLICE,
-                      Ops.CONST, Ops.BIND, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER,
+                      Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
                       Ops.LOAD, Ops.CALL, Ops.FUNCTION}
 
 def realize(ctx:IndexingContext, tr:UOp) -> None: ctx.realize_map[tr] = None
@@ -40,7 +38,10 @@ def _pointwise_self_store(ctx:IndexingContext, dest:UOp, src:UOp) -> bool:
   reaches_base: dict[UOp, bool] = {}
   unsafe = {Ops.REDUCE, Ops.ALLREDUCE, Ops.COPY, Ops.PERMUTE, Ops.FLIP, Ops.EXPAND, Ops.PAD, Ops.SHRINK,
             Ops.MSTACK, Ops.MSELECT, Ops.CALL, Ops.FUNCTION, Ops.BITCAST}
-  for x in src.toposort(gate=lambda x: x.op is not Ops.CONTIGUOUS, enter_calls=False):
+  nodes = src.toposort(gate=lambda x: x.op is not Ops.CONTIGUOUS, enter_calls=False)
+  # Device transfers must materialize before an assignment even when their source does not flow from the destination.
+  if any(x.op is Ops.COPY for x in nodes): return False
+  for x in nodes:
     reaches_base[x] = x is base or any(reaches_base.get(s, False) for s in x.src)
     if reaches_base[x] and x.op in unsafe: return False
   # Another assignment reading this pre-store value creates a cross-assignment WAR hazard. Each RHS must materialize
@@ -48,10 +49,6 @@ def _pointwise_self_store(ctx:IndexingContext, dest:UOp, src:UOp) -> bool:
   return sum(base in x.toposort(gate=lambda x: x.op is not Ops.CONTIGUOUS, enter_calls=False) for x in ctx.store_srcs) == 1
 
 def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
-  # don't realize SLICE when it's the direct source of STORE+AFTER — the target buffer is the output
-  if src.op is Ops.SLICE and src in ctx.realize_map \
-     and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
-    del ctx.realize_map[src]
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
   if dest.base in src.toposort(enter_calls=False) and not _pointwise_self_store(ctx, dest, src): ctx.realize_map[src] = None
 
@@ -93,19 +90,23 @@ def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   return tuple(r.const_like(0) if j in baxes else r for j,r in enumerate(rngs) if j >= nleft)
 
 # TODO: srcs contain (real data srcs, something else, ranges) and the boundary is confusing. see range_start
-def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
-  if op in {Ops.PARAM, Ops.BUFFER, Ops.RANGE, Ops.SPECIAL, Ops.BIND}: return ()
-  if op in GroupOp.Movement|{Ops.INDEX, Ops.SLICE, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END}: return src[:1]
-  return src
+def is_allreduce_view(x:UOp) -> bool: return x.op is Ops.SHRINK and x.tag == ("allreduce",)
+
+def data_srcs(x:UOp) -> tuple[UOp, ...]:
+  if x.op in {Ops.PARAM, Ops.BUFFER, Ops.RANGE, Ops.SPECIAL} or is_allreduce_view(x): return ()
+  # the store of a bound Variable only carries the input value, it has no data srcs
+  if x.op is Ops.STORE and x.src[0].is_variable: return ()
+  if x.op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END}: return x.src[:1]
+  return x.src
 
 def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   new_srcs = []
   # shape/bound/index args that are not data src should not be indexed
-  data_src_count = len(data_srcs(x.op, x.src))
+  data_src_count = len(data_srcs(x))
   for i, s in enumerate(x.src):
     new_src = s
     src_rngs = broadcast_rngs(x, s, ctx.range_map[x][0]) if x in ctx.range_map else ()
-    if s.op in {Ops.PARAM, Ops.BUFFER, Ops.SLICE, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
+    if s.op in {Ops.PARAM, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.AFTER} or is_allreduce_view(s):
       if x in ctx.range_map and i < data_src_count: new_src = new_src.index(*src_rngs)
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
@@ -154,6 +155,8 @@ def convert_stack_to_where(ctx:IndexingContext, x:UOp):
   return ret
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
+  # Tagged all-reduce SHRINKs are opaque physical runtime views, not logical movement operations.
+  if x.op is Ops.SHRINK and x.tag == ("allreduce",): return None
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
 
 pm_apply_rangeify = PatternMatcher([
@@ -210,7 +213,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
   return rngs
 
 @rewrite_group(new_ctx=False)
-def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
+def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
   if debug: print("**************************")
   rctx = IndexingContext()
   rctx.store_srcs = tuple(x.src[1] for x in tsink.toposort(gate_kernel_sink) if x.op is Ops.STORE)
@@ -223,7 +226,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     tsink_toposort = tsink.toposort(gate_kernel_sink)
     consumer_map: dict[UOp, dict[UOp, None]] = {x:{} for x in tsink_toposort}
     for c in tsink_toposort:
-      for x in data_srcs(c.op, c.src):
+      for x in data_srcs(c):
         if x in consumer_map: consumer_map[x][c] = None
 
   # explicit rangeify
@@ -317,7 +320,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     rngs = out_rngs  # rngs is the input ranges  # pylint: disable=possibly-used-before-assignment
 
     # apply movement ops
-    if x.op in GroupOp.Movement: rngs = apply_movement_op(x.op, x.src[0].shape, x.marg, rngs)
+    if x.op in GroupOp.Movement and not is_allreduce_view(x): rngs = apply_movement_op(x.op, x.src[0].shape, x.marg, rngs)
     # STACK: the leading range selects the src, srcs get the trailing ranges
     if x.op is Ops.STACK: rngs = out_rngs[1:]
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
@@ -346,7 +349,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
   # if a deviceless value must materialize, place it on the sink device
   tsink = graph_rewrite(tsink, pm_fix_deviceless, ctx=tsink.device, name="add device to deviceless")
-  return tsink, rctx
+  return tsink
 
 def render_ranges(*rngs_list, realized) -> str:
   disp = []

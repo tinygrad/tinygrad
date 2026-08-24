@@ -12,7 +12,7 @@ from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker
 from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb
 from extra.llama_kernels.rmsnorm import rmsnorm
-from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8
+from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8, asm_gemm, can_use_asm_gemm
 from extra.gemm.moe_gemm import grouped_mx_gemm
 from extra.gemm.moe_routing import route, dispatch, combine
 
@@ -146,6 +146,7 @@ class GPTOSS:
       return w_q, w_e8.is_param_(False)
     if moe:
       qs = [_one(*shape[1:]) for _ in range(shape[0])]
+      for q in qs: q[0]._zero2 = True  # grad arrives sharded on the expert axis under ZeRO-2 (moe_gemm)
       return [q[0] for q in qs], [q[1] for q in qs]
     return _one(*shape)
 
@@ -182,12 +183,14 @@ class GPTOSS:
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)  # (B,N,H,D)/(B,N,KV,D)
 
-    if sliding:
-      attn = self._sliding_attention(xq, xk, xv, sinks)
-    elif getenv("HK_FLASH_ATTENTION"):
+    fa_saves = []
+    if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention
-      attn, *_ = flash_attention(xq, xk, xv, is_causal=True, write_flat=True, sinks=sinks)
+      attn, _, l_vec = flash_attention(xq, xk, xv, is_causal=True, write_flat=True, sinks=sinks, window=self.sliding_window if sliding else 0)
       attn = attn.reshape(bsz, seqlen, self.n_heads * self.head_dim)
+      fa_saves = [xq, xk, xv, l_vec]
+    elif sliding:
+      attn = self._sliding_attention(xq, xk, xv, sinks)
     else:
       xqm = xq.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep, self.head_dim).permute(0, 2, 3, 1, 4)
       xkm, xvm = xk.permute(0, 2, 1, 3).unsqueeze(2), xv.permute(0, 2, 1, 3).unsqueeze(2)
@@ -199,7 +202,7 @@ class GPTOSS:
       attn = (w @ xvm).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
 
     out = matmul_mx(attn, wo, wo_scale) + wo_bias
-    return out, [x_normed, rrms, attn]
+    return out, [x_normed, rrms, attn] + fa_saves
 
   def feed_forward(self, x:Tensor, *, ffn_norm:Tensor, gate:Tensor, gate_bias:Tensor,
                    w_gate_up:Tensor, w_gate_up_scale:Tensor, w_gate_up_bias:Tensor,
@@ -220,6 +223,7 @@ class GPTOSS:
       z = grouped_mx_gemm(_pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
           + (onehot @ w_down_bias.float()).cast(dtypes.bfloat16)
       out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
+      return out, [x_normed, rrms, xg, h, y, z, r.weights, r.dest_row, r.off]
     else:
       thresh = logits.topk(self.experts_per_tok)[0][..., -1:]
       weights = (logits >= thresh).where(logits, -float("inf")).softmax(-1)
@@ -263,7 +267,11 @@ class GPTOSS:
                         w_down=self.w_down[i], w_down_scale=self.w_down_scale[i], w_down_bias=self.w_down_bias[i])
       h, *_ = self.run_layer(h, freqs_cis, mask_full, i % 2 == 0, attn_kwargs, ffn_kwargs, save=save)
 
-    logits = self.norm(h) @ self.output.T
+    h_normed = self.norm(h)
+    pad = (-self.dim) % 256
+    h_padded, w_padded = h_normed.pad((None, None, (0, pad))), self.output.pad(((0, 0), (0, pad)))
+    if ASM_GEMM and can_use_asm_gemm(h_padded, w_padded.T): logits = asm_gemm(h_padded, w_padded.T)
+    else: logits = h_normed @ self.output.T
     return logits
 
 def _get_pads(uop:UOp) -> list[UOp]:

@@ -1,7 +1,8 @@
 from __future__ import annotations
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum, atexit
+import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, itertools, struct, socket
+import subprocess, time, enum, atexit
 from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system, _ensure_downloads_dir, DEBUG, flatten, pluralize
-from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
+from tinygrad.runtime.autogen import libc, pci, vfio
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator
 from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, USBMMIOInterface
@@ -55,6 +56,7 @@ class _System:
   def pci_scan_bus(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None) -> list[str]:
     all_devs = []
     if OSX:
+      from tinygrad.runtime.autogen import iokit, corefoundation
       def read_prop(svc, key) -> int:
         cfkey = corefoundation.CFStringCreateWithCString(None, key.encode(), corefoundation.kCFStringEncodingUTF8)
         cfdata = ctypes.cast(iokit.IORegistryEntryCreateCFProperty(svc, ctypes.cast(cfkey, iokit.CFStringRef), None, 0), corefoundation.CFDataRef)
@@ -260,7 +262,7 @@ class PCIIfaceBase:
     self.dev_impl = dev_impl_t(self.pci_dev)
     self.dev, self.vram_bar, self.count = dev, vram_bar, len(hcq_filter_visible_devices(System.list_devices(vendor, devices, base_class), dn))
 
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False, **kwargs) -> HCQBuffer:
     should_use_sysmem = host or ((cpu_access if self.is_bar_small() else (uncached and cpu_access)) and not force_devmem)
 
     # Align size to huge pages for large allocations, otherwise the unaligned tail falls back to 4KB pages, increasing TLB pressure.
@@ -272,7 +274,7 @@ class PCIIfaceBase:
       mapping = self.dev_impl.mm.map_range(vaddr, size, [(paddr, 0x1000) for paddr in paddrs], aspace=AddrSpace.SYS, snooped=True, uncached=True)
       return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0]), view=memview, owner=self.dev)
 
-    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contiguous=cpu_access)
+    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contiguous=cpu_access, zero=zero)
     barview = self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], size=mapping.size) if cpu_access else None
     return HCQBuffer(mapping.va_addr, size, view=barview, meta=PCIAllocationMeta(mapping, cpu_access, hMemory=mapping.paddrs[0][0]), owner=self.dev)
 

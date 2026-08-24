@@ -1002,6 +1002,39 @@ class TestBarrier(unittest.TestCase):
     for tid in range(64):
       self.assertEqual(st.vgpr[tid][0], tid + 100 + 1000, f"tid={tid}")
 
+class TestSMaxMinSCCRegressions(unittest.TestCase):
+  """Regression test: S_MAX sets SCC only on strict inequality (equal operands -> SCC=0)."""
+
+  def test_s_max_i32_equal_scc(self):
+    st = run_program([s_mov_b32(s[4], 64), s_mov_b32(s[5], 64), s_max_i32(s[6], s[4], s[5])], n_lanes=1)
+    self.assertEqual(st.scc, 0)
+    self.assertEqual(st.sgpr[6], 64)
+    st = run_program([s_mov_b32(s[4], 65), s_mov_b32(s[5], 64), s_max_i32(s[6], s[4], s[5])], n_lanes=1)
+    self.assertEqual(st.scc, 1)  # still set when strictly greater
+
+  def test_s_max_u32_equal_scc(self):
+    st = run_program([s_mov_b32(s[4], 64), s_mov_b32(s[5], 64), s_max_u32(s[6], s[4], s[5])], n_lanes=1)
+    self.assertEqual(st.scc, 0)
+
+class TestAbsdiffOverflowRegressions(unittest.TestCase):
+  """Regression test: S_ABSDIFF_I32 computes abs on the WRAPPED 32-bit difference (found by random difftest vs hardware)."""
+
+  def test_s_absdiff_wrapped(self):
+    # |45 - (-2147483647)| overflows int32; hardware takes abs of the wrapped 32-bit difference
+    instructions = [s_mov_b32(s[4], 45), s_mov_b32(s[5], 0x80000001), s_absdiff_i32(s[6], s[4], s[5])]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[6], 0x7FFFFFD4)
+    self.assertEqual(st.scc, 1)
+    # INT_MIN - 1 wraps to +2147483647, already positive
+    instructions = [s_mov_b32(s[4], 0x80000000), s_mov_b32(s[5], 1), s_absdiff_i32(s[6], s[4], s[5])]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[6], 0x7FFFFFFF)
+    # equality -> 0 and SCC=0
+    instructions = [s_mov_b32(s[4], 7), s_mov_b32(s[5], 7), s_absdiff_i32(s[6], s[4], s[5])]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[6], 0)
+    self.assertEqual(st.scc, 0)
+
 
 if __name__ == '__main__':
   unittest.main()

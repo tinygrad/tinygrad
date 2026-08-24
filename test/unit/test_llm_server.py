@@ -1,6 +1,8 @@
 import unittest
+import numpy as np
 from unittest.mock import patch
 from tinygrad import Tensor, UOp
+from tinygrad.nn.state import get_state_dict
 from tinygrad.schedule import schedule_cache
 from tinygrad.llm.model import Transformer, TransformerConfig
 from tinygrad.llm.serve import StreamRouter
@@ -13,11 +15,17 @@ V_TOKS = UOp.variable("toks", 1, 32)  # 32 is the default chunk_size in generate
 class TestTransformerGenerate(unittest.TestCase):
   def test_warmup(self):
     model, calls = Transformer(TEST_CONFIG), []
-    def generate(tokens):
+    def generate(tokens, **kwargs):
       calls.append(tokens)
       yield from (1, 2)
     with patch.object(model, "generate", generate): model.warmup()
     self.assertEqual(calls, [[0], [0]])
+
+  def test_warmup_then_generate_with_default_chunk(self):
+    # warmup must not capture JIT graphs that generate()'s default chunk_size then rejects
+    model = Transformer(TEST_CONFIG)
+    model.warmup()
+    self.assertIsInstance(next(model.generate([5, 6, 7, 8])), int)
 
   def test_first_recurrent_generate_before_state_init(self):
     model = Transformer(TEST_CONFIG)
@@ -36,7 +44,19 @@ class TestTransformerGenerate(unittest.TestCase):
       return Tensor([[42]])
     with patch.object(Transformer, '__call__', mock_call):
       next(model.generate([1, 2, 3, 4, 5, 42, 10]))
-    self.assertEqual(calls, [((1, 1), V_START_POS.bind(5)), ((1, 1), V_START_POS.bind(6))])
+    # resumes from the reused state at position 5 and consumes the 2 new tokens (one chunk or two decode steps)
+    self.assertEqual(calls[0][1], V_START_POS.bind(5))
+    def ntok(shape): return shape[1] if isinstance(shape[1], int) else shape[1].unbind()[1]
+    self.assertEqual(sum(ntok(c[0]) for c in calls), 2)
+
+  def test_recurrent_divergent_prompt_restarts(self):
+    model, calls = Transformer(TEST_CONFIG), []
+    model.has_recurrent_block, model._cached_tokens = True, [1, 2, 9]
+    def mock_call(self, tokens, start_pos, temperature):
+      calls.append(start_pos)
+      return Tensor([[42]])
+    with patch.object(Transformer, '__call__', mock_call): next(model.generate([1, 2, 10, 11]))
+    self.assertEqual(calls[0], V_START_POS.bind(0))
 
   def test_template_starts_reasoning(self):
     router = StreamRouter(reasoning=True)
@@ -137,6 +157,22 @@ class TestTransformerGenerate(unittest.TestCase):
     # 4 tokens, chunk_size=4 -> 1 prefill chunk
     self.assertEqual(get_prefill_flags(list(range(4)), 4), [True, False, False])
 
+  def test_chunked_prefill_kv_cache_matches_single_chunk(self):
+    config = TransformerConfig(num_blocks=1, dim=8, hidden_dim=16, n_heads=1, n_kv_heads=1, norm_eps=1e-5,
+      vocab_size=32, head_dim=4, rope_theta=1000000, rope_dim=4, qk_norm=4, v_head_dim=4, max_context=16)
+    def model():
+      m = Transformer(config)
+      rng = np.random.RandomState(1234)
+      for t in get_state_dict(m).values():
+        t.assign(Tensor(rng.uniform(-1, 1, t.shape).astype(np.float32))).realize()
+      return m
+    def prefill(m, chunk_size):
+      gen = m.generate(list(range(1, 9)), chunk_size=chunk_size, temperature=0.0)
+      next(gen)
+      return [b.cache_kv.numpy() for b in m.blk]
+    for g, r in zip(prefill(model(), 4), prefill(model(), 8)):
+      np.testing.assert_allclose(g[:, :, :, :8, :], r[:, :, :, :8, :], atol=1e-5)
+
   def test_kv_cache_resume_matches_fresh(self):
     model = Transformer(TEST_CONFIG)
 
@@ -177,6 +213,12 @@ class TestTransformerGenerate(unittest.TestCase):
       runs.add(out)
     # with temperature=2.0, we should see at least 2 distinct outputs across 5 runs
     self.assertGreater(len(runs), 1, "high temperature should produce varied outputs")
+
+  def test_recurrent_temperature_high_produces_variety(self):
+    model = Transformer(TEST_CONFIG)
+    model.has_recurrent_block = True
+    outputs = {model.forward(Tensor([[1]]), 0, Tensor([2.0])).item() for _ in range(5)}
+    self.assertGreater(len(outputs), 1)
 
   def test_temperature_passed_to_forward(self):
     """Temperature from generate should be passed through to __call__."""

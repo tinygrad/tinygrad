@@ -48,6 +48,8 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     linear, var_vals = Tensor(t).linear_with_vars()
+  # test compiling the linear
+  compile_linear(linear)
   kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)
                    for call in linear.src if call.src[0].op is Ops.SINK or not filter_sink)
   if kernel_cnt != allowed:
@@ -57,8 +59,6 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
         print("kernel", i+1)
         print(call.src[0])
     raise KernelCountException(allowed, kernel_cnt)
-  # test compiling the linear
-  compile_linear(linear)
   return linear, var_vals
 
 def assert_kernel_count(expected:int):
@@ -86,7 +86,9 @@ def assert_jit_cache_len(fxn, expected_len):
   if linear is None or not linear.src:
     if expected_len != 0: raise KernelCountException(expected_len, 0)
     return
-  if expected_len and all(call_is_hcq(call) for call in linear.src): expected_len = 3 # HCQ2: merged same-queue calls + finalizer + bumps
+  if expected_len and all(call_is_hcq(call) for call in linear.src): # HCQ2: one batch submitter, or fence + reset + merged calls + finalizer
+    from tinygrad.runtime.support.hcq2 import HCQ_RUNTIME_DEV
+    expected_len = 1 if HCQ_RUNTIME_DEV.value == "CPU" else 4
   if call_is_graph(linear.src[0]):
     if len(linear.src) != 1: raise KernelCountException(1, len(linear.src))
     inner = linear.src[0].src[0].src[0]  # LINEAR UOp inside CUSTOM_FUNCTION

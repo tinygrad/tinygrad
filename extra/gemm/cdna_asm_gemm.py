@@ -139,7 +139,9 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
   sink = UOp.sink(C.flatten().index(zero).store(UOp.const(0, C.dtype)), A.flatten().index(zero).load(), B.flatten().index(zero).load(),
                   scale_a.flatten().index(zero).load(), scale_b.flatten().index(zero).load(),
                   *(x.flatten().index(zero).load() for x in extra), lds, threads, groups_x, groups_y,
-                  arg=KernelInfo(f"custom_mxfp4_gemm_{M}_{N}_{K}_{tile_m}x{tile_n}", estimates=Estimates(ops=2*M*N*K)))
+                  arg=KernelInfo(f"custom_mxfp4_gemm_{M}_{N}_{K}_{tile_m}x{tile_n}",
+                                 estimates=Estimates(ops=2*M*N*K,
+                                                     mem=(M*half_k+N*half_k)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
   insts = build_kernel(M, N, K, tile_m, tile_n)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in insts))))
 

@@ -23,6 +23,7 @@ class AllocCtx:
   bases: set[UOp] = field(default_factory=set)
   assigns: list[UOp] = field(default_factory=list)
   replacements: list[UOp] = field(default_factory=list)
+  views: set[UOp] = field(default_factory=set)
 
 def tag_uop(ctx:AllocCtx, x:UOp):
   if x.tag is not None: return None
@@ -63,7 +64,7 @@ def replace_contig_with_store_after(u:UOp):
 def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op not in {Ops.BUFFER, Ops.SLICE}: return src.contiguous(tag=u.tag)
+  if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def lift_full_buffer_reshape_after(r:UOp, a:UOp) -> UOp|None:
   if r.numel() != a.numel() or r.dtype != a.dtype or not a.src[0].has_buffer_identity(after_ok=True): return None
@@ -79,37 +80,34 @@ lift_full_buffer_after_views = PatternMatcher([
 ])
 
 def _make_buffer_view(src:UOp) -> UOp|None:
-  """If movement ops on src collapse to a contiguous range, return SLICE. Otherwise None."""
-  if (offset := src.contiguous_view_offset()) is None: return None
-  buf = src.base
-  if buf.op is Ops.SLICE:
-    byte_offset = buf.src[1].val * buf.src[0].dtype.itemsize + offset * src.dtype.itemsize
-    buf = buf.src[0]
-    if byte_offset % buf.dtype.itemsize != 0: return None
-    offset = byte_offset // buf.dtype.itemsize
-  return UOp(Ops.SLICE, src.dtype, (buf, UOp.const(offset)), src.numel())
+  if (cv := src.contiguous_view()) is None: return None
+  (buf, offset), size = cv, src.max_numel() * src.element_size() // cv[0].element_size()
+  if buf.op is not Ops.BUFFER: return None
+  # NB: make offset a UOp.variable here to do the offset computation in the kernels
+  return buf[offset:offset+size].bitcast(src.dtype)
 
-def contiguous_mops_to_view(c:UOp, src:UOp):
-  """MOPS(BUFFER) → SLICE when movement ops collapse to a contiguous range."""
+def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
+  """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
   buf = src.base
-  if buf.op not in {Ops.BUFFER, Ops.SLICE, Ops.UNSHARD}: return None
-  if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.SLICE} and c.op is not Ops.BITCAST: return None
-  if c.op is not Ops.BITCAST and src.op is Ops.BUFFER: return None
+  while buf.op is Ops.BITCAST: buf = buf.src[0].base
+  if buf.op not in {Ops.BUFFER, Ops.UNSHARD}: return None
 
   # no symbolic shape
   if not all_int(c.shape): return None
 
   if buf.op is not Ops.UNSHARD and (view := _make_buffer_view(src)) is not None:
-    view = (view.replace(dtype=c.dtype, arg=c.numel()) if c.op is Ops.BITCAST else view).reshape(c.shape)
-    return c.replace(src=(view,)) if c.op is Ops.COPY else view
+    ctx.views.add(view)
+    view = view.reshape(c.shape)
+    return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
-  # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then create SLICE on the resolved result
+  # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then create SHRINK on the resolved result
   if not isinstance(c.device, str):
     from tinygrad.schedule.multi import multi_pm
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
     if resolved.op is not Ops.UNSHARD: return None
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
-    return view.reshape(resolved.src[0].shape).unshard(resolved.arg, resolved.src[1:]).contiguous(tag=c.tag)
+    ctx.views.add(view)
+    return view.reshape(resolved.src[0].shape).unshard(resolved.arg, resolved.src[1:])
 
   return None
 
@@ -123,7 +121,7 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> tuple[UOp, dict[UOp, UOp]]|Non
   if s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): return t, {s:t}
   # a full-buffer reshape is the same storage with a different logical shape, so rebind both the view and its base
   if (s.op is Ops.RESHAPE and s.has_buffer_identity() and s.contiguous_view_offset() == 0 and s.numel() == s.base.numel()
-      and s.base.op in {Ops.BUFFER, Ops.SLICE, Ops.UNSHARD}):
+      and s.base.op in {Ops.BUFFER, Ops.UNSHARD}):
     return t, {s:t, s.base:t.reshape(s.base.shape)}
   return None
 
@@ -131,7 +129,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled FUNCTION, got {c.src[0].op}"
   body = graph_rewrite(c.src[0], lift_full_buffer_after_views, name="lift full-buffer AFTER views")
-  input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
+  input_buffers = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])
 
   # add the outputs to the call
   srcs = body.src
@@ -173,8 +171,9 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
-  # fold MOPS+BITCAST over BUFFER/SLICE into SLICE when movement ops collapse to contiguous range
-  (UPat((Ops.BITCAST, Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BUFFER}, name="src"),), name="c"), contiguous_mops_to_view),
+  # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
+  (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
+  (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, name="copy"), lambda x,copy:
@@ -199,6 +198,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
 ])
 
 def finalize_after(ctx:AllocCtx, x:UOp):
+  # bound Variables are call inputs, not assigns: they stay in the graph and pm_replace_buf turns them into call args
+  if x.is_bound_var: return None
   # untagged: record as an assign for the call body
   if x.tag is None:
     ctx.assigns.append(x)
@@ -219,9 +220,11 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
-  if b.op is Ops.BIND: return b.param_like(len(ctx.replacements)-1)
+  if b.is_bound_var or b.is_variable: return b.param_like(len(ctx.replacements)-1)
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
                    addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
+
+def replace_input_view(ctx:AllocCtx, b:UOp): return replace_input_buffer(ctx, b) if b in ctx.views else None
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),
@@ -232,10 +235,11 @@ pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(UPat(),), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
-  # replace SLICE with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
-  (UPat(Ops.SLICE, src=(UPat(Ops.BUFFER), UPat(Ops.CONST, dtype=dtypes.weakint)), name="b"), replace_input_buffer),
-  # strip value from BIND for cache key normalization, so different values hit same cache
-  (UPat(Ops.BIND, src=(UPat(Ops.PARAM), UPat(Ops.CONST)), name="b"), replace_input_buffer),
+  # replace SHRINK with PARAM
+  (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),), name="b", allow_any_len=True), replace_input_view),
+  (UPat(Ops.BITCAST, src=(UPat.any(UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),), allow_any_len=True), UPat(Ops.BUFFER)),), name="b"), replace_input_view),
+  # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
+  (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])
 
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
@@ -251,7 +255,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="number the uops")
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
-  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, name="early transform tensor graph")
+  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
 
   # here we construct the final buffer_map: as-built nodes -> their final storage. values are never keys
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
@@ -471,12 +475,11 @@ class Tensor(RandMixin):
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
-    if (base := self.uop.base).op in {Ops.BUFFER, Ops.AFTER} and self.uop is not base and not self.uop.has_buffer_identity():
+    ib = self.uop
+    while not ib.has_buffer_identity() and ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: ib = ib.src[0]
+    if ib is not self.uop and ib.has_buffer_identity(after_ok=True):
       # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
-      ib = self.uop
-      while not ib.has_buffer_identity() and ib is not base: ib = ib.src[0]
-      assigned_ib = ib.after(assign)
-      _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign")
+      _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign")
     else:
       # simple assign
       self.uop = assign
@@ -684,13 +687,13 @@ class Tensor(RandMixin):
     ```
     """
     all_uops = self.uop.toposort()
-    # backward fills .grad for every in-scope non-CONST float tensor
+    # backward fills .grad for every in-scope float tensor with a device
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
-                                       t.uop in all_uops and t.is_floating_point() and t.uop.op is not Ops.CONST]
+                                       t.uop in all_uops and t.is_floating_point() and t.device is not None]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
-      if g.device is None and t.device is not None: g = g.clone(device=t.device)
+      if g.device is None: g = g.clone(device=t.device)
       if t.grad is None: t.grad = g
       else: t.grad.assign(t.grad + g.to(t.grad.device))
     return self
@@ -761,9 +764,9 @@ class Tensor(RandMixin):
     the reference frames (`ref_frames`).
     """
     ref_frames = [x.contiguous() for x in ref_frames or []]
-    assert frame_pos.op is Ops.BIND, "frame_pos must be a bound Variable"
+    assert frame_pos.is_bound_var, "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
-    fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.src[0], *[UOp.const(s, dtypes.int) for s in shape]), arg="encdec")
+    fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.src[0], *[UOp.const(s) for s in shape]), arg="encdec")
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
 P = ParamSpec("P")

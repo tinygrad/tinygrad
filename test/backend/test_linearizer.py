@@ -16,8 +16,6 @@ from test.helpers import replace_opts, check_schedule
 from test.backend.test_softmax_fusion import single_kernel_softmax
 MOCKGPU = DEV.interface.startswith("MOCK")
 
-from tinygrad.uop.render import print_uops # noqa: F401 # pylint: disable=unused-import
-
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "isa backends don't preserve the op spec when lowering")
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -30,7 +28,7 @@ class TestLinearizer(unittest.TestCase):
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
     linear = c.schedule_linear()
     run_linear(linear)
-    rawbufs = [s.buffer for s in linear.src[-1].src[1:] if s.op is not Ops.BIND]
+    rawbufs = [s.buffer for s in linear.src[-1].src[1:] if not s.is_bound_var]
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.uop.base.realized, b.uop.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
@@ -248,11 +246,10 @@ class TestLinearizer(unittest.TestCase):
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     begin_range = [i for i, x in enumerate(uops) if x.op is Ops.RANGE][-1]
     end_range = [i for i, x in enumerate(uops) if x.op is Ops.END][0]
-    for i,u in enumerate(uops): print(i, u.op, [uops.index(s) for s in u.src], u.arg, u.dtype)
     for u in uops:
       if u.op is Ops.STORE and u.src[0].addrspace is AddrSpace.REG:
         if uops.index(u) < begin_range:
-          assert u.src[1].op is Ops.CONST
+          assert u.src[1].op not in GroupOp.ALU
         else:
           assert u.src[1].op in GroupOp.ALU
           assert begin_range < uops.index(u) < end_range
@@ -268,9 +265,9 @@ class TestLinearizer(unittest.TestCase):
     uops = tuple(to_program(replace_opts(ast, []), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     idxs = dedup([uop for uop in uops if uop.op is Ops.SPECIAL])
     idxs = sorted(idxs, key=lambda uop: uop.arg)
-    assert (idxs[0].arg, idxs[0].src[0].val) == ('gidx0', 6), idxs[0]
-    assert (idxs[1].arg, idxs[1].src[0].val) == ('gidx1', 5), idxs[1].arg
-    assert (idxs[2].arg, idxs[2].src[0].val) == ('gidx2', 4), idxs[2].arg
+    assert (idxs[0].arg, idxs[0].src[0].src[0].val) == ('gidx0', 6), idxs[0]
+    assert (idxs[1].arg, idxs[1].src[0].src[0].val) == ('gidx1', 5), idxs[1].arg
+    assert (idxs[2].arg, idxs[2].src[0].src[0].val) == ('gidx2', 4), idxs[2].arg
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
@@ -411,7 +408,7 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   last_call = linear.src[-1]
   ast = last_call.src[0]
   assert ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {last_call}"
-  last_bufs = [s.buffer for s in last_call.src[1:] if s.op is not Ops.BIND]
+  last_bufs = [s.buffer for s in last_call.src[1:] if not s.is_bound_var]
   # now all input buffers in last_call should be realized
   # create fresh buffers for the outputs
   bufs = [Buffer(x.device, x.size, x.dtype).allocate() if i < len(ast.src) else x for i,x in enumerate(last_bufs)]
@@ -437,7 +434,7 @@ def reset_bufs(bufs:list[Buffer]):
   for buf in bufs: buf.copy_from(Buffer("PYTHON", buf.size, buf.dtype, opaque=memoryview(bytearray(buf.nbytes))))
 
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
-                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):
+                               apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[], check_default_opt=True):
   outbufs = real_bufs[:len(realized_ast.src)]
   wanna_output = [np.array(x).flatten() for x in wanna_output]
   buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in real_bufs]
@@ -459,9 +456,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
     for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
 
   # Check correctness of handcoded optimiztions.
-  reset_bufs(outbufs)
-  run_prg(opts=None)
-  for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
+  if check_default_opt: check_opt(None)
   for x in opts: # Check custom transformations if any.
     check_opt(([Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, 1))] if apply_tc else [])+x)
 

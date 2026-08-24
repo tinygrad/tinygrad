@@ -6,7 +6,7 @@ from tinygrad.runtime.support.memory import TLSFAllocator
 
 def _collect_bufs(u:UOp) -> list[UOp]:
   if u.op is Ops.BUFFER: return [u]
-  if u.op is Ops.SLICE and u.tag == ("allreduce",): return _collect_bufs(u.src[0])
+  if u.op is Ops.SHRINK and u.tag == ("allreduce",): return _collect_bufs(u.src[0])
   if u.op in {Ops.MSELECT, Ops.MSTACK}: return [b for s in u.src for b in _collect_bufs(s)]
   return []
 
@@ -53,11 +53,9 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
     peaks[_key(buf)] = (max(peaks[_key(buf)][0], offsets[buf] + buf.max_numel() * buf.dtype.itemsize), peaks[_key(buf)][1])
   arena_sizes = {key: round_up(peak, block_size) for key, (peak, _) in peaks.items()}
 
-  # build replace_map: each buffer becomes a SLICE into a shared per-device-lane arena
+  # build replace_map: each buffer becomes a SHRINK/BITCAST into a shared per-device-lane arena
   arenas = {key: UOp.new_buffer(key[0], sz, dtypes.int8) for key, sz in arena_sizes.items()}
-  replace_map:dict[UOp, UOp] = {}
-  for buf_uop, offset in offsets.items():
-    replace_map[buf_uop] = UOp(Ops.SLICE, buf_uop.dtype, (arenas[_key(buf_uop)], UOp.const(offset)), buf_uop.max_numel())
+  replace_map = {buf_uop:arenas[_key(buf_uop)][offset:offset+buf_uop.nbytes()].bitcast(buf_uop.dtype) for buf_uop, offset in offsets.items()}
 
   if DEBUG >= 1 and (omem:=sum(nbytes.values()) / 1e6) != (nmem:=sum(arena_sizes.values()) / 1e6):
     print(f"memory reduced from {omem:.2f} MB -> {nmem:.2f} MB, {len(first_appearance)} -> {len(arenas)} bufs")

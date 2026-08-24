@@ -22,13 +22,11 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
   group_size = H // H_KV
   q, k, v = q.reshape(B, N, H, D), k.reshape(B, N, H_KV, D), v.reshape(B, N, H_KV, D)
   xqkv = xqkv.reshape(B, N, H_KV, group_size + 2, D)
-
   b, n = UOp.range(B, 0), UOp.range(N, 1)
   pair = UOp.range(D // 2, 2)
   even = pair * 2
   c = freqs_cis[0, n, 0, pair, 0].cast(dtypes.float)
   s = freqs_cis[0, n, 0, pair, 1].cast(dtypes.float)
-
   ordered:UOp|None = None
   for kvh in range(H_KV):
     q_out, k_out, v_out = (x.after(ordered) if ordered is not None else x for x in (q, k, v))
@@ -40,7 +38,6 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
       h = kvh * group_size + rep
       stores += [q_out[b, n, h, even].store((a * c - bb * s).cast(q.dtype)),
                  q_out[b, n, h, even + 1].store((a * s + bb * c).cast(q.dtype))]
-
     a = x_in[b, n, kvh, group_size, even].cast(dtypes.float)
     bb = x_in[b, n, kvh, group_size, even + 1].cast(dtypes.float)
     stores += [k_out[b, n, kvh, even].store((a * c - bb * s).cast(k.dtype)),
@@ -169,8 +166,7 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
-@functools.cache
-def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink):
+def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=0):
   def grad(dou:UOp, ker:UOp) -> tuple:
     do = Tensor(dou, device=dou.device)
     attn = Tensor(ker.src[1].after(ker), device=ker.src[1].device)
@@ -179,7 +175,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     xk = Tensor(ker.src[4], device=ker.src[4].device)
     xv = Tensor(ker.src[5], device=ker.src[5].device)
 
-    use_asm_bwd = getenv("ASM_FA", 1) and getenv("ASM_FA_BWD", 1) and arch == "gfx950" and not has_sink and \
+    use_asm_bwd = getenv("ASM_FA", 1) and getenv("ASM_FA_BWD", 1) and window == 0 and arch == "gfx950" and not has_sink and \
       (B_local, N, H_local, H_KV_local, D) == (2, 8192, 32, 8, 128)
     dq = _sharded_empty((B, H, N, D), xq, axis=shard_axis_t)
     GROUP_SIZE = H_local // H_KV_local
@@ -212,7 +208,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     else:
       dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, do, xq, xk, xv, l_vec, delta_vec,
         fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch,
-                              B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
+                              B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, window=window))[:3]
 
     if use_asm_bwd:
       pass
@@ -238,7 +234,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
   return grad
 
 # TODO: remove write_flat once scheduler can remove reshapes between custom_kernel. TestCustomKernel.test_simple_reshape
-def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, write_flat:bool=False, sinks:Tensor|None=None):
+def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, write_flat:bool=False, sinks:Tensor|None=None, window:int=0):
   assert attn_mask is None, "attn_mask not supported"
   assert is_causal, "only causal attention supported"
 
@@ -265,10 +261,10 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   attn = _sharded_empty((B, N, H * D), xq, axis=shard_axis) if write_flat else _sharded_empty_like(xq, axis=shard_axis)
   l_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
 
-  grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink)
+  grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=window)
 
   fwd_inputs = (attn, l_vec, xq, xk, xv) + ((sinks,) if has_sink else ())
-  attn, l_vec = Tensor.custom_kernel(*fwd_inputs, fxn=functools.partial(custom_fa_forward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, has_sink=has_sink), grad_fxn=grad)[:2]
+  attn, l_vec = Tensor.custom_kernel(*fwd_inputs, fxn=functools.partial(custom_fa_forward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, has_sink=has_sink, window=window), grad_fxn=grad)[:2]
 
   return attn, attn, l_vec
 
@@ -339,10 +335,10 @@ def custom_asm_fa_backward_shuffle(dq:UOp, dq_acc:UOp, *, B:int, N:int, H:int, D
 
 @functools.cache
 def custom_hk_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None, *, device:str, arch:str,
-                         B:int, N:int, H:int, H_KV:int, D:int, has_sink:bool=True):
+                         B:int, N:int, H:int, H_KV:int, D:int, has_sink:bool=True, window:int=0):
   code = (pathlib.Path(__file__).parent / "fa_fwd_causal.cpp").read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
-                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DATTN_SINK={int(has_sink)}"]
+                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DATTN_SINK={int(has_sink)}", f"-DWINDOW={window}"]
 
   Q_BLOCK_SIZE = 32
   NUM_WARPS = 8
@@ -372,11 +368,11 @@ def custom_hk_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=N
 
 @functools.cache
 def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None, *, device:str, arch:str,
-                      B:int, N:int, H:int, H_KV:int, D:int, has_sink:bool=True):
-  if getenv("ASM_FA", 1) and arch == "gfx950" and not has_sink and B in (1, 2) and (N, H, H_KV, D) == (8192, 32, 8, 128):
+                      B:int, N:int, H:int, H_KV:int, D:int, has_sink:bool=True, window:int=0):
+  if getenv("ASM_FA", 1) and window == 0 and arch == "gfx950" and not has_sink and B in (1, 2) and (N, H, H_KV, D) == (8192, 32, 8, 128):
     return custom_asm_fa_forward(o, l_vec, q, k, v, B=B, N=N, H=H, H_KV=H_KV, D=D)
   return custom_hk_fa_forward(o, l_vec, q, k, v, sinks, device=device, arch=arch,
-                              B=B, N=N, H=H, H_KV=H_KV, D=D, has_sink=has_sink)
+                              B=B, N=N, H=H, H_KV=H_KV, D=D, has_sink=has_sink, window=window)
 
 @functools.cache
 def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
@@ -410,10 +406,10 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
              src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
-def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_vec:UOp, delta_vec:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
+def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_vec:UOp, delta_vec:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int, window:int=0):
   code = (pathlib.Path(__file__).parent / "fa_bwd_causal.cpp").read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
-                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}"]
+                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DWINDOW={window}"]
 
   BLOCK_SIZE_KV = 256
   GROUP_SIZE = H // H_KV

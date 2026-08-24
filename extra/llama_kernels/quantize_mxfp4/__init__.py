@@ -3,6 +3,7 @@ from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.mixin.gradient import gradient_auxiliary_mailbox
 from tinygrad.renderer import Estimates
+from tinygrad.schedule.allreduce import _allreduce_view
 from extra.llama_kernels import alloc_like, compile_hip
 
 # A backward producer may create the exact row/column representations consumed by
@@ -54,8 +55,11 @@ def quantize_mxfp4(x:Tensor, *, shuffle_row:bool=False, shuffle_col:bool=False, 
   assert M % 256 == 0 and N % 256 == 0, f"MXFP4 quantization requires multiples of 256, got {x.shape}"
   # Updated flat-model weights are contiguous slices of one packed allocation. Pass the physical view (including its
   # byte offset and producer state) to the opaque quantizer instead of materializing one temporary per layer.
-  if (offset:=x.uop.contiguous_view_offset()) is not None and x.uop.numel() != x.uop.base.numel():
-    physical = UOp(Ops.SLICE, x.dtype, (x.uop.buf_uop, UOp.const(offset)), x.uop.numel(), tag=("allreduce",))
+  if (view:=x.uop.contiguous_view()) is not None and x.uop.numel() != x.uop.base.numel():
+    view_buf, offset = view
+    view_size = x.uop.numel() * x.dtype.itemsize // view_buf.dtype.itemsize
+    physical = _allreduce_view(view_buf, offset, offset+view_size)
+    if physical.dtype != x.dtype: physical = physical.bitcast(x.dtype)
     if x.uop.base.op is Ops.AFTER: physical = physical.after(x.uop.base)
     x = Tensor(physical.reshape(x.shape))
   if out is not None: outputs = out

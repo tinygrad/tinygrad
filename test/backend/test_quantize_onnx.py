@@ -82,7 +82,7 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
       linear = run_onnx({"input":inp})["output"].schedule_linear()
       prg = to_program(linear.src[-2].src[0], renderer=Device[Device.DEFAULT].renderer)
       daccs = [u for u in tuple(prg.src[1].src) if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
-      assert all(u.dtype.scalar() is dtypes.int for u in daccs)
+      assert all(u.dtype is dtypes.int for u in daccs)
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
 class TestQuantizeOnnx(unittest.TestCase):

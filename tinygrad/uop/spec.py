@@ -68,8 +68,10 @@ spec_shared = PatternMatcher([
   (UPat(GroupOp.Comparison, dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))),
    lambda x,y: matches_dtype(x, y.dtype) or matches_dtype(y, x.dtype) or x.dtype in dtypes.weaks or y.dtype in dtypes.weaks),
   (UPat((Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR), name="x"), lambda x: False if any(dtypes.is_float(s.dtype) for s in x.src) else None),
-  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat(dtype=dtypes.uint)), name="a"), lambda a,x: matches_dtype(x, a.dtype) or None),
-  (UPat((Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
+  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("c")), name="a"), lambda a,x,c: (matches_dtype(x, a.dtype) or x.dtype is dtypes.weakint)
+   and (matches_dtype(c, a.dtype) or c.dtype in (dtypes.uint, dtypes.weakint) or x.base.is_invalid)),
+  (UPat((Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"),
+   lambda x: None if dtypes.is_int(x.dtype) or any(s.base.is_invalid for s in x.src) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(matches_dtype(y, x.dtype) or y.dtype in dtypes.weaks for y in x.src)),
 
   # CAST
@@ -94,7 +96,7 @@ spec_shared = PatternMatcher([
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
 
   # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX, Ops.SLICE,
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX,
                                                      Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
         allow_any_len=True, name="x"), lambda x: matches_dtype(x.src[0], x.dtype)),
 
@@ -134,21 +136,16 @@ def valid_gettuple(g:UOp, t:UOp): return isinstance(g.arg, int) and 0 <= g.arg <
 
 # these ops can exist in tensor but not programs. example: movement
 spec_tensor = PatternMatcher([
-  (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(),), name="u"), lambda u: dtypes.is_float(u.dtype)),
+  (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(),), name="u"),
+   lambda u: dtypes.is_float(u.dtype) or u.src[0].base.is_invalid),
 
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
    (isinstance(buf.dtype, DType) and matches_dtype(buf.src[0], dtypes.weakint) and is_device(buf.arg.device))
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
-  # hardware slice of a buffer-backed tensor
-  (UPat(Ops.SLICE, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.INDEX})),
-                        UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
-   lambda bv: isinstance(bv.arg, int)),
-
-  # Tensor variable bindings
-  (UPat(Ops.BIND, (dtypes.int, dtypes.long, dtypes.weakint,), (UPat(Ops.PARAM), UPat.cvar(dtype=(dtypes.int,dtypes.long,dtypes.weakint,))), arg=None),
-   lambda: True),
+  # a Variable is a 0-d ALU BUFFER with a value range and no device
+  (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
@@ -206,11 +203,13 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
+  # a literal is CAST(dt, CONST(value)), so its inner CONST is the one weak node a program may contain
+  (UPat(Ops.CONST, dtype=dtypes.weaks, name="x"), lambda x: x.dtype is dtypes.from_py(x.val)),
   # index and weak dtypes are not allowed in programs
   (UPat(GroupOp.All, (dtypes.weakint, dtypes.weakfloat)), lambda: False),
 
   # allow special SHRINK
-  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST))), lambda: True),
+  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat(), UPat(Ops.CONST).or_casted())), lambda: True),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),
@@ -238,13 +237,6 @@ spec_hcq = PatternMatcher([
 spec_full = PatternMatcher([
   (UPat(Ops.REWRITE_ERROR, dtypes.void, name="x"), lambda x: isinstance(x.arg, str)),
 
-  # SLICE on BUFFER is allowed if BUFFER is
-  (UPat(Ops.SLICE, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.AFTER, Ops.MSELECT, Ops.MSTACK})),
-                        UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
-   lambda bv: isinstance(bv.arg, int)),
-
-  (UPat(Ops.CALL, dtypes.void, src=(UPat((Ops.SLICE,)),), allow_any_len=True), lambda: True),
-
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
 
@@ -253,9 +245,6 @@ spec_full = PatternMatcher([
 
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
-
-  # while BIND is being casted
-  (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
 ])+spec_tensor+spec_program+spec_hcq
 
 # ***** kernel graph spec *****
@@ -263,31 +252,29 @@ spec_full = PatternMatcher([
 spec_kernel_graph = PatternMatcher([
   # sink
   (UPat(Ops.SINK, dtypes.void), lambda: True),
-  # bind
-  (UPat(Ops.BIND), lambda: True),
-  # const + stack to make vconsts
+  # the store of a bound Variable binds it: AFTER(BUFFER, STORE(BUFFER, CONST)) in call args
+  (UPat(Ops.STORE, dtypes.void, (UPat(Ops.BUFFER, name="b"), UPat(Ops.CONST))), lambda b: b.is_variable),
+  # const + stack to make vconsts and shape args
   (UPat(Ops.CONST, src=()), lambda: True),
-  (UPat(Ops.STACK, src=()), lambda: True),
-  (UPat(Ops.STACK, src=UPat((Ops.CONST, Ops.BIND, Ops.PARAM))), lambda: True),
+  (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) or x.is_variable or x.is_bound_var for x in s.src) or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
   # param is outside buffer, buffer is local buffer
   (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
-  (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace == AddrSpace.GLOBAL),
+  (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.ALU)),
   # RESHAPE/BITCAST are NOOPs in the kernel graph (do we need them?)
   (UPat((Ops.RESHAPE, Ops.BITCAST)), lambda: True),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
-  # physical allreduce slices are direct copy arguments in the kernel graph
-  (UPat(Ops.SLICE, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.MSELECT})),
-                        UPat(Ops.CONST, dtype=dtypes.weakint)), name="x"),
-   lambda x: isinstance(x.arg, int) and x.tag == ("allreduce",)),
+  # physical allreduce views are direct copy arguments in the kernel graph
+  (UPat(Ops.SHRINK, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.MSELECT})),
+                         UPat(Ops.CONST, dtype=dtypes.weakint), UPat(Ops.CONST, dtype=dtypes.weakint)), name="x"),
+   lambda x: True),
   # all calls are on various sinks
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM)),), allow_any_len=True), lambda: True),
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
   # after on PARAM or AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE,
-                                                    Ops.SLICE})),),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),),
         allow_any_len=True, name="x"), lambda x: matches_dtype(x.src[0], x.dtype)),
 ])
 

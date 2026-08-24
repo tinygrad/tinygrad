@@ -9,7 +9,7 @@ from extra.llama_kernels.swiglu import swiglu
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
 from test.helpers import needs_second_gpu, assert_kernel_count
-from test.backend.test_asm_gemm import has_hipcc
+from test.backend.test_asm_gemm import has_hipcc, is_cdna4
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
   Tensor.manual_seed(0)
@@ -168,7 +168,7 @@ class TestFusedQKVRoPE(unittest.TestCase):
   SHAPE = (2, 8192, 32, 8, 128)
 
   def setUp(self):
-    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("test uses bf16 inputs")
 
   def rand_bf16(self, *shape:int) -> Tensor:
     return (Tensor.randn(*shape) * 0.1).cast(dtypes.bfloat16).contiguous().realize()
@@ -183,13 +183,13 @@ class TestFusedQKVRoPE(unittest.TestCase):
                        "only run production shape on gfx950 for speed")
   def test_llama31_8b_forward(self): run_fused_qkv_rope_forward(self, self.SHAPE)
 
-  @unittest.skipUnless(has_hipcc() and Device.DEFAULT == "AMD", "requires hipcc to compile and amd device to run")
+  @unittest.skipUnless(has_hipcc() and is_cdna4(), "backward kernel requires hipcc and CDNA4")
   def test_llama31_8b_backward(self):
     Tensor.manual_seed(1)
     B, N, H, H_KV, D = self.SHAPE
     PARTIALS = 2
     GROUP = H // H_KV
-    freqs_cis = self.freqs_cis()
+    freqs_cis = precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone().realize()
     dq = self.rand_bf16(B, N, H, D)
     dk_partial = self.rand_bf16(B * PARTIALS, N, H_KV, D)
     dv_partial = self.rand_bf16(B * PARTIALS, N, H_KV, D)

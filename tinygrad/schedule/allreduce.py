@@ -1,7 +1,10 @@
 import functools, itertools
 from tinygrad.helpers import all_int, all_same, prod, DEBUG, RING, ALL2ALL, getenv
-from tinygrad.uop.ops import Ops, UOp, ParamArg
-from tinygrad.dtype import dtypes
+from tinygrad.uop.ops import Ops, UOp, ParamArg, sint
+
+def _allreduce_view(buf:UOp, start:sint, end:sint) -> UOp:
+  """A physical contiguous view used directly as an all-reduce runtime argument."""
+  return buf.flatten().shrink(((start, end),)).rtag(("allreduce",))
 
 # *** allreduce implementation ***
 def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool]:
@@ -12,8 +15,7 @@ def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool]:
 def _allreduce_chunk(buf:UOp, start:int, end:int, input_staged:bool) -> UOp:
   # Keep chunks as physical views so SDMA reads the stable allocation directly. Outside a precompiled function,
   # retain the staging store as an explicit dependency; buf_uop alone carries the address but not its producer event.
-  chunks = [UOp(Ops.SLICE, buf.dtype, (buf.mselect(i).buf_uop, UOp.const(start, dtypes.weakint)), end-start,
-                tag=("allreduce",)) for i in range(len(buf.device))]
+  chunks = [_allreduce_view(buf.mselect(i).buf_uop, start, end) for i in range(len(buf.device))]
   if not input_staged: chunks = [chunk.after(buf) for chunk in chunks]
   return UOp.mstack(*chunks)
 
@@ -44,8 +46,13 @@ def is_allreduce_linear_output(linear:UOp, slot:int) -> bool:
     for s in x.src: consumers.setdefault(s, []).append(x)
   selects = consumers.get(params[0], [])
   if not selects or any(x.op is not Ops.MSELECT for x in selects): return False
-  slices = [y for x in selects for y in consumers.get(x, [])]
-  return bool(slices) and all(x.op is Ops.SLICE and x.tag == ("allreduce",) and
+  slices:list[UOp] = []
+  for x in selects:
+    uses = consumers.get(x, [])
+    while len(uses) == 1 and uses[0].op in {Ops.RESHAPE, Ops.BITCAST}:
+      uses = consumers.get(uses[0], [])
+    slices.extend(uses)
+  return bool(slices) and all(x.op is Ops.SHRINK and x.tag == ("allreduce",) and
                               consumers.get(x) and all(y.op is Ops.CALL for y in consumers[x]) for x in slices)
 
 def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=False) -> UOp|None:
@@ -100,8 +107,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   # a padded MSTACK and then running a full-size reassembly kernel on every device.
   if direct_stack:
     if output is None: output = UOp.empty(*shape, dtype=reduced_chunks[0].dtype, device=device)
-    states = [[UOp(Ops.SLICE, output.dtype, (output.mselect(j).buf_uop, UOp.const(s, dtypes.weakint)), e-s, tag=("allreduce",))
-               for s,e in chunks] for j in range(ndev)]
+    states = [[_allreduce_view(output.mselect(j).buf_uop, s, e) for s,e in chunks] for j in range(ndev)]
     for i,rc in enumerate(reduced_chunks):
       owner = i if use_all2all else (i-1) % ndev
       target = states[owner][i]
