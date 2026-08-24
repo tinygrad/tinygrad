@@ -25,7 +25,7 @@ SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
 SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE = \
   ContextVar("SQTT_ITRACE_SE_MASK", 0b11), ContextVar("SQTT_LIMIT_SE", 0), ContextVar("SQTT_SIMD_SEL", 0), ContextVar("SQTT_TOKEN_EXCLUDE", 0)
 PMC = ContextVar("PMC", abs(VIZ.value)>=2)
-AMD_USB_POLL_US = getenv("AMD_USB_POLL_US", 500)
+AMD_USB_POLL_US = getenv("AMD_USB_POLL_US", 500) # ms to sleep between USB signal polls. 0 disables
 EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
 WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
 WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
