@@ -44,6 +44,7 @@ def time_to_str(t:float, w=8) -> str: return next((f"{t * d:{w}.2f}{pr}" for d,p
 def size_to_str(s:int) -> str: return next((f"{s / d:.2f} {pr}" for d,pr in [(1<<30, "GB"),(1<<20, "MB"),(1<<10, "KB")] if s >= d), f"{s} B")
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
+def ansipad(s:str, w:int): return s+' '*max(w-ansilen(s), 0)
 def make_tuple(x:int|Sequence[int], cnt:int) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else tuple(x)
 def to_tuple(x:T|tuple[T, ...]) -> tuple[T, ...]: return x if isinstance(x, tuple) else (x,)
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
@@ -263,6 +264,9 @@ NUM_CPU_THREADS = ContextVar("NUM_CPU_THREADS", _get_cpu_count())
 NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
+# this PARALLEL is for BEAM and compilation, it's currently disabled if you are using VIZ
+# pytest-xdist workers share the CPU budget, explicit PARALLEL still overrides this default
+PARALLEL = ContextVar("PARALLEL", NUM_CPU_THREADS.value // max(1, getenv("PYTEST_XDIST_WORKER_COUNT", 1)) if VIZ == 0 else 0)
 PROFILE = ContextVar("PROFILE", abs(VIZ.value))
 SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
@@ -360,7 +364,8 @@ class TracingKey:
 class ProfileEvent: pass
 
 @dataclass
-class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None # noqa: E702
+class ProfileRangeEvent(ProfileEvent):
+  device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; profile_key:bytes|None=None # noqa: E702
 
 @dataclass(frozen=True)
 class ProfilePointEvent(ProfileEvent):
@@ -368,8 +373,8 @@ class ProfilePointEvent(ProfileEvent):
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
-def cpu_profile(name:str|TracingKey, device="TINY", display=True) -> Generator[ProfileRangeEvent, None, None]:
-  res = ProfileRangeEvent(device, name, perf_counter_us())
+def cpu_profile(name:str|TracingKey, device="TINY", display=True, profile_key:bytes|None=None) -> Generator[ProfileRangeEvent, None, None]:
+  res = ProfileRangeEvent(device, name, perf_counter_us(), profile_key=profile_key)
   try: yield res
   finally:
     res.en = perf_counter_us()
@@ -460,14 +465,16 @@ def _ensure_downloads_dir() -> pathlib.Path:
   return pathlib.Path(cache_dir) / "downloads"
 
 def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip:bool=False, allow_caching=not getenv("DISABLE_HTTP_CACHE"),
-          headers:dict[str, str]={}, sha256:str|None=None) -> pathlib.Path:
+          headers:dict[str, str]={}, sha256:str|None=None, extract:bool=False) -> pathlib.Path:
   import urllib.request
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
   else:
     hh = "_"+hashlib.md5(("\n".join(f"{k.strip()}:{v.strip()}" for k,v in sorted(headers.items()))).encode("utf-8")).hexdigest() if headers else ""
     fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + hh + (".gunzip" if gunzip else ""))
+  extract_dir = fp.parent / f"{fp.name}.extract"
   if not fp.is_file() or not allow_caching or (sha256 and hashlib.sha256(fp.read_bytes()).hexdigest() != sha256):
+    if extract: shutil.rmtree(extract_dir, ignore_errors=True)
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
     with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.13.0", **headers}), timeout=10) as r:
       assert r.status in {200, 206}, r.status
@@ -484,6 +491,17 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
         pathlib.Path(f.name).rename(fp)
       progress_bar.update(close=True)
       if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
+  if extract:
+    if not extract_dir.is_dir():
+      import tarfile
+      tmpdir = tempfile.mkdtemp(dir=fp.parent)
+      try:
+        with tarfile.open(fp) as t: t.extractall(tmpdir, filter="data")
+        try: os.rename(tmpdir, extract_dir)  # rename is atomic, so concurrent fetches can't see a partial extraction
+        except OSError:
+          if not extract_dir.is_dir(): raise
+      finally: shutil.rmtree(tmpdir, ignore_errors=True)
+    return extract_dir
   return fp
 
 def fetch_fw(path:str, name:str, sha256:str) -> bytes:
@@ -585,9 +603,9 @@ class tqdm(Generic[T]):
     est_text = f'<{HMS(elapsed/prog-elapsed) if self.n else "?"}' if self.t else ''
     it_text = (SI(self.n/elapsed) if self.unit_scale else f"{self.n/elapsed:5.2f}") if self.n else "?"
     suf = f'{prog_text} [{HMS(elapsed)}{est_text}, {it_text}{self.unit}/s]'
-    sz = max(ncols-len(self.desc)-3-2-2-len(suf), 1)
+    sz = max(ncols-ansilen(self.desc)-3-2-2-len(suf), 1)
     bar = '\r' + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
-    print(bar[:ncols+1], flush=True, end='\n'*close, file=sys.stderr)
+    print(bar, flush=True, end='\n'*close, file=sys.stderr)
   @classmethod
   def write(cls, s:str): print(f"\r\033[K{s}", flush=True, file=sys.stderr)
 

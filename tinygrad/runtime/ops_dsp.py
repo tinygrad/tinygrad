@@ -105,7 +105,7 @@ class DSPAllocator(Allocator['DSPDevice']):
 
 class DSPCompiler(Compiler):
   def __init__(self, mock:bool=False):
-    compiler_args = "--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b"
+    self.mock, compiler_args = mock, "--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b"
     if mock: self.args = f"-static {compiler_args}"
     else:
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
@@ -119,6 +119,9 @@ class DSPCompiler(Compiler):
       self.args = f"-shared {compiler_args} -T{self.link_ld.name}"
 
     super().__init__(None if mock else "compile_dsp")
+
+  def __del__(self):
+    if not self.mock: os.unlink(self.link_ld.name)
 
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here

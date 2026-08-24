@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace, strong_dtype
-from tinygrad.dtype import PyConst, InvalidType, weak_dtype, bitcast
+from tinygrad.dtype import PyConst, InvalidType, bitcast
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, TinyELF
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
@@ -116,13 +116,13 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | \
-         Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR:
+         Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR | Ops.PYLITERAL:
       # always void
       return dtypes.void
     case Ops.CALL:
       # a CALL of an opaque body is void, a CALL of an address can return a value
       return dtypes.void if src[0].dtype is dtypes.void else None
-    case Ops.CUSTOM | Ops.CUSTOMI | Ops.PYLITERAL:
+    case Ops.CUSTOM | Ops.CUSTOMI:
       return None
     case Ops.INS:
       return None
@@ -142,7 +142,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.CMPLT | Ops.CMPNE | Ops.CMPEQ:
       return dtypes.bool
     case Ops.SIN | Ops.LOG2 | Ops.EXP2 | Ops.SQRT | Ops.RECIPROCAL:
-      return least_upper_float(src[0].dtype)
+      return dtypes.bool if src[0].base.is_invalid else least_upper_float(src[0].dtype)
     case Ops.WHERE:
       if src[0].dtype != dtypes.bool: raise RuntimeError(f"where cond must be bool, got {src[0].dtype}")
       return promo_dtype(src[1:])
@@ -159,7 +159,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
     case Ops.GETADDR:
       return dtypes.uint64
     case Ops.SHL | Ops.SHR:
-      if not all(dtypes.is_int(x.dtype) for x in src): raise RuntimeError(f"shift operands must be int, got {[x.dtype for x in src]}")
+      if not all(dtypes.is_int(x.dtype) or x.base.is_invalid for x in src):
+        raise RuntimeError(f"shift operands must be int, got {[x.dtype for x in src]}")
       return src[0].dtype
     case Ops.BUFFER | Ops.PARAM:
       assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
@@ -189,10 +190,7 @@ class UOpMetaClass(type):
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
     # CONST derives its dtype by value only when the constructor omits one
     # TODO: delete this once the dtype field is removed, for now it just re-implements spec.py
-    # an INDEX presents its access dtype, which a still-weak source matches up to weakness
-    if SPEC == 2 and op is not Ops.CONST and \
-       not any(s.base.is_invalid for s in src) and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype and \
-       not (op is Ops.INDEX and weak_dtype(expected_dtype) == weak_dtype(dtype)):
+    if SPEC == 2 and op is not Ops.CONST and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -1137,14 +1135,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # *** uop high level syntactic sugar ***
 
   @staticmethod
-  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL, device=None, volatile=False):
+  def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, volatile=False, tag=None):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
+    if slot is None: slot = next(UOp.unique_num)
     if addrspace is AddrSpace.GLOBAL:
       ret = UOp(Ops.PARAM, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, dtype, addrspace=addrspace, device=device,volatile=volatile))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       assert device is None, "LOCAL and REG placeholders cannot have a device"
       ret = UOp(Ops.BUFFER, src=(shape_to_shape_arg((prod(shape),)),), arg=ParamArg(slot, dtype, addrspace=addrspace))
+    if tag is not None: ret = ret.rtag(tag)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int, addrspace=AddrSpace.GLOBAL):
@@ -1197,7 +1197,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
     sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape)
                 for u in tuple(filter(lambda u: u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU, self.src[1].src)) + self.arg.vars)
-    return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig)
+    return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig, self.key)
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -1747,7 +1747,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
 
 def _rebuild_dtype(n:UOp, new_src:tuple[UOp,...]) -> DType:
   # TODO: delete this once the dtype field is removed, every rebuild will re-derive
-  if all(a.dtype is b.dtype or b.base.is_invalid for a,b in zip(n.src, new_src)): return n.dtype
+  if all(a.dtype is b.dtype for a,b in zip(n.src, new_src)): return n.dtype
   return dtype_from_uop(n.op, new_src, n.arg) or n.dtype
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
