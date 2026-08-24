@@ -191,6 +191,8 @@ pm_forward_linear_store = PatternMatcher([
 ])
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
+  # ALLREDUCE lowering can introduce these after the multi pass has already visited the parent.
+  (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack,ms: mstack.src[ms.arg]),
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
 
@@ -413,10 +415,11 @@ def no_indexing_calls(u:UOp):
       # TODO: we should add safety checks here for contiguous
       new_srcs.append(x.src[0])
     elif x.op is Ops.SHRINK:
-      # SHRINK with offset 0 is fine
-      new_srcs.append(strip_zero_offset_shrink(x))
+      # Tagged all-reduce SHRINKs are physical runtime views. Even at offset zero their bounded allocation size
+      # must survive on compute calls, matching the former SLICE call argument semantics.
+      new_srcs.append(x if x.tag == ("allreduce",) else strip_zero_offset_shrink(x))
     elif x.op is Ops.MSTACK:
-      new_srcs.append(x.replace(src=tuple(strip_zero_offset_shrink(s) for s in x.src)))
+      new_srcs.append(x.replace(src=tuple(s if s.tag == ("allreduce",) else strip_zero_offset_shrink(s) for s in x.src)))
     else:
       # everything else we pass through
       new_srcs.append(x)
@@ -551,11 +554,12 @@ class LocalAddBufferContext:
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   # Variables (ALU buffers with a value range) are scalar symbolic values, not real buffers: they become ALU params with no slot
   if buf.is_variable: return buf.replace(op=Ops.PARAM)
-  param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),),
+  physical_shape = (buf.src[2].val,) if buf.op is Ops.SHRINK and buf.tag == ("allreduce",) else buf.max_shape
+  param = UOp(Ops.PARAM, src=(UOp.const(prod(physical_shape)),),
               arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
-  ret = param.reshape(buf.max_shape)
+  ret = param.reshape(physical_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
-  if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
+  if physical_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
   if buf not in ctx.map: ctx.map[buf] = buf
   ctx.dg += 1
   return ret
@@ -646,9 +650,12 @@ def split_copy_slice(x:UOp) -> UOp|None:
   if (slice_src:=copy_slice_src(store.src[1].src[0])) is None: return None
   src, source_state = slice_src
   copy = store.src[1]
-  psrc = UOp(Ops.PARAM, src=(UOp.const(prod(src.max_shape), dtypes.int),),
-             arg=ParamArg(1, src.dtype, addrspace=src.addrspace)).reshape(src.max_shape)
-  if src.max_shape != src.shape: psrc = psrc.shrink(tuple((0, s) for s in src.shape))
+  # A tagged SHRINK is a fixed physical transfer interval. Its parent can retain a larger symbolic max shape after
+  # FUNCTION substitution, but the copy parameter must stay bounded to the explicit SHRINK length (as SLICE was).
+  physical_shape = (src.src[2].val,) if src.op is Ops.SHRINK and src.tag == ("allreduce",) else src.max_shape
+  psrc = UOp(Ops.PARAM, src=(UOp.const(prod(physical_shape), dtypes.int),),
+             arg=ParamArg(1, src.dtype, addrspace=src.addrspace)).reshape(physical_shape)
+  if physical_shape != src.shape: psrc = psrc.shrink(tuple((0, s) for s in src.shape))
   target = store.src[0].src[0] if store.src[0].op is Ops.INDEX else store.src[0]
   return copy.replace(src=(psrc,)).call(target, source_state)
 
@@ -672,6 +679,9 @@ split_kernels = PatternMatcher([
 ])
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
+  # Tagged copies are the payload of the physical-view STORE synthesized below. Leave them intact for
+  # split_copy_slice instead of recursively materializing another destination.
+  if copy.tag == ("allreduce",): return None
   input_src = copy.src[0]
   # A hardware-slice COPY already under STORE is ready for split_copy_slice. A standalone COPY still needs its
   # destination buffer; its generated STORE will then take the same direct SDMA lowering path.
@@ -681,6 +691,11 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   # bottom-up, so the parent STORE can lower source and destination slices together instead of inserting a staging copy.
   source_is_stored = input_src.op is Ops.AFTER and any(s.op is Ops.STORE for s in input_src.src[1:])
   if is_slice_copy and (existing_buf is not None or source_is_stored): return None
+  if is_slice_copy:
+    # Preserve the old SLICE lowering shape: standalone transfers first acquire their destination, then the
+    # resulting STORE is split into a direct runtime copy whose source and destination retain their offsets.
+    buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), copy.dtype, device=copy.device))
+    return buf.after(buf.store(copy.rtag(("allreduce",)))).reshape(copy.shape)
   if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
   input_src = input_src.flatten()
   if existing_buf is not None:

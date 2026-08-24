@@ -912,7 +912,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # contiguous view even when the parent's logical rank differs after FUNCTION argument substitution.
     if self.op is Ops.SHRINK and self.tag == ("allreduce",) and self.src[1].op is Ops.CONST and self.src[2].op is Ops.CONST:
       if (parent:=self.src[0].contiguous_view()) is None: return None
-      return parent[0], parent[1]+self.src[1].val
+      byte_offset = self.src[1].val * self.src[0].dtype.itemsize
+      assert byte_offset % parent[0].dtype.itemsize == 0, "all-reduce view offset must align to the base dtype"
+      return parent[0], parent[1] + byte_offset // parent[0].dtype.itemsize
 
     idx = self.flatten().index(UOp.range(self.numel(), 0))
     out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
@@ -926,7 +928,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
-    return self.op in {Ops.BUFFER, Ops.PARAM}
+    return self.op in {Ops.BUFFER, Ops.PARAM} or (self.op is Ops.SHRINK and self.tag == ("allreduce",))
 
   def _base_buffer_is_realized(self) -> bool:
     """Walk through AFTER chain to find if the underlying buffer is realized (has allocated memory)."""

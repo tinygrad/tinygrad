@@ -3,6 +3,7 @@ from tinygrad import Tensor, UOp, dtypes
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, KernelInfo
 from tinygrad.schedule.allreduce import create_allreduce_function, handle_allreduce, _is_stable_custom_output, is_allreduce_linear_output
+from tinygrad.schedule.rangeify import no_indexing_calls
 from test.helpers import KernelCountException
 
 class TestRingAllReduce(unittest.TestCase):
@@ -10,10 +11,46 @@ class TestRingAllReduce(unittest.TestCase):
     devices = ("NULL", "NULL:1")
     out = UOp.param(0, dtypes.float, (8,), device=devices)
     slices = [out.mselect(i).shrink(((4*i, 4*i+4),)).rtag(("allreduce",)) for i in range(2)]
+    self.assertTrue(slices[0].has_buffer_identity())
     linear = UOp(Ops.LINEAR, src=tuple(UOp(Ops.CALL, src=(UOp(Ops.SINK), x)) for x in slices))
     self.assertTrue(is_allreduce_linear_output(linear, 0))
     ordinary = UOp(Ops.LINEAR, src=(UOp(Ops.CALL, src=(UOp(Ops.SINK), out)),))
     self.assertFalse(is_allreduce_linear_output(ordinary, 0))
+
+  def test_physical_view_offset_uses_base_dtype_units(self):
+    base = UOp.new_buffer("NULL", 64, dtypes.uint8)
+    view = base.bitcast(dtypes.float).shrink(((3, 7),)).rtag(("allreduce",))
+    self.assertEqual(view.contiguous_view(), (base, 12))
+
+  def test_copy_keeps_zero_offset_physical_view(self):
+    src = UOp.param(1, dtypes.float, (64,), device="NULL")
+    view = src.shrink(((0, 16),)).rtag(("allreduce",))
+    copy_call = UOp(Ops.COPY, src=(UOp.param(1, dtypes.float, (16,), device="NULL"),), arg="NULL:1").call(view, view)
+    self.assertEqual(no_indexing_calls(copy_call).src[1:], (view, view))
+    sink_call = UOp(Ops.SINK).call(view)
+    self.assertEqual(no_indexing_calls(sink_call).src[1:], (view,))
+
+  def test_classify_linear_allreduce_output_with_direct_write(self):
+    devices = ("NULL", "NULL:1")
+    out = UOp.param(5, dtypes.float, (8,), device=devices)
+    slices = [out.mselect(i).shrink(((4*i, 4*i+4),)).rtag(("allreduce",)) for i in range(2)]
+    calls = [UOp(Ops.CALL, src=(UOp(Ops.SINK), x)) for x in slices]
+    for i in range(2):
+      p, idx = UOp.param(0, dtypes.float, (8,)), UOp.const(0)
+      sink = UOp.sink(p.index(idx).store(UOp.const(0, dtypes.float)))
+      calls.append(UOp(Ops.CALL, src=(sink, out.mselect(i))))
+      copy = UOp(Ops.COPY, src=(UOp.param(1, dtypes.float, (4,), device=devices[(i+1)%2]),), arg=devices[i])
+      calls.append(UOp(Ops.CALL, dtypes.void, src=(copy, out.mselect(i), slices[(i+1)%2])))
+    self.assertTrue(is_allreduce_linear_output(UOp(Ops.LINEAR, src=tuple(calls)), 5))
+
+    p, idx = UOp.param(0, dtypes.float, (8,)), UOp.const(0)
+    read_sink = UOp.sink(p.index(idx).load())
+    calls.append(UOp(Ops.CALL, src=(read_sink, out.mselect(0))))
+    self.assertFalse(is_allreduce_linear_output(UOp(Ops.LINEAR, src=tuple(calls)), 5))
+
+    copy = UOp(Ops.COPY, src=(UOp.param(1, dtypes.float, (4,), device=devices[0]),), arg=devices[1])
+    bad_copy = UOp(Ops.CALL, dtypes.void, src=(copy, slices[0], out.mselect(0)))
+    self.assertFalse(is_allreduce_linear_output(UOp(Ops.LINEAR, src=tuple(calls[:-1])+(bad_copy,)), 5))
 
   def test_write_only_custom_output_is_stable(self):
     devices = tuple(f"NULL:{i}" for i in range(4))
@@ -65,8 +102,8 @@ class TestRingAllReduce(unittest.TestCase):
       copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       if len(copies) != 24: raise KernelCountException(24, len(copies))
-      # source shards are staged once, then their physical slices feed SDMA directly
-      if len(sinks) != 23: raise KernelCountException(23, len(sinks))
+      # direct physical views avoid the former zero-offset staging kernels
+      if len(sinks) != 11: raise KernelCountException(11, len(sinks))
 
   def test_correct_all2all_direct_slices(self):
     with Context(ALL2ALL=2):

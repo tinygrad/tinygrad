@@ -1,10 +1,11 @@
 import functools, itertools
 from tinygrad.helpers import all_int, all_same, prod, DEBUG, RING, ALL2ALL, getenv
-from tinygrad.uop.ops import Ops, UOp, ParamArg, sint
+from tinygrad.uop.ops import Ops, UOp, ParamArg, sint, shape_to_shape_arg
 
 def _allreduce_view(buf:UOp, start:sint, end:sint) -> UOp:
   """A physical contiguous view used directly as an all-reduce runtime argument."""
-  return buf.flatten().shrink(((start, end),)).rtag(("allreduce",))
+  # Tagged SHRINKs use physical (offset, size) coordinates, unlike ordinary SHRINK's (start, end) API.
+  return UOp(Ops.SHRINK, buf.dtype, (buf.flatten(), shape_to_shape_arg((start,)), shape_to_shape_arg((end-start,))), tag=("allreduce",))
 
 # *** allreduce implementation ***
 def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool]:
@@ -37,7 +38,7 @@ def _is_stable_custom_output(buf:UOp) -> bool:
 
 @functools.cache
 def is_allreduce_linear_output(linear:UOp, slot:int) -> bool:
-  """Check that a LINEAR parameter is used exclusively as the sliced output storage of an allreduce."""
+  """Check that a LINEAR parameter is used exclusively as the output storage of an allreduce."""
   nodes = linear.toposort()
   params = [x for x in nodes if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot == slot]
   if len(params) != 1: return False
@@ -49,6 +50,18 @@ def is_allreduce_linear_output(linear:UOp, slot:int) -> bool:
   slices:list[UOp] = []
   for x in selects:
     uses = consumers.get(x, [])
+    # A tagged SHRINK is lowered with its physical base as the write argument and the SHRINK as access metadata.
+    # Permit that direct base use only when the corresponding call argument is provably write-only.
+    direct_calls = [u for u in uses if u.op is Ops.CALL]
+    for call in direct_calls:
+      if call.src[0].op is Ops.COPY:
+        if len(call.src) < 2 or call.src[1] is not x: return False
+        continue
+      stores, loads = [u for u in call.src[0].toposort() if u.op is Ops.STORE], [u for u in call.src[0].toposort() if u.op is Ops.LOAD]
+      outs = {p.arg.slot for u in stores for p in u.src[0].toposort() if p.op is Ops.PARAM}
+      ins = {p.arg.slot for u in loads for p in u.src[0].toposort() if p.op is Ops.PARAM}
+      if any(i not in outs-ins for i,s in enumerate(call.src[1:]) if s is x): return False
+    uses = [u for u in uses if u.op is not Ops.CALL]
     while len(uses) == 1 and uses[0].op in {Ops.RESHAPE, Ops.BITCAST}:
       uses = consumers.get(uses[0], [])
     slices.extend(uses)

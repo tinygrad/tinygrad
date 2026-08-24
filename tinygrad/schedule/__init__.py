@@ -52,11 +52,6 @@ def _call_buf_uop(s:UOp) -> UOp:
 def _call_overwrite_outputs(call:UOp) -> tuple[UOp, ...]:
   if call.src[0].op is Ops.LINEAR:
     return tuple(x for i,x in enumerate(call.src[1:]) if is_allreduce_linear_output(call.src[0], i))
-  if call.src[0].op is Ops.SINK and any(_slice_region(x) is not None for x in call.src[1:]):
-    stores, loads = [x for x in call.src[0].toposort() if x.op is Ops.STORE], [x for x in call.src[0].toposort() if x.op is Ops.LOAD]
-    outs = {p.arg.slot for x in stores for p in x.src[0].toposort() if p.op is Ops.PARAM}
-    ins = {p.arg.slot for x in loads for p in x.src[0].toposort() if p.op is Ops.PARAM}
-    return tuple(call.src[slot+1] for slot in outs-ins if slot+1 < len(call.src))
   return ()
 
 def create_schedule(sched_sink:UOp) -> UOp:
