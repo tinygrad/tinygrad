@@ -62,8 +62,8 @@ def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> tuple[UOp, ...]
   ret, bit = [], buf.dtype.itemsize
   for (tag, dt, r), ps in groups.items():
     view = buf.shrink(((r // bit, (max(off for off,_ in ps) + dt.itemsize) // bit),)).bitcast(dt)
-    offs = UOp(Ops.STACK, dtypes.int, tuple(UOp.const((off - r) // dt.itemsize, dtypes.int) for off,_ in ps))
-    ret.append(view.index(offs).store(UOp(Ops.STACK, dt, tuple(val for _,val in ps))).rtag(tag))
+    offs = UOp(Ops.STACK, src=tuple(UOp.const((off - r) // dt.itemsize, dtypes.int) for off,_ in ps))
+    ret.append(view.index(offs).store(UOp(Ops.STACK, src=tuple(val for _,val in ps))).rtag(tag))
   return tuple(ret)
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp: return buf.store(UOp(Ops.BINARY, src=(), arg=blob).bitcast(buf.dtype)).rtag("link")

@@ -614,7 +614,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
   # weak CONST with width on the CAST. TODO: this is the final const
   @staticmethod
-  def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, dtype, src=(UOp.const(b),), arg=dtype)
+  def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, src=(UOp.const(b),), arg=dtype)
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.WEAK, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
@@ -797,7 +797,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.STACK:
         srcs = (self,)+tuple(arg)
         dtype = cast(DType, dtype_from_uop(Ops.STACK, srcs, None))
-        return UOp(Ops.STACK, dtype, tuple(u if u.base.is_invalid else UOp.const(u.val, dtype) if u.op is Ops.CONST else u.cast(dtype) for u in srcs))
+        return UOp(Ops.STACK, src=tuple(u if u.base.is_invalid else UOp.const(u.val, dtype) if u.op is Ops.CONST else u.cast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)

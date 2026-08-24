@@ -836,7 +836,7 @@ class X86Renderer(ISARenderer):
     if x.op is Ops.BUFFER: x = x.replace(dtype=dtypes.uint64)
     is_xmm = isinstance(x.tag, tuple) and x.tag[0].cons[0].size == 16
     op = X86Ops.VMOVUPSm if is_xmm else X86Ops.MOVm
-    return UOp(Ops.INS, dtypes.void, fold_address(self.stack_pointer().index(disp)) + (x,), op, x.tag)
+    return UOp(Ops.INS, src=fold_address(self.stack_pointer().index(disp)) + (x,), arg=op, tag=x.tag)
 
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp:
     is_xmm = reg.cons[0].size == 16
