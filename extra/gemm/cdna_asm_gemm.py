@@ -263,7 +263,7 @@ def custom_asm_bf16_mlperf_gemm1_bw(gradient:UOp, kernel:UOp):
     drange = UOp.range(len(g.device), -1, AxisType.DEVICE)
     g = Tensor(g.uop._shard(0, drange).unshard(0))
   a_t, b_t = Tensor(a_phys, device=a_phys.device), Tensor(b_phys, device=b_phys.device).reshape(-1, 4096)
-  grad_a = asm_gemm(g.T, b_t)
+  grad_a = hk_bf16_atb_gemm(g.reshape(1, *g.shape), b_t.reshape(1, *b_t.shape))
   grad_b = asm_gemm(g, a_t).reshape(b_phys.shape)
   return None, None, grad_a.uop, grad_b.uop, None, None
 
