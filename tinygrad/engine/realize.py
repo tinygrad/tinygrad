@@ -100,14 +100,13 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
   if prg.arg.local_size is not None or not Device[device].renderer.has_local or not all_int(prg.arg.global_size): return None
 
   if (local_size:=local_size_cache.get(prg.key)) is None:
-    # reuse one loaded runtime across candidates, only launch dims vary
-    (bufs, var_vals), runtime = args_from_ast(prg.src[0], device), get_runtime(device, prg, cache=False)
-    bufs  = [b.allocate() for b in bufs]
+    # time through the normal exec path, a loadable Program is not something every backend has
+    bufs, var_vals = args_from_ast(prg.src[0], device)
+    args = [UOp.from_buffer(b.allocate()) for b in bufs]
     def try_exec(local_size):
-      try:
-        new_gs = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
-        return runtime(*[bufs[i].get_buf(device) for i in prg.arg.globals], global_size=new_gs, local_size=(*local_size,),
-                       vals=prg.arg.vals(var_vals), wait=True)
+      new_gs = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
+      cand = prg.replace(arg=replace(prg.arg, global_size=new_gs, local_size=tuple(local_size)))
+      try: return next(time_call(cand.call(*args), var_vals))
       except Exception: return float('inf')
 
     MAX_WORKGROUP = 1024
