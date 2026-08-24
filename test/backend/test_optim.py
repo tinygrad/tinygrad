@@ -86,10 +86,14 @@ class TestOptim(unittest.TestCase):
 
   def test_muon(self): self._test_muon(1, {'lr': 0.001}, 1e-3, 0)
   # TODO: disabled due to big atol
-  # def test_muon_high_lr(self): self._test_muon(1, {'lr': 10}, 1e-6, 3e-4)
+  def test_muon_high_lr(self): self._test_muon(1, {'lr': 10, "momentum": 0.0, "nesterov": False, "ns_steps": 0, "weight_decay": 0.0}, 1e-6, 3e-4)
   def test_muon_wd(self): self._test_muon(1, {'lr': 0.001, 'weight_decay': 0.01}, 1e-3, 3e-4)
   # TODO: disabled due to big atol
   # def test_muon_high_lr_wd(self): self._test_muon(1, {'lr': 10, 'weight_decay': 0.01}, 1e-6, 5e-4)
+  def test_muon_wd_has_effect(self):
+    for x,y in zip(step(Tensor, Muon, steps=1, weight_decay=0.0),
+                   step(Tensor, Muon, steps=1, weight_decay=0.1)):
+      self.assertFalse(np.allclose(x, y))
 
   # NOTE: momentum set to 0.95 by default, nesterov set to True by default
   def test_multistep_muon_momentum_wd(self): self._test_muon(10, {'lr': 0.001, 'weight_decay': 0.01}, 3e-3, 0)
