@@ -122,7 +122,7 @@ class LARS(Optimizer):
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       if self.ns_coefficients: g = g.reshape(g.shape[0], -1).newton_schulz(self.ns_steps, self.ns_coefficients).reshape(g.shape)
       # muon does post momentum weight decay
-      if not self.pre_wd and self.wd > 0: t = t.detach() * (1.0 - self.wd * self.lr)
+      if not self.pre_wd and self.wd > 0: g = g + self.wd * t.detach()
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
       ret.append(g.cast(t.dtype))
