@@ -86,8 +86,8 @@ def _amd_load(ptr:UOp, lanes:int|None=None) -> UOp:
   assert ptr.op is Ops.INDEX
   if lanes is None: return UOp(Ops.CUSTOMI, ptr.dtype, (ptr,), arg="__builtin_nontemporal_load({0})")
   buf, coords = ptr.src[0], ptr.src[1:]
-  idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0, dtypes.weakint))
-  return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes, dtypes.weakint))).load(dtype=ptr.dtype)
+  idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0))
+  return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load(dtype=ptr.dtype)
 
 def _load_byte(raw:UOp, base:UOp, offset:UOp) -> UOp: return (raw[base + offset//4] >> ((offset&3)*8).cast(dtypes.uint32)) & 255
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
