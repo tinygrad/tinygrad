@@ -377,14 +377,17 @@ class TestUOpPrograms(unittest.TestCase):
                              (dtypes.int32,  [0,-340,2**31, -2**32], [35, 3, -9, -3**10])]:
       with self.subTest(dtype=dt):
         num, denom, out = Tensor(n_data, dtype=dt), Tensor(d_data, dtype=dt), Tensor.empty(4, dtype=dt)
-        with Context(DEBUG=0): Tensor.realize(num, denom, out)
+        ref = num.div(denom, rounding_mode='trunc')
+        with Context(DEBUG=0): Tensor.realize(num, denom, out, ref)
 
         N, D, O = num.uop.placeholder_like(0), denom.uop.placeholder_like(1), out.uop.placeholder_like(2)
-        prog = xidiv32(N, D, O)
+        i = UOp.range(4, axis_id=0)
 
-        truth = num.div(denom, rounding_mode='trunc').tolist()
+        div = N[i].alu(Ops.CDIV, D[i])
+        prog = O[i].set(xidiv32(div, *div.src)).end(i)
+
         self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), num, denom, out)
-        with Context(DEBUG=0): self.assertEqual(out.tolist(), truth)
+        with Context(DEBUG=0): self.assertEqual(out.tolist(), ref.tolist())
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

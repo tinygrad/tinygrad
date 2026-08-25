@@ -49,12 +49,13 @@ def _mulhi32(a:UOp, b:UOp): return ((a.cast(dtypes.uint64) * b.cast(dtypes.uint6
 def xidiv32(x:UOp, a:UOp, b:UOp) -> UOp:
   if (signed := not dtypes.is_unsigned(x.dtype)):
     s = ((a ^ b).bitcast(dtypes.int32) >> UOp.const(31, dtypes.int32)).bitcast(dtypes.uint32)
-    a, b = a.bitcast(dtypes.int32).abs(), b.bitcast(dtypes.int32).abs()
+    a, b = a.abs(), b.abs()
   a, b = a.bitcast(dtypes.uint32), b.bitcast(dtypes.uint32)
-  z = (b.float().reciprocal() * UOp.const(2**32 - 256, dtypes.float32)).cast(dtypes.uint32)
-  z = z + _mulhi32(z, (b*z).bitcast(dtypes.int32).neg())
+  z = (b.float().reciprocal() * UOp.const(2**32 - 512, dtypes.float32)).cast(dtypes.uint32)
+  z = z + _mulhi32(z, b.neg() * z)
   q = _mulhi32(a, z)
   r = a - q*b
+  q, r = (r < b).where(q, q + 1), (r < b).where(r, r - b)
   q, r = (r < b).where(q, q + 1), (r < b).where(r, r - b)
   if signed: q = (q ^ s) - s
   return q.cast(x.dtype)
