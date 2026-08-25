@@ -11,6 +11,10 @@ ZERO_OPTIM = getenv("ZERO_OPTIM", 0)
 FP8_AMAX_MARGIN = getenv("FP8_AMAX_MARGIN", 1.1)
 IMMEDIATE_SCALE = getenv("IMMEDIATE_SCALE", 0)
 MXFP8 = getenv("MXFP8", 0)
+_mxfp4_weight_caches:dict[int, list[tuple[Tensor, Tensor, Tensor, Tensor]]] = {}
+
+def register_mxfp4_weight_cache(param:Tensor, cache:list[tuple[Tensor, Tensor, Tensor, Tensor]]) -> None:
+  _mxfp4_weight_caches[id(param)] = cache
 
 def stochastic_round_bf16(x:Tensor) -> Tensor:
   bits = x.bitcast(dtypes.uint32)
@@ -64,6 +68,20 @@ def _adamw_master_step(param:Tensor, grad:Tensor, m:Tensor, v:Tensor, master:Ten
   updated = Tensor.custom_kernel(m, v, master, param, grad, lr, b1_t, b2_t, clip_coeff, fxn=fxn)
   for dst, src in zip((m, v, master, param), updated): dst.replace(src)
 
+def _adamw_master_mxfp4_step(param:Tensor, grad:Tensor, m:Tensor, v:Tensor, master:Tensor, lr:Tensor, b1_t:Tensor, b2_t:Tensor,
+                              cache:list[tuple[Tensor, Tensor, Tensor, Tensor]], *, b1:float, b2:float, eps:float, wd:float,
+                              clip_coeff:Tensor, grad_acc:int) -> list[Tensor]:
+  from extra.llama_kernels.adamw_quantize_mxfp4 import adamw_quantize_mxfp4
+  calls = []
+  for layer, outputs in enumerate(cache):
+    ret = adamw_quantize_mxfp4(param[layer], grad[layer], m[layer], v[layer], master[layer], lr, b1_t, b2_t, clip_coeff,
+                               b1=b1, b2=b2, eps=eps, wd=wd, grad_acc=grad_acc, out=outputs)
+    for dst, src in zip(outputs, ret[4:]): dst.replace(src)
+    calls.append(ret)
+  for full, idx in zip((m, v, master, param), range(4)):
+    full.replace(Tensor(full.uop.after(*(ret[idx].uop for ret in calls))))
+  return [x for outputs in cache for x in outputs]
+
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
     super().__init__(params, lr, device, fused)
@@ -96,11 +114,17 @@ class GradAccClipAdamW(Optimizer):
     ):
       self.b1_t *= self.b1
       self.b2_t *= self.b2
+      cached_outputs = []
       for p, p_shard, g, m, v, master in zip(self.params, self.param_shards, grads, self.m, self.v, self.master_params):
-        _adamw_master_step(p_shard, g, m, v, master, self.lr, self.b1_t, self.b2_t, b1=self.b1, b2=self.b2, eps=self.eps,
-                           wd=self.wd, clip_coeff=clip_coeff, grad_acc=self.grad_acc)
+        if (cache:=_mxfp4_weight_caches.get(id(p))) is not None:
+          cached_outputs += _adamw_master_mxfp4_step(p_shard, g, m, v, master, self.lr, self.b1_t, self.b2_t, cache, b1=self.b1,
+                                                      b2=self.b2, eps=self.eps, wd=self.wd, clip_coeff=clip_coeff,
+                                                      grad_acc=self.grad_acc)
+        else:
+          _adamw_master_step(p_shard, g, m, v, master, self.lr, self.b1_t, self.b2_t, b1=self.b1, b2=self.b2, eps=self.eps,
+                             wd=self.wd, clip_coeff=clip_coeff, grad_acc=self.grad_acc)
         if p_shard is not p: p.assign(self._zero_gather(p_shard))
-      return [self.b1_t, self.b2_t] + self.m + self.v + self.params + self.master_params
+      return [self.b1_t, self.b2_t] + self.m + self.v + self.params + self.master_params + cached_outputs
     grads = [((g / self.grad_acc).cast(g.dtype) * clip_coeff).cast(g.dtype) for g in grads]
     updates, extra = self._step([], grads)
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
