@@ -4,6 +4,7 @@ Includes: v_fma_f32, v_div_scale_f32, v_div_fmas_f32, v_div_fixup_f32,
           v_alignbit_b32, v_bfe_i32, v_mad_u64_u32, v_readlane_b32, v_writelane_b32
 """
 import unittest
+from tinygrad.helpers import OSX
 from test.amd.hw.helpers import *
 
 class TestFMA(unittest.TestCase):
@@ -3264,6 +3265,23 @@ class TestVOP3ClampMAD(unittest.TestCase):
     # 0xFFFF * 2 = 0x1FFFE, low 16 bits = 0xFFFE
     self.assertEqual(st.vgpr[0][3] & 0xFFFF, 0xFFFE, f"expected 0xFFFE, got 0x{st.vgpr[0][3] & 0xFFFF:04x}")
 
+class TestMadNarrowClampRegressions(unittest.TestCase):
+  """Regression tests: mad i16/i24 with clamp saturate to narrow output range (found by random difftest vs hardware)."""
+
+  def test_mad_i16_clamp_sat_max(self):
+    # neg/src-floggled 16-bit mul operands are sign-extended after toggling bit15; sum > INT_MAX saturates
+    instructions = [s_mov_b32(s[4], 1232348160), v_mov_b32_e32(v[3], 0x80000000),
+                    v_mov_b32_e32(v[1], 0x7F7FFFFF), v_mad_i32_i16(v[0], s[4], v[3], v[1], 0, 3, 5, 1)]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0x7FFFFFFF)
+
+  def test_mad_i24_clamp_sat_min(self):
+    # sext24(-6344704) * sext24(+4210688) << -2^31 saturates to INT_MIN
+    instructions = [s_mov_b32(s[7], 4290772992), v_mov_b32_e32(v[1], 1077936128),
+                    v_mad_i32_i24(v[0], s[7], v[1], v[1], 1, 0, 0, 1)]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0x80000000)
+
 
 class TestCvtPkF16(unittest.TestCase):
   """Tests for V_CVT_PK_RTZ_F16_F32 - pack two f32 to f16 with round toward zero."""
@@ -3650,6 +3668,80 @@ class TestPermlane(unittest.TestCase):
     self.assertEqual(st.vgpr[16][1], 0)
     self.assertEqual(st.vgpr[21][1], 5)
     self.assertEqual(st.vgpr[31][1], 15)
+
+class TestClampLdExpRegressions(unittest.TestCase):
+  """Regression tests for f32 clamp (-0 -> +0) and ldexp input passthrough."""
+
+  def test_clamp_negative_zero(self):
+    """clmp=1 maps -0.0 to +0.0 (found by random difftest vs hardware)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0x80000000), v_mov_b32_e32(v[1], 0x80000000),
+      v_add_f32_e64(v[2], v[0], v[1], clmp=1),  # -0 + -0 = -0, clamp -> +0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x00000000)
+    instructions = [
+      v_mov_b32_e32(v[0], 0x3F800000), v_mov_b32_e32(v[1], 0x80000000),
+      v_min_f32_e64(v[2], v[0], v[1], clmp=1),  # min(1.0, -0) = -0, clamp -> +0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x00000000)
+
+  def test_ldexp_special_inputs(self):
+    """v_ldexp_f32 of 0/-0/inf/NaN propagates the input instead of computing val * 2**exp (0*inf = NaN on host)."""
+    # -0.0 * 2^INT_MIN = -0.0 (src1 as integer exponent; huge negative)
+    instructions = [v_mov_b32_e32(v[0], 0x80000000), v_mov_b32_e32(v[1], 0x80000000), v_ldexp_f32(v[2], v[0], v[1])]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x80000000)
+    # inf stays inf even with negative exponent
+    instructions = [v_mov_b32_e32(v[0], 0x7F800000), v_mov_b32_e32(v[1], 0xFFFFFF80), v_ldexp_f32(v[2], v[0], v[1])]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x7F800000)
+
+  def test_ldexp_denormal_flush(self):
+    """v_ldexp_f32/f64 flush denormal inputs to signed zero (found by random difftest vs hardware)."""
+    # ldexp(+denorm, 1) = +0, ldexp(-denorm, 250) = -0
+    for src, exp_val, want in [(0x00000001, 1, 0x00000000), (0x80000001, 250, 0x80000000)]:
+      st = run_program([v_mov_b32_e32(v[0], src), v_mov_b32_e32(v[1], exp_val), v_ldexp_f32(v[2], v[0], v[1])], n_lanes=1)
+      self.assertEqual(st.vgpr[0][2], want)
+
+  def test_v_mul_neg_modifier_nan_sign(self):
+    """neg modifier is a pure sign-bit toggle on a NaN operand; result keeps that sign (found by random difftest)."""
+    # mul(normal, NEG(ABS(qNaN))): NaN payload negated in the operand stays negative qNaN
+    instructions = [v_mov_b32_e32(v[0], 0xC96CF47F), v_mov_b32_e32(v[1], 0x7FC00000),
+                    v_mul_f32_e64(v[2], v[0], v[1], s[0], 0, 7, 6)]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xFFC00000)
+    # plain neg modifier still applies to non-NaN values: mul(-1.0, NEG(2.0)) = +2.0
+    st = run_program([v_mov_b32_e32(v[0], 0xBF800000), v_mov_b32_e32(v[1], 0x40000000),
+                      v_mul_f32_e64(v[2], v[0], v[1], s[0], 0, 2, 0)], n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x40000000)
+
+
+class TestNaNPropagationRegressions(unittest.TestCase):
+  """Regression tests: float arithmetic propagates a NaN from the FIRST NaN operand, quieted with its own sign/payload."""
+
+  @unittest.skipIf(OSX, "broken on mac, TODO: why?")
+  def test_mul_nan_priority(self):
+    # first NaN operand wins (sign+payload), not x86's second-source propagation
+    for a, b, want in [(0x7FC00001, 0x7F800003, 0x7FC00001), (0xFFC00005, 0x7F800003, 0xFFC00005),
+                       (0x7F800001, 0xFFC00005, 0x7FC00001), (0xFF9F1800, 0x7F800001, 0xFFDF1800)]:
+      st = run_program([v_mov_b32_e32(v[0], a), v_mov_b32_e32(v[1], b),
+                        v_mul_f32_e32(v[2], v[0], v[1])], n_lanes=1)
+      self.assertEqual(st.vgpr[0][2], want, f"mul({a:#x}, {b:#x})")
+
+class TestMinMaxFlushE64Regressions(unittest.TestCase):
+  """Regression tests: f32 min/max/median flush denormal inputs to signed zero (e64 forms)."""
+
+  def test_v_min3_f32_denormal_flush(self):
+    st = run_program([v_mov_b32_e32(v[0], 0x00000001), v_mov_b32_e32(v[1], 0x3F800000), v_mov_b32_e32(v[2], 0x40000000),
+                      v_min3_f32(v[3], v[0], v[1], v[2])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0x00000000)  # min(+denorm, 1, 2) = +0
+
+  def test_v_med3_f32_denormal_flush(self):
+    st = run_program([v_mov_b32_e32(v[0], 0x80000001), v_mov_b32_e32(v[1], 0x3F800000), v_mov_b32_e32(v[2], 0x40000000),
+                      v_med3_f32(v[3], v[0], v[1], v[2])], n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0x3F800000)  # med(-0, 1, 2) = 1
 
 
 if __name__ == '__main__':

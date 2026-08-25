@@ -221,7 +221,7 @@ def float_to_fp16(x):
 
 def float_to_bf16(x):
   if not math.isfinite(x): return x
-  u = struct.unpack('I', struct.pack('f', x))[0]
+  u = struct.unpack('I', struct.pack('f', truncate[dtypes.float](x)))[0]
   u = (u + 0x7FFF + ((u >> 16) & 1)) & 0xFFFF0000
   return struct.unpack('f', struct.pack('I', u))[0]
 

@@ -822,6 +822,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor0&tor1, lambda: ten0&ten1, forward_only=True)
 
     helper_test_op(None, lambda x: (1 < x) & (x < 2), forward_only=True, vals=[[1.2, 1.2, 1.2, 3.2]])
+    helper_test_op([(3000,)]*10, lambda *xs: (sum(xs[1:], xs[0]) > 5) & (xs[0] < 0.9), forward_only=True)
+
+    if not COMPILE_ONLY:
+      np.testing.assert_equal((Tensor(2**64-1, dtype=dtypes.uint64) & 0xFFFFFFFF).numpy(), 0xFFFFFFFF)
 
   def test_or(self):
     data = [[1,-8,1],[32,1,6]]
@@ -861,9 +865,9 @@ class TestOps(unittest.TestCase):
                    lambda: (ten << Tensor([0,2,4], dtype=dtypes.uint32)).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__lshift__(2), lambda: ten.__lshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_left_shift(2), lambda: ten.lshift(2).cast(dtypes.int32), forward_only=True)
-    self.helper_test_exception([], lambda: torch.tensor([1.0]) << 2, lambda: Tensor([1.0]) << 2, expected=RuntimeError)
-    self.helper_test_exception([], lambda: tor << torch.tensor([1.0]), lambda: ten << Tensor([1.0]), expected=RuntimeError)
-    self.helper_test_exception([], lambda: tor << 1.0, lambda: ten << 1.0, expected=RuntimeError)
+    self.helper_test_exception([], lambda: torch.tensor([1.0]) << 2, lambda: (Tensor([1.0]) << 2).realize(), expected=RuntimeError)
+    self.helper_test_exception([], lambda: tor << torch.tensor([1.0]), lambda: (ten << Tensor([1.0])).realize(), expected=RuntimeError)
+    self.helper_test_exception([], lambda: tor << 1.0, lambda: (ten << 1.0).realize(), expected=RuntimeError)
 
   def test_rshift(self):
     data = [[0,1,2],[1<<8,1<<16,1<<31-1]]
@@ -877,8 +881,8 @@ class TestOps(unittest.TestCase):
                    lambda: (ten >> Tensor([0,2,4], dtype=dtypes.uint32)).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
-    self.helper_test_exception([], lambda: torch.tensor([4.0]) >> 1, lambda: Tensor([4.0]) >> 1, expected=RuntimeError)
-    self.helper_test_exception([], lambda: tor >> torch.tensor([1.0]), lambda: ten >> Tensor([1.0]), expected=RuntimeError)
+    self.helper_test_exception([], lambda: torch.tensor([4.0]) >> 1, lambda: (Tensor([4.0]) >> 1).realize(), expected=RuntimeError)
+    self.helper_test_exception([], lambda: tor >> torch.tensor([1.0]), lambda: (ten >> Tensor([1.0])).realize(), expected=RuntimeError)
 
   def test_lshift_signed(self):
     data = [[-1, -3, 1, 7], [0, -2147483648, 2147483647, -1]]
@@ -2164,6 +2168,10 @@ class TestOps(unittest.TestCase):
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))
     helper_test_op([(2, 4)], lambda x: x.roll((1,)))
+    helper_test_op([(0,)], lambda x: x.roll(1, 0))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1, 0))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1, 1))
+    helper_test_op([(2, 0, 3)], lambda x: x.roll(1))
     self.helper_test_exception([(2, 4)], lambda x: x.roll((1, 2)), expected=RuntimeError)
     helper_test_op([(2, 4)], lambda x: x.roll(1, 0))
     helper_test_op([(2, 4)], lambda x: x.roll(-1, 0))

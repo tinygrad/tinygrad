@@ -82,7 +82,7 @@ class TestVminVmaxProperties(unittest.TestCase):
   def test_vmin_vmax_multiplication_0_inf(self):
     # vmin and vmax for multiplication with a variable
     x = UOp.const(0.0)
-    y = UOp.load(UOp.param(0, dtypes.float, (1,)), UOp.const(0), dtype=dtypes.float)
+    y = UOp.load(UOp.param(0, dtypes.float, (1,)), UOp.const(0))
     uop = x * y
     # TODO: these should be 0, but definitely should not be nan
     self.assertEqual(uop.vmin, -math.inf)

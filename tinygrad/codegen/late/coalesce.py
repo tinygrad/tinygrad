@@ -51,8 +51,8 @@ def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|N
   if not drop_stmt and idx is start_idx: return None
   new_valid = UOp.uprod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
   idx_y, idx_x = idx.index(1), idx.index(0)
-  if new_valid is not None: return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid), dtype=dtypes.float)
-  return buf.index(idx_y, idx_x, dtype=dtypes.float)
+  if new_valid is not None: return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid))
+  return buf.index(idx_y, idx_x)
 
 indexing_simplify = PatternMatcher([
   # image load valid idx simplification
@@ -88,9 +88,9 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   buf = buf.replace(src=(shape_to_shape_arg((h, w, 4)),))
   shapes[buf.arg.slot] = (h, w)
   if valid.op is not Ops.CONST or valid.val is not True:
-    return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid), dtype=dtypes.float)
+    return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid))
   else:
-    return buf.index(cidx.src[1], cidx.src[0], dtype=dtypes.float)
+    return buf.index(cidx.src[1], cidx.src[0])
 
 pm_simplify_add_image = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
@@ -149,7 +149,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
         grp = full_grp[:length]
         # NOTE: we apply the valid again after we determine the length
         offset = offset.valid(valid) if valid is not None else offset
-        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(len(grp)))) if len(grp) > 1 else buf.index(offset, dtype=offsets[grp[0]][0].src[0].dtype)
+        idx = UOp(Ops.SHRINK, src=(buf, offset, UOp.const(len(grp)))) if len(grp) > 1 else buf.index(offset)
         if op == Ops.STORE:
           datas = []
           for i,g in enumerate(grp):
