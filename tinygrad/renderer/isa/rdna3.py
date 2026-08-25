@@ -269,10 +269,9 @@ def alu(ctx, x:UOp): # alu arg used for machine instruction overrides, ex. mul_h
 def render_wmma(ctx, wmma:UOp):
   a,b,acc = wmma.src
   srcdt = dt_to_isa[wmma.arg[1]]
-  if rdef(acc) is None: return None
   if wmma.arg[1] in dtypes.int8s: srcdt = "iu8"
   ins = getattr(RDNA3Ops, f"v_wmma_{dt_to_isa[wmma.dtype]}_16x16x16_{srcdt}")
-  return UOp(Ops.INS, arg=ins, dtype=wmma.dtype, src=(a,b,acc), tag=acc.tag)
+  return UOp(Ops.INS, arg=ins, dtype=wmma.dtype, src=(a,b,acc), tag=(ctx.ren.vreg(GP_VGPRS, width=8),))
 
 # ---- casting utilities -----
 def int_to_int64(y:UOp, tdt:DType):
