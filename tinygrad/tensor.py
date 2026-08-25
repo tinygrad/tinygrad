@@ -228,10 +228,10 @@ def _check_state_cycles(sink:UOp):
     elif u.op is Ops.AFTER and u.addrspace == AddrSpace.GLOBAL:
       key = u.buf_uop
       stores = [x for x in u.src[1:] if x.op is Ops.STORE and x.src[0].buf_uop is key]
-      # Ordering dependencies can STORE to another buffer without changing this state. Completed calls and self-dependent updates represent the
-      # current readable state; a write independent of the old value is a new state.
-      self_update = any(key in states[x.src[1]][0] for x in stores)
-      state = (frozenset((key,)), frozenset()) if not stores or self_update else (frozenset(), frozenset((key,)))
+      # Ordering dependencies can STORE to another buffer without changing this state. Self-dependent updates continue the existing state lineage;
+      # only a write independent of the old value creates a conflicting state.
+      self_update = any(key in states[x.src[1]][0] or key in states[x.src[1]][1] for x in stores)
+      state = states[u.src[0]] if not stores or self_update else (frozenset(), frozenset((key,)))
     else:
       srcs = u.src[1:] if u.op in {Ops.CALL, Ops.FUNCTION} else u.src
       raw = frozenset().union(*(states[x][0] for x in srcs))
