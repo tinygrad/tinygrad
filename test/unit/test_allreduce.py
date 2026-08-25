@@ -3,6 +3,7 @@ from tinygrad import Tensor, UOp, dtypes
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, KernelInfo
 from tinygrad.schedule.allreduce import create_allreduce_function, handle_allreduce, _is_stable_custom_output, is_allreduce_linear_output
+from tinygrad.schedule.prepare import prepare_rangeify, _accumulate_linear_allreduce, _accumulate_linear_replicated
 from tinygrad.schedule.rangeify import no_indexing_calls
 from test.helpers import KernelCountException
 
@@ -51,6 +52,53 @@ class TestRingAllReduce(unittest.TestCase):
     copy = UOp(Ops.COPY, src=(UOp.param(1, dtypes.float, (4,), device=devices[0]),), arg=devices[1])
     bad_copy = UOp(Ops.CALL, dtypes.void, src=(copy, slices[0], out.mselect(0)))
     self.assertFalse(is_allreduce_linear_output(UOp(Ops.LINEAR, src=tuple(calls[:-1])+(bad_copy,)), 5))
+
+  def test_accumulate_replicated_linear_output_preserves_cast(self):
+    devices = ("NULL", "NULL:1")
+    output = UOp.param(5, dtypes.bfloat16, (8,), device=devices)
+    dest = UOp.param(0, dtypes.bfloat16, (8,), device=devices)
+    reduced = UOp.param(1, dtypes.float, (8,), device=devices)
+    idx = UOp.range(8, 0)
+    cast = reduced.index(idx).cast(dtypes.bfloat16)
+    body = UOp.sink(dest.index(idx).store(cast).end(idx))
+    linear = UOp(Ops.LINEAR, src=(body.call(output, UOp.param(6, dtypes.float, (8,), device=devices)),))
+    accumulated = _accumulate_linear_replicated(linear, 5)
+    assert accumulated is not None
+    store = next(x for x in accumulated.toposort() if x.op is Ops.STORE)
+    self.assertEqual(store.src[1].tag, ("allreduce_accumulate",))
+    self.assertIs(store.src[1].src[1], cast)
+
+  def test_accumulate_linear_allreduce_changes_only_owners(self):
+    devices = ("NULL", "NULL:1")
+    output = UOp.param(5, dtypes.bfloat16, (8,), device=devices)
+    views = [[output.mselect(rank).shrink(((4*chunk, 4*chunk+4),)).rtag(("allreduce",)) for chunk in range(2)] for rank in range(2)]
+    calls = []
+    for rank,chunk in ((0, 0), (1, 1)):
+      dest, reduced, idx = UOp.param(0, dtypes.bfloat16, (4,)), UOp.param(1, dtypes.bfloat16, (4,)), UOp.range(4, 0)
+      calls.append(UOp.sink(dest.index(idx).store(reduced.index(idx)).end(idx)).call(views[rank][chunk], reduced))
+    copy = UOp(Ops.COPY, src=(UOp.param(1, dtypes.bfloat16, (4,), device="NULL"),), arg="NULL:1")
+    calls += [copy.call(views[1][0], views[0][0]), copy.call(views[0][1], views[1][1])]
+    accumulated = _accumulate_linear_allreduce(UOp(Ops.LINEAR, src=tuple(calls)), 5)
+    assert accumulated is not None
+    stores = [x for x in accumulated.toposort() if x.op is Ops.STORE]
+    self.assertTrue(all(x.src[1].tag == ("allreduce_accumulate",) for x in stores))
+    self.assertEqual(sum(any(x.op is Ops.STORE and x.src[1].tag == ("allreduce_accumulate",) for x in call.src[0].toposort())
+                         for call in accumulated.src if call.src[0].op is Ops.SINK), 2)
+    self.assertEqual(sum(x.op is Ops.COPY for x in accumulated.toposort()), 1)
+
+  def test_accumulate_linear_allreduce_rejects_other_reader(self):
+    devices = ("NULL", "NULL:1")
+    output = UOp.param(5, dtypes.bfloat16, (8,), device=devices)
+    views = [[output.mselect(rank).shrink(((4*chunk, 4*chunk+4),)).rtag(("allreduce",)) for chunk in range(2)] for rank in range(2)]
+    calls = []
+    for rank,chunk in ((0, 0), (1, 1)):
+      dest, reduced, idx = UOp.param(0, dtypes.bfloat16, (4,)), UOp.param(1, dtypes.bfloat16, (4,)), UOp.range(4, 0)
+      calls.append(UOp.sink(dest.index(idx).store(reduced.index(idx)).end(idx)).call(views[rank][chunk], reduced))
+    copy = UOp(Ops.COPY, src=(UOp.param(1, dtypes.bfloat16, (4,), device="NULL"),), arg="NULL:1")
+    calls += [copy.call(views[1][0], views[0][0]), copy.call(views[0][1], views[1][1])]
+    dest, inp, idx = UOp.param(0, dtypes.bfloat16, (4,)), UOp.param(1, dtypes.bfloat16, (4,)), UOp.range(4, 0)
+    calls.append(UOp.sink(dest.index(idx).store(inp.index(idx)).end(idx)).call(UOp.param(7, dtypes.bfloat16, (4,)), views[0][0]))
+    self.assertIsNone(_accumulate_linear_allreduce(UOp(Ops.LINEAR, src=tuple(calls)), 5))
 
   def test_write_only_custom_output_is_stable(self):
     devices = tuple(f"NULL:{i}" for i in range(4))
@@ -111,6 +159,54 @@ class TestRingAllReduce(unittest.TestCase):
       ds = tuple(f"CPU:{i}" for i in range(N))
       t = (Tensor.arange(N*W).reshape(N, W).shard(ds, axis=0) * 2 + 1).contiguous().realize()
       self.assertListEqual(t.sum(0).tolist(), [8*i + 4*W*3 + 4 for i in range(W)])
+
+  def _persistent_accumulate_tensors(self, packed=False):
+    ndev, width = 4, 512
+    devices = tuple(f"CPU:{i}" for i in range(ndev))
+    persistent = ((Tensor.arange(width+256)*0.125-17).cast(dtypes.bfloat16).clone(device="CPU").realize()
+                  .shard(devices, axis=None).realize())
+    target = persistent[128:128+width] if packed else persistent[:width]
+    grads = (((Tensor.arange(ndev*width)%97)*0.0625-2).reshape(ndev, width).cast(dtypes.bfloat16)
+             .clone(device="CPU").realize().shard(devices, axis=0).realize())
+    return persistent, target, grads
+
+  @Context(ALL2ALL=2, RING=0)
+  def test_schedule_persistent_allreduce_accumulate(self):
+    _, target, grads = self._persistent_accumulate_tensors()
+    target.assign(target+grads.sum(0))
+    prepared = prepare_rangeify(target.uop.sink())
+    stores = [x for x in prepared.toposort() if x.op is Ops.STORE]
+    self_stores = [x for x in stores if x.src[0] in x.src[1].toposort(enter_calls=False)]
+    self.assertEqual(len(self_stores), 4)
+    self.assertTrue(all(x.src[1].tag == ("allreduce_accumulate",) for x in self_stores))
+    self.assertEqual(sum(x.op is Ops.COPY for x in prepared.toposort()), 24)
+
+  @Context(ALL2ALL=2, RING=0)
+  def test_correct_persistent_allreduce_accumulate_bf16(self):
+    _, target, grads = self._persistent_accumulate_tensors()
+    target.assign(target+grads.sum(0)).realize()
+
+    _, reference, reference_grads = self._persistent_accumulate_tensors()
+    reduced = reference_grads.sum(0).realize()  # preserve the pre-accumulation BF16 store boundary
+    reference.assign(reference+reduced).realize()
+    self.assertListEqual(target.bitcast(dtypes.uint16).tolist(), reference.bitcast(dtypes.uint16).tolist())
+
+  @Context(ALL2ALL=2, RING=0)
+  def test_correct_packed_persistent_allreduce_accumulate(self):
+    persistent, target, grads = self._persistent_accumulate_tensors(packed=True)
+    before = persistent.bitcast(dtypes.uint16).tolist()
+    target_offset = target.uop.contiguous_view_offset()
+    assert target_offset is not None
+    target.assign(target+grads.sum(0))
+    prepared = prepare_rangeify(target.uop.sink())
+    owners = [x for x in prepared.toposort() if x.op is Ops.STORE and x.src[1].tag == ("allreduce_accumulate",)]
+    owner_offsets = [x.src[0].contiguous_view_offset() for x in owners]
+    self.assertFalse(any(x is None for x in owner_offsets))
+    self.assertEqual(sorted(target_offset+x for x in owner_offsets if x is not None), [128, 256, 384, 512])
+    target.realize()
+    after = persistent.bitcast(dtypes.uint16).tolist()
+    self.assertListEqual(after[:128], before[:128])
+    self.assertListEqual(after[640:], before[640:])
 
   @Context(RING=0, ALL2ALL=0)
   def test_schedule_naive(self):

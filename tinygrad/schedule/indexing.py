@@ -35,6 +35,16 @@ def realize_srcs(ctx:IndexingContext, rb:UOp) -> None:
 def _pointwise_self_store(ctx:IndexingContext, dest:UOp, src:UOp) -> bool:
   """True when src can be evaluated directly into dest without clobbering a value that is still needed."""
   base = dest.base
+  # An assembled allreduce accumulation is deliberately read-modify-write at the owner. Its other exact-slice
+  # readers are safe only when they consume AFTER(dest, owner_store), i.e. the post-store value during allgather.
+  if dest.op is Ops.SHRINK and dest.tag == ("allreduce",) and src.op is Ops.ADD and src.tag == ("allreduce_accumulate",):
+    old = next((s for s in src.src if s is dest), None)
+    reduced = next((s for s in src.src if s is not dest), None)
+    if old is not None and reduced is not None and base not in reduced.toposort(enter_calls=False):
+      owner_store = dest.store(src)
+      readers = [x for x in ctx.store_srcs if dest in x.toposort(gate=lambda y: y.op is not Ops.CONTIGUOUS, enter_calls=False)]
+      if src in readers and all(x is src or (x.op is Ops.COPY and any(y.op is Ops.AFTER and y.src[0] is dest and owner_store in y.src[1:]
+                                                    for y in x.toposort(enter_calls=False))) for x in readers): return True
   reaches_base: dict[UOp, bool] = {}
   unsafe = {Ops.REDUCE, Ops.ALLREDUCE, Ops.COPY, Ops.PERMUTE, Ops.FLIP, Ops.EXPAND, Ops.PAD, Ops.SHRINK,
             Ops.MSTACK, Ops.MSELECT, Ops.CALL, Ops.FUNCTION, Ops.BITCAST}

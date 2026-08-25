@@ -155,6 +155,56 @@ def forward_assembled_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
   if not any(s.op is Ops.AFTER and s.src[0].op is Ops.SHRINK and s.src[0].tag == ("allreduce",) for s in src.src[1:]): return None
   return output.after(*(s.substitute({src.src[0].base:destination}) for s in src.src[1:]))
 
+def forward_assembled_accumulate(output:UOp, target:UOp, old:UOp, src:UOp) -> UOp|None:
+  """Accumulate an assembled allreduce in its owner slices before the existing allgather."""
+  while target.op is Ops.RESHAPE: target = target.src[0]
+  while old.op is Ops.RESHAPE: old = old.src[0]
+  accum_debug = getenv("PERSISTENT_ACCUM_DEBUG")
+  if old is not target: return None
+  while src.op in {Ops.RESHAPE, Ops.CONTIGUOUS, Ops.CAST}: src = src.src[0]
+  if target.dtype != src.dtype or target.numel() != src.numel() or target.device != src.device: return None
+  if target is output: destination = output
+  elif target.base is output.base and target.contiguous_view_offset() is not None: destination = target
+  else: return None
+
+  # A direct all-to-all result is a complete matrix of physical slice states: one state per (rank, chunk).
+  # Exactly one state per chunk is an owner reduction; all other states copy from that owner through AFTER.
+  if src.op is not Ops.AFTER or not isinstance(src.device, tuple): return None
+  states, ndev, assembled_output = src.src[1:], len(src.device), src.src[0].buf_uop
+  if len(states) != ndev*ndev: return None
+  stores: list[UOp] = []
+  coordinates: list[tuple[int, int, int]] = []
+  for state in states:
+    if (state.op is not Ops.AFTER or len(state.src) != 2 or state.src[0].op is not Ops.SHRINK or state.src[0].tag != ("allreduce",)
+        or state.src[1].op is not Ops.STORE or state.src[1].src[0] is not state.src[0]): return None
+    view = state.src[0]
+    if (view.src[0].op is not Ops.MSELECT or view.src[0].src[0].buf_uop is not assembled_output
+        or view.src[1].op is not Ops.CONST or view.src[2].op is not Ops.CONST): return None
+    coordinates.append((view.src[0].arg, view.src[1].val, view.src[2].val))
+    stores.append(state.src[1])
+  owners = [state for state,store in zip(states, stores) if store.src[1].op is not Ops.COPY]
+  gathers = [store for store in stores if store.src[1].op is Ops.COPY]
+  if len(owners) != ndev or len(gathers) != ndev*(ndev-1): return None
+  chunks = {(start, size) for _,start,size in coordinates}
+  if (len(chunks) != ndev or set(rank for rank,_,_ in coordinates) != set(range(ndev))
+      or any(sum((start, size) == chunk for _,start,size in coordinates) != ndev for chunk in chunks)): return None
+  owner_chunks = {(owner.src[0].src[1].val, owner.src[0].src[2].val) for owner in owners}
+  if owner_chunks != chunks: return None
+  if any(assembled_output in owner.src[1].src[1].toposort(enter_calls=False) for owner in owners): return None
+  if any(len(gather.src[1].src) != 1 or gather.src[1].src[0] not in owners for gather in gathers): return None
+
+  # Preserve the reduced BF16 value as an input to the add. Only the owner store is changed; gather stores remain
+  # overwrites and therefore broadcast the already accumulated owner value exactly once.
+  owner_map: dict[UOp, UOp] = {}
+  for owner in owners:
+    store = owner.src[1]
+    accumulated = store.src[0].alu(Ops.ADD, store.src[1]).rtag(("allreduce_accumulate",))
+    rewritten_owner = owner.replace(src=(owner.src[0], store.replace(src=(store.src[0], accumulated))))
+    owner_map[owner] = rewritten_owner.substitute({assembled_output:destination})
+  rewritten = [owner_map[state] if state in owner_map else state.substitute({assembled_output:destination, **owner_map}) for state in states]
+  if accum_debug: print(f"persistent accumulate forwarded: {destination.shape} at {destination.contiguous_view_offset()}")
+  return output.after(*rewritten)
+
 def forward_linear_store(ctx:dict[UOp, UOp], output:UOp, target:UOp, src:UOp) -> UOp|None:
   """Collect caller-provided allreduce outputs so each shared LINEAR invocation is redirected exactly once."""
   while target.op is Ops.RESHAPE: target = target.src[0]
@@ -175,7 +225,123 @@ def forward_linear_store(ctx:dict[UOp, UOp], output:UOp, target:UOp, src:UOp) ->
   # fully redirected call afterward, avoiding one producer clone per returned gradient.
   return output.after(call)
 
+def _linear_allreduce_view(x:UOp, output:UOp) -> tuple[int, int, int]|None:
+  """Return (rank, offset, size) when x is a physical slice of a LINEAR allreduce output."""
+  x = x.buf_uop
+  if (x.op is not Ops.SHRINK or x.tag != ("allreduce",) or x.src[0].op is not Ops.MSELECT
+      or x.src[0].src[0].buf_uop is not output or x.src[1].op is not Ops.CONST or x.src[2].op is not Ops.CONST): return None
+  return x.src[0].arg, x.src[1].val, x.src[2].val
+
+def _accumulate_linear_allreduce(linear:UOp, slot:int) -> UOp|None:
+  params = [x for x in linear.toposort() if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot == slot]
+  if len(params) != 1 or not isinstance(params[0].device, tuple): return None
+  output, ndev = params[0], len(params[0].device)
+  rewritten, owners = list(linear.src), {}
+  for call_idx,call in enumerate(linear.src):
+    if call.op is not Ops.CALL or call.src[0].op is not Ops.SINK: continue
+    output_args = [(i,key) for i,arg in enumerate(call.src[1:]) if (key:=_linear_allreduce_view(arg, output)) is not None]
+    if len(output_args) != 1: continue
+    arg_idx, key = output_args[0]
+    body_params = [x for x in call.src[0].toposort() if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot == arg_idx]
+    if len(body_params) != 1: return None
+    param = body_params[0]
+    stores = [x for x in call.src[0].toposort() if x.op is Ops.STORE and param in x.src[0].toposort()]
+    loads = [x for x in call.src[0].toposort() if x.op is Ops.LOAD and param in x.src[0].toposort()]
+    if len(stores) != 1 or loads: continue
+    store = stores[0]
+    accumulated = store.src[0].alu(Ops.ADD, store.src[1]).rtag(("allreduce_accumulate",))
+    rewritten[call_idx] = call.replace(src=(call.src[0].substitute({store:store.replace(src=(store.src[0], accumulated))}),)+call.src[1:])
+    if key in owners: return None
+    owners[key] = call_idx
+  if len(owners) != ndev: return None
+
+  # Every other use of an assembled output slice must be an allgather COPY. Its destination is write-only and
+  # every source is an owner slice whose reducer call precedes the copy in the LINEAR ordering.
+  owner_calls = set(owners.values())
+  for call_idx,call in enumerate(linear.src):
+    if call.op is not Ops.CALL: continue
+    output_args = [(i,key) for i,arg in enumerate(call.src[1:]) if (key:=_linear_allreduce_view(arg, output)) is not None]
+    if not output_args or call_idx in owner_calls: continue
+    if call.src[0].op is not Ops.COPY or len(output_args) != 2 or output_args[0][0] != 0 or output_args[1][0] == 0: return None
+    source_key = output_args[1][1]
+    if source_key not in owners or owners[source_key] >= call_idx: return None
+  return linear.replace(src=tuple(rewritten))
+
+def _accumulate_linear_replicated(linear:UOp, slot:int) -> UOp|None:
+  """Add into a replicated LINEAR output with exactly one independent write-only producer per rank."""
+  nodes = linear.toposort()
+  params = [x for x in nodes if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot == slot]
+  if len(params) != 1 or not isinstance(params[0].device, tuple): return None
+  output, ndev = params[0], len(params[0].device)
+  consumers: dict[UOp, list[UOp]] = {}
+  for x in nodes:
+    for s in x.src: consumers.setdefault(s, []).append(x)
+  selects = consumers.get(output, [])
+  if len(selects) == 1 and selects[0].op is Ops.CALL:
+    call = selects[0]
+    if call not in linear.src or call.src[0].op is not Ops.SINK: return None
+    direct_arg_idxs = [i for i,arg in enumerate(call.src[1:]) if arg.buf_uop is output]
+    if len(direct_arg_idxs) != 1: return None
+    arg_idx = direct_arg_idxs[0]
+    body_params = [x for x in call.src[0].toposort() if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot == arg_idx]
+    if len(body_params) != 1: return None
+    param = body_params[0]
+    stores = [x for x in call.src[0].toposort() if x.op is Ops.STORE and param in x.src[0].toposort()]
+    loads = [x for x in call.src[0].toposort() if x.op is Ops.LOAD and param in x.src[0].toposort()]
+    if len(stores) != 1 or loads: return None
+    store = stores[0]
+    accumulated = store.src[0].alu(Ops.ADD, store.src[1]).rtag(("allreduce_accumulate",))
+    new_call = call.replace(src=(call.src[0].substitute({store:store.replace(src=(store.src[0], accumulated))}),)+call.src[1:])
+    return linear.replace(src=tuple(new_call if x is call else x for x in linear.src))
+  if len(selects) != ndev or any(x.op is not Ops.MSELECT or consumers.get(x) is None or
+                                 any(y.op is not Ops.CALL for y in consumers[x]) for x in selects): return None
+
+  rewritten, ranks = list(linear.src), set()
+  for call_idx,call in enumerate(linear.src):
+    ranked_output_args:list[tuple[int, int]] = [(i,arg.buf_uop.arg) for i,arg in enumerate(call.src[1:])
+      if arg.buf_uop.op is Ops.MSELECT and isinstance(arg.buf_uop.arg, int) and arg.buf_uop.src[0].buf_uop is output]
+    if not ranked_output_args: continue
+    if call.op is not Ops.CALL or call.src[0].op is not Ops.SINK or len(ranked_output_args) != 1: return None
+    arg_idx, rank = ranked_output_args[0]
+    body_params = [x for x in call.src[0].toposort() if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot == arg_idx]
+    if len(body_params) != 1: return None
+    param = body_params[0]
+    stores = [x for x in call.src[0].toposort() if x.op is Ops.STORE and param in x.src[0].toposort()]
+    loads = [x for x in call.src[0].toposort() if x.op is Ops.LOAD and param in x.src[0].toposort()]
+    if len(stores) != 1 or loads or rank in ranks: return None
+    store = stores[0]
+    accumulated = store.src[0].alu(Ops.ADD, store.src[1]).rtag(("allreduce_accumulate",))
+    rewritten[call_idx] = call.replace(src=(call.src[0].substitute({store:store.replace(src=(store.src[0], accumulated))}),)+call.src[1:])
+    ranks.add(rank)
+  return linear.replace(src=tuple(rewritten)) if ranks == set(range(ndev)) else None
+
+def forward_linear_accumulate(ctx:dict[UOp, UOp], output:UOp, target:UOp, old:UOp, src:UOp) -> UOp|None:
+  """Retarget a precompiled allreduce and add the old destination only in its owner reducer calls."""
+  while target.op is Ops.RESHAPE: target = target.src[0]
+  while old.op is Ops.RESHAPE: old = old.src[0]
+  if old is not target: return None
+  while src.op in {Ops.RESHAPE, Ops.CONTIGUOUS, Ops.CAST}: src = src.src[0]
+  if target.dtype != src.dtype or target.numel() != src.numel() or target.device != src.device: return None
+  if target is output: destination = output
+  elif target.base is output.base and target.contiguous_view_offset() is not None: destination = target
+  else: return None
+  linear_calls = [x for x in src.src[1:] if x.op is Ops.CALL and x.src[0].op is Ops.LINEAR] if src.op is Ops.AFTER else []
+  if len(linear_calls) != 1 or len(src.src) != 2 or (offset:=destination.contiguous_view_offset()) is None: return None
+  call, old_output = linear_calls[0], src.src[0].buf_uop
+  arg_idxs = [i for i,x in enumerate(call.src[1:], start=1) if x.buf_uop is old_output]
+  if len(arg_idxs) != 1: return None
+  arg_idx, prior = arg_idxs[0], ctx.get(call, call)
+  linear = (_accumulate_linear_allreduce(prior.src[0], arg_idx-1) if is_allreduce_linear_output(call.src[0], arg_idx-1)
+            else _accumulate_linear_replicated(prior.src[0], arg_idx-1))
+  if linear is None: return None
+  physical = _allreduce_view(destination.buf_uop, offset, offset+destination.numel()).reshape(call.src[arg_idx].shape)
+  ctx[call] = prior.replace(src=(linear,)+prior.src[1:arg_idx]+(physical,)+prior.src[arg_idx+1:])
+  if getenv("PERSISTENT_ACCUM_DEBUG"): print(f"persistent accumulate forwarded linear: {destination.shape} at {offset}")
+  return output.after(call)
+
 pm_forward_linear_store = PatternMatcher([
+  (UPat(Ops.AFTER, src=(UPat.var("output"), UPat(Ops.STORE, src=(UPat.var("target"),
+    UPat(Ops.ADD, src=(UPat.var("old"), UPat.var("src"))))))), forward_linear_accumulate),
   (UPat(Ops.AFTER, src=(UPat.var("output"), UPat(Ops.STORE, src=(UPat.var("target"), UPat.var("src"))))), forward_linear_store),
 ])
 
@@ -189,6 +355,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # resolve allreduce (must be bottom up)
+  (UPat(Ops.AFTER, src=(UPat.var("output"), UPat(Ops.STORE, src=(UPat.var("target"),
+    UPat(Ops.ADD, src=(UPat.var("old"), UPat.var("src"))))))), forward_assembled_accumulate),
   (UPat(Ops.AFTER, src=(UPat.var("output"), UPat(Ops.STORE, src=(UPat.var("target"), UPat.var("src"))))), forward_assembled_store),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
 
