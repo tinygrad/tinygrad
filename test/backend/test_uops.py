@@ -371,6 +371,7 @@ class TestUOpPrograms(unittest.TestCase):
     self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), a, b, c)
     with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)
 
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "PYTHON division by 0 overflows")
   def test_xidiv32(self):
     from tinygrad.codegen.decomp.op import xidiv32
     for dt,n_data,d_data in [(dtypes.uint32, [0,27,2**31,2**32-1],   [35, 0, 9, 2**30-1]),
@@ -384,7 +385,7 @@ class TestUOpPrograms(unittest.TestCase):
 
         truth = num.div(denom, rounding_mode='trunc').tolist()
         self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), num, denom, out)
-        self.assertEqual(out.tolist(), truth)
+        with Context(DEBUG=0): self.assertEqual(out.tolist(), truth)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
