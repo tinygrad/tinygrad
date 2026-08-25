@@ -68,14 +68,15 @@ def _mop_index(r:UOp, idx:UOp):
   if len(idxs) == len(r.shape):
     ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), dtype=idx.dtype, arg=idx.arg)
     if r.op is Ops.PAD:
-      # insert 0 for PAD with where
-      # TODO: does this need simplify to ensure the Invalids are at the base?
-      a = UOp.const(True)
-      for s in ret.src[1:]:
-        if s.op is Ops.WHERE and s.src[2].op is Ops.CONST and s.src[2].arg == Invalid: a = a & s.src[0]
       # NOTE: neither 0 or ret.const_like(0) is correct here.
       # const_like breaks because it adds casts, and 0 is wrong if ret is a bool
-      ret = a.where(ret, UOp.const(ret.dtype.const(0)))
+      invalid_value = UOp.const(ret.dtype.const(0))
+      # insert invalid_value for PAD with where
+      a = UOp.const(True)
+      for s in UOp.sink(*ret.src[1:]).simplify().src:
+        if s.is_invalid: return invalid_value
+        if s.op is Ops.WHERE and s.src[2].op is Ops.CONST and s.src[2].arg == Invalid: a = a & s.src[0]
+      ret = a.where(ret, invalid_value)
     return ret
   if r.op is Ops.RESHAPE:
     src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
