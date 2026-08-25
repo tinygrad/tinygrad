@@ -252,9 +252,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg), kwargs.pop("tag", self.tag))
-    dtype = kwargs.pop("dtype", None)
+    # the dtype is re-derived from the new op/src/arg. the ops that derive nothing (INS, NOOP, CUSTOM) keep the one they were given
+    if (dtype:=kwargs.pop("dtype", None)) is None: dtype = dtype_from_uop(*new_args[:3]) or self.dtype
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
-    if (self.op, self.src, self.arg, self.tag) == new_args and dtype in (None, self.dtype): return self
+    if (self.op, self.src, self.arg, self.tag) == new_args and dtype == self.dtype: return self
     return UOp(new_args[0], dtype, *new_args[1:])
   def rtag(self, tag=True): return self.replace(tag=tag)
   @property
