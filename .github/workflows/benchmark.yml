@@ -88,7 +88,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -135,7 +135,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -184,7 +184,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -227,7 +227,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -273,7 +273,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -327,7 +327,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -422,7 +422,7 @@ jobs:
   testusbgpu:
     name: UsbGPU Benchmark
     runs-on: [self-hosted, macOS]
-    timeout-minutes: 10
+    timeout-minutes: 3
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -547,7 +547,7 @@ jobs:
   testcommausbgpubenchmark:
     name: UsbGPU Benchmark (comma)
     runs-on: [self-hosted, Linux, comma4]
-    timeout-minutes: 20
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -576,7 +576,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['AMD', 'NV']
-    timeout-minutes: 20
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -650,7 +650,7 @@ jobs:
   llvmspeed:
     name: LLVM Speed
     runs-on: [self-hosted, Linux, tinyboxrandom]
-    timeout-minutes: 20
+    timeout-minutes: 5
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code

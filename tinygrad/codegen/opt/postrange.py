@@ -193,7 +193,7 @@ class Scheduler:
       for b in self.bufs:
         if rng in (i:=b.src[1].get_idx()).backward_slice_with_self:
           nb = b.replace(src=(b.src[0], i.valid(valid&b.src[1].get_valid())))
-          replaces[b] = nb if b in store_targets else valid.where(nb, UOp.const(Invalid, b.dtype))
+          replaces[b] = nb if b in store_targets else valid.where(nb, UOp.const(Invalid))
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
       try:

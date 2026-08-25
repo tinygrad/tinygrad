@@ -40,7 +40,7 @@ renderer = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat(Ops.CONST, name="x"), lambda x: str(x.val)),
   # CAST states the width, the weak CONST carries the value
-  (UPat.cvar("c", dtypes.weaks+(dtypes.bool,)).cast(), lambda c: str(c.val)),
+  (UPat.cvar("c").cast(), lambda c: str(c.val)),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"),
   (UPat(Ops.NEG, name="x"), lambda ctx,x: f"(-{ctx[x.src[0]]})"),
   (UPat(Ops.RECIPROCAL, name="x"), lambda ctx,x: f"(1/{ctx[x.src[0]]})"),
@@ -83,9 +83,9 @@ def render_marg(ctx,x:UOp):
 sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,
          Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER, Ops.DETACH}
 pm_pyrender_extra = PatternMatcher([
-  (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val}, {x.dtype})"),
+  (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val})"),
   (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})" if x.dtype != x.src[0].dtype else None),
-  (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].val}, {repr(x.arg)}, dtype={x.dtype})"),
+  (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].val}, {repr(x.arg)})"),
   (UPat(Ops.BUFFER, src=(UPat(),), name="x"), lambda x:
     f"UOp.new_buffer({repr(x.arg.device)}, {x.max_numel()}, {x.dtype}, {x.arg.slot})"
     if isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL else None),
@@ -95,7 +95,7 @@ pm_pyrender_extra = PatternMatcher([
   # NOTE: range has srcs sometimes after control flow
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:
     "UOp.range("+', '.join([str(c.val)] + [repr(y) for y in x.arg])+
-      (f', src={srcs(ctx, x.src[1:])}' if len(x.src) > 1 else '')+(', dtype='+str(x.dtype) if x.dtype is not dtypes.weakint else '')+")"),
+      (f', src={srcs(ctx, x.src[1:])}' if len(x.src) > 1 else '')+")"),
   # TODO: index shouldn't mismatch dtype
   (UPat(Ops.INDEX, src=(UPat(), UPat()), allow_any_len=True, name="x"), lambda ctx,x:
    f"{ctx[x.src[0]]}.index({ctx[x.src[1]]}, "+''.join([f"{ctx[xx]}, " for xx in x.src[2:]])+

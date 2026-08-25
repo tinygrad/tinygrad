@@ -121,8 +121,6 @@ class NIRRenderer(Renderer):
   code_for_op = {**{k:lambda:None for k in u_aop.keys()}, **{k:lambda:None for k in s_aop.keys()}, **{k:lambda:None for k in f_aop.keys()}}
 
   extra_matcher = PatternMatcher([
-    # handle negative unsigned CONST
-    (UPat.cvar("x", dtypes.uints), lambda x: UOp.const(x.dtype.max+x.val+1, x.dtype) if x.val < 0 else None),
     # from ptx
     (UPat.var('x', dtype=dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
     # load/store bool -> uint8
@@ -136,9 +134,10 @@ class NIRRenderer(Renderer):
     # ref: https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#OpConvertFToU
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
+    # nor to REG/ALU register picks, which keep their own index dtype
     (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
       src=(buf,UOp.const(off.val, dtypes.long) if off.op is Ops.CONST else off.cast(dtypes.long))+x.src[2:])
-      if buf.addrspace != AddrSpace.REG and not is_image_shape(buf._shape) else None),
+      if buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) and not is_image_shape(buf._shape) else None),
     # images need index to be int for nir (coordinates only: the INDEX keeps its access dtype)
     (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x"), name="x"),
      lambda x,buf,idx_y,idx_x: x.replace(src=(buf, idx_y.cast(dtypes.int), idx_x.cast(dtypes.int)))),

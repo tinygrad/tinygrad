@@ -259,7 +259,7 @@ def store_dest_multi(root:UOp, multi:UOp):
   # (scalars arrive EXPANDed to the full shape by UOp.store's const_like, so they sub-view like everything else)
   srcs = [multi.src[0]] + [x.src[0] if x.op is Ops.UNSHARD else shard_subview(x, multi) if tuple(x.shape) == tuple(multi.shape) else x
                            for x in root.src[1:]]
-  return UOp(root.op, root.dtype, tuple(srcs), root.arg)
+  return UOp(root.op, src=tuple(srcs), arg=root.arg)
 
 def passthrough_multi(root:UOp, multi:UOp):
   new_src = (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:])
@@ -306,7 +306,7 @@ multi_pm = PatternMatcher([
   (UPat((Ops.CALL, Ops.FUNCTION, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — FUNCTION is handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
-    UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), root.arg)),
+    UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg)),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), passthrough_multi),
   # STORE of a sharded value into an unsharded dest (e.g. a fragment into a full output tile)

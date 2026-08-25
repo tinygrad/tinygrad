@@ -45,7 +45,7 @@ z3_renderer = PatternMatcher([
   (UPat((Ops.LOAD, Ops.INDEX), dtypes.bool), lambda ctx: (z3.Bool(f"load{len(ctx[1])}", ctx=ctx[0]), None)),
   # constants
   (UPat(Ops.CONST, arg=Invalid), lambda ctx: (z3.Int("Invalid", ctx=ctx[0]), None)),
-  (UPat(Ops.CONST, dtypes.ints+(dtypes.weakint,), name="x"), lambda x,ctx: (z3.IntVal(x.val, ctx=ctx[0]), None)),
+  (UPat(Ops.CONST, dtypes.weakint, name="x"), lambda x,ctx: (z3.IntVal(x.val, ctx=ctx[0]), None)),
   (UPat(Ops.CONST, dtypes.bool, name="x"), lambda x,ctx: (z3.BoolVal(x.val, ctx=ctx[0]), None)),
   # casts from floats create new variables
   (UPat(Ops.CAST, dtypes.ints+(dtypes.weakint,), src=(UPat(dtype=dtypes.floats),), name="x"), lambda x,ctx:
