@@ -371,5 +371,20 @@ class TestUOpPrograms(unittest.TestCase):
     self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), a, b, c)
     with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)
 
+  def test_xidiv32(self):
+    from tinygrad.codegen.decomp.op import xidiv32
+    for dt,n_data,d_data in [(dtypes.uint32, [0,27,2**31,2**32-1],   [35, 0, 9, 2**30-1]),
+                             (dtypes.int32,  [0,-340,2**31, -2**32], [35, 0, -9, -3**10])]:
+      with self.subTest(dtype=dt):
+        num, denom, out = Tensor(n_data, dtype=dt), Tensor(d_data, dtype=dt), Tensor.empty(4, dtype=dt)
+        with Context(DEBUG=0): Tensor.realize(num, denom, out)
+
+        N, D, O = num.uop.placeholder_like(0), denom.uop.placeholder_like(1), out.uop.placeholder_like(2)
+        prog = xidiv32(N, D, O)
+
+        truth = num.div(denom, rounding_mode='trunc').tolist()
+        self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), num, denom, out)
+        self.assertEqual(out.tolist(), truth)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
