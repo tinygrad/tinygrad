@@ -183,11 +183,11 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual(dtype_from_uop(Ops.SHL, (UOp.const(1, dtypes.int8), UOp.const(1, dtypes.uint32)), None), dtypes.int8)
     self.assertEqual(UOp.const(1).alu(Ops.SHL, UOp.const(1, dtypes.uint)).dtype, dtypes.weakint)
     self.assertEqual((v & 3).dtype, dtypes.weakint)
-    with self.assertRaises(RuntimeError): Tensor.const(1.0) << Tensor.const(1.0)
-    with self.assertRaises(RuntimeError): UOp.const(1, dtypes.int32).alu(Ops.SHL, UOp.const(1, dtypes.float64))
+    with self.assertRaises(RuntimeError): (Tensor.const(1.0) << Tensor.const(1.0)).dtype
+    with self.assertRaises(RuntimeError): UOp.const(1, dtypes.int32).alu(Ops.SHL, UOp.const(1, dtypes.float64)).dtype
     for op in (Ops.SHL, Ops.SHR):
       with self.assertRaises(RuntimeError):
-        UOp.const(1, dtypes.float32).alu(op, UOp.const(1, dtypes.int32))
+        UOp.const(1, dtypes.float32).alu(op, UOp.const(1, dtypes.int32)).dtype
     # float bitwise builds, the spec rejects it
     with Context(SPEC=1):
       f32, wf = UOp.const(1.0, dtypes.float32), UOp.const(1.0)

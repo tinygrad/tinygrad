@@ -158,6 +158,10 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return in_tuple.src[arg].dtype
     case Ops.GETADDR:
       return dtypes.uint64
+    case Ops.THREEFRY:
+      return dtypes.uint64
+    case Ops.FDIV:
+      return least_upper_float(promo_dtype(src))
     case Ops.SHL | Ops.SHR:
       if not all(dtypes.is_int(x.dtype) or x.base.is_invalid for x in src):
         raise RuntimeError(f"shift operands must be int, got {[x.dtype for x in src]}")
