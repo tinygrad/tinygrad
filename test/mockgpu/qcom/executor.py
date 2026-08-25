@@ -1,4 +1,4 @@
-import ctypes, sys
+import ctypes, struct
 from typing import Any
 from tinygrad.runtime.autogen import mesa
 from test.mockgpu.qcom.decoder import decode_ir3
@@ -6,7 +6,7 @@ from test.mockgpu.qcom.registers import (_alu_runner, _compare, _convert, _float
                                          _s32, _signed, _float_values, _values, _write, local_id_regs, workgroup_id_regs)
 from test.mockgpu.qcom.uop_runner import IR3UOpRunner
 
-_UOP_RUNNER = IR3UOpRunner() if sys.platform == 'linux' else None
+_UOP_RUNNER = IR3UOpRunner()
 
 def _source_offset(src, offset):
   if isinstance(src, int): return src
@@ -46,6 +46,50 @@ def _private_lanes(private:bytearray|list[bytearray]|None, lanes:int, name:str) 
     raise RuntimeError(f'IR3 {name} requires {lanes} bytearray private backings')
   return private
 
+def _validate_targets(targets, mask, unit, check_range, name, pc):
+  active = [target for target, active in zip(targets, mask, strict=True) if active]
+  if active:
+    # One aggregate span check usually covers every lane; per-lane checks reproduce exact faults otherwise.
+    low, high = min(active), max(active)
+    try:
+      check_range(low, high - low + unit)
+      return
+    except Exception: pass
+  for lane, target in enumerate(targets):
+    if mask[lane]: _check_access(check_range, target, unit, name, pc)
+
+def _read_targets(targets, mask, itemsize):
+  char = {1: 'B', 2: 'H', 4: 'I'}[itemsize]
+  out: list[int] = []
+  lane = 0
+  while lane < len(targets):
+    if not mask[lane]:
+      out.append(0)
+      lane += 1
+      continue
+    run = lane + 1
+    while run < len(targets) and mask[run] and targets[run] == targets[run - 1] + itemsize: run += 1
+    if run > lane + 1: out.extend(struct.unpack(f'<{run - lane}{char}', ctypes.string_at(targets[lane], (run - lane) * itemsize)))
+    else: out.append(int.from_bytes(ctypes.string_at(targets[lane], itemsize), 'little'))
+    lane = run
+  return out
+
+def _write_targets(targets, mask, values, itemsize):
+  unit_mask = (1 << (itemsize * 8)) - 1
+  lane = 0
+  while lane < len(targets):
+    if not mask[lane]:
+      lane += 1
+      continue
+    run = lane + 1
+    while run < len(targets) and mask[run] and targets[run] == targets[run - 1] + itemsize: run += 1
+    if run > lane + 1 and itemsize == 4:
+      ctypes.memmove(targets[lane], b''.join((values[index] & 0xffffffff).to_bytes(4, 'little') for index in range(lane, run)), (run - lane) * 4)
+    else:
+      for index in range(lane, run):
+        ctypes.memmove(targets[index], (values[index] & unit_mask).to_bytes(itemsize, 'little'), itemsize)
+    lane = run
+
 def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:int=630, check_range=None, start_pc=0,
                 shared:bytearray|None=None, private:bytearray|list[bytearray]|None=None, stop_at_barrier=False, trace:dict|None=None,
                 textures=(), ibos=()):
@@ -64,7 +108,9 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
         exec_mask = [a or b for a, b in zip(exec_mask, frame['alternate'][1], strict=True)]
         branch_frames.pop()
     if trace is None and _UOP_RUNNER is not None and \
-       (next_pc := _UOP_RUNNER.try_run(program, pc, regs, exec_mask, predication)) is not None:
+       (next_pc := _UOP_RUNNER.try_run(program, pc, regs, exec_mask, predication, None if not branch_frames else
+         frozenset(target for frame in branch_frames for target in
+                   ((frame['reconv'] or (0,))[0], (frame['alternate'] or (0,))[0])))) is not None:
       steps += next_pc - pc
       if steps > step_limit: raise RuntimeError(f'IR3 execution did not terminate at PC {pc}')
       pc = next_pc
@@ -384,19 +430,53 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
       itemsize = _itemsize(inst.types[0])
       addresses = [low | high << 32 for low, high in
                    zip(_values(regs, address_reg, lanes), _values(regs, _next_reg(address_reg), lanes), strict=True)]
+      span = size * itemsize
       valid_lanes = write_mask.copy()
-      for lane, address in enumerate(addresses):
-        if write_mask[lane]:
-          try: _check_access(check_range, address + offset, size * itemsize, inst.name, inst_pc)
+      # Lanes usually access one mapped range together; validate the aggregate span once and fall
+      # back to the exact per-lane checks when the span straddles mappings or faults.
+      if predication is None and any(write_mask):
+        active = [addresses[lane] + offset for lane in range(lanes) if write_mask[lane]]
+        try:
+          check_range(min(active), max(active) - min(active) + span)
+          checked = True
+        except Exception: checked = False
+        if not checked:
+          for lane, address in enumerate(addresses):
+            if not write_mask[lane]: continue
+            try: _check_access(check_range, address + offset, span, inst.name, inst_pc)
+            except Exception as exc:
+              raise RuntimeError(f'IR3 {inst.name} memory fault at PC {inst_pc}, lane {lane}, address={address:#x}') from exc
+      else:
+        for lane, address in enumerate(addresses):
+          if not write_mask[lane]: continue
+          try: _check_access(check_range, address + offset, span, inst.name, inst_pc)
           except Exception as exc:
             if predication is not None:
               valid_lanes[lane] = False
               continue
             raise RuntimeError(f'IR3 {inst.name} memory fault at PC {inst_pc}, lane {lane}, address={address:#x}') from exc
-      for component in range(size):
-        values = [int.from_bytes(ctypes.string_at(address + offset + component * itemsize, itemsize), 'little') if valid_lanes[lane] else 0
-                  for lane, address in enumerate(addresses)]
-        _write(regs, _reg_offset(inst.dst, component), values, write_mask)
+      fmt = '<%d%s' % (size, {1: 'B', 2: 'H', 4: 'I'}[itemsize])
+      components: list[list[int]] = [[] for _ in range(size)]
+      lane = 0
+      while lane < lanes:
+        address = addresses[lane] + offset
+        if not valid_lanes[lane]:
+          for component in range(size): components[component].append(0)
+          lane += 1
+          continue
+        # Batch maximal runs of lanes accessing consecutive memory with one read.
+        run = lane + 1
+        if span >= 4:
+          while run < lanes and valid_lanes[run] and addresses[run] + offset == addresses[run - 1] + offset + span: run += 1
+        if run > lane + 1:
+          data = struct.unpack(f'<{(run - lane) * size}{fmt[2]}', ctypes.string_at(address, (run - lane) * span))
+          for index in range(run - lane):
+            for component in range(size): components[component].append(data[index * size + component])
+        else:
+          data = struct.unpack(fmt, ctypes.string_at(address, span))
+          for component in range(size): components[component].append(data[component])
+        lane = run
+      for component in range(size): _write(regs, _reg_offset(inst.dst, component), components[component], write_mask)
       continue
     if inst.name == 'ldg.a':
       address_reg, index_reg, shift, size = inst.srcs
@@ -405,12 +485,10 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
       addresses = [low | high << 32 for low, high in
                    zip(_values(regs, address_reg, lanes), _values(regs, _next_reg(address_reg), lanes), strict=True)]
       indices = _values(regs, index_reg, lanes)
+      targets = [address + (_s32(index) << shift) for address, index in zip(addresses, indices, strict=True)]
+      _validate_targets(targets, write_mask, itemsize, check_range, inst.name, inst_pc)
       for component in range(size):
-        output = []
-        for lane, (address, index) in enumerate(zip(addresses, indices, strict=True)):
-          target = address + (_s32(index) << shift) + component * itemsize
-          if write_mask[lane]: _check_access(check_range, target, itemsize, inst.name, inst_pc)
-          output.append(int.from_bytes(ctypes.string_at(target, itemsize), 'little') if write_mask[lane] else 0)
+        output = _read_targets([target + component * itemsize for target in targets], write_mask, itemsize)
         _write(regs, _reg_offset(inst.dst, component), output, write_mask)
       continue
     if inst.name == 'stg':
@@ -420,17 +498,38 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
       itemsize = _itemsize(inst.types[0])
       addresses = [low | high << 32 for low, high in
                    zip(_values(regs, address_reg, lanes), _values(regs, _next_reg(address_reg), lanes), strict=True)]
-      for lane, address in enumerate(addresses):
-        if write_mask[lane]:
-          try: _check_access(check_range, address + offset, size * itemsize, inst.name, inst_pc)
-          except Exception as exc:
-            raise RuntimeError(f'IR3 {inst.name} memory fault at PC {inst_pc}, lane {lane}, address={address:#x}, '
-              f'c0={[_values(regs, ("c", 0, i), lanes)[lane] for i in range(4)]}, '
-              f'r0={[_values(regs, ("r", 0, i), lanes)[lane] for i in range(4)]}') from exc
-      for component in range(size):
-        for lane, (address, value) in enumerate(zip(addresses, _values(regs, _reg_offset(value_reg, component), lanes), strict=True)):
-          if write_mask[lane]: ctypes.memmove(address + offset + component * itemsize,
-            (value & ((1 << (itemsize * 8)) - 1)).to_bytes(itemsize, 'little'), itemsize)
+      span = size * itemsize
+      if any(write_mask):
+        active = [addresses[lane] + offset for lane in range(lanes) if write_mask[lane]]
+        try:
+          check_range(min(active), max(active) - min(active) + span)
+          checked = True
+        except Exception: checked = False
+        if not checked:
+          for lane, address in enumerate(addresses):
+            if not write_mask[lane]: continue
+            try: _check_access(check_range, address + offset, span, inst.name, inst_pc)
+            except Exception as exc:
+              raise RuntimeError(f'IR3 {inst.name} memory fault at PC {inst_pc}, lane {lane}, address={address:#x}, '
+                f'c0={[_values(regs, ("c", 0, i), lanes)[lane] for i in range(4)]}, '
+                f'r0={[_values(regs, ("r", 0, i), lanes)[lane] for i in range(4)]}') from exc
+      columns = [_values(regs, _reg_offset(value_reg, component), lanes) for component in range(size)]
+      unit_mask = (1 << (itemsize * 8)) - 1
+      lane = 0
+      while lane < lanes:
+        if not write_mask[lane]: lane += 1; continue
+        address = addresses[lane] + offset
+        # Consecutive lanes writing adjacent, disjoint slots go through one packed store.
+        run = lane + 1
+        while run < lanes and write_mask[run] and addresses[run] + offset == addresses[run - 1] + offset + span: run += 1
+        if run > lane + 1 and itemsize == 4:
+          payload = b''.join((column[index] & unit_mask).to_bytes(4, 'little') for index in range(lane, run) for column in columns)
+          ctypes.memmove(address, payload, (run - lane) * span)
+        else:
+          for index in range(lane, run):
+            ctypes.memmove(addresses[index] + offset,
+              b''.join((column[index] & unit_mask).to_bytes(itemsize, 'little') for column in columns), span)
+        lane = run
       continue
     if inst.name == 'stg.a':
       address_reg, index_reg, shift, value_reg, size = inst.srcs
@@ -439,13 +538,11 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
       addresses = [low | high << 32 for low, high in
                    zip(_values(regs, address_reg, lanes), _values(regs, _next_reg(address_reg), lanes), strict=True)]
       indices = _values(regs, index_reg, lanes)
+      targets = [address + (_s32(index) << shift) for address, index in zip(addresses, indices, strict=True)]
+      _validate_targets(targets, write_mask, itemsize, check_range, inst.name, inst_pc)
       for component in range(size):
-        values = _values(regs, _reg_offset(value_reg, component), lanes)
-        for lane, (address, index, value) in enumerate(zip(addresses, indices, values, strict=True)):
-          if not write_mask[lane]: continue
-          target = address + (_s32(index) << shift) + component * itemsize
-          _check_access(check_range, target, itemsize, inst.name, inst_pc)
-          ctypes.memmove(target, (value & ((1 << (itemsize * 8)) - 1)).to_bytes(itemsize, 'little'), itemsize)
+        _write_targets([target + component * itemsize for target in targets], write_mask,
+                       _values(regs, _reg_offset(value_reg, component), lanes), itemsize)
       continue
     raise NotImplementedError(f'unsupported IR3 execution {inst.name}')
   return None

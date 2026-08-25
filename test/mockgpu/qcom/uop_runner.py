@@ -3,7 +3,9 @@
 This is deliberately a translator for :class:`IR3Instruction`, not a fallback
 to the source Tensor/UOp graph.  Unsupported machine instructions return
 ``None`` from :meth:`IR3UOpRunner.try_run`, leaving the IR3 interpreter as the
-single correctness authority.
+single correctness authority.  Each lowered opcode mirrors the exact branch
+the interpreter takes for it, including which branches ignore encoded source
+modifiers (``_IGNORE_MODS``) and which apply them.
 """
 import array
 from dataclasses import dataclass
@@ -26,9 +28,18 @@ _HALF_TYPES = {mesa.TYPE_F16, mesa.TYPE_U16, mesa.TYPE_S16, mesa.TYPE_U8}
 _FLOAT_TYPES = {mesa.TYPE_F16, mesa.TYPE_F32}
 _SIGNED_TYPES = {mesa.TYPE_S16, mesa.TYPE_S32}
 _BYTE_TYPES = {mesa.TYPE_U8, mesa.TYPE_U8_32}
-_SUPPORTED = {'mov', 'add.u', 'sub.u', 'cmps.u', 'cmps.s', 'shl.b', 'shr.b', 'ashr.b', 'mull.u', 'madsh.m16',
-              'and.b', 'or.b', 'xor.b', 'not.b', 'shrg', 'sel.b32', 'andg', 'absneg.s',
-              'add.f', 'mul.f', 'cmps.f', 'rcp'}
+
+# The interpreter takes a dedicated branch for these opcodes that reads raw
+# operands, so encoded modifiers must be ignored rather than rejected.
+_IGNORE_MODS = {'add.u', 'cmps.u', 'cmps.s', 'shrg', 'shrm', 'shlm', 'shlg', 'andg',
+                'sel.b16', 'sel.b32', 'sel.s16', 'sel.s32', 'sel.f16', 'sel.f32',
+                'sad.s16', 'sad.s32', 'mad.u16', 'madsh.u16', 'mad.s16', 'mad.u24', 'mad.s24', 'madsh.m16'}
+_MOD_OPS = {'add.s', 'sub.u', 'sub.s', 'min.u', 'min.s', 'max.u', 'max.s', 'cmpv.u', 'cmpv.s', 'shl.b', 'shr.b', 'ashr.b',
+            'and.b', 'or.b', 'xor.b', 'not.b', 'mul.u24', 'mul.s24', 'mull.u', 'getbit.b', 'absneg.s',
+            'add.f', 'mul.f', 'min.f', 'max.f', 'cmps.f', 'cmpv.f', 'sign.f', 'absneg.f', 'floor.f', 'ceil.f', 'rndaz.f',
+            'mad.f16', 'mad.f32', 'rcp', 'rsq', 'log2', 'exp2', 'sqrt', 'hrsq', 'hlog2', 'hexp2'}
+_NATIVE = _IGNORE_MODS | _MOD_OPS | {'mov'}
+_MAD_INT = {'mad.u16', 'madsh.u16', 'mad.s16', 'mad.u24', 'mad.s24'}
 
 
 class UnsupportedIR3Block(Exception):
@@ -57,24 +68,36 @@ def _output_mask(value: UOp, dst: Register) -> UOp:
   return _mask(value, 16 if dst[0].startswith('h') else 32)
 
 
+def _const(value: int | float, dtype) -> UOp: return UOp.const(value, dtype)
+
+def _comparison(lhs: UOp, rhs: UOp, condition: int) -> UOp:
+  comparisons = (lhs < rhs, lhs <= rhs, lhs > rhs, lhs >= rhs, lhs == rhs, lhs != rhs)
+  if not 0 <= condition < len(comparisons) or not isinstance(comparison := comparisons[condition], UOp):
+    raise UnsupportedIR3Block('invalid or constant-folded IR3 comparison')
+  return comparison.cast(dtypes.uint32)
+
+
 @dataclass
 class IR3UOpBlock:
   """A cached native CPU program for one decoded IR3 basic block."""
-  end_pc: int
+  length: int
   lanes: int
   slots: tuple[Register, ...]
   dirty_slots: tuple[tuple[Register, int], ...]
   runtime: Any
   regfile: Buffer
 
-  def run(self, regs: dict[Register, list[int]]) -> int:
+  def run(self, regs: dict[Register, list[int]], mask: list[bool]) -> None:
     words = self.regfile.as_memoryview(force_zero_copy=True).cast('I')
     for slot, reg in enumerate(self.slots):
-      words[slot * self.lanes:(slot + 1) * self.lanes] = array.array('I', (value & _UINT32_MASK for value in regs.get(reg, [0] * self.lanes)))
+      values = regs.get(reg)
+      if values is None: values = [0] * self.lanes
+      try: words[slot * self.lanes:(slot + 1) * self.lanes] = array.array('I', values)
+      except OverflowError: words[slot * self.lanes:(slot + 1) * self.lanes] = array.array('I', (value & _UINT32_MASK for value in values))
+    words[len(self.slots) * self.lanes:(len(self.slots) + 1) * self.lanes] = array.array('I', mask)
     self.runtime(self.regfile._buf, global_size=(1, 1, 1), local_size=(1, 1, 1), wait=True)
     for reg, slot in self.dirty_slots:
       regs[reg] = list(words[slot * self.lanes:(slot + 1) * self.lanes])
-    return self.end_pc
 
 
 class _Lowerer:
@@ -82,8 +105,11 @@ class _Lowerer:
     self.instructions, self.lanes = instructions, lanes
     self.keys = self._keys()
     self.slot = {reg: index for index, reg in enumerate(self.keys)}
-    self.regfile = UOp.placeholder((len(self.keys) * lanes,), dtypes.uint32, slot=0, device='CPU')
+    # One extra regfile slot holds the wave's write mask; masked stores select between old and new lanes.
+    self.mask_slot = len(self.keys)
+    self.regfile = UOp.placeholder(((self.mask_slot + 1) * lanes,), dtypes.uint32, slot=0, device='CPU')
     self.index = UOp.range(lanes, 0)
+    self.mask = self.regfile.index(self.index + self.mask_slot * lanes).load().ne(_const(0, dtypes.uint32))
     self.values: dict[Register, UOp] = {}
     self.dirty: set[Register] = set()
 
@@ -105,7 +131,7 @@ class _Lowerer:
     return tuple(_advance(src, component, repeat) for src, repeat in zip(inst.srcs, repeat_srcs, strict=True))
 
   def read(self, src: Register | int) -> UOp:
-    if isinstance(src, int): return UOp.const(src & _UINT32_MASK, dtypes.uint32)
+    if isinstance(src, int): return _const(src & _UINT32_MASK, dtypes.uint32)
     if src not in self.slot: raise UnsupportedIR3Block(f'unsupported IR3 source {src}')
     if src not in self.values:
       self.values[src] = self.regfile.index(self.index + self.slot[src] * self.lanes).load()
@@ -113,119 +139,226 @@ class _Lowerer:
 
   def write(self, dst: Register, value: UOp):
     if dst not in self.slot: raise UnsupportedIR3Block(f'unsupported IR3 destination {dst}')
-    self.values[dst] = _output_mask(value, dst)
+    # IR3 predication writes through only where the wave mask is set, like the interpreter's _write.
+    self.values[dst] = self.mask.where(_output_mask(value, dst), self.read(dst))
     self.dirty.add(dst)
 
+
+  # ---- typed operand views -------------------------------------------------
+
+  # The interpreter evaluates float ALU in Python doubles and repacks, so every
+ # float lowering here computes in float64.  For f32/f16-sourced operands the
+ # products and sums are exact in f64 (24+24 <= 53 bits), which also makes
+ # FMA contraction harmless, and the final cast performs the same single
+ # round-to-nearest-even that struct.pack applies.
+  @staticmethod
+  def unpack_float(value: UOp, half: bool) -> UOp:
+    if half: return _mask(value, 16).cast(dtypes.uint16).bitcast(dtypes.float16).cast(dtypes.float64)
+    return _mask(value, 32).bitcast(dtypes.float32).cast(dtypes.float64)
+
+  @staticmethod
+  def pack_float(value: UOp, half: bool) -> UOp:
+    if half: return value.cast(dtypes.float16).bitcast(dtypes.uint16).cast(dtypes.uint32)
+    return value.cast(dtypes.float32).bitcast(dtypes.uint32)
+
+  def float_source(self, inst: IR3Instruction, index: int, component: int, half: bool) -> UOp:
+    value = self.unpack_float(self.read(self.sources(inst, component)[index]), half)
+    modifier = inst.src_mods[index] if index < len(inst.src_mods) else 0
+    if modifier:
+      # neg/abs/-abs on a float equal sign-bit ops on the packed bits, including -0.0 and NaN payloads.
+      bits = value.bitcast(dtypes.uint64)
+      bits = bits ^ _const(1 << 63, dtypes.uint64) if modifier == 1 else \
+        bits & _const((1 << 63) - 1, dtypes.uint64) if modifier == 2 else bits | _const(1 << 63, dtypes.uint64)
+      value = bits.bitcast(dtypes.float64)
+    return value
+
+  def int_source(self, inst: IR3Instruction, index: int, component: int) -> UOp:
+    value = self.read(self.sources(inst, component)[index])
+    modifier = inst.src_mods[index] if index < len(inst.src_mods) else 0
+    if not modifier: return value
+    signed = _sign_extend(value, 16 if inst.source_half else 32).cast(dtypes.int32)
+    absolute = (signed < _const(0, dtypes.int32)).where(signed * _const(-1, dtypes.int32), signed)
+    out = signed * _const(-1, dtypes.int32) if modifier == 1 else absolute if modifier == 2 else absolute * _const(-1, dtypes.int32)
+    return out.cast(dtypes.uint32)
+
+  @staticmethod
+  def int_operand(value: UOp, signed: bool, bits: int) -> UOp:
+    return _sign_extend(value, bits).cast(dtypes.int32) if signed else _mask(value, bits)
+
   def convert(self, value: UOp, src_type: int, dst_type: int) -> UOp:
-    if src_type in _FLOAT_TYPES or dst_type in _FLOAT_TYPES: raise UnsupportedIR3Block('floating cat1 conversion')
+    if src_type == dst_type: return _mask(value, 16 if src_type in _HALF_TYPES else 32)
+    if src_type in _FLOAT_TYPES:
+      number = self.unpack_float(value, src_type == mesa.TYPE_F16)
+      if dst_type in _FLOAT_TYPES: return self.pack_float(number, dst_type == mesa.TYPE_F16)
+      # NOTE: the interpreter truncates unrepresentable magnitudes with Python arbitrary precision; native C
+      # casts saturate. Real kernels convert in-range indices, so this lowering accepts that divergence.
+      finite = (number - number) == _const(0.0, dtypes.float64)
+      return _mask(finite.where(number.cast(dtypes.int32), _const(0, dtypes.int32)).cast(dtypes.uint32),
+                   8 if dst_type in _BYTE_TYPES else 16 if dst_type in _HALF_TYPES else 32)
     src_bits = 8 if src_type in _BYTE_TYPES else 16 if src_type in _HALF_TYPES else 32
     if src_type == mesa.TYPE_U8 and dst_type in _SIGNED_TYPES: value = _sign_extend(value, 8)
     elif src_type in _SIGNED_TYPES: value = _sign_extend(value, src_bits)
     else: value = _mask(value, src_bits)
+    if dst_type in _FLOAT_TYPES:
+      return self.pack_float(value.cast(dtypes.int32 if src_type in _SIGNED_TYPES else dtypes.uint32).cast(dtypes.float64),
+                             dst_type == mesa.TYPE_F16)
     dst_bits = 8 if dst_type in _BYTE_TYPES else 16 if dst_type in _HALF_TYPES else 32
     return _mask(value, dst_bits)
 
-  def binary_sources(self, inst: IR3Instruction, component: int) -> tuple[UOp, UOp]:
-    if len(inst.srcs) != 2: raise UnsupportedIR3Block(f'unsupported IR3 source count for {inst.name}')
-    return tuple(self.read(src) for src in self.sources(inst, component)) # type: ignore[return-value]
+  # ---- opcode lowering -----------------------------------------------------
 
   def lower(self):
     for inst in self.instructions:
       if inst.name == 'nop': continue
-      if inst.name not in _SUPPORTED or not _register(inst.dst) or (any(inst.src_mods) and inst.name != 'absneg.s') or inst.sat:
+      if inst.name not in _NATIVE or not _register(inst.dst) or inst.sat:
         raise UnsupportedIR3Block(f'unsupported IR3 opcode {inst.name}')
-      if inst.name == 'mov':
-        if len(inst.srcs) != 1: raise UnsupportedIR3Block('invalid mov source count')
-        for component in range(inst.repeat + 1):
-          src, = self.sources(inst, component)
-          self.write(_reg_offset(inst.dst, component), self.convert(self.read(src), *inst.types))
-        continue
-      if inst.name == 'madsh.m16':
-        if len(inst.srcs) != 3 or inst.dst[0].startswith('h'):
-          raise UnsupportedIR3Block('unsupported madsh.m16 form')
-        for component in range(inst.repeat + 1):
-          a, b, c = (self.read(src) for src in self.sources(inst, component))
-          # Encoded IR3 source order is low(src0) * high(src1), inserted at bit 16.
-          self.write(_reg_offset(inst.dst, component), ((_mask(a, 16) * _mask(b >> 16, 16)) << 16) + c)
-        continue
-      if inst.name == 'shrg':
-        if len(inst.srcs) != 3: raise UnsupportedIR3Block('invalid shrg source count')
-        for component in range(inst.repeat + 1):
-          shift, value, other = (self.read(src) for src in self.sources(inst, component))
-          self.write(_reg_offset(inst.dst, component), (_mask(value, 16 if inst.source_half else 32) >> (shift & 31)) | other)
-        continue
-      if inst.name == 'not.b':
-        if len(inst.srcs) != 1: raise UnsupportedIR3Block('invalid not.b source count')
-        for component in range(inst.repeat + 1):
-          src, = self.sources(inst, component)
-          self.write(_reg_offset(inst.dst, component), self.read(src) ^ UOp.const(_UINT32_MASK, dtypes.uint32))
-        continue
-      if inst.name == 'absneg.s':
-        if len(inst.srcs) != 1: raise UnsupportedIR3Block('invalid absneg.s source count')
-        modifier = inst.src_mods[0] if inst.src_mods else 0
-        for component in range(inst.repeat + 1):
-          src, = self.sources(inst, component)
-          value = _sign_extend(self.read(src), 16 if inst.source_half else 32).cast(dtypes.int32)
-          absolute = (value < 0).where(-value, value)
-          self.write(_reg_offset(inst.dst, component), -absolute if modifier == 3 else absolute if modifier == 2 else
-                     -value if modifier == 1 else value)
-        continue
-      if inst.name in {'sel.b32', 'andg'}:
-        if len(inst.srcs) != 3: raise UnsupportedIR3Block(f'invalid {inst.name} source count')
-        for component in range(inst.repeat + 1):
-          a, b, c = (self.read(src) for src in self.sources(inst, component))
-          out = b.ne(0).where(a, c) if inst.name == 'sel.b32' else (b & a) | c
-          self.write(_reg_offset(inst.dst, component), out)
-        continue
-      if inst.name == 'rcp':
-        if len(inst.srcs) != 1 or inst.source_half or inst.dst[0].startswith('h'):
-          raise UnsupportedIR3Block('unsupported rcp form')
-        for component in range(inst.repeat + 1):
-          src, = self.sources(inst, component)
-          self.write(_reg_offset(inst.dst, component),
-                     (UOp.const(1.0, dtypes.float32) / self.read(src).bitcast(dtypes.float32)).bitcast(dtypes.uint32))
-        continue
       for component in range(inst.repeat + 1):
-        a, b = self.binary_sources(inst, component)
-        source_bits = 16 if inst.source_half else 32
-        if inst.name == 'add.u': out = a + b
-        elif inst.name == 'sub.u': out = a - b
-        elif inst.name == 'and.b': out = a & b
-        elif inst.name == 'or.b': out = a | b
-        elif inst.name == 'xor.b': out = a ^ b
-        elif inst.name == 'mull.u': out = _mask(a, 16) * _mask(b, 16)
-        elif inst.name == 'shl.b': out = a << (b & 31)
-        elif inst.name == 'shr.b': out = _mask(a, source_bits) >> (b & 31)
-        elif inst.name == 'ashr.b': out = _sign_extend(a, source_bits).cast(dtypes.int32) >> (b & 31)
-        elif inst.name in {'add.f', 'mul.f', 'cmps.f'}:
-          if inst.source_half or inst.dst[0].startswith('h') and inst.name != 'cmps.f':
-            raise UnsupportedIR3Block(f'unsupported half {inst.name}')
-          lhs, rhs = a.bitcast(dtypes.float32), b.bitcast(dtypes.float32)
-          if inst.name == 'add.f': out = (lhs + rhs).bitcast(dtypes.uint32)
-          elif inst.name == 'mul.f': out = (lhs * rhs).bitcast(dtypes.uint32)
-          else:
-            comparisons = (lhs < rhs, lhs <= rhs, lhs > rhs, lhs >= rhs, lhs == rhs, lhs != rhs)
-            if not 0 <= inst.condition < len(comparisons) or not isinstance(comparison := comparisons[inst.condition], UOp):
-              raise UnsupportedIR3Block('invalid IR3 floating comparison condition')
-            out = comparison.cast(dtypes.uint32)
-        elif inst.name in {'cmps.u', 'cmps.s'}:
-          lhs, rhs = (_mask(a, source_bits), _mask(b, source_bits)) if inst.name == 'cmps.u' else \
-                     (_sign_extend(a, source_bits).cast(dtypes.int32), _sign_extend(b, source_bits).cast(dtypes.int32))
-          comparisons = (lhs < rhs, lhs <= rhs, lhs > rhs, lhs >= rhs, lhs == rhs, lhs != rhs)
-          if not 0 <= inst.condition < len(comparisons) or not isinstance(comparison := comparisons[inst.condition], UOp):
-            raise UnsupportedIR3Block('invalid IR3 comparison condition')
-          out = comparison.cast(dtypes.uint32)
-        else: raise UnsupportedIR3Block(f'unsupported IR3 opcode {inst.name}')
-        self.write(_reg_offset(inst.dst, component), out)
+        self.lower_one(inst, component)
 
-  def compile(self, end_pc: int) -> IR3UOpBlock:
+  def lower_one(self, inst: IR3Instruction, component: int):
+    name, dst = inst.name, _reg_offset(inst.dst, component)
+    if name == 'mov':
+      if len(inst.srcs) != 1: raise UnsupportedIR3Block('invalid mov source count')
+      src, = self.sources(inst, component)
+      self.write(dst, self.convert(self.read(src), *inst.types))
+    elif name in {'mad.f16', 'mad.f32'}:
+      half = name == 'mad.f16'
+      a, b, c = (self.float_source(inst, index, component, half) for index in range(3))
+      self.write(dst, self.pack_float(a * b + c, half))
+    elif name in _MAD_INT:
+      a, b, c = (self.read(src) for src in self.sources(inst, component))
+      signed, bits = name in {'mad.s16', 'mad.s24'}, 16 if name.endswith('16') else 24
+      if signed:
+        product = self.int_operand(a, True, bits).cast(dtypes.int32) * self.int_operand(b, True, bits).cast(dtypes.int32)
+        out = product + c.cast(dtypes.int32)
+      else: out = self.int_operand(a, False, bits) * self.int_operand(b, False, bits) + c
+      self.write(dst, out)
+    elif name == 'madsh.m16':
+      if len(inst.srcs) != 3 or inst.dst[0].startswith('h'): raise UnsupportedIR3Block('unsupported madsh.m16 form')
+      a, b, c = (self.read(src) for src in self.sources(inst, component))
+      # Encoded IR3 source order is low(src0) * high(src1), inserted at bit 16.
+      self.write(dst, ((_mask(a, 16) * _mask(b >> 16, 16)) << 16) + c)
+    elif name.startswith('sad.'):
+      a, b, c = (self.read(src) for src in self.sources(inst, component))
+      difference = a.cast(dtypes.int32) - b.cast(dtypes.int32)
+      absolute = (difference < _const(0, dtypes.int32)).where(difference * _const(-1, dtypes.int32), difference)
+      self.write(dst, c.cast(dtypes.int32) + absolute)
+    elif name.startswith('sel.'):
+      a, b, c = (self.read(src) for src in self.sources(inst, component))
+      self.write(dst, b.ne(_const(0, dtypes.uint32)).where(a, c))
+    elif name in {'shrm', 'shlm', 'shlg', 'andg'}:
+      a, b, c = (self.read(src) for src in self.sources(inst, component))
+      shift = a & _const(31, dtypes.uint32)
+      out = _mask(b, 32) >> shift & c if name == 'shrm' else b << shift & c if name == 'shlm' else \
+        (b << shift) | c if name == 'shlg' else (b & a) | c
+      self.write(dst, out)
+    elif name == 'shrg':
+      if len(inst.srcs) != 3: raise UnsupportedIR3Block('invalid shrg source count')
+      shift, value, other = (self.read(src) for src in self.sources(inst, component))
+      self.write(dst, (_mask(value, 16 if inst.source_half else 32) >> (shift & _const(31, dtypes.uint32))) | other)
+    elif name == 'not.b':
+      if len(inst.srcs) != 1: raise UnsupportedIR3Block('invalid not.b source count')
+      self.write(dst, self.int_source(inst, 0, component) ^ _const(_UINT32_MASK, dtypes.uint32))
+    elif name in {'absneg.s', 'absneg.f', 'sign.f', 'floor.f', 'ceil.f', 'rndaz.f', 'rcp', 'rsq', 'log2', 'exp2', 'sqrt',
+                  'hrsq', 'hlog2', 'hexp2'}:
+      self.lower_unary(inst, component, dst)
+    elif name in {'add.f', 'mul.f', 'min.f', 'max.f', 'cmps.f', 'cmpv.f'}:
+      self.lower_binary_float(inst, component, dst)
+    else:
+      self.lower_binary_int(inst, component, dst)
+
+  def lower_unary(self, inst: IR3Instruction, component: int, dst: Register):
+    name = inst.name
+    if name == 'absneg.s':
+      if len(inst.srcs) != 1: raise UnsupportedIR3Block('invalid absneg.s source count')
+      modifier = inst.src_mods[0] if inst.src_mods else 0
+      value = _sign_extend(self.read(self.sources(inst, component)[0]), 16 if inst.source_half else 32).cast(dtypes.int32)
+      absolute = (value < _const(0, dtypes.int32)).where(value * _const(-1, dtypes.int32), value)
+      self.write(dst, value * _const(-1, dtypes.int32) if modifier == 1 else absolute if modifier == 2 else
+                 absolute * _const(-1, dtypes.int32) if modifier == 3 else value)
+      return
+    if len(inst.srcs) != 1: raise UnsupportedIR3Block(f'invalid {name} source count')
+    value = self.float_source(inst, 0, component, inst.source_half)
+    zero, one = _const(0.0, dtypes.float64), _const(1.0, dtypes.float64)
+    if name == 'absneg.f': out = value
+    elif name == 'sign.f': out = (value < zero).where(_const(-1.0, dtypes.float64), (value > zero).where(one, value))
+    elif name == 'floor.f': out = (value - value == zero).where(value.floor(), value)
+    elif name == 'ceil.f': out = (value - value == zero).where(value.ceil(), value)
+    elif name == 'rndaz.f':
+      # round-toward-zero of the magnitude with the sign restored: copysign(ceil(|x|), x).
+      magnitude = (value.bitcast(dtypes.uint64) & _const((1 << 63) - 1, dtypes.uint64)).bitcast(dtypes.float64)
+      out = (value - value == zero).where(
+        (magnitude.ceil().bitcast(dtypes.uint64) | (value.bitcast(dtypes.uint64) & _const(1 << 63, dtypes.uint64)))
+        .bitcast(dtypes.float64), value)
+    elif name == 'rcp': out = one / value
+    elif name in {'rsq', 'hrsq'}: out = one / value.sqrt()
+    elif name in {'log2', 'hlog2'}: out = value.log2()
+    elif name in {'exp2', 'hexp2'}: out = _const(2.0, dtypes.float64) ** value  # Python computes 2.0 ** x via libm pow
+    else: out = value.sqrt()
+    self.write(dst, self.pack_float(out, dst[0].startswith('h')))
+
+  def lower_binary_float(self, inst: IR3Instruction, component: int, dst: Register):
+    if len(inst.srcs) != 2: raise UnsupportedIR3Block(f'invalid {inst.name} source count')
+    lhs, rhs = (self.float_source(inst, index, component, inst.source_half) for index in range(2))
+    if inst.name in {'cmps.f', 'cmpv.f'}:
+      self.write(dst, _comparison(lhs, rhs, inst.condition))
+      return
+    if inst.name == 'add.f': out = lhs + rhs
+    elif inst.name == 'mul.f': out = lhs * rhs
+    else:
+      # The interpreter propagates the non-NaN operand when either side is NaN, then takes min/max.
+      picked = (lhs <= rhs).where(lhs, rhs) if inst.name == 'min.f' else (lhs >= rhs).where(lhs, rhs)
+      out = lhs.ne(lhs).where(rhs, rhs.ne(rhs).where(lhs, picked))
+    self.write(dst, self.pack_float(out, dst[0].startswith('h')))
+
+  def lower_binary_int(self, inst: IR3Instruction, component: int, dst: Register):
+    name = inst.name
+    if len(inst.srcs) != 2: raise UnsupportedIR3Block(f'invalid {name} source count')
+    source_bits = 16 if inst.source_half else 32
+    if name in {'cmps.u', 'cmps.s'}:  # dedicated interpreter branch reads raw operands, ignoring modifiers
+      raw_a, raw_b = (self.read(src) for src in self.sources(inst, component))
+      pair = (_mask(raw_a, source_bits), _mask(raw_b, source_bits)) if name == 'cmps.u' else \
+        (self.int_operand(raw_a, True, source_bits), self.int_operand(raw_b, True, source_bits))
+      self.write(dst, _comparison(*pair, inst.condition))
+      return
+    a, b = (self.int_source(inst, index, component) for index in range(2))
+    if name in ('add.u', 'add.s', 'sub.u', 'sub.s'): out = a + b if name.startswith('add') else a - b
+    elif name == 'cmpv.u': self.write(dst, _comparison(_mask(a, 32), _mask(b, 32), inst.condition)); return
+    elif name == 'cmpv.s':
+      self.write(dst, _comparison(self.int_operand(a, True, source_bits), self.int_operand(b, True, source_bits), inst.condition)); return
+    elif name == 'min.u': out = (_mask(a, 32) <= _mask(b, 32)).where(a, b)
+    elif name == 'max.u': out = (_mask(a, 32) >= _mask(b, 32)).where(a, b)
+    elif name == 'min.s': out = self.int_minmax(a, b, source_bits, True)
+    elif name == 'max.s': out = self.int_minmax(a, b, source_bits, False)
+    elif name == 'and.b': out = a & b
+    elif name == 'or.b': out = a | b
+    elif name == 'xor.b': out = a ^ b
+    elif name == 'mul.u24':
+      bits = 16 if inst.source_half else 24
+      out = _mask(a, bits) * _mask(b, bits)
+    elif name == 'mul.s24':
+      bits = 16 if inst.source_half else 24
+      out = self.int_operand(a, True, bits).cast(dtypes.int32) * self.int_operand(b, True, bits).cast(dtypes.int32)
+    elif name == 'mull.u': out = _mask(a, 16) * _mask(b, 16)
+    elif name == 'shl.b': out = a << (b & _const(31, dtypes.uint32))
+    elif name == 'shr.b': out = _mask(a, 32) >> (b & _const(31, dtypes.uint32))
+    elif name == 'ashr.b': out = self.int_operand(a, True, source_bits) >> (b & _const(31, dtypes.uint32))
+    elif name == 'getbit.b': out = (a >> (b & _const(31, dtypes.uint32))) & _const(1, dtypes.uint32)
+    else: raise UnsupportedIR3Block(f'unsupported IR3 opcode {name}')
+    self.write(dst, out)
+
+  def int_minmax(self, a: UOp, b: UOp, bits: int, is_min: bool) -> UOp:
+    sa, sb = self.int_operand(a, True, bits), self.int_operand(b, True, bits)
+    return (sa <= sb).where(a, b) if is_min else (sa >= sb).where(a, b)
+
+  def compile(self) -> IR3UOpBlock:
     self.lower()
     stores = tuple(self.regfile.index(self.index + self.slot[reg] * self.lanes).store(self.values[reg]) for reg in sorted(self.dirty))
     sink = UOp.group(*stores).end(self.index).sink(arg=KernelInfo('ir3_cpu_block', opts_to_apply=()))
     program = to_program(sink, Device['CPU'].renderer)
     runtime = get_runtime('CPU', program)
-    regfile = Buffer('CPU', len(self.keys) * self.lanes, dtypes.uint32).allocate()
-    return IR3UOpBlock(end_pc, self.lanes, self.keys,
+    regfile = Buffer('CPU', (self.mask_slot + 1) * self.lanes, dtypes.uint32).allocate()
+    return IR3UOpBlock(len(self.instructions), self.lanes, self.keys,
                        tuple((reg, self.slot[reg]) for reg in sorted(self.dirty)), runtime, regfile)
 
 
@@ -234,15 +367,17 @@ class IR3UOpRunner:
   def __init__(self, min_instructions: int = 8):
     self.min_instructions = min_instructions
     self.cache: dict[tuple[int, int, int, int], IR3UOpBlock] = {}
+    self.uncompilable: set[tuple[int, int, int, int]] = set()
     self.program_blocks: dict[int, tuple[tuple[IR3Instruction, ...], dict[int, int]]] = {}
+    # Structurally identical blocks (same register layout, lanes, and instruction forms) share one
+    # compiled program, so equivalent sequences in different shaders never recompile.
+    self.compiled: dict[tuple, IR3UOpBlock] = {}
 
   @staticmethod
   def _supported(inst: IR3Instruction) -> bool:
     if inst.name == 'nop': return True
-    if inst.name not in _SUPPORTED or not _register(inst.dst) or (any(inst.src_mods) and inst.name != 'absneg.s') or inst.sat: return False
-    if any(isinstance(src, tuple) and src[0] in {'rel', 'relr', 'relhr'} for src in inst.srcs): return False
-    if inst.name in {'add.f', 'mul.f', 'cmps.f', 'rcp'} and inst.source_half: return False
-    return not (inst.name in {'madsh.m16', 'add.f', 'mul.f', 'rcp'} and inst.dst[0].startswith('h'))
+    if inst.name not in _NATIVE or not _register(inst.dst) or inst.sat: return False
+    return not any(isinstance(src, tuple) and src[0] in {'rel', 'relr', 'relhr'} for src in inst.srcs)
 
   def _blocks(self, program: tuple[IR3Instruction, ...]) -> dict[int, int]:
     # decode_ir3 caches and reuses each exact program tuple.  Key by identity
@@ -265,16 +400,30 @@ class IR3UOpRunner:
     return blocks
 
   def try_run(self, program: tuple[IR3Instruction, ...], start_pc: int, regs: dict[Register, list[int]],
-              exec_mask: list[bool], predication: list[bool] | None = None) -> int | None:
+              exec_mask: list[bool], predication: list[bool] | None = None,
+              mask_pcs: frozenset[int] | None = None) -> int | None:
     """Return the next PC when accelerated, or ``None`` for exact interpreter fallback."""
-    if predication is not None or not regs: return None
+    if not regs: return None
     if (end_pc := self._blocks(program).get(start_pc)) is None: return None
+    # A pending branch reconvergence inside the range would change the write mask mid-block;
+    # leave those ranges to the interpreter, which re-enters native execution after the merge.
+    if mask_pcs is not None and any(start_pc < target < end_pc for target in mask_pcs): return None
     lanes = len(next(iter(regs.values())))
-    if len(exec_mask) != lanes or not all(exec_mask) or any(len(values) != lanes for values in regs.values()): return None
+    if len(exec_mask) != lanes: return None
+    mask = exec_mask if predication is None else [active and pred for active, pred in zip(exec_mask, predication, strict=True)]
     key = (id(program), start_pc, end_pc, lanes)
     try:
-      if (block := self.cache.get(key)) is None:
-        block = self.cache[key] = _Lowerer(program[start_pc:end_pc], lanes).compile(end_pc)
-      return block.run(regs)
+      if (block := self.cache.get(key)) is None and key not in self.uncompilable:
+        lowerer = _Lowerer(program[start_pc:end_pc], lanes)
+        signature = (lanes, lowerer.keys, tuple((inst.name, inst.dst, inst.srcs, inst.repeat, inst.repeat_srcs,
+                                                inst.src_mods, inst.condition, inst.types, inst.sat, inst.rounding,
+                                                inst.source_half) for inst in lowerer.instructions))
+        block = self.compiled.get(signature)
+        if block is None: block = self.compiled[signature] = lowerer.compile()
+        self.cache[key] = block
+      if block is None: return None
+      block.run(regs, mask)
+      return start_pc + block.length
     except UnsupportedIR3Block:
+      self.uncompilable.add(key)
       return None

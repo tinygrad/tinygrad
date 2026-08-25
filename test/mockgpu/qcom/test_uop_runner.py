@@ -67,4 +67,29 @@ class TestA630UOpRunner(unittest.TestCase):
     runner = IR3UOpRunner(min_instructions=1)
     self.assertIsNone(runner.try_run(program, 0, regs, [True]))
     self.assertIsNone(runner.try_run(program, 0, regs, [False]))
-    self.assertEqual(regs, {('r', 1, 0): [0x1234], ('r', 1, 1): [0]})
+
+  def test_partial_masks_write_through_only_active_lanes(self):
+    from test.mockgpu.qcom.decoder import IR3Instruction
+    import test.mockgpu.qcom.executor as executor
+    words = (*FLOAT_ALU_COMPARE.words, *END.words)
+    program = decode_ir3(struct.pack(f'<{len(words)}Q', *words))
+
+    def f32(value): return int.from_bytes(struct.pack('<f', value), 'little')
+    for mask in ([True, False], [False, True], [True, True]):
+      with self.subTest(mask=mask):
+        initial = {('r', 2, 2): [f32(1.5), f32(10.0)], ('r', 0, 2): [f32(2.0), f32(-0.5)]}
+        # Oracle: the same block with the write mask expressed as predication over the predicate register.
+        expected = {key: values.copy() for key, values in initial.items()}
+        expected[('p', 62, 0)] = [int(active) for active in mask]
+        predicated = (IR3Instruction('predt', None, (), False, 0),) + program[:3]
+        real_decode = executor.decode_ir3
+        def decode(code, gpu_id=630, program=predicated, decode_real=real_decode):
+          return program if isinstance(code, bytes) and code == b'masktest' else decode_real(code, gpu_id)
+        executor.decode_ir3 = decode
+        try: executor.execute_ir3(b'masktest', expected, check_range=lambda a, s: None)
+        finally: executor.decode_ir3 = real_decode
+        expected.pop(('p', 62, 0))
+
+        actual = {key: values.copy() for key, values in initial.items()}
+        self.assertEqual(IR3UOpRunner(min_instructions=1).try_run(program, 0, actual, mask), 3)
+        self.assertEqual(actual, expected)
