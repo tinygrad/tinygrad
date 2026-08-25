@@ -102,8 +102,7 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
         ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
@@ -149,8 +148,7 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
         ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
@@ -198,8 +196,7 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
         ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
@@ -241,8 +238,7 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
         ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
@@ -287,8 +283,7 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
         ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
@@ -340,8 +335,7 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
         ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
@@ -588,8 +582,7 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} rmmod
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} rmmod --expect
         ./extra/hcq/hcq_smi.py ${{ matrix.dev }} kill_pids
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet

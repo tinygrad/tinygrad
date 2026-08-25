@@ -19,6 +19,9 @@ def cmd_remove_module(args):
   modules = ["nvidia_drm", "nvidia_modeset", "nvidia_uvm", "nvidia", "ast"] if args.backend == "nv" else ["amdgpu"]
   to_unload = [m for m in modules if _is_module_loaded(m)]
   if not to_unload: print("Kernel modules are not loaded")
+  elif getattr(args, "expect", False):
+    print(f"Kernel modules are loaded: {to_unload}")
+    sys.exit(1)
   else:
     print("Removing kernel modules:", ", ".join(to_unload))
     try: subprocess.run(["sudo", "modprobe", "-r", *to_unload], check=True)
@@ -79,6 +82,7 @@ def add_common_commands(parent_subparsers):
   p_insmod.set_defaults(func=cmd_insert_module)
 
   p_rmmod = parent_subparsers.add_parser("rmmod", help="Remove a kernel module")
+  p_rmmod.add_argument("--expect", action="store_true", help="Just assert that module is already unloaded")
   p_rmmod.set_defaults(func=cmd_remove_module)
 
   p_reset = parent_subparsers.add_parser("reset", help="Reset a device")
