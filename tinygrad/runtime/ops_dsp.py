@@ -9,18 +9,10 @@ from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
 
-from tinygrad.uop.ops import PatternMatcher, UPat
-
-# NOTE: this just increases readability of the generated code
-dsp_string = PatternMatcher([
-  (UPat(Ops.CONST, (dtypes.int8, dtypes.uint8), name="x"), lambda ctx,x: str(x.val)),
-])
-
 class DSPRenderer(ClangRenderer):
   has_threads = False
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
-  string_rewrite = dsp_string+ClangRenderer.string_rewrite
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
 
@@ -105,7 +97,7 @@ class DSPAllocator(Allocator['DSPDevice']):
 
 class DSPCompiler(Compiler):
   def __init__(self, mock:bool=False):
-    compiler_args = "--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b"
+    self.mock, compiler_args = mock, "--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b"
     if mock: self.args = f"-static {compiler_args}"
     else:
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
@@ -119,6 +111,9 @@ class DSPCompiler(Compiler):
       self.args = f"-shared {compiler_args} -T{self.link_ld.name}"
 
     super().__init__(None if mock else "compile_dsp")
+
+  def __del__(self):
+    if not self.mock: os.unlink(self.link_ld.name)
 
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here

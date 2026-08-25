@@ -62,8 +62,8 @@ def make_patches(buf:UOp, patches:Sequence[tuple[sint, UOp]]) -> tuple[UOp, ...]
   ret, bit = [], buf.dtype.itemsize
   for (tag, dt, r), ps in groups.items():
     view = buf.shrink(((r // bit, (max(off for off,_ in ps) + dt.itemsize) // bit),)).bitcast(dt)
-    offs = UOp(Ops.STACK, dtypes.int, tuple(UOp.const((off - r) // dt.itemsize, dtypes.int) for off,_ in ps))
-    ret.append(view.index(offs).store(UOp(Ops.STACK, dt, tuple(val for _,val in ps))).rtag(tag))
+    offs = UOp(Ops.STACK, src=tuple(UOp.const((off - r) // dt.itemsize, dtypes.int) for off,_ in ps))
+    ret.append(view.index(offs).store(UOp(Ops.STACK, src=tuple(val for _,val in ps))).rtag(tag))
   return tuple(ret)
 
 def make_binary_patch(buf:UOp, blob:bytes) -> UOp: return buf.store(UOp(Ops.BINARY, src=(), arg=blob).bitcast(buf.dtype)).rtag("link")
@@ -71,8 +71,8 @@ def make_binary_patch(buf:UOp, blob:bytes) -> UOp: return buf.store(UOp(Ops.BINA
 def make_cmdbuf(lin, devs, buf:UOp|None=None, dep:tuple[UOp, ...]=()):
   blob, patches = bytearray(), []
   for s in (s for ins in lin.src for s in ins.src):
-    if s.op is not Ops.CONST: patches.append((len(blob), s))
-    blob.extend(struct.pack(f'<{s.dtype.fmt}', s.val if s.op is Ops.CONST else 0x0))
+    if not (is_const:=(s.op is Ops.CAST and s.src[0].op is Ops.CONST)): patches.append((len(blob), s))
+    blob.extend(struct.pack(f'<{s.dtype.fmt}', s.val if is_const else 0x0))
   cmdbuf = buf if buf is not None else UOp.placeholder((len(blob) // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("cmdbuf")
   return cmdbuf.after(*dep, make_binary_patch(cmdbuf, bytes(blob)), *make_patches(cmdbuf, patches))
 
@@ -344,7 +344,9 @@ def make_gather_loop(patches:list[UOp], table:UOp, slots:dict[UOp, int], lt_patc
   lt_patches.append(make_binary_patch(pairs, struct.pack(f'<{2*len(words)}I', *itertools.chain(*words))))
   r = UOp.range(len(words), next(UOp.unique_num), dtype=dtypes.int, src=(pairs, dst))
   off, slot = ((pairs.index(2*r+i).load() % bound).cast(dtypes.int) for i, bound in ((0, dst.max_numel()-1), (1, table.max_numel())))
-  patch = dst.shrink(((off, off+table.dtype.itemsize//dst.dtype.itemsize),)).bitcast(table.dtype).index(0).store(table.index(slot).load()).end(r)
+  # SHRINK(offset, length): a const length keeps the end bound from becoming an expression the program spec rejects
+  patch = UOp(Ops.SHRINK, src=(dst, off, off.const_like(table.dtype.itemsize//dst.dtype.itemsize))).bitcast(table.dtype).index(0) \
+    .store(table.index(slot).load()).end(r)
   return {p: UOp(Ops.NOOP) for p in patches} | {patches[0]: patch}
 
 def is_input_addr(g:UOp) -> bool: return all(x.op is Ops.PARAM and x.tag is None for x in unwrap_mstack(g.buf_uop))
@@ -511,7 +513,7 @@ def fold_const_store(view:UOp, off:UOp, val:UOp) -> UOp:
   buf, start = unwrap_view(view)
   for off,val in zip(off.src, val.src):
     for b,v in zip((bs:=mb.bufs if isinstance((mb:=buf.buffer), MultiBuffer) else (mb,)), val.src if val.op is Ops.STACK else (val,)*len(bs)):
-      data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype]((v.src[0] if v.op is Ops.CAST else v).val))
+      data = struct.pack(f'<{v.dtype.fmt}', truncate[v.dtype](v.val))
       bo = start*buf.dtype.itemsize + off.val*val.dtype.itemsize
       b.ensure_allocated()._buf.cpu_view().view(fmt='B')[bo:bo+len(data)] = data
   return UOp(Ops.NOOP)
