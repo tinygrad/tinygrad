@@ -26,7 +26,9 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   return (), ()
 
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp]]:
-  if (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return [(d, k) for devs, k, _ in call.arg.aux.kernels for d in devs]
+  if (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq":
+    return [(d, call.replace(arg=replace(call.arg, name=name, aux=replace(call.arg.aux, estimates=estimates, kernels=()))))
+            for devices,name,estimates,_ in call.arg.aux.kernels for d in devices]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call)]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "validate": return []
   return [(d, call) for d in to_tuple(call.src[1].device)]
@@ -220,13 +222,13 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*tables)})
   exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer()._buf.va_addr + base}), call, ast)
 
-  def _prof_tm(device:str, stat_call:UOp, prof:tuple[int, ...]) -> float|None:
-    (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, *prof)
+  def _prof_tm(device:str, name:str, prof:tuple[int, ...]) -> float|None:
+    (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, name, *prof)
     if not ctx.wait: return None
     d.synchronize(timeout=ctx.timeout)
     st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
     return float(en-st)/d.timestamp_divider/1e6
-  return [_prof_tm(device, k, prof) for devices, k, prof in info.kernels if prof for device in devices] if PROFILE or ctx.wait else []
+  return [_prof_tm(device, name, prof) for devices,name,_,prof in info.kernels if prof for device in devices] if PROFILE or ctx.wait else []
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
