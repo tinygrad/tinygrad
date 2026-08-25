@@ -85,13 +85,13 @@ SGPRS = tuple(Register(f"s{i}", i, size=4) for i in range(106))
 # reserve VGPRs ahead of time to be excluded from normal allocation to
 # prevent retroactive lifetime semantics and eviction cloberring when
 # spilling SGPRS to lanes. 8 vgprs x wave 32 = 256 SGPRs
-SCRATCH_BASE, SPILL_VGPRS = VGPRS[1], VGPRS[-8:]
+SPILL_VGPRS = VGPRS[-8:]
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
-GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[2:-8])
+GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:-8])
 VCC, EXEC = Register("vcc", 0, size=4), Register("exec_lo", 0, size=4)
 
 execop, vccop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, VCC)
-kernarg_ptr, scratch_base = def_reg(dtypes.uint64, KERNARG_PTR), def_reg(dtypes.uint32, SCRATCH_BASE)
+kernarg_ptr = def_reg(dtypes.uint64, KERNARG_PTR)
 
 # ---- register movement helpers ----
 def packb16(lo:UOp, hi:UOp):
@@ -477,8 +477,8 @@ def encode(x:UOp):
 
   match (group := x.arg.func):
     case RDNA3Ops.SCRATCH:
-      fields = dict(addr=encfield(x.src[0]), offset=encfield(x.src[1]), sve=1)
-      if rdef(x) is None: fields["data"] = encfield(x.src[2])
+      fields = dict(offset=encfield(x.src[0]), sve=0)
+      if rdef(x) is None: fields["data"] = encfield(x.src[1])
       else: fields["vdst"] = encfield(x)
     case RDNA3Ops.GLOBAL:
       fields = dict(addr=encfield(x.src[0]))
@@ -557,10 +557,10 @@ class RDNA3Renderer(ISARenderer):
     regs = rdefs(x)
     if regs[0].name[0] == 'v':
       if sub_idx is not None:
-        return [UOp(Ops.INS, arg=RDNA3Ops.scratch_store_b32, src=(scratch_base, const(spill_offset+sub_idx*4), def_reg(x.dtype, regs[0])))]
+        return [UOp(Ops.INS, arg=RDNA3Ops.scratch_store_b32, src=(const(spill_offset+sub_idx*4), def_reg(x.dtype, regs[0])))]
       batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
       return [UOp(Ops.INS, arg=getattr(RDNA3Ops, f"scratch_store_b{len(b)*32}"), \
-        src=(scratch_base, const(spill_offset+j*16), def_reg(x.dtype, b))) for j,b in enumerate(batches)]
+        src=(const(spill_offset+j*16), def_reg(x.dtype, b))) for j,b in enumerate(batches)]
     else:
       vgpr,lane = spill_offset
       return [UOp(Ops.INS, arg=RDNA3Ops.v_writelane_b32, src=(def_reg(x.dtype, r),
@@ -569,11 +569,11 @@ class RDNA3Renderer(ISARenderer):
   def fill(self, spill_offset:any, sub_idx:int|None, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
     if regs[0].name[0] == 'v':
       if sub_idx is not None:
-        ld = UOp(Ops.INS, x.dtype, arg=RDNA3Ops.scratch_load_b32, src=(scratch_base, const(spill_offset+sub_idx*4)), tag=(regs[0],))
+        ld = UOp(Ops.INS, x.dtype, arg=RDNA3Ops.scratch_load_b32, src=(const(spill_offset+sub_idx*4)), tag=(regs[0],))
         return ld, [ld]
       batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
       ops = [UOp(Ops.INS, x.dtype, arg=getattr(RDNA3Ops, f"scratch_load_b{len(b)*32}"), \
-        src=(scratch_base, const(spill_offset+j*16),), tag=b) for j,b in enumerate(batches)]
+        src=(const(spill_offset+j*16),), tag=b) for j,b in enumerate(batches)]
       return UOp.group(*ops, tag=regs), ops
     else:
       vgpr,lane = spill_offset
