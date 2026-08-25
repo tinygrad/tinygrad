@@ -178,7 +178,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   input_src = copy.src[0]
-  if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
+  # if it's a COPY, we need to give the input buffer identity
+  if not input_src.has_buffer_identity(after_ok=True) and copy.op is Ops.COPY: input_src = input_src.contiguous()
   input_src = input_src.flatten()
   if existing_buf is not None:
     # if the existing buffer is not a full buffer, we can't use it
@@ -188,11 +189,11 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   # create the output buffer
   buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), copy.dtype, device=copy.device))
   # reshape back to input
-  return buf.after(buf.store(input_src)).reshape(copy.shape)
+  return buf.after(buf.store(input_src)).reshape(copy.max_shape).shrink_to(copy.shape)
 
 pm_copy_to_store = PatternMatcher([
   (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),
-  (UPat(Ops.COPY, name="copy"), convert_copy_to_store),
+  (UPat((Ops.COPY, Ops.CONTIGUOUS), name="copy"), convert_copy_to_store),
 ])
 
 @rewrite_group(new_ctx=False)
