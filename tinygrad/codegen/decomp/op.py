@@ -43,7 +43,6 @@ def fast_idiv(ren: Renderer, x: UOp, d: int, dont_cast=False) -> UOp|None:
       return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
   return None
 
-# TODO: enable native mul_hi use
 def _mulhi32(a:UOp, b:UOp): return ((a.cast(dtypes.uint64) * b.cast(dtypes.uint64)) >> 32).cast(dtypes.uint32)
 
 def xidiv32(x:UOp, a:UOp, b:UOp) -> UOp:
