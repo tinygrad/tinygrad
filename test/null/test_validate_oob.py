@@ -1,9 +1,11 @@
 import unittest
-from tinygrad import dtypes, Variable
+from tinygrad import dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, UOp, AxisType
 from test.helpers import to_uops_list
+
+def Variable(name, nmin, nmax): return UOp.variable(name, nmin, nmax, param=True)
 
 class TestValidateOOB(unittest.TestCase):
   """Test z3 validation of index bounds for different ALU ops and patterns."""
@@ -12,37 +14,37 @@ class TestValidateOOB(unittest.TestCase):
   def test_const_index(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
-      to_uops_list([buf.index(UOp.const(0)).load(dtype=dtypes.int)])  # valid
-      to_uops_list([buf.index(UOp.const(15)).load(dtype=dtypes.int)])  # valid (last element)
+      to_uops_list([buf.index(UOp.const(0)).load()])  # valid
+      to_uops_list([buf.index(UOp.const(15)).load()])  # valid (last element)
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(UOp.const(16)).load(dtype=dtypes.int)])  # off by one
+        to_uops_list([buf.index(UOp.const(16)).load()])  # off by one
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(UOp.const(42)).load(dtype=dtypes.int)])  # way out
+        to_uops_list([buf.index(UOp.const(42)).load()])  # way out
 
   def test_variable_index(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
-      to_uops_list([buf.index(Variable("i", 0, 15)).load(dtype=dtypes.int)])  # valid
+      to_uops_list([buf.index(Variable("i", 0, 15)).load()])  # valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(Variable("i", 0, 20)).load(dtype=dtypes.int)])  # oob
+        to_uops_list([buf.index(Variable("i", 0, 20)).load()])  # oob
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(Variable("i", -5, 10)).load(dtype=dtypes.int)])  # negative
+        to_uops_list([buf.index(Variable("i", -5, 10)).load()])  # negative
 
   def test_range_with_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
       r = UOp.range(42, 0, AxisType.GLOBAL)
-      to_uops_list([buf.index(r.valid(r < 16)).load(dtype=dtypes.int)])  # valid
+      to_uops_list([buf.index(r.valid(r < 16)).load()])  # valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(r.valid(r < 17)).load(dtype=dtypes.int)])  # oob
+        to_uops_list([buf.index(r.valid(r < 17)).load()])  # oob
 
   def test_variable_with_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
       v = Variable("v", -5, 80)
-      to_uops_list([buf.index(v.valid((v >= 0) & (v < 16))).load(dtype=dtypes.int)])  # valid
+      to_uops_list([buf.index(v.valid((v >= 0) & (v < 16))).load()])  # valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(v.valid(v < 20)).load(dtype=dtypes.int)])  # negative not masked
+        to_uops_list([buf.index(v.valid(v < 20)).load()])  # negative not masked
 
   def test_gated_store(self):
     with Context(CHECK_OOB=1, SPEC=2):
@@ -56,62 +58,62 @@ class TestValidateOOB(unittest.TestCase):
   def test_floordiv(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
-      to_uops_list([buf.index(UOp.range(32, 0, AxisType.GLOBAL) // 2).load(dtype=dtypes.int)])  # 0..15 valid
+      to_uops_list([buf.index(UOp.range(32, 0, AxisType.GLOBAL) // 2).load()])  # 0..15 valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(UOp.range(34, 0, AxisType.GLOBAL) // 2).load(dtype=dtypes.int)])  # 0..16 oob
+        to_uops_list([buf.index(UOp.range(34, 0, AxisType.GLOBAL) // 2).load()])  # 0..16 oob
 
   def test_mod(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
       r = UOp.range(100, 0, AxisType.GLOBAL)
-      to_uops_list([buf.index(r % 16).load(dtype=dtypes.int)])  # 0..15 valid
+      to_uops_list([buf.index(r % 16).load()])  # 0..15 valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(r % 20).load(dtype=dtypes.int)])  # 0..19 oob
+        to_uops_list([buf.index(r % 20).load()])  # 0..19 oob
 
   def test_shr(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
-      to_uops_list([buf.index(UOp.range(64, 0, AxisType.GLOBAL) >> 2).load(dtype=dtypes.int)])  # 0..15 valid
+      to_uops_list([buf.index(UOp.range(64, 0, AxisType.GLOBAL) >> 2).load()])  # 0..15 valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(UOp.range(128, 0, AxisType.GLOBAL) >> 2).load(dtype=dtypes.int)])  # 0..31 oob
+        to_uops_list([buf.index(UOp.range(128, 0, AxisType.GLOBAL) >> 2).load()])  # 0..31 oob
 
   def test_shl(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (64,))
       r = UOp.range(8, 0, AxisType.GLOBAL)
-      to_uops_list([buf.index(r << 2).load(dtype=dtypes.int)])  # 0..28 valid
+      to_uops_list([buf.index(r << 2).load()])  # 0..28 valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(r << 4).load(dtype=dtypes.int)])  # 0..112 oob
+        to_uops_list([buf.index(r << 4).load()])  # 0..112 oob
 
   def test_and(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
       r = UOp.range(100, 0, AxisType.GLOBAL)
-      to_uops_list([buf.index(r & 15).load(dtype=dtypes.int)])  # 0..15 valid
+      to_uops_list([buf.index(r & 15).load()])  # 0..15 valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(r & 31).load(dtype=dtypes.int)])  # 0..31 oob
+        to_uops_list([buf.index(r & 31).load()])  # 0..31 oob
       # align masks round down to a multiple of 2^k
-      to_uops_list([buf.index((r & -4).valid(r < 16)).load(dtype=dtypes.int)])  # 0..12 valid
+      to_uops_list([buf.index((r & -4).valid(r < 16)).load()])  # 0..12 valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(r & -2).load(dtype=dtypes.int)])  # 0..100 oob
+        to_uops_list([buf.index(r & -2).load()])  # 0..100 oob
       # other masks can't be modeled as mod
       with self.assertRaisesRegex(RuntimeError, "z3 int AND only supports"):
-        to_uops_list([buf.index(r & 21).load(dtype=dtypes.int)])
+        to_uops_list([buf.index(r & 21).load()])
 
   def test_max(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
-      to_uops_list([buf.index(Variable("v", -10, 15).maximum(0)).load(dtype=dtypes.int)])  # 0..15 valid
+      to_uops_list([buf.index(Variable("v", -10, 15).maximum(0)).load()])  # 0..15 valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(Variable("v2", -10, 20).maximum(0)).load(dtype=dtypes.int)])  # 0..20 oob
+        to_uops_list([buf.index(Variable("v2", -10, 20).maximum(0)).load()])  # 0..20 oob
 
   def test_xor_in_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (16,))
       r = UOp.range(32, 0, AxisType.GLOBAL)
-      to_uops_list([buf.index(r.valid((r < 8) ^ ((r >= 8) & (r < 16)))).load(dtype=dtypes.int)])  # 0..15 valid
+      to_uops_list([buf.index(r.valid((r < 8) ^ ((r >= 8) & (r < 16)))).load()])  # 0..15 valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(r.valid((r < 10) ^ (r >= 20))).load(dtype=dtypes.int)])  # 0..9,20..31 oob
+        to_uops_list([buf.index(r.valid((r < 10) ^ (r >= 20))).load()])  # 0..9,20..31 oob
 
   # cast patterns
   def test_float_cast_in_index(self):
@@ -119,13 +121,13 @@ class TestValidateOOB(unittest.TestCase):
       buf = UOp.param(0, dtypes.int, (16,))
       r = UOp.range(20, 0)
       i = (r.cast(dtypes.float) * 0.68).trunc().cast(dtypes.int)
-      to_uops_list([buf.index(i.valid((i >= 0) & (i < 16))).load(dtype=dtypes.int)])
+      to_uops_list([buf.index(i.valid((i >= 0) & (i < 16))).load()])
 
   def test_bool_cast_in_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, (1,))
       r = UOp.range(20, 0)
-      to_uops_list([buf.index(r.valid(r.cast(dtypes.bool).logical_not())).load(dtype=dtypes.int)])  # only r=0 valid
+      to_uops_list([buf.index(r.valid(r.cast(dtypes.bool).logical_not())).load()])  # only r=0 valid
 
   # load result as index/mask
   def test_load_as_index(self):
@@ -133,18 +135,18 @@ class TestValidateOOB(unittest.TestCase):
       buf0 = UOp.param(0, dtypes.int, (16,))
       buf1 = UOp.param(1, dtypes.int, (64,))
       r = UOp.range(42, 0, AxisType.GLOBAL)
-      ld0 = buf0.index(r.valid(r < 8)).load(dtype=dtypes.int).cast(dtypes.weakint)
-      to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 32))).load(dtype=dtypes.int)])  # valid
+      ld0 = buf0.index(r.valid(r < 8)).load().cast(dtypes.weakint)
+      to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 32))).load()])  # valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 64))).load(dtype=dtypes.int)])  # oob
+        to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 64))).load()])  # oob
 
   def test_load_from_shrink_as_index(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf0 = UOp.param(0, dtypes.int, (16,))
       buf1 = UOp.param(1, dtypes.int, (64,))
       shrink = UOp(Ops.SHRINK, src=(buf0, UOp.const(0, dtypes.int), UOp.const(4)))
-      ld0 = shrink.load(dtype=dtypes.int).index(0)
-      to_uops_list([buf1.index(ld0.valid((ld0 >= 0) & (ld0 < 64))).load(dtype=dtypes.int)])
+      ld0 = shrink.load().index(0)
+      to_uops_list([buf1.index(ld0.valid((ld0 >= 0) & (ld0 < 64))).load()])
 
   def test_load_bool_as_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):

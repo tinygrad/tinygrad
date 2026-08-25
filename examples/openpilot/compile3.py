@@ -107,14 +107,21 @@ def compile(onnx_file):
   return inputs, test_val
 
 def test_vs_compile(run, inputs, test_val=None):
+  if (log:=bool(getenv("BENCHMARK_LOG", ""))): from extra.bench_log import WallTimeEvent, BenchEvent
 
   # run 20 times
   step_times = []
   for _ in range(20):
     st = time.perf_counter()
-    out = run(**inputs)
-    mt = time.perf_counter()
-    val = out.numpy()
+    if log:
+      with WallTimeEvent(BenchEvent.STEP):
+        out = run(**inputs)
+        mt = time.perf_counter()
+        val = out.numpy()
+    else:
+      out = run(**inputs)
+      mt = time.perf_counter()
+      val = out.numpy()
     et = time.perf_counter()
     step_times.append((et-st)*1e3)
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {step_times[-1]:6.2f} ms")
@@ -160,12 +167,6 @@ def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
   print("test vs onnx passed")
   return timings
 
-def bench(run, inputs):
-  from extra.bench_log import WallTimeEvent, BenchEvent
-  for _ in range(10):
-    with WallTimeEvent(BenchEvent.STEP):
-      run(**inputs).numpy()
-
 if __name__ == "__main__":
   if getenv("RUN_PICKLE"):
     with open(OUTPUT, "rb") as f: pickle_loaded = load_pickle(f)
@@ -181,6 +182,3 @@ if __name__ == "__main__":
     test_vs_compile(pickle_loaded, inputs, outputs)
     if getenv("SELFTEST"):
       test_vs_onnx(inputs, outputs, onnx_file, 1e-4)
-
-  if getenv("BENCHMARK_LOG", ""):
-    bench(pickle_loaded, inputs)

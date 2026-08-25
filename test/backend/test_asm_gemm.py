@@ -1,4 +1,5 @@
 import unittest
+import functools
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
 from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm
@@ -9,6 +10,7 @@ from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 # Use DEV=NULL:HIP:gfx950 to also test the assembly
 def is_cdna4(): return Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950")
 
+@functools.cache
 def has_hipcc():
   try: system("hipcc --version")
   except Exception: return False

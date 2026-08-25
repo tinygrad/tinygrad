@@ -3,11 +3,12 @@ import tempfile, unittest, math
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
-from tinygrad.uop.ops import UOp, Ops, dtype_from_uop, graph_rewrite
-from tinygrad.uop.weak import pm_lower_index_dtype, pm_commit_weak
+from tinygrad.uop.ops import UOp, Ops, GroupOp, dtype_from_uop, graph_rewrite
+from tinygrad.uop.weak import pm_commit_weak
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.engine.jit import JitError
+from test.helpers import full_rewrite
 
 
 class TestWeakPromotion(unittest.TestCase):
@@ -73,13 +74,18 @@ class TestWeakPromotion(unittest.TestCase):
     recips = [u for u in (x / y)._uop.toposort() if u.op is Ops.RECIPROCAL]
     self.assertEqual([(u.dtype, u.src[0].dtype) for u in recips], [(dtypes.float32, dtypes.float32)])
     with Context(DEFAULT_FLOAT=dtypes.float16):
-      committed = graph_rewrite((UOp.const(1).cast(dtypes.int32) + UOp.const(1.0)).cast(dtypes.float32), pm_lower_index_dtype, ctx={})
+      committed = graph_rewrite((UOp.const(1).cast(dtypes.int32) + UOp.const(1.0)).cast(dtypes.float32), pm_commit_weak)
     self.assertEqual([u.dtype for u in committed.toposort() if u.op is Ops.ADD], [dtypes.float32])
+
+  def test_div_sub_operand_kept_weak(self):
+    a = Tensor.empty(4, dtype=dtypes.float32)
+    for t in (a / 1, a - 0):
+      self.assertEqual(t.uop.src[1].dtype, dtypes.weakfloat)
 
   def test_cast_weak_expression_commits_at_cast_floor(self):
     # the floor never narrows: a cast BELOW the default does not pull the compute width down with it
     with Context(DEFAULT_FLOAT=dtypes.float32):
-      narrowed = graph_rewrite((UOp.const(1.0) + UOp.const(2.0)).cast(dtypes.float16), pm_lower_index_dtype, ctx={})
+      narrowed = graph_rewrite((UOp.const(1.0) + UOp.const(2.0)).cast(dtypes.float16), pm_commit_weak)
     self.assertEqual((narrowed.dtype, narrowed.src[0].dtype), (dtypes.float16, dtypes.float32))
 
   def test_cast_weak_expression_value_uses_cast_floor(self):
@@ -87,6 +93,13 @@ class TestWeakPromotion(unittest.TestCase):
       denom = Tensor.ones(1, dtype=dtypes.int32, device="CPU").sum() * 70000 + 1e-5
       out = Tensor(1.0, dtype=dtypes.float32, device="CPU") / denom
       self.assertAlmostEqual(out.item(), 1 / (70000 + 1e-5), places=10)
+
+  def test_stacked_weak_casts_convert_each_kind(self):
+    # each weak cast is a kind conversion: weakint truncates before weakfloat re-lifts (neither is only a marker)
+    x = Tensor([2.5, -3.7], dtype=dtypes.float32, device="CPU")
+    stacked = x.cast(dtypes.weakint).cast(dtypes.weakfloat)
+    self.assertIs(stacked.dtype, dtypes.weakfloat)
+    self.assertEqual(stacked.tolist(), [2.0, -3.0])
 
   def test_uop_scalar_const_lifts_kind(self):
     for dtype, value, out_dtype, const_dtype in ((dtypes.weakint, 1, dtypes.weakint, dtypes.weakint),
@@ -101,27 +114,35 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertIsInstance((x + 2).src[1].val, float)
     self.assertIs(x + UOp.const(2), x + 2)
 
-  def test_index_dtype_ignores_weakness(self):
-    with Context(SPEC=2):
-      idx = UOp.const(0).cast(dtypes.int32)
-      weak = UOp.const(1.0).expand((1,))
-      self.assertEqual(UOp(Ops.INDEX, dtypes.float32, (weak, idx)).dtype, dtypes.float32)
-      with self.assertRaisesRegex(RuntimeError, "bad dtype"): UOp(Ops.INDEX, dtypes.int32, (weak, idx))
-
   def test_store_weak_value_uses_destination_dtype(self):
     with Context(DEFAULT_FLOAT=dtypes.float16):
       dst = UOp.param(0, dtypes.bfloat16, (1,)).index(UOp.const(0).cast(dtypes.int32))
       gate = UOp.const(True)
-      out = graph_rewrite(dst.store(UOp.const(5.0), gate), pm_lower_index_dtype, ctx={})
+      out = graph_rewrite(dst.store(UOp.const(5.0), gate), pm_commit_weak)
     # a bare weak CONST commits directly: the pass runs without symbolic, so a CAST here would survive it
     self.assertEqual((out.src[1], out.src[2]), (UOp.const(5.0, dtypes.bfloat16), gate))
 
   def test_weak_srcs_commit_only_at_a_concrete_lub(self):
     weak_lub = UOp(Ops.ADD, src=(UOp.const(1), UOp.const(1.0)))
-    self.assertIs(graph_rewrite(weak_lub, pm_lower_index_dtype, ctx={}), weak_lub)
+    self.assertIs(graph_rewrite(weak_lub, pm_commit_weak), weak_lub)
     concrete = UOp.const(2.0).cast(dtypes.float16)
-    where = graph_rewrite(UOp(Ops.WHERE, src=(UOp.const(True), concrete, UOp.const(1.0))), pm_lower_index_dtype, ctx={})
-    self.assertEqual(tuple(x.dtype for x in where.src), (dtypes.bool, dtypes.float16, dtypes.float16))
+    # the weak arm stays bare: its sibling states the width, so the WHERE already derives float16 for it
+    where = graph_rewrite(UOp(Ops.WHERE, src=(UOp.const(True), concrete, UOp.const(1.0))), pm_commit_weak)
+    self.assertEqual((where.dtype, tuple(x.dtype for x in where.src)), (dtypes.float16, (dtypes.bool, dtypes.float16, dtypes.weakfloat)))
+
+  def test_derivable_const_rounds_at_the_derived_width(self):
+    # re-rounds a derivable const in place (still bare) so value-keyed folds (x*1 -> x, x*-1 -> NEG) still fire
+    x = UOp.param(0, dtypes.float32, (1,)).index(UOp.const(0).cast(dtypes.int32)).load()
+    mul = graph_rewrite(x * UOp.const(-0.9999999893980771), symbolic_simple+pm_commit_weak)
+    self.assertIs(mul.src[1], UOp.const(-1.0))
+    self.assertIs(graph_rewrite(x * UOp.const(1.0000000106), symbolic_simple+pm_commit_weak), x)
+
+  def test_committed_const_conversion_folds_for_native_format(self):
+    folded = graph_rewrite(UOp.const(16256, dtypes.ushort).cast(dtypes.uint), symbolic_simple)
+    self.assertIs(folded, UOp.const(16256, dtypes.uint))
+    # fmt-less targets are lowered by renderer rewrites, where collapsing this pair would cycle with float-intermediate insertion.
+    emulated = UOp.const(1.0, dtypes.float).cast(dtypes.bfloat16)
+    self.assertIs(graph_rewrite(emulated, symbolic_simple), emulated)
 
   def test_weak_shift_lhs_commits_the_node(self):
     # a shift derives its lhs's dtype, so committing the lhs restates the root (WGSL's packed store writes `mask << shift_am`)
@@ -162,11 +183,11 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual(dtype_from_uop(Ops.SHL, (UOp.const(1, dtypes.int8), UOp.const(1, dtypes.uint32)), None), dtypes.int8)
     self.assertEqual(UOp.const(1).alu(Ops.SHL, UOp.const(1, dtypes.uint)).dtype, dtypes.weakint)
     self.assertEqual((v & 3).dtype, dtypes.weakint)
-    with self.assertRaises(RuntimeError): Tensor.const(1.0) << Tensor.const(1.0)
-    with self.assertRaises(RuntimeError): UOp.const(1, dtypes.int32).alu(Ops.SHL, UOp.const(1, dtypes.float64))
+    with self.assertRaises(RuntimeError): (Tensor.const(1.0) << Tensor.const(1.0)).dtype
+    with self.assertRaises(RuntimeError): UOp.const(1, dtypes.int32).alu(Ops.SHL, UOp.const(1, dtypes.float64)).dtype
     for op in (Ops.SHL, Ops.SHR):
       with self.assertRaises(RuntimeError):
-        UOp.const(1, dtypes.float32).alu(op, UOp.const(1, dtypes.int32))
+        UOp.const(1, dtypes.float32).alu(op, UOp.const(1, dtypes.int32)).dtype
     # float bitwise builds, the spec rejects it
     with Context(SPEC=1):
       f32, wf = UOp.const(1.0, dtypes.float32), UOp.const(1.0)
@@ -274,6 +295,19 @@ class TestSignedUint64Weakfloat(unittest.TestCase):
     self.assertEqual((r.dtype, r.cast(dtypes.float32).item()), (dtypes.half, 4.0))
     self.assertEqual((i64 < u64).item(), True)  # comparison meets at float
     self.assertAlmostEqual((i64 + u64).sin().item(), math.sin(2), places=5)  # Unary lowers before transcendental
+
+
+class TestNoRedundantWide(unittest.TestCase):
+  def wide_alu(self, t:Tensor) -> int:
+    return sum(sum(1 for u in full_rewrite(call.src[0]).toposort() if u.op in GroupOp.ALU and u.dtype in {dtypes.long, dtypes.ulong})
+               for call in t.schedule_linear().src if call.src[0].op is Ops.SINK)
+
+  def test_unbounded_long_stays_long(self):
+    self.assertGreater(self.wide_alu(Tensor.empty(16, dtype=dtypes.long)*3 + 1), 0)
+
+  def test_fancy_index_has_no_wide_alu(self):
+    j, o = Tensor([0, 1, 2]).reshape(3, 1), Tensor([0, 1]).reshape(1, 2)
+    self.assertEqual(self.wide_alu(Tensor.empty(8, 9, 10, 11, 12)[1, j, 2, o, 2]), 0)
 
 
 if __name__ == "__main__":

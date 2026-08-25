@@ -1,6 +1,6 @@
 [project]
 name = "tinygrad"
-version = "0.13.0"
+version = "0.14.0"
 description = "You like pytorch? You like micrograd? You love tinygrad! <3"
 authors = [{ name = "George Hotz" }]
 
@@ -84,7 +84,7 @@ testing = [
   "pillow",
   "onnx==1.19.0",
   "onnx2torch",
-  "onnxruntime",
+  "onnxruntime==1.24.1",
   "opencv-python",
   "transformers",
   "sentencepiece",
@@ -111,6 +111,10 @@ docs = [
   "numpy",
 ]
 mesa = ["tinymesa==25.2.7.2"]
+autogen = [
+  "pyyaml",
+  "mako",
+]
 
 
 [tool.mutmut]

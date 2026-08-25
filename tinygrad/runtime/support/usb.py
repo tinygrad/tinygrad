@@ -1,6 +1,11 @@
 import ctypes, struct, time, functools, itertools
+from typing import Any, cast
 from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG, DEV, to_mv, round_up, ceildiv
+from tinygrad.helpers import DEBUG, DEV, to_mv, from_mv, round_up, ceildiv, unwrap, dedup, to_tuple
+from tinygrad.dtype import dtypes
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
+from tinygrad.device import Buffer, BufferSpec, Device
+from tinygrad.runtime.support.hcq2 import HCQInfo, make_buf, make_cmdbuf, make_submit, HCQ_RUNTIME_DEV
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support import c
 
@@ -35,6 +40,11 @@ class USB3:
     self._tags, self._transferred = itertools.count(1), ctypes.c_int(0)
     self._bulk_buf, self._bulk_mv = alloc_cbuffer(4 << 20)
     self._ctrl_buf, self._ctrl_mv = alloc_cbuffer(0x1000)
+    # async bulk OUT state: tag -> (pooled transfer, keepalive payload mv); transfer errors latch into _async_err
+    self._async_seq, self._async_err = itertools.count(1), 0
+    self._async_pending: dict = {}
+    self._async_pool: list = []
+    self._async_cb = libusb.libusb_transfer_cb_fn(self._on_bulk_done)
 
     self.handle = c.init_c_var(c.POINTER[libusb.struct_libusb_device_handle], lambda x: checked(libusb.libusb_open)(dev, x))
 
@@ -72,6 +82,42 @@ class USB3:
     checked(libusb.libusb_bulk_transfer, "bulk OUT 0x02 failed") \
       (self.handle, 0x02, self._bulk_buf, len(payload), self._transferred, timeout)
     assert self._transferred.value == len(payload), f"bulk OUT short write: {self._transferred.value}/{len(payload)} bytes"
+
+  def _on_bulk_done(self, xfer):  # runs in libusb event handling; latch errors (exceptions here are unraisable)
+    exp = xfer.contents.length - 8 if xfer.contents.type == libusb.LIBUSB_TRANSFER_TYPE_CONTROL else xfer.contents.length
+    if xfer.contents.status != 0 or xfer.contents.actual_length != exp: self._async_err = xfer.contents.status or -1
+    self._async_pool.append(self._async_pending.pop(int(xfer.contents.user_data or 0))[0])
+
+  def _submit_async(self, endpoint:int, xtype:int, payload:bytes|bytearray|memoryview, timeout:int) -> int:  # payload kept alive till bulk_wait
+    tr = self._async_pool.pop() if self._async_pool else libusb.libusb_alloc_transfer(0)
+    tr.contents.dev_handle, tr.contents.endpoint, tr.contents.type = self.handle, endpoint, xtype
+    tr.contents.timeout, tr.contents.length = timeout, len(payload)
+    tr.contents.buffer = ctypes.cast(from_mv(memoryview(payload), ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte))
+    tr.contents.callback, tr.contents.user_data = self._async_cb, (tag := next(self._async_seq))
+    self._async_pending[tag] = (tr, payload)
+    checked(libusb.libusb_submit_transfer, "async submit failed")(tr)
+    return tag
+
+  def bulk_write_async(self, payload:memoryview, timeout:int=10000) -> int:
+    """Queue a bulk OUT transfer without blocking; payload is kept alive until bulk_wait(tag)."""
+    return self._submit_async(0x02, libusb.LIBUSB_TRANSFER_TYPE_BULK, payload, timeout)
+
+  def control_write_async(self, request:int, value:int=0, index:int=0, data:bytes=b"", timeout:int=1000) -> int:
+    """Queue a vendor control OUT without blocking; completes via bulk_wait(tag) like bulk_write_async."""
+    setup = bytearray(struct.pack('<BBHHH', 0x40, request, value, index, len(data)) + data)
+    return self._submit_async(0, libusb.LIBUSB_TRANSFER_TYPE_CONTROL, setup, timeout)
+
+  def control_read_async(self, request:int, length:int, value:int=0, index:int=0, timeout:int=1000) -> tuple[int, memoryview]:
+    """Queue a vendor control IN without blocking; the data lands in the returned buffer by bulk_wait(tag)."""
+    buf = bytearray(struct.pack('<BBHHH', 0xC0, request, value, index, length)) + bytearray(length)
+    return self._submit_async(0, libusb.LIBUSB_TRANSFER_TYPE_CONTROL, buf, timeout), memoryview(buf)[8:]
+
+  def bulk_wait(self, tag:int):
+    """Block until the tagged transfer completes; raises if any async transfer failed. LIBUSB_ERROR_INTERRUPTED is retried."""
+    while tag in self._async_pending:
+      if (rc:=libusb.libusb_handle_events(None)) < 0 and rc != libusb.LIBUSB_ERROR_INTERRUPTED:
+        raise RuntimeError(f"libusb_handle_events: {ctypes.string_at(libusb.libusb_strerror(rc)).decode()}")
+    if self._async_err: raise RuntimeError(f"async bulk OUT failed: status={self._async_err}")
 
   def bulk_read(self, length:int, timeout:int=1000) -> memoryview:
     if length > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(length)
@@ -160,13 +206,10 @@ class CustomASM24Controller:
     """Write to chip XDATA via vendor control OUT (bRequest=0xE5). wValue=addr, wIndex=val."""
     for off, val in enumerate(data): self.usb.control_write(0xE5, value=base_addr + off, index=val)
 
-  def scsi_write(self, buf:bytes):
+  def scsi_write(self, buf:bytes, slot_start:int=0):
     """Write to SRAM via 0xF2 vendor command + bulk OUT."""
     buf_padded = buf + b'\x00' * (round_up(len(buf), 512) - len(buf))
-    sectors = len(buf_padded) // 512
-    num_slots = ceildiv(len(buf_padded), 0x4000)  # 16KB per slot
-    windex = (num_slots & 0xFF) << 8
-    self.usb.control_write(0xF2, value=sectors, index=windex)
+    self.usb.control_write(0xF2, value=len(buf_padded) // 512, index=(slot_start & 0xFF) | (ceildiv(len(buf_padded), 0x4000) << 8))
     self.usb.bulk_write(buf_padded)
 
   def scsi_read_arm(self, size:int):
@@ -184,20 +227,123 @@ class USBMMIOInterface(MMIOInterface):
     return (index * self.el_sz, self.el_sz)
 
   def __getitem__(self, index):
+    Device[HCQ_RUNTIME_DEV.value].synchronize() # one driver on the link: drain the compiled submits before python touches it
     off, sz = self._off_from_index(index)
     if self.pcimem:
       assert sz % 4 == 0 and off % 4 == 0, f"pcie_mem_read requires 4-byte aligned access, got off={off}, sz={sz}"
       data = self.usb.pcie_mem_read(self.addr + off, sz)
     else: data = self.usb.scsi_read(sz) if self.addr == 0xf000 else self.usb.read(self.addr + off, sz)
-    return int.from_bytes(data, "little") if sz == self.el_sz else data
+    return data if isinstance(index, slice) else int.from_bytes(data, "little")
 
   def __setitem__(self, index, data):
+    Device[HCQ_RUNTIME_DEV.value].synchronize()
     off, _ = self._off_from_index(index)
     data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
     if not self.pcimem: self.usb.scsi_write(data) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)
-    else: self.usb.pcie_mem_write(self.addr+off, data)
+    else:
+      # writes are whole dwords
+      assert len(data) % 4 == 0 and off % 4 == 0, f"pcie_mem_write requires 4-byte aligned access, got off={off}, sz={len(data)}"
+      self.usb.pcie_mem_write(self.addr+off, data)
 
   def view(self, offset:int=0, size:int|None=None, fmt=None):
     return USBMMIOInterface(self.usb, self.addr+offset, self.nbytes-offset if size is None else size, fmt=fmt or self.fmt, pcimem=self.pcimem)
+
+# *****************
+
+def _libusb(devs, dep:tuple[UOp, ...], fn:str, *args) -> UOp:
+  return make_buf(devs, tag=f"func:{fn}").after(*dep).index(0).load().call(make_buf(devs, tag="usb_handle").index(0).load(),
+    *[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args], ret_dtype=dtypes.void)
+
+def usb_bulk(devs, dep, endpoint:int, data:UOp, length, timeout:int=1000) -> UOp: # NULL actual_length out param
+  return _libusb(devs, dep, "libusb_bulk_transfer", endpoint, data, length, UOp.const(0, dtypes.uint64), timeout)
+
+def usb_stream(devs, dep:tuple[UOp, ...], addr:UOp, data:UOp, nbytes:int, write:bool) -> UOp:
+  hdr = UOp.placeholder((2,), dtypes.uint64, device=devs, tag="usb_scratch").after(*dep)
+  arm = _libusb(devs, (hdr.index(0).store(addr), hdr.index(1).store(UOp.const(nbytes // 4, dtypes.uint64))), "libusb_control_transfer",
+                0x40, 0xF0, (0x60 if write else 0x20) | (0x0F << 8), 1 if write else 2, hdr.index(0), 12, 5000)
+  return usb_bulk(devs, (arm,), 0x02 if write else 0x81, data, nbytes)
+
+def usb_writes(devs, ws:list[tuple[UOp, UOp, int]]) -> tuple[UOp, ...]:
+  return functools.reduce(lambda dep, w: (usb_stream(devs, dep, w[0], w[1], w[2], True),), ws, ())
+
+def usb_load(b:UOp, idx:UOp, dt) -> UOp:
+  got = UOp.placeholder((1,), dt, device=(devs:=to_tuple(b.device)), tag="usb_scratch")
+  addr = b.getaddr((HCQ_RUNTIME_DEV.value,)) + (idx*dt.itemsize).cast(dtypes.uint64)
+  return got.after(usb_stream(devs, b.src[1:] if b.op is Ops.AFTER else (), addr, got.index(0), dt.itemsize, False)).index(0).load()
+
+def usb_write(b:UOp, idx:UOp, v:UOp) -> UOp:
+  val = (s:=UOp.placeholder((1,), v.dtype, device=(devs:=to_tuple(b.device)), tag="usb_scratch")).after(s.index(0).store(v))
+  addr = b.getaddr((HCQ_RUNTIME_DEV.value,)) + (idx*v.dtype.itemsize).cast(dtypes.uint64)
+  return usb_stream(devs, b.src[1:] if b.op is Ops.AFTER else (), addr, val.index(0), v.dtype.itemsize, True)
+
+def usb_idle(devs) -> UOp:
+  v = usb_load(make_buf(devs, tag="timeline_signal").after(loop:=UOp.loop(0)), UOp.const(0, dtypes.int), dtypes.uint64)
+  return v.end(loop, v + 1 < make_buf(devs, tag="timeline_value").index(0).load())
+
+def usb_scsi(devs, read:bool, nbytes:int) -> UOp:
+  return _libusb(devs, (usb_idle(devs),), "libusb_control_transfer", 0x40, 0xF2, ceildiv(nbytes, 512) | (0x8000 if read else 0),
+                 (ceildiv(nbytes, 0x4000) & 0xFF) << 8, UOp.const(0, dtypes.uint64), 0, 1000)
+
+def usb_stage_copy(dst:UOp, src:UOp) -> UOp|None:
+  if (cin:=to_tuple(src.device)[0].startswith("CPU")) == to_tuple(dst.device)[0].startswith("CPU"): return None
+
+  total, ops, win = dst.nbytes(), [], cast(Any, Device[(devs:=to_tuple((dst if cin else src).device))[0]]).iface.usb_sram
+  for off in range(0, total, win.size): # off and nb are bytes, the two ends of the copy can have different dtypes
+    sram = UOp.from_buffer(win)[0:(nb:=min(win.size, total - off))]
+    s, d = src[off // src.dtype.itemsize:(off + nb) // src.dtype.itemsize], dst[off // dst.dtype.itemsize:(off + nb) // dst.dtype.itemsize]
+    if cin:
+      push = usb_bulk(devs, (usb_scsi(devs, False, nb),), 0x02, s.getaddr((HCQ_RUNTIME_DEV.value,)), round_up(nb, 512), 10000)
+      ops += [UOp.custom_function("hcq", push.sink()).call(sram, s, name="hcq_copyin", aux=HCQInfo(devs)),
+              sram.copy_to_device(d.device).call(d, sram)]
+    else:
+      pad = UOp.new_buffer("CPU", round_up(nb, 512), dtypes.uint8)[0:nb]
+      submit = make_submit(s.copy_to_device(sram.device).call(sram, s), devs=devs, queue="COPY:0")
+      pull = usb_bulk(devs, (submit,), 0x81, pad.getaddr((HCQ_RUNTIME_DEV.value,)), round_up(nb, 512), 10000)
+      ops += [UOp.custom_function("hcq", pull.sink()).call(pad, sram, s, name="hcq_copyout", aux=HCQInfo(devs)),
+              pad.copy_to_device("CPU").call(d, pad)]
+  return UOp(Ops.LINEAR, src=tuple(ops))
+pm_usb_stage = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), usb_stage_copy)])
+
+def usb_arm_bytes(lin:UOp, sram:Buffer) -> int:
+  dsts = [c.src[1] for c in lin.src if c.op is Ops.CALL and c.src[0].op is Ops.COPY] # the rest of a linear is INS, some with no srcs
+  return next((d.nbytes() for d in dsts if d.base.op is Ops.BUFFER and d.base.buffer is sram), 0)
+
+def usb_ib(devs, lin:UOp, align:int, arm:int=0) -> tuple[UOp, UOp, int]:
+  pkt_dw = sum(s.dtype.itemsize for ins in lin.src for s in ins.src) // 4 # by bytes: sdma packs 64-bit addresses as single srcs
+  kargs = dedup([b for b in lin.toposort() if b.op is Ops.PARAM and b.tag == "kernargs"])
+  offs, up_dw = {}, round_up(pkt_dw, align)
+  for k in kargs: offs[k], up_dw = up_dw, round_up(up_dw + k.max_numel(), 32)
+  ib_gpu = UOp.placeholder((up_dw,), dtypes.uint32, device=devs, tag="cmdbuf")
+  ib_host = UOp.placeholder((up_dw,), dtypes.uint32, device=devs, tag="usb_scratch")
+  gsubs = {g: g.replace(src=(d if a.op is not Ops.AFTER else d.after(*a.src[1:]),)) for g in lin.toposort() if g.op is Ops.GETADDR
+           for a in [g.src[0]] if (k:=a.src[0] if a.op is Ops.AFTER else a) in offs for d in [ib_gpu[offs[k]:offs[k] + k.max_numel()]]}
+  lin = lin.substitute(gsubs, walk=True).substitute({k: ib_host[offs[k]:offs[k] + k.max_numel()] for k in kargs}, walk=True)
+  return make_cmdbuf(lin, devs, buf=ib_host, dep=(usb_scsi(devs, True, arm),) if arm else ()), ib_gpu, pkt_dw
+
+def usb_push(devs, ring:UOp, wptr:UOp, doorbell:UOp, put_ptr:UOp, ib_host:UOp, ib_gpu:UOp, pkt:tuple, unit:int) -> UOp:
+  stage = UOp.placeholder(((n:=round_up(len(pkt), 4)) + 2,), dtypes.uint32, device=devs, tag="usb_scratch")
+  put, step = put_ptr.index(zero:=UOp.const(0, dtypes.int)), (n * 4 if pkt else ib_host.nbytes()) // unit
+  st = stage.after(*[stage.index(i).store(UOp.const(v, dtypes.uint32)) for i, v in enumerate(pkt)],
+                   *[stage.index(n + i).store((((put + step) >> (32 * i)) & 0xffffffff).cast(dtypes.uint32)) for i in (0, 1)])
+
+  writes = [(ib_gpu.getaddr((HCQ_RUNTIME_DEV.value,)), ib_host.index(zero), ib_gpu.nbytes())] if pkt else []
+  writes += [(ring.getaddr((HCQ_RUNTIME_DEV.value,)) + ((put % (ring.nbytes() // unit)) * unit).cast(dtypes.uint64),
+              (st if pkt else ib_host).index(zero), step * unit)]
+  writes += [(p.getaddr((HCQ_RUNTIME_DEV.value,)), st.index(n), 8) for p in (wptr, doorbell)]
+  return put_ptr.after(*usb_writes(devs, writes)).index(zero).store(put + step)
+
+USB_HOST_TAGS = {"signal", "timeline_signal"}
+pm_usb_hostio = PatternMatcher([
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(Ops.PARAM, tag=USB_HOST_TAGS).or_after(name="b"), UPat(name="idx"))),),
+        name="ld"), lambda b, idx, ld: usb_load(b, idx, ld.dtype)),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.PARAM, tag=USB_HOST_TAGS).or_after(name="b"), UPat(name="idx"))), UPat(name="v"))), usb_write)])
+
+pm_usb_bufferize = PatternMatcher([
+  (UPat(Ops.PARAM, tag={"systems", "runtime", "inputs", "usb_scratch"}, name="b"),
+   lambda ctx, b: Buffer("CPU", b.max_numel(), b.dtype, options=BufferSpec(nolru=True), preallocate=True)),
+  (UPat(Ops.PARAM, tag="usb_handle", name="b"), lambda ctx, b: ctx[0].signal(b.tag, ctx[0].iface.usb_handle, device="CPU")),
+  (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if not isinstance(b.tag, str) or not b.tag.startswith("func:") else
+   ctx[0].signal(b.tag, unwrap(ctypes.cast(getattr(libusb.dll, b.tag[5:]), ctypes.c_void_p).value), device="CPU")),
+])
 
 if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

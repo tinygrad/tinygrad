@@ -176,7 +176,7 @@ class TestLimitBufs(unittest.TestCase):
 
   def test_limit_bufs_linear_scaling(self):
     def sched_time(n):
-      with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      with Context(TRACK_MATCH_STATS=0, DEBUG=0, PARALLEL=0):
         bufs = [Tensor.ones(16).contiguous().realize() for _ in range(4)]
         root = bufs[0]
         for i in range(n): root = root + bufs[i % 4]
