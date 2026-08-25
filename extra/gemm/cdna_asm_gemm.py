@@ -507,12 +507,13 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   dname, arch = dname.split(":")[0], renderer.target.arch
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
     if mxfp4:
-      assert mxfp4_x is None or not save_original_input, "prequantized MXFP4 input already supplies its column representation"
       w = b.T
       if mxfp4_x is not None:
         a_q, scale_a, a_col, scale_a_col = mxfp4_x
         assert a_q is not None and scale_a is not None
-        if a_col is None or scale_a_col is None:
+        if save_original_input:
+          assert a_col is scale_a_col is None, "save_original_input requires row-only prequantized MXFP4 input"
+        elif a_col is None or scale_a_col is None:
           assert a_col is scale_a_col is None
           _, _, a_col, scale_a_col = quantize_mxfp4(a, shuffle_col=True, row=False)
       elif save_original_input:

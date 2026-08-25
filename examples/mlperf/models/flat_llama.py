@@ -26,6 +26,7 @@ SPLIT_W13 = getenv("SPLIT_W13", 0)
 COLUMNWISE_WEIGHT_SCALE = getenv("COLUMNWISE_WEIGHT_SCALE", 0)
 MXFP8 = getenv("MXFP8", 0)
 MXFP4 = getenv("MXFP4", 0)
+DEFER_MXFP4_COL_QUANT = getenv("DEFER_MXFP4_COL_QUANT", 0)
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
@@ -101,7 +102,7 @@ def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, ep
     normed, rrms, normed_mxfp4 = rmsnorm_mul_mxfp4(x, norm, eps)
     out, *ret = matmul(normed, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
                        next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w,
-                       x_prequant_mxfp4=normed_mxfp4)
+                       x_prequant_mxfp4=normed_mxfp4, save_original_input=bool(DEFER_MXFP4_COL_QUANT))
     return out, normed, rrms, ret
   x_normed, rrms = rmsnorm(x, eps)
   out, *ret = matmul(x_normed * norm, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
@@ -121,7 +122,7 @@ def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w
     normed, h, rrms, normed_mxfp4 = rmsnorm_add_mul_mxfp4(x, residual, norm, eps)
     out, *ret = matmul(normed, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
                        next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w,
-                       x_prequant_mxfp4=normed_mxfp4)
+                       x_prequant_mxfp4=normed_mxfp4, save_original_input=bool(DEFER_MXFP4_COL_QUANT))
     return out, h, normed, rrms, ret
   h = x + residual
   x_normed, rrms = rmsnorm(h, eps)

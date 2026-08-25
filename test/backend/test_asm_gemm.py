@@ -2,6 +2,7 @@ import unittest
 import functools
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
+from tinygrad.uop.ops import Ops, KernelInfo
 from extra.gemm.cdna_asm_gemm import MXFP4_TILES, _select_mxfp4_tile, asm_gemm, hk_bf16_atb_gemm
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
@@ -227,6 +228,34 @@ class TestMXFP4(unittest.TestCase):
     np.testing.assert_array_equal(out_recompute.numpy(), out_ref.numpy())
     np.testing.assert_array_equal(a_recompute.grad.numpy(), a_ref.grad.numpy())
     np.testing.assert_array_equal(w_recompute.grad.numpy(), w_ref.grad.numpy())
+
+  def test_save_original_prequantized_input(self):
+    import numpy as np
+    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+    rng = np.random.default_rng(5)
+    a_np = rng.standard_normal((256, 256), dtype=np.float32)
+    w_np = rng.standard_normal((256, 256), dtype=np.float32)
+    a_ref, w_ref = Tensor(a_np, dtype=dtypes.bfloat16), Tensor(w_np, dtype=dtypes.bfloat16)
+    a_deferred, w_deferred = Tensor(a_np, dtype=dtypes.bfloat16), Tensor(w_np, dtype=dtypes.bfloat16)
+    a_row, scale_a_row, _, _ = quantize_mxfp4(a_deferred, col=False)
+    w_mxfp4 = quantize_mxfp4(w_deferred, shuffle_row=True, shuffle_col=True)
+    out_ref = asm_gemm(a_ref, w_ref.T, mxfp4=True)
+    out_deferred = asm_gemm(a_deferred, w_deferred.T, mxfp4=True, mxfp4_x=(a_row, scale_a_row, None, None),
+                            mxfp4_w=w_mxfp4, save_original_input=True)
+
+    forward_names = [u.arg.name for u in out_deferred.uop.toposort() if u.op is Ops.SINK and isinstance(u.arg, KernelInfo)]
+    self.assertIn("quantize_mxfp4_row_256_256", forward_names)
+    self.assertNotIn("quantize_mxfp4_col_256_256", forward_names)
+
+    out_ref.sum().backward()
+    out_deferred.sum().backward()
+    backward_names = [u.arg.name for t in (a_deferred.grad, w_deferred.grad) for u in t.uop.toposort()
+                      if u.op is Ops.SINK and isinstance(u.arg, KernelInfo)]
+    self.assertIn("quantize_mxfp4_col_256_256", backward_names)
+    Tensor.realize(out_ref, out_deferred, a_ref.grad, w_ref.grad, a_deferred.grad, w_deferred.grad)
+    np.testing.assert_array_equal(out_deferred.numpy(), out_ref.numpy())
+    np.testing.assert_array_equal(a_deferred.grad.numpy(), a_ref.grad.numpy())
+    np.testing.assert_array_equal(w_deferred.grad.numpy(), w_ref.grad.numpy())
 
   def test_return_mxfp4_saves(self):
     import numpy as np
