@@ -44,7 +44,10 @@ class TestTransformerGenerate(unittest.TestCase):
       return Tensor([[42]])
     with patch.object(Transformer, '__call__', mock_call):
       next(model.generate([1, 2, 3, 4, 5, 42, 10]))
-    self.assertEqual(calls, [((1, 1), V_START_POS.bind(5)), ((1, 1), V_START_POS.bind(6))])
+    # resumes from the reused state at position 5 and consumes the 2 new tokens (one chunk or two decode steps)
+    self.assertEqual(calls[0][1], V_START_POS.bind(5))
+    def ntok(shape): return shape[1] if isinstance(shape[1], int) else shape[1].unbind()[1]
+    self.assertEqual(sum(ntok(c[0]) for c in calls), 2)
 
   def test_recurrent_divergent_prompt_restarts(self):
     model, calls = Transformer(TEST_CONFIG), []

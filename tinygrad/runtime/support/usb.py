@@ -113,8 +113,10 @@ class USB3:
     return self._submit_async(0, libusb.LIBUSB_TRANSFER_TYPE_CONTROL, buf, timeout), memoryview(buf)[8:]
 
   def bulk_wait(self, tag:int):
-    """Block until the tagged transfer completes; raises if any async transfer failed."""
-    while tag in self._async_pending: checked(libusb.libusb_handle_events)(None)
+    """Block until the tagged transfer completes; raises if any async transfer failed. LIBUSB_ERROR_INTERRUPTED is retried."""
+    while tag in self._async_pending:
+      if (rc:=libusb.libusb_handle_events(None)) < 0 and rc != libusb.LIBUSB_ERROR_INTERRUPTED:
+        raise RuntimeError(f"libusb_handle_events: {ctypes.string_at(libusb.libusb_strerror(rc)).decode()}")
     if self._async_err: raise RuntimeError(f"async bulk OUT failed: status={self._async_err}")
 
   def bulk_read(self, length:int, timeout:int=1000) -> memoryview:
@@ -295,7 +297,7 @@ def usb_stage_copy(dst:UOp, src:UOp) -> UOp|None:
               sram.copy_to_device(d.device).call(d, sram)]
     else:
       pad = UOp.new_buffer("CPU", round_up(nb, 512), dtypes.uint8)[0:nb]
-      submit = make_submit(UOp(Ops.CALL, dtypes.void, (UOp(Ops.COPY, dtypes.void, ()), sram, s)), devs=devs, queue="COPY:0")
+      submit = make_submit(UOp(Ops.CALL, src=(UOp(Ops.COPY, dtypes.void, ()), sram, s)), devs=devs, queue="COPY:0")
       pull = usb_bulk(devs, (submit,), 0x81, pad.getaddr((HCQ_RUNTIME_DEV.value,)), round_up(nb, 512), 10000)
       ops += [UOp.custom_function("hcq", pull.sink()).call(pad, sram, s, name="hcq_copyout", aux=HCQInfo(devs)),
               pad.copy_to_device("CPU").call(d, pad)]

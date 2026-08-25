@@ -46,7 +46,7 @@ wgsl_matcher = PatternMatcher([
   (UPat(Ops.LOAD, name="l"), lambda l: packed_load(l) if is_packed(l) else None),
   (UPat(Ops.STORE, name="s"), lambda s: packed_store(s) if is_packed(s) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
-  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
   # fix nan check: 'a != a -> is_nan()'. the decomp rewrites (a != a).logical_not() to CMPEQ, so match both forms
   (UPat.var("a", dtypes.floats) != UPat.var("a"), is_nan),
   (UPat.var("a", dtypes.floats).alu(Ops.CMPEQ, UPat.var("a")), lambda a: is_nan(a).ne(True)),
@@ -69,7 +69,8 @@ class WGSLRenderer(CStyleLanguage):
     (UPat.cvar("c").cast(dtypes.bool), lambda c: "true" if c.val else "false"),
     (UPat.cvar("c").cast((dtypes.uchar, dtypes.ushort, dtypes.uint32)),
      lambda c: f"bitcast<u32>({c.val})" if c.val < 0 else f"{c.val&0xFFFFFFFF}u"),
-    (UPat.cvar("c").cast(dtypes.int32, name="x"), lambda ctx,x,c: f"{truncate[x.dtype](c.val)}"),
+    # a negative const must state its type: contextual conversion of a bare abstract int rejects it in a u32 position
+    (UPat.cvar("c").cast(dtypes.int32, name="x"), lambda ctx,x,c: f"i32({v})" if (v:=truncate[x.dtype](c.val)) < 0 else f"{v}"),
     (UPat(Ops.BUFFER, name="x"), lambda ctx,x:
      f"var{'<workgroup>' if x.addrspace == AddrSpace.LOCAL else ''} {ctx[x]}: array<{ctx.buf_map(x)},{_packed_size(x)}>;"),
     (UPat(Ops.BITCAST, dtype=dtypes.half, name="x", src=(UPat(dtype=(dtypes.short, dtypes.ushort, dtypes.uint32),),)),
