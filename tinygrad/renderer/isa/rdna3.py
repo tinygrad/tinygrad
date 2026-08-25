@@ -84,10 +84,10 @@ VGPRS = tuple(Register(f"v{i}", i, size=4) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i, size=4) for i in range(106))
 # reserve VGPRs ahead of time to be excluded from normal allocation to
 # prevent retroactive lifetime semantics and eviction cloberring when
-# spilling SGPRS to lanes. 8 vgprs x wave 32 = 256 SGPRs
-SPILL_VGPRS = VGPRS[-8:]
+# spilling SGPRS to lanes. 12 vgprs x wave 32 = 384 SGPRs
+SPILL_VGPRS = VGPRS[-12:]
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
-GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:-8])
+GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:-12])
 VCC, EXEC = Register("vcc", 0, size=4), Register("exec_lo", 0, size=4)
 
 execop, vccop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, VCC)
@@ -569,8 +569,7 @@ class RDNA3Renderer(ISARenderer):
   def fill(self, spill_offset:any, sub_idx:int|None, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
     if regs[0].name[0] == 'v':
       if sub_idx is not None:
-        ld = UOp(Ops.INS, x.dtype, arg=RDNA3Ops.scratch_load_b32, src=(const(spill_offset+sub_idx*4)), tag=(regs[0],))
-        return ld, [ld]
+        return (ld := UOp(Ops.INS, x.dtype, arg=RDNA3Ops.scratch_load_b32, src=(const(spill_offset+sub_idx*4),), tag=regs)), [ld]
       batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
       ops = [UOp(Ops.INS, x.dtype, arg=getattr(RDNA3Ops, f"scratch_load_b{len(b)*32}"), \
         src=(const(spill_offset+j*16),), tag=b) for j,b in enumerate(batches)]
