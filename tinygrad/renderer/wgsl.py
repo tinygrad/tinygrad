@@ -18,19 +18,19 @@ def packed_store(s:UOp):
   # bool does its mask math at int32: renderer rewrites run after weak dtypes are lowered, and bool & 0xFF would create a weakint const
   if var.dtype == dtypes.bool: var = var.cast(dtypes.int32)
   new_v, wmask = (var & mask).cast(dtypes.uint32) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
-  buf = idx.load(*((UOp.const(0, dtypes.uint32), *gate) if gate else ()), dtype=dtypes.uint32)
+  buf = idx.cast(dtypes.uint32).load(*((UOp.const(0, dtypes.uint32), *gate) if gate else ()))
   return idx.store((buf & wmask) | new_v, *gate)
 
 # load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))
 def packed_load(root:UOp):
   bidx, *alt = root.src
   idx, shift_am, mask = packed_field(bidx, dtype:=root.dtype)
-  load = idx.load(*((alt[0].cast(dtypes.uint32), *alt[1:]) if alt else ()), dtype=dtypes.uint32, arg=root.arg)
+  load = idx.cast(dtypes.uint32).load(*((alt[0].cast(dtypes.uint32), *alt[1:]) if alt else ()), arg=root.arg)
   val = (load >> shift_am) & mask
   return sign_extend(val, 8*dtype.itemsize).cast(dtype) if dtype in [dtypes.char, dtypes.short] else val.cast(dtype)
 
 def is_packed(x:UOp):
-  dt = x.src[1].dtype if x.op is Ops.STORE else x.dtype
+  dt = x.src[1].dtype if x.op is Ops.STORE else x.buf_uop.dtype
   return dt.itemsize < 4 and dt != dtypes.half and x.buf_uop.addrspace != AddrSpace.REG
 def _packed_size(u:UOp): return ceildiv(u.max_numel(), 4//u.dtype.itemsize) if is_packed(u) else u.max_numel()
 def is_nan(a):
@@ -38,12 +38,12 @@ def is_nan(a):
   return (a.bitcast(getattr(dtypes, f"uint{bs}")) & ((1 << (bs - 1)) - 1)) > (((1 << exp) - 1) << mant)
 
 # the read-modify-write packed_store emits: a load of the very index being stored to, masked (a gated store loads with 3 srcs)
-packed_rmw = UPat(Ops.LOAD, src=(UPat.var("b"),), allow_any_len=True) & UPat.var("wmask")
+packed_rmw = UPat(Ops.LOAD, src=(UPat(Ops.CAST, dtype=dtypes.uint32, src=(UPat.var("b"),)),), allow_any_len=True) & UPat.var("wmask")
 
 wgsl_matcher = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.XOR), src=(UPat(name="a", dtype=dtypes.bool), UPat.var("b")), name="c"),
    lambda a,b,c: a.cast(dtypes.int).alu(c.op, b.cast(dtypes.int)).cast(dtypes.bool)),
-  (UPat(Ops.LOAD, name="l"), lambda l: packed_load(l) if is_packed(l) else None),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX),), allow_any_len=True, name="l"), lambda l: packed_load(l) if is_packed(l) else None),
   (UPat(Ops.STORE, name="s"), lambda s: packed_store(s) if is_packed(s) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
@@ -65,6 +65,7 @@ class WGSLRenderer(CStyleLanguage):
               dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.half: "f16" }
 
   string_rewrite = PatternMatcher([
+    (UPat(Ops.CAST, dtype=dtypes.uint32, src=(UPat(Ops.INDEX, name="x"),)), lambda ctx,x: ctx[x] if is_packed(x) else None),
     (UPat(Ops.NEG, dtypes.uints, src=(UPat.var('x'))), lambda ctx,x: f"(0-{ctx[x]})"),
     (UPat.cvar("c").cast(dtypes.bool), lambda c: "true" if c.val else "false"),
     (UPat.cvar("c").cast((dtypes.uchar, dtypes.ushort, dtypes.uint32)),
