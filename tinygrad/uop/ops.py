@@ -1202,8 +1202,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape)
-                for u in tuple(filter(lambda u: u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU, self.src[1].src)) + self.arg.vars)
+    params = tuple(u for u in self.src[1].src if u.op is Ops.PARAM and u.addrspace is not AddrSpace.ALU)
+    slots = {u.arg.slot for u in params}
+    params = tuple(sorted((*params, *(u for u in self.arg.params if u.addrspace is AddrSpace.ALU or u.arg.slot not in slots)),
+                          key=lambda u: u.arg.slot))
+    sig = tuple((replace(u.arg, dtype=u.dtype), u._shape) for u in params)
     return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig, self.key)
 
 @dataclass(frozen=True)
@@ -1228,6 +1231,7 @@ class ProgramInfo:
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
   target: Target = Target()
+  params: tuple[UOp, ...] = ()
 
   @property
   def function_name(self): return to_function_name(self.name)
@@ -1246,6 +1250,7 @@ class ProgramInfo:
 
   @staticmethod
   def from_sink(sink:UOp, target:Target=Target()) -> ProgramInfo:
+    params: list[UOp] = []
     _vars: list[UOp] = []
     _globals: list[int] = []
     outs: list[int] = []
@@ -1253,6 +1258,7 @@ class ProgramInfo:
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
     for u in sink.toposort():
+      if u.op is Ops.PARAM: params.append(u)
       if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
@@ -1263,9 +1269,12 @@ class ProgramInfo:
         special_size = local_size if u.arg[0] == 'l' else global_size
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
       if u.op is Ops.PARAM and u in _vars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
+    params, _vars, _globals = sorted(dedup(params), key=lambda v: v.arg.slot), sorted(dedup(_vars), key=lambda v: v.arg.slot), sorted(dedup(_globals))
+    var_slots = tuple(v.arg.slot for v in _vars if v.arg.slot >= 0)
+    def buf_slot(slot:int) -> int: return slot - sum(v < slot for v in var_slots)
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
-                       tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
-                       tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), target)
+                       tuple(local_size) if local_size is not None else None, tuple(_vars), tuple(buf_slot(x) for x in _globals),
+                       tuple(buf_slot(x) for x in sorted(dedup(outs))), tuple(buf_slot(x) for x in sorted(dedup(ins))), target, tuple(params))
 
 @dataclass(frozen=True)
 class CallInfo:

@@ -170,9 +170,11 @@ def run_program_emu(instructions: list, n_lanes: int = 1) -> WaveState:
 
 def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
   """Run instructions on real AMD hardware via HIPCompiler and the AMD runtime."""
+  from tinygrad import dtypes
   from tinygrad.device import Device, TinyELF
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
   from tinygrad.helpers import Target, flat_mv
+  from tinygrad.uop.ops import ParamArg
 
   dev = Device["AMD"]
   compiler = HIPCompiler(dev.arch)  # type: ignore[attr-defined]
@@ -222,7 +224,7 @@ amdhsa.kernels:
 """
 
   lib = compiler.compile(asm_src)
-  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
+  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ((ParamArg(0, dtypes.uint8), ()),)))
 
   buf_sz = _out_bytes(n_lanes)
   out_gpu = dev.allocator.alloc(buf_sz)

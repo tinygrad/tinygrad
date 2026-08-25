@@ -37,8 +37,10 @@ def _run_wave64_emu(instructions: list, out_reg: int = 1) -> list[int]:
   return list(out_buf)
 
 def _run_wave64_hw(instructions: list, out_reg: int = 1) -> list[int]:
+  from tinygrad import dtypes
   from tinygrad.device import Device, TinyELF
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
+  from tinygrad.uop.ops import ParamArg
 
   dev = Device["AMD"]
   compiler = HIPCompiler(dev.arch)  # type: ignore[attr-defined]
@@ -83,7 +85,7 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
   lib = compiler.compile(asm_src)
-  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
+  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ((ParamArg(0, dtypes.uint8), ()),)))
   out_gpu = dev.allocator.alloc(WAVE64 * 4)
   prg(out_gpu, global_size=(1, 1, 1), local_size=(WAVE64, 1, 1), wait=True)
   out = bytearray(WAVE64 * 4)

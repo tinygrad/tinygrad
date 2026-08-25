@@ -4,11 +4,11 @@ import struct, functools, time, collections, itertools, decimal, statistics
 from dataclasses import replace, dataclass
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
 from tinygrad.helpers import to_tuple, round_up, partition, panic, ContextVar, perf_counter_us, Context
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker, TinyELF
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.dtype import dtypes, truncate, DType
+from tinygrad.dtype import dtypes, truncate, DType, AddrSpace
 from tinygrad.runtime.support.hcq import MMIOInterface, HCQBuffer
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer, Estimates
@@ -84,9 +84,11 @@ def make_call(name:str, body:UOp, info:HCQInfo) -> UOp: return UOp.custom_functi
 
 def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
   data, info = prg.arg
-  buf = UOp.placeholder((data.kernargs_alloc_size // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("kernargs")
-  words = [get_call_arg_uops(call)[gi].getaddr(devs) for gi in info.globals] + list(info.vars)
-  return buf.after(*make_patches(buf, list(zip(itertools.accumulate((w.dtype.itemsize for w in words), initial=0), words))))
+  buf = UOp.placeholder((data.kernargs_alloc_size,), dtypes.uint8, next(UOp.unique_num), device=devs).rtag("kernargs")
+  bufs = [get_call_arg_uops(call)[gi].getaddr(devs) for gi in info.globals]
+  words = [(off, bufs[idx] if arg.addrspace is not AddrSpace.ALU else info.vars[idx])
+           for off,arg,_,idx in TinyELF.iter_sig(data.signature)]
+  return buf.after(*make_patches(buf, words))
 
 def make_buf(devs, slot:int=0, tag:str="signal") -> UOp: return UOp.placeholder((1,), dtypes.uint64, slot, device=devs, volatile=True, tag=tag)
 

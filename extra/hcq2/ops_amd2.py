@@ -5,7 +5,7 @@ assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, encode_kernargs_clike, make_cmdbuf
 from tinygrad.runtime.support.hcq2 import make_binary_patch
-from tinygrad.uop.ops import sint, UOp
+from tinygrad.uop.ops import sint, UOp, ParamArg
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar, TracingKey
@@ -279,12 +279,14 @@ class AMDProgramData:
   entry_point_offset:int; rsrc1:int; rsrc2:int; rsrc3:int; wave32:bool
   private_segment_size:int; kernargs_segment_size:int; kernargs_alloc_size:int
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int
+  signature:tuple[tuple[ParamArg, tuple], ...]
 
-_amd_program_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
+_amd_program_cache:dict[tuple[bytes, tuple[str, ...], tuple[tuple[ParamArg, tuple], ...]], UOp] = {}
 def amd_build_program(prg:UOp) -> UOp:
   dev = Device[to_tuple(prg.device)[0]] # TODO: rm this
   # key on the full device tuple: the same lib can be built for different device sets, each needs its own program buffer
-  if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, to_tuple(prg.device)))) is None:
+  obj = prg.to_elf()
+  if (cached:=_amd_program_cache.get(key:=(lib:=obj.lib, to_tuple(prg.device), obj.signature))) is None:
     image, sections, relocs = elf_loader(lib)
     rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
     for off, sym, typ, addent in relocs:
@@ -300,7 +302,8 @@ def amd_build_program(prg:UOp) -> UOp:
       rsrc2=desc.compute_pgm_rsrc2 | (lds<<15), rsrc3=desc.compute_pgm_rsrc3,
       wave32=bool(desc.kernel_code_properties & 0x400), private_segment_size=desc.private_segment_fixed_size, kernargs_segment_size=desc.kernarg_size,
       kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0), enable_dispatch_ptr=edp,
-      enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)
+      enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER,
+      signature=obj.signature)
     image = bytes(image).ljust(round_up(len(image), 4), b"\x00") # the program is uploaded as whole dwords
     buf = UOp.placeholder((len(image),), dtypes.uint8, next(UOp.unique_num), device=prg.device).rtag("program")
     cached = _amd_program_cache[key] = prg.replace(src=(buf.after(make_binary_patch(buf, image)),), arg=(data, prg.arg))

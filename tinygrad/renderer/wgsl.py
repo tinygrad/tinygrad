@@ -96,7 +96,7 @@ class WGSLRenderer(CStyleLanguage):
   def render_cast(self, u:UOp, val: str) -> str: return f"{self.type_map[u.dtype]}({val})"
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True, override_ptr=False, shape=None): return "var"
   def render_load(self, x:str, u:UOp) -> str: return f"atomicLoad(&{x})" if is_packed(u) else x
-  def buf_map(self, u:UOp) -> str: return "atomic<u32>" if is_packed(u) else self.type_map[u.dtype]
+  def buf_map(self, u:UOp) -> str: return "atomic<u32>" if is_packed(u) and u.addrspace is not AddrSpace.ALU else self.type_map[u.dtype]
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[UOp,bool]]], uops:list[UOp], prefix=None) -> str:
     local_size = [u.src[0].ssimplify() for u in sorted([u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == 'l'], key=lambda u: u.arg)]
     if not local_size: local_size = [1]
