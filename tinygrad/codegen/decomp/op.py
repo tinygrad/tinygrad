@@ -54,9 +54,9 @@ def xidiv32(x:UOp, a:UOp, b:UOp) -> UOp:
   z = (b.float().reciprocal() * UOp.const(2**32 - 256, dtypes.float32)).cast(dtypes.uint32)
   z = z + _mulhi32(z, (b*z).bitcast(dtypes.int32).neg())
   q = _mulhi32(a, z)
-  r = a.alu(Ops.SUB, q*b)
-  q, r = (r < b).where(q, q + 1), (r < b).where(r, r.alu(Ops.SUB, b))
-  if signed: q = (q ^ s).alu(Ops.SUB, s)
+  r = a - q*b
+  q, r = (r < b).where(q, q + 1), (r < b).where(r, r - b)
+  if signed: q = (q ^ s) - s
   return q.cast(x.dtype)
 
 # ***** threefry *****
