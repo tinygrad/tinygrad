@@ -12,8 +12,8 @@ WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
 WAVES_M, WAVES_N, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 2, 16
 WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * WAVES_N
 LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_M, WMMA_N, WMMA_K), 'AMD', 32), math.log2(math.e)
-Q4_K, Q5_K, Q6_K, IQ4_XS, GGML_BLOCK_SIZE, Q8_GROUP_SIZE, Q4_WORDS, Q5_WORDS, Q6_BYTES, IQ4_WORDS = 12, 13, 14, 23, 256, 32, 36, 44, 210, 34
-QUANT_SIZES = {Q4_K: Q4_WORDS*4, Q5_K: Q5_WORDS*4, Q6_K: Q6_BYTES, IQ4_XS: IQ4_WORDS*4}  # bytes per 256-weight block
+Q4_K, Q5_K, Q6_K, Q8_0, IQ4_XS, GGML_BLOCK_SIZE, Q8_GROUP_SIZE, Q4_WORDS, Q5_WORDS, Q6_BYTES, IQ4_WORDS = 12, 13, 14, 8, 23, 256, 32, 36, 44, 210, 34
+QUANT_SIZES = {Q4_K: Q4_WORDS*4, Q5_K: Q5_WORDS*4, Q6_K: Q6_BYTES, Q8_0: 272, IQ4_XS: IQ4_WORDS*4}  # bytes per 256-weight block
 
 def kernel_var(x:UOp) -> UOp:
   # a Variable is a 0-d ALU BUFFER in the tensor graph; inside kernels it takes the ALU PARAM form (same name keeps the value binding)
@@ -30,7 +30,18 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   if device is None or device.split(":")[0] != "AMD": return False
   # @function contexts set ALLOW_DEVICE_USAGE=0 (scheduling must not open devices); the device is always open here
   with Context(ALLOW_DEVICE_USAGE=1):
+    return (t:=getattr(Device[device], "target", None)) is not None and t[0] in (11, 12)
+@functools.cache
+def amd_custom_attention_supported(device:str|tuple[str, ...]|None) -> bool:
+  # the flash-attention prefill kernels' WMMA fragment layouts are still gfx11-only (linear is gfx11+gfx12)
+  if isinstance(device, tuple): device = device[0]
+  if device is None or device.split(":")[0] != "AMD": return False
+  with Context(ALLOW_DEVICE_USAGE=1):
     return (t:=getattr(Device[device], "target", None)) is not None and t[0] == 11
+
+def _amd_target_major(device:str) -> int|None:
+  with Context(ALLOW_DEVICE_USAGE=1):
+    return None if (t:=getattr(Device[device.split(":")[0]], "target", None)) is None else t[0]
 
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
@@ -61,7 +72,7 @@ class Linear(nn.Linear):
     self.ggml_type = packed_sizes[prod(raw.shape)]
     # store a typed buffer view: a lazy BITCAST is decomposed into byte-combining ALU before custom-kernel
     # scheduling and would copy the entire packed weight on every JIT graph
-    packed_dtype = dtypes.uint8 if self.ggml_type == Q6_K else dtypes.uint32
+    packed_dtype = dtypes.uint8 if self.ggml_type in (Q6_K, Q8_0) else dtypes.uint32
     self.weight = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer)
       .view(raw.max_numel() * raw.dtype.itemsize // packed_dtype.itemsize, packed_dtype, raw_offset)))
   def __call__(self, x:Tensor) -> Tensor:
@@ -69,7 +80,7 @@ class Linear(nn.Linear):
     if self.ggml_type is None and supported:
       self.set_quantized(self.weight)
       if self.ggml_type is None: self.use_custom_quant = supported = False  # not a supported quant format
-    if self.ggml_type in (Q4_K, Q5_K, Q6_K, IQ4_XS) and supported:
+    if self.ggml_type in (Q4_K, Q5_K, Q6_K, Q8_0, IQ4_XS) and supported:
       if isinstance(x.numel(), int): return q8_linear(self, x)
       # symbolic token count: pad to the max chunk size so the kernels see static shapes, garbage rows are sliced off
       out = q8_linear(self, x.pad_to(x.max_shape))
@@ -172,6 +183,15 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_
         dot = _amd_dp4a(_iq4_bytes(packed, 4*(word_idx//4)), xwords[word_idx], dot)
       d, scale = _iq4_scales(raw, base, subgroup)
       return dot.float() * xd[token, group] * d * scale
+    if ggml_type == Q8_0:
+      # Q8_0: 34 bytes per 32 values — f16 scale then 32 int8 (raw is byte-typed for Q8_0)
+      base = (output * in_features//Q8_GROUP_SIZE + group) * 34
+      dot = UOp.const(0, dtypes.int32)
+      for word_idx in range(8):
+        word = sum((raw[base + 2 + word_idx*4 + j].cast(dtypes.uint32) << (8*j) for j in range(4)), UOp.const(0, dtypes.uint32))
+        dot = _amd_dp4a(word, xwords[word_idx], dot)
+      d = (raw[base].cast(dtypes.uint16) | (raw[base+1].cast(dtypes.uint16) << 8)).bitcast(dtypes.float16).float()
+      return dot.float() * d * xd[token, group]
     base = (output*in_features//GGML_BLOCK_SIZE+block)*Q6_BYTES
     dots = [UOp.const(0, dtypes.int32)] * 2
     for word_idx in range(8):
@@ -184,8 +204,38 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, out_features:int, in_
     scales = [raw[base + 192 + subgroup*2+i].cast(dtypes.uint8).bitcast(dtypes.int8).float() for i in range(2)]
     dbits = raw[base+208].cast(dtypes.uint16) | (raw[base+209].cast(dtypes.uint16) << 8)
     return (dots[0].float()*scales[0] + dots[1].float()*scales[1]) * xd[token, group] * _half(dbits)
-  names = {Q4_K: "linear_q4_k", Q5_K: "linear_q5_k", IQ4_XS: "linear_iq4_xs", Q6_K: "linear_q6"}
+  names = {Q4_K: "linear_q4_k", Q5_K: "linear_q5_k", IQ4_XS: "linear_iq4_xs", Q6_K: "linear_q6", Q8_0: "linear_q8_0"}
   return _decode_linear(out, out_features, group_count, group_dot, names[ggml_type])
+
+# ******** packed embedding gather (keeps the dequantized embedding from materializing) ********
+def make_packed_embedding(weight:Tensor):
+  """Return an embed(tokens)->Tensor callable for a packed-quant embedding weight, or None if unsupported.
+  Supports IQ4_XS (the common embedding quant); falls back to generic nn.Embedding otherwise."""
+  packed_sizes = {weight.numel() // 256 * type_size:typ for typ,type_size in QUANT_SIZES.items()}
+  raw = next((u for u in weight.uop.toposort() if u.op is Ops.SHRINK and prod(u.shape) in packed_sizes), None)
+  if raw is None or packed_sizes[prod(raw.shape)] != IQ4_XS: return None
+  off = raw.contiguous_view_offset()
+  buf = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer)
+    .view(raw.max_numel() * raw.dtype.itemsize, dtypes.uint8, off)))
+  vocab, dim = weight.shape
+  nblk = dim // 256
+  bytes2d = buf.reshape(vocab, nblk * 136)
+  from tinygrad.runtime.autogen.ggml_common import kvalues_iq4nl
+  lut = Tensor(kvalues_iq4nl, dtype=dtypes.float16)
+  def embed(tokens:Tensor) -> Tensor:
+    shape = tokens.shape
+    d = Tensor.arange(dim, dtype=dtypes.int32)
+    blk, sg, v = d // 256, (d % 256) // 32, d % 32
+    rows = bytes2d[tokens].reshape(-1, nblk * 136)             # gather first: (prod(T), nblk*136)
+    qs_b = rows[:, blk*136 + 8 + sg*16 + (v % 16)]             # (prod(T), dim)
+    nib = (qs_b >> ((v // 16)*4).cast(dtypes.uint8)) & 15
+    lo = rows[:, blk*136 + 0].cast(dtypes.uint16) | (rows[:, blk*136 + 1].cast(dtypes.uint16) << 8)
+    d_f16 = lo.bitcast(dtypes.float16).float()
+    sc_l = (rows[:, blk*136 + 4 + sg//2] >> (4*(sg % 2)).cast(dtypes.uint8)) & 15
+    sc_h = (rows[:, blk*136 + 2 + sg//4] >> (2*(sg % 4)).cast(dtypes.uint8)) & 3
+    scale = ((sc_l | (sc_h << 4)).cast(dtypes.uint8).bitcast(dtypes.int8) - 32).float()
+    return (lut[nib].float() * d_f16 * scale).reshape(*shape, dim)
+  return embed
 
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
@@ -198,9 +248,10 @@ def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
   tokens = tuple(tuple(token_block*token_tile + tile*16 + half*8 + i for i in range(8)) for tile in range(token_tile//16))
   return output_waves, token_block, output_block, lane, wave, half, outputs, inputs, tokens
 
-def _wmma_stores(out, outputs, tokens, accs, update, half):
+def _wmma_stores(out, outputs, tokens, accs, update, half, gfx12:bool=False):
   def values(acc:UOp) -> tuple[UOp, ...]:
     vals = tuple(acc.after(update)[i].load() for i in range(8))
+    if gfx12: return vals  # gfx12 acc: lane L holds rows (L/16)*8+i directly — no inter-half exchange
     swapped = tuple(UOp(Ops.CUSTOM, dtypes.float32, (value,),
       arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {0}), 50688))") for value in vals)
     low = half.eq(0)
@@ -208,7 +259,7 @@ def _wmma_stores(out, outputs, tokens, accs, update, half):
   return [out[token, output].store(value) for output,output_accs in zip(outputs, accs)
           for tile_tokens,acc in zip(tokens, output_accs) for token,value in zip(tile_tokens, values(acc))]
 
-def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, dequant, name):
+def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, dequant, name, gfx12:bool=False):
   x = x.reshape(out.shape[0], in_features)
   _, token_block, output_block, lane, wave, physical_half, outputs, input_tokens, tokens = layout
   token_tile, output_tiles = len(tokens)*16, len(outputs)
@@ -219,21 +270,34 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
   group = UOp.range(in_features // Q8_GROUP_SIZE, 4, AxisType.REDUCE)
   block, subgroup = group // 8, group % 8
   wmma_accs = [list(output_accs) for output_accs in accs]
+  # gfx12 wmma takes 8-wide input fragments (vs gfx11's redundant 16-wide): each lane supplies
+  # k = (hw_lane//16)*4 + {0..3} and +8+{0..3} of the 16-wide window; m/n = hw_lane%16 rows as before.
+  KS0, KS1 = (0,1,2,3,8,9,10,11), (4,5,6,7,12,13,14,15)
   for half in range(2):
-    afrags = tuple(UOp.stack(*(x[input_token, group*32 + half*16 + i].cast(dtypes.float16) for i in range(16)))
-                   for input_token in input_tokens)
+    if gfx12:
+      kbase = group*32 + half*16 + physical_half*4
+      afrags = tuple(UOp.stack(*(x[input_token, kbase + (i%4) + 8*(i//4)].cast(dtypes.float16) for i in range(8)))
+                     for input_token in input_tokens)
+    else:
+      afrags = tuple(UOp.stack(*(x[input_token, group*32 + half*16 + i].cast(dtypes.float16) for i in range(16)))
+                     for input_token in input_tokens)
     for output_tile,output in enumerate(outputs):
-      bfrag = UOp.stack(*dequant(output*output_words + block*type_words, subgroup, half))
+      d = dequant(output*output_words + block*type_words, subgroup, half)
+      if gfx12:
+        low = physical_half.eq(0)
+        bfrag = UOp.stack(*(low.where(d[KS0[i]], d[KS1[i]]) for i in range(8)))
+      else:
+        bfrag = UOp.stack(*d)
       for tile,afrag in enumerate(afrags):
         previous = accs[output_tile][tile].after(group) if half == 0 else wmma_accs[output_tile][tile]
         wmma_accs[output_tile][tile] = UOp.wmma(afrag, bfrag, previous, *WMMA_ARG)
   update = UOp.group(*(acc.store(value) for output_accs,output_values in zip(accs, wmma_accs)
                        for acc,value in zip(output_accs, output_values))).end(group)
-  return UOp.group(*_wmma_stores(out, outputs, tokens, accs, update, physical_half)).end(token_block, output_block, lane, wave).sink(
+  return UOp.group(*_wmma_stores(out, outputs, tokens, accs, update, physical_half, gfx12=gfx12)).end(token_block, output_block, lane, wave).sink(
     arg=KernelInfo(name=name, opts_to_apply=()))
 
 @functools.cache
-def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int) -> UOp:
+def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int, gfx12:bool=False) -> UOp:
   token_tile, output_tiles = (64, 1) if out_features <= 1024 and out.shape[0] % 64 == 0 else \
     (64, 2) if out.shape[0] % 64 == 0 else (32 if out.shape[0] % 32 == 0 else 16, 2)
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
@@ -244,10 +308,10 @@ def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_fea
     return tuple(((word >> (byte*8) & 255).float()*d*scale-dmin*minimum).cast(dtypes.float16) for word in words for byte in range(4))
   return _quant_linear_wmma(out, x, out_features, in_features, Q4_WORDS if ggml_type == Q4_K else Q5_WORDS,
                             _wmma_layout(out, out_features, token_tile, output_tiles), dequant,
-                            f"linear_q{4 if ggml_type == Q4_K else 5}_k_f16_wmma")
+                            f"linear_q{4 if ggml_type == Q4_K else 5}_k_f16_wmma", gfx12=gfx12)
 
 @functools.cache
-def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:int, in_features:int) -> UOp:
+def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:int, in_features:int, gfx12:bool=False) -> UOp:
   token_tile = 32 if out_features <= 1024 and out.shape[0] % 32 == 0 else 64 if out.shape[0] % 64 == 0 and \
     (out_features <= 6144 or out_features == 5120 and in_features > 8192) else 128 if out.shape[0] % 128 == 0 else \
     32 if out.shape[0] % 32 == 0 else 16
@@ -268,10 +332,10 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
     lut_pairs = (lut[(nibble(packed, i) | nibble(packed, i+1)<<4).cast(dtypes.weakint)]
                  for packed in (raw[base+2+subgroup*4+i] for i in range(4)) for i in (0, 2))
     return tuple((_half((pair >> (i*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in lut_pairs for i in range(2))
-  return _quant_linear_wmma(out, x, out_features, in_features, IQ4_WORDS, layout, dequant, "linear_iq4_xs_f16_wmma")
+  return _quant_linear_wmma(out, x, out_features, in_features, IQ4_WORDS, layout, dequant, "linear_iq4_xs_f16_wmma", gfx12=gfx12)
 
 def q8_linear(layer:Linear, x:Tensor) -> Tensor:
-  assert layer.ggml_type in (Q4_K, Q5_K, Q6_K, IQ4_XS)
+  assert layer.ggml_type in (Q4_K, Q5_K, Q6_K, Q8_0, IQ4_XS)
   tokens = int(x.numel()) // layer.in_features
   raw, out_features, in_features = layer.weight.uop.buf_uop, layer.out_features, layer.in_features
   def run(fxn:Callable[..., UOp], out:UOp, *srcs:UOp) -> Tensor:
@@ -284,7 +348,9 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
     return result if layer.bias is None else result + layer.bias
   out = Tensor.empty(tokens, out_features, dtype=dtypes.float32, device=x.device).uop
   if tokens % 16 == 0 and out_features % 16 == 0 and layer.ggml_type in (Q4_K, Q5_K, IQ4_XS):
-    fxn = _iq4_linear_f16_wmma_kernel if layer.ggml_type == IQ4_XS else functools.partial(_q5_linear_f16_wmma_kernel, ggml_type=layer.ggml_type)
+    gfx12 = _amd_target_major(str(x.device)) == 12
+    fxn = functools.partial(_iq4_linear_f16_wmma_kernel if layer.ggml_type == IQ4_XS else _q5_linear_f16_wmma_kernel, gfx12=gfx12)
+    if layer.ggml_type != IQ4_XS: fxn = functools.partial(fxn, ggml_type=layer.ggml_type)
     extra = (iq4_half_lut(str(x.device)).uop,) if layer.ggml_type == IQ4_XS else ()
     return run(fxn, out, raw, x.cast(dtypes.float16).contiguous().uop, *extra)
   xq, xd = q8_quantize(x, tokens, in_features)
