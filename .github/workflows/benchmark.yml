@@ -102,12 +102,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -149,12 +148,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -198,12 +196,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
@@ -241,12 +238,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -287,12 +283,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -340,12 +335,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -588,9 +582,8 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} rmmod
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} kill_pids
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} rmmod --expect
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} kill_pids --sudoless
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
