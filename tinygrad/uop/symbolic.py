@@ -312,6 +312,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
                         else y.src for y in x.src[1:]]))))),
   # after/end with 1 src is just src[0]
   (UPat((Ops.AFTER, Ops.END), src=(UPat.var("s"),)), lambda s: s),
+  # ranges can be subbed for CONSTs, remove them from ENDs
+  (UPat(Ops.END, name="x"), lambda x: x.replace(src=(x.src[0],)+tuple([r for r in x.src[1:] if r.op is not Ops.CONST]))),
   # the rules above key on bare CONSTs, so a redundantly committed const has to be uncast in the same fixpoint
 ])+div_and_mod_symbolic+pm_uncast_const
 
