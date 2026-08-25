@@ -30,7 +30,7 @@ class Estimates:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
           excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op is not Ops.END)))
     for u in uops:
-      if u.op in {Ops.LOAD, Ops.STORE}:
+      if u.op in {Ops.LOAD, Ops.STORE} or (u.op is Ops.CUSTOMI and isinstance(u.arg, str) and "nontemporal_load" in u.arg):
         buf = u
         while len(buf.src) and buf.op is not Ops.PARAM: buf = buf.src[0]
         if buf.op is Ops.PARAM:

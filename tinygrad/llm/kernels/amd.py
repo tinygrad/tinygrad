@@ -314,9 +314,10 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
       pairs = tuple(lut[((raw[base + 2 + subgroup*4 + word] >> (byte*8)) & 255).cast(dtypes.weakint)]
                     for word in range(4) for byte in range(4))
       return tuple((_half((pair >> (half*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in pairs)
-    def nibble(packed:UOp, index:int): return (packed >> (8*index+4*half)) & 15
-    lut_pairs = (lut[(nibble(packed, i) | nibble(packed, i+1)<<4).cast(dtypes.weakint)]
-                 for packed in (raw[base+2+subgroup*4+i] for i in range(4)) for i in (0, 2))
+    # a subgroup-half gathers the lo (half=0) or hi (half=1) nibbles of byte pairs of each packed word
+    lut_pairs = (lut[(((raw[base+2+subgroup*4+i] >> (8*j+4*half)) & 15) |
+                      (((raw[base+2+subgroup*4+i] >> (8*j+8+4*half)) & 15) << 4)).cast(dtypes.weakint)]
+                 for i in range(4) for j in (0, 2))
     return tuple((_half((pair >> (i*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in lut_pairs for i in range(2))
   return _quant_linear_wmma(out, x, out_features, in_features, IQ4_WORDS, layout, dequant, "linear_iq4_xs_f16_wmma")
 
