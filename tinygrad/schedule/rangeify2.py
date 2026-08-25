@@ -287,6 +287,10 @@ pm_remove_stage = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), remove_stage),
 ])+fix_mselect_mstack
 
+pm_remove_index = PatternMatcher([
+  (UPat(Ops.STAGE, name="s").index(name="idx", allow_any_len=True), lambda s,idx: s.src[0] if s.src[1:] == idx.src[1:] else None),
+])
+
 @rewrite_group(new_ctx=False)
 def get_kernel_graph(sink:UOp) -> UOp:
   # TODO: multi should just be part of rangeify
@@ -323,9 +327,27 @@ def get_kernel_graph(sink:UOp) -> UOp:
   # simple rangeify
   tsink = graph_rewrite(tsink, pm_range_creation+pm_range_migration, ctx=itertools.count(0), bottom_up=True, name="simple rangeify")
 
-  # TODO: merging and splitting algorithm
-
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
+
+  # ***** MERGING AND SPLITTING (should be totally optional) *****
+
+  while 1:
+    staged: dict[UOp, list[UOp]] = {}
+    for u in tsink.toposort():
+      if u.op is Ops.INDEX and u.src[0].op is Ops.STAGE:
+        staged.setdefault(u.src[0], []).append(u)
+    replacements = {}
+    for stage,lst in staged.items():
+      if len(lst) == 1:
+        if all(r.op is Ops.RANGE and r.arg[1] == AxisType.WEAK for r in lst[0].src[1:]):
+          for old,new in zip(stage.src[1:], lst[0].src[1:]): replacements[old] = new
+    if len(replacements) == 0: break
+    tsink = tsink.substitute(replacements)
+    tsink = graph_rewrite(tsink, pm_remove_index, name="remove noop index")
+
+  # ***** MERGING AND SPLITTING (should be totally optional) *****
+
+  if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Merged Rangeify")
 
   tsink = graph_rewrite(tsink, pm_remove_stage, ctx=next_buffer_num, bottom_up=True, name="remove stage")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
