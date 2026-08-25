@@ -185,18 +185,18 @@ class TestViz(unittest.TestCase):
     @dataclass(frozen=True)
     class TestStruct:
       colored_field: str
-    a = UOp(Ops.CUSTOM, arg=TestStruct(colored("xyz", "magenta")+colored("12345", "blue")))
+    a = UOp(Ops.PYLITERAL, arg=TestStruct(colored("xyz", "magenta")+colored("12345", "blue")))
     a2 = uop_to_json(VizData(), a)[id(a)]
-    self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
+    self.assertEqual(ansistrip(a2["label"]), f"PYLITERAL\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
   def test_colored_label_multiline(self):
     with save_viz() as viz:
       arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
       src = [Tensor.empty(1).uop for _ in range(10)]
-      a = UOp(Ops.CUSTOM, src=tuple(src), arg=arg)
+      a = UOp(Ops.PYLITERAL, src=tuple(src), arg=arg)
       exec_rewrite(a, [PatternMatcher([])])
     a2 = next(viz.get_details(0, 0))["graph"][id(a)]
-    self.assertEqual(ansistrip(a2["label"]), "CUSTOM\nx\nyzww\nw")
+    self.assertEqual(ansistrip(a2["label"]), "PYLITERAL\nx\nyzww\nw")
 
   def test_inf_loop(self):
     a = UOp.const(3)
@@ -347,7 +347,7 @@ class TestVizGC(unittest.TestCase):
       init = bufs_allocated()
       a = UOp.new_buffer("NULL", 10, dtypes.char)
       a.buffer.allocate()
-      exec_rewrite(UOp(Ops.CUSTOM, src=(a,), arg=a), [PatternMatcher([])])
+      exec_rewrite(UOp(Ops.PYLITERAL, src=(a,), arg=a), [PatternMatcher([])])
       del a
       self.assertEqual(bufs_allocated()-init, 0)
     lst = viz.list_items()
@@ -474,7 +474,7 @@ class TestVizIntegration(unittest.TestCase):
     def custom_fn(X:UOp):
       X = X.flatten()
       i = UOp.range(X.numel(), 0)
-      custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg="{} + undeclared_name")
+      custom_op = UOp(Ops.CUSTOMI, src=(X[i],), arg=("{} + undeclared_name", X.dtype))
       return X[i].store(custom_op).end(i).sink(arg=KernelInfo(name=f"custom_fn_{X.numel()}"))
     x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_fn)[0]
     with save_viz() as viz:
