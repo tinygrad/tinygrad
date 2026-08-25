@@ -8,6 +8,10 @@ from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
+def walk_mop(u:UOp):
+  if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD}: return walk_mop(u.src[0])
+  return u
+
 def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
   if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, after = x.src[0], after.cast(dtypes.float)
   while True:
@@ -146,9 +150,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="shp"),), name="cpy"), lambda shp,cpy: shp.src[0].copy_to_device(cpy.device).reshape(shp.shape)),
 
   # reshaping on STORE can be a NOOP
-  (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),
-                        UPat(Ops.RESHAPE, src=(UPat.var("src",),), allow_any_len=True))),
-   lambda dst,src: dst.store(src) if dst.shape == src.shape else None),
+  #(UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),
+  #                      UPat(Ops.RESHAPE, src=(UPat.var("src",),), allow_any_len=True))),
+  # lambda dst,src: dst.store(src) if dst.shape == src.shape else None),
 
   # ** store rules **
 
@@ -174,6 +178,23 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if 0 in x.shape and 0 not in reduce.shape else None),
   # handle size 0
   (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and 0 in x.shape else None),
+
+  # ** new prepare **
+
+  # CALL inputs need buffer identity (and to be flat)
+  (UPat(Ops.CALL, name="c"),
+   lambda c: c.replace(src=c.src[0:1]+tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src[1:]))),
+
+  # MSTACK inputs need buffer identity
+  (UPat(Ops.MSTACK, name="c"),
+   lambda c: c.replace(src=tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src))),
+
+  # STORE to () is reshaped to (1,)
+  (UPat(Ops.STORE, name="s"), lambda s: s.src[0].reshape((1,)).store(s.src[1].reshape((1,))) if s.shape == () else None),
+
+  # remove movement ops from SINK/AFTER. TODO: should be generic
+  (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src if u.op is not Ops.NOOP))),
+  (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u) for u in s.src[1:] if u.op is not Ops.NOOP))),
 ])
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
