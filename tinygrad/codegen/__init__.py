@@ -145,11 +145,6 @@ ew_devectorizer = PatternMatcher([
   (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
 ])
 
-def lower_scalar_expand(x:UOp, out:UOp) -> UOp|None:
-  if x.shape != () or not all_int(out.shape): return None
-  for size in reversed(out.shape): x = UOp.stack(*([x]*size))
-  return x
-
 devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
@@ -168,7 +163,8 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
   # EXPAND on scalar -> nested STACKs with the same shape
-  (UPat(Ops.EXPAND, src=(UPat.var("x"), UPat()), name="out"), lower_scalar_expand),
+  (UPat(Ops.EXPAND, src=(UPat.var("x"), UPat()), name="out"),
+   lambda x,out: functools.reduce(lambda x,s: UOp.stack(*([x]*s)), reversed(out.shape), x) if x.shape == () and all_int(out.shape) else None),
 ])
 
 def fix_group_for_reduce(x:UOp):
