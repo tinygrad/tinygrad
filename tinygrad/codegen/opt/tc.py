@@ -153,7 +153,6 @@ pm_validate_wmma_rdna3 = PatternMatcher([
 
 pm_validate_wmma_rdna4 = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16), lambda x: x.replace(
-    dtype=dtypes.uint16,
     src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2].bitcast(dtypes.uint16)))
       .bitcast(dtypes.bfloat16) if x.max_numel() == 8 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None),
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
