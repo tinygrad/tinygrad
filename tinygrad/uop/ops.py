@@ -123,7 +123,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # a CALL of an opaque body is void, a CALL of an address can return a value
       return dtypes.void if src[0].dtype is dtypes.void else None
     case Ops.CUSTOM | Ops.CUSTOMI:
-      return None
+      return arg[1] if isinstance(arg, tuple) else dtypes.void
     case Ops.INS:
       return None
     case Ops.NOOP:
