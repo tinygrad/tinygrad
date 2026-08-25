@@ -32,7 +32,8 @@ class HCQInfo:
 
   input_idxs:tuple[tuple[tuple[str, ...], tuple[int, ...]], ...] = () # per inputs table: (devices, indexes into input_uops)
   inputs:int|None = None # index of the inputs table in call.src
-  kernels:tuple[tuple[tuple[str, ...], UOp, tuple[int, ...]], ...] = () # per kernel: (devices, a call carrying its name and estimates, timestamps)
+  # per kernel: (devices, name, estimates, timestamps, profile key)
+  kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = ()
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -271,7 +272,7 @@ def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...]]], profile:bool) -> li
     # and make hcq call
     name, info = get_call_name(call, get_call_arg_uops(call)), HCQInfo(devices, estimate_uop(call))
     ts_ids = [next(UOp.unique_num) for _ in range(2)] if profile else []
-    kerns.append((devices, make_call(name, call.src[0], info), tuple(ts_ids)))
+    kerns.append((devices, name, info.estimates, tuple(ts_ids), make_call(name, call.src[0], info).key))
 
     ts_ins = [UOp(Ops.INS, arg="timestamp", src=(make_buf(devices, s),)) for s in ts_ids]
     q += ts_ins[:1] + [call.replace(arg=replace(call.arg, aux=info))] + ts_ins[1:]
