@@ -8,6 +8,7 @@ the interpreter takes for it, including which branches ignore encoded source
 modifiers (``_IGNORE_MODS``) and which apply them.
 """
 import array
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, TypeGuard
 
@@ -28,7 +29,6 @@ _HALF_TYPES = {mesa.TYPE_F16, mesa.TYPE_U16, mesa.TYPE_S16, mesa.TYPE_U8}
 _FLOAT_TYPES = {mesa.TYPE_F16, mesa.TYPE_F32}
 _SIGNED_TYPES = {mesa.TYPE_S16, mesa.TYPE_S32}
 _BYTE_TYPES = {mesa.TYPE_U8, mesa.TYPE_U8_32}
-
 # The interpreter takes a dedicated branch for these opcodes that reads raw
 # operands, so encoded modifiers must be ignored rather than rejected.
 _IGNORE_MODS = {'add.u', 'cmps.u', 'cmps.s', 'shrg', 'shrm', 'shlm', 'shlg', 'andg',
@@ -46,6 +46,37 @@ class UnsupportedIR3Block(Exception):
   """The decoded block needs the ordinary machine-code interpreter."""
 
 
+class IR3UOpLoopTimeout(RuntimeError):
+  """Internal signal: scalar-replay this staged loop through its exact fuel limit."""
+  def __init__(self, start_pc: int):
+    super().__init__(f'IR3 native loop exhausted fuel at PC {start_pc}')
+    self.start_pc = start_pc
+
+
+@dataclass
+class IR3UOpRunnerStats:
+  """Small, resettable counters for the optional native block and loop paths."""
+  attempts: int = 0
+  runs: int = 0
+  native_calls: int = 0
+  fallbacks: int = 0
+  cache_hits: int = 0
+  compiled: int = 0
+  iterations: int = 0
+  load_checks: int = 0
+  load_rejections: int = 0
+  block_attempts: int = 0
+  block_runs: int = 0
+  block_compiles: int = 0
+  block_declines: int = 0
+  cache_evictions: int = 0
+
+  def reset(self) -> None:
+    self.attempts = self.runs = self.native_calls = self.fallbacks = self.cache_hits = 0
+    self.compiled = self.iterations = self.load_checks = self.load_rejections = 0
+    self.block_attempts = self.block_runs = self.block_compiles = self.block_declines = self.cache_evictions = 0
+
+
 def _register(value: Any) -> TypeGuard[Register]:
   return isinstance(value, tuple) and len(value) == 3 and value[0] not in {'rel', 'relr', 'relhr'}
 
@@ -53,6 +84,9 @@ def _register(value: Any) -> TypeGuard[Register]:
 def _advance(src: Register | int, component: int, repeated: bool) -> Register | int:
   if not repeated: return src
   return src + component if isinstance(src, int) else _reg_offset(src, component)
+
+def _full_constant(src: Register | int) -> Register | None:
+  return ('c', src[1], src[2]) if _register(src) and src[0] == 'hc' else None
 
 
 def _mask(value: UOp, bits: int) -> UOp:
@@ -63,6 +97,8 @@ def _sign_extend(value: UOp, bits: int) -> UOp:
   sign = UOp.const(1 << (bits - 1), dtypes.uint32)
   return (_mask(value, bits) ^ sign) - sign
 
+def _as_int32(value: UOp) -> UOp: return _mask(value, 32).bitcast(dtypes.int32)
+
 
 def _output_mask(value: UOp, dst: Register) -> UOp:
   return _mask(value, 16 if dst[0].startswith('h') else 32)
@@ -71,9 +107,13 @@ def _output_mask(value: UOp, dst: Register) -> UOp:
 def _const(value: int | float, dtype) -> UOp: return UOp.const(value, dtype)
 
 def _comparison(lhs: UOp, rhs: UOp, condition: int) -> UOp:
-  comparisons = (lhs < rhs, lhs <= rhs, lhs > rhs, lhs >= rhs, lhs == rhs, lhs != rhs)
-  if not 0 <= condition < len(comparisons) or not isinstance(comparison := comparisons[condition], UOp):
-    raise UnsupportedIR3Block('invalid or constant-folded IR3 comparison')
+  if condition == 0: comparison = lhs < rhs
+  elif condition == 1: comparison = lhs <= rhs
+  elif condition == 2: comparison = lhs > rhs
+  elif condition == 3: comparison = lhs >= rhs
+  elif condition == 4: comparison = lhs.ne(rhs).logical_not()
+  elif condition == 5: comparison = lhs.ne(rhs)
+  else: raise UnsupportedIR3Block('invalid IR3 comparison condition')
   return comparison.cast(dtypes.uint32)
 
 
@@ -86,9 +126,10 @@ class IR3UOpBlock:
   dirty_slots: tuple[tuple[Register, int], ...]
   runtime: Any
   regfile: Buffer
+  words: memoryview
 
   def run(self, regs: dict[Register, list[int]], mask: list[bool]) -> None:
-    words = self.regfile.as_memoryview(force_zero_copy=True).cast('I')
+    words = self.words
     for slot, reg in enumerate(self.slots):
       values = regs.get(reg)
       if values is None: values = [0] * self.lanes
@@ -122,7 +163,9 @@ class _Lowerer:
         keys.add(_reg_offset(inst.dst, component))
         for src, repeat in zip(inst.srcs, repeat_srcs, strict=True):
           advanced = _advance(src, component, repeat)
-          if _register(advanced): keys.add(advanced)
+          if _register(advanced):
+            keys.add(advanced)
+            if (full := _full_constant(advanced)) is not None: keys.add(full)
     return tuple(sorted(keys))
 
   @staticmethod
@@ -143,7 +186,6 @@ class _Lowerer:
     self.values[dst] = self.mask.where(_output_mask(value, dst), self.read(dst))
     self.dirty.add(dst)
 
-
   # ---- typed operand views -------------------------------------------------
 
   # The interpreter evaluates float ALU in Python doubles and repacks, so every
@@ -162,7 +204,15 @@ class _Lowerer:
     return value.cast(dtypes.float32).bitcast(dtypes.uint32)
 
   def float_source(self, inst: IR3Instruction, index: int, component: int, half: bool) -> UOp:
-    value = self.unpack_float(self.read(self.sources(inst, component)[index]), half)
+    src = self.sources(inst, component)[index]
+    raw = self.read(src)
+    # Half float ALU constants may name a full-float constant slot. A6xx converts the full
+    # value to f16 when its upper half is populated; integer/bit consumers still use raw hc.
+    if half and (full_reg := _full_constant(src)) is not None:
+      full = self.read(full_reg)
+      converted = self.pack_float(self.unpack_float(full, False), True)
+      raw = (full >> _const(16, dtypes.uint32)).ne(_const(0, dtypes.uint32)).where(converted, _mask(raw, 16))
+    value = self.unpack_float(raw, half)
     modifier = inst.src_mods[index] if index < len(inst.src_mods) else 0
     if modifier:
       # neg/abs/-abs on a float equal sign-bit ops on the packed bits, including -0.0 and NaN payloads.
@@ -176,31 +226,36 @@ class _Lowerer:
     value = self.read(self.sources(inst, component)[index])
     modifier = inst.src_mods[index] if index < len(inst.src_mods) else 0
     if not modifier: return value
-    signed = _sign_extend(value, 16 if inst.source_half else 32).cast(dtypes.int32)
+    signed = _as_int32(_sign_extend(value, 16 if inst.source_half else 32))
     absolute = (signed < _const(0, dtypes.int32)).where(signed * _const(-1, dtypes.int32), signed)
     out = signed * _const(-1, dtypes.int32) if modifier == 1 else absolute if modifier == 2 else absolute * _const(-1, dtypes.int32)
     return out.cast(dtypes.uint32)
 
   @staticmethod
   def int_operand(value: UOp, signed: bool, bits: int) -> UOp:
-    return _sign_extend(value, bits).cast(dtypes.int32) if signed else _mask(value, bits)
+    return _as_int32(_sign_extend(value, bits)) if signed else _mask(value, bits)
 
   def convert(self, value: UOp, src_type: int, dst_type: int) -> UOp:
     if src_type == dst_type: return _mask(value, 16 if src_type in _HALF_TYPES else 32)
     if src_type in _FLOAT_TYPES:
       number = self.unpack_float(value, src_type == mesa.TYPE_F16)
       if dst_type in _FLOAT_TYPES: return self.pack_float(number, dst_type == mesa.TYPE_F16)
-      # NOTE: the interpreter truncates unrepresentable magnitudes with Python arbitrary precision; native C
-      # casts saturate. Real kernels convert in-range indices, so this lowering accepts that divergence.
-      finite = (number - number) == _const(0.0, dtypes.float64)
-      return _mask(finite.where(number.cast(dtypes.int32), _const(0, dtypes.int32)).cast(dtypes.uint32),
-                   8 if dst_type in _BYTE_TYPES else 16 if dst_type in _HALF_TYPES else 32)
+      exponent = _const(0x7c00 if src_type == mesa.TYPE_F16 else 0x7f800000, dtypes.uint32)
+      finite = (value.cast(dtypes.uint32) & exponent).ne(exponent)
+      dst_bits = 8 if dst_type in _BYTE_TYPES else 16 if dst_type in _HALF_TYPES else 32
+      # IR3 conversion truncates and then keeps the destination-width low bits. Avoid native float-to-int
+      # saturation at signed/unsigned limits by reducing the integral value modulo 2**width before the cast.
+      integral = (number < _const(0.0, dtypes.float64)).where(number.ceil(), number.floor())
+      modulus = _const(float(1 << dst_bits), dtypes.float64)
+      wrapped = integral - (integral / modulus).floor() * modulus
+      return _mask(finite.where(wrapped.cast(dtypes.uint32), _const(0, dtypes.uint32)), dst_bits)
     src_bits = 8 if src_type in _BYTE_TYPES else 16 if src_type in _HALF_TYPES else 32
     if src_type == mesa.TYPE_U8 and dst_type in _SIGNED_TYPES: value = _sign_extend(value, 8)
     elif src_type in _SIGNED_TYPES: value = _sign_extend(value, src_bits)
     else: value = _mask(value, src_bits)
     if dst_type in _FLOAT_TYPES:
-      return self.pack_float(value.cast(dtypes.int32 if src_type in _SIGNED_TYPES else dtypes.uint32).cast(dtypes.float64),
+      number = _as_int32(value) if src_type in _SIGNED_TYPES else value.cast(dtypes.uint32)
+      return self.pack_float(number.cast(dtypes.float64),
                              dst_type == mesa.TYPE_F16)
     dst_bits = 8 if dst_type in _BYTE_TYPES else 16 if dst_type in _HALF_TYPES else 32
     return _mask(value, dst_bits)
@@ -229,8 +284,8 @@ class _Lowerer:
       a, b, c = (self.read(src) for src in self.sources(inst, component))
       signed, bits = name in {'mad.s16', 'mad.s24'}, 16 if name.endswith('16') else 24
       if signed:
-        product = self.int_operand(a, True, bits).cast(dtypes.int32) * self.int_operand(b, True, bits).cast(dtypes.int32)
-        out = product + c.cast(dtypes.int32)
+        product = self.int_operand(a, True, bits) * self.int_operand(b, True, bits)
+        out = product + _as_int32(c)
       else: out = self.int_operand(a, False, bits) * self.int_operand(b, False, bits) + c
       self.write(dst, out)
     elif name == 'madsh.m16':
@@ -240,9 +295,9 @@ class _Lowerer:
       self.write(dst, ((_mask(a, 16) * _mask(b >> 16, 16)) << 16) + c)
     elif name.startswith('sad.'):
       a, b, c = (self.read(src) for src in self.sources(inst, component))
-      difference = a.cast(dtypes.int32) - b.cast(dtypes.int32)
+      difference = _as_int32(a) - _as_int32(b)
       absolute = (difference < _const(0, dtypes.int32)).where(difference * _const(-1, dtypes.int32), difference)
-      self.write(dst, c.cast(dtypes.int32) + absolute)
+      self.write(dst, _as_int32(c) + absolute)
     elif name.startswith('sel.'):
       a, b, c = (self.read(src) for src in self.sources(inst, component))
       self.write(dst, b.ne(_const(0, dtypes.uint32)).where(a, c))
@@ -272,7 +327,7 @@ class _Lowerer:
     if name == 'absneg.s':
       if len(inst.srcs) != 1: raise UnsupportedIR3Block('invalid absneg.s source count')
       modifier = inst.src_mods[0] if inst.src_mods else 0
-      value = _sign_extend(self.read(self.sources(inst, component)[0]), 16 if inst.source_half else 32).cast(dtypes.int32)
+      value = _as_int32(_sign_extend(self.read(self.sources(inst, component)[0]), 16 if inst.source_half else 32))
       absolute = (value < _const(0, dtypes.int32)).where(value * _const(-1, dtypes.int32), value)
       self.write(dst, value * _const(-1, dtypes.int32) if modifier == 1 else absolute if modifier == 2 else
                  absolute * _const(-1, dtypes.int32) if modifier == 3 else value)
@@ -280,14 +335,18 @@ class _Lowerer:
     if len(inst.srcs) != 1: raise UnsupportedIR3Block(f'invalid {name} source count')
     value = self.float_source(inst, 0, component, inst.source_half)
     zero, one = _const(0.0, dtypes.float64), _const(1.0, dtypes.float64)
+    exponent = _const(0x7ff0000000000000, dtypes.uint64)
+    bits = value.bitcast(dtypes.uint64)
+    finite = (bits & exponent).ne(exponent)
+    is_zero = (bits & _const((1 << 63) - 1, dtypes.uint64)).ne(_const(0, dtypes.uint64)).logical_not()
     if name == 'absneg.f': out = value
     elif name == 'sign.f': out = (value < zero).where(_const(-1.0, dtypes.float64), (value > zero).where(one, value))
-    elif name == 'floor.f': out = (value - value == zero).where(value.floor(), value)
-    elif name == 'ceil.f': out = (value - value == zero).where(value.ceil(), value)
+    elif name == 'floor.f': out = finite.where(is_zero.where(zero, value.floor()), value)
+    elif name == 'ceil.f': out = finite.where(is_zero.where(zero, value.ceil()), value)
     elif name == 'rndaz.f':
       # round-toward-zero of the magnitude with the sign restored: copysign(ceil(|x|), x).
       magnitude = (value.bitcast(dtypes.uint64) & _const((1 << 63) - 1, dtypes.uint64)).bitcast(dtypes.float64)
-      out = (value - value == zero).where(
+      out = finite.where(
         (magnitude.ceil().bitcast(dtypes.uint64) | (value.bitcast(dtypes.uint64) & _const(1 << 63, dtypes.uint64)))
         .bitcast(dtypes.float64), value)
     elif name == 'rcp': out = one / value
@@ -323,9 +382,12 @@ class _Lowerer:
       return
     a, b = (self.int_source(inst, index, component) for index in range(2))
     if name in ('add.u', 'add.s', 'sub.u', 'sub.s'): out = a + b if name.startswith('add') else a - b
-    elif name == 'cmpv.u': self.write(dst, _comparison(_mask(a, 32), _mask(b, 32), inst.condition)); return
+    elif name == 'cmpv.u':
+      self.write(dst, _comparison(_mask(a, 32), _mask(b, 32), inst.condition))
+      return
     elif name == 'cmpv.s':
-      self.write(dst, _comparison(self.int_operand(a, True, source_bits), self.int_operand(b, True, source_bits), inst.condition)); return
+      self.write(dst, _comparison(self.int_operand(a, True, source_bits), self.int_operand(b, True, source_bits), inst.condition))
+      return
     elif name == 'min.u': out = (_mask(a, 32) <= _mask(b, 32)).where(a, b)
     elif name == 'max.u': out = (_mask(a, 32) >= _mask(b, 32)).where(a, b)
     elif name == 'min.s': out = self.int_minmax(a, b, source_bits, True)
@@ -338,7 +400,7 @@ class _Lowerer:
       out = _mask(a, bits) * _mask(b, bits)
     elif name == 'mul.s24':
       bits = 16 if inst.source_half else 24
-      out = self.int_operand(a, True, bits).cast(dtypes.int32) * self.int_operand(b, True, bits).cast(dtypes.int32)
+      out = self.int_operand(a, True, bits) * self.int_operand(b, True, bits)
     elif name == 'mull.u': out = _mask(a, 16) * _mask(b, 16)
     elif name == 'shl.b': out = a << (b & _const(31, dtypes.uint32))
     elif name == 'shr.b': out = _mask(a, 32) >> (b & _const(31, dtypes.uint32))
@@ -359,31 +421,110 @@ class _Lowerer:
     runtime = get_runtime('CPU', program)
     regfile = Buffer('CPU', (self.mask_slot + 1) * self.lanes, dtypes.uint32).allocate()
     return IR3UOpBlock(len(self.instructions), self.lanes, self.keys,
-                       tuple((reg, self.slot[reg]) for reg in sorted(self.dirty)), runtime, regfile)
+                       tuple((reg, self.slot[reg]) for reg in sorted(self.dirty)), runtime, regfile,
+                       regfile.as_memoryview(force_zero_copy=True).cast('I'))
 
 
 class IR3UOpRunner:
-  """Compile supported decoded, straight-line IR3 ALU runs to CPU UOps."""
-  def __init__(self, min_instructions: int = 8):
-    self.min_instructions = min_instructions
-    self.cache: dict[tuple[int, int, int, int], IR3UOpBlock] = {}
-    self.uncompilable: set[tuple[int, int, int, int]] = set()
-    self.program_blocks: dict[int, tuple[tuple[IR3Instruction, ...], dict[int, int]]] = {}
+  """Compile supported decoded IR3 ALU blocks and conservative single-lane natural loops to CPU UOps."""
+  def __init__(self, min_instructions: int = 8, max_instructions: int = 64, max_register_slots: int = 128,
+               max_average_register_slots: int = 40, max_compiled_blocks: int = 512, max_block_locations: int = 8192,
+               max_programs: int = 128, max_compiled_loops: int = 32, max_loop_locations: int = 64,
+               max_narrow_compiled_blocks: int | None = None, max_regular_narrow_compiled_blocks: int | None = None):
+    if not 1 <= min_instructions <= max_instructions: raise ValueError('invalid native IR3 block instruction limits')
+    if not 1 <= max_average_register_slots <= max_register_slots: raise ValueError('invalid native IR3 block register limits')
+    if min(max_compiled_blocks, max_block_locations, max_programs, max_compiled_loops, max_loop_locations) < 1:
+      raise ValueError('invalid native IR3 cache limits')
+    if max_narrow_compiled_blocks is None: max_narrow_compiled_blocks = min(384, max_compiled_blocks)
+    if not 1 <= max_narrow_compiled_blocks <= max_compiled_blocks: raise ValueError('invalid narrow IR3 compile budget')
+    if max_regular_narrow_compiled_blocks is None: max_regular_narrow_compiled_blocks = min(128, max_narrow_compiled_blocks)
+    if not 1 <= max_regular_narrow_compiled_blocks <= max_narrow_compiled_blocks:
+      raise ValueError('invalid regular narrow IR3 compile budget')
+    self.min_instructions, self.max_instructions = min_instructions, max_instructions
+    self.max_register_slots, self.max_average_register_slots = max_register_slots, max_average_register_slots
+    self.max_compiled_blocks, self.max_block_locations, self.max_programs = max_compiled_blocks, max_block_locations, max_programs
+    self.max_compiled_loops, self.max_loop_locations = max_compiled_loops, max_loop_locations
+    self.max_narrow_compiled_blocks = max_narrow_compiled_blocks
+    self.max_regular_narrow_compiled_blocks = max_regular_narrow_compiled_blocks
+    self.cache: OrderedDict[tuple[int, int, int, int], IR3UOpBlock] = OrderedDict()
+    self.uncompilable: OrderedDict[tuple[int, int, int, int], None] = OrderedDict()
+    self.program_blocks: OrderedDict[int, tuple[tuple[IR3Instruction, ...], dict[int, int]]] = OrderedDict()
+    self.program_policy: OrderedDict[tuple[int, bool], tuple[tuple[IR3Instruction, ...], bool]] = OrderedDict()
     # Structurally identical blocks (same register layout, lanes, and instruction forms) share one
     # compiled program, so equivalent sequences in different shaders never recompile.
-    self.compiled: dict[tuple, IR3UOpBlock] = {}
+    self.compiled: OrderedDict[tuple, IR3UOpBlock] = OrderedDict()
+    self.compiled_classes: dict[tuple, str] = {}
+    self.loop_cache: OrderedDict[tuple[int, int], tuple[tuple[IR3Instruction, ...], Any]] = OrderedDict()
+    self.loop_uncompilable: OrderedDict[tuple[int, int], None] = OrderedDict()
+    self.compiled_loops: OrderedDict[tuple, Any] = OrderedDict()
+    self.stats = IR3UOpRunnerStats()
+    self._vmem: Buffer | None = None
+
+  @staticmethod
+  def _put_lru(cache: OrderedDict, key, value, limit: int):
+    cache[key] = value
+    cache.move_to_end(key)
+    return cache.popitem(last=False) if len(cache) > limit else None
+
+  @staticmethod
+  def _get_lru(cache: OrderedDict, key):
+    if key not in cache: return None
+    cache.move_to_end(key)
+    return cache[key]
+
+  def _evict_compiled_class(self, block_class: str) -> bool:
+    for signature in tuple(self.compiled):
+      if self.compiled_classes.get(signature) != block_class: continue
+      block = self.compiled.pop(signature)
+      del self.compiled_classes[signature]
+      for location, cached_block in tuple(self.cache.items()):
+        if cached_block is block: del self.cache[location]
+      self.stats.cache_evictions += 1
+      return True
+    return False
 
   @staticmethod
   def _supported(inst: IR3Instruction) -> bool:
     if inst.name == 'nop': return True
-    if inst.name not in _NATIVE or not _register(inst.dst) or inst.sat: return False
+    if inst.name not in _NATIVE or not _register(inst.dst) or inst.sat or (inst.name == 'mov' and inst.rounding): return False
     return not any(isinstance(src, tuple) and src[0] in {'rel', 'relr', 'relhr'} for src in inst.srcs)
+
+  @classmethod
+  def _loop_shape(cls, program: tuple[IR3Instruction, ...], start_pc: int) -> Any:
+    from test.mockgpu.qcom.loop_runner import loop_shape
+    return loop_shape(program, start_pc, cls._supported)
+
+  @classmethod
+  def has_loop(cls, program: tuple[IR3Instruction, ...]) -> bool:
+    from test.mockgpu.qcom.loop_runner import has_loop
+    return has_loop(program, cls._supported)
+
+  @staticmethod
+  def _select_memory_bounds(regs: dict[Register, list[int]], bounds: tuple[tuple[int, int], ...]) -> tuple[tuple[int, int], ...] | None:
+    from test.mockgpu.qcom.loop_runner import _select_memory_bounds
+    return _select_memory_bounds(regs, bounds)
+
+  def _vmem_buffer(self) -> Buffer:
+    from test.mockgpu.qcom.loop_runner import _vmem_buffer
+    return _vmem_buffer(self)
+
+  def _loop_block(self, program: tuple[IR3Instruction, ...], start_pc: int) -> Any:
+    from test.mockgpu.qcom.loop_runner import loop_block
+    return loop_block(self, program, start_pc)
+
+  def try_run_loop(self, program: tuple[IR3Instruction, ...], start_pc: int, regs: dict[Register, list[int]], exec_mask: list[bool], *,
+                   check_range=None, memory_bounds: tuple[tuple[int, int], ...] | None = None,
+                   max_steps: int | None = None) -> tuple[int, int] | None:
+    """Run one eligible decoded-IR3 natural loop in a single native CPU call."""
+    from test.mockgpu.qcom.loop_runner import try_run_loop
+    return try_run_loop(self, program, start_pc, regs, exec_mask, check_range=check_range,
+                        memory_bounds=memory_bounds, max_steps=max_steps)
 
   def _blocks(self, program: tuple[IR3Instruction, ...]) -> dict[int, int]:
     # decode_ir3 caches and reuses each exact program tuple.  Key by identity
     # here so the hot scheduler never hashes thousands of decoded instructions.
     program_id = id(program)
-    if (cached := self.program_blocks.get(program_id)) is not None and cached[0] is program: return cached[1]
+    if (cached := self._get_lru(self.program_blocks, program_id)) is not None and cached[0] is program: return cached[1]
     blocks: dict[int, int] = {}
     pc = 0
     while pc < len(program):
@@ -392,38 +533,90 @@ class IR3UOpRunner:
         continue
       start = pc
       while pc < len(program) and self._supported(program[pc]): pc += 1
-      end, remaining = pc, sum(inst.name != 'nop' for inst in program[start:pc])
+      end = pc
       for candidate in range(start, end):
-        if remaining >= self.min_instructions: blocks[candidate] = end
-        remaining -= program[candidate].name != 'nop'
-    self.program_blocks[program_id] = (program, blocks)
+        stop, count = candidate, 0
+        while stop < end and count < self.max_instructions:
+          count += program[stop].name != 'nop'
+          stop += 1
+        if count >= self.min_instructions: blocks[candidate] = stop
+    if (evicted := self._put_lru(self.program_blocks, program_id, (program, blocks), self.max_programs)) is not None:
+      self.stats.cache_evictions += 1
+      evicted_id = evicted[0]
+      for policy_key in tuple(self.program_policy):
+        if policy_key[0] == evicted_id: del self.program_policy[policy_key]
+      for key in tuple(self.cache):
+        if key[0] == evicted_id: del self.cache[key]
+      for key in tuple(self.uncompilable):
+        if key[0] == evicted_id: del self.uncompilable[key]
     return blocks
+
+  def can_run_blocks(self, program: tuple[IR3Instruction, ...], lanes: int = 1) -> bool:
+    """Reject programs whose native chunks spend more time marshalling registers than interpreting IR3."""
+    program_id, wide = id(program), lanes >= 16
+    policy_key = (program_id, wide)
+    if (cached := self._get_lru(self.program_policy, policy_key)) is not None and cached[0] is program: return cached[1]
+    blocks = self._blocks(program)
+    ranges, covered_until = [], 0
+    for start, end in sorted(blocks.items()):
+      if start < covered_until: continue
+      ranges.append((start, end))
+      covered_until = end
+    pressures = [len(_Lowerer(program[start:end], 1).keys) for start, end in ranges]
+    average_limit = self.max_register_slots if wide else self.max_average_register_slots
+    enabled = bool(pressures) and sum(pressures) <= average_limit * len(pressures) and \
+      max(pressures) <= self.max_register_slots
+    self._put_lru(self.program_policy, policy_key, (program, enabled), self.max_programs * 2)
+    return enabled
 
   def try_run(self, program: tuple[IR3Instruction, ...], start_pc: int, regs: dict[Register, list[int]],
               exec_mask: list[bool], predication: list[bool] | None = None,
-              mask_pcs: frozenset[int] | None = None) -> int | None:
+              mask_pcs: frozenset[int] | None = None, *, policy_checked: bool = False) -> int | None:
     """Return the next PC when accelerated, or ``None`` for exact interpreter fallback."""
     if not regs: return None
+    lanes = len(next(iter(regs.values())))
+    if not policy_checked and not self.can_run_blocks(program, lanes): return None
+    self.stats.block_attempts += 1
     if (end_pc := self._blocks(program).get(start_pc)) is None: return None
     # A pending branch reconvergence inside the range would change the write mask mid-block;
     # leave those ranges to the interpreter, which re-enters native execution after the merge.
     if mask_pcs is not None and any(start_pc < target < end_pc for target in mask_pcs): return None
-    lanes = len(next(iter(regs.values())))
     if len(exec_mask) != lanes: return None
     mask = exec_mask if predication is None else [active and pred for active, pred in zip(exec_mask, predication, strict=True)]
     key = (id(program), start_pc, end_pc, lanes)
     try:
-      if (block := self.cache.get(key)) is None and key not in self.uncompilable:
+      if (block := self._get_lru(self.cache, key)) is None and key not in self.uncompilable:
         lowerer = _Lowerer(program[start_pc:end_pc], lanes)
+        if len(lowerer.keys) > self.max_register_slots: raise UnsupportedIR3Block('native IR3 block register pressure is too high')
         signature = (lanes, lowerer.keys, tuple((inst.name, inst.dst, inst.srcs, inst.repeat, inst.repeat_srcs,
                                                 inst.src_mods, inst.condition, inst.types, inst.sat, inst.rounding,
                                                 inst.source_half) for inst in lowerer.instructions))
-        block = self.compiled.get(signature)
-        if block is None: block = self.compiled[signature] = lowerer.compile()
-        self.cache[key] = block
+        block = self._get_lru(self.compiled, signature)
+        if block is None:
+          if lanes >= 16:
+            block_class = 'wide'
+            class_limit = self.max_compiled_blocks - self.max_narrow_compiled_blocks
+          else:
+            block_class = 'priority_narrow' if len(program) >= 256 else 'regular_narrow'
+            class_limit = self.max_regular_narrow_compiled_blocks if block_class == 'regular_narrow' else \
+              self.max_narrow_compiled_blocks - self.max_regular_narrow_compiled_blocks
+          class_count = sum(value == block_class for value in self.compiled_classes.values())
+          if class_count >= class_limit:
+            if block_class == 'regular_narrow' or not self._evict_compiled_class(block_class):
+              raise UnsupportedIR3Block(f'{block_class} native IR3 block compile budget exhausted')
+          if len(self.compiled) >= self.max_compiled_blocks and not self._evict_compiled_class(block_class):
+            raise UnsupportedIR3Block('native IR3 block compile budget exhausted')
+          block = lowerer.compile()
+          self.stats.block_compiles += 1
+          self.compiled[signature] = block
+          self.compiled_classes[signature] = block_class
+        if self._put_lru(self.cache, key, block, self.max_block_locations) is not None:
+          self.stats.cache_evictions += 1
       if block is None: return None
       block.run(regs, mask)
+      self.stats.block_runs += 1
       return start_pc + block.length
     except UnsupportedIR3Block:
-      self.uncompilable.add(key)
+      self.stats.block_declines += 1
+      self._put_lru(self.uncompilable, key, None, self.max_block_locations * 2)
       return None

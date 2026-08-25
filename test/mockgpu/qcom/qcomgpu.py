@@ -85,19 +85,26 @@ class A630GPU(VirtGPU):
         if not ranges: del self.mapped_pages[page]
     else: self.mapped_ranges[key] = count - 1
 
-  def _mapped_size(self, address:int) -> int:
-    if containing := [start + length - address for start, length in self.mapped_pages.get(address >> 12, ()) if start <= address < start + length]:
-      return max(containing)
+  def _mapped_bounds(self, address:int) -> tuple[int, int]:
+    if containing := [(start, start + length) for start, length in self.mapped_pages.get(address >> 12, ())
+                      if start <= address < start + length]:
+      return max(containing, key=lambda bounds: bounds[1] - address)
     nearby = sorted((start, start + length) for start, length in self.mapped_ranges if abs(start - address) < 0x100000)[:8]
     raise RuntimeError(f"QCOM kernel referenced unmapped address {address:#x}; nearby mappings={nearby}")
+
+  def _mapped_size(self, address:int) -> int:
+    return self._mapped_bounds(address)[1] - address
 
   def _validate_memory(self, address:int, size:int):
     try: end = _range_end(address, size, "A630 memory range")
     except ValueError as exc: raise RuntimeError(str(exc)) from None
-    try: available = self._mapped_size(address)
-    except RuntimeError: available = 0
-    if size > available:
+    try: bounds = self._mapped_bounds(address)
+    except RuntimeError: bounds = (address, address)
+    if end > bounds[1]:
       raise RuntimeError(f"A630 referenced unmapped range {address:#x}..{end:#x}")
+    # Native mock executors may use these bounds to gate every dynamic access. Existing callers
+    # only depend on validation and intentionally ignore the return value.
+    return bounds
 
   def execute(self, address:int, size:int):
     if size % 4: raise ValueError(f"A630 command buffer size must be dword aligned, got {size}")

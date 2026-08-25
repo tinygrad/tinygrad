@@ -63,6 +63,19 @@ FLOAT_ALU_COMPARE = _literal("float_alu_compare", (0x5010000E0002000A, 0x4070000
   "Mesa compiler output", "cat2-float")
 BACKWARD_BRANCH = _literal("backward_branch", (0x4250000020010000, 0x429500F820000000, 0x00800000FFFFFFFE),
   ("sub.u r0.x, r0.x, 1", "cmps.u.ne p0.x, r0.x, 0", "br p0.x, #-2"), "A630 ISA regression literal", "control")
+MESA_STD_HOT_PREHEADER = _literal("mesa_std_hot_preheader", (0x202CC00000000004, 0x202CC00100000005, 0x204CC00300000000,
+  0x204CC00400000000, 0x0000030000000000, 0xC006000201800001),
+  ("mov.u32u32 r0.x, c1.x", "mov.u32u32 r0.y, c1.y", "mov.u32u32 r0.w, 0", "mov.u32u32 r1.x, 0", "nop",
+   "ldg.u32 r0.z, g[r0.x], 1"), "Mesa compiler output from x.std() backward shape (15,25,35)", "preheader-cat1-cat6")
+MESA_STD_HOT_LOOP = _literal("mesa_std_hot_loop", (0x47100005201F0003, 0x46D8000620020003, 0x46D0000520020005,
+  0x4218000700061002, 0x650184050005301E, 0x4290500010020007, 0x4210080320010003, 0x4210000500051003,
+  0x2009400900000000, 0x42BB00F810100003, 0x4218080800050009, 0x0000020000000000, 0xC006000A0181C001,
+  0x5018080A4002000A, 0x638500040004000A, 0x0080000000000002, 0x01000000FFFFFFF0),
+  ("ashr.b r1.y, r0.w, 31", "shl.b r1.z, r0.w, 2", "shl.b r1.y, r1.y, 2", "add.u r1.w, c0.z, r1.z",
+   "shrg r1.y, 30, r0.w, r1.y", "cmps.u.lt hr0.x, r1.w, c0.z", "add.u r0.w, r0.w, 1", "add.u r1.y, c0.w, r1.y",
+   "mov.s16s32 r2.y, hr0.x", "cmps.s.ge p0.x, r0.w, c4.x", "add.u r2.x, r2.y, r1.y", "nop",
+   "ldg.u32 r2.z, g[r1.w], 1", "(sy)add.f r2.z, r2.z, r0.z", "mad.f32 r1.x, r2.z, r2.z, r1.x", "br p0.x, #2", "jump #-16"),
+  "Mesa compiler output from x.std() backward shape (15,25,35)", "natural-loop-cat2-cat3-cat6")
 MADSH_MAGIC_DIVIDE = _literal("madsh_magic_divide", (0x6182000C00080000, 0x46F000102011000C),
   ("madsh.m16 r3.x, r0.x, r1.x, r2.x", "shr.b r4.x, r3.x, 17"), "Mesa compiler output", "cat3-madsh")
 MADSH_REPEAT = _literal("madsh_repeat", (0x61878B2020198014,),

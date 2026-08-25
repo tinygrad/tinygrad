@@ -2,11 +2,23 @@ import ctypes, struct
 from typing import Any
 from tinygrad.runtime.autogen import mesa
 from test.mockgpu.qcom.decoder import decode_ir3
+from test.mockgpu.qcom.dispatch import (execute_dispatch as _execute_dispatch, native_memory_bounds as _native_memory_bounds,
+                                        use_native_blocks as _dispatch_use_native_blocks,
+                                        workgroup_batch_size as _dispatch_workgroup_batch_size)
 from test.mockgpu.qcom.registers import (_alu_runner, _compare, _convert, _float, _float_bits, _itemsize, _mod_float, _next_reg, _reg_offset,
-                                         _s32, _signed, _float_values, _values, _write, local_id_regs, workgroup_id_regs)
-from test.mockgpu.qcom.uop_runner import IR3UOpRunner
+                                         _s32, _signed, _float_values, _values, _write)
+from test.mockgpu.qcom.uop_runner import IR3UOpLoopTimeout, IR3UOpRunner
 
 _UOP_RUNNER = IR3UOpRunner()
+
+def _has_native_loop(program) -> bool:
+  return _UOP_RUNNER is not None and getattr(_UOP_RUNNER, 'has_loop', lambda _program: False)(program)
+
+def _use_native_blocks(grid_size, local_size) -> bool:
+  return _dispatch_use_native_blocks(grid_size, local_size)
+
+def _workgroup_batch_size(program, lane_count: int) -> int:
+  return _dispatch_workgroup_batch_size(program, lane_count, _has_native_loop)
 
 def _source_offset(src, offset):
   if isinstance(src, int): return src
@@ -91,13 +103,29 @@ def _write_targets(targets, mask, values, itemsize):
     lane = run
 
 def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:int=630, check_range=None, start_pc=0,
-                shared:bytearray|None=None, private:bytearray|list[bytearray]|None=None, stop_at_barrier=False, trace:dict|None=None,
-                textures=(), ibos=()):
-  program, pc, steps = decode_ir3(code, gpu_id), start_pc, 0
+                shared:bytearray|list[bytearray]|None=None, private:bytearray|list[bytearray]|None=None,
+                stop_at_barrier=False, trace:dict|None=None,
+                textures=(), ibos=(), memory_bounds:tuple[tuple[int, int], ...]|None=None, allow_native_blocks=True,
+                resume_state:dict[str, Any]|None=None):
+  program, pc = decode_ir3(code, gpu_id), start_pc
   step_limit = max(100000, len(program) * 65536)
-  lanes, predication = len(next(iter(regs.values()))), None
-  exec_mask = [True] * lanes
-  branch_frames: list[dict[str, Any]] = []
+  if memory_bounds is None: memory_bounds = _native_memory_bounds(check_range)
+  lanes = len(next(iter(regs.values())))
+  branch_frames: list[dict[str, Any]]
+  if resume_state:
+    steps = resume_state['steps']
+    predication = resume_state['predication']
+    exec_mask = resume_state['exec_mask']
+    branch_frames = resume_state['branch_frames']
+    native_loops_disabled = resume_state['native_loops_disabled']
+  else:
+    steps, predication = 0, None
+    exec_mask = [True] * lanes
+    branch_frames = []
+    native_loops_disabled = False
+  can_run_blocks = None if _UOP_RUNNER is None else getattr(_UOP_RUNNER, 'can_run_blocks', None)
+  native_blocks_enabled = allow_native_blocks and trace is None and _UOP_RUNNER is not None and \
+    (can_run_blocks is None or can_run_blocks(program, lanes))
   while pc < len(program):
     if branch_frames:
       frame = branch_frames[-1]
@@ -107,10 +135,22 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
       elif frame['alternate'] is not None and pc == frame['alternate'][0]:
         exec_mask = [a or b for a, b in zip(exec_mask, frame['alternate'][1], strict=True)]
         branch_frames.pop()
-    if trace is None and _UOP_RUNNER is not None and \
-       (next_pc := _UOP_RUNNER.try_run(program, pc, regs, exec_mask, predication, None if not branch_frames else
-         frozenset(target for frame in branch_frames for target in
-                   ((frame['reconv'] or (0,))[0], (frame['alternate'] or (0,))[0])))) is not None:
+    if trace is None and _UOP_RUNNER is not None and not native_loops_disabled and exec_mask == [True] and \
+       predication is None and not branch_frames:
+      try:
+        loop_result = _UOP_RUNNER.try_run_loop(program, pc, regs, exec_mask, check_range=check_range,
+                                              memory_bounds=memory_bounds, max_steps=step_limit - steps)
+      except IR3UOpLoopTimeout:
+        native_loops_disabled = True
+      else:
+        if loop_result is not None:
+          pc, loop_steps = loop_result
+          steps += loop_steps
+          continue
+    if native_blocks_enabled and \
+       (next_pc := _UOP_RUNNER.try_run(program, pc, regs, exec_mask, predication,
+         mask_pcs=None if not branch_frames else frozenset(target for frame in branch_frames for target in
+           ((frame['reconv'] or (0,))[0], (frame['alternate'] or (0,))[0])), policy_checked=True)) is not None:
       steps += next_pc - pc
       if steps > step_limit: raise RuntimeError(f'IR3 execution did not terminate at PC {pc}')
       pc = next_pc
@@ -123,7 +163,12 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
     if inst.name == 'nop': continue
     if inst.name == 'end': break
     if inst.name == 'bar':
-      if stop_at_barrier: return pc
+      if stop_at_barrier:
+        if resume_state is not None:
+          resume_state.clear()
+          resume_state.update(steps=steps, predication=predication, exec_mask=exec_mask, branch_frames=branch_frames,
+                              native_loops_disabled=native_loops_disabled)
+        return pc
       continue
     if inst.name == 'fence': continue
     if inst.name == 'jump':
@@ -294,7 +339,11 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
       itemsize, lanes = _itemsize(inst.types[0]), len(next(iter(regs.values())))
       if inst.name.endswith('l'):
         if shared is None: raise RuntimeError(f'IR3 {inst.name} has no backing memory')
-        memories = [shared] * lanes
+        if isinstance(shared, list):
+          if len(shared) != lanes or any(not isinstance(memory, bytearray) for memory in shared):
+            raise RuntimeError(f'IR3 {inst.name} requires {lanes} shared-memory lane mappings')
+          memories = shared
+        else: memories = [shared] * lanes
       else: memories = _private_lanes(private, lanes, inst.name)
       if inst.name.startswith('ld'):
         address_reg, offset, size = inst.srcs
@@ -456,12 +505,12 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
               continue
             raise RuntimeError(f'IR3 {inst.name} memory fault at PC {inst_pc}, lane {lane}, address={address:#x}') from exc
       fmt = '<%d%s' % (size, {1: 'B', 2: 'H', 4: 'I'}[itemsize])
-      components: list[list[int]] = [[] for _ in range(size)]
+      loaded_components: list[list[int]] = [[] for _ in range(size)]
       lane = 0
       while lane < lanes:
         address = addresses[lane] + offset
         if not valid_lanes[lane]:
-          for component in range(size): components[component].append(0)
+          for component in range(size): loaded_components[component].append(0)
           lane += 1
           continue
         # Batch maximal runs of lanes accessing consecutive memory with one read.
@@ -471,12 +520,12 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
         if run > lane + 1:
           data = struct.unpack(f'<{(run - lane) * size}{fmt[2]}', ctypes.string_at(address, (run - lane) * span))
           for index in range(run - lane):
-            for component in range(size): components[component].append(data[index * size + component])
+            for component in range(size): loaded_components[component].append(data[index * size + component])
         else:
           data = struct.unpack(fmt, ctypes.string_at(address, span))
-          for component in range(size): components[component].append(data[component])
+          for component in range(size): loaded_components[component].append(data[component])
         lane = run
-      for component in range(size): _write(regs, _reg_offset(inst.dst, component), components[component], write_mask)
+      for component in range(size): _write(regs, _reg_offset(inst.dst, component), loaded_components[component], write_mask)
       continue
     if inst.name == 'ldg.a':
       address_reg, index_reg, shift, size = inst.srcs
@@ -517,7 +566,9 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
       unit_mask = (1 << (itemsize * 8)) - 1
       lane = 0
       while lane < lanes:
-        if not write_mask[lane]: lane += 1; continue
+        if not write_mask[lane]:
+          lane += 1
+          continue
         address = addresses[lane] + offset
         # Consecutive lanes writing adjacent, disjoint slots go through one packed store.
         run = lane + 1
@@ -545,39 +596,12 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
                        _values(regs, _reg_offset(value_reg, component), lanes), itemsize)
       continue
     raise NotImplementedError(f'unsupported IR3 execution {inst.name}')
+  if resume_state is not None: resume_state.clear()
   return None
 
 def execute_dispatch(code, grid_size, local_size, local_id_register, initial_regs=None, check_range=None, workgroup_id_register=0xfc,
                      textures=(), ibos=(), global_id_register=0xfc, linear_group_register=0xfc, local_id_order=(0, 1, 2)):
-  lane_count = local_size[0] * local_size[1] * local_size[2]
-  uses_private = any(inst.name in {'ldp', 'stp'} for inst in decode_ir3(code))
-  all_local_ids = local_id_regs(local_size, local_id_register, local_id_order)
-  last_regs: dict[tuple[str, int, int], list[int]] = {}
-  for z in range(grid_size[2]):
-    for y in range(grid_size[1]):
-      for x in range(grid_size[0]):
-        waves, privates = [], []
-        for wave_start in range(0, lane_count, 64):
-          wave_lanes = min(64, lane_count - wave_start)
-          regs = {} if initial_regs is None else {key: values[wave_start:wave_start + wave_lanes] for key, values in initial_regs.items()}
-          regs.update({key: values[wave_start:wave_start + wave_lanes] for key, values in all_local_ids.items()})
-          if workgroup_id_register != 0xfc: regs.update(workgroup_id_regs((x, y, z), wave_lanes, workgroup_id_register))
-          if global_id_register != 0xfc:
-            regs.update(workgroup_id_regs((x * local_size[0], y * local_size[1], z * local_size[2]), wave_lanes, global_id_register))
-          if linear_group_register != 0xfc:
-            regs[('r', linear_group_register // 4, linear_group_register % 4)] = \
-              [x + grid_size[0] * (y + grid_size[1] * z)] * wave_lanes
-          waves.append(regs)
-          privates.append([bytearray(0x10000) for _ in range(wave_lanes)] if uses_private else None)
-        shared, pcs, done = bytearray(0x10000), [0] * len(waves), [False] * len(waves)
-        while not all(done):
-          reached_barrier: list[int] = []
-          for index, regs in enumerate(waves):
-            if done[index]: continue
-            next_pc = execute_ir3(code, regs, check_range=check_range, start_pc=pcs[index], shared=shared,
-                                  private=privates[index], stop_at_barrier=True, textures=textures, ibos=ibos)
-            if next_pc is None: done[index] = True
-            else: pcs[index], reached_barrier = next_pc, [*reached_barrier, index]
-          if reached_barrier and any(done): raise RuntimeError('IR3 barrier reached by only part of a workgroup')
-        last_regs = waves[-1]
-  return last_regs
+  """Run a mock A630 dispatch with workgroup scheduling in :mod:`dispatch`."""
+  return _execute_dispatch(execute_ir3, code, grid_size, local_size, local_id_register, initial_regs, check_range,
+                           workgroup_id_register, textures, ibos, global_id_register, linear_group_register, local_id_order,
+                           has_loop=_has_native_loop)
