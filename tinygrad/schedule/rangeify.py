@@ -278,7 +278,7 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
   # INDEX of a buffer through the weak cast added above: index the buffer directly and cast the loaded value instead.
   # this must run in the same rewrite that adds the cast, or the expander expands the whole casted buffer into one big VECTORIZE
   (UPat(Ops.INDEX, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("buf"),)),), allow_any_len=True, name="u"),
-   lambda u,buf: u.replace(dtype=None, src=(buf,)+u.src[1:]).cast(u.dtype)),
+   lambda u,buf: u.replace(src=(buf,)+u.src[1:]).cast(u.dtype)),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),

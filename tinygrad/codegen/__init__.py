@@ -126,7 +126,7 @@ def do_devectorize(b:UOp):
   if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
   src = []
   for idx_c in itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]):
-    src.append(b.replace(dtype=None, src=tuple(x.base if x.base.is_invalid else x.index(*idx_c) for x in b.src)))
+    src.append(b.replace(src=tuple(x.base if x.base.is_invalid else x.index(*idx_c) for x in b.src)))
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
