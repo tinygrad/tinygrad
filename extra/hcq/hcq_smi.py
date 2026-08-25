@@ -97,11 +97,13 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   backend_subparsers = parser.add_subparsers(dest="backend", required=True, metavar="{nv,amd}", help="Hardware backend to target")
 
-  nv_parser = backend_subparsers.add_parser("nv", help="NVIDIA GPUs")
+  nv_parser = backend_subparsers.add_parser("nv", aliases=["NV"], help="NVIDIA GPUs")
+  nv_parser.set_defaults(backend="nv")
   nv_commands = nv_parser.add_subparsers(dest="command", required=True)
   add_common_commands(nv_commands)
 
-  amd_parser = backend_subparsers.add_parser("amd", help="AMD GPUs")
+  amd_parser = backend_subparsers.add_parser("amd", aliases=["AMD"], help="AMD GPUs")
+  amd_parser.set_defaults(backend="amd")
   amd_commands = amd_parser.add_subparsers(dest="command", required=True)
   add_common_commands(amd_commands)
 

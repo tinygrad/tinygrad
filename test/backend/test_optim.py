@@ -87,7 +87,8 @@ class TestOptim(unittest.TestCase):
   def test_muon(self): self._test_muon(1, {'lr': 0.001}, 1e-3, 0)
   # TODO: disabled due to big atol
   # def test_muon_high_lr(self): self._test_muon(1, {'lr': 10}, 1e-6, 3e-4)
-  def test_muon_wd(self): self._test_muon(1, {'lr': 0.001, 'weight_decay': 0.01}, 1e-3, 3e-4)
+  # NOTE: big weight_decay so a missing wd would be way over atol
+  def test_muon_wd(self): self._test_muon(1, {'lr': 0.001, 'weight_decay': 10}, 1e-3, 3e-4)
   # TODO: disabled due to big atol
   # def test_muon_high_lr_wd(self): self._test_muon(1, {'lr': 10, 'weight_decay': 0.01}, 1e-6, 5e-4)
 

@@ -66,10 +66,10 @@ def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
 class ProfileDeviceEvent(ProfileEvent): device:str; tdiff:decimal.Decimal=decimal.Decimal(0); props:dict[str,Any]|None=None # noqa: E702
 
 @dataclass(frozen=True)
-class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None; tag:int|None=None # noqa: E702
+class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None; tag:int|None=None; profile_key:bytes|None=None # noqa: E702
 
 @dataclass(frozen=True)
-class ProfileGraphEntry: device:str; name:str|TracingKey; st_id:int; en_id:int # noqa: E702
+class ProfileGraphEntry: device:str; name:str|TracingKey; st_id:int; en_id:int; profile_key:bytes|None=None # noqa: E702
 
 @dataclass(frozen=True)
 class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[list[int]]; sigs:list[decimal.Decimal] # noqa: E702
@@ -83,6 +83,7 @@ class BufferSpec:
   cpu_access: bool = False
   host: bool = False
   nolru: bool = False
+  zero: bool = False
   external_ptr: int|None = None
 
 class MultiBuffer:
@@ -265,7 +266,7 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
       for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:BufferSpec|None=None):
-    if LRU and (options is None or (not options.nolru and options.external_ptr is None)): self.cache[(size, options)].append(opaque)
+    if LRU and (options is None or (not (options.nolru or options.zero) and options.external_ptr is None)): self.cache[(size, options)].append(opaque)
     else: super().free(opaque, size, options)
 
 class DepsTracker:
@@ -326,6 +327,7 @@ class TinyELF:
   target: Target
   # tuple of (name, slot, dtype, shape)
   signature: tuple[tuple[str|None, int, DType, tuple], ...]
+  profile_key: bytes|None = None
 
   @staticmethod
   def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:

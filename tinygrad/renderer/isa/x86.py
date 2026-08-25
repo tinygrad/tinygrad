@@ -143,16 +143,16 @@ extra_matcher = PatternMatcher([
   (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.int8s), UPat.var("b")),
    lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.max_numel() == 1 else None),
   # float16 alus are done in float32
-  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float,
-   tuple(s.cast(dtypes.float) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
+  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op,
+   src=tuple(s.cast(dtypes.float) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
   (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
    lambda x,a,b: UOp(x.op, src=(a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
   # no cmpne for packed ints, y != x => !(y==x)
   (UPat(Ops.CMPNE, src=(UPat.var("y", dtypes.ints), UPat.var("x")), name="cmp"),
    lambda y,x,cmp: UOp(Ops.CMPEQ, src=(y,x))^True if y.max_numel() > 1 else None),
-  # float where expects a mask
-  (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats), UPat.var("b")),
-   lambda m,a,b: m.cast(a.dtype).ne(0).where(a, b) if m.src[0].dtype not in dtypes.floats else None),
+  # float WHERE needs a mask unless its comparison already has a float operand
+  (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats+(dtypes.weakfloat,)), UPat.var("b")).named("w"),
+   lambda m,a,b,w: m.cast(w.dtype).ne(0).where(a, b) if w.dtype in dtypes.floats and not dtypes.is_float(m.src[0].dtype) else None),
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(0),) + x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
@@ -227,8 +227,7 @@ def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, dt, ar
 def imm(dt:DType, v:int) -> UOp: return UOp.cconst(truncate[dt](v), dt).rtag()
 def to_imm(c:UOp) -> UOp|None:
   if not (c.op is Ops.CAST and (v:=c.src[0]).op is Ops.CONST): return None
-  if c.dtype is dtypes.int64: return imm(dtypes.int32, v.val) if not v.overflows(dtypes.int32) else None
-  if c.dtype is dtypes.uint64: return imm(dtypes.uint32, v.val) if not v.overflows(dtypes.uint32) else None
+  if c.dtype in dtypes.int64s: return imm(dtypes.int32, v.val) if not v.overflows(dtypes.int32) else None
   if c.dtype in dtypes.ints+(dtypes.bool,): return imm(c.dtype, v.val)
   return None
 def cmp(x:UOp) -> UOp:
@@ -638,10 +637,12 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
       if sz == 2: inst += bytes([0x66])
       # bit signaling 64 bit variant of instruction
       w = sz == 8
-      # REX byte is required when 64 bit or an extended reg is used (index 8 - 15) or lower 8 bits of (rsp, rbp, rsi, rdi) are accessed
-      if w | r | _x | b | (reg_sz == 1 & reg >> 2) | (rm_sz == 1 & rm >> 2): inst += bytes([0b0100 << 4 | w << 3 | r << 2 | _x << 1 | b])
       # legacy 8bit opcode is 1 less than 16-64bit variants
-      if (rm_sz == 1 or reg_sz == 1) and x.arg not in X86GroupOp.ReadFlags | {X86Ops.LEA}: opc -= 1
+      demote = (rm_sz == 1 or reg_sz == 1) and x.arg not in X86GroupOp.ReadFlags | {X86Ops.LEA}
+      # REX byte is required when 64 bit or an extended reg is used (index 8 - 15) or lower 8 bits of (rsp, rbp, rsi, rdi) are accessed
+      if w | r | _x | b | (reg_sz == 1 & reg >> 2) | (rm_sz == 1 & rm >> 2) | (demote and disp_uop is None and rm >= 4):
+        inst += bytes([0b0100 << 4 | w << 3 | r << 2 | _x << 1 | b])
+      if demote: opc -= 1
     # OPCODE byte
     inst += opc.to_bytes((opc.bit_length() + 7) // 8, 'big')
     # MODRM byte
@@ -652,7 +653,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     # 0b10 -- signals memory access with 32bit displacement
     # 0b11 -- signals no memory access
     if disp_uop is not None:
-      assert disp_uop.op is Ops.CAST, "displacement must be a literal"
+      assert disp_uop.op is Ops.CAST, "displacement must be a const"
       assert disp_uop.dtype in (dtypes.int8, dtypes.int32), "displacement can only be 1 or 4 byte signed int"
       # rbp/r13 always require a displacement
       if disp_uop.src[0].val != 0 or rm == 0b101: mod = 0b01 if disp_uop.dtype.itemsize == 1 else 0b10
@@ -809,7 +810,8 @@ class X86Renderer(ISARenderer):
   device = "CPU"
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (NUM_CPU_THREADS.value, 0, 0)
+  @property
+  def global_max(self): return (NUM_CPU_THREADS.value, 0, 0)  # type: ignore[override]
   extra_matcher = extra_matcher
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
@@ -834,7 +836,7 @@ class X86Renderer(ISARenderer):
     if x.op is Ops.BUFFER: x = x.replace(dtype=dtypes.uint64)
     is_xmm = isinstance(x.tag, tuple) and x.tag[0].cons[0].size == 16
     op = X86Ops.VMOVUPSm if is_xmm else X86Ops.MOVm
-    return UOp(Ops.INS, dtypes.void, fold_address(self.stack_pointer().index(disp)) + (x,), op, x.tag)
+    return UOp(Ops.INS, src=fold_address(self.stack_pointer().index(disp)) + (x,), arg=op, tag=x.tag)
 
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp:
     is_xmm = reg.cons[0].size == 16

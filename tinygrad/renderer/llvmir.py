@@ -204,7 +204,8 @@ class LLVMRenderer(Renderer):
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (NUM_CPU_THREADS.value, 0, 0)
+  @property
+  def global_max(self): return (NUM_CPU_THREADS.value, 0, 0)  # type: ignore[override]
   abi = 'win64cc' if sys.platform == 'win32' else None
   string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
