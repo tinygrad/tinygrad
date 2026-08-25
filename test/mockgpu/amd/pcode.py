@@ -23,6 +23,7 @@ from tinygrad.codegen.decomp.dtype import f2f
 VarVal = UOp | tuple[str, list[str], str]
 
 def _const(dt, v): return UOp.const(v, dt)
+def _single_value(v: UOp): return v.vmin if v.vmin == v.vmax else None
 def _u32(v): return _const(dtypes.uint32, v)
 def _u64(v): return _const(dtypes.uint64, v)
 def _to_u32(v): return v if v.dtype == dtypes.uint32 else v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
@@ -70,8 +71,8 @@ def _expr_bits(v: UOp) -> int:
   if v.op in (Ops.AND, Ops.XOR):
     widths: list[int] = []
     for src in v.src:
-      if src.op == Ops.CONST and isinstance(src.val, int) and src.val > 0 and (src.val & (src.val + 1)) == 0:
-        widths.append(src.val.bit_length())
+      if isinstance(sv:=_single_value(src), int) and sv > 0 and (sv & (sv + 1)) == 0:
+        widths.append(sv.bit_length())
     if widths: return max(widths)
   return v.dtype.bitsize
 
@@ -159,9 +160,9 @@ def _minmax_reduce(is_max: bool, dt, *args: UOp) -> UOp:
 def _find_two_pi_mul(x):
   if x.op != Ops.MUL or len(x.src) != 2: return None
   for i, s in enumerate(x.src):
-    if s.op == Ops.CONST and abs(s.val - 6.283185307179586) < 1e-5: return (x.src[1-i], 6.283185307179586)
+    if (sv:=_single_value(s)) is not None and abs(sv - 6.283185307179586) < 1e-5: return (x.src[1-i], 6.283185307179586)
     if s.op == Ops.MUL and len(s.src) == 2:
-      vals = [ss.val for ss in s.src if ss.op == Ops.CONST] + [ss.src[0].val for ss in s.src if ss.op == Ops.CAST and ss.src[0].op == Ops.CONST]
+      vals = [sv for ss in s.src if (sv:=_single_value(ss)) is not None]
       if len(vals) == 2 and abs(vals[0] * vals[1] - 6.283185307179586) < 1e-5: return (x.src[1-i], vals[0] * vals[1])
   return None
 
@@ -178,7 +179,7 @@ def _trig_reduce(x, phase=0.0):
 
 def _signext(val: UOp) -> UOp:
   for bits, mask, ext in [(4, 0xF, 0xFFFFFFF0), (8, 0xFF, 0xFFFFFF00), (16, 0xFFFF, 0xFFFF0000)]:
-    if (val.op == Ops.AND and len(val.src) == 2 and val.src[1].op == Ops.CONST and val.src[1].val == mask) or val.dtype.itemsize == bits // 8:
+    if (val.op == Ops.AND and len(val.src) == 2 and _single_value(val.src[1]) == mask) or val.dtype.itemsize == bits // 8:
       v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
       sb = (v32 >> _u32(bits - 1)) & _u32(1)
       return sb.ne(_u32(0)).where(v32 | _u32(ext), v32).cast(dtypes.int)
@@ -549,7 +550,7 @@ class Parser:
         if not dtypes.is_int(right.dtype): right = right.cast(dtypes.uint32)
         return (left >> right) if op == '>>' else (left << right)
       case '+' | '-':
-        if op == '-' and left.op == Ops.CONST and right.op == Ops.CONST: return _const(left.dtype, left.val - right.val)
+        if op == '-' and (lv:=_single_value(left)) is not None and (rv:=_single_value(right)) is not None: return _const(left.dtype, lv - rv)
         return (left + right) if op == '+' else (left - right)
       case '*' | '/':
         # Integer promotion: promote 16-bit integers to 32-bit before multiply to avoid overflow
@@ -559,7 +560,7 @@ class Parser:
           left, right = left.cast(pdt), right.cast(pdt)
         if op == '*': return left * right
         return (left // right) if dtypes.is_int(left.dtype) else (left / right)
-      case '**': return UOp(Ops.EXP2, src=(right.cast(left.dtype),)) if left.op == Ops.CONST and left.val == 2.0 else left
+      case '**': return UOp(Ops.EXP2, src=(right.cast(left.dtype),)) if _single_value(left) == 2.0 else left
 
   _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/'), ('**',)]
 
@@ -581,8 +582,8 @@ class Parser:
       return inner.eq(_const(inner.dtype, 0))
     if self.try_eat_val('-', 'OP'):
       inner = self.unary()
-      if inner.op == Ops.CONST:
-        return _const(dtypes.int if inner.dtype == dtypes.uint32 else inner.dtype, -inner.val)
+      if (v:=_single_value(inner)) is not None:
+        return _const(dtypes.int if inner.dtype == dtypes.uint32 else inner.dtype, -v)
       return inner.neg()
     if self.try_eat_val('+', 'OP'): return self.unary()
     return self.postfix()
@@ -721,15 +722,13 @@ class Parser:
       self.eat('OP')
       width = self.parse()
       self.eat('RBRACKET')
-      if width.op == Ops.CONST:
-        w = int(width.val)
+      if isinstance(w:=_single_value(width), int):
         return (base >> _to_u32(first)) & _const(base.dtype, (1 << w) - 1)
       return base
     if self.try_eat('COLON'):
       second = self.parse()
       self.eat('RBRACKET')
-      if first.op == Ops.CONST and second.op == Ops.CONST:
-        a, b = int(first.val), int(second.val)
+      if isinstance(a:=_single_value(first), int) and isinstance(b:=_single_value(second), int):
         if a < b: return _bitreverse(base, b - a + 1)
         hi, lo = a, b
         if lo >= base.dtype.itemsize * 8:
@@ -750,8 +749,7 @@ class Parser:
       dt_suffix = DTYPES.get(self.eat('IDENT').val, dtypes.uint32)
     if var_name is None:
       var_name = self._find_var_name(base)
-    if first.op == Ops.CONST:
-      idx = int(first.val)
+    if isinstance(idx:=_single_value(first), int):
       # Check for array element (var@idx)
       if var_name and f'{var_name}@{idx}' in self.vars:
         v = self.vars[f'{var_name}@{idx}']
@@ -924,7 +922,7 @@ class Parser:
 
   def _coerce_cmp(self, l: UOp, r: UOp) -> tuple[UOp, UOp]:
     if l.dtype != r.dtype:
-      if r.dtype == dtypes.int and r.op == Ops.CONST and r.val < 0: l = l.cast(dtypes.int)
+      if r.dtype == dtypes.int and isinstance(rv:=_single_value(r), int) and rv < 0: l = l.cast(dtypes.int)
       else: r = r.cast(l.dtype)
     return l, r
 
