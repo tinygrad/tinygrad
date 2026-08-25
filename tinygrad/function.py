@@ -46,7 +46,7 @@ class _function(Generic[ReturnType]):
     params = get_state_dict((args, kwargs), tensor_type=(Tensor, UOp)).values()
 
     # deduplicate input_uops, keeping the first occurrence index for each unique uop
-    call_uops: list[UOp] = dedup([u for t in params if (u:=t._uop).device is not None])
+    call_uops: list[UOp] = dedup([u for t in params if (u:=t._uop).device is not None or u.is_bound_var])
 
     # disable realize/schedule while this is running
     # run it and do surgery later
@@ -64,7 +64,10 @@ class _function(Generic[ReturnType]):
       raise RuntimeError(f"function return type {type(ret)} not supported")
 
     # replace the known inputs with params (using deduplicated slots)
-    subs = {x:x.param_like(i) for i,x in enumerate(call_uops)}
+    def make_param(x:UOp, i:int) -> UOp:
+      p = x.param_like(i)
+      return p.replace(arg=replace(p.arg, name=f"p{i}")) if x.is_bound_var else p
+    subs = {x:make_param(x, i) for i,x in enumerate(call_uops)}
     uret = uret.substitute(subs)
 
     # the BUFFERs that are left are the implicit inputs

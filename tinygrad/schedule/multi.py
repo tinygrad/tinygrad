@@ -33,11 +33,15 @@ replace_allreduce = PatternMatcher([
     x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
   # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
+  # Identical device-less values do not need a multi wrapper.
+  (UPat(Ops.MSTACK, src=(UPat.var("x"),), allow_any_len=True, name="m"), lambda m,x: x if x.device is None and all_same(m.src) else None),
   # move shrink before MSTACK
   (UPat(Ops.SHRINK, src=(UPat(Ops.MSTACK, name="ms"),), allow_any_len=True, name="shrink"), mstack_early_shrink),
-  # move MSELECT before movement ops
+  # move MSELECT before movement/ALU ops
   (UPat(Ops.MSELECT, src=(UPat(GroupOp.Movement, src=(UPat.var("s"),), allow_any_len=True, name="v"),), name="ms"),
    lambda s,v,ms: v.replace(src=(s.mselect(ms.arg),)+v.src[1:])),
+  (UPat(Ops.MSELECT, src=(UPat(GroupOp.ALU, name="a"),), name="ms"), lambda a,ms:
+   a.replace(src=tuple(s.mselect(ms.arg) if isinstance(s.device, tuple) else s for s in a.src))),
 ])
 
 _early_allreduce = PatternMatcher([

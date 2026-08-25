@@ -256,12 +256,18 @@ spec_kernel_graph = PatternMatcher([
   # const + stack to make vconsts and shape args. a 0-size/bound reduce keeps its const casted
   (UPat(Ops.CONST, src=()), lambda: True),
   (UPat(Ops.CAST, src=(UPat(Ops.CONST, src=()),)), lambda: True),
+  # symbolic shape expressions can remain outside kernels (for example, flattening (n, 4) produces n*4)
+  (UPat(GroupOp.ALU, name="x"), lambda x: x.dtype in dtypes.ints+(dtypes.weakint,) or None),
   (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) or x.is_variable or x.is_bound_var for x in s.src) or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
   # param is outside buffer, buffer is local buffer
   (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.ALU)),
+  # indexing/movement views on kernel buffers/call results are allowed to carry symbolic shape expressions
+  (UPat({Ops.INDEX}|GroupOp.Movement,
+        src=(UPat({Ops.INDEX}|GroupOp.Movement|{Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST}),),
+        allow_any_len=True), lambda: True),
   # RESHAPE/BITCAST are NOOPs in the kernel graph (do we need them?)
   (UPat((Ops.RESHAPE, Ops.BITCAST)), lambda: True),
   # mstack/mselect

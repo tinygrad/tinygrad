@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
 import itertools
-from tinygrad.dtype import AddrSpace, Invalid
+from tinygrad.dtype import AddrSpace, Invalid, strong_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, KernelInfo
-from tinygrad.uop.ops import graph_rewrite, AxisType, rewrite_group, remove_all_tags, resolve
+from tinygrad.uop.ops import graph_rewrite, AxisType, rewrite_group, remove_all_tags, resolve, shape_to_shape_arg
 from tinygrad.helpers import all_int, VIZ, SPEC, Context, panic
 from tinygrad.schedule.indexing import BufferizeOpts, apply_movement_op
 from tinygrad.uop.symbolic import symbolic
@@ -121,16 +121,28 @@ pm_range_migration = PatternMatcher([
 
 @dataclass
 class SplitCtx:
-  call_args:list = field(default_factory=list)
+  call_args:list[UOp] = field(default_factory=list)
+  buffers:dict[UOp, int] = field(default_factory=dict)
   range_number:int = -1
   addrspace:AddrSpace = AddrSpace.GLOBAL
 
 def _split_graph(ctx:SplitCtx, u:UOp) -> UOp|None:
   if u.tag is not None: return None
   if u.addrspace != ctx.addrspace: return None
-  us = u.flatten() if u.addrspace == AddrSpace.GLOBAL else u
-  ctx.call_args.append(us)
-  return us.param_like(len(ctx.call_args)-1).rtag().reshape(u.shape)
+  if u.addrspace == AddrSpace.ALU: return u.param_like(-1).rtag().reshape(u.shape)
+
+  # A kernel takes each underlying buffer state once. In particular, AFTER and its buffer must use the same slot, with AFTER kept as the call
+  # argument so its dependencies are preserved.
+  key = u.buf_uop if u.op is Ops.AFTER else u
+  if (slot:=ctx.buffers.get(key)) is None:
+    slot = ctx.buffers[key] = len(ctx.call_args)
+    ctx.call_args.append(u)
+  elif u.op is Ops.AFTER:
+    ctx.call_args[slot] = u
+
+  # Parameters describe the max-sized physical allocation. A symbolic logical shape is a view of that allocation, not part of the PARAM itself.
+  param = u.param_like(slot).rtag().replace(src=(shape_to_shape_arg((u.max_numel(),)),))
+  return param.reshape(u.max_shape).shrink_to(u.shape)
 
 def _renumber_range(ctx:SplitCtx, u:UOp) -> UOp|None:
   if u.tag is not None: return None
@@ -142,7 +154,16 @@ pm_split_graph = pm_range_migration+PatternMatcher([
   (UPat(Ops.RANGE, name="u"), _renumber_range),
 ])
 
-def split_store(x:UOp) -> UOp:
+def _is_invalid_state(x:UOp) -> bool:
+  while x.op in GroupOp.Movement|{Ops.INDEX}: x = x.src[0]
+  if x.op is not Ops.AFTER or len(x.src) != 2: return False
+  dep = x.src[1].src[0] if x.src[1].op is Ops.END else x.src[1]
+  return dep.op is Ops.STORE and dep.src[1].base.is_invalid
+
+def split_store(x:UOp) -> UOp|None:
+  st = x.src[0] if x.op is Ops.END else x
+  if st.op is Ops.STORE and st.src[0].is_variable: return None
+  if st.op is Ops.STORE and (st.src[1].base.is_invalid or _is_invalid_state(st.src[1])): return UOp(Ops.NOOP)
   ret = graph_rewrite(x, pm_split_graph, ctx:=SplitCtx(), name="split kernel", bottom_up=True)
   # TODO: params and args should be able to be in any order
   ctx.addrspace = AddrSpace.ALU
@@ -178,6 +199,7 @@ def no_indexing_calls(u:UOp):
 
 pm_no_indexing_calls = PatternMatcher([
   (UPat(Ops.CALL, name="u"), no_indexing_calls),
+  (UPat(Ops.AFTER, name="u"), lambda u: u.replace(src=tuple(s for s in u.src if s.op is not Ops.NOOP))),
 ])
 
 # *** main rangeify ***
@@ -187,8 +209,10 @@ debug_tag_factor = PatternMatcher([
 ])
 
 def remove_stage(ctx, x:UOp) -> UOp:
-  buf = UOp.new_buffer(x.arg.device, x.max_numel(), x.dtype, num=next(ctx))
-  return buf.after(buf.reshape(x.shape).index(*x.src[1:]).store(x.src[0]).end(*x.src[1:])).reshape(x.shape)
+  dtype = strong_dtype(x.dtype)
+  buf = UOp.new_buffer(x.arg.device, x.max_numel(), dtype, num=next(ctx))
+  val = x.src[0] if x.src[0].dtype == dtype else x.src[0].cast(dtype)
+  return buf.after(buf.reshape(x.shape).index(*x.src[1:]).store(val).end(*x.src[1:])).reshape(x.shape)
 
 pm_remove_stage = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), remove_stage),
@@ -198,9 +222,28 @@ pm_remove_index = PatternMatcher([
   (UPat(Ops.STAGE, name="s").index(name="idx", allow_any_len=True), lambda s,idx: s.src[0] if s.src[1:] == idx.src[1:] else None),
 ])
 
+def materialize_call_args(c:UOp) -> UOp:
+  srcs:list[UOp] = []
+  for x in c.src[1:]:
+    device = x.device or c.device
+    srcs.append(x if x.op is Ops.STAGE or x.is_bound_var or x.has_buffer_identity(after_ok=True) or x.shape == () or device is None
+                else x.bufferize(arg=BufferizeOpts(device=device)))
+  return c.replace(src=(c.src[0], *srcs))
+
+def materialize_mselect(m:UOp, x:UOp) -> UOp|None:
+  if x.device is None or x.op is Ops.STAGE or (x.op not in GroupOp.ALU and x.has_buffer_identity(after_ok=True)): return None
+  return m.replace(src=(x.bufferize(arg=BufferizeOpts(device=x.device)),))
+
+pm_materialize_call_args = PatternMatcher([
+  (UPat(Ops.CALL, name="c"), materialize_call_args),
+  (UPat(Ops.MSELECT, src=(UPat(name="x"),), name="m"), materialize_mselect),
+])
+
 @rewrite_group(new_ctx=False)
 def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, pm_lil_prepare_graph, bottom_up=True, name="prepare graph")
+  # Calls can only receive buffer states. Materialize lazy constants/computations instead of silently unwrapping them to a nonexistent base buffer.
+  tsink = graph_rewrite(tsink, pm_materialize_call_args, name="materialize call args")
 
   # add safe STAGEs to never duplicate compute
   # we compute the number of times a buffer is consumed. if > 1, we realize
