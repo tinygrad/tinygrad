@@ -58,17 +58,24 @@ __device__ __forceinline__ void update_tile(uint16_t* tile, float* m, float* v, 
     float4 new_m, new_v, new_w;
     uint16_t p0, p1, p2, p3;
 
-    #define UPDATE_ONE(FIELD, SHIFT, P16) do { \
+    #define UPDATE_ONE(FIELD, SHIFT, ELEM, P16) do { \
       float g = bf16_to_float(static_cast<uint16_t>(packed_grad >> SHIFT)) / static_cast<float>(GRAD_ACC); \
       g = bf16_to_float(float_to_bf16(g)); \
       g = bf16_to_float(float_to_bf16(g * clip_coeff)); \
       new_m.FIELD = fmaf(B1, old_m.FIELD, ONE_MINUS_B1 * g); \
-      new_v.FIELD = fmaf(B2, old_v.FIELD, g * g * ONE_MINUS_B2); \
+      if constexpr (M == 6144 && N == 4096) { \
+        /* Match the UPCAST(3) packed AdamW kernel: lane 0 contracts the grad term, lanes 1/2 contract the old-v term. */ \
+        const float grad_sq = __fmul_rn(g, g); \
+        if ((base + ELEM) % 3 != 0) new_v.FIELD = fmaf(B2, old_v.FIELD, __fmul_rn(grad_sq, ONE_MINUS_B2)); \
+        else new_v.FIELD = fmaf(grad_sq, ONE_MINUS_B2, __fmul_rn(B2, old_v.FIELD)); \
+      } else { \
+        new_v.FIELD = fmaf(B2, old_v.FIELD, g * g * ONE_MINUS_B2); \
+      } \
       const float inv_denom = 1.0f / ((1.0f - b1_t) * (sqrtf(new_v.FIELD * inv_b2_correction) + EPS)); \
       new_w.FIELD = old_w.FIELD - lr * (new_m.FIELD * inv_denom + WEIGHT_DECAY * old_w.FIELD); \
       P16 = float_to_bf16(new_w.FIELD); \
     } while (0)
-    UPDATE_ONE(x, 0, p0); UPDATE_ONE(y, 16, p1); UPDATE_ONE(z, 32, p2); UPDATE_ONE(w, 48, p3);
+    UPDATE_ONE(x, 0, 0, p0); UPDATE_ONE(y, 16, 1, p1); UPDATE_ONE(z, 32, 2, p2); UPDATE_ONE(w, 48, 3, p3);
     #undef UPDATE_ONE
 
     *reinterpret_cast<float4*>(m + base) = new_m;

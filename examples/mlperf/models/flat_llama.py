@@ -405,13 +405,14 @@ class FlatTransformer:
     cache = {name:[quantize_mxfp4(w, shuffle_row=True, shuffle_col=True) for w in getattr(self, name)] for name in names}
     if not SPLIT_W13: register_mxfp4_weight_cache(self.w13, cache["w13"])
     register_mxfp4_weight_cache(self.w2, cache["w2"])
+    register_mxfp4_weight_cache(self.wqkv, cache["wqkv"])
     return cache
 
   def refresh_mxfp4_weight_cache(self, cache:dict[str, list[tuple[Tensor, Tensor, Tensor, Tensor]]]) -> list[Tensor]:
     from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
     refreshed = []
     for name, layers in cache.items():
-      if name in ("w13", "w2"):
+      if name in ("w13", "w2", "wqkv"):
         refreshed.extend(x for outputs in layers for x in outputs)
         continue
       for weight, outputs in zip(getattr(self, name), layers):
