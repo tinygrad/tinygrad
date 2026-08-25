@@ -250,7 +250,7 @@ class FlatTransformer:
       xq, xk, xv = fused_qkv_rope(xqkv, freqs_cis, self.n_heads, self.n_kv_heads, self.head_dim,
                                   prequantize_grad_mxfp4=bool(MXFP4))
       attn, *save = flash_attention(xq, xk, xv, is_causal=True, write_flat=True)
-      saves.extend(save)
+      saves.extend([xq, xk, xv, *save])
     else:
       xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
       xq = xqkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
