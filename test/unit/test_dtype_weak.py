@@ -4,7 +4,7 @@ from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import Context
 from tinygrad.dtype import least_upper_float
 from tinygrad.uop.ops import UOp, Ops, GroupOp, dtype_from_uop, graph_rewrite
-from tinygrad.uop.weak import pm_lower_index_dtype, pm_commit_weak
+from tinygrad.uop.weak import pm_commit_weak
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.engine.jit import JitError
@@ -74,7 +74,7 @@ class TestWeakPromotion(unittest.TestCase):
     recips = [u for u in (x / y)._uop.toposort() if u.op is Ops.RECIPROCAL]
     self.assertEqual([(u.dtype, u.src[0].dtype) for u in recips], [(dtypes.float32, dtypes.float32)])
     with Context(DEFAULT_FLOAT=dtypes.float16):
-      committed = graph_rewrite((UOp.const(1).cast(dtypes.int32) + UOp.const(1.0)).cast(dtypes.float32), pm_lower_index_dtype, ctx={})
+      committed = graph_rewrite((UOp.const(1).cast(dtypes.int32) + UOp.const(1.0)).cast(dtypes.float32), pm_commit_weak)
     self.assertEqual([u.dtype for u in committed.toposort() if u.op is Ops.ADD], [dtypes.float32])
 
   def test_div_sub_operand_kept_weak(self):
@@ -85,7 +85,7 @@ class TestWeakPromotion(unittest.TestCase):
   def test_cast_weak_expression_commits_at_cast_floor(self):
     # the floor never narrows: a cast BELOW the default does not pull the compute width down with it
     with Context(DEFAULT_FLOAT=dtypes.float32):
-      narrowed = graph_rewrite((UOp.const(1.0) + UOp.const(2.0)).cast(dtypes.float16), pm_lower_index_dtype, ctx={})
+      narrowed = graph_rewrite((UOp.const(1.0) + UOp.const(2.0)).cast(dtypes.float16), pm_commit_weak)
     self.assertEqual((narrowed.dtype, narrowed.src[0].dtype), (dtypes.float16, dtypes.float32))
 
   def test_cast_weak_expression_value_uses_cast_floor(self):
@@ -126,8 +126,23 @@ class TestWeakPromotion(unittest.TestCase):
     weak_lub = UOp(Ops.ADD, src=(UOp.const(1), UOp.const(1.0)))
     self.assertIs(graph_rewrite(weak_lub, pm_commit_weak), weak_lub)
     concrete = UOp.const(2.0).cast(dtypes.float16)
-    where = graph_rewrite(UOp(Ops.WHERE, src=(UOp.const(True), concrete, UOp.const(1.0))), pm_lower_index_dtype, ctx={})
-    self.assertEqual(tuple(x.dtype for x in where.src), (dtypes.bool, dtypes.float16, dtypes.float16))
+    # the weak arm stays bare: its sibling states the width, so the WHERE already derives float16 for it
+    where = graph_rewrite(UOp(Ops.WHERE, src=(UOp.const(True), concrete, UOp.const(1.0))), pm_commit_weak)
+    self.assertEqual((where.dtype, tuple(x.dtype for x in where.src)), (dtypes.float16, (dtypes.bool, dtypes.float16, dtypes.weakfloat)))
+
+  def test_derivable_const_rounds_at_the_derived_width(self):
+    # re-rounds a derivable const in place (still bare) so value-keyed folds (x*1 -> x, x*-1 -> NEG) still fire
+    x = UOp.param(0, dtypes.float32, (1,)).index(UOp.const(0).cast(dtypes.int32)).load()
+    mul = graph_rewrite(x * UOp.const(-0.9999999893980771), symbolic_simple+pm_commit_weak)
+    self.assertIs(mul.src[1], UOp.const(-1.0))
+    self.assertIs(graph_rewrite(x * UOp.const(1.0000000106), symbolic_simple+pm_commit_weak), x)
+
+  def test_committed_const_conversion_folds_for_native_format(self):
+    folded = graph_rewrite(UOp.const(16256, dtypes.ushort).cast(dtypes.uint), symbolic_simple)
+    self.assertIs(folded, UOp.const(16256, dtypes.uint))
+    # fmt-less targets are lowered by renderer rewrites, where collapsing this pair would cycle with float-intermediate insertion.
+    emulated = UOp.const(1.0, dtypes.float).cast(dtypes.bfloat16)
+    self.assertIs(graph_rewrite(emulated, symbolic_simple), emulated)
 
   def test_weak_shift_lhs_commits_the_node(self):
     # a shift derives its lhs's dtype, so committing the lhs restates the root (WGSL's packed store writes `mask << shift_am`)
@@ -168,11 +183,11 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertEqual(dtype_from_uop(Ops.SHL, (UOp.const(1, dtypes.int8), UOp.const(1, dtypes.uint32)), None), dtypes.int8)
     self.assertEqual(UOp.const(1).alu(Ops.SHL, UOp.const(1, dtypes.uint)).dtype, dtypes.weakint)
     self.assertEqual((v & 3).dtype, dtypes.weakint)
-    with self.assertRaises(RuntimeError): Tensor.const(1.0) << Tensor.const(1.0)
-    with self.assertRaises(RuntimeError): UOp.const(1, dtypes.int32).alu(Ops.SHL, UOp.const(1, dtypes.float64))
+    with self.assertRaises(RuntimeError): (Tensor.const(1.0) << Tensor.const(1.0)).dtype
+    with self.assertRaises(RuntimeError): UOp.const(1, dtypes.int32).alu(Ops.SHL, UOp.const(1, dtypes.float64)).dtype
     for op in (Ops.SHL, Ops.SHR):
       with self.assertRaises(RuntimeError):
-        UOp.const(1, dtypes.float32).alu(op, UOp.const(1, dtypes.int32))
+        UOp.const(1, dtypes.float32).alu(op, UOp.const(1, dtypes.int32)).dtype
     # float bitwise builds, the spec rejects it
     with Context(SPEC=1):
       f32, wf = UOp.const(1.0, dtypes.float32), UOp.const(1.0)

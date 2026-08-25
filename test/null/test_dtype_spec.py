@@ -419,7 +419,7 @@ class TestAutoCastType(unittest.TestCase):
     self.check_where_alternate_input_other(3, True, dtypes.weakint)
 
   def test_where_non_bool_cond_raises(self):
-    with self.assertRaises(RuntimeError): Tensor([1, 0, 2]).where(1, 0)
+    with self.assertRaises(RuntimeError): Tensor([1, 0, 2]).where(1, 0).dtype
     self.check_where_alternate_input_other(False, True, dtypes.bool)
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))

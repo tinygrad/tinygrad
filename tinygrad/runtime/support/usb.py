@@ -297,7 +297,7 @@ def usb_stage_copy(dst:UOp, src:UOp) -> UOp|None:
               sram.copy_to_device(d.device).call(d, sram)]
     else:
       pad = UOp.new_buffer("CPU", round_up(nb, 512), dtypes.uint8)[0:nb]
-      submit = make_submit(UOp(Ops.CALL, dtypes.void, (UOp(Ops.COPY, dtypes.void, ()), sram, s)), devs=devs, queue="COPY:0")
+      submit = make_submit(UOp(Ops.CALL, src=(UOp(Ops.COPY, dtypes.void, ()), sram, s)), devs=devs, queue="COPY:0")
       pull = usb_bulk(devs, (submit,), 0x81, pad.getaddr((HCQ_RUNTIME_DEV.value,)), round_up(nb, 512), 10000)
       ops += [UOp.custom_function("hcq", pull.sink()).call(pad, sram, s, name="hcq_copyout", aux=HCQInfo(devs)),
               pad.copy_to_device("CPU").call(d, pad)]

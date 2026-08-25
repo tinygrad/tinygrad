@@ -158,6 +158,10 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return in_tuple.src[arg].dtype
     case Ops.GETADDR:
       return dtypes.uint64
+    case Ops.THREEFRY:
+      return dtypes.uint64
+    case Ops.FDIV:
+      return least_upper_float(promo_dtype(src))
     case Ops.SHL | Ops.SHR:
       if not all(dtypes.is_int(x.dtype) or x.base.is_invalid for x in src):
         raise RuntimeError(f"shift operands must be int, got {[x.dtype for x in src]}")
@@ -188,9 +192,8 @@ class UOpMetaClass(type):
   def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
     if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
-    # CONST derives its dtype by value only when the constructor omits one
     # TODO: delete this once the dtype field is removed, for now it just re-implements spec.py
-    if SPEC == 2 and op is not Ops.CONST and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
+    if SPEC == 2 and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -256,8 +259,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def rtag(self, tag=True): return self.replace(tag=tag)
   @property
   def val(self):
-    assert self.op is Ops.CONST, f"val is only for CONST, got {self.op}"
-    return self.arg
+    if self.op is Ops.CONST: return self.arg
+    # a casted const CAST(dt, CONST(v)) is one const: .val reads the value through the CAST
+    assert self.op is Ops.CAST and self.src[0].op is Ops.CONST, f"val is only for consts, got {self.op}"
+    return self.src[0].val
   @property
   def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
   @recursive_property
@@ -611,7 +616,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.cast(dtype)
     # NOTE: it always has to be STACK now, even if they are all the same
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
-    return UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
+    # .cast folds away at exactly the dtypes a CONST derives (bool/weakint/weakfloat): bare there, the pair everywhere else
+    return UOp(Ops.CONST, arg=dtype.const(b), src=()).cast(dtype)
   # weak CONST with width on the CAST. TODO: this is the final const
   @staticmethod
   def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, src=(UOp.const(b),), arg=dtype)
@@ -621,7 +627,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def loop(axis_id:int, *arg): return UOp(Ops.RANGE, src=(UOp(Ops.NOOP),), arg=(axis_id, AxisType.WEAK)+arg)
   @staticmethod
-  def special(end:sint, name:str, dtype=dtypes.weakint): return UOp(Ops.SPECIAL, src=(sint_to_uop(end, dtype),), arg=name)
+  def special(end:sint, name:str): return UOp(Ops.SPECIAL, src=(sint_to_uop(end),), arg=name)
   @staticmethod
   def wmma(a:UOp, b:UOp, acc:UOp, dims:tuple[int, int, int], device:str, threads:int, tc_upcast_axes=None):
     # dtype_in is stored in the arg (not derived from src[0].dtype) because bitcast rewrites change src dtypes
@@ -888,7 +894,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return s
 
   def contiguous_view(self) -> tuple[UOp, int]|None:
-    from tinygrad.schedule.rangeify import pm_mops
+    from tinygrad.schedule.prepare import pm_mops
     from tinygrad.uop.symbolic import symbolic
 
     # WEBGPU and CL do not support views.
@@ -987,7 +993,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return unwrap(self.arg.name)
   def bind(self, val:int|UOp):
     assert self.is_variable, f"op is {self.op}, need Variable"
-    uval = self.const_like(val) if isinstance(val, int) else val
+    # the Variable states the width, so the bound value stays bare: is_bound_var tests for a CONST there, unbind reads .val
+    uval = UOp.const(val) if isinstance(val, int) else val
     assert self.vmin <= uval.vmin and uval.vmax <= self.vmax, f"bind {val} not in range [{self.vmin}, {self.vmax}]"
     assert uval.divides(self.arg.multiple_of) is not None, f"bind {val} not divisible by {self.arg.multiple_of}"
     return self.after(self.store(uval))
