@@ -63,17 +63,19 @@ def cmd_show_pids(args):
 
 def cmd_kill_pids(args):
   devs = scan_devs_based_on_lock(prefix:={"amd":"am", "nv":"nv"}[args.backend], args)
+  use_sudo = not getattr(args, "sudoless", False)
 
   for dev in devs:
     for i in range(128):
       if i > 0: time.sleep(0.2)
 
       try:
-        try: pid = subprocess.check_output(['sudo', 'lsof', temp(f'{prefix}_{dev}.lock')]).decode('utf-8').strip().split('\n')[1].split()[1]
+        try: pid = subprocess.check_output((['sudo'] if use_sudo else []) +
+                                           ['lsof', temp(f'{prefix}_{dev}.lock')]).decode('utf-8').strip().split('\n')[1].split()[1]
         except subprocess.CalledProcessError: break
 
         print(f"Killing process {pid} (which uses {dev})")
-        subprocess.run(['sudo', 'kill', '-9', pid], check=True)
+        subprocess.run((['sudo'] if use_sudo else []) + ['kill', '-9', pid], check=True)
       except subprocess.CalledProcessError as e:
         print(f"Failed to kill process for device {dev}: {e}", file=sys.stderr)
 
@@ -95,6 +97,7 @@ def add_common_commands(parent_subparsers):
 
   p_reset = parent_subparsers.add_parser("kill_pids", help="Kill pids of processes using the device")
   p_reset.add_argument("--pci_bus", default="", help="PCI bus ID of the device")
+  p_reset.add_argument("--sudoless", action="store_true", help="Do not use sudo when detecting or killing pids")
   p_reset.set_defaults(func=cmd_kill_pids)
 
 if __name__ == "__main__":

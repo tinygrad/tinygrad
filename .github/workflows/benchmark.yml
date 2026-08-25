@@ -103,7 +103,7 @@ jobs:
       if: ${{ matrix.dev == 'AMD' }}
       run: |
         ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
@@ -149,7 +149,7 @@ jobs:
       if: ${{ matrix.dev == 'AMD' }}
       run: |
         ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
@@ -197,7 +197,7 @@ jobs:
       if: ${{ matrix.dev == 'AMD' }}
       run: |
         ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
@@ -239,7 +239,7 @@ jobs:
       if: ${{ matrix.dev == 'AMD' }}
       run: |
         ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
@@ -284,7 +284,7 @@ jobs:
       if: ${{ matrix.dev == 'AMD' }}
       run: |
         ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
@@ -336,7 +336,7 @@ jobs:
       if: ${{ matrix.dev == 'AMD' }}
       run: |
         ./extra/hcq/hcq_smi.py amd rmmod --expect
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
       run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
@@ -583,7 +583,7 @@ jobs:
     - name: Setup
       run: |
         ./extra/hcq/hcq_smi.py ${{ matrix.dev }} rmmod --expect
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} kill_pids
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} kill_pids --sudoless
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
