@@ -188,7 +188,7 @@ class TestMXFP4(unittest.TestCase):
     M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
     a = Tensor.empty(M, K, dtype=dtypes.bfloat16)
     b = Tensor.empty(N, K, dtype=dtypes.bfloat16)
-    asm_gemm(a, b.T, mxfp4=True).realize()
+    for _ in range(getenv("CNT", 1)): asm_gemm(a, b.T, mxfp4=True).realize()
 
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
 
