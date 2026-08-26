@@ -37,8 +37,12 @@ class TestRingAllReduce(unittest.TestCase):
       # kernel count tests
       copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
-      if len(copies) != 24: raise KernelCountException(24, len(copies))
-      if len(sinks) != 26: raise KernelCountException(26, len(sinks))
+      # N*(N-1) copies for input and output
+      copy_count = N*(N-1)*2
+      if len(copies) != copy_count: raise KernelCountException(copy_count, len(copies))
+      # N*N shrinks becoming contigs, N ALU, N extra contig, reassembly (cat), and mul
+      sink_count = (N*N)+(N)+(N)+(1)+(1)
+      if len(sinks) != sink_count: raise KernelCountException(sink_count, len(sinks))
 
   @Context(RING=0, ALL2ALL=0)
   def test_schedule_naive(self):
