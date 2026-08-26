@@ -1,7 +1,7 @@
 from typing import Callable, Any
 from tinygrad.dtype import AddrSpace, DType, dtypes, truncate
 from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target, is_image_shape, round_up
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, with_storage
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.runtime.autogen import mesa, libc
@@ -123,11 +123,12 @@ class NIRRenderer(Renderer):
   extra_matcher = PatternMatcher([
     # from ptx
     (UPat.var('x', dtype=dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
-    # load/store bool -> uint8
+    # a bool is one bit in NIR but a byte in memory, so every access to a bool buffer goes through a uint8 view of it
     (UPat(Ops.LOAD, dtypes.bool, name="x"),
-     lambda x: x.replace(dtype=dtypes.uint8, src=x.src[0:1]+((x.src[1].cast(dtypes.uint8),) if len(x.src)>=2 else ())+x.src[2:]).cast(dtypes.bool)),
-    (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
-     lambda x: x.replace(src=(x.src[0], x.src[1].cast(dtypes.uint8))+x.src[2:])),
+     lambda x: x.replace(dtype=None, src=(with_storage(x.src[0], dtypes.uint8),)+((x.src[1].cast(dtypes.uint8),) if len(x.src)>=2 else ())
+      +x.src[2:]).cast(dtypes.bool)),
+    (UPat(Ops.STORE, src=(UPat(name="idx"), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
+     lambda x,idx: x.replace(src=(with_storage(idx, dtypes.uint8), x.src[1].cast(dtypes.uint8))+x.src[2:])),
     # NIR requires shift amount to be 32 bit: https://docs.mesa3d.org/nir/alu.html#nir-alu-op-ishl
     (UPat((Ops.SHL, Ops.SHR), name="x"), lambda x: x.replace(src=(x.src[0], x.src[1].cast(dtypes.uint))) if x.src[1].dtype.bitsize != 32 else None),
     # OpConvertFToU is undefined if Result Type is not wide enough, cast through int32

@@ -147,7 +147,7 @@ class TestSchedule(unittest.TestCase):
     devs = ("CPU:0", "CPU:1")
     x = Tensor.ones(2, device="CPU").shard(devs, axis=0).realize()
     out = (x.sum()*2).reshape(1).to("CPU")
-    run_linear(*check_schedule(out, 5))
+    run_linear(*check_schedule(out, 3))
     np.testing.assert_equal(out.numpy(), [4.])
 
 class TestLimitBufs(unittest.TestCase):
