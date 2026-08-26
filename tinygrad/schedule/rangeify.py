@@ -132,8 +132,6 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
-  (UPat(Ops.INDEX, src=(UPat(Ops.STAGE),), allow_any_len=True, name="idx").f(Ops.NOOP).f(Ops.STAGE, allow_any_len=True, name="b2"),
-   remove_noop_bufferize),
   # no buffers for a const, in either spelling
   (UPat.cvar('c').or_casted().f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.val)),
   # indexing a const is the const
@@ -141,8 +139,6 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   # indexing an after with all fully invalid stores is invalid
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
-  # hack if a noop turned to a const
-  (UPat(Ops.NOOP, src=(UPat.cvar().or_casted("c"),)), lambda c: c),
   # a deviceless MSTACK src is the same value on every device, so indexing the stack is just indexing that value
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True, name="idx"),
    lambda s,idx: idx.replace(src=(s,)+idx.src[1:]) if s.device is None else None),
@@ -364,10 +360,6 @@ def get_contiguous(ctx:LocalAddBufferContext, x:UOp):
 
 rangeify_codegen = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), get_contiguous),
-
-  # no NOOP in the kernel graph
-  # TODO: this can be moved into codegen?
-  (UPat(Ops.NOOP, name="x"), lambda x: x.src[0] if len(x.src) else None),
 ])
 
 pm_add_param_range_tags = PatternMatcher([

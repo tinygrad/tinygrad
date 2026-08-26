@@ -5,7 +5,7 @@ import z3
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.spec import spec_shared, type_verify
-from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load
+from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load, symbolic_simple
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
@@ -448,9 +448,19 @@ class TestSymbolic(unittest.TestCase):
   def test_and_remove(self):
     self.helper_test_variable(uand([uconst(1), Variable("a", 0, 1)]), 0, 1, "a")
 
+  def test_zero_div_zero_bottom_up(self):
+    # codegen runs symbolic_simple bottom_up, so the 0/0 is rewritten before its consts fold.
+    # without the guard the unsound x/x -> 1 below it claims this one.
+    z = UOp.const(0.0)
+    self.assertTrue(math.isnan(graph_rewrite(z/z, symbolic_simple, bottom_up=True).arg))
+
   def test_masked_shr_fold(self):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32, param=True)
     self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)")
+
+  def test_masked_idiv_fold(self):
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32, param=True)
+    self.helper_test_variable((x & -4) // 4, 0, 63, "(x//4)")
 
   def test_bool_or_not_tautology(self):
     a = Variable("a", 0, 10)
@@ -1455,6 +1465,11 @@ class TestGatedUopGivenValid(unittest.TestCase):
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
 class TestRangeSplitting(unittest.TestCase):
+  def test_end_preserves_constant_backedge(self):
+    loop, backedge = UOp.loop(0), UOp.const(False)
+    end = graph_rewrite(UOp(Ops.NOOP).end(loop, backedge), sym)
+    self.assertEqual(end.src, (UOp(Ops.NOOP), loop, backedge))
+
   def test_range_split_on_mod(self):
     # test that mark_range_mod splits RANGE(8) into RANGE(4)*2 + RANGE(2) when used with %2
     from tinygrad.codegen.simplify import pm_split_ranges, pm_flatten_range
