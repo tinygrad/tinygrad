@@ -3,6 +3,7 @@ from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
+from tinygrad.codegen.decomp.op import xidiv32, fast_idiv
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
 from tinygrad.helpers import prod, Target, NUM_CPU_THREADS, getenv, OSX
@@ -67,14 +68,15 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False, rdna4=False) -> str:
     f"{dt_map[wmma.arg[1]]}{suffix}(" + ", ".join(args) + ")"
 
 # llvm ops, lop[<dtype>][<op>]
-unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.CDIV: "udiv", Ops.CMOD: "urem",
+unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.CMOD: "urem",
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.CMPEQ: "icmp eq", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
                  Ops.SHL: "shl", Ops.SHR: "lshr",}
-signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.CDIV: "sdiv", Ops.CMOD: "srem", Ops.SHR: "ashr"}
+signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.CMOD: "srem", Ops.SHR: "ashr"}
 flags = " nsz arcp contract afn"
+idiv_op = {x: {Ops.CDIV : "udiv" if dtypes.is_unsigned(x) else "sdiv"} for x in dtypes.uints+dtypes.sints if x not in dtypes.int32s}
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} olt",
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
-lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
+lop = {**{x:unsigned_lop|idiv_op.get(x, {}) for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop|idiv_op.get(x, {}) for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
 
 base_rewrite = PatternMatcher([
   # memory load/store
@@ -243,6 +245,7 @@ class AMDLLVMRenderer(LLVMRenderer):
       f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x]}_i32, i32 0)"),
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
+    (UPat(Ops.CDIV, dtypes.int32s, src=(UPat.var("a"), UPat.var("b")), name="x"), xidiv32),
     # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
     (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
     (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),

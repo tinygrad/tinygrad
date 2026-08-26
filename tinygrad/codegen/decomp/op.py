@@ -46,10 +46,10 @@ def fast_idiv(ren: Renderer, x: UOp, d: int, dont_cast=False) -> UOp|None:
 def _mulhi32(a:UOp, b:UOp): return ((a.cast(dtypes.uint64) * b.cast(dtypes.uint64)) >> 32).cast(dtypes.uint32)
 
 def xidiv32(x:UOp, a:UOp, b:UOp) -> UOp:
+  # NOTE: fails on const divisor due to hardware overflow assumptions. ensure its placed in hardware?
   if (signed := not dtypes.is_unsigned(x.dtype)):
     s = ((a ^ b).bitcast(dtypes.int32) >> UOp.const(31, dtypes.int32)).bitcast(dtypes.uint32)
-    a, b = a.abs(), b.abs()
-  a, b = a.bitcast(dtypes.uint32), b.bitcast(dtypes.uint32)
+    a, b = a.abs().cast(dtypes.uint32), b.abs().cast(dtypes.uint32)
   z = (b.float().reciprocal() * UOp.const(2**32 - 512, dtypes.float32)).cast(dtypes.uint32)
   z = z + _mulhi32(z, b.neg() * z)
   q = _mulhi32(a, z)
