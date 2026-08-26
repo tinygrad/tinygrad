@@ -170,7 +170,9 @@ fused_qkv_rope_backward(
     const bf16* __restrict__ dk,
     const bf16* __restrict__ dv,
     const bf16* __restrict__ freqs_cis) {
+#ifndef WRITE_MXFP4
   gl<bf16, -1, -1, -1, -1> out{dxqkv, ATTN_B, ATTN_N, PACKED_H, ATTN_D};
+#endif
 #ifdef EXPANDED_FA_GRADS
   gl<bf16, -1, -1, -1, -1> dqg{const_cast<bf16*>(dq), ATTN_B, ATTN_N, ATTN_H, ATTN_D};
   // AITER writes one dK/dV contribution per query head. Keep the expanded H stride here and
@@ -187,18 +189,21 @@ fused_qkv_rope_backward(
   grad_tile<bf16> tile;
 
   if (field < ATTN_H) {
+#ifndef WRITE_MXFP4
+    const int out_head = (field / GROUP_SIZE) * (GROUP_SIZE + 2) + field % GROUP_SIZE;
+#endif
 #ifdef EXPANDED_FA_GRADS
     load<1>(tile, dqg, {b, n_tile, field, 0});
     inverse_rope(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
+#ifndef WRITE_MXFP4
+    store<1>(out, tile, {b, n_tile, out_head, 0});
+#endif
 #else
     load_fa_shuffled<2>(tile, dqg, {b, field, n_tile, 0});
     inverse_rope_fa(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
-#endif
-    const int out_head = (field / GROUP_SIZE) * (GROUP_SIZE + 2) + field % GROUP_SIZE;
-#ifdef EXPANDED_FA_GRADS
-    store<1>(out, tile, {b, n_tile, out_head, 0});
-#else
+#ifndef WRITE_MXFP4
     store_fa_shuffled<1>(out, tile, {b, n_tile, out_head, 0});
+#endif
 #endif
   } else {
     const bool is_k = field < ATTN_H + ATTN_H_KV;
@@ -226,7 +231,9 @@ fused_qkv_rope_backward(
     copy(tile, sum);
     if (is_k) inverse_rope(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
     const int out_head = kvh * (GROUP_SIZE + 2) + GROUP_SIZE + !is_k;
+#ifndef WRITE_MXFP4
     store<1>(out, tile, {b, n_tile, out_head, 0});
+#endif
   }
 
 #ifdef WRITE_MXFP4

@@ -43,7 +43,8 @@ def main() -> None:
                           B=B, N=N, H=H, H_KV=H_KV, D=D, expanded_fa_grads=True)
   dxqkv, row_fp4, row_scale, col_fp4, col_scale, *_ = \
     Tensor.custom_kernel(dxqkv, *quant, dq, dk, dv, freqs_cis, fxn=fxn)
-  Tensor.realize(dxqkv, row_fp4, row_scale, col_fp4, col_scale)
+  # The BF16 dxqkv is a logical autograd/mailbox key only. The MXFP4 kernel deliberately leaves its storage unwritten.
+  Tensor.realize(row_fp4, row_scale, col_fp4, col_scale)
 
   dq_ref = inverse_rope(dq, freqs_cis).reshape(B, N, H_KV, GROUP, D)
   dk_sum = dk.float().reshape(B, N, H_KV, GROUP, D).sum(3).cast(dtypes.bfloat16)
@@ -56,7 +57,6 @@ def main() -> None:
   print(f"dq={dq.shape} dk={dk.shape} dv={dv.shape} freqs_cis={freqs_cis.shape}")
   print(f"dxqkv={dxqkv.shape} row_fp4={row_fp4.shape} row_scale={row_scale.shape} "
         f"col_fp4={col_fp4.shape} col_scale={col_scale.shape}")
-  check("dxqkv", dxqkv, dxqkv_ref, 2e-2)
   for name, actual, expected in zip(("row_fp4", "row_scale", "col_fp4", "col_scale"),
                                     (row_fp4, row_scale, col_fp4, col_scale), quant_ref):
     check(name, actual, expected, 0.0)
