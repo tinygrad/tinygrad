@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from test.mockgpu.qcom.decoder import decode_ir3
 from test.mockgpu.qcom.executor import execute_ir3
-from test.mockgpu.qcom.uop_runner import IR3UOpLoopTimeout, IR3UOpRunner
+from test.mockgpu.qcom.runner import IR3UOpLoopTimeout, IR3UOpRunner
 from test.mockgpu.qcom.corpus import (BACKWARD_BRANCH, BITWISE_SHIFT_COMPARE, END, FLOAT_ALU_COMPARE, FP8_HALF_COMPARE, GLOBAL_LOAD,
   MADSH_MAGIC_DIVIDE, MADSH_REPEAT, MESA_STD_HOT_LOOP, MESA_STD_HOT_PREHEADER, MULL_REPEAT, REPEATED_ADD, SHRG_HALF_DEST, SIGNED_BYTE_TO_HALF,
   ir3_program as pack_ir3)

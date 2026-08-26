@@ -5,7 +5,8 @@ from test.mockgpu.qcom.corpus import (DIVERGENT_BRANCH, END, GLOBAL_ATOMIC_ADD, 
   MESA_STD_HOT_LOOP, MESA_STD_HOT_PREHEADER, PARTIAL_WAVE_ADD, PREDICATION, PRIVATE_LANE_SPILL, PRIVATE_SIGNED_SPILL,
   RELATIVE_DESTINATION, RELATIVE_SOURCE_REPEAT, SHARED_BARRIER, UNSUPPORTED_UL_ADD, ir3_program)
 from test.mockgpu.qcom.decoder import IR3Instruction, decode_ir3
-from test.mockgpu.qcom.executor import _use_native_blocks, _workgroup_batch_size, execute_dispatch, execute_ir3
+from test.mockgpu.qcom.dispatch import execute_dispatch, use_native_blocks as _use_native_blocks, workgroup_batch_size as _workgroup_batch_size
+from test.mockgpu.qcom.executor import execute_ir3
 
 
 class TestA630IR3Execution(unittest.TestCase):
@@ -123,7 +124,7 @@ class TestA630IR3Execution(unittest.TestCase):
       return program if code == b'barbranch' else decode_real(code, gpu_id)
     setattr(executor, 'decode_ir3', decode)
     setattr(dispatch, 'decode_ir3', decode)
-    try: regs = executor.execute_dispatch(b'barbranch', (2, 1, 1), (1, 1, 1), 0xfc, workgroup_id_register=2)
+    try: regs = dispatch.execute_dispatch(b'barbranch', (2, 1, 1), (1, 1, 1), 0xfc, workgroup_id_register=2)
     finally:
       setattr(executor, 'decode_ir3', real_executor_decode)
       setattr(dispatch, 'decode_ir3', real_dispatch_decode)

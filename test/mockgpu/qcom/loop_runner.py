@@ -1,11 +1,4 @@
-"""Native execution of conservative, reducible decoded-IR3 loops.
-
-The straight-line ALU lowerer and :class:`IR3UOpRunner` facade deliberately
-remain in :mod:`uop_runner`.  This module is imported by that facade only from
-its loop methods, after generic lowering support has initialized; the one-way
-dependency keeps loop-specific cache/runtime code out of the hot block runner
-without a module-import cycle.
-"""
+"""Lower conservative decoded-IR3 natural loops to CPU UOps."""
 import array
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -18,11 +11,11 @@ from tinygrad.uop.ops import KernelInfo, UOp
 
 from test.mockgpu.qcom.decoder import IR3Instruction
 from test.mockgpu.qcom.registers import _itemsize, _next_reg, _reg_offset
-from test.mockgpu.qcom.uop_runner import (Register, _Lowerer, _NATIVE, _UINT32_MASK, IR3UOpLoopTimeout,
-                                           UnsupportedIR3Block, _advance, _const, _full_constant, _output_mask, _register)
+from test.mockgpu.qcom.uop_runner import (Register, _Lowerer, _NATIVE, _UINT32_MASK, UnsupportedIR3Block, _advance, _const,
+                                           _full_constant, _output_mask, _register)
 
 if TYPE_CHECKING:
-  from test.mockgpu.qcom.uop_runner import IR3UOpRunner
+  from test.mockgpu.qcom.runner import IR3UOpRunner
 
 
 _U64_LIMIT = 1 << 64
@@ -40,6 +33,12 @@ _LOOP_FAULT, _LOOP_FAULT_PC, _LOOP_FAULT_LO, _LOOP_FAULT_HI = range(4)
 _LOOP_TIMEOUT, _LOOP_TIMEOUT_FUEL, _LOOP_ITERATIONS, _LOOP_LOAD_CHECKS, _LOOP_BOUNDS_COUNT = range(4, 9)
 _LOOP_BOUNDS_BASE = 9
 _LOOP_CONTROL_WORDS = _LOOP_BOUNDS_BASE + 4 * _MAX_LOOP_MEMORY_RANGES
+
+
+class IR3UOpLoopTimeout(RuntimeError):
+  def __init__(self, start_pc: int):
+    super().__init__(f'IR3 native loop exhausted fuel at PC {start_pc}')
+    self.start_pc = start_pc
 
 
 def _instruction_signature(inst: IR3Instruction) -> tuple:

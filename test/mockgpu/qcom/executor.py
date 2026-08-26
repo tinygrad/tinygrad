@@ -2,23 +2,17 @@ import ctypes, struct
 from typing import Any
 from tinygrad.runtime.autogen import mesa
 from test.mockgpu.qcom.decoder import decode_ir3
-from test.mockgpu.qcom.dispatch import (execute_dispatch as _execute_dispatch, native_memory_bounds as _native_memory_bounds,
-                                        use_native_blocks as _dispatch_use_native_blocks,
-                                        workgroup_batch_size as _dispatch_workgroup_batch_size)
 from test.mockgpu.qcom.registers import (_alu_runner, _compare, _convert, _float, _float_bits, _itemsize, _mod_float, _next_reg, _reg_offset,
                                          _s32, _signed, _float_values, _values, _write)
-from test.mockgpu.qcom.uop_runner import IR3UOpLoopTimeout, IR3UOpRunner
+from test.mockgpu.qcom.runner import IR3UOpLoopTimeout, IR3UOpRunner
 
 _UOP_RUNNER = IR3UOpRunner()
 
-def _has_native_loop(program) -> bool:
-  return _UOP_RUNNER is not None and getattr(_UOP_RUNNER, 'has_loop', lambda _program: False)(program)
-
-def _use_native_blocks(grid_size, local_size) -> bool:
-  return _dispatch_use_native_blocks(grid_size, local_size)
-
-def _workgroup_batch_size(program, lane_count: int) -> int:
-  return _dispatch_workgroup_batch_size(program, lane_count, _has_native_loop)
+def _native_memory_bounds(check_range) -> tuple[tuple[int, int], ...] | None:
+  owner = getattr(check_range, '__self__', None)
+  ranges = getattr(owner, 'mapped_ranges', None)
+  if not isinstance(ranges, dict): return None
+  return tuple(sorted((start, start + size) for (start, size), count in ranges.items() if count > 0))
 
 def _source_offset(src, offset):
   if isinstance(src, int): return src
@@ -598,10 +592,3 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
     raise NotImplementedError(f'unsupported IR3 execution {inst.name}')
   if resume_state is not None: resume_state.clear()
   return None
-
-def execute_dispatch(code, grid_size, local_size, local_id_register, initial_regs=None, check_range=None, workgroup_id_register=0xfc,
-                     textures=(), ibos=(), global_id_register=0xfc, linear_group_register=0xfc, local_id_order=(0, 1, 2)):
-  """Run a mock A630 dispatch with workgroup scheduling in :mod:`dispatch`."""
-  return _execute_dispatch(execute_ir3, code, grid_size, local_size, local_id_register, initial_regs, check_range,
-                           workgroup_id_register, textures, ibos, global_id_register, linear_group_register, local_id_order,
-                           has_loop=_has_native_loop)
