@@ -31,7 +31,7 @@ class HCQInfo:
   estimates:Estimates = Estimates()
 
   inputs:int|None = None
-  input_addrs:tuple[tuple[str, UOp], ...] = () # (device, single lane arg uop)
+  input_addrs:tuple[tuple[str, UOp], ...] = () # (device, lane arg uop)
   kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = ()
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
