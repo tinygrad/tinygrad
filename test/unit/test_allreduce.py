@@ -28,13 +28,6 @@ class TestRingAllReduce(unittest.TestCase):
       t = (x*x).clone().shard(ds, axis=0).realize()
       out = t.sum(0).mul(2.).contiguous()
       linear, var_vals = out.linear_with_vars()
-      # correctness
-      run_linear(linear, var_vals)
-      expected = [2*sum((d*M+i)**2 for d in range(N)) for i in range(M)]
-      dev_nums = Tensor.arange(1, N+1, dtype=dtypes.float).reshape(N, 1).expand(N, M).shard(ds, axis=0)
-      shards = out.reshape(1, M).expand(N, M)+dev_nums
-      self.assertListEqual(shards.tolist(), [[x+d+1 for x in expected] for d in range(N)])
-      # kernel count tests
       copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       # N*(N-1) copies for input and output
@@ -43,6 +36,12 @@ class TestRingAllReduce(unittest.TestCase):
       # N*N shrinks becoming contigs, N ALU, N extra contig, reassembly (cat), and mul
       sink_count = (N*N)+(N)+(N)+(1)+(1)
       if len(sinks) != sink_count: raise KernelCountException(sink_count, len(sinks))
+      # correctness
+      run_linear(linear, var_vals)
+      expected = [2*sum((d*M+i)**2 for d in range(N)) for i in range(M)]
+      dev_nums = Tensor.arange(1, N+1, dtype=dtypes.float).reshape(N, 1).expand(N, M).shard(ds, axis=0)
+      shards = out.reshape(1, M).expand(N, M)+dev_nums
+      self.assertListEqual(shards.tolist(), [[x+d+1 for x in expected] for d in range(N)])
 
   @Context(RING=0, ALL2ALL=0)
   def test_schedule_naive(self):
