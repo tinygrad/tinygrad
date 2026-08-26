@@ -1,13 +1,13 @@
 from __future__ import annotations
 import functools, math
 from typing import Callable, cast
-from tinygrad import Tensor, UOp, nn, Device, Context, getenv
+from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
 
-BLOCK_M, BLOCK_N, DECODE_HEAD_TILE, WARP_SIZE = 32, 32, 8, 32
+BLOCK_M, BLOCK_N, WARP_SIZE = 32, 32, 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
 WAVES_M, WAVES_N, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 2, 16
 WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * WAVES_N
@@ -72,17 +72,7 @@ class Linear(nn.Linear):
     else:
       self.weight = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer)
         .view(raw.max_numel() * raw.dtype.itemsize // dtypes.uint32.itemsize, dtypes.uint32, raw_offset)))
-  def prep_quant(self, x:Tensor) -> tuple[Tensor, Tensor, Tensor]|None:
-    # precompute the q8 activation so several linears can share it (gate/up, q/k/v). None if the custom path won't be used
-    if getenv("LLM_NO_QSHARE"): return None
-    supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
-    if self.ggml_type is None and supported: self.set_quantized(self.weight)
-    if self.ggml_type not in (Q4_K, Q5_K, Q6_K, IQ4_XS) or not supported: return None
-    if isinstance(x.numel(), int): return q8_quantize(x, int(x.numel()) // self.in_features, self.in_features)
-    xp = x.pad_to(x.max_shape)
-    return q8_quantize(xp, int(xp.numel()) // self.in_features, self.in_features)
-
-  def __call__(self, x:Tensor, xq:tuple[Tensor, Tensor, Tensor]|None=None) -> Tensor:
+  def __call__(self, x:Tensor) -> Tensor:
     supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
     if self.ggml_type is None and supported:
       self.set_quantized(self.weight)
@@ -90,27 +80,33 @@ class Linear(nn.Linear):
         # tiny dense fp16 matmul (e.g. the ssm beta/alpha head rows): single fp16 gemv kernel instead of a
         # generic matmul schedule, and realize the densely packed weight once if it is still a lazy ggml view
         if self.weight.dtype in (dtypes.half, dtypes.float, dtypes.bfloat16) and self.out_features <= 2048 \
-          and self.in_features % (WARP_SIZE*4) == 0 and not getenv("LLM_NO_F16GEMV"):
+          and self.in_features % (WARP_SIZE*4) == 0:
           numel, max_shape = x.numel(), x.max_shape
           if isinstance(numel, int) or prod(max_shape) // self.in_features <= 32:
             out = f16_gemv(self, x if isinstance(numel, int) else x.pad_to(max_shape))
             return out if isinstance(numel, int) else out.shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features)))
         self.use_custom_quant = supported = False  # not a supported quant format
     if self.ggml_type in (Q4_K, Q5_K, Q6_K, IQ4_XS) and supported:
-      if isinstance(x.numel(), int): return q8_linear(self, x, xq)
+      if isinstance(x.numel(), int): return q8_linear(self, x)
       # symbolic token count: pad to the max chunk size so the kernels see static shapes, garbage rows are sliced off
-      out = q8_linear(self, x.pad_to(x.max_shape), xq)
+      out = q8_linear(self, x.pad_to(x.max_shape))
       return out.shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features)))
     return super().__call__(x)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
-  return UOp(Ops.CUSTOMI, dtypes.int32, (a.int(), b.int(), c), arg="__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)")
+  # int8 4-wide dot, widened to scalar multiply-adds (2% decode slower than the sudot4 builtin, but portable)
+  for i in range(4):
+    av = ((a >> (8*i)) & 255).cast(dtypes.uint8).bitcast(dtypes.int8).int()
+    bv = ((b >> (8*i)) & 255).cast(dtypes.uint8).bitcast(dtypes.int8).int()
+    c = c + av*bv
+  return c
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
   return UOp(Ops.CUSTOMI, dtypes.uint32, tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), arg="__builtin_amdgcn_perm({}, {}, {})")
 
 def _amd_load(ptr:UOp, lanes:int|None=None) -> UOp:
   assert ptr.op is Ops.INDEX
+  # nontemporal scalar load: streamed weights must not evict the activations/KV cache from L2
   if lanes is None: return UOp(Ops.CUSTOMI, ptr.dtype, (ptr,), arg="__builtin_nontemporal_load({0})")
   buf, coords = ptr.src[0], ptr.src[1:]
   idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0, dtypes.weakint))
@@ -120,6 +116,7 @@ def _load_byte(raw:UOp, base:UOp, offset:UOp) -> UOp: return (raw[base + offset/
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
 
 def _iq4_bytes(packed:UOp, shift:int) -> UOp:
+  # the non-linear iq4nl table as a byte lookup: 3 byte_perms beat any arithmetic/select-tree form (~60% decode)
   selectors = (packed >> shift) & 0x0f0f0f0f
   low = _amd_byte_perm(UOp.const(0xf6eaddcf, dtypes.uint32), UOp.const(0xbfad9881, dtypes.uint32), selectors)
   high = _amd_byte_perm(UOp.const(0x71594535, dtypes.uint32), UOp.const(0x26190d01, dtypes.uint32), selectors & 0x07070707)
@@ -241,26 +238,33 @@ def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
   token_block, output_block = UOp.range(out.shape[0]//token_tile, 0), UOp.range(out_features//(16*output_tiles*output_waves), 1)
   lane, wave = UOp.range(WARP_SIZE, 2, axis_type=AxisType.LOCAL), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
+  # the lane id must stay opaque (mbcnt): visible lane%16/lane//16 arithmetic would get range-split into nested
+  # loops by the scheduler, scrambling the WMMA fragment layout
   hw_lane = UOp(Ops.CUSTOM, dtypes.int32, (lane.int(),), arg="__builtin_amdgcn_mbcnt_lo(-1, 0)").cast(dtypes.weakint)
   col, half = hw_lane % 16, hw_lane // 16
   outputs = tuple((output_block*output_waves+wave)*(16*output_tiles) + tile*16 + col for tile in range(output_tiles))
   inputs = tuple(token_block*token_tile + tile*16 + col for tile in range(token_tile//16))
   tokens = tuple(tuple(token_block*token_tile + tile*16 + half*8 + i for i in range(8)) for tile in range(token_tile//16))
-  return output_waves, token_block, output_block, lane, wave, half, outputs, inputs, tokens
+  return output_waves, token_block, output_block, lane, wave, half, outputs, inputs, tokens, hw_lane
 
-def _wmma_stores(out, outputs, tokens, accs, update, half):
-  def values(acc:UOp) -> tuple[UOp, ...]:
-    vals = tuple(acc.after(update)[i].load() for i in range(8))
-    swapped = tuple(UOp(Ops.CUSTOM, dtypes.float32, (value,),
-      arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {0}), 50688))") for value in vals)
+def _wmma_stores(out, outputs, tokens, accs, update, half, lane, wave, output_waves, hw_lane):
+  # the accumulator fragment halves are exchanged between lane pairs (l, l^16) through LDS (a ds_swizzle without CUSTOM)
+  flat_accs = [acc for output_accs in accs for acc in output_accs]
+  lds = UOp.placeholder((output_waves, 32, len(flat_accs)*8), dtypes.float32, slot=33, addrspace=AddrSpace.LOCAL)
+  stores = [lds[wave, lane, a*8+i].store(acc.after(update)[i].load()) for a,acc in enumerate(flat_accs) for i in range(8)]
+  lds = lds.after(UOp.barrier(UOp.group(*stores)))
+  def values(ai:int) -> tuple[UOp, ...]:
+    own = tuple(lds[wave, hw_lane, ai*8+i].load() for i in range(8))
+    peer = tuple(lds[wave, hw_lane ^ 16, ai*8+i].load() for i in range(8))
     low = half.eq(0)
-    return tuple(low.where(vals[i], swapped[i+4]) if j == 0 else low.where(swapped[i], vals[i+4]) for i in range(4) for j in range(2))
-  return [out[token, output].store(value) for output,output_accs in zip(outputs, accs)
-          for tile_tokens,acc in zip(tokens, output_accs) for token,value in zip(tile_tokens, values(acc))]
+    return tuple(low.where(own[i], peer[i+4]) if j == 0 else low.where(peer[i], own[i+4]) for i in range(4) for j in range(2))
+  tt = len(tokens)
+  return [out[token, output].store(value) for ot,(output,output_accs) in enumerate(zip(outputs, accs))
+          for tile,(tile_tokens,_acc) in enumerate(zip(tokens, output_accs)) for token,value in zip(tile_tokens, values(ot*tt+tile))]
 
 def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, dequant, name):
   x = x.reshape(out.shape[0], in_features)
-  _, token_block, output_block, lane, wave, physical_half, outputs, input_tokens, tokens = layout
+  output_waves, token_block, output_block, lane, wave, physical_half, outputs, input_tokens, tokens, hw_lane = layout
   token_tile, output_tiles = len(tokens)*16, len(outputs)
   output_words = in_features // GGML_BLOCK_SIZE * type_words
   accs = tuple(tuple(UOp.placeholder((8,), dtypes.float32, slot=ot*(token_tile//16)+tile, addrspace=AddrSpace.REG)
@@ -279,8 +283,8 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
         wmma_accs[output_tile][tile] = UOp.wmma(afrag, bfrag, previous, *WMMA_ARG)
   update = UOp.group(*(acc.store(value) for output_accs,output_values in zip(accs, wmma_accs)
                        for acc,value in zip(output_accs, output_values))).end(group)
-  return UOp.group(*_wmma_stores(out, outputs, tokens, accs, update, physical_half)).end(token_block, output_block, lane, wave).sink(
-    arg=KernelInfo(name=name, opts_to_apply=()))
+  stores = _wmma_stores(out, outputs, tokens, accs, update, physical_half, lane, wave, output_waves, hw_lane)
+  return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
 @functools.cache
 def _q5_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, out_features:int, in_features:int, ggml_type:int) -> UOp:
@@ -303,7 +307,7 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
     32 if out.shape[0] % 32 == 0 else 16
   output_tiles = 1 if out_features <= 1024 else 2 if out_features <= 6144 else 1 if out_features < 8192 else 2
   layout = _wmma_layout(out, out_features, token_tile, output_tiles)
-  output_waves, _, _, lane, wave, _, _, _, _ = layout
+  output_waves, _, _, lane, wave, _, _, _, _, _ = layout
   local_lut = UOp.placeholder((256,), dtypes.uint32, slot=32, addrspace=AddrSpace.LOCAL)
   tid, lut_items = wave*32+lane, 256//(32*output_waves)
   lut = local_lut.after(UOp.group(*(local_lut[tid*lut_items+i].store(lut[tid*lut_items+i]) for i in range(lut_items))).barrier())
@@ -321,7 +325,7 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
     return tuple((_half((pair >> (i*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in lut_pairs for i in range(2))
   return _quant_linear_wmma(out, x, out_features, in_features, IQ4_WORDS, layout, dequant, "linear_iq4_xs_f16_wmma")
 
-def q8_linear(layer:Linear, x:Tensor, xq:tuple[Tensor, Tensor, Tensor]|None=None) -> Tensor:
+def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   assert layer.ggml_type in (Q4_K, Q5_K, Q6_K, IQ4_XS)
   tokens = int(x.numel()) // layer.in_features
   raw, out_features, in_features = layer.weight.uop.buf_uop, layer.out_features, layer.in_features
@@ -338,8 +342,7 @@ def q8_linear(layer:Linear, x:Tensor, xq:tuple[Tensor, Tensor, Tensor]|None=None
     fxn = _iq4_linear_f16_wmma_kernel if layer.ggml_type == IQ4_XS else functools.partial(_q5_linear_f16_wmma_kernel, ggml_type=layer.ggml_type)
     extra = (iq4_half_lut(str(x.device)).uop,) if layer.ggml_type == IQ4_XS else ()
     return run(fxn, out, raw, x.cast(dtypes.float16).contiguous().uop, *extra)
-  if xq is None: xq = q8_quantize(x, tokens, in_features)
-  xq_, xd, xs = xq
+  xq_, xd, xs = q8_quantize(x, tokens, in_features)
   decode = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type)
   out = Tensor.empty(tokens, out_features, (in_features+1023)//1024, dtype=dtypes.float32, device=x.device).uop
   return run(decode, out, raw, xq_.uop, xd.uop, xs.uop)
@@ -382,76 +385,12 @@ def f16_gemv(layer:Linear, x:Tensor) -> Tensor:
   srcs = (out, weight.reshape(-1), x.reshape(tokens, layer.in_features)) + (() if layer.bias is None else (_view_back(layer.bias),))
   return Tensor.custom_kernel(*srcs, fxn=fxn)[0].reshape(*x.shape[:-1], layer.out_features)
 
-# ******** ssm beta/alpha joint gemv + epilogue ********
-
-@functools.cache
-def _amd_ssm_ab_kernel(out:UOp, x:UOp, w:UOp, dt:UOp, ssm_a:UOp, dim:int, rows:int) -> UOp:
-  heads = out.shape[-1] // 2
-  rh, lane = UOp.range(rows*heads*2, 0), UOp.range(WARP_SIZE, 1, axis_type=AxisType.LOCAL)
-  row, o = rh // (heads*2), rh % (heads*2)
-  h, is_alpha = o % heads, o >= heads
-  dot = UOp.const(0, dtypes.float32)
-  for i in range(dim // (WARP_SIZE*8)):
-    c = lane*8 + i*(WARP_SIZE*8)
-    xf, wf = _vec_load(x[row*dim + c], 8), _vec_load(w[o*dim + c], 8)
-    dot = dot + sum((xv*wv for xv, wv in zip(xf, wf)), UOp.const(0, dtypes.float32))
-  assert dim % (WARP_SIZE*8) == 0
-  dot = warp_reduce(dot, full_wave=True)
-  store_val = is_alpha.where((dot + dt[h].load().float()).softplus() * ssm_a[h, 0].load().float(), dot.sigmoid())
-  return out[row, o.valid(lane.eq(0))].store(store_val).end(rh, lane).sink(arg=KernelInfo(name="ssm_beta_alpha", opts_to_apply=()))
-
-def ssm_beta_alpha(x:Tensor, w:Tensor, dt:Tensor, ssm_a:Tensor) -> Tensor:
-  # x: (rows, dim) fp16; w: (2*heads, dim) with beta rows first. returns (rows, 2*heads) fp32 (beta | log_alpha)
-  rows, dim, heads = x.shape[0], x.shape[1], ssm_a.shape[0]
-  assert w.shape == (2*heads, dim) and dt.shape == (heads,)
-  out = Tensor.empty(rows, 2*heads, dtype=dtypes.float32, device=x.device)
-  fxn = functools.partial(_amd_ssm_ab_kernel, dim=dim, rows=rows)
-  return Tensor.custom_kernel(out, x.reshape(rows*dim), w.reshape(2*heads*dim), dt.reshape(heads), ssm_a.reshape(heads, 1), fxn=fxn)[0]
-
 # ******** flash attention on the KV cache ********
 
 def _vec_load(ptr:UOp, lanes:int) -> tuple[UOp, ...]:
   if lanes == 1: return (ptr.load().float(),)
   vec = _amd_load(ptr, lanes)
   return tuple(vec[i].float() for i in range(lanes))
-
-# ******** fused rmsnorm: one block does reduce + scale + apply ********
-
-@functools.cache
-def _amd_rmsnorm_kernel(o:UOp, x:UOp, weight:UOp, eps:float, dim:int, waves:int) -> UOp:
-  n_rows = o.numel() // dim
-  lanes = waves * WARP_SIZE
-  global_row = UOp.range(n_rows, 0)
-  lane, wave = UOp.range(WARP_SIZE, 1, axis_type=AxisType.LOCAL), UOp.range(waves, 2, axis_type=AxisType.LOCAL)
-  row = global_row
-  n_per = -(-dim // lanes)
-  icol = (wave*WARP_SIZE + lane) * n_per
-  noload = dim % lanes != 0
-  cols = tuple((icol + i).valid(icol + i < dim) if noload else icol + i for i in range(n_per))
-  xs = [x[row, c].load().float() for c in cols]
-  total = warp_reduce(sum((v*v for v in xs), UOp.const(0, dtypes.float32)), full_wave=True)
-  # cross-wave reduce through LDS, then broadcast
-  part = UOp.placeholder((waves,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
-  barrier = UOp.barrier(part[wave.valid(lane.eq(0))].store(total))
-  total = sum((part.after(barrier)[w].load() for w in range(waves)), UOp.const(0, dtypes.float32))
-  scale = (total / dim + eps).rsqrt()
-  stores = [o[row, c].store(xs[i] * scale * weight[row, c].load().float()) for i, c in enumerate(cols)]
-  return UOp.group(*stores).end(global_row, lane, wave).sink(arg=KernelInfo(name="rmsnorm", opts_to_apply=()))
-
-class RMSNorm(nn.RMSNorm):
-  def __call__(self, x:Tensor) -> Tensor: return amd_rmsnorm(self, x)
-
-def amd_rmsnorm(norm:nn.RMSNorm, x:Tensor) -> Tensor:
-  w = norm.weight
-  if w is not None and not getenv("LLM_NO_RMSNORM") and x.dtype == dtypes.float32 and amd_custom_kernels_supported(x.device) \
-    and isinstance(x.numel(), int) and x.shape[-1] >= 192 and x.shape[-1] % 32 == 0:
-    rows, dim = int(x.numel()) // x.shape[-1], x.shape[-1]
-    out = Tensor.empty(rows, dim, dtype=dtypes.float32, device=x.device)
-    waves = 4 if dim >= 3040 else 2
-    fxn = functools.partial(_amd_rmsnorm_kernel, eps=norm.eps, dim=dim, waves=waves)
-    w2 = _view_back(w).reshape(1, dim).expand(rows, dim)
-    return Tensor.custom_kernel(out, x.reshape(rows, dim).contiguous(), w2, fxn=fxn)[0].reshape(*x.shape)
-  return nn.RMSNorm.__call__(norm, x)
 
 @functools.cache
 def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, max_kv_len, block_n, waves=4):
