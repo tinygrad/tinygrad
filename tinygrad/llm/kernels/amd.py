@@ -113,7 +113,7 @@ def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
 def _amd_load(ptr:UOp, lanes:int|None=None) -> UOp:
   assert ptr.op is Ops.INDEX
   # nontemporal scalar load: streamed weights must not evict the activations/KV cache from L2
-  if lanes is None: return UOp(Ops.CUSTOMI, src=(ptr,), arg=("__builtin_nontemporal_load({0})", ptr.dtype))
+  if lanes is None: return ptr.load(arg="nontemporal")
   buf, coords = ptr.src[0], ptr.src[1:]
   idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0))
   return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load(dtype=ptr.dtype)

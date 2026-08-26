@@ -103,7 +103,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
 
   # collect
-  memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp], dict[int, list[UOp]]] = defaultdict(dict)
+  memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp, object], dict[int, list[UOp]]] = defaultdict(dict)
   for u in sink.toposort():
     # TODO: this should handle images too, it's just memory coalescing
     if u.op in {Ops.LOAD, Ops.STORE}:
@@ -118,11 +118,12 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       elif idx.op is Ops.CONST and idx.val is Invalid: root_src, arg = "INVALID", 0
       elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.val
       else: root_src, arg = idx, 0
-      memory[(u.op, buf, root_src, valid)].setdefault(arg, []).append(u)
+      # loads/stores only coalesce with others carrying the same arg (e.g. the nontemporal flag)
+      memory[(u.op, buf, root_src, valid, u.arg)].setdefault(arg, []).append(u)
 
   # build replacements
   replacements = {}
-  for (op,buf,base,valid),offsets in memory.items():
+  for (op,buf,base,valid,ld_arg),offsets in memory.items():
     # allowed lengths (copied in)
     lengths = []
     must_divide = True
@@ -157,7 +158,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
           store = idx.store(UOp.stack(*datas) if len(datas) > 1 else datas[0])
           for i,g in enumerate(grp): replacements[offsets[g][0]] = store
         else:
-          ld = idx.load()
+          ld = idx.load(arg=ld_arg)
           for i,g in enumerate(grp):
             for oo in offsets[g]:
               replacements[oo] = ld.index(i) if len(grp) > 1 else ld
