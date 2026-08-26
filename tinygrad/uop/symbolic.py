@@ -449,9 +449,6 @@ pm_clean_up_group_sink = PatternMatcher([
 ])
 
 sym = symbolic+pm_simplify_valid+PatternMatcher([
-  # reorder ALU/VECTORIZE
-  (UPat(GroupOp.ALU, src=(UPat(Ops.STACK, src=UPat(name='x')), UPat(Ops.STACK, src=UPat(name='y'))), name='alu'),
-   lambda x,y,alu: UOp(Ops.STACK, src=(UOp(alu.op, src=(x,y)),))),
   # ** where **
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"),

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field, replace
 from typing import cast
 import itertools
-from tinygrad.dtype import dtypes, AddrSpace, Invalid, strong_dtype
+from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic
@@ -132,8 +132,6 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
-  (UPat(Ops.INDEX, src=(UPat(Ops.STAGE),), allow_any_len=True, name="idx").f(Ops.NOOP).f(Ops.STAGE, allow_any_len=True, name="b2"),
-   remove_noop_bufferize),
   # no buffers for a const, in either spelling
   (UPat.cvar('c').or_casted().f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.val)),
   # indexing a const is the const
@@ -141,8 +139,6 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   # indexing an after with all fully invalid stores is invalid
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
-  # hack if a noop turned to a const
-  (UPat(Ops.NOOP, src=(UPat.cvar().or_casted("c"),)), lambda c: c),
   # a deviceless MSTACK src is the same value on every device, so indexing the stack is just indexing that value
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True, name="idx"),
    lambda s,idx: idx.replace(src=(s,)+idx.src[1:]) if s.device is None else None),
@@ -221,7 +217,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 
 def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   size = prod(x.shape)
-  dtype = strong_dtype(x.dtype)  # a BUFFER is never weak: store at the concrete dtype, the .cast(x.dtype) on the result keeps readers unchanged
+  if x.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {x.dtype}")
   rngs = sorted(idx.ranges, key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
@@ -242,15 +238,15 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
 
   # NOTE: the local BUFFER needs to be disambiguated here
   if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(next(ctx), dtype, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
-    do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
-    return buf.after(do_store).cast(x.dtype)
+    buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(next(ctx), x.dtype, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
+    do_store = buf.index(idx).store(x.src[0]).end(*rngs)
+    return buf.after(do_store)
 
   if allow_locals:
     # handle locals
-    buf = UOp.placeholder((size,), dtype, next(ctx), AddrSpace.LOCAL)
-    do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
-    return buf.after(do_store).cast(x.dtype)
+    buf = UOp.placeholder((size,), x.dtype, next(ctx), AddrSpace.LOCAL)
+    do_store = buf.index(idx).store(x.src[0]).end(*rngs)
+    return buf.after(do_store)
 
 # collapse any BUFFERIZE to single input BUFFERIZE
 def flatten_bufferize(x:UOp):
@@ -274,11 +270,6 @@ def remove_noop_afters(x:UOp) -> UOp|None:
 
 pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
   (UPat(Ops.STAGE, src=(UPat(), UPat(name="idx")), name="x"), lambda ctx,x,idx: bufferize_to_store(ctx, x, idx, allow_locals=False)),
-
-  # INDEX of a buffer through the weak cast added above: index the buffer directly and cast the loaded value instead.
-  # this must run in the same rewrite that adds the cast, or the expander expands the whole casted buffer into one big VECTORIZE
-  (UPat(Ops.INDEX, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("buf"),)),), allow_any_len=True, name="u"),
-   lambda u,buf: u.replace(dtype=None, src=(buf,)+u.src[1:]).cast(u.dtype)),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
@@ -364,10 +355,6 @@ def get_contiguous(ctx:LocalAddBufferContext, x:UOp):
 
 rangeify_codegen = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), get_contiguous),
-
-  # no NOOP in the kernel graph
-  # TODO: this can be moved into codegen?
-  (UPat(Ops.NOOP, name="x"), lambda x: x.src[0] if len(x.src) else None),
 ])
 
 pm_add_param_range_tags = PatternMatcher([
