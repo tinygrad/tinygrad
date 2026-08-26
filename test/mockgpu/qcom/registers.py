@@ -44,6 +44,7 @@ def _as_f32(bits): return ctypes.c_float.from_buffer_copy(ctypes.c_uint32(bits))
 
 def _f32_bits(value): return ctypes.c_uint32.from_buffer_copy(ctypes.c_float(value)).value
 
+@functools.cache
 def local_id_regs(local_size, register, order=(0, 1, 2)):
   x_size, y_size, z_size = local_size
   lanes = [(x, y, z) for z in range(z_size) for y in range(y_size) for x in range(x_size)]
@@ -51,6 +52,54 @@ def local_id_regs(local_size, register, order=(0, 1, 2)):
 
 def workgroup_id_regs(workgroup_id, lane_count, register):
   return {('r', register, component): [workgroup_id[component]] * lane_count for component in range(3)}
+
+class IR3ConstantBank:
+  """One launch's immutable constant words, shared as broadcast rows across every wave."""
+  def __init__(self, words):
+    self.words, self._rows = tuple(words), {}
+
+  def row(self, kind, index, lanes):
+    # Rows are immutable by construction: the emulator only mutates r/hr rows in
+    # place (relr/relhr destinations) and always replaces c/hc rows wholesale.
+    by_lanes = self._rows.setdefault((kind, index), {})
+    if (row := by_lanes.get(lanes)) is None:
+      word = self.words[index]
+      row = by_lanes[lanes] = [word if kind == 'c' else word & 0xffff] * lanes
+    return row
+
+class IR3RegisterFile(dict):
+  """Wave registers whose lane count stays authoritative even with no materialized rows.
+
+  Constant rows install lazily from the shared bank on first read; a local write
+  shadows the bank row.  Untouched bank rows stay absent from iteration, so only
+  constants a kernel actually reads are ever allocated."""
+  def __init__(self, lanes, initial=None, constants=None):
+    super().__init__(initial if initial is not None else {})
+    self.lanes, self.constants = lanes, constants
+
+  def __missing__(self, key):
+    kind, number, component = key
+    if self.constants is not None and kind in ('c', 'hc'):
+      index = number * 4 + component
+      if 0 <= index < len(self.constants.words):
+        self[key] = row = self.constants.row(kind, index, self.lanes)
+        return row
+    raise KeyError(key)
+
+  def get(self, key, default=None):
+    try: return self[key]
+    except KeyError: return default
+
+  def materialize_constants(self):
+    if self.constants is None: return
+    for index in range(len(self.constants.words)):
+      for kind in ('c', 'hc'):
+        key = (kind, index // 4, index % 4)
+        if key not in self: self[key] = self.constants.row(kind, index, self.lanes)
+
+def _lane_count(regs):
+  if isinstance(regs, IR3RegisterFile): return regs.lanes
+  return len(next(iter(regs.values()))) if regs else 0
 
 def _next_reg(reg):
   kind, number, component = reg
@@ -60,7 +109,10 @@ def _reg_offset(reg, offset):
   kind, number, component = reg
   return kind, number + (component + offset) // 4, (component + offset) % 4
 
-def _values(regs, src, lanes): return [src] * lanes if isinstance(src, int) else regs.get(src, [0] * lanes)
+def _values(regs, src, lanes):
+  if isinstance(src, int): return [src] * lanes
+  values = regs.get(src)
+  return [0] * lanes if values is None else values
 
 def _float_values(regs, src, lanes, half):
   values = _values(regs, src, lanes)
@@ -71,10 +123,15 @@ def _float_values(regs, src, lanes, half):
   if half and isinstance(src, tuple) and src[0] == 'hc' and (full := regs.get(('c', src[1], src[2]))) is not None:
     return [_float_bits(_float(value), True) if value >> 16 else value & 0xffff for value in full]
   return values
-
 def _write(regs, dst, values, mask):
-  previous = regs.get(dst, [0] * len(values))
-  regs[dst] = [value if active else old for value, old, active in zip(values, previous, mask, strict=True)]
+  if all(mask):
+    # Every caller passes a freshly materialized list, so an all-active write
+    # can install it without merging a previous row.
+    regs[dst] = values
+    return
+  previous = regs.get(dst)
+  regs[dst] = [value if active else old for value, old, active in
+               zip(values, [0] * len(values) if previous is None else previous, mask, strict=True)]
 def _s32(value): return ctypes.c_int32(value).value
 def _signed(value, half=False): return ctypes.c_int16(value).value if half else _s32(value)
 def _compare(lhs, rhs, condition):

@@ -403,10 +403,8 @@ class A630GPU(VirtGPU):
     workgroup_reg = 0xfc if opencl else _field(config, "A6XX_SP_CS_CONST_CONFIG_0_WGIDCONSTID")
     if local_reg != 0xfc and local_reg % 4: raise ValueError(f"unaligned local ID register {local_reg:#x}")
     if workgroup_reg != 0xfc and workgroup_reg % 4: raise ValueError(f"unaligned workgroup ID register {workgroup_reg:#x}")
-    lanes = local_size[0] * local_size[1] * local_size[2]
     words = (ctypes.c_uint32 * (constant_bytes // 4)).from_address(constants_addr)
-    constants_regs = {('c', i // 4, i % 4): [value] * lanes for i, value in enumerate(words)}
-    constants_regs.update({('hc', i // 4, i % 4): [value & 0xffff] * lanes for i, value in enumerate(words)})
+    constant_words = tuple(words)
     def image_descriptors(block, state_type):
       state = self.states.get((block, state_type))
       if state is None: return []
@@ -429,6 +427,7 @@ class A630GPU(VirtGPU):
     ibos = image_descriptors(mesa.SB6_CS_SHADER, mesa.ST6_UAV)
     self.last_regs.clear()
     self.last_regs.update(execute_dispatch(ctypes.string_at(shader_addr, shader_size), global_size, local_size,
-      local_reg if local_reg == 0xfc else local_reg // 4, constants_regs, self._validate_memory,
-      workgroup_reg if workgroup_reg == 0xfc else workgroup_reg // 4, textures=textures, ibos=ibos,
-      global_id_register=51 if opencl else 0xfc, linear_group_register=51 * 4 + 3 if opencl else 0xfc))
+      local_reg if local_reg == 0xfc else local_reg // 4, check_range=self._validate_memory,
+      workgroup_id_register=workgroup_reg if workgroup_reg == 0xfc else workgroup_reg // 4, textures=textures, ibos=ibos,
+      global_id_register=51 if opencl else 0xfc, linear_group_register=51 * 4 + 3 if opencl else 0xfc,
+      constant_words=constant_words))

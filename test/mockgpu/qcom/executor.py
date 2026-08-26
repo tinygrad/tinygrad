@@ -2,11 +2,20 @@ import ctypes, struct
 from typing import Any
 from tinygrad.runtime.autogen import mesa
 from test.mockgpu.qcom.decoder import decode_ir3
-from test.mockgpu.qcom.registers import (_alu_runner, _compare, _convert, _float, _float_bits, _itemsize, _mod_float, _next_reg, _reg_offset,
-                                         _s32, _signed, _float_values, _values, _write)
+from test.mockgpu.qcom.registers import (IR3RegisterFile, _alu_runner, _compare, _convert, _float, _float_bits, _itemsize,
+                                         _lane_count, _mod_float, _next_reg, _reg_offset, _s32, _signed, _float_values,
+                                         _values, _write)
 from test.mockgpu.qcom.runner import IR3UOpLoopTimeout, IR3UOpRunner
 
 _UOP_RUNNER = IR3UOpRunner()
+
+_ALU_OPS = frozenset({'add.f', 'mul.f', 'min.f', 'max.f', 'cmps.f', 'cmpv.f', 'sign.f', 'absneg.f', 'floor.f', 'ceil.f',
+  'rndne.f', 'rndaz.f', 'trunc.f', 'add.u', 'add.s', 'sub.u', 'sub.s', 'cmps.u', 'cmps.s', 'cmpv.u', 'cmpv.s', 'min.u', 'min.s',
+  'max.u', 'max.s', 'absneg.s', 'and.b', 'or.b', 'xor.b', 'not.b', 'mul.u24', 'mul.s24', 'mull.u', 'bfrev.b', 'clz.s', 'clz.b',
+  'cbits.b', 'shl.b', 'shr.b', 'ashr.b', 'getbit.b', 'rcp', 'rsq', 'log2', 'exp2', 'sin', 'cos', 'sqrt', 'hrsq', 'hlog2',
+  'hexp2'})
+_FLOAT_OPS = frozenset({'rcp', 'rsq', 'log2', 'exp2', 'sin', 'cos', 'sqrt', 'hrsq', 'hlog2', 'hexp2'}) | \
+  frozenset(name for name in _ALU_OPS if name.endswith('.f'))
 
 def _native_memory_bounds(check_range) -> tuple[tuple[int, int], ...] | None:
   owner = getattr(check_range, '__self__', None)
@@ -26,7 +35,8 @@ def _source_values(regs, src, lanes, half=False):
   values = []
   for lane, address in enumerate(addresses):
     component = address + src[1]
-    values.append(regs.get((kind, component // 4, component % 4), [0] * lanes)[lane])
+    row = regs.get((kind, component // 4, component % 4))
+    values.append(row[lane] if row is not None else 0)
   return values
 
 def _write_destination(regs, dst, values, mask):
@@ -37,7 +47,8 @@ def _write_destination(regs, dst, values, mask):
     if not active: continue
     component = address + dst[1]
     target = (kind, component // 4, component % 4)
-    previous = regs.setdefault(target, [0] * len(values))
+    previous = regs.get(target)
+    if previous is None: regs[target] = previous = [0] * len(values)
     previous[lane] = value
 
 def _check_access(check_range, address, size, name, pc):
@@ -104,7 +115,8 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
   program, pc = decode_ir3(code, gpu_id), start_pc
   step_limit = max(100000, len(program) * 65536)
   if memory_bounds is None: memory_bounds = _native_memory_bounds(check_range)
-  lanes = len(next(iter(regs.values())))
+  lanes = _lane_count(regs)
+  if trace is not None and isinstance(regs, IR3RegisterFile): regs.materialize_constants()
   branch_frames: list[dict[str, Any]]
   if resume_state:
     steps = resume_state['steps']
@@ -209,7 +221,6 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
       continue
     write_mask = exec_mask if predication is None else [active and pred for active, pred in zip(exec_mask, predication, strict=True)]
     if inst.name in {'ashr.b', 'shl.b'}:
-      lanes = len(next(iter(regs.values())))
       repeated = inst.repeat_srcs + (False,) * (2 - len(inst.repeat_srcs))
       runner = _alu_runner(inst.name, 0, inst.src_mods + (0,) * (2 - len(inst.src_mods)), inst.source_half, inst.dst[0].startswith('h'))
       for component in range(inst.repeat + 1):
@@ -241,7 +252,6 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
         _write(regs, _reg_offset(inst.dst, component), [(x + y) & mask for x, y in zip(lhs, rhs, strict=True)], write_mask)
       continue
     if inst.name in ('cmps.u', 'cmps.s'):
-      lanes = len(next(iter(regs.values())))
       unsigned_mask = 0xffff if inst.source_half else 0xffffffff
       for component in range(inst.repeat + 1):
         srcs = tuple(_source_offset(src, component) if repeated else src
@@ -263,7 +273,6 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
         _write(regs, _reg_offset(inst.dst, component), result, write_mask)
       continue
     if inst.name == 'sel.b32':
-      lanes = len(next(iter(regs.values())))
       for component in range(inst.repeat + 1):
         srcs = tuple(_source_offset(src, component) if repeated else src
                      for src, repeated in zip(inst.srcs, inst.repeat_srcs, strict=True))
@@ -287,7 +296,6 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
         _write(regs, _reg_offset(inst.dst, component), result, write_mask)
       continue
     if inst.name.startswith(('mad.', 'madsh.', 'sel.', 'sad.')):
-      lanes = len(next(iter(regs.values())))
       repeated = inst.repeat_srcs + (False,) * (3 - len(inst.repeat_srcs))
       half = inst.name.endswith('16')
       for component in range(inst.repeat + 1):
@@ -322,7 +330,6 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
         _write(regs, dst, converted, write_mask)
       continue
     if inst.name == 'mov':
-      lanes = len(next(iter(regs.values())))
       for component in range(inst.repeat + 1):
         src = _source_offset(inst.srcs[0], component) if inst.repeat_srcs[0] else inst.srcs[0]
         converted = [_convert(x, inst.types[0], inst.types[1], inst.rounding)
@@ -330,7 +337,7 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
         _write_destination(regs, _source_offset(inst.dst, component), converted, write_mask)
       continue
     if inst.name in {'ldl', 'ldp', 'stl', 'stp'}:
-      itemsize, lanes = _itemsize(inst.types[0]), len(next(iter(regs.values())))
+      itemsize = _itemsize(inst.types[0])
       if inst.name.endswith('l'):
         if shared is None: raise RuntimeError(f'IR3 {inst.name} has no backing memory')
         if isinstance(shared, list):
@@ -408,12 +415,7 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
             output.append(value)
       for offset, output in enumerate(outputs): _write(regs, _reg_offset(inst.dst, offset), output, write_mask)
       continue
-    alu_ops = {'add.f', 'mul.f', 'min.f', 'max.f', 'cmps.f', 'cmpv.f', 'sign.f', 'absneg.f', 'floor.f', 'ceil.f', 'rndne.f',
-      'rndaz.f', 'trunc.f', 'add.u', 'add.s', 'sub.u', 'sub.s', 'cmps.u', 'cmps.s', 'cmpv.u', 'cmpv.s', 'min.u', 'min.s', 'max.u',
-      'max.s', 'absneg.s', 'and.b', 'or.b', 'xor.b', 'not.b', 'mul.u24', 'mul.s24', 'mull.u', 'bfrev.b', 'clz.s', 'clz.b', 'cbits.b',
-      'shl.b', 'shr.b', 'ashr.b', 'getbit.b', 'rcp', 'rsq', 'log2', 'exp2', 'sin', 'cos', 'sqrt', 'hrsq', 'hlog2', 'hexp2'}
-    if inst.name in alu_ops:
-      lanes = len(next(iter(regs.values())))
+    if inst.name in _ALU_OPS:
       repeated = inst.repeat_srcs + (False,) * (len(inst.srcs) - len(inst.repeat_srcs))
       modifiers = inst.src_mods + (0,) * (len(inst.srcs) - len(inst.src_mods))
       half = inst.dst[0].startswith('h')
@@ -421,7 +423,7 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
       for component in range(inst.repeat + 1):
         srcs = tuple(_source_offset(src, component) if repeat else src
                      for src, repeat in zip(inst.srcs, repeated, strict=True))
-        float_op = inst.name.endswith('.f') or inst.name in {'rcp', 'rsq', 'log2', 'exp2', 'sin', 'cos', 'sqrt', 'hrsq', 'hlog2', 'hexp2'}
+        float_op = inst.name in _FLOAT_OPS
         values = [_float_values(regs, src, lanes, inst.source_half) if float_op else _values(regs, src, lanes) for src in srcs]
         result = [runner(tuple(x)) for x in zip(*values, strict=True)]
         if inst.sat: result = [_float_bits(min(1.0, max(0.0, _float(x, half))), half) for x in result]
@@ -432,7 +434,6 @@ def execute_ir3(code:bytes, regs:dict[tuple[str, int, int], list[int]], gpu_id:i
       continue
     if inst.name == 'mov.u32u32':
       src = inst.srcs[0]
-      lanes = len(next(iter(regs.values())))
       _write(regs, inst.dst, _values(regs, src, lanes).copy(), write_mask)
       continue
     if inst.name.startswith('atomic.g.'):

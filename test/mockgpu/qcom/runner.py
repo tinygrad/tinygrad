@@ -4,6 +4,7 @@ from typing import Any
 
 from test.mockgpu.qcom.decoder import IR3Instruction
 from test.mockgpu.qcom.loop_runner import IR3UOpLoopTimeout as IR3UOpLoopTimeout, has_loop, try_run_loop
+from test.mockgpu.qcom.registers import _lane_count
 from test.mockgpu.qcom.uop_runner import _Lowerer, _NATIVE, IR3UOpBlock, UnsupportedIR3Block, _register
 
 
@@ -137,8 +138,8 @@ class IR3UOpRunner:
     return enabled
 
   def try_run(self, program, start_pc, regs, exec_mask, predication=None, mask_pcs=None, *, policy_checked=False):
-    if not regs: return None
-    lanes = len(next(iter(regs.values())))
+    lanes = _lane_count(regs)
+    if not lanes: return None
     if not policy_checked and not self.can_run_blocks(program, lanes): return None
     self.stats.block_attempts += 1
     if (end_pc := self._blocks(program).get(start_pc)) is None: return None

@@ -7,6 +7,7 @@ from tinygrad.runtime.ops_qcom import pkt4_hdr, pkt7_hdr, qreg
 from tinygrad.uop.ops import Ops
 from test.mockgpu.qcom.qcomdriver import QCOMDriver
 from test.mockgpu.qcom.qcomgpu import A630GPU
+from test.mockgpu.qcom.registers import IR3ConstantBank, IR3RegisterFile
 
 
 class TestA630CommandProcessor(unittest.TestCase):
@@ -62,10 +63,11 @@ class TestA630CommandProcessor(unittest.TestCase):
     })
     with patch("test.mockgpu.qcom.qcomgpu.execute_dispatch", return_value={}) as execute:
       gpu._run_kernel((1, 1, 1))
-    initial_regs = execute.call_args.args[4]
-    self.assertEqual(initial_regs[('c', 0, 0)], [0x00008000])
-    self.assertEqual(initial_regs[('hc', 0, 0)], [0x8000])
-    self.assertEqual(initial_regs[('hc', 0, 1)], [0x7fff])
+    self.assertEqual(execute.call_args.kwargs['constant_words'], (0x00008000, 0x00007fff, 3, 4))
+    regs = IR3RegisterFile(1, constants=IR3ConstantBank(execute.call_args.kwargs['constant_words']))
+    self.assertEqual(regs[('c', 0, 0)], [0x00008000])
+    self.assertEqual(regs[('hc', 0, 0)], [0x8000])
+    self.assertEqual(regs[('hc', 0, 1)], [0x7fff])
 
   def test_kernel_only_seeds_mapped_constant_tail(self):
     gpu = A630GPU(0)
@@ -83,9 +85,11 @@ class TestA630CommandProcessor(unittest.TestCase):
     })
     with patch("test.mockgpu.qcom.qcomgpu.execute_dispatch", return_value={}) as execute:
       gpu._run_kernel((1, 1, 1))
-    initial_regs = execute.call_args.args[4]
-    self.assertEqual([initial_regs[('c', 0, i)] for i in range(4)], [[1], [2], [3], [4]])
-    self.assertNotIn(('c', 1, 0), initial_regs)
+    self.assertEqual(execute.call_args.kwargs['constant_words'], (1, 2, 3, 4))
+    regs = IR3RegisterFile(1, constants=IR3ConstantBank(execute.call_args.kwargs['constant_words']))
+    self.assertEqual([regs[('c', 0, i)] for i in range(4)], [[1], [2], [3], [4]])
+    self.assertNotIn(('c', 1, 0), regs)
+    self.assertIsNone(regs.get(('c', 1, 0)))
 
   def test_signal_and_timestamp_packets(self):
     gpu = A630GPU(0)

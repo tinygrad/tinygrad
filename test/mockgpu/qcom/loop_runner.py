@@ -98,6 +98,15 @@ def _loop_registers(shape: _LoopShape) -> tuple[Register, ...]:
   return tuple(sorted(keys))
 
 
+def _loop_load_addresses(shape: _LoopShape) -> tuple[Register, ...]:
+  """Memory-bound anchor registers: every ldg base plus the constants the loop reads.
+
+  Mesa computes ldg pointers inside the loop from constant base words, so the
+  live-in anchor is often a `c` pair rather than the ldg base itself."""
+  anchors = [inst.srcs[0] for inst in shape.instructions if inst.name == 'ldg' and _register(inst.srcs[0])]
+  return tuple(dict.fromkeys([*anchors, *(reg for reg in _loop_registers(shape) if reg[0] in ('c', 'hc'))]))
+
+
 def _normalise_memory_bounds(bounds: tuple[tuple[int, int], ...]) -> tuple[tuple[int, int], ...] | None:
   """Validate and deduplicate mappings without widening any individual mapping."""
   try:
@@ -130,6 +139,7 @@ class _NativeLoopBlock:
   slots: tuple[Register, ...]
   dirty_slots: tuple[tuple[Register, int], ...]
   load_specs: dict[int, tuple[int, int]]
+  load_addresses: tuple[Register, ...]
   runtime: Any
   regfile: Buffer
   words: memoryview
@@ -139,9 +149,11 @@ class _NativeLoopBlock:
   def control(self, offset: int) -> int: return self.control_base + offset
 
   def run(self, regs: dict[Register, list[int]], vmem: Buffer, bounds: tuple[tuple[int, int], ...], max_steps: int) -> _NativeLoopOutcome:
+    for slot, reg in enumerate(self.slots):
+      values = regs.get(reg)
+      self.words[slot] = (values[0] if values is not None else 0) & _UINT32_MASK
     # This is a private staging buffer.  No caller register is changed until
     # the generated loop exits normally and `commit` is called below.
-    for slot, reg in enumerate(self.slots): self.words[slot] = regs.get(reg, [0])[0] & _UINT32_MASK
     controls = self.control_base
     self.words[controls:controls + _LOOP_CONTROL_WORDS] = array.array('I', [0]) * _LOOP_CONTROL_WORDS
     self.words[self.control(_LOOP_TIMEOUT_FUEL)] = max_steps
@@ -325,17 +337,17 @@ def has_loop(program: tuple[IR3Instruction, ...], supported) -> bool:
              loop_shape(program, pc + inst.branch_offset, supported) is not None for pc, inst in enumerate(program))
 
 
-def _select_memory_bounds(regs: dict[Register, list[int]], bounds: tuple[tuple[int, int], ...]) -> tuple[tuple[int, int], ...] | None:
+def _select_memory_bounds(regs: dict[Register, list[int]], bounds: tuple[tuple[int, int], ...],
+                          address_regs: tuple[Register, ...]) -> tuple[tuple[int, int], ...] | None:
   """Keep only mappings anchored by a one-lane live-in adjacent register pair."""
   candidates: set[int] = set()
-  for reg, values in regs.items():
-    if not _register(reg) or len(values) != 1: continue
+  for reg in address_regs:
+    if (values := regs.get(reg)) is None or len(values) != 1: continue
     if (high := regs.get(_next_reg(reg))) is None or len(high) != 1: continue
     candidates.add((values[0] & _UINT32_MASK) | ((high[0] & _UINT32_MASK) << 32))
   try: selected = tuple((start, end) for start, end in bounds if any(start <= address < end for address in candidates))
   except TypeError: return None
   return _normalise_memory_bounds(selected)
-
 
 def _vmem_buffer(runner: 'IR3UOpRunner') -> Buffer:
   if runner._vmem is None:
@@ -364,7 +376,7 @@ def loop_block(runner: 'IR3UOpRunner', program: tuple[IR3Instruction, ...], star
       lowerer = _LoopLowerer(shape, slots)
       runtime, dirty_slots, load_specs = lowerer.compile_loop()
       regfile = Buffer('CPU', len(slots) + _LOOP_CONTROL_WORDS, dtypes.uint32).allocate()
-      block = _NativeLoopBlock(shape, slots, dirty_slots, load_specs, runtime, regfile,
+      block = _NativeLoopBlock(shape, slots, dirty_slots, load_specs, _loop_load_addresses(shape), runtime, regfile,
                                regfile.as_memoryview(force_zero_copy=True).cast('I'))
       runner.compiled_loops[signature] = block
       runner.stats.compiled += 1
@@ -381,7 +393,7 @@ def try_run_loop(runner: 'IR3UOpRunner', program: tuple[IR3Instruction, ...], st
                  max_steps: int | None = None) -> tuple[int, int] | None:
   """Run one eligible decoded-IR3 natural loop in a single native CPU call."""
   runner.stats.attempts += 1
-  if not regs or exec_mask != [True] or any(len(values) != 1 for values in regs.values()):
+  if len(exec_mask) != 1 or not exec_mask[0]:
     runner.stats.fallbacks += 1
     return None
   if (block := loop_block(runner, program, start_pc)) is None:
@@ -392,7 +404,7 @@ def try_run_loop(runner: 'IR3UOpRunner', program: tuple[IR3Instruction, ...], st
       # Mirror the scalar ldg prerequisite before touching staging state.
       first_pc = min(block.load_specs)
       raise RuntimeError(f'IR3 ldg requires a mapped-memory validator at PC {first_pc}')
-    if memory_bounds is None or (bounds := _select_memory_bounds(regs, memory_bounds)) is None:
+    if memory_bounds is None or (bounds := _select_memory_bounds(regs, memory_bounds, block.load_addresses)) is None:
       runner.stats.fallbacks += 1
       return None
   else: bounds = ()

@@ -5,6 +5,7 @@ from dataclasses import replace
 from test.mockgpu.qcom.decoder import decode_ir3
 from test.mockgpu.qcom.executor import execute_ir3
 from test.mockgpu.qcom.runner import IR3UOpLoopTimeout, IR3UOpRunner
+from test.mockgpu.qcom.registers import IR3ConstantBank, IR3RegisterFile
 from test.mockgpu.qcom.corpus import (BACKWARD_BRANCH, BITWISE_SHIFT_COMPARE, END, FLOAT_ALU_COMPARE, FP8_HALF_COMPARE, GLOBAL_LOAD,
   MADSH_MAGIC_DIVIDE, MADSH_REPEAT, MESA_STD_HOT_LOOP, MESA_STD_HOT_PREHEADER, MULL_REPEAT, REPEATED_ADD, SHRG_HALF_DEST, SIGNED_BYTE_TO_HALF,
   ir3_program as pack_ir3)
@@ -300,6 +301,29 @@ class TestA630UOpRunner(unittest.TestCase):
     assert result is not None
     self.assertEqual(result[0], 23)
     self.assertEqual(actual, expected)
+
+  def test_native_natural_loop_selects_bounds_from_lazy_constant_anchor(self):
+    # The std() loop computes its ldg pointer from c0.z/c0.w inside the loop, so
+    # the memory-bound anchor is a lazy constant pair.  A register file whose
+    # constants live in a bank must select the same bounds and produce the same
+    # registers as the fully materialized scalar oracle.
+    _code, program = std_loop_program(actual_pcs=True)
+    _data, check_range, bounds, initial = self.std_loop_state()
+    expected = {key: values.copy() for key, values in initial.items()}
+    execute_ir3(_code, expected, start_pc=6, check_range=check_range, trace={})
+
+    words = [0] * 17
+    for key, values in initial.items():
+      if key[0] == 'c': words[key[1] * 4 + key[2]] = values[0]
+    lazy = IR3RegisterFile(1, {key: values for key, values in initial.items() if key[0] != 'c'},
+                           IR3ConstantBank(words))
+    self.assertNotIn(('c', 0, 2), lazy)
+    result = IR3UOpRunner(min_instructions=1).try_run_loop(program, 6, lazy, [True],
+                                                           check_range=check_range, memory_bounds=bounds)
+    self.assertIsNotNone(result)
+    assert result is not None
+    self.assertEqual(result[0], 23)
+    self.assertEqual({key: lazy[key] for key in expected}, expected)
 
   def test_native_header_guarded_loop_matches_scalar_control_flow(self):
     from test.mockgpu.qcom.decoder import IR3Instruction

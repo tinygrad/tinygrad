@@ -6,7 +6,8 @@ from test.mockgpu.qcom.corpus import (DIVERGENT_BRANCH, END, GLOBAL_ATOMIC_ADD, 
   RELATIVE_DESTINATION, RELATIVE_SOURCE_REPEAT, SHARED_BARRIER, UNSUPPORTED_UL_ADD, ir3_program)
 from test.mockgpu.qcom.decoder import IR3Instruction, decode_ir3
 from test.mockgpu.qcom.dispatch import execute_dispatch, use_native_blocks as _use_native_blocks, workgroup_batch_size as _workgroup_batch_size
-from test.mockgpu.qcom.executor import execute_ir3
+from test.mockgpu.qcom.executor import _source_values, execute_ir3
+from test.mockgpu.qcom.registers import IR3ConstantBank, IR3RegisterFile
 
 
 class TestA630IR3Execution(unittest.TestCase):
@@ -202,3 +203,47 @@ class TestA630IR3Execution(unittest.TestCase):
 
     with self.assertRaisesRegex(ValueError, "IR3 code size must be a multiple of 8 bytes"):
       decode_ir3(b"\\0")
+
+  def test_lazy_register_file_executes_without_materialized_rows(self):
+    # add.u r1.x, r2.x, 1 with no materialized rows: the register file's explicit
+    # lane count drives execution and absent sources read as zero.
+    program = ir3_program(PARTIAL_WAVE_ADD, END)
+    regs = IR3RegisterFile(4)
+    execute_ir3(program, regs)
+    self.assertEqual(regs[("r", 1, 0)], [1, 1, 1, 1])
+
+  def test_constant_bank_rows_are_shared_by_lane_count(self):
+    bank = IR3ConstantBank((0x12345678,))
+    one, two = IR3RegisterFile(1, constants=bank), IR3RegisterFile(2, constants=bank)
+    self.assertEqual((one[("c", 0, 0)], one[("hc", 0, 0)]), ([0x12345678], [0x5678]))
+    self.assertIs(one[("c", 0, 0)], one[("c", 0, 0)])
+    self.assertEqual(two[("c", 0, 0)], [0x12345678] * 2)
+    self.assertIsNot(one[("c", 0, 0)], two[("c", 0, 0)])
+    # Beyond-tail and negative indices stay absent and read as zero.
+    self.assertIsNone(one.get(("c", 0, 1)))
+    self.assertIsNone(one.get(("hc", 1, 0)))
+    self.assertIsNone(one.get(("c", -1, 0)))
+    self.assertNotIn(("c", 0, 1), one)
+    one.materialize_constants()
+    self.assertEqual(sorted(one), [("c", 0, 0), ("hc", 0, 0)])
+
+  def test_a0_relative_constant_source_reads_lazy_bank_per_lane(self):
+    # mov-style relative source c<a0.x + 0>: lane 0 reads component 0, lane 1
+    # (a0.x=1) reads component 1, materializing only those rows.
+    regs = IR3RegisterFile(2, {("a", 61, 0): [0, 1]}, IR3ConstantBank((0x11, 0x22, 0x33, 0x44)))
+    self.assertEqual(_source_values(regs, ("rel", 0, 1), 2), [0x11, 0x22])
+    self.assertEqual(regs[("c", 0, 0)], [0x11, 0x11])
+    self.assertEqual(regs[("c", 0, 1)], [0x22, 0x22])
+    self.assertNotIn(("c", 0, 2), regs)
+
+  def test_batched_register_layout_is_group_major_lane_minor(self):
+    # add.u r1.x, r2.x, 1 across two two-lane workgroups in one scheduler batch.
+    program = ir3_program(PARTIAL_WAVE_ADD, END)
+    initial_regs = {("r", 2, 0): [10, 20]}
+    regs = execute_dispatch(program, (2, 1, 1), (2, 1, 1), 0, initial_regs=initial_regs,
+                            workgroup_id_register=4, global_id_register=6, linear_group_register=31)
+    self.assertEqual(regs[("r", 1, 0)], [11, 21])
+    with self.subTest("local id x, final group"): self.assertEqual(regs[("r", 0, 0)], [0, 1])
+    with self.subTest("workgroup id x, final group"): self.assertEqual(regs[("r", 4, 0)], [1, 1])
+    with self.subTest("global id base x"): self.assertEqual(regs[("r", 6, 0)], [2, 2])
+    with self.subTest("linear group id"): self.assertEqual(regs[("r", 7, 3)], [1, 1])
