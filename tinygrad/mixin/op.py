@@ -1067,7 +1067,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       reshape[i] = expand[i] = size[i]
       if mode == "linear":
         arr = type(self).arange(size[i])
-        num, den = (arr*(in_sz-1), size[i]-1) if align_corners else ((arr*2+1)*in_sz - size[i], size[i]*2)
+        num, den = (arr*(in_sz-1), max(size[i]-1, 1)) if align_corners else ((arr*2+1)*in_sz - size[i], size[i]*2)
         num = num.clip(0, (in_sz-1)*den)
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (num//den, (num+den-1)//den, (num % den).cast(dtypes.float32)/den)]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
