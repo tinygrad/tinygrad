@@ -450,37 +450,41 @@ jobs:
     strategy:
       matrix:
         dev: ['QCOM', 'QCOM:IR3']
-        version: [[0, 11, 0], [0, 11, 2]]
+        version: ['0.11.0', '0.11.2']
         model: ['vision', 'policy', 'supercombo', 'dmonitoring']
         # exclude non-existent models
-        exclude: [{ version: [0, 11, 0], model: supercombo }, { version: [0, 11, 2], model: vision }, { version: [0, 11, 2], model: policy }]
+        exclude: [{ version: '0.11.0', model: supercombo }, { version: '0.11.2', model: vision }, { version: '0.11.2', model: policy }]
         include:
-          - version: [0, 11, 0]
+          - version: '0.11.0'
             model: vision
             url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
             timing: 17
-          - version: [0, 11, 0]
+          - version: '0.11.0'
             model: policy
             url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
             timing: 3.2
-          - version: [0, 11, 0]
+          - version: '0.11.0'
             model: dmonitoring
             url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/dmonitoring_model.onnx
             timing: 11
-          - version: [0, 11, 2]
+          - version: '0.11.2'
             model: supercombo
             url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
             timing: 26
           - dev: QCOM:IR3
-            version: [0, 11, 2]
+            version: '0.11.2'
             model: supercombo
             timing: 41
-          - version: [0, 11, 2]
+          - version: '0.11.2'
             model: dmonitoring
             url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
             timing: 11
+          # IR3 dmonitoring is slightly slower
+          - dev: QCOM:IR3
+            model: dmonitoring
+            timing: 12
       fail-fast: false
-    name: openpilot ${{ join(matrix.version, '.') }} compile3 ${{ matrix.model }} (DEV=${{ matrix.dev }})
+    name: openpilot ${{ matrix.version }} compile3 ${{ matrix.model }} (DEV=${{ matrix.dev }})
     runs-on: [self-hosted, Linux, comma]
     timeout-minutes: 5
     defaults:
@@ -490,7 +494,7 @@ jobs:
     env:
       DEV: ${{ matrix.dev }}
       ASSERT_MIN_STEP_TIME: ${{ matrix.timing }}
-      BENCHMARK_LOG: ${{ matrix.dev == 'QCOM:IR3' && 'ir3_' || '' }}openpilot_${{ join(matrix.version, '_') }}_${{ matrix.model }}
+      BENCHMARK_LOG: ${{ matrix.dev == 'QCOM:IR3' && 'ir3_' || '' }}openpilot_${{ matrix.version }}_${{ matrix.model }}
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
