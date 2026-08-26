@@ -506,7 +506,7 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: compile
-      run: FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py ${{ matrix.url }}
+      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile3.py ${{ matrix.url }}
     - name: run pickle
       run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" RUN_PICKLE=1 taskset -c 4-7 python3 examples/openpilot/compile3.py
     - name: Run process replay tests
