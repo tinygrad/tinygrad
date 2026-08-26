@@ -1783,6 +1783,8 @@ def train_gptoss():
     for g, new_g in zip(grads, loss.gradient(*optim.params)):
       apply_grad(g, new_g.uop)
 
+    Tensor.realize(loss, *grads)
+
     grad_norm = clip_grads(grads, 1, 1.0)
     optim.fstep(grads, grad_norm)
     scheduler.step()
@@ -1794,7 +1796,7 @@ def train_gptoss():
     grad_norm_cpu = grad_norm.float().to("CPU")
     Tensor.realize(loss_cpu, lr_cpu, grad_norm_cpu, *grads, *fp8_inv_scales)
 
-    return loss, lr, grad_norm
+    return loss_cpu, lr_cpu, grad_norm_cpu
 
   @TinyJit
   @Context(TRAINING=0)
