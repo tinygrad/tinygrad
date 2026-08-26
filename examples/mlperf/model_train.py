@@ -2201,7 +2201,7 @@ def train_flux():
     clip_enc, t5_enc = sample["clip_encodings"], sample["t5_encodings"]
 
     if timesteps is not None:
-      timesteps = timesteps / 8.0
+      timesteps = (timesteps / 8.0).cast(dtypes.default_float)
     else:
       timesteps = Tensor.rand(BS)
 
