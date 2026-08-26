@@ -217,14 +217,12 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   dev = cast(Any, Device[(info:= call.arg.aux).device[0]])
-  addrs = [(next(x for x in b.bufs if x.device == d) if isinstance(b:=_resolve(u, ctx.input_uops).buffer, MultiBuffer) else b).get_buf(d).va_addr
-           for d, u in info.input_addrs]
+  addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(d).va_addr for d, u in info.input_addrs]
   dev.rt_buffer()._buf.cpu_view().view(offset=(base:=dev.rt_allocator.alloc(len(addrs) * 8)), fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
   if info.inputs is not None:
-    n = len(info.input_addrs) // len(info.device)
-    tables = [UOp.from_buffer(dev.rt_buffer().view(n, dtypes.uint64, base + j*n*8), HCQ_RUNTIME_DEV.value) for j in range(len(info.device))]
-    call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*tables)})
+    table = UOp.from_buffer(dev.rt_buffer().view(len(info.input_addrs), dtypes.uint64, base), HCQ_RUNTIME_DEV.value)
+    call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*[table]*len(info.device))})
   exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer()._buf.va_addr + base}), call, ast)
 
   def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:
