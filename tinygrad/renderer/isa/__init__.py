@@ -21,7 +21,7 @@ class VRegister:
   parent: VRegister|None = None
   pos: int|None = None
   phi: tuple[VRegister,...]|None = None
-  def __repr__(self): return self.name
+  def __repr__(self): return f"{self.name} <= phi[{','.join(str(e) for e in self.phi)}]" if self.phi is not None else self.name
   def is_sub(self) -> bool: return self.parent is not None
   def or_parent(self) -> VRegister: return self.parent if self.is_sub() else self
   def sub(self, i:int) -> VRegister:
@@ -72,6 +72,6 @@ class ISARenderer(Renderer):
   def stack_alloc(self, uops:list[UOp]) -> list[UOp]: return uops
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, x:UOp, regs:tuple[Register,...]) -> list[UOp]: raise NotImplementedError("arch specific")
-  def spill(self, spill_offset:int, sub_idx:int|None, x:UOp) -> list[UOp]: raise NotImplementedError("arch specific")
+  def spill(self, spill_offset:int, x:UOp) -> list[UOp]: raise NotImplementedError("arch specific")
   def fill(self, spill_offset:int, sub_idx:int|None, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")

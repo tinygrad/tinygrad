@@ -112,8 +112,8 @@ class LinearScanRegallocContext:
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i, nsrc, = next(ctx.idx), []
   for j,s in enumerate(x.src):
-    if i in ctx.reals and isinstance((v := rdef(ctx.uops[i].src[j])), VRegister) and (vv := v.or_parent()) in ctx.spills:
-      nsrc.append(ctx.ren.fill(ctx.spills[vv], v.pos, ctx.vdef(v), ctx.reals[i][v])[0])
+    if i in ctx.reals and isinstance((v := rdef(ctx.uops[i].src[j])), VRegister) and v.or_parent() in ctx.spills:
+      nsrc.append(s.replace(tag=ctx.reals[i][v]))
     else:
       nsrc.append(s)
 
@@ -125,9 +125,8 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
 
   for v in rdefs(x):
     if not isinstance(v, VRegister): continue
-    vv = v.or_parent()
-    if vv in ctx.spills and not (x.op is Ops.BUFFER and vv.phi is not None):
-      after.extend(ctx.ren.spill(ctx.spills[vv], v.pos, nx))
+    if v in ctx.spills and not (x.op is Ops.BUFFER and v.phi is not None):
+      after.extend(ctx.ren.spill(ctx.spills[v], nx))
   for v,rs in ctx.insert_before.get(i, []):
     before.extend(ctx.ren.fill(ctx.spills[v], None, ctx.vdef(v), rs)[1])
 

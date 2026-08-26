@@ -84,10 +84,10 @@ VGPRS = tuple(Register(f"v{i}", i, size=4) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i, size=4) for i in range(106))
 # reserve VGPRs ahead of time to be excluded from normal allocation to
 # prevent retroactive lifetime semantics and eviction cloberring when
-# spilling SGPRS to lanes. 12 vgprs x wave 32 = 384 SGPRs
-SPILL_VGPRS = VGPRS[-12:]
+# spilling SGPRS to lanes. 14 vgprs x wave 32 = 448 SGPRs
+SPILL_VGPRS = VGPRS[-14:]
 KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
-GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:-12])
+GP_SGPRS, GP_VGPRS = tuple(SGPRS[5:]), tuple(VGPRS[1:-14])
 VCC, EXEC = Register("vcc", 0, size=4), Register("exec_lo", 0, size=4)
 
 execop, vccop = def_reg(dtypes.uint32, EXEC), def_reg(dtypes.uint32, VCC)
@@ -540,7 +540,6 @@ class RDNA3Renderer(ISARenderer):
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str: ""
 
-  # returns stack slot offset and new stack ptr
   def assign_spill_slot(self, v:VRegister, vdef:UOp) -> tuple[int, int]:
     if v.cons[0].name[0] == 'v':
       sz = v.cons[0].size * v.width
@@ -552,19 +551,16 @@ class RDNA3Renderer(ISARenderer):
       self.spill_vgprs[vgpr] += v.width
       return ((vgpr,lane), self.spill_size)
 
-  # use scratch memory space for spilling thread local memory, addressed as:
-  def spill(self, spill_offset:any, sub_idx:int|None, x:UOp) -> list[UOp]:
+  def spill(self, spill_offset:any, x:UOp) -> list[UOp]:
     regs = rdefs(x)
     if regs[0].name[0] == 'v':
-      if sub_idx is not None:
-        return [UOp(Ops.INS, arg=RDNA3Ops.scratch_store_b32, src=(const(spill_offset+sub_idx*4), def_reg(x.dtype, regs[0])))]
       batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
       return [UOp(Ops.INS, arg=getattr(RDNA3Ops, f"scratch_store_b{len(b)*32}"), \
         src=(const(spill_offset+j*16), def_reg(x.dtype, b))) for j,b in enumerate(batches)]
     else:
       vgpr,lane = spill_offset
       return [UOp(Ops.INS, arg=RDNA3Ops.v_writelane_b32, src=(def_reg(x.dtype, r),
-        const(lane+i+(sub_idx or 0))), tag=vgpr) for i,r in enumerate(rdefs(x))]
+        const(lane+i)), tag=vgpr) for i,r in enumerate(rdefs(x))]
 
   def fill(self, spill_offset:any, sub_idx:int|None, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
     if regs[0].name[0] == 'v':

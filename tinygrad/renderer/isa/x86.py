@@ -840,7 +840,7 @@ class X86Renderer(ISARenderer):
     assert ret is not None, f"failed to copy {x}"
     return [ret]
 
-  def spill(self, spill_offset:int, sub_idx:int|None, x:UOp) -> list[UOp]:
+  def spill(self, spill_offset:int, x:UOp) -> list[UOp]:
     disp = UOp.cconst(spill_offset, dtypes.uint32)
     if x.op is Ops.BUFFER: x = x.replace(dtype=dtypes.uint64)
     is_xmm = x.tag[0].size == 16
