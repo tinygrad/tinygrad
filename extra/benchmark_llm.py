@@ -1,5 +1,8 @@
 import argparse, time
+from tinygrad.helpers import Context, fetch
 from tinygrad.llm.model import Transformer
+from tinygrad.llm.cli import models
+from extra.bench_log import BENCHMARK_LOG, InstantBenchEvent, log_event_instant
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -11,7 +14,7 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   st = time.perf_counter()
-  model, _ = Transformer.from_gguf(args.model, args.max_context)
+  model, _ = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
   print(f"load {time.perf_counter()-st:.3f}s", flush=True)
 
   st = time.perf_counter()
@@ -25,7 +28,11 @@ if __name__ == "__main__":
   output = [next(gen)]
   pt = time.perf_counter()
   print(f"prefill {args.prompt_tokens/(pt-st):.3f} tok/s", flush=True)
+  if BENCHMARK_LOG:
+    with Context(BENCHMARK_LOG=f"{BENCHMARK_LOG.value}_prefill"): log_event_instant(InstantBenchEvent.TPS, args.prompt_tokens/(pt-st))
 
   for _ in range(args.decode_tokens): output.append(next(gen))
   et = time.perf_counter()
   print(f"decode {args.decode_tokens/(et-pt):.3f} tok/s output {output}", flush=True)
+  if BENCHMARK_LOG:
+    with Context(BENCHMARK_LOG=f"{BENCHMARK_LOG.value}_decode"): log_event_instant(InstantBenchEvent.TPS, args.decode_tokens/(et-pt))
