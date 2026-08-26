@@ -50,7 +50,7 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_out:UOp, x:UOp, amax_state:
   else: raise NotImplementedError(f"no atomic max for device {device}")
   amax_idx = amax_out.reshape((1,)).index(UOp.const(0))
   max_val = lds[0].load()
-  atomic = UOp(Ops.CUSTOM, dtypes.void, (amax_idx, max_val.bitcast(dtypes.int32), max_val, amax_idx.load()), arg=atomic_arg)
+  atomic = UOp(Ops.CUSTOM, src=(amax_idx, max_val.bitcast(dtypes.int32), max_val, amax_idx.load()), arg=(atomic_arg, dtypes.void))
   return atomic.end(tid, wg).sink(arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}", opts_to_apply=()))
 
 @functools.cache

@@ -865,9 +865,9 @@ class TestOps(unittest.TestCase):
                    lambda: (ten << Tensor([0,2,4], dtype=dtypes.uint32)).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__lshift__(2), lambda: ten.__lshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_left_shift(2), lambda: ten.lshift(2).cast(dtypes.int32), forward_only=True)
-    self.helper_test_exception([], lambda: torch.tensor([1.0]) << 2, lambda: Tensor([1.0]) << 2, expected=RuntimeError)
-    self.helper_test_exception([], lambda: tor << torch.tensor([1.0]), lambda: ten << Tensor([1.0]), expected=RuntimeError)
-    self.helper_test_exception([], lambda: tor << 1.0, lambda: ten << 1.0, expected=RuntimeError)
+    self.helper_test_exception([], lambda: torch.tensor([1.0]) << 2, lambda: (Tensor([1.0]) << 2).realize(), expected=RuntimeError)
+    self.helper_test_exception([], lambda: tor << torch.tensor([1.0]), lambda: (ten << Tensor([1.0])).realize(), expected=RuntimeError)
+    self.helper_test_exception([], lambda: tor << 1.0, lambda: (ten << 1.0).realize(), expected=RuntimeError)
 
   def test_rshift(self):
     data = [[0,1,2],[1<<8,1<<16,1<<31-1]]
@@ -881,8 +881,8 @@ class TestOps(unittest.TestCase):
                    lambda: (ten >> Tensor([0,2,4], dtype=dtypes.uint32)).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
-    self.helper_test_exception([], lambda: torch.tensor([4.0]) >> 1, lambda: Tensor([4.0]) >> 1, expected=RuntimeError)
-    self.helper_test_exception([], lambda: tor >> torch.tensor([1.0]), lambda: ten >> Tensor([1.0]), expected=RuntimeError)
+    self.helper_test_exception([], lambda: torch.tensor([4.0]) >> 1, lambda: (Tensor([4.0]) >> 1).realize(), expected=RuntimeError)
+    self.helper_test_exception([], lambda: tor >> torch.tensor([1.0]), lambda: (ten >> Tensor([1.0])).realize(), expected=RuntimeError)
 
   def test_lshift_signed(self):
     data = [[-1, -3, 1, 7], [0, -2147483648, 2147483647, -1]]
@@ -1807,9 +1807,9 @@ class TestOps(unittest.TestCase):
       helper_test_op([()], lambda x: torch.nn.functional.hardtanh(x, -val, val), lambda x: x.hardtanh(-val, val), grad_atol=1e-6)
   def test_asinh(self):
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6)
-    # TODO: this one has larger tol?
-    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, rtol=2e-2, grad_rtol=2e-2, low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=300, high=303)
+    helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=-1e10, high=-1e9)
   def test_acosh(self):
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6)
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-3, grad_rtol=1e-2, low=-300, high=-297)

@@ -88,7 +88,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -102,12 +102,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -135,7 +134,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -149,12 +148,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -184,7 +182,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -198,12 +196,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
@@ -227,7 +224,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -241,12 +238,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -273,7 +269,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -287,12 +283,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -327,7 +322,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 60
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -340,12 +335,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -422,7 +416,7 @@ jobs:
   testusbgpu:
     name: UsbGPU Benchmark
     runs-on: [self-hosted, macOS]
-    timeout-minutes: 10
+    timeout-minutes: 3
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -437,23 +431,20 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: Kill stale pids
       run: |
-        PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
-        PYTHONPATH=. ./extra/hcq/hcq_smi.py nv kill_pids
-    # since sudo is required for usbgpu on macos, do not write bytecode, as some of the files are owned by root
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
+        ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: UsbGPU boot time
-      run: sudo -E PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
+      run: GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU tiny tests
-      run: sudo -E PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
+      run: GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
     - name: UsbGPU copy speeds
-      run: sudo -E PYTHONDONTWRITEBYTECODE=1 SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
-    #- name: UsbGPU openpilot test
-    #  run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+      run: SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     - name: UsbGPU (USB4/TB) install script
-      run: PYTHONPATH=. sh extra/setup_tinygpu_osx.sh
+      run: sh extra/setup_tinygpu_osx.sh
     - name: UsbGPU (USB4/TB) boot time
-      run: PYTHONPATH=. DEBUG=3 DEV=PCI+NV:NAK time python3.11 test/test_tiny.py TestTiny.test_plus
+      run: DEBUG=3 DEV=PCI+NV:NAK time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU (USB4/TB) tiny tests
-      run: PYTHONPATH=. DEV=PCI+NV:NAK python3.11 test/test_tiny.py
+      run: DEV=PCI+NV:NAK python3.11 test/test_tiny.py
 
   testcommalatest:
     name: comma Benchmark (0.11.2)
@@ -533,15 +524,6 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: setup staging db
-      if: github.ref == 'refs/heads/update_benchmark_staging'
-      run: |
-        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
-        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: reset process replay
-      run: test/external/process_replay/reset.py
     - name: benchmark MobileNetV2 on DSP
       run: |
         # generate quantized weights
@@ -556,7 +538,7 @@ jobs:
   testcommausbgpubenchmark:
     name: UsbGPU Benchmark (comma)
     runs-on: [self-hosted, Linux, comma4]
-    timeout-minutes: 20
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -585,7 +567,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['AMD', 'NV']
-    timeout-minutes: 20
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -597,9 +579,8 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} rmmod
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} kill_pids
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} rmmod --expect
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} kill_pids --sudoless
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
@@ -659,7 +640,7 @@ jobs:
   llvmspeed:
     name: LLVM Speed
     runs-on: [self-hosted, Linux, tinyboxrandom]
-    timeout-minutes: 20
+    timeout-minutes: 5
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code

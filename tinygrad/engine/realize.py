@@ -26,11 +26,12 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
 
-def get_call_kernels(call:UOp) -> list[tuple[str, UOp]]:
-  if (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return [(d, k) for devs, k, _ in call.arg.aux.kernels for d in devs]
-  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call)]
+def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]]:
+  if (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq":
+    return [(d, call, (name, estimates, profile_key)) for devices,name,estimates,_,profile_key in call.arg.aux.kernels for d in devices]
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call, None)]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "validate": return []
-  return [(d, call) for d in to_tuple(call.src[1].device)]
+  return [(d, call, None) for d in to_tuple(call.src[1].device)]
 
 def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|None=None) -> str:
   def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(sym_infer(prod(uop.shape) * uop.dtype.itemsize, var_vals or {}))
@@ -66,24 +67,25 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
   if DEBUG < 2 and not PROFILE: return
 
   kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
-  args = resolve_params(call, ctx.input_uops) if kernels and kernels[0][1] is call else []
+  args = resolve_params(call, ctx.input_uops) if kernels and kernels[0][2] is None else []
   lanes = list(unwrap_multi(call, [args[g] for g in call.src[0].arg.globals] if call.src[0].op is Ops.PROGRAM else args)) if args else []
-  for i, (device, kcall) in enumerate(kernels):
+  for i, (device, kcall, stats) in enumerate(kernels):
     et, bufs = ets[i] if i < len(ets) else None, lanes[i][0] if i < len(lanes) else []
+    display_name = get_call_name(kcall, bufs, ctx.var_vals) if stats is None else stats[0]
     if PROFILE: # backdate the event to the start of the call, the viz matches a device range with the exec event before it
       outputs, inputs = get_call_outs_ins(kcall)
       cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": ctx.var_vals,
-        "bufs": [b.trace_num for b in bufs], "name": get_call_name(kcall, bufs, ctx.var_vals), "outputs": outputs, "inputs": inputs}, ts=st))
+        "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}, ts=st))
     if DEBUG < 2 or not ctx.update_stats: continue
     if et is None:
       Device[device].synchronize()
       et, st = float(perf_counter_us() - st)*1e-6, perf_counter_us()
       GlobalCounters.time_sum_s += et
 
-    estimates = estimate_uop(kcall)
-    display_name = get_call_name(kcall, bufs, ctx.var_vals)
+    estimates = estimate_uop(kcall) if stats is None else stats[1]
     op_est, mem_est, lds_est = (sym_infer(x, ctx.var_vals) for x in (estimates.ops, estimates.mem, estimates.lds))
-    header_color = 'magenta' if ctx.jit else ('green' if kcall.src[0].key not in first_run_cache else None)
+    key = kcall.src[0].key if stats is None else stats[2]
+    header_color = 'magenta' if ctx.jit else ('green' if key not in first_run_cache else None)
     ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
     flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
     flops_str = f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:7.0f} TFLOPS", 'green')
@@ -92,7 +94,7 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
       f" {ansipad(display_name, 46)} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
       ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})"))
-    first_run_cache.add(kcall.src[0].key)
+    first_run_cache.add(key)
 
 local_size_cache: dict[bytes, tuple[int, ...]] = {}
 def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
@@ -221,13 +223,14 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*tables)})
   exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer()._buf.va_addr + base}), call, ast)
 
-  def _prof_tm(device:str, stat_call:UOp, prof:tuple[int, ...]) -> float|None:
-    (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, stat_call.arg.name, prof[0], prof[1], stat_call.key)
+  def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:
+    (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, name, prof[0], prof[1], profile_key)
     if not ctx.wait: return None
     d.synchronize(timeout=ctx.timeout)
     st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
     return float(en-st)/d.timestamp_divider/1e6
-  return [_prof_tm(device, k, prof) for devices, k, prof in info.kernels if prof for device in devices] if PROFILE or ctx.wait else []
+  return [_prof_tm(device, name, prof, profile_key) for devices,name,_,prof,profile_key in info.kernels
+          if prof for device in devices] if PROFILE or ctx.wait else []
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([

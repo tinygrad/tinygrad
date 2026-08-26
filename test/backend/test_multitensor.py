@@ -58,6 +58,11 @@ class TestMultiTensor(unittest.TestCase):
     assert X.uop.ended_ranges == X.uop.src[1:]
     (X + X).realize()
 
+  def test_shard_invalids_contiguous(self):
+    # every store is Invalid, so none of them should become a (empty) kernel
+    t = Tensor.invalids(8).shard(devices_2, axis=0).contiguous()
+    self.assertEqual(len([c for c in t.schedule_linear().src if c.src[0].op is Ops.SINK]), 1)
+
   @unittest.expectedFailure # TODO: fix
   def test_shard_empty(self):
     GlobalCounters.reset()

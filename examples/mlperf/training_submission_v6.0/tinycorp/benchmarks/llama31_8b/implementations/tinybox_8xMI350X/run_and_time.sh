@@ -17,7 +17,7 @@ export USE_ATOMICS=1
 export ASM_GEMM=1
 export WQKV=1
 export MASTER_WEIGHTS=1
-export FP8=1
+export MXFP4=1
 export ALLREDUCE_CAST=1
 export FAST_CE=1
 export FUSED_INPUT_QUANTIZE=1
@@ -26,7 +26,7 @@ export FUSED_ADD_NORM_MUL_QUANTIZE=1
 export FUSED_SILU_W13=1
 export SPLIT_W13=0
 
-export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="bfloat16"
+export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="float32"
 export DP=8 MP=1 BS=16 EVAL_BS=8 GRADIENT_ACC_STEPS=2
 export GBS=$((BS * GRADIENT_ACC_STEPS))
 

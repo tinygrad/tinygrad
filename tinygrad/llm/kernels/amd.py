@@ -36,8 +36,8 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
     if val.op is Ops.INDEX and val.addrspace == AddrSpace.REG: val = val.load()
-    other = UOp(Ops.CUSTOM, dtypes.float, (val,), arg=
-      f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | offset<<10}))")
+    other = UOp(Ops.CUSTOM, src=(val,), arg=
+      (f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | offset<<10}))", dtypes.float))
     val = val.maximum(other) if maximum else val + other
   return val
 
@@ -102,15 +102,15 @@ def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
   return c
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
-  return UOp(Ops.CUSTOMI, dtypes.uint32, tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), arg="__builtin_amdgcn_perm({}, {}, {})")
+  return UOp(Ops.CUSTOMI, src=tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), arg=("__builtin_amdgcn_perm({}, {}, {})", dtypes.uint32))
 
 def _amd_load(ptr:UOp, lanes:int|None=None) -> UOp:
   assert ptr.op is Ops.INDEX
   # nontemporal scalar load: streamed weights must not evict the activations/KV cache from L2
-  if lanes is None: return UOp(Ops.CUSTOMI, ptr.dtype, (ptr,), arg="__builtin_nontemporal_load({0})")
+  if lanes is None: return UOp(Ops.CUSTOMI, src=(ptr,), arg=("__builtin_nontemporal_load({0})", ptr.dtype))
   buf, coords = ptr.src[0], ptr.src[1:]
-  idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0, dtypes.weakint))
-  return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes, dtypes.weakint))).load(dtype=ptr.dtype)
+  idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0))
+  return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load(dtype=ptr.dtype)
 
 def _load_byte(raw:UOp, base:UOp, offset:UOp) -> UOp: return (raw[base + offset//4] >> ((offset&3)*8).cast(dtypes.uint32)) & 255
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
@@ -240,7 +240,7 @@ def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
   lane, wave = UOp.range(WARP_SIZE, 2, axis_type=AxisType.LOCAL), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
   # the lane id must stay opaque (mbcnt): visible lane%16/lane//16 arithmetic would get range-split into nested
   # loops by the scheduler, scrambling the WMMA fragment layout
-  hw_lane = UOp(Ops.CUSTOM, dtypes.int32, (lane.int(),), arg="__builtin_amdgcn_mbcnt_lo(-1, 0)").cast(dtypes.weakint)
+  hw_lane = UOp(Ops.CUSTOM, src=(lane.int(),), arg=("__builtin_amdgcn_mbcnt_lo(-1, 0)", dtypes.int32)).cast(dtypes.weakint)
   col, half = hw_lane % 16, hw_lane // 16
   outputs = tuple((output_block*output_waves+wave)*(16*output_tiles) + tile*16 + col for tile in range(output_tiles))
   inputs = tuple(token_block*token_tile + tile*16 + col for tile in range(token_tile//16))
