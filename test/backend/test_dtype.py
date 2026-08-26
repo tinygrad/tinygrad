@@ -328,7 +328,11 @@ class TestUint16DType(TestDType):
 class TestInt32DType(TestDType): DTYPE = dtypes.int32
 class TestUint32DType(TestDType): DTYPE = dtypes.uint32
 
-class TestInt64DType(TestDType): DTYPE = dtypes.int64
+class TestInt64DType(TestDType):
+  DTYPE = dtypes.int64
+  # the high bits a narrowing cast drops can't come back through a widening cast
+  def test_int64_to_uint32_to_int64(self):
+    _test_op(lambda: Tensor([0x12345678ABCDEF01], dtype=dtypes.int64).cast(dtypes.uint32).cast(dtypes.int64), dtypes.int64, [2882400001])
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
 class TestEmulatedInt64DType(TestInt64DType):

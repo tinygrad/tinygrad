@@ -24,7 +24,7 @@ def derived_dtypes(u:UOp, src:tuple[UOp, ...]) -> tuple[DType, DType]|None:
 def commit_srcs_at(u:UOp, dt:DType) -> UOp|None:
   # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
   dts = derived_dtypes(u, u.src)
-  ret = u.replace(dtype=None, src=tuple(UOp.const(dt.const(s.val)) if s.op is Ops.CONST and s.dtype in dtypes.weaks and dts is not None else
+  ret = u.replace(src=tuple(UOp.const(dt.const(s.val)) if s.op is Ops.CONST and s.dtype in dtypes.weaks and dts is not None else
                                         commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src))
   return None if ret is u else ret
 
@@ -61,9 +61,9 @@ def lower_weak_node(u:UOp) -> UOp|None:
   if u.op in _lower_weak_ops and src != u.src and not any(s.dtype in dtypes.weaks and s.op is not Ops.CONST for s in src[start:]):
     dt = strong_dtype(least_upper_dtype(default_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary
                       else unwrap(dtype_from_uop(u.op, src, u.arg)))
-    return u.replace(dtype=None, src=src[:start]+tuple(s if s.base.is_invalid or s.dtype in dtypes.weaks else commit_weak(s, dt)
+    return u.replace(src=src[:start]+tuple(s if s.base.is_invalid or s.dtype in dtypes.weaks else commit_weak(s, dt)
                                                        for s in src[start:])).cast(u.dtype)
-  return None if src == u.src else u.replace(dtype=None, src=src)
+  return None if src == u.src else u.replace(src=src)
 
 pm_lower_weak = PatternMatcher([
   # a gated long index into a small buffer narrows; its out-of-gate value is discarded
@@ -74,7 +74,7 @@ pm_lower_weak = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("x"),)),), name="u"),
    lambda u,x: x.cast(default_dtype(u.src[0])).cast(default_dtype(u)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
   (UPat((Ops.PARAM, Ops.BUFFER), dtype=dtypes.weakint, name="u"),
-    lambda u: u.replace(dtype=None, arg=replace(u.arg, dtype=default_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
+    lambda u: u.replace(arg=replace(u.arg, dtype=default_dtype(u))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
   (UPat(GroupOp.All, name="u"), lower_weak_node),
 ])
 

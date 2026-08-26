@@ -27,7 +27,8 @@ class IselContext:
     return Register(f"v{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
 
 def greg(u:UOp):
-  if u.op in {Ops.NOOP, Ops.AFTER} and u.src: return greg(u.src[0])
+  # a BITCAST that no instruction lowered is bit identity, it is an alias of the register its src is in
+  if u.op in {Ops.NOOP, Ops.AFTER, Ops.BITCAST} and u.src: return greg(u.src[0])
   if isinstance(u.tag, tuple): return u.tag[0]
   return u.tag
 
