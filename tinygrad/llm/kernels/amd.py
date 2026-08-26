@@ -202,8 +202,7 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, out_features:
       qs_base, dot = base + (4 if ggml_type == Q4_K else 12) + (subgroup//2)*8, UOp.const(0, dtypes.int32)
       # vectorize the 8 packed-weight words and (for Q5_K) the 32-byte high-bit bitmap
       qs_pair = (_amd_load(raw[qs_base], 4), _amd_load(raw[qs_base+4], 4))
-      zero = UOp.const(0, dtypes.uint32)
-      qh_pair = (_amd_load(raw[base+4], 4), _amd_load(raw[base+8], 4)) if ggml_type == Q5_K else (zero, zero)
+      if ggml_type == Q5_K: qh_pair = (_amd_load(raw[base+4], 4), _amd_load(raw[base+8], 4))
       for word_idx in range(8):
         word = (qs_pair[word_idx//4][word_idx%4] >> ((subgroup&1)*4).cast(dtypes.uint32)) & 0x0f0f0f0f
         if ggml_type == Q5_K: word |= ((qh_pair[word_idx//4][word_idx%4] >> subgroup.cast(dtypes.uint32)) & 0x01010101) << 4
