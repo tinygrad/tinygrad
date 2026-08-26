@@ -122,8 +122,10 @@ def expand_broadcast(x:UOp):
   shapes = [u._shape for u in x.src]
   if any(s is None for s in shapes) or all_same(shapes): return None
   shape = _broadcast_shape(*shapes)
-  # don't expand CONSTs: scalar consts pass through rangeify as-is, and EXPAND of an Invalid const must stay scalar
-  return x.replace(src=tuple([u if u.op is Ops.CONST else u.expand(shape) for u in x.src]))
+  # don't expand CONSTs (bare or casted): scalar consts pass through rangeify as-is,
+  # and EXPAND of an Invalid const must stay a bare scalar
+  def expanded(u:UOp): return u if u.op is Ops.CONST or (u.op is Ops.CAST and u.src[0].op is Ops.CONST) else u.expand(shape)
+  return x.replace(src=tuple([expanded(u) for u in x.src]))
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve FUNCTION calls (inline the body)
