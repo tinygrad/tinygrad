@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
+from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC, prod
 
 @dataclass
 class IndexingContext:
@@ -202,6 +202,9 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
 
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}
+  # ranges ended by an EXPAND don't fire at the first elementwise op below it: that eltwise op is a single-consumer
+  # wrapper, realizing there materializes the wrapper instead of the shared value below it. movement ops forward the deferral.
+  deferred_ending: dict[UOp, list[UOp]] = {}
   for x in reversed(tsink_toposort):
     # no ranges on kernels, they are internal
     if x.op in {Ops.CALL, Ops.FUNCTION, Ops.LINEAR}: continue
@@ -266,17 +269,27 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
       # we have to (partially) realize here if there's new ranges
       if len(_realize_axis): rctx.realize_map[x] = _realize_axis
 
+    defer = set()
+    if x in deferred_ending:
+      if x.op in GroupOp.Movement: deferred_ending.setdefault(x.src[0], []).extend(deferred_ending[x])
+      elif x.op in GroupOp.Elementwise and len(consumer_map[x]) == 1 and resolve(prod(x.shape) == 1):
+        # scalar single-consumer wrappers below the EXPAND chain (like broadcasting (x * -1)) can't materialize
+        # anything useful: defer the ended ranges to the first node below that can (the shared value anchor)
+        defer = set(deferred_ending[x])
+
     # if this element is a reduce and there's ended ranges, we might have to end some other ranges
     if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE}):
-      _realize_axis = rctx.realize_map.get(x) or []
-      for i,r in enumerate(out_rngs):
-        if i in _realize_axis: continue
-        if not (PCONTIG > 1) or any(any(rr.arg > e.arg for e in ending_ranges[x]) for rr in r.ranges):
-          _realize_axis.append(i)
-      ending_ranges[x] = []
-      if len(_realize_axis):
-        rctx.realize_map[x] = _realize_axis
-        out_rngs = tuple([(rctx.new_range(x.shape[i]) if i in _realize_axis else r) for i,r in enumerate(out_rngs)])
+      firing = set(ending_ranges[x]) - defer
+      if len(firing):
+        _realize_axis = rctx.realize_map.get(x) or []
+        for i,r in enumerate(out_rngs):
+          if i in _realize_axis: continue
+          if not (PCONTIG > 1) or any(any(rr.arg > e.arg for e in firing) for rr in r.ranges):
+            _realize_axis.append(i)
+        ending_ranges[x] = [r for r in ending_ranges[x] if r in defer]
+        if len(_realize_axis):
+          rctx.realize_map[x] = _realize_axis
+          out_rngs = tuple([(rctx.new_range(x.shape[i]) if i in _realize_axis else r) for i,r in enumerate(out_rngs)])
     ending_ranges[x] += broadcast_ending_ranges
 
     # TODO: some ops don't have shape, enable this after the `.st` property is removed
@@ -297,7 +310,9 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
     # NOTE: this doesn't actually always end a range, but this is why convs are realized, so for now we need it
     if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape):
-      ending_ranges[x] += list(UOp.sink(*out_rngs[:len(x.marg)]).ranges.keys())
+      ended_here = list(UOp.sink(*out_rngs[:len(x.marg)]).ranges.keys())
+      ending_ranges[x] += ended_here
+      deferred_ending.setdefault(x.src[0], []).extend(ended_here)
 
     # REDUCE creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE and x.arg[1]:
