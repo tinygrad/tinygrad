@@ -325,7 +325,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
-    return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
+    # arg goes through repr: args of different types (None, str, tuple) must stay mutually comparable for the sort
+    return (self.op.value, repr(self.arg), self.dtype,)+tuple([x.tuplize for x in self.src])
 
   # *** uop shape stuff ***
 
