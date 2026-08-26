@@ -377,7 +377,7 @@ def split_patches(call:UOp) -> UOp|None:
   for p in lt_patches: lt_srcs[p.buf_uop].append(p)
 
   bufs = [u for _, u in sorted(dedup([(i, g.src[0].without_after) for g, i in tables[0][3].items()]))]
-  aux = replace(aux, input_addrs=tuple((d, u) for d in to_tuple(inputs[0].arg) for u in bufs)) if inputs else call.arg.aux
+  aux = replace(call.arg.aux, input_addrs=tuple((d, u) for d in to_tuple(inputs[0].arg) for u in bufs)) if inputs else call.arg.aux
   return call.replace(src=(body, *call.src[1:], *[b.after(*ps) for b,ps in lt_srcs.items()], *fills), arg=replace(call.arg, aux=aux))
 pm_split_patches = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq"),), name="call", allow_any_len=True), split_patches)])
 
