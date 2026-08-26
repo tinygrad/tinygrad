@@ -20,7 +20,7 @@ class NVCtlFileDesc(VirtFileDesc):
     self.driver = driver
 
   def ioctl(self, fd, request, argp): return self.driver.ctl_ioctl(request, argp)
-  def mmap(self, start, sz, prot, flags, fd, offset): return libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, ctypes.c_int64(0))
+  def mmap(self, start, sz, prot, flags, fd, offset): return libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, 0)
 
 class NVUVMFileDesc(VirtFileDesc):
   def __init__(self, fd, driver):
@@ -28,7 +28,7 @@ class NVUVMFileDesc(VirtFileDesc):
     self.driver = driver
 
   def ioctl(self, fd, request, argp): return self.driver.uvm_ioctl(request, argp)
-  def mmap(self, start, sz, prot, flags, fd, offset): return libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, ctypes.c_int64(0))
+  def mmap(self, start, sz, prot, flags, fd, offset): return libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, 0)
 
 class NVDevFileDesc(VirtFileDesc):
   def __init__(self, fd, driver, gpu):
@@ -39,7 +39,7 @@ class NVDevFileDesc(VirtFileDesc):
 
   def ioctl(self, fd, request, argp): return self.driver.dev_ioctl(self.gpu, request, argp)
   def mmap(self, start, sz, prot, flags, fd, offset):
-    start = libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, ctypes.c_int64(0))
+    start = libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, 0)
     if self._mapping_userland or self._mapping_signal:
       self.driver.track_address(start, start+sz, lambda mv,off: None, lambda mv, off: self.driver._gpu_mmio_write(mv, off, self.gpu))
       self._mapping_signal = False
@@ -251,7 +251,7 @@ class NVDriver(VirtDriver):
     elif nr == nv_gpu.UVM_ENABLE_PEER_ACCESS: pass # uvm and shared spaced are setup already, no emulation for now
     elif nr == nv_gpu.UVM_CREATE_EXTERNAL_RANGE:
       st = nv_gpu.UVM_CREATE_EXTERNAL_RANGE_PARAMS.from_address(argp)
-      libc.mmap(st.base, st.length, mmap.PROT_READ|mmap.PROT_WRITE, libc.MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, ctypes.c_int64(0))
+      libc.mmap(st.base, st.length, mmap.PROT_READ|mmap.PROT_WRITE, libc.MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
     elif nr == nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION:
       st = nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS.from_address(argp)
       for gpu_attr_id in range(st.gpuAttributesCount):

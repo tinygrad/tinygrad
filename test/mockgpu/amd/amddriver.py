@@ -1,16 +1,14 @@
 import ctypes, mmap, collections, functools, copy, os
 from tinygrad.runtime.autogen import kfd, amdgpu_drm, libc
 import tinygrad.runtime.autogen.am.am as am
-from tinygrad.runtime.support import c
 from tinygrad.helpers import from_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props, GFX_TARGET_VERSION, MOCKGPU_ARCH
 
 def _ioctl_nr(ioctl: functools.partial) -> int: return ioctl.args[2]
-def _ioctl_struct(ioctl: functools.partial) -> type[c.Struct]: return ioctl.args[3]
 
-kfd_ioctl_info: dict[int, tuple[str, type[c.Struct]]] = {
-  _ioctl_nr(ioctl): (name, _ioctl_struct(ioctl)) for name, ioctl in vars(kfd).items()
+kfd_ioctl_info = {
+  _ioctl_nr(ioctl): (name, ioctl.args[3]) for name, ioctl in vars(kfd).items()
   if name.startswith("AMDKFD_IOC_") and isinstance(ioctl, functools.partial)}
 
 class KFDFileDesc(VirtFileDesc):
@@ -36,7 +34,7 @@ class DRMFileDesc(VirtFileDesc):
       return 0
     raise NotImplementedError(f"unknown DRM ioctl query {struct.query}")
 
-  def mmap(self, start, sz, prot, flags, fd, offset): return libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, ctypes.c_int64(0))
+  def mmap(self, start, sz, prot, flags, fd, offset): return libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, 0)
 
 class AMDDriver(VirtDriver):
   def __init__(self, gpus=6):
