@@ -83,6 +83,7 @@ class BufferSpec:
   cpu_access: bool = False
   host: bool = False
   nolru: bool = False
+  zero: bool = False
   external_ptr: int|None = None
 
 class MultiBuffer:
@@ -265,7 +266,7 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
       for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:BufferSpec|None=None):
-    if LRU and (options is None or (not options.nolru and options.external_ptr is None)): self.cache[(size, options)].append(opaque)
+    if LRU and (options is None or (not (options.nolru or options.zero) and options.external_ptr is None)): self.cache[(size, options)].append(opaque)
     else: super().free(opaque, size, options)
 
 class DepsTracker:

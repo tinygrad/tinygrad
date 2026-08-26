@@ -1773,8 +1773,13 @@ def train_gptoss():
   def minibatch(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if not is_sharding: tokens = tokens.to(None)
+
     logits:Tensor = model(tokens[:, :-1], save=True)
-    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    if getenv("FUSED_CE", 0):
+      from extra.llama_kernels.fused_ce import fused_ce_loss
+      loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)
+    else:
+      loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
 
     for g, new_g in zip(grads, loss.gradient(*optim.params)):
       apply_grad(g, new_g.uop)

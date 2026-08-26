@@ -77,6 +77,14 @@ class TestCStyleFailures(unittest.TestCase):
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "tests for wgsl renderer")
 class TestWGSLFailures(unittest.TestCase):
+  def test_folded_packed_store(self):
+    b = UOp.param(0, dtypes.char, (4,))
+    idx = b.index(UOp.const(0).cast(dtypes.int))
+    store = UOp.store(idx, idx.cast(dtypes.uint32).load() & UOp.const(0xffffff00).cast(dtypes.uint32))
+    src = Device[Device.DEFAULT].renderer.render(UOp.sink(store, arg=KernelInfo()).toposort())
+    self.assertIn("atomicAnd(&data0_4[0],4294967040u);", src)
+    self.assertNotIn("atomicAdd", src)
+
   def test_multiply_infinity(self):
     # multiplying a positive constant by infinity should return infinity
     # WGSL pipelines do not handle this reliably, some of which return zero, unless infinity always comes from a read on a dynamic buffer

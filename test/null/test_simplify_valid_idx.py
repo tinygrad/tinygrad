@@ -3,7 +3,7 @@ import unittest, itertools
 from tinygrad.codegen.late.coalesce import indexing_simplify
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
-from tinygrad.uop.weak import pm_lower_index_dtype
+from tinygrad.uop.weak import pm_commit_weak
 from tinygrad.uop.symbolic import simplify_valid, sym, pm_move_where_on_load
 from tinygrad.helpers import Context
 from test.helpers import full_rewrite
@@ -496,7 +496,7 @@ class TestImageSimplification(unittest.TestCase):
     idx_y = (f + UOp.const(1.0)).cast(dtypes.int)
     load = get_load_image_uop((10, 10, 4), (UOp.const(-1) < idx_y) & (idx_y < UOp.const(10)),
                               (Special("gidx0", 10), idx_y))
-    off = graph_rewrite(load.sink(), pm_lower_index_dtype+indexing_simplify, ctx={}).src[0].src[0]
+    off = graph_rewrite(load.sink(), pm_commit_weak+indexing_simplify).src[0].src[0]
     self.assertEqual(off.src[1].get_valid(), UOp.const(True))
 
 class TestDropTrueGate(unittest.TestCase):

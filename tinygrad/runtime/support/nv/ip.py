@@ -345,7 +345,7 @@ class NV_FLCN_COT(NV_IP):
 
 class NV_GSP(NV_IP):
   def init_sw(self):
-    self.handle_gen = itertools.count(0xcf000000)
+    self.handle_gen, self.chan_runlists = itertools.count(0xcf000000), {}
     self.init_rm_args()
     self.init_libos_args()
     self.init_wpr_meta()
@@ -355,6 +355,7 @@ class NV_GSP(NV_IP):
     self.rpc_set_registry_table()
 
     self.gpfifo_class, self.compute_class, self.dma_class = nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.AMPERE_COMPUTE_B, nv_gpu.AMPERE_DMA_COPY_B
+    self.viddec_class = {"AD":nv_gpu.NVC9B0_VIDEO_DECODER, "GB":nv_gpu.NVCFB0_VIDEO_DECODER}.get(self.nvdev.chip_name[:2]) # nvdec: ada and blackwell
     match self.nvdev.chip_name[:2]:
       case "AD": self.compute_class = nv_gpu.ADA_COMPUTE_A
       case "GB":
@@ -453,8 +454,8 @@ class NV_GSP(NV_IP):
     self.wpr_meta, _, wpr_meta_addrs = self.nvdev._alloc_boot_mem(ctypes.sizeof(type(m)), data=bytes(m))
     self.wpr_meta_sysmem = wpr_meta_addrs[0]
 
-  def promote_ctx(self, client:int, subdevice:int, obj:int, ctxbufs:dict[int, GRBufDesc], bufs=None, virt=None, phys=None):
-    res, prom = {}, nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(ctxbufs), engineType=0x1, hChanClient=client, hObject=obj)
+  def promote_ctx(self, client:int, subdevice:int, obj:int, ctxbufs:dict[int, GRBufDesc], bufs=None, virt=None, phys=None, engine=0x1):
+    res, prom = {}, nv_gpu.NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(entryCount=len(ctxbufs), engineType=engine, hChanClient=client, hObject=obj)
     for i,(buf,desc) in enumerate(ctxbufs.items()):
       use_v, use_p = (desc.virt if virt is None else virt), (desc.phys if phys is None else phys)
       x = (bufs or {}).get(buf, self.nvdev.mm.valloc(desc.size, contiguous=True)) # allocate buffers
@@ -469,6 +470,9 @@ class NV_GSP(NV_IP):
     dev = self.rpc_rm_alloc(hParent=self.priv_root, hClass=nv_gpu.NV01_DEVICE_0, params=nv_gpu.NV0080_ALLOC_PARAMETERS(hClientShare=self.priv_root))
     subdev = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.NV20_SUBDEVICE_0, params=nv_gpu.NV2080_ALLOC_PARAMETERS())
     vaspace = self.rpc_rm_alloc(hParent=dev, hClass=nv_gpu.FERMI_VASPACE_A, params=nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS())
+
+    di = self.rpc_rm_control(subdev, nv_gpu.NV2080_CTRL_CMD_FIFO_GET_DEVICE_INFO_TABLE, nv_gpu.NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS())
+    self.runlists = {di.entries[i].engineData[2]: di.entries[i].engineData[3] for i in range(di.numEntries)}
 
     # reserve 512MB for the reserved PDES
     res_va = self.nvdev.mm.alloc_vaddr(res_sz:=(512 << 20))
@@ -549,10 +553,16 @@ class NV_GSP(NV_IP):
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC, bytes(alloc_args) + (bytes(params) if params is not None else b''))
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC)
 
+    if hClass == self.gpfifo_class:
+      self.chan_runlists[obj] = self.runlists.get((e:=params.engineType) + 10*(e >= nv_gpu.NV2080_ENGINE_TYPE_NVDEC0), 0)
     if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_root:
       self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr, client=client)
     if hClass == nv_gpu.NV01_DEVICE_0 and client != self.priv_root: self.device = obj # save user device handle
     if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
+    if hClass == self.viddec_class and client != self.priv_root:
+      ctx, eng = {0: GRBufDesc(0x1000, phys=True, virt=True)}, nv_gpu.NV2080_ENGINE_TYPE_NVDEC0
+      bufs = self.promote_ctx(client, self.subdevice, hParent, ctx, virt=False, engine=eng)
+      self.promote_ctx(client, self.subdevice, hParent, ctx, bufs, phys=False, engine=eng)
     if hClass == self.compute_class and client != self.priv_root:
       phys_gr_ctx = self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
       self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
@@ -575,9 +585,10 @@ class NV_GSP(NV_IP):
     res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
     st = type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
 
-    # NOTE: gb20x requires the enable bit for token submission. Patch workSubmitToken here to maintain userspace compatibility.
-    if self.nvdev.chip_name.startswith("GB2") and cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN:
-      cast(nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS, st).workSubmitToken |= (1 << 30)
+    # NOTE: gsp only fills in the channel id, the runlist id (and, on gb20x, the doorbell enable bit) are added by the driver.
+    if cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN:
+      cast(nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS, st).workSubmitToken |= (self.chan_runlists[hObject] << 16) | \
+        ((1 << 30) if self.nvdev.chip_name.startswith("GB2") else 0)
     return st
 
   def rpc_set_page_directory(self, device:int, hVASpace:int, pdir_paddr:int, client=None, pasid=0xffffffff):

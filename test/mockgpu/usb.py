@@ -160,7 +160,7 @@ class MockUSB3:
     elif request == 0xE5:
       self.state._xram_write_byte(value, index)
     elif request == 0xF2:
-      op = ("sram_read" if value & 0x8000 else "sram_write", 0xF000, (value & 0x7FFF) * 512)
+      op = ("sram_read" if value & 0x8000 else "sram_write", 0xF000 + (index & 0xFF) * 0x4000, (value & 0x7FFF) * 512)
       if value & 0x8000: self._bulk_read_op = op
       else: self._bulk_write_op = op
     elif request == 0xF0:
@@ -193,19 +193,33 @@ class MockUSB3:
     op, address, size = self._bulk_write_op
     assert len(data) == size
     if op == "sram_write":
-      host_addr, region_size = self.state._dma_regions[address]
-      ctypes.memmove(host_addr, data, min(len(data), region_size))
+      ctrl, (host_addr, region_size) = next((ca, r) for ca, r in self.state._dma_regions.items() if ca <= address < ca + r[1])
+      ctypes.memmove(host_addr + (address - ctrl), data, min(len(data), region_size - (address - ctrl)))
+      self.state.driver._emulate_execute()  # landed data may un-stall a ring polling on it (e.g. copyin sentinels)
     elif op == "pcie_write": self.state._pcie_write(address, data)
     else: raise RuntimeError(f"cannot bulk write for {op}")
     self._bulk_write_op = None
+
+  def bulk_write_async(self, payload:memoryview, timeout:int=10000) -> int:  # the mock completes transfers synchronously
+    self.bulk_write(bytes(payload), timeout)
+    return 0
+
+  def control_write_async(self, request:int, value:int=0, index:int=0, data:bytes=b"", timeout:int=1000) -> int:
+    self.control_write(request, value, index, data, timeout)
+    return 0
+
+  def control_read_async(self, request:int, length:int, value:int=0, index:int=0, timeout:int=1000) -> tuple[int, memoryview]:
+    return 0, self.control_read(request, length, value, index, timeout)
+
+  def bulk_wait(self, tag:int): pass
 
   def bulk_read(self, length:int, timeout:int=1000) -> memoryview:
     assert self._bulk_read_op is not None
     op, address, size = self._bulk_read_op
     assert length == size
     if op == "sram_read":
-      host_addr, region_size = self.state._dma_regions[address]
-      data = bytes((ctypes.c_ubyte * min(length, region_size)).from_address(host_addr))
+      ctrl, (host_addr, region_size) = next((ca, r) for ca, r in self.state._dma_regions.items() if ca <= address < ca + r[1])
+      data = bytes((ctypes.c_ubyte * min(length, region_size - (address - ctrl))).from_address(host_addr + (address - ctrl)))
     elif op == "pcie_read": data = self.state._pcie_read(address, length)
     else: raise RuntimeError(f"cannot bulk read for {op}")
     self._bulk_read_op = None

@@ -3,7 +3,6 @@ from tinygrad import dtypes, Context
 from tinygrad.dtype import DType, ConstType
 from tinygrad.uop.ops import Ops, UOp
 from test.helpers import full_rewrite
-import numpy as np
 
 class TestWeakConstFolding(unittest.TestCase):
   def test_weakint_math(self):
@@ -27,16 +26,14 @@ class TestBitcastConstFolding(unittest.TestCase):
     for val, src_dt, dst_dt, bits in ((3000000000, dtypes.int32, dtypes.uint32, 3000000000),
                                       (70000, dtypes.int16, dtypes.uint16, 4464),
                                       (-5, dtypes.uint32, dtypes.int32, -5)):
-      self.assertEqual(UOp.const(val, src_dt).bitcast(dst_dt).simplify().val, bits)
+      self.assertIs(UOp.const(val, src_dt).bitcast(dst_dt).simplify(), UOp.const(bits, dst_dt))
 
   def test_scalar_bitcast(self):
     def t(cases: dict[DType, ConstType]):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
         if not math.isnan(from_v):
           r = UOp.const(from_v, from_dt).bitcast(to_dt).simplify()
-          self.assertEqual(r.op, Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
-          self.assertEqual(r.dtype, to_dt, msg)
-          np.testing.assert_equal(r.val, to_v, msg)
+          self.assertIs(r, UOp.const(to_v, to_dt), f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
 
     t({dtypes.int8: 0, dtypes.uint8: 0, dtypes.bool: False})
     t({dtypes.int8: 1, dtypes.uint8: 1, dtypes.bool: True})

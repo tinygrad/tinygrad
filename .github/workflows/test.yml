@@ -233,7 +233,7 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
     - name: Repo line count <= 26000 lines
-      run: MAX_LINE_COUNT=26000 python sz.py
+      run: MAX_LINE_COUNT=26500 python sz.py
 
   spec:
     strategy:

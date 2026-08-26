@@ -12,7 +12,7 @@ def _custom_quantize_mxfp4(row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UO
   mem = M*N*2 + M*N + M*N//16  # read bf16, write row+col fp4 + e8m0
   outputs = (row_fp4, row_scale, col_fp4, col_scale)
   sink = UOp.sink(*(o.base for o in outputs), x.base,
-                  *(UOp(Ops.CUSTOM, dtypes.void, (o.base.index(0),), arg="") for o in outputs),
+                  *(UOp(Ops.CUSTOM, src=(o.base.index(0),), arg=("", dtypes.void)) for o in outputs),
                   UOp.special(256, "lidx0"), UOp.special(M//128, "gidx0"), UOp.special(N//64, "gidx1"),
                   arg=KernelInfo(name, estimates=Estimates(ops=12*M*N, mem=mem)))
   src = (pathlib.Path(__file__).parent/"quantize_mxfp4.cpp").read_text()
