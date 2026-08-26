@@ -250,16 +250,16 @@ EMULATED_DTYPES = ContextVar("EMULATED_DTYPES", "")
 DEFAULT_FLOAT, DEFAULT_INT = ContextVar("DEFAULT_FLOAT", "float32"), ContextVar("DEFAULT_INT", "int32")
 CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
 def _get_cpu_count() -> int:
-  # os.process_cpu_count (3.13+) respects cgroup limits
-  if hasattr(os, "process_cpu_count"): return max(1, os.process_cpu_count() or 1)
-  # cgroup v2 (containers with --cpus=N)
+  # os.process_cpu_count is available in 3.13+, then try affinity, then fallback to cpu_count
+  count = (os.process_cpu_count() if hasattr(os, "process_cpu_count") else
+           len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()) or 1
+  # limit with cgroup v2 (containers with --cpus=N)
   try:
     with open("/sys/fs/cgroup/cpu.max") as f:
       quota, period = f.read().strip().split()
-      if quota != "max": return max(1, int(quota) // int(period))
+      if quota != "max": count = min(count, max(1, int(quota) // int(period)))
   except (FileNotFoundError, ValueError, ZeroDivisionError): pass
-  # fall back to affinity (respects taskset but not cgroup quota)
-  return max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1))
+  return count
 NUM_CPU_THREADS = ContextVar("NUM_CPU_THREADS", _get_cpu_count())
 NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
@@ -271,7 +271,6 @@ PROFILE = ContextVar("PROFILE", abs(VIZ.value))
 SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
 CHECK_OOB = ContextVar("CHECK_OOB", 0)
-PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
 DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
 # set to 1, this uses tuplize in the linearizer sort order
 TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)

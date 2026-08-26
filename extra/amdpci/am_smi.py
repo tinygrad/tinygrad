@@ -84,7 +84,8 @@ class AMSMI(AMDev):
     with open(f"/sys/bus/pci/devices/{self.pcibus}/power_state", "r") as f: return f.read().strip().rstrip()
 
 class SMICtx:
-  def __init__(self):
+  def __init__(self, dev_filter=None):
+    self.dev_filter = dev_filter
     self.devs = []
     self.opened_pcidevs = []
     self.opened_pci_resources = {}
@@ -135,6 +136,7 @@ class SMICtx:
     pattern = os.path.join('/tmp', 'am_*.lock')
     for d in [f[8:-5] for f in glob.glob(pattern)]:
       if d.startswith("usb"): continue
+      if self.dev_filter is not None and d != self.dev_filter: continue
       if d not in self.opened_pcidevs:
         self._open_am_device(d)
 
@@ -406,7 +408,7 @@ if __name__ == "__main__":
 
   try:
     if not args.list: os.system('clear')
-    smi_ctx = SMICtx()
+    smi_ctx = SMICtx(args.dev)
     while True:
       smi_ctx.rescan_devs()
       smi_ctx.draw(args.list)

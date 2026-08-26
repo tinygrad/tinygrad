@@ -71,7 +71,7 @@ base_rewrite = PatternMatcher([
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])}))" + (";" if x.dtype is dtypes.void else "")),
 
   # custom passes through with format
-  (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg.format(*[ctx[y] for y in x.src])),
+  (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
 ])
 
 def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
@@ -188,10 +188,12 @@ class CStyleLanguage(Renderer):
     return prefix + self.type_map.get(dtype, dtype.name) + suffix
 
   def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace, shape=u._shape)
-  def render_access(self, u:UOp):
+  def render_ptr(self, u:UOp):
+    # the address of an access, vector-cast if the access reads/writes more lanes than the pointer's scalar type
     if u.max_numel() > 1 or u.dtype != u.src[0].dtype:
-      return f"*(({self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True, shape=u._shape)})({self[u]}))"
-    else: return f"*{self[u]}"
+      return f"(({self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True, shape=u._shape)})({self[u]}))"
+    else: return f"{self[u]}"
+  def render_access(self, u:UOp): return f"*{self.render_ptr(u)}"
   def render_cast(self, u:UOp, val:str) -> str: return f"({self.render_type(u)})({val})"
 
   # LEGACY
@@ -509,6 +511,9 @@ class HIPRenderer(CStyleLanguage):
         (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",),
           lambda ctx,x,y: f"__builtin_amdgcn_cvt_f32_{('fp8', 'bf8')[fp8_index(y.dtype)]}((unsigned int){ctx[x.src[0]]}, 0)"),
       ]) + base_rewrite
+    # a LOAD flagged nontemporal renders as the cache-bypassing builtin (only used on global loads)
+    self.string_rewrite = PatternMatcher([(UPat(Ops.LOAD, arg="nontemporal", src=(UPat.var("bidx"),)),
+      lambda ctx,bidx: f"__builtin_nontemporal_load({ctx.render_ptr(bidx)})")]) + self.string_rewrite
 
   # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
   # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
