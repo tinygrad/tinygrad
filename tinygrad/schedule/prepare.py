@@ -12,6 +12,12 @@ def walk_mop(u:UOp):
   if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD}: return walk_mop(u.src[0])
   return u
 
+def has_buffer_view(u:UOp) -> bool:
+  # CALL argument lowering currently passes the base allocation, so only an
+  # offset-zero contiguous view backed by a real buffer can avoid a copy.
+  if u.has_buffer_identity(after_ok=True): return True
+  return (cv:=u.contiguous_view()) is not None and cv[1] == 0 and cv[0].has_buffer_identity(after_ok=True)
+
 def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
   if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, after = x.src[0], after.cast(dtypes.float)
   while True:
@@ -183,7 +189,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # CALL inputs need buffer identity (and to be flat)
   (UPat(Ops.CALL, name="c"),
-   lambda c: c.replace(src=c.src[0:1]+tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src[1:]))),
+   lambda c: c.replace(src=c.src[0:1]+tuple(x if has_buffer_view(x) else x.contiguous() for x in c.src[1:]))),
 
   # MSTACK inputs need buffer identity
   (UPat(Ops.MSTACK, name="c"),

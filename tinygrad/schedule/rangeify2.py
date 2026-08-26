@@ -5,6 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, AxisType, rewrite_group, remove_all_tags, resolve, shape_to_shape_arg
 from tinygrad.helpers import all_int, VIZ, SPEC, Context, panic
 from tinygrad.schedule.indexing import BufferizeOpts, apply_movement_op
+from tinygrad.schedule.prepare import has_buffer_view
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.codegen.simplify import pm_reduce_simplify
 
@@ -154,16 +155,27 @@ pm_split_graph = pm_range_migration+PatternMatcher([
   (UPat(Ops.RANGE, name="u"), _renumber_range),
 ])
 
-def _is_invalid_state(x:UOp) -> bool:
+def _is_fully_invalid_state(x:UOp) -> bool:
   while x.op in GroupOp.Movement|{Ops.INDEX}: x = x.src[0]
   if x.op is not Ops.AFTER or len(x.src) != 2: return False
-  dep = x.src[1].src[0] if x.src[1].op is Ops.END else x.src[1]
-  return dep.op is Ops.STORE and dep.src[1].base.is_invalid
+  end = x.src[1]
+  st = end.src[0] if end.op is Ops.END else end
+  if st.op is not Ops.STORE or not st.src[1].base.is_invalid: return False
+  if end.op is not Ops.END: return st.src[0].max_numel() == x.max_numel()
+  covered = 1
+  for r in end.src[1:]:
+    if r.op is not Ops.RANGE or r.src[0].op is not Ops.CONST or not isinstance(r.src[0].val, int): return False
+    covered *= r.src[0].val
+  return covered == x.max_numel()
 
 def split_store(x:UOp) -> UOp|None:
   st = x.src[0] if x.op is Ops.END else x
   if st.op is Ops.STORE and st.src[0].is_variable: return None
-  if st.op is Ops.STORE and (st.src[1].base.is_invalid or _is_invalid_state(st.src[1])): return UOp(Ops.NOOP)
+  if st.op is Ops.STORE and st.src[0] is st.src[1]: return UOp(Ops.NOOP)
+  # A directly-invalid value makes this store a no-op. An AFTER carrying an
+  # invalid partial store is still a valid buffer state: uncovered elements
+  # must continue to read from the previous state.
+  if st.op is Ops.STORE and (st.src[1].base.is_invalid or _is_fully_invalid_state(st.src[1])): return UOp(Ops.NOOP)
   ret = graph_rewrite(x, pm_split_graph, ctx:=SplitCtx(), name="split kernel", bottom_up=True)
   # TODO: params and args should be able to be in any order
   ctx.addrspace = AddrSpace.ALU
@@ -222,11 +234,22 @@ pm_remove_index = PatternMatcher([
   (UPat(Ops.STAGE, name="s").index(name="idx", allow_any_len=True), lambda s,idx: s.src[0] if s.src[1:] == idx.src[1:] else None),
 ])
 
+def inline_stage_index(stage:UOp, idx:UOp) -> UOp:
+  return stage.src[0].substitute(dict(zip(stage.src[1:], idx.src[1:])))
+
+def recompute_cost(x:UOp, seen:set[UOp]|None=None) -> int|None:
+  if seen is None: seen = set()
+  if x in seen or x.op is Ops.STAGE or x.has_buffer_identity(after_ok=True): return 0
+  seen.add(x)
+  if x.op is Ops.REDUCE: return None
+  costs = [recompute_cost(s, seen) for s in (x.src[:1] if x.op is Ops.INDEX else x.src)]
+  return None if any(c is None for c in costs) else sum(c for c in costs if c is not None) + (x.op in GroupOp.Elementwise)
+
 def materialize_call_args(c:UOp) -> UOp:
   srcs:list[UOp] = []
   for x in c.src[1:]:
     device = x.device or c.device
-    srcs.append(x if x.op is Ops.STAGE or x.is_bound_var or x.has_buffer_identity(after_ok=True) or x.shape == () or device is None
+    srcs.append(x if x.op is Ops.STAGE or x.is_bound_var or has_buffer_view(x) or x.shape == () or device is None
                 else x.bufferize(arg=BufferizeOpts(device=device)))
   return c.replace(src=(c.src[0], *srcs))
 
@@ -245,13 +268,28 @@ def get_kernel_graph(sink:UOp) -> UOp:
   # Calls can only receive buffer states. Materialize lazy constants/computations instead of silently unwrapping them to a nonexistent base buffer.
   tsink = graph_rewrite(tsink, pm_materialize_call_args, name="materialize call args")
 
+  read_cache:dict[UOp, set[UOp]] = {}
+  def read_buffers(x:UOp) -> set[UOp]:
+    if x not in read_cache:
+      read_cache[x] = {x.buf_uop} if x.has_buffer_identity(after_ok=True) else set().union(*(read_buffers(s) for s in x.src))
+    return read_cache[x]
+  stores = [u for u in tsink.toposort() if u.op is Ops.STORE and not u.src[0].is_variable]
+  dests = [u.src[0].buf_uop for u in stores]
+  reads = [read_buffers(u.src[1]) for u in stores]
+  force_stage = {stores[j].src[1] for j in range(len(stores)) for i in range(j)
+                 if stores[j].src[1].op_in_backward_slice_with_self(Ops.REDUCE) and dests[i].op is Ops.PARAM and dests[j].op is Ops.PARAM
+                 and dests[i] is not dests[j] and dests[i] in reads[j] and dests[j] in reads[i]}
+
   # add safe STAGEs to never duplicate compute
   # we compute the number of times a buffer is consumed. if > 1, we realize
   realize = {}
   consumes = {tsink:0}
   for u in reversed(tsink.toposort()):
     assert u in consumes, f"{u.op} not in consumes"
-    if (u.op in GroupOp.ALU or u.op is Ops.REDUCE) and consumes[u] > 1 and u.device is not None:
+    if u in force_stage:
+      realize[u] = u.rtag(1).bufferize(arg=BufferizeOpts(device=u.device, removable=False))
+      consumes[u] = 1
+    elif (u.op in GroupOp.ALU or u.op is Ops.REDUCE) and consumes[u] > 1 and u.device is not None:
       # TODO: rename to stage
       realize[u] = u.rtag(1).bufferize(arg=BufferizeOpts(device=u.device))
       consumes[u] = 1
@@ -280,13 +318,16 @@ def get_kernel_graph(sink:UOp) -> UOp:
     for u in tsink.toposort():
       if u.op is Ops.INDEX and u.src[0].op is Ops.STAGE:
         staged.setdefault(u.src[0], []).append(u)
-    replacements = {}
+    replacements:dict[UOp, UOp] = {}
+    range_replacements:dict[UOp, UOp] = {}
     for stage,lst in staged.items():
-      if len(lst) == 1:
-        if all(r.op is Ops.RANGE and r.arg[1] == AxisType.WEAK for r in lst[0].src[1:]):
-          for old,new in zip(stage.src[1:], lst[0].src[1:]): replacements[old] = new
-    if len(replacements) == 0: break
-    tsink = tsink.substitute(replacements)
+      cost = recompute_cost(stage.src[0])
+      if stage.arg.removable and len(lst) > 1 and cost is not None and cost <= 8:
+        replacements.update((idx, inline_stage_index(stage, idx)) for idx in lst)
+      elif stage.arg.removable and len(lst) == 1 and cost is not None and cost <= 8 and all(r.op is Ops.RANGE for r in lst[0].src[1:]):
+        range_replacements.update(zip(stage.src[1:], lst[0].src[1:]))
+    if not replacements and not range_replacements: break
+    tsink = tsink.substitute(replacements).substitute(range_replacements)
     tsink = graph_rewrite(tsink, pm_remove_index, name="remove noop index")
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify, name="reduce simplify")
