@@ -88,7 +88,7 @@ class TestRangeifyEdgeCase(unittest.TestCase):
     res = Tensor.cat(a, c, dim=0)
     self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
 
-  def test_pcontig_multi_gather(self):
+  def test_multi_gather(self):
     # regression test: local bufferize must have device set for const_like to work
     # NOTE: with uint type, this will become a long and fail on WEBGPU
     forest = Tensor(list(range(8)), dtype='int')
