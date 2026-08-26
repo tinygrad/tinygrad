@@ -15,6 +15,8 @@ class LinearScanRegallocContext:
     self.uops, self.ren, self.idx = [u for u in uops if u.op in REG_OPS], ren, itertools.count()
     self.live_intervals: dict[VRegister, list[int]] = {}
 
+    ren.spill_size = 0
+
     lr = self.live_intervals
     range_vars: list[VRegister] = []
     def live_edge(u:UOp) -> tuple[VRegister,...]: return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))

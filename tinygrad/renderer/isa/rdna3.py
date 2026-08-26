@@ -544,10 +544,10 @@ class RDNA3Renderer(ISARenderer):
   def assign_spill_slot(self, v:VRegister, vdef:UOp) -> tuple[int, int]:
     if v.cons[0].name[0] == 'v':
       sz = v.cons[0].size * v.width
-      offset = self.spill_size + (sz - self.spill_size % sz)
+      offset = self.spill_size + (sz - self.spill_size % sz) % sz
       return (offset, offset + sz)
     else:
-      vgpr,lane = next(((r,l) for r,l in self.spill_vgprs.items() if 32 - l > v.width), (None, None))
+      vgpr,lane = next(((r,l) for r,l in self.spill_vgprs.items() if 32 - l >= v.width), (None, None))
       assert vgpr is not None, "ran out of reserved SGPR spill lanes"
       self.spill_vgprs[vgpr] += v.width
       return ((vgpr,lane), self.spill_size)

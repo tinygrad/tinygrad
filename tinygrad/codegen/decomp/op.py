@@ -43,20 +43,20 @@ def fast_idiv(ren: Renderer, x: UOp, d: int, dont_cast=False) -> UOp|None:
       return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
   return None
 
-# TODO: enable native mul_hi use
 def _mulhi32(a:UOp, b:UOp): return ((a.cast(dtypes.uint64) * b.cast(dtypes.uint64)) >> 32).cast(dtypes.uint32)
 
 def xidiv32(x:UOp, a:UOp, b:UOp) -> UOp:
   if (signed := not dtypes.is_unsigned(x.dtype)):
     s = ((a ^ b).bitcast(dtypes.int32) >> UOp.const(31, dtypes.int32)).bitcast(dtypes.uint32)
-    a, b = a.bitcast(dtypes.int32).abs(), b.bitcast(dtypes.int32).abs()
+    a, b = a.abs(), b.abs()
   a, b = a.bitcast(dtypes.uint32), b.bitcast(dtypes.uint32)
   z = (b.float().reciprocal() * UOp.const(2**32 - 256, dtypes.float32)).cast(dtypes.uint32)
   z = z + _mulhi32(z, (b*z).bitcast(dtypes.int32).neg())
   q = _mulhi32(a, z)
-  r = a.alu(Ops.SUB, q*b)
-  q, r = (r < b).where(q, q + 1), (r < b).where(r, r.alu(Ops.SUB, b))
-  if signed: q = (q ^ s).alu(Ops.SUB, s)
+  r = a - q*b
+  q, r = (r < b).where(q, q + 1), (r < b).where(r, r - b)
+  q, r = (r < b).where(q, q + 1), (r < b).where(r, r - b)
+  if signed: q = (q ^ s) - s
   return q.cast(x.dtype)
 
 # ***** threefry *****
