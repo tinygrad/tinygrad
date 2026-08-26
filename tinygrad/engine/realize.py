@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import random, itertools, math, weakref, array, decimal
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, all_int, prod, flatten, Context, getenv, to_tuple, tqdm
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, all_int, prod, flatten, Context, getenv, to_tuple, tqdm, dedup
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
@@ -25,6 +25,10 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   if ast.op is Ops.COPY: return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
+
+def get_call_written_bufs(call:UOp) -> list[UOp]:
+  arg_uops, (outs, ins) = get_call_arg_uops(call), get_call_outs_ins(call)
+  return dedup([b for k in outs if k not in ins and (b:=u if (cv:=(u:=arg_uops[k]).contiguous_view()) is None else cv[0]).op is Ops.BUFFER])
 
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]]:
   if (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq":
@@ -213,14 +217,12 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   dev = cast(Any, Device[(info:= call.arg.aux).device[0]])
-  addrs = [(b.bufs[j] if isinstance(b:=_resolve(ctx.input_uops[k], ctx.input_uops).buffer, MultiBuffer) else b).get_buf(dev_name).va_addr
-           for devs, idxs in info.input_idxs for j, dev_name in enumerate(devs) for k in idxs]
+  addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(d).va_addr for d, u in info.input_addrs]
   dev.rt_buffer()._buf.cpu_view().view(offset=(base:=dev.rt_allocator.alloc(len(addrs) * 8)), fmt='Q')[:len(addrs)] = array.array('Q', addrs)
 
   if info.inputs is not None:
-    tables = [UOp.from_buffer(dev.rt_buffer().view(len(idxs), dtypes.uint64, base + j*len(idxs)*8), HCQ_RUNTIME_DEV.value)
-              for devs, idxs in info.input_idxs for j in range(len(devs))]
-    call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*tables)})
+    table = UOp.from_buffer(dev.rt_buffer().view(len(info.input_addrs), dtypes.uint64, base), HCQ_RUNTIME_DEV.value)
+    call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*[table]*len(info.device))})
   exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer()._buf.va_addr + base}), call, ast)
 
   def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:
