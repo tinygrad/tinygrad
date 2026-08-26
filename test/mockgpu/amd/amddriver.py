@@ -7,9 +7,10 @@ from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileD
 from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props, GFX_TARGET_VERSION, MOCKGPU_ARCH
 
 def _ioctl_nr(ioctl: functools.partial) -> int: return ioctl.args[2]
+def _ioctl_struct(ioctl: functools.partial) -> type[c.Struct]: return ioctl.args[3]
 
 kfd_ioctl_info: dict[int, tuple[str, type[c.Struct]]] = {
-  _ioctl_nr(ioctl): (name, ioctl.args[3]) for name, ioctl in vars(kfd).items()
+  _ioctl_nr(ioctl): (name, _ioctl_struct(ioctl)) for name, ioctl in vars(kfd).items()
   if name.startswith("AMDKFD_IOC_") and isinstance(ioctl, functools.partial)}
 
 class KFDFileDesc(VirtFileDesc):
@@ -168,7 +169,7 @@ class AMDDriver(VirtDriver):
           ev.memory_exception_data.va = int(os.environ["MOCKGPU_EMU_FAULTADDR"], 16)
           ev.memory_exception_data.failure.NotPresent = 1
     else:
-      raise RuntimeError(f"unknown kfd ioctl, {nr} {name}")
+      raise RuntimeError(f"unsupported kfd ioctl, {nr} {name}")
     return 0
 
   def _emulate_execute(self):
