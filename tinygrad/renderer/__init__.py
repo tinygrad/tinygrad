@@ -1,11 +1,16 @@
 from __future__ import annotations
 from typing import Callable, cast
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from tinygrad.helpers import prod, Target, EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, DType, dtypes
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.device import Compiler
+
+# an access takes its dtype from the buffer it indexes, so accessing at another dtype restates the storage on the buffer that owns it
+def with_storage(x:UOp, dt:DType) -> UOp:
+  if x.op in {Ops.PARAM, Ops.BUFFER}: return x.replace(dtype=None, arg=replace(x.arg, dtype=dt))
+  return x.replace(dtype=None, src=(with_storage(x.src[0], dt),)+x.src[1:])
 
 @dataclass(frozen=True)
 class Estimates:
