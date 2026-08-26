@@ -3,7 +3,7 @@ import itertools
 from tinygrad.dtype import AddrSpace, Invalid, strong_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, AxisType, rewrite_group, remove_all_tags, resolve, shape_to_shape_arg
-from tinygrad.helpers import all_int, VIZ, SPEC, Context, panic
+from tinygrad.helpers import all_int, prod, VIZ, SPEC, Context, panic
 from tinygrad.schedule.indexing import BufferizeOpts, apply_movement_op
 from tinygrad.schedule.prepare import has_buffer_view
 from tinygrad.uop.symbolic import symbolic
@@ -97,9 +97,6 @@ def index_on_stack(stack:UOp, idx:UOp):
 pm_range_migration = PatternMatcher([
   # STAGE on shape () is nothing
   (UPat(Ops.STAGE, src=(UPat.var('x'),)), lambda x: x if x.shape == () else None),
-  # if INDEX is on STAGE with the same ranges, remove the pair
-  (UPat(Ops.STAGE, allow_any_len=True, name="s").index(allow_any_len=True, name="i"),
-   lambda s,i: s.src[0] if s.src[1:] == i.src[1:] else None),
   # reshape of a single element shaped value to scalar is an index
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
   # handle movement ops on INDEX
@@ -230,12 +227,24 @@ pm_remove_stage = PatternMatcher([
   (UPat(Ops.STAGE, name="x"), remove_stage),
 ])+fix_mselect_mstack
 
-pm_remove_index = PatternMatcher([
-  (UPat(Ops.STAGE, name="s").index(name="idx", allow_any_len=True), lambda s,idx: s.src[0] if s.src[1:] == idx.src[1:] else None),
+def remove_selected_stage(ctx:set[UOp], stage:UOp, idx:UOp) -> UOp|None:
+  return stage.src[0] if stage in ctx and stage.src[1:] == idx.src[1:] else None
+
+pm_remove_selected_stage = PatternMatcher([
+  (UPat(Ops.STAGE, name="stage").index(name="idx", allow_any_len=True), remove_selected_stage),
 ])
 
 def inline_stage_index(stage:UOp, idx:UOp) -> UOp:
-  return stage.src[0].substitute(dict(zip(stage.src[1:], idx.src[1:])))
+  replacements, cache = dict(zip(stage.src[1:], idx.src[1:])), {}
+  def replace(x:UOp) -> UOp:
+    if x in replacements: return replacements[x]
+    if x.has_buffer_identity(after_ok=True) or x.op is Ops.STAGE: return x
+    if x not in cache: cache[x] = x.replace(src=tuple(replace(s) for s in x.src))
+    return cache[x]
+  return replace(stage.src[0])
+
+MAX_RECOMPUTE = 8
+MAX_SCALAR_RECOMPUTE = 64
 
 def recompute_cost(x:UOp, seen:set[UOp]|None=None) -> int|None:
   if seen is None: seen = set()
@@ -276,9 +285,12 @@ def get_kernel_graph(sink:UOp) -> UOp:
   stores = [u for u in tsink.toposort() if u.op is Ops.STORE and not u.src[0].is_variable]
   dests = [u.src[0].buf_uop for u in stores]
   reads = [read_buffers(u.src[1]) for u in stores]
-  force_stage = {stores[j].src[1] for j in range(len(stores)) for i in range(j)
-                 if stores[j].src[1].op_in_backward_slice_with_self(Ops.REDUCE) and dests[i].op is Ops.PARAM and dests[j].op is Ops.PARAM
-                 and dests[i] is not dests[j] and dests[i] in reads[j] and dests[j] in reads[i]}
+  force_stage:set[UOp] = set()
+  param_writes = [i for i,dest in enumerate(dests) if dest.op is Ops.PARAM]
+  if len(param_writes) == 2:
+    i, j = param_writes
+    if stores[j].src[1].op_in_backward_slice_with_self(Ops.REDUCE) and dests[i] is not dests[j] and \
+       dests[i] in reads[j] and dests[j] in reads[i]: force_stage.add(stores[j].src[1])
 
   # add safe STAGEs to never duplicate compute
   # we compute the number of times a buffer is consumed. if > 1, we realize
@@ -311,24 +323,88 @@ def get_kernel_graph(sink:UOp) -> UOp:
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
-  # ***** MERGING AND SPLITTING (should be totally optional) *****
+  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify, name="pre-fusion reduce simplify")
 
+  # remove stage boundaries when this doesn't duplicate expensive compute or nest reductions
   while 1:
-    staged: dict[UOp, list[UOp]] = {}
+    staged:dict[UOp, list[UOp]] = {}
+    children:dict[UOp, list[UOp]] = {}
     for u in tsink.toposort():
-      if u.op is Ops.INDEX and u.src[0].op is Ops.STAGE:
-        staged.setdefault(u.src[0], []).append(u)
+      for s in u.src: children.setdefault(s, []).append(u)
+      if u.op is Ops.INDEX and u.src[0].op is Ops.STAGE: staged.setdefault(u.src[0], []).append(u)
+
+    boundary_cache:dict[UOp, set[UOp]] = {}
+    def boundaries(x:UOp) -> set[UOp]:
+      if x not in boundary_cache:
+        boundary_cache[x] = set().union(*({c} if c.op in {Ops.STAGE, Ops.STORE, Ops.CALL} else boundaries(c)
+                                          for c in children.get(x, [])))
+      return boundary_cache[x]
+
+    reduce_cache:dict[UOp, bool] = {}
+    def feeds_reduce(x:UOp) -> bool:
+      if x not in reduce_cache:
+        reduce_cache[x] = any(c.op is Ops.REDUCE or (c.op not in {Ops.STAGE, Ops.STORE, Ops.CALL} and feeds_reduce(c))
+                              for c in children.get(x, []))
+      return reduce_cache[x]
+
+    def boundary_work(boundary:UOp) -> int|None:
+      value = boundary.src[1] if boundary.op is Ops.STORE else boundary.src[0]
+      if any(r.src[0].op is not Ops.CONST or not isinstance(r.src[0].val, int) for r in value.ranges): return None
+      return prod(r.src[0].val for r in value.ranges)
+
+    def recompute_work(idxs:list[UOp]) -> int|None:
+      works = [boundary_work(next(iter(bs))) for idx in idxs if len(bs:=boundaries(idx)) == 1]
+      return sum(x for x in works if x is not None) if len(works) == len(idxs) and all(x is not None for x in works) else None
+
     replacements:dict[UOp, UOp] = {}
     range_replacements:dict[UOp, UOp] = {}
-    for stage,lst in staged.items():
+    selected_stages:set[UOp] = set()
+    for stage,idxs in staged.items():
+      if not stage.arg.removable or children.get(stage) != idxs: continue
+      inlinable = stage.src[0].op in GroupOp.ALU or stage.src[0].op is Ops.REDUCE
       cost = recompute_cost(stage.src[0])
-      if stage.arg.removable and len(lst) > 1 and cost is not None and cost <= 8:
-        replacements.update((idx, inline_stage_index(stage, idx)) for idx in lst)
-      elif stage.arg.removable and len(lst) == 1 and cost is not None and cost <= 8 and all(r.op is Ops.RANGE for r in lst[0].src[1:]):
-        range_replacements.update(zip(stage.src[1:], lst[0].src[1:]))
+
+      # passthrough stages don't duplicate compute when indexing is unchanged
+      if not inlinable:
+        if len(idxs) == 1 and stage.src[1:] == idxs[0].src[1:]:
+          replacements[idxs[0]] = stage.src[0]
+          break
+        continue
+
+      # duplicate cheap elementwise stages; reductions require identical indexing into one output boundary
+      if len(idxs) > 1:
+        work = recompute_work(idxs)
+        if cost is not None and cost <= MAX_RECOMPUTE and work is not None and work <= stage.max_numel() * len(idxs):
+          replacements.update((idx, inline_stage_index(stage, idx)) for idx in idxs)
+        elif cost is None and all(idx.src[1:] == idxs[0].src[1:] for idx in idxs) and not any(feeds_reduce(idx) for idx in idxs):
+          stage_boundaries = set().union(*(boundaries(idx) for idx in idxs))
+          if len(stage_boundaries) == 1 and boundary_work(next(iter(stage_boundaries))) == stage.max_numel():
+            range_replacements.update(zip(stage.src[1:], idxs[0].src[1:]))
+            selected_stages.add(stage)
+        if replacements or range_replacements: break
+        continue
+
+      idx = idxs[0]
+      stage_boundaries = boundaries(idx)
+      work = boundary_work(next(iter(stage_boundaries))) if len(stage_boundaries) == 1 else None
+      scalar = stage.max_numel() == 1 and cost is not None and cost <= MAX_SCALAR_RECOMPUTE and all(r.op is Ops.CONST for r in idx.src[1:])
+      small = cost is not None and cost <= MAX_SCALAR_RECOMPUTE and stage.max_numel() <= 8 and idx.max_numel() <= 8
+      if cost is not None:
+        if stage.src[0].op_in_backward_slice_with_self(Ops.THREEFRY) or scalar or small or \
+           (cost <= MAX_RECOMPUTE and work is not None and work <= stage.max_numel()):
+          replacements[idx] = inline_stage_index(stage, idx)
+      elif len(stage_boundaries) == 1 and not feeds_reduce(idx) and work == stage.max_numel():
+        if all(r.op is Ops.RANGE for r in idx.src[1:]):
+          range_replacements.update(zip(stage.src[1:], idx.src[1:]))
+          selected_stages.add(stage)
+        else: replacements[idx] = inline_stage_index(stage, idx)
+      if replacements or range_replacements: break
+
     if not replacements and not range_replacements: break
     tsink = tsink.substitute(replacements).substitute(range_replacements)
-    tsink = graph_rewrite(tsink, pm_remove_index, name="remove noop index")
+    if selected_stages:
+      selected_stages = {stage.substitute(range_replacements) for stage in selected_stages}
+      tsink = graph_rewrite(tsink, pm_remove_selected_stage, ctx=selected_stages, name="remove selected stage")
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify, name="reduce simplify")
 

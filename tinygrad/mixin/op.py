@@ -549,6 +549,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
     numerator = squares.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
+    if resolve(n == 1, False) and correction >= 1: return self.sum(axis=axis, keepdim=keepdim).cast(output_dtype) * math.nan
     return numerator.div(smax(n - correction, 0)).cast(output_dtype)
 
   def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
