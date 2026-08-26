@@ -23,7 +23,7 @@ class TestGPUCrash(unittest.TestCase):
     cls.is_cdna = cls.dev.target[0] < 10
     ins = importlib.import_module('tinygrad.runtime.autogen.amd.' + ('cdna' if cls.is_cdna else 'rdna3') + '.ins')
     for rdna3_name, cdna3_name in RDNA3_CDNA3_MAP.items():
-      setattr(cls, rdna3_name, getattr(ins, cdna3_name if cls.is_cdna else rdna3_name))
+      setattr(cls, rdna3_name, staticmethod(getattr(ins, cdna3_name if cls.is_cdna else rdna3_name)))
 
   def setUp(self):
     # Verify device works before each test
