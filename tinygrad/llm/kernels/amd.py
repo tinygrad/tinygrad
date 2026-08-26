@@ -35,8 +35,8 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
     if val.op is Ops.INDEX and val.addrspace == AddrSpace.REG: val = val.load()
-    other = UOp(Ops.CUSTOM, dtypes.float, (val,), arg=
-      f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | offset<<10}))")
+    other = UOp(Ops.CUSTOM, src=(val,), arg=
+      (f"__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {{0}}), {0x1f | offset<<10}))", dtypes.float))
     val = val.maximum(other) if maximum else val + other
   return val
 
@@ -77,14 +77,14 @@ class Linear(nn.Linear):
     return super().__call__(x)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
-  return UOp(Ops.CUSTOMI, dtypes.int32, (a.int(), b.int(), c), arg="__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)")
+  return UOp(Ops.CUSTOMI, src=(a.int(), b.int(), c), arg=("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", dtypes.int32))
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
-  return UOp(Ops.CUSTOMI, dtypes.uint32, tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), arg="__builtin_amdgcn_perm({}, {}, {})")
+  return UOp(Ops.CUSTOMI, src=tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), arg=("__builtin_amdgcn_perm({}, {}, {})", dtypes.uint32))
 
 def _amd_load(ptr:UOp, lanes:int|None=None) -> UOp:
   assert ptr.op is Ops.INDEX
-  if lanes is None: return UOp(Ops.CUSTOMI, ptr.dtype, (ptr,), arg="__builtin_nontemporal_load({0})")
+  if lanes is None: return UOp(Ops.CUSTOMI, src=(ptr,), arg=("__builtin_nontemporal_load({0})", ptr.dtype))
   buf, coords = ptr.src[0], ptr.src[1:]
   idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0))
   return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load(dtype=ptr.dtype)
@@ -191,7 +191,7 @@ def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
   token_block, output_block = UOp.range(out.shape[0]//token_tile, 0), UOp.range(out_features//(16*output_tiles*output_waves), 1)
   lane, wave = UOp.range(WARP_SIZE, 2, axis_type=AxisType.LOCAL), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
-  hw_lane = UOp(Ops.CUSTOM, dtypes.int32, (lane.int(),), arg="__builtin_amdgcn_mbcnt_lo(-1, 0)").cast(dtypes.weakint)
+  hw_lane = UOp(Ops.CUSTOM, src=(lane.int(),), arg=("__builtin_amdgcn_mbcnt_lo(-1, 0)", dtypes.int32)).cast(dtypes.weakint)
   col, half = hw_lane % 16, hw_lane // 16
   outputs = tuple((output_block*output_waves+wave)*(16*output_tiles) + tile*16 + col for tile in range(output_tiles))
   inputs = tuple(token_block*token_tile + tile*16 + col for tile in range(token_tile//16))
@@ -201,8 +201,8 @@ def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
 def _wmma_stores(out, outputs, tokens, accs, update, half):
   def values(acc:UOp) -> tuple[UOp, ...]:
     vals = tuple(acc.after(update)[i].load() for i in range(8))
-    swapped = tuple(UOp(Ops.CUSTOM, dtypes.float32, (value,),
-      arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {0}), 50688))") for value in vals)
+    swapped = tuple(UOp(Ops.CUSTOM, src=(value,),
+      arg=("__builtin_bit_cast(float, __builtin_amdgcn_ds_swizzle(__builtin_bit_cast(int, {0}), 50688))", dtypes.float32)) for value in vals)
     low = half.eq(0)
     return tuple(low.where(vals[i], swapped[i+4]) if j == 0 else low.where(swapped[i], vals[i+4]) for i in range(4) for j in range(2))
   return [out[token, output].store(value) for output,output_accs in zip(outputs, accs)

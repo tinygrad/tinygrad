@@ -202,6 +202,11 @@ class TestUOpGraph(unittest.TestCase):
     invalid_lane_mul = next(u for u in out.src[0].toposort() if u.op is Ops.MUL)
     self.assertIs(invalid_lane_mul.dtype, dtypes.bool)
 
+  def test_devectorize_zero_sized_scalar_expand(self):
+    from tinygrad.codegen import devectorizer2
+    expanded = UOp.const(1.0).reshape(1, 1).expand(0, 3)
+    self.assertEqual(graph_rewrite(expanded, devectorizer2).shape, (0, 3))
+
   def test_gep_vec_const_fold(self):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(float(i), dtypes.float) for i in range(vec_size)]

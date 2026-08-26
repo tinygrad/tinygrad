@@ -164,7 +164,8 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
   # EXPAND on scalar -> nested STACKs with the same shape
   (UPat(Ops.EXPAND, src=(UPat.var("x"), UPat()), name="out"),
-   lambda x,out: functools.reduce(lambda x,s: UOp.stack(*([x]*s)), reversed(out.shape), x) if x.shape == () and all_int(out.shape) else None),
+   lambda x,out: functools.reduce(lambda x,s: UOp.stack(*([x]*s)), reversed(out.shape), x)
+   if x.shape == () and all_int(out.shape) and 0 not in out.shape else None),
 ])
 
 def fix_group_for_reduce(x:UOp):

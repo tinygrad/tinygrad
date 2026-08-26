@@ -1455,6 +1455,11 @@ class TestGatedUopGivenValid(unittest.TestCase):
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
 class TestRangeSplitting(unittest.TestCase):
+  def test_end_preserves_constant_backedge(self):
+    loop, backedge = UOp.loop(0), UOp.const(False)
+    end = graph_rewrite(UOp(Ops.NOOP).end(loop, backedge), sym)
+    self.assertEqual(end.src, (UOp(Ops.NOOP), loop, backedge))
+
   def test_range_split_on_mod(self):
     # test that mark_range_mod splits RANGE(8) into RANGE(4)*2 + RANGE(2) when used with %2
     from tinygrad.codegen.simplify import pm_split_ranges, pm_flatten_range
