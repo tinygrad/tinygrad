@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
+from tinygrad.helpers import argsort, all_same, cpu_profile, colored, Context, SPEC
 
 @dataclass
 class IndexingContext:
@@ -254,7 +254,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
       _realize_axis = []
       for i,(local_rngs,valids) in enumerate(rngs_valids):
         # we compare the ranges without their valids
-        if all_all_same or (PCONTIG and all_same(local_rngs)):
+        if all_all_same:
           # the new valid is the OR of all the children valids
           minimum_valid = UOp.const(False).usum(valids)
           _out_rngs.append(graph_rewrite(local_rngs[0].valid(minimum_valid), symbolic, name="minimum_valid"))
@@ -271,8 +271,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
       _realize_axis = rctx.realize_map.get(x) or []
       for i,r in enumerate(out_rngs):
         if i in _realize_axis: continue
-        if not (PCONTIG > 1) or any(any(rr.arg > e.arg for e in ending_ranges[x]) for rr in r.ranges):
-          _realize_axis.append(i)
+        _realize_axis.append(i)
       ending_ranges[x] = []
       if len(_realize_axis):
         rctx.realize_map[x] = _realize_axis
