@@ -1,5 +1,5 @@
 import ctypes, time, contextlib, functools
-from typing import Iterable, Literal
+from typing import Any, Iterable, Literal
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import import_soc
@@ -50,6 +50,8 @@ class AM_SOC(AM_IP):
     else: reg.write(val)
 
 class AM_GMC(AM_IP):
+  vf_owner:Any = None
+
   def init_sw(self):
     self.vmhubs = len(self.adev.regs_offset[am.MMHUB_HWIP])
 
@@ -86,22 +88,41 @@ class AM_GMC(AM_IP):
 
   def init_hw(self): self.init_hub("MM", insts=self.mm_insts)
 
-  def flush_hdp(self): self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4, 0x0)
+  def flush_hdp(self):
+    # a VF cannot read the remap window register (it reads all ones), it flushes through its own coherency register
+    if self.adev.is_vf: self.adev.reg("regBIF_BX_DEV0_EPF0_VF0_HDP_MEM_COHERENCY_FLUSH_CNTL").write(0x0)
+    else: self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4, 0x0)
+  def _cp_flush_tlb(self, req:int, vmid_mask:int):
+    from tinygrad.runtime.ops_amd import WAIT_REG_MEM_FUNCTION_EQ # ops_amd imports am, so this one is late
+    dev, q = self.vf_owner, self.vf_owner.hw_compute_queue_t()
+    # only the hub of the first xcc answers a VF, the host PF keeps the others to itself
+    q.wait_reg_mem(req, mask=vmid_mask, reg=self.adev.regGCVM_INVALIDATE_ENG17_REQ.addr[0],
+                   reg_done=self.adev.regGCVM_INVALIDATE_ENG17_ACK.addr[0], op=WAIT_REG_MEM_FUNCTION_EQ)
+    q.signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
+    dev.timeline_signal.wait(dev.timeline_value - 1)
+
   def flush_tlb(self, ip:Literal["MM", "GC"], vmid, flush_type=0):
     self.flush_hdp()
 
     # Can't issue TLB invalidation if the hub isn't initialized.
     if not self.hub_initted[ip]: return
 
-    for inst in (self.adev.gmc.mm_insts if ip == "MM" else range(self.adev.gfx.xccs)):
-      if ip == "MM": wait_cond(lambda: self.adev.regMMVM_INVALIDATE_ENG17_SEM.read(inst=inst) & 0x1, value=1, msg="mm flush_tlb timeout")
+    req = self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").encode(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid),
+      invalidate_l2_ptes=1, invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1,
+      clear_protection_fault_status_addr=0)
 
-      self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
-        invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0, inst=inst)
+    # a VF sees neither the GC invalidation ack nor the semaphore, the host PF owns both, so the cp runs the invalidation instead
+    if ip == "GC" and self.adev.is_vf and self.vf_owner is not None: return self._cp_flush_tlb(req, 1 << vmid)
+
+    use_sem = ip == "MM" and not self.adev.is_vf # the invalidation semaphore is owned by the host PF on a VF
+    for inst in (self.adev.gmc.mm_insts if ip == "MM" else range(self.adev.gfx.xccs)):
+      if use_sem: wait_cond(lambda: self.adev.regMMVM_INVALIDATE_ENG17_SEM.read(inst=inst) & 0x1, value=1, msg="mm flush_tlb timeout")
+
+      self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(req, inst=inst)
 
       wait_cond(lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read(inst=inst) & (1 << vmid), value=(1 << vmid), msg="flush_tlb timeout")
 
-      if ip == "MM": self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0, inst=inst)
+      if use_sem: self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0, inst=inst)
       if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0) and ip == "MM":
         self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.update(reserved_cache_private_invalidation=1, inst=inst)
 
@@ -255,9 +276,10 @@ class AM_GFX(AM_IP):
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
 
   def init_hw(self):
-    # Wait for RLC autoload to complete
-    wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0,
-              value=True, msg="RLC autoload timeout")
+    # Wait for RLC autoload to complete. a VF boots with the RLC already up.
+    if not self.adev.is_vf:
+      wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0,
+                value=True, msg="RLC autoload timeout")
 
     self.adev.gmc.init_hub("GC", insts=range(self.xccs))
     if self.adev.partial_boot: return self.reset_mec()
@@ -301,8 +323,12 @@ class AM_GFX(AM_IP):
 
     self._enable_mec()
 
-    # Set 1 partition
-    if self.xccs > 1: self.adev.psp._spatial_partition_cmd(1)
+    # the host PF shuts a VF down when it leaves its access window with no cp scheduler, point the RLC at the kiq slot (me 2, pipe 1, queue 0)
+    if self.adev.is_vf:
+      for xcc in range(self.xccs): self.adev.reg("regRLC_CP_SCHEDULERS").update(scheduler0=(2 << 5) | (1 << 3) | 0x80, inst=xcc)
+
+    # set 1 partition on bare metal. a VF uses the spatial partition its host PF assigned.
+    if self.xccs > 1 and not self.adev.is_vf: self.adev.psp._spatial_partition_cmd(1)
 
   def fini_hw(self): self._dequeue_hqds()
 
@@ -344,7 +370,7 @@ class AM_GFX(AM_IP):
 
       mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
       for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
-        self.adev.wreg(reg, mqd_st_mv[0x80 + i])
+        self.adev.wreg(reg, mqd_st_mv[0x80 + i], gated=True, inst=xcc)
       self.adev.regCP_HQD_ACTIVE.write(0x1, inst=xcc)
 
       self.adev.gmc.flush_hdp()
@@ -489,6 +515,7 @@ class AM_IH(AM_IP):
 
     self.drain()
 
+    if self.adev.is_vf: return # fatal RAS events are handled by the host PF
     bif_intr = self.adev.regBIF_BX0_BIF_DOORBELL_INT_CNTL.read_bitfields()
     athub_err, cntlr_err = bif_intr['ras_athub_err_event_interrupt_status'], bif_intr['ras_cntlr_interrupt_status']
     if athub_err or cntlr_err:
