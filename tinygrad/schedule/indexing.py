@@ -68,13 +68,17 @@ def data_srcs(op:Ops, src:tuple[UOp, ...]) -> tuple[UOp, ...]:
   if op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END}: return src[:1]
   return src
 
+def truncate_src_rngs(rngs:tuple[UOp, ...], s:UOp) -> tuple[UOp, ...]:
+  # smaller rank srcs (like bare scalar CONSTs) don't iterate the leading ranges
+  return rngs[len(rngs)-len(s_shape):] if (s_shape:=s._shape) is not None else rngs
+
 def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   new_srcs = []
   # shape/bound/index args that are not data src should not be indexed
   data_src_count = len(data_srcs(x.op, x.src))
   for i, s in enumerate(x.src):
     new_src = s
-    src_rngs = ctx.range_map[x][0] if x in ctx.range_map else ()
+    src_rngs = truncate_src_rngs(ctx.range_map[x][0], s) if x in ctx.range_map else ()
     if s.op in {Ops.PARAM, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
       if x in ctx.range_map and i < data_src_count: new_src = new_src.index(*src_rngs)
     elif s in ctx.realize_map:
@@ -217,7 +221,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
     #  2. from the single consumer if this op only has one consumer
     #  3. potentially new if this op has 2+ consumers
 
-    consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
+    consumer_rngs = [truncate_src_rngs(rctx.range_map[c][0], x) for c in consumer_map[x] if c in rctx.range_map]
     if x in rctx.realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
       out_rngs = tuple(rctx.new_range(s) for s in x.shape)
