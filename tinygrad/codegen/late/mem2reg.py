@@ -21,39 +21,42 @@ class Mem2regContext:
     self.phi_copies: dict[VRegister, list[VRegister]] = {}
 
     lane_ctr = itertools.count()
-    rng_stack: list[UOp] = []
     current: dict[tuple[UOp, int], UOp] = {}
     self.phis: dict[tuple[tuple[UOp, int], int], UOp] = {}
     flat: dict[tuple[UOp, int], dict[UOp, tuple[VRegister, int]]] = {}
-    rng_ctx: dict[UOp, dict[tuple[UOp, int], list[UOp]]] = {}
+    rng_ctx: dict[tuple[UOp, int], list[UOp]] = {}
+    rngs = 0
 
     for u in lst:
       if u.op in {Ops.STORE, Ops.LOAD}:
         ptr = bptr(u.src[0])
         if ptr[0].addrspace is not AddrSpace.REG: continue
-        if len(rng_stack):
-          rng_ctx.setdefault(rng_stack[-1], {}).setdefault(ptr, []).append(u)
+        if rngs: rng_ctx.setdefault(ptr, []).append(u)
         if u.op is Ops.STORE: current[ptr] = u
         if u.op is Ops.LOAD:
           if ptr not in flat: flat[ptr] = {}
           flat[ptr][u] = (rdef(current[ptr]), len(flat[ptr])+1)
 
-      if u.op is Ops.RANGE: rng_stack.append(u)
+      if u.op is Ops.RANGE: rngs += 1
       if u.op is Ops.END:
-        if (ctx := rng_ctx.get(rng_stack.pop(), None)):
-          for ptr,ops in ctx.items():
-            for i,u in enumerate(ops):
-              if u.op is Ops.LOAD and (carry := next((s for s in reversed(ops[i+1:]) if s.op is Ops.STORE), None)) is not None:
-                lin,n = flat[ptr][u]
-                vr = ren.vreg(lin.cons, width=lin.width, alignment=lin.alignment, phi=(lin,rdef(carry)))
-                phi = UOp.placeholder((1,), ptr[0].dtype, next(lane_ctr), AddrSpace.REG).replace(tag=(vr,))
-                self.phis[(ptr, n)] = phi
-                self.phi_copies.setdefault(lin, []).append(vr)
-                self.phi_copies.setdefault(rdef(carry), []).append(vr)
+        rngs -= 1
+        if rngs == 0:
+          for ptr,us in rng_ctx.items():
+            i,ld = next(((i,u) for i,u in enumerate(us) if u.op is Ops.LOAD), (None, None))
+            if ld is None: continue
+            carry = next((u for u in reversed(us[i+1:]) if u.op is Ops.STORE), None)
+            if carry is None: continue
+            header,n = flat[ptr][ld]
+            vr = ren.vreg(header.cons, width=header.width, alignment=header.alignment, phi=(header,rdef(carry)))
+            phi = UOp.placeholder((1,), ptr[0].dtype, next(lane_ctr), AddrSpace.REG).replace(tag=(vr,))
+            self.phis[(ptr, n)] = phi
+            self.phi_copies.setdefault(header, []).append(vr)
+            self.phi_copies.setdefault(rdef(carry), []).append(vr)
+          rng_ctx.clear()
 
   def try_phi(self, idx:UOp, x:UOp) -> UOp|None:
     ptr = bptr(idx)
-    self.nl[ptr] = self.nl.setdefault(ptr, 0) + 1
+    self.nl[ptr] = self.nl.get(ptr, 0) + 1
     phi = self.phis.get((ptr, self.nl[ptr]), None)
     return (phi, [phi]) if phi is not None else None
 
