@@ -492,7 +492,7 @@ def encode(x:UOp):
       if rdef(x) is None: fields["data0"]=encfield(x.src[3])
       else: fields["vdst"]=encfield(x)
     case RDNA3Ops.SMEM: fields = dict(sdata=encfield(x), sbase=encfield(x.src[0]), offset=encfield(x.src[1]))
-    case RDNA3Ops.SOPK: fields = dict(simm16=x.src[1].arg)
+    case RDNA3Ops.SOPK: fields = dict(sdst=dsl.NULL, simm16=x.src[0].src[0].val)
     case RDNA3Ops.SOPP: fields = dict(simm16=(x.src[0].val if len(x.src) > 0 and x.src[0].op is Ops.CONST else 0))
     case RDNA3Ops.VOPC: fields = dict(src0=encfield(x.src[0]), vsrc1=encfield(x.src[1]))
     case RDNA3Ops.VOP3SD: fields = dict(sdst=encfield(vccop), vdst=encfield(x), **{f"src{i}":encfield(u) for i,u in enumerate(x.src[:3])})
@@ -597,13 +597,18 @@ class RDNA3Renderer(ISARenderer):
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     deps: set[Register] = set()
     nuops = []
+    pending_scratch = False
     # s_waitcnt
     for u in lin.src:
       if any(r in deps for s in u.src for r in rdefs(s)):
         nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt, src=(const(0, dtypes.uint16),)))
         deps.clear()
-      if (tp := CntType.get(u)) is not None and tp in [CntType.DS_CNT, CntType.LOAD_CNT]:
-        deps.update(rdefs(u))
+      if (tp := CntType.get(u)) is not None:
+        if tp in [CntType.DS_CNT, CntType.LOAD_CNT]:
+          if u.arg.func is RDNA3Ops.SCRATCH and pending_scratch:
+            nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_vscnt, src=(const(0),)))
+          deps.update(rdefs(u))
+        elif u.arg.func is RDNA3Ops.SCRATCH: pending_scratch = True
       nuops.append(u)
 
     pc = 0
