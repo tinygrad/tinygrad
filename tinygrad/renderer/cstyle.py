@@ -193,10 +193,7 @@ class CStyleLanguage(Renderer):
     if u.max_numel() > 1 or u.dtype != u.src[0].dtype:
       return f"(({self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True, shape=u._shape)})({self[u]}))"
     else: return f"{self[u]}"
-  def render_access(self, u:UOp):
-    if u.max_numel() > 1 or u.dtype != u.src[0].dtype:
-      return f"*(({self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True, shape=u._shape)})({self[u]}))"
-    else: return f"*{self[u]}"
+  def render_access(self, u:UOp): return f"*{self.render_ptr(u)}"
   def render_cast(self, u:UOp, val:str) -> str: return f"({self.render_type(u)})({val})"
 
   # LEGACY

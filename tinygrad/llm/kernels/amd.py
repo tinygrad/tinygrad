@@ -242,25 +242,24 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, out_features:
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
   token_block, output_block = UOp.range(out.shape[0]//token_tile, 0), UOp.range(out_features//(16*output_tiles*output_waves), 1)
-  lane, wave = UOp.range(WARP_SIZE, 2, axis_type=AxisType.LOCAL), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
-  # the lane id must stay opaque (mbcnt): visible lane%16/lane//16 arithmetic would get range-split into nested
-  # loops by the scheduler, scrambling the WMMA fragment layout
-  hw_lane = UOp(Ops.CUSTOM, src=(lane.int(),), arg=("__builtin_amdgcn_mbcnt_lo(-1, 0)", dtypes.int32)).cast(dtypes.weakint)
-  col, half = hw_lane % 16, hw_lane // 16
+  # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
+  # range-split into nested loops, which would scramble the WMMA fragment layout
+  lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(output_waves, 3, axis_type=AxisType.LOCAL)
+  col, half = lane % 16, lane // 16
   outputs = tuple((output_block*output_waves+wave)*(16*output_tiles) + tile*16 + col for tile in range(output_tiles))
   inputs = tuple(token_block*token_tile + tile*16 + col for tile in range(token_tile//16))
   tokens = tuple(tuple(token_block*token_tile + tile*16 + half*8 + i for i in range(8)) for tile in range(token_tile//16))
-  return output_waves, token_block, output_block, lane, wave, half, outputs, inputs, tokens, hw_lane
+  return output_waves, token_block, output_block, lane, wave, half, outputs, inputs, tokens
 
-def _wmma_stores(out, outputs, tokens, accs, update, half, lane, wave, output_waves, hw_lane):
+def _wmma_stores(out, outputs, tokens, accs, update, half, lane, wave, output_waves):
   # the accumulator fragment halves are exchanged between lane pairs (l, l^16) through LDS (a ds_swizzle without CUSTOM)
   flat_accs = [acc for output_accs in accs for acc in output_accs]
   lds = UOp.placeholder((output_waves, 32, len(flat_accs)*8), dtypes.float32, slot=33, addrspace=AddrSpace.LOCAL)
   stores = [lds[wave, lane, a*8+i].store(acc.after(update)[i].load()) for a,acc in enumerate(flat_accs) for i in range(8)]
   lds = lds.after(UOp.barrier(UOp.group(*stores)))
   def values(ai:int) -> tuple[UOp, ...]:
-    own = tuple(lds[wave, hw_lane, ai*8+i].load() for i in range(8))
-    peer = tuple(lds[wave, hw_lane ^ 16, ai*8+i].load() for i in range(8))
+    own = tuple(lds[wave, lane, ai*8+i].load() for i in range(8))
+    peer = tuple(lds[wave, lane ^ 16, ai*8+i].load() for i in range(8))
     low = half.eq(0)
     return tuple(low.where(own[i], peer[i+4]) if j == 0 else low.where(peer[i], own[i+4]) for i in range(4) for j in range(2))
   tt = len(tokens)
@@ -269,7 +268,7 @@ def _wmma_stores(out, outputs, tokens, accs, update, half, lane, wave, output_wa
 
 def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, dequant, name):
   x = x.reshape(out.shape[0], in_features)
-  output_waves, token_block, output_block, lane, wave, physical_half, outputs, input_tokens, tokens, hw_lane = layout
+  output_waves, token_block, output_block, lane, wave, physical_half, outputs, input_tokens, tokens = layout
   token_tile, output_tiles = len(tokens)*16, len(outputs)
   output_words = in_features // GGML_BLOCK_SIZE * type_words
   accs = tuple(tuple(UOp.placeholder((8,), dtypes.float32, slot=ot*(token_tile//16)+tile, addrspace=AddrSpace.REG)
@@ -288,7 +287,7 @@ def _quant_linear_wmma(out, x, out_features, in_features, type_words, layout, de
         wmma_accs[output_tile][tile] = UOp.wmma(afrag, bfrag, previous, *WMMA_ARG)
   update = UOp.group(*(acc.store(value) for output_accs,output_values in zip(accs, wmma_accs)
                        for acc,value in zip(output_accs, output_values))).end(group)
-  stores = _wmma_stores(out, outputs, tokens, accs, update, physical_half, lane, wave, output_waves, hw_lane)
+  stores = _wmma_stores(out, outputs, tokens, accs, update, physical_half, lane, wave, output_waves)
   return UOp.group(*stores).end(token_block, output_block, lane, wave).sink(arg=KernelInfo(name=name, opts_to_apply=()))
 
 @functools.cache
@@ -312,7 +311,7 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
     32 if out.shape[0] % 32 == 0 else 16
   output_tiles = 1 if out_features <= 1024 else 2 if out_features <= 6144 else 1 if out_features < 8192 else 2
   layout = _wmma_layout(out, out_features, token_tile, output_tiles)
-  output_waves, _, _, lane, wave, _, _, _, _, _ = layout
+  output_waves, _, _, lane, wave, _, _, _, _ = layout
   local_lut = UOp.placeholder((256,), dtypes.uint32, slot=32, addrspace=AddrSpace.LOCAL)
   tid, lut_items = wave*32+lane, 256//(32*output_waves)
   lut = local_lut.after(UOp.group(*(local_lut[tid*lut_items+i].store(lut[tid*lut_items+i]) for i in range(lut_items))).barrier())
