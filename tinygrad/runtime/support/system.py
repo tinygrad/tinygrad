@@ -377,6 +377,7 @@ class RemotePCIDevice(PCIDevice):
     sock.sendall(struct.pack('<BIIQQQ', cmd, dev_id, bar, *(*args, 0, 0, 0)[:3]) + payload)
     if has_fd:
       msg, anc, _, _ = sock.recvmsg(17, socket.CMSG_LEN(4))
+      if not anc: raise RuntimeError(f"TinyGPU server refused {RemoteCmd(cmd).name} (no fd returned), check the tinygpu log")
       fd = struct.unpack('<i', anc[0][2][:4])[0]
     else: msg, fd = RemotePCIDevice._recvall(sock, 17), None
     if (resp:=struct.unpack('<BQQ', msg))[0] != 0:
@@ -444,4 +445,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
 
     # paddrs are returned as (paddr, size) pairs until a (paddr=0, size=0) terminator in the beginning of the mapping.
     paddrs_raw = list(itertools.takewhile(lambda p: p[1] != 0, zip(memview.view(fmt='Q')[0::2], memview.view(fmt='Q')[1::2])))
-    return memview, [p + i for p, sz in paddrs_raw for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
+    assert sum(sz for _, sz in paddrs_raw) >= size, f"TinyGPU dext returned a truncated scatter list for a {size:#x} byte sysmem alloc"
+    # the server allocates at least 16KB but only ceil(size/4K) pages are mapped on the GPU. return a view of the mapped size only:
+    # NVCommandQueue.bind derives command lengths from the view, and a larger view makes the GPU fetch past the mapping (4KB page hosts)
+    return memview.view(0, round_up(size, 0x1000)), [p + i for p, sz in paddrs_raw for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
