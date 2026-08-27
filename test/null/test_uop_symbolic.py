@@ -1392,7 +1392,7 @@ class TestInvalidIndex(unittest.TestCase):
 
   def test_gated_load_keeps_index_valid(self):
     # the load executes even on gated-off iterations: gated_given_valid must not erase its mask (PADTO OOB shape)
-    buf = UOp.param(0, dtypes.bool, (17,))
+    buf = UOp.param(0, dtypes.bool, 17)
     ridx = Variable("ridx", 0, 31)
     cond = ridx < 17
     load = buf.index(ridx.valid(cond))
@@ -1404,7 +1404,7 @@ class TestStoreLoadFolding(unittest.TestCase):
   """Tests for store(index, load(index)) -> NOOP rule. This rule matches patterns that EMERGE during simplification."""
   def test_store_load_folding(self):
     # store(idx, load(idx)) -> NOOP, including emergent patterns like store(idx, load(idx) + 0)
-    buf = UOp.param(0, dtypes.int, (1,))
+    buf = UOp.param(0, dtypes.int, 1)
     index = buf.index(UOp.const(0))
     # Direct: store(idx, load(idx)) -> NOOP
     self.assertEqual(graph_rewrite(index.store(index.load()), sym).op, Ops.NOOP)
@@ -1417,7 +1417,7 @@ class TestStoreLoadFolding(unittest.TestCase):
 
 class TestMoveWhereOnLoad(unittest.TestCase):
   def test_bool_index_preserves_dtype(self):
-    buf = UOp.param(0, dtypes.bool, (8,))
+    buf = UOp.param(0, dtypes.bool, 8)
     a = Variable("a", 0, 7)
     r = UOp.range(8, 0)
     # cond has a range that the rewrite can move into the valid: gate (a<4) goes into load valid
@@ -1475,7 +1475,7 @@ class TestRangeSplitting(unittest.TestCase):
     from tinygrad.codegen.simplify import pm_split_ranges, pm_flatten_range
     r0 = UOp.range(uconst(8), 0)
     # create a simple expression using the range with mod: store range%2 to a buffer
-    buf = UOp.param(0, dtypes.int, (1,))
+    buf = UOp.param(0, dtypes.int, 1)
     val = (r0 % uconst(2)).cast(dtypes.int)
     store = UOp(Ops.STORE, src=(buf.index(uconst(0)), val))
     sink = UOp(Ops.SINK, src=(UOp(Ops.END, src=(store, r0)),))

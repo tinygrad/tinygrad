@@ -15,7 +15,7 @@ def simplify_valid_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move
 def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+indexing_simplify, name="simplify_image_idx")
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
-  return UOp.param(0, dtypes.float, (1024,)).index(idx.valid(valid)).load()
+  return UOp.param(0, dtypes.float, 1024).index(idx.valid(valid)).load()
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp.param(0, dtypes.float, image_shape).index(idx[1].valid(valid), idx[0].valid(valid)).load()
@@ -505,7 +505,7 @@ class TestDropTrueGate(unittest.TestCase):
     from tinygrad.codegen.late.coalesce import indexing_simplify
     from tinygrad.uop.ops import graph_rewrite
     from tinygrad.uop.symbolic import sym
-    buf = UOp.param(0, dtypes.int, (1,))
+    buf = UOp.param(0, dtypes.int, 1)
     idx = UOp.const(0)
     true_gate = UOp.const(True)
     index_with_gate = buf.index(idx.valid(true_gate))
@@ -551,7 +551,7 @@ class TestRangeShrink(unittest.TestCase):
     # one load guards r < 4, but another load uses r without a gate -> no shrink
     r = Range(0, 204)
     load1 = get_gated_load_uop(r < UOp.const(4), r)
-    load2 = UOp.param(1, dtypes.float, (204,)).index(r).load()
+    load2 = UOp.param(1, dtypes.float, 204).index(r).load()
     ranges = self.get_ranges(UOp.sink(load1, load2))
     self.assert_range_end(ranges, 204)
 
@@ -575,7 +575,7 @@ class TestRangeShrink(unittest.TestCase):
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
     x = (r < 4).where(UOp.const(1.0), Invalid)
-    ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r < 4).where(x, Invalid)).sink())
+    ranges = self.get_ranges(UOp.param(0, dtypes.float, 204).index(r).store((r < 4).where(x, Invalid)).sink())
     self.assert_range_end(ranges, 4)
 
   def test_range_shrink_store_where_invalid_flipped(self):
@@ -583,7 +583,7 @@ class TestRangeShrink(unittest.TestCase):
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
     x = (r < 4).where(UOp.const(1.0), Invalid)
-    ranges = self.get_ranges(UOp.param(0, dtypes.float, (204,)).index(r).store((r >= 4).where(Invalid, x)).sink())
+    ranges = self.get_ranges(UOp.param(0, dtypes.float, 204).index(r).store((r >= 4).where(Invalid, x)).sink())
     self.assert_range_end(ranges, 4)
 
 if __name__ == '__main__':

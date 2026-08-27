@@ -139,7 +139,7 @@ def _get_enqueue_devs(call:UOp) -> Any|None:
 
 def copy_with_kernel(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if (devs:=_get_enqueue_devs(call)) is None or Device[(dev:=to_tuple(devs)[0])].has_copy_queue: return None
-  d, s = (UOp.param(i, dst.dtype, (n:=dst.max_numel(),), device=devs) for i in range(2))
+  d, s = (UOp.param(i, dst.dtype, n:=dst.max_numel(), device=devs) for i in range(2))
   ast = d.index(r:=UOp.range(n, 0)).store(s.index(r).load()).end(r).sink(arg=KernelInfo(name="copy"), tag=1)
   return call.replace(src=(to_program(ast, Device[dev].renderer), dst, src))
 
