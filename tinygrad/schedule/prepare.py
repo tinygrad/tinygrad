@@ -101,19 +101,17 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
     if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
 
   # params have a flat storage size in the arg, the logical shape is a view (RESHAPE/SHRINK/UNSHARD) on top of it.
-  # substitute args as views of their flat max-shaped storage so the movement views on the params stay valid
-  def storage(x:UOp) -> tuple[tuple[int, ...], int]:
-    shp = x.max_shard_shape if x.axis is not None and isinstance(x.device, tuple) else x.max_shape
-    return shp, prod(shp)
-  pairs = [(p, args[p.arg.slot]) for p in params]
-  for i, (p, a) in enumerate(pairs):
+  # substitute args by their flat max-shaped storage view so the movement views on the params stay valid
+  def flat_storage(a:UOp) -> tuple[int, UOp]:  # returns (size, view of a as flat max-shaped storage)
+    shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
+    return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
+  dict_map = {x:args[x.arg.slot] for x in params}
+  for i, (p, a) in enumerate(dict_map.items()):
     if p.arg.size is not None:
-      if p.arg.size != storage(a)[1]: raise TypeError(f"arg {i} shape mismatch: expected size {p.arg.size}, got {a.shape}")
+      n, flat = flat_storage(a)
+      if p.arg.size != n: raise TypeError(f"arg {i} shape mismatch: expected size {p.arg.size}, got {a.shape}")
+      dict_map[p] = flat
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
-  def as_storage(a:UOp) -> UOp:
-    mshp, n = storage(a)
-    return a if a.shape == (n,) else a.pad_to(mshp).reshape((n,))
-  dict_map = {p: a if p.arg.size is None else as_storage(a) for p, a in pairs}
   return c.src[0].substitute(dict_map, walk=True)
 
 # shape-changing bitcast

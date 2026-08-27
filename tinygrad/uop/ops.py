@@ -1182,7 +1182,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return UOp(Ops.PARAM, arg=ParamArg(slot, dtype, None, vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
     max_shape = to_max_shape(shape)
     ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, prod(max_shape), vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
-    return UOp.shared_view(ret, shape)
+    return ret.view_as(shape)
   def param_like(self, slot:int):
     # Variables become ALU params in the call body; the stored value (if bound) stays in the call args
     if self.is_bound_var or self.is_variable:
@@ -1191,14 +1191,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
-      return UOp.shared_view(UOp(Ops.PARAM, arg=ParamArg(slot, self.dtype, prod(to_max_shape(self.shard_shape)),
-                                                       addrspace=addrspace, device=self.device)), self.shard_shape, self.axis)
+      return UOp(Ops.PARAM, arg=ParamArg(slot, self.dtype, prod(to_max_shape(self.shard_shape)),
+                                         addrspace=addrspace, device=self.device)).view_as(self.shard_shape, self.axis)
     return UOp.param(slot, self.dtype, self._shape, self.device, addrspace=addrspace)
-  @staticmethod
-  def shared_view(flat:UOp, shape:tuple[sint, ...], axis:int|None=None) -> UOp:
+  def view_as(self:UOp, shape:tuple[sint, ...], axis:int|None=None) -> UOp:
     """view flat storage as the given (possibly symbolic) shape, optionally sharded on axis, the UNSHARD gives back the multiplied shape"""
     max_shape = to_max_shape(shape)
-    ret = flat.reshape(max_shape) if len(shape) > 1 else flat
+    ret = self.reshape(max_shape) if len(shape) > 1 else self
     if tuple(max_shape) != tuple(shape): ret = ret.shrink_to(shape)
     return ret if axis is None else ret.unshard(axis)
 
