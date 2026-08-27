@@ -15,7 +15,8 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
   ret:list[UOp] = []
   for i, x in enumerate(ms.src):
     if x.op is Ops.COPY:
-      ret.append(_apply_shrink(shrink.marg, x.src[0], i).copy_to_device(x.device))
+      src = _apply_shrink(shrink.marg, x.src[0], i)
+      ret.append(src.contiguous() if src.device == x.device else src.copy_to_device(x.device))
     else:
       ret.append(_apply_shrink(shrink.marg, x, i).contiguous())
   return ms.replace(src=tuple(ret))
