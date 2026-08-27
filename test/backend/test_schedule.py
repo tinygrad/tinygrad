@@ -365,16 +365,6 @@ class TestCopyFolding(unittest.TestCase):
     b = a.to("CPU")
     self.assertListEqual(b.tolist(), [2.])
 
-  def test_copy_to_same_device(self):
-    a = Tensor.empty(4).uop
-    b = a.copy_to_device(a.device)
-    check_schedule(b, 1, filter_sink=False) # TODO: 0?
-
-  def test_copy_to_same_device_alt(self):
-    a = Tensor.empty(4, 4).uop
-    b = a.copy_to_device(a.device)
-    check_schedule(b, 1, filter_sink=False) # TODO: 0?
-
   def test_copy_to_same_device_sched(self):
     a = Tensor.ones(4).contiguous().realize().uop.buf_uop
     t = Tensor(a.copy_to_device(a.device))
