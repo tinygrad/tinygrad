@@ -198,7 +198,7 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
 
 pm_copy_to_store = PatternMatcher([
   (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),
-  (UPat(Ops.COPY, name="copy"), convert_copy_to_store),
+  (UPat((Ops.COPY, Ops.CONTIGUOUS), name="copy"), convert_copy_to_store),
 ])
 
 @rewrite_group(new_ctx=False)
