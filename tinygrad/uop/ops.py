@@ -136,9 +136,9 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
       return None
     case Ops.INDEX:
-      # an image access is always float, no matter the storage dtype. image-ness is the (h, w, 4) shape of the index base
+      # an image access is always float, no matter the storage dtype
       # TODO: should there be a CAST so src[0].dtype just work?
-      if ((b:=src[0]).op is Ops.PARAM or (b.op is Ops.RESHAPE and b.src[0].op is Ops.PARAM)) and is_image_shape(b._shape): return dtypes.float
+      if (b:=src[0]).op is Ops.PARAM and is_image_shape(b.shape): return dtypes.float
       return b.dtype
     case Ops.LOAD | Ops.UNSHARD | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
          Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
