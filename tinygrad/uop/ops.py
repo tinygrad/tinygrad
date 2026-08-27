@@ -1174,12 +1174,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)
     return UOp(Ops.PARAM, src=src, arg=ParamArg(slot, dtype, vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
   def param_like(self, slot:int):
-    # Variables become ALU params in the call body; the stored value (if bound) stays in the call args
-    if self.is_bound_var or self.is_variable:
-      b = self.src[0] if self.op is Ops.AFTER else self
-      return UOp(Ops.PARAM, src=b.src, arg=replace(b.arg, slot=slot, name=f"p{slot}"))
-    addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
-    return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
+    # if it's a PARAM or BUFFER, we just replace the slot
+    buf = self
+    while buf.op is Ops.AFTER: buf = buf.src[0]
+    if buf.op in {Ops.PARAM, Ops.BUFFER}: return UOp(Ops.PARAM, src=buf.src, arg=replace(buf.arg, slot=slot))
+    # otherwise we create a new param
+    addrspace = buf.addrspace if buf.addrspace is not None else AddrSpace.GLOBAL
+    return UOp.param(slot, buf.dtype, buf.shard_shape if buf.axis is not None else buf._shape, self.device, addrspace=addrspace, axis=buf.axis)
 
   @staticmethod
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)

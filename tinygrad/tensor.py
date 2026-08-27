@@ -114,7 +114,8 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # add the outputs to the call
   srcs = c.src[0].src
   resolved = [c.gettuple(i) for i in range(len(srcs))]
-  outs = tuple(r.empty_like() for r in resolved)
+  # CALL outputs are max-sized physical buffers. Keep symbolic shapes as views so writable arguments and returned buffers stay identical.
+  outs = tuple(r.pad_to(r.max_shape).empty_like() for r in resolved)
   targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
 
   subs:dict[UOp, UOp] = {}
@@ -133,11 +134,8 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
 
   # body switches from TUPLE to SINK, so the node becomes an opaque CALL (not FUNCTION)
   new_call = UOp(Ops.CALL, src=(fxn, *input_buffers, *outs), arg=c.arg)
-  rets = tuple(o.after(new_call) for o in outs)
-
-  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  # NOTE: must use resolved shapes from the FUNCTION (which substitutes PARAMs with external args), not raw body shapes
-  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, resolved))
+  # NOTE: use resolved shapes from the FUNCTION (which substitutes PARAMs with external args), not raw body shapes.
+  rets = tuple(o.after(new_call).shrink_to(rs.shape) for o,rs in zip(outs, resolved))
 
   return UOp.maketuple(*rets)
 
@@ -219,6 +217,32 @@ pm_replace_buf = PatternMatcher([
   # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
   (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])
+
+def _check_state_cycles(sink:UOp):
+  # Track only the first storage state on each path. Combining a raw read with an assigned state is stale, while distinct AFTERs can be valid
+  # independent snapshots (for example RNG state). Memoizing the two state sets avoids repeatedly walking large training graphs.
+  states:dict[UOp, tuple[frozenset[UOp], frozenset[UOp]]] = {}
+  state:tuple[frozenset[UOp], frozenset[UOp]]
+  for u in sink.toposort(enter_calls=False):
+    if u.op is Ops.BUFFER and u.addrspace == AddrSpace.GLOBAL: state = (frozenset((u,)), frozenset())
+    elif u.op is Ops.AFTER and u.addrspace == AddrSpace.GLOBAL:
+      key = u.buf_uop
+      stores = [x for x in u.src[1:] if x.op is Ops.STORE and x.src[0].buf_uop is key]
+      # Ordering dependencies can STORE to another buffer without changing this state. Self-dependent updates continue the existing state lineage;
+      # only a write independent of the old value creates a conflicting state.
+      self_update = any(key in states[x.src[1]][0] or key in states[x.src[1]][1] for x in stores)
+      state = states[u.src[0]] if not stores or self_update else (frozenset(), frozenset((key,)))
+    else:
+      srcs = u.src[1:] if u.op in {Ops.CALL, Ops.FUNCTION} else u.src
+      raw = frozenset().union(*(states[x][0] for x in srcs))
+      assigned = frozenset().union(*(states[x][1] for x in srcs))
+      # CONTIGUOUS snapshots stale raw reads before a pending assignment, but cannot make a post-assignment read happen earlier.
+      state = (frozenset() if u.op is Ops.CONTIGUOUS else raw, assigned)
+    states[u] = state
+    if u.op in GroupOp.ALU:
+      branches = [states[x] for x in u.src]
+      if any((a[0] & b[1]) or (a[1] & b[0]) for i,a in enumerate(branches) for b in branches[i+1:]):
+        raise RuntimeError("cycle detected while combining buffer states")
 
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
@@ -406,7 +430,9 @@ class Tensor(RandMixin):
     # weakness ends where storage begins
     if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
-    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
+    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    _check_state_cycles(big_sink)
+    big_sink, becomes_map = transform_to_call(big_sink)
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
 

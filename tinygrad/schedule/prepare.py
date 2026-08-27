@@ -13,6 +13,12 @@ def walk_mop(u:UOp):
   if u.op is Ops.AFTER and (b:=walk_mop(u.src[0])) is not u.src[0]: return b.after(*u.src[1:])
   return u
 
+def has_buffer_view(u:UOp) -> bool:
+  # CALL argument lowering currently passes the base allocation, so only an
+  # offset-zero contiguous view backed by a real buffer can avoid a copy.
+  if u.has_buffer_identity(after_ok=True): return True
+  return (cv:=u.contiguous_view()) is not None and cv[1] == 0 and cv[0].has_buffer_identity(after_ok=True)
+
 def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
   if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, after = x.src[0], after.cast(dtypes.float)
   while True:
@@ -147,9 +153,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="shp"),), name="cpy"), lambda shp,cpy: shp.src[0].copy_to_device(cpy.device).reshape(shp.shape)),
 
   # reshaping on STORE can be a NOOP
-  (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),
-                        UPat(Ops.RESHAPE, src=(UPat.var("src",),), allow_any_len=True))),
-   lambda dst,src: dst.store(src) if dst.shape == src.shape else None),
+  #(UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),
+  #                      UPat(Ops.RESHAPE, src=(UPat.var("src",),), allow_any_len=True))),
+  # lambda dst,src: dst.store(src) if dst.shape == src.shape else None),
 
   # ** store rules **
 
@@ -176,6 +182,19 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # handle size 0
   (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and 0 in x.shape else None),
 
+  # ** new prepare **
+
+  # CALL inputs need buffer identity (and to be flat)
+  (UPat(Ops.CALL, name="c"),
+   lambda c: c.replace(src=c.src[0:1]+tuple(x if has_buffer_view(x) else x.contiguous() for x in c.src[1:]))),
+
+  # MSTACK inputs need buffer identity
+  (UPat(Ops.MSTACK, name="c"),
+   lambda c: c.replace(src=tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src))),
+
+  # STORE to () is reshaped to (1,)
+  (UPat(Ops.STORE, name="s"), lambda s: s.src[0].reshape((1,)).store(s.src[1].reshape((1,))) if s.shape == () else None),
+
   # remove movement ops from SINK/AFTER. TODO: should be generic
   (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src if u.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u) for u in s.src[1:] if u.op is not Ops.NOOP))),
@@ -193,12 +212,13 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
     return existing_buf.flatten().store(input_src)
   # create the output buffer
   buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), copy.dtype, device=copy.device))
+  buf = buf.shrink_to(input_src.shape)
   # reshape back to input
   return buf.after(buf.store(input_src)).reshape(copy.shape)
 
 pm_copy_to_store = PatternMatcher([
   (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),
-  (UPat(Ops.COPY, name="copy"), convert_copy_to_store),
+  (UPat((Ops.COPY, Ops.CONTIGUOUS), name="copy"), convert_copy_to_store),
 ])
 
 @rewrite_group(new_ctx=False)
