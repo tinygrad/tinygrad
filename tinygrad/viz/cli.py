@@ -65,7 +65,7 @@ def get(data:dict, key:str):
   raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
 
 def fmt_top(k:dict) -> str:
-  return f"{fmt_colored(k['name'])}{' ' * max(0, 58-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
+  return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
       (" "*4+fmt_data(k['fmt']) if k['fmt'] else "")
 
 def fmt_all(k:dict) -> str:
