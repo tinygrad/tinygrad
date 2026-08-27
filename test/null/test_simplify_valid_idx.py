@@ -18,7 +18,7 @@ def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp.param(0, dtypes.float, 1024).index(idx.valid(valid)).load()
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
-  return UOp.param_from_shape(0, image_shape, dtypes.float).index(idx[1].valid(valid), idx[0].valid(valid)).load()
+  return UOp.param(0, dtypes.float, image_shape).index(idx[1].valid(valid), idx[0].valid(valid)).load()
 
 def Special(expr, nmax): return UOp.special(nmax, expr)
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax, param=True)

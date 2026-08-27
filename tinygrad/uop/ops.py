@@ -1169,28 +1169,22 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # TODO: this should replace placeholder
   @staticmethod
-  def param(slot:int, dtype:DType, size:int|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None,
+  def param(slot:int, dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None,
             multiple_of:int|None=None, name=None, addrspace=AddrSpace.GLOBAL, axis:int|None=None, volatile:bool=False):
-    # a PARAM only has a size: a concrete number of elements. None means scalar (shape ()). no symbolic sizes here,
-    # symbolic shapes are expressed as a max-size param shrunk to the real shape, see param_from_shape
+    """create a PARAM: a single sint or 1-d shape gives a flat param of that size, a None shape gives a scalar param.
+    the arg only stores the concrete max size (never symbolic): a multi-dim shape is a RESHAPE on top of the flat param,
+    a symbolic shape is a max-size param shrunk to the real shape"""
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
-    if axis is not None and isinstance(device, tuple):
-      assert size is not None, "param with axis needs a size"
-      size *= len(device)
-    return UOp(Ops.PARAM, arg=ParamArg(slot, dtype, size, vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
-  @staticmethod
-  def param_from_shape(slot:int, shape:tuple[sint, ...], dtype:DType, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None,
-                       multiple_of:int|None=None, name=None, addrspace=AddrSpace.GLOBAL, axis:int|None=None, volatile:bool=False):
-    """create a PARAM for a (possibly multi-dim or symbolic) shape: the arg gets the concrete max size,
-    the real shape is laid on top with RESHAPE/SHRINK"""
-    if dtype in dtypes.weaks: raise RuntimeError(f"cannot create param for weak dtype {dtype}")
-    if axis is not None and isinstance(device, tuple): shape = tuple(s*len(device) if i == axis else s for i,s in enumerate(shape))
+    if isinstance(shape, (int, UOp)): shape = (shape,)
+    if shape is not None and axis is not None and isinstance(device, tuple):
+      shape = tuple(s*len(device) if i == axis else s for i,s in enumerate(shape))
+    if shape is None or len(shape) == 0:
+      return UOp(Ops.PARAM, arg=ParamArg(slot, dtype, None, vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
     max_shape = to_max_shape(shape)
-    if len(shape) == 3 and shape[2] == 4:  # image2d buffers keep (h, w) in the arg and are always max size
+    if len(shape) == 3 and shape[2] == 4:  # image2d params keep (h, w) in the arg, the size is the flat buffer len
       return UOp(Ops.PARAM, arg=ParamArg(slot, dtype, prod(max_shape), vmin_vmax, multiple_of, name,
                                          addrspace, axis, device, volatile, (max_shape[0], max_shape[1])))
-    ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, prod(max_shape) if len(shape) else None, vmin_vmax, multiple_of, name,
-                                      addrspace, axis, device, volatile))
+    ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, prod(max_shape), vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
     if len(shape) > 1: ret = ret.reshape(max_shape)
     if max_shape != shape: ret = ret.shrink_to(shape)
     return ret
@@ -1205,7 +1199,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       return UOp.shared_view(UOp(Ops.PARAM, arg=ParamArg(slot, self.dtype, prod(to_max_shape(self.shard_shape)),
                                                        addrspace=addrspace, device=self.device)),
                              self.shard_shape, self.axis, count=len(self.device))
-    return UOp.param_from_shape(slot, self._shape, self.dtype, self.device, addrspace=addrspace)
+    return UOp.param(slot, self.dtype, self._shape, self.device, addrspace=addrspace)
   @staticmethod
   def shared_view(flat:UOp, shard_shape:tuple[sint, ...], axis:int, count:int) -> UOp:
     """view flat storage (per-shard size) as a value sharded on axis with full shape shard_shape*count on axis"""

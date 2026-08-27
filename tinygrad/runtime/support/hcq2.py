@@ -388,7 +388,7 @@ def replace_params(call:UOp) -> UOp|None:
   addrs = dedup([g.src[0].without_after for g in call.toposort() if g.op is Ops.GETADDR])
   refhold += [a for a in addrs if a not in held and all(b.op is not Ops.PARAM or b.tag is not None for b in unwrap_mstack(a))]
 
-  sub = {(b:=u.without_after): UOp.param_from_shape(i, b.shape, u.dtype, HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
+  sub = {(b:=u.without_after): UOp.param(i, u.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.op is Ops.PARAM and b.arg.volatile)
          for i,u in enumerate(c_args)} | {v: v.replace(arg=replace(v.arg, slot=-1)) for v in variables if v.op is Ops.PARAM} | _rank_ranges(tops)
   info = replace(call.arg.aux, inputs=next((i for i,u in enumerate(c_args + refhold) if u.without_after.tag == "inputs"), None))
   prg_sink = body.src[0].substitute(sub).replace(arg=KernelInfo("hcq_submit"), tag=1)
