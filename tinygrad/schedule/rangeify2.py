@@ -5,7 +5,6 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, AxisType, rewrite_group, remove_all_tags, resolve
 from tinygrad.helpers import all_int, VIZ, SPEC, Context, panic
 from tinygrad.schedule.indexing import BufferizeOpts, apply_movement_op, broadcast_rngs
-from tinygrad.uop.symbolic import symbolic
 
 # *** RANGE creation ***
 
@@ -213,7 +212,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Merged Rangeify")
 
   next_buffer_num = itertools.count(1000)
-  tsink = graph_rewrite(tsink, symbolic+pm_remove_stage, ctx=next_buffer_num, bottom_up=True, name="remove stage")
+  tsink = graph_rewrite(tsink, pm_remove_stage, ctx=next_buffer_num, bottom_up=True, name="remove stage")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
   tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
 
