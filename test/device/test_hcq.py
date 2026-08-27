@@ -1,9 +1,11 @@
 import unittest, ctypes, struct, os, random, numpy as np, time
+from unittest.mock import patch
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import mv_address, DEBUG, DEV
 from test.helpers import slow, replace_opts
 from tinygrad.device import Buffer, BufferSpec
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
+import tinygrad.runtime.support.hcq as hcq
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer, HCQProgram, HCQSubmissionRejected
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.system import PCIIfaceBase
 from tinygrad.engine.realize import get_runtime
@@ -12,6 +14,119 @@ from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad import Variable
 
 MOCKGPU = DEV.interface.startswith("MOCK")
+
+class TestHCQSubmissionRejection(unittest.TestCase):
+  class Signal:
+    timestamp = 0
+
+  class Queue:
+    def __init__(self, dev, error:BaseException|None, reserve_later:bool=False):
+      self.dev, self.error, self.reserve_later = dev, error, reserve_later
+      self.signal_values:list[int] = []
+      self.records_at_submit,self.submitted = -1,False
+
+    def wait(self, *args): return self
+    def memory_barrier(self): return self
+    def timestamp(self, *args): return self
+    def exec(self, *args): return self
+    def signal(self, signal, value):
+      self.signal_values.append(value)
+      return self
+    def submit(self, dev, var_vals=None):
+      self.records_at_submit = len(dev.sig_prof_records)
+      if self.reserve_later: dev.next_timeline()
+      if self.error is not None: raise self.error
+      self.submitted = True
+
+  class Device:
+    device = "FAKE"
+    next_timeline = HCQCompiled.next_timeline
+    submit_program_timeline = HCQCompiled.submit_program_timeline
+
+    def __init__(self, error:BaseException|None, reserve_later:bool=False):
+      self.timeline_signal, self.timeline_value = TestHCQSubmissionRejection.Signal(), 7
+      self.sig_prof_records,self.pending_wait_signals,self.created_signals,self.prof_exec_counter = [],[],[],0
+      self.error,self.error_state,self.reserve_later,self.last_queue = error,None,reserve_later,None
+
+    def new_signal(self):
+      self.created_signals.append(signal:=TestHCQSubmissionRejection.Signal())
+      return signal
+    def hw_compute_queue_t(self):
+      self.last_queue = TestHCQSubmissionRejection.Queue(self, self.error, self.reserve_later)
+      return self.last_queue
+    def synchronize(self, timeout=None):
+      if self.error_state is not None: raise self.error_state
+
+  class Program:
+    name, profile_key = "rejected", b"rejected"
+    def __init__(self, dev): self.dev,self.fill_count = dev,0
+    def fill_kernargs(self, bufs, vals):
+      self.fill_count += 1
+      return object()
+
+  def test_definite_rejection_rolls_back_timeline_and_profile(self):
+    dev = self.Device(HCQSubmissionRejected("definite rejection"))
+    sentinel = (object(), object(), "prior", "FAKE", None)
+    dev.sig_prof_records.append(sentinel)
+    with patch.object(hcq, "PROFILE", True), self.assertRaisesRegex(HCQSubmissionRejected, "definite rejection"):
+      HCQProgram.__call__(self.Program(dev))
+    self.assertEqual((dev.timeline_value, dev.prof_exec_counter, dev.sig_prof_records), (7, 1, [sentinel]))
+    self.assertEqual((dev.last_queue.signal_values, dev.last_queue.records_at_submit), ([7], 2))
+
+  def test_other_failures_do_not_rollback_unrelated_reservations(self):
+    ambiguous = self.Device(RuntimeError("ambiguous failure"))
+    program = self.Program(ambiguous)
+    with patch.object(hcq, "PROFILE", True), self.assertRaisesRegex(RuntimeError, "ambiguous failure"):
+      HCQProgram.__call__(program)
+    self.assertEqual((ambiguous.timeline_value, len(ambiguous.sig_prof_records), ambiguous.last_queue.records_at_submit,
+                      ambiguous.error_state), (8, 1, 1, ambiguous.error))
+    blocked = self.Queue(ambiguous, None)
+    with self.assertRaisesRegex(RuntimeError, "ambiguous failure"): ambiguous.submit_program_timeline(blocked)
+    self.assertEqual((ambiguous.timeline_value, blocked.signal_values), (8, []))
+    with self.assertRaisesRegex(RuntimeError, "ambiguous failure"): HCQProgram.__call__(program)
+    self.assertEqual(program.fill_count, 1)
+
+    non_lifo = self.Device(HCQSubmissionRejected("non-LIFO rejection"), reserve_later=True)
+    queue = self.Queue(non_lifo, non_lifo.error, reserve_later=True)
+    with self.assertRaisesRegex(HCQSubmissionRejected, "non-LIFO rejection"): non_lifo.submit_program_timeline(queue)
+    self.assertEqual((non_lifo.timeline_value, queue.signal_values), (9, [7]))
+    self.assertRegex(str(non_lifo.error_state), "non-latest timeline reservation")
+
+  def test_interrupted_submission_poison_blocks_future_work(self):
+    dev = self.Device(None)
+    queue = self.Queue(dev, KeyboardInterrupt())
+    with self.assertRaises(KeyboardInterrupt): dev.submit_program_timeline(queue)
+    self.assertEqual((dev.timeline_value, queue.signal_values, queue.submitted), (8, [7], False))
+    self.assertRegex(str(dev.error_state), "interrupted with unknown acceptance state: KeyboardInterrupt")
+
+    blocked = self.Queue(dev, None)
+    with self.assertRaisesRegex(RuntimeError, "interrupted with unknown acceptance state"): dev.submit_program_timeline(blocked)
+    self.assertEqual((dev.timeline_value, blocked.signal_values, blocked.submitted), (8, [], False))
+
+    interrupted_reservation = self.Device(None)
+    def interrupt_next_timeline():
+      interrupted_reservation.timeline_value += 1
+      raise KeyboardInterrupt
+    interrupted_reservation.next_timeline = interrupt_next_timeline
+    unmodified = self.Queue(interrupted_reservation, None)
+    with self.assertRaises(KeyboardInterrupt): interrupted_reservation.submit_program_timeline(unmodified)
+    self.assertEqual((interrupted_reservation.timeline_value, unmodified.signal_values, unmodified.submitted), (8, [], False))
+    self.assertRegex(str(interrupted_reservation.error_state), "interrupted with unknown acceptance state: KeyboardInterrupt")
+
+  def test_program_retains_unprofiled_wait_signals_after_unknown_completion(self):
+    for failure in (RuntimeError("submission acceptance unknown"), None):
+      with self.subTest(failure=failure):
+        dev = self.Device(failure)
+        if failure is None:
+          timeout_error = RuntimeError("wait timeout")
+          def fail_synchronize(timeout=None):
+            dev.error_state = timeout_error
+            raise timeout_error
+          dev.synchronize = fail_synchronize
+        message = "submission acceptance unknown" if failure is not None else "wait timeout"
+        with patch.object(hcq, "PROFILE", False), self.assertRaisesRegex(RuntimeError, message):
+          HCQProgram.__call__(self.Program(dev), wait=True)
+        self.assertEqual(dev.pending_wait_signals, dev.created_signals)
 
 @unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "HCQ device required to run")
 class TestHCQ(unittest.TestCase):

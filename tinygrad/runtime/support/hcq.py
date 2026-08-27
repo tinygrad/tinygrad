@@ -55,6 +55,9 @@ class FileIOInterface:
   @staticmethod
   def eventfd(initval, flags=None): return FileIOInterface(fd=os.eventfd(initval, flags))  # type: ignore[attr-defined]
 
+class HCQSubmissionRejected(RuntimeError):
+  """The backend guarantees that no command was accepted and none can later retire the reserved timeline."""
+
 if DEV.interface.startswith("MOCK"): from test.mockgpu.mockgpu import MockFileIOInterface as FileIOInterface  # noqa: F401 # pylint: disable=unused-import
 
 # **************** for HCQ Compatible Devices ****************
@@ -234,6 +237,7 @@ class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
       dev: The device to submit the queue to
     """
 
+    if dev.error_state is not None: raise dev.error_state
     if var_vals is not None: self._apply_var_vals(var_vals)
     self._submit(dev)
     return self
@@ -300,18 +304,20 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]
   st, en = (dev.new_signal(), dev.new_signal()) if enabled else (None, None)
   assert queue is not None or queue_type is not None, "Either queue or queue_type must be provided"
 
+  body_completed = False
   if enabled and queue is not None: queue.timestamp(st)
   elif enabled and queue_type is not None:
     queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(st).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
 
-  try: yield (st, en)
+  try:
+    yield (st, en)
+    body_completed = True
   finally:
-    if enabled and queue is not None: queue.timestamp(en)
+    if enabled and queue is not None and body_completed: queue.timestamp(en)
     elif enabled and queue_type is not None:
       queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
-
-    if enabled and PROFILE: dev.sig_prof_records.append((unwrap(st), unwrap(en), desc, f"{dev.device}:{dev_suff}" if dev_suff else dev.device,
-                                                         profile_key))
+    if enabled and PROFILE and (queue_type is not None or body_completed):
+      dev.sig_prof_records.append((unwrap(st), unwrap(en), desc, f"{dev.device}:{dev_suff}" if dev_suff else dev.device, profile_key))
 
 class HCQArgsState(Generic[ProgramType]):
   def __init__(self, buf:HCQBuffer, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint|None, ...]=()):
@@ -371,14 +377,39 @@ class HCQProgram(Program[HCQDeviceType]):
       Execution time of the kernel if 'wait' is True, otherwise None.
     """
 
+    if self.dev.error_state is not None: raise self.dev.error_state
     kernargs = self.fill_kernargs(bufs, vals)
     q = unwrap(self.dev.hw_compute_queue_t)().wait(self.dev.timeline_signal, self.dev.timeline_value - 1).memory_barrier()
 
     self.dev.prof_exec_counter += 1
-    with hcq_profile(self.dev, queue=q, desc=self.name, enabled=wait or PROFILE, profile_key=self.profile_key) as (sig_st, sig_en):
-      q.exec(self, kernargs, global_size, local_size)
+    sig_st = sig_en = None
+    signals_retained = False
 
-    q.signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+    def retain_unprofiled_wait_signals():
+      nonlocal signals_retained
+      if wait and not PROFILE and not signals_retained:
+        self.dev.pending_wait_signals.extend((cast(HCQSignal, sig_st), cast(HCQSignal, sig_en)))
+        signals_retained = True
+    def release_unprofiled_wait_signals():
+      nonlocal signals_retained
+      if not signals_retained: return
+      for signal in (sig_st, sig_en):
+        if (index:=next((i for i,pending in enumerate(self.dev.pending_wait_signals) if pending is signal), None)) is not None:
+          self.dev.pending_wait_signals.pop(index)
+      signals_retained = False
+
+    try:
+      with hcq_profile(self.dev, queue=q, desc=self.name, enabled=wait or PROFILE, profile_key=self.profile_key) as (sig_st, sig_en):
+        q.exec(self, kernargs, global_size, local_size)
+      retain_unprofiled_wait_signals()
+      self.dev.submit_program_timeline(q)
+    except HCQSubmissionRejected:
+      release_unprofiled_wait_signals()
+      for index,record in enumerate(self.dev.sig_prof_records):
+        if record[0] is sig_st and record[1] is sig_en:
+          self.dev.sig_prof_records.pop(index)
+          break
+      raise
 
     if wait: self.dev.synchronize(timeout=timeout)
     return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
@@ -405,6 +436,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
     self.timeline_value:int = 1
     self.sig_prof_records:list[tuple[HCQSignal, HCQSignal, str|TracingKey, str, bytes|None]] = []
+    # Keep unprofiled wait timestamps alive until synchronization proves the submission can no longer reference them.
+    self.pending_wait_signals:list[HCQSignal] = []
     self.prof_exec_counter:int = 0
     self.prof_prg_counter = itertools.count(0)
 
@@ -438,6 +471,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       if hasattr(self, 'on_device_hang'): self.on_device_hang()
       raise e
 
+    self.pending_wait_signals = []
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE:
       Compiled.profile_events += [ProfileRangeEvent(dev, name, st.timestamp, en.timestamp, pk) for st,en,name,dev,pk in self.sig_prof_records]
@@ -446,6 +480,29 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   def next_timeline(self):
     self.timeline_value += 1
     return self.timeline_value - 1
+
+  def submit_program_timeline(self, queue:HWQueue, var_vals:dict[str, int]|None=None):
+    # Program submissions may be synchronously rejected by a backend before any command can retire. Copy and graph
+    # queues have different reservation lifetimes and intentionally keep their existing submission paths.
+    if self.error_state is not None: raise self.error_state
+    target = None
+    try:
+      target = self.next_timeline()
+      return queue.signal(self.timeline_signal, target).submit(self, var_vals)
+    except HCQSubmissionRejected:
+      if target is None:
+        self.error_state = RuntimeError("timeline reservation failed with unknown state")
+        raise self.error_state
+      if self.timeline_value == target + 1: self.timeline_value = target
+      else: self.error_state = RuntimeError("definite submission rejection could not recover a non-latest timeline reservation")
+      raise
+    except Exception as error:
+      if self.error_state is None: self.error_state = error
+      raise
+    except BaseException as error:
+      if self.error_state is None:
+        self.error_state = RuntimeError(f"timeline submission was interrupted with unknown acceptance state: {type(error).__name__}")
+      raise
 
   def new_signal(self, **kwargs) -> SignalType:
     assert self.signal_t is not None, "Device does not support signals"
