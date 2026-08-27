@@ -136,9 +136,9 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
       return None
     case Ops.INDEX:
-      # an image access is always float, no matter the storage dtype
+      # an image access is always float, no matter the storage dtype. image-ness is the (h, w, 4) shape of the index base
       # TODO: should there be a CAST so src[0].dtype just work?
-      if (b:=src[0]).op is Ops.PARAM and is_image_shape(b.shape): return dtypes.float
+      if ((b:=src[0]).op is Ops.PARAM or (b.op is Ops.RESHAPE and b.src[0].op is Ops.PARAM)) and is_image_shape(b._shape): return dtypes.float
       return b.dtype
     case Ops.LOAD | Ops.UNSHARD | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
          Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
@@ -1181,13 +1181,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if shape is None or len(shape) == 0:
       return UOp(Ops.PARAM, arg=ParamArg(slot, dtype, None, vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
     max_shape = to_max_shape(shape)
-    if len(shape) == 3 and shape[2] == 4:  # image2d params keep (h, w) in the arg, the size is the flat buffer len
-      return UOp(Ops.PARAM, arg=ParamArg(slot, dtype, prod(max_shape), vmin_vmax, multiple_of, name,
-                                         addrspace, axis, device, volatile, (max_shape[0], max_shape[1])))
     ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, prod(max_shape), vmin_vmax, multiple_of, name, addrspace, axis, device, volatile))
-    if len(shape) > 1: ret = ret.reshape(max_shape)
-    if max_shape != shape: ret = ret.shrink_to(shape)
-    return ret
+    return UOp.shared_view(ret, shape)
   def param_like(self, slot:int):
     # Variables become ALU params in the call body; the stored value (if bound) stays in the call args
     if self.is_bound_var or self.is_variable:
@@ -1197,17 +1192,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
       return UOp.shared_view(UOp(Ops.PARAM, arg=ParamArg(slot, self.dtype, prod(to_max_shape(self.shard_shape)),
-                                                       addrspace=addrspace, device=self.device)),
-                             self.shard_shape, self.axis, count=len(self.device))
+                                                       addrspace=addrspace, device=self.device)), self.shard_shape, self.axis)
     return UOp.param(slot, self.dtype, self._shape, self.device, addrspace=addrspace)
   @staticmethod
-  def shared_view(flat:UOp, shard_shape:tuple[sint, ...], axis:int, count:int) -> UOp:
-    """view flat storage (per-shard size) as a value sharded on axis with full shape shard_shape*count on axis"""
-    max_shp = to_max_shape(shard_shape)
-    ret = flat.reshape(max_shp) if len(shard_shape) > 1 else flat
-    if max_shp != shard_shape: ret = ret.shrink_to(shard_shape)
-    # the unshard output shape is already the full multiplied shape
-    return ret.unshard(axis)
+  def shared_view(flat:UOp, shape:tuple[sint, ...], axis:int|None=None) -> UOp:
+    """view flat storage as the given (possibly symbolic) shape, optionally sharded on axis, the UNSHARD gives back the multiplied shape"""
+    max_shape = to_max_shape(shape)
+    ret = flat.reshape(max_shape) if len(shape) > 1 else flat
+    if tuple(max_shape) != tuple(shape): ret = ret.shrink_to(shape)
+    return ret if axis is None else ret.unshard(axis)
 
   @staticmethod
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)

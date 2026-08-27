@@ -26,7 +26,7 @@ from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, flatten, argsort, partition
+from tinygrad.helpers import all_same, all_int, flatten, argsort, partition, is_image_shape
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -390,11 +390,21 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
   sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
 
+  sink = graph_rewrite(sink, pm_flatten_images, name="flatten image views")
+
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC: type_verify(sink, spec_program)
 
   # return the rewritten sink
   return sink
+
+# images are (h, w, 4) views of flat params while in codegen: fold the view dims into the flat param's image arg
+def flatten_image_index(img:UOp, x:UOp) -> UOp|None:
+  if (b:=img.src[0]).op is not Ops.PARAM or not is_image_shape(img._shape): return None
+  return x.replace(src=(b.replace(arg=replace(b.arg, image=(img.shape[-3], img.shape[-2]))),)+x.src[1:])
+pm_flatten_images = PatternMatcher([
+  (UPat(Ops.INDEX, name="x", allow_any_len=True, src=(UPat(Ops.RESHAPE, name="img", allow_any_len=True),)), flatten_image_index),
+])
 
 # inject IF/ENDIF. only needed if device doesn't support gated stores
 pm_linearize_cleanups = PatternMatcher([

@@ -1,6 +1,5 @@
 import itertools, functools
 from collections import defaultdict
-from dataclasses import replace
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, graph_rewrite
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate, sym
@@ -86,9 +85,9 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   if len(cands) == 0: return None
   # and tiebreak with indexing complexity (ie. number of nodes)
   h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].index(1).simplify().backward_slice))
-  # the image dims are stored in the arg, the size in the arg stays the flat buffer len
-  buf = buf.replace(arg=replace(buf.arg, size=h*w*4, image=(h, w)))
-  shapes[buf.arg.slot] = (h, w)
+  # the image is a (h, w, 4) view of the flat param. it's flattened back into the arg before rendering
+  buf = buf.reshape((h, w, 4))
+  shapes[buf.src[0].arg.slot] = (h, w)
   if valid.op is not Ops.CONST or valid.val is not True:
     return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid))
   else:

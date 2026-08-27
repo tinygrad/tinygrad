@@ -1,6 +1,6 @@
 from typing import cast
 import math, dataclasses
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes, to_max_shape
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes
 from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
 from tinygrad.function import renumber_invalid_outputs
@@ -34,10 +34,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   # grads are collected at the flat param storage: reshape to each arg's view (max view shrunk to symbolic)
   def shaped_grad(grad:UOp, i:int) -> UOp:
     a = args[i]
-    if a.axis is not None and isinstance(a.device, tuple): return UOp.shared_view(grad, a.shard_shape, a.axis, count=len(a.device))
-    vshape = a._shape
-    grad = grad.reshape(to_max_shape(vshape))
-    return grad.shrink_to(vshape) if to_max_shape(vshape) != tuple(vshape) else grad
+    return UOp.shared_view(grad, a.shard_shape, a.axis) if a.axis is not None and isinstance(a.device, tuple) else UOp.shared_view(grad, a._shape)
   grad_args = ctx.src
   root_grad = UOp(Ops.TUPLE, src=tuple(UOp(Ops.NOOP) if g.op is Ops.NOOP else
     g if g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
