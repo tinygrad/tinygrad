@@ -1,6 +1,7 @@
+from typing import cast
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, graph_rewrite, broadcast_axes, _broadcast_shape, sint_to_uop
-from tinygrad.uop.ops import sint, ssimplify
+from tinygrad.uop.ops import sint, ssimplify, ParamArg, to_max_shape
 from tinygrad.dtype import dtypes
 from tinygrad.schedule.allreduce import handle_allreduce
 
@@ -281,12 +282,33 @@ def rewrite_into_function(call:UOp):
   return call.replace(src=(new_body,)+new_args)
 
 def param_to_multi(p:UOp):
+  # a bare param with an axis is flat storage: the per-shard param is the storage divided by the device count.
+  # params with a view (RESHAPE/SHRINK on top) are handled by param_view_to_multi instead
+  if p.axis is None or p.axis != 0: return None
+  count = len(cast(tuple, p.device))
+  param = UOp(Ops.PARAM, arg=ParamArg(p.arg.slot, p.dtype, cast(int, p.arg.size)//count, p.arg.vmin_vmax, p.arg.multiple_of, p.arg.name,
+                                      p.arg.addrspace, device=p.device))
+  return param.unshard(p.axis)
+
+def param_view_to_multi(v:UOp, p:UOp):
+  # the movement view on the param carries the unpacked (multiplied on axis) shape: shard the view, not the flat storage
   if p.axis is None: return None
-  return UOp.param(p.arg.slot, p.dtype, p.shard_shape, p.device, p.arg.vmin_vmax, p.arg.multiple_of, p.arg.name, p.arg.addrspace).unshard(p.axis)
+  count = len(cast(tuple, p.device))
+  shp = tuple(s//count if i == p.axis else s for i,s in enumerate(v.shape))
+  max_shp, max_shp_of_v = to_max_shape(shp), to_max_shape(v.shape)
+  param = UOp(Ops.PARAM, arg=ParamArg(p.arg.slot, p.dtype, prod(max_shp), p.arg.vmin_vmax, p.arg.multiple_of, p.arg.name,
+                                      p.arg.addrspace, device=p.device))
+  # the unshard has to sit on the per-shard view so its axis is in range
+  view = param.reshape(max_shp) if len(max_shp) > 1 else param
+  if max_shp != shp: view = view.shrink_to(shp)
+  ret = view.unshard(p.axis)
+  if len(max_shp_of_v) > 1: ret = ret.reshape(max_shp_of_v)
+  return ret.shrink_to(v.shape) if max_shp_of_v != tuple(v.shape) else ret
 
 # NOTE: this is the same pattern as unrolled ranges
 multi_pm = PatternMatcher([
   (UPat(Ops.PARAM, name="p"), param_to_multi),
+  (UPat(GroupOp.Movement, src=(UPat(Ops.PARAM, name="p"),), name="v"), param_view_to_multi),
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.UNSHARD])), alu_multi),
   (UPat(Ops.REDUCE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), reduce_multi),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.UNSHARD, name="multi"), UPat()), name="root"), reshape_multi),

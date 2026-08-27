@@ -11,7 +11,7 @@ class TestCall(unittest.TestCase):
     Tensor.realize(a,b)
 
     # we define a plus function
-    plus_fxn = UOp.param(0, dtypes.float, (10,10)) + UOp.param(1, dtypes.float, (10,10))
+    plus_fxn = UOp.param_from_shape(0, (10,10), dtypes.float) + UOp.param_from_shape(1, (10,10), dtypes.float)
 
     c = Tensor.call(a, b, fxn=plus_fxn)
     np.testing.assert_equal(c.numpy(), (a+b).numpy())
@@ -29,7 +29,7 @@ class TestCall(unittest.TestCase):
     def grad_fxn(grad:UOp, call:UOp): return (grad, grad)
 
     # we define a plus function
-    plus_fxn = UOp.param(0, dtypes.float, (10,10)) + UOp.param(1, dtypes.float, (10,10))
+    plus_fxn = UOp.param_from_shape(0, (10,10), dtypes.float) + UOp.param_from_shape(1, (10,10), dtypes.float)
     c = Tensor.call(a, b, fxn=plus_fxn, grad_fxn=grad_fxn)
     c.mean().backward()
 
@@ -45,7 +45,7 @@ class TestCall(unittest.TestCase):
     gt_b_grad = b.grad.numpy()
     a.grad, b.grad = None, None
 
-    plus_fxn = UOp.param(0, dtypes.float, (10,10)) + UOp.param(1, dtypes.float, (10,10))
+    plus_fxn = UOp.param_from_shape(0, (10,10), dtypes.float) + UOp.param_from_shape(1, (10,10), dtypes.float)
     c = Tensor.call(a, b, fxn=plus_fxn)
     c.mean().backward()
 
@@ -67,8 +67,8 @@ class TestCall(unittest.TestCase):
     Tensor.realize(a, b)
 
     # we define a gemm function
-    x = UOp.param(0, dtypes.float, shape=(M, K))
-    y = UOp.param(1, dtypes.float, shape=(K, N))
+    x = UOp.param_from_shape(0, (M, K), dtypes.float)
+    y = UOp.param_from_shape(1, (K, N), dtypes.float)
     c = Tensor.call(a, b, fxn=x@y)
 
     np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), rtol=1e-5, atol=1e-6)
@@ -83,7 +83,7 @@ class TestCall(unittest.TestCase):
     gt_a_grad, gt_b_grad = a.grad.numpy(), b.grad.numpy()
     a.grad, b.grad = None, None
 
-    p0, p1 = UOp.param(0, dtypes.float, (10,10)), UOp.param(1, dtypes.float, (10,10))
+    p0, p1 = UOp.param_from_shape(0, (10,10), dtypes.float), UOp.param_from_shape(1, (10,10), dtypes.float)
     complex_fxn = (p0*p1 + p0).exp2() * p1.reciprocal()
     c = Tensor.call(a, b, fxn=complex_fxn)
     c.mean().backward()

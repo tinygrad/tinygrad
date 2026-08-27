@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 from typing import cast
 import itertools
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, dedup, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
@@ -223,7 +223,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
 
   # NOTE: the local BUFFER needs to be disambiguated here
   if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(next(ctx), x.dtype, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
+    buf = UOp(Ops.BUFFER, arg=ParamArg(next(ctx), x.dtype, size=size, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
     do_store = buf.index(idx).store(x.src[0]).end(*rngs)
     return buf.after(do_store)
 
@@ -282,8 +282,7 @@ class LocalAddBufferContext:
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   # Variables (ALU buffers with a value range) are scalar symbolic values, not real buffers: they become ALU params with no slot
   if buf.is_variable: return buf.replace(op=Ops.PARAM)
-  param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),),
-              arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
+  param = UOp(Ops.PARAM, arg=ParamArg(ctx.dg, buf.dtype, prod(buf.max_shape), addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
   if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))

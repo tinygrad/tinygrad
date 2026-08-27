@@ -87,10 +87,9 @@ spec_shared = PatternMatcher([
   # a loop-ended END requires a trailing bool condition for the backedge (loop again while true)
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool))), lambda: True),
 
-  # PARAM
-  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
-  (UPat(Ops.BUFFER, src=(UPat(),), name="x"), lambda x:
-   isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
+  # PARAM/BUFFER have a size in the arg, no shape input
+  (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.BUFFER, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   # GROUP of stores (or groups, or NOOPs)
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
@@ -141,12 +140,12 @@ spec_tensor = PatternMatcher([
    lambda u: dtypes.is_float(u.dtype) or u.src[0].base.is_invalid),
 
   # BUFFER
-  (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
-   (isinstance(buf.dtype, DType) and matches_dtype(buf.src[0], dtypes.weakint) and is_device(buf.arg.device))
+  (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf:
+   (isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device))
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
   # a Variable is a 0-d ALU BUFFER with a value range and no device
-  (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
+  (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),

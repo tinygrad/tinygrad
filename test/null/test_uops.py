@@ -55,11 +55,11 @@ class TestDTypeFromUOp(unittest.TestCase):
     self.assertEqual((scratch.dtype, next(u.dtype for u in scratch.uop.toposort() if u.op is Ops.BUFFER), next(u.dtype for u in scratch.uop.toposort()
       if u.is_invalid)), (dtypes.float32, dtypes.float32, dtypes.bool))
     invalid, value = UOp.invalid(), UOp.const(1, dtypes.float32)
-    for u in (UOp.param(0, dtypes.bool, ()).where(value, invalid), value+invalid, UOp.stack(value, invalid)): self.assertIs(u.src[-1], invalid)
+    for u in (UOp.param(0, dtypes.bool).where(value, invalid), value+invalid, UOp.stack(value, invalid)): self.assertIs(u.src[-1], invalid)
     for u in (UOp(Ops.STACK, src=(value, invalid)), UOp(Ops.ADD, src=(value, invalid)),
               UOp.const(True).where(value, invalid), UOp(Ops.CMPLT, src=(invalid, value)), UOp(Ops.CMPLT, src=(value, invalid)),
               UOp.param(0, dtypes.float32, 4).index(invalid)): type_verify(u, spec_shared)
-    gate, value = UOp.param(0, dtypes.bool, ()), UOp.param(1, dtypes.float, ())
+    gate, value = UOp.param(0, dtypes.bool), UOp.param(1, dtypes.float)
     self.assertIs((out:=graph_rewrite(gate.where(value, UOp.invalid()), pm_remove_invalid)).src[2], UOp.const(0, dtypes.float))
     type_verify(out.sink(), spec_program)
 
@@ -84,11 +84,10 @@ class TestLowerIndexDtype(unittest.TestCase):
 
   def test_reg_buffer_size_lowers(self):
     reg = UOp.placeholder((4,), dtypes.float, 0, addrspace=AddrSpace.REG)
-    self.assertEqual(reg.src[0].dtype, dtypes.weakint)
+    self.assertEqual(reg.arg.size, 4)
     lowered = graph_rewrite(reg.sink(), pm_lower_weak)
     self.assertTrue(all(u.op is Ops.CONST for u in lowered.backward_slice_with_self if u.dtype in dtypes.weaks),
                     "lowering must resolve every weak width, except a typed literal's value half")
-    self.assertEqual(next(u for u in lowered.backward_slice_with_self if u.op is Ops.BUFFER).src[0].dtype, dtypes.int)
 
 class TestSafeCast(unittest.TestCase):
   def test_cast_folds(self):

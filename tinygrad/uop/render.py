@@ -84,7 +84,7 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val})"),
   (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})" if x.dtype != x.src[0].dtype else None),
   (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].val}, {repr(x.arg)})"),
-  (UPat(Ops.BUFFER, src=(UPat(),), name="x"), lambda x:
+  (UPat(Ops.BUFFER, src=(), name="x"), lambda x:
     f"UOp.new_buffer({repr(x.arg.device)}, {x.max_numel()}, {x.dtype}, {x.arg.slot})"
     if isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL else None),
   (UPat(Ops.COPY, src=(UPat(name="x"),), name="copy"), lambda ctx,x,copy: f"{ctx[x]}.copy_to_device({repr(copy.arg)})"),

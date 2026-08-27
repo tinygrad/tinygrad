@@ -25,11 +25,11 @@ MAX_ARGS, CMD_SIZE, RING_SLOTS, FUNCS = 63, 64, (16 << 10), (() if WIN else ('cl
 # 1. workers
 
 def signal_prog():
-  val = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
+  val = UOp.param(1, dtypes.int, vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
   return UOp.param(0, dtypes.uint32, 1)[0].store(val.cast(dtypes.uint32))
 
 def wait_prog():
-  val = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
+  val = UOp.param(1, dtypes.int, vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
   return (v:=UOp.param(0, dtypes.uint32, 1, volatile=True).after(l:=UOp.loop(0))[0].load()).end(l, v < val.cast(dtypes.uint32))
 
 def timestamp_prog():
