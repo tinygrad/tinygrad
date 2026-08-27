@@ -118,7 +118,7 @@ static kern_return_t WriteDMASegments(IOMemoryDescriptor* mem, IOAddressSegment*
 	return 0;
 }
 
-kern_return_t TinyGPUDriver::SetupDMA(IOMemoryDescriptor* memory, uint64_t size, IODMACommand** outCmd,
+kern_return_t TinyGPUDriver::SetupDMA(IOMemoryDescriptor* memory, uint64_t offset, uint64_t size, IODMACommand** outCmd,
                                        IOAddressSegment* segments, uint32_t* segCount, uint64_t* outFlags)
 {
 	IODMACommandSpecification dmaSpec = {.options = 0, .maxAddressBits = 40};
@@ -130,7 +130,7 @@ kern_return_t TinyGPUDriver::SetupDMA(IOMemoryDescriptor* memory, uint64_t size,
 	// flags is an OUTPUT: kIOMemoryDirectionOut = device may read, kIOMemoryDirectionIn = device may write. IOMMUs that honour the
 	// access bits (Intel AppleVTD) drop DMA the descriptor was not prepared for, so callers must check both bits are present.
 	uint64_t flags = 0;
-	err = dmaCmd->PrepareForDMA(kIODMACommandPrepareForDMANoOptions, memory, 0, size, &flags, segCount, segments);
+	err = dmaCmd->PrepareForDMA(kIODMACommandPrepareForDMANoOptions, memory, offset, size, &flags, segCount, segments);
 	if (err) { os_log(OS_LOG_DEFAULT, "tinygpu: PrepareForDMA failed err=%d", err); dmaCmd->release(); return err; }
 
 	if (outFlags) *outFlags = flags;
@@ -148,7 +148,7 @@ kern_return_t TinyGPUDriver::CreateDMA(size_t size, TinyGPUCreateDMAResp* dmaDes
 	IOAddressSegment segments[32];
 	uint32_t segCount = 32;
 	uint64_t dmaFlags = 0;
-	err = SetupDMA(sharedBuf, size, &dmaCmd, segments, &segCount, &dmaFlags);
+	err = SetupDMA(sharedBuf, 0, size, &dmaCmd, segments, &segCount, &dmaFlags);
 	if (err) { sharedBuf->release(); return err; }
 
 	err = WriteDMASegments(sharedBuf, segments, segCount, IOVMPageSize, IOVMPageSize);
