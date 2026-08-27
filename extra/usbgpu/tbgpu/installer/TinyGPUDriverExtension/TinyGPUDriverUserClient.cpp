@@ -86,6 +86,10 @@ kern_return_t TinyGPUDriverUserClient::Stop_Impl(IOService* in_provider)
 				d.dmaCmd->release();
 				d.dmaCmd = nullptr;
 			}
+			if (d.sharedBuf) {
+				d.sharedBuf->release();
+				d.sharedBuf = nullptr;
+			}
 		}
 		ivars->dmaCount = 0;
 		IOSafeDeleteNULL(ivars->dmas, TinyGPUCreateDMAResp, ivars->dmaCap);
@@ -130,34 +134,80 @@ kern_return_t TinyGPUDriverUserClient::ExternalMethod(uint64_t selector, IOUserC
 		os_log(OS_LOG_DEFAULT, "tinygpu: reset");
 		return ivars->provider->ResetDevice();
 	} else if (selector == TinyGPURPC::PrepareDMA) {
-		// both input and output buffers must be >= 4097 bytes for IOMemoryDescriptor
-		if (!args->structureInputDescriptor || !args->structureOutputDescriptor) {
-			os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA requires buffers >= 4097 bytes");
+		// The DMA buffer is the caller's (out-of-line, >= 4097 bytes) OUTPUT struct; the inband INPUT struct carries flags.
+		//
+		// Why the output side: the kernel wraps an ool input struct in a kIODirectionOut (read-only-for-DMA) descriptor and an ool output
+		// struct in a kIODirectionIn one. IOMMUs that honour the access bits (Intel AppleVTD) silently drop every device write into a
+		// buffer prepared from an input descriptor, which is how GSP-RM ended up unable to post its RPC queue on an Intel Mac Pro.
+		// Wrapping the output descriptor in a multi-descriptor makes IODMACommand map it read+write (IOMemoryDescriptor::dmaMap), which
+		// is the only route DriverKit gives a dext to make app-owned memory device-writable.
+		if (!args->structureOutputDescriptor) {
+			os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA requires an ool output buffer >= 4097 bytes");
 			return kIOReturnBadArgument;
 		}
-		if (ivars->ensureDMACap(ivars->dmaCount + 1)) return kIOReturnNoMemory;
+		uint64_t reqFlags = 0;
+		if (args->structureInput && args->structureInput->getLength() >= sizeof(uint64_t))
+			reqFlags = *(const uint64_t*)args->structureInput->getBytesNoCopy();
+		if (reqFlags & 1) os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA contiguous requested; not possible for app-owned memory, ignoring");
 
 		uint64_t size = 0;
-		args->structureInputDescriptor->GetLength(&size);
+		args->structureOutputDescriptor->GetLength(&size);
 
-		IODMACommand* dmaCmd = nullptr;
-		IOAddressSegment segments[32];
-		uint32_t segCount = 32;
-		err = ivars->provider->SetupDMA(args->structureInputDescriptor, size, &dmaCmd, segments, &segCount);
-		if (err) return err;
+		IOMemoryDescriptor* dmaMem = nullptr;
+		IOMemoryDescriptor* sources[1] = { args->structureOutputDescriptor };
+		err = IOMemoryDescriptor::CreateWithMemoryDescriptors(kIOMemoryDirectionInOut, 1, sources, &dmaMem);
+		if (err || !dmaMem) { os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA wrapper failed err=%d", err); return err ?: kIOReturnError; }
 
-		// write physical addresses to output: [addr0, len0, addr1, len1, ..., 0, 0]
+		// The [addr, len, ..., 0, 0] table goes to the head of the buffer itself (the app reads it from the shared mapping).
 		IOMemoryMap* outMap = nullptr;
 		err = args->structureOutputDescriptor->CreateMapping(0, 0, 0, 0, 0, &outMap);
-		if (err || !outMap) { os_log(OS_LOG_DEFAULT, "tinygpu: output map failed err=%d", err); dmaCmd->release(); return err; }
-
+		if (err || !outMap) { os_log(OS_LOG_DEFAULT, "tinygpu: output map failed err=%d", err); dmaMem->release(); return err ?: kIOReturnError; }
 		uint64_t* out = (uint64_t*)outMap->GetAddress();
-		for (uint32_t i = 0; i < segCount; i++) { out[i * 2] = segments[i].address; out[i * 2 + 1] = segments[i].length; }
-		out[segCount * 2] = 0; out[segCount * 2 + 1] = 0;
-		outMap->release();
+		const uint64_t maxEntries = size / 16 - 1; // leave room for the terminator
 
-		os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA size=%llu segs=%u", size, segCount);
-		ivars->dmas[ivars->dmaCount++] = {nullptr, dmaCmd};
+		// DriverKit's PrepareForDMA returns at most 32 segments per call, so map the buffer in windows (one IODMACommand each) and
+		// fail instead of truncating. With an IOMMU the whole buffer is normally one segment; without one it is 4 KB pages.
+		uint64_t done = 0, total = 0, dmaFlags = 0;
+		const size_t firstCmd = ivars->dmaCount;
+		size_t windows = 0;
+		while (done < size) {
+			if (ivars->ensureDMACap(ivars->dmaCount + 1)) { err = kIOReturnNoMemory; break; }
+			IODMACommand* dmaCmd = nullptr;
+			IOAddressSegment segments[32];
+			uint32_t segCount = 32;
+			err = ivars->provider->SetupDMA(dmaMem, done, size - done, &dmaCmd, segments, &segCount, &dmaFlags);
+			if (err) break;
+			ivars->dmas[ivars->dmaCount++] = {nullptr, dmaCmd};
+			windows++;
+			if (segCount == 0) { os_log(OS_LOG_DEFAULT, "tinygpu: PrepareForDMA returned no segments at off=%llu", done); err = kIOReturnNoSpace; break; }
+			for (uint32_t i = 0; i < segCount; i++) {
+				if (total >= maxEntries) { os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA segment table does not fit in the buffer"); err = kIOReturnNoSpace; break; }
+				out[total * 2] = segments[i].address; out[total * 2 + 1] = segments[i].length;
+				total++; done += segments[i].length;
+			}
+			if (err) break;
+		}
+		if (!err && (dmaFlags & kIOMemoryDirectionInOut) != kIOMemoryDirectionInOut) {
+			os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA mapping is not read+write (flags=0x%llx), refusing", dmaFlags);
+			err = kIOReturnNotWritable;
+		}
+		if (err) {
+			for (size_t i = firstCmd; i < ivars->dmaCount; i++) {
+				ivars->dmas[i].dmaCmd->CompleteDMA(kIODMACommandCompleteDMANoOptions);
+				ivars->dmas[i].dmaCmd->release();
+				ivars->dmas[i] = {nullptr, nullptr};
+			}
+			ivars->dmaCount = firstCmd;
+			outMap->release();
+			dmaMem->release();
+			return err;
+		}
+		out[total * 2] = 0; out[total * 2 + 1] = 0;
+		outMap->release();
+		// keep the wrapper alive as long as the DMA commands that reference it
+		ivars->dmas[firstCmd].sharedBuf = dmaMem;
+
+		os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA size=%llu segs=%llu windows=%zu flags=0x%llx", size, total, windows, dmaFlags);
 		return kIOReturnSuccess;
 	}
 
