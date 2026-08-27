@@ -116,7 +116,7 @@ class TestWeakPromotion(unittest.TestCase):
 
   def test_store_weak_value_uses_destination_dtype(self):
     with Context(DEFAULT_FLOAT=dtypes.float16):
-      dst = UOp.param(0, dtypes.bfloat16, (1,)).index(UOp.const(0).cast(dtypes.int32))
+      dst = UOp.param(0, dtypes.bfloat16, 1).index(UOp.const(0).cast(dtypes.int32))
       gate = UOp.const(True)
       out = graph_rewrite(dst.store(UOp.const(5.0), gate), pm_commit_weak)
     # a bare weak CONST commits directly: the pass runs without symbolic, so a CAST here would survive it
@@ -132,7 +132,7 @@ class TestWeakPromotion(unittest.TestCase):
 
   def test_derivable_const_rounds_at_the_derived_width(self):
     # re-rounds a derivable const in place (still bare) so value-keyed folds (x*1 -> x, x*-1 -> NEG) still fire
-    x = UOp.param(0, dtypes.float32, (1,)).index(UOp.const(0).cast(dtypes.int32)).load()
+    x = UOp.param(0, dtypes.float32, 1).index(UOp.const(0).cast(dtypes.int32)).load()
     mul = graph_rewrite(x * UOp.const(-0.9999999893980771), symbolic_simple+pm_commit_weak)
     self.assertIs(mul.src[1], UOp.const(-1.0))
     self.assertIs(graph_rewrite(x * UOp.const(1.0000000106), symbolic_simple+pm_commit_weak), x)
