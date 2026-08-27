@@ -275,7 +275,7 @@ class TestMXFP4(unittest.TestCase):
     if expected_tile is not None: self.assertEqual(_select_mxfp4_tile(M, N, K), expected_tile)
     a = Tensor.empty(M, K, dtype=dtypes.bfloat16)
     b = Tensor.empty(N, K, dtype=dtypes.bfloat16)
-    asm_gemm(a, b.T, mxfp4=True).realize()
+    for _ in range(getenv("CNT", 1)): asm_gemm(a, b.T, mxfp4=True).realize()
 
   def test_empty(self): self.run_empty(getenv("M", 16384), getenv("N", 4096), getenv("K", 14336))
   def test_gemm_llama1(self): self.run_empty(28672, 4096, 16384, (256, 256))

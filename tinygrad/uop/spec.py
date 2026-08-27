@@ -100,8 +100,9 @@ spec_shared = PatternMatcher([
                                                      Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
         allow_any_len=True, name="x"), lambda x: matches_dtype(x.src[0], x.dtype)),
 
-  # CUSTOM (inline and non inline)
-  (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
+  # CUSTOM (inline and non inline): the arg is the source string and the dtype it produces, void for a bare statement
+  (UPat((Ops.CUSTOMI, Ops.CUSTOM), name="x"),
+   lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and isinstance(x.arg[0], str) and isinstance(x.arg[1], DType)),
 
   # CALL of an external function
   (UPat(Ops.CALL, src=(UPat(),), allow_any_len=True, name="x"),

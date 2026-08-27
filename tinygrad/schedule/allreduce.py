@@ -148,7 +148,7 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   return UOp.usum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
-  if output is None: output = UOp.invalids(red.shape, dtype=red.dtype, device=red.device)
+  if output is None: output = UOp.empty(*red.shape, dtype=red.dtype, device=red.device)
   if isinstance(buf.device, tuple) and all_int(buf.shape) and allreduce_modes(len(buf.device), prod(buf.shape))[0]:
     ret = handle_allreduce(buf, red, output)
     assert ret is not None

@@ -3,9 +3,10 @@ from tinygrad import Tensor, UOp, dtypes
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, KernelInfo
 from tinygrad.schedule.allreduce import create_allreduce_function, handle_allreduce, _is_stable_custom_output, is_allreduce_linear_output
-from tinygrad.schedule.prepare import prepare_rangeify, _accumulate_linear_allreduce, _accumulate_linear_replicated
+from tinygrad.schedule.prepare import prepare_rangeify, _accumulate_linear_allreduce, _accumulate_linear_replicated, walk_mop
 from tinygrad.schedule.rangeify import no_indexing_calls
 from test.helpers import KernelCountException
+from tinygrad.engine.realize import run_linear
 
 class TestRingAllReduce(unittest.TestCase):
   def test_classify_linear_allreduce_output(self):
@@ -30,6 +31,11 @@ class TestRingAllReduce(unittest.TestCase):
     self.assertEqual(no_indexing_calls(copy_call).src[1:], (view, view))
     sink_call = UOp(Ops.SINK).call(view)
     self.assertEqual(no_indexing_calls(sink_call).src[1:], (view,))
+
+  def test_walk_mop_keeps_physical_view(self):
+    src = UOp.param(1, dtypes.float, (64,), device="NULL")
+    view = src.shrink(((8, 24),)).rtag(("allreduce",))
+    self.assertIs(walk_mop(view), view)
 
   def test_classify_linear_allreduce_output_with_direct_write(self):
     devices = ("NULL", "NULL:1")
@@ -144,14 +150,25 @@ class TestRingAllReduce(unittest.TestCase):
   def test_schedule_all2all(self):
     with Context(ALL2ALL=2):
       N = 4
+      M = N*100
       ds = tuple(f"CPU:{i}" for i in range(N))
-      t = Tensor.empty(N, N*100).shard(ds, axis=0).realize()
-      linear = t.sum(0).mul(2.0).contiguous().linear_with_vars()[0]
+      x = Tensor.arange(N*M, dtype=dtypes.float).reshape(N, M)
+      t = (x*x).clone().shard(ds, axis=0).realize()
+      out = t.sum(0).mul(2.).contiguous()
+      linear, var_vals = out.linear_with_vars()
       copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
-      if len(copies) != 24: raise KernelCountException(24, len(copies))
+      # N*(N-1) copies for input and output
+      copy_count = N*(N-1)*2
+      if len(copies) != copy_count: raise KernelCountException(copy_count, len(copies))
       # direct physical views avoid the former zero-offset staging kernels
       if len(sinks) != 11: raise KernelCountException(11, len(sinks))
+      # correctness
+      run_linear(linear, var_vals)
+      expected = [2*sum((d*M+i)**2 for d in range(N)) for i in range(M)]
+      dev_nums = Tensor.arange(1, N+1, dtype=dtypes.float).reshape(N, 1).expand(N, M).shard(ds, axis=0)
+      shards = out.reshape(1, M).expand(N, M)+dev_nums
+      self.assertListEqual(shards.tolist(), [[x+d+1 for x in expected] for d in range(N)])
 
   def test_correct_all2all_direct_slices(self):
     with Context(ALL2ALL=2):

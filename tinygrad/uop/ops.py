@@ -123,7 +123,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       # a CALL of an opaque body is void, a CALL of an address can return a value
       return dtypes.void if src[0].dtype is dtypes.void else None
     case Ops.CUSTOM | Ops.CUSTOMI:
-      return None
+      assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"CUSTOM/CUSTOMI arg must be (str, DType), got {arg}"
+      return arg[1]
     case Ops.INS:
       return None
     case Ops.NOOP:
@@ -158,6 +159,10 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return in_tuple.src[arg].dtype
     case Ops.GETADDR:
       return dtypes.uint64
+    case Ops.THREEFRY:
+      return dtypes.uint64
+    case Ops.FDIV:
+      return least_upper_float(promo_dtype(src))
     case Ops.SHL | Ops.SHR:
       if not all(dtypes.is_int(x.dtype) or x.base.is_invalid for x in src):
         raise RuntimeError(f"shift operands must be int, got {[x.dtype for x in src]}")
@@ -320,7 +325,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
-    return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
+    # arg goes through repr: args of different types (None, str, tuple) must stay mutually comparable for the sort
+    return (self.op.value, repr(self.arg), self.dtype,)+tuple([x.tuplize for x in self.src])
 
   # *** uop shape stuff ***
 

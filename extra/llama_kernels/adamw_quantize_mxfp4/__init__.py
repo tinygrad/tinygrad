@@ -27,7 +27,7 @@ def _custom_adamw_quantize_mxfp4(m:UOp, v:UOp, master:UOp, param:UOp, row_fp4:UO
   outputs = bufs[:8]
   mem = M*N*(2 + 4*6 + 2 + 1) + M*N//16
   sink = UOp.sink(*(x.base for x in bufs),
-                  *(UOp(Ops.CUSTOM, dtypes.void, (x.base.index(0),), arg="") for x in outputs),
+                  *(UOp(Ops.CUSTOM, src=(x.base.index(0),), arg=("", dtypes.void)) for x in outputs),
                   UOp.special(256, "lidx0"), UOp.special(M//32, "gidx0"), UOp.special(N//256, "gidx1"),
                   arg=KernelInfo(name, estimates=Estimates(ops=40*M*N, mem=mem)))
   src = (pathlib.Path(__file__).parent/"adamw_quantize_mxfp4.cpp").read_text()

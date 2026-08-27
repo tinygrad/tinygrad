@@ -84,7 +84,7 @@ testing = [
   "pillow",
   "onnx==1.19.0",
   "onnx2torch",
-  "onnxruntime",
+  "onnxruntime==1.24.1",
   "opencv-python",
   "transformers",
   "sentencepiece",

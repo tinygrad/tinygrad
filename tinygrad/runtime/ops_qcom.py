@@ -22,8 +22,9 @@ def dcache_flush():
   from tinygrad.codegen import to_program
   buf, n = UOp.param(0, dtypes.uint8, shape=(1,)), UOp.param(1, dtypes.int, shape=(), name="n", addrspace=AddrSpace.ALU)
   i = UOp.range(n, 0, dtype=dtypes.int)
-  flush = UOp(Ops.CUSTOM, src=(buf.index(i * 64),), arg='__asm__ volatile("dc cvac, %0" :: "r"({0}) : "memory");')
-  sink = UOp.sink(flush.end(i), UOp(Ops.CUSTOM, arg='__asm__ volatile("dsb sy" ::: "memory");'), arg=KernelInfo(name="dcache_flush"), tag=1)
+  flush = UOp(Ops.CUSTOM, src=(buf.index(i * 64),), arg=('__asm__ volatile("dc cvac, %0" :: "r"({0}) : "memory");', dtypes.void))
+  sink = UOp.sink(flush.end(i), UOp(Ops.CUSTOM, arg=('__asm__ volatile("dsb sy" ::: "memory");', dtypes.void)),
+                  arg=KernelInfo(name="dcache_flush"), tag=1)
   prg = to_program(sink, Device["CPU"].renderer)
   return Device["CPU"].runtime(prg.to_elf())
 
