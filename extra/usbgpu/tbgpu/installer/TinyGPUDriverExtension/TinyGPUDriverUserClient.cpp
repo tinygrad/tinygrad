@@ -86,6 +86,10 @@ kern_return_t TinyGPUDriverUserClient::Stop_Impl(IOService* in_provider)
 				d.dmaCmd->release();
 				d.dmaCmd = nullptr;
 			}
+			if (d.sharedBuf) {
+				d.sharedBuf->release();
+				d.sharedBuf = nullptr;
+			}
 		}
 		ivars->dmaCount = 0;
 		IOSafeDeleteNULL(ivars->dmas, TinyGPUCreateDMAResp, ivars->dmaCap);
@@ -130,34 +134,53 @@ kern_return_t TinyGPUDriverUserClient::ExternalMethod(uint64_t selector, IOUserC
 		os_log(OS_LOG_DEFAULT, "tinygpu: reset");
 		return ivars->provider->ResetDevice();
 	} else if (selector == TinyGPURPC::PrepareDMA) {
-		// both input and output buffers must be >= 4097 bytes for IOMemoryDescriptor
-		if (!args->structureInputDescriptor || !args->structureOutputDescriptor) {
-			os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA requires buffers >= 4097 bytes");
+		// The DMA buffer is the caller's (out-of-line, >= 4097 bytes) OUTPUT struct; the inband INPUT struct carries flags.
+		//
+		// The kernel wraps an ool input struct in a kIODirectionOut descriptor and an ool output struct in a kIODirectionIn one. A
+		// kIODirectionOut descriptor is prepared read-only for DMA, and IOMMUs that honour the access bits (Intel AppleVTD) silently
+		// drop every device write into it, which is how GSP-RM ended up unable to post its RPC queue on an Intel Mac Pro. Wrapping the
+		// output descriptor in an InOut multi-descriptor makes IODMACommand map it read+write (IOMemoryDescriptor::dmaMap).
+		if (!args->structureOutputDescriptor) {
+			os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA requires an ool output buffer >= 4097 bytes");
 			return kIOReturnBadArgument;
 		}
 		if (ivars->ensureDMACap(ivars->dmaCount + 1)) return kIOReturnNoMemory;
 
 		uint64_t size = 0;
-		args->structureInputDescriptor->GetLength(&size);
+		args->structureOutputDescriptor->GetLength(&size);
+
+		IOMemoryDescriptor* dmaMem = nullptr;
+		IOMemoryDescriptor* sources[1] = { args->structureOutputDescriptor };
+		err = IOMemoryDescriptor::CreateWithMemoryDescriptors(kIOMemoryDirectionInOut, 1, sources, &dmaMem);
+		if (err || !dmaMem) { os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA wrapper failed err=%d", err); return err ?: kIOReturnError; }
 
 		IODMACommand* dmaCmd = nullptr;
 		IOAddressSegment segments[32];
 		uint32_t segCount = 32;
-		err = ivars->provider->SetupDMA(args->structureInputDescriptor, size, &dmaCmd, segments, &segCount);
-		if (err) return err;
+		uint64_t dmaFlags = 0;
+		err = ivars->provider->SetupDMA(dmaMem, size, &dmaCmd, segments, &segCount, &dmaFlags);
+		if (err) { dmaMem->release(); return err; }
+		if ((dmaFlags & kIOMemoryDirectionInOut) != kIOMemoryDirectionInOut) {
+			os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA mapping is not read+write (flags=0x%llx), refusing", dmaFlags);
+			dmaCmd->CompleteDMA(kIODMACommandCompleteDMANoOptions); dmaCmd->release(); dmaMem->release();
+			return kIOReturnNotWritable;
+		}
 
-		// write physical addresses to output: [addr0, len0, addr1, len1, ..., 0, 0]
+		// The [addr, len, ..., 0, 0] table goes to the head of the buffer itself (the app reads it from the shared mapping).
 		IOMemoryMap* outMap = nullptr;
 		err = args->structureOutputDescriptor->CreateMapping(0, 0, 0, 0, 0, &outMap);
-		if (err || !outMap) { os_log(OS_LOG_DEFAULT, "tinygpu: output map failed err=%d", err); dmaCmd->release(); return err; }
-
+		if (err || !outMap) {
+			os_log(OS_LOG_DEFAULT, "tinygpu: output map failed err=%d", err);
+			dmaCmd->CompleteDMA(kIODMACommandCompleteDMANoOptions); dmaCmd->release(); dmaMem->release();
+			return err ?: kIOReturnError;
+		}
 		uint64_t* out = (uint64_t*)outMap->GetAddress();
 		for (uint32_t i = 0; i < segCount; i++) { out[i * 2] = segments[i].address; out[i * 2 + 1] = segments[i].length; }
 		out[segCount * 2] = 0; out[segCount * 2 + 1] = 0;
 		outMap->release();
 
-		os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA size=%llu segs=%u", size, segCount);
-		ivars->dmas[ivars->dmaCount++] = {nullptr, dmaCmd};
+		os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA size=%llu segs=%u flags=0x%llx", size, segCount, dmaFlags);
+		ivars->dmas[ivars->dmaCount++] = {dmaMem, dmaCmd}; // keep the wrapper alive as long as the DMA command that references it
 		return kIOReturnSuccess;
 	}
 

@@ -143,11 +143,12 @@ static int map_sysmem_fd(uint64_t size, int contiguous, response_t *resp, int *o
   if (ftruncate(fd, alloc_sz) < 0) goto fail;
   if ((ptr = mmap(NULL, alloc_sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED) goto fail;
 
-  // PrepareDMA writes physical addresses to output buffer, copy to shared mem
-  uint8_t paddr_buf[8192] = {0};
-  size_t out_sz = sizeof(paddr_buf);
-  if (IOConnectCallStructMethod(g_conn, 3, ptr, alloc_sz, paddr_buf, &out_sz) != KERN_SUCCESS) goto fail;
-  memcpy(ptr, paddr_buf, out_sz);
+  // PrepareDMA: the buffer is passed as the (out-of-line) OUTPUT struct so the kernel wraps it in a device-writable descriptor
+  // (an input struct is mapped read-only for DMA and Intel's AppleVTD drops device writes into it). The dext writes the
+  // [paddr0, len0, ..., 0, 0] table to the head of the buffer itself. The small input struct carries request flags.
+  uint64_t flags = contiguous ? 1 : 0;
+  size_t out_sz = alloc_sz;
+  if (IOConnectCallStructMethod(g_conn, 3, &flags, sizeof(flags), ptr, &out_sz) != KERN_SUCCESS) goto fail;
 
   g_sysmem[idx] = (typeof(g_sysmem[idx])){.addr = (mach_vm_address_t)ptr, .size = alloc_sz, .shm_fd = fd};
   strncpy(g_sysmem[idx].shm_name, shm_name, sizeof(g_sysmem[idx].shm_name));

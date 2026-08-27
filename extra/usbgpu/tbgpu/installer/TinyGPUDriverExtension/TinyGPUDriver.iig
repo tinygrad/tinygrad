@@ -9,7 +9,7 @@
 
 struct TinyGPUCreateDMAResp
 {
-	IOBufferMemoryDescriptor* sharedBuf;
+	IOMemoryDescriptor* sharedBuf; // dext-owned buffer (CreateDMA) or the RW wrapper descriptor (PrepareDMA), released in Stop
 	IODMACommand* dmaCmd;
 };
 
@@ -29,7 +29,7 @@ public:
 	kern_return_t MapBar(uint32_t bar, IOMemoryDescriptor** memory) LOCALONLY;
 	kern_return_t CreateDMA(size_t size, TinyGPUCreateDMAResp* dmaDesc) LOCALONLY;
 	kern_return_t SetupDMA(IOMemoryDescriptor* memory, uint64_t size, IODMACommand** outCmd,
-	                       IOAddressSegment* segments, uint32_t* segCount) LOCALONLY;
+	                       IOAddressSegment* segments, uint32_t* segCount, uint64_t* outFlags) LOCALONLY;
 
 	kern_return_t CfgRead(uint32_t off, uint32_t size, uint32_t* val) LOCALONLY;
 	kern_return_t CfgWrite(uint32_t off, uint32_t size, uint32_t val) LOCALONLY;
