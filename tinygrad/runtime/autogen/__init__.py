@@ -192,6 +192,12 @@ def __getattr__(nm):
                   srcs=[linux_headers_kern_deb, *bnxt_src],
                   args=["-Du8=unsigned char", "-Du32=unsigned int", "-Du64=unsigned long long", "-D__le16=unsigned short",
                         "-D__le32=unsigned int", "-D__le64=unsigned long long", "-D__be16=unsigned short", "-D__be32=unsigned int", f"-I{kh}"],
+                  patterns=[r"hwrm_((ver_get|func_(qcaps|qcfg|reset|drv_rgtr|backing_store_(qcaps|cfg)_v2)|stat_ctx_alloc|ring_alloc"
+                            r"|vnic_(alloc|cfg)|cfa_l2_filter_alloc|port_phy_cfg)_(input|output)|(cmd|resp)_hdr)$",
+                            r"((cmdq|creq)_(base|init|add_gid|create_(cq|qp)|initialize_fw|modify_qp|query_version|register_mr)(_resp)?"
+                            r"|cq_(base|req)|sq_(rdma_hdr|sge))$",
+                            r"(BNXT|CMDQ|CREQ|CQ|SQ|DBC|PTU|RCFW|HWRM|VNIC|RING_ALLOC|STAT_CTX|CFA_L2_FILTER|PORT_PHY_CFG|FIRMWARE_FIRST"
+                            r"|FUNC_(QCAPS|QCFG|RESET|DRV_RGTR|BACKING_STORE))_"],
                   preprocess=lambda path: subprocess.run(f"ar x {linux_headers_kern_deb.split('/')[-1]} && tar xf data.tar.xz",
                                                          cwd=path, shell=True, check=True))
     case _: raise AttributeError(f"no such autogen: {nm}")
