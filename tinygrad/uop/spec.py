@@ -263,8 +263,8 @@ spec_kernel_graph = PatternMatcher([
   # a param's logical shape is a RESHAPE on top of it (see UOp.param/UOp.view_as)
   (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.ALU)),
-  # views of storage values (params/buffers), like a param's logical shape (see UOp.param/UOp.view_as)
-  (UPat(GroupOp.Movement, src=(UPat((Ops.PARAM, Ops.UNSHARD, Ops.AFTER)),), allow_any_len=True), lambda: True),
+  # a param's logical shape is a RESHAPE/SHRINK view on top of its storage (see UOp.param/UOp.view_as)
+  (UPat((Ops.RESHAPE, Ops.SHRINK), src=(UPat((Ops.PARAM, Ops.UNSHARD, Ops.AFTER)),), allow_any_len=True), lambda: True),
   (UPat(Ops.BITCAST), lambda: True),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
