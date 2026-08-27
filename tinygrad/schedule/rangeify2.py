@@ -4,9 +4,8 @@ from tinygrad.dtype import AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, GroupOp, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, AxisType, rewrite_group, remove_all_tags, resolve
 from tinygrad.helpers import all_int, VIZ, SPEC, Context, panic
-from tinygrad.schedule.indexing import BufferizeOpts, apply_movement_op
+from tinygrad.schedule.indexing import BufferizeOpts, apply_movement_op, broadcast_rngs
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.codegen.simplify import pm_reduce_simplify
 
 # *** RANGE creation ***
 
@@ -88,9 +87,9 @@ pm_range_migration = PatternMatcher([
   # block bitcast that changes shape
   (UPat(Ops.BITCAST, name="b").index(allow_any_len=True),
    lambda b: panic(RuntimeError, "shape changing bitcast not allowed in rangeify") if b.src[0].shape != b.shape else None),
-  # pass index through elementwise
+  # pass index through elementwise (with broadcasting support)
   (UPat(GroupOp.Elementwise, name="b").index(name="idx", allow_any_len=True),
-   lambda b,idx: b.replace(src=tuple(s.index(*idx.src[1:]) for s in b.src))),
+   lambda b,idx: b.replace(src=tuple(s.index(*broadcast_rngs(b, s, idx.src[1:])) for s in b.src))),
   # INDEX without src is nothing (must be at the bottom)
   (UPat(Ops.INDEX, src=(UPat.var('x'),)), lambda x: x),
 ])
@@ -205,6 +204,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
 
   # ***** MERGING AND SPLITTING (should be totally optional) *****
 
+  # TODO
 
   # ***** MERGING AND SPLITTING (should be totally optional) *****
 
