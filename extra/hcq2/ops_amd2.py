@@ -213,13 +213,13 @@ pm_sdma_opsel = PatternMatcher([
   (UPat(Ops.INS, arg="store", src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val")), name="ins"), sdma_store),
 ])
 
-def sdma_submit(cmdbuf, devs):
+def sdma_submit(cmdbuf, devs, qname:str):
   # the cmdbuf to submit + the patch writes that fill it
   size_dw, zero = cmdbuf.nbytes() // dtypes.uint32.itemsize, UOp.const(0, dtypes.int)
 
   # the sdma queue's ring and its host-side ring/write/put pointers
-  for d in devs: q = Device[d].sdma_queue(0)
-  ring, wptr, doorbell, put_ptr = queue_ptrs(devs, "COPY:0", q)
+  for d in devs: q = Device[d].sdma_queue(int(qname.split(":", 1)[1]))
+  ring, wptr, doorbell, put_ptr = queue_ptrs(devs, qname, q)
 
   # sdma needs the cmdbuf contiguous: if it won't fit before the ring end, restart at 0 and zero the tail
   put_b = put_ptr.index(zero)
@@ -244,7 +244,7 @@ def sdma_submit(cmdbuf, devs):
   return doorbell.after(flush).index(zero).store(next_put_b)
 
 pm_sdma_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
-  lambda ctx, lin: sdma_submit(make_cmdbuf(lin, ctx.devs), ctx.devs))])
+  lambda ctx, lin: sdma_submit(make_cmdbuf(lin, ctx.devs), ctx.devs, ctx.qname))])
 
 # *****************
 # USB submit
