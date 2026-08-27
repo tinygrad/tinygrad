@@ -358,7 +358,7 @@ def split_store(x:UOp) -> UOp|None:
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
-  return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values())
+  return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*[x.flatten() for x in lctx.map.values()])
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
