@@ -51,7 +51,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
 \op{Param} & () & slot, dtype, size?, device?, addrspace? &
-  Placeholder with flat storage of $\mathrm{size}$ elements (concrete, never symbolic; absent for scalars). Substituted in \op{Function}. \\[4pt]
+  Placeholder with flat storage of $\mathrm{size}$ elements. Substituted in \op{Call}. \\[4pt]
 \op{Buffer} & () & slot, dtype, size, device, addrspace &
   Concrete buffer slot with flat storage of $\mathrm{size}$ elements. \\
 \op{Const} & () & value, dtype &
