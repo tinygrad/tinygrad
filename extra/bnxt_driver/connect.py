@@ -53,7 +53,7 @@ def qp_info(dev:BNXTDev, qp:BNXTQP) -> dict[str, Any]:
   return {"qpn":qp.qpn, "mac":dev.mac.to_bytes(6, "big").hex(), "gid":dev.local_gid.hex()}
 
 def server():
-  dev = BNXTDev(PCIDevice("bnxt", os.getenv("BNXT_PCI", "0000:41:00.0"), remove_siblings=False), ip=os.getenv("BNXT_IP", REMOTE_IP))
+  dev = BNXTDev(PCIDevice("bnxt", os.getenv("BNXT_PCI", "0000:41:00.0")), ip=os.getenv("BNXT_IP", REMOTE_IP))
   qp = BNXTQP(dev)
   print(json.dumps(qp_info(dev, qp)), flush=True)
 
@@ -89,7 +89,7 @@ def client():
   assert remote.stdin is not None and remote.stdout is not None
   remote_info = read_json(remote.stdout, "QP information")
   print("booting local")
-  dev = BNXTDev(PCIDevice("bnxt", LOCAL_PCI, remove_siblings=False), ip=LOCAL_IP)
+  dev = BNXTDev(PCIDevice("bnxt", LOCAL_PCI), ip=LOCAL_IP)
   qp = BNXTQP(dev)
 
   send_line(remote.stdin, qp_info(dev, qp))

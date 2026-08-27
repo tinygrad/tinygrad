@@ -158,7 +158,7 @@ System = _System()
 # *** PCI Devices
 
 class PCIDevice:
-  def __init__(self, devpref:str, pcibus:str, remove_siblings:bool=True):
+  def __init__(self, devpref:str, pcibus:str):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.pcibus, self.irq_poller = pcibus, None
 
@@ -170,9 +170,8 @@ class PCIDevice:
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"): raise RuntimeError(f"Driver is bound to {pcibus}")
 
     # remove sibling functions of the gpu, if any
-    if remove_siblings:
-      for fn in range(1, 8):
-        if FileIOInterface.exists(sib:=f"/sys/bus/pci/devices/{self.pcibus[:-1]}{fn}"): FileIOInterface(f"{sib}/remove", os.O_WRONLY).write("1")
+    for fn in range(1, 8):
+      if FileIOInterface.exists(sib:=f"/sys/bus/pci/devices/{self.pcibus[:-1]}{fn}"): FileIOInterface(f"{sib}/remove", os.O_WRONLY).write("1")
 
     if getenv("VFIO", 0) and (vfio_fd:=System.vfio) is not None:
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")

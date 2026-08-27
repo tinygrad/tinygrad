@@ -21,7 +21,7 @@ BNXT_IP = os.getenv("BNXT_IP", "10.0.200.5")
 
 if __name__ == "__main__":
   print(f"[init] BNXT at {BNXT_PCI}")
-  dev = BNXTDev(PCIDevice("bnxt", BNXT_PCI, remove_siblings=False), ip=BNXT_IP)
+  dev = BNXTDev(PCIDevice("bnxt", BNXT_PCI), ip=BNXT_IP)
   tx_qp, rx_qp = BNXTQP(dev), BNXTQP(dev)
   print(f"[init] loopback-connect TX QP 0x{tx_qp.qpn:x} <-> RX QP 0x{rx_qp.qpn:x}")
   tx_qp.connect(rx_qp.qpn, dev.local_gid, dev.mac)
