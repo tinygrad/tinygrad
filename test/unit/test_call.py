@@ -67,8 +67,8 @@ class TestCall(unittest.TestCase):
     Tensor.realize(a, b)
 
     # we define a gemm function
-    x = UOp.param(0, dtypes.float, (M, K))
-    y = UOp.param(1, dtypes.float, (K, N))
+    x = UOp.param(0, dtypes.float, shape=(M, K))
+    y = UOp.param(1, dtypes.float, shape=(K, N))
     c = Tensor.call(a, b, fxn=x@y)
 
     np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), rtol=1e-5, atol=1e-6)
