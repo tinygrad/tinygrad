@@ -1198,8 +1198,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     body = self if self.op is Ops.TUPLE else UOp.maketuple(self)
     return UOp(Ops.FUNCTION, src=(body,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
-    kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
+    placeholders = [UOp.placeholder_like(s.flatten(), slot=i).reshape(s.shape) for i,s in enumerate(srcs)]
+    kernel = fxn(*placeholders).call(*[s.flatten() for s in srcs], grad_fxn=grad_fxn)
     return [s.after(kernel) for s in srcs]
 
   def to_elf(self) -> TinyELF:
