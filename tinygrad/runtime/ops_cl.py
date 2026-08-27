@@ -54,7 +54,7 @@ class CLProgram(Program['CLDevice']):
 
   def __call__(self, *bufs:cl.cl_mem, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None, vals:tuple[int, ...]=(),
                wait=False, **kw) -> float|None:
-    for i, (_, slot, dt, shape) in enumerate(self.signature):
+    for i, (_, slot, dt, shape, _) in enumerate(self.signature):
       b = bufs[slot] if slot < len(bufs) else getattr(ctypes, f"c_int{dt.bitsize}")(vals[slot-len(bufs)])
       if is_image_shape(shape):
         pitch = (round_up(shape[1], 256) if OSX else shape[1]) * 4 * dt.itemsize
