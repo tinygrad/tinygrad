@@ -389,8 +389,6 @@ pre_isel_matcher = PatternMatcher([
 ]) + pm_float_to_int + pm_int_to_float
 
 isel_matcher = PatternMatcher([
-  # renderer lowering can synthesize bare bool constants after the canonical CAST(CONST) pass
-  (UPat.cvar("x", dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.val else 0),), tag=GP_SGPRS)),
   # --- control flow ---
   (UPat(Ops.RANGE, name="rng"), lambda ctx,rng:
     rng.replace(src=rng.src + (UOp(Ops.INS, arg=RDNA3Ops.s_mov_b32, src=(execop,), tag=ctx.ren.vreg(GP_SGPRS)),),

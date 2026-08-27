@@ -59,7 +59,8 @@ class LinearScanRegallocContext:
       if v not in self.spills:
         self.spills[v], self.ren.spill_size = self.ren.assign_spill_slot(v, self.vdef(v))
       rs = alloc(v, [cons] if cons is not None else None, i)
-      self.insert_before.setdefault(i, []).append((v, rs))
+      if v.phi is None: # NOTE: phis insert their own fills at rewrite time
+        self.insert_before.setdefault(i, []).append((v, rs))
       return rs
 
     for i,u in enumerate(self.uops):
@@ -106,14 +107,19 @@ class LinearScanRegallocContext:
           if v not in live or live[v] != rs: live[v] = fill(v, i, rs)
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
-  i, nsrc, = next(ctx.idx), []
+  i, nsrc, before = next(ctx.idx), [], []
   for j,s in enumerate(x.src):
-    if i in ctx.reals and isinstance((v := rdef(ctx.uops[i].src[j])), VRegister) and v.or_parent() in ctx.spills:
-      nsrc.append(s.replace(tag=ctx.reals[i][v]))
+    if i in ctx.reals and isinstance((v := rdef(ctx.uops[i].src[j])), VRegister) and (vv := v.or_parent()) in ctx.spills:
+      if vv.phi is not None:
+        # spilled PHIs must be filled at every use.
+        filled, fills = ctx.ren.fill(ctx.spills[vv], v.pos if v.is_sub() else None, ctx.vdef(vv), ctx.reals[i][v])
+        nsrc.append(filled)
+        before.extend(fills)
+      else: nsrc.append(s.replace(tag=ctx.reals[i][v]))
     else:
       nsrc.append(s)
 
-  ndefs, after, before = [], [], []
+  ndefs, after = [], []
   for v in rdefs(x):
     if isinstance(v, VRegister): ndefs.extend(ctx.reals[i][v])
     else: ndefs.append(v)
