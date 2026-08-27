@@ -15,7 +15,8 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
   ret:list[UOp] = []
   for i, x in enumerate(ms.src):
     if x.op is Ops.COPY:
-      ret.append(_apply_shrink(shrink.marg, x.src[0], i).copy_to_device(x.device))
+      src = _apply_shrink(shrink.marg, x.src[0], i)
+      ret.append(src.contiguous() if src.device == x.device else src.copy_to_device(x.device))
     else:
       ret.append(_apply_shrink(shrink.marg, x, i).contiguous())
   return ms.replace(src=tuple(ret))
@@ -35,9 +36,11 @@ replace_allreduce = PatternMatcher([
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
   # move shrink before MSTACK
   (UPat(Ops.SHRINK, src=(UPat(Ops.MSTACK, name="ms"),), allow_any_len=True, name="shrink"), mstack_early_shrink),
-  # move MSELECT before movement ops
+  # move MSELECT before movement/ALU ops
   (UPat(Ops.MSELECT, src=(UPat(GroupOp.Movement, src=(UPat.var("s"),), allow_any_len=True, name="v"),), name="ms"),
    lambda s,v,ms: v.replace(src=(s.mselect(ms.arg),)+v.src[1:])),
+  (UPat(Ops.MSELECT, src=(UPat(GroupOp.ALU, name="a"),), name="ms"), lambda a,ms:
+   a.replace(src=tuple(s.mselect(ms.arg) if isinstance(s.device, tuple) else s for s in a.src))),
 ])
 
 _early_allreduce = PatternMatcher([

@@ -10,6 +10,9 @@ rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.ta
 linux_headers_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-libc-dev_6.18.9-1_all.deb"
 linux_headers_kern_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-headers-6.18.9+deb14-common_6.18.9-1_all.deb"
 liburing_src = "https://raw.githubusercontent.com/axboe/liburing/refs/tags/liburing-2.14/src/include/liburing.h"
+bnxt_src = ["https://raw.githubusercontent.com/torvalds/linux/v6.18/drivers/" + s for s in
+            ("infiniband/hw/bnxt_re/roce_hsi.h", "infiniband/hw/bnxt_re/qplib_rcfw.h", "infiniband/hw/bnxt_re/qplib_res.h",
+             "net/ethernet/broadcom/bnxt/bnxt_hwrm.h")]
 ggml_common_src = "https://raw.githubusercontent.com/ggml-org/ggml/d4fcfe88a8bcf5c9840be14be6c2fbf1f5b3b2db/src/ggml-common.h"
 cudart_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-12.0.146-archive.tar.xz"
 nvrtc_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.0.140-archive.tar.xz"
@@ -181,6 +184,20 @@ def __getattr__(nm):
       return load("mlx5", [root/"extra/mlx_driver/mlx5.h", f"{kh}/mlx5_ifc.h"], srcs=linux_headers_kern_deb,
                   args=["-Du8=unsigned char", "-Du16=unsigned short", "-Du32=unsigned int", "-Du64=unsigned long long",
                         "-D__be16=unsigned short", "-D__be32=unsigned int", "-D__be64=unsigned long long", f"-I{kh}"],
+                  preprocess=lambda path: subprocess.run(f"ar x {linux_headers_kern_deb.split('/')[-1]} && tar xf data.tar.xz",
+                                                         cwd=path, shell=True, check=True))
+    case "bnxt":
+      kh = "{}/usr/src/linux-headers-6.18.9+deb14-common/include"
+      return load("bnxt", [f"{kh}/linux/bnxt/hsi.h", *[f"{{}}/{s.split('/')[-1]}" for s in bnxt_src]],
+                  srcs=[linux_headers_kern_deb, *bnxt_src],
+                  args=["-Du8=unsigned char", "-Du32=unsigned int", "-Du64=unsigned long long", "-D__le16=unsigned short",
+                        "-D__le32=unsigned int", "-D__le64=unsigned long long", "-D__be16=unsigned short", "-D__be32=unsigned int", f"-I{kh}"],
+                  patterns=[r"hwrm_((ver_get|func_(qcaps|qcfg|reset|drv_rgtr|backing_store_(qcaps|cfg)_v2)|stat_ctx_alloc|ring_alloc"
+                            r"|vnic_(alloc|cfg)|cfa_l2_filter_alloc|port_phy_cfg)_(input|output)|(cmd|resp)_hdr)$",
+                            r"((cmdq|creq)_(base|init|add_gid|create_(cq|qp)|initialize_fw|modify_qp|query_version|register_mr)(_resp)?"
+                            r"|cq_(base|req)|sq_(rdma_hdr|sge))$",
+                            r"(BNXT|CMDQ|CREQ|CQ|SQ|DBC|PTU|RCFW|HWRM|VNIC|RING_ALLOC|STAT_CTX|CFA_L2_FILTER|PORT_PHY_CFG|FIRMWARE_FIRST"
+                            r"|FUNC_(QCAPS|QCFG|RESET|DRV_RGTR|BACKING_STORE))_"],
                   preprocess=lambda path: subprocess.run(f"ar x {linux_headers_kern_deb.split('/')[-1]} && tar xf data.tar.xz",
                                                          cwd=path, shell=True, check=True))
     case _: raise AttributeError(f"no such autogen: {nm}")

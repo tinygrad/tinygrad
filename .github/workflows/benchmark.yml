@@ -102,12 +102,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -149,12 +148,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -198,12 +196,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
@@ -241,12 +238,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -287,12 +283,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -340,12 +335,11 @@ jobs:
     - name: Setup (AMD)
       if: ${{ matrix.dev == 'AMD' }}
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py amd rmmod
-        ./extra/hcq/hcq_smi.py amd kill_pids
+        ./extra/hcq/hcq_smi.py amd rmmod --expect
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
     - name: Setup (NV)
       if: ${{ matrix.dev == 'NV' }}
-      run: sudo lsof -tQ /dev/nvidia* | { xargs -r sudo kill -9 || true; }
+      run: lsof -tQ /dev/nvidia* | { xargs -r kill -9 || true; }
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -437,32 +431,70 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: Kill stale pids
       run: |
-        PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
-        PYTHONPATH=. ./extra/hcq/hcq_smi.py nv kill_pids
-    # since sudo is required for usbgpu on macos, do not write bytecode, as some of the files are owned by root
+        ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
+        ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: UsbGPU boot time
-      run: sudo -E PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
+      run: GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU tiny tests
-      run: sudo -E PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
+      run: GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
     - name: UsbGPU copy speeds
-      run: sudo -E PYTHONDONTWRITEBYTECODE=1 SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
-    #- name: UsbGPU openpilot test
-    #  run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+      run: SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     - name: UsbGPU (USB4/TB) install script
-      run: PYTHONPATH=. sh extra/setup_tinygpu_osx.sh
+      run: sh extra/setup_tinygpu_osx.sh
     - name: UsbGPU (USB4/TB) boot time
-      run: PYTHONPATH=. DEBUG=3 DEV=PCI+NV:NAK time python3.11 test/test_tiny.py TestTiny.test_plus
+      run: DEBUG=3 DEV=PCI+NV:NAK time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU (USB4/TB) tiny tests
-      run: PYTHONPATH=. DEV=PCI+NV:NAK python3.11 test/test_tiny.py
+      run: DEV=PCI+NV:NAK python3.11 test/test_tiny.py
 
-  testcommalatest:
-    name: comma Benchmark (0.11.2)
+  testcomma:
+    strategy:
+      matrix:
+        dev: ['QCOM', 'QCOM:IR3']
+        version: ['0.11.0', '0.11.2']
+        model: ['vision', 'policy', 'supercombo', 'dmonitoring']
+        # exclude non-existent models
+        exclude: [{ version: '0.11.0', model: supercombo }, { version: '0.11.2', model: vision }, { version: '0.11.2', model: policy }]
+        include:
+          - version: '0.11.0'
+            model: vision
+            url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
+            timing: 17
+          - version: '0.11.0'
+            model: policy
+            url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
+            timing: 3.2
+          - version: '0.11.0'
+            model: dmonitoring
+            url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/dmonitoring_model.onnx
+            timing: 11
+          - version: '0.11.2'
+            model: supercombo
+            url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
+            timing: 26
+          - dev: QCOM:IR3
+            version: '0.11.2'
+            model: supercombo
+            timing: 41
+          - version: '0.11.2'
+            model: dmonitoring
+            url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
+            timing: 11
+          # IR3 dmonitoring is slightly slower
+          - dev: QCOM:IR3
+            model: dmonitoring
+            timing: 12
+      fail-fast: false
+    name: openpilot ${{ matrix.version }} compile3 ${{ matrix.model }} (DEV=${{ matrix.dev }})
     runs-on: [self-hosted, Linux, comma]
-    timeout-minutes: 12
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash -e -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
+    env:
+      DEV: ${{ matrix.dev }}
+      ASSERT_MIN_STEP_TIME: ${{ matrix.timing }}
+      BENCHMARK_LOG: ${{ matrix.dev == 'QCOM:IR3' && 'ir3_' || '' }}openpilot_${{ matrix.version }}_${{ matrix.model }}
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -473,45 +505,10 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: openpilot compile3 0.11.2 supercombo
-      run: BENCHMARK_LOG=openpilot_0_11_2_supercombo PYTHONPATH="." ASSERT_MIN_STEP_TIME=26 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
-    - name: openpilot compile3 0.11.2 supercombo (from pickle)
-      run: BENCHMARK_LOG=openpilot_0_11_2_supercombo_run_pickle RUN_PICKLE=1 PYTHONPATH="." ASSERT_MIN_STEP_TIME=26 DEV=QCOM taskset -c 4-7 python3 examples/openpilot/compile3.py
-    - name: IR3 openpilot compile3 0.11.2 supercombo
-      run: BENCHMARK_LOG=ir3_openpilot_0_11_2_supercombo PYTHONPATH="." ASSERT_MIN_STEP_TIME=41 DEV=QCOM:IR3 FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
-    - name: openpilot compile3 0.11.2 dmonitoring
-      run: BENCHMARK_LOG=openpilot_0_11_2_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=11 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
-    - name: Run process replay tests
-      uses: ./.github/actions/process-replay
-
-  testcommaold:
-    name: comma Benchmark (0.11.0)
-    runs-on: [self-hosted, Linux, comma]
-    timeout-minutes: 12
-    defaults:
-      run:
-        shell: bash -e -o pipefail {0}
-    if: github.repository_owner == 'tinygrad'
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: setup staging db
-      if: github.ref == 'refs/heads/update_benchmark_staging'
-      run: |
-        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
-        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
-    - name: reset process replay
-      run: test/external/process_replay/reset.py
-    - name: openpilot compile3 0.11.0 driving_vision
-      run: BENCHMARK_LOG=openpilot_0_11_0_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
-    - name: openpilot compile3 0.11.0 driving_vision (from pickle)
-      run: BENCHMARK_LOG=openpilot_0_11_0_vision_run_pickle RUN_PICKLE=1 PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM taskset -c 4-7 python3 examples/openpilot/compile3.py
-    - name: IR3 openpilot compile3 0.11.0 driving_vision
-      run: BENCHMARK_LOG=ir3_openpilot_0_11_0_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=18 DEV=QCOM:IR3 FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
-    - name: openpilot compile3 0.11.0 driving_policy
-      run: BENCHMARK_LOG=openpilot_0_11_0_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=3.2 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
-    - name: openpilot compile3 0.11.0 dmonitoring
-      run: BENCHMARK_LOG=openpilot_0_11_0_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=11 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/dmonitoring_model.onnx
+    - name: compile
+      run: FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py ${{ matrix.url }}
+    - name: run pickle
+      run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" RUN_PICKLE=1 taskset -c 4-7 python3 examples/openpilot/compile3.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -588,9 +585,8 @@ jobs:
       uses: actions/checkout@v6
     - name: Setup
       run: |
-        ./extra/amdpci/setup_python_cap.sh
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} rmmod
-        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} kill_pids
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} rmmod --expect
+        ./extra/hcq/hcq_smi.py ${{ matrix.dev }} kill_pids --sudoless
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
     - name: setup staging db
