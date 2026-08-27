@@ -33,7 +33,7 @@ class TestRingAllReduce(unittest.TestCase):
       # N*(N-1) copies for input and output
       copy_count = N*(N-1)*2
       if len(copies) != copy_count: raise KernelCountException(copy_count, len(copies))
-      # N*(N-1) remote shrinks becoming contigs, N ALU, N extra contig, reassembly (cat), and mul
+      # N*(N-1) shrinks from other devices becoming contigs, N ALU, N extra contig, reassembly (cat), and mul
       sink_count = (N*(N-1))+(N)+(N)+(1)+(1)
       if len(sinks) != sink_count: raise KernelCountException(sink_count, len(sinks))
       # correctness
