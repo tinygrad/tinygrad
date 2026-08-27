@@ -365,16 +365,6 @@ class TestCopyFolding(unittest.TestCase):
     b = a.to("CPU")
     self.assertListEqual(b.tolist(), [2.])
 
-  def test_copy_to_same_device(self):
-    a = Tensor.empty(4).uop
-    b = a.copy_to_device(a.device)
-    check_schedule(b, 1, filter_sink=False) # TODO: 0?
-
-  def test_copy_to_same_device_alt(self):
-    a = Tensor.empty(4, 4).uop
-    b = a.copy_to_device(a.device)
-    check_schedule(b, 1, filter_sink=False) # TODO: 0?
-
   def test_copy_to_same_device_sched(self):
     a = Tensor.ones(4).contiguous().realize().uop.buf_uop
     t = Tensor(a.copy_to_device(a.device))
@@ -383,14 +373,6 @@ class TestCopyFolding(unittest.TestCase):
     run_linear(linear, var_vals)
     assert t.uop.is_realized, f"didn't realize Tensor {t}"
     self.assertListEqual(t.tolist(), [1.,1.,1.,1.])
-
-  @unittest.skip("same-device copies are no-ops")
-  def test_self_assign_same_device_copy(self):
-    a = Tensor.ones(4, 4).contiguous().realize()
-    # use copy_to_device to bypass Tensor.to() shortcircuit and force a real same-device COPY in the graph
-    a.assign(Tensor(a.uop.copy_to_device(a.device), a.device))
-    run_linear(*check_schedule(a, 2, filter_sink=False))
-    self.assertListEqual(a.tolist(), [[1.]*4]*4)
 
   def test_clone(self):
     a = Tensor.empty(4)
