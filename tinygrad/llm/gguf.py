@@ -40,8 +40,8 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
 
   def q_to_uint8(t: Tensor, b: int) -> Tensor:
     # TODO: rewrite with arange?
-    shift_tensor, bitmask = Tensor.const(tuple(2**(i*b) for i in range(8//b)), t.dtype), 0xff >> (8 - b)
-    return t.unsqueeze(-1).div(shift_tensor, rounding_mode="trunc").bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
+    shift_tensor, bitmask = Tensor.const(tuple(i*b for i in range(8//b)), t.dtype), 0xff >> (8 - b)
+    return t.unsqueeze(-1).rshift(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   if (nelements_nbytes := _GGML_QUANT.get(ggml_type)) is not None:
     from tinygrad.runtime.autogen import ggml_common as _ggml

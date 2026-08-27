@@ -5,6 +5,10 @@ from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
 
+def _peel_cast(u):
+  while u.op is Ops.CAST: u = u.src[0]
+  return u
+
 def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # first try the tensor cores
   """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
@@ -58,24 +62,37 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
+  # also matches fused quantized GEMV (one MUL operand is a load, the other is packed dequant)
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
   if k.ren.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
-    k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.ren.has_shared and \
-    (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.INDEX and mulop.src[1].op is Ops.INDEX:
-    idx0, idx1 = mulop.src[0].src[1].get_idx(), mulop.src[1].src[1].get_idx()
-    if k.ranges_of(AxisType.REDUCE):
+    k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.ren.has_shared:
+    mulop = _peel_cast(k.reduceop.src[0])
+    vecs = [_peel_cast(s) for s in mulop.src] if mulop.op is Ops.MUL else []
+    vecs = [s for s in vecs if s.op is Ops.INDEX]
+    if vecs and k.ranges_of(AxisType.REDUCE):
       first_reduce_rng = k.ranges_of(AxisType.REDUCE)[0]
-      if any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges):
+      if len(vecs) == 2:
+        idx0, idx1 = vecs[0].src[1].get_idx(), vecs[1].src[1].get_idx()
+        matvec = any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges)
+      else:
+        matvec = first_reduce_rng in vecs[0].src[1].get_idx().ranges
+      if matvec:
         for global_idx in k.axes_of(AxisType.GLOBAL):
-          if first_reduce_rng.src[0].divides(MV_THREADS_PER_ROW) is not None and k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
-            if DEBUG >= 3:
-              print(f"MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
-            try:
-              if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
-            except KernelOptError: pass
-            if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
-            if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
-            return k
+          if not resolve(k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0, False): continue
+          # dense gemv uses 8 threads/row. fused dequant uses 8 if it divides the leading reduce, else 16/32.
+          # grouping by 4 was a regression on Q3_K (heavy ALU); skip matvec if nothing fits.
+          threads = MV_THREADS_PER_ROW
+          if len(vecs) == 1:
+            threads = next((t for t in (8, 16, 32) if first_reduce_rng.src[0].divides(t) is not None), 0)
+          if not threads or first_reduce_rng.src[0].divides(threads) is None: continue
+          if DEBUG >= 3:
+            print(f"MATVEC: {k.full_shape=} {first_reduce_rng.render()} {threads=} {MV_BLOCKSIZE=} {MV_ROWS_PER_THREAD=}")
+          try:
+            if threads > 1: k.apply_opt(Opt(OptOps.GROUP, 0, threads))
+          except KernelOptError: pass
+          if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
+          if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
+          return k
 
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS else 2048), False):
