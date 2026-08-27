@@ -75,8 +75,8 @@ pm_range_migration = PatternMatcher([
   # if INDEX is on STAGE with the same ranges, remove the pair
   (UPat(Ops.STAGE, allow_any_len=True, name="s").index(allow_any_len=True, name="i"),
    lambda s,i: s.src[0] if s.src[1:] == i.src[1:] else None),
-  # reshape of a single element shaped value to scalar is an index
-  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(0) if x.marg == () and x.src[0].shape == (1,) else None),
+  # RESHAPE to scalar is INDEX
+  (UPat(Ops.RESHAPE, name="x"), lambda x: x.src[0].index(*[0 for _ in range(x.src[0].ndim)]) if x.shape == () else None),
   # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").index(name="idx", allow_any_len=True), _mop_index),
   (UPat(Ops.STACK, name="stack").index(name="idx", allow_any_len=True), index_on_stack),

@@ -150,9 +150,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="shp"),), name="cpy"), lambda shp,cpy: shp.src[0].copy_to_device(cpy.device).reshape(shp.shape)),
 
   # reshaping on STORE can be a NOOP
-  #(UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),
-  #                      UPat(Ops.RESHAPE, src=(UPat.var("src",),), allow_any_len=True))),
-  # lambda dst,src: dst.store(src) if dst.shape == src.shape else None),
+  (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),
+                        UPat(Ops.RESHAPE, src=(UPat.var("src",),), allow_any_len=True))),
+   lambda dst,src: dst.store(src) if dst.shape == src.shape else None),
 
   # ** store rules **
 
@@ -182,19 +182,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # remove movement ops from SINK/AFTER. TODO: should be generic
   (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src if u.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u) for u in s.src[1:] if u.op is not Ops.NOOP))),
-
-  # ** hacks for new rangeify **
-
-  # CALL inputs need buffer identity (and to be flat)
-  (UPat(Ops.CALL, name="c"),
-   lambda c: c.replace(src=c.src[0:1]+tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src[1:]))),
-
-  # MSTACK inputs need buffer identity
-  (UPat(Ops.MSTACK, name="c"),
-   lambda c: c.replace(src=tuple(x.contiguous() if not x.has_buffer_identity(after_ok=True) else x for x in c.src))),
-
-  # STORE to () is reshaped to (1,)
-  (UPat(Ops.STORE, name="s"), lambda s: s.src[0].reshape((1,)).store(s.src[1].reshape((1,))) if s.shape == () else None),
 ])
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
