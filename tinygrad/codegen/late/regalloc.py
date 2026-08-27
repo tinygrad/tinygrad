@@ -35,7 +35,6 @@ class LinearScanRegallocContext:
     self.reals: dict[int, dict[VRegister, tuple[Register,...]]] = {} # mapping from virtual to real at each program point
     self.insert_before: dict[int, list[tuple[Register, tuple[Register,...]]]] = {} # fills to be inserted at each program point
     live: dict[VRegister, tuple[Register,...]] = {} # mapping from virtual to real that's currently assigned to it
-    phi_use: dict[VRegister, int] = {}
     live_ins: list[dict[VRegister, tuple[Register,...]]] = [] # mapping from virtual to real at loop entry
 
     # allocate the best register. Registers not in live or not used again are free and have priority,
@@ -47,14 +46,12 @@ class LinearScanRegallocContext:
       block = max(cons, key=lambda b: min(next((j-i for j in lr[live_inv[r]] if j >= i), len(self.uops)) \
         if r in live_inv else len(self.uops) for r in b))
 
-      pressure = len([b for b in cons if any(r in live_inv and lr[live_inv[r]][-1] > i for r in b)])
       for r in block:
         if r in live_inv and (v := live_inv.get(r)) in live:
           live.pop(v)
-          # phi evictions must be handled carefully to ensure loop carried
-          # use gets reloaded and not silently clobbered
-          if v.phi is not None and v not in self.spills and v in phi_use and i <= lr[v][-1]:
-            fill(v, phi_use[v], (r,))
+          # phi evictions must be handled carefully to ensure loop carry gets reloaded and not silently clobbered
+          if v.phi is not None and v not in self.spills and i <= lr[v][-1]:
+            fill(v, self.live_intervals[v][1], (r,))
       return block
 
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
@@ -71,8 +68,7 @@ class LinearScanRegallocContext:
         # HACK: cause of later hacks to lower range
         if u.op is Ops.END: continue
         if not isinstance(v:=rdef(s), VRegister): continue
-        if (vv := v.or_parent()).phi is not None: phi_use[vv] = i
-        if vv not in live: live[vv] = fill(vv,i)
+        if (vv := v.or_parent()) not in live: live[vv] = fill(vv,i)
         self.reals.setdefault(i, {})[v] = (live[vv][v.pos],) if v.is_sub() else live[vv]
 
       # allocate defs
