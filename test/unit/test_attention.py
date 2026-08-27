@@ -73,10 +73,10 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     return Tensor.linspace(start, stop, int(np.prod(shape)), dtype=dtypes.float32).reshape(*shape)
 
   def _make_config(self, **kwargs):
-    return TransformerConfig(**({"num_blocks":1, "dim":32, "hidden_dim":64, "n_heads":1, "n_kv_heads":1,
-                                 "norm_eps":1e-5, "vocab_size":32, "head_dim":32, "rope_theta":10000.0,
-                                 "rope_dim":32, "v_head_dim":32, "max_context":4, "ssm_layers":(True,),
-                                 "ssm":SSMConfig(conv_kernel=2, state_size=32, group_count=1, time_step_rank=1, inner_size=32)} | kwargs))
+    return TransformerConfig(**({"num_blocks":1, "dim":8, "hidden_dim":16, "n_heads":1, "n_kv_heads":1,
+                                 "norm_eps":1e-5, "vocab_size":32, "head_dim":8, "rope_theta":10000.0,
+                                 "rope_dim":8, "v_head_dim":8, "max_context":4, "ssm_layers":(True,),
+                                 "ssm":SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4)} | kwargs))
 
   def _make_block(self, config:TransformerConfig) -> GatedDeltaNetBlock:
     block = GatedDeltaNetBlock(config, config.ssm)
@@ -229,7 +229,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha[..., None], rtol=1e-5, atol=1e-5)
 
   def test_kda_prefill_matches_decode(self):
-    config = self._make_config(ssm=SSMConfig(conv_kernel=2, state_size=32, group_count=1, time_step_rank=1, inner_size=32, kda=True))
+    config = self._make_config(ssm=SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=True))
     block = GatedDeltaNetBlock(config, config.ssm)
     for p in nn.state.get_parameters(block):
       p.replace(self._tensor_linspace(-0.05, 0.05, p.shape) if len(p.shape) > 1 else self._tensor_linspace(0.05, 0.1, p.shape))
@@ -245,7 +245,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
 
   def test_varied_chunk_sizes_match_decode(self):
     for kda in (False, True):
-      ssm = SSMConfig(conv_kernel=2, state_size=32, group_count=1, time_step_rank=1, inner_size=32, kda=kda)
+      ssm = SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=kda)
       config = self._make_config(ssm=ssm)
       if kda:
         block = GatedDeltaNetBlock(config, config.ssm)
@@ -267,7 +267,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
         np.testing.assert_allclose(chunked_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
 
   def test_start_zero_resets_realized_state(self):
-    config, x = self._make_config(max_context=3), self._tensor_linspace(-1, 1, (1, 3, 32))
+    config = self._make_config(max_context=3)
+    x = self._tensor_linspace(-1, 1, (1, 3, config.dim))
     block = self._make_block(config)
     self._run_attention(block, x, 0)
     restarted = self._run_attention(block, x[:, :2], 0)
