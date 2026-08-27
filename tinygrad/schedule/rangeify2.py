@@ -105,6 +105,8 @@ class SplitCtx:
 def _split_graph(ctx:SplitCtx, u:UOp) -> UOp|None:
   if u.tag is not None: return None
   if u.addrspace != ctx.addrspace: return None
+  # ALU params are scalar symbolic values, not buffers: they are already params and bind by name in the outer LINEAR
+  if u.op is Ops.PARAM and u.arg.addrspace is AddrSpace.ALU: return None
   us = u.flatten() if u.addrspace == AddrSpace.GLOBAL else u
   ctx.call_args.append(us)
   return us.param_like(len(ctx.call_args)-1).rtag().reshape(u.shape)
