@@ -9,7 +9,8 @@ from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
 def walk_mop(u:UOp):
-  if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD}: return walk_mop(u.src[0])
+  if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD, Ops.BITCAST}: return walk_mop(u.src[0])
+  if u.op is Ops.AFTER and (b:=walk_mop(u.src[0])) is not u.src[0]: return b.after(*u.src[1:])
   return u
 
 def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
@@ -141,10 +142,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # copy to same device is a no-op
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
-
-  # COPY transfers a contiguous range, so materialize a source that's resized (shrink/pad/expand) or reordered (permute/flip)
-  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),), name="c"),
-   lambda c,r: c.replace(src=(r.contiguous(),)) if resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None else None),
 
   # copy on reshape is reshape on copy
   (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="shp"),), name="cpy"), lambda shp,cpy: shp.src[0].copy_to_device(cpy.device).reshape(shp.shape)),
