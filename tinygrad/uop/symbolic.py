@@ -26,7 +26,7 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   return root.const_like(bitcast(truncate[c.dtype](c.val), c.dtype, root.dtype))
 
 # no truncate: ints stay mathematical past the fold (emission truncates); floats re-round in the mint
-def fold_const_alu(a:UOp) -> UOp: return a.const_like(exec_alu(a.op, a.dtype, [const_arg(s) for s in a.src], False))
+def fold_const_alu(a:UOp, truncate=False) -> UOp: return a.const_like(exec_alu(a.op, a.dtype, [const_arg(s) for s in a.src], truncate))
 
 def _quotient_base(q:UOp, base:UOp, div:int) -> UOp|None:
   # the B with q == B//div and B%div == base%div, or None. only such congruence is needed to recombine, and canonicalization
