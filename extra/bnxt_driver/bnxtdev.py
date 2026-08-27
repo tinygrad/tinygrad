@@ -1,8 +1,7 @@
 import ctypes, struct
 from tinygrad.helpers import ceildiv, getenv, wait_cond, DEBUG
 from tinygrad.runtime.autogen import bnxt, pci
-from tinygrad.runtime.support.rdma import ipv4_to_gid
-from tinygrad.runtime.support.system import PCIDevice, System
+from tinygrad.runtime.support.system import PCIDevice, System, ipv4_to_gid
 
 BNXT_DEBUG = getenv("BNXT_DEBUG", 0)
 BNXT_ACCESS, BNXT_INIT_MASK, BNXT_RTR_MASK, BNXT_RTS_MASK = 3, 0xd, 0x41515ad, 0xae005

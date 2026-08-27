@@ -28,7 +28,7 @@ REMOTE_IP = os.getenv("REMOTE_IP", "10.0.200.6")
 MESSAGE = os.getenv("RDMA_MESSAGE", "Test message, rdma works!").encode()
 REMOTE = f"{REMOTE_USER}@{REMOTE_HOST}"
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new", REMOTE]
-SYNC_FILES = ("tinygrad/runtime/autogen/bnxt.py", "tinygrad/runtime/support/rdma.py", "tinygrad/runtime/support/system.py",
+SYNC_FILES = ("tinygrad/runtime/autogen/bnxt.py", "tinygrad/runtime/support/system.py",
               "extra/bnxt_driver/bnxtdev.py", "extra/bnxt_driver/connect.py")
 
 def read_json(stream:IO[str], what:str) -> dict[str, Any]:
