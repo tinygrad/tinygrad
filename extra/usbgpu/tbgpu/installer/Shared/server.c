@@ -39,7 +39,7 @@ typedef struct { uint8_t status; uint64_t resp0, resp1; } __attribute__((packed)
 
 #define BULK_BUF_SIZE (64 << 20)
 #define MAX_BARS 6
-#define MAX_SYSMEM 128
+#define MAX_SYSMEM 8192
 
 static uint8_t g_bulk_buf[BULK_BUF_SIZE];
 static io_connect_t g_conn = IO_OBJECT_NULL;
