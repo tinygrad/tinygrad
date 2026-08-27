@@ -2,6 +2,7 @@ from typing import Literal, Callable
 import math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
+from tinygrad.codegen.decomp.op import pm_software_idiv32
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
 from tinygrad.uop.weak import commit_weak_consts
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, NUM_CPU_THREADS, IMAGE, FLOAT16, is_image_shape
@@ -427,7 +428,7 @@ class CUDARenderer(CStyleLanguage):
     Ops.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
     Ops.RECIPROCAL: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
   type_map = {dtypes.uint32: "uint", dtypes.bfloat16: "nv_bfloat16", dtypes.fp8e4m3: "__nv_fp8_e4m3", dtypes.fp8e5m2: "__nv_fp8_e5m2"}
-  extra_matcher = create_non_native_float_pats(dtypes.fp8s, casting=False) + PatternMatcher([
+  extra_matcher = pm_software_idiv32 + create_non_native_float_pats(dtypes.fp8s, casting=False) + PatternMatcher([
     (UPat(Ops.CAST, dtypes.fp8s, UPat.var("x", dtypes.fp8s), name='y'), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=y.dtype else None),
   ])
   string_rewrite = PatternMatcher([
@@ -523,7 +524,7 @@ class HIPRenderer(CStyleLanguage):
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   type_map = {dtypes.bfloat16: "hip_bfloat16", dtypes.fp8e4m3: "hip_fp8", dtypes.fp8e5m2: "hip_bf8"}
-  extra_matcher = create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s)) + PatternMatcher([
+  extra_matcher = pm_software_idiv32 + create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s)) + PatternMatcher([
     (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
       lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64), x.src[2]))
       if x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8_ocp else None),

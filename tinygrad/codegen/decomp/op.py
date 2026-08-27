@@ -63,6 +63,10 @@ def xidiv32(x:UOp, a:UOp, b:UOp) -> UOp:
   if signed: q = (q ^ s) - s
   return q.cast(x.dtype)
 
+pm_software_idiv32 = PatternMatcher([
+  (UPat(Ops.CDIV, dtypes.int32s, src=(UPat.var("a"), UPat.var("b")), name="x"), xidiv32)
+])
+
 # ***** threefry *****
 
 def threefry2x32(x: UOp, key: UOp):

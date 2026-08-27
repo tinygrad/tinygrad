@@ -3,7 +3,7 @@ from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
-from tinygrad.codegen.decomp.op import xidiv32
+from tinygrad.codegen.decomp.op import pm_software_idiv32
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
 from tinygrad.helpers import prod, Target, NUM_CPU_THREADS, getenv, OSX
@@ -243,8 +243,7 @@ class AMDLLVMRenderer(LLVMRenderer):
       f"  {ctx[x]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
       f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x]}_i32, i32 0)"),
   ]) + base_rewrite
-  extra_matcher = LLVMRenderer.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
-    (UPat(Ops.CDIV, dtypes.int32s, src=(UPat.var("a"), UPat.var("b")), name="x"), xidiv32),
+  extra_matcher = pm_software_idiv32 + LLVMRenderer.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
     # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
     (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
     (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
