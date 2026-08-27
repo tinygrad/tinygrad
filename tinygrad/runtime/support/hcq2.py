@@ -245,10 +245,11 @@ def _make_finalizers(ctx:BatchCtx) -> tuple[list[UOp], list[UOp], list[UOp]]:
 
 def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], list[tuple]]:
   # one submit per call: timeline sync on first queue use, timestamps, the call, and a signal if someone waits on it
-  src, kerns = [], []
+  src, kerns, seen_queues = [], [], set()
   for tag, ((call, _), (devices, queue), q) in enumerate(zip(ctx.batch, ctx.batch_info, call_waits)):
     # first queue use, sync prior device work with the device timeline
-    if (devices, queue) not in ctx.batch_info[:tag]:
+    if (devices, queue) not in seen_queues:
+      seen_queues.add((devices, queue))
       epoch = make_buf(devices, tag="timeline_value").index(0) - 1
       q = [UOp(Ops.INS, arg="barrier", src=()), UOp(Ops.INS, arg="wait", src=(make_buf(devices, tag="timeline_signal"), epoch))] + q
 
@@ -351,14 +352,14 @@ def split_patches(call:UOp) -> UOp|None:
 
   # split patches. addresses read in the body go through the tables too
   lanes = len(to_tuple(call.arg.aux.device))
-  inputs, internals = partition(dedup([g for p in rt_patches for g in get_getaddrs(p)] + get_getaddrs(body)), is_input_addr)
+  inputs, internals = partition(dedup(get_getaddrs(UOp.sink(body, *rt_patches))), is_input_addr)
   runtimes, systems = partition(internals, lambda g: any(x.tag in {"program", "kernargs", "cmdbuf"} for x in unwrap_mstack(g.buf_uop)))
   tables = [make_addr_table(call, gs, n, lanes if n == "inputs" else 1) for gs,n in ((inputs, "inputs"), (runtimes, "runtime"), (systems, "systems"))]
   reads, fills = {k:v for _,r,_,_ in tables for k,v in r.items()}, [f for t in tables[1:] for f in t[2]] # inputs table is filled by exec
 
   ipatches = [p for p in rt_patches if p.tag == "inputs" and all(v in tables[0][3] for v in p.src[1].src)] # only getaddrs go to the table
   gathers = make_gather_loop(ipatches, tables[0][0], tables[0][3], lt_patches, lanes) if ipatches else {}
-  body = body.substitute({p:p.substitute(gathers | reads) for p in rt_patches}).substitute(reads)
+  body = body.substitute({p:p.substitute(gathers | reads) for p in rt_patches} | reads, walk=True)
 
   lt_srcs = collections.defaultdict(list)
   for p in lt_patches: lt_srcs[p.buf_uop].append(p)
