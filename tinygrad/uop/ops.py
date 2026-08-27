@@ -1204,8 +1204,21 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape)
-                for u in tuple(filter(lambda u: u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU, self.src[1].src)) + self.arg.vars)
+    # instead of only storing Buffers we need to store both variables and buffers
+    parameters = set(u for u in self.src[1].src if u.op is Ops.PARAM)
+
+    # adding this because the old code had, i am not convinced this is necessary
+    # todo: double check if this is necessary
+    variables = set(self.arg.vars)
+
+    parameters = parameters.union(variables)
+    sorted_parameters = sorted(parameters, key=lambda u: u.arg.slot)
+
+    # we need the address space now because the compiler cannot assume
+    # something is a buffer or variable from the position so it
+    # will have to do the != AddrSpace.ALU check to see if something is a buffer.
+    sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape, u.addrspace)
+                for u in sorted_parameters)
     return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig, self.key)
 
 @dataclass(frozen=True)
