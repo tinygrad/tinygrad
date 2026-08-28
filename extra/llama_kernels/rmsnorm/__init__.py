@@ -13,12 +13,12 @@ def _rmsnorm_fwd_fxn(x_in_p, eps, device):
   return rmsnorm_fwd(Tensor(x_in_p, device=device), eps)
 
 def _rmsnorm_bwd(grad:UOp, call:UOp) -> tuple:
-  x_normed, rrms = call.returned_outputs(call.src[-2:])
-  x_normed_f, do_float = Tensor(x_normed).float(), Tensor(grad).float()
-  d_x = Tensor(rrms) * (do_float - x_normed_f * (do_float * x_normed_f).mean(-1, keepdim=True))
+  x_normed, rrms = (Tensor(r.after(call)) for r in call.src[-2:])
+  do_float = Tensor(grad).float()
+  d_x = rrms * (do_float - x_normed.float() * (do_float * x_normed.float()).mean(-1, keepdim=True))
   return (d_x.cast(call.src[1].dtype).uop,)
 
 def rmsnorm(x_in:Tensor, eps:float) -> tuple[Tensor, Tensor]:
   fxn = _rmsnorm_fwd_fxn(x_in.as_param(0).uop, eps, x_in.device)
   call = UOp.call_outputs([fxn[0].uop, fxn[1].uop], x_in.uop, grad_fxn=_rmsnorm_bwd)
-  return map(Tensor, call.returned_outputs(call.src[-2:]))
+  return map(Tensor, call.returned_outputs)

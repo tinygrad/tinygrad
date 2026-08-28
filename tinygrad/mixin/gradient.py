@@ -27,7 +27,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     # put const on a device, also TODO why do we still have NOOP...
     def on_dev(g, i): return g.clone(device=args[i].device) if g.device is None else g
     def arg_grads(g): return (None,) + g + (None,)*k.num_returned
-    if ctx.op is Ops.GROUP:
+    if ctx.op is Ops.SINK:
       real = [on_dev(g, i) for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
       return arg_grads(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return arg_grads(k.arg.grad_fxn(on_dev(ctx, 0), k))
@@ -37,22 +37,22 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   n_args = len(args) - len(ret_pos)
   # the body stores the outputs into output PARAMs (slots after the args): the values are the stored values in slot order
   out_stores = sorted((st for st in fxn.src if st.op is Ops.STORE), key=lambda st: st.src[0].unsharded_base.arg.slot)
-  values = UOp(Ops.GROUP, src=tuple(st.src[1] for st in out_stores))
+  values = UOp.sink(*[st.src[1] for st in out_stores])
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   # grads are collected at the flat param storage: reshape to each arg's view (max view shrunk to symbolic)
   def shaped_grad(grad:UOp, i:int) -> UOp:
     a = args[i]
     return grad.view_as(a.shard_shape, a.axis) if a.axis is not None and isinstance(a.device, tuple) else grad.view_as(a._shape)
   grad_args = tuple(ctx.src[i] for i in ret_pos)
-  root_grad = UOp(Ops.GROUP, src=tuple(UOp(Ops.NOOP) if g.op is Ops.NOOP else
-    g if g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
+  root_grad = UOp.sink(*[UOp(Ops.NOOP) if g.op is Ops.NOOP else
+    g if g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)])
   grads = compute_gradient(values, root_grad, set(params.values()))
   # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(values.src)} if k.arg.precompile else {}
   fwd_outs = k.returned_outputs if k.arg.precompile else ()
   # collect needed gradient bodies, compact unused params, create a single backward CALL
   grad_bodies = [(i, shaped_grad(grads[p], i)) for i in needed if (p:=params.get(i)) is not None and p in grads]
-  bwd_body = UOp(Ops.GROUP, src=tuple(gb for _, gb in grad_bodies)).substitute(fwd_subs, walk=True)
+  bwd_body = UOp.sink(*[gb for _, gb in grad_bodies]).substitute(fwd_subs, walk=True)
   bwd_body = renumber_invalid_outputs(bwd_body)
   # NOTE: args includes the RETURNED inputs so the param slots above line up; they are unused and compacted away
   bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))
@@ -90,9 +90,9 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.STACK, name="ret"), lambda ctx, ret: tuple(ctx[i] for i in range(len(ret.src)))),
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),)),
   (UPat(Ops.UNSHARD, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
-  (UPat(Ops.GROUP), lambda ctx: ctx.src),
+  (UPat(Ops.SINK), lambda ctx: ctx.src),
   (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
-    (ctx, UOp(Ops.GROUP, src=tuple(ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1))))),
+    (ctx, UOp.sink(*([ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1)])))),
   # clone/assign gradient passes through to val
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE))), lambda ctx: (None, ctx)),
   (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
@@ -127,9 +127,9 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
       if k._shape is not None and v._shape is not None and k._shape != v._shape:
         v = v.cast(sum_acc_dtype(v.dtype))._rop(Ops.ADD, broadcast_axes(k.shape, v.shape)).reshape(k.shape).cast(v.dtype)
       if k in grads and grads[k].op is not Ops.NOOP:
-        if v.op is Ops.GROUP and grads[k].op is Ops.GROUP:
-          grads[k] = UOp(Ops.GROUP, src=tuple(p + n if (p.op is not Ops.NOOP and n.op is not Ops.NOOP) else
-                                              n if p.op is Ops.NOOP else p for p, n in zip(grads[k].src, v.src)))
+        if v.op is Ops.SINK and grads[k].op is Ops.SINK:
+          grads[k] = UOp.sink(*[p + n if (p.op is not Ops.NOOP and n.op is not Ops.NOOP) else
+                                 n if p.op is Ops.NOOP else p for p, n in zip(grads[k].src, v.src)])
         else: grads[k] = grads[k] + v
       else: grads[k] = v
       if len(forward_metadata:=all_metadata.get(t0, ())):
