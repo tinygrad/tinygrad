@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import cast, TypeVar, Generic, Any, Sequence, Iterable
+from typing import cast, TypeVar, Generic, Any, Sequence, Iterable, TYPE_CHECKING
 import struct, functools, time, collections, itertools, decimal, statistics
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
@@ -9,11 +9,11 @@ from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphE
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.dtype import dtypes, truncate, DType
-from tinygrad.runtime.support.hcq import MMIOInterface, HCQBuffer
-from tinygrad.runtime.support.memory import BumpAllocator
+from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop
-from tinygrad.engine.realize import pm_flatten_linear, lower_and_compile
+from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear, lower_and_compile
+
+if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: remove that
 
 # *****************
 # 0. helpers
