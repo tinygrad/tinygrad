@@ -162,6 +162,12 @@ pm_no_indexing_calls = PatternMatcher([
   (UPat(Ops.CALL, name="u"), no_indexing_calls),
 ])
 
+# the kernel graph is what gets executed: no shape views left in it, the storage of a value is just the storage
+pm_no_views = PatternMatcher([
+  (UPat((Ops.RESHAPE, Ops.SHRINK), name="v", src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER)),), allow_any_len=True), lambda v:
+   v.src[0]),
+])
+
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8, "CPU": 31} # TODO: get from device?
 @dataclass
 class LimitBufsContext:
@@ -382,6 +388,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_param_range_tags, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
   tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
+  tsink = graph_rewrite(tsink, pm_no_views, name="remove views from the kernel graph")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
   if SPEC:
