@@ -271,8 +271,8 @@ class AM_GFX(AM_IP):
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
 
   def init_hw(self):
-    # Wait for RLC autoload to complete. a VF boots with the RLC already up.
-    if not self.adev.is_vf:
+    # Wait for RLC autoload to complete
+    if not self.adev.is_vf: # VF boots with the RLC already up
       wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0,
                 value=True, msg="RLC autoload timeout")
 
