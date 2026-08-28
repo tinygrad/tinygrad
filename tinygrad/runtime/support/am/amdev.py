@@ -161,8 +161,11 @@ class AMDev:
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
     # a VF touches the engines only while the host PF grants it access, and the PF owns everything it is not granted
-    self.is_vf, self.vf_access = bool(self.mmio[0xde5] & 1), 0 # RCC_IOV_FUNC_IDENTIFIER
-    if self.is_vf: self.vf_access = self._vf_mailbox_request(1) # IDH_REQ_GPU_INIT_ACCESS
+    self.is_vf, self.vf_access = bool(self.mmio[am.mmRCC_IOV_FUNC_IDENTIFIER] & 1), 0
+    self.vf_mailbox = self.mmio.view(fmt='B')[am.NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE:] # byte 0 transmits, byte 1 receives
+    if self.is_vf:
+      self.vf_access = self._vf_mailbox_request(am.IDH_REQ_GPU_INIT_ACCESS)
+      self.vf_mailbox = self.mmio.view(fmt='B')[am.NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE:am.NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE+2]
 
     self._run_discovery()
     self._build_regs()
@@ -184,7 +187,7 @@ class AMDev:
     self.is_booting = True # During boot only boot memory can be allocated. This flag is to validate this.
     self.init_sw(smi_dev=False)
 
-    self.partial_boot = not self.is_vf and (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
+    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
     if self.partial_boot and (self.reg("regSCRATCH_REG6").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
@@ -192,9 +195,9 @@ class AMDev:
     # aqua (gc 9.5.0): full boot over live state can kill the fabric (power cycle recovers); partial boot+reset_mec is the deepest safe reset
     if self.ip_ver[am.GC_HWIP] == (9,5,0) and self.reg("regSCRATCH_REG7").read() == AMDev.Version: self.partial_boot = True
 
-    # Init hw for IP blocks where it is needed. PSP and SMU are owned by the host PF on a VF, the guest must not reset or reload them.
+    # Init hw for IP blocks where it is needed
     if not self.partial_boot:
-      if not self.is_vf and self.psp.is_sos_alive() and self.smu.is_smu_alive():
+      if not self.is_vf and self.psp.is_sos_alive() and self.smu.is_smu_alive(): # skip in vf mode, these are pf funcs.
         self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
         if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
@@ -209,7 +212,7 @@ class AMDev:
     # Re-initialize main blocks
     self.init_hw(self.gfx, self.sdma)
 
-    if not self.is_vf: # power, clockgating and the boot state registers all belong to the host PF
+    if not self.is_vf: # skip in vf mode, these are pf funcs.
       if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
         self.smu.set_power_limit(max_power)
         self.smu.set_clocks(level=None)
@@ -217,6 +220,7 @@ class AMDev:
       for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
       self.reg("regSCRATCH_REG7").write(AMDev.Version)
       self.reg("regSCRATCH_REG6").write(1) # set initialized state.
+
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def init_sw(self, smi_dev=False):
@@ -249,7 +253,7 @@ class AMDev:
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
     # a VF may only touch the engines inside an access window, take one so the host does not have to FLR the VF later
     if self.is_vf and not self.vf_access:
-      with contextlib.suppress(TimeoutError): self.vf_access = self._vf_mailbox_request(3) # IDH_REQ_GPU_FINI_ACCESS
+      with contextlib.suppress(TimeoutError): self.vf_access = self._vf_mailbox_request(am.IDH_REQ_GPU_FINI_ACCESS)
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
     if not self.is_vf: self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
@@ -261,18 +265,19 @@ class AMDev:
     with contextlib.suppress(TimeoutError): self._vf_mailbox_request(rel, wait_ready=False)
 
   def _vf_mailbox_request(self, req:int, wait_ready=True) -> int:
-    # VF/PF mailbox from the kernel's mxgpu_nv driver, it only ever asks for access, never for a gpu or a pci reset
-    ctrl, trn, rcv = self.mmio.view(fmt='B')[0xe5e*4:], 0xe56, 0xe5a
-    ctrl[0] = 0 # drop TRN_MSG_VALID and let the previous acknowledgement clear
-    wait_cond(lambda: ctrl[0] & 2, value=0, timeout_ms=1000, msg="VF mailbox acknowledgement did not clear")
-    for i, val in enumerate((req, 0, 0, 0)): self.mmio[trn+i] = val # the pf reads all four dwords, stale ones become request data
-    ctrl[0] = 1 # TRN_MSG_VALID
-    wait_cond(lambda: ctrl[0] & 2, value=2, timeout_ms=500, msg=f"VF mailbox request {req:#x} was not acknowledged")
-    ctrl[0] = 0
+    self.vf_mailbox[0] = 0 # drop TRN_MSG_VALID
+
+    wait_cond(lambda: self.vf_mailbox[0] & 2, value=0, timeout_ms=1000, msg="VF mailbox acknowledgement did not clear")
+    for i, val in enumerate((req, 0, 0, 0)): self.mmio[am.mmMAILBOX_MSGBUF_TRN_DW0 + i] = val
+
+    self.vf_mailbox[0] = 1 # set TRN_MSG_VALID
+    wait_cond(lambda: self.vf_mailbox[0] & 2, value=2, timeout_ms=am.NV_MAILBOX_POLL_ACK_TIMEDOUT, msg=f"VF mailbox request {req:#x} was not acked")
+    self.vf_mailbox[0] = 0
     if wait_ready:
-      wait_cond(lambda: self.mmio[rcv], value=1, timeout_ms=15000, msg="VF mailbox: the pf never granted access") # IDH_READY_TO_ACCESS_GPU
-      ctrl[1] = 2 # acknowledge RCV_MSG_VALID
-    return req + 1 # IDH_REL_GPU_{INIT,FINI}_ACCESS follows its request
+      wait_cond(lambda: self.mmio[am.mmMAILBOX_MSGBUF_RCV_DW0], value=am.IDH_READY_TO_ACCESS_GPU, timeout_ms=am.NV_MAILBOX_POLL_MSG_TIMEDOUT,
+                msg="VF mailbox: the pf never granted access")
+      self.vf_mailbox[1] = 2 # ack
+    return req + 1
 
   def recover(self, force=False) -> bool:
     if not force and not self.is_err_state: return False
