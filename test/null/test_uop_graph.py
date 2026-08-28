@@ -441,8 +441,7 @@ class TestMovementOps(unittest.TestCase):
     self.assertEqual(result.op, Ops.INDEX)
     self.assertIs(result.src[0], src)
     self.assertEqual(result.shape, (4,))
-    # the only RESHAPE is src itself: the view of the flat param, the extra reshape was folded into the INDEX
-    self.assertEqual([u for u in result.toposort() if u.op is Ops.RESHAPE], [src])
+    self.assertNotIn(Ops.RESHAPE, [u.op for u in result.toposort()])
 
   def test_pm_mops_partial_reshape_index_suffix_mismatch_does_nothing(self):
     from tinygrad.schedule.prepare import pm_mops

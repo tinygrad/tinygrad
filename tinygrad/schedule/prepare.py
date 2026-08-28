@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.dtype import dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
-from tinygrad.uop.ops import graph_rewrite, rewrite_group, ParamArg, identity_element
+from tinygrad.uop.ops import graph_rewrite, rewrite_group, shape_to_shape_arg, ParamArg, identity_element
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
 from tinygrad.schedule.indexing import apply_movement_op
@@ -110,19 +110,10 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
     if [x.arg.slot for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg.slot for x in params]}")
     if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
 
-  # params have a flat storage size in the arg, the logical shape is a view (RESHAPE/SHRINK/UNSHARD) on top of it.
-  # substitute args by their flat max-shaped storage view so the movement views on the params stay valid
-  def flat_storage(a:UOp) -> tuple[int, UOp]:  # returns (size, view of a as flat max-shaped storage)
-    shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
-    return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
   dict_map = {x:args[x.arg.slot] for x in params}
   for i, (p, a) in enumerate(dict_map.items()):
-    if p.arg.size is not None:
-      n, flat = flat_storage(a)
-      if p.arg.size != n: raise TypeError(f"arg {i} shape mismatch: expected size {p.arg.size}, got {a.shape}")
-      dict_map[p] = flat
-    elif a.shape != ():
-      raise TypeError(f"arg {i} shape mismatch: expected scalar, got {a.shape}")
+    if p.axis != a.axis: raise TypeError(f"arg {i} axis mismatch: expected {p.axis}, got {a.axis}")
+    if p.max_shape != a.max_shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   return c.src[0].substitute(dict_map, walk=True)
 
@@ -443,7 +434,7 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   if is_slice_copy:
     # Preserve the old SLICE lowering shape: standalone transfers first acquire their destination, then the
     # resulting STORE is split into a direct runtime copy whose source and destination retain their offsets.
-    buf = UOp(Ops.BUFFER, arg=ParamArg(next(ctx), copy.dtype, size=prod(input_src.max_shape), device=copy.device)).reshape(input_src.max_shape)
+    buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), copy.dtype, device=copy.device))
     return buf.after(buf.store(copy.rtag(("allreduce",)))).reshape(copy.shape)
   # if it's a COPY, we need to give the input buffer identity
   if not input_src.has_buffer_identity(after_ok=True) and copy.op is Ops.COPY: input_src = input_src.contiguous()
@@ -454,9 +445,9 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
     # if there's already a buffer, we just use it
     return existing_buf.flatten().store(input_src)
   # create the output buffer
-  buf = UOp(Ops.BUFFER, arg=ParamArg(next(ctx), copy.dtype, size=prod(input_src.max_shape), device=copy.device))
+  buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), copy.dtype, device=copy.device))
   # reshape back to input
-  return buf.reshape(input_src.max_shape).after(buf.store(input_src)).reshape(copy.shape)
+  return buf.after(buf.store(input_src)).reshape(copy.shape)
 
 pm_copy_to_store = PatternMatcher([
   (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),
