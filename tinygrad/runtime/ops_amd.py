@@ -321,11 +321,6 @@ class AMDComputeQueue(HWQueue):
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
 
-    # the workgroup must fit in the register file, otherwise it can never be dispatched and the GPU wedges
-    lanes = 32 if prg.wave32 else 64
-    if (vgprs:=((prg.rsrc1 & 0x3F) + 1) * 8) * lanes * ceildiv((threads:=prod(local_size)), lanes) > prg.dev.wg_vgpr_capacity:
-      raise RuntimeError(f"workgroup of {threads} threads with {vgprs} VGPRs/thread does not fit in the register file")
-
     self.acquire_mem(gli=0, gl2=0)
 
     user_regs = []
@@ -1013,9 +1008,6 @@ class AMDDevice(HCQCompiled):
     self.se_cnt = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine'] // self.xccs
     self.cu_cnt = self.iface.props['simd_count'] // self.iface.props['simd_per_cu'] // self.xccs
     self.waves_per_cu = self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu']
-    # VGPR file capacity of the smallest unit a workgroup is dispatched to, in 32-bit registers.
-    # SIMD32 has 64KB of VGPRs; gfx9/gfx11+ dispatch workgroups across 4 SIMDs, gfx10 across 2.
-    self.wg_vgpr_capacity = (4 if self.target[0] != 10 else 2) * 16384
     self.wave_cnt = (self.cu_cnt * self.waves_per_cu) if self.target[0] != 9 else min(self.cu_cnt * 40, self.se_cnt * self.xccs * 512)
 
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
