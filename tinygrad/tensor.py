@@ -123,6 +123,19 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> tuple[UOp, dict[UOp, UOp]]|Non
   if (s.op is Ops.RESHAPE and s.has_buffer_identity() and s.contiguous_view_offset() == 0 and s.numel() == s.base.numel()
       and s.base.op in {Ops.BUFFER, Ops.UNSHARD}):
     return t, {s:t, s.base:t.reshape(s.base.shape)}
+  # A shard-local full-buffer view can still be expressed as movement over UNSHARD here. Resolve it before deciding
+  # whether the function output needs a materializing copy.
+  if isinstance(s.device, tuple) and s.axis is not None:
+    from tinygrad.schedule.multi import multi_pm
+    resolved = graph_rewrite(s, multi_pm, name="resolve precompiled output sharding")
+    local = resolved.src[0] if resolved.op is Ops.UNSHARD else resolved
+    physical = local
+    while physical.op in GroupOp.Movement|{Ops.UNSHARD, Ops.AFTER}: physical = physical.src[0]
+    target_physical = t
+    while target_physical.op in GroupOp.Movement|{Ops.UNSHARD, Ops.AFTER}: target_physical = target_physical.src[0]
+    if (physical.op is Ops.BUFFER and target_physical.op is Ops.PARAM and physical.numel() == target_physical.numel()
+        and local.numel() == physical.numel() and local.contiguous_view_offset() == 0):
+      return t, {s:t, physical:target_physical.reshape(physical.shape)}
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:

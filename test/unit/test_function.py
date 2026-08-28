@@ -564,7 +564,7 @@ class TestFunctionTuple(unittest.TestCase):
     out, saved = f(a)
     GlobalCounters.reset()
     Tensor.realize(out, saved)
-    assert_kernel_count(6)
+    assert_kernel_count(4)
     np.testing.assert_equal(saved.numpy(), 6)
     np.testing.assert_equal(out.numpy(), 12)
 
