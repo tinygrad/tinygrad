@@ -6,6 +6,7 @@ except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import DEV, PROFILE, getenv, from_mv, cpu_profile, ProfileRangeEvent, unwrap
 from tinygrad.helpers import suppress_finalizing, pluralize, TracingKey
 from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, Program, TinyELF
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
@@ -318,10 +319,9 @@ class CLikeArgsState(HCQArgsState[ProgramType]):
 
     if prefix is not None: self.buf.cpu_view().view(size=len(prefix) * 4, fmt='I')[:] = array.array('I', prefix)
 
-    self.bind_sints_to_buf(*[b.va_addr for b in bufs], buf=self.buf, fmt='Q', offset=len(prefix or []) * 4)
-    for v,(val_offset,dt,_) in zip(vals, TinyELF.iter_sig(prg.signature[-len(vals):], len(bufs) * 8)):
+    for v,(off,dt,addrspace) in zip(TinyELF.merge_args(prg.signature, [b.va_addr for b in bufs], vals), TinyELF.iter_sig(prg.signature)):
       assert v is not None
-      self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=len(prefix or []) * 4 + val_offset)
+      self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt if addrspace is AddrSpace.ALU else 'Q', offset=len(prefix or []) * 4 + off)
 
 class HCQProgram(Program[HCQDeviceType]):
   def __init__(self, args_state_t:Type[HCQArgsState], dev:HCQDeviceType, obj:TinyELF, kernargs_alloc_size:int, base:int|None=None):

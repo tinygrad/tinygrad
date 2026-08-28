@@ -203,8 +203,9 @@ class QCOMArgsState(HCQArgsState):
     super().__init__(buf, prg, bufs, vals=vals)
     ctypes.memset(int(self.buf.va_addr), 0, prg.kernargs_alloc_size)
 
-    ubos = [bufs[slot] for _,slot,_,shape,_ in prg.signature if slot < len(bufs) and not is_image_shape(shape)]
-    uavs = [(dt,shape,bufs[slot]) for _,slot,dt,shape,_ in prg.signature if slot < len(bufs) and is_image_shape(shape)]
+    args = list(zip(TinyELF.merge_args(prg.signature, bufs, vals), prg.signature))
+    consts = [(a.va_addr if addrspace is not AddrSpace.ALU else a, dt, addrspace) for a,(_,_,dt,shape,addrspace) in args if not is_image_shape(shape)]
+    uavs = [(dt,shape,a) for a,(_,_,dt,shape,addrspace) in args if addrspace is not AddrSpace.ALU and is_image_shape(shape)]
     # NIR can reorder images to different texture slots
     ibos, texs = uavs[:prg.ibo_cnt], [uavs[prg.ibo_cnt + (prg.tex_to_image[i] if prg.NIR else i)] for i in range(prg.tex_cnt)]
     for cnst_val,cnst_off,cnst_sz in prg.consts_info:
@@ -212,13 +213,9 @@ class QCOMArgsState(HCQArgsState):
 
     if prg.samp_cnt > 0: to_mv(int(self.buf.va_addr) + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     if prg.NIR:
-      self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)
-      for v,(o,dt,_) in zip(vals, TinyELF.iter_sig(prg.signature[len(bufs):], len(ubos)*8)):
-        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_off + o)
-    else:
-      for i, b in enumerate(ubos): self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=prg.buf_offs[i])
-      for i,(v,(_,_,dt,_,_)) in enumerate(zip(vals, prg.signature[len(bufs):])):
-        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_offs[i+len(ubos)])
+      offs = [o for o,_,_ in TinyELF.iter_sig(tuple(s for _,s in args if not is_image_shape(s[3])), prg.buf_off)]
+    else: offs = prg.buf_offs
+    for (v,dt,addrspace),o in zip(consts, offs): self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt if addrspace is AddrSpace.ALU else 'Q', offset=o)
 
     def _tex(b, ibo=False):
       imgdt, shape, buf = b

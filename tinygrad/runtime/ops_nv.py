@@ -3,7 +3,8 @@ import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref
 assert sys.platform != 'win32'
 from typing import cast
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQArgsState, HCQProgram, HCQSignal
+from tinygrad.runtime.support.hcq import BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, hcq_filter_visible_devices, hcq_profile
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, BufferSpec, TinyELF
@@ -240,10 +241,12 @@ class NVVideoQueue(NVCommandQueue):
 
 class NVArgsState(CLikeArgsState):
   def __init__(self, buf:HCQBuffer, prg:NVProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
-    if (is_mock:=isinstance(prg.dev.iface, MOCKIface)): prg.cbuf_0[80:82] = [len(bufs), len(vals)]
-    super().__init__(buf, prg, bufs, vals=() if is_mock else vals, prefix=prg.cbuf_0 or None)
-    # mock expects all vars to be 64 bit
-    if is_mock and vals: self.bind_sints_to_buf(*vals, buf=self.buf, fmt='q', offset=len(prg.cbuf_0)*4 + len(bufs)*8)
+    if not isinstance(prg.dev.iface, MOCKIface): super().__init__(buf, prg, bufs, vals=vals, prefix=prg.cbuf_0 or None)
+    else:
+      HCQArgsState.__init__(self, buf, prg, bufs, vals=vals)
+      prg.cbuf_0[80:82] = [len(bufs)+len(vals), 0]
+      self.buf.cpu_view().view(size=len(prg.cbuf_0) * 4, fmt='I')[:] = array.array('I', prg.cbuf_0)
+      self.bind_sints_to_buf(*TinyELF.merge_args(prg.signature, [b.va_addr for b in bufs], vals), buf=self.buf, fmt='q', offset=len(prg.cbuf_0)*4)
 
 class NVProgram(HCQProgram['NVDevice']):
   def __init__(self, dev:NVDevice, obj:TinyELF):

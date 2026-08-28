@@ -1,6 +1,7 @@
-import ctypes
+import ctypes, itertools
 from tinygrad.helpers import mv_address, getenv, suppress_finalizing
 from tinygrad.device import Compiled, LRUAllocator, BufferSpec, Program, TinyELF
+from tinygrad.dtype import AddrSpace
 from tinygrad.runtime.autogen import hip
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.support.c import init_c_var, init_c_struct_t
@@ -37,9 +38,11 @@ class HIPProgram(Program[HIPDevice]):
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     check(hip.hipSetDevice(self.dev.device_id))
     if not hasattr(self, "vargs"):
-      fields = ([(f'f{i}', hip.hipDeviceptr_t, i*8) for i in range(len(args))] +
-        [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), o) for i,(o,dt,_) in enumerate(TinyELF.iter_sig(self.signature[len(args):], len(args)*8))])
-      self.c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
+      nbufs, nvals = itertools.count(), itertools.count()
+      fields = [(f'v{next(nvals)}', getattr(ctypes, f"c_int{dt.bitsize}"), o) if addrspace is AddrSpace.ALU else
+                (f'f{next(nbufs)}', hip.hipDeviceptr_t, o) for o,dt,addrspace in TinyELF.iter_sig(self.signature)]
+      self.c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(
+        *TinyELF.merge_args(self.signature, args, vals))
       self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
                                          ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)
 

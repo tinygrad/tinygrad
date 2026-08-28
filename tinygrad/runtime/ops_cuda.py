@@ -1,7 +1,8 @@
 from __future__ import annotations
-import ctypes
+import ctypes, itertools
 from tinygrad.helpers import DEBUG, DEV, getenv, mv_address, suppress_finalizing
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator, Program, TinyELF
+from tinygrad.dtype import AddrSpace
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
@@ -16,10 +17,11 @@ def check(status):
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
 def encode_args(args, vals, signature) -> tuple[ctypes.Structure, ctypes.Array]:
-  fields = ([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
-            [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), off)
-             for i,(off,dt,_) in enumerate(TinyELF.iter_sig(signature[len(args):], len(args)*8))])
-  c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
+  nbufs, nvals = itertools.count(), itertools.count()
+  fields = [(f'v{next(nvals)}', getattr(ctypes, f"c_int{dt.bitsize}"), off) if addrspace is AddrSpace.ALU else
+            (f'f{next(nbufs)}', cuda.CUdeviceptr_v2, off) for off,dt,addrspace in TinyELF.iter_sig(signature)]
+  c_args_t = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))
+  c_args = c_args_t(*TinyELF.merge_args(signature, args, vals))
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
   return c_args, vargs
