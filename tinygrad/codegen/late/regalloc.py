@@ -4,7 +4,7 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register, greg
 from tinygrad.dtype import dtypes
 
-PSEUDO_OPS = {Ops.CONST, Ops.CAST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
+PSEUDO_OPS = {Ops.CONST, Ops.CAST, Ops.BITCAST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
 
 class LinearScanRegallocContext:
   # returns the uop that defines the virtual register
