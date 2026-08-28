@@ -105,7 +105,16 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   # substitute args by their flat max-shaped storage view so the movement views on the params stay valid
   def flat_storage(a:UOp) -> tuple[int, UOp]:  # returns (size, view of a as flat max-shaped storage)
     shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
-    return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
+    n = prod(shp)
+    if a.shape == (n,): return n, a
+    # a zero-offset contiguous view of flat storage binds to the storage itself (it has offset 0 and enough length)
+    # rather than padding the view with zeros
+    x = a
+    while x.op in {Ops.RESHAPE, Ops.PAD, Ops.SHRINK, Ops.UNSHARD}:
+      if x.op is Ops.SHRINK and any(start != 0 for start, _ in x.marg): break
+      x = x.src[0]
+    if x is not a and x.op in {Ops.PARAM, Ops.BUFFER} and x.arg.size is not None and x.arg.size >= n: return n, x
+    return n, a.pad_to(shp).reshape((n,))
   dict_map = {x:args[x.arg.slot] for x in params}
   for i, (p, a) in enumerate(dict_map.items()):
     if p.arg.size is not None:

@@ -267,8 +267,6 @@ spec_kernel_graph = PatternMatcher([
   # after on PARAM or AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),),
         allow_any_len=True, name="x"), lambda x: matches_dtype(x.src[0], x.dtype)),
-  # movement ops (views of the flat PARAM storage) are valid in value positions too
-  (UPat(GroupOp.Movement), lambda: True),
 ])
 
 # **** pyrender (move this) ****

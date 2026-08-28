@@ -25,6 +25,7 @@ class AllocCtx:
   assigns: list[UOp] = field(default_factory=list)
   replacements: list[UOp] = field(default_factory=list)
   views: set[UOp] = field(default_factory=set)
+  final_tags: set[Any] = field(default_factory=set)
 
 def tag_uop(ctx:AllocCtx, x:UOp):
   if x.tag is not None: return None
@@ -147,9 +148,11 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
   return UOp.sink(*[r.store(v) for r, v in zip(returned, rets)])
 
-def returned_after_finalize(r:UOp) -> UOp|None:
+def returned_after_finalize(ctx:AllocCtx, r:UOp) -> UOp|None:
   # resolve AFTERs on RETURNED placeholders (function call outputs) while we are still in the tensor graph, like any
   # other value (this inlines the call body); afters between the return and the call don't matter
+  # finals (the tensors being realized) need real buffers, they aren't dissolved
+  if r.tag is not None and any(t in ctx.final_tags for t in r.tag): return None
   x = r.src[1]
   if len(r.src) != 2 or x.op is not Ops.CALL or x.src[0].op is not Ops.SINK or x.num_returned == 0 \
      or r.src[0].unsharded_base.op is not Ops.RETURNED: return None
@@ -171,6 +174,11 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # resolve AFTERs on RETURNED placeholders (function call outputs) into their values while we are still in the tensor
   # graph, like any other value (this inlines the call body); afters between the return and the call don't matter
   (UPat(Ops.AFTER, name="r"), returned_after_finalize),
+
+  # an AFTER on a RETURNED placeholder that is a final output: it's a call output buffer, allocate fresh storage for it
+  (UPat(Ops.AFTER, name="x"),
+   lambda ctx,x: None if x.tag is None or x.src[0].unsharded_base.op is not Ops.RETURNED
+                 or not any(t in ctx.final_tags for t in x.tag) else x.rtag(None).contiguous(tag=x.tag)),
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
