@@ -259,13 +259,12 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) or x.is_variable or x.is_bound_var for x in s.src) or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
-  # param is outside buffer, buffer is local buffer. params have a size in the arg, no shape input.
-  # a param's logical shape is a RESHAPE on top of it (see UOp.param/UOp.view_as)
+  # param is outside buffer, buffer is local buffer. params have a size in the arg, no shape input
   (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.ALU)),
-  # a param's logical shape is a RESHAPE/SHRINK view on top of its storage (see UOp.param/UOp.view_as)
-  (UPat((Ops.RESHAPE, Ops.SHRINK), src=(UPat((Ops.PARAM, Ops.UNSHARD, Ops.AFTER)),), allow_any_len=True), lambda: True),
   (UPat(Ops.BITCAST), lambda: True),
+  # no views at the kernel graph level: call args are storage (see pm_no_view_args)
+  (UPat((Ops.RESHAPE, Ops.SHRINK), name="v"), lambda v: panic(RuntimeError, f"view in kernel graph: {v}")),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
