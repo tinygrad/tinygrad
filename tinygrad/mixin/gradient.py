@@ -31,6 +31,10 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     return (None,) + k.arg.grad_fxn(on_dev(ctx, 0), k)
   assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
+  # grads are collected at the flat param storage: reshape to each arg's view (max view shrunk to symbolic)
+  def shaped_grad(grad:UOp, i:int) -> UOp:
+    a = args[i]
+    return grad.view_as(a.shard_shape, a.axis) if a.axis is not None and isinstance(a.device, tuple) else grad.view_as(a._shape)
   grad_args = ctx.src
   root_grad = UOp(Ops.TUPLE, src=tuple(UOp(Ops.NOOP) if g.op is Ops.NOOP else
     g if g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
@@ -39,7 +43,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}
   fwd_outs = tuple(k.gettuple(i) for i in range(len(fxn.src))) if k.arg.precompile else ()
   # collect needed gradient bodies, compact unused params, create a single backward CALL
-  grad_bodies = [(i, grads[p]) for i in needed if (p:=params.get(i)) is not None and p in grads]
+  grad_bodies = [(i, shaped_grad(grads[p], i)) for i in needed if (p:=params.get(i)) is not None and p in grads]
   bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies)).substitute(fwd_subs, walk=True)
   bwd_body = renumber_invalid_outputs(bwd_body)
   bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))

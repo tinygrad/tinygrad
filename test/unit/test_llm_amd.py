@@ -20,11 +20,13 @@ class TestQ8Quantize(unittest.TestCase):
   def test_values_and_scales(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     x = np.linspace(-3.1, 2.7, 64, dtype=np.float32).reshape(2, 32)
-    quant, scale = q8_quantize(Tensor(x), 2, 32)
+    quant, scale, gsum = q8_quantize(Tensor(x), 2, 32)
     scale_np = np.maximum(np.max(np.abs(x), axis=-1, keepdims=True) / 127, 1e-8)
     expected = np.clip(np.rint(x / scale_np), -127, 127).astype(np.int8)
     np.testing.assert_array_equal(quant.bitcast(dtypes.int8).reshape(2, 32).numpy(), expected)
     np.testing.assert_allclose(scale.numpy(), scale_np, rtol=1e-6)
+    # xsum holds the two per-16 sums per 32-wide group
+    np.testing.assert_array_equal(gsum.numpy().reshape(2, 2), expected.reshape(2, 2, 16).sum(-1).astype(np.float32))
 
   def test_q6_linear_compiles(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
@@ -36,7 +38,9 @@ class TestQ8Quantize(unittest.TestCase):
     linear = Linear(256, 1, bias=False)
     nn.state.load_state_dict(linear, {"weight":decoded}, verbose=False, realize=False)
     self.assertTrue(np.isfinite(linear(Tensor.randn(1, 256)).realize().item()))
-    self.assertEqual(linear.weight.uop.buf_uop.buffer.offset, 4)
+    # the Q6 weight is repacked: 210-byte blocks padded to 212 (one block = 53 words)
+    self.assertEqual(linear.weight.uop.buf_uop.buffer.nbytes, 53*4)
+    self.assertEqual(linear.weight.dtype, dtypes.uint32)
 
   def test_q4_k_linear(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")

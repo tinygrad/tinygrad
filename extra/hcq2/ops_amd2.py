@@ -87,7 +87,7 @@ def release_mem(ctx, address=0x0, value=0, data_sel=0, int_sel=2, ctxid=0, cache
 
 def memory_barrier(ctx):
   pf = '' if ctx.nbio.version[0] == 2 else '0' if ctx.nbio.version[:2] != (7, 11) else '1'
-  return UOp(Ops.LINEAR, dtypes.void, (
+  return UOp(Ops.LINEAR, src=(
     wait_reg_mem(ctx, reg=getattr(ctx.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr[0],
                  reg_done=getattr(ctx.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0], value=0xffffffff),
     acquire_mem(ctx)))
@@ -135,7 +135,7 @@ def pm4_program(ctx, call, prg):
     wreg(ctx, ctx.gc.regCOMPUTE_START_X, 0, 0, 0, *(info.local_size or (1, 1, 1)), 0, 0),
     pkt3(ctx, PM4Ops.DISPATCH_DIRECT, *info.global_size, dispatch_init),
     pkt3(ctx, PM4Ops.EVENT_WRITE, ctx.pm4.EVENT_TYPE(ctx.soc.CS_PARTIAL_FLUSH) | ctx.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))]
-  return UOp(Ops.LINEAR, dtypes.void, tuple(ins))
+  return UOp(Ops.LINEAR, src=tuple(ins))
 
 pm_pm4_opsel = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), pm4_program),
@@ -207,7 +207,7 @@ def sdma_timestamp(ctx, ins, dst):
 pm_sdma_opsel = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), sdma_copy),
 
-  (UPat(Ops.INS, arg="barrier"), lambda: UOp(Ops.NOOP, dtypes.void, ())),
+  (UPat(Ops.INS, arg="barrier"), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.INS, arg="wait", src=(UPat(name="dst"), UPat(name="val")), name="ins"), sdma_wait),
   (UPat(Ops.INS, arg="timestamp", src=(UPat(name="dst"),), name="ins"), sdma_timestamp),
   (UPat(Ops.INS, arg="store", src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val")), name="ins"), sdma_store),

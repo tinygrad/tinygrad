@@ -198,9 +198,7 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
-  if b.is_bound_var or b.is_variable: return b.param_like(len(ctx.replacements)-1)
-  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
-                   addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
+  return b.param_like(len(ctx.replacements)-1)
 
 def replace_input_view(ctx:AllocCtx, b:UOp): return replace_input_buffer(ctx, b) if b in ctx.views else None
 
@@ -211,7 +209,7 @@ pm_finalize_call = PatternMatcher([
 
 pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
-  (UPat(Ops.BUFFER, src=(UPat(),), name="b"), lambda ctx,b:
+  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
   # replace SHRINK with PARAM
   (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),), name="b", allow_any_len=True), replace_input_view),
@@ -381,7 +379,7 @@ class Tensor(RandMixin):
   # ***** data handlers ****
 
   def as_param(self, slot:int):
-    return Tensor(UOp.param(slot, self.dtype, self.uop.shard_shape, self.device, axis=self.uop.axis))
+    return Tensor(self.uop.param_like(slot))
 
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
     fret = fxn._uop.call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)

@@ -1,8 +1,6 @@
 from __future__ import annotations
 import functools, pathlib
-from dataclasses import replace
-from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import shape_to_shape_arg
+from tinygrad import Tensor
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 
 FP8_MAX = 448.0
@@ -12,7 +10,7 @@ NUM_WG, THREADS_PER_WG = 1024, 256
 @functools.cache
 def _local_abs_max_fxn(x_p, device):
   x = Tensor(x_p, device=device)
-  inner = Tensor(x.uop.replace(src=(shape_to_shape_arg(x.uop.shard_shape),), arg=replace(x.uop.arg, axis=None))) if x.uop.axis is not None else x
+  inner = Tensor(x.uop.src[0]) if x.uop.axis is not None else x  # the per-shard view of the flat param
   return (inner.abs().max(),)
 
 def local_abs_max(x:Tensor) -> Tensor:
