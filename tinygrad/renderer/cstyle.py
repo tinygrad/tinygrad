@@ -428,6 +428,14 @@ class CUDARenderer(CStyleLanguage):
     (UPat(Ops.CAST, dtypes.fp8s, UPat.var("x", dtypes.fp8s), name='y'), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=y.dtype else None),
     (UPat(Ops.CAST, (dtypes.char, dtypes.uchar, dtypes.long, dtypes.ulong, dtypes.bfloat16), (UPat.var("x", dtypes.half),), name="y"),
      lambda x,y: x.cast(dtypes.float).cast(y.dtype)),
+    (UPat(Ops.CAST, dtypes.half, (UPat.var("x", (dtypes.long, dtypes.ulong, dtypes.bfloat16)),)),
+     lambda x: x.cast(dtypes.float).cast(dtypes.half)),
+    (UPat(Ops.CAST, (dtypes.char, dtypes.uchar), (UPat.var("x", dtypes.bfloat16),), name="y"),
+     lambda x,y: x.cast(dtypes.float).cast(y.dtype)),
+    (UPat(Ops.CAST, (dtypes.long, dtypes.ulong), (UPat.var("x", dtypes.bfloat16),), name="y"),
+     lambda x,y: x.cast(dtypes.float).cast(y.dtype)),
+    (UPat(Ops.CAST, dtypes.bfloat16, (UPat.var("x", (dtypes.long, dtypes.ulong)),)),
+     lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16)),
   ])
   string_rewrite = PatternMatcher([
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"tg_bitcast<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"
