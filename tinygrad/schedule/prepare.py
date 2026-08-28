@@ -111,6 +111,8 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
       n, flat = flat_storage(a)
       if p.arg.size != n: raise TypeError(f"arg {i} shape mismatch: expected size {p.arg.size}, got {a.shape}")
       dict_map[p] = flat
+    elif a.shape != ():
+      raise TypeError(f"arg {i} shape mismatch: expected scalar, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   return c.src[0].substitute(dict_map, walk=True)
 

@@ -263,8 +263,6 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.ALU)),
   (UPat(Ops.BITCAST), lambda: True),
-  # no views at the kernel graph level: call args are storage (see pm_no_view_args)
-  (UPat((Ops.RESHAPE, Ops.SHRINK), name="v"), lambda v: panic(RuntimeError, f"view in kernel graph: {v}")),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
