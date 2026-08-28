@@ -553,6 +553,7 @@ def amdgpu_disassemble(lib:bytes):
 
 def wait_cond(cb, *args, value=True, timeout_ms=10000, msg="") -> bool:
   start_time = int(time.perf_counter() * 1000)
+  val = None
   while int(time.perf_counter() * 1000) - start_time < timeout_ms:
     if (val:=cb(*args)) == value: return val
   raise TimeoutError(f"{msg}. Timed out after {timeout_ms} ms, condition not met: {val} != {value}")

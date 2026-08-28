@@ -1,6 +1,6 @@
 import ctypes, gzip, unittest, timeit, pickle
 from tinygrad import Variable
-from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, mv_address, count, all_same
+from tinygrad.helpers import Context, ContextVar, argfix, colored, wait_cond, word_wrap, mv_address, count, all_same
 from tinygrad.tensor import is_numpy_ndarray
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.helpers import ceildiv, ansistrip, get_shape
@@ -409,5 +409,22 @@ class TestIsNumpyNdarray(unittest.TestCase):
     self.assertFalse(is_numpy_ndarray(Tensor([1, 2, 3])))
     self.assertFalse(is_numpy_ndarray(Tensor(np.array([1, 2, 3]))))
 
+class TestWaitCond(unittest.TestCase):
+  def test_returns_true_immediately(self):
+    import time
+    start = time.perf_counter()
+    self.assertTrue(wait_cond(lambda: True, timeout_ms=1000))
+    self.assertLess(time.perf_counter() - start, 0.1)
+  def test_raises_timeout(self):
+    with self.assertRaises(TimeoutError) as ctx:
+      wait_cond(lambda: False, timeout_ms=50, msg="should time out here")
+    self.assertIn("should time out here", str(ctx.exception))
+  def test_zero_timeout_raises_timeout_not_unbound_local(self):
+    with self.assertRaises(TimeoutError):
+        wait_cond(lambda: False, timeout_ms=0)
+  def test_custom_value(self):
+    self.assertEqual(wait_cond(lambda: 5, value=5, timeout_ms=1000), 5)
+  def test_passes_args(self):
+      self.assertEqual(wait_cond(lambda x: x, 5, value=5, timeout_ms=100), 5)
 if __name__ == '__main__':
   unittest.main()
