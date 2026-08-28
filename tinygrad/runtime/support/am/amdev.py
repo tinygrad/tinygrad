@@ -160,15 +160,11 @@ class AMDev:
     self._disable_aspm()
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
-    # a VF touches the engines only while the host PF grants it access, and the PF owns everything it is not granted
-    self.is_vf, self.vf_access = bool(self.mmio[am.mmRCC_IOV_FUNC_IDENTIFIER] & 1), 0
-    self.vf_mailbox = self.mmio.view(fmt='B')[am.NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE:] # byte 0 transmits, byte 1 receives
-    if self.is_vf:
-      self.vf_access = self._vf_mailbox_request(am.IDH_REQ_GPU_INIT_ACCESS)
-      self.vf_mailbox = self.mmio.view(fmt='B')[am.NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE:am.NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE+2]
-
-    self.rlc_gated:list[tuple[int, int]] = [] # a VF reaches the GC registers only through the RLC gateway, one range per segment
-    self.rlcg_scratch:set[int] = set() # the gateway's own ports are poked directly
+    # VF related
+    self.is_vf = bool(self.mmio[am.mmRCC_IOV_FUNC_IDENTIFIER] & 1)
+    self.vf_mailbox = self.mmio.view(am.NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE, 2, fmt='B')
+    self.vf_access = self._vf_mailbox_request(am.IDH_REQ_GPU_INIT_ACCESS) if self.is_vf else 0
+    self.vf_rlc_gated:list[tuple[int, int]] = []
 
     self._run_discovery()
     self._build_regs()
@@ -296,10 +292,8 @@ class AMDev:
 
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
-  def is_rlc_gated(self, reg:int) -> bool: return reg not in self.rlcg_scratch and any(lo <= reg <= hi for lo, hi in self.rlc_gated)
-
   def rreg(self, reg:int, inst=0, direct=False) -> int:
-    if not direct and any(lo <= reg <= hi for lo, hi in self.rlc_gated): return self.rlcg_rw(reg, 0, inst, read=True)
+    if not direct and any(lo <= reg <= hi for lo, hi in self.vf_rlc_gated): return self.rlcg_rw(reg, 0, inst, read=True)
     val = self.indirect_rreg(reg) if reg >= len(self.mmio) else self.mmio[reg]
     if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"am {self.devfmt}: Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
@@ -307,7 +301,7 @@ class AMDev:
 
   def wreg(self, reg:int, val:int, inst=0, direct=False):
     if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
-    if not direct and any(lo <= reg <= hi for lo, hi in self.rlc_gated): self.rlcg_rw(reg, val, inst)
+    if not direct and any(lo <= reg <= hi for lo, hi in self.vf_rlc_gated): self.rlcg_rw(reg, val, inst)
     elif reg >= len(self.mmio): self.indirect_wreg(reg, val)
     else: self.mmio[reg] = val
 
@@ -411,7 +405,7 @@ class AMDev:
       self.__dict__.update(regs)
       if prefix == "gc" and self.is_vf:
         ext = {seg: max(r.offset for r in regs.values() if r.segment == seg) for seg in {r.segment for r in regs.values()}}
-        self.rlc_gated = sorted((bases[seg], bases[seg] + off) for bases in self.regs_offset[hwip].values() for seg, off in ext.items())
+        self.vf_rlc_gated = sorted((bases[seg], bases[seg] + off) for bases in self.regs_offset[hwip].values() for seg, off in ext.items())
     self.__dict__.update(import_asic_regs('mp', (11, 0, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP])))
 
     # Live AIDs like the kernel: 4 SDMAs per AID; the AID lives iff its group's alive-mask is 0xf/0x3/0xc.
