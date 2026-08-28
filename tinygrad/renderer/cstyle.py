@@ -426,7 +426,7 @@ class CUDARenderer(CStyleLanguage):
   type_map = {dtypes.uint32: "uint", dtypes.bfloat16: "nv_bfloat16", dtypes.fp8e4m3: "__nv_fp8_e4m3", dtypes.fp8e5m2: "__nv_fp8_e5m2"}
   extra_matcher = create_non_native_float_pats(dtypes.fp8s, casting=False) + PatternMatcher([
     (UPat(Ops.CAST, dtypes.fp8s, UPat.var("x", dtypes.fp8s), name='y'), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=y.dtype else None),
-    (UPat(Ops.CAST, (dtypes.char, dtypes.uchar, dtypes.long), (UPat.var("x", dtypes.half),), name="y"),
+    (UPat(Ops.CAST, (dtypes.char, dtypes.uchar, dtypes.long, dtypes.ulong, dtypes.bfloat16), (UPat.var("x", dtypes.half),), name="y"),
      lambda x,y: x.cast(dtypes.float).cast(y.dtype)),
   ])
   string_rewrite = PatternMatcher([
