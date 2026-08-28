@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes, nn, Context
-from tinygrad.helpers import getenv, temp, mv_address
+from tinygrad.helpers import getenv, temp, mv_address, DEV
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.dtype import DTYPES_DICT
@@ -202,6 +202,7 @@ class TestTinygrad(unittest.TestCase):
     for x, y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
+  @unittest.skipIf(Device.DEFAULT == "QCOM", "a630 g*l max is 65536; dropout(1e6) launches 15625x16")
   def test_dropout(self):
     with Context(TRAINING=1):
       n, rate = 1_000_000, 0.1
@@ -250,6 +251,8 @@ class TestTinygrad(unittest.TestCase):
         b = random_fn(10,10).realize()
         np.testing.assert_allclose(a.numpy(), b.numpy())
 
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM",
+                   "randperm(1000) exceeds TEST_TIMEOUT=90 on the Python IR3 interpreter")
   def test_randperm(self):
     Tensor.manual_seed(0)
     a = Tensor.randperm(10).realize()

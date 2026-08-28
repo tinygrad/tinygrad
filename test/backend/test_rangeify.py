@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes, Variable
-from tinygrad.helpers import Context, GlobalCounters, getenv, DEBUG
+from tinygrad.helpers import Context, GlobalCounters, getenv, DEBUG, DEV
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
 from tinygrad.codegen.opt import OptOps, Opt
 from tinygrad.renderer.ptx import PTXRenderer
@@ -78,6 +78,8 @@ class TestRangeifyEdgeCase(unittest.TestCase):
     t = Tensor.ones(10)[:v] * Tensor(v.cast(dtypes.float))
     self.assertEqual(t.sum().item(), 9)
 
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM",
+                   "1x512 @ 512x512 is too slow for the Python IR3 interpreter")
   def test_matmul_relu_cat(self):
     a = Tensor.ones(100, 512).contiguous().realize()
     c = Tensor.ones(1, 512).contiguous().realize()

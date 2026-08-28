@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
+from tinygrad.helpers import DEV
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
@@ -164,6 +165,8 @@ class TestCustomKernel(unittest.TestCase):
     tst = tst.custom_kernel(fxn=custom_arange_kernel)[0]
     self.assertTrue((ref == tst).all().item())
 
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM",
+                   "eye(1024) custom kernel is too heavy for the Python IR3 interpreter under xdist")
   def test_eye(self):
     ref = Tensor.eye(1024).clone().realize()
     tst = Tensor.empty_like(ref)

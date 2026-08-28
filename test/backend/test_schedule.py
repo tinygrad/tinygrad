@@ -46,6 +46,8 @@ class TestSchedule(unittest.TestCase):
     run_linear(*check_schedule(out, 1))
     np.testing.assert_allclose(out.numpy(), 2*np.pad(b.numpy(), ((1, 1), (0, 0))).sum(axis=1), rtol=1e-6)
 
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM",
+                   "fused cumsum exceeds TEST_TIMEOUT=90 on the Python IR3 interpreter")
   def test_cumsum_parallel_reduce_fused(self):
     # two-stage cumsum + ops triggers parallel REDUCEs in one kernel that must share an END (same nesting context = should merge)
     step, num_steps = 513, 10

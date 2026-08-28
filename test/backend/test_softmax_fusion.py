@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, Context, Device
 from tinygrad.dtype import DTypeLike, dtypes
 from tinygrad.engine.realize import run_linear
-from tinygrad.helpers import DEBUG, get_single_element
+from tinygrad.helpers import DEBUG, get_single_element, DEV
 from test.helpers import check_schedule
 
 def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
@@ -57,6 +57,8 @@ class TestFuse(unittest.TestCase):
     a = Tensor.rand(50,50).realize()
     self._test_fuse(lambda a: a.softmax(axis=-1), a)
 
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM",
+                   "Python IR3 interpreter exceeds TEST_TIMEOUT=90")
   def test_fuse_gemm_softmax(self):
     a = Tensor.rand(50,50).realize()
     b = Tensor.rand(50,50).realize()

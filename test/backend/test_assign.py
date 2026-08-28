@@ -484,6 +484,7 @@ class TestAssign(unittest.TestCase):
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
+  @unittest.skipIf(Device.DEFAULT == "QCOM", "a630 g*l max is 65536; this assign launches 99000x1")
   def test_overlapping_shrink_assignment_forward(self):
     # Forward shift: read index > write index in overlap
     N = 100000
@@ -494,6 +495,7 @@ class TestAssign(unittest.TestCase):
     with Context(NOOPT=1): a[0:N-shift].assign(a[shift:N]).realize()
     np.testing.assert_allclose(a.numpy(), expected)
 
+  @unittest.skipIf(Device.DEFAULT == "QCOM", "a630 g*l max is 65536; this assign launches 99000x1")
   def test_overlapping_shrink_assignment_reverse(self):
     # Reverse shift: write index > read index in overlap
     N = 100000

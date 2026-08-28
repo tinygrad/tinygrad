@@ -237,6 +237,7 @@ class TestLinearizer(unittest.TestCase):
         helper_arg_acc_dtype(d.conv2d(w, dtype=acc_dtype), expected_dtype)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  @unittest.skipIf(MOCKGPU and Device.DEFAULT == "QCOM", "Python IR3 interpreter exceeds TEST_TIMEOUT=90")
   def test_simple_unroll_no_between_phi_dependencies(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     r = (x@y).relu()
@@ -350,6 +351,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  @unittest.skipIf(MOCKGPU and Device.DEFAULT == "QCOM", "Python IR3 interpreter exceeds TEST_TIMEOUT=90")
   def test_grouped_store_locals_and_globals(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     out = x@y
@@ -391,6 +393,7 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipIf(MOCKGPU and Device.DEFAULT == "QCOM", "Python IR3 interpreter exceeds TEST_TIMEOUT=90")
   def test_two_grouped_stores_local(self):
     # GROUP on both reduces puts two LOCAL buffers in one kernel, and the store to each needs its own barrier
     a = Tensor.rand(32, 32).realize()

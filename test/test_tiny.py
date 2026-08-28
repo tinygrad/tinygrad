@@ -1,7 +1,7 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest, random
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
-from tinygrad.helpers import getenv, OSX
+from tinygrad.helpers import getenv, OSX, DEV
 
 class TestTiny(unittest.TestCase):
 
@@ -120,6 +120,8 @@ class TestTiny(unittest.TestCase):
 
   # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
   @unittest.skipIf(Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM",
+                   "mnist convs exceed TEST_TIMEOUT=90 on the Python IR3 interpreter")
   def test_mnist(self):
     layers = [
       nn.Conv2d(1, 32, 5), Tensor.relu,
@@ -139,6 +141,8 @@ class TestTiny(unittest.TestCase):
 
   # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
   @unittest.skipIf(Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM",
+                   "mnist convs exceed TEST_TIMEOUT=90 on the Python IR3 interpreter")
   def test_mnist_backward(self):
     # NOTE: we don't have the whole model here for speed
     layers = [

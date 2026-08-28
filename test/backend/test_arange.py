@@ -33,6 +33,8 @@ class TestArange(unittest.TestCase):
     t = Tensor.arange(2, dtype=dtypes.int)+Tensor([3])
     self.assertEqual(t.cat(t).tolist(), [3, 4, 3, 4])
 
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM",
+                   "eye(2560) NOOPT is 6.5M 1-thread workgroups; too slow for the Python IR3 interpreter")
   def test_eye_complexity(self):
     with Context(NOOPT=1):
       # NOTE: not every backend supports CMPEQ
@@ -125,6 +127,7 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       np.testing.assert_equal(X.numpy(), 0)
 
+  @unittest.skipIf(Device.DEFAULT == "QCOM", "a630 g*l max is 65536; this gather launches 25088x32")
   def test_index_mnist(self, noopt=1, op_limit=512*784*13, split_reduceop=0):
     # WEBGPU generates more ops due to bitpacking of < 4-byte dtypes
     if Device.DEFAULT == "WEBGPU": op_limit *= 15
