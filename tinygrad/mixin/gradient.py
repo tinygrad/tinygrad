@@ -39,6 +39,10 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     return (None,) + k.arg.grad_fxn(on_dev(ctx, 0), k)
   assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
+  # grads are collected at the flat param storage: reshape to each arg's view (max view shrunk to symbolic)
+  def shaped_grad(grad:UOp, i:int) -> UOp:
+    a = args[i]
+    return grad.view_as(a.shard_shape, a.axis) if a.axis is not None and isinstance(a.device, tuple) else grad.view_as(a._shape)
   grad_args = ctx.src
   # Precompiled forward outputs and gradient auxiliaries are additional backward-function inputs.
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}
@@ -60,10 +64,11 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   grads = compute_gradient(fxn, root_grad, set(params.values()))
   # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   # collect needed gradient bodies, compact unused params, create a single backward CALL
-  grad_bodies = [(i, grads[p]) for i in needed if (p:=params.get(i)) is not None and p in grads]
+  raw_grad_bodies = [(i, grads[p]) for i in needed if (p:=params.get(i)) is not None and p in grads]
+  grad_bodies = [(i, shaped_grad(grad, i)) for i, grad in raw_grad_bodies]
   aux_bodies:list[UOp] = []
   aux_returns:list[tuple[int, dict[UOp, tuple[UOp|None, ...]], tuple[int|None, ...]]] = []
-  for arg_idx, grad_body in grad_bodies:
+  for arg_idx, grad_body in raw_grad_bodies:
     for mailbox in gradient_auxiliary_mailboxes.values():
       if (aux:=mailbox.pop(grad_body, None)) is None: continue
       slots:list[int|None] = []

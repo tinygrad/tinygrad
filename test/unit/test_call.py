@@ -52,6 +52,11 @@ class TestCall(unittest.TestCase):
     np.testing.assert_allclose(a.grad.numpy(), gt_a_grad, rtol=1e-5)
     np.testing.assert_allclose(b.grad.numpy(), gt_b_grad, rtol=1e-5)
 
+  def test_call_scalar_param_shape_mismatch(self):
+    scalar_fxn = UOp.param(0, dtypes.float, ()) * 2
+    with self.assertRaisesRegex(TypeError, "shape mismatch: expected scalar"):
+      Tensor.call(Tensor.ones(2), fxn=scalar_fxn).realize()
+
   def test_call_gemm(self):
     M, K, N = 4, 8, 4
     a = Tensor.randn(M, K)
