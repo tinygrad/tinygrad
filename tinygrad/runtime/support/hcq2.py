@@ -189,7 +189,7 @@ def _wait_ins(ctx:BatchCtx, bufs_by_lane:list[list[Any]], write, devices:tuple[s
   for (dqueue, dtag), by_lane in rows.items():
     for ds in itertools.zip_longest(*(by_lane[lane] for lane in range(len(devices)))):
       sig = UOp.mstack(*[make_buf(d, tag="sentinel_signal") if dd is None else make_buf(dd, ctx.slots[dqueue]) for dd, d in zip(ds, devices)])
-      waits.append(UOp(Ops.INS, arg="wait", src=(sig, UOp.const(dtag + 1, dtypes.uint64))))
+      waits.append(UOp(Ops.INS, arg=("wait", dtypes.void), src=(sig, UOp.const(dtag + 1, dtypes.uint64))))
   ctx.signal_tags |= {t for _, t in rows}
   return waits
 
@@ -238,7 +238,7 @@ def _make_finalizers(ctx:BatchCtx) -> tuple[list[UOp], list[UOp], list[UOp]]:
 
     # finalizer: bump the host timeline and remember this schedule's epoch for the next fence
     waits = _wait_ins(ctx, [list(dev_bufs[d].values()) for d in devs], None, devs, "COMPUTE:0", n)
-    fin_submit = make_submit(*waits, UOp(Ops.INS, arg="store", src=(tl_signal, tl_value.index(0))), devs=devs, queue="COMPUTE:0")
+    fin_submit = make_submit(*waits, UOp(Ops.INS, arg=("store", dtypes.void), src=(tl_signal, tl_value.index(0))), devs=devs, queue="COMPUTE:0")
     epoch = (epoch_slot:=tl_value.after(fin_submit).index(0)).load()
     fins.append(make_call("hcq_finalizer", UOp.sink(epoch_slot.store(epoch + 1), sched_epoch.after(fin_submit).index(0).store(epoch)), HCQInfo(devs)))
   return fences, resets, fins
@@ -251,18 +251,20 @@ def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], 
     if (devices, queue) not in seen_queues:
       seen_queues.add((devices, queue))
       epoch = make_buf(devices, tag="timeline_value").index(0) - 1
-      q = [UOp(Ops.INS, arg="barrier", src=()), UOp(Ops.INS, arg="wait", src=(make_buf(devices, tag="timeline_signal"), epoch))] + q
+      q = [UOp(Ops.INS, arg=("barrier", dtypes.void), src=()),
+           UOp(Ops.INS, arg=("wait", dtypes.void), src=(make_buf(devices, tag="timeline_signal"), epoch))] + q
 
     # and make hcq call
     name, info = get_call_name(call, get_call_arg_uops(call)), HCQInfo(devices, estimate_uop(call))
     ts_ids = [next(UOp.unique_num) for _ in range(2)] if ctx.profile else []
     kerns.append((devices, name, info.estimates, tuple(ts_ids), make_call(name, call.src[0], info).key))
 
-    ts_ins = [UOp(Ops.INS, arg="timestamp", src=(make_buf(devices, s),)) for s in ts_ids]
+    ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(make_buf(devices, s),)) for s in ts_ids]
     q += ts_ins[:1] + [call.replace(arg=replace(call.arg, aux=info))] + ts_ins[1:]
 
     # signal the queue if someone waits for us
-    if tag in ctx.signal_tags: q += [UOp(Ops.INS, arg="store", src=(make_buf(devices, ctx.slots[queue]), UOp.const(tag + 1, dtypes.uint64)))]
+    if tag in ctx.signal_tags:
+      q += [UOp(Ops.INS, arg=("store", dtypes.void), src=(make_buf(devices, ctx.slots[queue]), UOp.const(tag + 1, dtypes.uint64)))]
     src.append(make_call(f"submit {name}", make_submit(*q, devs=devices, queue=queue).sink(), info))
   return src, kerns
 
