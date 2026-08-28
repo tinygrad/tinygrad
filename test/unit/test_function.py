@@ -425,6 +425,15 @@ class TestFunctionTuple(unittest.TestCase):
     np.testing.assert_allclose(x.grad.numpy(), [1., 1., 1.])
     np.testing.assert_allclose(y.grad.numpy(), [1., 1., 1.])
 
+  def test_grad_fxn_more_outputs_than_inputs(self):
+    def grad_fxn(grad:UOp, call:UOp): return (grad,)
+
+    x = Tensor([2.]).contiguous()
+    @function(grad_fxn=grad_fxn)
+    def f(x:Tensor): return (x+1, x+2)
+    _, y = f(x)
+    self.assertEqual(y.sum().gradient(x)[0].item(), 1.0)
+
   def test_grad_unused_tuple_output_recursive(self):
     # only one output is used
     @function(precompile=True, precompile_backward=True)

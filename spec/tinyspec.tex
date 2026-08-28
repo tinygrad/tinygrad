@@ -102,7 +102,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Call} & (body, $a_0$, $a_1$, \ldots) & --- & A \op{Tuple} body substitutes each \op{Param} $k$ with $a_k$ and produces values (gradient-able); any other body is an opaque invocation of a compiled kernel or custom function. \\
+\op{Call} & (body, $a_0$, $a_1$, \ldots) & --- & Substitute each \op{Param} $k$ in body with $a_k$. \\
 \op{Tuple} & $(v_0, v_1, \ldots)$ & --- & Pack values; required as a value-producing \op{Call} body. \\
 \op{GetTuple} & $(T,)$ & idx & Extract element at idx from a \op{Tuple}. \\
 \bottomrule

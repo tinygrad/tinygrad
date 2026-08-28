@@ -24,7 +24,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fxn, args = k.src[0], k.src[1:]
   if k.arg.grad_fxn is not None:
     # put const on a device, also TODO why do we still have NOOP...
-    def on_dev(g, i): return g.clone(device=args[i].device) if g.device is None else g
+    def on_dev(g, i): return g.clone(device=k.device if fxn.op is Ops.TUPLE else args[i].device) if g.device is None else g
     if ctx.op is Ops.TUPLE:
       real = [on_dev(g, i) for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
       return (None,) + (k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
