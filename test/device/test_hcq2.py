@@ -3,10 +3,10 @@ from unittest.mock import patch
 from tinygrad import Device, Tensor
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import getenv
+from tinygrad.helpers import HCQ2
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in
 
-@unittest.skipUnless(getenv("HCQ2") and all_devices_in(Device.DEFAULT, HCQ_DEVS), "hcq2 device required")
+@unittest.skipUnless(HCQ2 and all_devices_in(Device.DEFAULT, HCQ_DEVS), "hcq2 device required")
 class TestHCQ2(unittest.TestCase):
   def test_copy_without_copy_queue(self):
     with patch.object(Device[Device.DEFAULT], "has_copy_queue", False):

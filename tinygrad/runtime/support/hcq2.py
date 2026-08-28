@@ -462,7 +462,7 @@ def hcq_lower(linear:UOp, pm_encode:PatternMatcher) -> UOp:
   linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
 
   # and compile it
-  return lower_and_compile(graph_rewrite(linear, pm_replace_params, walk=True, name="replace params"))
+  with Context(EMULATED_DTYPES=""): return lower_and_compile(graph_rewrite(linear, pm_replace_params, walk=True, name="replace params"))
 
 @rewrite_group(lambda linear,input_uops,profile,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
