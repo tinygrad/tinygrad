@@ -1785,7 +1785,7 @@ def train_gptoss():
 
     Tensor.realize(loss, *grads)
 
-    clipped_grads, grad_norm = fclip_grads(grads, 1, 1.0)
+    clipped_grads, grad_norm = fclip_grads(grads, 1.0)
     optim.fstep(clipped_grads, grad_norm)
     scheduler.step()
 
