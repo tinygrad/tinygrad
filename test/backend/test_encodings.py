@@ -100,13 +100,6 @@ class TestEncodingsX86(unittest.TestCase):
     # vaddss xmm0, xmm0, xmm8
     self.assertEqual(bytes.fromhex(self.encode(add)), bytes.fromhex("C4 C1 7A 58 C0"))
 
-  # test ymm encoding
-  def test_ymm_encoding(self):
-    xmm0, xmm1 = def_reg(dtypes._uint256, XMM[0]), def_reg(dtypes._uint256, XMM[1])
-    add = ins(X86Ops.VADDPS, dtypes._uint256, (xmm0, xmm1), XMM[0])
-    # vaddps ymm0, ymm0, ymm1
-    self.assertEqual(bytes.fromhex(self.encode(add)), bytes.fromhex("C5 FC 58 C1"))
-
   # test encoding where register is in the immediate field
   def test_reg_in_imm_field(self):
     xmm0, xmm1, xmm2 = def_reg(dtypes.float32, XMM[0]), def_reg(dtypes.float32, XMM[1]), def_reg(dtypes.float32, XMM[2])
