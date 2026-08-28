@@ -750,7 +750,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def MaxUnpool(xT: Tensor, xI: Tensor, outshape: list[int]|None=None, kernel_shape:list[int]|None=None, pads:list[int]|int=0,
                 strides:list[int]|int=1):
     if kernel_shape is None: kernel_shape = []
-    pads_: int | tuple[int, ...] = tuple(pads) if isinstance(pads, list) else pads
+    pads_: int | tuple[int, ...] = pads if isinstance(pads, int) else _onnx_pads_to_tiny_pads(pads)
     return Tensor.max_unpool2d(xT, xI, tuple(kernel_shape), strides, 1, pads_, outshape if outshape is None else tuple(outshape))
 
   def GlobalAveragePool(X:Tensor): return X.mean(axis=tuple(range(2, X.ndim)), keepdim=True)
