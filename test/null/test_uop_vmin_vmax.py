@@ -134,6 +134,11 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(UOp.variable('x', -1, 10).cast(dtypes.uint8)._min_max, (0, 255))
     self.assertEqual(UOp.variable('x', 250, 260).cast(dtypes.uint8)._min_max, (0, 255))
 
+  def test_vmin_vmax_cast_signed(self):
+    self.assertEqual(UOp.variable('x', 5, 10).cast(dtypes.int8)._min_max, (5, 10))
+    self.assertEqual(UOp.variable('x', 0, 255).cast(dtypes.int8)._min_max, (-128, 127))
+    self.assertEqual(UOp.variable('x', -200, 5).cast(dtypes.int8)._min_max, (-128, 127))
+
   def test_vmin_vmax_xor_neg1(self):
     x = UOp.variable('x', 3, 7)
     uop = x ^ -1
