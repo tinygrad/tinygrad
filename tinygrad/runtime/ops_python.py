@@ -80,7 +80,6 @@ class PythonProgram(Program['PythonDevice']):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
-        assert u.dtype is not None, f"{u.op} is missing a dtype"
         if u.op is Ops.STORE:
           assert len(src_values) == 2, f"STORE must be lowered to 2 srcs, got {len(src_values)}"
           store_gate = exec_masks[-1]
