@@ -1,6 +1,6 @@
 import ctypes, time, contextlib, functools
 from typing import Any, Iterable, Literal
-from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits
+from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits, unwrap
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import import_soc
 from tinygrad.runtime.support.memory import AddrSpace
@@ -89,17 +89,8 @@ class AM_GMC(AM_IP):
   def init_hw(self): self.init_hub("MM", insts=self.mm_insts)
 
   def flush_hdp(self):
-    # a VF cannot read the remap window register (it reads all ones), it flushes through its own coherency register
     if self.adev.is_vf: self.adev.reg("regBIF_BX_DEV0_EPF0_VF0_HDP_MEM_COHERENCY_FLUSH_CNTL").write(0x0)
     else: self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4, 0x0)
-  def _cp_flush_tlb(self, req:int, vmid_mask:int):
-    from tinygrad.runtime.ops_amd import WAIT_REG_MEM_FUNCTION_EQ # ops_amd imports am, so this one is late
-    dev, q = self.vf_owner, self.vf_owner.hw_compute_queue_t()
-    # only the hub of the first xcc answers a VF, the host PF keeps the others to itself
-    q.wait_reg_mem(req, mask=vmid_mask, reg=self.adev.regGCVM_INVALIDATE_ENG17_REQ.addr[0],
-                   reg_done=self.adev.regGCVM_INVALIDATE_ENG17_ACK.addr[0], op=WAIT_REG_MEM_FUNCTION_EQ)
-    q.signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
-    dev.timeline_signal.wait(dev.timeline_value - 1)
 
   def flush_tlb(self, ip:Literal["MM", "GC"], vmid, flush_type=0):
     self.flush_hdp()
@@ -111,18 +102,22 @@ class AM_GMC(AM_IP):
       invalidate_l2_ptes=1, invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1,
       clear_protection_fault_status_addr=0)
 
-    # a VF sees neither the GC invalidation ack nor the semaphore, the host PF owns both, so the cp runs the invalidation instead
-    if ip == "GC" and self.adev.is_vf and self.vf_owner is not None: return self._cp_flush_tlb(req, 1 << vmid)
+    if ip == "GC" and self.adev.is_vf and (dev:=self.vf_owner) is not None: # the cp runs invalidations once its queues are up
+      from tinygrad.runtime.ops_amd import WAIT_REG_MEM_FUNCTION_EQ
+      dev.hw_compute_queue_t().wait_reg_mem(req, mask=1 << vmid, reg_done=self.adev.regGCVM_INVALIDATE_ENG17_ACK.addr[0],
+        reg=self.adev.regGCVM_INVALIDATE_ENG17_REQ.addr[0], op=WAIT_REG_MEM_FUNCTION_EQ).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
+      dev.timeline_signal.wait(dev.timeline_value - 1)
+      return
 
-    use_sem = ip == "MM" and not self.adev.is_vf # the invalidation semaphore is owned by the host PF on a VF
+    use_sema = ip == "MM" and not self.adev.is_vf # vf can't use sema
     for inst in (self.adev.gmc.mm_insts if ip == "MM" else range(self.adev.gfx.xccs)):
-      if use_sem: wait_cond(lambda: self.adev.regMMVM_INVALIDATE_ENG17_SEM.read(inst=inst) & 0x1, value=1, msg="mm flush_tlb timeout")
+      if use_sema: wait_cond(lambda: self.adev.regMMVM_INVALIDATE_ENG17_SEM.read(inst=inst) & 0x1, value=1, msg="mm flush_tlb timeout")
 
       self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(req, inst=inst)
 
       wait_cond(lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read(inst=inst) & (1 << vmid), value=(1 << vmid), msg="flush_tlb timeout")
 
-      if use_sem: self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0, inst=inst)
+      if use_sema: self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0, inst=inst)
       if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0) and ip == "MM":
         self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.update(reserved_cache_private_invalidation=1, inst=inst)
 
@@ -323,8 +318,7 @@ class AM_GFX(AM_IP):
 
     self._enable_mec()
 
-    # the host PF shuts a VF down when it leaves its access window with no cp scheduler, point the RLC at the kiq slot (me 2, pipe 1, queue 0)
-    if self.adev.is_vf:
+    if self.adev.is_vf: # the host PF shuts a VF down when it leaves its access window with no cp scheduler, point the RLC at the kiq slot
       for xcc in range(self.xccs): self.adev.reg("regRLC_CP_SCHEDULERS").update(scheduler0=(2 << 5) | (1 << 3) | 0x80, inst=xcc)
 
     # set 1 partition on bare metal. a VF uses the spatial partition its host PF assigned.
