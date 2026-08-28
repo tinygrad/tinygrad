@@ -115,11 +115,11 @@ def promo_dtype(src:tuple[UOp,...]) -> DType:
   dts = [x.dtype for x in src]
   return dts[0] if all_same(dts) else least_upper_dtype(*dts)
 
-def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
-  # here are the dtype production rules, eventually this will go in UOp as a recursive property
+def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
+  # here are the dtype production rules, total over all Ops
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
-         Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | \
+         Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | Ops.NOOP | \
          Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR | Ops.PYLITERAL:
       # always void
       return dtypes.void
@@ -131,10 +131,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType|None:
       return arg[1]
     case Ops.INS:
       # arg is (instruction, dtype), a queue command or an asm line is void
+      assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"INS arg must be (instruction, DType), got {arg}"
       return arg[1]
-    case Ops.NOOP:
-      # NOOP can be void or carry any dtype (e.g. x.f(Ops.NOOP) or substitute base with NOOP)
-      return None
     case Ops.INDEX:
       # an image access is always float, no matter the storage dtype
       # TODO: should there be a CAST so src[0].dtype just work?
@@ -197,9 +195,9 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType|None=None, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
-    if dtype is None: dtype = dtype_from_uop(op, src, arg) or dtypes.void
+    if dtype is None: dtype = dtype_from_uop(op, src, arg)
     # TODO: delete this once the dtype field is removed, for now it just re-implements spec.py
-    if SPEC == 2 and (expected_dtype:=dtype_from_uop(op, src, arg)) is not None and expected_dtype != dtype:
+    elif SPEC == 2 and (expected_dtype:=dtype_from_uop(op, src, arg)) != dtype:
       raise RuntimeError(f"bad dtype {dtype}, expected {expected_dtype} on {op}")
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -257,11 +255,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER and self.realized is not None: args.append(self.realized)
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
-    new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src),
-                kwargs.pop("arg", self.arg), kwargs.pop("tag", self.tag))
+    new_args = (kwargs.pop("op", self.op), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg), kwargs.pop("tag", self.tag))
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
-    if (self.op, self.dtype, self.src, self.arg, self.tag) == new_args: return self
-    return UOp(*new_args)
+    if (self.op, self.src, self.arg, self.tag) == new_args: return self
+    return UOp(new_args[0], src=new_args[1], arg=new_args[2], tag=new_args[3])
   def rtag(self, tag=True): return self.replace(tag=tag)
   @property
   def val(self):
@@ -281,8 +278,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.REDUCE: return f'({", ".join(map(str, self.arg))})'
     return repr(self.arg)
   def tagstr(self): return f", tag={self.tag}" if self.tag is not None else ""
-
-  def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
 
   @functools.cached_property
   def backward_slice(self:UOp) -> dict[UOp, None]:
@@ -807,7 +802,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.PERMUTE | Ops.FLIP: src_args = []
       case Ops.STACK:
         srcs = (self,)+tuple(arg)
-        dtype = cast(DType, dtype_from_uop(Ops.STACK, srcs, None))
+        dtype = dtype_from_uop(Ops.STACK, srcs, None)
         return UOp(Ops.STACK, src=tuple(u if u.base.is_invalid else UOp.const(u.val, dtype) if u.op is Ops.CONST else u.cast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
@@ -1694,7 +1689,7 @@ class RewriteContext:
       else:
         # rebuild node with rewritten srcs
         new_src = tuple(self.replace.get(x, x) for x in n.src)
-        new_n = UOp(n.op, _rebuild_dtype(n, new_src), new_src, n.arg, n.tag) if new_src != n.src else n
+        new_n = UOp(n.op, src=new_src, arg=n.arg, tag=n.tag) if new_src != n.src else n
         # top-down: try pm on rebuilt node, use result as-is (no re-traversal)
         if self.pm is not None and (rewritten:=self.pm_rewrite(new_n)) is not None: new_n = rewritten
         self.replace[n] = new_n
@@ -1753,7 +1748,7 @@ class RewriteContext:
               continue
           else:
             # if srcs changed from rewrites, construct a new UOp with the new srcs
-            new_src_n = UOp(new_n.op, _rebuild_dtype(new_n, new_src), new_src, new_n.arg, new_n.tag)
+            new_src_n = UOp(new_n.op, src=new_src, arg=new_n.arg, tag=new_n.tag)
           # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
           stack.append((n, 2, new_src_n))
           stack.append((new_src_n, 0, new_src_n))
@@ -1773,10 +1768,6 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls)
   return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 
-def _rebuild_dtype(n:UOp, new_src:tuple[UOp,...]) -> DType:
-  # TODO: delete this once the dtype field is removed, every rebuild will re-derive
-  if all(a.dtype is b.dtype for a,b in zip(n.src, new_src)): return n.dtype
-  return dtype_from_uop(n.op, new_src, n.arg) or n.dtype
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(x, dtype)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
