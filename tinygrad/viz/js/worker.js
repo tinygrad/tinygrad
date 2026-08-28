@@ -55,7 +55,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
       height += lineHeight;
     }
     const op = label.split("\n", 1)[0];
-    const callNode = op === "CALL" || op === "FUNCTION", programNode = op === "PROGRAM";
+    const callNode = op === "CALL", programNode = op === "PROGRAM";
     const collapsePorts = callNode ? [0] : programNode ? [0, 1] : null;
     if (callNode) callCount++;
     g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, tag, callNode, collapsePorts, exclude, addrspace,
