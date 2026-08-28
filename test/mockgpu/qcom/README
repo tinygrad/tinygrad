@@ -1,0 +1,4 @@
+`DEV=MOCK+QCOM python3 -c "from tinygrad import Device; print(Device['QCOM'].arch)"`
+`DEV=MOCK+QCOM python3 test/test_tiny.py`
+`DEV=MOCK+QCOM python3 -m pytest test/backend/test_dtype.py`
+`DEV=MOCK+QCOM python3 -m pytest test/backend/test_dtype_alu.py`

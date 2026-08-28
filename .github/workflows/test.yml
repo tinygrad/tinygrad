@@ -570,6 +570,28 @@ jobs:
           REMOTE=127.0.0.1:6667 python test/test_tiny.py
           REMOTE=127.0.0.1:6667 python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk; kill %1
 
+  testmockqcom:
+    name: Linux (MOCK+QCOM)
+    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    env:
+      DEV: MOCK+QCOM
+      SKIP_SLOW_TEST: 1
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: mockqcom
+          deps: "testing_unit mesa"
+      - name: Check Device.DEFAULT
+        run: python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'QCOM', Device.DEFAULT"
+      - name: Run test_tiny
+        run: python test/test_tiny.py
+      - name: Run pytest
+        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_jit.py test/backend/test_graph.py test/device/test_hcq.py --durations=20
+
   testamd:
     strategy:
       fail-fast: false
