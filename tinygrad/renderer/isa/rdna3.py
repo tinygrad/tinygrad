@@ -594,7 +594,7 @@ class RDNA3Renderer(ISARenderer):
     pending_scratch = False
     # s_waitcnt
     for u in lin.src:
-      if any(r in deps for s in u.src for r in rdefs(s)):
+      if any(r in deps for s in u.src for r in rdefs(s)) or any(r in deps for r in rdefs(u)):
         nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt, src=(const(0, dtypes.uint16),)))
         deps.clear()
       if (tp := CntType.get(u)) is not None:
