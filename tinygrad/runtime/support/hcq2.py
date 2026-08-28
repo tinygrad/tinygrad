@@ -168,8 +168,8 @@ class BatchCtx:
   slots:dict[str, int] = field(default_factory=lambda: collections.defaultdict(lambda: next(UOp.unique_num)))
 
 def _get_call_bufs_by_lane(call:UOp, devices:tuple[str, ...]) -> list[list[Any]]:
-  return [[b if (b:=_lane(a, lane)).op is Ops.PARAM or (b.op is Ops.MSELECT and b.src[0].op is Ops.PARAM) else b.buffer
-           for a in get_call_arg_uops(call)] for lane in range(len(devices))]
+  def dep_buf(b:UOp) -> Any: return base if (base:=(b.src[0] if b.op is Ops.MSELECT else b).base).op is Ops.PARAM else b.buffer
+  return [[dep_buf(_lane(a, lane)) for a in get_call_arg_uops(call)] for lane in range(len(devices))]
 
 def _wait_ins(ctx:BatchCtx, bufs_by_lane:list[list[Any]], write, devices:tuple[str, ...], queue:str, tag:int) -> list[UOp]:
   deps:list[Dep] = []
