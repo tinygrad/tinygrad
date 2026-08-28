@@ -110,10 +110,10 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or c.num_returned == 0: return None
   assert c.src[0].op is Ops.SINK, f"expected SINK body for precompiled call, got {c.src[0].op}"
-  # the RETURNED inputs are the call outputs (they are always the last srcs), the outputs are the stores into the
-  # output PARAMs (slots after the args) in slot order
-  n_ret = c.num_returned
-  call_args, returned = c.src[1:len(c.src)-n_ret], c.src[len(c.src)-n_ret:]
+  # the RETURNED srcs are the call outputs (they can be anywhere in the srcs), the outputs are the stores into the
+  # output PARAMs in slot order
+  returned = tuple(a for a in c.src[1:] if a.unsharded_base.op is Ops.RETURNED)
+  call_args = tuple(a for a in c.src[1:] if a.unsharded_base.op is not Ops.RETURNED)
   input_buffers = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in call_args)
   out_stores = sorted((st for st in c.src[0].src if st.op is Ops.STORE), key=lambda st: st.src[0].unsharded_base.arg.slot)
   srcs = tuple(st.src[1] for st in out_stores)

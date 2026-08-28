@@ -15,6 +15,16 @@ class TestFunction(unittest.TestCase):
     b = Tensor([4,5,6])
     np.testing.assert_equal(f(a,b).numpy(), [5,7,9])
 
+  def test_two_return(self, precompile=False):
+    @function(precompile=precompile)
+    def f(a:Tensor, b:Tensor) -> tuple[Tensor, Tensor]:
+      return (a+b, (a+b)*2)
+    a = Tensor([1,2,3])
+    b = Tensor([4,5,6])
+    c = f(a,b)
+    np.testing.assert_equal((c[0]+c[1]).numpy(), [5*3,7*3,9*3])
+  def test_two_return_precompiled(self): self.test_two_return(True)
+
   def test_simple_same(self):
     @function
     def f(a:Tensor, b:Tensor) -> Tensor: return a+b

@@ -13,7 +13,7 @@ def _rmsnorm_fwd_fxn(x_in_p, eps, device):
   return rmsnorm_fwd(Tensor(x_in_p, device=device), eps)
 
 def _rmsnorm_bwd(grad:UOp, call:UOp) -> tuple:
-  x_normed, rrms = (Tensor(r.after(call)) for r in call.src[-2:])
+  x_normed, rrms = map(Tensor, call.returned_outputs)
   do_float = Tensor(grad).float()
   d_x = rrms * (do_float - x_normed.float() * (do_float * x_normed.float()).mean(-1, keepdim=True))
   return (d_x.cast(call.src[1].dtype).uop,)

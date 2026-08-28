@@ -26,7 +26,10 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   if k.arg.grad_fxn is not None:
     # put const on a device, also TODO why do we still have NOOP...
     def on_dev(g, i): return g.clone(device=args[i].device) if g.device is None else g
-    def arg_grads(g): return (None,) + g + (None,)*k.num_returned
+    # grads align with the call's src positions (None for the body and for RETURNED outputs, wherever they are)
+    def arg_grads(g):
+      git = iter(g)
+      return (None,) + tuple(next(git) if a.unsharded_base.op is not Ops.RETURNED else None for a in k.src[1:])
     if ctx.op is Ops.SINK:
       real = [on_dev(g, i) for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
       return arg_grads(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
