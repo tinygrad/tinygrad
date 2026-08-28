@@ -223,8 +223,8 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.ones(3)
     x = f(a, UOp.variable("scale_a", 1, 100).bind(2))
     y = f(a, UOp.variable("scale_b", 1, 100).bind(3))
-    fx = next(u for u in x.uop.toposort() if u.op is Ops.FUNCTION)
-    fy = next(u for u in y.uop.toposort() if u.op is Ops.FUNCTION)
+    fx = next(u for u in x.uop.toposort() if u.op is Ops.CALL and u.src[0].op is Ops.TUPLE)
+    fy = next(u for u in y.uop.toposort() if u.op is Ops.CALL and u.src[0].op is Ops.TUPLE)
     self.assertEqual(fx.src[0].key, fy.src[0].key)
     np.testing.assert_equal(x.numpy(), [2, 2, 2])
     np.testing.assert_equal(y.numpy(), [3, 3, 3])
@@ -251,9 +251,9 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.empty(4, 8)
     b = Tensor.empty(4, 8)
     r0, r1 = f(a), f(b)
-    # find the FUNCTION nodes
-    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.FUNCTION)
-    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.FUNCTION)
+    # find the value-producing call nodes
+    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.src[0].op is Ops.TUPLE)
+    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.src[0].op is Ops.TUPLE)
     # the function bodies (src[0]) should have identical keys
     self.assertEqual(c0.src[0].key, c1.src[0].key)
 

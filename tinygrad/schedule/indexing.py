@@ -23,7 +23,7 @@ class IndexingContext:
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER,
                       Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
-                      Ops.LOAD, Ops.CALL, Ops.FUNCTION}
+                      Ops.LOAD, Ops.CALL}
 
 def realize(ctx:IndexingContext, tr:UOp) -> None: ctx.realize_map[tr] = None
 
@@ -204,7 +204,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in reversed(tsink_toposort):
     # no ranges on kernels, they are internal
-    if x.op in {Ops.CALL, Ops.FUNCTION, Ops.LINEAR}: continue
+    if x.op in {Ops.CALL, Ops.LINEAR}: continue
 
     # AFTER doesn't have range
     if x.op is Ops.AFTER: continue

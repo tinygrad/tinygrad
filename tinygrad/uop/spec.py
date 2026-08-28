@@ -153,10 +153,10 @@ spec_tensor = PatternMatcher([
   # CALL
   (UPat(Ops.CALL, dtypes.void, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
 
-  # FUNCTION + TUPLE must have void dtype, GETTUPLE can only appear on FUNCTION or TUPLE
-  (UPat(Ops.FUNCTION, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
+  # value-producing CALLs and TUPLEs must have void dtype, GETTUPLE can only appear on CALL or TUPLE
+  (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
   (UPat(Ops.TUPLE, dtypes.void), lambda: True),
-  (UPat(Ops.GETTUPLE, src=(UPat(Ops.FUNCTION, src=(UPat(Ops.TUPLE, name="t"),), allow_any_len=True),), name="g"), valid_gettuple),
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.CALL, src=(UPat(Ops.TUPLE, name="t"),), allow_any_len=True),), name="g"), valid_gettuple),
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), valid_gettuple),
 
   # SPECIAL is index before index lowering. custom_kernel currently has this
