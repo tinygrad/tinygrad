@@ -117,8 +117,6 @@ class X86GroupOp:
   # X86Ops whose second src is the rm field
   Rm2nd = ReadMem2nd
 
-  All = set(X86Ops)
-
 # ***** X86 legalization *****
 
 extra_matcher = PatternMatcher([
@@ -354,8 +352,6 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  # cast of void is a noop
-  (UPat.var("y").cast(name="x"), lambda y,x: y if y.dtype == dtypes.void else None),
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
