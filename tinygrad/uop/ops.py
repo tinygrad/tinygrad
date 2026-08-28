@@ -49,7 +49,7 @@ axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.THREA
 axis_to_pos = {AxisType.DEVICE: -2, AxisType.WEAK: -1, AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1,
                AxisType.LOCAL: 2, AxisType.UPCAST: 3, AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
-range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.FUNCTION: 1, Ops.LINEAR: 0}
+range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.LINEAR: 0}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op])
@@ -120,7 +120,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | Ops.NOOP | \
-         Ops.TUPLE | Ops.FUNCTION | Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR | Ops.PYLITERAL:
+         Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR | Ops.PYLITERAL:
       # always void
       return dtypes.void
     case Ops.CALL:
@@ -156,10 +156,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
     case Ops.WMMA:
       # WMMA output dtype is the accumulator dtype (src[2])
       return src[2].dtype
-    case Ops.GETTUPLE:
-      # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
-      in_tuple = src[0].src[0] if src[0].op is Ops.FUNCTION else src[0]
-      return in_tuple.src[arg].dtype
     case Ops.GETADDR:
       return dtypes.uint64
     case Ops.THREEFRY:
@@ -170,8 +166,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       if not all(dtypes.is_int(x.dtype) or x.base.is_invalid for x in src):
         raise RuntimeError(f"shift operands must be int, got {[x.dtype for x in src]}")
       return src[0].dtype
-    case Ops.BUFFER | Ops.PARAM:
-      assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
+    case Ops.BUFFER | Ops.PARAM | Ops.RETURNED:
+      assert isinstance(arg, ParamArg), f"{op} must have ParamArg"
       return arg.dtype
     case Ops.BINARY:
       return dtypes.uint8
@@ -306,7 +302,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(node.src if enter_calls or node.op not in {Ops.CALL, Ops.FUNCTION} else node.src[1:]):
+          for s in reversed(node.src if enter_calls or node.op is not Ops.CALL else node.src[1:]):
             stack.append((s, False)) # push srcs on the stack
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
     return cache
@@ -335,7 +331,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.GROUP | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE | Ops.FUNCTION:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE:
         return None
 
       # a void CALL has no shape, the return value of a CALL has the shape of its dtype
@@ -355,17 +351,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.NOOP:
         return self.src[0]._shape if len(self.src) >= 1 else None
 
-      case Ops.GETTUPLE:
-        # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
-        in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
-        assert in_tuple.op is Ops.TUPLE
-        inner_shape = in_tuple.src[self.arg]._shape
-        if inner_shape is None: return None
-        # if through a FUNCTION, substitute internal PARAMs in the shape with corresponding args
-        if self.src[0].op is Ops.FUNCTION:
-          return tuple(graph_rewrite(s, _pm_resolve_params, self.src[0].src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
-        return inner_shape
-
       case Ops.INDEX:
         shp:list[sint] = []
         for s in self.src[1:]: shp.extend(list(s.shape))
@@ -381,8 +366,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.GETADDR: return ()
       case Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
-      case Ops.BUFFER | Ops.PARAM:
-        # PARAM/BUFFER don't have a shape input, they have a size in the arg: int gives shape (size,), None gives ()
+      case Ops.BUFFER | Ops.PARAM | Ops.RETURNED:
+        # these don't have a shape input, they have a size in the arg: int gives shape (size,), None gives ()
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return () if self.arg.size is None else (self.arg.size,)
       case Ops.CUSTOM | Ops.CUSTOMI:
@@ -424,7 +409,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       match self.op:
         case Ops.RESHAPE:
           if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
-          if prod(ps) != prod(self.marg): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
+          # with symbolic views prod equality can be true at runtime but unprovable, only reject provably unequal products
+          if resolve(prod(ps) != prod(self.marg), False): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
           return self.marg
         case Ops.EXPAND:
           return tuple(self.marg) + ps
@@ -551,12 +537,23 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, src=tuple([x for x in srcs if x is not None]), **kwargs)
-  def maketuple(*srcs:UOp):  # pylint: disable=no-self-argument
-    return UOp(Ops.TUPLE, src=srcs)
-  def gettuple(self, idx:int) -> UOp:
-    in_tuple = self.src[0] if self.op is Ops.FUNCTION else self
-    assert in_tuple.op is Ops.TUPLE, f"gettuple requires FUNCTION or TUPLE source, got {self.op}"
-    return UOp(Ops.GETTUPLE, src=(self,), arg=idx)
+  @staticmethod
+  def returned(slot:int, dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, axis:int|None=None) -> UOp:
+    """create a RETURNED placeholder: like PARAM it has a flat storage size in the arg with a view on top,
+    but it marks a buffer the enclosing call writes and returns: it's an input to the call and you AFTER on it"""
+    if isinstance(shape, (int, UOp)): shape = (shape,)
+    if shape is not None and axis is not None and isinstance(device, tuple):
+      # multi-device values have a per-shard sized storage wrapped in UNSHARD: the sharding lives in the graph, not the arg
+      shape = tuple(s // len(device) if i == axis else s for i, s in enumerate(shape))
+    if shape is None or len(shape) == 0: return UOp(Ops.RETURNED, arg=ParamArg(slot, dtype, None, device=device))
+    ret = UOp(Ops.RETURNED, arg=ParamArg(slot, dtype, prod(to_max_shape(shape)), device=device))
+    return ret.view_as(shape, axis)
+  @property
+  def num_returned(self) -> int: return sum(x.unsharded_base.op is Ops.RETURNED for x in self.src[1:])
+  @property
+  def returned_outputs(self) -> tuple[UOp, ...]:
+    """the outputs of a value-producing call: an AFTER on each RETURNED input, usable like a normal buffer"""
+    return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.op is Ops.RETURNED)
   def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]), **kwargs)
@@ -701,10 +698,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.UNSHARD:
       if len(self.arg) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {self.arg}, use .sharding")
       return self.arg[0]
-    # GETTUPLE: axis comes from the specific TUPLE element, not src[0]
-    if self.op is Ops.GETTUPLE:
-      in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
-      return in_tuple.src[self.arg].axis if in_tuple.op is Ops.TUPLE else None
     if self.op is Ops.PARAM: return None
     # NOTE: they all have to share an axis, we always choose [-1]. src axes are right-aligned into the output shape
     if self.op in GroupOp.ALU.union({Ops.STACK}):
@@ -851,7 +844,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret.after(ret.store(src.cast(ret.dtype)))
   @recursive_property
   def device(self) -> str|tuple[str, ...]|None:
-    if self.op is Ops.PARAM: return self.arg.device
+    if self.op in (Ops.PARAM, Ops.RETURNED): return self.arg.device
     if self.op is Ops.STAGE: return self.arg.device
     if self.op is Ops.AFTER: return self.src[0].device
     if self.op is Ops.MSELECT:
@@ -871,7 +864,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return self.device is None or self.dtype in dtypes.weaks
   @recursive_property
   def addrspace(self) -> AddrSpace|None:
-    if self.op is Ops.PARAM: return self.arg.addrspace
+    if self.op in (Ops.PARAM, Ops.RETURNED): return self.arg.addrspace
     if self.op is Ops.BUFFER: return self.arg.addrspace
     if self.op in {Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
@@ -885,7 +878,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return None
   @property
   def buf_uop(self) -> UOp:
-    if self.op in {Ops.BUFFER, Ops.PARAM}: return self
+    if self.op in {Ops.BUFFER, Ops.PARAM, Ops.RETURNED}: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, src=tuple(x.buf_uop for x in self.src))
     if self.base.op is Ops.AFTER: return self.base.src[0].buf_uop.base
@@ -1197,7 +1190,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)
 
-  # opaque bodies stay as Ops.CALL; value-producing bodies become Ops.FUNCTION (wrapped in TUPLE)
+  # opaque bodies are just CALLs; value-producing bodies become CALLs with RETURNED placeholders as extra inputs
   _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}
   def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
@@ -1207,9 +1200,27 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     if self.op in UOp._OPAQUE_CALL_BODIES:
       return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
-    # value-producing bodies are always wrapped in TUPLE so FUNCTION dtype is always void
-    body = self if self.op is Ops.TUPLE else UOp.maketuple(self)
-    return UOp(Ops.FUNCTION, src=(body,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
+    # value-producing bodies delegate to call_outputs with a single output
+    return UOp.call_outputs((self,), *srcs, grad_fxn=grad_fxn, name=name, precompile=precompile,
+                            precompile_backward=precompile_backward, aux=aux)
+
+  @staticmethod
+  def call_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
+                   name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
+    """call a body producing the given values: the body stores into output PARAMs, and the outputs are RETURNED
+    placeholders that are inputs to the call (you AFTER on them like normal buffers). the RETURNEDs are bound to the
+    output PARAMs positionally wherever the call is resolved, just like the args are bound to the input PARAMs"""
+    # the device defaults to the first device in the values or args, like srcs-based device resolution
+    default_dev = next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None)
+    # the RETURNED storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
+    def returned(o:UOp, i:int) -> UOp:
+      return UOp.returned(len(srcs)+i, o.dtype, None if (shp:=o._shape) is None else
+                          tuple(graph_rewrite(s, _pm_resolve_params, srcs, walk=True) if isinstance(s, UOp) else s for s in shp),
+                          dev if (dev:=o.device) is not None else default_dev, o.axis if isinstance(o.device, tuple) else None)
+    rets = tuple(returned(o, i) for i, o in enumerate(values))
+    # the body only knows PARAMs: the output PARAMs get the slots right after the input PARAM slots
+    body = UOp.sink(*[v.param_like(len(srcs)+i).store(v) for i, v in enumerate(values)])
+    return UOp(Ops.CALL, src=(body,)+srcs+rets, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
     kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
@@ -1681,7 +1692,8 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        if not self.enter_calls and (n.op is Ops.FUNCTION or (n.op is Ops.CALL and n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
+        # calls with RETURNED inputs are always inlined into the enclosing graph, their bodies are never rewritten separately
+        if n.op is Ops.CALL and (n.num_returned or (not self.enter_calls and n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
           self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
           if x not in self.replace: stack.append((x, False))
@@ -1719,11 +1731,10 @@ class RewriteContext:
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
-        # NOTE: CALL/FUNCTION are handled as a special case.
-        # The function that is called is not included in the graph_rewrite.
-        # If you want to graph_rewrite a call, you can
-        # A CALL of an address is not a body, its srcs are regular dataflow
-        if not self.enter_calls and (new_n.op is Ops.FUNCTION or (new_n.op is Ops.CALL and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
+        # NOTE: CALLs are handled as a special case: the call body is not included in the graph_rewrite (a CALL of an
+        # address is not a body, its srcs are regular dataflow). calls with RETURNED inputs are always inlined into the
+        # enclosing graph, their bodies are never rewritten separately
+        if new_n.op is Ops.CALL and (new_n.num_returned or (not self.enter_calls and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
           self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
@@ -1773,6 +1784,12 @@ def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot])])
+
+def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
+  """AFTER on a RETURNED placeholder extracts the call output value: the value of the matching store in a SINK body"""
+  if (rb:=r.unsharded_base).op is not Ops.RETURNED or t.op is not Ops.SINK: return None
+  vals = [st.src[1] for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is rb]
+  return vals[0] if len(vals) == 1 else None
 remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool:

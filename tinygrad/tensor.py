@@ -9,6 +9,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, ParamArg, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import resolve_returned_after
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -107,15 +108,19 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
-  if not c.arg.precompile: return None
-  assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled FUNCTION, got {c.src[0].op}"
-  input_buffers = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])
+  if c.arg is None or not c.arg.precompile or c.num_returned == 0: return None
+  assert c.src[0].op is Ops.SINK, f"expected SINK body for precompiled call, got {c.src[0].op}"
+  # the RETURNED inputs are the call outputs (they are always the last srcs), the outputs are the stores into the
+  # output PARAMs (slots after the args) in slot order
+  n_ret = c.num_returned
+  call_args, returned = c.src[1:len(c.src)-n_ret], c.src[len(c.src)-n_ret:]
+  input_buffers = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in call_args)
+  out_stores = sorted((st for st in c.src[0].src if st.op is Ops.STORE), key=lambda st: st.src[0].unsharded_base.arg.slot)
+  srcs = tuple(st.src[1] for st in out_stores)
 
   # add the outputs to the call
-  srcs = c.src[0].src
-  resolved = [c.gettuple(i) for i in range(len(srcs))]
-  outs = tuple(r.empty_like() for r in resolved)
-  targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
+  outs = tuple(r.empty_like() for r in returned)
+  targets = [o.param_like(len(input_buffers)+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
 
   subs:dict[UOp, UOp] = {}
   items:list[UOp] = []
@@ -131,23 +136,24 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
       items.append(t.after(t.store(s.after(*after_deps))))
   fxn = UOp.sink(*(x.substitute(subs) for x in items))
 
-  # body switches from TUPLE to SINK, so the node becomes an opaque CALL (not FUNCTION)
+  # all bodies are SINKs now, the node just becomes an opaque CALL
   new_call = UOp(Ops.CALL, src=(fxn, *input_buffers, *outs), arg=c.arg)
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  # NOTE: must use resolved shapes from the FUNCTION (which substitutes PARAMs with external args), not raw body shapes
-  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, resolved))
+  # NOTE: must use the resolved shapes of the RETURNED placeholders (which substitute PARAMs with external args), not raw body shapes
+  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, returned))
 
-  return UOp.maketuple(*rets)
+  # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
+  return UOp.sink(*[r.store(v) for r, v in zip(returned, rets)])
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
-  # transform precompiled FUNCTIONs into CALLs (body becomes SINK with stores)
-  (UPat(Ops.FUNCTION, name="c"), transform_precompiled_call),
+  # transform precompiled value-producing calls into opaque CALLs (outputs become real buffers)
+  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
 
-  # resolve TUPLE+GETTUPLE (for precompiled calls)
-  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
+  # resolve AFTER on RETURNED placeholders (for precompiled calls)
+  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
@@ -164,6 +170,9 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.AFTER, Ops.STORE}, name="x"),
    lambda x: None if x.tag is None else x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
+  # an AFTER on a RETURNED placeholder is a call output (a computed value), not an assignment: allocate fresh storage for it
+  (UPat(Ops.AFTER, name="x"),
+   lambda x: None if x.tag is None or x.src[0].unsharded_base.op is not Ops.RETURNED else x.rtag(None).contiguous(tag=x.tag)),
   # remove extra CONTIGUOUS on AFTER (only when target is contiguous)
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
@@ -178,6 +187,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
 def finalize_after(ctx:AllocCtx, x:UOp):
   # bound Variables are call inputs, not assigns: they stay in the graph and pm_replace_buf turns them into call args
   if x.is_bound_var: return None
+  # AFTER on a RETURNED placeholder is a call output, not an assign: it's inlined when the call is resolved
+  if x.src[0].unsharded_base.op is Ops.RETURNED: return None
   # untagged: record as an assign for the call body
   if x.tag is None:
     ctx.assigns.append(x)
@@ -383,7 +394,7 @@ class Tensor(RandMixin):
 
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
     fret = fxn._uop.call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
-    return Tensor(fret.gettuple(0))
+    return Tensor(fret.returned_outputs[0])
 
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
