@@ -305,7 +305,7 @@ class RMSNorm:
 
 from tinygrad.uop.ops import UOp, KernelInfo, Ops, AxisType
 def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
-  weight, idx = call.src[1:]
+  weight, idx = call.src[1:-call.num_returned]
   is_vocab_sharded = isinstance(weight.device, tuple) and weight.axis == 0
   # for multi-device: replicate grad_emb and idx on all devices
   if isinstance(weight.device, tuple):
