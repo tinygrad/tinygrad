@@ -158,6 +158,12 @@ pm_no_indexing_calls = PatternMatcher([
   (UPat(Ops.CALL, name="u"), no_indexing_calls),
 ])
 
+# the kernel graph is what gets executed: no shape views left in it, the storage of a value is just the storage
+pm_no_views = PatternMatcher([
+  (UPat((Ops.RESHAPE, Ops.SHRINK), name="v", src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER)),), allow_any_len=True), lambda v:
+   v.src[0]),
+])
+
 # *** rangeify ***
 
 debug_tag_factor = PatternMatcher([
@@ -215,6 +221,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_remove_stage, ctx=next_buffer_num, bottom_up=True, name="remove stage")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
   tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
+  tsink = graph_rewrite(tsink, pm_no_views, name="remove views from the kernel graph")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
   if SPEC:
