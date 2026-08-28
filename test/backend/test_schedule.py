@@ -383,18 +383,18 @@ class TestCopyFolding(unittest.TestCase):
     b = a.to("CPU:2").shrink(((1, 3),)).to("CPU:3")
     GlobalCounters.reset()
     run_linear(*check_schedule(b, 3, filter_sink=False))
-    # copy 16 bytes, extra E kernel, copy exactly 4 bytes
-    self.assertEqual(GlobalCounters.global_mem, 4*4 + 2*4*2+ 2*4)
+    # extra E kernel, copy exactly 4 bytes
+    self.assertEqual(GlobalCounters.global_mem, 4*4 + 2*4*2 + 2*4)
     self.assertListEqual(b.tolist(), [1, 2])
 
   def test_expanded_copy(self):
-    a = Tensor.arange(2).clone("CPU:1").realize()
-    b = a.to("CPU:2").reshape(2, 1).expand(2, 2).to("CPU:3")
+    a = Tensor.arange(4).clone("CPU:1").realize()
+    b = a.to("CPU:2").reshape(4, 1).expand(4, 2).to("CPU:3")
     GlobalCounters.reset()
     run_linear(*check_schedule(b, 3, filter_sink=False))
     # TODO: expands before copy
-    self.assertEqual(GlobalCounters.global_mem, 2*4 + (2*4 + 4*4) + 4*4)
-    self.assertListEqual(b.tolist(), [[0, 0], [1, 1]])
+    self.assertEqual(GlobalCounters.global_mem, 4*4 + (4*4 + 8*4) + 8*4)
+    self.assertListEqual(b.tolist(), [[0, 0], [1, 1], [2, 2], [3, 3]])
 
   def test_permuted_copy(self):
     a = Tensor.arange(4).clone("CPU:1").realize()
@@ -402,7 +402,7 @@ class TestCopyFolding(unittest.TestCase):
     GlobalCounters.reset()
     run_linear(*check_schedule(b, 3, filter_sink=False))
     # permutes before copy
-    self.assertEqual(GlobalCounters.global_mem, 2*4 + (2*4 + 4*4) + 4*4)
+    self.assertEqual(GlobalCounters.global_mem, 4*4 + (4*4 + 4*4) + 4*4)
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
   def test_permute_on_disk(self):
