@@ -193,11 +193,14 @@ runs:
 
         echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
         echo "hash=$(echo -n "$pkgs" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-        if dpkg-query -W $pkgs; then
-          echo "installed=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "installed=false" >> "$GITHUB_OUTPUT"
-        fi
+
+        installed=true
+        for pkg in $pkgs; do
+          info=$(dpkg-query -W -f='${db:Status-Abbrev} ${Version}' "$pkg" 2> /dev/null || true)
+          echo "${pkg}: ${info:-not in dpkg database}"
+          [[ "$info" == ii* ]] || installed=false
+        done
+        echo "installed=$installed" >> "$GITHUB_OUTPUT"
 
     - name: Cache apt (PR)
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true') && github.event_name == 'pull_request' && steps.apt-pkgs.outputs.installed == 'false'
