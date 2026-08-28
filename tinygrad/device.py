@@ -349,11 +349,13 @@ class TinyELF:
     value_iterator = iter(values)
 
     def _next() -> Generator:
-      for _,_,_,_,addrspace in signature:
-        if addrspace is AddrSpace.ALU:
-          yield next(value_iterator)
-        else:
-          yield next(buffer_iterator)
+      current, previous_slot = None, None
+      for _,slot,_,_,addrspace in signature:
+        if slot != previous_slot:
+          previous_slot = slot
+          current = next(value_iterator) if addrspace is AddrSpace.ALU else next(buffer_iterator)
+        yield current
+
     return list(_next())
 
 

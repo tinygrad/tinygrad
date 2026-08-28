@@ -578,7 +578,7 @@ class TestFunctionTuple(unittest.TestCase):
       sink = UOp.sink(C.base, A.base, arg=KernelInfo(name="k"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                    UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
-                 arg=ProgramInfo(name="k", global_size=(1, 1, 1), local_size=(1, 1, 1), globals=(0, 1)))
+                 arg=ProgramInfo(name="k", global_size=(1, 1, 1), local_size=(1, 1, 1), globals=(0, 1), parameters=sink.src))
 
     @function(precompile=True)
     def f(a:Tensor):

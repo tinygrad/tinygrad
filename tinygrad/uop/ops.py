@@ -1217,21 +1217,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    # instead of only storing Buffers we need to store both variables and buffers
-    parameters = set(u for u in self.src[1].src if u.op is Ops.PARAM)
-
-    # adding this because the old code had, i am not convinced this is necessary
-    # todo: double check if this is necessary
-    variables = set(self.arg.vars)
-
-    parameters = parameters.union(variables)
-    sorted_parameters = sorted(parameters, key=lambda u: u.arg.slot)
-
-    # we need the address space now because the compiler cannot assume
-    # something is a buffer or variable from the position so it
-    # will have to do the != AddrSpace.ALU check to see if something is a buffer.
-    sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape, u.addrspace)
-                for u in sorted_parameters)
+    sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape, u.addrspace) for u in self.arg.parameters)
     return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig, self.key)
 
 @dataclass(frozen=True)
@@ -1256,6 +1242,7 @@ class ProgramInfo:
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
   target: Target = Target()
+  parameters: tuple[UOp, ...] = ()
 
   @property
   def function_name(self): return to_function_name(self.name)
@@ -1274,15 +1261,14 @@ class ProgramInfo:
 
   @staticmethod
   def from_sink(sink:UOp, target:Target=Target()) -> ProgramInfo:
-    _vars: list[UOp] = []
-    _globals: list[int] = []
+    parameters: list[UOp] = []
     outs: list[int] = []
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
     for u in sink.toposort():
-      if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
-      if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
+      if u.op is Ops.PARAM:
+        parameters.append(u)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
@@ -1290,10 +1276,12 @@ class ProgramInfo:
         if u.arg[0] == 'i': local_size = None
         special_size = local_size if u.arg[0] == 'l' else global_size
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
-      if u.op is Ops.PARAM and u in _vars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
+      if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
+    parameters = sorted(parameters, key=lambda u: u.arg.slot)
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
-                       tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
-                       tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), target)
+                       tuple(local_size) if local_size is not None else None, tuple(u for u in parameters if u.addrspace == AddrSpace.ALU),
+                       tuple(sorted(dedup(u.arg.slot for u in parameters if u.addrspace != AddrSpace.ALU))), tuple(sorted(dedup(outs))),
+                       tuple(sorted(dedup(ins))), target, tuple(parameters))
 
 @dataclass(frozen=True)
 class CallInfo:
