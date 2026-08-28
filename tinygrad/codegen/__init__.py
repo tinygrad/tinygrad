@@ -418,7 +418,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
   newlst = []
   replaced: dict[UOp, UOp] = {}
   for u in lst:
-    nu = u.replace(src=tuple([replaced.get(x, x) for x in u.src]))
+    nu = u.replace(dtype=None, src=tuple([replaced.get(x, x) for x in u.src]))
     ret: tuple[UOp, list[UOp]] = pm.rewrite(nu, ctx) or (nu, [nu])
     replaced[u] = ret[0]
     newlst.extend(ret[1])
