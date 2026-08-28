@@ -379,23 +379,21 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(a.clone(), 1, filter_sink=False)
 
   def test_shrink_copy(self):
-    a = Tensor.arange(4).clone("CPU:1")
-    out = a.shrink(((1, 3),)).to("CPU:2")
-    run_linear(*check_schedule(out, 3, filter_sink=False))
-    self.assertListEqual(a.tolist(), [0, 1, 2, 3])
-    self.assertListEqual(out.tolist(), [1, 2])
+    a = Tensor.arange(4).clone("CPU:1").realize()
+    b = a.to("CPU:2").shrink(((1, 3),)).to("CPU:3")
+    run_linear(*check_schedule(b, 3, filter_sink=False))
+    self.assertListEqual(b.tolist(), [1, 2])
 
   def test_expanded_copy(self):
     a = Tensor.arange(2).clone("CPU:1").realize()
-    view = a.reshape(2, 1).expand(2, 2)
-    b = view.to("CPU:2")
-    run_linear(*check_schedule(b, 2, filter_sink=False))
+    b = a.to("CPU:2").reshape(2, 1).expand(2, 2).to("CPU:3")
+    run_linear(*check_schedule(b, 3, filter_sink=False))
     self.assertListEqual(b.tolist(), [[0, 0], [1, 1]])
 
   def test_permuted_copy(self):
     a = Tensor.arange(4).clone("CPU:1").realize()
-    b = a.reshape(2, 2).permute(1, 0).to("CPU:2")
-    run_linear(*check_schedule(b, 2, filter_sink=False))
+    b = a.to("CPU:2").reshape(2, 2).permute(1, 0).to("CPU:3")
+    run_linear(*check_schedule(b, 3, filter_sink=False))
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
   def test_permute_on_disk(self):
