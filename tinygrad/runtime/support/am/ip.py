@@ -370,7 +370,7 @@ class AM_GFX(AM_IP):
 
       mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
       for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
-        self.adev.wreg(reg, mqd_st_mv[0x80 + i], gated=True, inst=xcc)
+        self.adev.wreg(reg, mqd_st_mv[0x80 + i], inst=xcc)
       self.adev.regCP_HQD_ACTIVE.write(0x1, inst=xcc)
 
       self.adev.gmc.flush_hdp()

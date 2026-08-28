@@ -13,12 +13,12 @@ AM_DEBUG = getenv("AM_DEBUG", 0)
 @dataclasses.dataclass
 class AMRegister(AMDReg):
   adev:AMDev
-  gated:bool=False # a VF reaches these registers only through the RLC gateway
 
-  def read(self, inst=0): return self.adev.rreg(self.addr[inst], gated=self.gated, inst=inst)
+  def read(self, inst=0, direct=False): return self.adev.rreg(self.addr[inst], inst=inst, direct=direct)
   def read_bitfields(self, inst=0) -> dict[str, int]: return self.decode(self.read(inst=inst))
 
-  def write(self, _am_val:int=0, inst=0, **kwargs): self.adev.wreg(self.addr[inst], _am_val|self.encode(**kwargs), gated=self.gated, inst=inst)
+  def write(self, _am_val:int=0, inst=0, direct=False, **kwargs):
+    self.adev.wreg(self.addr[inst], _am_val|self.encode(**kwargs), inst=inst, direct=direct)
 
   def update(self, inst=0, **kwargs): self.write(self.read(inst=inst) & ~self.fields_mask(*kwargs.keys()), inst=inst, **kwargs)
 
@@ -167,12 +167,11 @@ class AMDev:
       self.vf_access = self._vf_mailbox_request(am.IDH_REQ_GPU_INIT_ACCESS)
       self.vf_mailbox = self.mmio.view(fmt='B')[am.NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE:am.NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE+2]
 
+    self.rlc_gated:list[tuple[int, int]] = [] # a VF reaches the GC registers only through the RLC gateway, one range per segment
+    self.rlcg_scratch:set[int] = set() # the gateway's own ports are poked directly
+
     self._run_discovery()
     self._build_regs()
-
-    if self.is_vf:
-      ports = [f"regSCRATCH_REG{i}" for i in range(4)] + ["regRLC_SPARE_INT", "regGRBM_GFX_CNTL", "regGRBM_GFX_INDEX"]
-      self.rlcg_ports = {inst: tuple(self.reg(r).addr[inst] for r in ports) for inst in self.reg(ports[0]).addr}
 
     # AM boot Process:
     # The GPU being passed can be in one of several states: 1. Not initialized. 2. Initialized by amdgpu. 3. Initialized by AM.
@@ -297,38 +296,38 @@ class AMDev:
 
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
-  def rreg(self, reg:int, gated=False, inst=0) -> int:
-    if gated and self.is_vf: return self.rlcg_rw(reg, 0, inst, read=True)
+  def is_rlc_gated(self, reg:int) -> bool: return reg not in self.rlcg_scratch and any(lo <= reg <= hi for lo, hi in self.rlc_gated)
+
+  def rreg(self, reg:int, inst=0, direct=False) -> int:
+    if not direct and any(lo <= reg <= hi for lo, hi in self.rlc_gated): return self.rlcg_rw(reg, 0, inst, read=True)
     val = self.indirect_rreg(reg) if reg >= len(self.mmio) else self.mmio[reg]
     if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"am {self.devfmt}: Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
     return val
 
-  def wreg(self, reg:int, val:int, gated=False, inst=0):
+  def wreg(self, reg:int, val:int, inst=0, direct=False):
     if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
-    if gated and self.is_vf: self.rlcg_rw(reg, val, inst)
+    if not direct and any(lo <= reg <= hi for lo, hi in self.rlc_gated): self.rlcg_rw(reg, val, inst)
     elif reg >= len(self.mmio): self.indirect_wreg(reg, val)
     else: self.mmio[reg] = val
 
   def rlcg_rw(self, addr:int, val:int, inst:int, read=False) -> int:
-    # RLC gateway: SCRATCH_REG0 holds the value, SCRATCH_REG1 the command and the dword address, RLC_SPARE_INT kicks the RLC.
-    scratch0, scratch1, scratch2, scratch3, spare_int, grbm_cntl, grbm_idx = self.rlcg_ports[inst]
-    # the gateway takes the grbm selection through its own scratch registers
-    if addr in {grbm_cntl, grbm_idx}:
-      self.wreg(scratch2 if addr == grbm_cntl else scratch3, val)
+    # the rlc gateway takes the grbm selection through its own scratch registers
+    if addr in {self.reg("regGRBM_GFX_CNTL").addr[inst], self.reg("regGRBM_GFX_INDEX").addr[inst]}:
+      self.reg("regSCRATCH_REG2" if addr == self.reg("regGRBM_GFX_CNTL").addr[inst] else "regSCRATCH_REG3").write(val, inst=inst, direct=True)
       return val
 
-    self.wreg(scratch0, val)
-    self.wreg(scratch1, addr | (0x1 << 28 if read else 0)) # AMDGPU_RLCG_GC_READ / AMDGPU_RLCG_GC_WRITE
-    self.wreg(spare_int, 1)
-    wait_cond(lambda: self.rreg(scratch1) & 0xFFFFF, value=0, msg=f"RLC gateway timeout on register {addr:#x}")
-    # the RLC refuses the registers the host PF keeps to itself, the kernel driver logs those and moves on as well
-    if AM_DEBUG >= 1 and (err:=self.rreg(scratch1) & 0xF000000): print(f"am {self.devfmt}: RLC gateway refused {addr:#x}: {err:#x}")
-    return self.rreg(scratch0)
+    self.wreg_pair("regSCRATCH_REG", "0", "1", (addr | (0x1 << 28 if read else 0)) << 32 | val, inst=inst, direct=True)
+    self.reg("regRLC_SPARE_INT").write(1, inst=inst, direct=True)
+    wait_cond(lambda: self.reg("regSCRATCH_REG1").read(inst=inst, direct=True) & 0xFFFFF, value=0, msg=f"RLC gateway timeout on {addr:#x}")
 
-  def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0):
-    self.reg(f"{reg_base}{lo_suffix}").write(lo32(val), inst=inst)
-    self.reg(f"{reg_base}{hi_suffix}").write(hi32(val), inst=inst)
+    if AM_DEBUG >= 1 and (err:=self.reg("regSCRATCH_REG1").read(inst=inst, direct=True) & 0xF000000):
+      print(f"am {self.devfmt}: RLC gateway refused {addr:#x}: {err:#x}")
+    return self.reg("regSCRATCH_REG0").read(inst=inst, direct=True)
+
+  def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0, direct=False):
+    self.reg(f"{reg_base}{lo_suffix}").write(lo32(val), inst=inst, direct=direct)
+    self.reg(f"{reg_base}{hi_suffix}").write(hi32(val), inst=inst, direct=direct)
 
   def indirect_rreg(self, reg:int) -> int:
     self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg * 4)
@@ -408,8 +407,11 @@ class AMDev:
     if self.ip_ver[am.SDMA0_HWIP] in {(4,4,2), (4,4,4)}: mods += [("sdma", am.SDMA0_HWIP)]
 
     for prefix, hwip in mods:
-      self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip],
-        cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip], gated=prefix=="gc")))
+      regs = import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip]))
+      self.__dict__.update(regs)
+      if prefix == "gc" and self.is_vf:
+        ext = {seg: max(r.offset for r in regs.values() if r.segment == seg) for seg in {r.segment for r in regs.values()}}
+        self.rlc_gated = sorted((bases[seg], bases[seg] + off) for bases in self.regs_offset[hwip].values() for seg, off in ext.items())
     self.__dict__.update(import_asic_regs('mp', (11, 0, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP])))
 
     # Live AIDs like the kernel: 4 SDMAs per AID; the AID lives iff its group's alive-mask is 0xf/0x3/0xc.
