@@ -167,7 +167,7 @@ def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
   return UOp.placeholder((count,), elem_dt, slot, AddrSpace.LOCAL)
 
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
-  local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx))
+  local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx.scratch_slot))
   local_idx = local.index(UOp.cconst(0, dtypes.int32), dtype=dtypes.uint64)
   # the selected address is a 64bit value, the AFTER orders the load after the scratch store and carries the element dtype for the encoder
   sel = gate.where(addr.replace(dtype=dtypes.uint64), local_idx)

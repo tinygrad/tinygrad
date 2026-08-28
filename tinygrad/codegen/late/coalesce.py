@@ -132,15 +132,15 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     if ctx is not None and ctx.target.device == "DSP":
       lengths = [128,64,32,16,8,4]
       must_divide = False
-    elif buf.dtype not in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and not is_image_shape(buf._shape):
-      pass
     elif buf.addrspace == AddrSpace.REG:
+      pass
+    elif "AMD" == ctx.target.device and ctx.target.renderer == "RDNA3" and buf.dtype is not dtypes.bool:
+      must_divide, sz = False, buf.dtype.itemsize
+      lengths = [b//(sz*8) for b in [128,96,64,32,16,8] if b >= sz*8]
+    elif buf.dtype not in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and not is_image_shape(buf._shape):
       pass
     elif is_image_shape(buf._shape):
       lengths = [4]
-    elif "AMD" == ctx.target.device:
-      must_divide, sz = False, buf.dtype.itemsize
-      lengths = [b//(sz*8) for b in [128,96,64,32,16,8] if b >= sz*8]
     elif ctx is not None and ctx.supports_float4:
       # TODO: a better way to get this than ctx
       lengths = [8,4,2] if buf.dtype == dtypes.half and getenv("ALLOW_HALF8") else [4,2]

@@ -6,7 +6,7 @@ from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.dtype import dtypes
 from bisect import bisect_left
 
-REG_OPS = {Ops.STORE, Ops.INS, Ops.GROUP, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.INDEX}
+REG_OPS = {Ops.STORE, Ops.INS, Ops.STACK, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.INDEX}
 
 class LinearScanRegallocContext:
   def vdef(self, v:VRegister) -> UOp: return self.uops[self.live_intervals[v.parent if v.is_sub() else v][0]]
@@ -70,7 +70,7 @@ class LinearScanRegallocContext:
         if u.op is Ops.END: continue
         if not isinstance(v:=rdef(s), VRegister): continue
         if (vv := v.or_parent()) not in live: live[vv] = fill(vv,i)
-        self.reals.setdefault(i, {})[v] = (live[vv][v.pos],) if v.is_sub() else live[vv]
+        self.reals.setdefault(i, {})[v] = live[vv][v.pos:v.pos+v.width] if v.is_sub() else live[vv]
 
       # allocate defs
       for j,v in enumerate(rdefs(u)):
@@ -84,7 +84,7 @@ class LinearScanRegallocContext:
         # parents can be defined by premature subregister op ex. collect then store
         if (vv := v.or_parent()) not in live:
           live[vv] = alloc(vv, cons, i+1 if u.op is not Ops.RANGE else i)
-        self.reals.setdefault(i, {})[v] = (live[vv][v.pos],) if v.is_sub() else live[v]
+        self.reals.setdefault(i, {})[v] = live[vv][v.pos:v.pos+v.width] if v.is_sub() else live[vv]
 
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
@@ -134,10 +134,33 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
 
   return nx, before + [nx] + after
 
-# INDEX -> subregister, lifetimes simple
+def regspace(buf:UOp, c:UOp, x:UOp):
+  if (vr := rdef(buf)) is None or c.val >= vr.width: return None
+  svr = vr[(c.val)*2:(c.val*2)+1] if x.dtype.itemsize > 4 else vr[c.val]
+  return (nx := x.replace(tag=(svr,))), [nx]
+
+# INDEX -> subregister(s), conversion to regspace coordinates
 pm_index_subregisters = PatternMatcher([
-  (UPat.var("buf").index(UPat.cvar("c").cast(), name="x", tag=None), lambda buf,c,x:
-    ((nx := x.replace(tag=(v.sub(c.val),))), [nx]) if (v := rdef(buf)) and c.val < v.width else None),
+  (UPat.var("buf").index(UPat.cvar("c").cast(), name="x", tag=None), regspace)
+])
+
+def propogate_subs(ctx, x:UOp):
+  vr, n, nsrc = rdef(x), max(x.dtype.itemsize//4, 1), []
+  for i,s in enumerate(x.src):
+    def _strip(x:UOp):
+      while x.op in {Ops.BITCAST, Ops.AFTER}: x = x.src[0]
+      return x
+    # INDEX srcs have to become copies, can be redundant but must enforce contiguity restraint.
+    # Optimization would have to identify equivalent STACKs and tie register blocks
+    if _strip(s).op is Ops.INDEX: nsrc.append(ctx.vcopy(s, vr[i*n:(i+1)*n-1])[0])
+    else: nsrc.append(s.replace(tag=(vr[i*n:(i+1)*n - 1],)))
+  return x.replace(src=tuple(nsrc))
+
+pm_prepare_regalloc = PatternMatcher([
+  (UPat(Ops.STACK, name="x"), propogate_subs),
+  (UPat((Ops.AFTER, Ops.BITCAST), name="x"), lambda x:
+    x.replace(src=(x.src[0].replace(tag=x.tag), *x.src[1:]))
+    if x.tag is not None else None),
 ])
 
 pm_regalloc_rewrite = PatternMatcher([

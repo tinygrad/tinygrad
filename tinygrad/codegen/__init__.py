@@ -25,7 +25,7 @@ from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_s
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
-from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite, pm_index_subregisters
+from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite, pm_index_subregisters, pm_prepare_regalloc
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, all_int, flatten, argsort, partition
 from tinygrad.uop.ops import _broadcast_shape, identity_element
@@ -494,9 +494,10 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
 
     # instruction selection
     if isinstance(renderer, ISARenderer):
-      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
       renderer.pre_regalloc_context = PreRegallocContext(full_sink, renderer)
+      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=renderer.pre_regalloc_context, name="pre instruction selection", bottom_up=True)
       full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=renderer.pre_regalloc_context, name="instruction selection", bottom_up=True)
+      full_sink = graph_rewrite(full_sink, pm_prepare_regalloc, ctx=renderer, name="assign children regs")
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))
