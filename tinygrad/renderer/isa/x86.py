@@ -4,7 +4,7 @@ import sys, struct, functools
 from typing import cast
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext, greg
 from tinygrad.helpers import getenv, NUM_CPU_THREADS, unwrap, Target
 
@@ -145,14 +145,14 @@ extra_matcher = PatternMatcher([
   # float16 alus are done in float32
   (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op,
    src=tuple(s.cast(dtypes.float) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
-  (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
-   lambda x,a,b: UOp(x.op, src=(a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
+  (UPat(GroupOp.Comparison, src=[UPat(dtype=dtypes.float16), UPat()], name="x"),
+   lambda x: UOp(x.op, src=tuple(s.cast(dtypes.float32) for s in x.src)).cast(x.dtype)),
   # no cmpne for packed ints, y != x => !(y==x)
   (UPat(Ops.CMPNE, src=(UPat.var("y", dtypes.ints), UPat.var("x")), name="cmp"),
    lambda y,x,cmp: UOp(Ops.CMPEQ, src=(y,x))^True if y.max_numel() > 1 else None),
-  # float WHERE needs a mask unless its comparison already has a float operand
+  # a float WHERE blends at the width of its value, so it needs a comparison at that width to make the mask
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats+(dtypes.weakfloat,)), UPat.var("b")).named("w"),
-   lambda m,a,b,w: m.cast(w.dtype).ne(0).where(a, b) if w.dtype in dtypes.floats and not dtypes.is_float(m.src[0].dtype) else None),
+   lambda m,a,b,w: m.cast(w.dtype).ne(0).where(a, b) if w.dtype in dtypes.floats and promo_dtype(m.src) is not w.dtype else None),
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(0),) + x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
@@ -282,7 +282,7 @@ def shift(x:UOp, op:X86Ops) -> UOp:
 # it is materialized as an immediate so the address stays correct if the base register is ever spilled and refilled
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.int8.max else dtypes.int8, v)
-  def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v
+  def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v.cast(dtypes.uint32) if v.dtype.itemsize < 4 else v
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0), imm(dtypes.uint8, x.dtype.itemsize))
   base, idx = x.src[0], x.src[1]
   # buffers are indexed by element, everything else (the stack pointer) by byte

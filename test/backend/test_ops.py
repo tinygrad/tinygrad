@@ -1813,6 +1813,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=300, high=303)
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=-1e10, high=-1e9)
+    helper_test_op(None, lambda x: x.asinh(), grad_atol=1e-6, vals=[[-1.0, 0.0, 1.0]])
   def test_acosh(self):
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6)
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-3, grad_rtol=1e-2, low=-300, high=-297)
@@ -2809,7 +2810,7 @@ class TestOps(unittest.TestCase):
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"))
 
   def test_interpolate_linear_corners_aligned(self):
-    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
+    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,)), ((29,),(1,))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear", align_corners=True),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True))
@@ -2961,6 +2962,10 @@ class TestOps(unittest.TestCase):
   def test_fancy_indexing_inf(self):
     data = [math.inf, -math.inf, math.nan]
     helper_test_op((), lambda: torch.tensor(data)[torch.tensor([0, 1, 2])], lambda: Tensor(data)[Tensor([0, 1, 2])])
+
+  def test_fancy_indexing_index_dtypes(self):
+    helper_test_op((), lambda: torch.tensor([10., 20., 30., 40.])[torch.tensor([1, 2, 3, 0])],
+                       lambda: Tensor([10., 20., 30., 40.])[Tensor([1, 2, 3, 0], dtype=dtypes.uint8)])
 
   @slow_test
   def test_slice_fancy_indexing_no_dim_collapse(self):

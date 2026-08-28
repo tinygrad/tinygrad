@@ -26,24 +26,24 @@ MAX_ARGS, CMD_SIZE, RING_SLOTS, FUNCS = 63, 64, (16 << 10), (() if WIN else ('cl
 
 def signal_prog():
   val = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
-  return UOp.param(0, dtypes.uint32, (1,))[0].store(val.cast(dtypes.uint32))
+  return UOp.param(0, dtypes.uint32, 1)[0].store(val.cast(dtypes.uint32))
 
 def wait_prog():
   val = UOp.param(1, dtypes.int, (), vmin_vmax=(0, dtypes.int.max), name="value", addrspace=AddrSpace.ALU)
-  return (v:=UOp.param(0, dtypes.uint32, (1,), volatile=True).after(l:=UOp.loop(0))[0].load()).end(l, v < val.cast(dtypes.uint32))
+  return (v:=UOp.param(0, dtypes.uint32, 1, volatile=True).after(l:=UOp.loop(0))[0].load()).end(l, v < val.cast(dtypes.uint32))
 
 def timestamp_prog():
   if WIN: val = UOp.const(0, dtypes.uint64)
   else:
-    fn, ts = UOp.param(1, dtypes.uint64, (1,)), UOp.placeholder((2,), dtypes.uint64, slot=0, addrspace=AddrSpace.REG)
+    fn, ts = UOp.param(1, dtypes.uint64, 1), UOp.placeholder((2,), dtypes.uint64, slot=0, addrspace=AddrSpace.REG)
     call = fn[0].load().call(UOp.const(6 if OSX else 1, dtypes.int), ts[0], ret_dtype=dtypes.void) # clock_gettime(CLOCK_MONOTONIC, &ts)
     val = ts.after(call)[0].load() * 1_000_000_000 + ts.after(call)[1].load()
-  return UOp.param(0, dtypes.uint64, (1,))[0].store(val)
+  return UOp.param(0, dtypes.uint64, 1)[0].store(val)
 
 def worker_prog():
-  ring = UOp.param(0, dtypes.uint64, (RING_SLOTS * CMD_SIZE,), volatile=True)
-  wait, done = UOp.param(1, dtypes.uint64, (1,), volatile=True), UOp.param(2, dtypes.uint64, (1,), volatile=True)
-  sem, cur = UOp.param(3, dtypes.uint64, (1,)), UOp.range(2**64-1, 0, dtype=dtypes.uint64) # sem is unused on windows, it has to come last
+  ring = UOp.param(0, dtypes.uint64, RING_SLOTS * CMD_SIZE, volatile=True)
+  wait, done = UOp.param(1, dtypes.uint64, 1, volatile=True), UOp.param(2, dtypes.uint64, 1, volatile=True)
+  sem, cur = UOp.param(3, dtypes.uint64, 1), UOp.range(2**64-1, 0, dtype=dtypes.uint64) # sem is unused on windows, it has to come last
 
   # spin on windows, sem_wait to sleep on posix
   if WIN: ready = (v:=wait.after(lw:=UOp.loop(1), cur)[0].load()).end(lw, v <= cur)

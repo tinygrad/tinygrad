@@ -28,7 +28,7 @@ def vision_conv_143():
   c48 = (c24&c32).where(c34.index(c45), UOp.const(0.0, dtypes.float))
   c49 = UOp.param(2, dtypes.half, shape=(64, 49, 4))
   c61 = c48*c49.index((c26*4+c5%2+c16*28+c38*196))
-  c63 = UOp.param(3, dtypes.float, (128,))
+  c63 = UOp.param(3, dtypes.float, 128)
   c65 = c61.reduce(c16, c26, arg=Ops.ADD)+c63.index(c5)
   c67 = c0.index((c2*128+c5+c8*4096)).store(c65).end(c8, c2, c5)
 
@@ -54,7 +54,7 @@ def vision_conv_153():
   c48 = (c24&c32).where(c34.index(c45), UOp.const(0.0, dtypes.float))
   c49 = UOp.param(2, dtypes.half, shape=(128, 49, 4))
   c61 = c48*c49.index((c26*4+c5%2+c16*28+c38*196))
-  c63 = UOp.param(3, dtypes.float, (256,))
+  c63 = UOp.param(3, dtypes.float, 256)
   c65 = c61.reduce(c16, c26, arg=Ops.ADD)+c63.index(c5)
   c67 = c0.index((c2*256+c5+c8*4096)).store(c65).end(c8, c2, c5)
 
@@ -73,7 +73,7 @@ def dm_conv_172():
   c18 = UOp.range(8, 2, AxisType.REDUCE)
   c23 = UOp.param(2, dtypes.half, shape=(240, 128, 4))
   c35 = c5.index((c7*4+c10+c13*128+c18*1536))*c23.index((c10*4+c2%4+c7*16+c2//4*512))
-  c37 = UOp.param(3, dtypes.float, (960,))
+  c37 = UOp.param(3, dtypes.float, 960)
   c39 = c35.reduce(c7, c10, arg=Ops.ADD)+c37.index(c2)
   c50 = (1.0+((c39+0.044708251953125*(c39*(c39*c39)))*-2.3021129851685216).exp2()).reciprocal()*c39
   c53 = c50.reduce(c18, c13, arg=Ops.ADD)*0.010416666666666666
