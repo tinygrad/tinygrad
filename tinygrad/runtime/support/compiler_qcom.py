@@ -20,7 +20,9 @@ class QCOMCompiler(Compiler):
                                                 f"-e PYTHONPATH={root} -e QEMU_CPU=max,pauth=off gcr.io/distroless/static python3"), arch)
     super().__init__(f"compile_qcomcl_{arch}")
 
-  def __del__(self): llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst) if platform.machine() == "aarch64" else self.compiler_process.kill()
+  def __del__(self):
+    if hasattr(self, 'llvm_inst'): llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst)
+    elif hasattr(self, 'compiler_process'): self.compiler_process.kill()
 
   def __reduce__(self): return QCOMCompiler, (self.arch,)
 

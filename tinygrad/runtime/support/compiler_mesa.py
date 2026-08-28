@@ -60,7 +60,8 @@ class NAKCompiler(Compiler):
     self.nir_options = bytes(mesa.nak_nir_options(self.cc).contents)
     super().__init__(f"compile_nak_{arch}")
 
-  def __del__(self): mesa.nak_compiler_destroy(self.cc)
+  def __del__(self):
+    if hasattr(self, 'cc'): mesa.nak_compiler_destroy(self.cc)
 
   def __reduce__(self): return NAKCompiler, (self.arch,)
 
@@ -103,7 +104,8 @@ class IR3Compiler(Compiler):
     self.nir_options = bytes(mesa.ir3_get_compiler_options(self.cc).contents)
     super().__init__(f"compile_ir3_{arch}")
 
-  def __del__(self): mesa.ir3_compiler_destroy(self.cc)
+  def __del__(self):
+    if hasattr(self, 'cc'): mesa.ir3_compiler_destroy(self.cc)
 
   def __reduce__(self): return IR3Compiler, (self.arch,)
 
