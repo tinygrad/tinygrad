@@ -140,8 +140,8 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
 pm_long_decomp: PatternMatcher = PatternMatcher([
   # the decomp's own bottom-up rewrite can mint bare consts mid-flight: word splitting commits them at the long sibling's dtype
   (UPat(GroupOp.All, name='x'), lambda x: commit_weak_consts(x, next((s.dtype for s in x.src if s.dtype in l2i_dt), None))),
-  (UPat(GroupOp.Defines, tuple(l2i_dt.keys()), src=(UPat.var("sz"),), name="x"), lambda x,sz:
-   UOp(x.op, src=(sz*2,), arg=replace(x.arg, dtype=l2i_dt[x.dtype]), tag=x.tag)),
+  (UPat(GroupOp.Defines, tuple(l2i_dt.keys()), name="x"), lambda x:
+   UOp(x.op, arg=replace(x.arg, dtype=l2i_dt[x.dtype], size=None if x.arg.size is None else x.arg.size*2), tag=x.tag)),
   (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x:
    reindex(x, x.tag[0]).replace(tag=None) if x.tag is not None else None),
   (UPat(Ops.STORE, src=(UPat.var('idx', tuple(l2i_dt.keys())), UPat.var('val')), name='st'), lambda st,idx,val:

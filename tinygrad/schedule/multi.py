@@ -280,13 +280,8 @@ def rewrite_into_function(call:UOp):
                            for i, s in enumerate(new_body.src)])
   return call.replace(src=(new_body,)+new_args)
 
-def param_to_multi(p:UOp):
-  if p.axis is None: return None
-  return UOp.param(p.arg.slot, p.dtype, p.shard_shape, p.device, p.arg.vmin_vmax, p.arg.multiple_of, p.arg.name, p.arg.addrspace).unshard(p.axis)
-
 # NOTE: this is the same pattern as unrolled ranges
 multi_pm = PatternMatcher([
-  (UPat(Ops.PARAM, name="p"), param_to_multi),
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.UNSHARD])), alu_multi),
   (UPat(Ops.REDUCE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), reduce_multi),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.UNSHARD, name="multi"), UPat()), name="root"), reshape_multi),
