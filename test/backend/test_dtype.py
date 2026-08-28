@@ -428,6 +428,11 @@ class TestDtypeUsage(unittest.TestCase):
         t = Tensor([[1, 2], [3, 4]], dtype=d)
         (t*t).max().item()
 
+  def test_where_float16_compare_to_const(self):
+    # t > 0 is CMPLT(0, t): the float16 operand is on the right
+    t = Tensor([-1.0, 1.0], dtype=dtypes.float16)
+    np.testing.assert_equal((t > 0).where(Tensor.ones(2, dtype=dtypes.float16), Tensor.zeros(2, dtype=dtypes.float16)).numpy(), [0.0, 1.0])
+
 @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, f"no bfloat16 on {Device.DEFAULT}")
 class TestOpsBFloat16(unittest.TestCase):
   def test_cast(self):
