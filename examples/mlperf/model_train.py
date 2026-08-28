@@ -1667,7 +1667,7 @@ def train_llama3():
 def train_gptoss():
   from examples.mlperf.models.gpt_oss import GPTOSS, GPT_OSS_20B, apply_grad, FP8_DTYPE
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, clip_grads
+  from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, fclip_grads
 
   BENCHMARK = getenv("BENCHMARK")
 
@@ -1785,11 +1785,9 @@ def train_gptoss():
 
     Tensor.realize(loss, *grads)
 
-    grad_norm = clip_grads(grads, 1, 1.0)
-    optim.fstep(grads, grad_norm)
+    clipped_grads, grad_norm = fclip_grads(grads, 1.0)
+    optim.fstep(clipped_grads, grad_norm)
     scheduler.step()
-
-    for g in grads: g.assign(0)
 
     loss_cpu = loss.flatten().float().to("CPU")
     lr_cpu = optim.lr.float().to("CPU")
