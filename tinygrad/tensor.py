@@ -147,7 +147,6 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
   return UOp.sink(*[r.store(v) for r, v in zip(returned, rets)])
 
-_resolved_calls: dict[UOp, UOp|None] = {}
 def returned_after_finalize(r:UOp) -> UOp|None:
   # resolve AFTERs on RETURNED placeholders (function call outputs) while we are still in the tensor graph, like any
   # other value (this inlines the call body); afters between the return and the call don't matter
@@ -157,10 +156,8 @@ def returned_after_finalize(r:UOp) -> UOp|None:
   # don't inline calls with bound-variable or unresolved sharded (UNSHARD) args in the tensor graph,
   # those get resolved at schedule time
   if any(any(u.op is Ops.UNSHARD or u.is_variable or u.is_bound_var for u in a.toposort(enter_calls=False)) for a in x.src[1:]): return None
-  if x not in _resolved_calls:
-    from tinygrad.schedule.prepare import resolve_function
-    _resolved_calls[x] = resolve_function(x)
-  if (inlined := _resolved_calls[x]) is None or (v := resolve_returned_after(r.src[0], inlined)) is None: return None
+  from tinygrad.schedule.prepare import resolve_function
+  if (inlined := resolve_function(x)) is None or (v := resolve_returned_after(r.src[0], inlined)) is None: return None
   return r.src[0].after(v).replace(tag=r.tag)
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
