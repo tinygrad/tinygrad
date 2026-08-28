@@ -1674,8 +1674,7 @@ def train_gptoss():
   config = {}
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "/raid/datasets/c4-8b/"))
   BS                 = config["BS"]                     = getenv("BS", 16)
-  grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
-  GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
+  GBS                = config["GLOBAL_BATCH_SIZE"]      = BS
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
   DATA_SEED          = config["DATA_SEED"]              = getenv("DATA_SEED", SEED)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
@@ -1737,8 +1736,8 @@ def train_gptoss():
   params_wd = [p for p in params if p.ndim >= 3]
   params_no_wd = [p for p in params if p.ndim < 3]
   optim = GradAccClipAdamWGroup(
-    GradAccClipAdamW(params_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device),
-    GradAccClipAdamW(params_no_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=0.0, grad_acc=grad_acc, device=optim_device),
+    GradAccClipAdamW(params_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=1, device=optim_device),
+    GradAccClipAdamW(params_no_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=0.0, grad_acc=1, device=optim_device),
   )
 
   for p in optim.params:
@@ -1770,7 +1769,7 @@ def train_gptoss():
 
   @TinyJit
   @Context(TRAINING=1)
-  def minibatch(tokens:Tensor):
+  def step(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if not is_sharding: tokens = tokens.to(None)
 
@@ -1784,22 +1783,20 @@ def train_gptoss():
     for g, new_g in zip(grads, loss.gradient(*optim.params)):
       apply_grad(g, new_g.uop)
 
-    loss_cpu = loss.flatten().float().to("CPU")
-    return loss_cpu.realize(*grads)
+    Tensor.realize(loss, *grads)
 
-  @TinyJit
-  def optim_step():
-    grad_norm = clip_grads(grads, grad_acc, 1.0)
+    grad_norm = clip_grads(grads, 1, 1.0)
     optim.fstep(grads, grad_norm)
     scheduler.step()
 
     for g in grads: g.assign(0)
 
+    loss_cpu = loss.flatten().float().to("CPU")
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, *grads, *fp8_inv_scales)
+    Tensor.realize(loss_cpu, lr_cpu, grad_norm_cpu, *grads, *fp8_inv_scales)
 
-    return lr_cpu, grad_norm_cpu
+    return loss_cpu, lr_cpu, grad_norm_cpu
 
   @TinyJit
   @Context(TRAINING=0)
@@ -1848,30 +1845,20 @@ def train_gptoss():
       profile_marker(f"train @ {i}")
       st = time.perf_counter()
 
-      stopped = False
-      losses, data_time, dev_time = [], 0, 0
-      for _ in range(grad_acc if i >= 2 else 1):
-        ist = time.perf_counter()
-        try: tokens = next(train_iter)
-        except StopIteration:
-          stopped = True
-          break
-        mst = time.perf_counter()
-        data_time += mst - ist
-        losses.append(minibatch(tokens).item())
-        dev_time += time.perf_counter() - mst
-      if stopped: break
+      ist = time.perf_counter()
 
-      gt = time.perf_counter()
-      ret = optim_step()
-      lr, grad_norm = ret[0].item(), ret[1].item()
+      try: tokens = next(train_iter)
+      except StopIteration: break
+      mst = time.perf_counter()
+      data_time = mst - ist
+
+      ret = step(tokens)
+      dev_time = time.perf_counter() - mst
+
+      loss, lr, grad_norm = ret[0].item(), ret[1].item(), ret[2].item()
       et = time.perf_counter()
 
-      loss = sum(losses) / len(losses)
-      optim_time = et - gt
-      dev_time += optim_time
       step_time = et - st
-      gbs_time = gt - st
       if BENCHMARK: step_times.append(step_time)
 
       i += 1
@@ -1881,7 +1868,7 @@ def train_gptoss():
       gflops = GlobalCounters.global_ops / 1e9 / dev_time
       mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * 4.6e15)) * 100
       tqdm.write(
-          f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
+          f"{i:5} {step_time:.3f} s step, {dev_time:.3f} s dev, {data_time:.3f} s data, {loss:.4f} loss, " \
           f"{lr:.12f} LR, {grad_norm:.6f} grad_norm, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
       if DEBUG >= 1: tqdm.write("  mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))
 
@@ -1891,8 +1878,6 @@ def train_gptoss():
           "train/lr": lr,
           "train/grad_norm": grad_norm,
           "train/step_time": step_time,
-          "train/gbs_time": gbs_time,
-          "train/optim_time": optim_time,
           "train/dev_time": dev_time,
           "train/data_time": data_time,
           "train/mem": mem_gb,

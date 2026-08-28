@@ -15,7 +15,8 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
   ret:list[UOp] = []
   for i, x in enumerate(ms.src):
     if x.op is Ops.COPY:
-      ret.append(_apply_shrink(shrink.marg, x.src[0], i).copy_to_device(x.device))
+      src = _apply_shrink(shrink.marg, x.src[0], i)
+      ret.append(src.contiguous() if src.device == x.device else src.copy_to_device(x.device))
     else:
       ret.append(_apply_shrink(shrink.marg, x, i).contiguous())
   return ms.replace(src=tuple(ret))
@@ -35,9 +36,11 @@ replace_allreduce = PatternMatcher([
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
   # move shrink before MSTACK
   (UPat(Ops.SHRINK, src=(UPat(Ops.MSTACK, name="ms"),), allow_any_len=True, name="shrink"), mstack_early_shrink),
-  # move MSELECT before movement ops
+  # move MSELECT before movement/ALU ops
   (UPat(Ops.MSELECT, src=(UPat(GroupOp.Movement, src=(UPat.var("s"),), allow_any_len=True, name="v"),), name="ms"),
    lambda s,v,ms: v.replace(src=(s.mselect(ms.arg),)+v.src[1:])),
+  (UPat(Ops.MSELECT, src=(UPat(GroupOp.ALU, name="a"),), name="ms"), lambda a,ms:
+   a.replace(src=tuple(s.mselect(ms.arg) if isinstance(s.device, tuple) else s for s in a.src))),
 ])
 
 _early_allreduce = PatternMatcher([
@@ -259,7 +262,7 @@ def store_dest_multi(root:UOp, multi:UOp):
   # (scalars arrive EXPANDed to the full shape by UOp.store's const_like, so they sub-view like everything else)
   srcs = [multi.src[0]] + [x.src[0] if x.op is Ops.UNSHARD else shard_subview(x, multi) if tuple(x.shape) == tuple(multi.shape) else x
                            for x in root.src[1:]]
-  return UOp(root.op, root.dtype, tuple(srcs), root.arg)
+  return UOp(root.op, src=tuple(srcs), arg=root.arg)
 
 def passthrough_multi(root:UOp, multi:UOp):
   new_src = (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:])
@@ -277,13 +280,8 @@ def rewrite_into_function(call:UOp):
                            for i, s in enumerate(new_body.src)])
   return call.replace(src=(new_body,)+new_args)
 
-def param_to_multi(p:UOp):
-  if p.axis is None: return None
-  return UOp.param(p.arg.slot, p.dtype, p.shard_shape, p.device, p.arg.vmin_vmax, p.arg.multiple_of, p.arg.name, p.arg.addrspace).unshard(p.axis)
-
 # NOTE: this is the same pattern as unrolled ranges
 multi_pm = PatternMatcher([
-  (UPat(Ops.PARAM, name="p"), param_to_multi),
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.UNSHARD])), alu_multi),
   (UPat(Ops.REDUCE, src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), reduce_multi),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.UNSHARD, name="multi"), UPat()), name="root"), reshape_multi),
@@ -306,7 +304,7 @@ multi_pm = PatternMatcher([
   (UPat((Ops.CALL, Ops.FUNCTION, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — FUNCTION is handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
-    UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), root.arg)),
+    UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg)),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), passthrough_multi),
   # STORE of a sharded value into an unsharded dest (e.g. a fragment into a full output tile)
