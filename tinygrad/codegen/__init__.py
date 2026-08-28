@@ -391,7 +391,15 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
-  if SPEC: type_verify(sink, spec_program)
+  if SPEC:
+    import os
+    if os.environ.get("DBGTV"):
+      try: type_verify(sink, spec_program)
+      except RuntimeError:
+        from tinygrad.uop.render import print_uops
+        print_uops(list(sink.toposort()))
+        raise
+    else: type_verify(sink, spec_program)
 
   # return the rewritten sink
   return sink

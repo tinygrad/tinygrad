@@ -82,6 +82,11 @@ def _adamw_master_mxfp4_step(param:Tensor, grad:Tensor, m:Tensor, v:Tensor, mast
     full.replace(Tensor(full.uop.after(*(ret[idx].uop for ret in calls))))
   return [x for outputs in cache for x in outputs]
 
+def fclip_grads(grads:list[Tensor], clip_norm) -> Tensor:
+  total_norm = Tensor.stack(*[g.float().square().sum() for g in grads]).sum().sqrt().contiguous()
+  scale = (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
+  return [(g * scale).cast(g.dtype) for g in grads], total_norm
+
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
     super().__init__(params, lr, device, fused)

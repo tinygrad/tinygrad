@@ -19,6 +19,7 @@ def v_mfma_fp4(dst, a, b, opsel, opsel_hi, scale_a, scale_b):
 
 def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
   k = Kernel()
+  scale_k = K // 32
   k.emit(s_and_b32(s[1], s[1], LIT, 65535))
   if (tile_m, tile_n) == (128, 512):
     k.emit(s_mov_b32(s[47], s[2]))
@@ -36,8 +37,8 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
   k.emit(s_mov_b32(s[45], K))
   k.emit(s_load_dwordx2(s[20:21], s[0:1], s[0], 24, 0, 0, 0, 1))
   k.emit(s_load_dwordx2(s[24:25], s[0:1], s[0], 32, 0, 0, 0, 1))
-  k.emit(s_mov_b32(s[39], K // 32))
-  k.emit(s_mov_b32(s[40], K // 32))
+  k.emit(s_mov_b32(s[39], scale_k))
+  k.emit(s_mov_b32(s[40], scale_k))
   k.emit(v_lshrrev_b32_e32(v[1], 10))
   k.emit(v_lshrrev_b32_e32(v[2], 10, v[1]))
   k.emit(v_and_b32_e32(v[2], LIT, v[2], 1023))

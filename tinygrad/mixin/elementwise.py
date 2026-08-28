@@ -870,7 +870,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).asinh().numpy())
     ```
     """
-    return self.sign() * (self.abs() + (self.square() + 1).sqrt()).log()
+    return (sg:=(self<0).where(-1.0, 1.0)) * (self*sg + (self.square() + 1).sqrt()).log()
 
   def acosh(self) -> Self:
     """

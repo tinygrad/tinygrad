@@ -1808,8 +1808,6 @@ def train_gptoss():
     optim.fstep(grads, grad_norm, clip_coeff)
     scheduler.step()
 
-    for g in grads: g.assign(0)
-
     loss_cpu = loss.flatten().float().to("CPU")
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")

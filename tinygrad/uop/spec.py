@@ -87,10 +87,9 @@ spec_shared = PatternMatcher([
   # a loop-ended END requires a trailing bool condition for the backedge (loop again while true)
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool))), lambda: True),
 
-  # PARAM
-  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
-  (UPat(Ops.BUFFER, src=(UPat(),), name="x"), lambda x:
-   isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
+  # PARAM/BUFFER have a size in the arg, no shape input
+  (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  (UPat(Ops.BUFFER, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   # GROUP of stores (or groups, or NOOPs)
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
@@ -141,12 +140,12 @@ spec_tensor = PatternMatcher([
    lambda u: dtypes.is_float(u.dtype) or u.src[0].base.is_invalid),
 
   # BUFFER
-  (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf:
-   (isinstance(buf.dtype, DType) and matches_dtype(buf.src[0], dtypes.weakint) and is_device(buf.arg.device))
+  (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf:
+   (isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device))
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
   # a Variable is a 0-d ALU BUFFER with a value range and no device
-  (UPat(Ops.BUFFER, src=(UPat(),), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
+  (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
@@ -229,7 +228,8 @@ spec_program = PatternMatcher([
 ])+spec_shared
 
 spec_hcq = PatternMatcher([
-  (UPat(Ops.GETADDR, dtypes.uint64, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),), name="x"), lambda x: is_device(x.arg)),
+  (UPat(Ops.GETADDR, dtypes.uint64, src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.SHRINK, Ops.BITCAST, Ops.MSTACK)).or_after(),), name="x"),
+   lambda x: is_device(x.arg)),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),)), lambda: True),
 ])+spec_shared
 
@@ -260,11 +260,10 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) or x.is_variable or x.is_bound_var for x in s.src) or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
-  # param is outside buffer, buffer is local buffer
-  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
+  # param is outside buffer, buffer is local buffer. params have a size in the arg, no shape input
+  (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.ALU)),
-  # RESHAPE/BITCAST are NOOPs in the kernel graph (do we need them?)
-  (UPat((Ops.RESHAPE, Ops.BITCAST)), lambda: True),
+  (UPat(Ops.BITCAST), lambda: True),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
