@@ -112,7 +112,8 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
 # ** MXFP4 GEMM custom kernel
 
 MXFP4_TILES = ((256, 256), (192, 256), (128, 512))
-MXFP4_TILE_OVERRIDES = {(4096, 14336, 16384):(128, 512), (6144, 4096, 16384):(192, 256)}
+# best tiles from a full sweep over the production shapes (mxfp4_tile_sweep.md); unmatched shapes fall back to 256x256
+MXFP4_TILE_OVERRIDES = {(6144, 4096, 16384):(192, 256), (16384, 4096, 6144):(128, 512), (16384, 6144, 4096):(128, 512)}
 
 def _select_mxfp4_tile(M:int, N:int, K:int) -> tuple[int, int]:
   if (tile:=MXFP4_TILE_OVERRIDES.get((M, N, K))) is not None: return tile
