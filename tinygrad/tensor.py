@@ -107,7 +107,7 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
-  if c.arg is None or not c.arg.precompile or c.src[0].op is not Ops.TUPLE: return None
+  if c.arg is None or not c.arg.precompile: return None
   input_buffers = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])
 
   # add the outputs to the call
@@ -143,7 +143,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
   # transform precompiled value-producing calls into opaque CALLs (body becomes SINK with stores)
-  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
+  (UPat(Ops.CALL, src=(UPat(Ops.TUPLE),), allow_any_len=True, name="c"), transform_precompiled_call),
 
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),

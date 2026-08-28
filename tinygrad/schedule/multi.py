@@ -301,7 +301,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
   # rewrite into FUNCTION calls explicitly for UNSHARD (value-producing)
   # rewrite into value-producing calls explicitly for UNSHARD
-  (UPat(Ops.CALL, name="call"), lambda call: rewrite_into_function(call) if call.src[0].op is Ops.TUPLE else None),
+  (UPat(Ops.CALL, src=(UPat(Ops.TUPLE),), allow_any_len=True, name="call"), rewrite_into_function),
   (UPat((Ops.CALL, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:

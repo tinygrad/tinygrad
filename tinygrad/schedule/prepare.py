@@ -130,7 +130,7 @@ def expand_bitcast(bc:UOp) -> UOp|None:
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve value-producing calls (inline the body)
-  (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.src[0].op is Ops.TUPLE else None),
+  (UPat(Ops.CALL, src=(UPat(Ops.TUPLE),), allow_any_len=True, name="c"), resolve_function),
 
   # resolve TUPLE+GETTUPLE
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
