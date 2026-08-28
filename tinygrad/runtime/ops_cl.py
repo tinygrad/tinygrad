@@ -55,7 +55,7 @@ class CLProgram(Program['CLDevice']):
 
   def __call__(self, *bufs:cl.cl_mem, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None, vals:tuple[int, ...]=(),
                wait=False, **kw) -> float|None:
-    for a, (_, i, dt, shape, addrspace) in zip(TinyELF.merge_args(self.signature, bufs, vals), self.signature):
+    for i, (a, (_, _, dt, shape, addrspace)) in enumerate(zip(TinyELF.merge_args(self.signature, bufs, vals), self.signature)):
       b = getattr(ctypes, f"c_int{dt.bitsize}")(a) if addrspace is AddrSpace.ALU else a
       if is_image_shape(shape):
         pitch = (round_up(shape[1], 256) if OSX else shape[1]) * 4 * dt.itemsize
