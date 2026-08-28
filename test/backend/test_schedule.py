@@ -381,7 +381,10 @@ class TestCopyFolding(unittest.TestCase):
   def test_shrink_copy(self):
     a = Tensor.arange(4).clone("CPU:1").realize()
     b = a.to("CPU:2").shrink(((1, 3),)).to("CPU:3")
+    GlobalCounters.reset()
     run_linear(*check_schedule(b, 3, filter_sink=False))
+    # copy 16 bytes, extra E kernel, copy exactly 4 bytes
+    self.assertEqual(GlobalCounters.global_mem, 4*4 + 2*4*2+ 2*4)
     self.assertListEqual(b.tolist(), [1, 2])
 
   def test_expanded_copy(self):
