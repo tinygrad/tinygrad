@@ -187,6 +187,11 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   if op in GroupOp.Movement: return src[0].dtype
   raise RuntimeError(f"no dtype for {op} with arg {arg}")
 
+class _LegacyTupleValues:
+  """legacy compatibility shim: TUPLE is gone, a tuple-of-values just holds the values until they are called"""
+  def __init__(self, srcs:tuple[UOp, ...]): self.srcs = srcs
+  def call(self, *args:UOp, **kwargs) -> UOp: return UOp.call_outputs(self.srcs, *args, **kwargs)
+
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
@@ -555,6 +560,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def returned_outputs(self) -> tuple[UOp, ...]:
     """the outputs of a value-producing call: an AFTER on each RETURNED input, usable like a normal buffer"""
     return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.op is Ops.RETURNED)
+  # legacy compatibility: TUPLE/GETTUPLE are gone. a tuple of values called is call_outputs, gettuple is returned_outputs[i]
+  @staticmethod
+  def maketuple(*srcs:UOp) -> _LegacyTupleValues: return _LegacyTupleValues(srcs)
+  def gettuple(self, idx:int) -> UOp:
+    assert self.op is Ops.CALL and self.num_returned, f"gettuple requires a CALL with RETURNED outputs, got {self.op}"
+    return self.returned_outputs[idx]
   def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]), **kwargs)
