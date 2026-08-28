@@ -54,6 +54,12 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["squeezed"]
     self.helper_test_single_op("Squeeze", inputs, attributes, outputs)
 
+  def test_mean_variance_normalization_axes(self):
+    inputs = {"x": np.random.randn(2, 3, 4, 5).astype(np.float32)}
+    attributes = {"axes": [2, 3]}
+    outputs = ["out"]
+    self.helper_test_single_op("MeanVarianceNormalization", inputs, attributes, outputs)
+
   def test_conv(self):
     # test VALID auto_pad
     inputs = {

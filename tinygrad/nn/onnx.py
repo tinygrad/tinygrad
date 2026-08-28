@@ -937,9 +937,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if segment_embedding is not None: embedding_sum = embedding_sum + embedding(segment_ids, segment_embedding.shape[0], segment_embedding)
     out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
     return out, None, embedding_sum
-  def MeanVarianceNormalization(x:Tensor, axis:Sequence[int]|None=None):
-    if axis is None: axis = [0,2,3]
-    return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
+  def MeanVarianceNormalization(x:Tensor, axes:Sequence[int]=(0,2,3)):
+    return (x - x.mean(axes, keepdim=True)) / (x.std(axes, keepdim=True, correction=0) + 1e-9)
 
   def LpNormalization(x:Tensor, axis:int=-1, p:int=2):
     return x / (x.abs().sum(axis, keepdim=True) if p == 1 else x.square().sum(axis, keepdim=True).sqrt())
@@ -1246,8 +1245,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     ret = _qlinearop_float(GlobalAveragePool, [X], [x_zero_point], [x_scale], y_scale, y_zero_point)
     return ret.permute(0, *range(2, ret.ndim), 1) if channels_last else ret  # NCHW -> NHWC
 
-  def ConvInteger(x: Tensor, w: Tensor, x_zero_point:Tensor = Tensor(0), w_zero_point:Tensor = Tensor(0), B: Tensor | None = None, **opts) -> Tensor:
-    return _op_integer(Conv, [x,w], [x_zero_point,w_zero_point], **{"B":B, **opts})
+  def ConvInteger(x: Tensor, w: Tensor, x_zero_point:Tensor = Tensor(0), w_zero_point:Tensor = Tensor(0), **opts) -> Tensor:
+    return _op_integer(Conv, [x,w], [x_zero_point,w_zero_point], **opts)
 
   def MatMulInteger(A: Tensor, B: Tensor, a_zero_point: Tensor = Tensor(0), b_zero_point: Tensor = Tensor(0)) -> Tensor:
     return _op_integer(Tensor.matmul, [A,B], [a_zero_point,b_zero_point])
