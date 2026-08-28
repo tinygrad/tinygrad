@@ -2810,7 +2810,7 @@ class TestOps(unittest.TestCase):
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"))
 
   def test_interpolate_linear_corners_aligned(self):
-    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
+    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,)), ((29,),(1,))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear", align_corners=True),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True))
