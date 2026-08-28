@@ -359,6 +359,7 @@ class TestOps(unittest.TestCase):
       lambda x: torch.where(x > 0.5, 4, 2).type(torch.int32).permute((1, 0)),
       lambda x: (x > 0.5).where(4, 2).clone().permute((1, 0)), forward_only=True)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "software vulkan evaluates a NaN != x as false")
   def test_where_nan_cond(self):
     # a NaN compares false against everything except !=.
     for fxn in (lambda x: x<1, lambda x: x>1, lambda x: x!=1, lambda x: x==1):
