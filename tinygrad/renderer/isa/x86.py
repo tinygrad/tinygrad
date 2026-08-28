@@ -33,7 +33,6 @@ class X86Ops(FastEnum):
   # bitcasts
   VMOVD = auto(); VMOVQ = auto(); VMOVDm = auto(); VMOVQm = auto()
   # comparisons
-  VUCOMISS = auto(); VUCOMISD = auto()
   VCMPSS = auto(); VCMPSD = auto(); VCMPPS = auto(); VCMPPD = auto()
   VPCMPGTB = auto(); VPCMPGTW = auto(); VPCMPGTD = auto(); VPCMPGTQ = auto()
   VPCMPEQB = auto(); VPCMPEQW = auto(); VPCMPEQD = auto(); VPCMPEQQ = auto()
@@ -95,7 +94,7 @@ class X86GroupOp:
                 X86Ops.VPMULLW, X86Ops.VPMULLD, X86Ops.VROUNDSS, X86Ops.VROUNDSD, X86Ops.VSQRTSS, X86Ops.VSQRTSD, X86Ops.VINSERTPS,
                 X86Ops.VPINSRB, X86Ops.VPINSRW, X86Ops.VPINSRD, X86Ops.VPINSRQ, X86Ops.VPAND, X86Ops.VPOR, X86Ops.VPXOR, X86Ops.VPSLLVD,
                 X86Ops.VPSLLVQ, X86Ops.VPSRLVD, X86Ops.VPSRLVQ, X86Ops.VPSRAVD, X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB,
-                X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS, X86Ops.VUCOMISS, X86Ops.VUCOMISD, X86Ops.IDIV, X86Ops.DIV}
+                X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS, X86Ops.IDIV, X86Ops.DIV}
 
   # X86Ops that can write to memory
   WriteMem = {X86Ops.MOVm, X86Ops.MOVi, X86Ops.VMOVSSm, X86Ops.VMOVSDm, X86Ops.VMOVUPSm, X86Ops.VMOVDm, X86Ops.VMOVQm,
@@ -110,7 +109,7 @@ class X86GroupOp:
   # X86Ops that write flags or can modify flags to undefined values
   WriteFlags = {X86Ops.CMP, X86Ops.CMPi, X86Ops.ADD, X86Ops.ADDi, X86Ops.SUB, X86Ops.SUBi, X86Ops.IMUL, X86Ops.IMULi, X86Ops.IDIV, X86Ops.DIV,
                 X86Ops.SHL, X86Ops.SHLi, X86Ops.SHR, X86Ops.SHRi, X86Ops.SAR, X86Ops.SARi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi,
-                X86Ops.OR, X86Ops.ORi, X86Ops.VUCOMISS, X86Ops.VUCOMISD}
+                X86Ops.OR, X86Ops.ORi}
 
   # X86Ops whose first src is the rm field
   Rm1st = ReadMem1st | (ReadMem2nd & TwoAddress) | {X86Ops.VPSRLDQ}
@@ -177,6 +176,12 @@ def gated_store(addr:UOp, gate:UOp, val:UOp):
   sel = gate.where(addr.replace(dtype=dtypes.uint64), local.index(UOp.cconst(0, dtypes.int32), dtype=dtypes.uint64))
   return UOp(Ops.AFTER, addr.dtype, (sel,)).store(val)
 
+# a gate the flags can be picked with, or the bool compared to zero that replaces one they can't: only an integer
+# comparison sets the flags, see cmp. NOTE: the 0 is int so the bool zero-extends and compares as int (a byte compare renders
+# different kernels)
+def flag_gate(m:UOp) -> UOp|None:
+  return None if m.op in GroupOp.Comparison and m.src[0].dtype not in dtypes.floats else m.ne(UOp.cconst(0, dtypes.int))
+
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
   # noop casts: zero extending scalar 32bit int, same-width signed/unsigned, narrowing scalar int
@@ -191,11 +196,9 @@ pre_isel_matcher = PatternMatcher([
   # gated load/store become a conditional move on the address, the load/store are unconditional
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate")), gated_store),
-  # TODO: remove this once we allow all flag producing ops in cmove
-  # if gate in scalar int cmove is not a comparison need to add one to set the flag
-  # NOTE: the 0 is int so the bool gate zero-extends and compares as int (a byte compare renders different kernels)
-  (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")),
-   lambda m,a,b: m.ne(UOp.cconst(0, dtypes.int)).where(a,b) if m.op not in GroupOp.Comparison else None),
+  # a conditional backedge picks with the flags, and so does the cmove, which is legalized in isel
+  (UPat(Ops.END, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
+   lambda m,x: x.replace(src=x.src[:2]+(g,)) if (g:=flag_gate(m)) is not None else None),
 ])
 
 # ***** X86 registers *****
@@ -230,9 +233,10 @@ def to_imm(c:UOp) -> UOp|None:
   if c.dtype in dtypes.int64s: return imm(dtypes.int32, v.val) if not v.overflows(dtypes.int32) else None
   if c.dtype in dtypes.ints+(dtypes.bool,): return imm(c.dtype, v.val)
   return None
+# the flag path, which only an integer comparison can take: an x86 float compare sets carry, zero and parity together when an
+# operand is NaN, so a NaN reads as "below" and as "equal", and it clears sign and overflow, so nothing reads as "less"
 def cmp(x:UOp) -> UOp:
-  if x.src[0].dtype is dtypes.float32: return x.ins(X86Ops.VUCOMISS, dtype=dtypes.void)
-  if x.src[0].dtype is dtypes.float64: return x.ins(X86Ops.VUCOMISD, dtype=dtypes.void)
+  if x.src[0].dtype in dtypes.floats: raise RuntimeError(f"no flag compare for {x.src[0].dtype}, a float gate must be a mask")
   return x.ins(X86Ops.CMP, dtype=dtypes.void) if (i:=to_imm(x.src[1])) is None else x.ins(X86Ops.CMPi, dtype=dtypes.void, src=(x.src[0], i))
 def vcmp(x:UOp) -> UOp:
   v = imm(dtypes.uint8, {Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op])
@@ -382,6 +386,9 @@ isel_matcher = PatternMatcher([
   (UPat(GroupOp.Comparison, dtypes.bool, (UPat.var("y", (dtypes.float32, dtypes.float64)), UPat()), name="x"), lambda y,x:
    UOp(Ops.AND, src=(x.replace(dtype=y.dtype).bitcast(dt:=to_int(y.dtype)), UOp.cconst(1, dt))).f(Ops.NOOP, dtype=dtypes.bool)),
   # conditional moves that use flags
+  # TODO: remove this once we allow all flag producing ops in cmove
+  # the blends took every float gate a mask can serve, so a gate that is still not an integer comparison becomes one here
+  (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")), lambda m,a,b: g.where(a, b) if (g:=flag_gate(m)) is not None else None),
   (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.sints), UPat()), name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b:
    a.ins(X86Ops.CMOVL, src=(b, a, cmp(m)))),
   (UPat(Ops.CMPLT, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVB, src=(b, a, cmp(m)))),
@@ -695,7 +702,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
   if x.arg in X86GroupOp.Rm2nd:
     if len(x.src) > 4: address, rest = x.src[1:5], x.src[:1] + x.src[5:]
     else: address, rest = (x.src[1], None, None, None), x.src[:1] + x.src[2:]
-    # cmp/vucomiss reg, rm don't define a new register
+    # cmp reg, rm doesn't define a new register
     return _encode(x, *address, *rest) if x.dtype is not dtypes.void else _encode(rest[0], *address)
 
   return None
@@ -770,8 +777,6 @@ encodings = {
   X86Ops.VPSUBB: lambda x: encode(x, 0xF8, pp=1, sel=1), X86Ops.VPSUBW: lambda x: encode(x, 0xF9, pp=1, sel=1),
   X86Ops.VPSUBD: lambda x: encode(x, 0xFA, pp=1, sel=1), X86Ops.VPSUBQ: lambda x: encode(x, 0xFB, pp=1, sel=1),
   X86Ops.VPSRAVD: lambda x: encode(x, 0x46, pp=1, sel=2),
-  # float cmp
-  X86Ops.VUCOMISS: lambda x: encode(x, 0x2E, pp=0, sel=1), X86Ops.VUCOMISD: lambda x: encode(x, 0x2E, pp=1, sel=1),
   # scalar / packed float binary
   X86Ops.VADDSS: lambda x: encode(x, 0x58, pp=2, sel=1), X86Ops.VADDPS: lambda x: encode(x, 0x58, pp=0, sel=1),
   X86Ops.VADDSD: lambda x: encode(x, 0x58, pp=3, sel=1), X86Ops.VADDPD: lambda x: encode(x, 0x58, pp=1, sel=1),
