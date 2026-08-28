@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, USE_TC, IMAGE
+from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, USE_TC, IMAGE, REASSOC_OPT, REASSOC_CUS
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -31,14 +31,21 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       # check TC first and apply hand-coded opts if successful
       try: rngs = tk.apply_opt(Opt(OptOps.TC, axis, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
       except KernelOptError: continue
+      baseline, baseline_rngs = tk.copy(), rngs[:]
       for tc_dim in [1,0]: # attempt to upcast M and N
-        szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
+        szs = [sz for sz in [5,4,3,2] if baseline_rngs[tc_dim].src[0].divides(sz) is not None]
         if szs:
           # set it to the replaced range
-          rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
-      if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
-        tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
-      return tk
+          baseline_rngs[tc_dim] = baseline.apply_opt(Opt(OptOps.UPCAST, baseline.rngs.index(baseline_rngs[tc_dim]), szs[0]))[0]
+      if (szs := [sz for sz in [4,2] if baseline_rngs[0].src[0].divides(sz) is not None]): # attempt to local N
+        baseline.apply_opt(Opt(OptOps.LOCAL, baseline.rngs.index(baseline_rngs[0]), szs[0]))
+      baseline_ctas = prod(baseline.full_shape[i] for i in baseline.axes_of(AxisType.GLOBAL))
+      if not REASSOC_OPT or not resolve(2*baseline_ctas < (cus:=REASSOC_CUS.value or 32), False): return baseline
+      if (szs := [sz for sz in [5,4,3,2] if rngs[1].src[0].divides(sz) is not None]):
+        rngs[1] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[1]), szs[0]))[0]
+      if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
+      ctas = prod(tk.full_shape[i] for i in tk.axes_of(AxisType.GLOBAL))
+      return tk if resolve((ctas >= cus) & (ctas <= 2*cus), False) else baseline
 
   # make a copy so it does not mutate the input
   k = k.copy()
