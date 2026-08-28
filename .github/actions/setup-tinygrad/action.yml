@@ -248,10 +248,10 @@ runs:
       if: inputs.amd == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
-        sudo mkdir -p /usr/local/lib
-        curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/tinygrad/amdcomgr_dylib/releases/latest | \
-          jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
-          sudo xargs curl -fL -o /usr/local/lib/libamd_comgr.dylib
+        sudo "$VIRTUAL_ENV/bin/python" -c "
+          from tinygrad.helpers import fetch
+          fetch('https://github.com/tinygrad/amdcomgr_dylib/releases/download/v7.2.0/libamd_comgr.dylib', name='/usr/local/lib/libamd_comgr.dylib',
+                sha256='7712fbe4fcb9fcdea49aeac989876448df975ce0a8ce7c9b15b55c15e7a05935').chmod(0o644)"
 
     # **** CUDA ****
     - name: Install CUDA
@@ -269,8 +269,11 @@ runs:
       if: inputs.ocelot == 'true'
       shell: bash
       run: |
-        sudo mkdir -p /usr/local/lib
-        sudo curl --output-dir /usr/local/lib -fLO https://github.com/tinygrad/gpuocelot/releases/download/v0.1.0/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
+        sudo "$VIRTUAL_ENV/bin/python" -c "
+          from tinygrad.helpers import fetch
+          fetch('https://github.com/tinygrad/gpuocelot/releases/download/v0.1.0/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}',
+                name='/usr/local/lib/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}',
+                sha256='${{ runner.os == 'Linux' && 'a24705276a9a187111371465987b3258f8836ef512a34266e3075bc4714e125a' || '5106c998c795a36dec79eb7b2aae324a93d1338236d36eeaae232649ec457663' }}').chmod(0o644)"
 
     # **** WebGPU ****
 
@@ -278,8 +281,11 @@ runs:
       if: inputs.webgpu == 'true'
       shell: bash
       run: |
-        sudo mkdir -p /usr/local/lib
-        sudo curl --output-dir /usr/local/lib -fLO https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
+        sudo "$VIRTUAL_ENV/bin/python" -c "
+          from tinygrad.helpers import fetch
+          fetch('https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.${{ runner.os == 'Linux' && 'so' || 'dylib' }}',
+                name='/usr/local/lib/libwebgpu_dawn.${{ runner.os == 'Linux' && 'so' || 'dylib' }}',
+                sha256='${{ runner.os == 'Linux' && 'cf36091d266a32c9d5080f14662de44cece241987939713282ea0ff558db81c6' || '7e87c7acefda8b6af1a1c5debfedcf62958311284b8fd8d9bcf93e312e6636e3' }}').chmod(0o644)"
 
     # **** LLVM ****
 
@@ -293,7 +299,10 @@ runs:
       if: inputs.opencl == 'true'
       shell: bash
       run: |
-        sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/rusticl-v1/libRusticlOpenCL.so.1.0.0 -o /usr/lib/libRusticlOpenCL.so
+        sudo "$VIRTUAL_ENV/bin/python" -c "
+          from tinygrad.helpers import fetch
+          fetch('https://github.com/sirhcm/tinymesa/releases/download/rusticl-v1/libRusticlOpenCL.so.1.0.0', name='/usr/lib/libRusticlOpenCL.so',
+                sha256='d4f48566d8fd33f6cdd8ef6de35a71966e8a8517e6f68ff3c52dbb43765a2513').chmod(0o644)"
         sudo mkdir -p /etc/OpenCL/vendors
         echo "/usr/lib/libRusticlOpenCL.so" | sudo tee /etc/OpenCL/vendors/rusticl.icd
         echo "RUSTICL_ENABLE=llvmpipe" >> "$GITHUB_ENV"
