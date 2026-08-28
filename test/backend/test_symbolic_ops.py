@@ -1,7 +1,8 @@
 import unittest
-from tinygrad import Tensor, Variable, GlobalCounters, Context
+from tinygrad import Tensor, Variable, GlobalCounters, Context, Device
 from tinygrad.uop.ops import sym_infer
 from tinygrad.dtype import dtypes
+from tinygrad.helpers import DEV
 from examples.gpt2 import Attention
 import numpy as np
 
@@ -130,12 +131,18 @@ class TestSymbolicOps(unittest.TestCase):
       expected = q[:, :i].scaled_dot_product_attention(k[:, :i], v[:, :i]).realize().numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM",
+                   "Python IR3 interpreter exceeds TEST_TIMEOUT=90")
   def test_attention_pos_0_sz_0(self):
     Attention(128, 8)(Tensor.ones(1, 0, 128), Variable("start_pos", 0, 128).bind(0), None)
 
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM",
+                   "Python IR3 interpreter exceeds TEST_TIMEOUT=90")
   def test_attention_pos_0_sz_1(self):
     Attention(128, 8)(Tensor.ones(1, 1, 128), Variable("start_pos", 0, 128).bind(0), None)
 
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM",
+                   "Python IR3 interpreter exceeds TEST_TIMEOUT=90")
   def test_attention_pos_0_sz_2(self):
     Attention(128, 8)(Tensor.ones(1, 2, 128), Variable("start_pos", 0, 128).bind(0), None)
 
