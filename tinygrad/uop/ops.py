@@ -538,15 +538,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, src=tuple([x for x in srcs if x is not None]), **kwargs)
   @staticmethod
-  def returned(slot:int, dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, axis:int|None=None) -> UOp:
-    """create a RETURNED placeholder: like PARAM it has a flat storage size in the arg with a view on top,
-    but it marks a buffer the enclosing call writes and returns: it's an input to the call and you AFTER on it"""
+  def returned(placement:int, dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, axis:int|None=None) -> UOp:
+    """create a RETURNED placeholder: like PARAM it has a flat storage size in the arg with a view on top, but it marks a
+    buffer the enclosing call writes and returns. it's an input to the call and you AFTER on it like a normal buffer.
+    the placement is its position among the call's srcs, which is its identity (identical placements merge)"""
     if isinstance(shape, (int, UOp)): shape = (shape,)
     if shape is not None and axis is not None and isinstance(device, tuple):
       # multi-device values have a per-shard sized storage wrapped in UNSHARD: the sharding lives in the graph, not the arg
       shape = tuple(s // len(device) if i == axis else s for i, s in enumerate(shape))
-    if shape is None or len(shape) == 0: return UOp(Ops.RETURNED, arg=ParamArg(slot, dtype, None, device=device))
-    ret = UOp(Ops.RETURNED, arg=ParamArg(slot, dtype, prod(to_max_shape(shape)), device=device))
+    if shape is None or len(shape) == 0: return UOp(Ops.RETURNED, arg=ParamArg(placement, dtype, None, device=device))
+    ret = UOp(Ops.RETURNED, arg=ParamArg(placement, dtype, prod(to_max_shape(shape)), device=device))
     return ret.view_as(shape, axis)
   @property
   def num_returned(self) -> int: return sum(x.unsharded_base.op is Ops.RETURNED for x in self.src[1:])
