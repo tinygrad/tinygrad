@@ -38,14 +38,8 @@ class TestDTypeFromUOp(unittest.TestCase):
     self.assertEqual(UOp(Ops.CONST, arg=ConstFloat(3.0)).dtype, dtypes.weakfloat)
     self.assertEqual(UOp(Ops.CONST, arg=True).dtype, dtypes.bool)
     self.assertEqual(UOp(Ops.CONST, arg=Invalid).dtype, dtypes.bool)
-    # an explicit (strong) const dtype is legal until the field is removed
+    # UOp.const at a strong dtype builds the CAST that carries it
     self.assertEqual(UOp.const(3, dtypes.int32).dtype, dtypes.int32)
-
-  def test_invalid_stated_dtype(self):
-    # UOp.const normalizes a stated dtype away (const_like/full pass their position's); the core constructor does not,
-    # and the spec is what rejects a non-bool Invalid
-    self.assertIs(UOp.const(Invalid, dtypes.float32), UOp.invalid())
-    with self.assertRaises(RuntimeError): type_verify(UOp(Ops.CONST, dtypes.float32, arg=Invalid), spec_shared)
 
   def test_invalid_dtype_and_consumers(self):
     invalid = UOp.invalid()

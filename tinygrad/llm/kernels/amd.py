@@ -116,7 +116,7 @@ def _amd_load(ptr:UOp, lanes:int|None=None) -> UOp:
   if lanes is None: return ptr.load(arg="nontemporal")
   buf, coords = ptr.src[0], ptr.src[1:]
   idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0))
-  return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load(dtype=ptr.dtype)
+  return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load()
 
 def _load_byte(raw:UOp, base:UOp, offset:UOp) -> UOp: return (raw[base + offset//4] >> ((offset&3)*8).cast(dtypes.uint32)) & 255
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
