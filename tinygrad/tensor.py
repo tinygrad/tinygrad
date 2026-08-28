@@ -14,6 +14,9 @@ from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 
+all_tensors: dict[weakref.ref[Tensor], bool|None] = {}
+all_chains: dict[UOp,list[UOp]] = {}
+
 # *** callify: transform a tensor graph into a CALL UOp such that all state is properly scoped ***
 
 @dataclass
@@ -24,6 +27,8 @@ class AllocCtx:
   assigns: list[UOp] = field(default_factory=list)
   replacements: list[UOp] = field(default_factory=list)
   views: set[UOp] = field(default_factory=set)
+  topos: dict[UOp, dict[UOp, None]] = field(default_factory=dict)
+  afters: set[UOp] = field(default_factory=set)
 
 def tag_uop(ctx:AllocCtx, x:UOp):
   if x.tag is not None: return None
@@ -41,8 +46,39 @@ def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   from_creation = isinstance(u.src[0].device, str) and u.src[0].device.startswith(("NPY", "DISK", "PYTHON", "TINYFS"))
   if from_creation: return tag_uop(ctx, u)
 
+def after(ctx: AllocCtx, u: UOp):
+  def _topo(ctx: AllocCtx, u: UOp) -> dict[UOp, None]:
+    if (cached:=ctx.topos.get(u)) is None: ctx.topos[u] = cached = u.toposort()
+    return cached
+
+  if u.buf_uop not in all_chains or u in ctx.afters: return None
+  if u not in all_chains[u.buf_uop]: return None
+
+  for tref in all_tensors:
+    if (t:=tref()) is not None and all_tensors[tref] is None and u not in _topo(ctx, t.uop) and t.uop not in _topo(ctx, u):
+      if t.grad is not None: break
+      all_tensors[tref] = False
+      if any(n in all_chains[u.buf_uop]
+             and all_chains[u.buf_uop].index(n) < all_chains[u.buf_uop].index(u)
+             for n in _topo(ctx, t.uop)):
+        if not any((t2:=tref2()) is not None
+                   and all_tensors[tref2] is True
+                   and t2.uop.buf_uop in all_chains
+                   and t2.uop in all_chains[t2.uop.buf_uop]
+                   and t.uop in _topo(ctx, t2.uop)
+                   and any(n.buf_uop is t2.uop.buf_uop for n in _topo(ctx, u))
+                   for tref2 in all_tensors):
+          nb = u.src[0].empty_like()
+          st = u.src[1]
+          u = nb.after(nb.store(st.src[1], *st.src[2:]), *u.src[2:])
+          return u.rtag(())
+
+  ctx.afters.add(u)
+  return None
+
 # CONTIGUOUS and AFTER + parents are the only nodes that get updated
 add_tags = PatternMatcher([
+  (UPat(Ops.AFTER, name="u"), after),
   (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
   # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
@@ -242,7 +278,6 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
-all_tensors: dict[weakref.ref[Tensor], None] = {}
 def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
@@ -327,7 +362,15 @@ class Tensor(RandMixin):
     all_tensors[weakref.ref(self)] = None
 
   @suppress_finalizing
-  def __del__(self): all_tensors.pop(weakref.ref(self), None)
+  def __del__(self):
+    all_tensors.pop(weakref.ref(self), None)
+    if (uop:=getattr(self, "uop", None)) is None: return
+    #buff=uop.buf_uop
+    if (buff:=uop.buf_uop) in all_chains and not any((t:=tref()) is not None
+                                      and t is not self
+                                      and t.uop.buf_uop is buff
+                                      for tref in all_tensors):
+      all_chains.pop(buff, None)
 
   def _apply_uop(self, fxn:Callable[..., UOp], *x:Tensor, **kwargs) -> Tensor:
     srcs = (self,)+x
@@ -419,7 +462,9 @@ class Tensor(RandMixin):
     """Triggers the computation needed to create these Tensor(s)."""
     to_realize = [x for x in (self,)+lst if not x.uop.is_virtual and not x.uop.has_buffer_identity()]
     if len(to_realize):
+      all_tensors.update({weakref.ref(t): True for t in to_realize})
       run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
+      all_tensors.update({weakref.ref(t): None for t in to_realize})
     return self
 
   def replace(self, x:Tensor) -> Tensor:
@@ -459,6 +504,8 @@ class Tensor(RandMixin):
     else:
       # simple assign
       self.uop = assign
+    if (buff:=self.uop.buf_uop) not in all_chains: all_chains[buff] = [buff,self.uop]
+    else: all_chains[buff].append(self.uop)
     return self
 
   def _buffer(self) -> Buffer:

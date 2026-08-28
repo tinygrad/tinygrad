@@ -181,21 +181,18 @@ class TestAssign(unittest.TestCase):
     self.assertEqual((a + b).item(), 3)
 
   def test_assign_diamond_cycle(self):
-    # NOTE: should *not* raise AssertionError from numpy
-    with self.assertRaisesRegex(RuntimeError, "cycle"):
-      a = Tensor.ones(4).contiguous().realize()
-      times_a = a*3
-      a.assign(Tensor.full((4,), 2.).contiguous())
-      new = a + (times_a-1)
-      np.testing.assert_allclose(new.numpy(), 4)
+    a = Tensor.ones(4).contiguous().realize()
+    times_a = a*3
+    a.assign(Tensor.full((4,), 2.).contiguous())
+    new = a + (times_a-1)
+    np.testing.assert_allclose(new.numpy(), 4)
 
   def test_assign_diamond_contiguous_cycle(self):
-    with self.assertRaisesRegex(RuntimeError, "cycle"):
-      a = Tensor.ones(4).contiguous().realize()
-      times_a = a*3
-      a.assign(Tensor.full((4,), 2.))
-      new = a.contiguous() + times_a-1
-      np.testing.assert_allclose(new.numpy(), 4)
+    a = Tensor.ones(4).contiguous().realize()
+    times_a = a*3
+    a.assign(Tensor.full((4,), 2.))
+    new = a.contiguous() + times_a-1
+    np.testing.assert_allclose(new.numpy(), 4)
 
   def test_assign_diamond_possible(self):
     a = Tensor.ones(4).contiguous().realize()
@@ -886,9 +883,7 @@ class TestAssignOrdering(unittest.TestCase):
     y.assign(y + x)
     z = y + x_expr
     Tensor.realize(x, y, z)
-    # TODO: z should be 15: x_expr means 11 (x captured at build time), but the read is fused past the assign and
-    # sees the new bytes. once stale readers are scheduled before the overwrite, update this to 15
-    np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 16.0])
+    np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 15.0])
 
   def test_war_multi_read_then_assign(self):
     devices = ("CPU:0", "CPU:1")
