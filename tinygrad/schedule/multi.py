@@ -266,7 +266,7 @@ def store_dest_multi(root:UOp, multi:UOp):
 
 def passthrough_multi(root:UOp, multi:UOp):
   new_src = (multi.src[0],)+tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src[1:])
-  return UOp(root.op, root.dtype, src=new_src, arg=root.arg).unshard(multi.arg, multi.src[1:])
+  return UOp(root.op, src=new_src, arg=root.arg).unshard(multi.arg, multi.src[1:])
 
 def rewrite_into_function(call:UOp):
   if call.arg.precompile: return None

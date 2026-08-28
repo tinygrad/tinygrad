@@ -171,9 +171,9 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
 
 def _reconstruct(data:VizData, a:int, depth:int|None=None):
   if depth is None and a in data.all_uops: return data.all_uops[a]
-  op, dtype, src, arg, *rest = data.trace.uop_fields[a]
-  if depth is not None and depth <= 0: return UOp(op, dtype, (), arg, *rest)
-  ret = UOp(op, dtype, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
+  op, src, arg, *rest = data.trace.uop_fields[a]
+  if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
+  ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
   if depth is None: data.all_uops[a] = ret
   return ret
 

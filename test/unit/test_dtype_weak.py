@@ -191,7 +191,7 @@ class TestWeakPromotion(unittest.TestCase):
     # float bitwise builds, the spec rejects it
     with Context(SPEC=1):
       f32, wf = UOp.const(1.0, dtypes.float32), UOp.const(1.0)
-      for bad in (f32.alu(Ops.AND, f32), UOp(Ops.AND, dtypes.float32, (f32, f32)), UOp(Ops.AND, dtypes.int32, (wf, wf))):
+      for bad in (f32.alu(Ops.AND, f32), UOp(Ops.AND, (f32, f32)), UOp(Ops.AND, (wf, wf))):
         with self.assertRaises(RuntimeError): type_verify([bad], spec_shared)
 
   def test_integer_values(self):
