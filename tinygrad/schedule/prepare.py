@@ -93,7 +93,7 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   params: list[UOp] = []
   graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")
   params = sorted(params, key=lambda x: x.arg.slot)
-  # the RETURNED inputs bind to the output PARAMs (slots after the input PARAM slots), just like the args bind to input PARAMs
+  # the RETURNED inputs bind positionally to the output PARAMs, just like the args bind to the input PARAMs
   args = c.src[1:]
 
   # NOTE: this isn't really needed. it's okay if there's unused args in the function
@@ -105,9 +105,7 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   # substitute args by their flat max-shaped storage view so the movement views on the params stay valid
   def flat_storage(a:UOp) -> tuple[int, UOp]:  # returns (size, view of a as flat max-shaped storage)
     shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
-    n = prod(shp)
-    if a.shape == (n,): return n, a
-    return n, a.pad_to(shp).reshape((n,))
+    return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
   dict_map = {x:args[x.arg.slot] for x in params}
   for i, (p, a) in enumerate(dict_map.items()):
     if p.arg.size is not None:

@@ -37,7 +37,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   # the RETURNED inputs are the call outputs: their positions in the args get the output gradients from the AFTER rule
   assert fxn.op is Ops.SINK and k.num_returned, f"expected a CALL with RETURNED inputs or a grad_fxn, got {fxn.op}"
   ret_pos = [i for i, a in enumerate(args) if a.unsharded_base.op is Ops.RETURNED]
-  # the body stores the outputs into output PARAMs (slots after the args): the values are the stored values in slot order
+  # the body stores the outputs into output PARAMs: the values are the stored values in slot order
   out_stores = sorted((st for st in fxn.src if st.op is Ops.STORE), key=lambda st: st.src[0].unsharded_base.arg.slot)
   values = UOp.sink(*[st.src[1] for st in out_stores])
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}

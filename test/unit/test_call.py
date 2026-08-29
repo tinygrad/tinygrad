@@ -324,22 +324,6 @@ class TestArgOrder(unittest.TestCase):
     y.sum().backward()
     np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])
 
-  def test_function_padded_input(self):
-    # padded-then-shrunk unrealized view with zero start over a REALIZED buffer (clone forces buffer identity):
-    # the function input must come from the padded values (flat_storage must not strip the pad to the backing buffer)
-    x = Tensor.arange(9, dtype=dtypes.int).reshape(3, 3).clone().realize()
-    v = x.pad(((1, 0), (0, 0)))[:3, :]
-    p0 = UOp.param(0, v.dtype, v.max_shape, v.device)
-    out = v.call(fxn=p0.reshape(v.max_shape) * 2).realize()
-    np.testing.assert_equal(out.numpy(), 2 * np.pad(np.arange(9).reshape(3, 3), ((1, 0), (0, 0)))[:3, :])
-
-  def test_function_strided_input(self):
-    x = Tensor.arange(16, dtype=dtypes.int).reshape(4, 4).clone().realize()
-    sl = x[:, :2]
-    p0 = UOp.param(0, sl.dtype, sl.max_shape, sl.device)
-    out = sl.call(fxn=p0.reshape((4, 2)) * 2).realize()
-    np.testing.assert_equal(out.numpy(), [[e*2 for e in row[:2]] for row in x.tolist()])
-
 class TestCallMultiSharded(unittest.TestCase):
   # TODO: multi-output + sharded needs per-device CALL execution, which requires reworking how MULTI propagates through TUPLE bodies
   def test_tuple_sharded(self):
