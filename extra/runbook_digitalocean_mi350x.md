@@ -50,12 +50,12 @@ curl -sL https://raw.githubusercontent.com/geohot/configuration/master/.tmux.con
 ```
 
 ### 1.6 Verify GPU PCI access
-The AM userspace driver accesses the GPUs directly over PCI. Do not load `amdgpu`; `/dev/kfd` is not required.
+The AM userspace driver accesses the GPUs directly over PCI. Do not load `amdgpu`. `/dev/kfd` is not required.
 ```bash
 rmmod amdgpu
 lspci -nnk -d 1002:
 ```
-The MI350X devices should not show a `Kernel driver in use`.
+The MI350X devices should not show a `Kernel driver in use: amdgpu`.
 
 ## Phase 2: Clone tinygrad
 ```bash
@@ -137,7 +137,7 @@ tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/liba
 | `COMGR_PATH` | `/opt/rocm/lib/libamd_comgr.so` | tinygrad's DLL loader needs explicit path to find comgr 3.3 |
 | `COMGR_3_PATH` | `/opt/rocm/lib/libamd_comgr.so` | comgr 3.x uses a separate `comgr_3` module with its own path var |
 | `CC` | `/opt/rocm/core-7.14/lib/llvm/bin/clang` | System clang doesn't know gfx950; must use ROCm's bundled clang |
-| `DEV` | `PCI+AMD:HIP` | Use the AM userspace PCI driver |
+| `DEV` | `PCI+AMD:HIP` | Force HIPRenderer (comgr-based) over HIPCCRenderer (hipcc subprocess) |
 | `ROCM_PATH` | `/opt/rocm` | Script defaults to `/opt/rocm-7.1.1` which doesn't exist |
 | `WANDB` | `1` | Enable wandb logging (off by default) |
 
@@ -153,7 +153,7 @@ tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/liba
 | ASM GEMM | `extra/gemm/cdna_asm_gemm.py` — gfx950 MFMA assembly, MXFP4 |
 | Flash attention | `extra/thunder/amd/fa.py` |
 | Fused kernels | `extra/llama_kernels/` — rmsnorm, silu, quantize, fused_ce |
-| GPU driver | `tinygrad/runtime/ops_amd.py` — HCQ using the AM userspace PCI interface |
+| GPU driver | `tinygrad/runtime/ops_amd.py` — HCQ, using the AM userspace PCI interface |
 | Renderer | `tinygrad/renderer/cstyle.py` — HIPRenderer for gfx950 |
 | comgr compiler | `tinygrad/runtime/support/compiler_amd.py` — HIPCompiler using comgr 3.3 |
 
@@ -192,9 +192,6 @@ $ lspci -nn | grep AMD
 83:00.0 ... Device [1002:75b0]
 ```
 CPU flags include `hypervisor`. `dmesg` shows `Hypervisor detected: KVM`.
-
-### AM userspace driver
-Cloud GPUs may be exposed as SR-IOV virtual functions. tinygrad supports these through the AM userspace PCI interface as of commit `959958135` (`am: vf`).
 
 ### No fan control
 No `fan*` or `pwm*` hwmon entries exist. Only `temp*`, `power*`, `freq*` are exposed. GPU temps read 56-63°C, power ~265W per GPU.
