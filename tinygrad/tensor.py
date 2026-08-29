@@ -111,11 +111,9 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or c.num_returned == 0: return None
   assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
-  # the RETURNED srcs are the call outputs (slots are src positions). afters on real buffers are the input storage;
-  # afters on RETURNED placeholders have no storage yet, materialize them
+  # the RETURNED srcs are the call outputs (slots are src positions)
   ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.op is Ops.RETURNED]
-  args = tuple(a if a.unsharded_base.op is Ops.RETURNED or a.has_buffer_identity(after_ok=True) else a.contiguous() for a in c.src[1:])
-  srcs = tuple(st.src[1] for st in sorted((st for st in c.src[0].src if st.op is Ops.STORE), key=lambda st: st.src[0].unsharded_base.arg.slot))
+  srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
 
   # add the outputs to the call
   outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
@@ -135,9 +133,11 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
       items.append(t.after(t.store(s.after(*after_deps))))
   fxn = UOp.sink(*(x.substitute(subs) for x in items))
 
-  # all bodies are SINKs now, the node just becomes an opaque CALL, and the outs take the RETURNEDs' places
+  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
+  # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
   rmap = dict(zip(ret_pos, outs))
-  new_call = UOp(Ops.CALL, src=(fxn, *[rmap.get(i, a) for i, a in enumerate(args)]), arg=c.arg)
+  new_call = UOp(Ops.CALL, src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                     for i, a in enumerate(c.src[1:])]), arg=c.arg)
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
