@@ -107,14 +107,10 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
     shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
     n = prod(shp)
     if a.shape == (n,): return n, a
-    # a zero-offset contiguous view of flat storage binds to the storage itself (it has offset 0 and enough length)
-    # rather than padding the view with zeros
-    x = a
-    while x.op in {Ops.RESHAPE, Ops.PAD, Ops.SHRINK, Ops.UNSHARD}:
-      if x.op is Ops.SHRINK and any(start != 0 for start, _ in x.marg): break
-      x = x.src[0]
-    if x is not a and x.op in {Ops.PARAM, Ops.BUFFER} and x.arg.size is not None and x.arg.size >= n: return n, x
-    return n, a.pad_to(shp).reshape((n,))
+    # a view of flat storage binds as its flattened view (reshape is itself the contiguity check, it raises if the
+    # view isn't a flat prefix); a view that can't be flattened (like a strided slice) materializes first
+    try: return n, a.pad_to(shp).reshape((n,))
+    except ValueError: return n, a.pad_to(shp).contiguous().reshape((n,))
   dict_map = {x:args[x.arg.slot] for x in params}
   for i, (p, a) in enumerate(dict_map.items()):
     if p.arg.size is not None:

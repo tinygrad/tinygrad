@@ -37,7 +37,6 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   # the RETURNED inputs are the call outputs: their positions in the args get the output gradients from the AFTER rule
   assert fxn.op is Ops.SINK and k.num_returned, f"expected a CALL with RETURNED inputs or a grad_fxn, got {fxn.op}"
   ret_pos = [i for i, a in enumerate(args) if a.unsharded_base.op is Ops.RETURNED]
-  n_args = len(args) - len(ret_pos)
   # the body stores the outputs into output PARAMs (slots after the args): the values are the stored values in slot order
   out_stores = sorted((st for st in fxn.src if st.op is Ops.STORE), key=lambda st: st.src[0].unsharded_base.arg.slot)
   values = UOp.sink(*[st.src[1] for st in out_stores])
@@ -62,7 +61,9 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   bwd_outs = UOp.call_outputs(bwd_body.src, *compact_args, name=(k.arg.name or "")+"_backward",
                               precompile=k.arg.precompile_backward).returned_outputs
   gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
-  return (None,) + tuple(bwd_outs[gb_map[i]] if i in gb_map else None for i in range(n_args)) + (None,)*len(ret_pos)
+  # align gradients with the original source positions: None at RETURNED positions, gradients elsewhere
+  ret_set = set(ret_pos)
+  return (None,) + tuple(None if i in ret_set else (bwd_outs[gb_map[i]] if i in gb_map else None) for i in range(len(args)))
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([

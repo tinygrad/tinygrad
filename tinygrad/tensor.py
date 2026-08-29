@@ -111,18 +111,18 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or c.num_returned == 0: return None
   assert c.src[0].op is Ops.SINK, f"expected SINK body for precompiled call, got {c.src[0].op}"
-  # the RETURNED srcs are the call outputs (they can be anywhere in the srcs), the outputs are the stores into the
-  # output PARAMs in slot order
-  returned = tuple(a for a in c.src[1:] if a.unsharded_base.op is Ops.RETURNED)
-  call_args = tuple(a for a in c.src[1:] if a.unsharded_base.op is not Ops.RETURNED)
+  # the RETURNED srcs are the call outputs (they can be anywhere in the srcs): slots are src positions, nothing
+  # reorders; the outputs are the stores into the output PARAMs in slot order
+  returned = tuple((p,a) for p,a in enumerate(c.src[1:]) if a.unsharded_base.op is Ops.RETURNED)
   # afters on real buffers are the input storage; afters on RETURNED placeholders have no storage yet, materialize them
-  input_buffers = tuple(x.contiguous() if not (x.op is Ops.AFTER and x.unsharded_base.has_buffer_identity()) else x for x in call_args)
+  def input_buffer(x:UOp) -> UOp:
+    return x if (x.op is Ops.AFTER and x.unsharded_base.has_buffer_identity()) else x.contiguous()
   out_stores = sorted((st for st in c.src[0].src if st.op is Ops.STORE), key=lambda st: st.src[0].unsharded_base.arg.slot)
   srcs = tuple(st.src[1] for st in out_stores)
 
   # add the outputs to the call
-  outs = tuple(r.empty_like() for r in returned)
-  targets = [o.param_like(len(input_buffers)+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
+  outs = tuple(r.empty_like() for _,r in returned)
+  targets = [o.param_like(p).shrink_to(s.shape) for (p,_),o,s in zip(returned, outs, srcs)]
 
   subs:dict[UOp, UOp] = {}
   items:list[UOp] = []
@@ -139,15 +139,17 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   fxn = UOp.sink(*(x.substitute(subs) for x in items))
 
   # all bodies are SINKs now, the node just becomes an opaque CALL
-  new_call = UOp(Ops.CALL, src=(fxn, *input_buffers, *outs), arg=c.arg)
+  # the new call preserves the original src positions: outs take the RETURNEDs' places, other args are input buffers
+  rmap = {p: o for (p,_), o in zip(returned, outs)}
+  new_call = UOp(Ops.CALL, src=(fxn, *[rmap[p] if p in rmap else input_buffer(a) for p, a in enumerate(c.src[1:])]), arg=c.arg)
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
   # NOTE: must use the resolved shapes of the RETURNED placeholders (which substitute PARAMs with external args), not raw body shapes
-  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, returned))
+  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (r for _,r in returned)))
 
   # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
-  return UOp.sink(*[r.store(v) for r, v in zip(returned, rets)])
+  return UOp.sink(*[r.store(v) for (p,r), v in zip(returned, rets)])
 
 def returned_after_finalize(ctx:AllocCtx, r:UOp) -> UOp|None:
   # resolve AFTERs on RETURNED placeholders (function call outputs) while we are still in the tensor graph, like any
