@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Device, Tensor, Variable, TinyJit, dtypes
-from tinygrad.helpers import CHECK_OOB
+from tinygrad.helpers import CHECK_OOB, Context
 
 class TestTensorVariable(unittest.TestCase):
   def test_add_tvar(self):
@@ -35,7 +35,16 @@ class TestTensorVariable(unittest.TestCase):
     vv = Variable("a", 1, 10).bind(2)
     self.assertEqual(Tensor(vv).dtype, dtypes.weakint)
     self.assertEqual((Tensor(vv) + Tensor([1], dtype=dtypes.int8)).dtype, dtypes.int8)  # takes the concrete side, no widening
-    self.assertEqual(Tensor(vv).item(), 2)                                              # a read commits at default_int
+    self.assertEqual(Tensor(vv).item(), 2)                                              # a read commits by bounds, like a kernel
+
+  def test_weak_read_widens_by_bounds(self):
+    self.assertEqual(Tensor(2**40).item(), 2**40)
+    self.assertEqual(Tensor(Variable("b", 0, 2**40).bind(2**35+3)).item(), 2**35+3)
+
+  @unittest.expectedFailure
+  def test_long_variable_emulated(self):
+    # the long decomp splits the variable into two int PARAMs that share its name, so both bind the full value and truncate
+    with Context(EMULATED_DTYPES="long"): self.assertEqual(Tensor(Variable("c", 0, 2**40).bind(2**35+3)).item(), 2**35+3)
 
   def test_variable_tensor_dtype_arg(self):
     vv = Variable("a", 1, 10).bind(2)
