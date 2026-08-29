@@ -1783,6 +1783,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45)], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.logsumexp(x, dim=-1), lambda x: x.logsumexp(-1), atol=1e-7, grad_atol=1e-7)
+    helper_test_op(None, lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), vals=[[-math.inf, -math.inf]], forward_only=True)
 
   @slow_test
   def test_logcumsumexp(self):
