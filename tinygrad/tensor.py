@@ -14,7 +14,10 @@ from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 
+# all living tensors in the process (True/False for buffer versioning, None base state)
 all_tensors: dict[weakref.ref[Tensor], bool|None] = {}
+# all AFTER chains still tied to a living tensor in the process
+# {original_buffer:[original_buffer,after1,after2,...],...]
 all_chains: dict[weakref.ref[UOp],list[weakref.ref[UOp]]] = {}
 
 # *** callify: transform a tensor graph into a CALL UOp such that all state is properly scoped ***
@@ -46,7 +49,9 @@ def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   from_creation = isinstance(u.src[0].device, str) and u.src[0].device.startswith(("NPY", "DISK", "PYTHON", "TINYFS"))
   if from_creation: return tag_uop(ctx, u)
 
-def after(ctx: AllocCtx, u: UOp):
+def cow_after(ctx: AllocCtx, u: UOp):
+  # we do not want realizing tensor to overwrite previous buffer states of not realizing tensors
+  # for such cases, we cut the AFTER chain
   def _topo(ctx: AllocCtx, u: UOp) -> dict[UOp, None]:
     if (cached:=ctx.topos.get(u)) is None: ctx.topos[u] = cached = u.toposort()
     return cached
@@ -78,7 +83,7 @@ def after(ctx: AllocCtx, u: UOp):
 
 # CONTIGUOUS and AFTER + parents are the only nodes that get updated
 add_tags = PatternMatcher([
-  (UPat(Ops.AFTER, name="u"), after),
+  (UPat(Ops.AFTER, name="u"), cow_after),
   (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
   # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
