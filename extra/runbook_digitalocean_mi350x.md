@@ -55,7 +55,7 @@ The AM userspace driver accesses the GPUs directly over PCI. Do not load `amdgpu
 rmmod amdgpu
 lspci -nnk -d 1002:
 ```
-The MI350X devices should not show a `Kernel driver in use`.
+The MI350X devices should not show a `Kernel driver in use: amdgpu`.
 
 ## Phase 2: Clone tinygrad
 ```bash
