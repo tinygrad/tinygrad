@@ -21,7 +21,7 @@ def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   if op is Ops.CONST: uops.append(UOp.const(arg).cast(dtype))
   elif op is Ops.PARAM: uops.append(UOp.param(arg, dtype, 1))
-  else: uops.append(UOp(op, dtype, tuple(src), arg))
+  else: uops.append(UOp(op, tuple(src), arg))
   return uops[-1]
 
 def _test_single_value(vals, op, dts):

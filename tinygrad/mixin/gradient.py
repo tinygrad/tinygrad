@@ -24,7 +24,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fxn, args = k.src[0], k.src[1:]
   if k.arg.grad_fxn is not None:
     # put const on a device, also TODO why do we still have NOOP...
-    def on_dev(g, i): return g.clone(device=args[i].device if k.op is Ops.CALL else k.device) if g.device is None else g
+    def on_dev(g, i): return g.clone(device=k.device if fxn.op is Ops.TUPLE else args[i].device) if g.device is None else g
     if ctx.op is Ops.TUPLE:
       real = [on_dev(g, i) for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
       return (None,) + (k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
@@ -102,18 +102,18 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
   grads: dict[UOp, UOp] = {root: root_grad}
   for t0 in reversed(walk):
     if t0 not in grads or grads[t0].op is Ops.NOOP: continue
-    # GETTUPLE: accumulate gradient into a TUPLE UOp on the FUNCTION, process when we hit the FUNCTION
+    # GETTUPLE: accumulate gradient into a TUPLE UOp on the value-producing call, process when we hit the call
     if t0.op is Ops.GETTUPLE:
-      k = t0.src[0]  # the FUNCTION
-      assert k.op is Ops.FUNCTION and k.src[0].op is Ops.TUPLE
+      k = t0.src[0]  # the call
+      assert k.op is Ops.CALL and k.src[0].op is Ops.TUPLE
       n_outputs = len(k.src[0].src)
       prev = grads[k].src if k in grads else tuple(UOp(Ops.NOOP) for _ in range(n_outputs))
       grads[k] = UOp.maketuple(*(prev[i] + grads[t0] if i == t0.arg and prev[i].op is not Ops.NOOP else
                                  grads[t0] if i == t0.arg else prev[i] for i in range(n_outputs)))
       continue
-    # FUNCTION/CALL: pass needed param set so backward only computes required gradients
-    # (FUNCTION uses implicit TUPLE gradient or grad_fxn; CALL requires an explicit grad_fxn)
-    if t0.op in {Ops.FUNCTION, Ops.CALL}:
+    # CALL: pass needed param set so backward only computes required gradients
+    # (value-producing calls use implicit TUPLE gradient or grad_fxn; opaque calls require an explicit grad_fxn)
+    if t0.op is Ops.CALL:
       needed = {i for i, arg in enumerate(t0.src[1:]) if arg in targets or in_target_path.get(arg, False)}
       lgrads:tuple[UOp|None, ...]|None = call_gradient(grads[t0], t0, needed)
     else:
