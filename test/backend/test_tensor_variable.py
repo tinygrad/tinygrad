@@ -41,10 +41,8 @@ class TestTensorVariable(unittest.TestCase):
     self.assertEqual(Tensor(2**40).item(), 2**40)
     self.assertEqual(Tensor(Variable("b", 0, 2**40).bind(2**35+3)).item(), 2**35+3)
 
-  @unittest.expectedFailure
-  def test_long_variable_emulated(self):
-    # the long decomp splits the variable into two int PARAMs that share its name, so both bind the full value and truncate
-    with Context(EMULATED_DTYPES="long"): self.assertEqual(Tensor(Variable("c", 0, 2**40).bind(2**35+3)).item(), 2**35+3)
+  def test_long_variable_emulated_raises(self):
+    with Context(EMULATED_DTYPES="long"), self.assertRaises(RuntimeError): Tensor(Variable("c", 0, 2**40).bind(2**35+3)).item()
 
   def test_variable_tensor_dtype_arg(self):
     vv = Variable("a", 1, 10).bind(2)
@@ -58,6 +56,8 @@ class TestTensorVariable(unittest.TestCase):
     with self.assertRaisesRegex(RuntimeError, "unbound"): (Tensor(Variable("u", 1, 10)) + 1).item()
     # bound variables in an expression are fine
     self.assertEqual(Tensor(Variable("u", 1, 10).bind(2) + 1).item(), 3)
+
+  def test_negative_variable_on_device(self): self.assertEqual(Tensor(Variable("n", -10, 10).bind(-3)).clone().item(), -3)
 
   def test_shrink_beyond_buffer_variable(self):
     # TODO: shrink by a variable whose vmax exceeds the dim should fail at build, today only CHECK_OOB=1 rejects it
