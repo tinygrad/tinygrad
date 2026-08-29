@@ -199,8 +199,6 @@ class UOpMetaClass(type):
     # NOTE: the key must separate nodes of different dtype: a CONST's dtype is the type of its arg, and True == 1 as dict keys
     if (wret:=UOpMetaClass.ucache.get(key:=(op, src, arg, tag, type(arg)), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(op, src, arg, tag))
-    # derive at construction: bottom up, so no recursion, and a bad node fails where it is built
-    created.__dict__["dtype"] = dtype_from_uop(op, src, arg)
     if metadata is not None: all_metadata[created] = metadata
     # NOTE: this value is set by pickle when pickling a realized tensor
     if _buffer is not None:
@@ -234,7 +232,6 @@ class recursive_property(property):
     return x.__dict__[self.nm]
 
 # we import this late so we can use resolve/smax in mixins
-from tinygrad.mixin.op import OpMixin
 from tinygrad.mixin.rand import RandMixin
 
 # NOTE: this should be frozen, but frozen is slower
@@ -244,7 +241,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
   tag:Any = None
-  @functools.cached_property
+  @recursive_property
   def dtype(self) -> DType: return dtype_from_uop(self.op, self.src, self.arg)
   def __del__(self):
     # NOTE: getattr because this object may be partially constructed (e.g. if __init__ raised, like the BEAM timeout SIGALRM)
@@ -626,7 +623,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
     # .cast folds away at exactly the dtypes a CONST derives (bool/weakint/weakfloat): bare there, the pair everywhere else
     return UOp(Ops.CONST, arg=dtype.const(b), src=()).cast(dtype)
-  # weak CONST with width on the CAST. TODO: this is the final const
+  # a forced CAST for bool: .cast(bool) folds, so UOp.const cannot state the width
   @staticmethod
   def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, src=(UOp.const(b),), arg=dtype)
   @staticmethod
@@ -1359,7 +1356,7 @@ def get_location() -> tuple[str, int]:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
-class UPat(OpMixin):
+class UPat(RandMixin):
   __slots__ = ("op", "match_dtype", "match_tag", "arg", "name", "src", "is_any")
   def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
