@@ -50,7 +50,7 @@ curl -sL https://raw.githubusercontent.com/geohot/configuration/master/.tmux.con
 ```
 
 ### 1.6 Verify GPU PCI access
-The AM userspace driver accesses the GPUs directly over PCI. Do not load `amdgpu`; `/dev/kfd` is not required.
+The AM userspace driver accesses the GPUs directly over PCI. Do not load `amdgpu`. `/dev/kfd` is not required.
 ```bash
 rmmod amdgpu
 lspci -nnk -d 1002:
@@ -153,7 +153,7 @@ tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/liba
 | ASM GEMM | `extra/gemm/cdna_asm_gemm.py` — gfx950 MFMA assembly, MXFP4 |
 | Flash attention | `extra/thunder/amd/fa.py` |
 | Fused kernels | `extra/llama_kernels/` — rmsnorm, silu, quantize, fused_ce |
-| GPU driver | `tinygrad/runtime/ops_amd.py` — HCQ using the AM userspace PCI interface |
+| GPU driver | `tinygrad/runtime/ops_amd.py` — HCQ, using the AM userspace PCI interface |
 | Renderer | `tinygrad/renderer/cstyle.py` — HIPRenderer for gfx950 |
 | comgr compiler | `tinygrad/runtime/support/compiler_amd.py` — HIPCompiler using comgr 3.3 |
 
