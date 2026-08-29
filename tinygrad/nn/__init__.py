@@ -99,7 +99,7 @@ class Conv2d:
     if isinstance(padding, str):
       if padding.lower() != 'same': raise ValueError(f"Invalid padding string {padding!r}, only 'same' is supported")
       if stride != 1: raise ValueError("padding='same' is not supported for strided convolutions")
-      pad = [(d*(k-1)//2, d*(k-1) - d*(k-1)//2) for d,k in zip(make_tuple(dilation, len(self.kernel_size)), self.kernel_size[::-1])]
+      pad = [(d*(k-1)//2, d*(k-1) - d*(k-1)//2) for d,k in zip(make_tuple(dilation, len(self.kernel_size))[::-1], self.kernel_size[::-1])]
       padding = tuple(flatten(pad))
     self.stride, self.dilation, self.groups, self.padding = stride, dilation, groups, padding
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
