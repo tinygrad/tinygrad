@@ -1794,9 +1794,10 @@ _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot])])
 
 def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
-  """AFTER on a RETURNED placeholder extracts the call output value: the value of the matching store in a SINK body"""
-  if (rb:=r.unsharded_base).op is not Ops.RETURNED or t.op is not Ops.SINK: return None
-  vals = [st.src[1] for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is rb]
+  """AFTER on a RETURNED placeholder extracts the call output value: the value of its matching store in a SINK body
+  (called from patterns that bind t to a SINK)"""
+  vals = [st.src[1] for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is r.unsharded_base] \
+    if r.unsharded_base.op is Ops.RETURNED else []
   return vals[0] if len(vals) == 1 else None
 remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 

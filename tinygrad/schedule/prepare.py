@@ -135,9 +135,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # resolve AFTER on RETURNED (call outputs)
   (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
-  # an AFTER resolved to its return value in the tensor graph (by returned_after_finalize) is just the value
-  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(name="t")), allow_any_len=True),
-   lambda r,t: t if r.unsharded_base.op is Ops.RETURNED and t.op is not Ops.CALL else None),
 
   # resolve allreduce (must be bottom up)
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
