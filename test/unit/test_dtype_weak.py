@@ -226,6 +226,21 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertNotIn(out.uop.buffer.dtype, dtypes.weaks)
 
 
+class TestWeakBounds(unittest.TestCase):
+  def test_bounds_survive_movement(self):
+    moved = Tensor(5).reshape(1).expand(2).pad((1, 1)).detach().contiguous_backward()
+    self.assertEqual((moved.uop.vmin, moved.uop.vmax), (0, 5))
+    self.assertEqual(moved.numpy().dtype, Tensor(5).numpy().dtype)   # a moved weak int reads at the same dtype as the bare one
+
+  def test_wide_src_keeps_its_width(self):
+    # the node's result fits int32, its variable does not: the shift runs at long, only the result narrows
+    v = UOp.variable("v", 0, 2**40).bind(2**35+7)
+    for t in (Tensor(v) // 2**31, (Tensor(v) - 1) // 2**31, Tensor(v).reshape(1) // 2**31): self.assertEqual(t.item(), 16)
+
+  def test_padded_weak_const_keeps_its_zeros(self):
+    self.assertEqual(Tensor(1).expand(1).cat(Tensor(2).expand(2), Tensor(3).expand(3)).tolist(), [1, 2, 2, 3, 3, 3])
+    self.assertEqual((Tensor(5).reshape(1).pad((1, 1)) == 5).tolist(), [False, True, False])
+
 class TestWeakStorageBoundary(unittest.TestCase):
   # weak has no storage: a weak assignment source casts when it defers to the destination, everything else raises
   def test_weak_source(self):
