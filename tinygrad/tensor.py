@@ -15,7 +15,7 @@ from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 
 all_tensors: dict[weakref.ref[Tensor], bool|None] = {}
-all_chains: dict[UOp,list[UOp]] = {}
+all_chains: dict[weakref.ref[UOp],list[weakref.ref[UOp]]] = {}
 
 # *** callify: transform a tensor graph into a CALL UOp such that all state is properly scoped ***
 
@@ -51,20 +51,20 @@ def after(ctx: AllocCtx, u: UOp):
     if (cached:=ctx.topos.get(u)) is None: ctx.topos[u] = cached = u.toposort()
     return cached
 
-  if u.buf_uop not in all_chains or u in ctx.afters: return None
-  if u not in all_chains[u.buf_uop]: return None
+  if (ubufopref:=weakref.ref(u.buf_uop)) not in all_chains or u in ctx.afters: return None
+  if (uref:=weakref.ref(u)) not in all_chains[ubufopref]: return None
 
   for tref in all_tensors:
     if (t:=tref()) is not None and all_tensors[tref] is None and u not in _topo(ctx, t.uop) and t.uop not in _topo(ctx, u):
       if t.grad is not None: break
       all_tensors[tref] = False
-      if any(n in all_chains[u.buf_uop]
-             and all_chains[u.buf_uop].index(n) < all_chains[u.buf_uop].index(u)
+      if any((nref:=weakref.ref(n)) in all_chains[ubufopref]
+             and all_chains[ubufopref].index(nref) < all_chains[ubufopref].index(uref)
              for n in _topo(ctx, t.uop)):
         if not any((t2:=tref2()) is not None
                    and all_tensors[tref2] is True
-                   and t2.uop.buf_uop in all_chains
-                   and t2.uop in all_chains[t2.uop.buf_uop]
+                   and (ut2ref:=weakref.ref(t2.uop.buf_uop)) in all_chains
+                   and weakref.ref(t2.uop) in all_chains[ut2ref]
                    and t.uop in _topo(ctx, t2.uop)
                    and any(n.buf_uop is t2.uop.buf_uop for n in _topo(ctx, u))
                    for tref2 in all_tensors):
@@ -365,12 +365,11 @@ class Tensor(RandMixin):
   def __del__(self):
     all_tensors.pop(weakref.ref(self), None)
     if (uop:=getattr(self, "uop", None)) is None: return
-    #buff=uop.buf_uop
-    if (buff:=uop.buf_uop) in all_chains and not any((t:=tref()) is not None
-                                      and t is not self
-                                      and t.uop.buf_uop is buff
-                                      for tref in all_tensors):
-      all_chains.pop(buff, None)
+    buff = uop.buf_uop
+    if (buffref:=weakref.ref(buff)) in all_chains and not any(
+        (t:=tref()) is not None and t is not self and t.uop.buf_uop is buff
+        for tref in all_tensors):
+      all_chains.pop(buffref, None)
 
   def _apply_uop(self, fxn:Callable[..., UOp], *x:Tensor, **kwargs) -> Tensor:
     srcs = (self,)+x
@@ -504,8 +503,8 @@ class Tensor(RandMixin):
     else:
       # simple assign
       self.uop = assign
-    if (buff:=self.uop.buf_uop) not in all_chains: all_chains[buff] = [buff,self.uop]
-    else: all_chains[buff].append(self.uop)
+    if (buffref:=weakref.ref(self.uop.buf_uop)) not in all_chains: all_chains[buffref] = [buffref,weakref.ref(self.uop)]
+    else: all_chains[buffref].append(weakref.ref(self.uop))
     return self
 
   def _buffer(self) -> Buffer:
