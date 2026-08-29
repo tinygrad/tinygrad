@@ -888,7 +888,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, src=tuple(x.buf_uop for x in self.src))
-    if self.base.op is Ops.AFTER: return self.base.src[0].buf_uop.base
+    s = self.base
+    while s.op is Ops.AFTER: s = s.src[0].base
+    if s is not self.base: return s.buf_uop.base
     s = self
     while len(s.src) and s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK}: s = s.src[0]
     return s

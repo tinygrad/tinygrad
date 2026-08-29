@@ -504,10 +504,7 @@ class Tensor(RandMixin):
       # simple assign
       self.uop = assign
 
-    buff = self.uop
-    while buff.base.op is Ops.AFTER: buff = buff.base.src[0]
-    buffref = weakref.ref(buff.buf_uop)
-    if buffref not in all_chains: all_chains[buffref] = [buffref,weakref.ref(self.uop)]
+    if (buffref:=weakref.ref(self.uop.buf_uop)) not in all_chains: all_chains[buffref] = [buffref,weakref.ref(self.uop)]
     else: all_chains[buffref].append(weakref.ref(self.uop))
     return self
 
