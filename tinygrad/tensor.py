@@ -175,10 +175,9 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # graph, like any other value (this inlines the call body); afters between the return and the call don't matter
   (UPat(Ops.AFTER, name="r"), returned_after_finalize),
 
-  # an AFTER on a RETURNED placeholder that is a final output: it's a call output buffer, allocate fresh storage for it
+  # an AFTER on a RETURNED placeholder (call outputs get real buffers): allocate fresh storage for it
   (UPat(Ops.AFTER, name="x"),
-   lambda ctx,x: None if x.tag is None or x.src[0].unsharded_base.op is not Ops.RETURNED
-                 or not any(t in ctx.final_tags for t in x.tag) else x.rtag(None).contiguous(tag=x.tag)),
+   lambda ctx,x: None if x.tag is None or x.src[0].unsharded_base.op is not Ops.RETURNED else x.rtag(None).contiguous(tag=x.tag)),
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
