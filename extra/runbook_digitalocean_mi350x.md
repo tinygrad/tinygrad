@@ -76,8 +76,23 @@ rclone config create mlc-training s3 provider=Cloudflare \
   endpoint=c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
 
 mkdir -p /raid/datasets/c4-8b
-rclone copy mlc-training:mlcommons-training-wg-public/llama3_1/datasets/c4/llama3_1_8b/ /raid/datasets/c4-8b/ -P
+(rclone copy mlc-training:mlcommons-training-wg-public/llama3_1/datasets/c4/llama3_1_8b/ /raid/datasets/c4-8b/ -P && \
+  PYTHONPATH=. python3 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/buid_dataset_cache.py) \
+  > /root/dataset_cache.log 2>&1 &
 ```
+Leave this running and proceed to the beam step while the dataset downloads and its cache builds.
+
+### 3.1 Smoke test (beam search, 2 layers, fake data)
+Always run beam first to validate the pipeline:
+```bash
+tmux new-session -d -s beam 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=AMD:HIP ROCM_PATH=/opt/rocm bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_beam.sh 2>&1 | tee /root/beam.log'
+```
+
+The beam test runs 10 training steps with 2 layers. Expected results:
+- ~0.29s per step after warmup
+- ~700K GFLOPS, ~7% MFU (low because only 2 layers)
+- ~380 GB VRAM used
+- Loss stable at ~12.55 with random init
 
 Files downloaded (~85GB total, ~6 minutes):
 - `c4-train.en_6_text_document.bin` (79 GB)
@@ -110,19 +125,7 @@ tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/liba
 ```
 Attach with `tmux attach -t train`.
 
-### 5.1 Smoke test (beam search, 2 layers, real data)
-Always run beam first to validate the pipeline:
-```bash
-tmux new-session -d -s beam 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=AMD:HIP ROCM_PATH=/opt/rocm bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_beam.sh 2>&1 | tee /root/beam.log'
-```
-
-The beam test runs 10 training steps with 2 layers. Expected results:
-- ~0.29s per step after warmup
-- ~700K GFLOPS, ~7% MFU (low because only 2 layers)
-- ~380 GB VRAM used
-- Loss stable at ~12.55 with random init
-
-### 5.2 Full training run
+### 5.1 Full training run
 ```bash
 tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=AMD:HIP ROCM_PATH=/opt/rocm WANDB=1 bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_run.sh 2>&1 | tee /root/train.log'
 ```
