@@ -1095,10 +1095,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # NOTE: returned UOp is assumed to be CONST
     if self.op in (Ops.PARAM, Ops.BUFFER) and isinstance(self.arg, ParamArg) and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op in (Ops.RANGE, Ops.SPECIAL) and self.dtype is not dtypes.void: return 0, (self.src[0]-1).vmax
-    if self.op is Ops.AFTER: return self.src[0]._min_max
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     if self.op is Ops.CONST and self.val is not Invalid: return self.val, self.val
-    if self.op is Ops.INDEX: return self.src[0]._min_max
+    if self.op is Ops.PAD: return min(self.src[0].vmin, 0), max(self.src[0].vmax, 0)  # PAD adds zeros
+    if self.op in GroupOp.Movement|{Ops.INDEX, Ops.AFTER, Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD}: return self.src[0]._min_max
     if self.op is Ops.CAST:
       # rounding is monotone (truncation toward zero into an int, to-nearest onto the value grid into a float)
       smin, smax = self.src[0]._min_max

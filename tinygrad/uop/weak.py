@@ -35,7 +35,9 @@ def commit_weak_srcs(u:UOp) -> UOp|None:
 def cast_weak_srcs(c:UOp, u:UOp) -> UOp|None:
   # only within the kind: an int cast of a weakfloat node is a value conversion, not a statement about the node's width
   if c.dtype in dtypes.weaks or weak_dtype(c.dtype) is not u.dtype: return None
-  return None if (ret:=commit_srcs_at(u, least_upper_dtype(c.dtype, default_dtype(u)))) is None else ret.cast(c.dtype)
+  # every weak src commits at the one width: the node's own bounds and each src's, none of them narrowed
+  dt = least_upper_dtype(c.dtype, default_dtype(u), *(default_dtype(s) for s in u.src if s.dtype in dtypes.weaks))
+  return None if (ret:=commit_srcs_at(u, dt)) is None else ret.cast(c.dtype)
 
 # rides every round that can mint a weak const, and must reach fixpoint before pm_lower_weak below defaults one
 pm_commit_weak = PatternMatcher([
