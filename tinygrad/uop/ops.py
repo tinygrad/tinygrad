@@ -231,7 +231,6 @@ class recursive_property(property):
     return x.__dict__[self.nm]
 
 # we import this late so we can use resolve/smax in mixins
-from tinygrad.mixin.op import OpMixin
 from tinygrad.mixin.rand import RandMixin
 
 # NOTE: this should be frozen, but frozen is slower
@@ -1334,7 +1333,7 @@ def get_location() -> tuple[str, int]:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
-class UPat(OpMixin):
+class UPat(RandMixin):
   __slots__ = ("op", "match_dtype", "match_tag", "arg", "name", "src", "is_any")
   def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
