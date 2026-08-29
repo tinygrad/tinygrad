@@ -23,10 +23,9 @@ def derived_dtypes(u:UOp, src:tuple[UOp, ...]) -> tuple[DType, DType]|None:
 
 def commit_srcs_at(u:UOp, dt:DType) -> UOp|None:
   # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
-  dts = derived_dtypes(u, u.src)
-  ret = u.replace(src=tuple(UOp.const(dt.const(s.val)) if s.op is Ops.CONST and s.dtype in dtypes.weaks and dts is not None else
-                            commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in u.src))
-  return None if ret is u else ret
+  bare = derived_dtypes(u, u.src) is not None
+  src = tuple(s if s.dtype not in dtypes.weaks else UOp.const(dt.const(s.val)) if bare and s.op is Ops.CONST else commit_weak(s, dt) for s in u.src)
+  return None if (ret := u.replace(src=src)) is u else ret
 
 def commit_weak_srcs(u:UOp) -> UOp|None:
   if not any(s.dtype in dtypes.weaks for s in u.src) or (dt:=least_upper_dtype(*(s.dtype for s in u.src))) in dtypes.weaks: return None
@@ -53,17 +52,15 @@ _lower_weak_ops = GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK,
 def lower_weak_node(u:UOp) -> UOp|None:
   if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return None  # a committed const, not a consumer
   src = tuple(s.src[0] if s.op is Ops.CAST and s.dtype in dtypes.weaks else s for s in u.src)
-  dts = derived_dtypes(u, src)
-  src = tuple(commit_weak(s, default_dtype(s)) if s.op is Ops.CONST and s.dtype in dtypes.weaks and dts is None else s
-              for s in src)
+  if derived_dtypes(u, src) is None:
+    src = tuple(commit_weak(s, default_dtype(s)) if s.op is Ops.CONST and s.dtype in dtypes.weaks else s for s in src)
+  if src == u.src: return None
   start = 1 if u.op is Ops.WHERE else 0  # WHERE's cond is bool, never part of the width unification
+  if u.op not in _lower_weak_ops or any(s.dtype in dtypes.weaks and s.op is not Ops.CONST for s in src[start:]): return u.replace(src=src)
   # resolve whole once every weak expression lowered: a Binary widens from its own bounds too, derivable consts wait
-  if u.op in _lower_weak_ops and src != u.src and not any(s.dtype in dtypes.weaks and s.op is not Ops.CONST for s in src[start:]):
-    dt = strong_dtype(least_upper_dtype(default_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary
-                      else dtype_from_uop(u.op, src, u.arg))
-    return u.replace(src=src[:start]+tuple(s if s.base.is_invalid or s.dtype in dtypes.weaks else commit_weak(s, dt)
-                                                       for s in src[start:])).cast(u.dtype)
-  return None if src == u.src else u.replace(src=src)
+  dt = strong_dtype(least_upper_dtype(default_dtype(u), *(s.dtype for s in src)) if u.op in GroupOp.Binary else dtype_from_uop(u.op, src, u.arg))
+  src = src[:start]+tuple(s if s.base.is_invalid or s.dtype in dtypes.weaks else commit_weak(s, dt) for s in src[start:])
+  return u.replace(src=src).cast(u.dtype)
 
 pm_lower_weak = PatternMatcher([
   # a gated long index into a small buffer narrows; its out-of-gate value is discarded
