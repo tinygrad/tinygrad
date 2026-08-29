@@ -62,7 +62,7 @@ def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
   progs = [get_runtime(d, prog) if isinstance(prog, UOp) else cast(CPUDevice, Device[d]).prgs[prog] for d in devs]
   addrs = tuple(UOp.const(p.addr, dtypes.uint64) for p in progs)
   words = ((addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, src=addrs)),) + args
-  return UOp(Ops.INS, src=words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)), arg="cmd")
+  return UOp(Ops.INS, src=words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)), arg=("cmd", dtypes.void))
 
 def cpu_exec(ctx:tuple[str, ...], call:UOp, prg:UOp) -> UOp:
   args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
@@ -74,12 +74,12 @@ def cpu_exec(ctx:tuple[str, ...], call:UOp, prg:UOp) -> UOp:
 pm_cpu_opsel = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), cpu_exec),
 
-  (UPat(Ops.INS, arg="barrier"), lambda: UOp(Ops.NOOP)),
-  (UPat(Ops.INS, arg="wait", src=(UPat(name="dst"), UPat(name="val"))),
+  (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda: UOp(Ops.NOOP)),
+  (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))),
    lambda ctx, dst, val: cpu_cmd(ctx, wait_prog, dst.getaddr(ctx), val.cast(dtypes.uint64))),
-  (UPat(Ops.INS, arg="store", src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))),
+  (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))),
    lambda ctx, dst, val: cpu_cmd(ctx, signal_prog, dst.getaddr(ctx), val.cast(dtypes.uint64))),
-  (UPat(Ops.INS, arg="timestamp", src=(UPat(name="dst"),)),
+  (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)),
    lambda ctx, dst: cpu_cmd(ctx, timestamp_prog, dst.getaddr(ctx), *(() if WIN else (make_buf(ctx, tag="func:clock_gettime").getaddr(ctx),)))),
 ])
 

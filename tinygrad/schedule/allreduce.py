@@ -5,7 +5,7 @@ from tinygrad.uop.ops import Ops, UOp, ParamArg, sint, shape_to_shape_arg
 def _allreduce_view(buf:UOp, start:sint, end:sint) -> UOp:
   """A physical contiguous view used directly as an all-reduce runtime argument."""
   # Tagged SHRINKs use physical (offset, size) coordinates, unlike ordinary SHRINK's (start, end) API.
-  return UOp(Ops.SHRINK, buf.dtype, (buf.flatten(), shape_to_shape_arg((start,)), shape_to_shape_arg((end-start,))), tag=("allreduce",))
+  return UOp(Ops.SHRINK, (buf.flatten(), shape_to_shape_arg((start,)), shape_to_shape_arg((end-start,))), tag=("allreduce",))
 
 # *** allreduce implementation ***
 def allreduce_modes(ndev:int, numel:int) -> tuple[bool, bool]:

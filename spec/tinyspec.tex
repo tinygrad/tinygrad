@@ -102,9 +102,8 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Function} & (body, $a_0$, $a_1$, \ldots) & --- & Substitute each \op{Param} $k$ in \op{Tuple} body with $a_k$. Gradient-able. \\
-\op{Call} & (body, $a_0$, $a_1$, \ldots) & --- & Opaque invocation of a compiled kernel or custom function. \\
-\op{Tuple} & $(v_0, v_1, \ldots)$ & --- & Pack values; required as \op{Function} body to return a value. \\
+\op{Call} & (body, $a_0$, $a_1$, \ldots) & --- & Substitute each \op{Param} $k$ in body with $a_k$. \\
+\op{Tuple} & $(v_0, v_1, \ldots)$ & --- & Pack values; required as a value-producing \op{Call} body. \\
 \op{GetTuple} & $(T,)$ & idx & Extract element at idx from a \op{Tuple}. \\
 \bottomrule
 \end{tabular}
@@ -272,7 +271,7 @@ ALU unary & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0].\mathrm{shape}$ 
 Other binary & $\mathrm{src}[0].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
 \op{CmpLt}, \op{CmpNe} & bool & broadcast & $\mathrm{src}[0].\mathrm{device}$ & from intervals \\
 \op{Where} & $\mathrm{src}[1].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & $[\min(b,c),\, \max(B,C)]$ \\[3pt]
-\op{Function}, \op{Call} & $\mathrm{src}[0].\mathrm{dtype}$ & substitute \op{Param} shapes & $\mathrm{src}[1].\mathrm{device}$ & dtype range \\
+\op{Call} & $\mathrm{src}[0].\mathrm{dtype}$ & substitute \op{Param} shapes & $\mathrm{src}[1].\mathrm{device}$ & dtype range \\
 \op{Range} & index & $()$ & \textsc{null} & $[0,\, n{-}1]$ \\
 \op{Index} & $\mathrm{src}[0].\mathrm{dtype}$ & remaining dims & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Store} & void & $()$ & $\mathrm{src}[0].\mathrm{device}$ & --- \\
@@ -421,7 +420,7 @@ def allreduce(T):
 %% ============================================================
 \subsection*{{\color{callblue}The \texttt{@function} Decorator} \normalfont\small--- graph capture via tracing}
 
-The \texttt{@function} decorator transforms a Python function on Tensors into a single \op{Function} node.
+The \texttt{@function} decorator transforms a Python function on Tensors into a single \op{Call} node.
 
 \begin{lstlisting}
 @function
@@ -436,11 +435,11 @@ When \texttt{f(x, y)} is called, the decorator:
   \item \textbf{Runs the function} lazily (no device execution), building a UOp graph from the result.
   \item \textbf{Parameterizes}: replaces each input UOp with a \op{Param}$(k)$ placeholder.
   \item \textbf{Wraps the body} in a \op{Tuple} (even for single returns) and creates\\
-        \op{Function}(\op{Tuple}(body), $x$, $y$).
+        \op{Call}(\op{Tuple}(body), $x$, $y$).
   \item \textbf{Returns} the result via \op{GetTuple}$(0)$, or one \op{GetTuple} per element for tuple returns.
 \end{enumerate}
 
-The result is a reusable graph fragment: the body contains only \op{Param} references, not concrete buffers. At schedule time, the \op{Function} is resolved by substituting each \op{Param}$(k)$ back with its corresponding argument $a_k$, or lowered into an opaque \op{Call} if it is to be compiled as a reusable kernel.
+The result is a reusable graph fragment: the body contains only \op{Param} references, not concrete buffers. At schedule time, the value-producing \op{Call} is resolved by substituting each \op{Param}$(k)$ back with its corresponding argument $a_k$, or its body is lowered into a \op{Sink} (opaque) if it is to be compiled as a reusable kernel.
 
 %% ============================================================
 \subsection*{Lowering Pipeline \normalfont\small--- from Tensor graph to machine code}

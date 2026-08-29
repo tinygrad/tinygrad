@@ -284,7 +284,7 @@ def custom_asm_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, *, B:int, N:int
                   lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name=f"asm_fa_fwd_bf16_causal_{B}_8192_32_8_128",
                                  estimates=Estimates(ops=2*B*H*N*N*D, mem=(2*B*N*H*D+2*B*N*H_KV*D)*2+B*H*N*4)))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in build_kernel(B, N, H, H_KV, D)))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, H_KV, D)))))
 
 @functools.cache
 def custom_asm_fa_backward_pre(o:UOp, do:UOp, delta:UOp, *, B:int, N:int, H:int, D:int):
@@ -299,7 +299,7 @@ def custom_asm_fa_backward_pre(o:UOp, do:UOp, delta:UOp, *, B:int, N:int, H:int,
                   lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="asm_fa_bwd_odo_bf16_2_8192_32_128",
                                  estimates=Estimates(ops=2*B*H*N*D, mem=(2*B*N*H*D)*2+B*H*N*4)))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in build_kernel(B, N, H, D)))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, D)))))
 
 @functools.cache
 def custom_asm_fa_backward(dq_acc:UOp, dk_expanded:UOp, dv_expanded:UOp, q:UOp, k:UOp, v:UOp, do:UOp, lse:UOp, delta:UOp,
@@ -318,7 +318,7 @@ def custom_asm_fa_backward(dq_acc:UOp, dk_expanded:UOp, dv_expanded:UOp, q:UOp, 
                   lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="asm_fa_bwd_main_bf16_causal_2_8192_32_8_128",
                                  estimates=Estimates(ops=5*B*H*N*N*D)))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in build_kernel(B, N, H, H_KV, D)))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, H_KV, D)))))
 
 @functools.cache
 def custom_asm_fa_backward_shuffle(dq:UOp, dq_acc:UOp, *, B:int, N:int, H:int, D:int):
@@ -331,7 +331,7 @@ def custom_asm_fa_backward_shuffle(dq:UOp, dq_acc:UOp, *, B:int, N:int, H:int, D
   dq_write = dq.flatten().index(zero).store(dq.flatten().index(zero).load())
   sink = UOp.sink(dq_write, dq_acc.flatten().index(zero).load(), lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="asm_fa_bwd_dq_shuffle_bf16_2_8192_32_128"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in build_kernel(B, N, H, D)))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, D)))))
 
 @functools.cache
 def custom_hk_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None, *, device:str, arch:str,

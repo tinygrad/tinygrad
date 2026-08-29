@@ -20,7 +20,7 @@ class TestIselX86(unittest.TestCase):
       with self.subTest(dtype=dt):
         v = [UOp.variable(str(i), 0, 0, dt) for i in range(nargs)]
         n = self.isel_rewrite(expr(*v))
-        self.assertIs(n.arg, op)
+        self.assertIs(n.arg[0], op)
 
   def test_cmove(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
@@ -29,9 +29,9 @@ class TestIselX86(unittest.TestCase):
     d = (a != b).where(a, b)
     f = c + d
     n = self.isel_rewrite(f)
-    self.assertTrue(n.src[0].arg is X86Ops.CMOVL and n.src[1].arg is X86Ops.CMOVNE)
+    self.assertTrue(n.src[0].arg[0] is X86Ops.CMOVL and n.src[1].arg[0] is X86Ops.CMOVNE)
     # both comparisons become the same instruction
-    self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].arg is X86Ops.CMP)
+    self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].arg[0] is X86Ops.CMP)
 
   def test_vinsertps(self):
     a = UOp.variable("a", 0, 0, dtypes.float32)
@@ -41,7 +41,7 @@ class TestIselX86(unittest.TestCase):
 
     valid = [UOp.stack(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
              UOp.stack(lane(a, 3), lane(b, 2), lane(c, 1), d)]
-    for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg, X86Ops.VINSERTPS)
+    for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg[0], X86Ops.VINSERTPS)
 
   # complex address is [base + index*scale + displacement]
   def test_complex_address(self):

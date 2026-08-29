@@ -178,7 +178,7 @@ def canonicalize_call_for_schedule_cache(call:UOp) -> UOp|None:
   return call.replace(src=(body,)+tuple(call.src[1+slot] for slot in param_slots), arg=arg)
 
 pm_schedule_cache_key = PatternMatcher([
-  (UPat((Ops.CALL, Ops.FUNCTION), name="call", allow_any_len=True), canonicalize_call_for_schedule_cache),
+  (UPat(Ops.CALL, name="call", allow_any_len=True), canonicalize_call_for_schedule_cache),
 ])
 
 # ctx is just for DEBUG on inner

@@ -363,8 +363,8 @@ pm_forward_linear_store = PatternMatcher([
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # ALLREDUCE lowering can introduce these after the multi pass has already visited the parent.
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack,ms: mstack.src[ms.arg]),
-  # resolve FUNCTION calls (inline the body)
-  (UPat(Ops.FUNCTION, name="c"), resolve_function),
+  # resolve value-producing calls (inline the body)
+  (UPat(Ops.CALL, src=(UPat(Ops.TUPLE),), allow_any_len=True, name="c"), resolve_function),
 
   # resolve TUPLE+GETTUPLE
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),

@@ -24,7 +24,7 @@ class IndexingContext:
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER,
                       Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
-                      Ops.LOAD, Ops.CALL, Ops.FUNCTION}
+                      Ops.LOAD, Ops.CALL}
 
 def realize(ctx:IndexingContext, tr:UOp) -> None: ctx.realize_map[tr] = None
 
@@ -47,7 +47,7 @@ def _pointwise_self_store(ctx:IndexingContext, dest:UOp, src:UOp) -> bool:
                                                     for y in x.toposort(enter_calls=False))) for x in readers): return True
   reaches_base: dict[UOp, bool] = {}
   unsafe = {Ops.REDUCE, Ops.ALLREDUCE, Ops.COPY, Ops.PERMUTE, Ops.FLIP, Ops.EXPAND, Ops.PAD, Ops.SHRINK,
-            Ops.MSTACK, Ops.MSELECT, Ops.CALL, Ops.FUNCTION, Ops.BITCAST}
+            Ops.MSTACK, Ops.MSELECT, Ops.CALL, Ops.BITCAST}
   nodes = src.toposort(gate=lambda x: x.op is not Ops.CONTIGUOUS, enter_calls=False)
   # Device transfers must materialize before an assignment even when their source does not flow from the destination.
   if any(x.op is Ops.COPY for x in nodes): return False
@@ -243,7 +243,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in reversed(tsink_toposort):
     # no ranges on kernels, they are internal
-    if x.op in {Ops.CALL, Ops.FUNCTION, Ops.LINEAR}: continue
+    if x.op in {Ops.CALL, Ops.LINEAR}: continue
 
     # AFTER doesn't have range
     if x.op is Ops.AFTER: continue

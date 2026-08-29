@@ -47,7 +47,7 @@ class TestRingAllReduce(unittest.TestCase):
       sink = UOp.sink(p.index(idx).store(UOp.const(0, dtypes.float)))
       calls.append(UOp(Ops.CALL, src=(sink, out.mselect(i))))
       copy = UOp(Ops.COPY, src=(UOp.param(1, dtypes.float, (4,), device=devices[(i+1)%2]),), arg=devices[i])
-      calls.append(UOp(Ops.CALL, dtypes.void, src=(copy, out.mselect(i), slices[(i+1)%2])))
+      calls.append(UOp(Ops.CALL, src=(copy, out.mselect(i), slices[(i+1)%2])))
     self.assertTrue(is_allreduce_linear_output(UOp(Ops.LINEAR, src=tuple(calls)), 5))
 
     p, idx = UOp.param(0, dtypes.float, (8,)), UOp.const(0)
@@ -56,7 +56,7 @@ class TestRingAllReduce(unittest.TestCase):
     self.assertFalse(is_allreduce_linear_output(UOp(Ops.LINEAR, src=tuple(calls)), 5))
 
     copy = UOp(Ops.COPY, src=(UOp.param(1, dtypes.float, (4,), device=devices[0]),), arg=devices[1])
-    bad_copy = UOp(Ops.CALL, dtypes.void, src=(copy, slices[0], out.mselect(0)))
+    bad_copy = UOp(Ops.CALL, src=(copy, slices[0], out.mselect(0)))
     self.assertFalse(is_allreduce_linear_output(UOp(Ops.LINEAR, src=tuple(calls[:-1])+(bad_copy,)), 5))
 
   def test_accumulate_replicated_linear_output_preserves_cast(self):
