@@ -276,6 +276,65 @@ class TestCallSchedule(unittest.TestCase):
     out = f(a) + 2
     np.testing.assert_allclose(out.numpy(), np.arange(8, dtype=np.float32).reshape(4, 2) + 3)
 
+class TestArgOrder(unittest.TestCase):
+  """RETURNED placeholders can appear anywhere in a call's srcs: slots are src positions, nothing reorders"""
+  def make_intersperse_call(self, x, precompile=False):
+    # call with sources (body, returned(slot=0), input(slot=1)): the input is the input, the output binds the RETURNED
+    r0 = UOp.returned(0, x.dtype, x.shape, device=x.device)
+    o0 = UOp.param(0, x.dtype, x.shape, x.device)
+    p1 = UOp.param(1, x.dtype, x.shape, x.device)
+    from tinygrad.uop.ops import CallInfo
+    return UOp(Ops.CALL, src=(UOp.sink(o0.store(p1.reshape(x.shape) * 2)), r0, x.uop),
+               arg=CallInfo(None, 't', precompile, False, None))
+
+  def test_intersperse_returned(self):
+    x = Tensor.arange(3, dtype=dtypes.int).realize()
+    call = self.make_intersperse_call(x)
+    out = Tensor(call.returned_outputs[0], device='CPU') + 1
+    np.testing.assert_equal(out.numpy(), [1, 3, 5])
+
+  def test_intersperse_returned_precompile(self):
+    x = Tensor.arange(3, dtype=dtypes.int).realize()
+    call = self.make_intersperse_call(x, precompile=True)
+    # the transform must preserve the RETURNED's src position: its placeholder is at src 1, the input stays at src 2
+    from tinygrad.tensor import transform_precompiled_call
+    new = transform_precompiled_call(call)
+    new_call = new.src[0].src[1].src[1]
+    # the out buffer takes the RETURNED's position (src 1), the input value keeps its position (src 2)
+    self.assertEqual(new_call.src[1].op, Ops.BUFFER)
+    self.assertEqual(new_call.src[1].arg.size, 3)
+    self.assertEqual(new_call.src[2].op, Ops.ADD)
+    # the body binds positionally: store dest at slot 0 (the RETURNED's position), input param at slot 1
+    store = [u for u in new_call.src[0].toposort(enter_calls=False) if u.op is Ops.STORE][0]
+    self.assertEqual(store.src[0].arg.slot, 0)
+    self.assertEqual([u.arg.slot for u in store.src[1].toposort(enter_calls=False) if u.op is Ops.PARAM], [1])
+
+  def test_intersperse_returned_gradient(self):
+    x = Tensor([1.0, 2.0, 3.0]).realize()
+    x.requires_grad = True
+    r0 = UOp.returned(0, dtypes.float, x.shape, device='CPU')
+    o0 = UOp.param(0, dtypes.float, x.shape, 'CPU')
+    p1 = UOp.param(1, dtypes.float, x.shape, 'CPU')
+    from tinygrad.uop.ops import CallInfo
+    body = UOp.sink(o0.store(p1.reshape(x.shape) * p1.reshape(x.shape)))
+    call = UOp(Ops.CALL, src=(body, r0, x.uop), arg=CallInfo(None, 't', False, False, None))
+    y = Tensor(call.returned_outputs[0], device='CPU')
+    y.sum().backward()
+    np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])
+
+  def test_function_padded_input(self):
+    x = Tensor.arange(3, dtype=dtypes.int).realize().pad((0, 2)).realize()
+    p0 = UOp.param(0, x.dtype, x.max_shape, x.device)
+    out = x.call(fxn=p0.reshape(x.max_shape) * 2).realize()
+    np.testing.assert_equal(out.numpy(), [0, 2, 4, 0, 0])
+
+  def test_function_strided_input(self):
+    x = Tensor.arange(16, dtype=dtypes.int).reshape(4, 4).realize()
+    sl = x[:, :2]
+    p0 = UOp.param(0, sl.dtype, sl.max_shape, sl.device)
+    out = sl.call(fxn=p0.reshape((4, 2)) * 2).realize()
+    np.testing.assert_equal(out.numpy(), [[e*2 for e in row[:2]] for row in x.tolist()])
+
 class TestCallMultiSharded(unittest.TestCase):
   # TODO: multi-output + sharded needs per-device CALL execution, which requires reworking how MULTI propagates through TUPLE bodies
   def test_tuple_sharded(self):

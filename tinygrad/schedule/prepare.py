@@ -107,10 +107,7 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
     shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
     n = prod(shp)
     if a.shape == (n,): return n, a
-    # a view of flat storage binds as its flattened view (reshape is itself the contiguity check, it raises if the
-    # view isn't a flat prefix); a view that can't be flattened (like a strided slice) materializes first
-    try: return n, a.pad_to(shp).reshape((n,))
-    except ValueError: return n, a.pad_to(shp).contiguous().reshape((n,))
+    return n, a.pad_to(shp).reshape((n,))
   dict_map = {x:args[x.arg.slot] for x in params}
   for i, (p, a) in enumerate(dict_map.items()):
     if p.arg.size is not None:

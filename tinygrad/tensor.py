@@ -115,8 +115,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # reorders; the outputs are the stores into the output PARAMs in slot order
   returned = tuple((p,a) for p,a in enumerate(c.src[1:]) if a.unsharded_base.op is Ops.RETURNED)
   # afters on real buffers are the input storage; afters on RETURNED placeholders have no storage yet, materialize them
-  def input_buffer(x:UOp) -> UOp:
-    return x if (x.op is Ops.AFTER and x.unsharded_base.has_buffer_identity()) else x.contiguous()
+  def input_buffer(x:UOp) -> UOp: return x if x.has_buffer_identity(after_ok=True) else x.contiguous()
   out_stores = sorted((st for st in c.src[0].src if st.op is Ops.STORE), key=lambda st: st.src[0].unsharded_base.arg.slot)
   srcs = tuple(st.src[1] for st in out_stores)
 
