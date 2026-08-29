@@ -615,7 +615,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
     # .cast folds away at exactly the dtypes a CONST derives (bool/weakint/weakfloat): bare there, the pair everywhere else
     return UOp(Ops.CONST, arg=dtype.const(b), src=()).cast(dtype)
-  # weak CONST with width on the CAST. TODO: this is the final const
+  # a forced CAST for bool: .cast(bool) folds, so UOp.const cannot state the width
   @staticmethod
   def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, src=(UOp.const(b),), arg=dtype)
   @staticmethod
