@@ -232,11 +232,17 @@ class CPUDevice(HCQ2Compiled):
     addr, hsem = 0, None
 
     # sem are posix-only
-    if not WIN:
-      hsem = libc.sem_open(nm:=f"/tinygrad-{os.getpid()}-{id(ring):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
-      if (addr:=unwrap(ctypes.cast(hsem, ctypes.c_void_p).value)) == ctypes.c_void_p(-1).value or libc.sem_unlink(nm):
-        raise OSError(ctypes.get_errno(), "semaphore")
-    sem = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(external_ptr=addr), preallocate=True)
+    if hasattr(sys, "getandroidapilevel"):
+      # Android's bionic libc does not support named semaphores.
+      sem = Buffer(self.device, 16, dtypes.uint8, preallocate=True)
+      hsem = ctypes.cast(addr:=sem._buf.va_addr, ctypes.POINTER(libc.sem_t))
+      if libc.sem_init(hsem, 0, 0): raise OSError(ctypes.get_errno(), "semaphore")
+    else:
+      if not WIN:
+        hsem = libc.sem_open(nm:=f"/tinygrad-{os.getpid()}-{id(ring):x}".encode(), os.O_CREAT|os.O_EXCL, 0o600, 0) # type: ignore[call-arg]
+        if (addr:=unwrap(ctypes.cast(hsem, ctypes.c_void_p).value)) == ctypes.c_void_p(-1).value or libc.sem_unlink(nm):
+          raise OSError(ctypes.get_errno(), "semaphore")
+      sem = Buffer(self.device, 1, dtypes.uint64, options=BufferSpec(external_ptr=addr), preallocate=True)
 
     worker_args = [ring._buf.va_addr, sysbuf._buf.va_addr if WIN else self.func_ptr('sem_wait')._buf.va_addr, done._buf.va_addr, addr]
     (thread:=threading.Thread(target=self.prgs[worker_prog].fxn, daemon=True, args=[ctypes.c_uint64(x) for x in worker_args])).start()
