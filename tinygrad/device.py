@@ -54,7 +54,7 @@ class _Device:
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device: _Device = _Device()
-atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices])
+atexit.register(lambda: [Device[dn].finalize() for dn in tuple(Device._opened_devices)])
 
 def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
   if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
@@ -346,7 +346,8 @@ class Compiled:
 
   has_copy_queue:bool = True
 
-  pm_lower:Any = None
+  pm_encode:Any = None # per queue kind: queue ops -> flat command words
+  pm_lower:Any = None # per queue kind: custom_function(submit, cmdbuf) -> the queue push
   pm_bufferize:Any = None
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, graph=None, arch=None):

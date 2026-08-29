@@ -2,11 +2,10 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import random, itertools, math, weakref, array, decimal
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, all_int, prod, flatten, Context, to_tuple, tqdm, dedup
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, all_int, prod, flatten, Context, to_tuple, tqdm, dedup, to_mv
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, HCQ2, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
-from tinygrad.dtype import dtypes
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
 from tinygrad.codegen.opt.postrange import args_from_ast
@@ -169,7 +168,9 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
     # the DEVICE axis is bound per device at launch: it's a RANGE in the AST and the _device_num variable after codegen
     has_dnum = any((x.op is Ops.RANGE and x.arg[-1] is AxisType.DEVICE) or (x.op is Ops.PARAM and x.arg.name == '_device_num')
                    for x in call.src[0].toposort())
-    for j, per_dev in enumerate(zip(*[cast(MultiBuffer, b).bufs for b in bufs])): yield list(per_dev), {"_device_num": j} if has_dnum else {}
+    lanes = max(len(b.bufs) for b in bufs if isinstance(b, MultiBuffer)) # a single buffer is shared by every lane
+    per_lane = [b.bufs if isinstance(b, MultiBuffer) else (b,)*lanes for b in bufs]
+    for j, per_dev in enumerate(zip(*per_lane)): yield list(per_dev), {"_device_num": j} if has_dnum else {}
 
 def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
@@ -183,10 +184,10 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return []
 
-def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
+def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|None]:
   ets:list[float|None] = []
   resolved = resolve_params(call, ctx.input_uops)
-  for device, (bufs, device_vars) in zip(to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
+  for device, (bufs, device_vars) in zip(devices or to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
@@ -215,15 +216,23 @@ def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return [get_graph_runtime(ast, ctx.input_uops)(ctx.input_uops, ctx.var_vals, wait=ctx.wait)]
 
+_push_marks:dict[bytes, int] = {}
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
-  dev = cast(Any, Device[(info:= call.arg.aux).device[0]])
-  addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(d).va_addr for d, u in info.input_addrs]
-  dev.rt_buffer()._buf.cpu_view().view(offset=(base:=dev.rt_allocator.alloc(len(addrs) * 8)), fmt='Q')[:len(addrs)] = array.array('Q', addrs)
+  info = call.arg.aux
+  assert len(ast.arg.globals) == len(info.args), f"{call.arg.name}: an arg is dead in the rendered body, the args after it would mis-bind"
 
-  if info.inputs is not None:
-    table = UOp.from_buffer(dev.rt_buffer().view(len(info.input_addrs), dtypes.uint64, base), HCQ_RUNTIME_DEV.value)
-    call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*[table]*len(info.device))})
-  exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer()._buf.va_addr + base}), call, ast)
+  # the worker consumes the tables and cmdbufs async: wait out this call's previous push before refilling them
+  d = cast(Any, Device[HCQ_RUNTIME_DEV.value])
+  if (mark:=_push_marks.get(call.key)) is not None: d._wait_signal(d.worker("SUBMIT:0").done._buf.cpu_view().view(fmt='Q'), mark, ctx.timeout)
+
+  # fill the inputs table with the address of every input the sealed cmdbufs reference
+  if info.table is not None:
+    addrs = [cast(Buffer, _resolve(_lane(u, lane), ctx.input_uops).buffer).get_buf(dev).va_addr for u, lane, dev in info.inputs]
+    tab = cast(Buffer, call.src[info.table].without_after.buffer)
+    to_mv(tab._buf.va_addr, len(addrs) * 8).cast('Q')[:] = array.array('Q', addrs)
+
+  exec_kernel(replace(ctx, var_vals={**ctx.var_vals, **dict(info.vals)}), call, ast, devices=to_tuple(info.device))
+  _push_marks[call.key] = d.worker("SUBMIT:0").put._buf.cpu_view().view(fmt='Q')[0]
 
   def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:
     (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, name, prof[0], prof[1], profile_key)
@@ -305,7 +314,7 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQ_RUNTIME_DEV # noqa: E402 # down here, hcq2 imports realize
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, _lane, HCQ_RUNTIME_DEV # noqa: E402 # down here, hcq2 imports realize
 
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)

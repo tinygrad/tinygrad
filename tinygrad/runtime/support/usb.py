@@ -1,11 +1,11 @@
 import ctypes, struct, time, functools, itertools
 from typing import Any, cast
 from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG, DEV, to_mv, from_mv, round_up, ceildiv, unwrap, dedup, to_tuple
+from tinygrad.helpers import DEBUG, DEV, to_mv, from_mv, round_up, ceildiv, unwrap, to_tuple
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 from tinygrad.device import Buffer, BufferSpec, Device
-from tinygrad.runtime.support.hcq2 import HCQInfo, make_buf, make_cmdbuf, make_submit, HCQ_RUNTIME_DEV
+from tinygrad.runtime.support.hcq2 import HCQInfo, make_buf, make_submit, HCQ_RUNTIME_DEV
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support import c
 
@@ -263,9 +263,6 @@ def usb_stream(devs, dep:tuple[UOp, ...], addr:UOp, data:UOp, nbytes:int, write:
                 0x40, 0xF0, (0x60 if write else 0x20) | (0x0F << 8), 1 if write else 2, hdr.index(0), 12, 5000)
   return usb_bulk(devs, (arm,), 0x02 if write else 0x81, data, nbytes)
 
-def usb_writes(devs, ws:list[tuple[UOp, UOp, int]]) -> tuple[UOp, ...]:
-  return functools.reduce(lambda dep, w: (usb_stream(devs, dep, w[0], w[1], w[2], True),), ws, ())
-
 def usb_load(b:UOp, idx:UOp, dt) -> UOp:
   got = UOp.placeholder((1,), dt, device=(devs:=to_tuple(b.device)), tag="usb_scratch")
   addr = b.getaddr((HCQ_RUNTIME_DEV.value,)) + (idx*dt.itemsize).cast(dtypes.uint64)
@@ -303,34 +300,6 @@ def usb_stage_copy(dst:UOp, src:UOp) -> UOp|None:
               pad.copy_to_device("CPU").call(d, pad)]
   return UOp(Ops.LINEAR, src=tuple(ops))
 pm_usb_stage = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), usb_stage_copy)])
-
-def usb_arm_bytes(lin:UOp, sram:Buffer) -> int:
-  dsts = [c.src[1] for c in lin.src if c.op is Ops.CALL and c.src[0].op is Ops.COPY] # the rest of a linear is INS, some with no srcs
-  return next((d.nbytes() for d in dsts if d.base.op is Ops.BUFFER and d.base.buffer is sram), 0)
-
-def usb_ib(devs, lin:UOp, align:int, arm:int=0) -> tuple[UOp, UOp, int]:
-  pkt_dw = sum(s.dtype.itemsize for ins in lin.src for s in ins.src) // 4 # by bytes: sdma packs 64-bit addresses as single srcs
-  kargs = dedup([b for b in lin.toposort() if b.op is Ops.PARAM and b.tag == "kernargs"])
-  offs, up_dw = {}, round_up(pkt_dw, align)
-  for k in kargs: offs[k], up_dw = up_dw, round_up(up_dw + k.max_numel(), 32)
-  ib_gpu = UOp.placeholder((up_dw,), dtypes.uint32, device=devs, tag="cmdbuf")
-  ib_host = UOp.placeholder((up_dw,), dtypes.uint32, device=devs, tag="usb_scratch")
-  gsubs = {g: g.replace(src=(d if a.op is not Ops.AFTER else d.after(*a.src[1:]),)) for g in lin.toposort() if g.op is Ops.GETADDR
-           for a in [g.src[0]] if (k:=a.src[0] if a.op is Ops.AFTER else a) in offs for d in [ib_gpu[offs[k]:offs[k] + k.max_numel()]]}
-  lin = lin.substitute(gsubs, walk=True).substitute({k: ib_host[offs[k]:offs[k] + k.max_numel()] for k in kargs}, walk=True)
-  return make_cmdbuf(lin, devs, buf=ib_host, dep=(usb_scsi(devs, True, arm),) if arm else ()), ib_gpu, pkt_dw
-
-def usb_push(devs, ring:UOp, wptr:UOp, doorbell:UOp, put_ptr:UOp, ib_host:UOp, ib_gpu:UOp, pkt:tuple, unit:int) -> UOp:
-  stage = UOp.placeholder(((n:=round_up(len(pkt), 4)) + 2,), dtypes.uint32, device=devs, tag="usb_scratch")
-  put, step = put_ptr.index(zero:=UOp.const(0, dtypes.int)), (n * 4 if pkt else ib_host.nbytes()) // unit
-  st = stage.after(*[stage.index(i).store(UOp.const(v, dtypes.uint32)) for i, v in enumerate(pkt)],
-                   *[stage.index(n + i).store((((put + step) >> (32 * i)) & 0xffffffff).cast(dtypes.uint32)) for i in (0, 1)])
-
-  writes = [(ib_gpu.getaddr((HCQ_RUNTIME_DEV.value,)), ib_host.index(zero), ib_gpu.nbytes())] if pkt else []
-  writes += [(ring.getaddr((HCQ_RUNTIME_DEV.value,)) + ((put % (ring.nbytes() // unit)) * unit).cast(dtypes.uint64),
-              (st if pkt else ib_host).index(zero), step * unit)]
-  writes += [(p.getaddr((HCQ_RUNTIME_DEV.value,)), st.index(n), 8) for p in (wptr, doorbell)]
-  return put_ptr.after(*usb_writes(devs, writes)).index(zero).store(put + step)
 
 USB_HOST_TAGS = {"signal", "timeline_signal"}
 pm_usb_hostio = PatternMatcher([
