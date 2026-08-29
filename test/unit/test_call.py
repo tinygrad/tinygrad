@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, function
+from tinygrad import Tensor, function, Device
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 
@@ -280,9 +280,10 @@ class TestArgOrder(unittest.TestCase):
   """RETURNED placeholders can appear anywhere in a call's srcs: slots are src positions, nothing reorders"""
   def make_intersperse_call(self, x, precompile=False):
     # call with sources (body, returned(slot=0), input(slot=1)): the input is the input, the output binds the RETURNED
-    r0 = UOp.returned(0, x.dtype, x.shape, device=x.device)
-    o0 = UOp.param(0, x.dtype, x.shape, x.device)
-    p1 = UOp.param(1, x.dtype, x.shape, x.device)
+    dev = x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
+    r0 = UOp.returned(0, x.dtype, x.shape, device=dev)
+    o0 = UOp.param(0, x.dtype, x.shape, dev)
+    p1 = UOp.param(1, x.dtype, x.shape, dev)
     from tinygrad.uop.ops import CallInfo
     return UOp(Ops.CALL, src=(UOp.sink(o0.store(p1.reshape(x.shape) * 2)), r0, x.uop),
                arg=CallInfo(None, 't', precompile, False, None))
@@ -290,7 +291,7 @@ class TestArgOrder(unittest.TestCase):
   def test_intersperse_returned(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
     call = self.make_intersperse_call(x)
-    out = Tensor(call.returned_outputs[0], device='CPU') + 1
+    out = Tensor(call.returned_outputs[0], device=x.device) + 1
     np.testing.assert_equal(out.numpy(), [1, 3, 5])
 
   def test_intersperse_returned_precompile(self):
@@ -312,21 +313,24 @@ class TestArgOrder(unittest.TestCase):
   def test_intersperse_returned_gradient(self):
     x = Tensor([1.0, 2.0, 3.0]).realize()
     x.requires_grad = True
-    r0 = UOp.returned(0, dtypes.float, x.shape, device='CPU')
-    o0 = UOp.param(0, dtypes.float, x.shape, 'CPU')
-    p1 = UOp.param(1, dtypes.float, x.shape, 'CPU')
+    dev = x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
+    r0 = UOp.returned(0, dtypes.float, x.shape, device=dev)
+    o0 = UOp.param(0, dtypes.float, x.shape, dev)
+    p1 = UOp.param(1, dtypes.float, x.shape, dev)
     from tinygrad.uop.ops import CallInfo
     body = UOp.sink(o0.store(p1.reshape(x.shape) * p1.reshape(x.shape)))
     call = UOp(Ops.CALL, src=(body, r0, x.uop), arg=CallInfo(None, 't', False, False, None))
-    y = Tensor(call.returned_outputs[0], device='CPU')
+    y = Tensor(call.returned_outputs[0], device=x.device)
     y.sum().backward()
     np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])
 
   def test_function_padded_input(self):
-    x = Tensor.arange(3, dtype=dtypes.int).realize().pad((0, 2)).realize()
-    p0 = UOp.param(0, x.dtype, x.max_shape, x.device)
-    out = x.call(fxn=p0.reshape(x.max_shape) * 2).realize()
-    np.testing.assert_equal(out.numpy(), [0, 2, 4, 0, 0])
+    # padded-then-shrunk unrealized view: the function input must come from the padded values
+    x = Tensor.arange(9, dtype=dtypes.int).reshape(3, 3).realize()
+    v = x.pad(((0, 2), (0, 2)))[:4, 1:]
+    p0 = UOp.param(0, v.dtype, v.max_shape, v.device)
+    out = v.call(fxn=p0.reshape(v.max_shape) * 2).realize()
+    np.testing.assert_equal(out.numpy(), 2 * np.pad(np.arange(9).reshape(3, 3), ((0, 2), (0, 2)))[:4, 1:])
 
   def test_function_strided_input(self):
     x = Tensor.arange(16, dtype=dtypes.int).reshape(4, 4).realize()
