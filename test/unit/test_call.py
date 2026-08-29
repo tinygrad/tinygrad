@@ -325,12 +325,13 @@ class TestArgOrder(unittest.TestCase):
     np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])
 
   def test_function_padded_input(self):
-    # padded-then-shrunk unrealized view: the function input must come from the padded values
+    # padded-then-shrunk unrealized view with zero start: the function input must come from the padded values
+    # (regression for flat_storage stripping zero-start SHRINK/PAD to the backing buffer)
     x = Tensor.arange(9, dtype=dtypes.int).reshape(3, 3).realize()
-    v = x.pad(((0, 2), (0, 2)))[:4, 1:]
+    v = x.pad(((1, 0), (0, 0)))[:3, :]
     p0 = UOp.param(0, v.dtype, v.max_shape, v.device)
     out = v.call(fxn=p0.reshape(v.max_shape) * 2).realize()
-    np.testing.assert_equal(out.numpy(), 2 * np.pad(np.arange(9).reshape(3, 3), ((0, 2), (0, 2)))[:4, 1:])
+    np.testing.assert_equal(out.numpy(), 2 * np.pad(np.arange(9).reshape(3, 3), ((1, 0), (0, 0)))[:3, :])
 
   def test_function_strided_input(self):
     x = Tensor.arange(16, dtype=dtypes.int).reshape(4, 4).realize()
