@@ -115,7 +115,8 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # output PARAMs in slot order
   returned = tuple(a for a in c.src[1:] if a.unsharded_base.op is Ops.RETURNED)
   call_args = tuple(a for a in c.src[1:] if a.unsharded_base.op is not Ops.RETURNED)
-  input_buffers = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in call_args)
+  # afters on real buffers are the input storage; afters on RETURNED placeholders have no storage yet, materialize them
+  input_buffers = tuple(x.contiguous() if not (x.op is Ops.AFTER and x.unsharded_base.has_buffer_identity()) else x for x in call_args)
   out_stores = sorted((st for st in c.src[0].src if st.op is Ops.STORE), key=lambda st: st.src[0].unsharded_base.arg.slot)
   srcs = tuple(st.src[1] for st in out_stores)
 
@@ -175,9 +176,10 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # graph, like any other value (this inlines the call body); afters between the return and the call don't matter
   (UPat(Ops.AFTER, name="r"), returned_after_finalize),
 
-  # an AFTER on a RETURNED placeholder (call outputs get real buffers): allocate fresh storage for it
+  # an AFTER on a RETURNED placeholder that is a final output: it's a call output buffer, allocate fresh storage for it
   (UPat(Ops.AFTER, name="x"),
-   lambda ctx,x: None if x.tag is None or x.src[0].unsharded_base.op is not Ops.RETURNED else x.rtag(None).contiguous(tag=x.tag)),
+   lambda ctx,x: None if x.tag is None or x.src[0].unsharded_base.op is not Ops.RETURNED
+                 or not any(t in ctx.final_tags for t in x.tag) else x.rtag(None).contiguous(tag=x.tag)),
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
@@ -261,6 +263,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
   big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="number the uops")
+  ctx.final_tags = {t for u in big_sink.src if u.tag is not None for t in u.tag}
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
