@@ -9,6 +9,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, ParamArg, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import shape_to_shape_arg
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -135,7 +136,7 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> tuple[UOp, dict[UOp, UOp]]|Non
     while target_physical.op in GroupOp.Movement|{Ops.UNSHARD, Ops.AFTER}: target_physical = target_physical.src[0]
     if (physical.op is Ops.BUFFER and target_physical.op is Ops.PARAM and physical.numel() == target_physical.numel()
         and local.numel() == physical.numel() and local.contiguous_view_offset() == 0):
-      return t, {s:t, physical:target_physical.reshape(physical.shape)}
+      return t, {physical:target_physical.reshape(physical.shape)}
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
@@ -242,6 +243,15 @@ pm_finalize_call = PatternMatcher([
   (UPat(Ops.COPY, name="x"), lambda ctx,x: ctx.assigns.append(x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
 ])
 
+# BUFFER/PARAM used to carry their flat shape as a source. Keep those dependency edges during the side-effectful finalization walk so removing
+# them from the storage representation does not reorder independent assigns, then remove them before constructing the call.
+pm_add_finalize_shape_src = PatternMatcher([
+  (UPat((Ops.BUFFER, Ops.PARAM), src=(), name="x"), lambda x: x.replace(src=(shape_to_shape_arg(x.shape),))),
+])
+pm_remove_finalize_shape_src = PatternMatcher([
+  (UPat((Ops.BUFFER, Ops.PARAM), src=(UPat(),), name="x"), lambda x: x.replace(src=())),
+])
+
 pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
@@ -269,8 +279,11 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
 
   # here we construct the final buffer_map: as-built nodes -> their final storage. values are never keys
-  graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
-  ret = graph_rewrite(UOp.sink(*ctx.assigns), pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
+  finalize_sink = graph_rewrite(big_sink, pm_add_finalize_shape_src, bottom_up=True, name="add finalize shape dependencies")
+  graph_rewrite(finalize_sink, pm_finalize_call, ctx=ctx, name="finalize call")
+  assigns = graph_rewrite(UOp.sink(*ctx.assigns), pm_remove_finalize_shape_src, bottom_up=True, name="remove finalize shape dependencies").src
+  ctx.buffer_map = {k:graph_rewrite(v, pm_remove_finalize_shape_src, bottom_up=True) for k,v in ctx.buffer_map.items()}
+  ret = graph_rewrite(UOp.sink(*assigns), pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, ctx.buffer_map
