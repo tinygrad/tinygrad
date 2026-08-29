@@ -1,9 +1,10 @@
-import unittest
-from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
+import unittest, itertools
+from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, TinyJit, Variable
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.engine.realize import compile_linear, run_linear
 from test.helpers import assert_kernel_count, KernelCountException
 
 # **** kernels ****
@@ -691,6 +692,40 @@ class TestUOpWhere(unittest.TestCase):
 
     result = Tensor(cond.uop.where(1.5, 0))
     self.assertEqual(result.tolist(), [1.5, 0, 1.5])
+
+def custom_scaled_add(order:str, out:Tensor, a:Tensor, *scalars:UOp) -> Tensor:
+  # out[i] = a[i]*m + c, order gives the slot of the two buffers and the two scalar args m and c
+  bufs, n = {'o': out, 'a': a}, out.shape[0]
+  params = {k: UOp.param(slot, dtypes.int, n) if k in bufs else UOp.param(slot, dtypes.int, name=k, vmin_vmax=(0, 9), addrspace=AddrSpace.ALU)
+            for slot,k in enumerate(order)}
+  i = UOp.range(n, 0)
+  sink = params['o'][i].store(params['a'][i] * params['m'] + params['c']).end(i).sink(arg=KernelInfo(name=f"scaled_add_{order}"))
+  return Tensor(out.uop.after(sink.call(*[bufs[k].uop for k in order if k in bufs], *scalars)))
+
+class TestCustomKernelArgOrder(unittest.TestCase):
+  # buffers and scalar args can be in any order in the signature, the call args are the buffers in slot order
+  def _test_order(self, order:str, n=16):
+    out = custom_scaled_add(order, Tensor.empty(n, dtype=dtypes.int), Tensor.arange(n).contiguous().realize())
+    linear = compile_linear(out.schedule_linear())
+    prg = next(c.src[0] for c in linear.src if c.src[0].op is Ops.PROGRAM and c.src[0].arg.name == f"scaled_add_{order}")
+    self.assertEqual([name for name,*_ in prg.to_elf().signature], [k if k in "mc" else None for k in order])
+    run_linear(linear, var_vals={"m": 3, "c": 5})
+    self.assertEqual(out.tolist(), [3*x+5 for x in range(n)])
+
+  def test_all_orders(self):
+    for order in map(''.join, itertools.permutations("oamc")):
+      with self.subTest(order=order): self._test_order(order)
+
+  def test_jit(self):
+    # two kernels so the graph runners rebind the inputs and scalars through the signatures
+    n = 16
+    @TinyJit
+    def f(a:Tensor, m:UOp, c:UOp) -> Tensor:
+      y = custom_scaled_add("moca", Tensor.empty(n, dtype=dtypes.int), a, m, c)
+      return custom_scaled_add("caom", Tensor.empty(n, dtype=dtypes.int), y, m, c).realize()
+    for mv, cv in [(3, 5), (2, 7), (1, 1)]:
+      out = f(Tensor.arange(n).clone().realize(), Variable("m", 0, 9).bind(mv), Variable("c", 0, 9).bind(cv))
+      self.assertEqual(out.tolist(), [(mv*x+cv)*mv+cv for x in range(n)])
 
 if __name__ == '__main__':
   unittest.main()

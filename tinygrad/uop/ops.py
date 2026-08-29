@@ -1214,8 +1214,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape)
-                for u in tuple(filter(lambda u: u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU, self.src[1].src)) + self.arg.vars)
+    sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape) for u in self.arg.params)
     return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig, self.key)
 
 @dataclass(frozen=True)
@@ -1235,14 +1234,19 @@ class ProgramInfo:
   name: str = "test"
   global_size: tuple[int|float, ...] = (1, 1, 1)
   local_size: tuple[int, ...]|None = None
-  vars: tuple[UOp, ...] = ()
-  globals: tuple[int, ...] = ()
-  outs: tuple[int, ...] = ()
-  ins: tuple[int, ...] = ()
+  params: tuple[UOp, ...] = ()  # every PARAM in slot order, each buffer slot is a call arg (an image and a flat view share one)
+  outs: tuple[int, ...] = ()    # call args the kernel stores to
+  ins: tuple[int, ...] = ()     # call args the kernel loads from
   target: Target = Target()
 
   @property
   def function_name(self): return to_function_name(self.name)
+
+  @property
+  def vars(self) -> tuple[UOp, ...]: return tuple(p for p in self.params if p.addrspace is AddrSpace.ALU)
+
+  @property
+  def globals(self) -> tuple[int, ...]: return tuple(dedup(p.arg.slot for p in self.params if p.addrspace is not AddrSpace.ALU))
 
   @property
   def runtimevars(self) -> dict[str, int]: return {v.expr: i for i, v in enumerate(self.vars) if v.expr == 'core_id'}
@@ -1258,15 +1262,13 @@ class ProgramInfo:
 
   @staticmethod
   def from_sink(sink:UOp, target:Target=Target()) -> ProgramInfo:
-    _vars: list[UOp] = []
-    _globals: list[int] = []
+    params: list[UOp] = []
     outs: list[int] = []
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
     for u in sink.toposort():
-      if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
-      if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
+      if u.op is Ops.PARAM: params.append(u)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
@@ -1274,10 +1276,12 @@ class ProgramInfo:
         if u.arg[0] == 'i': local_size = None
         special_size = local_size if u.arg[0] == 'l' else global_size
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
-      if u.op is Ops.PARAM and u in _vars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
-    return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
-                       tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
-                       tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), target)
+      if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
+    # same order as the linearizer: by slot, the flat view of a buffer before its image view
+    params = sorted(params, key=lambda p: (p.arg.slot, p.arg.image is not None))
+    info = ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
+                       tuple(local_size) if local_size is not None else None, tuple(params), target=target)
+    return replace(info, outs=tuple(sorted({info.globals.index(s) for s in outs})), ins=tuple(sorted({info.globals.index(s) for s in ins})))
 
 @dataclass(frozen=True)
 class CallInfo:

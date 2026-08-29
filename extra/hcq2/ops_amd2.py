@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, encode_ker
 from tinygrad.runtime.support.hcq2 import make_binary_patch
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar, TracingKey
 from tinygrad.helpers import VIZ, ceildiv, unwrap, pluralize, to_tuple
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
@@ -278,7 +278,7 @@ def encode_queue(q:UOp) -> UOp|None:
 class AMDProgramData:
   entry_point_offset:int; rsrc1:int; rsrc2:int; rsrc3:int; wave32:bool
   private_segment_size:int; kernargs_segment_size:int; kernargs_alloc_size:int
-  enable_dispatch_ptr:int; enable_private_segment_sgpr:int
+  enable_dispatch_ptr:int; enable_private_segment_sgpr:int; signature:tuple[tuple[str|None, int, DType, tuple], ...]
 
 _amd_program_cache:dict[tuple[bytes, tuple[str, ...]], UOp] = {}
 def amd_build_program(prg:UOp) -> UOp:
@@ -300,7 +300,8 @@ def amd_build_program(prg:UOp) -> UOp:
       rsrc2=desc.compute_pgm_rsrc2 | (lds<<15), rsrc3=desc.compute_pgm_rsrc3,
       wave32=bool(desc.kernel_code_properties & 0x400), private_segment_size=desc.private_segment_fixed_size, kernargs_segment_size=desc.kernarg_size,
       kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0), enable_dispatch_ptr=edp,
-      enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)
+      enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER,
+      signature=prg.to_elf().signature)
     image = bytes(image).ljust(round_up(len(image), 4), b"\x00") # the program is uploaded as whole dwords
     buf = UOp.placeholder((len(image),), dtypes.uint8, next(UOp.unique_num), device=prg.device).rtag("program")
     cached = _amd_program_cache[key] = prg.replace(src=(buf.after(make_binary_patch(buf, image)),), arg=(data, prg.arg))

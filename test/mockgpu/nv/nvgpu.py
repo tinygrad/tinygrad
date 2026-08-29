@@ -1,9 +1,9 @@
-import ctypes, time
+import ctypes, time, re
 from tinygrad.runtime.autogen import nv_570 as nv_gpu
 from enum import Enum, auto
 from test.mockgpu.gpu import VirtGPU
 from test.mockgpu.helpers import ptx_run
-from tinygrad.helpers import to_mv
+from tinygrad.helpers import to_mv, round_up
 from tinygrad.runtime.support.c import init_c_struct_t
 
 def make_qmd_struct_type():
@@ -87,15 +87,15 @@ class GPFIFO:
   def execute_qmd(self, qmd_addr):
     qmd = qmd_struct_t.from_address(qmd_addr)
     prg_addr = qmd.program_address_lower + (qmd.program_address_upper << 32)
-    const0 = to_mv(qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32), 0x160).cast('I')
-    args_cnt, vals_cnt = const0[80], const0[81]
+    # the kernel params follow the driver params in constant buffer 0, naturally aligned like on real hardware
     args_addr = qmd.constant_buffer_addr_lower_0 + (qmd.constant_buffer_addr_upper_0 << 32) + 0x160
-    args = to_mv(args_addr, args_cnt*8).cast('Q')
-    vals = to_mv(args_addr + args_cnt*8, vals_cnt*8).cast('Q')
-    cargs = [ctypes.cast(args[i], ctypes.c_void_p) for i in range(args_cnt)] + [ctypes.cast(vals[i], ctypes.c_void_p) for i in range(vals_cnt)]
+    cargs, off = [], 0
+    for sz in [int(bits)//8 for bits in re.findall(r"\.param \.\w(\d+)", ctypes.string_at(prg_addr).decode())]:
+      cargs.append(ctypes.c_void_p(int.from_bytes(to_mv(args_addr + (off:=round_up(off, sz)), sz), 'little')))
+      off += sz
     gx, gy, gz = qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth
     lx, ly, lz = qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2
-    try: ptx_run(ctypes.cast(prg_addr, ctypes.c_char_p), args_cnt+vals_cnt, (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
+    try: ptx_run(ctypes.cast(prg_addr, ctypes.c_char_p), len(cargs), (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
     except Exception as e: print("failed to execute:", e)
     if qmd.release0_enable:
       rel0 = to_mv(qmd.release0_address_lower + (qmd.release0_address_upper << 32), 0x10).cast('Q')

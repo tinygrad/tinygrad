@@ -72,7 +72,7 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
 
   kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
   args = resolve_params(call, ctx.input_uops) if kernels and kernels[0][2] is None else []
-  lanes = list(unwrap_multi(call, [args[g] for g in call.src[0].arg.globals] if call.src[0].op is Ops.PROGRAM else args)) if args else []
+  lanes = list(unwrap_multi(call, args)) if args else []
   for i, (device, kcall, stats) in enumerate(kernels):
     et, bufs = ets[i] if i < len(ets) else None, lanes[i][0] if i < len(lanes) else []
     display_name = get_call_name(kcall, bufs, ctx.var_vals) if stats is None else stats[0]
@@ -112,8 +112,7 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
     def try_exec(local_size):
       try:
         new_gs = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
-        return runtime(*[bufs[i].get_buf(device) for i in prg.arg.globals], global_size=new_gs, local_size=(*local_size,),
-                       vals=prg.arg.vals(var_vals), wait=True)
+        return runtime(*[b.get_buf(device) for b in bufs], global_size=new_gs, local_size=(*local_size,), vals=prg.arg.vals(var_vals), wait=True)
       except Exception: return float('inf')
 
     MAX_WORKGROUP = 1024
@@ -185,8 +184,7 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   ets:list[float|None] = []
-  resolved = resolve_params(call, ctx.input_uops)
-  for device, (bufs, device_vars) in zip(to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
+  for device, (bufs, device_vars) in zip(to_tuple(call.src[1].device), unwrap_multi(call, resolve_params(call, ctx.input_uops))):
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
@@ -202,7 +200,7 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     var_vals = {**ctx.var_vals, **device_vars}
     cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
     global_size, local_size = prg.arg.launch_dims(var_vals)
-    cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
+    cpu_rt(*[b.ensure_allocated()._buf for b in bufs], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
     for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
   return []
 
@@ -223,6 +221,8 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   if info.inputs is not None:
     table = UOp.from_buffer(dev.rt_buffer().view(len(info.input_addrs), dtypes.uint64, base), HCQ_RUNTIME_DEV.value)
     call = call.substitute({call.src[1+info.inputs]: UOp.mstack(*[table]*len(info.device))})
+  # the call carries every buffer of the batch, the submit program takes the ones it uses
+  call = call.replace(src=(call.src[0], *[call.src[1+g] for g in ast.arg.globals]))
   exec_kernel(replace(ctx, var_vals={**ctx.var_vals, "hcq_inputs_ptr": dev.rt_buffer()._buf.va_addr + base}), call, ast)
 
   def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:

@@ -37,9 +37,12 @@ class HIPProgram(Program[HIPDevice]):
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     check(hip.hipSetDevice(self.dev.device_id))
     if not hasattr(self, "vargs"):
-      fields = ([(f'f{i}', hip.hipDeviceptr_t, i*8) for i in range(len(args))] +
-        [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), o) for i,(o,dt) in enumerate(TinyELF.iter_sig(self.signature[len(args):], len(args)*8))])
-      self.c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
+      layout = list(TinyELF.iter_sig(self.signature))
+      names = TinyELF.merge_args(self.signature, [f'f{i}' for i in range(len(args))], [f'v{i}' for i in range(len(vals))])
+      fields = [(nm, hip.hipDeviceptr_t if shape != () else getattr(ctypes, f"c_int{dt.bitsize}"), off)
+                for nm,(off,dt),(_,_,_,shape) in zip(names, layout, self.signature)]
+      size = layout[-1][0] + layout[-1][1].itemsize if layout else 0
+      self.c_args = init_c_struct_t(size, tuple(fields))(*TinyELF.merge_args(self.signature, args, vals))
       self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
                                          ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)
 

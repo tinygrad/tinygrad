@@ -65,10 +65,12 @@ def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
   return UOp(Ops.INS, src=words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)), arg=("cmd", dtypes.void))
 
 def cpu_exec(ctx:tuple[str, ...], call:UOp, prg:UOp) -> UOp:
-  args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
-  if (core:=prg.arg.runtimevars.get('core_id')) is None: return cpu_cmd(ctx, prg, *args)
+  rt = get_runtime(ctx[0], prg)
+  addrs, vals = [a.getaddr(ctx) for a in get_call_arg_uops(call)], [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
+  args = TinyELF.merge_args(rt.signature, addrs, vals)
+  if (cid:=rt.runtimevars.get('core_id')) is None: return cpu_cmd(ctx, prg, *args)
 
-  la = [cpu_cmd(ctx,prg,*args[:(cid:=(len(prg.arg.globals)+core))],UOp.const(t, dtypes.uint64),*args[cid+1:]) for t in range(prg.arg.global_size[0])]
+  la = [cpu_cmd(ctx, prg, *args[:cid], UOp.const(t, dtypes.uint64), *args[cid+1:]) for t in range(prg.arg.global_size[0])]
   return UOp(Ops.LINEAR, src=tuple(la))
 
 pm_cpu_opsel = PatternMatcher([
@@ -118,7 +120,7 @@ class CPUProgram(Program['CPUDevice']):
 
   def __init__(self, dev:CPUDevice, obj:TinyELF):
     self.dev, self.name, self.signature = dev, obj.name, obj.signature
-    self.runtimevars = {name:slot for name,slot,*_ in obj.signature if name == 'core_id'}
+    self.runtimevars = {name:i for i,(name,*_) in enumerate(obj.signature) if name == 'core_id'}
     self.lvp = obj.target.renderer == "LVP"
 
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
@@ -155,14 +157,14 @@ class CPUProgram(Program['CPUDevice']):
   def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
     st = time.perf_counter()
+    args = TinyELF.merge_args(self.signature, [cast(int, b.va_addr) for b in bufs], vals)
     if self.lvp:
-      lvp_args = bytearray(12 + (len(bufs) + len(vals)) * 8)
+      lvp_args = bytearray(12 + len(args) * 8)
       addr = mv_address(lvp_args)
-      struct.pack_into(f'<3I{len(bufs)}Q', lvp_args, 0, *data64_le(addr+12), (len(bufs)+len(vals))*2, *[b.va_addr for b in bufs])
-      for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs)*8)): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, v)
+      struct.pack_into('<3I', lvp_args, 0, *data64_le(addr+12), len(args)*2)
+      for v,(off,dt) in zip(args, TinyELF.iter_sig(self.signature)): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, v)
       self.fxn(addr)
     else:
-      args = [*[cast(int, b.va_addr) for b in bufs], *cast(tuple[int, ...], vals)]
       assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(args)}"
       for tid in range(global_size[0]):
         if 'core_id' in self.runtimevars: args[self.runtimevars['core_id']] = tid

@@ -30,16 +30,19 @@ class MetalGraph(GraphRunner):
       self.var_buf_view, var_buf_offset = cast(MetalAllocator, self.dev.allocator)._as_buffer(self.var_buf), 0
 
     all_pipelines, all_resources = [], [self.var_buf.buf] if len(self.vars) else []
+    self.buf_index: list[list[list[int]]] = []  # kernel buffer indices of each call arg
     for j, ((_, ast, bufs, _), runtime, replace) in enumerate(zip(self.calls, self.runtimes, self.uop_replace)):
       assert runtime is not None
       icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
       icb_command.setComputePipelineState(runtime.pipeline_state)
       all_pipelines.append(runtime.pipeline_state)
-      for i, b in enumerate(bufs):
-        if not any(pos == i for pos, _ in replace):
-          icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
+      self.buf_index.append([[i for i,(_,s,_,shape) in enumerate(runtime.signature) if shape != () and s == g] for g in ast.arg.globals])
+      for pos, (idxs, b) in enumerate(zip(self.buf_index[j], bufs)):
+        if not any(p == pos for p, _ in replace):
+          for i in idxs: icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
-      for nm,i,dt,_ in runtime.signature[len(bufs):]:
+      for i,(nm,_,dt,shape) in enumerate(runtime.signature):
+        if shape != (): continue
         icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, var_buf_offset, i)
         self.var_bind_data.append((nm, var_buf_offset, dt.fmt))
         var_buf_offset += dt.itemsize
@@ -63,7 +66,7 @@ class MetalGraph(GraphRunner):
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
       for pos, iidx in self.uop_replace[j]:
         buf = cast(Buffer, input_uops[iidx].buffer)
-        computeCommand.setKernelBuffer_offset_atIndex(buf._buf.buf, buf._buf.offset, pos)
+        for i in self.buf_index[j][pos]: computeCommand.setKernelBuffer_offset_atIndex(buf._buf.buf, buf._buf.offset, i)
         updated_bufs.append(buf._buf.buf)
 
     all_resources = dedup(self.all_resources + updated_bufs)
