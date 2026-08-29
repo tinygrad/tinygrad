@@ -24,7 +24,9 @@ def derived_dtypes(u:UOp, src:tuple[UOp, ...]) -> tuple[DType, DType]|None:
 def commit_srcs_at(u:UOp, dt:DType) -> UOp|None:
   # the root re-derives: a shift's dtype is its lhs's, so committing the lhs commits the node too
   bare = derived_dtypes(u, u.src) is not None
-  src = tuple(s if s.dtype not in dtypes.weaks else UOp.const(dt.const(s.val)) if bare and s.op is Ops.CONST else commit_weak(s, dt) for s in u.src)
+  # dt is a floor for each src: one whose bounds overflow it widens to the width they need
+  src = tuple(s if s.dtype not in dtypes.weaks else UOp.const(dt.const(s.val)) if bare and s.op is Ops.CONST
+              else commit_weak(s, least_upper_dtype(dt, default_dtype(s)) if s.overflows(dt) else dt) for s in u.src)
   return None if (ret := u.replace(src=src)) is u else ret
 
 def commit_weak_srcs(u:UOp) -> UOp|None:
