@@ -376,7 +376,8 @@ def lower_hcq_call(call:UOp) -> UOp|None:
           for i, b in enumerate(placeholders)}
 
   # vars slots aft args
-  vrs = {v: v.replace(arg=replace(v.arg, slot=len(args) + i)) for i, v in enumerate(variables)}
+  base = max([len(args)] + [v.arg.slot + 1 for v in variables]) # above every existing slot, or a renumber can cycle
+  vrs = {v: v.replace(arg=replace(v.arg, slot=base + i)) for i, v in enumerate(sorted(variables, key=lambda v: (v.arg.name, v.arg.slot)))}
 
   # reenum ranges
   rngs = {r: r.replace(arg=(i,)+r.arg[1:]) for i,r in enumerate(sorted([u for u in tops if u.op is Ops.RANGE], key=lambda r: r.arg))}
