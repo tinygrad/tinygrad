@@ -229,7 +229,7 @@ class TestWeakPromotion(unittest.TestCase):
 class TestWeakBounds(unittest.TestCase):
   def test_bounds_survive_movement(self):
     moved = Tensor(5).reshape(1).expand(2).pad((1, 1)).detach().contiguous_backward()
-    self.assertEqual((moved.uop.vmin, moved.uop.vmax), (0, 5))
+    self.assertEqual((moved.uop.vmin, moved.uop.vmax, moved.uop.bufferize().vmax), (0, 5, 5))
     self.assertEqual(moved.numpy().dtype, Tensor(5).numpy().dtype)   # a moved weak int reads at the same dtype as the bare one
 
   def test_wide_src_keeps_its_width(self):
@@ -254,6 +254,25 @@ class TestWeakStorageBoundary(unittest.TestCase):
     with tempfile.TemporaryDirectory() as td:                                          # the DISK path checks the same
       ddst = Tensor.empty(2, dtype=dtypes.int32, device=f"DISK:{td}/t")
       with self.assertRaises(RuntimeError): ddst.assign(w05.expand(2))
+
+  def test_weak_commits_by_bounds(self):
+    big = Tensor(2**40)
+    edges = (big.clone(), big.sum(), big.reshape(1).max(), big.reshape(1).mean(), Tensor.stack(big, Tensor(1)).sum() - 1,
+             Tensor([2**40]), big.full_like(2**40))
+    for t in edges: self.assertEqual(t.item(), 2**40)
+    self.assertEqual(Tensor(UOp.variable("b", 0, 2**40).bind(2**35+3)).clone().item(), 2**35+3)
+    self.assertEqual(Tensor([10, 20, 30])[[2**32+1]].tolist(), [0])  # a wide list index is out of range, not wrapped
+    with Context(DEFAULT_INT=dtypes.int64): self.assertEqual(Tensor(2).clone().dtype, dtypes.int64)
+
+  def test_literal_beyond_any_int_raises(self):
+    for make in (lambda: Tensor(2**64).item(), lambda: Tensor([2**64]), lambda: Tensor.full((2,), -2**63-1)):
+      with self.assertRaises(OverflowError): make()
+
+  def test_weak_sentinels_commit_first(self):
+    # max_pool2d, scatter_reduce and cummax pad with the dtype's min/max, which a weak dtype does not have
+    self.assertEqual(Tensor(-5).expand(1, 1, 2, 2).max_pool2d(2, padding=1).dtype, Tensor(-5).clone().dtype)
+    self.assertEqual(Tensor(-5).expand(2).scatter_reduce(0, Tensor([0]), Tensor(-5).expand(1), "amax", include_self=False).tolist(), [-5, -5])
+    self.assertEqual(Tensor(2**40).expand(3).cummax(0)[0].tolist(), [2**40]*3)
 
   def test_weak_has_no_storage(self):
     import numpy as np
