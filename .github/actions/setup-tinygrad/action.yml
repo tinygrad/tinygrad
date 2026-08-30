@@ -258,7 +258,9 @@ runs:
           curl -fL "https://developer.download.nvidia.com/compute/cuda/redist/${archive%%-linux-x86_64-*}/linux-x86_64/$archive" \
             | sudo tar -xJ -C "$cuda_root" --strip-components=1
         done
-        printf 'CUDA_PATH=%s\nLD_LIBRARY_PATH=%s%s\n' "$cuda_root" "$cuda_root/lib" "${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+        echo "CUDA_PATH=$cuda_root" >> "$GITHUB_ENV"
+        echo "$cuda_root/lib" | sudo tee /etc/ld.so.conf.d/cuda-nvrtc.conf
+        sudo ldconfig
 
     # **** gpuocelot ****
     - name: Install gpuocelot
