@@ -139,8 +139,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
-  # a CAST to a concrete dtype over a CONST is a value conversion: evaluate it once, at the CAST's dtype
-  # TODO: delete this once CONST has no dtype
+  # canonicalize casted CONST
   (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
   # collapse committed const conversions when the target has a native constant format. fmt-less targets are emulated and would re-expand this pair.
   (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat(Ops.CAST, dtypes.all, src=(UPat(Ops.CONST, name="c"),)),)),
@@ -158,7 +157,6 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
   # *** div rules ***
   (UPat.cvar('x', arg=0) / 0, lambda x: x.const_like(float('nan'))),   # 0/0 -> nan
-  ((UPat.var("x") * 0) / 0, lambda x: x.const_like(float('nan'))),     # (x*0)/0 -> nan
   # can be wrong if x or x2 is 0
   (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)),          # x/x -> 1
   ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
@@ -390,7 +388,6 @@ def simplify_valid(valid:UOp) -> UOp|None:
 
 def reduce_mul_chain(r:UOp) -> UOp|None:
   if r.arg[0] not in {Ops.ADD, Ops.MAX}: return None
-  if r.dtype != r.src[0].dtype: return None
   inside, outside = [], []
   for m in r.src[0].split_uop(Ops.MUL):
     m_parents = m.backward_slice
@@ -471,8 +468,6 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")), lambda x,d: 1-d), # x*/(1+x) -> 1-1/(1+x)
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")*UPat.var("y")), lambda x,y,d: y*(1-d)),
   (UPat.var("x") * ((1+UPat.var("x")).reciprocal().named("d")+UPat.var("y")), lambda x,y,d: (1-d)+x*y),
-  # move const multiply after REDUCE (NOTE: the mul chain can do this, but only if it's a same dtype reduce)
-  ((UPat.var("x")*UPat.cvar("c")).reduce(arg=Ops.ADD, name="r", allow_any_len=True), lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.val),
   # reduce mul chain, move muls after the reduce
   (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
   # ** combine terms (opinionated) **
