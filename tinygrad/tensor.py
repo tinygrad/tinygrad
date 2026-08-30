@@ -257,6 +257,8 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
       if s is ns: continue
       t.uop = ns
 
+def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop is u for tref in list(all_tensors))
+
 # **** Tensor helper functions ****
 
 def is_numpy_ndarray(x) -> "TypeGuard[numpy.ndarray]": return str(type(x)) == "<class 'numpy.ndarray'>"
@@ -450,7 +452,7 @@ class Tensor(RandMixin):
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
     ib = self.uop
-    while not ib.has_buffer_identity() and ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: ib = ib.src[0]
+    while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
     if ib is not self.uop and ib.has_buffer_identity(after_ok=True):
       # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign")
