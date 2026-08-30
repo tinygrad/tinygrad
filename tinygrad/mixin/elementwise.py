@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 def remint(u:'UOp', dt:DType) -> 'UOp':
-  return u.const_like(u.val, dt) if u.op is Ops.CONST else u.replace(src=(remint(u.src[0], dt),)+u.src[1:])
+  return u.ccast(dt) if u.op is Ops.CONST else u.replace(src=(remint(u.src[0], dt),)+u.src[1:])
 
 class ElementwiseMixin(CreationMixin):
   # required to implement
@@ -28,8 +28,8 @@ class ElementwiseMixin(CreationMixin):
     # keep weak CONST weak, might lift weakint -> weakfloat
     def promote(t):
       if t._uop.base.is_invalid: return t  # invalid bool is weak const
-      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST and t._uop.vmin == t._uop.vmax:
-        return t._wrap_uop(remint(t._uop, weak_dtype(out_dtype)))
+      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST:
+        return t if t.dtype == (dt:=weak_dtype(out_dtype)) else t._wrap_uop(remint(t._uop, dt))
       return t.cast(out_dtype)
     return promote(x), promote(y)
 
@@ -119,7 +119,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    # alu, not +: _broadcasted already promoted these, and a second promote would cast -b (only a bare weak CONST is kept weak)
+    # alu, not +: _broadcasted already promoted these, and a second promote would cast -b (only a weak CONST is kept weak)
     return a.alu(Ops.ADD, -b)
 
   def mul(self, x: Self | ConstType, reverse: bool = False) -> Self:
@@ -251,7 +251,7 @@ class ElementwiseMixin(CreationMixin):
       if rounding_mode == "trunc": return a.alu(Ops.CDIV, b)
       if rounding_mode == "floor": return a.alu(Ops.FLOORDIV, b)
     if dtypes.is_int(a.dtype) or a.dtype == dtypes.bool: a = a.cast(dtypes.default_float)
-    # alu, not *: _broadcasted already promoted these, and a second promote would cast 1/b (only a bare weak CONST is kept weak)
+    # alu, not *: _broadcasted already promoted these, and a second promote would cast 1/b (only a weak CONST is kept weak)
     d = a.alu(Ops.MUL, b.reciprocal())
     if rounding_mode is None: return d
     if rounding_mode == "trunc": return d.trunc()
