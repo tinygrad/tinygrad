@@ -1,10 +1,16 @@
 # ruff: noqa: E501,F403,F405
 from tinygrad.runtime.autogen.amd.cdna.ins import *
 
+MXFP4_TARGET_SHAPES = {(16384, 28672, 4096), (16384, 14336, 4096), (16384, 4096, 4096), (16384, 6144, 4096)}
+
 class Kernel:
-  def __init__(self): self.instructions, self.labels, self.pos = [], {}, 0
+  def __init__(self, target_optimization=False, store_nt=False):
+    self.instructions, self.labels, self.pos = [], {}, 0
+    self.target_optimization, self.store_nt = target_optimization, store_nt
   def label(self, name): self.labels[name] = self.pos
   def emit(self, inst, target=None):
+    if self.target_optimization and repr(inst).startswith("buffer_store_dwordx4"):
+      inst.sc0, inst.sc1, inst.nt = 0, 1, self.store_nt
     self.instructions.append(inst)
     inst._target, inst._pos = target, self.pos
     self.pos += inst.size()
@@ -18,7 +24,8 @@ def v_mfma_fp4(dst, a, b, opsel, opsel_hi, scale_a, scale_b):
   return v_mfma_scale_f32_16x16x128_f8f6f4(dst, a, b, dst, 0, 0, opsel, opsel_hi, 4, 1, 1, 0, 4, 0xD3AC, scale_a.offset, scale_b.offset)
 
 def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
-  k = Kernel()
+  target_optimization = (M, N, K) in MXFP4_TARGET_SHAPES and (tile_m, tile_n) == (256, 256)
+  k = Kernel(target_optimization, store_nt=target_optimization and N >= 14336)
   scale_k = K // 32
   k.emit(s_and_b32(s[1], s[1], LIT, 65535))
   if (tile_m, tile_n) == (128, 512):
@@ -2214,10 +2221,25 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_waitcnt())
     k.emit(s_endpgm())
   elif (tile_m, tile_n) == (256, 256):
+    logical_groups_x, logical_groups_y = N // tile_n, M // tile_m
+    persist = target_optimization
+    if persist:
+      persist_groups = min(logical_groups_x * logical_groups_y, 1024 if N == 14336 else 256)
+      physical_groups_x, physical_groups_y = (32, persist_groups // 32) if persist_groups >= 32 else (persist_groups, 1)
+      physical_groups, logical_groups = physical_groups_x * physical_groups_y, logical_groups_x * logical_groups_y
+      k.emit(v_mov_b32_e32(v[255], v[0]))
+      k.emit(s_mul_i32(s[65], s[3], physical_groups_x))
+      k.emit(s_add_u32(s[65], s[65], s[2]))
+      k.emit(s_mov_b32(s[66], physical_groups))
+      k.emit(s_mov_b32(s[67], logical_groups))
+      k.label('L2_TILE')
+      k.emit(v_mov_b32_e32(v[0], v[255]))
     k.emit(s_add_u32(s[55], s[44], LIT, 255))
     k.emit(s_lshr_b32(s[54], s[55], 8))
-    k.emit(s_mul_i32(s[48], s[54], s[47]))
-    k.emit(s_add_i32(s[48], s[48], s[49]))
+    if persist: k.emit(s_mov_b32(s[48], s[65]))
+    else:
+      k.emit(s_mul_i32(s[48], s[54], s[47]))
+      k.emit(s_add_i32(s[48], s[48], s[49]))
     k.emit(s_add_u32(s[55], s[43], LIT, 255))
     k.emit(s_lshr_b32(s[52], s[55], 8))
     k.emit(s_lshl_b32(s[52], s[52], 5))
@@ -3391,6 +3413,25 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_nop(1))
     k.emit(buffer_store_dwordx4(v[16:19], v[250], s[4:7], 0, 0, 1))
     k.emit(v_add_i32(v[250], v[250], 64))
+    if persist:
+      k.emit(s_barrier())
+      k.emit(s_add_u32(s[65], s[65], s[66]))
+      k.emit(s_cmp_lt_u32(s[65], s[67]))
+      k.emit(s_cbranch_scc0(13), target='L2_DONE')
+      k.emit(s_load_dwordx2(s[4:5], s[0:1], s[0], 0, 0, 0, 0, 1))
+      k.emit(s_load_dwordx2(s[12:13], s[0:1], s[0], 8, 0, 0, 0, 1))
+      k.emit(s_load_dwordx2(s[16:17], s[0:1], s[0], 16, 0, 0, 0, 1))
+      k.emit(s_load_dwordx2(s[20:21], s[0:1], s[0], 24, 0, 0, 0, 1))
+      k.emit(s_load_dwordx2(s[24:25], s[0:1], s[0], 32, 0, 0, 0, 1))
+      k.emit(s_mov_b32(s[36], N))
+      k.emit(s_mov_b32(s[37], K))
+      k.emit(s_mov_b32(s[38], K))
+      k.emit(s_mov_b32(s[39], scale_k))
+      k.emit(s_mov_b32(s[40], scale_k))
+      k.emit(s_mov_b32(s[45], K))
+      k.emit(s_waitcnt(49279))
+      k.emit(s_branch(0), target='L2_TILE')
+      k.label('L2_DONE')
     k.emit(s_waitcnt())
     k.emit(s_endpgm())
   else:

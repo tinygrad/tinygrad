@@ -112,10 +112,12 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
 # ** MXFP4 GEMM custom kernel
 
 MXFP4_TILES = ((256, 256), (192, 256), (128, 512))
+MXFP4_TARGET_SHAPES = {(16384, 28672, 4096), (16384, 14336, 4096), (16384, 4096, 4096), (16384, 6144, 4096)}
 # best tiles from a full sweep over the production shapes (mxfp4_tile_sweep.md); unmatched shapes fall back to 256x256
 MXFP4_TILE_OVERRIDES = {(6144, 4096, 16384):(192, 256), (16384, 4096, 6144):(128, 512), (16384, 6144, 4096):(128, 512)}
 
 def _select_mxfp4_tile(M:int, N:int, K:int) -> tuple[int, int]:
+  if (M, N, K) in MXFP4_TARGET_SHAPES: return 256, 256
   if (tile:=MXFP4_TILE_OVERRIDES.get((M, N, K))) is not None: return tile
   return next((tile_m, tile_n) for tile_m, tile_n in MXFP4_TILES if M % tile_m == N % tile_n == 0)
 
@@ -133,8 +135,14 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
   K = half_k * 2
   assert half_k == half_k_b and math.prod(C.shape[:-1]) == M and C.shape[-1] == N
   threads = UOp.special(256, "lidx0")
-  groups_x, groups_y = UOp.special(ceildiv(N, tile_n), "gidx0"), UOp.special(ceildiv(M, tile_m), "gidx1")
-  lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  logical_groups_x, logical_groups_y = ceildiv(N, tile_n), ceildiv(M, tile_m)
+  target_optimization = (M, N, K) in MXFP4_TARGET_SHAPES and (tile_m, tile_n) == (256, 256)
+  if target_optimization:
+    persist_groups = min(logical_groups_x * logical_groups_y, 1024 if N == 14336 else 256)
+    physical_groups_x, physical_groups_y = (32, persist_groups // 32) if persist_groups >= 32 else (persist_groups, 1)
+  else: physical_groups_x, physical_groups_y = logical_groups_x, logical_groups_y
+  groups_x, groups_y = UOp.special(physical_groups_x, "gidx0"), UOp.special(physical_groups_y, "gidx1")
+  lds = UOp.placeholder((81920 if target_optimization else 163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
   # TODO: this is saving extra copies, why?
   zero = UOp.const(0)
   sink = UOp.sink(C.flatten().index(zero).store(UOp.const(0, C.dtype)), A.flatten().index(zero).load(), B.flatten().index(zero).load(),
