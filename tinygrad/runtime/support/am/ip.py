@@ -318,9 +318,8 @@ class AM_GFX(AM_IP):
 
     self._enable_mec()
 
-    if self.adev.is_vf: # the RLC saves the queue its scheduler points at when the host world switches a VF, so it needs a live one
-      buf = self.adev.mm.valloc(0x2000, uncached=True, contiguous=True, zero=True)
-      self.setup_ring(buf.va_addr, 0x1000, buf.va_addr+0x1000, buf.va_addr+0x1008, buf.va_addr, 0x1000, idx=4, aql=False, me=2)
+    if self.adev.is_vf: # PF expects RLC scheds
+      self.setup_ring(b:=self.adev.paddr2mc(self.adev.mm.palloc(0x2000, zero=True)), 0x1000, b+0x1000, b+0x1008, b, 0x1000, idx=4, aql=False, me=2)
       for xcc in range(self.xccs): self.adev.reg("regRLC_CP_SCHEDULERS").update(scheduler0=(2 << 5) | (1 << 3) | 0x80, inst=xcc)
 
     # set 1 partition on bare metal. a VF uses the spatial partition its host PF assigned.

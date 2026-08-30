@@ -260,8 +260,7 @@ class AMDev:
     with contextlib.suppress(TimeoutError): self._vf_mailbox_request(rel, wait_ready=False)
 
   def _vf_mailbox_request(self, req:int, wait_ready=True) -> int:
-    # the pf delivers nothing while an event is unacknowledged, and it leaves IDH_FLR_NOTIFICATION_CMPL pending after a reset
-    if self.vf_mailbox[1] & 1: self.vf_mailbox[1] = 2
+    if self.vf_mailbox[1] & 1: self.vf_mailbox[1] = 2 # ack
     self.vf_mailbox[0] = 0 # drop TRN_MSG_VALID
 
     wait_cond(lambda: self.vf_mailbox[0] & 2, value=0, timeout_ms=1000, msg="VF mailbox acknowledgement did not clear")
