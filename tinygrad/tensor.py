@@ -9,7 +9,6 @@ from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, Tracin
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, ParamArg, graph_rewrite, rewrite_group
 from tinygrad.uop.ops import resolve_returned_after
-from tinygrad.uop.weak import default_dtype
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
