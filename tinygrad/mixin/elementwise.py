@@ -971,7 +971,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).elu().numpy())
     ```
     """
-    return self.relu() - alpha*(1-self.exp()).relu()
+    return (self > 0).where(self, alpha*((self - self.relu()).exp() - 1))
 
   def celu(self, alpha=1.0) -> Self:
     """
@@ -983,7 +983,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).celu().numpy())
     ```
     """
-    return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
+    return alpha * (self / alpha).elu()
 
   def selu(self, alpha=1.67326, gamma=1.0507) -> Self:
     """
@@ -995,7 +995,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).selu().numpy())
     ```
     """
-    return gamma * (self >= 0).where(self, alpha * (self.exp() - 1))
+    return gamma * self.elu(alpha)
 
   def softplus(self, beta=1.0) -> Self:
     """

@@ -978,9 +978,12 @@ class TestOps(unittest.TestCase):
   def test_celu(self):
     for val in range(1, 5):
       helper_test_op([(45,65)], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
+      helper_test_op([(3,3)], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val), low=300, high=400)
       helper_test_op([()], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
   def test_selu(self):
     helper_test_op([(45,65)], torch.nn.functional.selu, Tensor.selu)
+    helper_test_op([(3,3)], torch.nn.functional.selu, Tensor.selu, low=300, high=400)
+    helper_test_op(None, torch.nn.functional.selu, Tensor.selu, vals=[[-1.,0.,1.]])
     helper_test_op([()], torch.nn.functional.selu, Tensor.selu)
   def test_silu(self):
     helper_test_op([(45,65)], torch.nn.functional.silu, Tensor.silu)
@@ -1117,6 +1120,7 @@ class TestOps(unittest.TestCase):
   def test_elu(self):
     helper_test_op([(45,65)], torch.nn.functional.elu, Tensor.elu)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.elu(x, alpha=0.1), lambda x: Tensor.elu(x, alpha=0.1))
+    helper_test_op([(3,3)], torch.nn.functional.elu, Tensor.elu, low=300, high=400)
     helper_test_op([()], torch.nn.functional.elu, Tensor.elu)
   def test_relu6(self):
     helper_test_op([(45,65)], torch.nn.functional.relu6, Tensor.relu6)
