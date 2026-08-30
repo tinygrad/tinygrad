@@ -37,7 +37,7 @@ class PM4Ops(FastEnum):
   RELEASE_MEM = auto(); DISPATCH_DIRECT = auto(); EVENT_WRITE = auto()  # noqa: E702
 
 def pkt3(ctx, op:PM4Ops, *vals):
-  return UOp(Ops.INS, arg=op, src=tuple(UOp.const(x, dtypes.uint32)
+  return UOp(Ops.INS, arg=(op, dtypes.void), src=tuple(UOp.const(x, dtypes.uint32)
     for x in (ctx.pm4.PACKET3(getattr(ctx.pm4, f"PACKET3_{op.name}"), len(vals) - 1), *vals)))
 
 def wreg(ctx, reg:AMDReg, *args:sint, **kwargs:int):
@@ -140,10 +140,10 @@ def pm4_program(ctx, call, prg):
 pm_pm4_opsel = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), pm4_program),
 
-  (UPat(Ops.INS, arg="wait", src=(UPat(name="dst"), UPat(name="val"))), pm4_wait),
-  (UPat(Ops.INS, arg="barrier"), pm4_barrier),
-  (UPat(Ops.INS, arg="timestamp", src=(UPat(name="dst"),)), pm4_timestamp),
-  (UPat(Ops.INS, arg="store", src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))), pm4_store),
+  (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), pm4_wait),
+  (UPat(Ops.INS, arg=("barrier", dtypes.void)), pm4_barrier),
+  (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), pm4_timestamp),
+  (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))), pm4_store),
 ])
 
 def queue_ptrs(devs, qname:str, q:AMDQueueDesc) -> tuple[UOp, ...]:
@@ -207,10 +207,10 @@ def sdma_timestamp(ctx, ins, dst):
 pm_sdma_opsel = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), sdma_copy),
 
-  (UPat(Ops.INS, arg="barrier"), lambda: UOp(Ops.NOOP)),
-  (UPat(Ops.INS, arg="wait", src=(UPat(name="dst"), UPat(name="val")), name="ins"), sdma_wait),
-  (UPat(Ops.INS, arg="timestamp", src=(UPat(name="dst"),), name="ins"), sdma_timestamp),
-  (UPat(Ops.INS, arg="store", src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val")), name="ins"), sdma_store),
+  (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda: UOp(Ops.NOOP)),
+  (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val")), name="ins"), sdma_wait),
+  (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),), name="ins"), sdma_timestamp),
+  (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val")), name="ins"), sdma_store),
 ])
 
 def sdma_submit(cmdbuf, devs):
@@ -254,7 +254,7 @@ def amd_usb_submit(ctx, lin):
 
   if nb:=usb_arm_bytes(ctx.pre, Device[ctx.devs[0]].iface.usb_sram):
     poke = (ctx.sdma.SDMA_OP_WRITE, *data64_le(Device[ctx.devs[0]].iface.cq_buf.va_addr + 12), 0, 0)
-    lin = lin.replace(src=lin.src + (UOp(Ops.INS, arg="poke", src=tuple(UOp.const(x, dtypes.uint32) for x in poke)),))
+    lin = lin.replace(src=lin.src + (UOp(Ops.INS, arg=("poke", dtypes.void), src=tuple(UOp.const(x, dtypes.uint32) for x in poke)),))
 
   ib_host, ib_gpu, pkt_dw = usb_ib(ctx.devs, lin, 32 if comp else 0x100, nb)
   pkt = (ctx.pm4.PACKET3(ctx.pm4.PACKET3_INDIRECT_BUFFER,2),*data64_le(ib_gpu.getaddr(ctx.devs)),pkt_dw|ctx.pm4.INDIRECT_BUFFER_VALID) if comp else ()

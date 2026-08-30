@@ -228,7 +228,7 @@ class TestViz(unittest.TestCase):
     with save_viz() as viz:
       inner = UOp.const(3)
       call = UOp(Ops.CALL, src=(UOp(Ops.SINK, src=(inner,)),))
-      func = UOp(Ops.FUNCTION, src=(UOp(Ops.TUPLE, src=(call,)),))
+      func = UOp(Ops.CALL, src=(UOp(Ops.TUPLE, src=(call,)),))
       graph_rewrite(func, TrackedPatternMatcher(pm.patterns), enter_calls=True)
     details = list(viz.get_details(0, 0))
     self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
@@ -841,7 +841,7 @@ class TestCfg(unittest.TestCase):
       lidx = UOp.special(1, "lidx0")
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
     with save_viz() as viz:
       with Context(DEV="NULL::gfx1100"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]

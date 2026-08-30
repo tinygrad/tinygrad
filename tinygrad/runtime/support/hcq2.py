@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import cast, TypeVar, Generic, Any, Sequence, Iterable
+from typing import cast, TypeVar, Generic, Any, Sequence, Iterable, TYPE_CHECKING
 import struct, functools, time, collections, itertools, decimal, statistics
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE
@@ -9,11 +9,11 @@ from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphE
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.dtype import dtypes, truncate, DType
-from tinygrad.runtime.support.hcq import MMIOInterface, HCQBuffer
-from tinygrad.runtime.support.memory import BumpAllocator
+from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop
-from tinygrad.engine.realize import pm_flatten_linear, lower_and_compile
+from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear,lower_and_compile
+
+if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: remove that
 
 # *****************
 # 0. helpers
@@ -168,8 +168,8 @@ class BatchCtx:
   slots:dict[str, int] = field(default_factory=lambda: collections.defaultdict(lambda: next(UOp.unique_num)))
 
 def _get_call_bufs_by_lane(call:UOp, devices:tuple[str, ...]) -> list[list[Any]]:
-  return [[b if (b:=_lane(a, lane)).op is Ops.PARAM or (b.op is Ops.MSELECT and b.src[0].op is Ops.PARAM) else b.buffer
-           for a in get_call_arg_uops(call)] for lane in range(len(devices))]
+  def dep_buf(b:UOp) -> Any: return base if (base:=(b.src[0] if b.op is Ops.MSELECT else b).base).op is Ops.PARAM else b.buffer
+  return [[dep_buf(_lane(a, lane)) for a in get_call_arg_uops(call)] for lane in range(len(devices))]
 
 def _wait_ins(ctx:BatchCtx, bufs_by_lane:list[list[Any]], write, devices:tuple[str, ...], queue:str, tag:int) -> list[UOp]:
   deps:list[Dep] = []
@@ -189,7 +189,7 @@ def _wait_ins(ctx:BatchCtx, bufs_by_lane:list[list[Any]], write, devices:tuple[s
   for (dqueue, dtag), by_lane in rows.items():
     for ds in itertools.zip_longest(*(by_lane[lane] for lane in range(len(devices)))):
       sig = UOp.mstack(*[make_buf(d, tag="sentinel_signal") if dd is None else make_buf(dd, ctx.slots[dqueue]) for dd, d in zip(ds, devices)])
-      waits.append(UOp(Ops.INS, arg="wait", src=(sig, UOp.const(dtag + 1, dtypes.uint64))))
+      waits.append(UOp(Ops.INS, arg=("wait", dtypes.void), src=(sig, UOp.const(dtag + 1, dtypes.uint64))))
   ctx.signal_tags |= {t for _, t in rows}
   return waits
 
@@ -238,7 +238,7 @@ def _make_finalizers(ctx:BatchCtx) -> tuple[list[UOp], list[UOp], list[UOp]]:
 
     # finalizer: bump the host timeline and remember this schedule's epoch for the next fence
     waits = _wait_ins(ctx, [list(dev_bufs[d].values()) for d in devs], None, devs, "COMPUTE:0", n)
-    fin_submit = make_submit(*waits, UOp(Ops.INS, arg="store", src=(tl_signal, tl_value.index(0))), devs=devs, queue="COMPUTE:0")
+    fin_submit = make_submit(*waits, UOp(Ops.INS, arg=("store", dtypes.void), src=(tl_signal, tl_value.index(0))), devs=devs, queue="COMPUTE:0")
     epoch = (epoch_slot:=tl_value.after(fin_submit).index(0)).load()
     fins.append(make_call("hcq_finalizer", UOp.sink(epoch_slot.store(epoch + 1), sched_epoch.after(fin_submit).index(0).store(epoch)), HCQInfo(devs)))
   return fences, resets, fins
@@ -251,18 +251,20 @@ def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], 
     if (devices, queue) not in seen_queues:
       seen_queues.add((devices, queue))
       epoch = make_buf(devices, tag="timeline_value").index(0) - 1
-      q = [UOp(Ops.INS, arg="barrier", src=()), UOp(Ops.INS, arg="wait", src=(make_buf(devices, tag="timeline_signal"), epoch))] + q
+      q = [UOp(Ops.INS, arg=("barrier", dtypes.void), src=()),
+           UOp(Ops.INS, arg=("wait", dtypes.void), src=(make_buf(devices, tag="timeline_signal"), epoch))] + q
 
     # and make hcq call
     name, info = get_call_name(call, get_call_arg_uops(call)), HCQInfo(devices, estimate_uop(call))
     ts_ids = [next(UOp.unique_num) for _ in range(2)] if ctx.profile else []
     kerns.append((devices, name, info.estimates, tuple(ts_ids), make_call(name, call.src[0], info).key))
 
-    ts_ins = [UOp(Ops.INS, arg="timestamp", src=(make_buf(devices, s),)) for s in ts_ids]
+    ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(make_buf(devices, s),)) for s in ts_ids]
     q += ts_ins[:1] + [call.replace(arg=replace(call.arg, aux=info))] + ts_ins[1:]
 
     # signal the queue if someone waits for us
-    if tag in ctx.signal_tags: q += [UOp(Ops.INS, arg="store", src=(make_buf(devices, ctx.slots[queue]), UOp.const(tag + 1, dtypes.uint64)))]
+    if tag in ctx.signal_tags:
+      q += [UOp(Ops.INS, arg=("store", dtypes.void), src=(make_buf(devices, ctx.slots[queue]), UOp.const(tag + 1, dtypes.uint64)))]
     src.append(make_call(f"submit {name}", make_submit(*q, devs=devices, queue=queue).sink(), info))
   return src, kerns
 
@@ -462,7 +464,7 @@ def hcq_lower(linear:UOp, pm_encode:PatternMatcher) -> UOp:
   linear = graph_rewrite(linear, pm_split_patches, walk=True, name="split patches")
 
   # and compile it
-  return lower_and_compile(graph_rewrite(linear, pm_replace_params, walk=True, name="replace params"))
+  with Context(EMULATED_DTYPES=""): return lower_and_compile(graph_rewrite(linear, pm_replace_params, walk=True, name="replace params"))
 
 @rewrite_group(lambda linear,input_uops,profile,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:

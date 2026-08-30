@@ -54,6 +54,12 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["squeezed"]
     self.helper_test_single_op("Squeeze", inputs, attributes, outputs)
 
+  def test_mean_variance_normalization_axes(self):
+    inputs = {"x": np.random.randn(2, 3, 4, 5).astype(np.float32)}
+    attributes = {"axes": [2, 3]}
+    outputs = ["out"]
+    self.helper_test_single_op("MeanVarianceNormalization", inputs, attributes, outputs)
+
   def test_conv(self):
     # test VALID auto_pad
     inputs = {
@@ -234,6 +240,15 @@ class TestMainOnnxOps(TestOnnxOps):
     attributes = {"kernel_shape": [2, 2], "strides": [2, 2]}
     outputs = ["y"]
     self.helper_test_single_op("MaxUnpool", inputs, attributes, outputs)
+
+  def test_maxunpool_pads(self):
+    # per-axis pads shrink the output: spatial dim is (i-1)*stride + kernel - pad_begin - pad_end -> (2, 4), and indices index into that output
+    # NOTE: indices must be in bounds of that output; ORT aborts the process on out-of-bounds indices
+    xT = np.array([[[[5, 6], [7, 8]]]], dtype=np.float32)
+    xI = np.array([[[[0, 3], [4, 7]]]], dtype=np.int64)
+    inputs = {"x": xT, "indices": xI}
+    attributes = {"kernel_shape": [2, 2], "strides": [2, 2], "pads": [1, 0, 1, 0]}
+    self.helper_test_single_op("MaxUnpool", inputs, attributes, ["y"])
 
   def test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-13

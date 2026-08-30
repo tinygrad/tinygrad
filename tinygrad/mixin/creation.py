@@ -78,8 +78,7 @@ class CreationMixin(DTypeMixin, MovementMixin):
     from tinygrad.uop.ops import UOp
     new_shape = argfix(shape)
     dt = to_dtype(dtype) if dtype is not None else fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)
-    val = cls.const(fill_value, dt)
-    val = val.reshape((1,)*len(new_shape)).expand(new_shape)
+    val = cls.const(fill_value, dt).expand(new_shape)
     if not buffer: return val
     ret = val.empty_like(dt if dtype is not None else None, device)
     return cls._wrap_uop(ret._uop.after(ret._uop.store(val._uop)))

@@ -359,6 +359,13 @@ class TestOps(unittest.TestCase):
       lambda x: torch.where(x > 0.5, 4, 2).type(torch.int32).permute((1, 0)),
       lambda x: (x > 0.5).where(4, 2).clone().permute((1, 0)), forward_only=True)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "software vulkan evaluates a NaN != x as false")
+  def test_where_nan_cond(self):
+    # a NaN compares false against everything except !=.
+    for fxn in (lambda x: x<1, lambda x: x>1, lambda x: x!=1, lambda x: x==1):
+      helper_test_op(None, lambda x,a,b: torch.where(fxn(x), a, b), lambda x,a,b: fxn(x).where(a, b), forward_only=True,
+                     vals=[[math.nan, 1.0, 2.0, -1.0], [10, 20, 30, 40], [-1, -2, -3, -4]])
+
   def _test_cmp(self, fxn, reverse=True):
     # test different dtypes
     helper_test_op(None, fxn, fxn, forward_only=True, vals=[[0.,1,2], [2.,1,0]])
@@ -1761,6 +1768,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.normalize(x, p=3, dim=0), lambda x: x.normalize(p=3, dim=0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.normalize(x, p=0), lambda x: x.normalize(p=0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.normalize(x, p=-1), lambda x: x.normalize(p=-1), atol=1e-7, grad_atol=1e-7)
+  def test_normalize_int(self):
+    helper_test_op(None, lambda x: torch.nn.functional.normalize(x.float(), p=2), lambda x: x.normalize(p=2), forward_only=True,
+                   vals=[[[3, 4], [6, 8]]])
 
   def test_logsumexp(self):
     helper_test_op([(45,65)], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)
@@ -1773,6 +1783,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45)], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.logsumexp(x, dim=-1), lambda x: x.logsumexp(-1), atol=1e-7, grad_atol=1e-7)
+    helper_test_op(None, lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), vals=[[-math.inf, -math.inf]], forward_only=True)
 
   @slow_test
   def test_logcumsumexp(self):
@@ -2810,7 +2821,7 @@ class TestOps(unittest.TestCase):
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear"))
 
   def test_interpolate_linear_corners_aligned(self):
-    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
+    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,)), ((29,),(1,))]:
       helper_test_op([(2,3)+in_sz],
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear", align_corners=True),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True))

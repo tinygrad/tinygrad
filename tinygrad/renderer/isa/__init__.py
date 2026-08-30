@@ -12,6 +12,13 @@ class Register:
   def __repr__(self): return self.name
   def __hash__(self): return hash(self.name) * 256 + self.index
 
+"""
+Hierarchical representation of a register view before assigned physical registers in regalloc.
+- multi-register values are represented as STACK(..., tag=parent vreg, dtype=unit dtype).bitcast(overall dtype)
+  - child values are given sub-vregister tags pre-regalloc that obey the contiguity constraint
+- child values can also be accessed by INDEX into a parent register, rewritten to sub at pre-regalloc time
+  - differentiated from high level INDEX by src[0] (memory address if PARAM/BUFFER)
+"""
 @dataclass(frozen=True)
 class VRegister:
   name: str
@@ -21,12 +28,15 @@ class VRegister:
   parent: VRegister|None = None
   pos: int|None = None
   phi: tuple[VRegister,...]|None = None
-  def __repr__(self): return f"{self.name} <= phi[{','.join(str(e) for e in self.phi)}]" if self.phi is not None else self.name
+  def __repr__(self): return f"{self.name} <= phi[{','.join(str(e) for e in self.phi)}]" if self.phi is not None else f"{self.name}({self.width})"
   def is_sub(self) -> bool: return self.parent is not None
   def or_parent(self) -> VRegister: return self.parent if self.is_sub() else self
-  def sub(self, i:int) -> VRegister:
-    assert i < self.width, f"sub-register index out of width range ({i} >= {self.width})"
-    return VRegister(f"{self.name}.{i}", self.cons, 1, self.alignment, self, i)
+  def sub(self, i:int, length:int=1) -> VRegister:
+    assert i+length <= self.width, f"sub-register index out of width range ({i} >= {self.width})"
+    if self.is_sub(): return self.parent.sub(self.pos + i)
+    return VRegister(f"{self.name}.{i}", self.cons, length, self.alignment, self, i)
+  def __getitem__(self, idx):
+    return self.sub(idx.start, idx.stop - idx.start + 1) if isinstance(idx, slice) else self.sub(idx)
   @functools.cached_property
   def _hash(self): return hash((self.name, len(self.cons), self.width, self.alignment, self.pos, (self.parent.name if self.parent else None)))
   def __hash__(self): return self._hash
@@ -36,7 +46,7 @@ class VRegister:
   def candidates(self) -> list[tuple[Register,...]]: return self._candidates
 
 def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
-  if u.op in {Ops.AFTER, Ops.NOOP} and len(u.src): return rdefs(u.src[0])
+  if u.op in {Ops.AFTER, Ops.NOOP, Ops.BITCAST} and len(u.src): return rdefs(u.src[0])
   return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)) if isinstance(v, (VRegister, Register)))
 def rdef(u:UOp) -> VRegister|Register|None: return rdefs(u)[0] if len(rdefs(u)) >= 1 else None
 
@@ -44,6 +54,7 @@ class PreRegallocContext:
   def __init__(self, sink:UOp, ren:ISARenderer):
     self.ren = ren
     self.uses = consumer_map_from_toposort(sink.toposort())
+    self.scratch_slot = itertools.count(-1, -1)
     self.reg_n = itertools.count()
     self.lock: UOp|None = None
     self.clobbered: set[UOp] = set()

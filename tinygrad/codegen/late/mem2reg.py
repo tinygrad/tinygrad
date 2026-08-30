@@ -4,6 +4,7 @@ from tinygrad.uop.ops import PatternMatcher, UOp, UPat, Ops, ParamArg, AddrSpace
 import itertools
 
 def bptr(x:UOp) -> tuple[UOp, int]:
+  while x.op is not Ops.INDEX: x=x.src[0]
   buf,idx = x.src
   while buf.op is Ops.AFTER: buf=buf.src[0]
   return (buf,idx.src[0].val)
