@@ -1,13 +1,16 @@
 import math, functools, operator
 from typing import TYPE_CHECKING, Literal, Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float, weak_dtype
+from tinygrad.dtype import dtypes, ConstType, DType, PyConst, least_upper_dtype, least_upper_float, weak_dtype
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.creation import CreationMixin
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp, sint
 
+
+def remint(u:'UOp', dt:DType) -> 'UOp':
+  return u.const_like(u.val, dt) if u.op is Ops.CONST else u.replace(src=(remint(u.src[0], dt),)+u.src[1:])
 
 class ElementwiseMixin(CreationMixin):
   # required to implement
@@ -26,7 +29,7 @@ class ElementwiseMixin(CreationMixin):
     def promote(t):
       if t._uop.base.is_invalid: return t  # invalid bool is weak const
       if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST and t._uop.vmin == t._uop.vmax:
-        return t._wrap_uop(t._uop.const_like(t._uop.base.val, weak_dtype(out_dtype)))
+        return t._wrap_uop(remint(t._uop, weak_dtype(out_dtype)))
       return t.cast(out_dtype)
     return promote(x), promote(y)
 
