@@ -262,7 +262,7 @@ runs:
       shell: bash
       run: |
         sudo mkdir -p /usr/local/lib
-        sudo curl --output-dir /usr/local/lib -fLO https://github.com/li0nr/gpuocelot/releases/download/cuda-12-support/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
+        sudo curl --output-dir /usr/local/lib -fLO https://github.com/li0nr/gpuocelot/releases/download/cuda-12-support-v2/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
 
     # **** WebGPU ****
 
