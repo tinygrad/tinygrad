@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field, replace
 from typing import cast
 import itertools
-from tinygrad.dtype import dtypes, AddrSpace, Invalid, strong_dtype
+from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic

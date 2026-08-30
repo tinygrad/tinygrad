@@ -152,15 +152,19 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
   else: cons, width = GP_VGPRS, ((x.dtype.itemsize+3) // 4) * (len(x.src) if x.op is Ops.STACK else 1)
   return x.replace(tag=(ctx.ren.vreg(cons, width=width),))
 
-# https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
 def abi(ctx, x:UOp) -> UOp|None:
   if x.tag is True: return None
+
+  if x.op is Ops.SPECIAL:
+    if x.arg[0] == 'g': return vmov(def_reg(dtypes.uint32, WGIDS[int(x.arg[-1])])).after(x.rtag())
+    return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(def_reg(dtypes.uint32, WIIDS), const(10*int(x.arg[-1])), const(10)))
+
   # NOTE: carries PARAM op through meta src edge to preserve program info
-  offs = const(sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:ctx.func_args.index(x)]))
-  if x.addrspace is AddrSpace.ALU:
-    return vmov(UOp(Ops.INS, src=(kernarg_ptr, offs, x.rtag()), arg=(RDNA3Ops.s_load_b32, x.dtype), tag=GP_SGPRS))
-  return UOp(Ops.INS, src=(kernarg_ptr, offs, x.rtag()), arg=(RDNA3Ops.s_load_b64, dtypes.ulong),
-             tag=(ctx.ren.vreg(GP_SGPRS, width=2, alignment=2),))
+  offs = const(sum(8 if u.op == Ops.PARAM else u.dtype.itemsize for u in ctx.func_args[:ctx.func_args.index(x)]))
+  src = (kernarg_ptr, offs, x.rtag())
+  if x.addrspace is AddrSpace.ALU: return vmov(UOp(Ops.INS, src=src, arg=(RDNA3Ops.s_load_b32, x.dtype), tag=GP_SGPRS))
+  vr = ctx.ren.vreg(GP_SGPRS, width=2, alignment=2)
+  return UOp(Ops.INS, src=src, arg=(RDNA3Ops.s_load_b64, dtypes.ulong), tag=(vr,))
 
 # ----- memory access ----
 def fold_global(base:UOp, idx:UOp):
@@ -464,9 +468,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("idx").load(name="x", allow_any_len=True), lambda ctx,x,idx:
     load(ctx,x,idx) if idx.addrspace is not AddrSpace.REG else None),
   # --- other ---
-  (UPat(Ops.SPECIAL, name="x"), lambda x: vmov(def_reg(dtypes.uint32, WGIDS[int(x.arg[-1])])) if x.arg[0] == 'g' else
-    x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=(def_reg(dtypes.uint32, WIIDS), const(10*int(x.arg[-1])), const(10)))),
-  (UPat(Ops.PARAM, name="x"), abi),
+  (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
   (UPat((Ops.INS, Ops.STACK), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   (UPat(Ops.STACK, name="x"), lambda ctx,x: stack2regs(ctx, x) if len(x.src) and x.dtype.itemsize < 4 else None),

@@ -36,11 +36,11 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str, scratch_size:int=0) -> bytes:
       elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
 
   # ** scan sink for metadata
-  sink, lds_size, n_bufs, n_vars, gids = prg.src[0], 0, len(prginfo.globals), len(prginfo.vars), set([0, 1, 2])
-  # Hack for now, derive from local_size/global_size?
-  # - maybe just add which kernel shape indices are used to program info ex. gidx_used, lidx_used or sum
+  sink, param_sizes, lds_size, gids = prg.src[0], {}, 0, set()
   for u in sink.toposort():
+    if u.op is Ops.PARAM: param_sizes[u.arg.slot] = u.dtype.itemsize if u.addrspace is AddrSpace.ALU else 8
     if u.op is Ops.BUFFER and u.addrspace is AddrSpace.LOCAL: lds_size += u.max_numel() * u.dtype.itemsize
+    if u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
   arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
@@ -61,7 +61,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str, scratch_size:int=0) -> bytes:
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t()
   desc.group_segment_fixed_size = lds_size
   desc.private_segment_fixed_size = scratch_size
-  desc.kernarg_size = n_bufs * 8 + n_vars * 4
+  for sz in (param_sizes[i] for i in sorted(param_sizes)): desc.kernarg_size = round_up(desc.kernarg_size, sz) + sz
   desc.kernel_code_entry_byte_offset = -len(text)
 
   # https://llvm.org/docs/AMDGPUUsage.html#amdgpu-amdhsa-compute-pgm-rsrc1-gfx6-gfx12-table
