@@ -185,9 +185,12 @@ def fold_global(base:UOp, idx:UOp):
 # TODO: actually calculate lds offset per seperate BUFFER, (ctx.func_args)
 def fold_lds(base:UOp, idx:UOp): # (vaddr, ioffs)
   scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
-  if is_const(idx): return (idx.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),)), const(idx.src[0].val * scale, dtypes.uint16), base)
-  if idx.op is Ops.ADD and is_const(idx.src[1]): return (idx.src[0].cast(dtypes.uint32), const(idx.src[1].src[0].val * scale, dtypes.uint16), base)
   shft = const(scale.bit_length() - 1, dtypes.int32)
+  # offset0/offset1 form one 16 bit unsigned immediate, anything outside that has to stay in the addr vgpr
+  def foldable(v:int) -> bool: return 0 <= v < (1 << 16)
+  if is_const(idx) and foldable(v := const_val(idx) * scale): return (vmov(const(0)), const(v, dtypes.uint16), base)
+  if idx.op is Ops.ADD and is_const(idx.src[1]) and foldable(v := const_val(idx.src[1]) * scale):
+    return ((idx.src[0] << shft if scale > 1 else idx.src[0]).cast(dtypes.uint32), const(v, dtypes.uint16), base)
   return (idx << shft, const(0, dtypes.uint16), base)
 
 def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(*x.src[:2])
