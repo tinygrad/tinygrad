@@ -127,8 +127,9 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
 
   for v in rdefs(x):
     if not isinstance(v, VRegister): continue
-    if v in ctx.spills and not (x.op is Ops.BUFFER and v.phi is not None):
-      after.extend(ctx.ren.spill(ctx.spills[v], nx))
+    # spills are keyed by the parent, a subregister def still has to write back into the parent's slot at its own offset
+    if (vv := v.or_parent()) in ctx.spills and not (x.op is Ops.BUFFER and vv.phi is not None):
+      after.extend(ctx.ren.spill(ctx.spills[vv], nx, v.pos if v.is_sub() else None))
   for v,rs in ctx.insert_before.get(i, []):
     before.extend(ctx.ren.fill(ctx.spills[v], None, ctx.vdef(v), rs)[1])
 

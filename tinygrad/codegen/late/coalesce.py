@@ -129,6 +129,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     # allowed lengths (copied in)
     lengths = []
     must_divide = True
+    sz, dword_align = buf.dtype.itemsize, 1
     if ctx is not None and ctx.target.device == "DSP":
       lengths = [128,64,32,16,8,4]
       must_divide = False
@@ -136,7 +137,8 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       pass
     elif "AMD" == ctx.target.device and ctx.target.renderer == "RDNA3" and buf.dtype is not dtypes.bool and \
          not (buf.dtype in dtypes.int64s and dtypes.long in EMULATED_DTYPES.tolist(dtypes)):
-      must_divide, sz = False, buf.dtype.itemsize
+      # NOTE: odd loads/stores must still be aligned on dword (b32) boundary
+      must_divide, dword_align = False, max(4//sz, 1)
       lengths = [b//(sz*8) for b in [128,96,64,32,16,8] if b >= sz*8]
     elif buf.dtype not in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and not is_image_shape(buf._shape):
       pass
@@ -151,7 +153,8 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
     for full_grp in grouped_offsets:
       while len(full_grp):
         offset = (base+full_grp[0]) if isinstance(base, UOp) else UOp.const(full_grp[0])
-        length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)][0]
+        length = [l for l in lengths if l <= len(full_grp) and (not must_divide or offset.divides(l) is not None)
+                  and (dword_align == 1 or l*sz < 4 or offset.divides(dword_align) is not None)][0]
         grp = full_grp[:length]
         # NOTE: we apply the valid again after we determine the length
         offset = offset.valid(valid) if valid is not None else offset

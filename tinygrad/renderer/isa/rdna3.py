@@ -8,6 +8,7 @@ from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.codegen.decomp.op import fast_idiv
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext
 from tinygrad.renderer.amd.elf import assemble_linear
+from tinygrad.renderer.cstyle import HIPRenderer
 import tinygrad.renderer.amd.dsl as dsl
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 import itertools, functools, struct
@@ -129,17 +130,19 @@ def can_fold_lit(c:UOp):
   if isinstance(v, int): return 0 <= v <= 64 or -16 <= v < 0
   return False
 
-def _vop3(x:UOp):
+def lvop3(x:UOp):
   lits = [s for s in x.src if is_const(s) and not can_fold_lit(s)]
   return None if len(lits) == 1 else x.replace(src=tuple([vmov(s) if s in lits[1:] else s for s in x.src]))
 
 rev_op_order = { RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshlrev_b16, RDNA3Ops.v_lshlrev_b64, RDNA3Ops.v_lshrrev_b32_e32, RDNA3Ops.v_lshrrev_b16, RDNA3Ops.v_lshrrev_b64, RDNA3Ops.v_ashrrev_i32_e32, RDNA3Ops.v_ashrrev_i64 }
-def _vop2(x:UOp):
+commutative_ins = {i for op in (Ops.ADD, Ops.MUL, Ops.MAX) for i in OP_INS[op].values()}
+def lvop2(x:UOp, swap_only=False):
   if not is_const(x.src[1]): return None # TODO: should check positive vgpr, sgpr cant be used in vrsc1
   rest = x.src[2:] if len(x.src) > 2 else ()
   non_commutative = x.arg[0] in set(OP_INS[Ops.SUB].values()) | rev_op_order
   if not non_commutative and not is_const(x.src[0]): return x.replace(src=(x.src[1], x.src[0]) + rest)
-  return x.replace(src=(x.src[0], vmov(x.src[1])) + rest)
+  # VOP3 encodes a const in src1 fine, it only ever wants the commutative swap above, never the vmov
+  return None if swap_only else x.replace(src=(x.src[0], vmov(x.src[1])) + rest)
 
 def alloc_vregs(ctx, x:UOp) -> UOp|None:
   if x.dtype is dtypes.void: return None
@@ -467,8 +470,10 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.INS, Ops.STACK), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   (UPat(Ops.STACK, name="x"), lambda ctx,x: stack2regs(ctx, x) if len(x.src) and x.dtype.itemsize < 4 else None),
-  (UPat(Ops.INS, name="x"), lambda x: _vop2(x) if x.arg[0].func in {RDNA3Ops.VOP2, RDNA3Ops.VOP2_LIT} else None),
-  (UPat(Ops.INS, name="x"), lambda x: _vop3(x) if x.arg[0].func in {RDNA3Ops.VOP3, RDNA3Ops.VOP3SD, RDNA3Ops.VOPC, RDNA3Ops.VOP3P} else None),
+  # NOTE: commutative ALU that lands in a VOP3 encoding (v_add_nc_i32, v_mul_lo_u32) needs same legalization
+  (UPat(Ops.INS, name="x"), lambda x: lvop2(x) if x.arg[0].func in {RDNA3Ops.VOP2, RDNA3Ops.VOP2_LIT} else
+    lvop2(x, swap_only=True) if x.arg[0] in commutative_ins and len(x.src) == 2 else None),
+  (UPat(Ops.INS, name="x"), lambda x: lvop3(x) if x.arg[0].func in {RDNA3Ops.VOP3, RDNA3Ops.VOP3SD, RDNA3Ops.VOPC, RDNA3Ops.VOP3P} else None),
 ])
 
 # NOTE: could also match these by tag tuples (all valid load/store instructions) instead of using more ctx
@@ -558,6 +563,7 @@ class RDNA3Renderer(ISARenderer):
   post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
     super().__init__(target)
+    self.shared_max = HIPRenderer.shared_max
     self.tensor_cores = tc.get_amd(target.arch)
     self.spill_vgprs: dict[Register, int] = {r:0 for r in SPILL_VGPRS}
 
@@ -577,16 +583,19 @@ class RDNA3Renderer(ISARenderer):
       self.spill_vgprs[vgpr] += v.width
       return ((vgpr,lane), self.spill_size)
 
-  def spill(self, spill_offset:any, x:UOp) -> list[UOp]:
+  def spill(self, spill_offset:any, x:UOp, sub_idx:int|None=None) -> list[UOp]:
     regs = rdefs(x)
     if regs[0].name[0] == 'v':
+      if sub_idx is not None:
+        return [UOp(Ops.INS, arg=(RDNA3Ops.scratch_store_b32, dtypes.void),
+          src=(const(spill_offset+sub_idx*4), def_reg(x.dtype, regs)))]
       batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
       return [UOp(Ops.INS, arg=(getattr(RDNA3Ops, f"scratch_store_b{len(b)*32}"), dtypes.void), \
         src=(const(spill_offset+j*16), def_reg(x.dtype, b))) for j,b in enumerate(batches)]
     else:
       vgpr,lane = spill_offset
       return [UOp(Ops.INS, arg=(RDNA3Ops.v_writelane_b32, dtypes.void), src=(def_reg(x.dtype, r),
-        const(lane+i)), tag=vgpr) for i,r in enumerate(rdefs(x))]
+        const(lane+i+(sub_idx or 0))), tag=vgpr) for i,r in enumerate(regs)]
 
   def fill(self, spill_offset:any, sub_idx:int|None, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
     if regs[0].name[0] == 'v':
