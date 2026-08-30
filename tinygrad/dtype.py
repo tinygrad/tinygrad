@@ -101,7 +101,11 @@ class DTypes:
     if isinstance(x, float): return dtypes.weakfloat
     if isinstance(x, int): return dtypes.weakint
     # put this in the last is faster because there are more items than lists/tuples to check
-    if isinstance(x, (list, tuple)): return strong_dtype(max(dtypes.from_py(xi) for xi in x)) if x else dtypes.default_float
+    if isinstance(x, (list, tuple)):
+      dt = max(dtypes.from_py(xi) for xi in x) if x else dtypes.weakfloat
+      if dt is not dtypes.weakint: return strong_dtype(dt)
+      ints = [xi for xi in x if isinstance(xi, int)]  # a vconst also holds Invalid
+      return commit_int(min(ints), max(ints))
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
@@ -162,6 +166,10 @@ assert dtypes.is_float(dtypes.default_float), f"{DEFAULT_FLOAT.value} is not a f
 assert dtypes.is_int(dtypes.default_int), f"{DEFAULT_INT.value} is not an int dtype"
 def strong_dtype(dtype:DType) -> DType:
   return {dtypes.weakint: dtypes.default_int, dtypes.weakfloat: dtypes.default_float}.get(dtype, dtype)
+def commit_int(lo:int|float, hi:int|float, default_int:DType|None=None) -> DType:
+  if lo == hi and not dtypes.long.min <= lo <= dtypes.ulong.max: raise OverflowError(f"{lo} does not fit any int")
+  ladder = (dtypes.default_int if default_int is None else default_int, dtypes.int, dtypes.long, dtypes.ulong)
+  return next((dt for dt in ladder if dt.min <= lo and hi <= dt.max), dtypes.long)
 def weak_dtype(dtype:DType) -> DType:
   return dtypes.weakfloat if dtypes.is_float(dtype) else dtypes.weakint if dtypes.is_int(dtype) else dtype
 
