@@ -1803,6 +1803,7 @@ class TestOps(unittest.TestCase):
 
   def test_logcumsumexp_numerical(self):
     helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7, vals=[[0.0, 100.0]])
+    helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), vals=[[-math.inf, 0.0, 1.0]], forward_only=True)
 
   def test_sinh(self):
     helper_test_op([(45,65)], lambda x: x.sinh(), grad_atol=1e-6)
