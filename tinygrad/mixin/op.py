@@ -855,7 +855,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     x = self.transpose(axis, -1)
     last_dim_size = x.shape[-1]
     x_unsqueezed = x.unsqueeze(-2)
-    x_cummax = x.cummax(-1)[0].detach()
+    x_cummax = (mx:=x.cummax(-1)[0].detach()).isfinite().where(mx, 0)
     mask = self._tri(last_dim_size, last_dim_size, 1).logical_not()
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)
