@@ -288,8 +288,9 @@ def lower_and_compile(linear:UOp) -> UOp:
       if pool is not None: terminate_worker_pool()
       raise
 
-  # swap the compiled PROGRAMs into the calls
-  return linear.substitute({c: c.replace(src=(c.src[0].substitute({a[0]: to_program_cache[keys[c]]}), *c.src[1:])) for c, a in ar.items()},
+  # swap the compiled PROGRAMs into the calls, replacing the ast inside the "hcq" wrapper if there is one
+  def swap_ast(a0:UOp, prg:UOp) -> UOp: return a0.replace(src=(prg, *a0.src[1:])) if a0.op is Ops.CUSTOM_FUNCTION else prg
+  return linear.substitute({c: c.replace(src=(swap_ast(c.src[0], to_program_cache[keys[c]]), *c.src[1:])) for c in ar},
                            name="precompile kernels")
 
 pm_optimize_local_size = PatternMatcher([
