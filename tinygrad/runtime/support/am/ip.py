@@ -267,7 +267,7 @@ class AM_SMU(AM_IP):
 class AM_GFX(AM_IP):
   def init_sw(self):
     self.xccs = sum(1 for i in self.adev.regs_offset[am.GC_HWIP] if i not in self.adev.harvested[am.GC_HWIP])
-    self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(2)]
+    self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(3)] # 2 rings + the kiq
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
 
   def init_hw(self):
@@ -318,7 +318,9 @@ class AM_GFX(AM_IP):
 
     self._enable_mec()
 
-    if self.adev.is_vf: # the host PF shuts a VF down when it leaves its access window with no cp scheduler, point the RLC at the kiq slot
+    if self.adev.is_vf: # the RLC saves the queue its scheduler points at when the host world switches a VF, so it needs a live one
+      buf = self.adev.mm.valloc(0x2000, uncached=True, contiguous=True, zero=True)
+      self.setup_ring(buf.va_addr, 0x1000, buf.va_addr+0x1000, buf.va_addr+0x1008, buf.va_addr, 0x1000, idx=4, aql=False, me=2)
       for xcc in range(self.xccs): self.adev.reg("regRLC_CP_SCHEDULERS").update(scheduler0=(2 << 5) | (1 << 3) | 0x80, inst=xcc)
 
     # set 1 partition on bare metal. a VF uses the spatial partition its host PF assigned.
@@ -337,15 +339,16 @@ class AM_GFX(AM_IP):
     self._config_mec()
     self._enable_mec()
 
-  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool) -> int:
-    pipe, queue, doorbell = idx // 4, idx % 4, am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
+  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool, me=1) -> int:
+    pipe, queue = idx // 4, idx % 4
+    mqd, doorbell = (2, am.AMDGPU_DOORBELL_KIQ) if me == 2 else (queue, am.AMDGPU_NAVI10_DOORBELL_MEC_RING0)
 
     for xcc in range(self.xccs if aql else 1):
-      self._grbm_select(me=1, pipe=pipe, queue=queue, inst=xcc)
+      self._grbm_select(me=me, pipe=pipe, queue=queue, inst=xcc)
 
       struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}{'_compute' if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else ''}_mqd")
-      mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.mqd_mc[queue] + 0x1000*xcc),
-        cp_mqd_base_addr_hi=hi32(self.mqd_mc[queue] + 0x1000*xcc), cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
+      mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.mqd_mc[mqd] + 0x1000*xcc),
+        cp_mqd_base_addr_hi=hi32(self.mqd_mc[mqd] + 0x1000*xcc), cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
         cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode(preload_size=0x55, preload_req=1),
         cp_hqd_pq_base_lo=lo32(ring_addr>>8), cp_hqd_pq_base_hi=hi32(ring_addr>>8),
         cp_hqd_pq_rptr_report_addr_lo=lo32(rptr_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(rptr_addr),
@@ -360,7 +363,7 @@ class AM_GFX(AM_IP):
         **({'compute_tg_chunk_size':1, 'compute_current_logic_xcc_id':xcc, 'cp_mqd_stride_size':0x1000} if aql and self.xccs > 1 else {}))
       for se in range(8 if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else 4): setattr(mqd_struct, f'compute_static_thread_mgmt_se{se}', 0xffffffff)
 
-      self.adev.vram.view(self.mqd_paddr[queue] + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
+      self.adev.vram.view(self.mqd_paddr[mqd] + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
 
       mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
       for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
