@@ -25,7 +25,6 @@ class AllocCtx:
   assigns: list[UOp] = field(default_factory=list)
   replacements: list[UOp] = field(default_factory=list)
   views: set[UOp] = field(default_factory=set)
-  final_tags: set[Any] = field(default_factory=set)
 
 def tag_uop(ctx:AllocCtx, x:UOp):
   if x.tag is not None: return None
@@ -155,10 +154,6 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # resolve AFTER on RETURNED placeholders (for precompiled calls)
   (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
 
-  # an AFTER on a RETURNED placeholder that is a final output: it's a call output buffer, allocate fresh storage for it
-  (UPat(Ops.AFTER, name="x"),
-   lambda ctx,x: None if x.tag is None or x.src[0].unsharded_base.op is not Ops.RETURNED
-                 or not any(t in ctx.final_tags for t in x.tag) else x.rtag(None).contiguous(tag=x.tag)),
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
@@ -242,7 +237,12 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
   big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="number the uops")
-  ctx.final_tags = {t for u in big_sink.src if u.tag is not None for t in u.tag}
+  # final outputs of value calls materialize with fresh storage (precompiled calls don't: transform gives them real buffers)
+  def materialize_finals(u:UOp):
+    if u.op is not Ops.AFTER or u.src[0].unsharded_base.op is not Ops.RETURNED: return u
+    if u.src[1].op is Ops.CALL and (u.src[1].arg is not None and u.src[1].arg.precompile) and u.src[1].num_returned: return u
+    return u.rtag(None).contiguous(tag=u.tag)
+  big_sink = big_sink.replace(src=tuple(materialize_finals(u) for u in big_sink.src))
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
