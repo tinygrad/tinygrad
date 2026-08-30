@@ -106,6 +106,11 @@ class LinearScanRegallocContext:
         for v,rs in live_ins.pop().items():
           if v not in live or live[v] != rs: live[v] = fill(v, i, rs)
 
+# push the register down the wrapper chain so the use encodes the register the fill actually wrote, match rdefs() semantics
+def retag(s:UOp, tag:tuple) -> UOp:
+  if s.op in {Ops.AFTER, Ops.NOOP, Ops.BITCAST} and len(s.src): return s.replace(src=(retag(s.src[0], tag), *s.src[1:]))
+  return s.replace(tag=tag)
+
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i, nsrc, before = next(ctx.idx), [], []
   for j,s in enumerate(x.src):
@@ -115,7 +120,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
         filled, fills = ctx.ren.fill(ctx.spills[vv], v.pos if v.is_sub() else None, ctx.vdef(vv), ctx.reals[i][v])
         nsrc.append(filled)
         before.extend(fills)
-      else: nsrc.append(s.replace(tag=ctx.reals[i][v]))
+      else: nsrc.append(retag(s, ctx.reals[i][v]))
     else:
       nsrc.append(s)
 

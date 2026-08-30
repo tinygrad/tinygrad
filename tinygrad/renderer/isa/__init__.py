@@ -12,13 +12,6 @@ class Register:
   def __repr__(self): return self.name
   def __hash__(self): return hash(self.name) * 256 + self.index
 
-"""
-Hierarchical representation of a register view before assigned physical registers in regalloc.
-- multi-register values are represented as STACK(..., tag=parent vreg, dtype=unit dtype).bitcast(overall dtype)
-  - child values are given sub-vregister tags pre-regalloc that obey the contiguity constraint
-- child values can also be accessed by INDEX into a parent register, rewritten to sub at pre-regalloc time
-  - differentiated from high level INDEX by src[0] (memory address if PARAM/BUFFER)
-"""
 @dataclass(frozen=True)
 class VRegister:
   name: str
