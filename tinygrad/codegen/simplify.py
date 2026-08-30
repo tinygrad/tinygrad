@@ -84,7 +84,7 @@ def reduce_unparented(red:UOp) -> UOp|None:
   assert all(x.op is Ops.RANGE for x in red.src[1:]), "some reduce srcs aren't ranges"
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].ranges)
   if len(reduce_unparented) == 0: return None
-  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
+  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) else red.src[0]
   if red.arg[0] is Ops.ADD:
     for r in reduce_unparented: ret = ret * r.src[0]
   if red.arg[0] is Ops.MUL:
