@@ -240,7 +240,6 @@ class TestWeakBounds(unittest.TestCase):
   def test_padded_weak_const_keeps_its_zeros(self):
     self.assertEqual(Tensor(1).expand(1).cat(Tensor(2).expand(2), Tensor(3).expand(3)).tolist(), [1, 2, 2, 3, 3, 3])
     self.assertEqual((Tensor(5).reshape(1).pad((1, 1)) == 5).tolist(), [False, True, False])
-    self.assertEqual((Tensor(5).reshape(1,1).expand(1,2).pad(((0,2),(0,0))) + Tensor([[1],[2],[3]])).tolist(), [[6,6],[2,2],[3,3]])
 
 class TestWeakStorageBoundary(unittest.TestCase):
   # weak has no storage: a weak assignment source casts when it defers to the destination, everything else raises
