@@ -3,7 +3,7 @@ from typing import cast, TypeVar, Generic, Any, Sequence, TYPE_CHECKING
 import struct, functools, time, collections, itertools, decimal, statistics
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, JIT_BATCH_SIZE, unwrap, PROFILE, all_same, all_int
-from tinygrad.helpers import to_tuple, ContextVar, perf_counter_us, Context, panic, partition, round_up, flatten
+from tinygrad.helpers import to_tuple, ContextVar, perf_counter_us, Context, panic, partition, round_up, flatten, next_power2
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer, DepsTracker
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, rewrite_group, GroupOp
@@ -304,45 +304,56 @@ def seal_call(call:UOp) -> UOp|None:
     offs[l] = len(datas[tags[l]])
     datas[tags[l]] += b.ljust(round_up(len(b), 128), b"\xbf")
 
-  bufs = {t: UOp.placeholder((max(len(d), 1),), dtypes.uint8, next(UOp.unique_num), device=devs).rtag(t) for t, d in datas.items()}
+  bufs = {t: UOp.placeholder((next_power2(len(d)),), dtypes.uint8, next(UOp.unique_num), device=devs).rtag(t) for t, d in datas.items()}
   views = {l: bufs[tags[l]][offs[l]:offs[l] + len(blobs[l])] for l in blobs}
 
-  # split the patches
-  links, runtime = partition([(bufs[tags[l]], offs[l] + o, w.substitute(views)) for l, o, w in patches], lambda p: is_link_value(p[2]))
-  offt = UOp.placeholder((max(len(runtime), 1),), dtypes.uint32, next(UOp.unique_num), device=HCQ_RUNTIME_DEV.value).rtag("offs")
-
-  # every getaddr reads the inputs table
-  gaddrs = dedup([g for _, _, w in runtime for g in w.toposort() if g.op is Ops.GETADDR])
-  table_srcs = dedup([g.src[0].without_after for g in gaddrs])
-
-  slots = {src: i for i, src in enumerate(table_srcs)}
-  table = UOp.placeholder((max(len(table_srcs) * len(devs), 1),), dtypes.uint64, next(UOp.unique_num), device=HCQ_RUNTIME_DEV.value).rtag("inputs")
-
-  dvar = UOp.variable("_device_num", 0, len(devs) - 1, dtypes.int, param=True) if len(devs) > 1 else UOp.const(0, dtypes.int)
-  reads = {g: table.index(slots[g.src[0].without_after] * len(devs) + dvar).load() for g in gaddrs}
+  # place the words in the merged blobs, then split: link words fold at link time, runtime words the body stores every call
+  placed = UOp.sink(*[w for _, _, w in patches]).substitute(views).src
+  links, runtime = partition([(bufs[tags[l]], offs[l] + o, w) for (l, o, _), w in zip(patches, placed)], lambda p: is_link_value(p[2]))
 
   rt_sink = UOp.sink(*[w for _, _, w in runtime])
   rt_vars = {u: u.src[0] for u in rt_sink.toposort() if u.is_bound_var}
 
-  stores = []
-  for j, ((buf, _, w), v) in enumerate(zip(runtime, rt_sink.substitute(reads | rt_vars).src)):
-    o = offt.index(j).load().cast(dtypes.int)
-    stores.append(UOp(Ops.SHRINK, src=(buf, o, o.const_like(w.dtype.itemsize))).bitcast(w.dtype).index(0).store(v))
+  # all getaddrs are one input table
+  gaddrs = dedup([g for g in rt_sink.toposort() if g.op is Ops.GETADDR])
+  table_srcs = dedup([g.src[0].without_after for g in gaddrs])
+  slots = {src: i * len(devs) for i, src in enumerate(table_srcs)}
+  table = UOp.placeholder((next_power2(len(slots)*len(devs)),), dtypes.uint64, next(UOp.unique_num), device=HCQ_RUNTIME_DEV.value).rtag("inputs")
+  dvar = UOp.variable("_device_num", 0, len(devs) - 1, dtypes.int, param=True) if len(devs) > 1 else UOp.const(0, dtypes.int)
+  reads = {g: table.index(slots[g.src[0].without_after] + dvar).load() for g in gaddrs}
+
+  # group rt-patches by target and uop
+  groups:dict[tuple[UOp, UOp], list[tuple[int, int]]] = collections.defaultdict(list)
+  for (buf, off, w), v in zip(runtime, rt_sink.substitute(reads | rt_vars).src):
+    if w.op is Ops.GETADDR: groups[(buf, table)].append((off, slots[w.src[0].without_after]))
+    else: groups[(buf, v)].append((off, 0))
+
+  stores, vals, base = [], [], UOp.const(0, dtypes.int)
+  offtbl = UOp.placeholder((next_power2(2 * len(runtime)),), dtypes.uint32, next(UOp.unique_num), device=HCQ_RUNTIME_DEV.value).rtag("offtbl")
+  for j, ((buf, v), grp) in enumerate(groups.items()):
+    n = UOp.variable(f"hcq_off_len{j}", 0, 0xffffffff, dtypes.uint32, param=True)
+    vals.append((n.arg.name, len(grp)))
+
+    r = UOp.range(n, 20 + j, dtype=dtypes.int, src=(buf,))
+    off = offtbl.index(2 * (base + r)).load().cast(dtypes.int)
+    val = table.index(offtbl.index(2 * (base + r) + 1).load().cast(dtypes.int) + dvar).load() if v is table else v # reindex table
+    stores.append(buf.shrink(((off, off + val.dtype.itemsize),)).bitcast(val.dtype).index(0).store(val).end(r))
+    base = base + n.cast(dtypes.int)
 
   patched = bufs[tags[lin]].after(*stores)
   body = call.src[0].substitute({submit: submit.replace(src=(patched,))})
 
-  # blobs, blobs
+  # link-time patches are just stores
   link_stores:dict[UOp, list[tuple[int, UOp]]] = collections.defaultdict(list)
   for b, off, w in links: link_stores[b].append((off, w))
 
-  link_blobs = [blobify(bufs[t], bytes(d), link_stores[bufs[t]]) for t, d in datas.items()] \
-             + [blobify(offt, struct.pack(f"<{len(runtime)}I", *[off for _, off, _ in runtime]))]
-  prog_blobs = dedup([u for _, _, w in links for u in w.toposort() if u.op is Ops.AFTER])
-
-  info = replace(call.arg.aux, table=table if table_srcs else call.arg.aux.table, vals=(("hcq_size", len(blobs[lin])),),
+  # blobs, blobs
+  data_blobs = [blobify(offtbl, struct.pack(f"<{2*len(runtime)}I", *flatten(flatten(groups.values()))))] if runtime else []
+  link_blobs = [blobify(bufs[t], bytes(d), link_stores[bufs[t]]) for t, d in datas.items()]
+  prog_blobs = dedup([u for u in UOp.sink(*[w for _, _, w in links]).toposort() if u.op is Ops.AFTER])
+  info = replace(call.arg.aux, table=table if table_srcs else call.arg.aux.table, vals=(("hcq_size", len(blobs[lin])), *vals),
                  inputs=call.arg.aux.inputs + tuple((src, lane, dev) for src in table_srcs for lane, dev in enumerate(devs)))
-  return call.replace(src=(body, *dedup([*call.src[1:], *link_blobs, *prog_blobs])), arg=replace(call.arg, aux=info))
+  return call.replace(src=(body, *dedup([*call.src[1:], *link_blobs, *data_blobs, *prog_blobs])), arg=replace(call.arg, aux=info))
 
 pm_seal = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat(Ops.SINK),)),), name="call", allow_any_len=True), seal_call)])
@@ -403,7 +414,7 @@ def _lane_arg(a:UOp, lane:int) -> UOp: return a.mselect(lane) if len(to_tuple(a.
 
 def _batch_hcq_calls(calls:list[UOp]) -> UOp:
   # flatten tables + views for each cmd
-  table = UOp.placeholder((max(sum(len(c.arg.aux.inputs) for c in calls), 1),), dtypes.uint64, next(UOp.unique_num),
+  table = UOp.placeholder((next_power2(sum(len(c.arg.aux.inputs) for c in calls)),), dtypes.uint64, next(UOp.unique_num),
                           device=HCQ_RUNTIME_DEV.value).rtag("inputs")
   offs = itertools.accumulate((len(c.arg.aux.inputs) for c in calls), initial=0)
   views = {c: table[off:off + len(c.arg.aux.inputs)] for c, off in zip(calls, offs)}
@@ -460,9 +471,9 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
 # *****************
 # 9. bufferize placeholders: replace placeholders with real buffers
 
-def bufferize_buf(ctx:bool, buf:UOp) -> UOp|None:
+def bufferize_buf(ctx:tuple[bool, list[UOp]], buf:UOp) -> UOp|None:
   if buf.tag is None: return None
-  return UOp.mstack(*(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=(dv, ctx)), HCQ_RUNTIME_DEV.value)
+  return UOp.mstack(*(UOp.from_buffer((dv:=Device[dev]).pm_bufferize.rewrite(buf, ctx=(dv, ctx[0])), HCQ_RUNTIME_DEV.value)
                       for dev in to_tuple(buf.device)))
 pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="buf"), bufferize_buf)])
 
@@ -493,7 +504,8 @@ def fold_word_store(view:UOp, idx:UOp, val:UOp) -> UOp|None:
     b.ensure_allocated()._buf.cpu_view().view(fmt='B')[bo:bo+width] = (c & (1 << 8 * width) - 1).to_bytes(width, 'little')
   return UOp(Ops.NOOP)
 
-def resolve_getaddr(buf:UOp, g:UOp) -> UOp:
+def resolve_getaddr(ctx:tuple[bool, list[UOp]], buf:UOp, g:UOp) -> UOp:
+  ctx[1].append(buf) # the address bakes into the blob, the linked linear refholds the buffer (amd scratch outlives its realloc)
   devs, bufs = to_tuple(g.arg), _bufs(buf)
   if len(bufs) == 1: bufs = bufs * len(devs) # one buffer shared by every lane
   assert len(bufs) == len(devs), f"can't resolve {len(bufs)} buffers on {len(devs)} devices"
@@ -526,8 +538,10 @@ link_linear_cache:dict[bytes, UOp] = {}
 @rewrite_group(lambda _,cache,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, cache=True) -> UOp:
   if (linked:=link_linear_cache.get(linear_key:=linear.key)) is not None: return linked
-  linear = graph_rewrite(linear, pm_resolve_patches+symbolic+pm_assert_no_afters, bpm=pm_bufferize, ctx=cache, bottom_up=False,
+  refs:list[UOp] = []
+  linear = graph_rewrite(linear, pm_resolve_patches+symbolic+pm_assert_no_afters, bpm=pm_bufferize, ctx=(cache, refs), bottom_up=False,
                          name="resolve patches")
+  if refs: linear = linear.replace(src=(linear.src[0].replace(src=linear.src[0].src + tuple(dedup(refs))), *linear.src[1:]))
   if cache: link_linear_cache[linear_key] = linear
   return linear
 
