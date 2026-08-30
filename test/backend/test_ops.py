@@ -983,6 +983,7 @@ class TestOps(unittest.TestCase):
   def test_selu(self):
     helper_test_op([(45,65)], torch.nn.functional.selu, Tensor.selu)
     helper_test_op([(3,3)], torch.nn.functional.selu, Tensor.selu, low=300, high=400)
+    helper_test_op(None, torch.nn.functional.selu, Tensor.selu, vals=[[-1.,0.,1.]])
     helper_test_op([()], torch.nn.functional.selu, Tensor.selu)
   def test_silu(self):
     helper_test_op([(45,65)], torch.nn.functional.silu, Tensor.silu)
