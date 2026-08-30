@@ -464,7 +464,8 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
 
     # lower
     linear = hcq_lower(linear)
-    final_linear = hcq_compile_cache[cache_key] = hcq_lower(batch_hcq_linear(hcq_lower(linear)), name="lower c submitter")
+    final_linear = hcq_compile_cache[cache_key] = \
+      hcq_lower(batch_hcq_linear(linear), name="lower c submitter") if HCQ_RUNTIME_DEV.value == "CPU" else linear
 
   return final_linear
 
