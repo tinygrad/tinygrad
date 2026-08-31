@@ -42,7 +42,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str, scratch_size:int=0) -> bytes:
     elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
   arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
-  is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
+  is_cdna, is_rdna4, is_rdna3 = arch == "cdna", arch == "rdna4", arch == "rdna3"
 
   # ** pad text to ISA alignment
   padding_inst = (s_nop_cdna(0) if is_cdna else s_code_end()).to_bytes()
@@ -68,6 +68,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str, scratch_size:int=0) -> bytes:
   desc.compute_pgm_rsrc1 = (vgpr_granule << amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT |
                             sgpr_granule << amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT_SHIFT |
                             3 << amdgpu_kd.COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64_SHIFT |
+                            (0 if is_rdna3 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_WGP_MODE_SHIFT |
                             (0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_DX10_CLAMP_SHIFT |
                             (0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_IEEE_MODE_SHIFT |
                             (0 if is_cdna else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_MEM_ORDERED_SHIFT)

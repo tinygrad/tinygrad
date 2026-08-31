@@ -202,8 +202,7 @@ def load(ctx, x:UOp, idx:UOp):
   prefix = "global" if idx.addrspace is AddrSpace.GLOBAL else "ds"
   opc = getattr(RDNA3Ops, f"{prefix}_load_{suffix}{sz*8}")
   ctx.ren.semantic_op[opc]=Ops.LOAD
-  out = x.ins(opc, src=fold_address(rafter(idx, True))+x.src[1:], tag=(ctx.ren.vreg(GP_VGPRS, width=(sz+3)//4),))
-  return out
+  return x.ins(opc, src=fold_address(rafter(idx, True))+x.src[1:], tag=(ctx.ren.vreg(GP_VGPRS, width=(sz+3)//4),))
 
 def store(ctx, x:UOp, idx:UOp, val:UOp):
   n = idx.src[-1].src[0].val if idx.op is Ops.SHRINK else 1
@@ -225,8 +224,7 @@ def lower_gated_store(ctx, x:UOp):
   return x, [mask, x, restoreexec(mask)]
 
 # ------ ALU ------
-# NOTE: these run at isel time, after const64 has already fired, so a 64 bit const src still has to be
-# materialized into a register pair here or gep() lands on something with no register to encode
+# TODO: remove this, run const64 at isel time fix f64 test that breaks
 def as_u64(u:UOp) -> UOp:
   return const64(u.cast(dtypes.uint64), rafter(u, True)) if is_const(u) else u.cast(dtypes.uint64)
 
@@ -633,18 +631,38 @@ class RDNA3Renderer(ISARenderer):
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     deps: set[Register] = set()
-    nuops = []
-    pending_scratch = False
-    # s_waitcnt
+    nuops, pending_scratch, pending_lds = [], False, False
+    self.spill_vgprs: dict[Register, int] = {r:0 for r in SPILL_VGPRS} # reset?
+
+    # data dependency resolution (s_waitcnt)
+    def waitcnt(): return UOp(Ops.INS, src=(const(0),), arg=(RDNA3Ops.s_waitcnt, dtypes.void))
+    def wait_vscnt(): return UOp(Ops.INS, src=(const(0),), arg=(RDNA3Ops.s_waitcnt_vscnt, dtypes.void))
     for u in lin.src:
-      if any(r in deps for s in u.src for r in rdefs(s)) or any(r in deps for r in rdefs(u)):
-        nuops.append(UOp(Ops.INS, src=(const(0, dtypes.uint16),), arg=(RDNA3Ops.s_waitcnt, dtypes.void)))
+      if u.arg[0] is RDNA3Ops.s_barrier:
+        # flush before barrier
+        nuops.append(waitcnt())
+        deps.clear()
+        pending_lds = False
+      elif isinstance(u.tag, str) and u.arg[0].func is RDNA3Ops.SOPP:
+        # flush at loop backedge
+        if deps: nuops.append(waitcnt()); deps.clear()
+        if pending_scratch: nuops.append(wait_vscnt()); pending_scratch = False
+      elif any(r in deps for s in u.src for r in rdefs(s)) or any(r in deps for r in rdefs(u)):
+        nuops.append(waitcnt())
         deps.clear()
       if (tp := CntType.get(u)) is not None:
         if tp in [CntType.DS_CNT, CntType.LOAD_CNT]:
+          # realize outstanding stores before reading
           if u.arg[0].func is RDNA3Ops.SCRATCH and pending_scratch:
-            nuops.append(UOp(Ops.INS, src=(const(0),), arg=(RDNA3Ops.s_waitcnt_vscnt, dtypes.void)))
+            nuops.append(wait_vscnt()); pending_scratch = False
+          if tp is CntType.DS_CNT:
+            if u.arg[1] is dtypes.void: pending_lds = True
+            elif pending_lds:
+              nuops.append(waitcnt())
+              pending_lds = False
           deps.update(rdefs(u))
+          if u.arg[1] is dtypes.void: # protect address registers?
+            for s in u.src: deps.update(rdefs(s))
         elif u.arg[0].func is RDNA3Ops.SCRATCH: pending_scratch = True
       nuops.append(u)
 

@@ -20,7 +20,7 @@ from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_
 # NOTE: to_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
 
 def contains_wmma(uops: list[UOp]) -> bool:
-  if Device.DEFAULT == "AMD" and DEV.renderer == "RDNA3": nwmmas = len([uop for uop in uops if "v_wmma" in uop.arg.args[0].name.lower()])
+  if Device.DEFAULT == "AMD" and DEV.renderer == "RDNA3": nwmmas = len([uop for uop in uops if "v_wmma" in uop.arg[0].args[0].name.lower()])
   else: nwmmas = len([uop for uop in uops if uop.op is Ops.WMMA]) > 0
   return nwmmas > 0
 
