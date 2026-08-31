@@ -12,7 +12,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       si = out.schedule_linear().src[-1]
       opts_to_apply = []
       opts_to_apply.append(Opt(OptOps.UPCAST, 0, 4))
-      opts_to_apply.append(Opt(OptOps.UNROLL, 0, 4))
+      opts_to_apply.append(Opt(OptOps.UPCAST, 2, 4))
       ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
       prg = to_program(ast, Device["CPU"].renderer)
       print(prg.src[2].arg)

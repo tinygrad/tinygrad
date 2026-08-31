@@ -190,7 +190,7 @@ class TestStatsOptimized(unittest.TestCase):
   @unittest.skip("fails locally on AMD")
   def test_gemm_tc_unroll_half(self):
     try:
-      p = to_program(replace_opts(self.ast_gemm_half, [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UNROLL, 0, 2)]),
+      p = to_program(replace_opts(self.ast_gemm_half, [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UPCAST, 4, 2)]),
                       renderer=Device[Device.DEFAULT].renderer)
     except KernelOptError:
       raise unittest.SkipTest("no tensor cores")
@@ -199,7 +199,7 @@ class TestStatsOptimized(unittest.TestCase):
 
   def test_gemm_tc_unroll(self):
     try:
-      p = to_program(replace_opts(self.ast_gemm, [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UNROLL, 0, 2)]),
+      p = to_program(replace_opts(self.ast_gemm, [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UPCAST, 4, 2)]),
                       renderer=Device[Device.DEFAULT].renderer)
     except KernelOptError:
       raise unittest.SkipTest("no tensor cores")
@@ -214,7 +214,7 @@ class TestStatsOptimized(unittest.TestCase):
     self.assertEqual(p.src[0].arg.estimates.lds, N*N*N*4 + N*N*N*4//4 + 4*N*N)
 
   def test_gemm_upcasted(self):
-    p = to_program(replace_opts(self.ast_gemm, [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)]),
+    p = to_program(replace_opts(self.ast_gemm, [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 4, 4)]),
                     renderer=Device[Device.DEFAULT].renderer)
     self.check_gemm(p)
     self.assertEqual(p.src[0].arg.estimates.lds, 2*N*N*N*4//4 + 4*N*N)

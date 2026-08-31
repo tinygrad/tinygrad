@@ -4,8 +4,7 @@ from enum import Enum, auto
 from dataclasses import dataclass
 
 class OptOps(Enum):
-  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
+  TC = auto(); UPCAST = auto(); LOCAL = auto(); GROUP = auto(); GROUPTOP = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 @dataclass(frozen=True, order=True)

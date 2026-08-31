@@ -188,9 +188,9 @@ class TestTensorCores(unittest.TestCase):
     tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in not in dtypes.fp8s)
     x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
-    opts = [Opt(OptOps.UNROLL, 0, 2)]
+    opts = [Opt(OptOps.UPCAST, 4, 2)]
     ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src):
+    for u in tuple(to_program(replace_opts(ast, [Opt(OptOps.UPCAST, 2, 2)]), Device[Device.DEFAULT].renderer).src[1].src):
       if u.op is Ops.WMMA:
         assert u.src[-1].src[0].op != Ops.STORE
 
@@ -202,9 +202,9 @@ class TestTensorCores(unittest.TestCase):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
     x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
-    opts = [Opt(OptOps.UNROLL, 0, 2)]
+    opts = [Opt(OptOps.UPCAST, 4, 2)]
     ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src):
+    for u in tuple(to_program(replace_opts(ast, [Opt(OptOps.UPCAST, 2, 2)]), Device[Device.DEFAULT].renderer).src[1].src):
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.STORE
@@ -218,9 +218,9 @@ class TestTensorCores(unittest.TestCase):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
     x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out).relu()
-    opts = [Opt(OptOps.UNROLL, 0, 2)]
+    opts = [Opt(OptOps.UPCAST, 4, 2)]
     ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src):
+    for u in tuple(to_program(replace_opts(ast, [Opt(OptOps.UPCAST, 2, 2)]), Device[Device.DEFAULT].renderer).src[1].src):
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.STORE
