@@ -621,6 +621,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if isinstance(b, tuple): return UOp.stack(*[UOp.const(c, dtype) for c in b])
     # .cast folds away at exactly the dtypes a CONST derives (bool/weakint/weakfloat): bare there, the pair everywhere else
     return UOp(Ops.CONST, arg=dtype.const(b), src=()).cast(dtype)
+  # cast, except for CONST, in which case rebuild a new CONST at the dtype
+  def ccast(self, dtype:DType): return UOp.const(self.val, dtype) if self.op is Ops.CONST else self.cast(dtype)
   # a forced CAST for bool: .cast(bool) folds, so UOp.const cannot state the width
   @staticmethod
   def cconst(b:ConstLike, dtype:DType): return UOp(Ops.CAST, src=(UOp.const(b),), arg=dtype)
@@ -806,7 +808,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.STACK:
         srcs = (self,)+tuple(arg)
         dtype = dtype_from_uop(Ops.STACK, srcs, None)
-        return UOp(Ops.STACK, src=tuple(u if u.base.is_invalid else UOp.const(u.val, dtype) if u.op is Ops.CONST else u.cast(dtype) for u in srcs))
+        return UOp(Ops.STACK, src=tuple(u if u.base.is_invalid else u.ccast(dtype) for u in srcs))
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: return UOp(op, src=(self,), arg=arg)

@@ -1,13 +1,16 @@
 import math, functools, operator
 from typing import TYPE_CHECKING, Literal, Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float, weak_dtype
+from tinygrad.dtype import dtypes, ConstType, DType, PyConst, least_upper_dtype, least_upper_float, weak_dtype
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.creation import CreationMixin
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp, sint
 
+
+def remint(u:'UOp', dt:DType) -> 'UOp':
+  return u.ccast(dt) if u.op is Ops.CONST else u.replace(src=(remint(u.src[0], dt),)+u.src[1:])
 
 class ElementwiseMixin(CreationMixin):
   # required to implement
@@ -25,8 +28,8 @@ class ElementwiseMixin(CreationMixin):
     # keep weak CONST weak, might lift weakint -> weakfloat
     def promote(t):
       if t._uop.base.is_invalid: return t  # invalid bool is weak const
-      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST and t._uop.vmin == t._uop.vmax:
-        return t._wrap_uop(t._uop.const_like(t._uop.base.val, weak_dtype(out_dtype)))
+      if t.dtype in dtypes.weaks and t._uop.base.op is Ops.CONST:
+        return t if t.dtype == (dt:=weak_dtype(out_dtype)) else t._wrap_uop(remint(t._uop, dt))
       return t.cast(out_dtype)
     return promote(x), promote(y)
 
@@ -116,7 +119,7 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     a, b = self._broadcasted(x, reverse)
-    # alu, not +: _broadcasted already promoted these, and a second promote would cast -b (only a bare weak CONST is kept weak)
+    # alu, not +: _broadcasted already promoted these, and a second promote would cast -b (only a weak CONST is kept weak)
     return a.alu(Ops.ADD, -b)
 
   def mul(self, x: Self | ConstType, reverse: bool = False) -> Self:
@@ -248,7 +251,7 @@ class ElementwiseMixin(CreationMixin):
       if rounding_mode == "trunc": return a.alu(Ops.CDIV, b)
       if rounding_mode == "floor": return a.alu(Ops.FLOORDIV, b)
     if dtypes.is_int(a.dtype) or a.dtype == dtypes.bool: a = a.cast(dtypes.default_float)
-    # alu, not *: _broadcasted already promoted these, and a second promote would cast 1/b (only a bare weak CONST is kept weak)
+    # alu, not *: _broadcasted already promoted these, and a second promote would cast 1/b (only a weak CONST is kept weak)
     d = a.alu(Ops.MUL, b.reciprocal())
     if rounding_mode is None: return d
     if rounding_mode == "trunc": return d.trunc()
@@ -968,7 +971,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).elu().numpy())
     ```
     """
-    return self.relu() - alpha*(1-self.exp()).relu()
+    return (self > 0).where(self, alpha*((self - self.relu()).exp() - 1))
 
   def celu(self, alpha=1.0) -> Self:
     """
@@ -980,7 +983,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).celu().numpy())
     ```
     """
-    return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
+    return alpha * (self / alpha).elu()
 
   def selu(self, alpha=1.67326, gamma=1.0507) -> Self:
     """
@@ -992,7 +995,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).selu().numpy())
     ```
     """
-    return gamma * (self >= 0).where(self, alpha * (self.exp() - 1))
+    return gamma * self.elu(alpha)
 
   def softplus(self, beta=1.0) -> Self:
     """
