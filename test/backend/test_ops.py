@@ -955,15 +955,18 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.asin(), low=-1, high=1)
     helper_test_op([(45,65)], lambda x: x.asin(), low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.asin(), low=300, high=303)
+    helper_test_op(None, lambda x: x.asin(), vals=[[-0.5, 0., 0.5]])
   def test_acos(self):
     # high grad atol
     helper_test_op([(45,65)], lambda x: x.acos(), low=-1, high=1)
     helper_test_op([(45,65)], lambda x: x.acos(), low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.acos(), low=300, high=303)
+    helper_test_op(None, lambda x: x.acos(), vals=[[-0.5, 0., 0.5]])
   def test_atan(self):
     helper_test_op([(45,65)], lambda x: x.atan())
     helper_test_op([(45,65)], lambda x: x.atan(), low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.atan(), low=300, high=303)
+    helper_test_op(None, lambda x: x.atan(), vals=[[-0.5, 0., 0.5]])
 
   def test_relu(self):
     helper_test_op([(64,64)], lambda x: x.relu())
@@ -1050,6 +1053,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-1.], [-1.0, 2, 3]])
     helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-100.0, -200, -300], [-1.0, 2, 3]])
     helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[1.0, 2000, 30000], [-1.0, 2, 3]])
+    helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-math.inf, math.inf, 1.0, -math.inf], [-math.inf, math.inf, -math.inf, 1.0]])
 
   def test_softsign(self):
     helper_test_op([(45,65)], torch.nn.functional.softsign, Tensor.softsign)
@@ -1091,6 +1095,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6, low=300, high=400)
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6, low=-400, high=-300)
     helper_test_op([()], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
+    helper_test_op(None, torch.nn.functional.softplus, Tensor.softplus, vals=[[-math.inf, math.inf, 0.0]], forward_only=True)
 
   def test_erf(self):
     helper_test_op([(45,65)], torch.erf, Tensor.erf)
