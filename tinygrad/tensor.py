@@ -745,6 +745,64 @@ class Tensor(RandMixin):
     fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.src[0], *[UOp.const(s) for s in shape]), arg="encdec")
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
+def _scan_map(fn:Callable[..., Any], *trees:Any) -> Any:
+  first = trees[0]
+  if isinstance(first, Tensor):
+    if not all(isinstance(x, Tensor) for x in trees): raise TypeError("associative_scan tree structures must match")
+    return fn(*trees)
+  if isinstance(first, dict):
+    keys = tuple(first)
+    if not all(isinstance(x, dict) and tuple(x) == keys for x in trees): raise TypeError("associative_scan tree structures must match")
+    return {k:_scan_map(fn, *(x[k] for x in trees)) for k in keys}
+  if isinstance(first, (list, tuple)):
+    if not all(type(x) is type(first) and len(x) == len(first) for x in trees): raise TypeError("associative_scan tree structures must match")
+    values = [_scan_map(fn, *(x[i] for x in trees)) for i in range(len(first))]
+    return type(first)(values)
+  raise TypeError(f"associative_scan only supports trees of Tensors, got {type(first).__name__}")
+
+def associative_scan(combine_fn:Callable[[Any, Any], Any], xs:Any, dim:int=0, reverse:bool=False, combine_mode:str="pointwise") -> Any:
+  """Performs an inclusive scan with an associative ``combine_fn`` in logarithmic depth.
+
+  ``xs`` can be a Tensor or a nested tree of Tensors with the same scan length.
+  Both ``combine_mode`` values use tinygrad's staged Tensor lowering.
+  """
+  if not callable(combine_fn): raise ValueError(f"combine_fn must be callable, got {combine_fn!r}")
+  if combine_mode not in ("pointwise", "generic"): raise ValueError(f"combine_mode must be 'pointwise' or 'generic', got {combine_mode!r}")
+  leaves:list[Tensor] = []
+  _scan_map(lambda x: leaves.append(x), xs)
+  if not leaves: raise ValueError("associative_scan requires at least one Tensor")
+  axis = leaves[0]._resolve_dim(dim)
+  if any(x.ndim <= axis for x in leaves): raise ValueError(f"all associative_scan inputs must have dimension {axis}")
+  sizes = [x.shape[axis] for x in leaves]
+  if not all(isinstance(size, int) for size in sizes): raise ValueError("associative_scan requires a concrete scan length")
+  if len(set(sizes)) != 1: raise ValueError(f"associative_scan inputs must have the same scan length, got {sizes}")
+  size = int(sizes[0])
+
+  def move_front(x:Tensor) -> Tensor:
+    return x if axis == 0 else x.permute((axis,)+tuple(i for i in range(x.ndim) if i != axis))
+
+  def move_back(x:Tensor) -> Tensor:
+    return x if axis == 0 else x.permute(tuple(range(1, axis+1))+(0,)+tuple(range(axis+1, x.ndim)))
+
+  def slice_tree(tree:Any, start:int|None, stop:int|None) -> Any:
+    return _scan_map(lambda x: x[start:stop], tree)
+
+  def join(prefix:Tensor, combined:Tensor, expected:int) -> Tensor:
+    if combined.ndim != prefix.ndim or combined.shape[1:] != prefix.shape[1:] or combined.shape[0] != expected or \
+       combined.dtype != prefix.dtype or combined.device != prefix.device:
+      raise ValueError("combine_fn must preserve the input tree structure and Tensor metadata")
+    return prefix.cat(combined).contiguous()
+
+  out = _scan_map(move_front, xs)
+  if reverse: out = _scan_map(lambda x: x.flip(0), out)
+  stride = 1
+  while stride < size:
+    combined = combine_fn(slice_tree(out, 0, size-stride), slice_tree(out, stride, size))
+    out = _scan_map(lambda x,y: join(x, y, size-stride), slice_tree(out, 0, stride), combined)
+    stride *= 2
+  if reverse: out = _scan_map(lambda x: x.flip(0), out)
+  return _scan_map(move_back, out)
+
 P = ParamSpec("P")
 T = TypeVar("T")
 
