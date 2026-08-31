@@ -216,14 +216,9 @@ def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return [get_graph_runtime(ast, ctx.input_uops)(ctx.input_uops, ctx.var_vals, wait=ctx.wait)]
 
-_push_marks:dict[bytes, int] = {}
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   info = call.arg.aux
   assert len(ast.arg.globals) == len(info.args), f"{call.arg.name}: an arg is dead in the rendered body, the args after it would mis-bind"
-
-  # the worker consumes the tables and cmdbufs async: wait out this call's previous push before refilling them
-  d = cast(Any, Device[HCQ_RUNTIME_DEV.value])
-  if (mark:=_push_marks.get(call.key)) is not None: d._wait_signal(d.worker("SUBMIT:0").done._buf.cpu_view().view(fmt='Q'), mark, ctx.timeout)
 
   # fill the inputs table with the address of every input the sealed cmdbufs reference
   if info.table is not None:
@@ -231,8 +226,8 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     tab = cast(Buffer, call.src[info.table].without_after.buffer)
     to_mv(tab._buf.va_addr, len(addrs) * 8).cast('Q')[:] = array.array('Q', addrs)
 
-  exec_kernel(replace(ctx, var_vals={**ctx.var_vals, **dict(info.vals)}), call, ast, devices=to_tuple(info.device))
-  _push_marks[call.key] = d.worker("SUBMIT:0").put._buf.cpu_view().view(fmt='Q')[0]
+  # every lane's body runs on the runtime device, info.device is only the lane count
+  exec_kernel(replace(ctx, var_vals={**ctx.var_vals, **dict(info.vals)}), call, ast, devices=(HCQ_RUNTIME_DEV.value,)*len(info.device))
 
   def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:
     (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, name, prof[0], prof[1], profile_key)

@@ -53,6 +53,9 @@ def get_submit(ast:UOp) -> UOp|None:
 
 def make_call(name:str, body:UOp, info:HCQInfo) -> UOp: return UOp.custom_function("hcq", body).call(name=name, aux=info)
 
+def hcq_size_var(cmdbuf:UOp) -> UOp: # the sealed byte count, bounded by the cmdbuf it walks so the submit copy loops stay in bounds
+  return UOp.variable("hcq_size", 0, cmdbuf.max_numel() * cmdbuf.dtype.itemsize, dtypes.uint32, param=True)
+
 def make_buf(devs, slot:int=0, tag:str="signal") -> UOp: return UOp.placeholder((1,), dtypes.uint64, slot, device=devs, volatile=True, tag=tag)
 
 # *****************
@@ -314,11 +317,11 @@ def seal_call(call:UOp) -> UOp|None:
   rt_sink = UOp.sink(*[w for _, _, w in runtime])
   rt_vars = {u: u.src[0] for u in rt_sink.toposort() if u.is_bound_var}
 
-  # all getaddrs are one input table
+  # all getaddrs are one input table. the body walks it on the host, so it's a CPU buffer: an emulated runtime device has no memory of its own
   gaddrs = dedup([g for g in rt_sink.toposort() if g.op is Ops.GETADDR])
   table_srcs = dedup([g.src[0].without_after for g in gaddrs])
   slots = {src: i * len(devs) for i, src in enumerate(table_srcs)}
-  table = UOp.placeholder((next_power2(len(slots)*len(devs)),), dtypes.uint64, next(UOp.unique_num), device=HCQ_RUNTIME_DEV.value).rtag("inputs")
+  table = UOp.placeholder((tsz:=next_power2(len(slots)*len(devs)),), dtypes.uint64, next(UOp.unique_num), device="CPU").rtag("inputs")
   dvar = UOp.variable("_device_num", 0, len(devs) - 1, dtypes.int, param=True) if len(devs) > 1 else UOp.const(0, dtypes.int)
   reads = {g: table.index(slots[g.src[0].without_after] + dvar).load() for g in gaddrs}
 
@@ -329,14 +332,16 @@ def seal_call(call:UOp) -> UOp|None:
     else: groups[(buf, v)].append((off, 0))
 
   stores, vals, base = [], [], UOp.const(0, dtypes.int)
-  offtbl = UOp.placeholder((next_power2(2 * len(runtime)),), dtypes.uint32, next(UOp.unique_num), device=HCQ_RUNTIME_DEV.value).rtag("offtbl")
+  offtbl = UOp.placeholder((osz:=next_power2(2 * len(runtime)),), dtypes.uint32, next(UOp.unique_num), device="CPU").rtag("offtbl")
   for j, ((buf, v), grp) in enumerate(groups.items()):
-    n = UOp.variable(f"hcq_off_len{j}", 0, 0xffffffff, dtypes.uint32, param=True)
+    n = UOp.variable(f"hcq_off_len{j}", 0, osz // 2, dtypes.uint32, param=True)
     vals.append((n.arg.name, len(grp)))
 
+    # the lens sum to the entry count, so both masks are no-ops. they just keep the table indices provably in bounds
     r = UOp.range(n, 20 + j, dtype=dtypes.int, src=(buf,))
-    off = offtbl.index(2 * (base + r)).load().cast(dtypes.int)
-    val = table.index(offtbl.index(2 * (base + r) + 1).load().cast(dtypes.int) + dvar).load() if v is table else v # reindex table
+    ent = 2 * ((base + r) & (osz // 2 - 1))
+    off = offtbl.index(ent).load().cast(dtypes.int)
+    val = table.index((offtbl.index(ent + 1).load().cast(dtypes.int) + dvar) & (tsz - 1)).load() if v is table else v # reindex table
     stores.append(buf.shrink(((off, off + val.dtype.itemsize),)).bitcast(val.dtype).index(0).store(val).end(r))
     base = base + n.cast(dtypes.int)
 

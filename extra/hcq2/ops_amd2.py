@@ -3,7 +3,7 @@ from typing import cast
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, itertools, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_buf
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_buf, hcq_size_var
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -207,7 +207,7 @@ def _queue_bufs(ctx, q:AMDQueueDesc) -> tuple[UOp, UOp, UOp, UOp]:
 def pm4_submit(ctx, cmdbuf:UOp) -> UOp:
   for d in ctx.devs: q = Device[d].compute_queue
   ring, wptr, doorbell, put = _queue_bufs(ctx, q)
-  p, size_dw = put.after(cmdbuf).index(0).load(), UOp.variable("hcq_size", 0, 0xffffffff, dtypes.uint32, param=True) // 4
+  p, size_dw = put.after(cmdbuf).index(0).load(), hcq_size_var(cmdbuf) // 4
   i = UOp.range(size_dw, 10, dtype=dtypes.int, src=(cmdbuf, ring))
   copy = ring.index(((p + i.cast(p.dtype)) % q.ring.size).cast(dtypes.int)).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
   next_put = p + size_dw.cast(p.dtype)
@@ -218,7 +218,7 @@ def sdma_submit(ctx, cmdbuf:UOp) -> UOp:
   # sdma needs the cmdbuf contiguous in the ring: if it won't fit before the ring end, restart at 0 and zero the tail
   for d in ctx.devs: q = unwrap(Device[d].sdma_queue(int(ctx.queue.split(":")[1])))
   (ring, wptr, doorbell, put), rs = _queue_bufs(ctx, q), q.ring.size
-  size_dw = UOp.variable("hcq_size", 0, 0xffffffff, dtypes.uint32, param=True) // 4
+  size_dw = hcq_size_var(cmdbuf) // 4
   put_b = put.after(cmdbuf).index(0).load()
   tail = ((put_b % (rs * 4)) // 4).cast(dtypes.int)
   fits = (size_dw <= rs - tail).cast(dtypes.int)

@@ -5,7 +5,7 @@ from typing import cast, Callable
 from tinygrad.helpers import to_mv, from_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import Buffer, BufferSpec, TinyELF, Program, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_buf
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_buf, hcq_size_var
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
@@ -87,7 +87,7 @@ pm_cpu_opsel = PatternMatcher([
 def cpu_submit(ctx, cmdbuf:UOp) -> UOp:
   # copy the cmd entries into the worker ring and post the semaphore once per entry
   assert ctx.nbytes % (CMD_SIZE * 8) == 0 and ctx.nbytes // (CMD_SIZE * 8) < RING_SLOTS, f"submit of {ctx.nbytes} bytes doesn't fit the ring"
-  devs, cnt, cb = ctx.devs, UOp.variable("hcq_size", 0, 0xffffffff, dtypes.uint32, param=True) // (CMD_SIZE * 8), cmdbuf.bitcast(dtypes.uint64)
+  devs, cnt, cb = ctx.devs, hcq_size_var(cmdbuf) // (CMD_SIZE * 8), cmdbuf.bitcast(dtypes.uint64)
   ring, put, done, sem = (make_buf(devs, tag=f"{ctx.queue}_{n}") for n in ("ring", "put", "done", "sem"))
 
   # submits are serialized on the submitter, so they can bump put without atomics
