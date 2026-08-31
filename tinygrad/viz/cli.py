@@ -96,48 +96,6 @@ def main(args) -> None:
           for line in m["diff"]: print(emit(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(emit(data["src"]))
 
-  sched_counter = itertools.count()
-  def print_kernel_graph(step:dict) -> bool:
-    graph = next(viz.get_render(viz_data, step["query"], update_sink=False, call_graph=True)["value"])["graph"]
-    unique:dict[int, int] = {}
-    access_cache:dict[int, list[str]] = {}
-    sched_num, found = next(sched_counter), False
-    for v in graph.values():
-      if not v["label"].startswith("CALL"): continue
-      lines = v["label"].splitlines()
-      print(emit(f"{lines[0]:<12} {lines[-1]}"))
-      for i,(_,s) in enumerate(v["src"][1:]):
-        while graph[s]["label"].startswith("AFTER"): s = graph[s]["src"][0][1]
-        if (num:=unique.get(s)) is None: unique[s] = num = len(unique)
-        print(emit(f"SRC {i} id={num}-{sched_num} {' '.join(graph[s]['label'].splitlines())}"))
-      if (root:=v["src"][0][1]) not in access_cache:
-        accesses:list[str] = []
-        ss, seen = [root], set()
-        while ss:
-          if (s:=ss.pop()) in seen: continue
-          seen.add(s)
-          if graph[s]["label"].startswith("INDEX"):
-            idx_str = graph[s]["label"].splitlines()
-            src_str = ["SRC"]+graph[graph[s]["src"][0][1]]["label"].splitlines()[1:]
-            accesses.append(" ".join(idx_str+src_str))
-          ss += [x[1] for x in graph[s]["src"]]
-        access_cache[root] = accesses
-      for access in access_cache[root]: print(emit(access))
-      if args.kernel_graph != "ALL" and args.kernel_graph in ansistrip(v["label"]): found = True
-    return found
-
-  if args.kernel_graph:
-    # Prefer the post-codegen JIT graph: its CALLs contain PROGRAMs and therefore
-    # always have the exact codegen identity that actually executes. Scheduler
-    # graphs are only a fallback for traces without a captured JIT.
-    compiled_graphs = [(i, ctx, s) for i,ctx in enumerate(viz_data.ctxs) for s in ctx["steps"] if s["name"] == "View graphed linear"]
-    graph_steps = compiled_graphs or [(i, ctx, s) for i,ctx in enumerate(viz_data.ctxs) for s in ctx["steps"] if s["name"] == "View Kernel Graph"]
-    for i,ctx,kernel_graph_step in graph_steps:
-      if len(args.src) > 1 and ctx["name"] not in args.src: continue
-      print(emit(f"*** TINY    {ctx['name']} ref={i}"))
-      if print_kernel_graph(kernel_graph_step): break
-    return None
-
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
   profile = decode_profile(profile_bytes)
@@ -265,8 +223,6 @@ def get_arg_parser() -> argparse.ArgumentParser:
   parser.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
   parser.add_argument("--interval", nargs="+", metavar=("START", "END"), help="Optional start and end marker")
   parser.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
-  parser.add_argument("--kernel-graph", nargs="?", const="ALL", metavar="NAME",
-                      help="Print only schedule CALL graphs, optionally stopping after a matching kernel (default: all)")
   parser.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
                       default=temp("profile.pkl", append_user=True))
   parser.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
