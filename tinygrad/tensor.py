@@ -8,6 +8,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, ParamArg, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import shape_to_shape_arg
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -65,6 +66,19 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: assigned_to = assigned_to.src[0].base
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
+def lift_full_buffer_reshape_after(r:UOp, a:UOp) -> UOp|None:
+  if r.numel() != a.numel() or r.dtype != a.dtype or not a.src[0].has_buffer_identity(after_ok=True): return None
+  return r.replace(src=(a.src[0], *r.src[1:])).after(*a.src[1:])
+
+def lift_unshard_after(u:UOp, a:UOp) -> UOp|None:
+  if not a.src[0].has_buffer_identity(after_ok=True): return None
+  return u.replace(src=(a.src[0], *u.src[1:])).after(*a.src[1:])
+
+lift_full_buffer_after_views = PatternMatcher([
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.AFTER, name="a"),), allow_any_len=True, name="r"), lift_full_buffer_reshape_after),
+  (UPat(Ops.UNSHARD, src=(UPat(Ops.AFTER, name="a"),), allow_any_len=True, name="u"), lift_unshard_after),
+])
+
 def _make_buffer_view(src:UOp) -> UOp|None:
   if (cv := src.contiguous_view()) is None: return None
   (buf, offset), size = cv, src.max_numel() * src.element_size() // cv[0].element_size()
@@ -97,20 +111,41 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
 
   return None
 
-def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
+def _precompiled_output_redirect(s:UOp, t:UOp) -> tuple[UOp, dict[UOp, UOp]]|None:
   # how output s lands in the caller's buffer t, or None if it must be copied into t
   # materialize straight into t
-  if s.op is Ops.CONTIGUOUS: return t.after(t.store(s.src[0]))
+  if s.op is Ops.CONTIGUOUS:
+    placed = t.after(t.store(s.src[0]))
+    return placed, {s:placed}
   # rebind output storage to t
-  if s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): return t
+  if s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): return t, {s:t}
+  # a full-buffer reshape is the same storage with a different logical shape, so rebind both the view and its base
+  if (s.op is Ops.RESHAPE and s.has_buffer_identity() and s.contiguous_view_offset() == 0 and s.numel() == s.base.numel()
+      and s.base.op in {Ops.BUFFER, Ops.UNSHARD}):
+    return t, {s:t, s.base:t.reshape(s.base.shape)}
+  # A shard-local full-buffer view can still be expressed as movement over UNSHARD here. Resolve it before deciding
+  # whether the function output needs a materializing copy.
+  if isinstance(s.device, tuple) and s.axis is not None:
+    from tinygrad.schedule.multi import multi_pm
+    resolved = graph_rewrite(s, multi_pm, name="resolve precompiled output sharding")
+    local = resolved.src[0] if resolved.op is Ops.UNSHARD else resolved
+    physical = local
+    while physical.op in GroupOp.Movement|{Ops.UNSHARD, Ops.AFTER}: physical = physical.src[0]
+    target_physical = t
+    while target_physical.op in GroupOp.Movement|{Ops.UNSHARD, Ops.AFTER}: target_physical = target_physical.src[0]
+    if (physical.op is Ops.BUFFER and target_physical.op is Ops.PARAM and physical.numel() == target_physical.numel()
+        and local.numel() == physical.numel() and local.contiguous_view_offset() == 0):
+      return t, {physical:target_physical.reshape(physical.shape)}
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile: return None
+  assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled CALL, got {c.src[0].op}"
+  body = graph_rewrite(c.src[0], lift_full_buffer_after_views, name="lift full-buffer AFTER views")
   input_buffers = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])
 
   # add the outputs to the call
-  srcs = c.src[0].src
+  srcs = body.src
   resolved = [c.gettuple(i) for i in range(len(srcs))]
   outs = tuple(r.empty_like() for r in resolved)
   targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
@@ -122,8 +157,10 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
     while s.op is Ops.AFTER:
       after_deps.extend(s.src[1:])
       s = s.src[0]
-    if (placed := _precompiled_output_redirect(s, t)) is not None and s not in subs:
-      subs[s] = placed
+    redirect = _precompiled_output_redirect(s, t)
+    if redirect is not None and all(old not in subs for old in redirect[1]):
+      placed, redirect_subs = redirect
+      subs.update(redirect_subs)
       items.append(s.after(*after_deps) if after_deps else s)
     else:
       items.append(t.after(t.store(s.after(*after_deps))))
@@ -205,6 +242,15 @@ pm_finalize_call = PatternMatcher([
   (UPat(Ops.COPY, name="x"), lambda ctx,x: ctx.assigns.append(x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
 ])
 
+# BUFFER/PARAM used to carry their flat shape as a source. Keep those dependency edges during the side-effectful finalization walk so removing
+# them from the storage representation does not reorder independent assigns, then remove them before constructing the call.
+pm_add_finalize_shape_src = PatternMatcher([
+  (UPat((Ops.BUFFER, Ops.PARAM), src=(), name="x"), lambda x: x.replace(src=(shape_to_shape_arg(x.shape),))),
+])
+pm_remove_finalize_shape_src = PatternMatcher([
+  (UPat((Ops.BUFFER, Ops.PARAM), src=(UPat(),), name="x"), lambda x: x.replace(src=())),
+])
+
 pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
@@ -232,8 +278,11 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
 
   # here we construct the final buffer_map: as-built nodes -> their final storage. values are never keys
-  graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
-  ret = graph_rewrite(UOp.sink(*ctx.assigns), pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
+  finalize_sink = graph_rewrite(big_sink, pm_add_finalize_shape_src, bottom_up=True, name="add finalize shape dependencies")
+  graph_rewrite(finalize_sink, pm_finalize_call, ctx=ctx, name="finalize call")
+  assigns = graph_rewrite(UOp.sink(*ctx.assigns), pm_remove_finalize_shape_src, bottom_up=True, name="remove finalize shape dependencies").src
+  ctx.buffer_map = {k:graph_rewrite(v, pm_remove_finalize_shape_src, bottom_up=True) for k,v in ctx.buffer_map.items()}
+  ret = graph_rewrite(UOp.sink(*assigns), pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, ctx.buffer_map

@@ -261,12 +261,19 @@ spec_kernel_graph = PatternMatcher([
   # param is outside buffer, buffer is local buffer. params have a size in the arg, no shape input
   (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.ALU)),
+  # tagged all-reduce SHRINKs are physical runtime buffer views whose byte offsets must survive in call arguments
+  (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM), UPat(Ops.CONST), UPat(Ops.CONST)), name="x"),
+   lambda x: x.tag == ("allreduce",) and x.contiguous_view_offset() is not None),
   (UPat(Ops.BITCAST), lambda: True),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
+  # physical allreduce views are direct copy arguments in the kernel graph
+  (UPat(Ops.SHRINK, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.MSELECT})),
+                         UPat(Ops.CONST, dtype=dtypes.weakint), UPat(Ops.CONST, dtype=dtypes.weakint)), name="x"),
+   lambda x: True),
   # all calls are on various sinks
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
   # after on PARAM or AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),),
         allow_any_len=True), lambda: True),

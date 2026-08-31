@@ -5,6 +5,27 @@ from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
 from tinygrad.function import renumber_invalid_outputs
 
+# Gradient producers can attach auxiliary representations that are valid only for that exact gradient value (for
+# example a quantized row/column pair emitted by the same kernel). Function boundaries replace a gradient body with a
+# GETTUPLE of the compiled backward function, so carry registered auxiliaries through that output at the same time.
+gradient_auxiliary_mailboxes:dict[str, dict[UOp, tuple[UOp|None, ...]]] = {}
+
+def gradient_auxiliary_mailbox(name:str) -> dict[UOp, tuple[UOp|None, ...]]:
+  return gradient_auxiliary_mailboxes.setdefault(name, {})
+
+def forward_gradient_auxiliaries(src:UOp, dst:UOp) -> UOp:
+  for mailbox in gradient_auxiliary_mailboxes.values():
+    if (aux:=mailbox.pop(src, None)) is not None: mailbox[dst] = aux
+  return dst
+
+def forward_unshard_auxiliaries(ctx:UOp, ret:UOp, physical:UOp) -> UOp:
+  # view_as(..., axis) creates UNSHARD(RESHAPE(...)). The next gradient rule will peel that storage RESHAPE, so attach
+  # auxiliaries directly to the UOp it will produce. This deliberately does not preserve auxiliaries across arbitrary
+  # model-level reshapes, whose changed matrix dimensions could invalidate row/column quantization.
+  dst = physical.reshape(ret.src[0].src[0].shape) if ret.src[0].op is Ops.RESHAPE else physical
+  forward_gradient_auxiliaries(ctx, dst)
+  return physical
+
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   if op == Ops.ADD: return (ctx._broadcast_to(ret.src[0].shape),)
   if op == Ops.MAX: return (((mask:=ret.src[0].eq(ret).cast(ctx.dtype))/mask._rop(Ops.ADD, tuple(range(ret.arg[1])))) * ctx,)
@@ -13,6 +34,18 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
     safe_x, axes = (is_zero:=(x:=ret.src[0]).eq(0)).where(1, x), tuple(range(ret.arg[1]))
     zero_count = is_zero.cast(sum_acc_dtype(is_zero.dtype))._rop(Ops.ADD, axes)
     return (ctx * is_zero.where(zero_count.eq(1).where(safe_x._rop(Ops.MUL, axes), 0), ret/safe_x),)
+
+def unshard_gradient(ctx:UOp, ret:UOp) -> tuple[UOp, ...]:
+  # Sharding is an identity view. If the incoming gradient already has the same layout, resolve its shard-local view;
+  # UOp.shard would first COPY to the same device tuple and unnecessarily materialize the full logical tensor.
+  axis = ret.axis
+  assert axis is not None
+  if ctx.device == ret.device and ctx.axis == ret.axis:
+    # Keep the logical view until multi_pm resolves the shard-local SHRINK. Directly taking UNSHARD.src[0] can bypass
+    # movement and AFTER semantics carried by the view even when the device range appears identical.
+    physical = ctx._shard(axis, ret.src[1])
+    return (forward_unshard_auxiliaries(ctx, ret, physical), *ret.src[1:])
+  return ctx.shard(ret.device, axis).src
 
 def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp, ...]]:
   """Remove unused PARAMs from body and return compacted (body, args)."""
@@ -36,19 +69,48 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     a = args[i]
     return grad.view_as(a.shard_shape, a.axis) if a.axis is not None and isinstance(a.device, tuple) else grad.view_as(a._shape)
   grad_args = ctx.src
-  root_grad = UOp(Ops.TUPLE, src=tuple(UOp(Ops.NOOP) if g.op is Ops.NOOP else
-    g if g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
-  grads = compute_gradient(fxn, root_grad, set(params.values()))
-  # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
+  # Precompiled forward outputs and gradient auxiliaries are additional backward-function inputs.
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}
   fwd_outs = tuple(k.gettuple(i) for i in range(len(fxn.src))) if k.arg.precompile else ()
+  root_grads = [UOp(Ops.NOOP) if g.op is Ops.NOOP else g if g.device is None else g.param_like(len(args)+i)
+                for i,g in enumerate(grad_args)]
+  aux_args:list[UOp] = []
+  for grad_arg, root in zip(grad_args, root_grads):
+    for mailbox in gradient_auxiliary_mailboxes.values():
+      if (aux:=mailbox.pop(grad_arg, None)) is None: continue
+      aux_params:list[UOp|None] = []
+      for value in aux:
+        if value is None: aux_params.append(None)
+        else:
+          aux_params.append(value.param_like(len(args)+len(grad_args)+len(fwd_outs)+len(aux_args)))
+          aux_args.append(value)
+      mailbox[root] = tuple(aux_params)
+  root_grad = UOp(Ops.TUPLE, src=tuple(root_grads))
+  grads = compute_gradient(fxn, root_grad, set(params.values()))
+  # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   # collect needed gradient bodies, compact unused params, create a single backward CALL
-  grad_bodies = [(i, shaped_grad(grads[p], i)) for i in needed if (p:=params.get(i)) is not None and p in grads]
-  bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies)).substitute(fwd_subs, walk=True)
+  raw_grad_bodies = [(i, grads[p]) for i in needed if (p:=params.get(i)) is not None and p in grads]
+  grad_bodies = [(i, shaped_grad(grad, i)) for i, grad in raw_grad_bodies]
+  aux_bodies:list[UOp] = []
+  aux_returns:list[tuple[int, dict[UOp, tuple[UOp|None, ...]], tuple[int|None, ...]]] = []
+  for arg_idx, grad_body in raw_grad_bodies:
+    for mailbox in gradient_auxiliary_mailboxes.values():
+      if (aux:=mailbox.pop(grad_body, None)) is None: continue
+      slots:list[int|None] = []
+      for value in aux:
+        if value is None: slots.append(None)
+        else:
+          slots.append(len(grad_bodies)+len(aux_bodies))
+          aux_bodies.append(value)
+      aux_returns.append((arg_idx, mailbox, tuple(slots)))
+  bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies), *aux_bodies).substitute(fwd_subs, walk=True)
   bwd_body = renumber_invalid_outputs(bwd_body)
-  bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))
+  bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs, *aux_args))
   bwd_call = bwd_body.call(*compact_args, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
   gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
+  for arg_idx, mailbox, returned_slots in aux_returns:
+    returned_grad = bwd_call.gettuple(gb_map[arg_idx])
+    mailbox[returned_grad] = tuple(None if slot is None else bwd_call.gettuple(slot) for slot in returned_slots)
   return (None,) + tuple(bwd_call.gettuple(gb_map[i]) if i in gb_map else None for i in range(len(args)))
 
 # ctx is grad_output
@@ -79,7 +141,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip([i for i,x in enumerate(ret.marg) if x]),)),
   (UPat(Ops.STACK, name="ret"), lambda ctx, ret: tuple(ctx[i] for i in range(len(ret.src)))),
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),)),
-  (UPat(Ops.UNSHARD, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
+  (UPat(Ops.UNSHARD, name="ret"), unshard_gradient),
   (UPat(Ops.TUPLE), lambda ctx: ctx.src),
   (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
     (ctx, UOp.maketuple(*(ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1))))),

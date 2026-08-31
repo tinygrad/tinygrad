@@ -1,4 +1,7 @@
 #include "kittens.cuh"
+#ifdef WRITE_MXFP4
+#include "quantize_mxfp4_device.h"
+#endif
 
 using namespace kittens;
 
@@ -120,32 +123,103 @@ __device__ __forceinline__ void inverse_rope(RT &tile, const bf16_2 *freqs, cons
   }
 }
 
+#ifdef WRITE_MXFP4
+constexpr int QUANT_TILE_STRIDE = ATTN_D + 2;
+
+template<ducks::rt::row_layout RT>
+__device__ __forceinline__ void stage_quant_tile(uint16_t *dst, const RT &src) {
+  const int lane = kittens::laneid();
+  const int row = kittens::warpid() * TILE_N + lane % src.base_tile_rows;
+  const int lane_col = src.base_tile_stride * (lane / src.base_tile_rows);
+  #pragma unroll
+  for (int j = 0; j < src.width; j++) {
+    #pragma unroll
+    for (int k = 0; k < src.packed_per_base_tile; k++) {
+      *reinterpret_cast<uint32_t*>(dst + row * QUANT_TILE_STRIDE + j * src.base_tile_cols + lane_col + 2 * k) =
+        *reinterpret_cast<const uint32_t*>(&src.tiles[0][j].data[k]);
+    }
+  }
+}
+
+template<ducks::rt::row_layout RT>
+__device__ __forceinline__ void stage_quant_tile_fa(uint16_t *dst, const RT &src) {
+  const int lane = kittens::laneid();
+  const int row = kittens::warpid() * TILE_N + (lane % 4) * 4;
+  const int lane_col = ((lane / 32) * 16) + (((lane % 32) / 16) * 2) + (((lane % 16) / 4) * 4);
+  #pragma unroll
+  for (int j = 0; j < src.width; j++) {
+    #pragma unroll
+    for (int k = 0; k < src.packed_per_base_tile; k++) {
+      *reinterpret_cast<uint32_t*>(dst + (row + k) * QUANT_TILE_STRIDE + j * src.base_tile_cols + lane_col) =
+        *reinterpret_cast<const uint32_t*>(&src.tiles[0][j].data[k]);
+    }
+  }
+}
+#endif
+
 extern "C" __global__ __launch_bounds__(THREADS_PER_BLOCK) void
 fused_qkv_rope_backward(
     bf16*       __restrict__ dxqkv,
+#ifdef WRITE_MXFP4
+    uint8_t*    __restrict__ row_fp4,
+    uint8_t*    __restrict__ row_scale,
+    uint8_t*    __restrict__ col_fp4,
+    uint8_t*    __restrict__ col_scale,
+#endif
     const bf16* __restrict__ dq,
     const bf16* __restrict__ dk,
     const bf16* __restrict__ dv,
     const bf16* __restrict__ freqs_cis) {
+#ifndef WRITE_MXFP4
   gl<bf16, -1, -1, -1, -1> out{dxqkv, ATTN_B, ATTN_N, PACKED_H, ATTN_D};
+#endif
+#ifdef EXPANDED_FA_GRADS
+  gl<bf16, -1, -1, -1, -1> dqg{const_cast<bf16*>(dq), ATTN_B, ATTN_N, ATTN_H, ATTN_D};
+  // AITER writes one dK/dV contribution per query head. Keep the expanded H stride here and
+  // reduce each GROUP_SIZE run below before packing the shared KV head into dxqkv.
+  gl<bf16, -1, -1, -1, -1> dkg{const_cast<bf16*>(dk), ATTN_B, ATTN_N, ATTN_H, ATTN_D};
+  gl<bf16, -1, -1, -1, -1> dvg{const_cast<bf16*>(dv), ATTN_B, ATTN_N, ATTN_H, ATTN_D};
+#else
   gl<bf16, -1, -1, -1, -1> dqg{const_cast<bf16*>(dq), ATTN_B, ATTN_H, ATTN_N, ATTN_D};
   gl<bf16, -1, -1, -1, -1> dkg{const_cast<bf16*>(dk), ATTN_B * KV_PARTIALS, ATTN_N, ATTN_H_KV, ATTN_D};
   gl<bf16, -1, -1, -1, -1> dvg{const_cast<bf16*>(dv), ATTN_B * KV_PARTIALS, ATTN_N, ATTN_H_KV, ATTN_D};
+#endif
   const int b = blockIdx.x, n_tile = blockIdx.y * NUM_WARPS + kittens::warpid(), n_base = n_tile * TILE_N;
   const int field = blockIdx.z;
+  grad_tile<bf16> tile;
 
   if (field < ATTN_H) {
-    grad_tile<bf16> tile;
+#ifndef WRITE_MXFP4
+    const int out_head = (field / GROUP_SIZE) * (GROUP_SIZE + 2) + field % GROUP_SIZE;
+#endif
+#ifdef EXPANDED_FA_GRADS
+    load<1>(tile, dqg, {b, n_tile, field, 0});
+    inverse_rope(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
+#ifndef WRITE_MXFP4
+    store<1>(out, tile, {b, n_tile, out_head, 0});
+#endif
+#else
     load_fa_shuffled<2>(tile, dqg, {b, field, n_tile, 0});
     inverse_rope_fa(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
-    const int out_head = (field / GROUP_SIZE) * (GROUP_SIZE + 2) + field % GROUP_SIZE;
+#ifndef WRITE_MXFP4
     store_fa_shuffled<1>(out, tile, {b, n_tile, out_head, 0});
+#endif
+#endif
   } else {
     const bool is_k = field < ATTN_H + ATTN_H_KV;
     const int kvh = field - ATTN_H - (is_k ? 0 : ATTN_H_KV);
     const auto &src = is_k ? dkg : dvg;
-    grad_tile<bf16> partial, tile;
+    grad_tile<bf16> partial;
     grad_tile<float> partial_f, sum;
+#ifdef EXPANDED_FA_GRADS
+    zero(sum);
+    #pragma unroll
+    for (int qh = 0; qh < GROUP_SIZE; qh++) {
+      load<1>(partial, src, {b, n_tile, kvh * GROUP_SIZE + qh, 0});
+      copy(partial_f, partial);
+      add(sum, sum, partial_f);
+    }
+#else
     zero(sum);
     #pragma unroll
     for (int p = 0; p < KV_PARTIALS; p++) {
@@ -153,9 +227,54 @@ fused_qkv_rope_backward(
       copy(partial_f, partial);
       add(sum, sum, partial_f);
     }
+#endif
     copy(tile, sum);
     if (is_k) inverse_rope(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
     const int out_head = kvh * (GROUP_SIZE + 2) + GROUP_SIZE + !is_k;
+#ifndef WRITE_MXFP4
     store<1>(out, tile, {b, n_tile, out_head, 0});
+#endif
   }
+
+#ifdef WRITE_MXFP4
+  __shared__ uint16_t quant_tile[NUM_WARPS * TILE_N * QUANT_TILE_STRIDE];
+#ifdef EXPANDED_FA_GRADS
+  stage_quant_tile(quant_tile, tile);
+#else
+  if (field < ATTN_H) stage_quant_tile_fa(quant_tile, tile);
+  else stage_quant_tile(quant_tile, tile);
+#endif
+  __syncthreads();
+
+  constexpr int MATRIX_M = ATTN_B * ATTN_N;
+  constexpr int MATRIX_N = PACKED_H * ATTN_D;
+  const int line = threadIdx.x / 8, lane = threadIdx.x % 8;
+  const int out_head = field < ATTN_H ? (field / GROUP_SIZE) * (GROUP_SIZE + 2) + field % GROUP_SIZE :
+    (field - ATTN_H - (field < ATTN_H + ATTN_H_KV ? 0 : ATTN_H_KV)) * (GROUP_SIZE + 2) +
+      GROUP_SIZE + !(field < ATTN_H + ATTN_H_KV);
+
+  #pragma unroll
+  for (int chunk_m = 0; chunk_m < 2; chunk_m++) {
+    #pragma unroll
+    for (int chunk_n = 0; chunk_n < ATTN_D / 32; chunk_n++) {
+      const int row = b * ATTN_N + blockIdx.y * 64 + chunk_m * 32 + line;
+      const int col = out_head * ATTN_D + chunk_n * 32 + lane * 4;
+      const int tile_row = chunk_m * 32 + line, tile_col = chunk_n * 32 + lane * 4;
+
+      const auto row_result = mxfp4::quantize(mxfp4::load_bf16x4(quant_tile + tile_row * QUANT_TILE_STRIDE + tile_col), lane);
+      mxfp4::store_fp4<false>(row_fp4, row, col / 2, MATRIX_N / 2, row_result.fp4);
+      if (lane == 0) mxfp4::store_scale(row_scale, row, col / 32, MATRIX_N / 32, row_result.scale);
+
+      const int row_lane = lane * 4;
+      const int col_line = out_head * ATTN_D + chunk_n * 32 + line;
+      const auto col_result = mxfp4::quantize(make_float4(
+        __uint_as_float(static_cast<uint32_t>(quant_tile[(chunk_m * 32 + row_lane + 0) * QUANT_TILE_STRIDE + chunk_n * 32 + line]) << 16),
+        __uint_as_float(static_cast<uint32_t>(quant_tile[(chunk_m * 32 + row_lane + 1) * QUANT_TILE_STRIDE + chunk_n * 32 + line]) << 16),
+        __uint_as_float(static_cast<uint32_t>(quant_tile[(chunk_m * 32 + row_lane + 2) * QUANT_TILE_STRIDE + chunk_n * 32 + line]) << 16),
+        __uint_as_float(static_cast<uint32_t>(quant_tile[(chunk_m * 32 + row_lane + 3) * QUANT_TILE_STRIDE + chunk_n * 32 + line]) << 16)), lane);
+      mxfp4::store_fp4<false>(col_fp4, col_line, (row - line + row_lane) / 2, MATRIX_M / 2, col_result.fp4);
+      if (lane == 0) mxfp4::store_scale(col_scale, col_line, (row - line) / 32, MATRIX_M / 32, col_result.scale);
+    }
+  }
+#endif
 }

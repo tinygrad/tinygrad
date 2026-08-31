@@ -1431,4 +1431,3 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None) -> tuple[d
           break
       else: assigns.append((var, val))
   return env, assigns
-

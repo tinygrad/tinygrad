@@ -63,6 +63,52 @@ class TestApplyGradE2E(unittest.TestCase):
     for x in xs: fwd_bwd(x)
     self._assert_close([grads[p] for p in get_parameters(model)], self._run_reference(model, xs), atol=1e-3, rtol=1e-3)
 
+  def test_overwrite_then_accumulate_without_reset(self):
+    model = FlatModel(n_layers=3, dim=8, hidden=16)
+    params = get_parameters(model)
+    Tensor.realize(*params)
+    grads = {p: Tensor.full(p.shape, 123, dtype=p.dtype).contiguous().realize() for p in params}
+
+    def run(x, accumulate):
+      loss = model(x)
+      new_grads = loss.gradient(*params)
+      for p, g in zip(params, new_grads): apply_grad(grads[p], g.uop, accumulate)
+      Tensor.realize(*new_grads, *grads.values())
+      return new_grads
+
+    xs = [Tensor.randn(2, 8).realize() for _ in range(3)]
+    first = run(xs[0], False)
+    self._assert_close([grads[p] for p in params], first, atol=1e-4, rtol=1e-4)
+    second = run(xs[1], True)
+    self._assert_close([grads[p] for p in params], [a+b for a,b in zip(first, second)], atol=1e-4, rtol=1e-4)
+    third = run(xs[2], False)
+    self._assert_close([grads[p] for p in params], third, atol=1e-4, rtol=1e-4)
+
+  def test_overwrite_and_accumulate_use_separate_jits(self):
+    model = FlatModel(n_layers=3, dim=8, hidden=16)
+    params = get_parameters(model)
+    Tensor.realize(*params)
+    grads = {p: Tensor.full(p.shape, 123, dtype=p.dtype).contiguous().realize() for p in params}
+
+    def fwd_bwd(x, accumulate):
+      loss = model(x)
+      for p, g in zip(params, loss.gradient(*params)): apply_grad(grads[p], g.uop, accumulate)
+      Tensor.realize(*grads.values())
+
+    @TinyJit
+    def overwrite(x): fwd_bwd(x, False)
+
+    @TinyJit
+    def accumulate(x): fwd_bwd(x, True)
+
+    for _ in range(3):
+      xs = [Tensor.randn(2, 8).realize() for _ in range(2)]
+      expected = self._run_reference(model, xs)
+      overwrite(xs[0])
+      accumulate(xs[1])
+      self._assert_close([grads[p] for p in params], expected, atol=1e-3, rtol=1e-3)
+      for p in params: p.grad = None
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -1,5 +1,5 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
-from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, graph_rewrite, broadcast_axes, _broadcast_shape, sint_to_uop
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, graph_rewrite, broadcast_axes, _broadcast_shape, sint_to_uop, resolve
 from tinygrad.uop.ops import sint, ssimplify
 from tinygrad.dtype import dtypes
 from tinygrad.schedule.allreduce import handle_allreduce
@@ -114,7 +114,11 @@ def reduce_multi(root:UOp, multi:UOp):
     # all sharded axes are reduced: full allreduce
     if ALLREDUCE_CAST and multi.src[0].op is Ops.CAST and multi.src[0].src[0].dtype in (dtypes.bfloat16, dtypes.half):
       orig_dtype = multi.src[0].src[0].dtype
-      return local.cast(orig_dtype).allreduce(op, multi.device).cast(local.dtype)
+      # A local reduction over only singleton axes is an identity. Reduce the original low-precision storage
+      # directly instead of materializing a cast/reduce/cast kernel before the cross-device reduction.
+      local_to_reduce = multi.src[0].src[0].reshape(local.shape) if all(resolve(s == 1) for s in multi.src[0].shape[:num_axes]) \
+                        else local.cast(orig_dtype)
+      return local_to_reduce.allreduce(op, multi.device).cast(local.dtype)
     return local.allreduce(op, multi.device)
   # no sharded axes reduced: piecewise, keep all remaining sharding
   new_axes = tuple(ax - num_axes for ax, _ in remaining)

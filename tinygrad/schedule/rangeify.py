@@ -11,6 +11,7 @@ from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, apply_movement_op
 from tinygrad.schedule.prepare import pm_mops
+from tinygrad.schedule.allreduce import _allreduce_view
 
 # creation can recurse a lot
 import sys
@@ -106,6 +107,13 @@ def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:]: return None
   return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
 
+def normalize_allreduce_view_source(x:UOp) -> UOp|None:
+  # Rangeify can wrap a physical view's buffer in INDEX. Keep the view attached to the buffer itself so
+  # scheduling and runtime argument resolution retain the physical offset.
+  if (x.tag != ("allreduce",) or x.src[0].op is not Ops.INDEX or
+      x.src[1].op is not Ops.CONST or x.src[2].op is not Ops.CONST): return None
+  return _allreduce_view(x.src[0].src[0], x.src[1].val, x.src[1].val+x.src[2].val)
+
 def after_all_invalid(after:UOp):
   buf = after.src[0].buf_uop
   # check all ranges are used (no expand), and same size (no pad and shrink)
@@ -114,6 +122,7 @@ def after_all_invalid(after:UOp):
     and resolve(cast(UOp, prod(r.src[0] for r in s.ended_ranges)).eq(buf.numel()), False) for s in after.src[1:])
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
+  (UPat(Ops.SHRINK, name="x"), normalize_allreduce_view_source),
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
@@ -149,10 +158,11 @@ def no_indexing_calls(u:UOp):
       # TODO: we should add safety checks here for contiguous
       new_srcs.append(x.src[0])
     elif x.op is Ops.SHRINK:
-      # SHRINK with offset 0 is fine
-      new_srcs.append(strip_zero_offset_shrink(x))
+      # Tagged all-reduce SHRINKs are physical runtime views. Even at offset zero their bounded allocation size
+      # must survive on compute calls, matching the former SLICE call argument semantics.
+      new_srcs.append(x if x.tag == ("allreduce",) else strip_zero_offset_shrink(x))
     elif x.op is Ops.MSTACK:
-      new_srcs.append(x.replace(src=tuple(strip_zero_offset_shrink(s) for s in x.src)))
+      new_srcs.append(x.replace(src=tuple(s if s.tag == ("allreduce",) else strip_zero_offset_shrink(s) for s in x.src)))
     else:
       # everything else we pass through
       new_srcs.append(x)
@@ -165,7 +175,7 @@ pm_no_indexing_calls = PatternMatcher([
 # the kernel graph is what gets executed: no shape views left in it, the storage of a value is just the storage
 pm_no_views = PatternMatcher([
   (UPat((Ops.RESHAPE, Ops.SHRINK), name="v", src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER)),), allow_any_len=True), lambda v:
-   v.src[0]),
+   None if v.op is Ops.SHRINK and v.tag == ("allreduce",) and v.src[0].op is Ops.PARAM else v.src[0]),
 ])
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8, "CPU": 31} # TODO: get from device?
@@ -293,10 +303,11 @@ class LocalAddBufferContext:
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   # Variables (ALU buffers with a value range) are scalar symbolic values, not real buffers: they become ALU params with no slot
   if buf.is_variable: return buf.replace(op=Ops.PARAM)
-  param = UOp(Ops.PARAM, arg=ParamArg(ctx.dg, buf.dtype, prod(buf.max_shape), addrspace=buf.addrspace, device=buf.device))
-  ret = param.reshape(buf.max_shape)
+  physical_shape = (buf.src[2].val,) if buf.op is Ops.SHRINK and buf.tag == ("allreduce",) else buf.max_shape
+  param = UOp(Ops.PARAM, arg=ParamArg(ctx.dg, buf.dtype, prod(physical_shape), addrspace=buf.addrspace, device=buf.device))
+  ret = param.reshape(physical_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
-  if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
+  if physical_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
   if buf not in ctx.map: ctx.map[buf] = buf
   ctx.dg += 1
   return ret
@@ -317,12 +328,19 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
 def find_bufs(x:UOp):
   idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
   read_from: dict[UOp, Ops] = {}
-  if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.PARAM} and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
-    raise RuntimeError(f"cycle detected while indexing {buf}")
+  for idx in idxs:
+    # A dependency around a physical all-reduce view does not change its addressing mode. Keep ordinary AFTER
+    # accesses distinct: mixing pre/post-assignment states must still report a scheduling cycle.
+    access = idx.src[0]
+    op = access.src[0].op if access.op is Ops.AFTER and access.src[0].tag == ("allreduce",) else access.op
+    buf = idx.buf_uop
+    if buf.op not in {Ops.BUFFER, Ops.PARAM}: continue
+    if read_from.setdefault(buf, op) is not op: raise RuntimeError(f"cycle detected while indexing {buf}")
 
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
+  (UPat(Ops.SHRINK, name="buf"), lambda ctx,buf: debuf(ctx, buf) if buf.tag == ("allreduce",) else None),
   (UPat(Ops.PARAM, name="v"), lambda v:
    v.replace(arg=replace(v.arg, slot=-1)) if v.arg.name is not None and v.arg.vmin_vmax is not None and v.arg.slot != -1 else None),
 
@@ -356,6 +374,34 @@ pm_add_param_range_tags = PatternMatcher([
   (UPat((Ops.PARAM, Ops.RANGE), name="x"), lambda x: x.rtag(())),
 ])
 
+def copy_slice_src(x:UOp) -> tuple[UOp, UOp]|None:
+  """Recover a hardware view and retain the state that produced it."""
+  state = x
+  # Rangeify indexes a COPY source before split_kernels. The runtime copy still consumes the complete physical
+  # view; keep its AFTER as the dependency-bearing argument instead of lowering a cross-device elementwise kernel.
+  if x.op is Ops.INDEX: state = x = x.src[0]
+  while x.op is Ops.AFTER: x = x.src[0]
+  if (x.op is not Ops.SHRINK or x.tag != ("allreduce",) or
+      x.src[1].op is not Ops.CONST or x.src[2].op is not Ops.CONST): return None
+  src = x.src[0].src[0] if x.src[0].op is Ops.INDEX else x.src[0]
+  return (x if src is x.src[0] else _allreduce_view(src, x.src[1].val, x.src[1].val+x.src[2].val)), state
+
+def split_copy_slice(x:UOp) -> UOp|None:
+  """Lower STORE(COPY(view)) directly to a copy call with viewed source and destination arguments."""
+  if any(r.arg[-1] is not AxisType.DEVICE for r in x.ranges): return None
+  store = x.src[0] if x.op is Ops.END else x
+  if store.op is not Ops.STORE or store.src[1].op is not Ops.COPY: return None
+  if (slice_src:=copy_slice_src(store.src[1].src[0])) is None: return None
+  src, source_state = slice_src
+  copy = store.src[1]
+  # A tagged SHRINK is a fixed physical transfer interval. Its parent can retain a larger symbolic max shape after
+  # FUNCTION substitution, but the copy parameter must stay bounded to the explicit SHRINK length (as SLICE was).
+  physical_shape = (src.src[2].val,) if src.op is Ops.SHRINK and src.tag == ("allreduce",) else src.max_shape
+  psrc = UOp(Ops.PARAM, arg=ParamArg(1, src.dtype, prod(physical_shape), addrspace=src.addrspace)).reshape(physical_shape)
+  if physical_shape != src.shape: psrc = psrc.shrink(tuple((0, s) for s in src.shape))
+  target = store.src[0].src[0] if store.src[0].op is Ops.INDEX else store.src[0]
+  return copy.replace(src=(psrc,)).call(target, source_state)
+
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split. open DEVICE ranges are fine, they are bound per device at launch
   if any(r.arg[-1] is not AxisType.DEVICE for r in x.ranges): return None
@@ -371,6 +417,7 @@ def split_store(x:UOp) -> UOp|None:
   return ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts)).call(*lctx.map.values())
 
 split_kernels = PatternMatcher([
+  (UPat((Ops.STORE, Ops.END), name="x"), split_copy_slice),
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 

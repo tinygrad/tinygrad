@@ -174,6 +174,7 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
 def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
+    assert dest.nbytes == src.nbytes, f"copy size mismatch, {dest.nbytes} != {src.nbytes}"
     if hasattr(dest.allocator,'_transfer') and dest.allocator.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:
       dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev)
     elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
@@ -275,7 +276,7 @@ def lower_and_compile(linear:UOp) -> UOp:
   if len(todo):
     # kernels that beam search must compile in the parent, beam needs device access to time candidates
 
-    pool = None if len(todo) == 1 or any(getattr(c.src[0].arg, "beam", 0) for c in ar) else get_worker_pool()
+    pool = None if len(todo) == 1 or any(getattr(a[0].arg, "beam", 0) for a in ar.values()) else get_worker_pool()
     ctx = {v.key: v.value for v in to_program_context}
     tasks = ((i, ast_ren, ctx) for i, (_, ast_ren) in enumerate(todo))
     try:

@@ -1285,7 +1285,7 @@ def train_llama3():
   from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, MXFP8, MXFP4
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW, clip_grads
+  from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, clip_grads
 
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
@@ -1414,8 +1414,14 @@ def train_llama3():
   is_offload_optim = bool(getenv("OFFLOAD_OPTIM"))
   is_fake_offload = Device.DEFAULT == "NULL"
   optim_device = ("CPU" if not is_fake_offload else "NULL:99") if is_offload_optim else None
-  optim = GradAccClipAdamW(params, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
-                           eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
+  params_wd = [p for p in params if p.ndim >= 3 or p is model.tok_embeddings.weight]
+  params_no_wd = [p for p in params if p.ndim < 3 and p is not model.tok_embeddings.weight]
+  optim = GradAccClipAdamWGroup(
+    GradAccClipAdamW(params_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
+                     eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device),
+    GradAccClipAdamW(params_no_wd, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
+                     eps=opt_adamw_epsilon, weight_decay=0.0, grad_acc=grad_acc, device=optim_device),
+  )
 
   for p in optim.params:
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
@@ -1458,16 +1464,19 @@ def train_llama3():
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
+  Tensor.realize(*[x for o in optim.optimizers for x in o.m + o.v + o.param_shards])
   loss_acc = Tensor.zeros(1, dtype=dtypes.float32, device=device)
   Tensor.realize(loss_acc, *optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
+  mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
+  if mxfp4_weights is not None:
+    Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
 
-  @TinyJit
-  def minibatch(tokens:Tensor):
+  def minibatch_impl(tokens:Tensor, accumulate:bool):
     model.reset_amax()
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
-    logits:Tensor = model(tokens[:, :-1], save=bool(SMALL))
+    logits:Tensor = model(tokens[:, :-1], save=bool(SMALL), mxfp4_weights=mxfp4_weights)
     if getenv("FAST_CE", 0):
       from extra.llama_kernels.fused_ce import fused_ce_loss
       loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)
@@ -1475,24 +1484,29 @@ def train_llama3():
       loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
 
     for g, new_g in zip(grads, loss.gradient(*optim.params)):
-      apply_grad(g, new_g.uop)
+      apply_grad(g, new_g.uop, accumulate)
 
     loss_acc.assign(loss_acc + loss.flatten().float())
     return loss_acc.realize(*grads, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
 
   @TinyJit
+  def minibatches(tokens:list[Tensor]):
+    for grad_acc_idx, batch_tokens in enumerate(tokens): minibatch_impl(batch_tokens, grad_acc_idx != 0)
+
+  @TinyJit
   def optim_step():
-    grad_norm = clip_grads(grads, grad_acc, 1.0)
-    optim.fstep(grads, grad_norm)
+    grad_norm, clip_coeff = clip_grads(grads, grad_acc, 1.0)
+    optim.fstep(grads, grad_norm, clip_coeff)
     scheduler.step()
 
-    for g in grads: g.assign(0)
     model.update_amax()
+    refreshed_mxfp4 = model.refresh_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
     loss_cpu = loss_acc.to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_acc.assign(0), *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
+    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_acc.assign(0), *fp8_inv_scales, *fp8_amax, *fp8_grad_amax,
+                   *refreshed_mxfp4)
 
     return lr_cpu, grad_norm_cpu, loss_cpu
 
@@ -1502,7 +1516,7 @@ def train_llama3():
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
-    logits:Tensor = model(tokens[:, :-1])
+    logits:Tensor = model(tokens[:, :-1], mxfp4_weights=mxfp4_weights)
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float().to("CPU")
 
@@ -1543,14 +1557,15 @@ def train_llama3():
 
   while i < MAX_STEPS:
     GlobalCounters.reset()
-    actual_gbs = GBS if i >= 2 else BS
+    actual_gbs = GBS
     if getenv("TRAIN", 1):
       profile_marker(f"train @ {i}")
       st = time.perf_counter()
 
       stopped = False
       data_time, dev_time = 0, 0
-      for _ in range(accum_steps:=grad_acc if i >= 2 else 1):
+      batch_tokens = []
+      for _ in range(grad_acc):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
@@ -1558,13 +1573,15 @@ def train_llama3():
           break
         mst = time.perf_counter()
         data_time += mst - ist
-        minibatch(tokens)
-        dev_time += time.perf_counter() - mst
+        batch_tokens.append(tokens)
       if stopped: break
+      mst = time.perf_counter()
+      minibatches(batch_tokens)
+      dev_time += time.perf_counter() - mst
 
       gt = time.perf_counter()
       ret = optim_step()
-      lr, grad_norm, loss = ret[0].item(), ret[1].item(), ret[2].item() / accum_steps
+      lr, grad_norm, loss = ret[0].item(), ret[1].item(), ret[2].item() / grad_acc
       et = time.perf_counter()
 
       optim_time = et - gt
@@ -1636,6 +1653,8 @@ def train_llama3():
         eval_losses += eval_step(tokens).tolist()
 
         if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
+          if getenv("BENCHMARK_EVAL_LOSS", 0):
+            tqdm.write(f"benchmark eval log perplexity: {sum(eval_losses) / len(eval_losses):.4f}")
           if MLLOGGER and INITMLPERF:
             MLLOGGER.end(key=mllog_constants.INIT_STOP, value=None)
           return
@@ -1667,7 +1686,7 @@ def train_llama3():
 def train_gptoss():
   from examples.mlperf.models.gpt_oss import GPTOSS, GPT_OSS_20B, apply_grad, FP8_DTYPE
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
-  from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, fclip_grads
+  from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, clip_grads
 
   BENCHMARK = getenv("BENCHMARK")
 
@@ -1785,8 +1804,8 @@ def train_gptoss():
 
     Tensor.realize(loss, *grads)
 
-    clipped_grads, grad_norm = fclip_grads(grads, 1.0)
-    optim.fstep(clipped_grads, grad_norm)
+    grad_norm, clip_coeff = clip_grads(grads, 1, 1.0)
+    optim.fstep(grads, grad_norm, clip_coeff)
     scheduler.step()
 
     loss_cpu = loss.flatten().float().to("CPU")

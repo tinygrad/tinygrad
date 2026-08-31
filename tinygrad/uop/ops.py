@@ -435,6 +435,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           return tuple(ssimplify(sz) for _,sz in self.marg)
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
+          # All-reduce views address the underlying allocation as a flat physical buffer. This preserves the
+          # semantics of the former SLICE op when a FUNCTION parameter is rebound to a differently shaped view.
+          if self.tag == ("allreduce",) and len(self.marg) == 1:
+            o,sz = self.marg[0]
+            if not (resolve(0<=o) and resolve(sz>=0) and resolve(o+sz<=prod(ps))):
+              raise ValueError(f"invalid allreduce shrink {self.marg} for {ps}")
+            return (ssimplify(sz),)
           if len(ps) != len(self.marg) or not all(resolve(0<=o) and resolve(sz>=0) and resolve(o+sz<=s) for s,(o,sz) in zip(ps, self.marg)):
             raise ValueError(f"invalid shrink {self.marg} for {ps}")
           return tuple(ssimplify(sz) for _,sz in self.marg)
@@ -887,9 +894,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, src=tuple(x.buf_uop for x in self.src))
+    # A hardware buffer view is part of the call argument: dropping it here loses its byte offset.
+    if self.op is Ops.SHRINK and self.tag == ("allreduce",) and self.src[0].op is not Ops.INDEX: return self
     if self.base.op is Ops.AFTER: return self.base.src[0].buf_uop.base
     s = self
-    while len(s.src) and s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK}: s = s.src[0]
+    while len(s.src) and (s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK} and
+                          not (s.op is Ops.SHRINK and s.tag == ("allreduce",) and s.src[0].op is not Ops.INDEX)): s = s.src[0]
     return s
 
   def contiguous_view(self) -> tuple[UOp, int]|None:
@@ -903,6 +913,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # by relevant CL runtimes at time of writing.
     if (dev:=self.device) is not None and any(d.startswith(("WEBGPU", "CL")) for d in ((dev,) if isinstance(dev, str) else dev)): return None
 
+    # An all-reduce SHRINK is a flat physical allocation view, so its offset composes directly with its parent's
+    # contiguous view even when the parent's logical rank differs after FUNCTION argument substitution.
+    if self.op is Ops.SHRINK and self.tag == ("allreduce",) and self.src[1].op is Ops.CONST and self.src[2].op is Ops.CONST:
+      if (parent:=self.src[0].contiguous_view()) is None: return None
+      byte_offset = self.src[1].val * self.src[0].dtype.itemsize
+      assert byte_offset % parent[0].dtype.itemsize == 0, "all-reduce view offset must align to the base dtype"
+      return parent[0], parent[1] + byte_offset // parent[0].dtype.itemsize
+
     idx = self.flatten().index(UOp.range(self.numel(), 0))
     out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
     if out.op is not Ops.INDEX or not (b:=out.src[0]).tag or (c:=out.src[1]).op is not Ops.CONST or not isinstance(c.val, int): return None
@@ -915,7 +933,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
-    return self.op in {Ops.BUFFER, Ops.PARAM}
+    return self.op in {Ops.BUFFER, Ops.PARAM} or (self.op is Ops.SHRINK and self.tag == ("allreduce",))
 
   def _base_buffer_is_realized(self) -> bool:
     """Walk through AFTER chain to find if the underlying buffer is realized (has allocated memory)."""

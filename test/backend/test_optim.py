@@ -44,6 +44,39 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
     optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
 
+class TestMLPerfAdamWKernel(unittest.TestCase):
+  def test_replicated_clip_grads(self):
+    from examples.mlperf.optim import clip_grads
+    rng, devices = np.random.default_rng(11), tuple(f"CPU:{i}" for i in range(4))
+    arrays = [rng.standard_normal((16, 7), dtype=np.float32), rng.standard_normal((3,), dtype=np.float32)]
+    grads = [Tensor(x, dtype=dtypes.bfloat16).shard(devices).realize() for x in arrays]
+    norm, _ = clip_grads(grads, grad_acc=2, clip_norm=1.0)
+    rounded = [Tensor(x, dtype=dtypes.bfloat16).numpy().astype(np.float32) / 2 for x in arrays]
+    expected = np.sqrt(sum(np.square(x).sum(dtype=np.float32) for x in rounded))
+    np.testing.assert_allclose(norm.numpy(), expected, rtol=2e-4, atol=2e-4)
+
+  def test_master_weight_transition(self):
+    from examples.mlperf.optim import _adamw_master_step
+    rng = np.random.default_rng(7)
+    param = Tensor(rng.standard_normal(256, dtype=np.float32), dtype=dtypes.bfloat16).realize()
+    grad = Tensor(rng.standard_normal(256, dtype=np.float32), dtype=dtypes.bfloat16).realize()
+    m, v = Tensor.randn(256, dtype=dtypes.bfloat16).realize(), Tensor.rand(256, dtype=dtypes.bfloat16).realize()
+    master = param.float().contiguous().realize()
+    m0, v0, w0 = m.clone().realize(), v.clone().realize(), master.clone().realize()
+    lr, b1_t, b2_t = Tensor([1e-3]).realize(), Tensor([0.9]).realize(), Tensor([0.95]).realize()
+    expected_m = (0.9 * m0.float() + 0.1 * grad.float()).cast(dtypes.bfloat16)
+    expected_v = (0.95 * v0.float() + 0.05 * grad.float().square()).cast(dtypes.bfloat16)
+    calc_m, calc_v = 0.9 * m0.float() + 0.1 * grad.float(), 0.95 * v0.float() + 0.05 * grad.float().square()
+    expected_w = w0 - lr * ((calc_m / (1.0-b1_t)) / ((calc_v / (1.0-b2_t)).sqrt()+1e-5) + 0.1*w0)
+    Tensor.realize(expected_m, expected_v, expected_w)
+
+    _adamw_master_step(param, grad, m, v, master, lr, b1_t, b2_t, b1=0.9, b2=0.95, eps=1e-5, wd=0.1)
+    Tensor.realize(param, m, v, master)
+    np.testing.assert_array_equal(m.numpy(), expected_m.numpy())
+    np.testing.assert_array_equal(v.numpy(), expected_v.numpy())
+    np.testing.assert_allclose(master.numpy(), expected_w.numpy(), rtol=2e-7, atol=2e-7)
+    np.testing.assert_array_equal(param.numpy(), expected_w.cast(dtypes.bfloat16).numpy())
+
 @slow
 class TestOptim(unittest.TestCase):
   def setUp(self): self.enterContext(Context(TRAINING=1))

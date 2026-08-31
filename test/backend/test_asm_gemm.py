@@ -2,7 +2,8 @@ import unittest
 import functools
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv, system, DEV
-from extra.gemm.cdna_asm_gemm import asm_gemm, hk_bf16_atb_gemm
+from tinygrad.uop.ops import Ops, KernelInfo
+from extra.gemm.cdna_asm_gemm import MXFP4_TILES, _select_mxfp4_tile, asm_gemm, hk_bf16_atb_gemm
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 
@@ -48,16 +49,16 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
                    next_grad_amax_state=next_grad_amax_state)
   else:
     tst = asm_gemm(a, b)
-  tst.sum().backward()
-  Tensor.realize(tst, a.grad, b.grad)
+  tst_grad_a, tst_grad_b = tst.sum().gradient(a, b)
+  Tensor.realize(tst, tst_grad_a, tst_grad_b)
 
   if multi and isinstance(a_ref.device, str): a_ref, b_ref = a_ref.shard(devs, axis=a_shard), b_ref.shard(devs, axis=b_shard)
   if dtype == FP8_DTYPE:
     ref = ((a_ref @ b_ref.T) * ((x_scale.float() + 1e-8) / FP8_MAX) * w_scale).cast(dtypes.bfloat16)
   else:
     ref = a_ref @ b_ref
-  ref.sum().backward()
-  Tensor.realize(ref, a_ref.grad, b_ref.grad)
+  ref_grad_a, ref_grad_b = ref.sum().gradient(a_ref, b_ref)
+  Tensor.realize(ref, ref_grad_a, ref_grad_b)
 
   # no validation on the NULL device
   if Device.DEFAULT.startswith("NULL"): return None
@@ -69,11 +70,11 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.bfloat16, a_shard=None, b_shard=
     if getenv("USE_NPY"):
       import numpy as np
       np.testing.assert_allclose(tst.numpy(), ref.numpy(), atol=atol, rtol=rtol)
-      np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), atol=grad_atol, rtol=grad_rtol)
-      np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), atol=grad_atol, rtol=grad_rtol)
+      np.testing.assert_allclose(tst_grad_a.numpy(), ref_grad_a.numpy(), atol=grad_atol, rtol=grad_rtol)
+      np.testing.assert_allclose(tst_grad_b.numpy(), ref_grad_b.numpy(), atol=grad_atol, rtol=grad_rtol)
     assert tst.allclose(ref, atol=atol, rtol=rtol).item(), "forward mismatch"
-    assert a.grad.allclose(a_ref.grad, atol=grad_atol, rtol=grad_rtol).item(), "grad_a mismatch"
-    assert b.grad.allclose(b_ref.grad, atol=grad_atol, rtol=grad_rtol).item(), "grad_b mismatch"
+    assert tst_grad_a.allclose(ref_grad_a, atol=grad_atol, rtol=grad_rtol).item(), "grad_a mismatch"
+    assert tst_grad_b.allclose(ref_grad_b, atol=grad_atol, rtol=grad_rtol).item(), "grad_b mismatch"
 
 def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=1) -> None:
   run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=0, b_shard=None, gpus=gpus)
@@ -122,6 +123,7 @@ class TestAsmGEMM(unittest.TestCase):
       self.skipTest("assembly gemm is only for cdna4")
 
   def test_tiny(self): verify_asm_gemm(1, 256, 256, 256)
+  def test_mlperf_1(self): verify_asm_gemm(1, 16384, 128256, 4096)
 
   def test_verify_with_numpy(self):
     import numpy as np
@@ -174,6 +176,21 @@ class TestMXFP4(unittest.TestCase):
     self.assertTrue((row_scale == 127).any())
     self.assertTrue((row_scale != 127).any())
 
+    row_only, row_scale_only, _, _ = quantize_mxfp4(Tensor(x, dtype=dtypes.bfloat16), col=False)
+    _, _, col_only, col_scale_only = quantize_mxfp4(Tensor(x, dtype=dtypes.bfloat16), row=False)
+    Tensor.realize(row_only, row_scale_only, col_only, col_scale_only)
+    np.testing.assert_array_equal(row_only.numpy(), row)
+    np.testing.assert_array_equal(row_scale_only.numpy(), row_scale)
+    np.testing.assert_array_equal(col_only.numpy(), col)
+    np.testing.assert_array_equal(col_scale_only.numpy(), col_scale)
+
+    updated = Tensor(rng.standard_normal((256, 256), dtype=np.float32), dtype=dtypes.bfloat16)
+    expected = quantize_mxfp4(updated)
+    cached = quantize_mxfp4(Tensor(x, dtype=dtypes.bfloat16))
+    refresh = quantize_mxfp4(updated, out=cached)
+    Tensor.realize(*expected, *refresh)
+    for actual, reference in zip(cached, expected): np.testing.assert_array_equal(actual.numpy(), reference.numpy())
+
   def test_correctness(self):
     import numpy as np
     M = N = K = 256
@@ -184,11 +201,94 @@ class TestMXFP4(unittest.TestCase):
     ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32).T
     self.assertLess(np.linalg.norm(out-ref) / np.linalg.norm(ref), 0.2)
 
-  def test_empty(self):
-    M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
+  def test_tile_variants(self):
+    M, N, K = 256, 512, 256
+    Tensor.manual_seed(4)
+    a = Tensor.randn(M, K, dtype=dtypes.bfloat16).contiguous()
+    b = Tensor.randn(N, K, dtype=dtypes.bfloat16).contiguous()
+    ref = a.float() @ b.float().T
+    for tile in MXFP4_TILES:
+      with self.subTest(tile=tile):
+        out = asm_gemm(a, b.T, mxfp4=True, mxfp4_tile=tile)
+        relative_l2 = ((out.float() - ref).square().sum() / ref.square().sum()).sqrt().item()
+        self.assertLess(relative_l2, 0.2)
+
+  def test_save_original_input(self):
+    import numpy as np
+    rng = np.random.default_rng(2)
+    a_np = rng.standard_normal((256, 256), dtype=np.float32)
+    w_np = rng.standard_normal((256, 256), dtype=np.float32)
+    a_ref, w_ref = Tensor(a_np, dtype=dtypes.bfloat16), Tensor(w_np, dtype=dtypes.bfloat16)
+    a_recompute, w_recompute = Tensor(a_np, dtype=dtypes.bfloat16), Tensor(w_np, dtype=dtypes.bfloat16)
+    out_ref = asm_gemm(a_ref, w_ref.T, mxfp4=True)
+    out_recompute = asm_gemm(a_recompute, w_recompute.T, mxfp4=True, save_original_input=True)
+    out_ref.sum().backward()
+    out_recompute.sum().backward()
+    Tensor.realize(out_ref, out_recompute, a_ref.grad, w_ref.grad, a_recompute.grad, w_recompute.grad)
+    np.testing.assert_array_equal(out_recompute.numpy(), out_ref.numpy())
+    np.testing.assert_array_equal(a_recompute.grad.numpy(), a_ref.grad.numpy())
+    np.testing.assert_array_equal(w_recompute.grad.numpy(), w_ref.grad.numpy())
+
+  def test_save_original_prequantized_input(self):
+    import numpy as np
+    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+    rng = np.random.default_rng(5)
+    a_np = rng.standard_normal((256, 256), dtype=np.float32)
+    w_np = rng.standard_normal((256, 256), dtype=np.float32)
+    a_ref, w_ref = Tensor(a_np, dtype=dtypes.bfloat16), Tensor(w_np, dtype=dtypes.bfloat16)
+    a_deferred, w_deferred = Tensor(a_np, dtype=dtypes.bfloat16), Tensor(w_np, dtype=dtypes.bfloat16)
+    a_row, scale_a_row, _, _ = quantize_mxfp4(a_deferred, col=False)
+    w_mxfp4 = quantize_mxfp4(w_deferred, shuffle_row=True, shuffle_col=True)
+    out_ref = asm_gemm(a_ref, w_ref.T, mxfp4=True)
+    out_deferred = asm_gemm(a_deferred, w_deferred.T, mxfp4=True, mxfp4_x=(a_row, scale_a_row, None, None),
+                            mxfp4_w=w_mxfp4, save_original_input=True)
+
+    forward_names = [u.arg.name for u in out_deferred.uop.toposort() if u.op is Ops.SINK and isinstance(u.arg, KernelInfo)]
+    self.assertIn("quantize_mxfp4_row_256_256", forward_names)
+    self.assertNotIn("quantize_mxfp4_col_256_256", forward_names)
+
+    out_ref.sum().backward()
+    out_deferred.sum().backward()
+    backward_names = [u.arg.name for t in (a_deferred.grad, w_deferred.grad) for u in t.uop.toposort()
+                      if u.op is Ops.SINK and isinstance(u.arg, KernelInfo)]
+    self.assertIn("quantize_mxfp4_col_256_256", backward_names)
+    Tensor.realize(out_ref, out_deferred, a_ref.grad, w_ref.grad, a_deferred.grad, w_deferred.grad)
+    np.testing.assert_array_equal(out_deferred.numpy(), out_ref.numpy())
+    np.testing.assert_array_equal(a_deferred.grad.numpy(), a_ref.grad.numpy())
+    np.testing.assert_array_equal(w_deferred.grad.numpy(), w_ref.grad.numpy())
+
+  def test_return_mxfp4_saves(self):
+    import numpy as np
+    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+    rng = np.random.default_rng(3)
+    a = Tensor(rng.standard_normal((256, 256), dtype=np.float32), dtype=dtypes.bfloat16)
+    w = Tensor(rng.standard_normal((256, 256), dtype=np.float32), dtype=dtypes.bfloat16)
+    ret = asm_gemm(a, w.T, mxfp4=True, return_mxfp4_saves=True)
+    assert isinstance(ret, tuple)
+    out, a_col, scale_a_col = ret
+    _, _, expected_col, expected_scale_col = quantize_mxfp4(a, shuffle_col=True)
+    Tensor.realize(out, a_col, scale_a_col, expected_col, expected_scale_col)
+    np.testing.assert_array_equal(a_col.numpy(), expected_col.numpy())
+    np.testing.assert_array_equal(scale_a_col.numpy(), expected_scale_col.numpy())
+
+  def run_empty(self, M:int, N:int, K:int, expected_tile:tuple[int, int]|None=None):
+    if expected_tile is not None: self.assertEqual(_select_mxfp4_tile(M, N, K), expected_tile)
     a = Tensor.empty(M, K, dtype=dtypes.bfloat16)
     b = Tensor.empty(N, K, dtype=dtypes.bfloat16)
     for _ in range(getenv("CNT", 1)): asm_gemm(a, b.T, mxfp4=True).realize()
+
+  def test_empty(self): self.run_empty(getenv("M", 16384), getenv("N", 4096), getenv("K", 14336))
+  def test_gemm_llama1(self): self.run_empty(28672, 4096, 16384, (256, 256))
+  def test_gemm_llama2(self): self.run_empty(16384, 4096, 28672, (256, 256))
+  def test_gemm_llama3(self): self.run_empty(16384, 4096, 14336, (256, 256))
+  def test_gemm_llama4(self): self.run_empty(4096, 14336, 16384, (256, 256))
+  def test_gemm_llama5(self): self.run_empty(16384, 28672, 4096, (256, 256))
+  def test_gemm_llama6(self): self.run_empty(4096, 4096, 16384, (256, 256))
+  def test_gemm_llama7(self): self.run_empty(16384, 6144, 4096, (128, 512))
+  def test_gemm_llama8(self): self.run_empty(16384, 4096, 4096, (256, 256))
+  def test_gemm_llama9(self): self.run_empty(16384, 14336, 4096, (256, 256))
+  def test_gemm_llama10(self): self.run_empty(6144, 4096, 16384, (192, 256))
+  def test_gemm_llama11(self): self.run_empty(16384, 4096, 6144, (128, 512))
 
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
 

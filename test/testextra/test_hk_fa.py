@@ -1,10 +1,10 @@
-import unittest, time
+import functools, unittest, time
 
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.engine.jit import TinyJit
 import numpy as np
 
-from extra.thunder.amd.fa import flash_attention
+from extra.thunder.amd.fa import custom_asm_fa_forward, custom_fa_forward, custom_hk_fa_forward, flash_attention
 
 def assert_allclose(cmp:Tensor, ref:Tensor, **kwargs) -> None:
   if Device.DEFAULT == "NULL": Tensor.realize(cmp, ref)
@@ -42,6 +42,62 @@ class TestFA(unittest.TestCase):
     ref = q.scaled_dot_product_attention(k, v, is_causal=True, enable_gqa=True).float().transpose(1, 2)
 
     assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
+
+  def test_asm_fa_fwd_mlperf(self):
+    if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("translated FA requires gfx950")
+    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
+    Tensor.manual_seed(42)
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      Tensor.realize(q, k, v)
+
+    def run(fxn):
+      o = Tensor.empty(B, N, H, D, dtype=dtypes.bfloat16)
+      lse = Tensor.empty(B, H, 1, N, dtype=dtypes.float32)
+      return Tensor.custom_kernel(o, lse, q, k, v, fxn=fxn)[:2]
+
+    def asm_fxn(*xs): return custom_asm_fa_forward(*xs, B=B, N=N, H=H, H_KV=H_KV, D=D)
+    selected_fxn = functools.partial(custom_fa_forward, device=Device.DEFAULT,
+      arch=Device[Device.DEFAULT].renderer.target.arch, B=B, N=N, H=H, H_KV=H_KV, D=D, has_sink=False)
+    hk_fxn = functools.partial(custom_hk_fa_forward, device=Device.DEFAULT,
+      arch=Device[Device.DEFAULT].renderer.target.arch, B=B, N=N, H=H, H_KV=H_KV, D=D, has_sink=False)
+    out, lse = run(selected_fxn)
+    asm_out, asm_lse = run(asm_fxn)
+    ref, ref_lse = run(hk_fxn)
+    assert_allclose(out, asm_out, atol=0, rtol=0)
+    assert_allclose(lse, asm_lse, atol=0, rtol=0)
+    assert_allclose(out, ref, atol=3e-2, rtol=3e-2)
+    assert_allclose(lse, ref_lse, atol=3e-2, rtol=3e-2)
+
+  def test_asm_fa_fwd_mlperf_eval_batch(self):
+    if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("translated FA requires gfx950")
+    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
+    Tensor.manual_seed(42)
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      Tensor.realize(q, k, v)
+
+    def run(fxn):
+      o = Tensor.empty(B, N, H, D, dtype=dtypes.bfloat16)
+      lse = Tensor.empty(B, H, 1, N, dtype=dtypes.float32)
+      return Tensor.custom_kernel(o, lse, q, k, v, fxn=fxn)[:2]
+
+    def asm_fxn(*xs): return custom_asm_fa_forward(*xs, B=B, N=N, H=H, H_KV=H_KV, D=D)
+    selected_fxn = functools.partial(custom_fa_forward, device=Device.DEFAULT,
+      arch=Device[Device.DEFAULT].renderer.target.arch, B=B, N=N, H=H, H_KV=H_KV, D=D, has_sink=False)
+    hk_fxn = functools.partial(custom_hk_fa_forward, device=Device.DEFAULT,
+      arch=Device[Device.DEFAULT].renderer.target.arch, B=B, N=N, H=H, H_KV=H_KV, D=D, has_sink=False)
+    out, lse = run(selected_fxn)
+    asm_out, asm_lse = run(asm_fxn)
+    ref, ref_lse = run(hk_fxn)
+    assert_allclose(out, asm_out, atol=0, rtol=0)
+    assert_allclose(lse, asm_lse, atol=0, rtol=0)
+    assert_allclose(out, ref, atol=3e-2, rtol=3e-2)
+    assert_allclose(lse, ref_lse, atol=3e-2, rtol=3e-2)
 
   def test_fast_fa_bwd_causal(self):
     Tensor.manual_seed(42)
