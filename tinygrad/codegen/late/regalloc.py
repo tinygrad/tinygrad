@@ -6,7 +6,7 @@ from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
 from tinygrad.dtype import dtypes
 from bisect import bisect_left
 
-REG_OPS = {Ops.STORE, Ops.INS, Ops.STACK, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.INDEX}
+REG_OPS = {Ops.INS, Ops.STACK, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.INDEX}
 
 class LinearScanRegallocContext:
   def vdef(self, v:VRegister) -> UOp: return self.uops[self.live_intervals[v.parent if v.is_sub() else v][0]]
@@ -15,6 +15,7 @@ class LinearScanRegallocContext:
     self.uops, self.ren, self.idx = [u for u in uops if u.op in REG_OPS], ren, itertools.count()
     self.live_intervals: dict[VRegister, list[int]] = {}
 
+    # TODO: per kernel state not renderer
     ren.spill_size = 0
 
     lr = self.live_intervals
@@ -26,7 +27,8 @@ class LinearScanRegallocContext:
       for v in defs + tuple(uses):
         lr.setdefault(v, []).insert(0, len(self.uops) - i - 1)
       for v in defs: # if lifetime of v ends during range, pick latest range and add to lr
-        if (n := max((lr[rv][-1] for rv in range_vars if lr[rv][0] <= lr[v][-1] < lr[rv][-1]), default=None)): lr[v].append(n)
+        if (n := max((lr[rv][-1] for rv in range_vars if lr[rv][0] <= lr[v][-1] < lr[rv][-1]), default=None)) is not None:
+          lr[v].append(n)
       if u.op is Ops.RANGE:
         # NOTE: cant derive range lifetime like this because of boundless LOOP
         range_vars.append(rdef(u))
@@ -133,9 +135,9 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
 
   for v in rdefs(x):
     if not isinstance(v, VRegister): continue
-    # spills are keyed by the parent, a subregister def still has to write back into the parent's slot at its own offset
-    if (vv := v.or_parent()) in ctx.spills and not (x.op is Ops.BUFFER and vv.phi is not None):
-      after.extend(ctx.ren.spill(ctx.spills[vv], nx, v.pos if v.is_sub() else None))
+    # only spill parents
+    if v in ctx.spills and not (x.op is Ops.BUFFER and v.phi is not None):
+      after.extend(ctx.ren.spill(ctx.spills[v], nx, None))
   for v,rs in ctx.insert_before.get(i, []):
     before.extend(ctx.ren.fill(ctx.spills[v], None, ctx.vdef(v), rs)[1])
 

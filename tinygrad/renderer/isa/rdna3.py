@@ -2,7 +2,7 @@ from tinygrad.dtype import dtypes, AddrSpace, truncate, DType, InvalidType, to_s
 from tinygrad.codegen.opt import tc
 from tinygrad.helpers import Target
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp, graph_rewrite
-from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
+from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef, PreRegallocContext
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.codegen.decomp.op import fast_idiv
@@ -148,7 +148,7 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
 
   if isinstance(x.tag, tuple): cons, width = x.tag if isinstance(x.tag[0], tuple) else (x.tag, 1)
-  else: cons, width = ctx.ren.gp_vgprs, ((x.dtype.itemsize+3) // 4) * (len(x.src) if x.op is Ops.STACK else 1)
+  else: cons, width = ctx.gp_vgprs, ((x.dtype.itemsize+3) // 4) * (len(x.src) if x.op is Ops.STACK else 1)
   return x.replace(tag=(ctx.ren.vreg(cons, width=width),))
 
 def abi(ctx, x:UOp) -> UOp|None:
@@ -201,7 +201,7 @@ def load(ctx, x:UOp, idx:UOp):
   prefix = "global" if idx.addrspace is AddrSpace.GLOBAL else "ds"
   opc = getattr(RDNA3Ops, f"{prefix}_load_{suffix}{sz*8}")
   ctx.ren.semantic_op[opc]=Ops.LOAD
-  return x.ins(opc, src=fold_address(rafter(idx, True))+x.src[1:], tag=(ctx.ren.vreg(ctx.ren.gp_vgprs, width=(sz+3)//4),))
+  return x.ins(opc, src=fold_address(rafter(idx, True))+x.src[1:], tag=(ctx.ren.vreg(ctx.gp_vgprs, width=(sz+3)//4),))
 
 def store(ctx, x:UOp, idx:UOp, val:UOp):
   n = idx.src[-1].src[0].val if idx.op is Ops.SHRINK else 1
@@ -296,7 +296,7 @@ def render_wmma(ctx, wmma:UOp):
   srcdt = dt_to_isa[wmma.arg[1]]
   if wmma.arg[1] in dtypes.int8s: srcdt = "iu8"
   ins = getattr(RDNA3Ops, f"v_wmma_{dt_to_isa[wmma.dtype]}_16x16x16_{srcdt}")
-  return UOp(Ops.INS, src=(a,b,acc), arg=(ins, wmma.dtype), tag=(ctx.ren.vreg(ctx.ren.gp_vgprs, width=8),))
+  return UOp(Ops.INS, src=(a,b,acc), arg=(ins, wmma.dtype), tag=(ctx.ren.vreg(ctx.gp_vgprs, width=8),))
 
 # ---- casting utilities -----
 def int_to_int64(y:UOp, tdt:DType):
@@ -417,7 +417,7 @@ isel_matcher = PatternMatcher([
   # --- control flow ---
   (UPat(Ops.RANGE, name="rng"), lambda ctx,rng:
     rng.replace(src=rng.src + (execop.ins(RDNA3Ops.s_mov_b32, dtype=dtypes.uint32, src=(execop,), tag=GP_SGPRS),),
-    tag=ctx.ren.vreg(ctx.ren.gp_vgprs)) if rng.tag is None else None),
+    tag=ctx.ren.vreg(ctx.gp_vgprs)) if rng.tag is None else None),
   (UPat(Ops.END, src=(UPat(), UPat.var("rng"), UPat()), name="x"),
     lambda x,rng: x.replace(src=(x.src[0],rng,x.src[-1],rng.src[-1])) if rng.tag is not None else None),
   (UPat(Ops.END, src=(UPat(), UPat.var("rng")), name="x"), \
@@ -460,7 +460,7 @@ isel_matcher = PatternMatcher([
   # --- mem ops ---
   (UPat.var("idx").store(UPat.var("val"), allow_any_len=True).named("x"), lambda ctx,x,idx,val:
     store(ctx,x,idx,val) if idx.addrspace is not AddrSpace.REG else
-    x.replace(tag=(ctx.ren.vreg(ctx.ren.gp_vgprs, width=(idx.dtype.itemsize+3)//4),)) if x.tag is None else None),
+    x.replace(tag=(ctx.ren.vreg(ctx.gp_vgprs, width=(idx.dtype.itemsize+3)//4),)) if x.tag is None else None),
   (UPat.var("idx").load(name="x", allow_any_len=True), lambda ctx,x,idx:
     load(ctx,x,idx) if idx.addrspace is not AddrSpace.REG else None),
   # --- other ---
@@ -550,23 +550,9 @@ class CntType(Enum):
 class RDNA3LinearCtx:
   loop_label: dict[UOp, str] = field(default_factory=dict)
 
-class RDNA3Renderer(ISARenderer):
-  device = "AMD"
-  pre_isel_matcher = pre_isel_matcher
-  isel_matcher = isel_matcher
-  extra_matcher = extra_matcher
-  post_regalloc_matcher = post_regalloc_matcher
-  pre_regalloc_matcher = pre_regalloc_matcher
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL, Ops.MAX, Ops.MULACC)}
-  def __init__(self, target:Target):
-    super().__init__(target)
-    self.shared_max = HIPRenderer.shared_max
-    self.tensor_cores = tc.get_amd(target.arch)
-    self.post_regalloc_ctx = RDNA3LinearCtx()
-    self.semantic_op = {}
-
-  # TODO: put this in context, renderer state is shared by Device across parallel kernel compilation
-  def view_prg(self, info:ProgramInfo):
+class RDNA3IselContext(PreRegallocContext):
+  def __init__(self, sink:UOp, ren:RDNA3Renderer, info:ProgramInfo):
+    super().__init__(sink, ren, info)
     # NOTE: entire kernel must fit on single CU? (WGP?)
     # 1536 vgprs per SIMD, 2 SIMD per CU
     # constrain waves*vgpr_limit <<< 1536*2, prevent dispatch hang
@@ -576,7 +562,24 @@ class RDNA3Renderer(ISARenderer):
     # 12x32 (wave 32) -> 384 spillable SGPR lanes
     n_spill_vgprs = 12
     self.gp_vgprs = VGPRS[1:max_per_thread-n_spill_vgprs]
-    self.spill_vgprs: dict[Register, int] = {r:0 for r in VGPRS[max_per_thread-n_spill_vgprs:max_per_thread]}
+    # TODO: how to make this per-kernel but accessible in renderer?
+    self.ren.spill_vgprs: dict[Register, int] = {r:0 for r in VGPRS[max_per_thread-n_spill_vgprs:max_per_thread]}
+
+class RDNA3Renderer(ISARenderer):
+  device = "AMD"
+  pre_isel_matcher = pre_isel_matcher
+  isel_matcher = isel_matcher
+  extra_matcher = extra_matcher
+  post_regalloc_matcher = post_regalloc_matcher
+  pre_regalloc_matcher = pre_regalloc_matcher
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL, Ops.MAX, Ops.MULACC)}
+  pre_regalloc_ctx_type = RDNA3IselContext
+  def __init__(self, target:Target):
+    super().__init__(target)
+    self.shared_max = HIPRenderer.shared_max
+    self.tensor_cores = tc.get_amd(target.arch)
+    self.post_regalloc_ctx = RDNA3LinearCtx()
+    self.semantic_op = {}
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
   def is_two_address(self, x:UOp) -> bool: return False

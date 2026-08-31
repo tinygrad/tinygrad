@@ -793,6 +793,13 @@ class PostRegallocCtx:
   ren: X86Renderer
   loop_label: dict[UOp, str] = field(default_factory=dict)
 
+class X86IselContext(PreRegallocContext):
+  def __init__(self, sink:UOp, ren:X86Renderer, info:ProgramInfo):
+    super().__init__(sink, ren, info)
+    self.clobbered: set[UOp] = set()
+    self.lock: UOp|None = None
+    self.scratch_slot = itertools.count(-1, -1)
+
 class X86Renderer(ISARenderer):
   device = "CPU"
   has_local = False
@@ -804,6 +811,7 @@ class X86Renderer(ISARenderer):
   isel_matcher = isel_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
+  pre_regalloc_ctx_type = X86IselContext
   spill_alignment: 16
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   def __init__(self, target:Target):
