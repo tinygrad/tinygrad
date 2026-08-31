@@ -260,12 +260,13 @@ def _get_cpu_count() -> int:
       if quota != "max": count = min(count, max(1, int(quota) // int(period)))
   except (FileNotFoundError, ValueError, ZeroDivisionError): pass
   return count
+CPU_COUNT = _get_cpu_count()
 NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
 # this PARALLEL is for BEAM and compilation, it's currently disabled if you are using VIZ
 # pytest-xdist workers share the CPU budget, explicit PARALLEL still overrides this default
-PARALLEL = ContextVar("PARALLEL", _get_cpu_count() // max(1, getenv("PYTEST_XDIST_WORKER_COUNT", 1)) if VIZ == 0 else 0)
+PARALLEL = ContextVar("PARALLEL", CPU_COUNT // max(1, getenv("PYTEST_XDIST_WORKER_COUNT", 1)) if VIZ == 0 else 0)
 PROFILE = ContextVar("PROFILE", abs(VIZ.value))
 SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed

@@ -167,6 +167,11 @@ def _merge_submits(calls:list[UOp]) -> UOp:
     estimates=sum((c.arg.aux.estimates for c in calls), start=Estimates()).simplify()))
 
 def _merge_queues(submits:list[UOp]) -> list[UOp]:
+  # CPU submits run inline and can block on another queue. Keep multi-queue CPU work in schedule order so every
+  # producer queue is submitted before a CPU wait; merging by queue can otherwise deadlock alternating dependencies.
+  keys = [unwrap(get_submit(call)).src[0].arg for call in submits]
+  if len(set(keys)) > 1 and any(any(d.split(":")[0] == "CPU" for d in devs) for devs, _ in keys): return submits
+
   merged:list[UOp] = []
   opened:dict[tuple[tuple[str, ...], str], list[UOp]] = {} # (devs, queue) -> hcq calls in submit order
   limits:dict[tuple[tuple[str, ...], str], int] = collections.defaultdict(lambda: JIT_BATCH_SIZE.value)
