@@ -111,8 +111,8 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
     def try_exec(local_size):
       try:
         new_gs = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
-        return runtime(*[bufs[i].get_buf(device) for i in prg.arg.globals], global_size=new_gs, local_size=(*local_size,),
-                       vals=prg.arg.vals(var_vals), wait=True)
+        return runtime(*prg.arg.merge_args([bufs[i].get_buf(device) for i in prg.arg.globals], prg.arg.vals(var_vals)),
+                       global_size=new_gs, local_size=(*local_size,), wait=True)
       except Exception: return float('inf')
 
     MAX_WORKGROUP = 1024
@@ -192,7 +192,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
     global_size, local_size = ast.arg.launch_dims(var_vals)
-    ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals),
+    ets.append(rt(*ast.arg.merge_args([b.get_buf(device) for b in prg_bufs], ast.arg.vals(var_vals)), global_size=global_size, local_size=local_size,
                   wait=ctx.wait, timeout=ctx.timeout))
   return ets
 
@@ -203,7 +203,8 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     var_vals = {**ctx.var_vals, **device_vars}
     cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
     global_size, local_size = prg.arg.launch_dims(var_vals)
-    cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
+    cpu_rt(*prg.arg.merge_args([bufs[i].ensure_allocated()._buf for i in prg.arg.globals], prg.arg.vals(var_vals)), global_size=global_size,
+           local_size=local_size)
     for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
   return []
 

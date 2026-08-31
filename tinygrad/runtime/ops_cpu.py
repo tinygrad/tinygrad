@@ -153,21 +153,22 @@ class CPUProgram(Program['CPUDevice']):
 
       self.fxn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(self.addr) if self.lvp else ctypes.CFUNCTYPE(None)(self.addr)
 
-  def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
+  def __call__(self, *args:HCQBuffer|int|None, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
+               wait:bool=False, timeout:int|None=None) -> float|None:
     st = time.perf_counter()
     if self.lvp:
-      lvp_args = bytearray(12 + (len(bufs) + len(vals)) * 8)
+      lvp_args = bytearray(12 + len(args) * 8)
       addr = mv_address(lvp_args)
-      struct.pack_into(f'<3I{len(bufs)}Q', lvp_args, 0, *data64_le(addr+12), (len(bufs)+len(vals))*2, *[b.va_addr for b in bufs])
-      for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs)*8)): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, v)
+      struct.pack_into('<3I', lvp_args, 0, *data64_le(addr+12), len(args)*2)
+      for a, (off,dt) in zip(args, TinyELF.iter_sig(self.signature)):
+        struct.pack_into('<Q' if isinstance(a, HCQBuffer) else f'<{dt.fmt}', lvp_args, 12+off, a.va_addr if isinstance(a, HCQBuffer) else a)
       self.fxn(addr)
     else:
-      args = [*[cast(int, b.va_addr) for b in bufs], *cast(tuple[int, ...], vals)]
-      assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(args)}"
+      c_args = [a.va_addr if isinstance(a, HCQBuffer) else a for a in args]
+      assert len(c_args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(c_args)}"
       for tid in range(global_size[0]):
-        if 'core_id' in self.runtimevars: args[self.runtimevars['core_id']] = tid
-        self.fxn(*[ctypes.c_uint64(x) for x in args])
+        if 'core_id' in self.runtimevars: c_args[self.runtimevars['core_id']] = tid
+        self.fxn(*[ctypes.c_uint64(cast(int, x)) for x in c_args])
     return time.perf_counter() - st if wait else None
 
   @suppress_finalizing

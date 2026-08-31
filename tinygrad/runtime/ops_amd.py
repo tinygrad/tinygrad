@@ -607,10 +607,10 @@ class AMDProgram(HCQProgram['AMDDevice']):
     super().__init__(CLikeArgsState, self.dev, obj, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, base=self.lib_gpu.va_addr)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(),
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                wait=False, timeout:int|None=None):
     if self.dev.sqtt_enabled: cast(AMDComputeQueue, unwrap(self.dev.hw_compute_queue_t)()).sqtt_start(self.dev.sqtt_buffers).submit(self.dev)
-    res = super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait, timeout=timeout)
+    res = super().__call__(*args, global_size=global_size, local_size=local_size, wait=wait, timeout=timeout)
     if self.dev.pmc_enabled:
       cast(AMDComputeQueue, unwrap(self.dev.hw_compute_queue_t)()).pmc_read(self.dev.pmc_buffer, self.dev.pmc_sched) \
                                                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)

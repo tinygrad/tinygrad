@@ -15,10 +15,10 @@ def check(status):
     error = ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
-def encode_args(args, vals, signature) -> tuple[ctypes.Structure, ctypes.Array]:
-  fields = ([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
-            [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), off) for i,(off,dt) in enumerate(TinyELF.iter_sig(signature[len(args):], len(args)*8))])
-  c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
+def encode_args(args, signature) -> tuple[ctypes.Structure, ctypes.Array]:
+  fields = [(f'f{i}', getattr(ctypes, f"c_int{dt.bitsize}") if isinstance(a, int) else cuda.CUdeviceptr_v2, off)
+            for i,(a,(off,dt)) in enumerate(zip(args, TinyELF.iter_sig(signature)))]
+  c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
   return c_args, vargs
@@ -52,16 +52,15 @@ class CUDAProgram(Program['CUDADevice']):
   @suppress_finalizing
   def __del__(self): check(cuda.cuModuleUnload(self.module))
 
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     if not hasattr(self, "vargs"):
-      self.c_args, self.vargs = encode_args(args, vals, self.signature)
+      self.c_args, self.vargs = encode_args(args, self.signature)
 
       # HACK: For MOCKGPU send the args struct itself.
       if MOCKGPU: self.vargs = self.c_args # type: ignore[assignment]
     else:
       for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
-      for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
 
 class CUDAAllocator(LRUAllocator['CUDADevice']):

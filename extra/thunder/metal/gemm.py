@@ -61,8 +61,8 @@ if __name__ == "__main__":
 
   gsz = (N // (M_BLOCK * TILE_DIM), N // (N_BLOCK * TILE_DIM), 1)
   for _ in range(5):
-    et = prg(c.uop.buffer.ensure_allocated()._buf, a.uop.buffer._buf, b.uop.buffer._buf,
-            global_size=gsz, local_size=(32,1,1), vals=(N, N, N), wait=True)
+    et = prg(c.uop.buffer.ensure_allocated()._buf, a.uop.buffer._buf, b.uop.buffer._buf, N, N, N,
+            global_size=gsz, local_size=(32,1,1), wait=True)
     print(f"{N*N*N*2/(et*1e9):2f} GFLOPS")
 
   for _ in range(5):

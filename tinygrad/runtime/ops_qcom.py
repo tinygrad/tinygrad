@@ -199,26 +199,23 @@ class QCOMComputeQueue(HWQueue):
     return self
 
 class QCOMArgsState(HCQArgsState):
-  def __init__(self, buf:HCQBuffer, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
-    super().__init__(buf, prg, bufs, vals=vals)
+  def __init__(self, buf:HCQBuffer, prg:QCOMProgram, args:tuple[HCQBuffer|int, ...]):
+    super().__init__(buf, prg, args)
     ctypes.memset(int(self.buf.va_addr), 0, prg.kernargs_alloc_size)
 
-    ubos = [bufs[slot] for _,slot,_,shape in prg.signature if slot < len(bufs) and not is_image_shape(shape)]
-    uavs = [(dt,shape,bufs[slot]) for _,slot,dt,shape in prg.signature if slot < len(bufs) and is_image_shape(shape)]
+    unis = [a for a,(_,_,_,shape,_) in zip(args, prg.signature) if not is_image_shape(shape)]
+    usig = tuple(sig for sig in prg.signature if not is_image_shape(sig[3]))
+    uavs = [(dt,shape,a) for a,(_,_,dt,shape,_) in zip(args, prg.signature) if is_image_shape(shape)]
     # NIR can reorder images to different texture slots
     ibos, texs = uavs[:prg.ibo_cnt], [uavs[prg.ibo_cnt + (prg.tex_to_image[i] if prg.NIR else i)] for i in range(prg.tex_cnt)]
     for cnst_val,cnst_off,cnst_sz in prg.consts_info:
       to_mv(cast(int, self.buf.va_addr) + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(int(self.buf.va_addr) + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
-    if prg.NIR:
-      self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)
-      for v,(o,dt) in zip(vals, TinyELF.iter_sig(prg.signature[len(bufs):], len(ubos)*8)):
-        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_off + o)
-    else:
-      for i, b in enumerate(ubos): self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=prg.buf_offs[i])
-      for i,(v,(_,_,dt,_)) in enumerate(zip(vals, prg.signature[len(bufs):])):
-        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_offs[i+len(ubos)])
+    offs = [prg.buf_off + off for off,_ in TinyELF.iter_sig(usig)] if prg.NIR else prg.buf_offs
+    for a,(_,_,dt,_,_),off in zip(unis,usig,offs):
+      val, fmt = (a.va_addr, 'Q') if isinstance(a, HCQBuffer) else (a, dt.fmt)
+      self.bind_sints_to_buf(val, buf=self.buf, fmt=fmt, offset=off)
 
     def _tex(b, ibo=False):
       imgdt, shape, buf = b
@@ -273,12 +270,11 @@ class QCOMProgram(HCQProgram['QCOMDevice']):
     super().__init__(QCOMArgsState, self.dev, obj, kernargs_alloc_size=kernargs_alloc_size)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int|None, ...]=(), wait=False, **kw):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
     if any(g*l>mx for g,l,mx in zip(global_size, local_size, [65536, 65536, 65536])) and any(l>mx for l,mx in zip(local_size, [1024, 1024, 1024])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
-    return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
+    return super().__call__(*args, global_size=global_size, local_size=local_size, wait=wait)
 
   def _parse_lib(self, lib):
     # Extract image binary

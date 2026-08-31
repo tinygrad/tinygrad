@@ -112,7 +112,7 @@ class GraphRunner:
     def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
     for j,p,dv in crs:
-      if (replace:=[(i, self.vars.index(v.expr)) for i, v in enumerate(p.vars) if v.expr not in dv | p.runtimevars]):
+      if (replace:=[(v.arg.slot, self.vars.index(v.expr)) for v in p.vars if v.expr not in dv | p.runtimevars]):
         self.var_vals_replace[j] = replace
       global_dim_idx, local_dim_idx = find_symbolic_dim(p.global_size), find_symbolic_dim(p.local_size)
       if global_dim_idx is not None or local_dim_idx is not None:

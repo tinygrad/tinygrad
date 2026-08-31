@@ -306,22 +306,22 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]
                                                          profile_key))
 
 class HCQArgsState(Generic[ProgramType]):
-  def __init__(self, buf:HCQBuffer, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint|None, ...]=()):
-    self.buf, self.prg, self.bufs, self.vals = buf, prg, bufs, vals
+  def __init__(self, buf:HCQBuffer, prg:ProgramType, args:tuple[HCQBuffer|sint|None, ...]):
+    self.buf, self.prg, self.args = buf, prg, args
     self.bind_data:list[tuple[tuple[sint, ...], MMIOInterface, str]] = []
 
   def bind_sints_to_buf(self, *vals:sint, buf:HCQBuffer, fmt, offset=0): self.bind_data.append((vals, buf.cpu_view().view(offset=offset), fmt))
 
 class CLikeArgsState(HCQArgsState[ProgramType]):
-  def __init__(self, buf:HCQBuffer, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint|None, ...]=(), prefix:list[int]|None=None):
-    super().__init__(buf, prg, bufs, vals=vals)
+  def __init__(self, buf:HCQBuffer, prg:ProgramType, args:tuple[HCQBuffer|sint|None, ...], prefix:list[int]|None=None):
+    super().__init__(buf, prg, args)
 
     if prefix is not None: self.buf.cpu_view().view(size=len(prefix) * 4, fmt='I')[:] = array.array('I', prefix)
 
-    self.bind_sints_to_buf(*[b.va_addr for b in bufs], buf=self.buf, fmt='Q', offset=len(prefix or []) * 4)
-    for v,(val_offset,dt) in zip(vals, TinyELF.iter_sig(prg.signature[-len(vals):], len(bufs) * 8)):
-      assert v is not None
-      self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=len(prefix or []) * 4 + val_offset)
+    for a,(off,dt) in zip(args, TinyELF.iter_sig(prg.signature)):
+      assert a is not None
+      val, fmt = (a.va_addr, 'Q') if isinstance(a, HCQBuffer) else (a, dt.fmt)
+      self.bind_sints_to_buf(val, buf=self.buf, fmt=fmt, offset=len(prefix or []) * 4 + off)
 
 class HCQProgram(Program[HCQDeviceType]):
   def __init__(self, args_state_t:Type[HCQArgsState], dev:HCQDeviceType, obj:TinyELF, kernargs_alloc_size:int, base:int|None=None):
@@ -333,37 +333,35 @@ class HCQProgram(Program[HCQDeviceType]):
   @staticmethod
   def _fini(dev, buf, spec): dev.allocator.free(buf, buf.size, spec)
 
-  def fill_kernargs(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int|None, ...]=(), kernargs:HCQBuffer|None=None) -> HCQArgsState:
+  def fill_kernargs(self, args:tuple[HCQBuffer|int|None, ...], kernargs:HCQBuffer|None=None) -> HCQArgsState:
     """
     Fills arguments for the kernel, optionally allocating space from the device if `kernargs_ptr` is not provided.
     Args:
-      bufs: Buffers to be written to kernel arguments.
-      vals: Values to be written to kernel arguments.
+      args: Buffers and values to be written to kernel arguments
       kernargs_ptr: Optional pointer to pre-allocated kernel arguments memory.
     Returns:
       Arguments state with the given buffers and values set for the program.
     """
     argsbuf = kernargs or self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(self.kernargs_alloc_size, 8),
                                                        size=self.kernargs_alloc_size)
-    return self.args_state_t(argsbuf, self, bufs, vals=vals)
+    return self.args_state_t(argsbuf, self, args)
 
-  def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
+  def __call__(self, *args:HCQBuffer|int|None, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
+               wait:bool=False, timeout:int|None=None) -> float|None:
     """
     Enqueues the program for execution with the given arguments and dimensions.
 
     Args:
-      bufs: Buffer arguments to execute the kernel with.
+      args: Buffer and value arguments to execute the kernel with
       global_size: Specifies the global work size for kernel execution (equivalent to CUDA's grid size).
       local_size: Specifies the local work size for kernel execution (equivalent to CUDA's block size).
-      vals: Value arguments to execute the kernel with.
       wait: If True, waits for the kernel to complete execution.
 
     Returns:
       Execution time of the kernel if 'wait' is True, otherwise None.
     """
 
-    kernargs = self.fill_kernargs(bufs, vals)
+    kernargs = self.fill_kernargs(args)
     q = unwrap(self.dev.hw_compute_queue_t)().wait(self.dev.timeline_signal, self.dev.timeline_value - 1).memory_barrier()
 
     self.dev.prof_exec_counter += 1

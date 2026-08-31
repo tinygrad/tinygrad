@@ -52,10 +52,10 @@ class CLProgram(Program['CLDevice']):
     try: check(cl.clReleaseProgram(self.program))
     except (TypeError, AttributeError): pass
 
-  def __call__(self, *bufs:cl.cl_mem, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None, vals:tuple[int, ...]=(),
+  def __call__(self, *args:cl.cl_mem|int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None,
                wait=False, **kw) -> float|None:
-    for i, (_, slot, dt, shape) in enumerate(self.signature):
-      b = bufs[slot] if slot < len(bufs) else getattr(ctypes, f"c_int{dt.bitsize}")(vals[slot-len(bufs)])
+    for i, (a, (_,_,dt,shape,_)) in enumerate(zip(args, self.signature)):
+      b = a if isinstance(a, cl.cl_mem) else getattr(ctypes, f"c_int{dt.bitsize}")(a)
       if is_image_shape(shape):
         pitch = (round_up(shape[1], 256) if OSX else shape[1]) * 4 * dt.itemsize
         fmt = cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize])

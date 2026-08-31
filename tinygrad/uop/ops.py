@@ -1238,8 +1238,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape)
-                for u in tuple(filter(lambda u: u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU, self.src[1].src)) + self.arg.vars)
+    params = sorted([u for u in self.src[0].toposort() if u.op is Ops.PARAM], key=lambda u: u.arg.slot)
+    sig = tuple((p.arg.name, p.arg.slot, p.dtype, p._shape, p.arg.addrspace) for p in params)
     return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig, self.key)
 
 @dataclass(frozen=True)
@@ -1279,6 +1279,10 @@ class ProgramInfo:
   def vals(self, var_vals:dict[str, int]) -> tuple[int|None, ...]:
     try: return tuple(var_vals[k.expr] if k.expr not in self.runtimevars else None for k in self.vars)
     except KeyError as e: raise RuntimeError(f"unbound Variable {e} used by {self.function_name}") from None
+
+  def merge_args(self, bufs:Iterable[Any], vals:Iterable[Any]) -> list[Any]:
+    slot_to_arg = dict(zip(self.globals, bufs)) | dict(zip([v.arg.slot for v in self.vars], vals))
+    return [slot_to_arg[s] for s in sorted(slot_to_arg)]
 
   @staticmethod
   def from_sink(sink:UOp, target:Target=Target()) -> ProgramInfo:

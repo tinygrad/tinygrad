@@ -101,7 +101,7 @@ if __name__ == "__main__":
   gsize, lsize = info.launch_dims({})
   tflops = []
   for i in range(5):
-    tm = rt(*[b._buf for b in prg_bufs], global_size=gsize, local_size=lsize, vals=info.vals({}), wait=True)
+    tm = rt(*info.merge_args([b._buf for b in prg_bufs], info.vals({})), global_size=gsize, local_size=lsize, wait=True)
     tflops.append((2*M*K*N/tm)*1e-12)
   print(f"TFLOPS: {max(tflops):.2f}")
 

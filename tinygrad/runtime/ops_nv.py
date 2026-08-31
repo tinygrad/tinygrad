@@ -239,11 +239,12 @@ class NVVideoQueue(NVCommandQueue):
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.vid_gpfifo)
 
 class NVArgsState(CLikeArgsState):
-  def __init__(self, buf:HCQBuffer, prg:NVProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
-    if (is_mock:=isinstance(prg.dev.iface, MOCKIface)): prg.cbuf_0[80:82] = [len(bufs), len(vals)]
-    super().__init__(buf, prg, bufs, vals=() if is_mock else vals, prefix=prg.cbuf_0 or None)
-    # mock expects all vars to be 64 bit
-    if is_mock and vals: self.bind_sints_to_buf(*vals, buf=self.buf, fmt='q', offset=len(prg.cbuf_0)*4 + len(bufs)*8)
+  def __init__(self, buf:HCQBuffer, prg:NVProgram, args:tuple[HCQBuffer|int, ...]):
+    if (is_mock:=isinstance(prg.dev.iface, MOCKIface)): prg.cbuf_0[80:82] = [len(args), 0]
+    super().__init__(buf, prg, () if is_mock else args, prefix=prg.cbuf_0 or None)
+    # mock expects all args to be 64 bit
+    if is_mock: self.bind_sints_to_buf(*[a.va_addr if isinstance(a, HCQBuffer) else a for a in args],
+                                       buf=self.buf, fmt='q', offset=len(prg.cbuf_0)*4)
 
 class NVProgram(HCQProgram['NVDevice']):
   def __init__(self, dev:NVDevice, obj:TinyELF):
@@ -325,13 +326,13 @@ class NVProgram(HCQProgram['NVDevice']):
       yield typ, param, sh.content[start_off+4:start_off+sz+4] if typ == 0x4 else sz
       start_off += (sz if typ == 0x4 else 0) + 4
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(),
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                wait=False, timeout:int|None=None):
     if prod(local_size) > 1024 or self.max_threads < prod(local_size) or self.lcmem_usage > self.dev.slm_per_thread:
       raise RuntimeError(f"Too many resources requested for launch, {prod(local_size)=}, {self.max_threads=}")
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
-    res = super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait, timeout=timeout)
+    res = super().__call__(*args, global_size=global_size, local_size=local_size, wait=wait, timeout=timeout)
     if self.dev.pma_enabled:
       self.dev.synchronize()
       if pma_blob:=self.dev._prof_readback():

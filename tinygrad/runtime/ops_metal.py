@@ -2,6 +2,7 @@ import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platfo
 from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, Program, TinyELF, LRUAllocator, ProfileDeviceEvent
+from tinygrad.dtype import AddrSpace
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
@@ -128,7 +129,7 @@ class MetalProgram(Program[MetalDevice]):
     # cache these msg calls
     self.max_total_threads: int = self.pipeline_state.maxTotalThreadsPerThreadgroup()
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     if prod(local_size) > self.max_total_threads:
       exec_width = self.pipeline_state.threadExecutionWidth()
       memory_length = self.pipeline_state.staticThreadgroupMemoryLength()
@@ -138,9 +139,9 @@ class MetalProgram(Program[MetalDevice]):
     command_buffer = self.dev.mtl_queue.commandBuffer().retained()
     encoder = command_buffer.computeCommandEncoder().retained()
     encoder.setComputePipelineState(self.pipeline_state)
-    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
-    for a,(_,i,dt,_) in zip(vals, self.signature[len(bufs):]):
-      encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{dt.bitsize}")(a)), dt.itemsize, i)
+    for a,(_,i,dt,_,addrspace) in zip(args, self.signature):
+      if addrspace is AddrSpace.ALU: encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{dt.bitsize}")(a)), dt.itemsize, i)
+      else: encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
     encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?

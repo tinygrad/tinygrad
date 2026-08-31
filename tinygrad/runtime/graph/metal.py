@@ -26,7 +26,7 @@ class MetalGraph(GraphRunner):
 
     self.var_bind_data = []
     if len(self.vars):
-      self.var_buf = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s) in unwrap(r).signature if s == ()))
+      self.var_buf = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s,_) in unwrap(r).signature if s == ()))
       self.var_buf_view, var_buf_offset = cast(MetalAllocator, self.dev.allocator)._as_buffer(self.var_buf), 0
 
     all_pipelines, all_resources = [], [self.var_buf.buf] if len(self.vars) else []
@@ -39,7 +39,7 @@ class MetalGraph(GraphRunner):
         if not any(pos == i for pos, _ in replace):
           icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
-      for nm,i,dt,_ in runtime.signature[len(bufs):]:
+      for nm,i,dt,_,_ in runtime.signature[len(bufs):]:
         icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, var_buf_offset, i)
         self.var_bind_data.append((nm, var_buf_offset, dt.fmt))
         var_buf_offset += dt.itemsize

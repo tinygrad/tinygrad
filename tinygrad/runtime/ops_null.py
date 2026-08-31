@@ -18,7 +18,7 @@ class NullRenderer(CStyleLanguage):
 
 class NullProgram(Program['NullDevice']):
   def __init__(self, dev:'NullDevice', obj:TinyELF): self.device, self.name, self.profile_key = dev.device, obj.name, obj.profile_key
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     with cpu_profile(self.name, self.device, profile_key=self.profile_key): return 1e-3
 
 class NullAllocator(Allocator['NullDevice']):
