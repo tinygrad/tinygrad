@@ -1,15 +1,14 @@
 from __future__ import annotations
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
-import sys, struct, functools
+import sys, struct, functools, itertools
 from typing import cast
 from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
-from tinygrad.renderer.isa import ISARenderer, Register, PreRegallocContext, rdef, rdefs, VRegister
+from tinygrad.renderer.isa import ISARenderer, Register, PreLinearKernelCtx, rdef, rdefs, VRegister
 from tinygrad.helpers import getenv, NUM_CPU_THREADS, unwrap, Target
-from dataclasses import dataclass, field
 
 # ***** X86 Ops *****
 
@@ -251,8 +250,8 @@ def vpins(x:UOp, srcs:tuple[UOp, ...]) -> UOp:
   op = {1: X86Ops.VPINSRB, 2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD, 8: X86Ops.VPINSRQ}[x.dtype.itemsize]
   return functools.reduce(lambda ret,i: x.ins(op, src=(ret, srcs[i], imm(dtypes.uint8, i))), range(len(srcs)), def_reg(x.dtype))
 
-# we don't call ctx.ren.vreg on the srcs to avoid duplicates, a rewrite will assign the tuple of valid registers to a vreg
-def idiv(ctx:PreRegallocContext, x:UOp) -> UOp:
+# we don't call ctx.vreg on the srcs to avoid duplicates, a rewrite will assign the tuple of valid registers to a vreg
+def idiv(ctx:PreLinearKernelCtx, x:UOp) -> UOp:
   op = X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV
   # for >8bit need to zero/sign extend rax to rdx
   if x.dtype in dtypes.int8s: ext = []
@@ -265,7 +264,7 @@ def idiv(ctx:PreRegallocContext, x:UOp) -> UOp:
   # divisor can't be in rax or rdx
   divisor = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
   # for >8bit both rax and rdx are written to
-  defs = (ctx.ren.vreg(RAX),) if x.dtype in dtypes.int8s else (ctx.ren.vreg(RAX), ctx.ren.vreg(RDX))
+  defs = (ctx.vreg(RAX),) if x.dtype in dtypes.int8s else (ctx.vreg(RAX), ctx.vreg(RDX))
   idiv = x.ins(op, src=(dividend, divisor) + tuple(ext), tag=defs)
   # this move "cleanses" the register constraints (rax/rdx) of idiv as that only applies on definition and not on the uses of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
@@ -290,7 +289,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   if idx.op is Ops.CAST and idx.src[0].op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.src[0].val * scale), sz)
   return (base, _cast(idx), _disp(0), sz)
 
-def abi(ctx:PreRegallocContext, x:UOp) -> UOp|None:
+def abi(ctx:PreLinearKernelCtx, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple): return None
   i = ctx.func_args.index(x)
   # buffer params hold addresses, their value moves as a 64bit int
@@ -324,7 +323,7 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
   if bits >= 8: return X86Ops.VMOVSDm
   return X86Ops.VMOVSSm
 
-def alloc_vregs(ctx:PreRegallocContext, x:UOp) -> UOp|None:
+def alloc_vregs(ctx:PreLinearKernelCtx, x:UOp) -> UOp|None:
   # register placeholders with real registers
   if x.op is Ops.INS and x.arg[0] is X86Ops.DEFINE and x.tag is not None: return None
   if x.op is Ops.INS and x.arg[0] is X86Ops.LOOP_CMP: return None
@@ -336,10 +335,10 @@ def alloc_vregs(ctx:PreRegallocContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple) and isinstance(x.tag[0], VRegister): return None
   # allocate vreg definitions, the value of a BUFFER is its address so it lives in a gpr
   defs = []
-  if isinstance(x.tag, tuple): defs = [ctx.ren.vreg(x.tag)]
-  elif x.op is Ops.BUFFER: defs = [ctx.ren.vreg(WGPR)]
-  elif x.dtype in dtypes.floats or (x.op is Ops.INS and x.arg[0] in XMM_OPS) or x.max_numel() > 1: defs = [ctx.ren.vreg(XMM)]
-  elif x.dtype in dtypes.ints+(dtypes.bool,): defs = [ctx.ren.vreg(WGPR)]
+  if isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag)]
+  elif x.op is Ops.BUFFER: defs = [ctx.vreg(WGPR)]
+  elif x.dtype in dtypes.floats or (x.op is Ops.INS and x.arg[0] in XMM_OPS) or x.max_numel() > 1: defs = [ctx.vreg(XMM)]
+  elif x.dtype in dtypes.ints+(dtypes.bool,): defs = [ctx.vreg(WGPR)]
   # TODO: add this once the scheduler can track register pressure
   # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   # the size src of a BUFFER is not a value, tag it so it isn't materialized into a register
@@ -350,7 +349,7 @@ isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.ren.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
   # really all a backedge END is is an IF with a tag referencing the RANGE start label
   (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
     lambda x,cond: cond.ins(X86Ops.LOOP_CMP, src=cond.src + x.src[:2] + (UOp(Ops.NOOP, tag=cond.op),))),
@@ -543,7 +542,7 @@ isel_matcher = PatternMatcher([
 # this handles flag clobbers. Unfortunately x86 doesn't have a good way to store/restore the flag register (then regalloc would handle it)
 # so we rematerialize. This is different from rematerialization you might want to do in regalloc because it is not optional,
 # regalloc shouldn't rematerialize if a src of the instruction is dead, but here you need to as there's no fallback load from stack
-def flag_rematerialize(ctx:PreRegAllocContext, x:UOp):
+def flag_rematerialize(ctx:PreLinearKernelCtx, x:UOp):
   flag_def = x if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags else x.src[-1] if x.arg[0] in X86GroupOp.ReadFlags else None
   if flag_def is None: return None
   if ctx.lock is not None and ctx.lock is not flag_def: ctx.clobbered.add(ctx.lock)
@@ -585,7 +584,7 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
 post_regalloc_matcher = PatternMatcher([
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(Ops.INS, src=(UPat.cvar("disp").cast(),), name="x"), lambda ctx,x,disp:
-    (nx:=UOp.cconst(ctx.ren.spill_size + disp.val, x.dtype), [nx]) if x.arg[0] is X86Ops.FRAME_INDEX else None),
+    (nx:=UOp.cconst(ctx.spill_size + disp.val, x.dtype), [nx]) if x.arg[0] is X86Ops.FRAME_INDEX else None),
   # expand the cmp here so we can preserve rng src edge to get label from ctx
   (UPat(Ops.INS, name="x"), lambda ctx,x: lower_loop(ctx, x) if x.arg[0] is X86Ops.LOOP_CMP else None),
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
@@ -788,17 +787,33 @@ encodings = {
   X86Ops.RET: lambda x: bytes([0xC3]),
 }
 
-@dataclass
-class PostRegallocCtx:
-  ren: X86Renderer
-  loop_label: dict[UOp, str] = field(default_factory=dict)
-
-class X86IselContext(PreRegallocContext):
+class X86PreLinearKernelCtx(PreLinearKernelCtx):
   def __init__(self, sink:UOp, ren:X86Renderer, info:ProgramInfo):
     super().__init__(sink, ren, info)
     self.clobbered: set[UOp] = set()
     self.lock: UOp|None = None
     self.scratch_slot = itertools.count(-1, -1)
+
+  def assign_spill_slot(self, v:VRegister, vdef:UOp) -> int:
+    sz = 8 if vdef.op is Ops.BUFFER else v.cons[0].size
+    offset = self.spill_size + (sz - self.spill_size % sz) % sz
+    self.spill_size = offset + sz
+    return offset
+
+  # NOTE: buffers have to be rewritten and the stack size updated before post regalloc lowers FRAME_INDEX
+  def stack_alloc(self, uops:list[UOp]) -> list[UOp]:
+    sp = self.ren.spill_pointer()
+    # allocate buffers
+    for i, u in enumerate(uops):
+      if u.op is Ops.BUFFER:
+        uops[i] = self.ren.isel_matcher.rewrite(sp.index(UOp.cconst(self.spill_size, dtypes.uint32), tag=u.tag))
+        self.spill_size += u.max_numel() * u.dtype.itemsize
+
+    if self.spill_size > 0:
+      sz = UOp.cconst(self.spill_size, sp.dtype)
+      uops.insert(0, self.ren.isel_matcher.rewrite(UOp(Ops.SUB, src=(sp, sz), tag=sp.tag)))
+      uops.insert(len(uops) - 2, self.ren.isel_matcher.rewrite(UOp(Ops.ADD, src=(sp, sz), tag=sp.tag)))
+    return uops
 
 class X86Renderer(ISARenderer):
   device = "CPU"
@@ -811,15 +826,14 @@ class X86Renderer(ISARenderer):
   isel_matcher = isel_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
-  pre_regalloc_ctx_type = X86IselContext
-  spill_alignment: 16
+  kernel_ctx_type = X86PreLinearKernelCtx
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   def __init__(self, target:Target):
     if target.arch.split(",")[0] != "x86_64": raise RuntimeError(f"X86Renderer only supports x86_64, got {target.arch}")
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
-    self.post_regalloc_ctx = PostRegallocCtx(self)
+
   def is_two_address(self, x:UOp) -> bool: return x.arg[0] in X86GroupOp.TwoAddress
   def spill_pointer(self) -> UOp: return def_reg(dtypes.uint64, RSP)
   # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
@@ -843,27 +857,6 @@ class X86Renderer(ISARenderer):
     disp = UOp.cconst(spill_offset, dtypes.uint32)
     nx = UOp(Ops.INS, src=fold_address(self.spill_pointer().index(disp)), arg=(X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, dt), tag=regs)
     return nx, [nx]
-
-  def assign_spill_slot(self, v:VRegister, vdef:UOp) -> tuple[int, int]:
-    sz = 8 if vdef.op is Ops.BUFFER else v.cons[0].size
-    offset = self.spill_size + (sz - self.spill_size % sz) % sz
-    return (offset, offset + sz)
-
-  # NOTE: kinda dirty, where does this belong in pipeline?
-  # - buffers have to be rewritten/stack size updated before FRAME_INDEX in post_regalloc
-  # - make this a seperate line rewrite pattern matcher?
-  def stack_alloc(self, uops:list[UOp]) -> list[UOp]:
-    sp = self.spill_pointer()
-    # allocate buffers
-    for i, u in enumerate(uops):
-      if u.op is Ops.BUFFER:
-        uops[i] = self.isel_matcher.rewrite(sp.index(UOp.cconst(self.spill_size, dtypes.uint32), tag=u.tag))
-        self.spill_size += u.max_numel() * u.dtype.itemsize
-    if self.spill_size > 0:
-      sz = UOp.cconst(self.spill_size, sp.dtype)
-      uops.insert(0, self.isel_matcher.rewrite(UOp(Ops.SUB, src=(sp, sz), tag=sp.tag)))
-      uops.insert(len(uops) - 2, self.isel_matcher.rewrite(UOp(Ops.ADD, src=(sp, sz), tag=sp.tag)))
-    return uops
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg[0]))[-1] in ('i', 'm') else o[7:]).lower():7s}"

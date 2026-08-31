@@ -1,5 +1,4 @@
-from tinygrad.renderer import Renderer
-from tinygrad.renderer.isa import VRegister, rdef, rdefs, ISARenderer
+from tinygrad.renderer.isa import VRegister, rdef, rdefs, ISARenderer, PreLinearKernelCtx
 from tinygrad.uop.ops import PatternMatcher, UOp, UPat, Ops, ParamArg, AddrSpace
 import itertools
 
@@ -14,9 +13,9 @@ def bptr(x:UOp) -> tuple[UOp, int]:
 class Mem2regContext:
   # in tinygrad phis are only necessary for loop carried dependencies ex.
   # stores that occur between load and one or more backedges
-  def __init__(self, lst:list[UOp], ren:Renderer):
-    assert isinstance(ren, ISARenderer), "mem2reg only supported for assembly backends"
-    self.ren = ren
+  def __init__(self, lst:list[UOp], ctx:PreLinearKernelCtx):
+    assert isinstance(ctx.ren, ISARenderer), "mem2reg only supported for assembly backends"
+    self.ren = ctx.ren
     self.current: dict[UOp, UOp] = {}
     self.nl: dict[tuple[UOp, int], int] = {}
     self.phi_copies: dict[VRegister, list[VRegister]] = {}
@@ -49,7 +48,7 @@ class Mem2regContext:
             carry = next((u for u in reversed(us[i+1:]) if u.op is Ops.STORE), None)
             if carry is None: continue
             header,n = flat[ptr][ld]
-            vr = ren.vreg(header.cons, width=header.width, alignment=header.alignment, phi=(header,rdef(carry)))
+            vr = ctx.vreg(header.cons, width=header.width, alignment=header.alignment, phi=(header,rdef(carry)))
             phi = UOp.placeholder((1,), ptr[0].dtype, next(lane_ctr), AddrSpace.REG).replace(tag=(vr,))
             self.phis[(ptr, n)] = phi
             self.phi_copies.setdefault(header, []).append(vr)

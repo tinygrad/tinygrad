@@ -43,9 +43,12 @@ def rdefs(u:UOp) -> tuple[VRegister|Register,...]:
   return tuple(v for v in (u.tag if isinstance(u.tag, tuple) else (u.tag,)) if isinstance(v, (VRegister, Register)))
 def rdef(u:UOp) -> VRegister|Register|None: return rdefs(u)[0] if len(rdefs(u)) >= 1 else None
 
-class PreRegallocContext:
+# all per-kernel state of the ISA pipeline (isel -> linearize -> regalloc -> post regalloc) lives here, not on the renderer
+class PreLinearKernelCtx:
   def __init__(self, sink:UOp, ren:ISARenderer, info:ProgramInfo):
     self.ren = ren
+    self.spill_size = 0
+    self.loop_label: dict[UOp, str] = {}
     self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n = itertools.count()
     def arg_key(u:UOp):
@@ -53,26 +56,26 @@ class PreRegallocContext:
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
     self.func_args = sorted([u for u in self.uses if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
 
-class ISARenderer(Renderer):
-  pre_isel_matcher: PatternMatcher
-  isel_matcher: PatternMatcher
-  pre_regalloc_matcher: PatternMatcher|None = None
-  post_regalloc_matcher: PatternMatcher
-  post_regalloc_ctx: any|None = None
-  pre_regalloc_ctx_type: type = PreRegallocContext
-  spill_size: int = 0
-  reg_n = itertools.count()
-  # NOTE: would be nice for this to be cached automatically like in UOp.ins() or something?
-  # instead of needing to manually register important instructions in each renderer impl
-  # TODO: this doesnt belong to renderer, per-kernel state but needs to be accessible by linearize?
-  semantic_op: dict[any, Ops] = {} # preserve IR metadata post-isel
-
   def vreg(self, cons:tuple[Register, ...], **kwargs) -> VRegister:
     return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
 
-  def is_two_address(self, x:UOp) -> bool: return False
-  def assign_spill_slot(self, v:VRegister, vdef:UOp) -> tuple[int, int]: raise NotImplementedError("arch specific")
+  # returns arch specific placement information for the spilled virtual register, and grows the stack frame if it spills to memory
+  def assign_spill_slot(self, v:VRegister, vdef:UOp) -> any: raise NotImplementedError("arch specific")
+  # runs after regalloc, when the size of the stack frame is known
   def stack_alloc(self, uops:list[UOp]) -> list[UOp]: return uops
+
+class ISARenderer(Renderer):
+  pre_isel_matcher: PatternMatcher
+  isel_matcher: PatternMatcher
+  pre_regalloc_matcher: PatternMatcher = PatternMatcher([])
+  post_regalloc_matcher: PatternMatcher
+  kernel_ctx_type: type = PreLinearKernelCtx
+  # NOTE: would be nice for this to be cached automatically like in UOp.ins() or something?
+  # instead of needing to manually register important instructions in each renderer impl
+  # NOTE: this is a memo of the isa opcode -> Ops mapping, it's the same for every kernel so it can live on the renderer
+  semantic_op: dict[any, Ops] = {} # preserve IR metadata post-isel
+
+  def is_two_address(self, x:UOp) -> bool: return False
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def vcopy(self, u:UOp, vr:VRegister) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
   def copy(self, x:UOp, regs:tuple[Register,...]) -> list[UOp]: raise NotImplementedError("arch specific")

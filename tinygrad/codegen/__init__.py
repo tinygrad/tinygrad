@@ -7,7 +7,7 @@ from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.renderer.isa import ISARenderer, PreRegallocContext
+from tinygrad.renderer.isa import ISARenderer, PreLinearKernelCtx
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
 
 # import all pattern matchers here
@@ -425,23 +425,39 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
+# NOTE: the per-kernel ctx is created for isel and threaded through the rest of the pipeline, it holds the spill state regalloc mutates
+def do_regalloc(kctx:PreLinearKernelCtx, lst:list[UOp]) -> list[UOp]:
+  ren = kctx.ren
+  lst = line_rewrite(lst, ren.pre_regalloc_matcher, kctx)
+  # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
+  lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
+  lst = line_rewrite(lst, pm_promote_regbufs, Mem2regContext(lst, kctx))
+  lst = line_rewrite(lst, pm_index_subregisters)
+  lst = line_rewrite(lst, pm_regalloc_rewrite, LinearScanRegallocContext(lst, kctx))
+  # the stack frame is only known after regalloc has assigned every spill slot
+  lst = kctx.stack_alloc(lst)
+  return line_rewrite(lst, ren.post_regalloc_matcher, kctx)
+
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  # TODO: cleaner way of ISA TUPLE_ORDER?
-  lst = line_rewrite(linearize(sink, ctx), pm_linearize_cleanups)
-  # isa renderers need to allocate registers
+
+  # instruction selection. NOTE: this must run on the sink we linearize, the ProgramInfo is already computed from the pre isel sink
+  kctx: PreLinearKernelCtx|None = None
   if isinstance(ctx, ISARenderer):
-    if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, ctx.pre_regalloc_context)
-    # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
-    lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
-    lst = line_rewrite(lst, pm_promote_regbufs, Mem2regContext(lst, ctx))
-    lst = line_rewrite(lst, pm_index_subregisters)
-    regalloc_ctx = LinearScanRegallocContext(lst, ctx)
-    lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
-    lst = ctx.stack_alloc(lst)
-    lst = line_rewrite(lst, ctx.post_regalloc_matcher, ctx.post_regalloc_ctx)
+    kctx = ctx.kernel_ctx_type(sink, ctx, prg.arg)
+    sink = graph_rewrite(sink, ctx.pre_isel_matcher, ctx=kctx, name="pre instruction selection", bottom_up=True)
+    sink = graph_rewrite(sink, ctx.isel_matcher, ctx=kctx, name="instruction selection", bottom_up=True)
+    sink = graph_rewrite(sink, pm_prepare_regalloc, ctx=ctx, name="assign children regs")
+
+  # linearize graph
+  lst = line_rewrite(linearize(sink, ctx), pm_linearize_cleanups)
+
+  # isa renderers need to allocate registers
+  if kctx is not None:
+    lst = do_regalloc(kctx, lst)
     if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
-  return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
+  # NOTE: the LINEAR arg is the size of the stack frame, the assembler needs it to reserve scratch
+  return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst), arg=kctx.spill_size if kctx is not None else None),))
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
   if sink.arg.estimates is not None: return None
@@ -489,14 +505,6 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
-
-    # instruction selection
-    if isinstance(renderer, ISARenderer):
-      # TODO; better way to expose hook? RDNA3 needs to compute # waves
-      renderer.pre_regalloc_context = renderer.pre_regalloc_ctx_type(full_sink, renderer, prog_info)
-      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=renderer.pre_regalloc_context, name="pre instruction selection", bottom_up=True)
-      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=renderer.pre_regalloc_context, name="instruction selection", bottom_up=True)
-      full_sink = graph_rewrite(full_sink, pm_prepare_regalloc, ctx=renderer, name="assign children regs")
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))

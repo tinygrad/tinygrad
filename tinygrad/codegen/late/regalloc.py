@@ -2,7 +2,7 @@ import itertools
 from dataclasses import dataclass
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, AddrSpace
-from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef
+from tinygrad.renderer.isa import Register, VRegister, rdefs, rdef, PreLinearKernelCtx
 from tinygrad.dtype import dtypes
 from bisect import bisect_left
 
@@ -11,12 +11,9 @@ REG_OPS = {Ops.INS, Ops.STACK, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SP
 class LinearScanRegallocContext:
   def vdef(self, v:VRegister) -> UOp: return self.uops[self.live_intervals[v.parent if v.is_sub() else v][0]]
 
-  def __init__(self, uops:list[UOp], ren:ISARenderer):
-    self.uops, self.ren, self.idx = [u for u in uops if u.op in REG_OPS], ren, itertools.count()
+  def __init__(self, uops:list[UOp], ctx:PreLinearKernelCtx):
+    self.uops, self.ren, self.idx = [u for u in uops if u.op in REG_OPS], ctx.ren, itertools.count()
     self.live_intervals: dict[VRegister, list[int]] = {}
-
-    # TODO: per kernel state not renderer
-    ren.spill_size = 0
 
     lr = self.live_intervals
     range_vars: list[VRegister] = []
@@ -60,7 +57,7 @@ class LinearScanRegallocContext:
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:VRegister, i:int, cons:tuple[Register, ...]|None=None) -> tuple[Register,...]:
       if v not in self.spills:
-        self.spills[v], self.ren.spill_size = self.ren.assign_spill_slot(v, self.vdef(v))
+        self.spills[v] = ctx.assign_spill_slot(v, self.vdef(v))
       rs = alloc(v, [cons] if cons is not None else None, i)
       if v.phi is None: # NOTE: phis insert their own fills at rewrite time
         self.insert_before.setdefault(i, []).append((v, rs))
@@ -79,7 +76,7 @@ class LinearScanRegallocContext:
       for j,v in enumerate(rdefs(u)):
         if not isinstance(v, VRegister): continue
         cons = None
-        if ren.is_two_address(u) and j == 0:
+        if self.ren.is_two_address(u) and j == 0:
           uses = []
           for s in u.src:
             if rdef(s) in live: uses.extend(live.get(rdef(s)))
@@ -160,10 +157,10 @@ def propogate_subs(ctx, x:UOp):
   vr, nsrc = rdef(x), []
   n = vr.width//len(x.src) if isinstance(vr, VRegister) and len(x.src) and vr.width%len(x.src) == 0 \
       else max(x.dtype.itemsize//4, 1)
+  def _strip(x:UOp):
+    while x.op in {Ops.BITCAST, Ops.AFTER}: x = x.src[0]
+    return x
   for i,s in enumerate(x.src):
-    def _strip(x:UOp):
-      while x.op in {Ops.BITCAST, Ops.AFTER}: x = x.src[0]
-      return x
     # INDEX/reg LOAD srcs have to become copies, can be redundant but must enforce contiguity restraint.
     # Optimization would have to identify equivalent STACKs and tie register blocks
     if _strip(s).op in {Ops.INDEX, Ops.LOAD}: nsrc.append(ctx.vcopy(s, vr[i*n:(i+1)*n-1])[0])
