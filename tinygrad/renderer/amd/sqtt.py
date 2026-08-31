@@ -664,7 +664,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
     if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
-    elif isinstance(p, (WAVEEND, WAVEEND_RDNA4)):
+    elif isinstance(p, (WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)):
       pc = wave_pc.pop(p.wave)
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
     elif isinstance(p, IMMEDIATE_MASK):
