@@ -167,6 +167,11 @@ def _merge_submits(calls:list[UOp]) -> UOp:
     estimates=sum((c.arg.aux.estimates for c in calls), start=Estimates()).simplify()))
 
 def _merge_queues(submits:list[UOp]) -> list[UOp]:
+  # CPU submits run inline and can block on another queue. Keep multi-queue CPU work in schedule order so every
+  # producer queue is submitted before a CPU wait; merging by queue can otherwise deadlock alternating dependencies.
+  keys = [unwrap(get_submit(call)).src[0].arg for call in submits]
+  if len(set(keys)) > 1 and any(any(d.split(":")[0] == "CPU" for d in devs) for devs, _ in keys): return submits
+
   merged:list[UOp] = []
   opened:dict[tuple[tuple[str, ...], str], list[UOp]] = {} # (devs, queue) -> hcq calls in submit order
   limits:dict[tuple[tuple[str, ...], str], int] = collections.defaultdict(lambda: JIT_BATCH_SIZE.value)
@@ -412,8 +417,8 @@ pm_lower_hcq = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat(Ops.SINK),)),), name="call", allow_any_len=True), lower_hcq_call)])
 
 # *****************
-# 6. batch: adjacent hcq calls fold into one submitter on the host SUBMIT:0 ring: a submit whose cmds call the
-#    compiled piece programs, so the worker runs the batch in fifo order and the python exec is one ring push
+# 6. batch: adjacent hcq calls fold into one submitter on the host SUBMIT:0 queue: a submit whose cmds call the
+#    compiled piece programs, so the batch runs in fifo order and the python exec is one submitter call
 
 def _lane_arg(a:UOp, lane:int) -> UOp: return a.mselect(lane) if len(to_tuple(a.device)) > 1 else a
 

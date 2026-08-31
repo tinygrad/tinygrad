@@ -1,6 +1,6 @@
 import math
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Renderer
 
 def _dim_max(d:sint) -> int: return d if isinstance(d, int) else int(d.vmax)
@@ -47,7 +47,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
   all_ranges = {x.arg[0:-1]:x for x in s_topo if x.op is Ops.RANGE}
 
   # extract global/local dims
-  global_dims = sorted([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.GLOBAL, AxisType.THREAD)])
+  global_dims = sorted([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] is AxisType.GLOBAL])
   local_dims = sorted([x.arg[0:-1] for x in all_ranges.values() if x.arg[-1] in (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
   if not global_dims and not local_dims: return None
 
@@ -57,8 +57,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
 
   # get the idxs
   ki: KernelInfo = s.arg
-  if ctx.has_threads: idxs = [UOp.variable("core_id", 0, int(global_shape[0])-1, dtypes.int, param=True).cast(dtypes.weakint)]
-  elif ki.dont_use_locals:
+  if ki.dont_use_locals:
     assert not local_dims, "can't use locals if there's no local dims"
     idxs = get_grouped_dims("idx", global_shape, ctx.global_max, reverse=True)
   else:
