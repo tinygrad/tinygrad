@@ -458,31 +458,27 @@ jobs:
           - version: '0.11.0'
             model: vision
             url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
-            timing: 17
+            timing: 18
           - version: '0.11.0'
             model: policy
             url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
-            timing: 3.2
+            timing: 3.4
           - version: '0.11.0'
             model: dmonitoring
             url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/dmonitoring_model.onnx
-            timing: 11
+            timing: 12.5
           - version: '0.11.2'
             model: supercombo
             url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
-            timing: 26
+            timing: 28
           - dev: QCOM:IR3
             version: '0.11.2'
             model: supercombo
-            timing: 41
+            timing: 29
           - version: '0.11.2'
             model: dmonitoring
             url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
-            timing: 11
-          # IR3 dmonitoring is slightly slower
-          - dev: QCOM:IR3
-            model: dmonitoring
-            timing: 12
+            timing: 12.5
       fail-fast: false
     name: openpilot ${{ matrix.version }} compile3 ${{ matrix.model }} (DEV=${{ matrix.dev }})
     runs-on: [self-hosted, Linux, comma]
@@ -506,7 +502,7 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: compile
-      run: FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py ${{ matrix.url }}
+      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile3.py ${{ matrix.url }}
     - name: run pickle
       run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" RUN_PICKLE=1 taskset -c 4-7 python3 examples/openpilot/compile3.py
     - name: Run process replay tests

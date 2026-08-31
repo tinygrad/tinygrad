@@ -78,7 +78,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             return k
 
   # are we grouping? (requires local shape support)
-  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS else 2048), False):
+  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS or k.ren.target.device == "QCOM" else 2048), False):
     for axis, sz in itertools.product((0, 1, 2), (16,)):
       try:
         k.apply_opt(Opt(OptOps.GROUPTOP, axis, sz))
@@ -162,6 +162,19 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   if k.ren.has_local:
     if NOLOCALS:
       k.apply_opt(Opt(OptOps.NOLOCALS))
+    elif k.ren.target.device == "QCOM":
+      # for openpilot: use 32..128 threads per workgroup, at most 8 on the innermost axis
+      # apply innermost global axes first so the leading hardware local dims hold the trailing global axes, like gidx
+      workgroup = 1
+      opts: list[tuple[int, int]] = []
+      for axis in [a for a in k.axes_of(AxisType.GLOBAL, AxisType.WEAK) if k.rngs[a].src[0].op is Ops.CONST][-3:][::-1]:
+        if (sz:=max(x for x in range(1, min(int(k.full_shape[axis]), 128 // workgroup if opts else 8) + 1) if int(k.full_shape[axis]) % x == 0)) > 1:
+          opts.append((axis, sz))
+          workgroup *= sz
+      if opts and workgroup < 32:  # fill at least one wave: grow the innermost local as much as possible
+        axis, sz = opts[0]
+        opts[0] = axis, max(x for x in range(1, min(int(k.full_shape[axis]), 128 * sz // workgroup) + 1) if int(k.full_shape[axis]) % x == 0)
+      for axis, sz in opts: k.apply_opt(Opt(OptOps.LOCAL, axis, sz))
     else:
       # prioritize making expand axes local
       local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().backward_slice for b in k.bufs), axis) \
