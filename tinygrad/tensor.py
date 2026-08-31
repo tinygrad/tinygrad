@@ -8,7 +8,6 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, ParamArg, graph_rewrite, rewrite_group
-from tinygrad.uop.weak import default_dtype
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -258,6 +257,8 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
       if s is ns: continue
       t.uop = ns
 
+def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop is u for tref in list(all_tensors))
+
 # **** Tensor helper functions ****
 
 def is_numpy_ndarray(x) -> "TypeGuard[numpy.ndarray]": return str(type(x)) == "<class 'numpy.ndarray'>"
@@ -451,7 +452,7 @@ class Tensor(RandMixin):
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
     ib = self.uop
-    while not ib.has_buffer_identity() and ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: ib = ib.src[0]
+    while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
     if ib is not self.uop and ib.has_buffer_identity(after_ok=True):
       # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign")
@@ -480,7 +481,7 @@ class Tensor(RandMixin):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
-    if self.dtype in dtypes.weaks: return self.cast(default_dtype(self.uop)).data()
+    if self.dtype in dtypes.weaks: return self.cast(self.commit_dtype()).data()
     if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.fmt)  # type: ignore[arg-type,return-value]
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     buf = self._buffer()
@@ -521,7 +522,7 @@ class Tensor(RandMixin):
     print(repr(t.numpy()))
     ```
     """
-    if self.dtype in dtypes.weaks: return self.cast(default_dtype(self.uop)).numpy()
+    if self.dtype in dtypes.weaks: return self.cast(self.commit_dtype()).numpy()
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     import numpy as np
     if self.dtype in { dtypes.bfloat16, *dtypes.fp8s }: return self.float().numpy()

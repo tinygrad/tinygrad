@@ -978,9 +978,12 @@ class TestOps(unittest.TestCase):
   def test_celu(self):
     for val in range(1, 5):
       helper_test_op([(45,65)], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
+      helper_test_op([(3,3)], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val), low=300, high=400)
       helper_test_op([()], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
   def test_selu(self):
     helper_test_op([(45,65)], torch.nn.functional.selu, Tensor.selu)
+    helper_test_op([(3,3)], torch.nn.functional.selu, Tensor.selu, low=300, high=400)
+    helper_test_op(None, torch.nn.functional.selu, Tensor.selu, vals=[[-1.,0.,1.]])
     helper_test_op([()], torch.nn.functional.selu, Tensor.selu)
   def test_silu(self):
     helper_test_op([(45,65)], torch.nn.functional.silu, Tensor.silu)
@@ -1093,6 +1096,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.erf, Tensor.erf)
     helper_test_op([(45,65)], torch.erf, Tensor.erf, low=300, high=400)
     helper_test_op([(45,65)], torch.erf, Tensor.erf, low=-400, high=-300)
+    helper_test_op(None, torch.erf, Tensor.erf, vals=[[-1., 0., 1.]])
     helper_test_op([()], torch.erf, Tensor.erf)
 
   def test_gelu(self):
@@ -1117,6 +1121,7 @@ class TestOps(unittest.TestCase):
   def test_elu(self):
     helper_test_op([(45,65)], torch.nn.functional.elu, Tensor.elu)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.elu(x, alpha=0.1), lambda x: Tensor.elu(x, alpha=0.1))
+    helper_test_op([(3,3)], torch.nn.functional.elu, Tensor.elu, low=300, high=400)
     helper_test_op([()], torch.nn.functional.elu, Tensor.elu)
   def test_relu6(self):
     helper_test_op([(45,65)], torch.nn.functional.relu6, Tensor.relu6)
@@ -1799,6 +1804,7 @@ class TestOps(unittest.TestCase):
 
   def test_logcumsumexp_numerical(self):
     helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7, vals=[[0.0, 100.0]])
+    helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), vals=[[-math.inf, 0.0, 1.0]], forward_only=True)
 
   def test_sinh(self):
     helper_test_op([(45,65)], lambda x: x.sinh(), grad_atol=1e-6)
