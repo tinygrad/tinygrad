@@ -139,7 +139,7 @@ def pm4_program(ctx, call, prg):
   ins += [wreg(ctx, ctx.gc.regCOMPUTE_RESTART_X, 0, 0, 0),
     wreg(ctx, ctx.gc.regCOMPUTE_USER_DATA_0, *user_regs),
     wreg(ctx, ctx.gc.regCOMPUTE_RESOURCE_LIMITS, ctx.gc.regCOMPUTE_RESOURCE_LIMITS.encode(waves_per_sh=getenv("WAVES_PER_SH"))),
-    wreg(ctx, ctx.gc.regCOMPUTE_START_X, 0, 0, 0, *(info.local_size or (1, 1, 1)), 0, 0),
+    wreg(ctx, ctx.gc.regCOMPUTE_START_X, 0, 0, 0, *info.local_size, 0, 0),
     pkt3(ctx, PM4Ops.DISPATCH_DIRECT, *info.global_size, dispatch_init),
     pkt3(ctx, PM4Ops.EVENT_WRITE, ctx.pm4.EVENT_TYPE(ctx.soc.CS_PARTIAL_FLUSH) | ctx.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))]
   return UOp(Ops.LINEAR, src=tuple(ins))
