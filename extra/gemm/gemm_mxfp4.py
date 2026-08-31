@@ -2502,6 +2502,27 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_cmp_lt_i32(s[46], 2))
     k.emit(s_cbranch_scc0(1367), target='L2_25B8')
     k.label('L2_105C')
+    final_k_f4 = target_optimization and N == 4096
+    def emit_final_f4(skip_label):
+      # On the final K phase, drain four completed low-half accumulator chunks while
+      # the independent high-half MFMA tail is still outstanding.
+      k.emit(s_add_u32(s[52], LIT, s[50], 256))
+      k.emit(s_cmp_lt_u32(s[52], s[51]))
+      k.emit(s_cbranch_scc1(1), target=skip_label)
+      for acc_base, addr in ((0, 235), (64, 235), (4, 236), (68, 236)):
+        for i in range(2):
+          for j in range(4):
+            k.emit(v_accvgpr_read(v[8 + j + i * 4], v[acc_base + j + i * 32]))
+        for i in range(4):
+          k.emit(v_cvt_pk_bf16_f32(v[16 + i], v[8 + i * 2], v[9 + i * 2]))
+        k.emit(s_nop(1))
+        k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
+        k.emit(s_nop(1))
+        k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
+        k.emit(s_nop(1))
+        k.emit(buffer_store_dwordx4(v[16:19], v[addr], s[4:7], 0, 0, 1))
+        k.emit(v_add_i32(v[addr], v[addr], 64))
+      k.label(skip_label)
     k.emit(s_waitcnt(122))
     k.emit(v_mfma_fp4(v[0:3], v[136:139], v[8:11], 0, 0, v[208], v[200]))
     k.emit(s_barrier())
@@ -2575,6 +2596,7 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(v_mfma_fp4(v[120:123], v[164:167], v[64:67], 1, 3, v[209], v[203]))
     k.emit(v_mfma_fp4(v[124:127], v[164:167], v[68:71], 3, 3, v[209], v[203]))
     k.emit(s_waitcnt(127))
+    if final_k_f4: emit_final_f4('L2_F4_PHASE0_SKIP')
     k.emit(v_mfma_fp4(v[128:131], v[136:139], v[72:75], 0, 0, v[208], v[204]))
     k.emit(s_barrier())
     k.emit(s_nop())
@@ -2743,6 +2765,7 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(v_mfma_fp4(v[120:123], v[196:199], v[64:67], 1, 3, v[211], v[203]))
     k.emit(v_mfma_fp4(v[124:127], v[196:199], v[68:71], 3, 3, v[211], v[203]))
     k.emit(s_waitcnt(127))
+    if final_k_f4: emit_final_f4('L2_F4_PHASE1_SKIP')
     k.emit(v_mfma_fp4(v[128:131], v[168:171], v[72:75], 0, 0, v[210], v[204]))
     k.emit(s_barrier())
     k.emit(s_nop())
@@ -2915,6 +2938,7 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(v_mfma_fp4(v[120:123], v[164:167], v[64:67], 1, 3, v[209], v[203]))
     k.emit(v_mfma_fp4(v[124:127], v[164:167], v[68:71], 3, 3, v[209], v[203]))
     k.emit(s_waitcnt(127))
+    if final_k_f4: emit_final_f4('L2_F4_PHASE2_SKIP')
     k.emit(v_mfma_fp4(v[128:131], v[136:139], v[72:75], 0, 0, v[208], v[204]))
     k.emit(s_barrier())
     k.emit(s_nop())
@@ -3083,6 +3107,7 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(v_mfma_fp4(v[120:123], v[196:199], v[64:67], 1, 3, v[211], v[203]))
     k.emit(v_mfma_fp4(v[124:127], v[196:199], v[68:71], 3, 3, v[211], v[203]))
     k.emit(s_waitcnt(127))
+    if final_k_f4: emit_final_f4('L2_F4_PHASE3_SKIP')
     k.emit(v_mfma_fp4(v[128:131], v[168:171], v[72:75], 0, 0, v[210], v[204]))
     k.emit(s_barrier())
     k.emit(s_nop())
@@ -3181,54 +3206,20 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.label('L2_3B10')
     k.emit(s_waitcnt(112))
     k.emit(s_barrier())
-    for i in range(2):
-      for j94 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j94 * 1 + i * 4], v[0 + j94 * 1 + i * 32]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    k.emit(buffer_store_dwordx4(v[16:19], v[235], s[4:7], 0, 0, 1))
-    k.emit(v_add_i32(v[235], v[235], 64))
-    for i in range(2):
-      for j95 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j95 * 1 + i * 4], v[64 + j95 * 1 + i * 32]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    k.emit(buffer_store_dwordx4(v[16:19], v[235], s[4:7], 0, 0, 1))
-    k.emit(v_add_i32(v[235], v[235], 64))
-    for i in range(2):
-      for j96 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j96 * 1 + i * 4], v[4 + j96 * 1 + i * 32]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    k.emit(buffer_store_dwordx4(v[16:19], v[236], s[4:7], 0, 0, 1))
-    k.emit(v_add_i32(v[236], v[236], 64))
-    for i in range(2):
-      for j97 in range(4):
-        k.emit(v_accvgpr_read(v[8 + j97 * 1 + i * 4], v[68 + j97 * 1 + i * 32]))
-    for i in range(4):
-      k.emit(v_cvt_pk_bf16_f32(v[16 + i * 1], v[8 + i * 2], v[9 + i * 2]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-    k.emit(s_nop(1))
-    k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-    k.emit(s_nop(1))
-    k.emit(buffer_store_dwordx4(v[16:19], v[236], s[4:7], 0, 0, 1))
-    k.emit(v_add_i32(v[236], v[236], 64))
+    if not final_k_f4:
+      for acc_base, addr in ((0, 235), (64, 235), (4, 236), (68, 236)):
+        for i in range(2):
+          for j in range(4):
+            k.emit(v_accvgpr_read(v[8 + j + i * 4], v[acc_base + j + i * 32]))
+        for i in range(4):
+          k.emit(v_cvt_pk_bf16_f32(v[16 + i], v[8 + i * 2], v[9 + i * 2]))
+        k.emit(s_nop(1))
+        k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
+        k.emit(s_nop(1))
+        k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
+        k.emit(s_nop(1))
+        k.emit(buffer_store_dwordx4(v[16:19], v[addr], s[4:7], 0, 0, 1))
+        k.emit(v_add_i32(v[addr], v[addr], 64))
     for i in range(2):
       for j98 in range(4):
         k.emit(v_accvgpr_read(v[8 + j98 * 1 + i * 4], v[8 + j98 * 1 + i * 32]))
