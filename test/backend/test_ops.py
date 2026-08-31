@@ -1096,6 +1096,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.erf, Tensor.erf)
     helper_test_op([(45,65)], torch.erf, Tensor.erf, low=300, high=400)
     helper_test_op([(45,65)], torch.erf, Tensor.erf, low=-400, high=-300)
+    helper_test_op(None, torch.erf, Tensor.erf, vals=[[-1., 0., 1.]])
     helper_test_op([()], torch.erf, Tensor.erf)
 
   def test_gelu(self):
