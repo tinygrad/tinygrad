@@ -23,7 +23,7 @@ def linearize(sink:UOp, ren:Renderer) -> list[UOp]:
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     extra = None
-    effective_op = ren.semantic_op.get(u.arg, u.op) if isinstance(ren, ISARenderer) and u.op is Ops.INS else u.op
+    effective_op = ren.semantic_op.get(u.arg[0], u.op) if isinstance(ren, ISARenderer) and u.op is Ops.INS else u.op
     match effective_op:
       # the order and placement of these defines is important
       case Ops.PARAM: priority, extra = -20, u.arg.slot

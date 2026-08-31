@@ -162,7 +162,7 @@ def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
   return UOp.placeholder((count,), elem_dt, slot, AddrSpace.LOCAL)
 
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
-  local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx))
+  local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx.scratch_slot))
   local_idx = local.index(UOp.cconst(0, dtypes.int32))
   # the AFTER orders the load after the scratch store
   sel = gate.where(addr, local_idx)
@@ -577,7 +577,6 @@ def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   return (inc, [inc, jmp, end_label])
 
 def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  print(x.op, x.arg, x.tag)
   cond = x.replace(op=x.src[-1].tag, src=x.src[:2])
   jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
   return (jmp.src[0], [jmp.src[0], jmp.replace(tag=x.src[3].tag)])
@@ -839,7 +838,7 @@ class X86Renderer(ISARenderer):
 
   def assign_spill_slot(self, v:VRegister, vdef:UOp) -> tuple[int, int]:
     sz = 8 if vdef.op is Ops.BUFFER else v.cons[0].size
-    offset = self.spill_size + (sz - self.spill_size % sz)
+    offset = self.spill_size + (sz - self.spill_size % sz) % sz
     return (offset, offset + sz)
 
   # NOTE: kinda dirty, where does this belong in pipeline?

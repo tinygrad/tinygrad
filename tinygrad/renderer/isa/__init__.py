@@ -26,7 +26,7 @@ class VRegister:
   def or_parent(self) -> VRegister: return self.parent if self.is_sub() else self
   def sub(self, i:int, length:int=1) -> VRegister:
     assert i+length <= self.width, f"sub-register index out of width range ({i} >= {self.width})"
-    if self.is_sub(): return self.parent.sub(self.pos + i)
+    if self.is_sub(): return self.parent.sub(self.pos + i, length)
     return VRegister(f"{self.name}.{i}", self.cons, length, self.alignment, self, i)
   def __getitem__(self, idx):
     return self.sub(idx.start, idx.stop - idx.start + 1) if isinstance(idx, slice) else self.sub(idx)
@@ -63,10 +63,10 @@ class ISARenderer(Renderer):
   post_regalloc_matcher: PatternMatcher
   post_regalloc_ctx: any|None = None
   spill_size: int = 0
+  reg_n = itertools.count()
   # NOTE: would be nice for this to be cached automatically like in UOp.ins() or something?
   # instead of needing to manually register important instructions in each renderer impl
-  semantic_op: dict[any, UOp] = {} # preserve IR metadata post-isel
-  reg_n = itertools.count()
+  semantic_op: dict[any, Ops] = {} # preserve IR metadata post-isel
 
   def vreg(self, cons:tuple[Register, ...], **kwargs) -> VRegister:
     return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)

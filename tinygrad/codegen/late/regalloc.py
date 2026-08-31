@@ -41,17 +41,18 @@ class LinearScanRegallocContext:
     # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
     def alloc(v:VRegister, cons:list[tuple[Register, ...]]|None, i:int) -> tuple[Register,...]:
       cons = cons or v.candidates()
+      assert len(cons), f"no candidate register blocks provided for {v}"
       live_inv = {r:k for k,v in live.items() for r in v}
 
       block = max(cons, key=lambda b: min(next((j-i for j in lr[live_inv[r]] if j >= i), len(self.uops)) \
         if r in live_inv else len(self.uops) for r in b))
 
       for r in block:
-        if r in live_inv and (v := live_inv.get(r)) in live:
-          live.pop(v)
+        if r in live_inv and (ev := live_inv.get(r)) in live:
+          live.pop(ev)
           # phi evictions must be handled carefully to ensure loop carry gets reloaded and not silently clobbered
-          if v.phi is not None and v not in self.spills and i <= lr[v][-1]:
-            fill(v, self.live_intervals[v][1], (r,))
+          if ev.phi is not None and ev not in self.spills and i <= lr[ev][-1]:
+            fill(ev, self.live_intervals[ev][1], (r,))
       return block
 
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
@@ -141,7 +142,8 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, before + [nx] + after
 
 def regspace(buf:UOp, c:UOp, x:UOp):
-  if (vr := rdef(buf)) is None or c.val >= vr.width: return None
+  stride = buf.dtype.itemsize // 4
+  if (vr := rdef(buf)) is None or stride*c.val >= vr.width: return None
   svr = vr[(c.val)*2:(c.val*2)+1] if x.dtype.itemsize > 4 else vr[c.val]
   return (nx := x.replace(tag=(svr,))), [nx]
 

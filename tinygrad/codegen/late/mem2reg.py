@@ -36,6 +36,7 @@ class Mem2regContext:
         if u.op is Ops.STORE: current[ptr] = u
         if u.op is Ops.LOAD:
           if ptr not in flat: flat[ptr] = {}
+          assert ptr in current, f"LOAD before STORE for buffer element: ({ptr[0].arg}, {ptr[1]})"
           flat[ptr][u] = (rdef(current[ptr]), len(flat[ptr])+1)
 
       if u.op is Ops.RANGE: rngs += 1

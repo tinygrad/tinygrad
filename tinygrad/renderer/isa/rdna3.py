@@ -81,6 +81,11 @@ def multireg(*src, dtype: DType, vr:VRegister|None=None) -> UOp:
   # stack of 32 bit register values/value producing instructions
   # grouped by order to be assigned contiguous register slice
   return UOp(Ops.STACK, src=tuple(s.bitcast(dtypes.uint32) for s in src), tag=(vr,) if vr else None).bitcast(dtype)
+# TODO: only expand to double vgpr if not used as src and not foldable?
+# - realize into registers on demand if in stack or in to_vgpr
+def const64(x:UOp, c:UOp):
+  v = c.val.bits if dtypes.is_float(x.dtype) else c.val
+  return multireg(vmov(const(v)), vmov(const(v >> 32)), dtype=x.dtype)
 
 # ---- register classes/ABI regs ---
 VGPRS = tuple(Register(f"v{i}", i, size=4) for i in range(256))
@@ -309,14 +314,10 @@ def f64_to_i64(y:UOp, tdt:DType):
 
 # TODO: automatically fuse f64 * 2^n -> ldexp
 def i64_to_f64(x:UOp):
-  lo = gep(x, 0).cast(dtypes.float64)
-  hi = gep(x, 1).bitcast(smux(x.dtype, dtypes.int, dtypes.uint)).cast(dtypes.float64)
+  lo = gep(x, 0).double()
+  hi = gep(x, 1).bitcast(smux(x.dtype, dtypes.int, dtypes.uint)).double()
   hi = hi.ins(RDNA3Ops.v_ldexp_f64, src=(hi,const(32)))
   return lo + hi
-
-def const64(x:UOp, c:UOp):
-  v = c.val.bits if dtypes.is_float(x.dtype) else c.val
-  return multireg(vmov(const(v)), vmov(const(v >> 32)), dtype=x.dtype)
 
 # ---- control flow ----
 def lower_range(ctx, x:UOp):
@@ -557,12 +558,14 @@ class RDNA3Renderer(ISARenderer):
   post_regalloc_matcher = post_regalloc_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL, Ops.MAX, Ops.MULACC)}
-  post_regalloc_ctx = RDNA3LinearCtx()
   def __init__(self, target:Target):
     super().__init__(target)
     self.shared_max = HIPRenderer.shared_max
     self.tensor_cores = tc.get_amd(target.arch)
+    self.post_regalloc_ctx = RDNA3LinearCtx()
+    self.semantic_op = {}
 
+  # TODO: put this in context, renderer state is shared by Device across parallel kernel compilation
   def view_prg(self, info:ProgramInfo):
     # NOTE: entire kernel must fit on single CU? (WGP?)
     # 1536 vgprs per SIMD, 2 SIMD per CU
@@ -573,7 +576,7 @@ class RDNA3Renderer(ISARenderer):
     # 12x32 (wave 32) -> 384 spillable SGPR lanes
     n_spill_vgprs = 12
     self.gp_vgprs = VGPRS[1:max_per_thread-n_spill_vgprs]
-    self.spill_vgprs: dict[Register, int] = {r:0 for r in VGPRS[-n_spill_vgprs:]}
+    self.spill_vgprs: dict[Register, int] = {r:0 for r in VGPRS[max_per_thread-n_spill_vgprs:max_per_thread]}
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
   def is_two_address(self, x:UOp) -> bool: return False
