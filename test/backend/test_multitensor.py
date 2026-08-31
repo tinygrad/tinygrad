@@ -58,6 +58,11 @@ class TestMultiTensor(unittest.TestCase):
     assert X.uop.ended_ranges == X.uop.src[1:]
     (X + X).realize()
 
+  def test_shard_invalids_contiguous(self):
+    # every store is Invalid, so none of them should become a (empty) kernel
+    t = Tensor.invalids(8).shard(devices_2, axis=0).contiguous()
+    self.assertEqual(len([c for c in t.schedule_linear().src if c.src[0].op is Ops.SINK]), 1)
+
   @unittest.expectedFailure # TODO: fix
   def test_shard_empty(self):
     GlobalCounters.reset()
@@ -177,6 +182,13 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_allreduce_ring_jit(self):
     with Context(RING=2):
+      jit_allreduce = TinyJit(_test_allreduce)
+      for _ in range(5):
+        a,b = jit_allreduce(Tensor.rand(256, 256))
+        np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
+
+  def test_allreduce_all2all_jit(self):
+    with Context(ALL2ALL=2):
       jit_allreduce = TinyJit(_test_allreduce)
       for _ in range(5):
         a,b = jit_allreduce(Tensor.rand(256, 256))

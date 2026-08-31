@@ -1,5 +1,5 @@
 import ctypes, time, contextlib, functools
-from typing import Literal
+from typing import Any, Iterable, Literal
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import import_soc
@@ -32,7 +32,7 @@ class AM_SOC(AM_IP):
       # fence doorbells for harvested xccs (0xff & ~xcc_mask in the kernel); a fully-unharvested chip keeps the previous 0x0
       live_xccs = sum(1 << i for i in self.adev.regs_offset[am.GC_HWIP] if i not in self.adev.harvested[am.GC_HWIP] and i < 8)
       self.adev.regXCC_DOORBELL_FENCE.write(0xff & ~live_xccs)
-      for aid in range(1, self.adev.gmc.vmhubs):
+      for aid in self.adev.aids[1:]:
         self.adev.indirect_wreg_pcie(self.adev.regXCC_DOORBELL_FENCE.addr[0], self.adev.regXCC_DOORBELL_FENCE.encode(shub_slv_mode=1), aid=aid)
       self.adev.regBIFC_GFX_INT_MONITOR_MASK.write(0x7ff)
       self.adev.regBIFC_DOORBELL_ACCESS_EN_PF.write(0xfffff)
@@ -50,13 +50,14 @@ class AM_SOC(AM_IP):
     else: reg.write(val)
 
 class AM_GMC(AM_IP):
+  vf_owner:Any = None
+
   def init_sw(self):
     self.vmhubs = len(self.adev.regs_offset[am.MMHUB_HWIP])
 
-    # XGMI (for supported systems)
-    xgmi_lfb_cntl = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields() if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_CNTL') else {}
+    xgmi_lfb_cntl = self.adev.regGCMC_VM_XGMI_LFB_CNTL.read_bitfields() if hasattr(self.adev, 'regGCMC_VM_XGMI_LFB_CNTL') else {}
     self.xgmi_phys_id, self.xgmi_max_region = xgmi_lfb_cntl.get('pf_lfb_region', 0), xgmi_lfb_cntl.get('pf_max_region', 0)
-    self.xgmi_seg_sz = self.adev.regMMMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size']<<24 if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_SIZE') else 0
+    self.xgmi_seg_sz = self.adev.regGCMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size']<<24 if hasattr(self.adev, 'regGCMC_VM_XGMI_LFB_CNTL') else 0
 
     self.paddr_base = self.xgmi_phys_id * self.xgmi_seg_sz
 
@@ -81,26 +82,42 @@ class AM_GMC(AM_IP):
     # MM hub is inited before any tlb flushes and is still valid during partial_boot, so set it to true
     self.hub_initted = {"MM": True, "GC": False}
 
+    self.mm_insts = self.adev.aids if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)} else list(range(self.vmhubs)) # dead mmhubs hang us
+
     self.pf_status_reg = lambda ip: f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS{'_LO32' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else ''}"
 
-  def init_hw(self): self.init_hub("MM", inst_cnt=self.vmhubs)
+  def init_hw(self): self.init_hub("MM", insts=self.mm_insts)
 
-  def flush_hdp(self): self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4, 0x0)
+  def flush_hdp(self):
+    if self.adev.is_vf: self.adev.reg("regBIF_BX_DEV0_EPF0_VF0_HDP_MEM_COHERENCY_FLUSH_CNTL").write(0x0)
+    else: self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4, 0x0)
+
   def flush_tlb(self, ip:Literal["MM", "GC"], vmid, flush_type=0):
     self.flush_hdp()
 
     # Can't issue TLB invalidation if the hub isn't initialized.
     if not self.hub_initted[ip]: return
 
-    for inst in range(self.adev.gmc.vmhubs if ip == "MM" else self.adev.gfx.xccs):
-      if ip == "MM": wait_cond(lambda: self.adev.regMMVM_INVALIDATE_ENG17_SEM.read(inst=inst) & 0x1, value=1, msg="mm flush_tlb timeout")
+    req = self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").encode(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid),
+      invalidate_l2_ptes=1, invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1,
+      clear_protection_fault_status_addr=0)
 
-      self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
-        invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0, inst=inst)
+    if ip == "GC" and self.adev.is_vf and (dev:=self.vf_owner) is not None: # the cp runs invalidations once its queues are up
+      from tinygrad.runtime.ops_amd import WAIT_REG_MEM_FUNCTION_EQ
+      dev.hw_compute_queue_t().wait_reg_mem(req, mask=1 << vmid, reg_done=self.adev.regGCVM_INVALIDATE_ENG17_ACK.addr[0],
+        reg=self.adev.regGCVM_INVALIDATE_ENG17_REQ.addr[0], op=WAIT_REG_MEM_FUNCTION_EQ).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
+      dev.timeline_signal.wait(dev.timeline_value - 1)
+      return
+
+    use_sema = ip == "MM" and not self.adev.is_vf # vf can't use sema
+    for inst in (self.adev.gmc.mm_insts if ip == "MM" else range(self.adev.gfx.xccs)):
+      if use_sema: wait_cond(lambda: self.adev.regMMVM_INVALIDATE_ENG17_SEM.read(inst=inst) & 0x1, value=1, msg="mm flush_tlb timeout")
+
+      self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(req, inst=inst)
 
       wait_cond(lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read(inst=inst) & (1 << vmid), value=(1 << vmid), msg="flush_tlb timeout")
 
-      if ip == "MM": self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0, inst=inst)
+      if use_sema: self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0, inst=inst)
       if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0) and ip == "MM":
         self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.update(reserved_cache_private_invalidation=1, inst=inst)
 
@@ -117,9 +134,9 @@ class AM_GMC(AM_IP):
     self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1800000, **fault_flags, **en_def_flags, enable_context=1,
       page_table_depth=((2 if self.trans_futher else 3) - page_table.lv), page_table_block_size=9 if self.trans_futher else 0, inst=inst)
 
-  def init_hub(self, ip:Literal["MM", "GC"], inst_cnt:int):
+  def init_hub(self, ip:Literal["MM", "GC"], insts:Iterable[int]):
     # Init system apertures
-    for inst in range(inst_cnt):
+    for inst in insts:
       self.adev.reg(f"reg{ip}MC_VM_AGP_BASE").write(0, inst=inst)
       self.adev.reg(f"reg{ip}MC_VM_AGP_BOT").write(0xffffffffffff >> 24, inst=inst) # disable AGP
       self.adev.reg(f"reg{ip}MC_VM_AGP_TOP").write(0, inst=inst)
@@ -255,10 +272,11 @@ class AM_GFX(AM_IP):
 
   def init_hw(self):
     # Wait for RLC autoload to complete
-    wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0,
-              value=True, msg="RLC autoload timeout")
+    if not self.adev.is_vf: # VF boots with the RLC already up
+      wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0,
+                value=True, msg="RLC autoload timeout")
 
-    self.adev.gmc.init_hub("GC", inst_cnt=self.xccs)
+    self.adev.gmc.init_hub("GC", insts=range(self.xccs))
     if self.adev.partial_boot: return self.reset_mec()
 
     self._config_mec()
@@ -300,8 +318,11 @@ class AM_GFX(AM_IP):
 
     self._enable_mec()
 
-    # Set 1 partition
-    if self.xccs > 1: self.adev.psp._spatial_partition_cmd(1)
+    if self.adev.is_vf: # the host PF shuts a VF down when it leaves its access window with no cp scheduler, point the RLC at the kiq slot
+      for xcc in range(self.xccs): self.adev.reg("regRLC_CP_SCHEDULERS").update(scheduler0=(2 << 5) | (1 << 3) | 0x80, inst=xcc)
+
+    # set 1 partition on bare metal. a VF uses the spatial partition its host PF assigned.
+    if self.xccs > 1 and not self.adev.is_vf: self.adev.psp._spatial_partition_cmd(1)
 
   def fini_hw(self): self._dequeue_hqds()
 
@@ -343,7 +364,7 @@ class AM_GFX(AM_IP):
 
       mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
       for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
-        self.adev.wreg(reg, mqd_st_mv[0x80 + i])
+        self.adev.wreg(reg, mqd_st_mv[0x80 + i], inst=xcc)
       self.adev.regCP_HQD_ACTIVE.write(0x1, inst=xcc)
 
       self.adev.gmc.flush_hdp()
@@ -406,7 +427,11 @@ class AM_GFX(AM_IP):
         if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
           self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
           self.adev.regSPI_COMPUTE_QUEUE_RESET.write(0x1, inst=xcc)
-          if not self.adev.is_err_state: wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, msg="HQD dequeue timeout")
+          if not self.adev.is_err_state:
+            try: wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, msg="HQD dequeue timeout")
+            # kernel tolerates this too; a wedged wave can survive RESET_WAVES
+            except TimeoutError:
+              if DEBUG >= 2: print(f"am {self.adev.devfmt}: HQD dequeue timeout xcc{xcc} q{q}, continuing")
     self._grbm_select()
 
 class AM_IH(AM_IP):
@@ -484,6 +509,7 @@ class AM_IH(AM_IP):
 
     self.drain()
 
+    if self.adev.is_vf: return # fatal RAS events are handled by the host PF
     bif_intr = self.adev.regBIF_BX0_BIF_DOORBELL_INT_CNTL.read_bitfields()
     athub_err, cntlr_err = bif_intr['ras_athub_err_event_interrupt_status'], bif_intr['ras_cntlr_interrupt_status']
     if athub_err or cntlr_err:
@@ -517,7 +543,7 @@ class AM_SDMA(AM_IP):
         **({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}), inst=inst)
 
     if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
-      for aid_id in range(self.adev.gmc.vmhubs):
+      for aid_id in self.adev.aids:
         for dev_inst, (port, awid, offset, awaddr) in enumerate([(1, 0xe, 0xe, 0x1), (2, 0x8, 0x8, 0x2), (5, 0x9, 0x9, 0x8), (6, 0xa, 0xa, 0x9)]):
           entry = dev_inst + 1 + 4 * aid_id
           self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_{entry}").write(**{f"bif_doorbell{entry}_range_size_entry": 20,

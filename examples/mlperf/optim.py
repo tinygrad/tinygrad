@@ -15,7 +15,7 @@ def stochastic_round_bf16(x:Tensor) -> Tensor:
   bits = x.bitcast(dtypes.uint32)
   if isinstance(x.device, tuple):
     shape = x.uop.shard_shape if x.uop.axis is not None else x.shape
-    noise = Tensor(UOp(Ops.MSTACK, dtypes.default_float, tuple(Tensor.rand(*shape, device=d).uop for d in x.device)))
+    noise = Tensor(UOp(Ops.MSTACK, src=tuple(Tensor.rand(*shape, device=d).uop for d in x.device)))
   else:
     noise = x.rand_like()
   noise = (noise * 0xFFFF).cast(dtypes.uint32)
@@ -26,6 +26,11 @@ def clip_grads(grads:list[Tensor], grad_acc, clip_norm) -> Tensor:
   total_norm = Tensor.stack(*[g.float().square().sum() for g in grads]).sum().sqrt().contiguous()
   for g in grads: g.assign((g * (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(g.dtype))
   return total_norm
+
+def fclip_grads(grads:list[Tensor], clip_norm) -> Tensor:
+  total_norm = Tensor.stack(*[g.float().square().sum() for g in grads]).sum().sqrt().contiguous()
+  scale = (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
+  return [(g * scale).cast(g.dtype) for g in grads], total_norm
 
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):

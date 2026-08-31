@@ -4,8 +4,7 @@ import time, functools, sys, inspect, pathlib, hashlib, weakref
 from dataclasses import dataclass, field
 from typing import Any, Callable, cast, get_args, ParamSpec, TypeGuard, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
-from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, strong_dtype, \
-  _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
+from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, ParamArg, graph_rewrite, rewrite_group
@@ -107,8 +106,7 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
-  if not c.arg.precompile: return None
-  assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled FUNCTION, got {c.src[0].op}"
+  if c.arg is None or not c.arg.precompile: return None
   input_buffers = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])
 
   # add the outputs to the call
@@ -131,20 +129,20 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
       items.append(t.after(t.store(s.after(*after_deps))))
   fxn = UOp.sink(*(x.substitute(subs) for x in items))
 
-  # body switches from TUPLE to SINK, so the node becomes an opaque CALL (not FUNCTION)
+  # body switches from TUPLE to SINK, so the node becomes an opaque CALL
   new_call = UOp(Ops.CALL, src=(fxn, *input_buffers, *outs), arg=c.arg)
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  # NOTE: must use resolved shapes from the FUNCTION (which substitutes PARAMs with external args), not raw body shapes
+  # NOTE: must use the resolved shapes of the CALL (which substitutes PARAMs with external args), not raw body shapes
   rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, resolved))
 
   return UOp.maketuple(*rets)
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
-  # transform precompiled FUNCTIONs into CALLs (body becomes SINK with stores)
-  (UPat(Ops.FUNCTION, name="c"), transform_precompiled_call),
+  # transform precompiled value-producing calls into opaque CALLs (body becomes SINK with stores)
+  (UPat(Ops.CALL, src=(UPat(Ops.TUPLE),), allow_any_len=True, name="c"), transform_precompiled_call),
 
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
@@ -198,9 +196,7 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
-  if b.is_bound_var or b.is_variable: return b.param_like(len(ctx.replacements)-1)
-  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
-                   addrspace=b.addrspace if b.addrspace is not None else AddrSpace.GLOBAL)
+  return b.param_like(len(ctx.replacements)-1)
 
 def replace_input_view(ctx:AllocCtx, b:UOp): return replace_input_buffer(ctx, b) if b in ctx.views else None
 
@@ -211,7 +207,7 @@ pm_finalize_call = PatternMatcher([
 
 pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
-  (UPat(Ops.BUFFER, src=(UPat(),), name="b"), lambda ctx,b:
+  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
   # replace SHRINK with PARAM
   (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),), name="b", allow_any_len=True), replace_input_view),
@@ -260,6 +256,8 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
     for t,s,ns in zip(scope_tensors, sink.src, new_sink.src):
       if s is ns: continue
       t.uop = ns
+
+def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop is u for tref in list(all_tensors))
 
 # **** Tensor helper functions ****
 
@@ -381,7 +379,7 @@ class Tensor(RandMixin):
   # ***** data handlers ****
 
   def as_param(self, slot:int):
-    return Tensor(UOp.param(slot, self.dtype, self.uop.shard_shape, self.device, axis=self.uop.axis))
+    return Tensor(self.uop.param_like(slot))
 
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
     fret = fxn._uop.call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
@@ -454,7 +452,7 @@ class Tensor(RandMixin):
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
     ib = self.uop
-    while not ib.has_buffer_identity() and ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: ib = ib.src[0]
+    while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
     if ib is not self.uop and ib.has_buffer_identity(after_ok=True):
       # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign")
@@ -483,7 +481,7 @@ class Tensor(RandMixin):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
-    if self.dtype in dtypes.weaks: return self.cast(strong_dtype(self.dtype)).data()
+    if self.dtype in dtypes.weaks: return self.cast(self.commit_dtype()).data()
     if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.fmt)  # type: ignore[arg-type,return-value]
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     buf = self._buffer()
@@ -524,7 +522,7 @@ class Tensor(RandMixin):
     print(repr(t.numpy()))
     ```
     """
-    if self.dtype in dtypes.weaks: return self.cast(strong_dtype(self.dtype)).numpy()
+    if self.dtype in dtypes.weaks: return self.cast(self.commit_dtype()).numpy()
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     import numpy as np
     if self.dtype in { dtypes.bfloat16, *dtypes.fp8s }: return self.float().numpy()
@@ -744,7 +742,7 @@ class Tensor(RandMixin):
     ref_frames = [x.contiguous() for x in ref_frames or []]
     assert frame_pos.is_bound_var, "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
-    fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.src[0], *[UOp.const(s, dtypes.int) for s in shape]), arg="encdec")
+    fn = UOp(Ops.CUSTOM_FUNCTION, src=(frame_pos.src[0], *[UOp.const(s) for s in shape]), arg="encdec")
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
 P = ParamSpec("P")

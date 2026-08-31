@@ -43,7 +43,7 @@ def nested_loop_kernel(C:UOp) -> UOp:
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="nested_loop", opts_to_apply=()))
 
 def wait_ext_kernel() -> UOp:
-  sig = UOp.param(0, dtypes.int, (1,), volatile=True)
+  sig = UOp.param(0, dtypes.int, 1, volatile=True)
   l = UOp.loop(0)
   v = sig.after(l)[0].load()
   e = v.end(l, v < 1)

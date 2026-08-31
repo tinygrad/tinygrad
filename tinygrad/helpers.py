@@ -1,7 +1,7 @@
 from __future__ import annotations
 import time
 START_TIME = time.perf_counter()
-import os, functools, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
+import os, functools, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc, threading
 from collections import defaultdict
 import shutil, math, types, copyreg, inspect, importlib, decimal, itertools, difflib
 from dataclasses import dataclass, field, replace
@@ -240,7 +240,7 @@ TRANSCENDENTAL, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("NOLOCALS
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("LRU", 1)
 RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
-VALIDATE_WITH_CPU = ContextVar("VALIDATE_WITH_CPU", 0)
+VALIDATE_WITH_CPU, HCQ2 = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("HCQ2", 0)
 # TODO: this is broken for some indexing
 DISABLE_FAST_IDIV = ContextVar("DISABLE_FAST_IDIV", 1)
 FUSE_OPTIM = ContextVar("FUSE_OPTIM", 0)
@@ -250,16 +250,16 @@ EMULATED_DTYPES = ContextVar("EMULATED_DTYPES", "")
 DEFAULT_FLOAT, DEFAULT_INT = ContextVar("DEFAULT_FLOAT", "float32"), ContextVar("DEFAULT_INT", "int32")
 CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
 def _get_cpu_count() -> int:
-  # os.process_cpu_count (3.13+) respects cgroup limits
-  if hasattr(os, "process_cpu_count"): return max(1, os.process_cpu_count() or 1)
-  # cgroup v2 (containers with --cpus=N)
+  # os.process_cpu_count is available in 3.13+, then try affinity, then fallback to cpu_count
+  count = (os.process_cpu_count() if hasattr(os, "process_cpu_count") else
+           len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()) or 1
+  # limit with cgroup v2 (containers with --cpus=N)
   try:
     with open("/sys/fs/cgroup/cpu.max") as f:
       quota, period = f.read().strip().split()
-      if quota != "max": return max(1, int(quota) // int(period))
+      if quota != "max": count = min(count, max(1, int(quota) // int(period)))
   except (FileNotFoundError, ValueError, ZeroDivisionError): pass
-  # fall back to affinity (respects taskset but not cgroup quota)
-  return max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1))
+  return count
 NUM_CPU_THREADS = ContextVar("NUM_CPU_THREADS", _get_cpu_count())
 NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
@@ -271,7 +271,6 @@ PROFILE = ContextVar("PROFILE", abs(VIZ.value))
 SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
 CHECK_OOB = ContextVar("CHECK_OOB", 0)
-PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
 DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
 # set to 1, this uses tuplize in the linearizer sort order
 TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
@@ -398,18 +397,17 @@ cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Lib
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
 VERSION = 22
-_db_connection = None
+_db_connection = threading.local()
 def db_connection():
-  global _db_connection
-  if _db_connection is None:
+  if (conn:=getattr(_db_connection, "conn", None)) is None:
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
-    _db_connection = sqlite3.connect(CACHEDB, timeout=60, isolation_level="IMMEDIATE")
+    conn = _db_connection.conn = sqlite3.connect(CACHEDB, timeout=60, isolation_level="IMMEDIATE")
     # another connection has set it already or is in the process of setting it
     # that connection will lock the database
-    with contextlib.suppress(sqlite3.OperationalError): _db_connection.execute("PRAGMA journal_mode=WAL").fetchone()
-    _db_connection.execute("PRAGMA synchronous=NORMAL")
-    if DEBUG >= 8: _db_connection.set_trace_callback(print)
-  return _db_connection
+    with contextlib.suppress(sqlite3.OperationalError): conn.execute("PRAGMA journal_mode=WAL").fetchone()
+    conn.execute("PRAGMA synchronous=NORMAL")
+    if DEBUG >= 8: conn.set_trace_callback(print)
+  return conn
 
 def diskcache_clear():
   cur = db_connection().cursor()
@@ -476,7 +474,7 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
   if not fp.is_file() or not allow_caching or (sha256 and hashlib.sha256(fp.read_bytes()).hexdigest() != sha256):
     if extract: shutil.rmtree(extract_dir, ignore_errors=True)
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.13.0", **headers}), timeout=10) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.14.0", **headers}), timeout=10) as r:
       assert r.status in {200, 206}, r.status
       length = int(r.headers.get('content-length', 0)) if not gunzip else None
       readfile = gzip.GzipFile(fileobj=r) if gunzip else r

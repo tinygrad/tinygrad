@@ -7,7 +7,7 @@ from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, rewrite_group, graph_rewrite
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime
-from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_outs_ins
+from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_written_bufs
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
 from tinygrad.uop.movement import mop_cleanup
@@ -67,7 +67,7 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
-  linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
+  linear = linear.substitute({u: UOp.param(i, u.dtype, u.max_numel(), u.device) for i,u in enumerate(input_uops)}, walk=True)
   linear = memory_plan_rewrite(linear, held_bufs)
   linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
@@ -173,13 +173,7 @@ class CapturedJit(Generic[ReturnType]):
 
   @functools.cached_property
   def _written_uops(self) -> set[UOp]:
-    out: set[UOp] = set()
-    for call in self.linear.toposort():
-      if call.op is not Ops.CALL: continue
-      arg_uops = get_call_arg_uops(call)
-      outs, ins = get_call_outs_ins(call)
-      out |= {b for k in set(outs) - set(ins) if (b:=u if (cv:=(u:=arg_uops[k]).contiguous_view()) is None else cv[0]).op is Ops.BUFFER}
-    return out
+    return {b for call in self.linear.toposort() if call.op is Ops.CALL for b in get_call_written_bufs(call)}
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
     concrete = tuple(_copy_input(u) if u in self._written_uops else u for u in input_uops)

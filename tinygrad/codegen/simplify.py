@@ -35,10 +35,10 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
         nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
                              name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
 
-        # check if it simplifies
-        if count_divmod(nidx) <= count_divmod(u):
-          u = nidx
-  return u
+        # check if it simplifies. return after one merge so the next rewrite uses the new ranges,
+        # rather than continuing with stale pairs from the original ended_ranges.
+        if count_divmod(nidx) <= count_divmod(u): return nidx
+  return None
 
 def mark_gated(ctx, idx):
   if len(idx.src) > 1 and idx.src[1].op is Ops.WHERE:
@@ -84,7 +84,7 @@ def reduce_unparented(red:UOp) -> UOp|None:
   assert all(x.op is Ops.RANGE for x in red.src[1:]), "some reduce srcs aren't ranges"
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].ranges)
   if len(reduce_unparented) == 0: return None
-  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
+  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) else red.src[0]
   if red.arg[0] is Ops.ADD:
     for r in reduce_unparented: ret = ret * r.src[0]
   if red.arg[0] is Ops.MUL:

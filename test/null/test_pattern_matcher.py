@@ -40,7 +40,7 @@ class TestPatternMatcher(unittest.TestCase):
       assert len(x.src) == 0
       return UOp(Ops.CONST, src=(UOp(Ops.CONST),))
     matcher = PatternMatcher([(UPat(Ops.CONST, src=(), name="x"), fxn)])
-    c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
+    c1 = UOp(Ops.CONST, arg=1.0)
     # second rewrite shouldn't match anything
     c1 = matcher.rewrite(c1)
     c1 = matcher.rewrite(c1)

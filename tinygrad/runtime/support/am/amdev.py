@@ -1,6 +1,6 @@
 from __future__ import annotations
-import ctypes, collections, dataclasses, functools, hashlib, array
-from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw, to_mv
+import ctypes, collections, dataclasses, functools, hashlib, array, contextlib
+from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw, to_mv, wait_cond
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
@@ -14,10 +14,11 @@ AM_DEBUG = getenv("AM_DEBUG", 0)
 class AMRegister(AMDReg):
   adev:AMDev
 
-  def read(self, inst=0): return self.adev.rreg(self.addr[inst])
+  def read(self, inst=0, direct=False): return self.adev.rreg(self.addr[inst], inst=inst, direct=direct)
   def read_bitfields(self, inst=0) -> dict[str, int]: return self.decode(self.read(inst=inst))
 
-  def write(self, _am_val:int=0, inst=0, **kwargs): self.adev.wreg(self.addr[inst], _am_val | self.encode(**kwargs))
+  def write(self, _am_val:int=0, inst=0, direct=False, **kwargs):
+    self.adev.wreg(self.addr[inst], _am_val|self.encode(**kwargs), inst=inst, direct=direct)
 
   def update(self, inst=0, **kwargs): self.write(self.read(inst=inst) & ~self.fields_mask(*kwargs.keys()), inst=inst, **kwargs)
 
@@ -145,9 +146,25 @@ class AMMemoryManager(MemoryManager):
 class AMDev:
   Version = 0xA0000008
 
+  def _disable_aspm(self):
+    # L1 across retimers makes reads oscillate to 0xffffffff; power on defaults it enabled. Clearing the GPU endpoint
+    # alone suffices: L1 only engages when both ends of the link enable it.
+    cap, seen = self.pci_dev.read_config(0x34, 1) & 0xfc, set() # bound the walk: a dead link can return 0xff pointers forever
+    while cap and cap not in seen and self.pci_dev.read_config(cap, 1) != 0x10:
+      seen.add(cap)
+      cap = self.pci_dev.read_config(cap + 1, 1) & 0xfc
+    if cap and cap not in seen: self.pci_dev.write_config_flush(cap + 0x10, self.pci_dev.read_config(cap + 0x10, 2) & ~3, 2) # PCIe cap lnkctl
+
   def __init__(self, pci_dev:PCIDevice, reset_mode=False):
     self.pci_dev, self.devfmt = pci_dev, pci_dev.pcibus
+    self._disable_aspm()
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
+
+    # VF related
+    self.is_vf = bool(self.mmio[am.mmRCC_IOV_FUNC_IDENTIFIER] & 1)
+    self.vf_mailbox = self.mmio.view(am.NV_MAIBOX_CONTROL_TRN_OFFSET_BYTE, 2, fmt='B')
+    self.vf_access = self._vf_mailbox_request(am.IDH_REQ_GPU_INIT_ACCESS) if self.is_vf else 0
+    self.vf_rlc_gated:list[tuple[int, int]] = []
 
     self._run_discovery()
     self._build_regs()
@@ -170,16 +187,19 @@ class AMDev:
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
 
+    # aqua (gc 9.5.0): full boot over live state can kill the fabric (power cycle recovers); partial boot+reset_mec is the deepest safe reset
+    if self.ip_ver[am.GC_HWIP] == (9,5,0) and self.reg("regSCRATCH_REG7").read() == AMDev.Version: self.partial_boot = True
+
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
-      if self.psp.is_sos_alive() and self.smu.is_smu_alive():
+      if not self.is_vf and self.psp.is_sos_alive() and self.smu.is_smu_alive(): # skip in vf mode, these are pf funcs.
         self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
         if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
         self.smu.mode1_reset()
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
-      self.init_hw(self.soc, self.gmc, self.ih, self.psp, self.smu)
+      self.init_hw(self.soc, self.gmc, self.ih, *(() if self.is_vf else (self.psp, self.smu)))
 
     # Booting done
     self.is_booting = False
@@ -187,13 +207,15 @@ class AMDev:
     # Re-initialize main blocks
     self.init_hw(self.gfx, self.sdma)
 
-    if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
-      self.smu.set_power_limit(max_power)
-      self.smu.set_clocks(level=None)
-    else: self.smu.set_clocks(level=-1) # last level, max perf.
-    for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
-    self.reg("regSCRATCH_REG7").write(AMDev.Version)
-    self.reg("regSCRATCH_REG6").write(1) # set initialized state.
+    if not self.is_vf: # skip in vf mode, these are pf funcs.
+      if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
+        self.smu.set_power_limit(max_power)
+        self.smu.set_clocks(level=None)
+      else: self.smu.set_clocks(level=-1) # last level, max perf.
+      for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
+      self.reg("regSCRATCH_REG7").write(AMDev.Version)
+      self.reg("regSCRATCH_REG6").write(1) # set initialized state.
+
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def init_sw(self, smi_dev=False):
@@ -224,10 +246,33 @@ class AMDev:
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
+    # a VF may only touch the engines inside an access window, take one so the host does not have to FLR the VF later
+    if self.is_vf and not self.vf_access:
+      with contextlib.suppress(TimeoutError): self.vf_access = self._vf_mailbox_request(am.IDH_REQ_GPU_FINI_ACCESS)
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
-    self.smu.set_clocks(level=0)
+    if not self.is_vf: self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
-    self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
+    if not self.is_vf: self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
+    if self.vf_access: self.release_vf_access()
+
+  def release_vf_access(self):
+    rel, self.vf_access = self.vf_access, 0 # give back the same lease that was taken
+    with contextlib.suppress(TimeoutError): self._vf_mailbox_request(rel, wait_ready=False)
+
+  def _vf_mailbox_request(self, req:int, wait_ready=True) -> int:
+    self.vf_mailbox[0] = 0 # drop TRN_MSG_VALID
+
+    wait_cond(lambda: self.vf_mailbox[0] & 2, value=0, timeout_ms=1000, msg="VF mailbox acknowledgement did not clear")
+    for i, val in enumerate((req, 0, 0, 0)): self.mmio[am.mmMAILBOX_MSGBUF_TRN_DW0 + i] = val
+
+    self.vf_mailbox[0] = 1 # set TRN_MSG_VALID
+    wait_cond(lambda: self.vf_mailbox[0] & 2, value=2, timeout_ms=am.NV_MAILBOX_POLL_ACK_TIMEDOUT, msg=f"VF mailbox request {req:#x} was not acked")
+    self.vf_mailbox[0] = 0
+    if wait_ready:
+      wait_cond(lambda: self.mmio[am.mmMAILBOX_MSGBUF_RCV_DW0], value=am.IDH_READY_TO_ACCESS_GPU, timeout_ms=am.NV_MAILBOX_POLL_MSG_TIMEDOUT,
+                msg="VF mailbox: the pf never granted access")
+      self.vf_mailbox[1] = 2 # ack
+    return req + 1
 
   def recover(self, force=False) -> bool:
     if not force and not self.is_err_state: return False
@@ -247,20 +292,36 @@ class AMDev:
 
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
-  def rreg(self, reg:int) -> int:
+  def rreg(self, reg:int, inst=0, direct=False) -> int:
+    if not direct and any(lo <= reg <= hi for lo, hi in self.vf_rlc_gated): return self.rlcg_rw(reg, 0, inst, read=True)
     val = self.indirect_rreg(reg) if reg >= len(self.mmio) else self.mmio[reg]
     if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"am {self.devfmt}: Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
     return val
 
-  def wreg(self, reg:int, val:int):
+  def wreg(self, reg:int, val:int, inst=0, direct=False):
     if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
-    if reg >= len(self.mmio): self.indirect_wreg(reg, val)
+    if not direct and any(lo <= reg <= hi for lo, hi in self.vf_rlc_gated): self.rlcg_rw(reg, val, inst)
+    elif reg >= len(self.mmio): self.indirect_wreg(reg, val)
     else: self.mmio[reg] = val
 
-  def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0):
-    self.reg(f"{reg_base}{lo_suffix}").write(lo32(val), inst=inst)
-    self.reg(f"{reg_base}{hi_suffix}").write(hi32(val), inst=inst)
+  def rlcg_rw(self, addr:int, val:int, inst:int, read=False) -> int:
+    # the rlc gateway takes the grbm selection through its own scratch registers
+    if addr in {self.reg("regGRBM_GFX_CNTL").addr[inst], self.reg("regGRBM_GFX_INDEX").addr[inst]}:
+      self.reg("regSCRATCH_REG2" if addr == self.reg("regGRBM_GFX_CNTL").addr[inst] else "regSCRATCH_REG3").write(val, inst=inst, direct=True)
+      return val
+
+    self.wreg_pair("regSCRATCH_REG", "0", "1", (addr | (0x1 << 28 if read else 0)) << 32 | val, inst=inst, direct=True)
+    self.reg("regRLC_SPARE_INT").write(1, inst=inst, direct=True)
+    wait_cond(lambda: self.reg("regSCRATCH_REG1").read(inst=inst, direct=True) & 0xFFFFF, value=0, msg=f"RLC gateway timeout on {addr:#x}")
+
+    if AM_DEBUG >= 1 and (err:=self.reg("regSCRATCH_REG1").read(inst=inst, direct=True) & 0xF000000):
+      print(f"am {self.devfmt}: RLC gateway refused {addr:#x}: {err:#x}")
+    return self.reg("regSCRATCH_REG0").read(inst=inst, direct=True)
+
+  def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0, direct=False):
+    self.reg(f"{reg_base}{lo_suffix}").write(lo32(val), inst=inst, direct=direct)
+    self.reg(f"{reg_base}{hi_suffix}").write(hi32(val), inst=inst, direct=direct)
 
   def indirect_rreg(self, reg:int) -> int:
     self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg * 4)
@@ -340,5 +401,15 @@ class AMDev:
     if self.ip_ver[am.SDMA0_HWIP] in {(4,4,2), (4,4,4)}: mods += [("sdma", am.SDMA0_HWIP)]
 
     for prefix, hwip in mods:
-      self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip])))
+      regs = import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip]))
+      self.__dict__.update(regs)
+      if prefix == "gc" and self.is_vf:
+        ext = {seg: max(r.offset for r in regs.values() if r.segment == seg) for seg in {r.segment for r in regs.values()}}
+        self.vf_rlc_gated = sorted((bases[seg], bases[seg] + off) for bases in self.regs_offset[hwip].values() for seg, off in ext.items())
     self.__dict__.update(import_asic_regs('mp', (11, 0, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP])))
+
+    # Live AIDs like the kernel: 4 SDMAs per AID; the AID lives iff its group's alive-mask is 0xf/0x3/0xc.
+    # Dead AIDs must never be touched via the indirect window: writes poison the whole fabric.
+    live_sdma = {k for k in self.regs_offset[am.SDMA0_HWIP] if k not in self.harvested[am.SDMA0_HWIP]}
+    max_aid = max((k >> 2 for k in self.regs_offset[am.SDMA0_HWIP]), default=0)
+    self.aids = [0] + [aid for aid in range(1, max_aid + 1) if sum(1 << (i & 3) for i in live_sdma if i >> 2 == aid) in {0xf, 0x3, 0xc}]

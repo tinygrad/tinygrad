@@ -1,7 +1,7 @@
 from typing import Callable, Any
 from tinygrad.dtype import AddrSpace, DType, dtypes, truncate
 from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target, is_image_shape, round_up
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, with_storage
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.runtime.autogen import mesa, libc
@@ -121,24 +121,24 @@ class NIRRenderer(Renderer):
   code_for_op = {**{k:lambda:None for k in u_aop.keys()}, **{k:lambda:None for k in s_aop.keys()}, **{k:lambda:None for k in f_aop.keys()}}
 
   extra_matcher = PatternMatcher([
-    # handle negative unsigned CONST
-    (UPat.cvar("x", dtypes.uints), lambda x: UOp.const(x.dtype.max+x.val+1, x.dtype) if x.val < 0 else None),
     # from ptx
     (UPat.var('x', dtype=dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
-    # load/store bool -> uint8
+    # a bool is one bit in NIR but a byte in memory, so every access to a bool buffer goes through a uint8 view of it
     (UPat(Ops.LOAD, dtypes.bool, name="x"),
-     lambda x: x.replace(dtype=dtypes.uint8, src=x.src[0:1]+((x.src[1].cast(dtypes.uint8),) if len(x.src)>=2 else ())+x.src[2:]).cast(dtypes.bool)),
-    (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
-     lambda x: x.replace(src=(x.src[0], x.src[1].cast(dtypes.uint8))+x.src[2:])),
+     lambda x: x.replace(src=(with_storage(x.src[0], dtypes.uint8),)+((x.src[1].cast(dtypes.uint8),) if len(x.src)>=2 else ())
+      +x.src[2:]).cast(dtypes.bool)),
+    (UPat(Ops.STORE, src=(UPat(name="idx"), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
+     lambda x,idx: x.replace(src=(with_storage(idx, dtypes.uint8), x.src[1].cast(dtypes.uint8))+x.src[2:])),
     # NIR requires shift amount to be 32 bit: https://docs.mesa3d.org/nir/alu.html#nir-alu-op-ishl
     (UPat((Ops.SHL, Ops.SHR), name="x"), lambda x: x.replace(src=(x.src[0], x.src[1].cast(dtypes.uint))) if x.src[1].dtype.bitsize != 32 else None),
     # OpConvertFToU is undefined if Result Type is not wide enough, cast through int32
     # ref: https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#OpConvertFToU
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
-    (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
-      src=(buf,UOp.const(off.val, dtypes.long) if off.op is Ops.CONST else off.cast(dtypes.long))+x.src[2:])
-      if buf.addrspace != AddrSpace.REG and not is_image_shape(buf._shape) else None),
+    # nor to REG/ALU register picks, which keep their own index dtype
+    (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"),
+     lambda x,buf,off: x.replace(src=(buf,off.ccast(dtypes.long))+x.src[2:])
+      if buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) and not is_image_shape(buf._shape) else None),
     # images need index to be int for nir (coordinates only: the INDEX keeps its access dtype)
     (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x"), name="x"),
      lambda x,buf,idx_y,idx_x: x.replace(src=(buf, idx_y.cast(dtypes.int), idx_x.cast(dtypes.int)))),

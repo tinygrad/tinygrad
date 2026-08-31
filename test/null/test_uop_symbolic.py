@@ -5,8 +5,7 @@ import z3
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.spec import spec_shared, type_verify
-from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load
-from tinygrad.uop.weak import pm_cast_weak
+from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load, symbolic_simple
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
@@ -36,7 +35,7 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(solver.check(expr1 != expr2), z3.unsat, "simplified expression not equal to original")
 
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
-    v_simplified = graph_rewrite(v, sym+pm_cast_weak, name="simplify symbolic uop")
+    v_simplified = graph_rewrite(v, sym, name="simplify symbolic uop")
     if test_z3: self.check_equal_z3(v, v_simplified)
     nmin, nmax = v_simplified.vmin, v_simplified.vmax
     check_uop_against_string(self, v_simplified, s)
@@ -449,9 +448,19 @@ class TestSymbolic(unittest.TestCase):
   def test_and_remove(self):
     self.helper_test_variable(uand([uconst(1), Variable("a", 0, 1)]), 0, 1, "a")
 
+  def test_zero_div_zero_bottom_up(self):
+    # codegen runs symbolic_simple bottom_up, so the 0/0 is rewritten before its consts fold.
+    # without the guard the unsound x/x -> 1 below it claims this one.
+    z = UOp.const(0.0)
+    self.assertTrue(math.isnan(graph_rewrite(z/z, symbolic_simple, bottom_up=True).arg))
+
   def test_masked_shr_fold(self):
     x = UOp.variable('x', 0, 255, dtype=dtypes.uint32, param=True)
     self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)")
+
+  def test_masked_idiv_fold(self):
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32, param=True)
+    self.helper_test_variable((x & -4) // 4, 0, 63, "(x//4)")
 
   def test_bool_or_not_tautology(self):
     a = Variable("a", 0, 10)
@@ -1024,7 +1033,7 @@ class TestSymbolic(unittest.TestCase):
     cond = Variable("s", 0, 3, dtypes.int) < 2
     a = Variable("a", 0, 3, dtypes.int)
     self.assertIs(graph_rewrite(cond.where(a, a+1).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), (a+1).cast(dtypes.half)))
-    self.assertIs(graph_rewrite(cond.where(a, uconst(2)).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.const(2, dtypes.half)))
+    self.assertIs(graph_rewrite(cond.where(a, uconst(2)).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), uconst(2.0)))
     self.assertIs(graph_rewrite(cond.where(a, UOp.invalid()).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.invalid()))
 
   def test_where_const_gate_keeps_stated_width(self):
@@ -1383,7 +1392,7 @@ class TestInvalidIndex(unittest.TestCase):
 
   def test_gated_load_keeps_index_valid(self):
     # the load executes even on gated-off iterations: gated_given_valid must not erase its mask (PADTO OOB shape)
-    buf = UOp.param(0, dtypes.bool, (17,))
+    buf = UOp.param(0, dtypes.bool, 17)
     ridx = Variable("ridx", 0, 31)
     cond = ridx < 17
     load = buf.index(ridx.valid(cond))
@@ -1395,7 +1404,7 @@ class TestStoreLoadFolding(unittest.TestCase):
   """Tests for store(index, load(index)) -> NOOP rule. This rule matches patterns that EMERGE during simplification."""
   def test_store_load_folding(self):
     # store(idx, load(idx)) -> NOOP, including emergent patterns like store(idx, load(idx) + 0)
-    buf = UOp.param(0, dtypes.int, (1,))
+    buf = UOp.param(0, dtypes.int, 1)
     index = buf.index(UOp.const(0))
     # Direct: store(idx, load(idx)) -> NOOP
     self.assertEqual(graph_rewrite(index.store(index.load()), sym).op, Ops.NOOP)
@@ -1408,7 +1417,7 @@ class TestStoreLoadFolding(unittest.TestCase):
 
 class TestMoveWhereOnLoad(unittest.TestCase):
   def test_bool_index_preserves_dtype(self):
-    buf = UOp.param(0, dtypes.bool, (8,))
+    buf = UOp.param(0, dtypes.bool, 8)
     a = Variable("a", 0, 7)
     r = UOp.range(8, 0)
     # cond has a range that the rewrite can move into the valid: gate (a<4) goes into load valid
@@ -1456,12 +1465,17 @@ class TestGatedUopGivenValid(unittest.TestCase):
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
 class TestRangeSplitting(unittest.TestCase):
+  def test_end_preserves_constant_backedge(self):
+    loop, backedge = UOp.loop(0), UOp.const(False)
+    end = graph_rewrite(UOp(Ops.NOOP).end(loop, backedge), sym)
+    self.assertEqual(end.src, (UOp(Ops.NOOP), loop, backedge))
+
   def test_range_split_on_mod(self):
     # test that mark_range_mod splits RANGE(8) into RANGE(4)*2 + RANGE(2) when used with %2
     from tinygrad.codegen.simplify import pm_split_ranges, pm_flatten_range
     r0 = UOp.range(uconst(8), 0)
     # create a simple expression using the range with mod: store range%2 to a buffer
-    buf = UOp.param(0, dtypes.int, (1,))
+    buf = UOp.param(0, dtypes.int, 1)
     val = (r0 % uconst(2)).cast(dtypes.int)
     store = UOp(Ops.STORE, src=(buf.index(uconst(0)), val))
     sink = UOp(Ops.SINK, src=(UOp(Ops.END, src=(store, r0)),))

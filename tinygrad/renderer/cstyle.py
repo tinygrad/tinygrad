@@ -3,6 +3,7 @@ import math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
+from tinygrad.uop.weak import commit_weak_consts
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, NUM_CPU_THREADS, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
@@ -70,11 +71,13 @@ base_rewrite = PatternMatcher([
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])}))" + (";" if x.dtype is dtypes.void else "")),
 
   # custom passes through with format
-  (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg.format(*[ctx[y] for y in x.src])),
+  (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
 ])
 
 def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
   patterns = PatternMatcher([
+    # a weak CONST states no width and cannot be restated: commit it at the emulated dtype a sibling src states
+    (UPat(GroupOp.ALU, name="x"), lambda x, dts=dts: commit_weak_consts(x, next((s.dtype for s in x.src if s.dtype in dts), None))),
     (UPat(Ops.WHERE, dtype=dts, src=(UPat.var("b"), UPat.var("x"), UPat.var("y")), name="w"),
      lambda w,b,x,y: b.where(x.cast(dtypes.float), y.cast(dtypes.float)).cast(w.dtype)),
     (UPat(GroupOp.ALU-{Ops.WHERE}, dtype=dts, name="x"),
@@ -185,10 +188,12 @@ class CStyleLanguage(Renderer):
     return prefix + self.type_map.get(dtype, dtype.name) + suffix
 
   def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace, shape=u._shape)
-  def render_access(self, u:UOp):
+  def render_ptr(self, u:UOp):
+    # the address of an access, vector-cast if the access reads/writes more lanes than the pointer's scalar type
     if u.max_numel() > 1 or u.dtype != u.src[0].dtype:
-      return f"*(({self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True, shape=u._shape)})({self[u]}))"
-    else: return f"*{self[u]}"
+      return f"(({self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True, shape=u._shape)})({self[u]}))"
+    else: return f"{self[u]}"
+  def render_access(self, u:UOp): return f"*{self.render_ptr(u)}"
   def render_cast(self, u:UOp, val:str) -> str: return f"({self.render_type(u)})({val})"
 
   # LEGACY
@@ -242,7 +247,7 @@ class CStyleLanguage(Renderer):
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
-        if u.op not in {Ops.RANGE, Ops.STORE, Ops.BUFFER} and u.dtype != dtypes.void:
+        if u.op not in {Ops.RANGE, Ops.BUFFER} and u.dtype != dtypes.void:
           l = f"{self.render_type(u)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
         kernel.append("\n".join("  "*depth + line for line in l.split("\n")))
         if prefix: c[prefix] += 1  # if it was used, increment
@@ -516,6 +521,9 @@ class HIPRenderer(CStyleLanguage):
         (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",),
           lambda ctx,x,y: f"__builtin_amdgcn_cvt_f32_{('fp8', 'bf8')[fp8_index(y.dtype)]}((unsigned int){ctx[x.src[0]]}, 0)"),
       ]) + base_rewrite
+    # a LOAD flagged nontemporal renders as the cache-bypassing builtin (only used on global loads)
+    self.string_rewrite = PatternMatcher([(UPat(Ops.LOAD, arg="nontemporal", src=(UPat.var("bidx"),)),
+      lambda ctx,bidx: f"__builtin_nontemporal_load({ctx.render_ptr(bidx)})")]) + self.string_rewrite
 
   # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
   # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
@@ -534,8 +542,6 @@ class HIPRenderer(CStyleLanguage):
     (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
       lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64), x.src[2]))
       if x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8_ocp else None),
-    # bfloat16 constant casting
-    (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(x.val, dtypes.float))),
   ])
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:

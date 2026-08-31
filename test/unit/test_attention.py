@@ -5,12 +5,23 @@ from tinygrad.llm.model import (
   GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
 )
+from tinygrad.llm.kernels.amd import Linear, gated_delta_prefill, amd_custom_kernels_supported
+from tinygrad.llm.gguf import ggml_data_to_tensor
 
 def apply_rope(x:Tensor, start_pos:int):
   B, H, T, Hd = x.shape
   precompute_freqs_cis.cache_clear()
   freqs_cis = precompute_freqs_cis(Hd, start_pos+T)[start_pos:start_pos+T]
   return apply_rope_new(x, freqs_cis)
+
+class TestLinear(unittest.TestCase):
+  def test_recovers_packed_ggml_weight(self):
+    for ggml_type,packed_size,words in ((13, 176, 44), (14, 210, 53), (23, 136, 34)):
+      packed = Tensor.empty(packed_size+4, dtype=dtypes.uint8, device="CPU")[4:]
+      decoded = ggml_data_to_tensor(packed, 256, ggml_type).reshape(1, 256)
+      linear = Linear(256, 1, bias=False)
+      linear.set_quantized(decoded)
+      self.assertEqual((linear.ggml_type, linear.weight.numel()), (ggml_type, words))
 
 class TestAttention(unittest.TestCase):
   def test_apply_rope(self):
@@ -41,14 +52,31 @@ class TestAttention(unittest.TestCase):
     np.testing.assert_allclose(block.cache_kv[0, :, :, :seqlen, :].numpy(), expected.numpy(), rtol=1e-5, atol=1e-5)
 
 class TestGatedDeltaNetBlock(unittest.TestCase):
+  def test_gated_delta_rectangular_state_and_row_decay(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    rng = np.random.default_rng(42)
+    q, k = (rng.normal(size=(1, 1, 3, 32)).astype(np.float32) for _ in range(2))
+    v, beta = rng.normal(size=(1, 1, 3, 4)).astype(np.float32), rng.uniform(size=(1, 1, 3)).astype(np.float32)
+    alpha, initial = rng.uniform(0.8, 1, size=(1, 1, 3, 4)).astype(np.float32), rng.normal(size=(1, 1, 4, 32)).astype(np.float32)
+    expected_state, expected_out = initial.copy(), np.empty_like(v)
+    for t in range(3):
+      previous, av = expected_state.copy(), alpha[:, :, t, :, None]
+      delta = (v[:, :, t] - (previous*k[:, :, t, None]).sum(-1)*alpha[:, :, t]) * beta[:, :, t, None]
+      expected_state = previous*av + delta[..., None]*k[:, :, t, None, :]
+      expected_out[:, :, t] = (previous*q[:, :, t, None]).sum(-1)*alpha[:, :, t] + delta*(q[:, :, t]*k[:, :, t]).sum(-1)
+    state = Tensor(initial).contiguous().realize()
+    out = gated_delta_prefill(Tensor(q), Tensor(k), Tensor(v), Tensor(beta), Tensor(alpha), state).realize()
+    np.testing.assert_allclose(out.numpy(), expected_out, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(state.numpy(), expected_state, rtol=1e-4, atol=1e-4)
+
   def _tensor_linspace(self, start:float, stop:float, shape:tuple[int, ...]) -> Tensor:
     return Tensor.linspace(start, stop, int(np.prod(shape)), dtype=dtypes.float32).reshape(*shape)
 
   def _make_config(self, **kwargs):
-    return TransformerConfig(**({"num_blocks":1, "dim":32, "hidden_dim":64, "n_heads":1, "n_kv_heads":1,
-                                 "norm_eps":1e-5, "vocab_size":32, "head_dim":32, "rope_theta":10000.0,
-                                 "rope_dim":32, "v_head_dim":32, "max_context":4, "ssm_layers":(True,),
-                                 "ssm":SSMConfig(conv_kernel=2, state_size=32, group_count=1, time_step_rank=1, inner_size=32)} | kwargs))
+    return TransformerConfig(**({"num_blocks":1, "dim":8, "hidden_dim":16, "n_heads":1, "n_kv_heads":1,
+                                 "norm_eps":1e-5, "vocab_size":32, "head_dim":8, "rope_theta":10000.0,
+                                 "rope_dim":8, "v_head_dim":8, "max_context":4, "ssm_layers":(True,),
+                                 "ssm":SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4)} | kwargs))
 
   def _make_block(self, config:TransformerConfig) -> GatedDeltaNetBlock:
     block = GatedDeltaNetBlock(config, config.ssm)
@@ -201,7 +229,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     np.testing.assert_allclose(block.recurrent_state.numpy(), initial_state.numpy() * alpha[..., None], rtol=1e-5, atol=1e-5)
 
   def test_kda_prefill_matches_decode(self):
-    config = self._make_config(ssm=SSMConfig(conv_kernel=2, state_size=32, group_count=1, time_step_rank=1, inner_size=32, kda=True))
+    config = self._make_config(ssm=SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=True))
     block = GatedDeltaNetBlock(config, config.ssm)
     for p in nn.state.get_parameters(block):
       p.replace(self._tensor_linspace(-0.05, 0.05, p.shape) if len(p.shape) > 1 else self._tensor_linspace(0.05, 0.1, p.shape))
@@ -217,7 +245,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
 
   def test_varied_chunk_sizes_match_decode(self):
     for kda in (False, True):
-      ssm = SSMConfig(conv_kernel=2, state_size=32, group_count=1, time_step_rank=1, inner_size=32, kda=kda)
+      ssm = SSMConfig(conv_kernel=2, state_size=4, group_count=1, time_step_rank=1, inner_size=4, kda=kda)
       config = self._make_config(ssm=ssm)
       if kda:
         block = GatedDeltaNetBlock(config, config.ssm)
@@ -239,7 +267,8 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
         np.testing.assert_allclose(chunked_recurrent, decode_recurrent, rtol=1e-3, atol=1e-3, err_msg=f"{kda=} {chunking=}")
 
   def test_start_zero_resets_realized_state(self):
-    config, x = self._make_config(max_context=3), self._tensor_linspace(-1, 1, (1, 3, 32))
+    config = self._make_config(max_context=3)
+    x = self._tensor_linspace(-1, 1, (1, 3, config.dim))
     block = self._make_block(config)
     self._run_attention(block, x, 0)
     restarted = self._run_attention(block, x[:, :2], 0)
