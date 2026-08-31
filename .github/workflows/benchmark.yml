@@ -458,7 +458,7 @@ jobs:
           - version: '0.11.0'
             model: vision
             url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
-            timing: 17
+            timing: 18
           - version: '0.11.0'
             model: policy
             url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
