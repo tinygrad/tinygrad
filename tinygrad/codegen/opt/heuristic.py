@@ -167,7 +167,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       # apply innermost global axes first so the leading hardware local dims hold the trailing global axes, like gidx
       workgroup, opts = 1, []
       for axis in [a for a in k.axes_of(AxisType.GLOBAL, AxisType.WEAK) if k.rngs[a].src[0].op is Ops.CONST][-3:][::-1]:
-        if (sz:=max(x for x in range(1, min(int(k.full_shape[axis]), 128 if opts else 8 // workgroup) + 1) if int(k.full_shape[axis]) % x == 0)) > 1:
+        if (sz:=max(x for x in range(1, min(int(k.full_shape[axis]), 128 // workgroup if opts else 8) + 1) if int(k.full_shape[axis]) % x == 0)) > 1:
           opts.append((axis, sz))
           workgroup *= sz
       if opts and workgroup < 32:  # fill at least one wave: grow the innermost local as much as possible
