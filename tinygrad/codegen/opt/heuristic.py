@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, IMAGE
+from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, USE_TC, IMAGE
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -78,7 +78,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             return k
 
   # are we grouping? (requires local shape support)
-  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS or k.ren.target.device == "QCOM" else 2048), False):
+  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if k.ren.target.device == "QCOM" else 2048), False):
     for axis, sz in itertools.product((0, 1, 2), (16,)):
       try:
         k.apply_opt(Opt(OptOps.GROUPTOP, axis, sz))
@@ -160,9 +160,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # **** local groups ****
 
   if k.ren.has_local:
-    if NOLOCALS:
-      k.apply_opt(Opt(OptOps.NOLOCALS))
-    elif k.ren.target.device == "QCOM":
+    if k.ren.target.device == "QCOM":
       # for openpilot: use 32..128 threads per workgroup, at most 8 on the innermost axis
       # apply innermost global axes first so the leading hardware local dims hold the trailing global axes, like gidx
       workgroup = 1

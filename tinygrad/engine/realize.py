@@ -1,14 +1,13 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import random, itertools, math, weakref, array, decimal
+import weakref, array, decimal
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, all_int, prod, flatten, Context, to_tuple, tqdm, dedup, to_mv
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup, to_mv
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, HCQ2, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.renderer import Estimates, Renderer
 from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
-from tinygrad.codegen.opt.postrange import args_from_ast
 from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 # **************** Helpers ****************
@@ -98,32 +97,6 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
       f" {ansipad(display_name, 46)} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
       ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})"))
     first_run_cache.add(key)
-
-local_size_cache: dict[bytes, tuple[int, ...]] = {}
-def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
-  device = to_tuple(prg.device)[0]
-  if prg.arg.local_size is not None or not Device[device].renderer.has_local or not all_int(prg.arg.global_size): return None
-
-  if (local_size:=local_size_cache.get(prg.key)) is None:
-    # reuse one loaded runtime across candidates, only launch dims vary
-    (bufs, var_vals), runtime = args_from_ast(prg.src[0], device), get_runtime(device, prg, cache=False)
-    bufs  = [b.allocate() for b in bufs]
-    def try_exec(local_size):
-      try:
-        new_gs = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
-        return runtime(*[bufs[i].get_buf(device) for i in prg.arg.globals], global_size=new_gs, local_size=(*local_size,),
-                       vals=prg.arg.vals(var_vals), wait=True)
-      except Exception: return float('inf')
-
-    MAX_WORKGROUP = 1024
-    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in prg.arg.global_size]
-    local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
-    best_time, best = min([(try_exec(ls), ls) for ls in random.sample(local_sizes, len(local_sizes))])
-    assert not math.isinf(best_time), "all optimize_local_size exec failed"
-    local_size = local_size_cache[prg.key] = tuple(best)
-
-  new_global = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
-  return call.replace(src=(prg.replace(arg=replace(prg.arg, global_size=new_global, local_size=local_size)), *call.src[1:]))
 
 # **************** runtime cache ****************
 
@@ -296,10 +269,6 @@ def lower_and_compile(linear:UOp) -> UOp:
   return linear.substitute({c: c.replace(src=(c.src[0].substitute({a[0]: to_program_cache[keys[c]]}), *c.src[1:])) for c, a in ar.items()},
                            name="precompile kernels")
 
-pm_optimize_local_size = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), optimize_local_size),
-])
-
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True), exec_kernel),
@@ -315,7 +284,6 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = lower_and_compile(linear)
-  linear = graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
   if HCQ2: linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
   return linear
 

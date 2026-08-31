@@ -1,5 +1,5 @@
 import math
-from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType
+from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, ssimplify, AxisType
 from tinygrad.dtype import AddrSpace
 from tinygrad.renderer import Renderer
 
@@ -55,18 +55,12 @@ def add_gpudims(ctx:Renderer, s:UOp):
   global_shape = tuple(ssimplify(all_ranges[r].src[0]) for r in global_dims)
   local_shape = tuple(ssimplify(all_ranges[r].src[0]) for r in local_dims)
 
-  # get the idxs
-  ki: KernelInfo = s.arg
-  if ki.dont_use_locals:
-    assert not local_dims, "can't use locals if there's no local dims"
-    idxs = get_grouped_dims("idx", global_shape, ctx.global_max, reverse=True)
-  else:
-    # define indexes for GPU-like execution
-    local_idxs = get_grouped_dims("lidx", local_shape, ctx.local_max)
-    hw_local = [_dim_max(u.src[0]) for u in local_idxs if u.op is Ops.SPECIAL]
-    global_max = ctx.global_max if ctx.global_prod_max is None else \
-      tuple(min(gm, pm//l) for gm,pm,l in zip(ctx.global_max or ctx.global_prod_max, ctx.global_prod_max, hw_local+[1]*3))
-    idxs = get_grouped_dims("gidx", global_shape, global_max, reverse=True) + local_idxs
+  # define indexes for GPU-like execution
+  local_idxs = get_grouped_dims("lidx", local_shape, ctx.local_max)
+  hw_local = [_dim_max(u.src[0]) for u in local_idxs if u.op is Ops.SPECIAL]
+  global_max = ctx.global_max if ctx.global_prod_max is None else \
+    tuple(min(gm, pm//l) for gm,pm,l in zip(ctx.global_max or ctx.global_prod_max, ctx.global_prod_max, hw_local+[1]*3))
+  idxs = get_grouped_dims("gidx", global_shape, global_max, reverse=True) + local_idxs
 
   # apply to multiple ranges
   subs = {}

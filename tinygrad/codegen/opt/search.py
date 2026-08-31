@@ -22,7 +22,6 @@ actions += [Opt(op=OptOps.TC, axis=0, arg=(-1, 0, getenv("TC", 1)))]
 # covers resnet kernels (3 global * 3 reduce)
 actions += [Opt(op=OptOps.TC, axis=axis, arg=(-1, getenv("TC_OPT", 2), getenv("TC", 1))) for axis in range(9)]
 actions += [Opt(op=OptOps.SWAP, axis=axis_0, arg=axis_1) for axis_0 in range(5) for axis_1 in range(axis_0+1, 5)]
-if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
 
 def get_test_global_size(global_size, max_global_size, var_vals):
   test_global_size = [sym_infer(sz, var_vals) for sz in global_size]

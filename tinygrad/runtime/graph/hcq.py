@@ -172,7 +172,7 @@ class HCQGraph(MultiGraphRunner):
 
       # Encode main commands based on ji type.
       if runtime is not None:
-        enqueue_queue.exec(runtime, self.ji_args[j], ast.arg.global_size or (1,1,1), ast.arg.local_size or (1,1,1))
+        enqueue_queue.exec(runtime, self.ji_args[j], ast.arg.global_size, ast.arg.local_size)
       elif j in self.rdma_deps:
         dest_queue, dest_deps, dest_out_signal, dest_out_val = self.rdma_deps[j]
         for sig, val in dest_deps: dest_queue.wait(sig, val)
