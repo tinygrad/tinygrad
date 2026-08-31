@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Correctness and DEBUG=2 performance verification for MI350X MXFP4 target GEMMs."""
 
-import gc
+import gc, math
 
 
 M, K = 16384, 4096
 TARGETS = (28672, 14336, 4096, 6144)
-WARMUPS, ITERATIONS = 1, 3
+WARMUPS, ITERATIONS = 1, 7
 MAX_REL_ERROR = 0.2
 
 
@@ -40,7 +40,7 @@ def main() -> None:
     with Context(DEBUG=0):
       reference = (a @ b.T).realize()
       relative_error = ((out.float() - reference.float()).square().sum() / reference.float().square().sum()).sqrt().item()
-    if relative_error >= MAX_REL_ERROR:
+    if not math.isfinite(relative_error) or relative_error >= MAX_REL_ERROR:
       raise AssertionError(f"N={n} relative error {relative_error:.6f} >= {MAX_REL_ERROR}")
     print(f"PASS M={M} N={n} K={K}: full_matrix_relative_error={relative_error:.6f}")
     del out, reference, a_q, scale_a, b_q, scale_b, a, b

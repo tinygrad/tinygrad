@@ -4,11 +4,13 @@ from tinygrad.runtime.autogen.amd.cdna.ins import *
 MXFP4_TARGET_SHAPES = {(16384, 28672, 4096), (16384, 14336, 4096), (16384, 4096, 4096), (16384, 6144, 4096)}
 
 class Kernel:
-  def __init__(self, target_optimization=False, store_nt=False):
+  def __init__(self, target_optimization=False, store_nt=False, cache_direct=False):
     self.instructions, self.labels, self.pos = [], {}, 0
-    self.target_optimization, self.store_nt = target_optimization, store_nt
+    self.target_optimization, self.store_nt, self.cache_direct = target_optimization, store_nt, cache_direct
   def label(self, name): self.labels[name] = self.pos
   def emit(self, inst, target=None):
+    if self.cache_direct and repr(inst).startswith("buffer_load") and inst.lds:
+      inst.sc1 = 1
     if self.target_optimization and repr(inst).startswith("buffer_store_dwordx4"):
       inst.sc0, inst.sc1, inst.nt = 0, 1, self.store_nt
     self.instructions.append(inst)
@@ -25,7 +27,9 @@ def v_mfma_fp4(dst, a, b, opsel, opsel_hi, scale_a, scale_b):
 
 def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
   target_optimization = (M, N, K) in MXFP4_TARGET_SHAPES and (tile_m, tile_n) == (256, 256)
-  k = Kernel(target_optimization, store_nt=target_optimization and N >= 14336)
+  epilogue_slot_fill = target_optimization and N != 6144
+  k = Kernel(target_optimization, store_nt=target_optimization and (N >= 14336 or N == 4096),
+             cache_direct=target_optimization and N <= 6144)
   scale_k = K // 32
   k.emit(s_and_b32(s[1], s[1], LIT, 65535))
   if (tile_m, tile_n) == (128, 512):
@@ -2224,9 +2228,11 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     logical_groups_x, logical_groups_y = N // tile_n, M // tile_m
     persist = target_optimization
     if persist:
-      persist_groups = min(logical_groups_x * logical_groups_y, 1024 if N == 14336 else 256)
+      persist_groups = min(logical_groups_x * logical_groups_y, 1024 if N in (14336, 4096) else 256)
       physical_groups_x, physical_groups_y = (32, persist_groups // 32) if persist_groups >= 32 else (persist_groups, 1)
       physical_groups, logical_groups = physical_groups_x * physical_groups_y, logical_groups_x * logical_groups_y
+      for saved, live in ((68, 4), (70, 12), (72, 16), (74, 20), (76, 24)):
+        k.emit(s_mov_b64(s[saved:saved+1], s[live:live+1]))
       k.emit(v_mov_b32_e32(v[255], v[0]))
       k.emit(s_mul_i32(s[65], s[3], physical_groups_x))
       k.emit(s_add_u32(s[65], s[65], s[2]))
@@ -2408,42 +2414,26 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(s_add_u32(NULL, 0, s[59]))
     for i in range(3):
       k.emit(buffer_load_dwordx4(v[0:3], v[212 + i * 1], s[12:15], 0, 0, 1, 0, 0, 0, 0, 1))
-      for j67 in range(8):
-        k.emit(v_accvgpr_write(v[0 + j67 * 1 + i * 8], 0))
       k.emit(s_add_u32(NULL, LIT, s[59], 4224 + i * 4224))
     k.emit(buffer_load_dwordx4(v[0:3], v[215], s[12:15], 0, 0, 1, 0, 0, 0, 0, 1))
-    for i in range(8):
-      k.emit(v_accvgpr_write(v[24 + i * 1], 0))
     k.emit(s_add_u32(NULL, 0, s[60]))
     k.emit(buffer_load_dword(v[0], v[222], s[20:23], 0, 0, 1, 0, 0, 0, 0, 1))
     for i in range(4):
-      for j68 in range(8):
-        k.emit(v_accvgpr_write(v[32 + j68 * 1 + i * 8], 0))
       k.emit(s_add_u32(NULL, LIT, s[59], 16896 + i * 4224))
       k.emit(buffer_load_dwordx4(v[0:3], v[216 + i * 1], s[12:15], 0, 0, 1, 0, 0, 0, 0, 1))
-    for i in range(8):
-      k.emit(v_accvgpr_write(v[64 + i * 1], 0))
     k.emit(s_add_u32(NULL, LIT, s[60], 1024))
     k.emit(buffer_load_dword(v[0], v[223], s[20:23], 0, 0, 1, 0, 0, 0, 0, 1))
-    for i in range(8):
-      k.emit(v_accvgpr_write(v[72 + i * 1], 0))
     for i in range(2):
       k.emit(s_add_u32(s[12 + i * 8], s[61 + i * 2], s[12 + i * 8]))
       k.emit(s_addc_u32(s[13 + i * 8], 0, s[13 + i * 8]))
       k.emit(s_sub_u32(s[14 + i * 8], s[14 + i * 8], s[61 + i * 2]))
     for i in range(8):
-      for j69 in range(8):
-        k.emit(v_accvgpr_write(v[80 + j69 * 1 + i * 8], 0))
       k.emit(buffer_load_dwordx4(v[136 + i * 4:139 + i * 4], v[225 + i * 1], s[16:19], 0, 0, 1))
-    for i in range(8):
-      k.emit(v_accvgpr_write(v[144 + i * 1], 0))
     k.emit(s_add_u32(s[16], s[62], s[16]))
     k.emit(s_addc_u32(s[17], 0, s[17]))
     k.emit(s_sub_u32(s[18], s[18], s[62]))
     for i in range(2):
       k.emit(buffer_load_dword(v[208 + i * 1], v[233 + i * 1], s[24:27], 0, 0, 1))
-      for j70 in range(8):
-        k.emit(v_accvgpr_write(v[152 + j70 * 1 + i * 8], 0))
     k.emit(s_add_u32(s[24], s[64], s[24]))
     k.emit(s_addc_u32(s[25], 0, s[25]))
     k.emit(s_sub_u32(s[26], s[26], s[64]))
@@ -2451,24 +2441,14 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
       for j71 in range(4):
         k.emit(s_add_u32(NULL, LIT, s[59], 33792 + j71 * 4224 + i * 16896))
         k.emit(buffer_load_dwordx4(v[0:3], v[212 + j71 * 1 + i * 4], s[12:15], 0, 0, 1, 0, 0, 0, 0, 1))
-        k.emit(v_accvgpr_write(v[168 + j71 * 8 + i * 40], 0))
-        k.emit(v_accvgpr_write(v[169 + j71 * 8 + i * 40], 0))
-        k.emit(v_accvgpr_write(v[170 + j71 * 8 + i * 40], 0))
-        k.emit(v_accvgpr_write(v[171 + j71 * 8 + i * 40], 0))
-        k.emit(v_accvgpr_write(v[172 + j71 * 8 + i * 40], 0))
-        k.emit(v_accvgpr_write(v[173 + j71 * 8 + i * 40], 0))
-        k.emit(v_accvgpr_write(v[174 + j71 * 8 + i * 40], 0))
-        k.emit(v_accvgpr_write(v[175 + j71 * 8 + i * 40], 0))
       k.emit(s_add_u32(NULL, LIT, s[60], 2048 + i * 1024))
       k.emit(buffer_load_dword(v[0], v[222 + i * 1], s[20:23], 0, 0, 1, 0, 0, 0, 0, 1))
-      for j72 in range(8):
-        k.emit(v_accvgpr_write(v[200 + j72 * 1 + i * 40], 0))
     for i in range(2):
       k.emit(s_add_u32(s[12 + i * 8], s[61 + i * 2], s[12 + i * 8]))
       k.emit(s_addc_u32(s[13 + i * 8], 0, s[13 + i * 8]))
       k.emit(s_sub_u32(s[14 + i * 8], s[14 + i * 8], s[61 + i * 2]))
-    for i in range(8):
-      k.emit(v_accvgpr_write(v[248 + i * 1], 0))
+    for i in range(256):
+      k.emit(v_accvgpr_write(v[i], 0))
     k.emit(s_waitcnt(20345))
     k.emit(s_barrier())
     k.emit(ds_read_b128(v[8:11], v[220]))
@@ -3389,19 +3369,31 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
         k.emit(v_cvt_pk_bf16_f32(v[17], v[10], v[11]))
         k.emit(v_cvt_pk_bf16_f32(v[18], v[12], v[13]))
         k.emit(v_cvt_pk_bf16_f32(v[19], v[14], v[15]))
-        k.emit(s_nop(1))
-        k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
-        k.emit(s_nop(1))
-        k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
-        k.emit(s_nop(1))
+        next_acc = (128 + j110 * 64 + i * 4, 160 + j110 * 64 + i * 4)
+        if epilogue_slot_fill:
+          k.emit(v_accvgpr_read(v[8], v[next_acc[0]]))
+          k.emit(v_accvgpr_read(v[9], v[next_acc[0] + 1]))
+          k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
+          k.emit(v_accvgpr_read(v[10], v[next_acc[0] + 2]))
+          k.emit(v_accvgpr_read(v[11], v[next_acc[0] + 3]))
+          k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
+          k.emit(v_accvgpr_read(v[12], v[next_acc[1]]))
+          k.emit(v_accvgpr_read(v[13], v[next_acc[1] + 1]))
+        else:
+          k.emit(s_nop(1))
+          k.emit(v_permlane16_swap_b32_e32(v[16], v[18]))
+          k.emit(s_nop(1))
+          k.emit(v_permlane16_swap_b32_e32(v[17], v[19]))
+          k.emit(s_nop(1))
         k.emit(buffer_store_dwordx4(v[16:19], v[242 + j110 * 1 + i * 1], s[4:7], 0, 0, 1))
         k.emit(v_add_i32(v[242 + j110 * 1 + i * 1], v[242 + j110 * 1 + i * 1], 64))
-        k.emit(v_accvgpr_read(v[8], v[128 + j110 * 64 + i * 4]))
-        k.emit(v_accvgpr_read(v[9], v[129 + j110 * 64 + i * 4]))
-        k.emit(v_accvgpr_read(v[10], v[130 + j110 * 64 + i * 4]))
-        k.emit(v_accvgpr_read(v[11], v[131 + j110 * 64 + i * 4]))
-        k.emit(v_accvgpr_read(v[12], v[160 + j110 * 64 + i * 4]))
-        k.emit(v_accvgpr_read(v[13], v[161 + j110 * 64 + i * 4]))
+        if not epilogue_slot_fill:
+          k.emit(v_accvgpr_read(v[8], v[next_acc[0]]))
+          k.emit(v_accvgpr_read(v[9], v[next_acc[0] + 1]))
+          k.emit(v_accvgpr_read(v[10], v[next_acc[0] + 2]))
+          k.emit(v_accvgpr_read(v[11], v[next_acc[0] + 3]))
+          k.emit(v_accvgpr_read(v[12], v[next_acc[1]]))
+          k.emit(v_accvgpr_read(v[13], v[next_acc[1] + 1]))
         k.emit(v_accvgpr_read(v[14], v[162 + j110 * 64 + i * 4]))
         k.emit(v_accvgpr_read(v[15], v[163 + j110 * 64 + i * 4]))
     for i in range(4):
@@ -3418,18 +3410,14 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
       k.emit(s_add_u32(s[65], s[65], s[66]))
       k.emit(s_cmp_lt_u32(s[65], s[67]))
       k.emit(s_cbranch_scc0(13), target='L2_DONE')
-      k.emit(s_load_dwordx2(s[4:5], s[0:1], s[0], 0, 0, 0, 0, 1))
-      k.emit(s_load_dwordx2(s[12:13], s[0:1], s[0], 8, 0, 0, 0, 1))
-      k.emit(s_load_dwordx2(s[16:17], s[0:1], s[0], 16, 0, 0, 0, 1))
-      k.emit(s_load_dwordx2(s[20:21], s[0:1], s[0], 24, 0, 0, 0, 1))
-      k.emit(s_load_dwordx2(s[24:25], s[0:1], s[0], 32, 0, 0, 0, 1))
+      for live, saved in ((4, 68), (12, 70), (16, 72), (20, 74), (24, 76)):
+        k.emit(s_mov_b64(s[live:live+1], s[saved:saved+1]))
       k.emit(s_mov_b32(s[36], N))
       k.emit(s_mov_b32(s[37], K))
       k.emit(s_mov_b32(s[38], K))
       k.emit(s_mov_b32(s[39], scale_k))
       k.emit(s_mov_b32(s[40], scale_k))
       k.emit(s_mov_b32(s[45], K))
-      k.emit(s_waitcnt(49279))
       k.emit(s_branch(0), target='L2_TILE')
       k.label('L2_DONE')
     k.emit(s_waitcnt())
