@@ -113,6 +113,7 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
 
 MXFP4_TILES = ((256, 256), (192, 256), (128, 512))
 MXFP4_TARGET_SHAPES = {(16384, 28672, 4096), (16384, 14336, 4096), (16384, 4096, 4096), (16384, 6144, 4096)}
+MXFP4_TARGET_GROUPS = {28672:256, 14336:512, 4096:1024, 6144:768}
 # best tiles from a full sweep over the production shapes (mxfp4_tile_sweep.md); unmatched shapes fall back to 256x256
 MXFP4_TILE_OVERRIDES = {(6144, 4096, 16384):(192, 256), (16384, 4096, 6144):(128, 512), (16384, 6144, 4096):(128, 512)}
 
@@ -138,7 +139,7 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
   logical_groups_x, logical_groups_y = ceildiv(N, tile_n), ceildiv(M, tile_m)
   target_optimization = (M, N, K) in MXFP4_TARGET_SHAPES and (tile_m, tile_n) == (256, 256)
   if target_optimization:
-    persist_groups = min(logical_groups_x * logical_groups_y, 1024 if N in (14336, 4096) else 256)
+    persist_groups = min(logical_groups_x * logical_groups_y, MXFP4_TARGET_GROUPS[N])
     physical_groups_x, physical_groups_y = (32, persist_groups // 32) if persist_groups >= 32 else (persist_groups, 1)
   else: physical_groups_x, physical_groups_y = logical_groups_x, logical_groups_y
   groups_x, groups_y = UOp.special(physical_groups_x, "gidx0"), UOp.special(physical_groups_y, "gidx1")

@@ -2,6 +2,7 @@
 from tinygrad.runtime.autogen.amd.cdna.ins import *
 
 MXFP4_TARGET_SHAPES = {(16384, 28672, 4096), (16384, 14336, 4096), (16384, 4096, 4096), (16384, 6144, 4096)}
+MXFP4_TARGET_GROUPS = {28672:256, 14336:512, 4096:1024, 6144:768}
 
 class Kernel:
   def __init__(self, target_optimization=False, store_nt=False, cache_direct=False):
@@ -2228,7 +2229,7 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     logical_groups_x, logical_groups_y = N // tile_n, M // tile_m
     persist = target_optimization
     if persist:
-      persist_groups = min(logical_groups_x * logical_groups_y, 1024 if N in (14336, 4096) else 256)
+      persist_groups = min(logical_groups_x * logical_groups_y, MXFP4_TARGET_GROUPS[N])
       physical_groups_x, physical_groups_y = (32, persist_groups // 32) if persist_groups >= 32 else (persist_groups, 1)
       physical_groups, logical_groups = physical_groups_x * physical_groups_y, logical_groups_x * logical_groups_y
       for saved, live in ((68, 4), (70, 12), (72, 16), (74, 20), (76, 24)):
@@ -3406,7 +3407,7 @@ def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
     k.emit(buffer_store_dwordx4(v[16:19], v[250], s[4:7], 0, 0, 1))
     k.emit(v_add_i32(v[250], v[250], 64))
     if persist:
-      k.emit(s_barrier())
+      if N != 14336: k.emit(s_barrier())
       k.emit(s_add_u32(s[65], s[65], s[66]))
       k.emit(s_cmp_lt_u32(s[65], s[67]))
       k.emit(s_cbranch_scc0(13), target='L2_DONE')
