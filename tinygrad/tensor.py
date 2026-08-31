@@ -8,6 +8,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, ParamArg, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import resolve_returned_after
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -106,14 +107,15 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
   return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
-  if c.arg is None or not c.arg.precompile: return None
-  input_buffers = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])
+  if c.arg is None or not c.arg.precompile or c.num_returned == 0: return None
+  assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
+  # the RETURNED srcs are the call outputs (slots are src positions)
+  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.op is Ops.RETURNED]
+  srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
 
   # add the outputs to the call
-  srcs = c.src[0].src
-  resolved = [c.gettuple(i) for i in range(len(srcs))]
-  outs = tuple(r.empty_like() for r in resolved)
-  targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
+  outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
+  targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
 
   subs:dict[UOp, UOp] = {}
   items:list[UOp] = []
@@ -129,23 +131,28 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
       items.append(t.after(t.store(s.after(*after_deps))))
   fxn = UOp.sink(*(x.substitute(subs) for x in items))
 
-  # body switches from TUPLE to SINK, so the node becomes an opaque CALL
-  new_call = UOp(Ops.CALL, src=(fxn, *input_buffers, *outs), arg=c.arg)
+  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
+  # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
+  rmap = dict(zip(ret_pos, outs))
+  new_call = UOp(Ops.CALL, src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                     for i, a in enumerate(c.src[1:])]), arg=c.arg)
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  # NOTE: must use the resolved shapes of the CALL (which substitutes PARAMs with external args), not raw body shapes
-  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, resolved))
+  # NOTE: must use the resolved shapes of the RETURNED placeholders (which substitute PARAMs with external args), not raw body shapes
+  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
 
-  return UOp.maketuple(*rets)
+  # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
+  return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
-  # transform precompiled value-producing calls into opaque CALLs (body becomes SINK with stores)
-  (UPat(Ops.CALL, src=(UPat(Ops.TUPLE),), allow_any_len=True, name="c"), transform_precompiled_call),
+  # transform precompiled value-producing calls into opaque CALLs (outputs become real buffers)
+  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
 
-  # resolve TUPLE+GETTUPLE (for precompiled calls)
-  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
+  # resolve AFTER on RETURNED placeholders (for precompiled calls)
+  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
+
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
@@ -176,6 +183,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
 def finalize_after(ctx:AllocCtx, x:UOp):
   # bound Variables are call inputs, not assigns: they stay in the graph and pm_replace_buf turns them into call args
   if x.is_bound_var: return None
+  # AFTER on a RETURNED placeholder is a call output, not an assign: it's inlined when the call is resolved
+  if x.src[0].unsharded_base.op is Ops.RETURNED: return None
   # untagged: record as an assign for the call body
   if x.tag is None:
     ctx.assigns.append(x)
@@ -227,6 +236,12 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
   big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="number the uops")
+  # final outputs of value calls materialize with fresh storage (precompiled calls don't: transform gives them real buffers)
+  def materialize_finals(u:UOp):
+    if u.op is not Ops.AFTER or u.src[0].unsharded_base.op is not Ops.RETURNED: return u
+    if u.src[1].op is Ops.CALL and (u.src[1].arg is not None and u.src[1].arg.precompile) and u.src[1].num_returned: return u
+    return u.rtag(None).contiguous(tag=u.tag)
+  big_sink = big_sink.replace(src=tuple(materialize_finals(u) for u in big_sink.src))
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
@@ -383,7 +398,7 @@ class Tensor(RandMixin):
 
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
     fret = fxn._uop.call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
-    return Tensor(fret.gettuple(0))
+    return Tensor(fret.returned_outputs[0])
 
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """

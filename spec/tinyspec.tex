@@ -50,9 +50,11 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Param} & () & slot, dtype, size?, device?, addrspace? &
+\op{Param} & () & \texttt{ParamArg} &
   Placeholder with flat storage of $\mathrm{size}$ elements. Substituted in \op{Call}. \\[4pt]
-\op{Buffer} & () & slot, dtype, size, device, addrspace &
+\op{Returned} & () & \texttt{ParamArg} &
+  Call output buffer placeholder; slot is its call argument index. \\[4pt]
+\op{Buffer} & () & \texttt{ParamArg} &
   Concrete buffer slot with flat storage of $\mathrm{size}$ elements. \\
 \op{Const} & () & value, dtype &
   A scalar constant with shape $(\ )$. \\
@@ -62,7 +64,21 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 \smallskip
-\textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}.
+\texttt{ParamArg} contains slot, dtype, concrete size (or \textsc{null} for a scalar), value bounds, alignment, name, addrspace, device, volatility, and optional image shape. \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}.
+
+%% ============================================================
+\subsection*{{\color{callblue}Call Ops} \normalfont\small--- function abstraction, like the lambda calculus}
+
+\begin{tabular}{@{}l l l l@{}}
+\toprule
+\textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
+\midrule
+\op{Call} & (body, $a_0$, $a_1$, \ldots) & --- & Substitute each \op{Param} $k$ in body with $a_k$. \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+A value \op{Call} is void: its \op{Sink} body stores to \op{Param}s bound positionally to \op{Returned} arguments; output $a_k$ is \op{After}$(a_k, \op{Call})$.
 
 %% ============================================================
 \subsection*{{\color{movgreen}Movement Ops} \normalfont\small--- no arithmetic; view, indexing, and reinterpretation only}
@@ -92,19 +108,6 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
 \op{Reduce} & ($T$, $r_0$, $r_1$, \ldots) & op, $n$ & Reduce the first $n$ axes of $T$. Op is \op{Add}, \op{Max}, or \op{Mul}. \\
-\bottomrule
-\end{tabular}
-
-%% ============================================================
-\subsection*{{\color{callblue}Call Ops} \normalfont\small--- function abstraction, like the lambda calculus}
-
-\begin{tabular}{@{}l l l l@{}}
-\toprule
-\textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
-\midrule
-\op{Call} & (body, $a_0$, $a_1$, \ldots) & --- & Substitute each \op{Param} $k$ in body with $a_k$. \\
-\op{Tuple} & $(v_0, v_1, \ldots)$ & --- & Pack values; required as a value-producing \op{Call} body. \\
-\op{GetTuple} & $(T,)$ & idx & Extract element at idx from a \op{Tuple}. \\
 \bottomrule
 \end{tabular}
 
@@ -257,7 +260,8 @@ Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspa
 \midrule
 \op{Buffer} & from arg & from arg ($\mathrm{size}$) & from arg & dtype range \\
 \op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\
-\op{Param} & from arg & from arg ($\mathrm{size}$) & from arg & from src or dtype range \\[3pt]
+\op{Param} & from arg & from arg ($\mathrm{size}$) & from arg & from src or dtype range \\
+\op{Returned} & from arg & from arg ($\mathrm{size}$) & from arg & dtype range \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Unshard} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0]$, each $a_k \times n_k$ & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Reduce} & $\mathrm{src}[0].\mathrm{dtype}$ & remove first $n$ axes & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\[3pt]
@@ -271,7 +275,7 @@ ALU unary & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0].\mathrm{shape}$ 
 Other binary & $\mathrm{src}[0].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
 \op{CmpLt}, \op{CmpNe} & bool & broadcast & $\mathrm{src}[0].\mathrm{device}$ & from intervals \\
 \op{Where} & $\mathrm{src}[1].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & $[\min(b,c),\, \max(B,C)]$ \\[3pt]
-\op{Call} & $\mathrm{src}[0].\mathrm{dtype}$ & substitute \op{Param} shapes & $\mathrm{src}[1].\mathrm{device}$ & dtype range \\
+\op{Call} & void & --- & first non-null src device & --- \\
 \op{Range} & index & $()$ & \textsc{null} & $[0,\, n{-}1]$ \\
 \op{Index} & $\mathrm{src}[0].\mathrm{dtype}$ & remaining dims & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Store} & void & $()$ & $\mathrm{src}[0].\mathrm{device}$ & --- \\
@@ -432,14 +436,15 @@ When \texttt{f(x, y)} is called, the decorator:
 
 \begin{enumerate}[leftmargin=1.5em, itemsep=2pt]
   \item \textbf{Extracts inputs}: walks all arguments to find every Tensor, deduplicates by identity.
-  \item \textbf{Runs the function} lazily (no device execution), building a UOp graph from the result.
-  \item \textbf{Parameterizes}: replaces each input UOp with a \op{Param}$(k)$ placeholder.
-  \item \textbf{Wraps the body} in a \op{Tuple} (even for single returns) and creates\\
-        \op{Call}(\op{Tuple}(body), $x$, $y$).
-  \item \textbf{Returns} the result via \op{GetTuple}$(0)$, or one \op{GetTuple} per element for tuple returns.
+  \item \textbf{Runs the function} lazily (no device execution), building a UOp graph from each returned value.
+  \item \textbf{Parameterizes inputs}: replaces each input UOp with a positional \op{Param}$(k)$ placeholder.
+  \item \textbf{Parameterizes outputs}: for each returned value $v_i$, creates an output \op{Param}$(m+i)$ and a matching \op{Returned}$(m+i)$, where $m$ is the number of inputs.
+  \item \textbf{Builds the call}: stores every $v_i$ into its output parameter and creates\\
+        \op{Call}(\op{Sink}(\op{Store}(\op{Param}$(m)$, $v_0$), \ldots), $x$, $y$, \op{Returned}$(m)$, \ldots).
+  \item \textbf{Returns values}: exposes each result as \op{After}(\op{Returned}$(m+i)$, \op{Call}).
 \end{enumerate}
 
-The result is a reusable graph fragment: the body contains only \op{Param} references, not concrete buffers. At schedule time, the value-producing \op{Call} is resolved by substituting each \op{Param}$(k)$ back with its corresponding argument $a_k$, or its body is lowered into a \op{Sink} (opaque) if it is to be compiled as a reusable kernel.
+The result is a reusable graph fragment: the body contains only \op{Param} references, not concrete buffers, and a single call can return any number of values. At schedule time, an ordinary value-producing \op{Call} is inlined by positional \op{Param} substitution and each output \op{After} resolves to the value stored in the body. A precompiled call instead materializes real output buffers in the \op{Returned} slots and lowers the body to an opaque call that writes them.
 
 %% ============================================================
 \subsection*{Lowering Pipeline \normalfont\small--- from Tensor graph to machine code}
