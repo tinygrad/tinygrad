@@ -629,13 +629,14 @@ jobs:
           key: ${{ matrix.backend }}-minimal
           deps: testing_unit
           cuda: 'true'
-          ocelot: 'true'
       - name: Set env
         run: printf "${{ matrix.backend == 'ptx' && 'DEV=MOCK+CUDA:PTX' || matrix.backend == 'nv' && 'DEV=MOCK+NV\nSKIP_SLOW_TEST=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CUDA','NV'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
+      - name: Run ptx emulator tests
+        run: python -m pytest -n=auto test/testextra/test_ptx_emu.py --durations=20
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
         run: python -m pytest -n=auto test/backend --ignore test/backend/test_multitensor.py --durations=20

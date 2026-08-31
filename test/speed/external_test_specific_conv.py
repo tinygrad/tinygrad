@@ -1,9 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import DEV
 # similar to test/external/external_test_gpu_ast.py, but universal
 
-@unittest.skipIf(Device.DEFAULT in {"CUDA", "NV"} and DEV.interface.startswith("MOCK"), "slow on ocelot")
 class TestSpecific(unittest.TestCase):
   # from openpilot
 

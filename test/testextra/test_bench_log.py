@@ -6,7 +6,7 @@ from tinygrad.helpers import Context, DEV
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
 
-# WEBGPU kernel timing not supported, ocelot CUDA is inaccurate
+# WEBGPU kernel timing not supported, the emulated CUDA device does not model kernel time
 _SKIP_KERNEL_TIMING = Device.DEFAULT == "WEBGPU" or (Device.DEFAULT == "CUDA" and DEV.interface.startswith("MOCK"))
 
 class TestBenchLog(unittest.TestCase):

@@ -23,6 +23,7 @@ class CUDAState:
     self.next_event_id = 1
     self.next_module_id = 1
     self.next_context_id = 1
+    self.error_str: ctypes.Array|None = None  # keeps the last cuGetErrorString buffer alive
 
 cuda_state = CUDAState()
 
@@ -40,7 +41,7 @@ def cuDeviceGet(device, ordinal: int) -> int:
   if ordinal < 0:
     return orig_cuda.CUDA_ERROR_INVALID_VALUE
   device._obj.value = ordinal
-  cuda_state.devices[ordinal] = {"compute_capability": (3, 5)}
+  cuda_state.devices[ordinal] = {"compute_capability": (8, 6)}
   return orig_cuda.CUDA_SUCCESS
 
 def cuCtxCreate_v2(pctx, flags: int, dev: int) -> int:
@@ -136,8 +137,8 @@ def cuLaunchKernel(f, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, shar
 def cuDeviceComputeCapability(major, minor, dev: int) -> int:
   if dev not in cuda_state.devices:
     return orig_cuda.CUDA_ERROR_INVALID_VALUE
-  major._obj.value = 3
-  minor._obj.value = 5
+  major._obj.value = 8
+  minor._obj.value = 6
   return orig_cuda.CUDA_SUCCESS
 
 def cuDeviceCanAccessPeer(canAccessPeer, dev: int, peerDev: int) -> int:
@@ -164,9 +165,9 @@ def cuCtxSynchronize() -> int: return orig_cuda.CUDA_SUCCESS
 
 def cuGetErrorString(error: int, pStr) -> int:
   error_str = orig_cuda.enum_cudaError_enum.get(error, "Unknown CUDA error").encode()
-  buf = ctypes.create_string_buffer(error_str)
-  # Set the pointer to point to our error string buffer
-  pStr._obj.value = ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))
+  # the buffer must outlive this call, the caller reads it with string_at
+  cuda_state.error_str = buf = ctypes.create_string_buffer(error_str)
+  pStr._obj.contents = ctypes.c_char.from_buffer(buf)
   return orig_cuda.CUDA_SUCCESS
 
 def cuDeviceGetCount(count) -> int:

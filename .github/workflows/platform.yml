@@ -62,7 +62,6 @@ jobs:
         key: unittest-macos-mock
         deps: testing_unit
         amd: 'true'
-        ocelot: 'true'
     - name: Run NULL backend tests
       run: SPEC=2 DEV=NULL python -m pytest -n=auto test/null/ --durations=20
     - name: Run pytest (amd)
@@ -78,7 +77,7 @@ jobs:
         # TODO: failing due to library loading error
         CAPTURE_PROCESS_REPLAY: 0
       run: |
-        python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py \
+        python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py test/testextra/test_ptx_emu.py \
           test/testextra/test_hevc.py::TestHevc::test_hevc_decode_compile --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay

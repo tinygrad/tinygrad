@@ -7,7 +7,7 @@ import numpy as np
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.uop.ops import Ops, UPat
-from tinygrad.helpers import DEV, GlobalCounters, Context, all_same, temp
+from tinygrad.helpers import GlobalCounters, Context, all_same, temp, DEV
 from tinygrad.engine.realize import run_linear
 from test.helpers import check_schedule, assert_kernel_count
 
@@ -151,7 +151,8 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(out.numpy(), [4.])
 
 class TestLimitBufs(unittest.TestCase):
-  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in ocelot")
+  # the mock NV kernarg region fits 20 buffer pointers before the QMD, so a kernel with more reads garbage
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "mockgpu NV cannot pass this many buffers")
   def test_limit_bufs_with_var(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
