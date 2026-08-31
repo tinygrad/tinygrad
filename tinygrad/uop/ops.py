@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 class AxisType(Enum):
   def __repr__(self): return str(self)
   DEVICE = auto(); GLOBAL = auto(); WARP = auto(); LOCAL = auto(); WEAK = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto() # noqa: E702
-  UNROLL = auto(); THREAD = auto(); PLACEHOLDER = auto(); LOOP = auto() # noqa: E702
+  UNROLL = auto(); PLACEHOLDER = auto(); LOOP = auto() # noqa: E702
 
 @dataclass(frozen=True, order=True)
 class ParamArg:
@@ -39,14 +39,14 @@ class ParamArg:
     args = [repr(self.slot), repr(self.dtype)] + ([repr(self.size)] if self.size is not None else []) + \
       [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     return f"ParamArg({', '.join(args)})"
-axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
+axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
                 AxisType.LOOP: "L", AxisType.UPCAST: "u", AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
-axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN",
+axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN",
                AxisType.WEAK: "WHITE", AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow", AxisType.GROUP_REDUCE: "RED", AxisType.REDUCE: "red",
                AxisType.UNROLL: "magenta"}
 
 # NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
-axis_to_pos = {AxisType.DEVICE: -2, AxisType.WEAK: -1, AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1,
+axis_to_pos = {AxisType.DEVICE: -2, AxisType.WEAK: -1, AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.WARP: 1,
                AxisType.LOCAL: 2, AxisType.UPCAST: 3, AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
 range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.LINEAR: 0}
@@ -1268,16 +1268,13 @@ class ProgramInfo:
   @property
   def function_name(self): return to_function_name(self.name)
 
-  @property
-  def runtimevars(self) -> dict[str, int]: return {v.expr: i for i, v in enumerate(self.vars) if v.expr == 'core_id'}
-
   def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]|None]:
     global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
     local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size]) if self.local_size is not None else None
     return global_size, local_size
 
-  def vals(self, var_vals:dict[str, int]) -> tuple[int|None, ...]:
-    try: return tuple(var_vals[k.expr] if k.expr not in self.runtimevars else None for k in self.vars)
+  def vals(self, var_vals:dict[str, int]) -> tuple[int, ...]:
+    try: return tuple(var_vals[k.expr] for k in self.vars)
     except KeyError as e: raise RuntimeError(f"unbound Variable {e} used by {self.function_name}") from None
 
   @staticmethod
@@ -1298,7 +1295,6 @@ class ProgramInfo:
         if u.arg[0] == 'i': local_size = None
         special_size = local_size if u.arg[0] == 'l' else global_size
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
-      if u.op is Ops.PARAM and u in _vars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
                        tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
                        tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), target)

@@ -652,6 +652,6 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v6
     - name: Speed Test
-      run: DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
+      run: DEV=CPU:LLVM python3 test/speed/external_test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
-      run: BEAM=2 DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
+      run: BEAM=2 DEV=CPU:LLVM python3 test/speed/external_test_speed_v_torch.py

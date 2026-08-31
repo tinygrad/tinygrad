@@ -50,7 +50,6 @@ class Estimates:
           mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.END: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
-      elif u.op is Ops.PARAM and u.arg.addrspace == AddrSpace.ALU and u.expr == 'core_id': mults *= int(u.vmax) + 1
       elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
         lds += u.max_numel() * u.dtype.itemsize * mults
       elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
@@ -67,7 +66,6 @@ class Renderer:
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   has_local: bool = True
-  has_threads: bool = False
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
   global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now

@@ -263,7 +263,6 @@ class ClangRenderer(CStyleLanguage):
   float4_style = ('{', '}')
   gep_arr_threshold = 0
   has_local = False
-  has_threads = bool(getenv("THREADS", 1))
   @property
   def global_max(self): return (NUM_CPU_THREADS.value, 0, 0)  # type: ignore[override]
   infinity = "__builtin_inff()"

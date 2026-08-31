@@ -5,7 +5,7 @@ from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, 
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, truncate, AddrSpace
-from tinygrad.helpers import prod, Target, NUM_CPU_THREADS, getenv, OSX
+from tinygrad.helpers import prod, Target, NUM_CPU_THREADS, OSX
 
 def is_volatile(u:UOp) -> bool: return (buf:=u.buf_uop).op is Ops.PARAM and buf.arg.volatile
 
@@ -203,7 +203,6 @@ class LLVMRenderer(Renderer):
 
 class CPULLVMRenderer(LLVMRenderer):
   has_local = False
-  has_threads = bool(getenv("THREADS", 1))
   @property
   def global_max(self): return (NUM_CPU_THREADS.value, 0, 0)  # type: ignore[override]
   abi = 'win64cc' if sys.platform == 'win32' else None

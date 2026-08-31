@@ -412,8 +412,8 @@ pm_lower_hcq = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat(Ops.SINK),)),), name="call", allow_any_len=True), lower_hcq_call)])
 
 # *****************
-# 6. batch: adjacent hcq calls fold into one submitter on the host SUBMIT:0 ring: a submit whose cmds call the
-#    compiled piece programs, so the worker runs the batch in fifo order and the python exec is one ring push
+# 6. batch: adjacent hcq calls fold into one submitter on the host SUBMIT:0 queue: a submit whose cmds call the
+#    compiled piece programs, so the batch runs in fifo order and the python exec is one submitter call
 
 def _lane_arg(a:UOp, lane:int) -> UOp: return a.mselect(lane) if len(to_tuple(a.device)) > 1 else a
 

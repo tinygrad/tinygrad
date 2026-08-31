@@ -96,7 +96,6 @@ class HCQGraph(MultiGraphRunner):
 
       # set any fixedvars on the device
       self.device_vars[enqueue_dev] = merge_dicts([self.device_vars.get(enqueue_dev, {}), device_vars])
-      if runtime is not None: self.device_vars[enqueue_dev] = merge_dicts([self.device_vars[enqueue_dev], {k: 0 for k in ast.arg.runtimevars}])
 
       if runtime is not None:
         enqueue_queue = self.comp_queues[enqueue_dev]
