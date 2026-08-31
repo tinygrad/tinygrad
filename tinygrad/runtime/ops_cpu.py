@@ -2,10 +2,10 @@ from __future__ import annotations
 import platform, sys, os, ctypes, functools, mmap, threading, array, struct, time
 from dataclasses import dataclass, replace
 from typing import cast, Callable
-from tinygrad.helpers import to_mv, from_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le, to_tuple
+from tinygrad.helpers import to_mv, from_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import Buffer, BufferSpec, TinyELF, Program, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_cmdbuf, make_buf
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_buf, hcq_size_var
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
@@ -14,10 +14,10 @@ from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.autogen import libc
 from tinygrad.codegen import do_to_program
-from tinygrad.engine.realize import pm_flatten_linear, get_call_arg_uops, get_call_var_uops, get_runtime
+from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops, get_runtime
 from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
-from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher, graph_rewrite
+from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher
 
 MAX_ARGS, CMD_SIZE, RING_SLOTS, FUNCS = 63, 64, (16 << 10), (() if WIN else ('clock_gettime', 'sem_wait', 'sem_post'))
 
@@ -62,49 +62,50 @@ def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
   progs = [get_runtime(d, prog) if isinstance(prog, UOp) else cast(CPUDevice, Device[d]).prgs[prog] for d in devs]
   addrs = tuple(UOp.const(p.addr, dtypes.uint64) for p in progs)
   words = ((addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, src=addrs)),) + args
-  return UOp(Ops.INS, src=words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)), arg=("cmd", dtypes.void))
+  return UOp(Ops.LINEAR, src=words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)))
 
-def cpu_exec(ctx:tuple[str, ...], call:UOp, prg:UOp) -> UOp:
-  args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
-  if (core:=prg.arg.runtimevars.get('core_id')) is None: return cpu_cmd(ctx, prg, *args)
+def cpu_exec(ctx, call:UOp, prg:UOp) -> UOp:
+  devs = ctx.devs
+  args = [get_call_arg_uops(call)[i].getaddr(devs) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
+  if (core:=prg.arg.runtimevars.get('core_id')) is None: return cpu_cmd(devs, prg, *args)
 
-  la = [cpu_cmd(ctx,prg,*args[:(cid:=(len(prg.arg.globals)+core))],UOp.const(t, dtypes.uint64),*args[cid+1:]) for t in range(prg.arg.global_size[0])]
+  la = [cpu_cmd(devs,prg,*args[:(cid:=(len(prg.arg.globals)+core))],UOp.const(t,dtypes.uint64),*args[cid+1:]) for t in range(prg.arg.global_size[0])]
   return UOp(Ops.LINEAR, src=tuple(la))
 
 pm_cpu_opsel = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), cpu_exec),
 
-  (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda: UOp(Ops.NOOP)),
+  (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda: UOp(Ops.LINEAR)),
   (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))),
-   lambda ctx, dst, val: cpu_cmd(ctx, wait_prog, dst.getaddr(ctx), val.cast(dtypes.uint64))),
+   lambda ctx, dst, val: cpu_cmd(ctx.devs, wait_prog, dst.getaddr(ctx.devs), val.cast(dtypes.uint64))),
   (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))),
-   lambda ctx, dst, val: cpu_cmd(ctx, signal_prog, dst.getaddr(ctx), val.cast(dtypes.uint64))),
-  (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)),
-   lambda ctx, dst: cpu_cmd(ctx, timestamp_prog, dst.getaddr(ctx), *(() if WIN else (make_buf(ctx, tag="func:clock_gettime").getaddr(ctx),)))),
+   lambda ctx, dst, val: cpu_cmd(ctx.devs, signal_prog, dst.getaddr(ctx.devs), val.cast(dtypes.uint64))),
+  (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: cpu_cmd(ctx.devs, timestamp_prog, dst.getaddr(ctx.devs),
+   *(() if WIN else (make_buf(ctx.devs, tag="func:clock_gettime").getaddr(ctx.devs),)))),
 ])
 
-def encode_queue(q:UOp) -> UOp:
-  devs, queue = to_tuple(q.arg[0]), q.arg[1]
-  lin = graph_rewrite(q, pm_cpu_opsel+pm_flatten_linear, ctx=devs, walk=True, name=f"{queue} opsel")
-
-  cnt = sum(len(ins.src) for ins in lin.src) // CMD_SIZE
-  assert cnt < RING_SLOTS, f"submit of {cnt} entries doesn't fit the ring"
-  cmdbuf = make_cmdbuf(lin, devs, buf=UOp.placeholder((cnt*CMD_SIZE,), dtypes.uint64, next(UOp.unique_num), device=devs).rtag("cmdbuf"))
-  ring = UOp.placeholder((ring_words:=RING_SLOTS*CMD_SIZE,), dtypes.uint64, 0, device=devs, volatile=True).rtag(f"{queue}_ring")
-  put, done, sem, sysbuf = (make_buf(devs, tag=f"{queue}_{name}") for name in ("put", "done", "sem", "sys"))
+def cpu_submit(ctx, cmdbuf:UOp) -> UOp:
+  # copy the cmd entries into the worker ring and post the semaphore once per entry
+  assert ctx.nbytes % (CMD_SIZE * 8) == 0 and ctx.nbytes // (CMD_SIZE * 8) < RING_SLOTS, f"submit of {ctx.nbytes} bytes doesn't fit the ring"
+  devs, cnt, cb = ctx.devs, hcq_size_var(cmdbuf) // (CMD_SIZE * 8), cmdbuf.bitcast(dtypes.uint64)
+  ring, put, done, sem = (make_buf(devs, tag=f"{ctx.queue}_{n}") for n in ("ring", "put", "done", "sem"))
 
   # submits are serialized on the submitter, so they can bump put without atomics
-  ran = done.after(l:=UOp.loop(next(UOp.unique_num))).index(0).load()
-  room = ran.end(l, put.index(0).load() - ran > RING_SLOTS - cnt) # wait until cnt entries fit in the ring
-  base = ((put.after(room).index(0).load() % RING_SLOTS) * CMD_SIZE).cast(dtypes.int)
-  e = UOp.range(cnt, next(UOp.unique_num), dtype=dtypes.int, src=(cmdbuf, ring))
-  copy = UOp.group(*[ring.index((base + e*CMD_SIZE + w) % ring_words).store(cmdbuf.index(e*CMD_SIZE + w).load()) for w in range(CMD_SIZE)])
+  ran = done.after(l:=UOp.loop(10)).index(0).load()
+  room = ran.end(l, put.index(0).load() - ran > (RING_SLOTS - cnt).cast(ran.dtype)) # wait until cnt entries fit in the ring
+  base = ((put.after(room, cmdbuf).index(0).load() % RING_SLOTS) * CMD_SIZE).cast(dtypes.int)
+  e = UOp.range(cnt, 11, dtype=dtypes.int, src=(cmdbuf, ring))
+  # the slot is a multiple of CMD_SIZE, so a word can never wrap on its own: take the modulo once per entry, not per word
+  slot = (base + e*CMD_SIZE) % (RING_SLOTS * CMD_SIZE)
+  w = UOp.range(CMD_SIZE, 12, dtype=dtypes.int, src=(cmdbuf, ring))
+  copy = ring.index(slot + w).store(cb.index(e*CMD_SIZE + w).load()).end(w)
 
-  bumped = put.after(copy.end(e)).index(0).store(put.index(0).load() + cnt)
-  if WIN: return sysbuf.after(bumped).index(0).store(put.after(bumped).index(0).load())
-
-  e = UOp.range(cnt, next(UOp.unique_num), dtype=dtypes.int, src=(bumped,))
+  bumped = put.after(copy.end(e)).index(0).store(put.index(0).load() + cnt.cast(dtypes.uint64))
+  if WIN: return make_buf(devs, tag=f"{ctx.queue}_sys").after(bumped).index(0).store(put.after(bumped).index(0).load())
+  e = UOp.range(cnt, 13, dtype=dtypes.int, src=(bumped,))
   return make_buf(devs, tag="func:sem_post").after(e).index(0).load().call(sem.after(e).index(0), ret_dtype=dtypes.void).end(e)
+
+pm_cpu_submit = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(name="cmdbuf"),)), cpu_submit)])
 
 # *****************
 
@@ -194,7 +195,7 @@ class CPUAllocator(HCQAllocator['CPUDevice']):
 
 class CPUDevice(HCQ2Compiled):
   wait_timeout_ms, has_copy_queue = 30000, False
-  pm_lower = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue)])
+  pm_encode, pm_lower = {"COMPUTE": pm_cpu_opsel, "SUBMIT": pm_cpu_opsel}, {"COMPUTE": pm_cpu_submit, "SUBMIT": pm_cpu_submit}
 
   def __init__(self, device:str=""):
     self.workers:list[CPUWorker] = []
@@ -202,8 +203,8 @@ class CPUDevice(HCQ2Compiled):
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
 
     self.pm_bufferize = PatternMatcher(
-      [(UPat(Ops.PARAM, tag=f"{q}_{n}"), lambda ctx, q=q,n=n: getattr(ctx[0].worker(q), n))
-       for q in ("COMPUTE:0", "SUBMIT:0") for n in ("ring", "put", "sem", "sys", "done")] +
+      [(UPat(Ops.PARAM, tag=f"{q}_{n}"), lambda ctx, q=q, n=n: getattr(ctx[0].worker(q), n))
+       for q in ("COMPUTE:0", "SUBMIT:0") for n in ("ring","put","sem","sys","done")] +
       [(UPat(Ops.PARAM, tag=f"func:{f}"), lambda ctx, f=f: ctx[0].func_ptr(f)) for f in FUNCS]) + self.pm_bufferize
 
     with Context(EMULATED_DTYPES="", TRACK_MATCH_STATS=0):
