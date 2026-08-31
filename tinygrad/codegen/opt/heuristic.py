@@ -163,17 +163,18 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     if NOLOCALS:
       k.apply_opt(Opt(OptOps.NOLOCALS))
     elif k.ren.target.device == "QCOM":
-      # measured on Adreno: use 32..256 threads per workgroup, at most 8 on the innermost axis (which launches as lidx0/gidx0)
+      # measured on Adreno: use 32..128 threads per workgroup, at most 8 on the innermost axis (which launches as lidx0/gidx0)
+      # NOTE: workgroups must stay <= 128, binary register usage can limit QCOM launches to 128 threads (see QCOMProgram.max_threads)
       # apply innermost global axes first so the leading hardware local dims hold the trailing global axes, like gidx
       workgroup, qcom_local = 1, []
       for axis in [a for a in k.axes_of(AxisType.GLOBAL, AxisType.WEAK) if k.rngs[a].src[0].op is Ops.CONST][-3:][::-1]:
-        if (sz := max(x for x in range(1, min(int(k.full_shape[axis]), 8 if workgroup == 1 else 256 // workgroup) + 1)
+        if (sz := max(x for x in range(1, min(int(k.full_shape[axis]), 8 if workgroup == 1 else 128 // workgroup) + 1)
                       if int(k.full_shape[axis]) % x == 0)) > 1:
           qcom_local.append((axis, sz))
           workgroup *= sz
       if qcom_local and workgroup < 32:  # fill at least one wave: grow the innermost local as much as possible
         axis, old_sz = qcom_local[0]
-        sz = max(x for x in range(1, min(int(k.full_shape[axis]), 256 * old_sz // workgroup) + 1) if int(k.full_shape[axis]) % x == 0)
+        sz = max(x for x in range(1, min(int(k.full_shape[axis]), 128 * old_sz // workgroup) + 1) if int(k.full_shape[axis]) % x == 0)
         qcom_local[0], workgroup = (axis, sz), workgroup // old_sz * sz
       for axis, sz in qcom_local: k.apply_opt(Opt(OptOps.LOCAL, axis, sz))
     else:
