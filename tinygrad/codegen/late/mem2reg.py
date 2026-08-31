@@ -62,27 +62,21 @@ class Mem2regContext:
     phi = self.phis.get((ptr, self.nl[ptr]), None)
     return (phi, [phi]) if phi is not None else None
 
-  def try_merge_edge(self, x:UOp) -> tuple[UOp, list[UOp]]|None:
+  def try_merge_edge(self, x:UOp, idx:UOp, val:UOp) -> tuple[UOp, list[UOp]]|None:
     if (phis := self.phi_copies.get(rdef(x), None)):
-      copies = []
-      for p in phis: copies.extend(self.ren.vcopy(x.src[1], p)[1])
+      carry, copies = None, []
+      for i, p in enumerate(phis):
+        out = self.ren.vcopy(x.src[1], p)
+        if i == 0: carry = out[0]
+        copies.extend(out[1])
+      self.current[bptr(idx)] = carry
       return x, [x] + copies
-    return None
+    else:
+      out = self.ren.vcopy(val, rdef(x))
+      self.current[bptr(idx)] = out[0]
+      return out
 
-pm_insert_phis = PatternMatcher([
-  (UPat.var("idx").load(name="x"), lambda ctx,idx,x: ctx.try_phi(idx, x)),
-  (UPat(Ops.STORE, name="x"), lambda ctx,x: ctx.try_merge_edge(x)),
-])
-
-# REG store copy/coalesce is handled by regalloc PHI logic
-# simply rewrite LOADs to equivalent SSA node
-def update(ctx, val:UOp, x:UOp, idx:UOp):
-  nx = ctx.ren.vcopy(val, rdef(x))
-  ctx.current[bptr(idx)] = nx[0]
-  return nx
-
-# only deterministic LOADs remain
 pm_promote_regbufs = PatternMatcher([
-  (UPat.var("idx").store(UPat.var("val"), name="x"), update),
-  (UPat.var("idx").load(name="x"), lambda ctx,idx,x: (ctx.current[bptr(idx)], [])),
+  (UPat.var("idx").load(name="x"), lambda ctx,idx,x: ctx.try_phi(idx, x) or (ctx.current[bptr(idx)], [])),
+  (UPat.var("idx").store(UPat.var("val"), name="x"), lambda ctx,x,idx,val: ctx.try_merge_edge(x, idx, val)),
 ])
