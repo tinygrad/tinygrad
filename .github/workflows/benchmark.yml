@@ -474,7 +474,7 @@ jobs:
           - dev: QCOM:IR3
             version: '0.11.2'
             model: supercombo
-            timing: 41
+            timing: 29
           - version: '0.11.2'
             model: dmonitoring
             url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
