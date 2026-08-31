@@ -662,11 +662,32 @@ class GPTDataset:
     print(f"building sample_idx for {self.samples=}, {self.seqlen=}, {self.doc_idx.shape[0]=}")
     sample_idx_max = max(self.doc_idx.shape[0], self.indexed_dataset.sizes.max())
     sample_idx = np.empty((self.samples + 1, 2), dtype=np.int64 if sample_idx_max > dtypes.int32.max else np.int32)
-    doc_ends = np.cumsum(self.indexed_dataset.sizes[self.doc_idx], dtype=np.int64)
-    sample_positions = np.arange(self.samples + 1, dtype=np.int64) * self.seqlen
-    sample_idx[:, 0] = doc_idx_idx = np.searchsorted(doc_ends, sample_positions, side="right")
-    sample_idx[:, 1] = sample_positions
-    sample_idx[doc_idx_idx > 0, 1] -= doc_ends[doc_idx_idx[doc_idx_idx > 0] - 1]
+
+    sample_idx_idx, doc_idx_idx, doc_offset = 0, 0, 0
+    sample_idx[sample_idx_idx, 0], sample_idx[sample_idx_idx, 1] = doc_idx_idx, doc_offset
+    sample_idx_idx += 1
+
+    for _ in tqdm(range(1, self.samples + 1)):
+      remaining_seqlen = self.seqlen + 1
+      while remaining_seqlen > 0:
+        doc_idx = int(self.doc_idx[doc_idx_idx])
+        doc_len = int(self.indexed_dataset.sizes[doc_idx]) - doc_offset
+        remaining_seqlen -= doc_len
+        if remaining_seqlen <= 0:
+          doc_offset += remaining_seqlen + doc_len - 1
+          remaining_seqlen = 0
+        else:
+          if doc_idx_idx == len(self.doc_idx) - 1:
+            assert sample_idx_idx == self.samples
+            doc_idx = int(self.doc_idx[doc_idx_idx])
+            doc_offset = int(self.indexed_dataset.sizes[doc_idx]) - 1
+            break
+          doc_idx_idx += 1
+          doc_offset = 0
+
+      sample_idx[sample_idx_idx, 0], sample_idx[sample_idx_idx, 1] = doc_idx_idx, doc_offset
+      sample_idx_idx += 1
+
     return sample_idx
 
   def _build_shuffle_idx(self):
