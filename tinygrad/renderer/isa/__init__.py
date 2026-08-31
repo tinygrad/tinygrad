@@ -2,7 +2,7 @@ from __future__ import annotations
 import itertools, functools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort, ProgramInfo
 
 @dataclass(frozen=True)
 class Register:
@@ -71,6 +71,7 @@ class ISARenderer(Renderer):
   def vreg(self, cons:tuple[Register, ...], **kwargs) -> VRegister:
     return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
 
+  def view_prg(self, info:ProgramInfo) -> None: return None
   def is_two_address(self, x:UOp) -> bool: return False
   def assign_spill_slot(self, v:VRegister, vdef:UOp) -> tuple[int, int]: raise NotImplementedError("arch specific")
   def stack_alloc(self, uops:list[UOp]) -> list[UOp]: return uops

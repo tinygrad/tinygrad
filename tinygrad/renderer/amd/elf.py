@@ -71,6 +71,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str, scratch_size:int=0) -> bytes:
                             (0 if is_rdna3 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_WGP_MODE_SHIFT |
                             (0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_DX10_CLAMP_SHIFT |
                             (0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_IEEE_MODE_SHIFT |
+                            (0 if is_cdna else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_WGP_MODE_SHIFT |
                             (0 if is_cdna else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_MEM_ORDERED_SHIFT)
   desc.compute_pgm_rsrc2 = (1 << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT_SHIFT |
                             2 << amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT |
