@@ -734,7 +734,6 @@ if __name__ == "__main__":
     data = pickle.load(f)
   prg_names = {e.tag: e.name for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
-  dev_targets = {e.device:f"gfx{e.props['gfx_target_version']//1000}" for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.props}
   evt_num = getenv("SQTT_EVENT", -1)
   for i, event in enumerate(sqtt_events):
     print(f"\n=== event {i} {prg_names.get(event.kern, '')} ===")
