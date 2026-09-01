@@ -29,6 +29,21 @@ def build_onnx(nodes, from_disk:bool=True, **kwargs):
   return runner
 
 class TestOnnxRunner(unittest.TestCase):
+  def test_tinygrad_contiguous(self):
+    graph = onnx.helper.make_graph([
+      onnx.helper.make_node("Add", ["input", "one"], ["added"]),
+      onnx.helper.make_node("TinygradContiguous", ["added"], ["materialized"], domain="org.tinygrad"),
+      onnx.helper.make_node("Mul", ["materialized", "two"], ["output"]),
+    ], "test_tinygrad_contiguous",
+      [onnx.helper.make_tensor_value_info("input", onnx.TensorProto.FLOAT, (4,))],
+      [onnx.helper.make_tensor_value_info("output", onnx.TensorProto.FLOAT, (4,))],
+      [onnx.helper.make_tensor("one", onnx.TensorProto.FLOAT, (), [1.0]),
+       onnx.helper.make_tensor("two", onnx.TensorProto.FLOAT, (), [2.0])])
+    model = onnx.helper.make_model(graph, opset_imports=[onnx.helper.make_opsetid("", 13), onnx.helper.make_opsetid("org.tinygrad", 1)])
+    onnx.checker.check_model(model)
+    runner = OnnxRunner(Tensor(model.SerializeToString(), device="PYTHON")).to("PYTHON")
+    _check_ast_count(2, runner({"input": Tensor.empty(4, device="PYTHON")})["output"])
+
   def _test_const_fold_unary_op(self, from_disk:bool):
     runner = build_onnx(
         nodes=[
