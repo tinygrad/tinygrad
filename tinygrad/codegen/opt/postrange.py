@@ -116,12 +116,12 @@ class Scheduler:
     return axis
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
-    if opt.op in {OptOps.LOCAL, OptOps.GROUPTOP}:
-      check(self.ren.has_local, "locals needed for opt")
+    if opt.op is OptOps.LOCAL: check(self.ren.has_local, "locals needed for opt")
 
     rng = self.rngs[real_axis] if (real_axis:=self.real_axis(opt.op, opt.axis)) >= 0 else UOp(Ops.NOOP)
+    check(not opt.top or (opt.op is OptOps.LOCAL and rng.arg[-1] is AxisType.REDUCE), "top is only for group reduce")
 
-    opt_to_at = {OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST, OptOps.GROUPTOP: AxisType.GROUP_REDUCE}
+    opt_to_at = {OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST}
 
     ret = None
     if opt.op in opt_to_at:
@@ -135,7 +135,6 @@ class Scheduler:
       if opt.op is OptOps.LOCAL:
         check(rng.arg[-1] in local_to, f"local is for GLOBAL/LOOP/REDUCE, not {rng.arg[-1]}")
         new_type = local_to[rng.arg[-1]]
-      if opt.op is OptOps.GROUPTOP: check(rng.arg[-1] is AxisType.REDUCE, "grouptop is for reduce")
       if new_type is AxisType.GROUP_REDUCE:
         check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
 
@@ -149,7 +148,7 @@ class Scheduler:
         reduce = [u for u in self.ast.backward_slice if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
         check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
           "cannot have a GROUP_REDUCE inside another reduce")
-      ret = self.shift_to(rng, amt, new_type, top=opt.op is OptOps.GROUPTOP)
+      ret = self.shift_to(rng, amt, new_type, top=opt.top)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
       check(opt.axis is not None, "tensor core opts must have an axis")
