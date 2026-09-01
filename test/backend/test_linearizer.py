@@ -345,7 +345,7 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_store_locals_and_globals(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     out = x@y
-    opt = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 3, 8),
+    opt = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 3, 8, top=True),
             Opt(OptOps.UPCAST, 3, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
     ast = helper_linearizer_opt(out, opts=[opt])
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])

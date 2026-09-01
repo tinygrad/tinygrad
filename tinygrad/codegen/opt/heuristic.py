@@ -78,7 +78,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if k.ren.target.device == "QCOM" else 2048), False):
     for axis, sz in itertools.product(k.axes_of(AxisType.REDUCE)[:3], (16,)):
       try:
-        k.apply_opt(Opt(OptOps.GROUPTOP, axis, sz))
+        k.apply_opt(Opt(OptOps.LOCAL, axis, sz, top=True))
         break
       except KernelOptError: pass
 
