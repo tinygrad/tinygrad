@@ -61,13 +61,13 @@ class DSPProgram(Program['DSPDevice']):
   def __init__(self, dev:DSPDevice, obj:TinyELF): self.dev, self.lib, self.signature = dev, obj.lib, obj.signature
 
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
-    bufs = [a for a,(*_,addrspace) in zip(args, self.signature) if addrspace is not AddrSpace.ALU]
+    bufs = [a for a,(*_,shape) in zip(args, self.signature) if shape != ()]
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
 
     pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray(len(args)*8)), off_mv:=memoryview(bytearray(len(bufs)*4))],
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
-    for i,(a,(_,_,dt,_,addrspace)) in enumerate(zip(args, self.signature)):
-      val, fmt = (a, unwrap(dt.fmt)) if addrspace is AddrSpace.ALU else (a.size, 'i')
+    for i,(a,(_,_,dt,shape)) in enumerate(zip(args, self.signature)):
+      val, fmt = (a, unwrap(dt.fmt)) if shape == () else (a.size, 'i')
       struct.pack_into(fmt, var_vals_mv, i*8, val)
     off_mv.cast('I')[:] = array.array('I', tuple(b.offset for b in bufs))
     self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
@@ -278,14 +278,14 @@ class MockDSPRenderer(DSPRenderer):
 class MockDSPProgram(Program[DSPDevice]):
   def __init__(self, dev:DSPDevice, obj:TinyELF): self.lib, self.signature = obj.lib, obj.signature
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
-    bufs = [a for a,(*_,addrspace) in zip(args, self.signature) if addrspace is not AddrSpace.ALU]
+    bufs = [a for a,(*_,shape) in zip(args, self.signature) if shape != ()]
     with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
       dsp_lib.write(self.lib)
       dsp_lib.flush()
       os.chmod(dsp_lib.name, 0o0777)
       proc = subprocess.run(["qemu-hexagon-static", *(['-strace'] if DEBUG >= 5 else []), dsp_lib.name],
-        input=b''.join([struct.pack(unwrap(dt.fmt), a) if addrspace is AddrSpace.ALU else bytes(to_mv(a.va_addr, a.size))
-                        for a,(_,_,dt,_,addrspace) in zip(args, self.signature)]),
+        input=b''.join([struct.pack(unwrap(dt.fmt), a) if shape == () else bytes(to_mv(a.va_addr, a.size))
+                        for a,(_,_,dt,shape) in zip(args, self.signature)]),
         stdout=subprocess.PIPE, check=True)
     offset = 4
     for x in bufs:

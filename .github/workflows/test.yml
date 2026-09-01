@@ -114,7 +114,7 @@ jobs:
     - name: Run backend tests
       run: SKIP_SLOW_TEST=1 DEV=PYTHON python3 -m pytest -n=auto test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_ops.py test/backend/test_uops.py test/backend/test_symbolic_ops.py test/backend/test_renderer_failures.py::TestRendererFailures test/backend/test_kernel_arg_order.py --durations=20
     - name: Test IMAGE support
-      run: IMAGE=1 DEV=PYTHON python3 test/backend/test_ops.py TestOps.test_gemm TestOps.test_simple_conv2d
+      run: IMAGE=1 DEV=PYTHON python3 -m pytest test/backend/test_ops.py::TestOps::test_gemm test/backend/test_ops.py::TestOps::test_simple_conv2d test/backend/test_kernel_arg_order.py
     - name: Test emulated tensor cores
       env:
         DEBUG: 2
@@ -286,7 +286,7 @@ jobs:
           opencl: 'true'
       - name: Test CL IMAGE=1 ops
         run: |
-          DEV=CL IMAGE=1 python -m pytest -n=auto test/backend/test_ops.py --durations=20
+          DEV=CL IMAGE=1 python -m pytest -n=auto test/backend/test_ops.py test/backend/test_kernel_arg_order.py --durations=20
           DEV=CL IMAGE=1 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - name: Run process replay tests
         uses: ./.github/actions/process-replay

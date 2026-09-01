@@ -45,12 +45,14 @@ def generic_wmma_helper(inp, warp_size, WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_
 class PythonProgram(Program['PythonDevice']):
   def __init__(self, dev:'PythonDevice', obj:TinyELF):
     self.uops: list[UOp] = pickle.loads(obj.lib)
+    self.signature = obj.signature
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
     self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op == Ops.END}
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), wait=False, **kw):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
+    slot_to_arg = {slot: a for a,(_,slot,_,_) in zip(args, self.signature)}
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
       values: dict[UOp, Any] = {}
       exec_masks = [[True] * warp_size]
@@ -88,7 +90,7 @@ class PythonProgram(Program['PythonDevice']):
           i += 1
           continue
         if u.op is Ops.AFTER or (u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]
-        elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [args[u.arg.slot]] * warp_size
+        elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [slot_to_arg[u.arg.slot]] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
           storage_fmt = storage_fmt_for_dtype(u.dtype)
           if storage_fmt is None: raise RuntimeError(f"dtype={u.dtype} is not supported")
@@ -97,7 +99,7 @@ class PythonProgram(Program['PythonDevice']):
             # REGs are per thread
             values[u] = [memoryview(bytearray(u.max_numel()*u.dtype.itemsize)).cast(storage_fmt) for _ in range(warp_size)]
           else:
-            buf = memoryview(bytearray(u.max_numel()*u.dtype.itemsize)) if u.op is not Ops.PARAM else args[u.arg.slot]
+            buf = memoryview(bytearray(u.max_numel()*u.dtype.itemsize)) if u.op is not Ops.PARAM else slot_to_arg[u.arg.slot]
             values[u] = [buf.cast(storage_fmt)] * warp_size
         elif u.op is Ops.SPECIAL:
           if u.arg[0] == 'g': values[u] = [idxs[2-int(u.arg[-1])]] * warp_size

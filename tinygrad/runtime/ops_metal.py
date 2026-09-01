@@ -2,7 +2,6 @@ import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platfo
 from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, Program, TinyELF, LRUAllocator, ProfileDeviceEvent
-from tinygrad.dtype import AddrSpace
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
@@ -139,8 +138,8 @@ class MetalProgram(Program[MetalDevice]):
     command_buffer = self.dev.mtl_queue.commandBuffer().retained()
     encoder = command_buffer.computeCommandEncoder().retained()
     encoder.setComputePipelineState(self.pipeline_state)
-    for a,(_,i,dt,_,addrspace) in zip(args, self.signature):
-      if addrspace is AddrSpace.ALU: encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{dt.bitsize}")(a)), dt.itemsize, i)
+    for a,(_,i,dt,shape) in zip(args, self.signature):
+      if shape == (): encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{dt.bitsize}")(a)), dt.itemsize, i)
       else: encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
     encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
     encoder.endEncoding()

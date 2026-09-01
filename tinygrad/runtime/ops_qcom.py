@@ -203,9 +203,9 @@ class QCOMArgsState(HCQArgsState):
     super().__init__(buf, prg, args)
     ctypes.memset(int(self.buf.va_addr), 0, prg.kernargs_alloc_size)
 
-    unis = [a for a,(_,_,_,shape,_) in zip(args, prg.signature) if not is_image_shape(shape)]
+    unis = [a for a,(_,_,_,shape) in zip(args, prg.signature) if not is_image_shape(shape)]
     usig = tuple(sig for sig in prg.signature if not is_image_shape(sig[3]))
-    uavs = [(dt,shape,a) for a,(_,_,dt,shape,_) in zip(args, prg.signature) if is_image_shape(shape)]
+    uavs = [(dt,shape,a) for a,(_,_,dt,shape) in zip(args, prg.signature) if is_image_shape(shape)]
     # NIR can reorder images to different texture slots
     ibos, texs = uavs[:prg.ibo_cnt], [uavs[prg.ibo_cnt + (prg.tex_to_image[i] if prg.NIR else i)] for i in range(prg.tex_cnt)]
     for cnst_val,cnst_off,cnst_sz in prg.consts_info:
@@ -213,7 +213,7 @@ class QCOMArgsState(HCQArgsState):
 
     if prg.samp_cnt > 0: to_mv(int(self.buf.va_addr) + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     offs = [prg.buf_off + off for off,_ in TinyELF.iter_sig(usig)] if prg.NIR else prg.buf_offs
-    for a,(_,_,dt,_,_),off in zip(unis,usig,offs):
+    for a,(_,_,dt,_),off in zip(unis,usig,offs):
       val, fmt = (a.va_addr, 'Q') if isinstance(a, HCQBuffer) else (a, dt.fmt)
       self.bind_sints_to_buf(val, buf=self.buf, fmt=fmt, offset=off)
 

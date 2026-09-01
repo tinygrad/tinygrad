@@ -1238,9 +1238,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    params = sorted([u for u in self.src[0].toposort() if u.op is Ops.PARAM], key=lambda u: u.arg.slot)
-    sig = tuple((p.arg.name, p.arg.slot, p.dtype, p._shape, p.arg.addrspace) for p in params)
-    return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig, self.key)
+    return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, self.arg.signature, self.key)
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -1260,7 +1258,7 @@ class ProgramInfo:
   global_size: tuple[int|float, ...] = (1, 1, 1)
   local_size: tuple[int, ...]|None = None
   vars: tuple[UOp, ...] = ()
-  globals: tuple[int, ...] = ()
+  signature: tuple[tuple[str|None, int, DType, tuple], ...] = ()
   outs: tuple[int, ...] = ()
   ins: tuple[int, ...] = ()
   target: Target = Target()
@@ -1270,6 +1268,9 @@ class ProgramInfo:
 
   @property
   def runtimevars(self) -> dict[str, int]: return {v.expr: i for i, v in enumerate(self.vars) if v.expr == 'core_id'}
+
+  @property
+  def globals(self) -> tuple[int, ...]: return tuple(dedup(s[1] for s in self.signature if s[3] != ()))
 
   def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]|None]:
     global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
@@ -1282,19 +1283,19 @@ class ProgramInfo:
 
   def merge_args(self, bufs:Iterable[Any], vals:Iterable[Any]) -> list[Any]:
     slot_to_arg = dict(zip(self.globals, bufs)) | dict(zip([v.arg.slot for v in self.vars], vals))
-    return [slot_to_arg[s] for s in sorted(slot_to_arg)]
+    return [slot_to_arg[s[1]] for s in self.signature]
 
   @staticmethod
   def from_sink(sink:UOp, target:Target=Target()) -> ProgramInfo:
     _vars: list[UOp] = []
-    _globals: list[int] = []
+    _bufs: list[UOp] = []
     outs: list[int] = []
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
     for u in sink.toposort():
       if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
-      if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
+      if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _bufs.append(u)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
@@ -1305,7 +1306,8 @@ class ProgramInfo:
       if u.op is Ops.PARAM and u in _vars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
                        tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
-                       tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), target)
+                       tuple((u.arg.name, u.arg.slot, u.dtype, u._shape) for u in sorted(dedup(_bufs + _vars),
+                             key=lambda v: (v.arg.slot, is_image_shape(v._shape)))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), target)
 
 @dataclass(frozen=True)
 class CallInfo:

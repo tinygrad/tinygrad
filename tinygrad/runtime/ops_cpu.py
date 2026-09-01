@@ -119,7 +119,7 @@ class CPUProgram(Program['CPUDevice']):
 
   def __init__(self, dev:CPUDevice, obj:TinyELF):
     self.dev, self.name, self.signature = dev, obj.name, obj.signature
-    self.runtimevars = {name:slot for name,slot,*_ in obj.signature if name == 'core_id'}
+    self.runtimevars = {name:i for i,(name,*_) in enumerate(obj.signature) if name == 'core_id'}
     self.lvp = obj.target.renderer == "LVP"
 
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
