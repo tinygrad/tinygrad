@@ -1,8 +1,8 @@
+
 import unittest
 import numpy as np
 
-from tinygrad import Tensor
-from tinygrad.ops_scan import associative_scan
+from tinygrad import Tensor, associative_scan
 
 class TestAssociativeScan(unittest.TestCase):
   def test_add_axis(self):
