@@ -8,7 +8,7 @@ from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, lo32, hi32
-from tinygrad.helpers import ceildiv, unwrap, pluralize, to_tuple
+from tinygrad.helpers import ceildiv, unwrap, pluralize
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amdgpu_kd, amdgpu_drm
@@ -99,7 +99,7 @@ class AMDComputeQueue(HWQueue):
     self.acquire_mem()
 
   def exec(self, call:UOp, prg:UOp):
-    data, lib = amd_build_program(self.dev, prg)
+    data, lib = amd_build_program(self.dev, prg, self.devs)
     info = prg.arg
 
     # kernargs: a nested blob linear inside a getaddr, packed into the tail of the cmdbuf
@@ -146,10 +146,11 @@ class AMDComputeQueue(HWQueue):
   def submit(self, cmdbuf:UOp) -> UOp:
     for d in self.devs: q = Device[d].compute_queue
 
-    ring = self.new_arg(UOp.placeholder((q.ring.size,), q.ring.dtype, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_ring"))
-    wptr = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_write_ptr"))
-    doorbell = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_doorbell"))
-    put = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_put_value"))
+    nm = "_".join([self.devs[0].split(":")[0], *self.queue.split(":")]).lower()
+    ring = self.new_arg(UOp.placeholder((q.ring.size,), q.ring.dtype, 0, device=self.devs, volatile=True, tag=f"{self.queue}_ring", name=f"ring_{nm}"))
+    wptr = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_write_ptr", name=f"write_ptr_{nm}"))
+    doorbell = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_doorbell", name=f"doorbell_{nm}"))
+    put = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_put_value", name=f"put_value_{nm}"))
 
     size_dw = cmdbuf.max_numel() // 4
     p = put.after(*self.deps).index(0).load()
@@ -197,10 +198,11 @@ class AMDSDMAQueue(HWQueue):
     # sdma needs the cmdbuf contiguous in the ring: if it won't fit before the ring end, restart at 0 and zero the tail
     for d in self.devs: q = unwrap(Device[d].sdma_queue(int(self.queue.split(":")[1])))
 
-    ring = self.new_arg(UOp.placeholder((q.ring.size,), q.ring.dtype, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_ring"))
-    wptr = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_write_ptr"))
-    doorbell = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_doorbell"))
-    put = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_put_value"))
+    nm = "_".join([self.devs[0].split(":")[0], *self.queue.split(":")]).lower()
+    ring = self.new_arg(UOp.placeholder((q.ring.size,), q.ring.dtype, 0, device=self.devs, volatile=True, tag=f"{self.queue}_ring", name=f"ring_{nm}"))
+    wptr = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_write_ptr", name=f"write_ptr_{nm}"))
+    doorbell = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_doorbell", name=f"doorbell_{nm}"))
+    put = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_put_value", name=f"put_value_{nm}"))
 
     rs, size_dw = q.ring.size, cmdbuf.max_numel() // 4
     put_b = put.after(*self.deps).index(0).load()
@@ -222,9 +224,9 @@ class AMDProgramData:
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int
 
 _amd_program_cache:dict[tuple[bytes, tuple[str, ...]], tuple[AMDProgramData, UOp]] = {}
-def amd_build_program(dev, prg:UOp) -> tuple[AMDProgramData, UOp]:
+def amd_build_program(dev, prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramData, UOp]:
   # key on the full device tuple: the same lib can be built for different device sets, each needs its own program buffer
-  if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, to_tuple(prg.device)))) is None:
+  if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, devs))) is None:
     image, sections, relocs = elf_loader(lib)
     rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
     for off, sym, typ, addent in relocs:
@@ -242,7 +244,7 @@ def amd_build_program(dev, prg:UOp) -> tuple[AMDProgramData, UOp]:
       kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0), enable_dispatch_ptr=edp,
       enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)
     image = bytes(image).ljust(round_up(len(image), 4), b"\x00") # the program is uploaded as whole dwords
-    buf = UOp.placeholder((len(image),), dtypes.uint8, next(UOp.unique_num), device=prg.device).rtag("program")
+    buf = UOp.placeholder((len(image),), dtypes.uint8, next(UOp.unique_num), device=devs).rtag("program")
     cached = _amd_program_cache[key] = (data, buf.after(buf.store(UOp(Ops.BINARY, src=(), arg=image).bitcast(buf.dtype))))
   return cached
 
