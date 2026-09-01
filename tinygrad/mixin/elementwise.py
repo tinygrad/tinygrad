@@ -506,8 +506,10 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).cos().numpy())
     ```
     """
+    # pi/2 falls below the ulp of x once |x| is large, so (pi/2 - x) rounds to -x and cos collapses to -sin(x).
+    # halving is exact in binary fp, so cos(x) = 1 - 2*sin(x/2)**2 keeps the phase and lets sin do the range reduction.
     self = self.cast(least_upper_float(self.dtype))
-    return ((math.pi/2)-self.cast(least_upper_dtype(self.dtype, dtypes.float32))).sin().cast(self.dtype)
+    return (1.0 - 2.0 * (self.cast(least_upper_dtype(self.dtype, dtypes.float32)) * 0.5).sin().square()).cast(self.dtype)
 
   def exp(self) -> Self:
     """

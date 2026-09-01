@@ -68,7 +68,8 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
 pm_gradient = PatternMatcher([
   (UPat(Ops.CAST, name="ret"), lambda ctx, ret: (ctx.cast(ret.src[0].dtype),)),
   (UPat(Ops.RECIPROCAL, name="ret"), lambda ctx, ret: (-ctx * ret * ret,)),
-  (UPat(Ops.SIN, name="ret"), lambda ctx, ret: ((math.pi/2 - ret.src[0]).sin() * ctx,)),
+  # d(sin)/dx = cos(x), as 1 - 2*sin(x/2)**2 rather than sin(pi/2 - x), which collapses to -sin(x) for large x
+  (UPat(Ops.SIN, name="ret"), lambda ctx, ret: ((1.0 - 2.0 * (h:=(ret.src[0]*0.5).sin()) * h) * ctx,)),
   (UPat(Ops.LOG2, name="ret"), lambda ctx, ret: (ctx / (ret.src[0] * math.log(2)),)),
   (UPat(Ops.EXP2, name="ret"), lambda ctx, ret: (ret * ctx * math.log(2),)),
   (UPat(Ops.SQRT, name="ret"), lambda ctx, ret: (ctx / (ret*2),)),
