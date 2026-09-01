@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, USE_TC, IMAGE, REASSOC_OPT, REASSOC_CUS
+from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, USE_TC, IMAGE, TC_OCCUPANCY_OPT, REASSOC_CUS
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -40,7 +40,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       if (szs := [sz for sz in [4,2] if baseline_rngs[0].src[0].divides(sz) is not None]): # attempt to local N
         baseline.apply_opt(Opt(OptOps.LOCAL, baseline.rngs.index(baseline_rngs[0]), szs[0]))
       baseline_ctas = prod(baseline.full_shape[i] for i in baseline.axes_of(AxisType.GLOBAL))
-      if not REASSOC_OPT or not resolve(2*baseline_ctas < (cus:=REASSOC_CUS.value or 32), False): return baseline
+      if not TC_OCCUPANCY_OPT or not resolve(2*baseline_ctas < (cus:=REASSOC_CUS.value or 32), False): return baseline
       if (szs := [sz for sz in [5,4,3,2] if rngs[1].src[0].divides(sz) is not None]):
         rngs[1] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[1]), szs[0]))[0]
       if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
