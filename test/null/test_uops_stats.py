@@ -245,13 +245,5 @@ class TestStatsOptimized(unittest.TestCase):
     self.assertEqual(est.ops, N*N)
     self.assertEqual(est.mem, N*N*4 + 4)
 
-  def test_reduce_group(self):
-    try:
-      p = to_program(replace_opts(self.ast_reduce, [Opt(OptOps.GROUP, 0, 50)]), renderer=Device[Device.DEFAULT].renderer)
-    except KernelOptError:
-      raise unittest.SkipTest("no locals")
-    est = p.src[0].arg.estimates
-    print(p.arg.name, est.ops, est.mem, est.lds)
-
 if __name__ == '__main__':
   unittest.main(verbosity=2)
