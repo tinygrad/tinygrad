@@ -435,8 +435,7 @@ class Tensor(RandMixin):
       (b:=self._buffer()).copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=x._data()))
       return self
     # a STORE can only write into storage: the target must be backed by a BUFFER (possibly under views)
-    assigned_to = self.uop.base
-    while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: assigned_to = assigned_to.src[0].base
+    assigned_to = self.uop.storage_base
     # assigning to a value (not storage-backed and not a CONTIGUOUS realization point) is initialization,
     # not a write: a Tensor.assign always overwrites the whole tensor, so the pending value is dead
     if assigned_to.op not in {Ops.BUFFER, Ops.CONTIGUOUS}:

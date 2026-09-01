@@ -125,16 +125,11 @@ spec_shared = PatternMatcher([
   # STORE: the target must be storage or a CONTIGUOUS realization point (or an AFTER/BITCAST/view of one);
   # CONTIGUOUS targets are written into the buffer the CONTIGUOUS creates. INDEX stores are checked above
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x:
-   True if (b:=store_target_base(x)).op in {Ops.BUFFER, Ops.PARAM, Ops.RETURNED, Ops.CONTIGUOUS} else None if b.op is Ops.INDEX else False),
+   True if (b:=x.storage_base).op in {Ops.BUFFER, Ops.PARAM, Ops.RETURNED, Ops.CONTIGUOUS} else None if b.op is Ops.INDEX else False),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 5),
 ])
-
-def store_target_base(x:UOp) -> UOp:
-  b = x.unsharded_base
-  while b.op in {Ops.BITCAST, Ops.AFTER}: b = b.src[0].unsharded_base
-  return b
 
 def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isinstance(s, str) for s in d))
 
