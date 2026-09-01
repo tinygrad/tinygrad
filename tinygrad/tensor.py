@@ -71,37 +71,29 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: assigned_to = assigned_to.src[0].base
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
-def _make_buffer_view(src:UOp) -> UOp|None:
-  if (cv := src.contiguous_view()) is None: return None
-  (buf, offset), size = cv, src.max_numel() * src.element_size() // cv[0].element_size()
-  if buf.op is not Ops.BUFFER: return None
-  # NB: make offset a UOp.variable here to do the offset computation in the kernels
-  return buf[offset:offset+size].bitcast(src.dtype)
-
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
   buf = src.base
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
-  if buf.op not in {Ops.BUFFER, Ops.UNSHARD}: return None
-
   # no symbolic shape
-  if not all_int(c.shape): return None
+  if buf.op not in {Ops.BUFFER, Ops.UNSHARD} or not all_int(c.shape): return None
 
-  if buf.op is not Ops.UNSHARD and (view := _make_buffer_view(src)) is not None:
-    ctx.views.add(view)
-    view = view.reshape(c.shape)
-    return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
-
-  # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then create SHRINK on the resolved result
-  if not isinstance(c.device, str):
+  # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then view the resolved shard
+  unshard = None
+  if buf.op is Ops.UNSHARD:
+    if isinstance(c.device, str): return None
     from tinygrad.schedule.multi import multi_pm
-    resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
-    if resolved.op is not Ops.UNSHARD: return None
-    if (view := _make_buffer_view(resolved.src[0])) is None: return None
-    ctx.views.add(view)
-    return view.reshape(resolved.src[0].shape).unshard(resolved.arg, resolved.src[1:])
+    if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
+    src = unshard.src[0]
 
-  return None
+  # offset the base buffer by the collapsed movement ops and view it
+  if (cv := src.contiguous_view()) is None or (buf := cv[0]).op is not Ops.BUFFER: return None
+  # NB: make offset a UOp.variable here to do the offset computation in the kernels
+  view = buf[cv[1]:cv[1] + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
+  ctx.views.add(view)
+  if unshard is not None: return view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:])
+  view = view.reshape(c.shape)
+  return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or c.num_returned == 0: return None
