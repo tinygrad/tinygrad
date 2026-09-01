@@ -129,9 +129,6 @@ class Scheduler:
       if amt == 0: amt = int(rng.vmax+1)
       if new_type is AxisType.UNROLL: check(amt <= 32, "don't unroll more than 32")
       if new_type is AxisType.UPCAST: check(self.ren.target.device == "DSP" or amt <= 16, "don't upcast more than 16")
-      if new_type is AxisType.GROUP_REDUCE:
-        check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
-
       # prevents METAL compiler hangs
       if self.reduceop is not None and (new_type is AxisType.GROUP_REDUCE or self.group_for_reduces):
         upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])

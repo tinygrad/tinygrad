@@ -173,7 +173,7 @@ def fix_group_for_reduce(x:UOp):
   if len(reduce_gfr) == 0: return None
 
   # NOTE: if there's other locals here, we need them in the buffer too
-  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] == AxisType.LOCAL]
+  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] in (AxisType.WARP, AxisType.LOCAL)]
 
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
