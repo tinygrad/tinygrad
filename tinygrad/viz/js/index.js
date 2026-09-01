@@ -487,13 +487,6 @@ async function renderProfiler(path, opts) {
           for (let si=start; si<steps.length; si++) {
             if (steps[si].name == e.name) { ref.step = si; shapeRef = ref; break; }
           }
-        } else {
-          const steps = ctxs[state.currentCtx].steps;
-          for (let i=state.currentStep+1; i<steps.length; i++) {
-            const loc = steps[i].loc;
-            if (loc == null) break;
-            if (loc === e.name) { shapeRef = {ctx:state.currentCtx-1, step:i}; break; }
-          }
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;

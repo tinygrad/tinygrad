@@ -465,11 +465,12 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
   start_ts:int|None = None
   end_ts:int|None = None
   for ts,en,e in flatten_events(profile, device_ts_diffs):
-    dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
-    if start_ts is None or st < start_ts: start_ts = st
-    if end_ts is None or et > end_ts: end_ts = et
-    if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
     if isinstance(e, ProfilePointEvent) and e.name == "JSON": ext_data[e.key] = e.arg
+    else:
+      dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
+      if start_ts is None or st < start_ts: start_ts = st
+      if end_ts is None or et > end_ts: end_ts = et
+      if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
   if start_ts is None: return None
   # return layout of per device events
   layout:dict[str, bytes|None] = {}
