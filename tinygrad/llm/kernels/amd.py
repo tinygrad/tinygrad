@@ -70,11 +70,11 @@ class Linear(nn.Linear):
     # scheduling and would copy the entire packed weight on every JIT graph
     if self.ggml_type == Q6_K:
       # Q6 blocks are 210 bytes, so consecutive blocks are only 2-byte aligned. pad each block to 212 bytes
-      # (a one-time copy at load) so the kernel can do all its reads as aligned u32 words
+      # the kernel can do all its reads as aligned u32 words
       nbytes, nblocks = raw.max_numel(), raw.max_numel() // Q6_BYTES
       byte_view = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer).view(nbytes, dtypes.uint8, raw_offset)))
-      padded = byte_view.reshape((nblocks, Q6_BYTES)).pad_to((nblocks, Q6_PADDED)).contiguous().realize()
-      self.weight = Tensor(UOp.from_buffer(cast(Buffer, padded.uop.buf_uop.buffer).view(nblocks * Q6_WORDS, dtypes.uint32, 0)))
+      padded = byte_view.reshape((nblocks, Q6_BYTES)).pad_to((nblocks, Q6_PADDED)).bitcast(dtypes.uint32)
+      self.weight = padded.contiguous().reshape(nblocks * Q6_WORDS)
     else:
       self.weight = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer)
         .view(raw.max_numel() * raw.dtype.itemsize // dtypes.uint32.itemsize, dtypes.uint32, raw_offset)))
@@ -116,7 +116,7 @@ def _amd_load(ptr:UOp, lanes:int|None=None) -> UOp:
   if lanes is None: return ptr.load(arg="nontemporal")
   buf, coords = ptr.src[0], ptr.src[1:]
   idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0))
-  return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load(dtype=ptr.dtype)
+  return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load()
 
 def _load_byte(raw:UOp, base:UOp, offset:UOp) -> UOp: return (raw[base + offset//4] >> ((offset&3)*8).cast(dtypes.uint32)) & 255
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
@@ -332,7 +332,7 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
 def q8_linear(layer:Linear, x:Tensor) -> Tensor:
   assert layer.ggml_type in (Q4_K, Q5_K, Q6_K, IQ4_XS)
   tokens = int(x.numel()) // layer.in_features
-  raw, out_features, in_features = layer.weight.uop.buf_uop, layer.out_features, layer.in_features
+  raw, out_features, in_features = layer.weight.uop, layer.out_features, layer.in_features
   def run(fxn:Callable[..., UOp], out:UOp, *srcs:UOp) -> Tensor:
     all_srcs = (out,)+srcs
     params = tuple(UOp.placeholder_like(src, slot=i) for i,src in enumerate(all_srcs))

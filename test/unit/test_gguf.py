@@ -5,16 +5,32 @@ from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
 from tinygrad.runtime.autogen import ggml_common as _ggml
 import numpy as np
 from gguf import GGUFReader, GGUFValueType, GGMLQuantizationType, GGML_QUANT_SIZES, dequantize, quantize
-from gguf.quants import IQ2_S, IQ3_S, IQ3_XXS
+from gguf.quants import IQ1_S, IQ2_S, IQ2_XS, IQ2_XXS, IQ3_S, IQ3_XXS
 
 ggml_test_block_count = 4
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
 class TestGGUFTables(unittest.TestCase):
+  def test_iq2_xxs_grid_matches_gguf_py(self):
+    IQ2_XXS.init_grid()
+    grid = _ggml_iq_grid(Device.DEFAULT, _ggml.iq2xxs_grid, (256, 8)).numpy()
+    np.testing.assert_equal(grid, IQ2_XXS.grid.reshape(256, 8))
+
+  def test_iq2_xs_grid_matches_gguf_py(self):
+    IQ2_XS.init_grid()
+    grid = _ggml_iq_grid(Device.DEFAULT, _ggml.iq2xs_grid, (512, 8)).numpy()
+    np.testing.assert_equal(grid, IQ2_XS.grid.reshape(512, 8))
+
   def test_iq2_s_grid_matches_gguf_py(self):
     IQ2_S.init_grid()
     grid = _ggml_iq_grid(Device.DEFAULT, _ggml.iq2s_grid, (1024, 8)).numpy()
     np.testing.assert_equal(grid, IQ2_S.grid.reshape(1024, 8))
+
+  def test_iq1_s_grid_matches_gguf_py(self):
+    IQ1_S.init_grid()
+    grid = _ggml_iq_grid(Device.DEFAULT, _ggml.iq1s_grid, (2048, 8)).numpy()
+    grid = np.where(grid > 127, grid - 256, grid)
+    np.testing.assert_equal(grid, IQ1_S.grid.reshape(2048, 8))
 
   def test_iq3_xxs_grid_matches_gguf_py(self):
     IQ3_XXS.init_grid()
@@ -39,6 +55,56 @@ class TestGGUF(unittest.TestCase):
     expected = np.arange(1, 33, dtype=np.float32) * 2.0
     np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, GGMLQuantizationType.Q8_0.value).numpy().flatten(), expected)
 
+  def test_dequantization_q2_k_hardcoded(self):
+    # Q2_K: scales[16] + qs[64] + d(fp16) + dmin(fp16). 16 sub-blocks of 16, x = d*(scale&0xF)*q - dmin*(scale>>4)
+    scales, qs = bytes([0x11]*16), bytes([0x55]*64)  # scale=1, min=1; qs=0x55 -> 2-bit quants of 1
+    d, dmin = np.float16(1.0).tobytes(), np.float16(0.0).tobytes()
+    block = np.frombuffer(scales + qs + d + dmin, dtype=np.uint8).copy()
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 10).numpy().flatten(), np.ones(256, dtype=np.float32))
+
+  def test_dequantization_q3_k_hardcoded(self):
+    # Q3_K: hmask[32] + qs[64] + scales[12] + d(fp16). 16 sub-blocks of 16, x = d * (scale-32) * (q - (hbit?0:4))
+    # 6-bit scales 32..47 so (scale-32) = 0..15; qs=0x55 -> 2-bit quants of 1; d=1.0
+    scales = bytes([0x80, 0x91, 0xA2, 0xB3, 0xC4, 0xD5, 0xE6, 0xF7, 0xAA, 0xAA, 0xAA, 0xAA])
+    d = np.float16(1.0).tobytes()
+    qs, ones = bytes([0x55]*64), np.ones(16, dtype=np.float32)
+    # hmask all-ones: high bit set, q=1; hmask zeros: subtract 4, q=-3
+    for hmask, q in ((bytes([0xFF]*32), 1.0), (bytes([0x00]*32), -3.0)):
+      block = np.frombuffer(hmask + qs + scales + d, dtype=np.uint8).copy()
+      expected = np.concatenate([q * s * ones for s in range(16)])
+      np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 11).numpy().flatten(), expected)
+
+  def test_dequantization_iq2_xxs_hardcoded(self):
+    # IQ2_XXS: d + 8 groups of (4 grid bytes + uint32 signs/scale). grid[0]=all 0x08, scale=0, signs=0
+    # db = 1.0 * (0.5 + 0) * 0.25 = 0.125; 0.125 * 8 = 1.0
+    block = np.frombuffer(np.float16(1.0).tobytes() + bytes(64), dtype=np.uint8).copy()
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 16).numpy().flatten(), np.ones(256, dtype=np.float32))
+
+  def test_dequantization_iq2_xs_hardcoded(self):
+    # IQ2_XS: d + 32 uint16 qs + 8 scale bytes. qs=0 -> grid[0]=all 0x08, signs=0; scales=0
+    block = np.frombuffer(np.float16(1.0).tobytes() + bytes(64) + bytes(8), dtype=np.uint8).copy()
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 17).numpy().flatten(), np.ones(256, dtype=np.float32))
+
+  def test_dequantization_iq1_s_hardcoded(self):
+    # IQ1_S: d + qs[32] + qh[16]. qs=qh=0 -> grid[0]=all -1, scale=1, delta=+0.125 -> -0.875
+    block = np.frombuffer(np.float16(1.0).tobytes() + bytes(48), dtype=np.uint8).copy()
+    expected = np.full(256, -0.875, dtype=np.float32)
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 19).numpy().flatten(), expected)
+
+  def test_dequantization_iq1_m_hardcoded(self):
+    # IQ1_M: qs[32] + qh[16] + scales[8]. f16 1.0=0x3C00 packed in high nibbles; qs=qh=0 -> -0.875
+    scales = bytes([0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x30])
+    block = np.frombuffer(bytes(48) + scales, dtype=np.uint8).copy()
+    expected = np.full(256, -0.875, dtype=np.float32)
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 256, 29).numpy().flatten(), expected)
+
+  def test_dequantization_iq4_nl_hardcoded(self):
+    # IQ4_NL: 2-byte fp16 scale + 16 packed bytes. low nibbles first, then high
+    lut = list(_ggml.kvalues_iq4nl)
+    block = np.frombuffer(np.float16(1.0).tobytes() + bytes(range(16)), dtype=np.uint8).copy()
+    expected = np.array(lut + [lut[0]]*16, dtype=np.float32)
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, 20).numpy().flatten(), expected)
+
   def test_dequantization_mxfp4_hardcoded(self):
     # MXFP4: 1 byte shared exponent E + 16 packed bytes (32 x 4-bit values)
     # nibble: bit3=sign, bit2:1=exp, bit0=mant; E=128 gives scale=1.0
@@ -52,13 +118,20 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_q5_0(self): self._test_dequantization(GGMLQuantizationType.Q5_0)
   def test_dequantization_q5_1(self): self._test_dequantization(GGMLQuantizationType.Q5_1)
   def test_dequantization_q8_0(self): self._test_dequantization(GGMLQuantizationType.Q8_0)
+  def test_dequantization_q2_k(self): self._test_dequantization(GGMLQuantizationType.Q2_K)
+  def test_dequantization_q3_k(self): self._test_dequantization(GGMLQuantizationType.Q3_K)
   def test_dequantization_q4_k(self): self._test_dequantization(GGMLQuantizationType.Q4_K)
   def test_dequantization_q5_k(self): self._test_dequantization(GGMLQuantizationType.Q5_K)
   def test_dequantization_q6_k(self): self._test_dequantization(GGMLQuantizationType.Q6_K)
+  def test_dequantization_iq2_xxs(self): self._test_dequantization(GGMLQuantizationType.IQ2_XXS)
+  def test_dequantization_iq2_xs(self): self._test_dequantization(GGMLQuantizationType.IQ2_XS)
   def test_dequantization_iq3_xxs(self): self._test_dequantization(GGMLQuantizationType.IQ3_XXS)
+  def test_dequantization_iq1_s(self): self._test_dequantization(GGMLQuantizationType.IQ1_S)
+  def test_dequantization_iq4_nl(self): self._test_dequantization(GGMLQuantizationType.IQ4_NL)
   def test_dequantization_iq3_s(self): self._test_dequantization(GGMLQuantizationType.IQ3_S)
   def test_dequantization_iq2_s(self): self._test_dequantization(GGMLQuantizationType.IQ2_S)
   def test_dequantization_iq4_xs(self): self._test_dequantization(GGMLQuantizationType.IQ4_XS)
+  def test_dequantization_iq1_m(self): self._test_dequantization(GGMLQuantizationType.IQ1_M)
   def test_dequantization_mxfp4(self): self._test_dequantization(GGMLQuantizationType.MXFP4)
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_dequantization_bf16(self): self._test_dequantization(GGMLQuantizationType.BF16)
@@ -203,12 +276,23 @@ class TestGGUFGEMV(unittest.TestCase):
       q_data = rng.integers(0, 256, size=n_blocks * type_size, dtype=np.uint8).reshape(n_blocks, type_size)
       scales = np.float16(rng.standard_normal(n_blocks * 4)).view(np.uint8).reshape(n_blocks, -1)
       if qtype in (GGMLQuantizationType.Q5_0, GGMLQuantizationType.Q8_0,
-                   GGMLQuantizationType.IQ3_XXS,
-                   GGMLQuantizationType.IQ2_S,
+                   GGMLQuantizationType.IQ2_XXS, GGMLQuantizationType.IQ2_XS,
+                   GGMLQuantizationType.IQ3_XXS, GGMLQuantizationType.IQ4_NL,
+                   GGMLQuantizationType.IQ1_S, GGMLQuantizationType.IQ2_S,
                    GGMLQuantizationType.IQ3_S, GGMLQuantizationType.IQ4_XS): q_data[:, :2] = scales[:, :2]  # d at offset 0
       elif qtype in (GGMLQuantizationType.Q5_1, GGMLQuantizationType.Q4_K, GGMLQuantizationType.Q5_K):
         q_data[:, :4] = scales[:, :4]  # d, m/dmin at offset 0
-      elif qtype == GGMLQuantizationType.Q6_K: q_data[:, -2:] = scales[:, :2]               # d at end
+      elif qtype == GGMLQuantizationType.Q2_K: q_data[:, -4:] = scales[:, :4]  # d, dmin at end
+      elif qtype in (GGMLQuantizationType.Q6_K, GGMLQuantizationType.Q3_K): q_data[:, -2:] = scales[:, :2]  # d at end
+      elif qtype == GGMLQuantizationType.IQ1_M:
+        s = np.float16(rng.standard_normal(n_blocks)).view(np.uint16)
+        sc = q_data[:, -8:].copy().view(np.uint16).reshape(n_blocks, 4)
+        sc &= np.uint16(0x0FFF)
+        sc[:, 0] |= (s & np.uint16(0x000F)) << 12
+        sc[:, 1] |= (s & np.uint16(0x00F0)) << 8
+        sc[:, 2] |= (s & np.uint16(0x0F00)) << 4
+        sc[:, 3] |= (s & np.uint16(0xF000))
+        q_data[:, -8:] = sc.reshape(n_blocks, -1).view(np.uint8)
       elif qtype == GGMLQuantizationType.MXFP4: q_data[:, 0] = rng.integers(120, 136, size=n_blocks, dtype=np.uint8) # constrain byte0
       q_data = q_data.flatten()
     ref = dequantize(q_data, qtype).reshape(rows, cols)
@@ -235,13 +319,20 @@ class TestGGUFGEMV(unittest.TestCase):
   def test_gguf_gemv_q8_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q8_0)
   def test_gguf_gemv_q5_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_0)
   def test_gguf_gemv_q5_1(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_1)
+  def test_gguf_gemv_q2_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q2_K)
+  def test_gguf_gemv_q3_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q3_K)
   def test_gguf_gemv_q4_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q4_K)
   def test_gguf_gemv_q5_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_K)
   def test_gguf_gemv_q6_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q6_K)
+  def test_gguf_gemv_iq2_xxs(self): self._test_gguf_gemv(GGMLQuantizationType.IQ2_XXS)
+  def test_gguf_gemv_iq2_xs(self): self._test_gguf_gemv(GGMLQuantizationType.IQ2_XS)
   def test_gguf_gemv_iq3_xxs(self): self._test_gguf_gemv(GGMLQuantizationType.IQ3_XXS)
+  def test_gguf_gemv_iq1_s(self): self._test_gguf_gemv(GGMLQuantizationType.IQ1_S)
+  def test_gguf_gemv_iq4_nl(self): self._test_gguf_gemv(GGMLQuantizationType.IQ4_NL)
   def test_gguf_gemv_iq3_s(self): self._test_gguf_gemv(GGMLQuantizationType.IQ3_S)
   def test_gguf_gemv_iq2_s(self): self._test_gguf_gemv(GGMLQuantizationType.IQ2_S)
   def test_gguf_gemv_iq4_xs(self): self._test_gguf_gemv(GGMLQuantizationType.IQ4_XS)
+  def test_gguf_gemv_iq1_m(self): self._test_gguf_gemv(GGMLQuantizationType.IQ1_M)
   def test_gguf_gemv_mxfp4(self): self._test_gguf_gemv(GGMLQuantizationType.MXFP4)
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_gguf_gemv_bf16(self): self._test_gguf_gemv(GGMLQuantizationType.BF16)

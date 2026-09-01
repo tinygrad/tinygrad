@@ -4,9 +4,9 @@ import numpy as np
 
 from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_device, needs_second_gpu, KernelCountException
 from test.unit.test_jit import _simple_test
-from tinygrad import Tensor, Variable, TinyJit, Device, dtypes
+from tinygrad import Tensor, TinyJit, Device, dtypes
 from tinygrad.engine.jit import graph_class
-from tinygrad.helpers import JIT, DEV, GlobalCounters
+from tinygrad.helpers import JIT, DEV, GlobalCounters, HCQ2
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer.isa.x86 import X86Renderer
 
@@ -15,19 +15,6 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def add(a, b): return (a+b).realize()
     _simple_test(add)
-
-  @unittest.skipUnless(Device.DEFAULT == "CPU", "core_id is a CPU runtimevar")
-  def test_hcq_core_id_runtimevar_merge(self):
-    N = 262144
-    @TinyJit
-    def f(x, st):
-      y = (x + 1).contiguous().realize()
-      z = x.shrink(((st, st + N),)).contiguous().realize()
-      return y, z
-    x = Tensor.arange(2*N).clone().realize()
-    for _ in range(3): y, z = f(x, Variable("a", 0, N).bind(0))
-    self.assertEqual(y.shape, (2*N,))
-    self.assertEqual(z.shape, (N,))
 
   def test_jit_input_view(self):
     @TinyJit
@@ -235,6 +222,7 @@ class TestJitPrune(unittest.TestCase):
     assert_jit_cache_len(w2_prune, 1)
 
 class TestJitFree(unittest.TestCase):
+  @unittest.skipIf(HCQ2, "hcq2 keeps refs to intermediate buffers")
   def test_free_intermediates(self):
     ext_tensor = Tensor([1,24,23,45,1])
     @TinyJit

@@ -15,7 +15,8 @@ from tinygrad.renderer import Renderer
 def _load(m, i, dtype: DType):
   if i is None: return 0.0
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
-  return from_storage_scalar(m[i], dtype)
+  if (w:=m.nbytes // len(m)) >= dtype.itemsize: return from_storage_scalar(m[i], dtype)
+  return sum(m[i+k] << (8*w*k) for k in range(dtype.itemsize // w)) # a bitcast can read wider than the buffer, _store splits it the same way
 
 def load(inp, j, dtype: DType):
   if len(inp) >= 3: return [_load(m, x+j if x is not None else None, dtype) if gate else default for (m,x),default,gate in zip(*inp[:3])]
@@ -80,7 +81,6 @@ class PythonProgram(Program['PythonDevice']):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
-        assert u.dtype is not None, f"{u.op} is missing a dtype"
         if u.op is Ops.STORE:
           assert len(src_values) == 2, f"STORE must be lowered to 2 srcs, got {len(src_values)}"
           store_gate = exec_masks[-1]

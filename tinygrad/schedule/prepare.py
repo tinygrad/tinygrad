@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.dtype import dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
-from tinygrad.uop.ops import graph_rewrite, rewrite_group, ParamArg, identity_element
+from tinygrad.uop.ops import graph_rewrite, rewrite_group, ParamArg, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
 from tinygrad.schedule.indexing import apply_movement_op
@@ -38,7 +38,7 @@ def _mop_index(r:UOp, idx:UOp):
   if r.op is Ops.RESHAPE:
     src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
     if src_prefix >= 0 and r.src[0].shape[src_prefix:] == r.shape[len(idxs):]:
-      if src_prefix == 0: return r.src[0] if r.src[0].dtype == idx.dtype else None
+      if src_prefix == 0: return r.src[0]
       ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs), arg=idx.arg)
       return ret if ret.shape == idx.shape else None
 
@@ -93,6 +93,7 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   params: list[UOp] = []
   graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")
   params = sorted(params, key=lambda x: x.arg.slot)
+  # the RETURNED inputs bind positionally to the output PARAMs, just like the args bind to the input PARAMs
   args = c.src[1:]
 
   # NOTE: this isn't really needed. it's okay if there's unused args in the function
@@ -129,11 +130,11 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
-  # resolve FUNCTION calls (inline the body)
-  (UPat(Ops.FUNCTION, name="c"), resolve_function),
+  # resolve calls with RETURNED inputs (inline the body)
+  (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.num_returned else None),
 
-  # resolve TUPLE+GETTUPLE
-  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
+  # resolve AFTER on RETURNED (call outputs)
+  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
 
   # resolve allreduce (must be bottom up)
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
