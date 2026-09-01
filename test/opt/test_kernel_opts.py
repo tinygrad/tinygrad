@@ -245,11 +245,23 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.expectedFailure
   def test_padto_group_full_unroll_sum(self):
-    a = Tensor.ones(2, 28, 4096, dtype=dtypes.bfloat16).realize()
+    a = Tensor.ones(2, 28, 4096).realize()
     out = ((a * 0.5).float().square()).sum(axis=(0, 2))
     opts_to_apply = [Opt(OptOps.SPLIT, 2, (256, AxisType.GROUP_REDUCE, True)), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.SPLIT, 3, (0, AxisType.UNROLL)),
                      Opt(OptOps.SPLIT, 0, (7, AxisType.UPCAST))]
     helper_linearizer_opt(out, [opts_to_apply], check_default_opt=False)
+
+  @unittest.expectedFailure
+  def test_padto_unrolled_sum(self):
+    a = Tensor.arange(4*17, dtype=dtypes.float).reshape(4, 17).clone().realize()
+    for amt in (4, 0):
+      helper_linearizer_opt(a.sum(1), [[Opt(OptOps.PADTO, 1, 32), Opt(OptOps.SPLIT, 1, (amt, AxisType.UNROLL))]])
+
+  @unittest.expectedFailure
+  def test_padto_unrolled_max(self):
+    a = (Tensor.arange(4*17, dtype=dtypes.float).reshape(4, 17) - 100).clone().realize()
+    for amt in (4, 0):
+      helper_linearizer_opt(a.max(1), [[Opt(OptOps.PADTO, 1, 32), Opt(OptOps.SPLIT, 1, (amt, AxisType.UNROLL))]])
 
   def test_padto_sum(self):
     N = 18
