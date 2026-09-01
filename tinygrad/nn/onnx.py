@@ -539,8 +539,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return __decorator
 
   # ***** Tinygrad Custom Ops *****
-  def tinygrad_contiguous_1(x:Tensor): return x.contiguous()
-  TinygradContiguous = {OpSetId(Domain.TINYGRAD, 1):tinygrad_contiguous_1}
+  def contiguous_1(x:Tensor): return x.contiguous()
+  Contiguous = {OpSetId(Domain.TINYGRAD, 1):contiguous_1}
 
   # ***** Property/Graph Ops *****
   def If(condition:Tensor, else_branch:OnnxRunner, then_branch:OnnxRunner, intermediate_tensors:dict[str, Tensor]):
