@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Device, Tensor, dtypes
+from tinygrad.helpers import Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.uop.ops import AxisType
 
@@ -243,7 +244,6 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.expectedFailure
   def test_padto_group_full_unroll_sum(self):
     a = Tensor.ones(2, 28, 4096).realize()
     out = ((a * 0.5).float().square()).sum(axis=(0, 2))
@@ -251,17 +251,40 @@ class TestKernelOpts(unittest.TestCase):
                      Opt(OptOps.SPLIT, 0, (7, AxisType.UPCAST))]
     helper_linearizer_opt(out, [opts_to_apply], check_default_opt=False)
 
-  @unittest.expectedFailure
   def test_padto_unrolled_sum(self):
     a = Tensor.arange(4*17, dtype=dtypes.float).reshape(4, 17).clone().realize()
     for amt in (4, 0):
       helper_linearizer_opt(a.sum(1), [[Opt(OptOps.PADTO, 1, 32), Opt(OptOps.SPLIT, 1, (amt, AxisType.UNROLL))]])
 
-  @unittest.expectedFailure
   def test_padto_unrolled_max(self):
     a = (Tensor.arange(4*17, dtype=dtypes.float).reshape(4, 17) - 100).clone().realize()
     for amt in (4, 0):
       helper_linearizer_opt(a.max(1), [[Opt(OptOps.PADTO, 1, 32), Opt(OptOps.SPLIT, 1, (amt, AxisType.UNROLL))]])
+
+  def test_padto_unrolled_upcast(self):
+    a = Tensor.arange(4*17, dtype=dtypes.float).reshape(4, 17).clone().realize()
+    helper_linearizer_opt(a.sum(1), [[Opt(OptOps.PADTO, 1, 32), Opt(OptOps.SPLIT, 1, (0, AxisType.UNROLL)),
+                                      Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST))]])
+
+  @unittest.skipUnless(any(tc.dtype_in in (dtypes.half, dtypes.float) for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                       "test requires half or float tensor cores")
+  def test_tc_shape_padded(self):
+    tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in in (dtypes.half, dtypes.float))
+    Tensor.manual_seed(3)
+    a, b = Tensor.rand(17, 23, dtype=tc.dtype_in).realize(), Tensor.rand(23, 29, dtype=tc.dtype_in).realize()
+    with Context(ALLOW_TF32=1):
+      helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out), [[Opt(OptOps.TC, 0, (-1, 2, 2))]], check_default_opt=False, atol=3e-2, rtol=1e-3)
+
+  def test_padto_unrolled_prod(self):
+    a = (Tensor.arange(4*17, dtype=dtypes.float).reshape(4, 17) / 100 + 1).clone().realize()
+    helper_linearizer_opt(a.prod(1), [[Opt(OptOps.PADTO, 1, 32), Opt(OptOps.SPLIT, 1, (0, AxisType.UNROLL)),
+                                       Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST))]])
+
+  def test_padto_arg(self):
+    a = Tensor.arange(4*17, dtype=dtypes.float).reshape(4, 17).clone().realize()
+    for arg in (-4, 0, 1, True):
+      with self.assertRaises(KernelOptError):
+        helper_linearizer_opt(a.sum(1), [[Opt(OptOps.PADTO, 1, arg)]])
 
   def test_padto_sum(self):
     N = 18
