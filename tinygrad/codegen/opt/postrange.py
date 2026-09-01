@@ -145,7 +145,7 @@ class Scheduler:
       ret = self.shift_to(rng, amt, new_type, top=top)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
-      check(opt.axis is not None, "tensor core opts must have an axis")
+      check(opt.axis is not None and opt.axis >= 0, "tensor core opts must have an axis")
       check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "tensor core opts must have valid arg")
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.ren.tensor_cores), "tensor core opts must have valid tc_select")
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
@@ -154,6 +154,7 @@ class Scheduler:
       except ValueError as e: raise KernelOptError(str(e))
       check(ret is not None, "no tensor core available")
     elif opt.op is OptOps.PADTO:
+      check(type(opt.arg) is int and opt.arg > 1, f"padto arg is a multiple > 1, not {opt.arg}")
       check(rng.src[0].op is Ops.CONST, "only pad const axes")
       check(rng.arg[-1] not in {AxisType.UPCAST, AxisType.UNROLL}, "cannot pad upcasted") # TODO: why is this wrong?
       new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))

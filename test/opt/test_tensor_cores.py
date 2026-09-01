@@ -52,14 +52,15 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
       assert False, "OptOps.TC triggered, expected KernelOptError"
     except KernelOptError: pass
 
-def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1):
+def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1,
+                       extra_opts:list[Opt]=[]):
   _skip_unsupported_tc_dtypes(dtype_in, dtype_out)
   a, b = _tc_rand(M, K, dtype=dtype_in), _tc_rand(K, N, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, dtype=dtype_out)
   if dtype_in == dtypes.bfloat16: r = r.float()
   realized_ast, bufs = helper_realized_ast(r)
-  opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))]
+  opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))] + extra_opts
   ast = replace_opts(realized_ast, opts)
   pu = to_program(ast, Device[Device.DEFAULT].renderer)
   if use_tensor_cores == 1: assert len([uop for uop in pu.src[1].src if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
@@ -81,6 +82,15 @@ class TestTensorCores(unittest.TestCase):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       with self.subTest(tc=tc):
         helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
+
+  @Context(ALLOW_TF32=1)
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_extra_locals(self):
+    # LOCAL splits after the TC opt: the WARP must keep a whole hardware local dim, its lanes are consecutive threads
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      with self.subTest(tc=tc):
+        helper_tc_allclose(tc.dims[0]*8, tc.dims[1]*8, tc.dims[2], tc.dtype_in, tc.dtype_out,
+                           extra_opts=[Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))]*3)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_nested_reduce(self):

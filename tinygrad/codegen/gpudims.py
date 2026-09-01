@@ -56,7 +56,10 @@ def add_gpudims(ctx:Renderer, s:UOp):
   local_shape = tuple(ssimplify(all_ranges[r].src[0]) for r in local_dims)
 
   # define indexes for GPU-like execution
-  local_idxs = get_grouped_dims("lidx", local_shape, ctx.local_max)
+  # if we got a WARP, set the local_max to it so it does not fold with other dims
+  local_max = (local_shape[0],)+ctx.local_max[1:] if ctx.local_max is not None and local_dims and \
+    all_ranges[local_dims[0]].arg[-1] is AxisType.WARP else ctx.local_max
+  local_idxs = get_grouped_dims("lidx", local_shape, local_max)
   hw_local = [_dim_max(u.src[0]) for u in local_idxs if u.op is Ops.SPECIAL]
   global_max = ctx.global_max if ctx.global_prod_max is None else \
     tuple(min(gm, pm//l) for gm,pm,l in zip(ctx.global_max or ctx.global_prod_max, ctx.global_prod_max, hw_local+[1]*3))
