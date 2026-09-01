@@ -36,14 +36,16 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         szs = [sz for sz in [5,4,3,2] if baseline_rngs[tc_dim].src[0].divides(sz) is not None]
         if szs:
           # set it to the replaced range
-          baseline_rngs[tc_dim] = baseline.apply_opt(Opt(OptOps.UPCAST, baseline.rngs.index(baseline_rngs[tc_dim]), szs[0]))[0]
+          baseline_rngs[tc_dim] = baseline.apply_opt(
+            Opt(OptOps.SPLIT, baseline.rngs.index(baseline_rngs[tc_dim]), (szs[0], AxisType.UPCAST)))[0]
       if (szs := [sz for sz in [4,2] if baseline_rngs[0].src[0].divides(sz) is not None]): # attempt to local N
-        baseline.apply_opt(Opt(OptOps.LOCAL, baseline.rngs.index(baseline_rngs[0]), szs[0]))
+        baseline.apply_opt(Opt(OptOps.SPLIT, baseline.rngs.index(baseline_rngs[0]), (szs[0], AxisType.LOCAL)))
       baseline_ctas = prod(baseline.full_shape[i] for i in baseline.axes_of(AxisType.GLOBAL))
       if not TC_OCCUPANCY_OPT or not resolve(2*baseline_ctas < (cus:=TC_OCCUPANCY_CUS.value or 32), False): return baseline
       if (szs := [sz for sz in [5,4,3,2] if rngs[1].src[0].divides(sz) is not None]):
-        rngs[1] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[1]), szs[0]))[0]
-      if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
+        rngs[1] = tk.apply_opt(Opt(OptOps.SPLIT, tk.rngs.index(rngs[1]), (szs[0], AxisType.UPCAST)))[0]
+      if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]):
+        tk.apply_opt(Opt(OptOps.SPLIT, tk.rngs.index(rngs[0]), (szs[0], AxisType.LOCAL)))
       ctas = prod(tk.full_shape[i] for i in tk.axes_of(AxisType.GLOBAL))
       return tk if resolve((ctas >= cus) & (ctas <= 2*cus), False) else baseline
 
@@ -59,7 +61,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         unit_stride_axes_mul_4 = [k.rngs.index(c) for c in idx.get_idx().split_uop(Ops.ADD) if
           c.op is Ops.RANGE and (c.vmax+1)%4 == 0 and c not in idx.get_valid().backward_slice]
         if len(unit_stride_axes_mul_4):
-          if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims+k.unrollable_dims: k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
+          if (axis:=unit_stride_axes_mul_4[0]) in (upd:=k.upcastable_dims)+k.unrollable_dims:
+            k.apply_opt(Opt(OptOps.SPLIT, axis, (4, AxisType.UPCAST if axis in upd else AxisType.UNROLL)))
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
@@ -75,17 +78,17 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             if DEBUG >= 3:
               print(f"MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
             try:
-              if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.LOCAL, k.axes_of(AxisType.REDUCE)[0], MV_THREADS_PER_ROW))
+              if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.SPLIT, k.axes_of(AxisType.REDUCE)[0], (MV_THREADS_PER_ROW, AxisType.GROUP_REDUCE)))
             except KernelOptError: pass
-            if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
-            if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
+            if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.SPLIT, global_idx, (MV_BLOCKSIZE, AxisType.LOCAL)))
+            if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.SPLIT, global_idx, (MV_ROWS_PER_THREAD, AxisType.UPCAST)))
             return k
 
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if k.ren.target.device == "QCOM" else 2048), False):
     for axis, sz in itertools.product(k.axes_of(AxisType.REDUCE)[:3], (16,)):
       try:
-        k.apply_opt(Opt(OptOps.LOCAL, axis, sz, top=True))
+        k.apply_opt(Opt(OptOps.SPLIT, axis, (sz, AxisType.GROUP_REDUCE, True)))
         break
       except KernelOptError: pass
 
@@ -110,7 +113,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         if resolve(global_items_after < getenv("OCCUPANCY_FLOOR", 4096), False): continue
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)
-  for axis in to_upcast[::-1]: k.apply_opt(Opt(OptOps.UPCAST, axis, 0))
+  for axis in to_upcast[::-1]: k.apply_opt(Opt(OptOps.SPLIT, axis, (0, AxisType.UPCAST)))
 
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.ren is not None and k.ren.target.device == "DSP"
@@ -136,7 +139,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     if xb_choices:
       xb_choices = sorted(xb_choices)
       if DEBUG >= 4: print(f"more upcast axis : {xb_choices}")
-      k.apply_opt(Opt(OptOps.UPCAST, xb_choices[0][2], xb_choices[0][3]))
+      k.apply_opt(Opt(OptOps.SPLIT, xb_choices[0][2], (xb_choices[0][3], AxisType.UPCAST)))
       upcasted_axis.add(xb_choices[0][2])
     else: break
 
@@ -145,21 +148,21 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   try:
     if k.unrollable_dims and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UNROLL)) and (k.upcast_size() < 64):
       if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
-        k.apply_opt(Opt(OptOps.UPCAST, k.unrollable_dims[-1], 0))
+        k.apply_opt(Opt(OptOps.SPLIT, k.unrollable_dims[-1], (0, AxisType.UNROLL)))
         # if it's small, upcast a second reduce dimension too
         if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
-          k.apply_opt(Opt(OptOps.UPCAST, k.unrollable_dims[-1], 0))
+          k.apply_opt(Opt(OptOps.SPLIT, k.unrollable_dims[-1], (0, AxisType.UNROLL)))
       else:
         for splits in [4]:
           if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
-            k.apply_opt(Opt(OptOps.UPCAST, axis, splits))
+            k.apply_opt(Opt(OptOps.SPLIT, axis, (splits, AxisType.UNROLL)))
             break
   except KernelOptError: pass
 
   # if nothing at all is upcasted and it's easy to, do an upcast
   for splits in [4]:
     if not k.upcasted and k.upcastable_dims and k.full_shape[k.upcastable_dims[-1]] % splits == 0:
-      k.apply_opt(Opt(OptOps.UPCAST, k.upcastable_dims[-1], splits))
+      k.apply_opt(Opt(OptOps.SPLIT, k.upcastable_dims[-1], (splits, AxisType.UPCAST)))
 
   # **** local groups ****
 
@@ -176,7 +179,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       if opts and workgroup < 32:  # fill at least one wave: grow the innermost local as much as possible
         axis, sz = opts[0]
         opts[0] = axis, max(x for x in range(1, min(int(k.full_shape[axis]), 128 * sz // workgroup) + 1) if int(k.full_shape[axis]) % x == 0)
-      for axis, sz in opts: k.apply_opt(Opt(OptOps.LOCAL, axis, sz))
+      for axis, sz in opts: k.apply_opt(Opt(OptOps.SPLIT, axis, (sz, AxisType.LOCAL)))
     else:
       # prioritize making expand axes local
       local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().backward_slice for b in k.bufs), axis) \
@@ -190,7 +193,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       for axis, local_sz in sorted(to_local[:3]):
         axis = axis - deleted_shape
         will_delete_shape = local_sz == k.full_shape[axis]
-        k.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
+        k.apply_opt(Opt(OptOps.SPLIT, axis, (local_sz, AxisType.LOCAL)))
         if will_delete_shape: deleted_shape += 1
 
   return k

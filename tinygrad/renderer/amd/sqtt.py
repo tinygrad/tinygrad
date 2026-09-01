@@ -724,22 +724,17 @@ def format_packet(p) -> str:
 def print_packets(packets) -> None:
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {"NOP"}
-  for data in packets:
-    p, inst = data if isinstance(data, tuple) else (data, None)
-    if type(p).__name__.replace("_RDNA4", "") not in skip: print(format_packet(p), f"inst={inst.inst}" if inst is not None else '')
+  for p in packets:
+    if type(p).__name__.replace("_RDNA4", "") not in skip: print(format_packet(p))
 
 if __name__ == "__main__":
   import sys, pickle
   from tinygrad.helpers import temp
   with open(temp("profile.pkl", append_user=True) if len(sys.argv) < 2 else sys.argv[1], "rb") as f:
     data = pickle.load(f)
-  prg_events = {e.tag: e for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
+  prg_names = {e.tag: e.name for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
-  dev_targets = {e.device:f"gfx{e.props['gfx_target_version']//1000}" for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.props}
   evt_num = getenv("SQTT_EVENT", -1)
   for i, event in enumerate(sqtt_events):
-    prg = prg_events.get(event.kern)
-    print(f"=== event {i} {prg.name if prg is not None else ''} ===")
-    if evt_num == -1 or i == evt_num:
-      print_packets(map_insts(event.blob, prg.lib, dev_targets[prg.device]) if prg is not None else decode(event.blob))
-      print("\n")
+    print(f"\n=== event {i} {prg_names.get(event.kern, '')} ===")
+    print_packets(decode(event.blob))
