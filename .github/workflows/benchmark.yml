@@ -481,7 +481,7 @@ jobs:
             timing: 12.5
       fail-fast: false
     name: openpilot ${{ matrix.version }} compile3 ${{ matrix.model }} (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, Linux, comma]
+    runs-on: [self-hosted, Linux, comma4]
     timeout-minutes: 5
     defaults:
       run:
