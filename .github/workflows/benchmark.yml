@@ -466,7 +466,7 @@ jobs:
           - version: '0.11.0'
             model: dmonitoring
             url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/dmonitoring_model.onnx
-            timing: 12.5
+            timing: 13
           - version: '0.11.2'
             model: supercombo
             url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
@@ -481,7 +481,7 @@ jobs:
             timing: 12.5
       fail-fast: false
     name: openpilot ${{ matrix.version }} compile3 ${{ matrix.model }} (DEV=${{ matrix.dev }})
-    runs-on: [self-hosted, Linux, comma]
+    runs-on: [self-hosted, Linux, comma4]
     timeout-minutes: 5
     defaults:
       run:
@@ -502,9 +502,9 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: compile
-      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile3.py ${{ matrix.url }}
+      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile3.py ${{ matrix.url }} openpilot.pkl
     - name: run pickle
-      run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" RUN_PICKLE=1 taskset -c 4-7 python3 examples/openpilot/compile3.py
+      run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" RUN_PICKLE=1 taskset -c 4-7 python3 examples/openpilot/compile3.py - openpilot.pkl
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
