@@ -874,7 +874,11 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).asinh().numpy())
     ```
     """
-    return (sg:=(self<0).where(-1.0, 1.0)) * (self*sg + (self.square() + 1).sqrt()).log()
+    # self.square() overflows to inf for |x| > 1.8e19 in float32, giving asinh(x) = inf. for a > 1 the a factors out:
+    # log(a + sqrt(a*a + 1)) = log(a) + log(1 + sqrt(1 + 1/(a*a))), which never squares a large value.
+    # max(a, 1) keeps the -inf of log(0) out of the where() branch that is not selected, which would nan the gradient at 0
+    am = (a := (sg := (self < 0).where(-1.0, 1.0)) * self).maximum(1.0)
+    return sg * (a > 1).where(am.log() + (1 + (1 + am.square().reciprocal()).sqrt()).log(), (a + (a.square() + 1).sqrt()).log())
 
   def acosh(self) -> Self:
     """
@@ -886,7 +890,12 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).acosh().numpy())
     ```
     """
-    return (self + (self.square() - 1).sqrt()).log()
+    # self.square() overflows to inf for x > 1.8e19 in float32, giving acosh(x) = inf. for x > 1 the x factors out:
+    # log(x + sqrt(x*x - 1)) = log(x) + log(1 + sqrt(1 - 1/(x*x))), which never squares a large value.
+    # x <= 2 keeps the original expression, so the nan below the domain still reaches the gradient and the sqrt of the
+    # factored form, whose derivative is infinite at x = 1, stays out of the where() branch that is not selected
+    xm = self.maximum(2.0)
+    return (self > 2).where(xm.log() + (1 + (1 - xm.square().reciprocal()).sqrt()).log(), (self + (self.square() - 1).sqrt()).log())
 
   def round(self) -> Self:
     """
@@ -959,7 +968,10 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).atan().numpy())
     ```
     """
-    return (self / (1 + self * self).sqrt()).asin()
+    # self*self overflows to inf for |x| > 1.8e19 in float32 (atan -> 0, nan at inf), so |x| > 1 folds to pi/2 - atan(1/x).
+    # max(a, 1) keeps an inf out of the unselected where() branch, which would nan the gradient at 0
+    t = (big := (a := (s := (self >= 0).where(1.0, -1.0)) * self) > 1).where(a.maximum(1.0).reciprocal(), a)
+    return s * big.where(math.pi / 2 - (at := (t / (1 + t * t).sqrt()).asin()), at)
 
   def elu(self, alpha=1.0) -> Self:
     """

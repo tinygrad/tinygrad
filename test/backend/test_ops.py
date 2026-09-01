@@ -967,6 +967,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.atan(), low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.atan(), low=300, high=303)
     helper_test_op(None, lambda x: x.atan(), vals=[[-0.5, 0., 0.5]])
+    helper_test_op(None, lambda x: x.atan(), vals=[[-1e30, -1e20, 0., 1e20, 1e30]])
 
   def test_relu(self):
     helper_test_op([(64,64)], lambda x: x.relu())
@@ -1835,11 +1836,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=300, high=303)
     helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=-1e10, high=-1e9)
+    helper_test_op(None, lambda x: x.asinh(), vals=[[-1e30, -1e20, 0., 1e20, 1e30]])
     helper_test_op(None, lambda x: x.asinh(), grad_atol=1e-6, vals=[[-1.0, 0.0, 1.0]])
   def test_acosh(self):
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6)
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-3, grad_rtol=1e-2, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6, low=300, high=303)
+    helper_test_op(None, lambda x: x.acosh(), vals=[[1.5, 1e20, 1e30]])
   def test_atanh(self):
     helper_test_op([(45,65)], lambda x: x.atanh(), grad_atol=1e-6)
     helper_test_op([(45,65)], lambda x: x.atanh(), grad_atol=1e-6, low=-300, high=-297)
