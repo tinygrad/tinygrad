@@ -437,9 +437,9 @@ class Tensor(RandMixin):
     # a STORE can only write into storage: the target must be backed by a BUFFER (possibly under views)
     assigned_to = self.uop.base
     while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: assigned_to = assigned_to.src[0].base
-    # assigning to a value (nothing backed by storage, e.g. a pending creation copy) is initialization,
+    # assigning to a value (not storage-backed and not a CONTIGUOUS realization point) is initialization,
     # not a write: a Tensor.assign always overwrites the whole tensor, so the pending value is dead
-    if assigned_to.op is not Ops.BUFFER:
+    if assigned_to.op not in {Ops.BUFFER, Ops.CONTIGUOUS}:
       # x is the new value: alias it if it materializes on its own (a CONTIGUOUS or a load from a creation device),
       # otherwise give it a realization point so this tensor gets storage of its own
       if x.uop.op is not Ops.CONTIGUOUS and not (x.uop.op is Ops.COPY and is_creation_device(x.uop.src[0])): x = x.contiguous()
