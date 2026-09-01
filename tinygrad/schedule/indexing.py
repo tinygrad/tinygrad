@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, colored, Context, SPEC, REASSOC_OPT
+from tinygrad.helpers import argsort, all_same, cpu_profile, colored, Context, SPEC
 
 @dataclass
 class IndexingContext:
@@ -35,21 +35,6 @@ def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
   if dest.base in src.toposort(enter_calls=False): ctx.realize_map[src] = None
 
-def realize_reassoc(ctx:IndexingContext, r:UOp) -> None:
-  if not REASSOC_OPT or r.arg[0] is not Ops.ADD: return
-  todo = [r.src[0]]
-  while todo:
-    red = todo.pop()
-    if red.op is not Ops.REDUCE:
-      if red.op in GroupOp.Elementwise|GroupOp.Movement: todo.extend(red.src)
-      continue
-    if red.arg[0] is not Ops.ADD or red.src[0].max_numel() < max(1_000_000_000, 1024*r.src[0].max_numel()): continue
-    x = red.src[0]
-    while x.op in GroupOp.Movement|{Ops.CAST}: x = x.src[0]
-    if x.op is Ops.MUL and x.src[0].dtype == x.src[1].dtype and x.src[0].dtype in {dtypes.half, dtypes.bfloat16}:
-      ctx.realize_map[r.src[0]] = None
-      return
-
 def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
   for s in c.src[1:]:
     while s.op is Ops.RESHAPE: s = s.src[0]
@@ -66,8 +51,6 @@ pm_generate_realize_map = PatternMatcher([
   (UPat((Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # sometimes we need to realize the src of STORE if there's a self-access
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
-  # keep a large tensor-core contraction out of a following reduction
-  (UPat(Ops.REDUCE, name="r"), realize_reassoc),
 ])
 
 @dataclass(frozen=True)
