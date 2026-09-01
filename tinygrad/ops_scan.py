@@ -13,6 +13,7 @@ def _tree_map(fn:Callable[[Tensor], Tensor], x:ScanTree) -> ScanTree:
 def _tree_zip(fn:Callable[[Tensor, Tensor], Tensor], a:ScanTree, b:ScanTree) -> ScanTree:
   if isinstance(a, Tensor) and isinstance(b, Tensor): return fn(a, b)
   if type(a) is not type(b) or len(a) != len(b): raise ValueError("associative_scan tree mismatch")
+  assert isinstance(a, (tuple, list)) and isinstance(b, (tuple, list))
   out = [_tree_zip(fn, x, y) for x,y in zip(a, b)]
   return tuple(out) if isinstance(a, tuple) else out
 
