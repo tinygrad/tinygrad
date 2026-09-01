@@ -783,7 +783,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def storage_base(self) -> UOp:
     b = self.unsharded_base
-    while b.op in {Ops.BITCAST, Ops.AFTER}: b = b.src[0].unsharded_base
+    while b.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: b = b.src[0].unsharded_base
     return b
 
   # cached property here makes external_uop_gc fail, why?
