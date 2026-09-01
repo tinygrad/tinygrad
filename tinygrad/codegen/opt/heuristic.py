@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, IMAGE
+from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, USE_TC, IMAGE
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -52,10 +52,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         unit_stride_axes_mul_4 = [k.rngs.index(c) for c in idx.get_idx().split_uop(Ops.ADD) if
           c.op is Ops.RANGE and (c.vmax+1)%4 == 0 and c not in idx.get_valid().backward_slice]
         if len(unit_stride_axes_mul_4):
-          if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
-            k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
-          elif axis in k.unrollable_dims:
-            k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
+          if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims+k.unrollable_dims: k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
@@ -71,17 +68,17 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             if DEBUG >= 3:
               print(f"MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
             try:
-              if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
+              if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.LOCAL, k.axes_of(AxisType.REDUCE)[0], MV_THREADS_PER_ROW))
             except KernelOptError: pass
             if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             return k
 
   # are we grouping? (requires local shape support)
-  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS else 2048), False):
-    for axis, sz in itertools.product((0, 1, 2), (16,)):
+  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if k.ren.target.device == "QCOM" else 2048), False):
+    for axis, sz in itertools.product(k.axes_of(AxisType.REDUCE)[:3], (16,)):
       try:
-        k.apply_opt(Opt(OptOps.GROUPTOP, axis, sz))
+        k.apply_opt(Opt(OptOps.LOCAL, axis, sz, top=True))
         break
       except KernelOptError: pass
 
@@ -141,14 +138,14 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   try:
     if k.unrollable_dims and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UNROLL)) and (k.upcast_size() < 64):
       if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
-        k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
+        k.apply_opt(Opt(OptOps.UPCAST, k.unrollable_dims[-1], 0))
         # if it's small, upcast a second reduce dimension too
         if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
-          k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
+          k.apply_opt(Opt(OptOps.UPCAST, k.unrollable_dims[-1], 0))
       else:
         for splits in [4]:
           if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
-            k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
+            k.apply_opt(Opt(OptOps.UPCAST, axis, splits))
             break
   except KernelOptError: pass
 
@@ -160,8 +157,19 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # **** local groups ****
 
   if k.ren.has_local:
-    if NOLOCALS:
-      k.apply_opt(Opt(OptOps.NOLOCALS))
+    if k.ren.target.device == "QCOM":
+      # for openpilot: use 32..128 threads per workgroup, at most 8 on the innermost axis
+      # apply innermost global axes first so the leading hardware local dims hold the trailing global axes, like gidx
+      workgroup = 1
+      opts: list[tuple[int, int]] = []
+      for axis in [a for a in k.axes_of(AxisType.GLOBAL, AxisType.WEAK) if k.rngs[a].src[0].op is Ops.CONST][-3:][::-1]:
+        if (sz:=max(x for x in range(1, min(int(k.full_shape[axis]), 128 // workgroup if opts else 8) + 1) if int(k.full_shape[axis]) % x == 0)) > 1:
+          opts.append((axis, sz))
+          workgroup *= sz
+      if opts and workgroup < 32:  # fill at least one wave: grow the innermost local as much as possible
+        axis, sz = opts[0]
+        opts[0] = axis, max(x for x in range(1, min(int(k.full_shape[axis]), 128 * sz // workgroup) + 1) if int(k.full_shape[axis]) % x == 0)
+      for axis, sz in opts: k.apply_opt(Opt(OptOps.LOCAL, axis, sz))
     else:
       # prioritize making expand axes local
       local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().backward_slice for b in k.bufs), axis) \
@@ -177,18 +185,5 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         will_delete_shape = local_sz == k.full_shape[axis]
         k.apply_opt(Opt(OptOps.LOCAL, axis, local_sz))
         if will_delete_shape: deleted_shape += 1
-
-  # **** threading ****
-
-  if k.ren.has_threads and k.ren.global_max is not None:
-    for threads in [32,16,12,8,6,5,4,3,2]:
-      # Skip if too many threads. Heuristic: use about 128K ops per thread
-      if threads > k.ren.global_max[0] or resolve(prod(k.full_shape) // (128 << 10) < threads): continue
-      for axis in k.axes_of(AxisType.WEAK):
-        if k.full_shape[axis] % threads == 0:
-          try: k.apply_opt(Opt(OptOps.THREAD, axis, threads))
-          except KernelOptError: pass
-          break
-      if k.applied_opts and k.applied_opts[-1].op is OptOps.THREAD: break
 
   return k

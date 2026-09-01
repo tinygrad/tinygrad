@@ -18,20 +18,21 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2)],
       [Opt(OptOps.LOCAL, 0, 8)],
       [Opt(OptOps.LOCAL, 0, 16)], # Checking how it works with locals
-      [Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 64)], # Checking how it works with grouped reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUPTOP, 0, 16)],
-      [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUPTOP, 0, 2)],
+      [Opt(OptOps.LOCAL, 1, 2, top=True)],
+      [Opt(OptOps.LOCAL, 1, 32, top=True)],
+      [Opt(OptOps.LOCAL, 1, 64, top=True)], # Checking how it works with grouped reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 2, top=True)],
+      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.LOCAL, 2, 16, top=True)],
+      [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.LOCAL, 2, 2, top=True)],
       # Checking how it works with locals + grouped reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 64)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 64, top=True)],
       # Checking how it works with locals + grouped reduce + upcasts
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 2, top=True), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UPCAST, 4, 4)],
       # many local + many group
-      [Opt(OptOps.GROUP, 0, 2)] * 4,
+      [Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.LOCAL, 2, 2), Opt(OptOps.LOCAL, 3, 2), Opt(OptOps.LOCAL, 4, 2)],
       [Opt(OptOps.LOCAL, 0, 2)] * 4,
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2)] * 4,
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 2), Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 4, 2),
+       Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 6, 2), Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 8, 2)],
     ])
 
   def test_upcasts(self):
@@ -71,17 +72,17 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4)],
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 32)],
       [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.LOCAL, 1, 8)], # Checking how it works with locals
-      [Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.UNROLL, 0, 4)], # Checking how it works with grouped_reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 4)], # Checking how it works with local+grouped_reduce
+      [Opt(OptOps.LOCAL, 2, 2, top=True)],
+      [Opt(OptOps.LOCAL, 2, 32, top=True)],
+      [Opt(OptOps.LOCAL, 2, 32, top=True), Opt(OptOps.UPCAST, 2, 4)], # Checking how it works with grouped_reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.LOCAL, 4, 32, top=True)],
+      [Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.LOCAL, 3, 32, top=True)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.LOCAL, 4, 4, top=True)], # Checking how it works with local+grouped_reduce
       # Checking all together
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4),
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 4, 8, top=True), Opt(OptOps.UPCAST, 4, 4), Opt(OptOps.UPCAST, 0, 4),
        Opt(OptOps.UPCAST, 1, 2)],
       # Full global upcast + local
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 4, 8, top=True), Opt(OptOps.UPCAST, 4, 4), Opt(OptOps.UPCAST, 0, 8)],
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -93,21 +94,25 @@ class TestKernelOpts(unittest.TestCase):
     r = a.sum(axis=(1,3))
     helper_linearizer_opt(r, [
       # openCL / DEV=CL is 256 max threads
-      [Opt(OptOps.GROUPTOP, 0, 2)], [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 1, 2)], [Opt(OptOps.GROUPTOP, 1, 32)], # Checking how it works with 1 grouped_reduce.
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 64)], # Checking how it works with 2 grouped_reduces.
-      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 0, 4)],
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UNROLL, 2, 4)], # Checking how it works with 2 grouped_reduces + upcasts.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4)],
+      [Opt(OptOps.LOCAL, 2, 2, top=True)], [Opt(OptOps.LOCAL, 2, 32, top=True)],
+      [Opt(OptOps.LOCAL, 3, 2, top=True)], [Opt(OptOps.LOCAL, 3, 32, top=True)], # Checking how it works with 1 grouped_reduce.
+      [Opt(OptOps.LOCAL, 2, 2, top=True), Opt(OptOps.LOCAL, 4, 2, top=True)],
+      [Opt(OptOps.LOCAL, 2, 16, top=True), Opt(OptOps.LOCAL, 4, 2, top=True)],
+      [Opt(OptOps.LOCAL, 2, 4, top=True), Opt(OptOps.LOCAL, 4, 64, top=True)], # Checking how it works with 2 grouped_reduces.
+      [Opt(OptOps.LOCAL, 2, 16, top=True), Opt(OptOps.LOCAL, 4, 2, top=True), Opt(OptOps.UPCAST, 2, 4)],
+      # Checking how it works with 2 grouped_reduces + upcasts.
+      [Opt(OptOps.LOCAL, 2, 2, top=True), Opt(OptOps.LOCAL, 4, 32, top=True), Opt(OptOps.UPCAST, 4, 4)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.LOCAL, 4, 4, top=True), Opt(OptOps.LOCAL, 6, 4, top=True)],
       # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UNROLL, 1, 4)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2),
-       Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2),
-       Opt(OptOps.UPCAST, 0, 2)], # No globals
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.LOCAL, 4, 2, top=True), Opt(OptOps.LOCAL, 6, 32, top=True),
+       Opt(OptOps.UPCAST, 5, 4)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.LOCAL, 4, 8, top=True), Opt(OptOps.LOCAL, 6, 4, top=True),
+       Opt(OptOps.UPCAST, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.LOCAL, 4, 8, top=True), Opt(OptOps.LOCAL, 6, 4, top=True),
+       Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 4, 4),
+       Opt(OptOps.UPCAST, 5, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.LOCAL, 4, 4, top=True), Opt(OptOps.LOCAL, 6, 4, top=True),
+       Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
@@ -124,14 +129,14 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.UPCAST, 0, 4)],
       [Opt(OptOps.UPCAST, 1, 4)],
       [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
-      [Opt(OptOps.UNROLL, 0, 2)], # check unroll
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of unroll and local
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
+      [Opt(OptOps.UPCAST, 4, 2)], # check unroll
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 5, 2)], # check combo of unroll and local
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 6, 2)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 6, 4)],
       [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations
-      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
-      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
+      [Opt(OptOps.UPCAST, 4, 2), Opt(OptOps.UPCAST, 0, 4)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 5, 2), Opt(OptOps.UPCAST, 1, 4)],
+      [Opt(OptOps.UPCAST, 4, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 6, 4)],
     ], apply_tc=True, atol=atol, rtol=rtol)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
@@ -145,34 +150,10 @@ class TestKernelOpts(unittest.TestCase):
     r = a.matmul(b, dtype=dtypes.half)
     atol, rtol = 0.25, 0.01
     helper_linearizer_opt(r, [
-      [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
+      [Opt(OptOps.UPCAST, 4, 0)], # check full unroll of reduce with locals
       [Opt(OptOps.LOCAL, 0, 4)], # check local
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
-    ], apply_tc=True, atol=atol, rtol=rtol)
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
-  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
-                      "test requires tensor cores with accumulation in half") # testing with half suffices.
-  # NOTE: the METAL test is broken, likely due to a compiler bug. passes on CI with -O0 and with default opt level locally on M3
-  @unittest.skipIf(Device.DEFAULT == "METAL", "broken for METAL")
-  @unittest.skip("feature was removed")
-  def test_tensor_core_opts_group(self):
-    N = 128
-    Tensor.manual_seed(1552)
-    a, b = Tensor.rand(N, N, dtype=dtypes.half), Tensor.rand(N, N, dtype=dtypes.half)
-    r = a.matmul(b, dtype=dtypes.half)
-    atol, rtol = 0.25, 0.01
-    helper_linearizer_opt(r, [
-      [Opt(OptOps.GROUP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 4)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.GROUP, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUP, 0, 2)],
-      [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.GROUP, 0, 2)],
-      [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 2)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 6, 4), Opt(OptOps.LOCAL, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 6, 2), Opt(OptOps.UPCAST, 0, 4)],
     ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
@@ -197,7 +178,7 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(a@b, [
       [Opt(OptOps.UPCAST, 0, 0)],
       [Opt(OptOps.UPCAST, 1, 0)],
-      [Opt(OptOps.UNROLL, 0, 0)],
+      [Opt(OptOps.UPCAST, 2, 0)],
       [Opt(OptOps.PADTO, 0, 8)],
       [Opt(OptOps.PADTO, 1, 8)],
       [Opt(OptOps.PADTO, 2, 8)],
@@ -207,7 +188,7 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a@b, [[Opt(OptOps.UPCAST, 1, 0), Opt(OptOps.PADTO, 1, 8)]])
     with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(a@b, [[Opt(OptOps.UNROLL, 0, 0), Opt(OptOps.PADTO, 2, 8)]])
+      helper_linearizer_opt(a@b, [[Opt(OptOps.UPCAST, 2, 0), Opt(OptOps.PADTO, 2, 8)]])
 
   def test_padto_sum_ok(self):
     N = 18
@@ -245,7 +226,7 @@ class TestKernelOpts(unittest.TestCase):
   def test_padto_group_full_unroll_sum(self):
     a = Tensor.ones(2, 28, 4096, dtype=dtypes.bfloat16).realize()
     out = ((a * 0.5).float().square()).sum(axis=(0, 2))
-    opts_to_apply = [Opt(OptOps.GROUPTOP, 1, 256), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.UNROLL, 2, 0), Opt(OptOps.UPCAST, 0, 7)]
+    opts_to_apply = [Opt(OptOps.LOCAL, 2, 256, top=True), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.UPCAST, 3, 0), Opt(OptOps.UPCAST, 0, 7)]
     helper_linearizer_opt(out, [opts_to_apply], check_default_opt=False)
 
   def test_padto_sum(self):
@@ -306,15 +287,15 @@ class TestKernelOpts(unittest.TestCase):
     r = a@b
     opts_shapes = [
       ([Opt(OptOps.LOCAL, 0, 2)], [("blue",16),("blue",32),("cyan",2),("red",32)]),
-      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.GROUP, 0, 2)], [("blue",16),("blue",32),("cyan",2),("green",2),("red",16)]),
+      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.LOCAL, 3, 2)], [("blue",16),("blue",32),("cyan",2),("green",2),("red",16)]),
       # check to ensure local_dims are stable for full UNROLL of the first reduce
-      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.UNROLL, 0, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
-      ([Opt(OptOps.UNROLL, 0, 0),Opt(OptOps.LOCAL, 0, 2)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
+      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.UPCAST, 3, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
+      ([Opt(OptOps.UPCAST, 2, 0),Opt(OptOps.LOCAL, 0, 2)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
       # check behavior for full UNROLL on an existing GROUP
-      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.GROUP, 0, 0),Opt(OptOps.UNROLL, 0, 2)], [("blue",16),("blue",32),("cyan",2),("green",16),("magenta",2)]),
-      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.GROUP, 0, 0),Opt(OptOps.UNROLL, 0, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
-      ([Opt(OptOps.GROUP, 0, 0),Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.UNROLL, 0, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
-      ([Opt(OptOps.GROUP, 0, 2),Opt(OptOps.UNROLL, 0, 0)], [("blue",32),("blue",32),("red",16),("magenta",2)]),
+      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.LOCAL, 3, 0),Opt(OptOps.UPCAST, 3, 2)], [("blue",16),("blue",32),("cyan",2),("green",16),("magenta",2)]),
+      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.LOCAL, 3, 0),Opt(OptOps.UPCAST, 3, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
+      ([Opt(OptOps.LOCAL, 2, 0),Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.UPCAST, 2, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
+      ([Opt(OptOps.LOCAL, 2, 2),Opt(OptOps.UPCAST, 2, 0)], [("blue",32),("blue",32),("red",16),("magenta",2)]),
     ]
     helper_linearizer_opt(r, [x[0] for x in opts_shapes], color_sizes=[x[1] for x in opts_shapes])
 
@@ -325,39 +306,21 @@ class TestKernelOpts(unittest.TestCase):
     a = Tensor.arange(128).clone()
     # NOTE: arange no longer has reduce ops available for opt
     helper_linearizer_opt(a, [
-      #[Opt(OptOps.GROUP, 0, 32)],
-      #[Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(op=OptOps.LOCAL, axis=0, arg=8)],
       [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0)],
-      #[Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8)],
-      #[Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.UNROLL, axis=1, arg=4)], # noqa: E501
     ])
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_threads, "test requires threads")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.global_max is not None and
-                       Device[Device.DEFAULT].renderer.global_max[0] > 1, "test requires multicore")
-  def test_thread_opts(self):
-    a = Tensor.rand(4, 4, 4, 4)
-    b = Tensor.rand(4, 4, 4)
-    r = (b.sqrt() + ((a+1).sum(axis=3).exp()))
-    helper_linearizer_opt(r, [
-      [Opt(OptOps.THREAD, 0, 2)],
-      [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.THREAD, 0, 2)],
-      [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.THREAD, 0, 2), Opt(OptOps.UNROLL, 0, 2)],
-    ] + [[Opt(OptOps.THREAD, 0, 4)] if Device[Device.DEFAULT].renderer.global_max[0] >= 4 else []]
-      + [[Opt(OptOps.THREAD, 0, 8)] if Device[Device.DEFAULT].renderer.global_max[0] >= 8 else []])
 
   def test_double_sum_group(self):
     a = Tensor.rand(4, 4, 4)
     r = a.sum((1, 2)).sum()
     with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(r, [[Opt(OptOps.GROUPTOP, 0, 16)],])
+      helper_linearizer_opt(r, [[Opt(OptOps.LOCAL, 0, 16, top=True)],])
     r = a.sum((1, 2)).sum()
     with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(r, [[Opt(OptOps.UNROLL, 1, 4), Opt(OptOps.GROUPTOP, 0, 16)],])
+      helper_linearizer_opt(r, [[Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.LOCAL, 0, 16, top=True)],])
     r = a.sum((1, 2)).sum()
     with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(r, [[Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 0, 16)],])
+      helper_linearizer_opt(r, [[Opt(OptOps.LOCAL, 1, 4, top=True), Opt(OptOps.LOCAL, 1, 16, top=True)],])
 
 if __name__ == '__main__':
   unittest.main()

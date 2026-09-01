@@ -13,8 +13,8 @@ if __name__ == "__main__":
   C = A.matmul(B)
   if getenv("GEMV"):
     opts = [
-      Opt(op=OptOps.UNROLL, axis=0, amt=8),
-      Opt(op=OptOps.GROUP, axis=0, amt=32),
+      Opt(op=OptOps.UPCAST, axis=1, amt=8),
+      Opt(op=OptOps.LOCAL, axis=1, amt=32),
     ]
   else:
     opts = [

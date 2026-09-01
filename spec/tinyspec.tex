@@ -23,7 +23,6 @@
 \definecolor{axblue}{HTML}{1565C0}       % GLOBAL
 \definecolor{axcyan}{HTML}{00838F}       % LOCAL
 \definecolor{axbrcyan}{HTML}{00ACC1}     % WARP
-\definecolor{axbrblue}{HTML}{42A5F5}     % THREAD
 \definecolor{axwhite}{HTML}{616161}      % LOOP (gray on white paper)
 \definecolor{axred}{HTML}{C62828}        % REDUCE
 \definecolor{axbrred}{HTML}{E53935}      % GROUP_REDUCE
@@ -307,7 +306,6 @@ Each kernel's iteration space is a set of \op{Range} axes. Every range has an \t
 {\color{axblue}\texttt{GLOBAL}} & \texttt{g} & --- & --- & GPU global workgroup dimension. \\
 {\color{axcyan}\texttt{LOCAL}} & \texttt{l} & g, L & inner & Workgroup local dimension (shared memory). \\
 {\color{axbrcyan}\texttt{WARP}} & \texttt{w} & \multicolumn{2}{l}{(created by \op{TC})} & Warp-level lanes for tensor cores. \\
-{\color{axbrblue}\texttt{THREAD}} & \texttt{t} & g & outer & CPU thread parallelism. \\
 {\color{axwhite}\texttt{LOOP}} & \texttt{L} & --- & --- & Generic sequential loop (initial state). \\
 {\color{axred}\texttt{REDUCE}} & \texttt{R} & --- & --- & Reduction axis. \\
 {\color{axbrred}\texttt{GROUP\_REDUCE}} & \texttt{G} & R & inner/outer & Shared-memory group reduction. \\

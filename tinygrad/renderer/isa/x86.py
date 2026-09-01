@@ -7,7 +7,7 @@ from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext, greg
-from tinygrad.helpers import getenv, NUM_CPU_THREADS, unwrap, Target
+from tinygrad.helpers import unwrap, Target
 
 # ***** X86 Ops *****
 
@@ -791,9 +791,7 @@ encodings = {
 class X86Renderer(ISARenderer):
   device = "CPU"
   has_local = False
-  has_threads = bool(getenv("THREADS", 1))
-  @property
-  def global_max(self): return (NUM_CPU_THREADS.value, 0, 0)  # type: ignore[override]
+  global_max = (1, 0, 0)
   extra_matcher = extra_matcher
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher

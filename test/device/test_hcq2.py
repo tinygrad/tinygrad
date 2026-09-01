@@ -12,6 +12,16 @@ class TestHCQ2(unittest.TestCase):
     with patch.object(Device[Device.DEFAULT], "has_copy_queue", False):
       np.testing.assert_equal(Tensor(np.arange(61, dtype=np.float32)).to(Device.DEFAULT).contiguous().realize().numpy(), np.arange(61))
 
+  @unittest.skipIf(Device.DEFAULT == "CPU", "ping-pong needs a non-CPU hcq2 device")
+  def test_cpu_device_ping_pong(self):
+    # CPU submits run inline, so alternating dependencies must be submitted in schedule order to avoid blocking the host submitter.
+    x = Tensor.ones(16, device="CPU").contiguous().realize()
+    a = (x + 1).contiguous()
+    b = (a.to(Device.DEFAULT).contiguous() + 1).contiguous()
+    c = (b.to("CPU").contiguous() + 1).contiguous()
+    out = (c.to(Device.DEFAULT).contiguous() + 1).contiguous().realize()
+    np.testing.assert_equal(out.numpy(), np.full(16, 5))
+
   @unittest.skipIf(Device.DEFAULT == "CPU", "staged copies need a non-CPU hcq2 device")
   def test_staged_copy_slot_reuse(self):
     # chunks of a staged copy rotate through the staging buffer slots, many rotations must stay bit-exact in both directions

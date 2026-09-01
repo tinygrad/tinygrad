@@ -306,20 +306,19 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]
                                                          profile_key))
 
 class HCQArgsState(Generic[ProgramType]):
-  def __init__(self, buf:HCQBuffer, prg:ProgramType, args:tuple[HCQBuffer|sint|None, ...]):
+  def __init__(self, buf:HCQBuffer, prg:ProgramType, args:tuple[HCQBuffer|sint, ...]):
     self.buf, self.prg, self.args = buf, prg, args
     self.bind_data:list[tuple[tuple[sint, ...], MMIOInterface, str]] = []
 
   def bind_sints_to_buf(self, *vals:sint, buf:HCQBuffer, fmt, offset=0): self.bind_data.append((vals, buf.cpu_view().view(offset=offset), fmt))
 
 class CLikeArgsState(HCQArgsState[ProgramType]):
-  def __init__(self, buf:HCQBuffer, prg:ProgramType, args:tuple[HCQBuffer|sint|None, ...], prefix:list[int]|None=None):
+  def __init__(self, buf:HCQBuffer, prg:ProgramType, args:tuple[HCQBuffer|sint, ...], prefix:list[int]|None=None):
     super().__init__(buf, prg, args)
 
     if prefix is not None: self.buf.cpu_view().view(size=len(prefix) * 4, fmt='I')[:] = array.array('I', prefix)
 
     for a,(off,dt) in zip(args, TinyELF.iter_sig(prg.signature)):
-      assert a is not None
       val, fmt = (a.va_addr, 'Q') if isinstance(a, HCQBuffer) else (a, dt.fmt)
       self.bind_sints_to_buf(val, buf=self.buf, fmt=fmt, offset=len(prefix or []) * 4 + off)
 
@@ -333,7 +332,7 @@ class HCQProgram(Program[HCQDeviceType]):
   @staticmethod
   def _fini(dev, buf, spec): dev.allocator.free(buf, buf.size, spec)
 
-  def fill_kernargs(self, args:tuple[HCQBuffer|int|None, ...], kernargs:HCQBuffer|None=None) -> HCQArgsState:
+  def fill_kernargs(self, args:tuple[HCQBuffer|int, ...], kernargs:HCQBuffer|None=None) -> HCQArgsState:
     """
     Fills arguments for the kernel, optionally allocating space from the device if `kernargs_ptr` is not provided.
     Args:
@@ -346,7 +345,7 @@ class HCQProgram(Program[HCQDeviceType]):
                                                        size=self.kernargs_alloc_size)
     return self.args_state_t(argsbuf, self, args)
 
-  def __call__(self, *args:HCQBuffer|int|None, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
+  def __call__(self, *args:HCQBuffer|int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                wait:bool=False, timeout:int|None=None) -> float|None:
     """
     Enqueues the program for execution with the given arguments and dimensions.
