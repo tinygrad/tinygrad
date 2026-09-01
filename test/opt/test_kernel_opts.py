@@ -151,30 +151,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 6, 2), Opt(OptOps.UPCAST, 0, 4)],
     ], apply_tc=True, atol=atol, rtol=rtol)
 
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
-  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
-                      "test requires tensor cores with accumulation in half") # testing with half suffices.
-  # NOTE: the METAL test is broken, likely due to a compiler bug. passes on CI with -O0 and with default opt level locally on M3
-  @unittest.skipIf(Device.DEFAULT == "METAL", "broken for METAL")
-  @unittest.skip("feature was removed")
-  def test_tensor_core_opts_group(self):
-    N = 128
-    Tensor.manual_seed(1552)
-    a, b = Tensor.rand(N, N, dtype=dtypes.half), Tensor.rand(N, N, dtype=dtypes.half)
-    r = a.matmul(b, dtype=dtypes.half)
-    atol, rtol = 0.25, 0.01
-    helper_linearizer_opt(r, [
-      [Opt(OptOps.GROUP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 4)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.GROUP, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUP, 0, 2)],
-      [Opt(OptOps.UPCAST, 4, 4), Opt(OptOps.GROUP, 0, 2)],
-      [Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UPCAST, 4, 2), Opt(OptOps.UPCAST, 1, 2)],
-    ], apply_tc=True, atol=atol, rtol=rtol)
-
   def test_padto_matmul(self):
     N = 17
     Tensor.manual_seed(289)
@@ -325,11 +301,8 @@ class TestKernelOpts(unittest.TestCase):
     a = Tensor.arange(128).clone()
     # NOTE: arange no longer has reduce ops available for opt
     helper_linearizer_opt(a, [
-      #[Opt(OptOps.GROUP, 0, 32)],
-      #[Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(op=OptOps.LOCAL, axis=0, arg=8)],
       [Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0)],
-      #[Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.GROUP, axis=0, arg=8)],
     ])
 
   def test_double_sum_group(self):
