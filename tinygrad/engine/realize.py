@@ -242,6 +242,8 @@ def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
     return ast, Device[c.device if isinstance(c.device, str) else c.device[0]].renderer
   return None
 
+def _put_call_program(c:UOp, ast:UOp, prg:UOp) -> UOp: return c.replace(src=(prg if (b:=c.src[0]) is ast else b.replace(src=(prg,)), *c.src[1:]))
+
 def lower_and_compile(linear:UOp) -> UOp:
   # collect the kernels to lower and compile, deduped by their compile cache key
   if not len(ar:={c: a for c in linear.toposort() if c.op is Ops.CALL and (a:=_get_call_to_compile(c)) is not None}): return linear
@@ -266,8 +268,7 @@ def lower_and_compile(linear:UOp) -> UOp:
       raise
 
   # swap the compiled PROGRAMs into the calls
-  return linear.substitute({c: c.replace(src=(c.src[0].substitute({a[0]: to_program_cache[keys[c]]}), *c.src[1:])) for c, a in ar.items()},
-                           name="precompile kernels")
+  return linear.substitute({c: _put_call_program(c, a[0], to_program_cache[keys[c]]) for c, a in ar.items()}, name="precompile kernels")
 
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
