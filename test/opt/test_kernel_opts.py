@@ -130,7 +130,7 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.UPCAST, 1, 4)],
       [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
       [Opt(OptOps.UPCAST, 4, 2)], # check unroll
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 5, 2)], # check combo of unroll and local
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 5, 2)], # check combo of unroll and upcast
       [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 6, 2)],
       [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 6, 4)],
       [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations

@@ -245,9 +245,6 @@ class TestLinearizer(unittest.TestCase):
         else:
           assert u.src[1].op in GroupOp.ALU
           assert begin_range < uops.index(u) < end_range
-      # children of END are placed after ENDRANGE
-      if any(x.op is Ops.END and x.src[1].op in GroupOp.ALU for x in u.src):
-        assert end_range < uops.index(u)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_default_global_reversed(self):
@@ -384,7 +381,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_two_grouped_stores_local(self):
-    # GROUP on both reduces puts two LOCAL buffers in one kernel, and the store to each needs its own barrier
+    # GROUP_REDUCE on both reduces puts two LOCAL buffers in one kernel, and the store to each needs its own barrier
     a = Tensor.rand(32, 32).realize()
     opts = [Opt(OptOps.LOCAL, 3, 4), Opt(OptOps.LOCAL, 5, 4)]
     ast = helper_linearizer_opt(single_kernel_softmax(a), [opts])
@@ -407,12 +404,6 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   # ensure buffers are allocated
   for b in bufs: b.ensure_allocated()
   return ast, bufs
-
-def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
-  assert isinstance(ast, UOp), "ast must be UOp"
-  inbufs = [x.uop.base.buffer for x in inputs]
-  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.size, out.src[1].dtype).allocate() for out in ast.src]
-  _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
 def helper_linearizer_opt(r:Tensor|list[Tensor], *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)

@@ -102,7 +102,6 @@ class Scheduler:
 
   def upcast_size(self): return prod(self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
 
-  # copied from kernel.py
   @property
   def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK) \
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
@@ -138,7 +137,7 @@ class Scheduler:
       if new_type is AxisType.GROUP_REDUCE:
         check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
 
-      # copied from kernel.py. prevents METAL compiler hangs
+      # prevents METAL compiler hangs
       if self.reduceop is not None and (new_type is AxisType.GROUP_REDUCE or (self.group_for_reduces and opt.op != OptOps.PADTO)):
         upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
         smem_sz = amt*upcast_local_sz*self.reduceop.dtype.itemsize
