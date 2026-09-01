@@ -5,7 +5,7 @@ from typing import cast, Callable
 from tinygrad.helpers import to_mv, from_mv, OSX, WIN, Context, mv_address, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import Buffer, BufferSpec, TinyELF, Program, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_buf, hcq_size_var
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
@@ -14,7 +14,6 @@ from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.autogen import libc
 from tinygrad.codegen import do_to_program
-from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops, get_runtime
 from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher
@@ -39,41 +38,6 @@ def timestamp_prog():
     call = fn[0].load().call(UOp.const(6 if OSX else 1, dtypes.int), ts[0], ret_dtype=dtypes.void) # clock_gettime(CLOCK_MONOTONIC, &ts)
     val = ts.after(call)[0].load() * 1_000_000_000 + ts.after(call)[1].load()
   return UOp.param(0, dtypes.uint64, 1)[0].store(val)
-
-# *****************
-# 2. queue encoders
-
-def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
-  progs = [get_runtime(d, prog) if isinstance(prog, UOp) else cast(CPUDevice, Device[d]).prgs[prog] for d in devs]
-  addrs = tuple(UOp.const(p.addr, dtypes.uint64) for p in progs)
-  words = ((addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, src=addrs)),) + args
-  return UOp(Ops.LINEAR, src=words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)))
-
-def cpu_exec(ctx, call:UOp, prg:UOp) -> UOp:
-  devs = ctx.devs
-  args = [get_call_arg_uops(call)[i].getaddr(devs) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
-  return cpu_cmd(devs, prg, *args)
-
-pm_cpu_opsel = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), cpu_exec),
-
-  (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda: UOp(Ops.LINEAR)),
-  (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))),
-   lambda ctx, dst, val: cpu_cmd(ctx.devs, wait_prog, dst.getaddr(ctx.devs), val.cast(dtypes.uint64))),
-  (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))),
-   lambda ctx, dst, val: cpu_cmd(ctx.devs, signal_prog, dst.getaddr(ctx.devs), val.cast(dtypes.uint64))),
-  (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: cpu_cmd(ctx.devs, timestamp_prog, dst.getaddr(ctx.devs),
-   *(() if WIN else (make_buf(ctx.devs, tag="func:clock_gettime").getaddr(ctx.devs),)))),
-])
-
-def cpu_submit(ctx, cmdbuf:UOp) -> UOp:
-  # run the cmd entries inline on the submitting thread, the cpu has no worker threads
-  cb, cnt = cmdbuf.bitcast(dtypes.uint64), hcq_size_var(cmdbuf) // (CMD_SIZE * 8)
-  e = UOp.range(cnt, 10, dtype=dtypes.int, src=(cmdbuf,))
-  entry = [cb.index(e*CMD_SIZE + i).load() for i in range(CMD_SIZE)]
-  return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(e)
-
-pm_cpu_submit = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(name="cmdbuf"),)), cpu_submit)])
 
 # *****************
 
@@ -160,7 +124,6 @@ class CPUAllocator(HCQAllocator['CPUDevice']):
 
 class CPUDevice(HCQ2Compiled):
   wait_timeout_ms, has_copy_queue = 30000, False
-  pm_encode, pm_lower = {"COMPUTE": pm_cpu_opsel, "SUBMIT": pm_cpu_opsel}, {"COMPUTE": pm_cpu_submit, "SUBMIT": pm_cpu_submit}
 
   def __init__(self, device:str=""):
     super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], CPUProgram,
@@ -175,6 +138,10 @@ class CPUDevice(HCQ2Compiled):
                                               for f in (signal_prog, wait_prog, timestamp_prog)}
 
   def func_ptr(self, name:str) -> Buffer: return self.func_table.view(1, dtypes.uint64, FUNCS.index(name)*8).ensure_allocated()
+
+  def synchronize(self, timeout:int|None=None): # a host read is safe once every device timeline caught up
+    for dev in [Device[d] for d in Device._opened_devices if not d.startswith("CPU")]:
+      if isinstance(dev, HCQ2Compiled): dev.synchronize(timeout)
 
   @functools.cached_property
   def func_table(self) -> Buffer:

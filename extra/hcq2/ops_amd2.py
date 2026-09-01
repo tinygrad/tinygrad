@@ -3,7 +3,7 @@ from typing import cast
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, itertools, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, make_buf, hcq_size_var
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -25,214 +25,195 @@ from tinygrad.runtime.ops_amd import EVENT_INDEX_PARTIAL_FLUSH, WAIT_REG_MEM_FUN
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
-from tinygrad.uop import FastEnum, auto
 from tinygrad.uop.ops import Ops, UPat, PatternMatcher
 
 # *****************
 # PM4
 
-class PM4Ops(FastEnum):
-  SET_SH_REG = auto(); SET_UCONFIG_REG = auto(); WAIT_REG_MEM = auto(); ACQUIRE_MEM = auto()  # noqa: E702
-  RELEASE_MEM = auto(); DISPATCH_DIRECT = auto(); EVENT_WRITE = auto()  # noqa: E702
-
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
-def pkt3(ctx, op:PM4Ops, *vals):
-  return UOp(Ops.LINEAR, src=tuple(x if isinstance(x, UOp) else UOp.const(x, dtypes.uint32)
-    for x in (ctx.pm4.PACKET3(getattr(ctx.pm4, f"PACKET3_{op.name}"), _dw(vals) - 1), *vals)))
+class AMDComputeQueue(HWQueue):
+  q_rewrite = PatternMatcher([
+    (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), lambda ctx, call, prg: ctx.exec(call, prg)),
+    (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda ctx: ctx.memory_barrier()),
+    (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
+    (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
+    (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))),
+     lambda ctx, dst, val: ctx.signal(dst, val)),
+  ])
 
-def wreg(ctx, reg:AMDReg, *args:sint, **kwargs:int):
-  if bool(args) == bool(kwargs): raise RuntimeError('One (and only one) of *args or **kwargs must be specified')
-  if ctx.pm4.PACKET3_SET_SH_REG_START <= reg.addr[0] < ctx.pm4.PACKET3_SET_SH_REG_END:
-    op, set_packet_start = PM4Ops.SET_SH_REG, ctx.pm4.PACKET3_SET_SH_REG_START
-  elif ctx.pm4.PACKET3_SET_UCONFIG_REG_START <= reg.addr[0] < ctx.pm4.PACKET3_SET_UCONFIG_REG_START + 2**16-1:
-    op, set_packet_start = PM4Ops.SET_UCONFIG_REG, ctx.pm4.PACKET3_SET_UCONFIG_REG_START
-  else: raise RuntimeError(f'Cannot set {reg.name} ({reg.addr[0]}) via pm4 packet')
-  return pkt3(ctx, op, reg.addr[0] - set_packet_start, *(args or (reg.encode(**kwargs),)))
+  def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, _dw(vals) - 1), *vals)
 
-def wait_reg_mem(ctx, value, mask=0xffffffff, mem=None, reg=None, reg_done=0, op=WAIT_REG_MEM_FUNCTION_GEQ):
-  wrm_info_dw = ctx.pm4.WAIT_REG_MEM_MEM_SPACE(int(mem is not None)) | ctx.pm4.WAIT_REG_MEM_OPERATION(int(mem is None and reg_done > 0)) \
-              | ctx.pm4.WAIT_REG_MEM_FUNCTION(op) | ctx.pm4.WAIT_REG_MEM_ENGINE(0)
-  return pkt3(ctx, PM4Ops.WAIT_REG_MEM, wrm_info_dw, *((mem,) if mem is not None else (reg, reg_done)), value, mask, 4)
+  def wreg(self, reg:AMDReg, *args:sint, **kwargs:int):
+    if bool(args) == bool(kwargs): raise RuntimeError('One (and only one) of *args or **kwargs must be specified')
+    if self.pm4.PACKET3_SET_SH_REG_START <= reg.addr[0] < self.pm4.PACKET3_SET_SH_REG_END:
+      set_packet, set_packet_start = self.pm4.PACKET3_SET_SH_REG, self.pm4.PACKET3_SET_SH_REG_START
+    elif self.pm4.PACKET3_SET_UCONFIG_REG_START <= reg.addr[0] < self.pm4.PACKET3_SET_UCONFIG_REG_START + 2**16-1:
+      set_packet, set_packet_start = self.pm4.PACKET3_SET_UCONFIG_REG, self.pm4.PACKET3_SET_UCONFIG_REG_START
+    else: raise RuntimeError(f'Cannot set {reg.name} ({reg.addr[0]}) via pm4 packet')
+    self.pkt3(set_packet, reg.addr[0] - set_packet_start, *(args or (reg.encode(**kwargs),)))
 
-def acquire_mem(ctx, addr=0x0, sz=(1 << 64)-1, gli=1, glm=1, glk=1, glv=1, gl1=1, gl2=1):
-  if ctx.target[0] != 9:
-    cache_flags_dw = ctx.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(gli) \
-                   | ctx.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_INV(glm) | ctx.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_WB(glm) \
-                   | ctx.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(glk) | ctx.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_WB(glk) \
-                   | ctx.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(glv) | ctx.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(gl1) \
-                   | ctx.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2) | ctx.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_WB(gl2)
-    return pkt3(ctx, PM4Ops.ACQUIRE_MEM, 0, *data64_le(sz), *data64_le(addr), 0, cache_flags_dw)
-  cp_coher_cntl = ctx.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_SH_ICACHE_ACTION_ENA(gli) | \
-                  ctx.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_SH_KCACHE_ACTION_ENA(glk) | \
-                  ctx.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TC_ACTION_ENA(gl2) | \
-                  ctx.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TCL1_ACTION_ENA(gl1) | \
-                  ctx.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TC_WB_ACTION_ENA(gl2)
-  return pkt3(ctx, PM4Ops.ACQUIRE_MEM, cp_coher_cntl, *data64_le(sz), *data64_le(addr), 0x0000000A)
+  def wait_reg_mem(self, value, mask=0xffffffff, mem=None, reg=None, reg_done=0, op=WAIT_REG_MEM_FUNCTION_GEQ):
+    wrm_info_dw = self.pm4.WAIT_REG_MEM_MEM_SPACE(int(mem is not None)) | self.pm4.WAIT_REG_MEM_OPERATION(int(mem is None and reg_done > 0)) \
+                | self.pm4.WAIT_REG_MEM_FUNCTION(op) | self.pm4.WAIT_REG_MEM_ENGINE(0)
+    self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, wrm_info_dw, *((mem,) if mem is not None else (reg, reg_done)), value, mask, 4)
 
-def release_mem(ctx, address=0x0, value=0, data_sel=0, int_sel=2, ctxid=0, cache_flush=False):
-  if ctx.target[0] != 9:
-    cache_flags_dw = 0 if not cache_flush else (ctx.pm4.PACKET3_RELEASE_MEM_GCR_GLV_INV | ctx.pm4.PACKET3_RELEASE_MEM_GCR_GL1_INV \
-                   | ctx.pm4.PACKET3_RELEASE_MEM_GCR_GL2_INV | ctx.pm4.PACKET3_RELEASE_MEM_GCR_GLM_WB \
-                   | ctx.pm4.PACKET3_RELEASE_MEM_GCR_GLM_INV | ctx.pm4.PACKET3_RELEASE_MEM_GCR_GL2_WB | ctx.pm4.PACKET3_RELEASE_MEM_GCR_SEQ)
-    event_dw = ctx.pm4.PACKET3_RELEASE_MEM_EVENT_TYPE(ctx.pm4.CACHE_FLUSH_AND_INV_TS_EVENT) \
-             | ctx.pm4.PACKET3_RELEASE_MEM_EVENT_INDEX(ctx.pm4.event_index__mec_release_mem__end_of_pipe)
-    memsel_dw = ctx.pm4.PACKET3_RELEASE_MEM_DATA_SEL(data_sel) | ctx.pm4.PACKET3_RELEASE_MEM_INT_SEL(int_sel) \
-              | ctx.pm4.PACKET3_RELEASE_MEM_DST_SEL(0)
-  else:
-    cache_flags_dw = 0 if not cache_flush else (ctx.pm4.EOP_TC_WB_ACTION_EN | ctx.pm4.EOP_TC_NC_ACTION_EN)
-    event_dw = ctx.pm4.EVENT_TYPE(ctx.pm4.CACHE_FLUSH_AND_INV_TS_EVENT) | ctx.pm4.EVENT_INDEX(ctx.pm4.event_index__mec_release_mem__end_of_pipe)
-    memsel_dw = ctx.pm4.DATA_SEL(data_sel) | ctx.pm4.INT_SEL(int_sel)
-    ctxid = 0
-  addr_w = address if isinstance(address, UOp) else UOp.const(address, dtypes.uint64)
-  val_w = value.cast(dtypes.uint64) if isinstance(value, UOp) else UOp.const(value, dtypes.uint64)
-  return pkt3(ctx, PM4Ops.RELEASE_MEM, event_dw | cache_flags_dw, memsel_dw, addr_w, val_w, ctxid)
+  def acquire_mem(self, addr=0x0, sz=(1 << 64)-1, gli=1, glm=1, glk=1, glv=1, gl1=1, gl2=1):
+    if self.target[0] != 9:
+      cache_flags_dw = self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(gli) \
+                     | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_INV(glm) | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_WB(glm) \
+                     | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(glk) | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_WB(glk) \
+                     | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(glv) | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(gl1) \
+                     | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2) | self.pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_WB(gl2)
+      return self.pkt3(self.pm4.PACKET3_ACQUIRE_MEM, 0, *data64_le(sz), *data64_le(addr), 0, cache_flags_dw)
+    cp_coher_cntl = self.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_SH_ICACHE_ACTION_ENA(gli) | \
+                    self.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_SH_KCACHE_ACTION_ENA(glk) | \
+                    self.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TC_ACTION_ENA(gl2) | \
+                    self.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TCL1_ACTION_ENA(gl1) | \
+                    self.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TC_WB_ACTION_ENA(gl2)
+    return self.pkt3(self.pm4.PACKET3_ACQUIRE_MEM, cp_coher_cntl, *data64_le(sz), *data64_le(addr), 0x0000000A)
 
-def memory_barrier(ctx):
-  pf = '' if ctx.nbio.version[0] == 2 else '0' if ctx.nbio.version[:2] != (7, 11) else '1'
-  return UOp(Ops.LINEAR, src=(
-    wait_reg_mem(ctx, reg=getattr(ctx.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr[0],
-                 reg_done=getattr(ctx.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0], value=0xffffffff),
-    acquire_mem(ctx)))
+  def release_mem(self, address=0x0, value=0, data_sel=0, int_sel=2, ctxid=0, cache_flush=False):
+    if self.target[0] != 9:
+      cache_flags_dw = 0 if not cache_flush else (self.pm4.PACKET3_RELEASE_MEM_GCR_GLV_INV | self.pm4.PACKET3_RELEASE_MEM_GCR_GL1_INV \
+                     | self.pm4.PACKET3_RELEASE_MEM_GCR_GL2_INV | self.pm4.PACKET3_RELEASE_MEM_GCR_GLM_WB \
+                     | self.pm4.PACKET3_RELEASE_MEM_GCR_GLM_INV | self.pm4.PACKET3_RELEASE_MEM_GCR_GL2_WB | self.pm4.PACKET3_RELEASE_MEM_GCR_SEQ)
+      event_dw = self.pm4.PACKET3_RELEASE_MEM_EVENT_TYPE(self.pm4.CACHE_FLUSH_AND_INV_TS_EVENT) \
+               | self.pm4.PACKET3_RELEASE_MEM_EVENT_INDEX(self.pm4.event_index__mec_release_mem__end_of_pipe)
+      memsel_dw = self.pm4.PACKET3_RELEASE_MEM_DATA_SEL(data_sel) | self.pm4.PACKET3_RELEASE_MEM_INT_SEL(int_sel) \
+                | self.pm4.PACKET3_RELEASE_MEM_DST_SEL(0)
+    else:
+      cache_flags_dw = 0 if not cache_flush else (self.pm4.EOP_TC_WB_ACTION_EN | self.pm4.EOP_TC_NC_ACTION_EN)
+      event_dw = self.pm4.EVENT_TYPE(self.pm4.CACHE_FLUSH_AND_INV_TS_EVENT) | \
+                 self.pm4.EVENT_INDEX(self.pm4.event_index__mec_release_mem__end_of_pipe)
+      memsel_dw = self.pm4.DATA_SEL(data_sel) | self.pm4.INT_SEL(int_sel)
+      ctxid = 0
+    addr_w = address if isinstance(address, UOp) else UOp.const(address, dtypes.uint64)
+    val_w = value.cast(dtypes.uint64) if isinstance(value, UOp) else UOp.const(value, dtypes.uint64)
+    self.pkt3(self.pm4.PACKET3_RELEASE_MEM, event_dw | cache_flags_dw, memsel_dw, addr_w, val_w, ctxid)
 
-def pm4_wait(ctx, dst, val): return wait_reg_mem(ctx, val.cast(dtypes.uint32), mem=dst.getaddr(ctx.devs))
+  def memory_barrier(self):
+    pf = '' if self.nbio.version[0] == 2 else '0' if self.nbio.version[:2] != (7, 11) else '1'
+    self.wait_reg_mem(reg=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr[0],
+                      reg_done=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0], value=0xffffffff)
+    self.acquire_mem()
 
-def pm4_barrier(ctx): return memory_barrier(ctx)
+  def exec(self, call:UOp, prg:UOp):
+    data, lib = amd_build_program(self.dev, prg)
+    info = prg.arg
 
-def pm4_store(ctx, dst, val):
-  if val.op is Ops.BINARY: return None
-  return release_mem(ctx, dst.getaddr(ctx.devs), val, ctx.pm4.data_sel__mec_release_mem__send_32_bit_low,
-                     ctx.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
+    # kernargs: a nested blob linear inside a getaddr, packed into the tail of the cmdbuf
+    ka_words = [get_call_arg_uops(call)[gi].getaddr(self.devs) for gi in info.globals] + list(get_call_var_uops(call, prg))
+    pad = data.kernargs_alloc_size - sum(w.dtype.itemsize for w in ka_words)
+    assert pad >= 0 and pad % 4 == 0, f"bad kernargs padding {pad}"
+    ka = UOp(Ops.LINEAR, src=tuple(ka_words) + (UOp.const(0, dtypes.uint32),) * (pad // 4)).rtag("kernargs")
 
-def pm4_timestamp(ctx, dst):
-  return release_mem(ctx, dst.getaddr(ctx.devs), 0, ctx.pm4.data_sel__mec_release_mem__send_gpu_clock_counter,
-                     ctx.pm4.int_sel__mec_release_mem__none)
+    prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
+    scratch_addr = UOp.placeholder((data.private_segment_size,), dtypes.uint8, 0, device=self.devs).rtag("scratch").getaddr(self.devs)
+    args_addr = ka.getaddr(self.devs)
 
-def pm4_program(ctx, call, prg):
-  data, lib = amd_build_program(ctx.dev, prg)
-  info = prg.arg
+    user_regs:list = []
+    if data.enable_private_segment_sgpr: user_regs = [scratch_addr | (1 << 63), 0xffffffff, 0x20c14000]
+    if data.enable_dispatch_ptr: user_regs += [args_addr + data.kernargs_segment_size]
+    user_regs += [args_addr]
 
-  # kernargs: a nested blob linear inside a getaddr, input addresses and variable values are filled per call through the input table
-  ka_words = [get_call_arg_uops(call)[gi].getaddr(ctx.devs) for gi in info.globals] + list(get_call_var_uops(call, prg))
-  pad = data.kernargs_alloc_size - sum(w.dtype.itemsize for w in ka_words)
-  assert pad >= 0 and pad % 4 == 0, f"bad kernargs padding {pad}"
-  ka = UOp(Ops.LINEAR, src=tuple(ka_words) + (UOp.const(0, dtypes.uint32),) * (pad // 4)).rtag("kernargs")
+    dispatch_init = self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(
+      **({'cs_w32_en': int(data.wave32)} if self.target[0] != 9 else {}), force_start_at_000=1, compute_shader_en=1)
+    self.acquire_mem(gli=0, gl2=0)
+    self.wreg(self.gc.regCOMPUTE_PGM_LO, prog_addr >> 8)
+    self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
+    self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
+    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, self.tmpring_size(data.private_segment_size))
+    for xcc_id in range(self.xccs):
+      self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, (scratch_addr + data.private_segment_size // self.xccs * xcc_id) >> 8)
+    self.wreg(self.gc.regCOMPUTE_RESTART_X, 0, 0, 0)
+    self.wreg(self.gc.regCOMPUTE_USER_DATA_0, *user_regs)
+    self.wreg(self.gc.regCOMPUTE_RESOURCE_LIMITS, self.gc.regCOMPUTE_RESOURCE_LIMITS.encode(waves_per_sh=getenv("WAVES_PER_SH")))
+    self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *info.local_size, 0, 0)
+    self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *info.global_size, dispatch_init)
+    self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
 
-  prog_addr = lib.getaddr(ctx.devs) + data.entry_point_offset
-  scratch_addr = UOp.placeholder((data.private_segment_size,), dtypes.uint8, 0, device=ctx.devs).rtag("scratch").getaddr(ctx.devs)
-  args_addr = ka.getaddr(ctx.devs)
+  def wait(self, signal:UOp, value:UOp): self.wait_reg_mem(value.cast(dtypes.uint32), mem=signal.getaddr(self.devs))
 
-  user_regs:list = []
-  if data.enable_private_segment_sgpr: user_regs = [scratch_addr | (1 << 63), 0xffffffff, 0x20c14000]
-  if data.enable_dispatch_ptr: user_regs += [args_addr + data.kernargs_segment_size]
-  user_regs += [args_addr]
+  def timestamp(self, signal:UOp):
+    self.release_mem(signal.getaddr(self.devs), 0, self.pm4.data_sel__mec_release_mem__send_gpu_clock_counter,
+                     self.pm4.int_sel__mec_release_mem__none)
 
-  dispatch_init = ctx.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(
-    **({'cs_w32_en': int(data.wave32)} if ctx.target[0] != 9 else {}), force_start_at_000=1, compute_shader_en=1)
-  ins = [acquire_mem(ctx, gli=0, gl2=0),
-    wreg(ctx, ctx.gc.regCOMPUTE_PGM_LO, prog_addr >> 8),
-    wreg(ctx, ctx.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2),
-    wreg(ctx, ctx.gc.regCOMPUTE_PGM_RSRC3, data.rsrc3),
-    wreg(ctx, ctx.gc.regCOMPUTE_TMPRING_SIZE, ctx.tmpring_size(data.private_segment_size))]
-  ins += [wreg(ctx, ctx.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, (scratch_addr + data.private_segment_size // ctx.xccs * xcc_id) >> 8)
-          for xcc_id in range(ctx.xccs)]
-  ins += [wreg(ctx, ctx.gc.regCOMPUTE_RESTART_X, 0, 0, 0),
-    wreg(ctx, ctx.gc.regCOMPUTE_USER_DATA_0, *user_regs),
-    wreg(ctx, ctx.gc.regCOMPUTE_RESOURCE_LIMITS, ctx.gc.regCOMPUTE_RESOURCE_LIMITS.encode(waves_per_sh=getenv("WAVES_PER_SH"))),
-    wreg(ctx, ctx.gc.regCOMPUTE_START_X, 0, 0, 0, *info.local_size, 0, 0),
-    pkt3(ctx, PM4Ops.DISPATCH_DIRECT, *info.global_size, dispatch_init),
-    pkt3(ctx, PM4Ops.EVENT_WRITE, ctx.pm4.EVENT_TYPE(ctx.soc.CS_PARTIAL_FLUSH) | ctx.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))]
-  return UOp(Ops.LINEAR, src=tuple(ins))
+  def signal(self, signal:UOp, value:UOp):
+    self.release_mem(signal.getaddr(self.devs), value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+                     self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
 
-def pm4_ib(ctx, submit:UOp, lin:UOp) -> UOp|None:
-  # the ring only carries a packet pointing at the ib: the host fence at the start of the batch guarantees the ib is free to reuse
-  if lin.tag is not None or any(w.op in {Ops.CALL, Ops.INS, Ops.LINEAR, Ops.NOOP} for w in lin.src): return None # wait for the flat word linear
-  assert (size_dw:=sum(w.dtype.itemsize for w in lin.src) // 4) < (1 << 20), f"indirect buffer of {size_dw} dwords doesn't fit one packet"
-  pkt = (UOp.const(ctx.pm4.PACKET3(ctx.pm4.PACKET3_INDIRECT_BUFFER, 2), dtypes.uint32), lin.rtag("indirect").getaddr(ctx.devs),
-         UOp.const(size_dw | ctx.pm4.INDIRECT_BUFFER_VALID, dtypes.uint32))
-  return submit.replace(src=(UOp(Ops.LINEAR, src=pkt, arg=lin.arg).rtag(("cmdbuf", ctx.queue)),))
+  def submit(self, cmdbuf:UOp) -> UOp:
+    for d in self.devs: q = Device[d].compute_queue
 
-pm_pm4_encode = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), pm4_program),
-  (UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(Ops.LINEAR, name="lin"),), name="submit"), pm4_ib),
+    ring = self.new_arg(UOp.placeholder((q.ring.size,), q.ring.dtype, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_ring"))
+    wptr = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_write_ptr"))
+    doorbell = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_doorbell"))
+    put = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_put_value"))
 
-  (UPat(Ops.INS, arg=("barrier", dtypes.void)), pm4_barrier),
-  (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), pm4_wait),
-  (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), pm4_timestamp),
-  (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))), pm4_store),
-])
+    size_dw = cmdbuf.max_numel() // 4
+    p = put.after(*self.deps).index(0).load()
+    i = UOp.range(size_dw, 10, dtype=dtypes.int, src=(cmdbuf,))
+    copy = ring.index(((p + i.cast(p.dtype)) % q.ring.size).cast(dtypes.int)).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
+    next_put = p + size_dw
+    flush = UOp.barrier(copy, put.index(0).store(next_put), wptr.index(0).store(next_put))
+    return doorbell.after(flush).index(0).store(next_put)
 
 # *****************
 # SDMA
 
-def sdma_copy(ctx, call):
-  sz = call.src[2].max_numel() * call.src[2].dtype.itemsize
-  hdr = ctx.sdma.SDMA_OP_COPY | ctx.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_COPY_LINEAR)
-  return UOp(Ops.LINEAR, src=tuple(x for off in range(0, sz, ctx.max_copy_size) for x in (
-    *(UOp.const(v, dtypes.uint32) for v in (hdr, ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz-off, ctx.max_copy_size)-1), 0)),
-    *(a + UOp.const(off, dtypes.uint64) if off else a for a in (call.src[2].getaddr(ctx.devs), call.src[1].getaddr(ctx.devs))))))
+class AMDSDMAQueue(HWQueue):
+  q_rewrite = PatternMatcher([
+    (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), lambda ctx, call: ctx.copy(call)),
+    (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda ctx: ()),
+    (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
+    (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
+    (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))),
+     lambda ctx, dst, val: ctx.signal(dst, val)),
+  ])
 
-def sdma_wait(ctx, dst, val):
-  op = ctx.sdma.SDMA_OP_POLL_REGMEM | ctx.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) \
-     | ctx.sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
-  return UOp(Ops.LINEAR, src=(
-    UOp.const(op, dtypes.uint32), dst.getaddr(ctx.devs), val.cast(dtypes.uint32), UOp.const(0xffffffff, dtypes.uint32),
-    UOp.const(ctx.sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | ctx.sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff), dtypes.uint32)))
+  def copy(self, call:UOp):
+    sz = call.src[2].max_numel() * call.src[2].dtype.itemsize
+    hdr = self.sdma.SDMA_OP_COPY | self.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_COPY_LINEAR)
+    for off in range(0, sz, self.max_copy_size):
+      self.q(hdr, self.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz-off, self.max_copy_size)-1), 0,
+             *(a + UOp.const(off, dtypes.uint64) if off else a for a in (call.src[2].getaddr(self.devs), call.src[1].getaddr(self.devs))))
 
-def sdma_store(ctx, dst, val): # a fence packet then a trap
-  op = ctx.sdma.SDMA_OP_FENCE | (ctx.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if ctx.target[0] != 9 else 0)
-  return UOp(Ops.LINEAR, src=(UOp.const(op, dtypes.uint32), dst.getaddr(ctx.devs), val.cast(dtypes.uint32),
-                              UOp.const(ctx.sdma.SDMA_OP_TRAP, dtypes.uint32), UOp.const(0, dtypes.uint32)))
+  def wait(self, signal:UOp, value:UOp):
+    op = self.sdma.SDMA_OP_POLL_REGMEM | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) \
+       | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
+    self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), 0xffffffff,
+           self.sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | self.sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
 
-def sdma_timestamp(ctx, dst):
-  op = ctx.sdma.SDMA_OP_TIMESTAMP | ctx.sdma.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL)
-  return UOp(Ops.LINEAR, src=(UOp.const(op, dtypes.uint32), dst.getaddr(ctx.devs)))
+  def timestamp(self, signal:UOp):
+    self.q(self.sdma.SDMA_OP_TIMESTAMP | self.sdma.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
+           signal.getaddr(self.devs))
 
-pm_sdma_encode = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), sdma_copy),
+  def signal(self, signal:UOp, value:UOp): # a fence packet then a trap
+    op = self.sdma.SDMA_OP_FENCE | (self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.target[0] != 9 else 0)
+    self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), self.sdma.SDMA_OP_TRAP, 0)
 
-  (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda: UOp(Ops.LINEAR)),
-  (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), sdma_wait),
-  (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), sdma_timestamp),
-  (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))), sdma_store),
-])
+  def submit(self, cmdbuf:UOp) -> UOp:
+    # sdma needs the cmdbuf contiguous in the ring: if it won't fit before the ring end, restart at 0 and zero the tail
+    for d in self.devs: q = unwrap(Device[d].sdma_queue(int(self.queue.split(":")[1])))
 
-# *****************
-# queue submit
+    ring = self.new_arg(UOp.placeholder((q.ring.size,), q.ring.dtype, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_ring"))
+    wptr = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_write_ptr"))
+    doorbell = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_doorbell"))
+    put = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True).rtag(f"{self.queue}_put_value"))
 
-def _queue_bufs(ctx, q:AMDQueueDesc) -> tuple[UOp, UOp, UOp, UOp]:
-  ring = UOp.placeholder((q.ring.size,), q.ring.dtype, 0, device=ctx.devs, volatile=True).rtag(f"{ctx.queue}_ring")
-  return (ring, *(make_buf(ctx.devs, tag=f"{ctx.queue}_{n}") for n in ("write_ptr", "doorbell", "put_value")))
-
-def pm4_submit(ctx, cmdbuf:UOp) -> UOp:
-  for d in ctx.devs: q = Device[d].compute_queue
-  ring, wptr, doorbell, put = _queue_bufs(ctx, q)
-  p, size_dw = put.after(cmdbuf).index(0).load(), hcq_size_var(cmdbuf) // 4
-  i = UOp.range(size_dw, 10, dtype=dtypes.int, src=(cmdbuf, ring))
-  copy = ring.index(((p + i.cast(p.dtype)) % q.ring.size).cast(dtypes.int)).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
-  next_put = p + size_dw.cast(p.dtype)
-  flush = UOp.barrier(copy, put.index(0).store(next_put), wptr.index(0).store(next_put))
-  return doorbell.after(flush).index(0).store(next_put)
-
-def sdma_submit(ctx, cmdbuf:UOp) -> UOp:
-  # sdma needs the cmdbuf contiguous in the ring: if it won't fit before the ring end, restart at 0 and zero the tail
-  for d in ctx.devs: q = unwrap(Device[d].sdma_queue(int(ctx.queue.split(":")[1])))
-  (ring, wptr, doorbell, put), rs = _queue_bufs(ctx, q), q.ring.size
-  size_dw = hcq_size_var(cmdbuf) // 4
-  put_b = put.after(cmdbuf).index(0).load()
-  tail = ((put_b % (rs * 4)) // 4).cast(dtypes.int)
-  fits = (size_dw <= rs - tail).cast(dtypes.int)
-  start_dw, zero_amt = fits * tail, (1 - fits) * (rs - tail)
-  zi = UOp.range(zero_amt, 10, dtype=dtypes.int, src=(ring,))
-  zero_tail = ring.index(tail + zi).store(UOp.const(0, dtypes.uint32)).end(zi)
-  i = UOp.range(size_dw, 11, dtype=dtypes.int, src=(cmdbuf, ring))
-  copy = ring.index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
-  next_put = put_b + ((zero_amt + size_dw) * 4).cast(put_b.dtype)
-  flush = UOp.barrier(zero_tail, copy, put.index(0).store(next_put), wptr.index(0).store(next_put))
-  return doorbell.after(flush).index(0).store(next_put)
-
-pm_pm4_submit = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(name="cmdbuf"),)), pm4_submit)])
-pm_sdma_submit = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(name="cmdbuf"),)), sdma_submit)])
+    rs, size_dw = q.ring.size, cmdbuf.max_numel() // 4
+    put_b = put.after(*self.deps).index(0).load()
+    tail = ((put_b % (rs * 4)) // 4).cast(dtypes.int)
+    fits = (size_dw <= rs - tail).cast(dtypes.int)
+    start_dw, zero_amt = fits * tail, (1 - fits) * (rs - tail)
+    zi = UOp.range(zero_amt, 10, dtype=dtypes.int, src=(cmdbuf,))
+    zero_tail = ring.index(tail + zi).store(UOp.const(0, dtypes.uint32)).end(zi)
+    i = UOp.range(size_dw, 11, dtype=dtypes.int, src=(cmdbuf,))
+    copy = ring.index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
+    next_put = put_b + ((zero_amt + size_dw) * 4).cast(put_b.dtype)
+    flush = UOp.barrier(zero_tail, copy, put.index(0).store(next_put), wptr.index(0).store(next_put))
+    return doorbell.after(flush).index(0).store(next_put)
 
 @dataclass(frozen=True)
 class AMDProgramData:
@@ -548,8 +529,10 @@ def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface
 class AMDDevice(HCQ2Compiled):
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
   max_scratch_psize = 0
-  pm_encode = {"COMPUTE": pm_pm4_encode, "COPY": pm_sdma_encode}
-  pm_lower = {"COMPUTE": pm_pm4_submit, "COPY": pm_sdma_submit}
+  pm_encode = PatternMatcher([
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute", name="submit"), lambda ctx, submit: AMDComputeQueue(ctx).encode(submit)),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy", name="submit"), lambda ctx, submit: AMDSDMAQueue(ctx).encode(submit)),
+  ])
 
   ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]
 

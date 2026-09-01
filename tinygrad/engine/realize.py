@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import weakref, array, decimal
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup, to_mv
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup, to_mv, getenv
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, HCQ2, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
@@ -19,6 +19,7 @@ def get_call_var_uops(call:UOp, prg:UOp) -> list[UOp]:
 
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.src[0]
+  if isinstance(call.arg.aux, HCQInfo): return (), ()
   if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
   if ast.op is Ops.COPY: return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
@@ -29,8 +30,9 @@ def get_call_written_bufs(call:UOp) -> list[UOp]:
   return dedup([b for k in outs if k not in ins and (b:=u if (cv:=(u:=arg_uops[k]).contiguous_view()) is None else cv[0]).op is Ops.BUFFER])
 
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]]:
-  if (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq":
+  if isinstance(call.arg.aux, HCQInfo):
     return [(d, call, (name, estimates, profile_key)) for devices,name,estimates,_,profile_key in call.arg.aux.kernels for d in devices]
+  ast = call.src[0]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call, None)]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "validate": return []
   return [(d, call, None) for d in to_tuple(call.src[1].device)]
@@ -40,27 +42,27 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
   def _dev_str(buf:Buffer|UOp) -> str: return ', '.join(d[:7] for d in to_tuple(buf.device))
 
   ast, arg_uops = call.src[0], get_call_arg_uops(call)
+  if isinstance(call.arg.aux, HCQInfo): return cast(str, call.arg.name)
   if ast.op is Ops.PROGRAM: return ast.arg.name
   if ast.op is Ops.COPY: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {_dev_str(bufs[0]):>7s} <- {_dev_str(bufs[1]):7s}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return colored(f"batched {len(ast.src[0].src)}", "cyan")
-  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return cast(str, call.arg.name)
   raise NotImplementedError("get_call_name is not implemented")
 
 # **************** Stat ****************
 
 def estimate_uop(call:UOp) -> Estimates:
+  if isinstance(call.arg.aux, HCQInfo): return call.arg.aux.estimates
   if (ast:=call.src[0]).op is Ops.PROGRAM: return ast.src[0].arg.estimates or Estimates()
   if ast.op is Ops.COPY or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec"):
     return Estimates(lds=(nbytes:=prod(call.src[1].shape) * call.src[1].dtype.itemsize), mem=nbytes)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return get_graph_runtime(ast).estimates
-  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return call.arg.aux.estimates
   return Estimates()
 
 first_run_cache:set[bytes] = set()
 def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|None]):
   if ctx.update_stats:
-    is_hcq = (ast:=call.src[0]).op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq"
+    is_hcq = isinstance(call.arg.aux, HCQInfo)
     estimates, n = estimate_uop(call), 1 if is_hcq else len(get_call_kernels(call))
     GlobalCounters.kernel_count += len(call.arg.aux.kernels) if is_hcq else n
     GlobalCounters.global_ops += n*sym_infer(estimates.ops, ctx.var_vals)
@@ -236,7 +238,7 @@ def _compile_kernel(x:tuple[int, tuple[UOp, Renderer], dict]) -> tuple[int, UOp]
   with Context(**x[2]): return x[0], to_program(*x[1])
 
 def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
-  ast = a0.src[0] if (a0:=c.src[0]).op is Ops.CUSTOM_FUNCTION and a0.arg == "hcq" else a0
+  ast = c.src[0]
   # a PROGRAM with a ProgramInfo and a BINARY is already compiled
   if ast.op is Ops.SINK or (ast.op is Ops.PROGRAM and not (isinstance(ast.arg, ProgramInfo) and ast.src[-1].op is Ops.BINARY)):
     return ast, Device[c.device if isinstance(c.device, str) else c.device[0]].renderer
@@ -271,14 +273,14 @@ def lower_and_compile(linear:UOp) -> UOp:
 
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True), exec_kernel),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True),
+   lambda ctx, call, ast: exec_hcq(ctx, call, ast) if isinstance(call.arg.aux, HCQInfo) else exec_kernel(ctx, call, ast)),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="ast"),), name="call", allow_any_len=True), exec_graph),
-  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="hcq", src=(UPat(Ops.PROGRAM, name="ast"),)),), name="call", allow_any_len=True), exec_hcq),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, _lane, HCQ_RUNTIME_DEV # noqa: E402 # down here, hcq2 imports realize
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, _lane, HCQ_RUNTIME_DEV, HCQInfo # noqa: E402 # down here, hcq2 imports realize
 
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
@@ -293,6 +295,7 @@ def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequenc
   inputs = list(input_uops)
   if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs))
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
+  if getenv("NORUN"): return # TODO: remove, compile benchmarking only
   for call in linear.src: track_stats(ctx, call, perf_counter_us(), pm_exec.rewrite(call, ctx))
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:

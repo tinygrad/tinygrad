@@ -5,7 +5,10 @@ from tinygrad.helpers import DEBUG, DEV, to_mv, from_mv, round_up, ceildiv, unwr
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 from tinygrad.device import Buffer, BufferSpec, Device
-from tinygrad.runtime.support.hcq2 import HCQInfo, make_buf, make_submit, HCQ_RUNTIME_DEV
+from tinygrad.runtime.support.hcq2 import HCQInfo, make_submit, HCQ_RUNTIME_DEV
+
+# TODO: unported to the hcq2 rewrite, keeps the old signal placeholder helper alive
+def make_buf(devs, slot:int=0, tag:str="signal") -> UOp: return UOp.placeholder((1,), dtypes.uint64, slot, device=devs, volatile=True, tag=tag)
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support import c
 
