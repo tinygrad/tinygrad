@@ -18,20 +18,21 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2)],
       [Opt(OptOps.LOCAL, 0, 8)],
       [Opt(OptOps.LOCAL, 0, 16)], # Checking how it works with locals
-      [Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 64)], # Checking how it works with grouped reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUPTOP, 0, 16)],
-      [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUPTOP, 0, 2)],
+      [Opt(OptOps.GROUPTOP, 1, 2)],
+      [Opt(OptOps.GROUPTOP, 1, 32)],
+      [Opt(OptOps.GROUPTOP, 1, 64)], # Checking how it works with grouped reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 2, 2)],
+      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUPTOP, 2, 16)],
+      [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUPTOP, 2, 2)],
       # Checking how it works with locals + grouped reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 64)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 2, 64)],
       # Checking how it works with locals + grouped reduce + upcasts
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UPCAST, 4, 4)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UPCAST, 4, 4)],
       # many local + many group
-      [Opt(OptOps.GROUP, 0, 2)] * 4,
+      [Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.LOCAL, 2, 2), Opt(OptOps.LOCAL, 3, 2), Opt(OptOps.LOCAL, 4, 2)],
       [Opt(OptOps.LOCAL, 0, 2)] * 4,
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2)] * 4,
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 2), Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 4, 2),
+       Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 6, 2), Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 8, 2)],
     ])
 
   def test_upcasts(self):
@@ -71,17 +72,17 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4)],
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 32)],
       [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.LOCAL, 1, 8)], # Checking how it works with locals
-      [Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.UPCAST, 2, 4)], # Checking how it works with grouped_reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 4)], # Checking how it works with local+grouped_reduce
+      [Opt(OptOps.GROUPTOP, 2, 2)],
+      [Opt(OptOps.GROUPTOP, 2, 32)],
+      [Opt(OptOps.GROUPTOP, 2, 32), Opt(OptOps.UPCAST, 2, 4)], # Checking how it works with grouped_reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 4, 32)],
+      [Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 3, 32)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 4, 4)], # Checking how it works with local+grouped_reduce
       # Checking all together
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UPCAST, 4, 4), Opt(OptOps.UPCAST, 0, 4),
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 4, 8), Opt(OptOps.UPCAST, 4, 4), Opt(OptOps.UPCAST, 0, 4),
        Opt(OptOps.UPCAST, 1, 2)],
       # Full global upcast + local
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UPCAST, 4, 4), Opt(OptOps.UPCAST, 0, 8)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 4, 8), Opt(OptOps.UPCAST, 4, 4), Opt(OptOps.UPCAST, 0, 8)],
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -93,20 +94,20 @@ class TestKernelOpts(unittest.TestCase):
     r = a.sum(axis=(1,3))
     helper_linearizer_opt(r, [
       # openCL / DEV=CL is 256 max threads
-      [Opt(OptOps.GROUPTOP, 0, 2)], [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 1, 2)], [Opt(OptOps.GROUPTOP, 1, 32)], # Checking how it works with 1 grouped_reduce.
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 64)], # Checking how it works with 2 grouped_reduces.
-      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UPCAST, 2, 4)],
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UPCAST, 4, 4)], # Checking how it works with 2 grouped_reduces + upcasts.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4)],
+      [Opt(OptOps.GROUPTOP, 2, 2)], [Opt(OptOps.GROUPTOP, 2, 32)],
+      [Opt(OptOps.GROUPTOP, 3, 2)], [Opt(OptOps.GROUPTOP, 3, 32)], # Checking how it works with 1 grouped_reduce.
+      [Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 4, 2)],
+      [Opt(OptOps.GROUPTOP, 2, 16), Opt(OptOps.GROUPTOP, 4, 2)],
+      [Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 4, 64)], # Checking how it works with 2 grouped_reduces.
+      [Opt(OptOps.GROUPTOP, 2, 16), Opt(OptOps.GROUPTOP, 4, 2), Opt(OptOps.UPCAST, 2, 4)],
+      [Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 4, 32), Opt(OptOps.UPCAST, 4, 4)], # Checking how it works with 2 grouped_reduces + upcasts.
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 4, 4), Opt(OptOps.GROUPTOP, 6, 4)],
       # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UPCAST, 5, 4)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2),
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 4, 2), Opt(OptOps.GROUPTOP, 6, 32), Opt(OptOps.UPCAST, 5, 4)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 4, 8), Opt(OptOps.GROUPTOP, 6, 4), Opt(OptOps.UPCAST, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 4, 8), Opt(OptOps.GROUPTOP, 6, 4), Opt(OptOps.UPCAST, 0, 2),
        Opt(OptOps.UPCAST, 4, 4), Opt(OptOps.UPCAST, 5, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2),
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 4, 4), Opt(OptOps.GROUPTOP, 6, 4), Opt(OptOps.UPCAST, 0, 2),
        Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
 
@@ -221,7 +222,7 @@ class TestKernelOpts(unittest.TestCase):
   def test_padto_group_full_unroll_sum(self):
     a = Tensor.ones(2, 28, 4096, dtype=dtypes.bfloat16).realize()
     out = ((a * 0.5).float().square()).sum(axis=(0, 2))
-    opts_to_apply = [Opt(OptOps.GROUPTOP, 1, 256), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.UPCAST, 3, 0), Opt(OptOps.UPCAST, 0, 7)]
+    opts_to_apply = [Opt(OptOps.GROUPTOP, 2, 256), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.UPCAST, 3, 0), Opt(OptOps.UPCAST, 0, 7)]
     helper_linearizer_opt(out, [opts_to_apply], check_default_opt=False)
 
   def test_padto_sum(self):
@@ -282,15 +283,15 @@ class TestKernelOpts(unittest.TestCase):
     r = a@b
     opts_shapes = [
       ([Opt(OptOps.LOCAL, 0, 2)], [("blue",16),("blue",32),("cyan",2),("red",32)]),
-      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.GROUP, 0, 2)], [("blue",16),("blue",32),("cyan",2),("green",2),("red",16)]),
+      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.LOCAL, 3, 2)], [("blue",16),("blue",32),("cyan",2),("green",2),("red",16)]),
       # check to ensure local_dims are stable for full UNROLL of the first reduce
       ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.UPCAST, 3, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
       ([Opt(OptOps.UPCAST, 2, 0),Opt(OptOps.LOCAL, 0, 2)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
       # check behavior for full UNROLL on an existing GROUP
-      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.GROUP, 0, 0),Opt(OptOps.UPCAST, 3, 2)], [("blue",16),("blue",32),("cyan",2),("green",16),("magenta",2)]),
-      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.GROUP, 0, 0),Opt(OptOps.UPCAST, 3, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
-      ([Opt(OptOps.GROUP, 0, 0),Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.UPCAST, 2, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
-      ([Opt(OptOps.GROUP, 0, 2),Opt(OptOps.UPCAST, 2, 0)], [("blue",32),("blue",32),("red",16),("magenta",2)]),
+      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.LOCAL, 3, 0),Opt(OptOps.UPCAST, 3, 2)], [("blue",16),("blue",32),("cyan",2),("green",16),("magenta",2)]),
+      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.LOCAL, 3, 0),Opt(OptOps.UPCAST, 3, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
+      ([Opt(OptOps.LOCAL, 2, 0),Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.UPCAST, 2, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
+      ([Opt(OptOps.LOCAL, 2, 2),Opt(OptOps.UPCAST, 2, 0)], [("blue",32),("blue",32),("red",16),("magenta",2)]),
     ]
     helper_linearizer_opt(r, [x[0] for x in opts_shapes], color_sizes=[x[1] for x in opts_shapes])
 
@@ -315,7 +316,7 @@ class TestKernelOpts(unittest.TestCase):
       helper_linearizer_opt(r, [[Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.GROUPTOP, 0, 16)],])
     r = a.sum((1, 2)).sum()
     with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(r, [[Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 0, 16)],])
+      helper_linearizer_opt(r, [[Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 1, 16)],])
 
 if __name__ == '__main__':
   unittest.main()

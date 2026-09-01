@@ -173,7 +173,7 @@ class TestLinearizer(unittest.TestCase):
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
-    opts_to_apply = [Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    opts_to_apply = [Opt(op=OptOps.LOCAL, axis=1, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
     program = to_program(replace_opts(r.schedule_linear().src[-1].src[0], opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
 
     stores = [u for u in tuple(program.src[1].src) if u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG]
@@ -345,7 +345,7 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_store_locals_and_globals(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     out = x@y
-    opt = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8),
+    opt = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 3, 8),
             Opt(OptOps.UPCAST, 3, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
     ast = helper_linearizer_opt(out, opts=[opt])
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
@@ -386,7 +386,7 @@ class TestLinearizer(unittest.TestCase):
   def test_two_grouped_stores_local(self):
     # GROUP on both reduces puts two LOCAL buffers in one kernel, and the store to each needs its own barrier
     a = Tensor.rand(32, 32).realize()
-    opts = [Opt(OptOps.GROUP, 1, 4), Opt(OptOps.GROUP, 2, 4)]
+    opts = [Opt(OptOps.LOCAL, 3, 4), Opt(OptOps.LOCAL, 5, 4)]
     ast = helper_linearizer_opt(single_kernel_softmax(a), [opts])
     uops = to_program(replace_opts(ast, opts), renderer=Device[Device.DEFAULT].renderer).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)

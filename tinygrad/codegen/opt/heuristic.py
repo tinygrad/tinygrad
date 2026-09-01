@@ -68,7 +68,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             if DEBUG >= 3:
               print(f"MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
             try:
-              if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
+              if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.LOCAL, k.axes_of(AxisType.REDUCE)[0], MV_THREADS_PER_ROW))
             except KernelOptError: pass
             if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
@@ -76,7 +76,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if k.ren.target.device == "QCOM" else 2048), False):
-    for axis, sz in itertools.product((0, 1, 2), (16,)):
+    for axis, sz in itertools.product(k.axes_of(AxisType.REDUCE)[:3], (16,)):
       try:
         k.apply_opt(Opt(OptOps.GROUPTOP, axis, sz))
         break

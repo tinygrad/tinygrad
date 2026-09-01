@@ -14,7 +14,7 @@ if __name__ == "__main__":
   if getenv("GEMV"):
     opts = [
       Opt(op=OptOps.UPCAST, axis=1, amt=8),
-      Opt(op=OptOps.GROUP, axis=0, amt=32),
+      Opt(op=OptOps.LOCAL, axis=1, amt=32),
     ]
   else:
     opts = [
