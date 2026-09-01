@@ -31,25 +31,25 @@ class TestDoubleMatmul(unittest.TestCase):
   def test_upcast_02(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 2, 4)))
   def test_upcast_12(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 2, 4)))
 
-  def test_unroll_0(self): self._test((Opt(OptOps.UNROLL, 0, 4),))
-  def test_unroll_1(self): self._test((Opt(OptOps.UNROLL, 1, 4),))
-  def test_unroll_01(self): self._test((Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
+  def test_unroll_0(self): self._test((Opt(OptOps.UPCAST, 3, 4),))
+  def test_unroll_1(self): self._test((Opt(OptOps.UPCAST, 4, 4),))
+  def test_unroll_01(self): self._test((Opt(OptOps.UPCAST, 3, 4), Opt(OptOps.UPCAST, 4, 4)))
 
-  def test_upcast_0_unroll_0(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)))
-  def test_upcast_1_unroll_0(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)))
-  def test_upcast_2_unroll_0(self): self._test((Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UNROLL, 0, 4)))
+  def test_upcast_0_unroll_0(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 4, 4)))
+  def test_upcast_1_unroll_0(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 4, 4)))
+  def test_upcast_2_unroll_0(self): self._test((Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UPCAST, 4, 4)))
 
-  def test_upcast_0_unroll_1(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
-  def test_upcast_1_unroll_1(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 1, 4)))
-  def test_upcast_2_unroll_1(self): self._test((Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UNROLL, 1, 4)))
+  def test_upcast_0_unroll_1(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 5, 4)))
+  def test_upcast_1_unroll_1(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 5, 4)))
+  def test_upcast_2_unroll_1(self): self._test((Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UPCAST, 5, 4)))
 
-  def test_upcast_1_unroll_1_small(self): self._test((Opt(OptOps.UPCAST, 1, 2), Opt(OptOps.UNROLL, 1, 2)))
-  def test_upcast_1_unroll_1_rev(self): self._test((Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UPCAST, 1, 2)))
+  def test_upcast_1_unroll_1_small(self): self._test((Opt(OptOps.UPCAST, 1, 2), Opt(OptOps.UPCAST, 5, 2)))
+  def test_upcast_1_unroll_1_rev(self): self._test((Opt(OptOps.UPCAST, 4, 2), Opt(OptOps.UPCAST, 1, 2)))
 
   def test_upcast_01_unroll_01(self):
-    self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
+    self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 5, 4), Opt(OptOps.UPCAST, 6, 4)))
   def test_upcast_12_unroll_01(self):
-    self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
+    self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UPCAST, 5, 4), Opt(OptOps.UPCAST, 6, 4)))
 
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):

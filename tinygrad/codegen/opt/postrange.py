@@ -11,6 +11,9 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
 
+upcast_to = {AxisType.GLOBAL: AxisType.UPCAST, AxisType.LOCAL: AxisType.UPCAST, AxisType.WEAK: AxisType.UPCAST,
+             AxisType.GROUP_REDUCE: AxisType.UNROLL, AxisType.REDUCE: AxisType.UNROLL}
+
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
     self.ast, self.ren = ast, ren
@@ -109,7 +112,6 @@ class Scheduler:
   def real_axis(self, op:OptOps, axis:int|None) -> int:
     try:
       if axis is None or op is OptOps.TC: return -1
-      if op is OptOps.UNROLL: return self.unrollable_dims[axis]
       if op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.axes_of(AxisType.REDUCE)[axis]
       check(axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
       return axis
@@ -122,13 +124,13 @@ class Scheduler:
     rng = self.rngs[real_axis] if (real_axis:=self.real_axis(opt.op, opt.axis)) >= 0 else UOp(Ops.NOOP)
 
     opt_to_at = {
-      OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST,
-      OptOps.UNROLL: AxisType.UNROLL, OptOps.GROUP: AxisType.GROUP_REDUCE,
+      OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST, OptOps.GROUP: AxisType.GROUP_REDUCE,
       OptOps.GROUPTOP: AxisType.GROUP_REDUCE}
 
     ret = None
     if opt.op in opt_to_at:
       amt:int = int(rng.vmax+1) if opt.arg == 0 else cast(int, opt.arg)
+      new_type = opt_to_at[opt.op]
 
       # copied from kernel.py. prevents METAL compiler hangs
       if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or (self.group_for_reduces and opt.op != OptOps.PADTO)):
@@ -141,18 +143,16 @@ class Scheduler:
         check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
           "cannot have a GROUP_REDUCE inside another reduce")
 
-      if opt.op is OptOps.UNROLL:
-        check(amt <= 32, "don't unroll more than 32")
-        check(rng.arg[-1] in {AxisType.GROUP_REDUCE, AxisType.REDUCE}, "unroll is for GROUP_REDUCE/REDUCE")
       if opt.op is OptOps.UPCAST:
-        check((self.ren is not None and self.ren.target.device == "DSP") or amt <= 16, "don't upcast more than 16")
-        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK}, f"upcast is for GLOBAL/LOCAL/LOOP, not {rng.arg[-1]}")
+        check(rng.arg[-1] in upcast_to, f"upcast is for GLOBAL/LOCAL/LOOP/REDUCE, not {rng.arg[-1]}")
+        if (new_type:=upcast_to[rng.arg[-1]]) is AxisType.UNROLL: check(amt <= 32, "don't unroll more than 32")
+        else: check((self.ren is not None and self.ren.target.device == "DSP") or amt <= 16, "don't upcast more than 16")
       if opt.op is OptOps.LOCAL:
         check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.WEAK}, "local is for globals")
       if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:
         check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
-      ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op is OptOps.GROUPTOP)
+      ret = self.shift_to(rng, amt, new_type, top=opt.op is OptOps.GROUPTOP)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
       check(opt.axis is not None, "tensor core opts must have an axis")

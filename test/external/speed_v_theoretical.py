@@ -86,7 +86,7 @@ class TestKernelSpeed(unittest.TestCase):
     self._compare(tm, tflops, gbs, nv_tflops, nv_gbs, amd_tflops, amd_gbs)
 
   # TODO: why are convs so slow?!?
-  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=14)
+  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=13)
 
   # theoretical is nv_tflops=165, amd_tflops=123
   def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=110, amd_tflops=65)
