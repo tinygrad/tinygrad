@@ -25,6 +25,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     0: applies to only kernels with a single reduce axis and direct Ops.LOAD into Ops.MUL
     1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
     2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
+  tc_occupancy_opt -- on gfx1200, when the baseline TC schedule launches fewer than 16 CTAs, use the reduced-upcast schedule if it
+  launches 32-64 CTAs
   """
   # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
   if USE_TC > 0 and (len(k.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (TC_OPT.value >= 1)):
