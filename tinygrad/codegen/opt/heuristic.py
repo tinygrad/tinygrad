@@ -1,9 +1,11 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, USE_TC, IMAGE, TC_OCCUPANCY_OPT, TC_OCCUPANCY_CUS
+from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, USE_TC, IMAGE, TC_OCCUPANCY_OPT
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
+
+TC_OCCUPANCY_FLOOR = {"gfx1200": 32}
 
 def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # first try the tensor cores
@@ -41,13 +43,14 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       if (szs := [sz for sz in [4,2] if baseline_rngs[0].src[0].divides(sz) is not None]): # attempt to local N
         baseline.apply_opt(Opt(OptOps.SPLIT, baseline.rngs.index(baseline_rngs[0]), (szs[0], AxisType.LOCAL)))
       baseline_ctas = prod(baseline.full_shape[i] for i in baseline.axes_of(AxisType.GLOBAL))
-      if not TC_OCCUPANCY_OPT or not resolve(2*baseline_ctas < (cus:=TC_OCCUPANCY_CUS.value or 32), False): return baseline
+      if not TC_OCCUPANCY_OPT or (floor:=TC_OCCUPANCY_FLOOR.get(k.ren.target.arch.split(":")[0])) is None or \
+         not resolve(2*baseline_ctas < floor, False): return baseline
       if (szs := [sz for sz in [5,4,3,2] if rngs[1].src[0].divides(sz) is not None]):
         rngs[1] = tk.apply_opt(Opt(OptOps.SPLIT, tk.rngs.index(rngs[1]), (szs[0], AxisType.UPCAST)))[0]
       if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]):
         tk.apply_opt(Opt(OptOps.SPLIT, tk.rngs.index(rngs[0]), (szs[0], AxisType.LOCAL)))
       ctas = prod(tk.full_shape[i] for i in tk.axes_of(AxisType.GLOBAL))
-      return tk if resolve((ctas >= cus) & (ctas <= 2*cus), False) else baseline
+      return tk if resolve((ctas >= floor) & (ctas <= 2*floor), False) else baseline
 
   # make a copy so it does not mutate the input
   k = k.copy()
