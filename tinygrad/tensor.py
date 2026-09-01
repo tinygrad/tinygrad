@@ -96,14 +96,6 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
 
   return None
 
-def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
-  # how output s lands in the caller's buffer t, or None if it must be copied into t
-  # materialize straight into t
-  if s.op is Ops.CONTIGUOUS: return t.after(t.store(s.src[0]))
-  # rebind output storage to t
-  if s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): return t
-  return None
-
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or c.num_returned == 0: return None
   assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
@@ -115,19 +107,24 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
   targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
 
-  subs:dict[UOp, UOp] = {}
+  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
+  # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
+  placed:dict[UOp, UOp] = {}
   items:list[UOp] = []
   for s, t in zip(srcs, targets):
-    after_deps:list[UOp] = []
+    deps:list[UOp] = []
     while s.op is Ops.AFTER:
-      after_deps.extend(s.src[1:])
+      deps.extend(s.src[1:])
       s = s.src[0]
-    if (placed := _precompiled_output_redirect(s, t)) is not None and s not in subs:
-      subs[s] = placed
-      items.append(s.after(*after_deps) if after_deps else s)
-    else:
-      items.append(t.after(t.store(s.after(*after_deps))))
-  fxn = UOp.sink(*(x.substitute(subs) for x in items))
+    if s not in placed:
+      if s.op is Ops.CONTIGUOUS: placed[s] = t.after(t.store(s.src[0]))
+      elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = t
+      if s in placed:
+        items.append(s.after(*deps))
+        continue
+    items.append(t.after(t.store(s.after(*deps))))
+  # swap every placed value for its target storage, also inside other stores' AFTER deps
+  fxn = UOp.sink(*(x.substitute(placed) for x in items))
 
   # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
   # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
