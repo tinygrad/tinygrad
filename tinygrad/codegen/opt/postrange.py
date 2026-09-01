@@ -13,6 +13,7 @@ from tinygrad.renderer import Renderer
 
 upcast_to = {AxisType.GLOBAL: AxisType.UPCAST, AxisType.LOCAL: AxisType.UPCAST, AxisType.WEAK: AxisType.UPCAST,
              AxisType.GROUP_REDUCE: AxisType.UNROLL, AxisType.REDUCE: AxisType.UNROLL}
+local_to = {AxisType.GLOBAL: AxisType.LOCAL, AxisType.WEAK: AxisType.LOCAL, AxisType.REDUCE: AxisType.GROUP_REDUCE}
 
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
@@ -110,48 +111,44 @@ class Scheduler:
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
 
   def real_axis(self, op:OptOps, axis:int|None) -> int:
-    try:
-      if axis is None or op is OptOps.TC: return -1
-      if op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.axes_of(AxisType.REDUCE)[axis]
-      check(axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
-      return axis
-    except IndexError as e: raise KernelOptError from e
+    if axis is None or op is OptOps.TC: return -1
+    check(0 <= axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
+    return axis
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
-    if opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}:
+    if opt.op in {OptOps.LOCAL, OptOps.GROUPTOP}:
       check(self.ren.has_local, "locals needed for opt")
 
     rng = self.rngs[real_axis] if (real_axis:=self.real_axis(opt.op, opt.axis)) >= 0 else UOp(Ops.NOOP)
 
-    opt_to_at = {
-      OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST, OptOps.GROUP: AxisType.GROUP_REDUCE,
-      OptOps.GROUPTOP: AxisType.GROUP_REDUCE}
+    opt_to_at = {OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST, OptOps.GROUPTOP: AxisType.GROUP_REDUCE}
 
     ret = None
     if opt.op in opt_to_at:
       amt:int = int(rng.vmax+1) if opt.arg == 0 else cast(int, opt.arg)
       new_type = opt_to_at[opt.op]
 
-      # copied from kernel.py. prevents METAL compiler hangs
-      if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or (self.group_for_reduces and opt.op != OptOps.PADTO)):
-        upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
-        smem_sz = amt*upcast_local_sz*self.reduceop.dtype.itemsize
-        check(smem_sz <= self.ren.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.ren.shared_max}")
-      if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP}):
-        # We currently dont support a group within another rudece, TODO: fix if-contexts
-        reduce = [u for u in self.ast.backward_slice if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
-        check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
-          "cannot have a GROUP_REDUCE inside another reduce")
-
       if opt.op is OptOps.UPCAST:
         check(rng.arg[-1] in upcast_to, f"upcast is for GLOBAL/LOCAL/LOOP/REDUCE, not {rng.arg[-1]}")
         if (new_type:=upcast_to[rng.arg[-1]]) is AxisType.UNROLL: check(amt <= 32, "don't unroll more than 32")
         else: check((self.ren is not None and self.ren.target.device == "DSP") or amt <= 16, "don't upcast more than 16")
       if opt.op is OptOps.LOCAL:
-        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.WEAK}, "local is for globals")
-      if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:
+        check(rng.arg[-1] in local_to, f"local is for GLOBAL/LOOP/REDUCE, not {rng.arg[-1]}")
+        new_type = local_to[rng.arg[-1]]
+      if opt.op is OptOps.GROUPTOP: check(rng.arg[-1] is AxisType.REDUCE, "grouptop is for reduce")
+      if new_type is AxisType.GROUP_REDUCE:
         check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
-        check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
+
+      # copied from kernel.py. prevents METAL compiler hangs
+      if self.reduceop is not None and (new_type is AxisType.GROUP_REDUCE or (self.group_for_reduces and opt.op != OptOps.PADTO)):
+        upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
+        smem_sz = amt*upcast_local_sz*self.reduceop.dtype.itemsize
+        check(smem_sz <= self.ren.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.ren.shared_max}")
+      if self.reduceop is not None and new_type is AxisType.GROUP_REDUCE:
+        # We currently dont support a group within another rudece, TODO: fix if-contexts
+        reduce = [u for u in self.ast.backward_slice if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
+        check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
+          "cannot have a GROUP_REDUCE inside another reduce")
       ret = self.shift_to(rng, amt, new_type, top=opt.op is OptOps.GROUPTOP)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
