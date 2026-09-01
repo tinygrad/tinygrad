@@ -4,7 +4,7 @@ from enum import Enum, auto
 from dataclasses import dataclass
 
 class OptOps(Enum):
-  TC = auto(); UPCAST = auto(); LOCAL = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
+  TC = auto(); SPLIT = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 @dataclass(frozen=True, order=True)
@@ -12,8 +12,7 @@ class Opt:
   op: OptOps
   axis: int|None = None
   arg: int|tuple|None = None
-  top: bool = False
-  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg}{', top=True' if self.top else ''})"
+  def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, arg={self.arg})"
 
 class KernelOptError(Exception): pass
 def check(cond:bool, msg:str=""):

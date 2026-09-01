@@ -127,7 +127,7 @@ class TestLinearizer(unittest.TestCase):
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
 
-    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=0)]),
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
     num_loads = len([uop for uop in uops if uop.op is Ops.LOAD])
     assert num_loads <= 4, "more load uops than needed"
@@ -140,7 +140,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
 
-    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=0)]),
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops <= 1, "more alu uops than needed"
@@ -151,7 +151,8 @@ class TestLinearizer(unittest.TestCase):
     r = Tensor.conv2d(x,w,padding=1).relu()
 
     uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0],
-      [Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UPCAST, axis=1, arg=0)]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+      [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST)),
+       Opt(op=OptOps.SPLIT, axis=1, arg=(0, AxisType.UNROLL))]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     accs = [u for u in uops if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
     stores = [u for u in uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now
@@ -162,7 +163,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "CPU", "test only for CPU")
   def test_upcast_with_locals_cpu(self):
     out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
-    prg = to_program(replace_opts(out.schedule_linear().src[-1].src[0], [Opt(OptOps.LOCAL, axis=0, arg=4)]),
+    prg = to_program(replace_opts(out.schedule_linear().src[-1].src[0], [Opt(OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL))]),
                       renderer=Device[Device.DEFAULT].renderer)
     self.assertEqual(len(prg.src[2].arg.split("for")), 5)
 
@@ -173,7 +174,8 @@ class TestLinearizer(unittest.TestCase):
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
-    opts_to_apply = [Opt(op=OptOps.LOCAL, axis=1, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    opts_to_apply = [Opt(op=OptOps.SPLIT, axis=1, arg=(8, AxisType.GROUP_REDUCE)), Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL)),
+                     Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]
     program = to_program(replace_opts(r.schedule_linear().src[-1].src[0], opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
 
     stores = [u for u in tuple(program.src[1].src) if u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG]
@@ -189,7 +191,7 @@ class TestLinearizer(unittest.TestCase):
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack(a, b)
-    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=0)]),
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
@@ -232,7 +234,7 @@ class TestLinearizer(unittest.TestCase):
   def test_simple_unroll_no_between_phi_dependencies(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     r = (x@y).relu()
-    opt = [Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UPCAST, 0, 4)]
+    opt = [Opt(OptOps.SPLIT, 2, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
     ast = helper_linearizer_opt(r, [opt])
     # the uops graph is reg BUFFER -> 4x STORE 0.0 -> RANGE -> 4x ALU -> 4x STORE -> ENDRANGE
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
@@ -342,8 +344,9 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_store_locals_and_globals(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     out = x@y
-    opt = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 3, 8, top=True),
-            Opt(OptOps.UPCAST, 3, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
+    opt = [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 3, (8, AxisType.GROUP_REDUCE, True)),
+            Opt(OptOps.SPLIT, 3, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),
+            Opt(OptOps.SPLIT, 1, (2, AxisType.UPCAST))] # upcast accs in both reduces
     ast = helper_linearizer_opt(out, opts=[opt])
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
@@ -383,7 +386,7 @@ class TestLinearizer(unittest.TestCase):
   def test_two_grouped_stores_local(self):
     # GROUP_REDUCE on both reduces puts two LOCAL buffers in one kernel, and the store to each needs its own barrier
     a = Tensor.rand(32, 32).realize()
-    opts = [Opt(OptOps.LOCAL, 3, 4), Opt(OptOps.LOCAL, 5, 4)]
+    opts = [Opt(OptOps.SPLIT, 3, (4, AxisType.GROUP_REDUCE)), Opt(OptOps.SPLIT, 5, (4, AxisType.GROUP_REDUCE))]
     ast = helper_linearizer_opt(single_kernel_softmax(a), [opts])
     uops = to_program(replace_opts(ast, opts), renderer=Device[Device.DEFAULT].renderer).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
