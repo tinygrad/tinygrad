@@ -529,8 +529,8 @@ jobs:
     - name: benchmark MobileNetV2 on DSP
       run: |
         # generate quantized weights
-        ln -s /data/home/tiny/tinygrad/extra/datasets/imagenet extra/datasets/imagenet
-        ln -s /data/home/tiny/tinygrad/testsig-*.so .
+        ln -s ~/tinygrad/extra/datasets/imagenet extra/datasets/imagenet
+        ln -s ~/tinygrad/testsig-*.so .
         PYTHONPATH=. DEV=CPU QUANT=1 CNT=0 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx /tmp/model.quant.onnx
         # benchmark on DSP with NOOPT=1, the devectorizer has issues
         PYTHONPATH=. DEV=DSP NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
