@@ -6,9 +6,10 @@ from typing import Any, Callable, cast, get_args, ParamSpec, TypeGuard, TypeVar,
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize
+from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
 from tinygrad.uop.ops import resolve_returned_after, remove_all_tags
+from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -65,11 +66,6 @@ def wrap_tagged_in_contig(x:UOp):
   # () is falsy but not None, so it isn't re-tagged like a bare (tag=None) node would be; just strip it here
   if not x.tag: return x.rtag(None)
   return x.rtag(None).contiguous(tag=x.tag)  # the tag moves onto the wrapping CONTIGUOUS
-
-def replace_store_after_with_contig(u:UOp, src:UOp):
-  assigned_to = u
-  while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -163,8 +159,6 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # remove extra CONTIGUOUS on AFTER (only when target is contiguous)
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
-  # replace AFTER+STORE with CONTIGUOUS when target is not a buffer
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat(name="src")))), name="u"), replace_store_after_with_contig),
   # replace CONTIGUOUS with STORE+AFTER
   (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_store_after),
   # remove DETACH/CONTIGUOUS_BACKWARD (allows more contiguous removal)
@@ -187,6 +181,7 @@ pm_replace_buf = PatternMatcher([
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
+  if SPEC: type_verify(big_sink, spec_tensor)
   # bases to realize: same predicate as Tensor.realize
   ctx = AllocCtx(bases={base for x in big_sink.src if not (base:=x.base).is_virtual and not base.has_buffer_identity()
                         and base.op is not Ops.AFTER and base.addrspace is not AddrSpace.ALU})
@@ -438,6 +433,17 @@ class Tensor(RandMixin):
     # TODO: this is a hack for writing to DISK. remove with working assign
     if is_disk:
       (b:=self._buffer()).copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=x._data()))
+      return self
+    # a STORE can only write into storage: the target must be backed by a BUFFER (possibly under views)
+    assigned_to = self.uop.base
+    while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: assigned_to = assigned_to.src[0].base
+    # assigning to a value (nothing backed by storage, e.g. a pending creation copy) is initialization,
+    # not a write: a Tensor.assign always overwrites the whole tensor, so the pending value is dead
+    if assigned_to.op is not Ops.BUFFER:
+      # x is the new value: alias it if it materializes on its own (a CONTIGUOUS or a load from a creation device),
+      # otherwise give it a realization point so this tensor gets storage of its own
+      if x.uop.op is not Ops.CONTIGUOUS and not (x.uop.op is Ops.COPY and is_creation_device(x.uop.src[0])): x = x.contiguous()
+      self.uop = x.uop
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))

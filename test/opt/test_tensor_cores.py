@@ -11,7 +11,7 @@ from test.helpers import slow, replace_opts
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.codegen.opt.tc import amd_cdna_1616128
+from tinygrad.renderer.tc import amd_cdna_1616128
 
 # TODO: write a clean version of this
 from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_opt
