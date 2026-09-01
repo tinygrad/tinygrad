@@ -7,7 +7,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize
-from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, ParamArg, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
 from tinygrad.uop.ops import resolve_returned_after, remove_all_tags
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
@@ -176,20 +176,13 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
   return b.param_like(len(ctx.replacements)-1)
 
 pm_replace_buf = PatternMatcher([
-  # replace BUFFER with PARAM for cache key normalization
-  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
-   replace_input_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
+  # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay)
+  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
   # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
   # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
   (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])
-
-# final outputs of value calls materialize with fresh storage (precompiled calls don't: transform gives them real buffers)
-def materialize_finals(u:UOp):
-  if u.op is not Ops.AFTER or u.src[0].unsharded_base.op is not Ops.RETURNED: return u
-  if u.src[1].op is Ops.CALL and u.src[1].arg is not None and u.src[1].arg.precompile and u.src[1].num_returned: return u
-  return u.rtag(None).contiguous(tag=u.tag)
 
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
@@ -201,7 +194,17 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
   big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="add tags")
-  big_sink = big_sink.replace(src=tuple(materialize_finals(u) for u in big_sink.src))
+
+  # final outputs of value calls materialize with fresh storage
+  srcs:list[UOp] = []
+  for u in big_sink.src:
+    if u.op is Ops.AFTER and u.src[0].unsharded_base.op is Ops.RETURNED:
+      # precompiled calls don't need this: transform_precompiled_call gives their outputs real buffers
+      call = u.src[1]
+      if not (call.op is Ops.CALL and call.arg is not None and call.arg.precompile and call.num_returned):
+        u = u.rtag(None).contiguous(tag=u.tag)
+    srcs.append(u)
+  big_sink = big_sink.replace(src=tuple(srcs))
 
   # here we can break the tensor graph. tags propagate through replaces so we can still find the original UOps
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
