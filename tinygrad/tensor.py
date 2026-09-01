@@ -76,11 +76,16 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   buf = src.base
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
   if buf.op not in {Ops.BUFFER, Ops.UNSHARD}: return None
+
+  # no symbolic shape
   if not all_int(c.shape): return None
+
   if buf.op is not Ops.UNSHARD and (view := _make_buffer_view(src)) is not None:
     ctx.views.add(view)
     view = view.reshape(c.shape)
     return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
+
+  # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then create SHRINK on the resolved result
   if not isinstance(c.device, str):
     from tinygrad.schedule.multi import multi_pm
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
@@ -88,6 +93,7 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
     ctx.views.add(view)
     return view.reshape(resolved.src[0].shape).unshard(resolved.arg, resolved.src[1:])
+
   return None
 
 def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
