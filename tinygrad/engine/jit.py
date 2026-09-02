@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ, disable_gc
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer, DepsTracker
 from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, rewrite_group, graph_rewrite
+from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, rewrite_group, graph_rewrite
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime
 from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_written_bufs
@@ -185,7 +185,7 @@ class CapturedJit(Generic[ReturnType]):
     for call in self.linear.src:
       if call.src[0].op is Ops.CUSTOM_FUNCTION and call.src[0].arg == "graph": graph_cache.pop(call.src[0], None)
     for u in self._written_uops:
-      if (buf:=buffers.get(u)) is None: continue
+      if u.op is not Ops.BUFFER or (buf:=u.arg.buffer) is None: continue
       for b in (buf.bufs if isinstance(buf, MultiBuffer) else (buf,)):
         if b.is_initialized(): b.deallocate()
         if (base:=b._base) is not None and base.allocated_views == 0 and base.is_allocated(): base.deallocate()
@@ -264,8 +264,11 @@ class _TinyJit(Generic[ReturnType]):
         run_linear(onetime_linear, var_vals)
         del onetime_linear
 
-      # hold all buffers reachable from live Tensors (e.g. lazy .grad created during capture), the memory planner can't suballocate those
-      held_bufs = set(buffers) | {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if u.op is Ops.BUFFER}
+      # hold all buffers with real storage reachable from live Tensors (e.g. lazy .grad created during capture) and all buffers with
+      # allocated storage in the captured linear (e.g. constants baked in by copies): the memory planner can't suballocate those
+      def _buf_or_none(u:UOp) -> Buffer|MultiBuffer|None: return u.arg.buffer if u.op is Ops.BUFFER else None
+      held_bufs = {u for tref in list(all_tensors) if (t:=tref()) is not None for u in t.uop.toposort() if _buf_or_none(u) is not None}
+      held_bufs |= {u for u in big_linear.toposort() if (b:=_buf_or_none(u)) is not None and b.is_allocated()}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops)
       # drop the pre-planning graph: it keeps the whole capture-time working set allocated (big_linear) or referenced (held_bufs).
       # the planned linear only uses the arena/held buffers, so the intermediates must be freed before linking and first exec

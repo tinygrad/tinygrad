@@ -11,9 +11,8 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
 
-upcast_to = {AxisType.GLOBAL: AxisType.UPCAST, AxisType.LOCAL: AxisType.UPCAST, AxisType.WEAK: AxisType.UPCAST,
-             AxisType.GROUP_REDUCE: AxisType.UNROLL, AxisType.REDUCE: AxisType.UNROLL}
-local_to = {AxisType.GLOBAL: AxisType.LOCAL, AxisType.WEAK: AxisType.LOCAL, AxisType.REDUCE: AxisType.GROUP_REDUCE}
+split_targets = {AxisType.UPCAST: (AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK), AxisType.UNROLL: (AxisType.REDUCE, AxisType.GROUP_REDUCE),
+                 AxisType.LOCAL: (AxisType.GLOBAL, AxisType.WEAK), AxisType.GROUP_REDUCE: (AxisType.REDUCE,)}
 
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
@@ -102,7 +101,6 @@ class Scheduler:
 
   def upcast_size(self): return prod(self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
 
-  # copied from kernel.py
   @property
   def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK) \
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
@@ -116,30 +114,23 @@ class Scheduler:
     return axis
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
-    if opt.op is OptOps.LOCAL: check(self.ren.has_local, "locals needed for opt")
-
     rng = self.rngs[real_axis] if (real_axis:=self.real_axis(opt.op, opt.axis)) >= 0 else UOp(Ops.NOOP)
-    check(not opt.top or (opt.op is OptOps.LOCAL and rng.arg[-1] is AxisType.REDUCE), "top is only for group reduce")
-
-    opt_to_at = {OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST}
 
     ret = None
-    if opt.op in opt_to_at:
-      amt:int = int(rng.vmax+1) if opt.arg == 0 else cast(int, opt.arg)
-      new_type = opt_to_at[opt.op]
+    if opt.op is OptOps.SPLIT:
+      check(isinstance(opt.arg, tuple) and len(opt.arg) in (2, 3), f"split arg is (amt, target) or (amt, target, top), not {opt.arg}")
+      amt, new_type, top = (*cast(tuple, opt.arg), False)[0:3]
+      check(type(amt) is int and (amt == 0 or amt > 1) and isinstance(new_type, AxisType) and new_type in split_targets and isinstance(top, bool),
+            f"invalid split arg {opt.arg}")
+      check(not top or new_type is AxisType.GROUP_REDUCE, "top is only for group reduce")
+      if new_type in (AxisType.LOCAL, AxisType.GROUP_REDUCE): check(self.ren.has_local, "locals needed for opt")
+      check(rng.arg[-1] in split_targets[new_type], f"{new_type} is from {split_targets[new_type]}, not {rng.arg[-1]}")
 
-      if opt.op is OptOps.UPCAST:
-        check(rng.arg[-1] in upcast_to, f"upcast is for GLOBAL/LOCAL/LOOP/REDUCE, not {rng.arg[-1]}")
-        if (new_type:=upcast_to[rng.arg[-1]]) is AxisType.UNROLL: check(amt <= 32, "don't unroll more than 32")
-        else: check((self.ren is not None and self.ren.target.device == "DSP") or amt <= 16, "don't upcast more than 16")
-      if opt.op is OptOps.LOCAL:
-        check(rng.arg[-1] in local_to, f"local is for GLOBAL/LOOP/REDUCE, not {rng.arg[-1]}")
-        new_type = local_to[rng.arg[-1]]
-      if new_type is AxisType.GROUP_REDUCE:
-        check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
-
-      # copied from kernel.py. prevents METAL compiler hangs
-      if self.reduceop is not None and (new_type is AxisType.GROUP_REDUCE or (self.group_for_reduces and opt.op != OptOps.PADTO)):
+      if amt == 0: amt = int(rng.vmax+1)
+      if new_type is AxisType.UNROLL: check(amt <= 32, "don't unroll more than 32")
+      if new_type is AxisType.UPCAST: check(self.ren.target.device == "DSP" or amt <= 16, "don't upcast more than 16")
+      # prevents METAL compiler hangs
+      if self.reduceop is not None and (new_type is AxisType.GROUP_REDUCE or self.group_for_reduces):
         upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
         smem_sz = amt*upcast_local_sz*self.reduceop.dtype.itemsize
         check(smem_sz <= self.ren.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.ren.shared_max}")
@@ -148,10 +139,10 @@ class Scheduler:
         reduce = [u for u in self.ast.backward_slice if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
         check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
           "cannot have a GROUP_REDUCE inside another reduce")
-      ret = self.shift_to(rng, amt, new_type, top=opt.top)
+      ret = self.shift_to(rng, amt, new_type, top=top)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
-      check(opt.axis is not None, "tensor core opts must have an axis")
+      check(opt.axis is not None and opt.axis >= 0, "tensor core opts must have an axis")
       check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "tensor core opts must have valid arg")
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.ren.tensor_cores), "tensor core opts must have valid tc_select")
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
@@ -160,8 +151,10 @@ class Scheduler:
       except ValueError as e: raise KernelOptError(str(e))
       check(ret is not None, "no tensor core available")
     elif opt.op is OptOps.PADTO:
+      check(type(opt.arg) is int and opt.arg > 1, f"padto arg is a multiple > 1, not {opt.arg}")
       check(rng.src[0].op is Ops.CONST, "only pad const axes")
-      check(rng.arg[-1] not in {AxisType.UPCAST, AxisType.UNROLL}, "cannot pad upcasted") # TODO: why is this wrong?
+      # TODO: upcasted is only wrong for a range pinned in WMMA tc_upcast_axes
+      check(rng.arg[-1] not in {AxisType.UPCAST, AxisType.UNROLL, AxisType.WARP}, "cannot pad upcasted or warp")
       new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
       replaced_rng = UOp.range(new_sz, *rng.arg, dtype=rng.dtype)

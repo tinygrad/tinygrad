@@ -129,7 +129,7 @@ class ExecContext:
   timeout: int|None = None
   cache: bool = True
 
-def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp: # views and lane selects resolve through to the param underneath
+def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
   if b.op in (Ops.MSELECT, Ops.SHRINK): return b.replace(src=(_resolve(b.src[0], inputs), *b.src[1:]))
   if b.op is Ops.MSTACK: return b.replace(src=tuple(_resolve(x, inputs) for x in b.src))
   return inputs[b.arg.slot] if b.op is Ops.PARAM else b

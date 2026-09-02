@@ -18,7 +18,7 @@ from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher
 
-FUNCS = () if WIN else ('clock_gettime',)
+CMD_SIZE, FUNCS = 64, (() if WIN else ('clock_gettime',))
 
 # *****************
 # 1. signal programs
@@ -38,6 +38,42 @@ def timestamp_prog():
     call = fn[0].load().call(UOp.const(6 if OSX else 1, dtypes.int), ts[0], ret_dtype=dtypes.void) # clock_gettime(CLOCK_MONOTONIC, &ts)
     val = ts.after(call)[0].load() * 1_000_000_000 + ts.after(call)[1].load()
   return UOp.param(0, dtypes.uint64, 1)[0].store(val)
+
+# *****************
+# 2. queue encoders
+
+def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
+  progs = [get_runtime(d, prog) if isinstance(prog, UOp) else cast(CPUDevice, Device[d]).prgs[prog] for d in devs]
+  addrs = tuple(UOp.const(p.addr, dtypes.uint64) for p in progs)
+  words = ((addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, src=addrs)),) + args
+  assert len(words) <= CMD_SIZE, f"a cpu cmd holds at most {CMD_SIZE-1} args, got {len(args)}"
+  return UOp(Ops.LINEAR, src=words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)))
+
+def cpu_exec(ctx, call:UOp, prg:UOp) -> UOp:
+  devs = ctx.devs
+  args = [get_call_arg_uops(call)[i].getaddr(devs) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
+  return cpu_cmd(devs, prg, *args)
+
+pm_cpu_opsel = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), cpu_exec),
+
+  (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda: UOp(Ops.LINEAR)),
+  (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))),
+   lambda ctx, dst, val: cpu_cmd(ctx.devs, wait_prog, dst.getaddr(ctx.devs), val.cast(dtypes.uint64))),
+  (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))),
+   lambda ctx, dst, val: cpu_cmd(ctx.devs, signal_prog, dst.getaddr(ctx.devs), val.cast(dtypes.uint64))),
+  (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: cpu_cmd(ctx.devs, timestamp_prog, dst.getaddr(ctx.devs),
+   *(() if WIN else (make_buf(ctx.devs, tag="func:clock_gettime").getaddr(ctx.devs),)))),
+])
+
+def cpu_submit(ctx, cmdbuf:UOp) -> UOp:
+  # run the cmd entries inline on the submitting thread, the cpu has no worker threads
+  cb, cnt = cmdbuf.bitcast(dtypes.uint64), hcq_size_var(cmdbuf) // (CMD_SIZE * 8)
+  e = UOp.range(cnt, 10, dtype=dtypes.int, src=(cmdbuf,))
+  entry = [cb.index(e*CMD_SIZE + i).load() for i in range(CMD_SIZE)]
+  return entry[0].call(*entry[1:], ret_dtype=dtypes.void).end(e)
+
+pm_cpu_submit = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit_cmdbuf", src=(UPat(name="cmdbuf"),)), cpu_submit)])
 
 # *****************
 

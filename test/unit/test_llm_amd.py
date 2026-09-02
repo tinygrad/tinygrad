@@ -94,6 +94,15 @@ class TestQ8Quantize(unittest.TestCase):
     out = flash_attention(q, assigned, 1).realize()
     np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
 
+  def test_flash_attention_decode_gqa_output_layout(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    Tensor.manual_seed(42)
+    q = Tensor.randn(1, 4, 1, 128, dtype=dtypes.half).realize()
+    cache = Tensor.randn(2, 1, 1, 256, 128, dtype=dtypes.half).realize()
+    out = flash_attention(q, cache, 3).realize()
+    expected = q.scaled_dot_product_attention(cache[0, :, :, :3], cache[1, :, :, :3], enable_gqa=True)
+    np.testing.assert_allclose(out.numpy(), expected.numpy(), rtol=2e-3, atol=2e-3)
+
   def test_prefill_attention_unaligned_start(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)

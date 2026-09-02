@@ -120,7 +120,7 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
 # shape-changing bitcast
 def expand_bitcast(bc:UOp) -> UOp|None:
   x = bc.src[0]
-  if (ns:=bc.dtype.itemsize) == (os:=x.dtype.itemsize) or (isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS"))): return None
+  if (ns:=bc.dtype.itemsize) == (os:=x.dtype.itemsize) or (isinstance(x.device, str) and x.device.startswith("DISK")): return None
   new_uint, tmp = to_dtype(f"uint{8*ns}"), x.bitcast(to_dtype(f"uint{8*os}"))
   if ns > os:
     tmp = tmp.reshape(x.shape[:-1] + (x.shape[-1]//(rate := ns//os), rate))

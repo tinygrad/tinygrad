@@ -143,7 +143,7 @@ def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache
       if cache is not None: cache[(typ,) + args] = x
       return x
     except Exception as e: excs.append(e)
-  raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg + " is available", excs)
+  raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg, excs)
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
@@ -232,10 +232,9 @@ class _DEV(ContextVar):
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
 JIT, JIT_BATCH_SIZE = ContextVar("JIT", 1), ContextVar("JIT_BATCH_SIZE", 32)
-CHUNK_SIZE = 2**20  # TinyFS content-addressed store: blob chunk + hash-tree node granularity
 WINO, CAPTURING, TRACEMETA, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1), ContextVar("NO_COLOR", 0)
 TRAINING = ContextVar("TRAINING", 0)
-USE_TC, TC_SELECT, TC_OPT = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0)
+USE_TC, TC_SELECT, TC_OPT, TC_MIN_GLOBALS = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("TC_MIN_GLOBALS", 0)
 TRANSCENDENTAL = ContextVar("TRANSCENDENTAL", 1)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("LRU", 1)
 RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)

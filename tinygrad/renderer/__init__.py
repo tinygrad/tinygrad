@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from tinygrad.helpers import prod, Target, EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, DType, dtypes
-from tinygrad.codegen.opt.tc import TensorCore
+from tinygrad.renderer.tc import TensorCore
 from tinygrad.device import Compiler
 
 # an access takes its dtype from the buffer it indexes, so accessing at another dtype restates the storage on the buffer that owns it

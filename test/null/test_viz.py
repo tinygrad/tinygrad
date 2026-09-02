@@ -192,7 +192,8 @@ class TestViz(unittest.TestCase):
   def test_colored_label_multiline(self):
     with save_viz() as viz:
       arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
-      src = [Tensor.empty(1).uop for _ in range(10)]
+      # NOTE: can't use BUFFER uops as srcs here, reconstructed traces don't retain their Buffers so identity with the live uops is lost
+      src = [UOp.const(i, dtypes.int) for i in range(10)]
       a = UOp(Ops.PYLITERAL, src=tuple(src), arg=arg)
       exec_rewrite(a, [PatternMatcher([])])
     a2 = next(viz.get_details(0, 0))["graph"][id(a)]

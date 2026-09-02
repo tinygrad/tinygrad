@@ -328,8 +328,6 @@ An optimization is a triple $(\mathrm{op},\;\mathrm{axis},\;\mathrm{arg})$:
   Pad axis to next multiple of $m$ with validity masks. \\[4pt]
 \op{Swap} & axis$_i$ & axis$_j$ &
   Swap two axes $i \leftrightarrow j$. \\
-\op{Nolocals} & --- & --- &
-  Disable local memory; no workgroup dims emitted. \\
 \op{TC} & reduce idx & (tc, opt, mode) &
   Apply tensor core \op{Wmma}: split reduce/output axes into \texttt{WARP}, \texttt{UPCAST}, and \texttt{UNROLL} dims. \\
 \bottomrule
