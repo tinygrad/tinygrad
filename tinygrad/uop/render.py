@@ -154,6 +154,8 @@ def pyrender(ast:UOp) -> str:
     if u.op is Ops.STORE: to_render.add(u.src[1])
     if u.op is Ops.REDUCE: to_render.add(u.src[0])
     if u.op is Ops.CALL and u.src[0].dtype is dtypes.void: raise NotImplementedError("call can't be pyrendered")
+    # a BUFFER carrying a device Buffer can't be pyrendered: the Buffer object can't be reconstructed from code
+    if u.op is Ops.BUFFER and isinstance(u.arg, ParamArg) and u.arg.buffer is not None: raise NotImplementedError("buffer can't be pyrendered")
     if u.op in not_rendered: continue
     # checking the consumers is not enough, you have to make sure it's not used twice by the one consumer
     if len(cmap[u]) == 1 and len([x for x in list(cmap[u].keys())[0].src if x is u]) == 1 and u.op not in always_rendered: continue

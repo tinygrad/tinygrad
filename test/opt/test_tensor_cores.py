@@ -3,7 +3,7 @@ import unittest
 
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.uop.ops import Ops, UOp, AxisType, buffers
+from tinygrad.uop.ops import Ops, UOp, AxisType
 from tinygrad.dtype import DType
 from tinygrad.device import Buffer
 from tinygrad.helpers import DEV, Context
@@ -23,8 +23,7 @@ def _tc_rand(*shape, dtype:DType) -> Tensor:
   return Tensor.randint(*shape, low=dtype.min, high=dtype.max+1, dtype=dtype) if dtypes.is_int(dtype) else Tensor.rand(*shape, dtype=dtype)
 
 def run_program(prg:UOp, bufs:list[Buffer]):
-  buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in bufs]
-  for u,b in zip(buf_uops, bufs): buffers[u] = b
+  buf_uops = [UOp.from_buffer(b) for b in bufs]
   run_linear(UOp(Ops.LINEAR, src=(prg.call(*buf_uops),)))
 
 def _skip_unsupported_tc_dtypes(dtype_in:DType, dtype_out:DType):

@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import Context, ceildiv
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType, buffers
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
@@ -14,8 +14,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import to_uops_list
 
 def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
-  buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in bufs]
-  for u,b in zip(buf_uops, bufs): buffers[u] = b
+  buf_uops = [UOp.from_buffer(b) for b in bufs]
   run_linear(UOp(Ops.LINEAR, src=(UOp.sink(*uops_list, arg=KernelInfo()).call(*buf_uops),)))
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
