@@ -271,7 +271,7 @@ def passthrough_multi(root:UOp, multi:UOp):
 def rewrite_into_function(call:UOp):
   if call.arg is None or call.arg.precompile: return None
   # the call body is a plain parametric program: multi rewrites it like anything else (the output PARAM dests sub-view per
-  # shard through the normal store rules), and all srcs (args and unbound BUFFERs) become their per-shard views
+  # shard through the normal store rules), and all srcs (args and RETURNEDs) become their per-shard views
   new_body = graph_rewrite(call.src[0], multi_pm, name="subcall")
   assert new_body.op is Ops.SINK
   return call.replace(src=(new_body,) + tuple(a.src[0] if a.op is Ops.UNSHARD else a for a in call.src[1:]))

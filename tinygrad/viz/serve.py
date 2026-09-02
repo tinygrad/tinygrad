@@ -163,10 +163,11 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     # limit SOURCE labels line count
     if u.op is Ops.SOURCE and len(lines:=label.split("\n")) > 40:
       label = "\n".join(lines[:30]) + "\n..."
+    if u.op is Ops.BUFFER: label += "\nUNBOUND" if u.is_unbound else "\nBOUND"
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
-    graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded,
-                    "color":"#C07788" if u.is_unbound else uops_colors.get(u.op, "#ffffff"),
+    color = "#C07788" if u.is_unbound else uops_colors.get(u.op, "#ffffff")
+    graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":color,
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
   return graph
 

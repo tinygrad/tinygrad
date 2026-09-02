@@ -93,7 +93,7 @@ spec_shared = PatternMatcher([
   # GROUP of stores (or groups, or NOOPs)
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
 
-  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
+  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, RETURNED, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX,
                                                      Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
         allow_any_len=True), lambda: True),
@@ -138,7 +138,7 @@ spec_tensor = PatternMatcher([
   (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(),), name="u"),
    lambda u: dtypes.is_float(u.dtype) or u.src[0].base.is_invalid),
 
-  # BUFFER (unbound buffers are declarations whose storage is bound later, and can be scalar)
+  # BUFFER
   (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf:
    True if buf.is_unbound else (isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device))
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),

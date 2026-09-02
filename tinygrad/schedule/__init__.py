@@ -118,9 +118,6 @@ pm_resolve_linear_call = PatternMatcher([
 schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(function:UOp) -> UOp|None:
-  import os
-  _lsdb = os.environ.get('LSDB')
-  if _lsdb: print('LSL enter:', 'NONE' if function.arg is None else 'KI', function.key.hex()[:8], flush=True)
   st = time.perf_counter()
   if isinstance(function.arg, KernelInfo): return None
   cache_key = function.key
@@ -142,7 +139,6 @@ def lower_sink_to_linear(function:UOp) -> UOp|None:
     print(f"scheduled {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
-  if _lsdb: print('LSL exit:', linear.op.name if linear is not None else 'None', len(linear.src) if linear is not None else 0, flush=True)
   return linear
 
 pm_schedule = PatternMatcher([

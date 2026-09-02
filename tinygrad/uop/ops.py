@@ -34,7 +34,6 @@ class ParamArg:
   # (h, w) if this is an image2d buffer, then size == h*w*4
   image: tuple[int, int]|None = None
   # the device Buffer for a realized BUFFER. the UOp is the owner of the Buffer: they live and die together (1:1)
-  # a GLOBAL BUFFER without a device Buffer is unbound: a declaration of storage, bound later by whoever closes its scope
   buffer: Buffer|MultiBuffer|None = None
   def __repr__(self):
     fields = (("vmin_vmax", None), ("multiple_of", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
@@ -558,13 +557,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return sum(x.unsharded_base.is_unbound for x in self.src[1:])
   @property
   def returned_outputs(self) -> tuple[UOp, ...]:
-    """the outputs of a value-producing call: an AFTER on each unbound BUFFER input, usable like a normal buffer"""
+    """the outputs of a value-producing call: an AFTER on each RETURNED input, usable like a normal buffer"""
     return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.is_unbound)
   # legacy compatibility: TUPLE/GETTUPLE are gone. a tuple of values called is call_outputs, gettuple is returned_outputs[i]
   @staticmethod
   def maketuple(*srcs:UOp) -> _LegacyTupleValues: return _LegacyTupleValues(srcs)
   def gettuple(self, idx:int) -> UOp:
-    assert self.op is Ops.CALL and self.num_returned, f"gettuple requires a CALL with outputs, got {self.op}"
+    assert self.op is Ops.CALL and self.num_returned, f"gettuple requires a CALL with RETURNED outputs, got {self.op}"
     return self.returned_outputs[idx]
   def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
@@ -930,7 +929,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
-    # unbound buffers are declarations of storage that will exist later: they have no concrete identity
     return self.op in {Ops.BUFFER, Ops.PARAM} and not self.is_unbound
   @property
   def is_unbound(self) -> bool:
@@ -1209,7 +1207,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)
 
-  # opaque bodies are just CALLs; value-producing bodies become CALLs with unbound BUFFER declarations as extra inputs
+  # opaque bodies are just CALLs; value-producing bodies become CALLs with RETURNED placeholders as extra inputs
   _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}
   def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
@@ -1226,12 +1224,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def call_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
                    name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
-    """call a body producing the given values: the body stores into output PARAMs, and the outputs are unbound BUFFER
-    declarations that are inputs to the call (you AFTER on them like normal buffers). they are bound to the
+    """call a body producing the given values: the body stores into output PARAMs, and the outputs are RETURNED
+    placeholders that are inputs to the call (you AFTER on them like normal buffers). the RETURNEDs are bound to the
     output PARAMs positionally wherever the call is resolved, just like the args are bound to the input PARAMs"""
     # the device defaults to the first device in the values or args, like srcs-based device resolution
     default_dev = next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None)
-    # the output storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
+    # the RETURNED storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
     rets = tuple(UOp.returned(o.dtype, None if (shp:=o._shape) is None else
                               tuple(graph_rewrite(s, _pm_resolve_params, srcs, walk=True) if isinstance(s, UOp) else s for s in shp),
                               o.device if o.device is not None else default_dev, o.axis if isinstance(o.device, tuple) else None)
@@ -1701,7 +1699,7 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        # calls with unbound BUFFER inputs are always inlined into the enclosing graph, their bodies are never rewritten separately
+        # calls with RETURNED inputs are always inlined into the enclosing graph, their bodies are never rewritten separately
         if n.op is Ops.CALL and (n.num_returned or (not self.enter_calls and n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
           self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
@@ -1741,7 +1739,7 @@ class RewriteContext:
             continue
         stack.append((n, 1, new_n))
         # NOTE: CALLs are handled as a special case: the call body is not included in the graph_rewrite (a CALL of an
-        # address is not a body, its srcs are regular dataflow). calls with unbound BUFFER inputs are always inlined into the
+        # address is not a body, its srcs are regular dataflow). calls with RETURNED inputs are always inlined into the
         # enclosing graph, their bodies are never rewritten separately
         if new_n.op is Ops.CALL and (new_n.num_returned or (not self.enter_calls and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
           self.replace[new_n.src[0]] = new_n.src[0]
@@ -1795,7 +1793,7 @@ _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot])])
 
 def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
-  """AFTER on an unbound BUFFER placeholder extracts the call output value: the value of its matching store in a SINK body
+  """AFTER on a RETURNED placeholder extracts the call output value: the value of its matching store in a SINK body
   (called from patterns that bind t to a SINK)"""
   vals = [st.src[1] for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is r.unsharded_base] \
     if r.unsharded_base.is_unbound else []
