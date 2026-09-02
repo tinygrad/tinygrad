@@ -28,12 +28,11 @@ class AllocCtx:
 def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
 
 def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
-def disk_like(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS"))
-def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS", "NPY", "PYTHON"))
+def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
 def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   # copies to disk are replaced with the disk buffer
-  if disk_like(u) and u.tag is None:
+  if on_disk(u) and u.tag is None:
     ctx.buffer_map[u] = u.empty_like()
     return u.rtag(())
   # all copies from disk/numpy are realized into a real buffer
@@ -54,8 +53,8 @@ def replace_contig_with_store_after(u:UOp):
   if u.is_virtual: return None
   # if size is 0, remove the contig
   if 0 in u.shape: return u.src[0]
-  # no real contig for DISK/TINYFS tensors, they are left alone
-  if disk_like(u): return u.rtag(None)
+  # no real contig for DISK tensors, they are left alone
+  if on_disk(u): return u.rtag(None)
   buf = u.empty_like()
   return buf.after(buf.store(u.src[0])).rtag(u.tag)
 
@@ -211,7 +210,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
   # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
   for u in big_sink.toposort(enter_calls=False):
-    if u.op is Ops.COPY and disk_like(u): ctx.stores.append(u)  # copies to disk are stores to the disk buffer
+    if u.op is Ops.COPY and on_disk(u): ctx.stores.append(u)  # copies to disk are stores to the disk buffer
     # bound Variables are call inputs and RETURNEDs are call outputs: only other AFTERs are stores
     elif u.op is Ops.AFTER and not u.is_bound_var and u.src[0].unsharded_base.op is not Ops.RETURNED:
       ctx.stores.append(u)
@@ -423,7 +422,7 @@ class Tensor(RandMixin):
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
     if self.dtype in dtypes.weaks: self.uop = self.uop.clone()
-    is_disk = isinstance(self.device, str) and self.device.startswith(("DISK", "TINYFS"))
+    is_disk = isinstance(self.device, str) and self.device.startswith("DISK")
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
     # broadcast x (shape only, dtype must match)
