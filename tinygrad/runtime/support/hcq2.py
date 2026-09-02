@@ -149,7 +149,7 @@ class BatchCtx:
   queues:dict[str, list[str]] = field(init=False)
   first:dict[tuple[str, str], int] = field(init=False); last:dict[tuple[str, str], int] = field(init=False) # noqa: E702
   signal_tags:set[int] = field(init=False)
-  slot_uid:int = field(default_factory=lambda: next(UOp.unique_num))
+  slots_uid:int = field(default_factory=lambda: next(UOp.unique_num))
 
   def __post_init__(self):
     self.queues, self.first, self.last = {}, {}, {}
@@ -163,7 +163,7 @@ class BatchCtx:
 
   def slots(self, devs:tuple[str, ...]) -> UOp:
     n = len(self.queues[devs[0]]) + 1 + (2 * len(self.batch) if self.profile else 0)
-    return UOp.placeholder((n,), dtypes.uint64, self.uid, device=devs, volatile=True, tag="slots")
+    return UOp.placeholder((n,), dtypes.uint64, self.slots_uid, device=devs, volatile=True, tag="slots")
 
   def queue_signal(self, devs:tuple[str, ...], queue:str) -> UOp: return self.slots(devs)[(i:=self.queues[devs[0]].index(queue)):i+1]
 
