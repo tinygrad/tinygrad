@@ -422,7 +422,7 @@ class Tensor(RandMixin):
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
     if self.dtype in dtypes.weaks: self.uop = self.uop.clone()
-    is_disk = isinstance(self.device, str) and self.device.startswith("DISK")
+    is_disk = on_disk(self.uop)
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
     # broadcast x (shape only, dtype must match)
@@ -681,7 +681,7 @@ class Tensor(RandMixin):
              if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
         raise RuntimeError("can't setitem on a tensor with other uses")
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
-    is_disk = isinstance(self.device, str) and self.device.startswith("DISK")
+    is_disk = on_disk(self.uop)
     advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
     realized = is_disk or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized()
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
