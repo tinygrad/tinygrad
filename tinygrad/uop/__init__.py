@@ -23,7 +23,7 @@ class Ops(FastEnum):
 
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
-  # CALL is a kernel invocation; calls with RETURNED inputs are value-producing (and gradient-able), the rest are opaque
+  # CALL is a kernel invocation; calls with optional BUFFER inputs are value-producing (and gradient-able), the rest are opaque
   PARAM = auto(); CALL = auto()
 
   # renderer
@@ -36,9 +36,6 @@ class Ops(FastEnum):
 
   # vector creation / item selection
   STACK = auto()
-
-  # RETURNED is a placeholder for a buffer a call writes and returns: it's an input to the call and you AFTER on it
-  RETURNED = auto()
 
   # hcq specific
   GETADDR = auto()
