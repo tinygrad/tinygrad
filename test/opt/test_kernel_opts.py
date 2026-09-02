@@ -394,17 +394,28 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(op=OptOps.SPLIT, axis=0, arg=(8, AxisType.LOCAL)), Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))],
     ])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_double_sum_group(self):
     a = Tensor.rand(4, 4, 4)
-    r = a.sum((1, 2)).sum()
-    with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(r, [[Opt(OptOps.SPLIT, 0, (16, AxisType.GROUP_REDUCE, True))],])
-    r = a.sum((1, 2)).sum()
-    with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(r, [[Opt(OptOps.SPLIT, 1, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (16, AxisType.GROUP_REDUCE, True))],])
-    r = a.sum((1, 2)).sum()
-    with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(r, [[Opt(OptOps.SPLIT, 1, (4, AxisType.GROUP_REDUCE, True)), Opt(OptOps.SPLIT, 1, (16, AxisType.GROUP_REDUCE, True))],])
+    helper_linearizer_opt(a.sum((1, 2)).sum(), [
+      [Opt(OptOps.SPLIT, 0, (16, AxisType.GROUP_REDUCE, True))],
+      [Opt(OptOps.SPLIT, 1, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (16, AxisType.GROUP_REDUCE, True))],
+      [Opt(OptOps.SPLIT, 1, (4, AxisType.GROUP_REDUCE, True)), Opt(OptOps.SPLIT, 1, (16, AxisType.GROUP_REDUCE, True))],
+    ])
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_group_inside_group(self):
+    Tensor.manual_seed(1882)
+    a = Tensor.rand(7, 11, 13)
+    helper_linearizer_opt(a.max(2).sum(1), [
+      [Opt(OptOps.SPLIT, 2, (0, AxisType.GROUP_REDUCE))],
+      [Opt(OptOps.SPLIT, 1, (0, AxisType.GROUP_REDUCE)), Opt(OptOps.SPLIT, 2, (0, AxisType.GROUP_REDUCE))],
+      [Opt(OptOps.SPLIT, 1, (0, AxisType.GROUP_REDUCE, True)), Opt(OptOps.SPLIT, 2, (0, AxisType.GROUP_REDUCE))],
+      [Opt(OptOps.SPLIT, 1, (0, AxisType.GROUP_REDUCE)), Opt(OptOps.SPLIT, 2, (0, AxisType.GROUP_REDUCE)),
+       Opt(OptOps.SPLIT, 0, (7, AxisType.LOCAL))],
+    ])
 
 if __name__ == '__main__':
   unittest.main()
