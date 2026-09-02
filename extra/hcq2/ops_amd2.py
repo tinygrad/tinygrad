@@ -5,7 +5,7 @@ assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue, to_name
 from tinygrad.uop.ops import sint, UOp
-from tinygrad.device import BufferSpec, Buffer, Device
+from tinygrad.device import BufferSpec, Buffer
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, lo32, hi32
 from tinygrad.helpers import ceildiv, unwrap, pluralize
@@ -29,6 +29,10 @@ from tinygrad.uop.ops import Ops, UPat, PatternMatcher
 
 # *****************
 # PM4
+
+def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, tagged {name}_{device}_{queue} like the device's bufferize rules
+  shapes = [("ring", (q.ring.size,), q.ring.dtype)] + [(n, (1,), dtypes.uint64) for n in ("write_ptr", "doorbell", "put_value")]
+  return [hq.ctx.new_arg(UOp.placeholder(s, d, 0, device=hq.devs, volatile=True, tag=to_name(n, hq.devs, hq.queue))) for n, s, d in shapes]
 
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
@@ -103,10 +107,11 @@ class AMDComputeQueue(HWQueue):
     info = prg.arg
 
     # kernargs: a nested blob linear inside a getaddr, packed into the tail of the cmdbuf
-    ka_words = [get_call_arg_uops(call)[gi].getaddr(self.devs) for gi in info.globals] + list(get_call_var_uops(call, prg))
+    ka_words = [get_call_arg_uops(call)[gi].getaddr(self.devs) for gi in info.globals] + \
+               [b.ccast(v.dtype) for v, b in zip(info.vars, get_call_var_uops(call, prg))] # a bound value is a bare const, the var has the width
     pad = data.kernargs_alloc_size - sum(w.dtype.itemsize for w in ka_words)
     assert pad >= 0 and pad % 4 == 0, f"bad kernargs padding {pad}"
-    ka = UOp(Ops.LINEAR, src=tuple(ka_words) + (UOp.const(0, dtypes.uint32),) * (pad // 4)).rtag("kernargs")
+    ka = UOp(Ops.LINEAR, src=tuple(ka_words) + (UOp.const(0, dtypes.uint32),) * (pad // 4))
 
     prog_addr = lib.getaddr(self.devs) + data.entry_point_offset
     scratch_addr = UOp.placeholder((data.private_segment_size,), dtypes.uint8, 0, device=self.devs).rtag("scratch").getaddr(self.devs)
@@ -144,13 +149,9 @@ class AMDComputeQueue(HWQueue):
                      self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
 
   def submit(self, cmdbuf:UOp) -> UOp:
-    for d in self.devs: q = Device[d].compute_queue
+    q = self.dev.compute_queue
 
-    nm = "_".join([self.devs[0].split(":")[0], *self.queue.split(":")]).lower()
-    ring = self.new_arg(UOp.placeholder((q.ring.size,), q.ring.dtype, 0, device=self.devs, volatile=True, tag=f"{self.queue}_ring", name=f"ring_{nm}"))
-    wptr = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_write_ptr", name=f"write_ptr_{nm}"))
-    doorbell = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_doorbell", name=f"doorbell_{nm}"))
-    put = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_put_value", name=f"put_value_{nm}"))
+    ring, wptr, doorbell, put = _queue_args(self, q)
 
     size_dw = cmdbuf.max_numel() // 4
     p = put.after(*self.deps).index(0).load()
@@ -196,13 +197,9 @@ class AMDSDMAQueue(HWQueue):
 
   def submit(self, cmdbuf:UOp) -> UOp:
     # sdma needs the cmdbuf contiguous in the ring: if it won't fit before the ring end, restart at 0 and zero the tail
-    for d in self.devs: q = unwrap(Device[d].sdma_queue(int(self.queue.split(":")[1])))
+    q = unwrap(self.dev.sdma_queue(int(self.queue.split(":")[1])))
 
-    nm = "_".join([self.devs[0].split(":")[0], *self.queue.split(":")]).lower()
-    ring = self.new_arg(UOp.placeholder((q.ring.size,), q.ring.dtype, 0, device=self.devs, volatile=True, tag=f"{self.queue}_ring", name=f"ring_{nm}"))
-    wptr = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_write_ptr", name=f"write_ptr_{nm}"))
-    doorbell = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_doorbell", name=f"doorbell_{nm}"))
-    put = self.new_arg(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, volatile=True, tag=f"{self.queue}_put_value", name=f"put_value_{nm}"))
+    ring, wptr, doorbell, put = _queue_args(self, q)
 
     rs, size_dw = q.ring.size, cmdbuf.max_numel() // 4
     put_b = put.after(*self.deps).index(0).load()
@@ -225,28 +222,32 @@ class AMDProgramData:
 
 _amd_program_cache:dict[tuple[bytes, tuple[str, ...]], tuple[AMDProgramData, UOp]] = {}
 def amd_build_program(dev, prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramData, UOp]:
-  # key on the full device tuple: the same lib can be built for different device sets, each needs its own program buffer
+  # the image parses once per lib, each device set gets its own program buffer of it
   if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, devs))) is None:
-    image, sections, relocs = elf_loader(lib)
-    rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
-    for off, sym, typ, addent in relocs:
-      assert typ == 5, f"unknown AMD reloc {typ}"  # R_AMDGPU_REL64
-      image[off:off+8] = struct.pack('<q', sym - off + addent)
-    desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytes(image[rodata:rodata+ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)]))
-    if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > (dev.iface.props['lds_size_in_kb']*1024)//512:
-      raise RuntimeError("Too many resources requested: group_segment_size")
-    edp = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
-
-    data = AMDProgramData(entry_point_offset=rodata + desc.kernel_code_entry_byte_offset,
-      rsrc1=desc.compute_pgm_rsrc1 | ((1<<20) if dev.target[0]==11 else 0),  # priv=1 on gfx11 for cwsr
-      rsrc2=desc.compute_pgm_rsrc2 | (lds<<15), rsrc3=desc.compute_pgm_rsrc3,
-      wave32=bool(desc.kernel_code_properties & 0x400), private_segment_size=desc.private_segment_fixed_size, kernargs_segment_size=desc.kernarg_size,
-      kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0), enable_dispatch_ptr=edp,
-      enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)
-    image = bytes(image).ljust(round_up(len(image), 4), b"\x00") # the program is uploaded as whole dwords
+    data, image = _amd_program_image(dev, lib)
     buf = UOp.placeholder((len(image),), dtypes.uint8, next(UOp.unique_num), device=devs).rtag("program")
     cached = _amd_program_cache[key] = (data, buf.after(buf.store(UOp(Ops.BINARY, src=(), arg=image).bitcast(buf.dtype))))
   return cached
+
+@functools.cache
+def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
+  image, sections, relocs = elf_loader(lib)
+  rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
+  for off, sym, typ, addent in relocs:
+    assert typ == 5, f"unknown AMD reloc {typ}"  # R_AMDGPU_REL64
+    image[off:off+8] = struct.pack('<q', sym - off + addent)
+  desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytes(image[rodata:rodata+ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)]))
+  if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > (dev.iface.props['lds_size_in_kb']*1024)//512:
+    raise RuntimeError("Too many resources requested: group_segment_size")
+  edp = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
+
+  data = AMDProgramData(entry_point_offset=rodata + desc.kernel_code_entry_byte_offset,
+    rsrc1=desc.compute_pgm_rsrc1 | ((1<<20) if dev.target[0]==11 else 0),  # priv=1 on gfx11 for cwsr
+    rsrc2=desc.compute_pgm_rsrc2 | (lds<<15), rsrc3=desc.compute_pgm_rsrc3,
+    wave32=bool(desc.kernel_code_properties & 0x400), private_segment_size=desc.private_segment_fixed_size, kernargs_segment_size=desc.kernarg_size,
+    kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0), enable_dispatch_ptr=edp,
+    enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)
+  return data, bytes(image).ljust(round_up(len(image), 4), b"\x00") # the program is uploaded as whole dwords
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):

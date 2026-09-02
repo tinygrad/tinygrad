@@ -18,7 +18,7 @@ from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher
 
-MAX_ARGS, CMD_SIZE, FUNCS = 63, 64, (() if WIN else ('clock_gettime',))
+FUNCS = () if WIN else ('clock_gettime',)
 
 # *****************
 # 1. signal programs
@@ -95,7 +95,6 @@ class CPUProgram(Program['CPUDevice']):
       self.fxn(addr)
     else:
       args = [*[cast(int, b.va_addr) for b in bufs], *cast(tuple[int, ...], vals)]
-      assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(args)}"
       self.fxn(*[ctypes.c_uint64(x) for x in args])
     return time.perf_counter() - st if wait else None
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import weakref, array, decimal
+import weakref, decimal, array
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup, to_mv, getenv
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup, getenv
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, HCQ2, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
@@ -130,8 +130,8 @@ class ExecContext:
   timeout: int|None = None
   cache: bool = True
 
-def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
-  if b.op in (Ops.MSELECT, Ops.SHRINK) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg.slot], *b.src[1:]))
+def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp: # views and lane selects resolve through to the param underneath
+  if b.op in (Ops.MSELECT, Ops.SHRINK): return b.replace(src=(_resolve(b.src[0], inputs), *b.src[1:]))
   if b.op is Ops.MSTACK: return b.replace(src=tuple(_resolve(x, inputs) for x in b.src))
   return inputs[b.arg.slot] if b.op is Ops.PARAM else b
 def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in get_call_arg_uops(call)]
@@ -163,6 +163,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp, devices=None) -> list[float|
   ets:list[float|None] = []
   resolved = resolve_params(call, ctx.input_uops)
   for device, (bufs, device_vars) in zip(devices or to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
+    if devices is None and HCQ2 and device.startswith("CPU"): Device[device].synchronize() # a host kernel reads what the queues wrote
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
@@ -195,14 +196,10 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   info = call.arg.aux
   assert len(ast.arg.globals) == len(info.args), f"{call.arg.name}: an arg is dead in the rendered body, the args after it would mis-bind"
 
-  # fill the inputs table with the address of every input the sealed cmdbufs reference
-  if info.table is not None:
-    addrs = [cast(Buffer, _resolve(_lane(u, lane), ctx.input_uops).buffer).get_buf(dev).va_addr for u, lane, dev in info.inputs]
-    tab = cast(Buffer, call.src[info.table].without_after.buffer)
-    to_mv(tab._buf.va_addr, len(addrs) * 8).cast('Q')[:] = array.array('Q', addrs)
-
-  # every lane's body runs on the runtime device, info.device is only the lane count
-  exec_kernel(replace(ctx, var_vals={**ctx.var_vals, **dict(info.vals)}), call, ast, devices=(HCQ_RUNTIME_DEV.value,)*len(info.device))
+  if info.inputs: # the body reads every input's device address from its table, filled here from this call's buffers
+    addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(dev).va_addr for u, dev in info.inputs]
+    cast(Buffer, call.src[1 + info.table].buffer)._buf.cpu_view().view(fmt='Q')[:] = array.array('Q', addrs)
+  exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,)) # the body runs on the runtime device, it drives every device's queues
 
   def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:
     (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, name, prof[0], prof[1], profile_key)
@@ -280,7 +277,7 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, _lane, HCQ_RUNTIME_DEV, HCQInfo # noqa: E402 # down here, hcq2 imports realize
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQ_RUNTIME_DEV, HCQInfo # noqa: E402 # down here, hcq2 imports realize
 
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
