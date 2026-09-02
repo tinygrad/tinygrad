@@ -71,8 +71,6 @@ def vmov(x:UOp, r:VRegister|Register|None=None) -> UOp:
   if isinstance(r, VRegister): assert r.width == 1
   nx = x.ins(RDNA3Ops.v_mov_b16_e64 if x.dtype is dtypes.half else RDNA3Ops.v_mov_b32_e32, src=(x,))
   return nx.rtag() if r is None else nx.replace(tag=(r,))
-def restoreexec(ctx, mask:UOp) -> UOp: return UOp(Ops.INS, src=(ctx.execop,mask), arg=(RDNA3Ops.s_or_b32, dtypes.void), tag=(EXEC,))
-def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=(RDNA3Ops.s_nop, dtypes.void), tag=name)
 def rafter(x:UOp, bitcast=False) -> UOp:
   return rafter(x.src[0]) if x.op in ({Ops.AFTER, Ops.BITCAST} if bitcast else {Ops.AFTER}) else x
 def multireg(*src, dtype: DType, vr:VRegister|None=None) -> UOp:
@@ -149,8 +147,7 @@ def alloc_vregs(ctx, x:UOp) -> UOp|None:
 
   width, alignment = 1, 1
   is_sdst = x.op is Ops.INS and defines_sgpr(x.arg[0].func)
-  if isinstance(x.tag, tuple): cons = x.tag
-  elif is_sdst:
+  if is_sdst:
     cons, width = ctx.gp_sgprs, (x.dtype.itemsize+3) // 4
     if width == 2: alignment = 2
   else: cons, width = ctx.gp_vgprs, ((x.dtype.itemsize+3) // 4) * (len(x.src) if x.op is Ops.STACK else 1)
@@ -247,22 +244,6 @@ def store(ctx, x:UOp, idx:UOp, val:UOp):
   prefix = "global" if idx.addrspace is AddrSpace.GLOBAL else "ds"
   opc = getattr(RDNA3Ops, f"{prefix}_store_b{sz*8}")
   return x.ins(opc, src=fold_address(rafter(idx, True))+(to_vgpr(val),*x.src[2:]))
-
-# TODO: cleaner way of lowering gateds
-# - what can we move upstream?
-# - how to nudge linearizer to place necessary ops in the same CFG block?
-# (how are RANGE dependencies normally modeled? AFTER, rng src edge...)
-def lower_gated_load(ctx, x:UOp):
-  alt, gate = x.src[-2:]
-  mask = gate.ins(RDNA3Ops.s_and_saveexec_b32, dtype=dtypes.uint32, src=(gate,), tag=(ctx.vreg(ctx.gp_sgprs),))
-  x = x.replace(src=x.src[:-2])
-  return x, ctx.ren.copy(alt, rdef(x))[1] + [mask, x, restoreexec(ctx, mask)]
-
-# NOTE: can this be done pre-linearize?
-def lower_gated_store(ctx, x:UOp):
-  mask = x.src[-1].ins(RDNA3Ops.s_and_saveexec_b32, dtype=dtypes.uint32, src=(x.src[-1],), tag=(ctx.vreg(ctx.gp_sgprs),))
-  x = x.replace(src=x.src[:-1])
-  return x, [mask, x, restoreexec(ctx, mask)]
 
 # ------ ALU ------
 # TODO: remove this, run const64 at isel time fix f64 test that breaks
@@ -361,6 +342,19 @@ def i64_to_f64(x:UOp):
   return lo + hi
 
 # ---- control flow ----
+def restoreexec(ctx, mask:UOp) -> UOp: return UOp(Ops.INS, src=(ctx.execop,mask), arg=(RDNA3Ops.s_or_b32, dtypes.void), tag=(EXEC,))
+def saveexec(ctx, gate:UOp) -> UOp: return UOp(Ops.INS, src=(gate,), arg=(RDNA3Ops.s_and_saveexec_b32, dtypes.uint32), tag=(ctx.vreg(ctx.gp_sgprs),))
+def label(ctx, name:str) -> UOp: return UOp(Ops.INS, arg=(RDNA3Ops.s_nop, dtypes.void), tag=name)
+
+def lower_gated_load(ctx, x:UOp):
+  alt, gate = x.src[-2:]
+  mask = saveexec(ctx, gate)
+  # return x, [mask, x, restoreexec(ctx, mask)]
+  return x, ctx.ren.copy(alt, rdef(x))[1] + [mask, x, restoreexec(ctx, mask)]
+
+def lower_gated_store(ctx, x:UOp):
+  return x, [(mask := saveexec(ctx, x.src[-1])), x, restoreexec(ctx, mask)]
+
 def lower_range(ctx, x:UOp):
   if x.src[0].op is Ops.NOOP: return x, [label(ctx, f".LOOP_BODY_{range_str(x)}")] # loop
   acc = x.ins(RDNA3Ops.v_mov_b32_e32, src=(const(0),))
@@ -384,14 +378,13 @@ def lower_end(ctx, x:UOp):
 # ---- lowering passes ----
 int1regs = dtypes.int8s + dtypes.int16s + dtypes.int32s
 extra_matcher = PatternMatcher([
-  # NOTE: runs before casted const
   (UPat.cvar("c", dtypes.bfloat16), lambda c: UOp.const(c.val if isinstance(c.val, InvalidType) else
     to_storage_scalar(c.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
-  # NOTE: DISABLE_FAST_IDIV=1 by default, copy patterns here
   (UPat(Ops.CDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))),
     lambda ctx,x,d: fast_idiv(ctx, x, d.val) if x.vmin >= 0 or x.dtype in dtypes.uints else None),
   (UPat(Ops.CMOD, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: a - b * a.alu(Ops.CDIV, b)),
   (UPat(Ops.CDIV, dtypes.int32s+dtypes.int16s+dtypes.int8s, (UPat.var("a"), UPat.var("b")), name="x"), idiv32),
+  (UPat(Ops.CDIV, dtypes.int64s, (UPat.var("a"), UPat.var("b")), name="x"), idiv64),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
 ]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,)) + tc.pm_validate_wmma_rdna3
@@ -417,6 +410,10 @@ pm_int_to_float = PatternMatcher([
   (UPat.var("x", dtypes.int64s).cast(dtypes.float64), i64_to_f64),
 ])
 
+def recast(u:UOp, dt:DType):
+  src = tuple(s.cast(dt) for s in u.src)
+  return src[0].alu(u.op, *src[1:]).bitcast(u.dtype)
+
 pre_isel_matcher = PatternMatcher([
   # --- bools are lane masks ---
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("val", dtype=dtypes.bool)), allow_any_len=True, name="x"), \
@@ -424,9 +421,11 @@ pre_isel_matcher = PatternMatcher([
   (UPat(Ops.LOAD, dtypes.bool, src=(UPat.var("buf"),), allow_any_len=True, name="x"),
     lambda buf,x: x.replace(src=(buf.bitcast(dtypes.uchar),) +
       (() if len(x.src) == 1 else (x.src[1].cast(dtypes.uchar), x.src[2]))).cast(dtypes.bool)),
+  (UPat.cvar("x").cast(dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.val else 0),))),
+  (UPat.var("x").cast(dtypes.bool), lambda x: x.alu(Ops.CMPEQ, const(1, x.dtype))),
+  (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(1, x.dtype), const(0, x.dtype))),
   # --- int8 alu is int16 for now ---
-  (UPat(GroupOp.ALU-{Ops.WHERE}, dtypes.int8s, name="x"),
-    lambda x: (upcast := tuple(s.cast(smux(x.dtype, dtypes.int16, dtypes.uint16)) for s in x.src))[0].alu(x.op, *upcast[1:]).bitcast(x.dtype)),
+  (UPat(GroupOp.ALU-{Ops.WHERE}, dtypes.int8s, name="x"), lambda x: recast(x, smux(x.dtype, dtypes.int16, dtypes.uint16))),
   (UPat(GroupOp.Comparison, src=(UPat(dtype=dtypes.int8s), UPat()), name="x"),
     lambda x: x.replace(src=tuple(s.cast(smux(x.dtype, dtypes.int16, dtypes.uint16)) for s in x.src))),
   # -- int -> int casts ---
@@ -434,22 +433,15 @@ pre_isel_matcher = PatternMatcher([
   (UPat.var("y", int1regs).cast(dtypes.int64s, name="x"), lambda y,x: int_to_int64(y, x.dtype)),
   (UPat.var("y", dtypes.double).cast(dtypes.half), lambda y: y.float().half()),
   # --- other ---
-  # prevent 64 bit shift from being realized into 2 regs
+  (UPat.cvar("c").cast((dtypes.float64,)+dtypes.int64s, name="x"), const64),
   (UPat((Ops.SHR, Ops.SHL), src=(UPat.var("val"), UPat.var("n", dtypes.int64s+(dtypes.float64,))), name="x"),
     lambda val,x,n: x.replace(src=(val, n.cast(dtypes.uint32)))),
   (UPat(Ops.INDEX, (dtypes.half,dtypes.bfloat16)+dtypes.int8s+dtypes.int16s,
     src=(UPat.var("buf"), UPat.cvar("c").cast()), name="idx"), unpack),
-  (UPat(Ops.CDIV, dtypes.int64s, (UPat.var("a"), UPat.var("b")), name="x"), idiv64),
-  (UPat(Ops.MUL, (dtypes.int16,dtypes.int32), src=(UPat.var("a"), UPat.var("b")), name="x"), lambda a,b,x:
-    (a.cast(dtypes.uint32) * b.cast(dtypes.uint32)).cast(x.dtype)),
-  (UPat(Ops.MAX, dtypes.int16s, name="x"), lambda x:
-    (upcast := tuple(s.cast(smux(x.dtype, dtypes.int32, dtypes.uint32)) for s in x.src))[0].alu(Ops.MAX, *upcast[1:]).bitcast(x.dtype)),
-  (UPat.cvar("x").cast(dtypes.bool), lambda x: x.ins(RDNA3Ops.s_mov_b32, src=(const((1 << 32) - 1 if x.val else 0),))),
-  (UPat.var("x").cast(dtypes.bool), lambda x: x.alu(Ops.CMPEQ, const(1, x.dtype))),
-  (UPat.cvar("c").cast((dtypes.float64,)+dtypes.int64s, name="x"), const64),
-  (UPat.var("y", dtypes.bool).cast(name="x"), lambda y,x: y.where(const(1, x.dtype), const(0, x.dtype))),
   (UPat(Ops.STACK, name="x"), lambda x: x.replace(src=tuple(vmov(s) if is_const(s) and s.dtype.itemsize < 8 else s for s in x.src))
     if any(is_const(s) for s in x.src) else None),
+  (UPat(Ops.MUL, (dtypes.int16,dtypes.int32), name="x"), lambda x: recast(x, dtypes.uint32)),
+  (UPat(Ops.MAX, dtypes.int16s, name="x"), lambda x: recast(x, smux(x.dtype, dtypes.int32, dtypes.uint32))),
   (UPat(Ops.MAX, dtypes.int64s, src=(UPat.var("a"), UPat.var("b"))), lambda a,b: (a < b).where(b, a)),
   (UPat(Ops.MULACC, dtypes.ints, src=(UPat.var("a"), UPat.var("b"), UPat.var("c"))), lambda a,b,c: a*b + c),
 ]) + pm_float_to_int + pm_int_to_float
@@ -495,26 +487,23 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.ints).cast(dtypes.ints).named("x"), lambda y,x: y.bitcast(x.dtype)
     if y.dtype.itemsize >= x.dtype.itemsize else
     x.ins(RDNA3Ops.v_bfe_i32 if y.dtype in dtypes.sints else RDNA3Ops.v_bfe_u32, src=(y,const(0),const(y.dtype.itemsize*8)))),
-  # NOTE: dont realize weak casts
   (UPat.var("y", dtype=dtypes.ints+dtypes.floats).cast(name="x"),
     lambda y,x: x.ins(getattr(RDNA3Ops, f"v_cvt_{dt_to_isa[x.dtype]}_{dt_to_isa[y.dtype]}_e64"))),
   # --- mem ops ---
   (UPat.var("idx").store(UPat.var("val"), allow_any_len=True).named("x"), store),
   (UPat.var("idx").load(name="x", allow_any_len=True), load),
+  # --- operand legalization ---
+  (UPat(Ops.INS, name="x"), lambda x: lvop2(x) if x.arg[0].func in {RDNA3Ops.VOP2, RDNA3Ops.VOP2_LIT} else
+    lvop2(x, swap_only=True) if x.arg[0] in commutative_ins and len(x.src) == 2 else None),
+  (UPat(Ops.INS, name="x"), lambda x: lvop3(x) if x.arg[0].func in {RDNA3Ops.VOP3, RDNA3Ops.VOP3SD, RDNA3Ops.VOPC, RDNA3Ops.VOP3P} else None),
   # --- other ---
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
   (UPat((Ops.INS, Ops.STACK), name="x"), alloc_vregs),
   (UPat(Ops.BARRIER, name="x"), lambda x: x.ins(RDNA3Ops.s_barrier)),
   (UPat(Ops.STACK, name="x"), lambda ctx,x: stack2regs(ctx, x) if len(x.src) and x.dtype.itemsize < 4 else None),
-  # NOTE: commutative ALU that lands in a VOP3 encoding (v_add_nc_i32, v_mul_lo_u32) needs same legalization
-  (UPat(Ops.INS, name="x"), lambda x: lvop2(x) if x.arg[0].func in {RDNA3Ops.VOP2, RDNA3Ops.VOP2_LIT} else
-    lvop2(x, swap_only=True) if x.arg[0] in commutative_ins and len(x.src) == 2 else None),
-  (UPat(Ops.INS, name="x"), lambda x: lvop3(x) if x.arg[0].func in {RDNA3Ops.VOP3, RDNA3Ops.VOP3SD, RDNA3Ops.VOPC, RDNA3Ops.VOP3P} else None),
 ])
 
-
 pre_regalloc_matcher = PatternMatcher([
-  # Lower a gated load as one adjacent sequence after linearization so the alt initialization cannot escape its CFG block.
   (UPat(Ops.INS, name="x"), lambda ctx,x: lower_gated_load(ctx,x) if ctx.ins_schedule.get(x.arg[0],x.op)
     is Ops.LOAD and x.src[-1].dtype is dtypes.bool and rafter(x.src[-1]).op is not Ops.BUFFER else None),
   (UPat(Ops.INS, name="x"), lambda ctx,x: lower_gated_store(ctx,x) if ctx.ins_schedule.get(x.arg[0],x.op)
@@ -525,7 +514,6 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, name="x"), lower_end),
-  # TODO: figure out what Ops stay in graph this long and remove them?
   # NOTE: hacky, forces do_assemble in codegen but might hide incomplete lowering
   (UPat(GroupOp.All - {Ops.INS}, name="x"), lambda x: (x, [])),
 ])
