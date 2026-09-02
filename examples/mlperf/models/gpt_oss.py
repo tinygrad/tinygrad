@@ -61,7 +61,25 @@ def dequant_weight(w_q:Tensor, w_scale:Tensor) -> Tensor:
   call = UOp.maketuple(fxn.uop).call(w_q.uop, w_scale.uop, grad_fxn=_dequant_bwd)
   return Tensor(call.gettuple(0))
 
-def matmul_mx(x:Tensor, w_q:Tensor, w_scale:Tensor) -> Tensor:
+def matmul_mx(x:Tensor|tuple[Tensor, Tensor], w_q:Tensor, w_scale:Tensor) -> Tensor:
+  if isinstance(x, tuple):
+    assert ASM_GEMM, "pre-quantized MXFP8 input requires ASM_GEMM"
+    from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm, mx_pack
+    x_q, x_e8 = x
+    l_shape, padded = x_q.shape[:-1], x_q.shape[-1]
+    x_q, x_e8 = x_q.reshape(-1, padded), x_e8.reshape(-1, padded // 32)
+    K, N = w_q.shape[1], w_q.shape[0]
+    assert padded >= K and (padded - K) % 32 == 0 and x_e8.shape[-1] == padded // 32
+    wq, ws = w_q, w_scale
+    if (pad := padded - K):
+      wq = wq.pad(((0, 0), (0, pad)))
+      ws = ws.pad(((0, 0), (0, pad // 32)), value=127).cast(dtypes.uint8)
+    if (npad := (-N) % 256):
+      wq = wq.pad(((0, npad), (0, 0)))
+      ws = ws.pad(((0, npad), (0, 0)), value=127).cast(dtypes.uint8)
+    assert can_use_asm_gemm(x_q, wq.T)
+    out = asm_gemm(x_q, wq.T, mx=True, mx_scales=(mx_pack(x_e8), x_e8, mx_pack(ws), ws), mx_w_stored=True)
+    return (out[:, :N] if npad else out).reshape(*l_shape, N).cast(dtypes.bfloat16)
   l_shape = x.shape[:-1]
   if ASM_GEMM:
     from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm, mx_pack
