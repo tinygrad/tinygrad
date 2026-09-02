@@ -102,7 +102,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
   targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
 
-  # how each stored value lands in its bound output target: a CONTIGUOUS materializes straight into the target and
+  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
   # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
   placed:dict[UOp, UOp] = {}
   items:list[UOp] = []
@@ -129,6 +129,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
+  # NOTE: must use the resolved shapes of the unbound BUFFER placeholders (which substitute PARAMs with external args), not raw body shapes
   rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
 
   # the AFTER outputs resolve against this: stores of each real output into its unbound BUFFER placeholder
@@ -171,8 +172,8 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
   return b.param_like(len(ctx.replacements)-1)
 
-# unbound BUFFER identities are unique at creation (outputs of different calls never alias); here they get canonical
-# scope-local ids (negative, so already-canonical ones are skipped) so identical calls hash identically for the schedule cache
+# unbound BUFFER identities are unique at creation (outputs of different calls never alias): here they get canonical
+# scope-local ids (negative, so already-canonical ones are skipped), so identical calls hash identically for the schedule cache
 def canonicalize_unbound_buffer(ctx:AllocCtx, b:UOp):
   if b.arg.slot < -1: return None
   if b not in ctx.unbound: ctx.unbound[b] = b.replace(arg=replace(b.arg, slot=-2-len(ctx.unbound)))

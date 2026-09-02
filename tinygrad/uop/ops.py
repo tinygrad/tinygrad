@@ -551,8 +551,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return ret.view_as(shp, axis)
   @property
   def num_returned(self) -> int:
-    # a value-producing call: an unannotated value SINK body (kernel bodies have KernelInfo) with unbound BUFFER output args
+    # a value-producing call: a SINK of stores into output PARAMs (not KernelInfo kernels, not stores to buffers),
+    # with the outputs as extra unbound BUFFER args
     if self.op is not Ops.CALL or self.src[0].op is not Ops.SINK or self.src[0].arg is not None: return 0
+    if not any(st.op is Ops.STORE and st.src[0].storage_base.op is Ops.PARAM for st in self.src[0].src): return 0
     return sum(x.unsharded_base.is_unbound for x in self.src[1:])
   @property
   def returned_outputs(self) -> tuple[UOp, ...]:

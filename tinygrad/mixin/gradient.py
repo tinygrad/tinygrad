@@ -116,7 +116,7 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
   for t0 in reversed(walk):
     if t0 not in grads or grads[t0].op is Ops.NOOP: continue
     # CALL: pass needed param set so backward only computes required gradients
-    # (calls with unbound BUFFER outputs use the implicit body gradient or grad_fxn; opaque CALLs require an explicit grad_fxn)
+    # (calls with unbound BUFFER inputs use the implicit body gradient or grad_fxn; opaque CALLs require an explicit grad_fxn)
     if t0.op is Ops.CALL:
       needed = {i for i, arg in enumerate(t0.src[1:]) if arg in targets or in_target_path.get(arg, False)}
       lgrads:tuple[UOp|None, ...]|None = call_gradient(grads[t0], t0, needed)
