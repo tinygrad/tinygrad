@@ -143,7 +143,7 @@ def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache
       if cache is not None: cache[(typ,) + args] = x
       return x
     except Exception as e: excs.append(e)
-  raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg + " is available", excs)
+  raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg, excs)
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
