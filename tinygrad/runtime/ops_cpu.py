@@ -19,7 +19,7 @@ from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher
 
-MAX_ARGS, CMD_SIZE, FUNCS = 63, 64, (() if WIN else ('clock_gettime',))
+CMD_SIZE, FUNCS = 64, (() if WIN else ('clock_gettime',))
 
 # *****************
 # 1. signal programs
@@ -47,6 +47,7 @@ def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
   progs = [get_runtime(d, prog) if isinstance(prog, UOp) else cast(CPUDevice, Device[d]).prgs[prog] for d in devs]
   addrs = tuple(UOp.const(p.addr, dtypes.uint64) for p in progs)
   words = ((addrs[0] if len(addrs) == 1 else UOp(Ops.STACK, src=addrs)),) + args
+  assert len(words) <= CMD_SIZE, f"a cpu cmd holds at most {CMD_SIZE-1} args, got {len(args)}"
   return UOp(Ops.LINEAR, src=words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)))
 
 def cpu_exec(ctx, call:UOp, prg:UOp) -> UOp:
@@ -131,7 +132,6 @@ class CPUProgram(Program['CPUDevice']):
       self.fxn(addr)
     else:
       args = [*[cast(int, b.va_addr) for b in bufs], *cast(tuple[int, ...], vals)]
-      assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(args)}"
       self.fxn(*[ctypes.c_uint64(x) for x in args])
     return time.perf_counter() - st if wait else None
 
@@ -156,7 +156,7 @@ class CPUAllocator(HCQAllocator['CPUDevice']):
   def _do_map(self, buf:HCQBuffer):
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
     return HCQBuffer(buf.view.addr, buf.size, view=buf.view, owner=buf.owner)
-  def _unmap(self, mb): pass  # CPU _do_map returns a view wrapper, nothing to release
+  def _do_unmap(self, mb): pass  # CPU _do_map returns a view wrapper, nothing to release
 
 class CPUDevice(HCQ2Compiled):
   wait_timeout_ms, has_copy_queue = 30000, False
