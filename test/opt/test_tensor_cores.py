@@ -175,6 +175,22 @@ class TestTensorCores(unittest.TestCase):
         helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[1], tc.dims[2]//8, tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
 
   @Context(ALLOW_TF32=1)
+  @unittest.skipUnless(any(tc.dtype_in in (dtypes.half, dtypes.float) for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                       "test requires half or float tensor cores")
+  def test_tensor_cores_padto_unroll(self):
+    # a padded then fully unrolled reduce makes both operands of one WMMA constant, its output is still a register
+    tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in in (dtypes.half, dtypes.float))
+    Tensor.manual_seed(3)
+    a = Tensor.rand(tc.dims[1]*2+1, tc.dims[2]*3-1, dtype=tc.dtype_in).realize()
+    b = Tensor.rand(tc.dims[2]*3-1, tc.dims[0]*2+1, dtype=tc.dtype_in).realize()
+    sche = Scheduler(a.matmul(b, dtype=tc.dtype_out).schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
+    sche.apply_opt(tc_opt:=Opt(OptOps.TC, 0, (-1, 2, 1)))
+    axis = sche.axis_types.index(AxisType.REDUCE)
+    helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out), [[tc_opt, Opt(OptOps.PADTO, axis, 4), Opt(OptOps.SPLIT, axis, (2, AxisType.UNROLL)),
+                                                            Opt(OptOps.SPLIT, axis, (0, AxisType.UNROLL))]],
+                          check_default_opt=False, atol=3e-2, rtol=1e-3)
+
+  @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "not generated on EMULATED device")
   @slow
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")

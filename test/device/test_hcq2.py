@@ -4,7 +4,7 @@ from tinygrad import Device, Tensor
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import HCQ2
-from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in, hcq_compile_cache, link_linear_cache
+from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in, hcq_compile_cache
 
 @unittest.skipUnless(HCQ2 and all_devices_in(Device.DEFAULT, HCQ_DEVS), "hcq2 device required")
 class TestHCQ2(unittest.TestCase):
@@ -34,31 +34,39 @@ class TestHCQ2(unittest.TestCase):
   def test_overlapping_device_tuples(self):
     # an op on a wide device tuple followed by an op on an overlapping smaller tuple used to MMU-fault the smaller one
     d4, d2 = tuple(f"{Device.DEFAULT}:{i}" for i in range(4)), tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+    try: Device[d4[-1]]
+    except Exception: self.skipTest("needs four devices")
     ref = Tensor.arange(16).contiguous().realize()
     Tensor(ref.uop.copy_to_device(d4)).realize()
     out = Tensor.ones(8).shard(d2, axis=0).contiguous().realize()
     np.testing.assert_equal(out.numpy(), np.ones(8))
 
-  def relowers(self, t:Tensor) -> tuple[int, int]:
-    # a miss in either cache relowers the whole submit, a hit costs ~0.1ms
-    before = (len(hcq_compile_cache), len(link_linear_cache))
+  def relowers(self, t:Tensor) -> int: # a compile miss relowers the whole submit, a hit only links it
+    before = len(hcq_compile_cache)
     t.realize()
-    return (len(hcq_compile_cache) - before[0], len(link_linear_cache) - before[1])
+    return len(hcq_compile_cache) - before
 
   def test_relower_only_on_new_kernel(self):
     a, b = (Tensor.empty(64, 64).contiguous().realize() for _ in range(2))
     self.relowers(a.sin())
-    self.assertEqual(self.relowers(a.sin()), (0, 0))  # nothing changed
-    self.assertEqual(self.relowers(b.sin()), (0, 0))  # new buffers, patched in at link time
-    self.assertEqual(self.relowers(a.cos()), (1, 1))  # new kernel, though only the code address moved
-    self.assertEqual(self.relowers(a.cos()), (0, 0))
-    self.assertEqual(self.relowers(Tensor.empty(32, 32).contiguous().realize().sin()), (1, 1))  # new shape
+    self.assertEqual(self.relowers(a.sin()), 0)  # nothing changed
+    self.assertEqual(self.relowers(b.sin()), 0)  # new buffers, patched in at link time
+    self.assertEqual(self.relowers(a.cos()), 1)  # new kernel, though only the code address moved
+    self.assertEqual(self.relowers(a.cos()), 0)
+    self.assertEqual(self.relowers(Tensor.empty(32, 32).contiguous().realize().sin()), 1)  # new shape
 
   def test_dtype_sweep_relowers_every_dtype(self):
     # test_dtype sweeps dtypes at one shape, so nearly every kernel is new: this is where hcq2 ci time goes
     src = Tensor.empty(64, 64).contiguous().realize()
     dts = (dtypes.int8, dtypes.uint8, dtypes.int16, dtypes.uint16, dtypes.int32)
-    self.assertEqual([self.relowers(src.cast(dt).contiguous())[0] for dt in dts], [1] * len(dts))
+    self.assertEqual([self.relowers(src.cast(dt).contiguous()) for dt in dts], [1] * len(dts))
+
+  @unittest.skipIf(Device.DEFAULT == "CPU", "sharding needs a non-CPU hcq2 device")
+  def test_shard_from_host(self): # the host copy, the p2p copy of its second half and the lane kernels are one batch: the deps must chain
+    try: Device[d1:=f"{Device.DEFAULT}:1"]
+    except Exception: self.skipTest("needs a second device")
+    a = np.arange(64*64, dtype=np.float32).reshape(64, 64)
+    np.testing.assert_equal(Tensor(a).shard((Device.DEFAULT, d1), axis=0).realize().numpy(), a)
 
 if __name__ == "__main__":
   unittest.main()

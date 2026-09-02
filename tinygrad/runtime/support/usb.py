@@ -5,7 +5,7 @@ from tinygrad.helpers import DEBUG, DEV, to_mv, from_mv, round_up, ceildiv, unwr
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 from tinygrad.device import Buffer, BufferSpec, Device
-from tinygrad.runtime.support.hcq2 import HCQInfo, make_buf, make_submit, HCQ_RUNTIME_DEV
+from tinygrad.runtime.support.hcq2 import HCQInfo, make_submit, HCQ_RUNTIME_DEV
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support import c
 
@@ -250,6 +250,9 @@ class USBMMIOInterface(MMIOInterface):
 
 # *****************
 
+# TODO: unported to the hcq2 rewrite, keeps the old signal placeholder helper alive
+def make_buf(devs, slot:int=0, tag:str="signal") -> UOp: return UOp.placeholder((1,), dtypes.uint64, slot, device=devs, volatile=True, tag=tag)
+
 def _libusb(devs, dep:tuple[UOp, ...], fn:str, *args) -> UOp:
   return make_buf(devs, tag=f"func:{fn}").after(*dep).index(0).load().call(make_buf(devs, tag="usb_handle").index(0).load(),
     *[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args], ret_dtype=dtypes.void)
@@ -310,9 +313,9 @@ pm_usb_hostio = PatternMatcher([
 pm_usb_bufferize = PatternMatcher([
   (UPat(Ops.PARAM, tag={"systems", "runtime", "inputs", "usb_scratch"}, name="b"),
    lambda ctx, b: Buffer("CPU", b.max_numel(), b.dtype, options=BufferSpec(nolru=True), preallocate=True)),
-  (UPat(Ops.PARAM, tag="usb_handle", name="b"), lambda ctx, b: ctx[0].signal(b.tag, ctx[0].iface.usb_handle, device="CPU")),
+  (UPat(Ops.PARAM, tag="usb_handle", name="b"), lambda ctx, b: ctx.signal(b.tag, ctx.iface.usb_handle, device="CPU")),
   (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if not isinstance(b.tag, str) or not b.tag.startswith("func:") else
-   ctx[0].signal(b.tag, unwrap(ctypes.cast(getattr(libusb.dll, b.tag[5:]), ctypes.c_void_p).value), device="CPU")),
+   ctx.signal(b.tag, unwrap(ctypes.cast(getattr(libusb.dll, b.tag[5:]), ctypes.c_void_p).value), device="CPU")),
 ])
 
 if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

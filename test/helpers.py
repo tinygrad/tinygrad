@@ -69,9 +69,9 @@ def call_is_graph(call:UOp) -> bool:
   ast = call.src[0]
   return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph"
 
-def call_is_hcq(call:UOp) -> bool:
-  ast = call.src[0]
-  return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq"
+def call_is_hcq(call:UOp) -> bool: # an hcq2 batch: a compiled body whose aux lists the kernels it submits
+  from tinygrad.runtime.support.hcq2 import HCQInfo
+  return isinstance(getattr(call.arg, "aux", None), HCQInfo)
 
 def jit_cache_count(linear:UOp) -> int:
   n = 0
