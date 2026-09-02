@@ -655,8 +655,9 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   """maps SQTT packets to instructions, yields (packet, instruction_info or None)"""
   # map pcs to insts
   from tinygrad.viz.serve import amd_decode
-  pc_map, is_cdna = amd_decode(lib, target), target.startswith("gfx9")
+  pc_map = amd_decode(lib, target)
   wave_pc:dict[tuple[int, int], int] = {}
+  # RDNA selects one SIMD for instruction tracing, CDNA traces multiple SIMDs
   simd:int = 0
   for p in decode(data):
     if not getattr(p, "cu", 0) == 0: continue
