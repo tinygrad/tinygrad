@@ -347,7 +347,7 @@ class TestCustomKernel(unittest.TestCase):
     self.assertTrue((c == 2).all().item())
 
   def test_partial_invalid_store_keeps_uncovered_reads(self):
-    x = Tensor([10., 20., 30., 40.])
+    x = Tensor([10., 20., 30., 40.]).realize()
     after = x.uop.after(x.uop.shrink(((0, 2),)).store(Invalid))
     self.assertEqual(Tensor(after).contiguous().tolist(), [10., 20., 30., 40.])
 
