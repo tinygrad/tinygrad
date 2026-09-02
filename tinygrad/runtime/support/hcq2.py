@@ -256,13 +256,13 @@ class HWQueue:
 
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
 
-def input_addr(ctx:EncodeCtx, g:UOp) -> UOp|None: # an input's address is only known at exec: the body reads it from the table
+def addrs_to_table(ctx:EncodeCtx, g:UOp) -> UOp|None:
   base, off = unwrap_view(g.src[0])
-  param = base.src[0].base if base.op is Ops.MSELECT else base # an input is an untagged param, or a lane of one
+  param = base.src[0].base if base.op is Ops.MSELECT else base # unwrap mselects
   if param.op is not Ops.PARAM or param.tag is not None: return None
   slot = ctx.inputs.setdefault((base, to_tuple(g.arg)[0]), len(ctx.inputs))
   return ctx.table.index(slot).load() + UOp.const(off, dtypes.uint64)
-pm_input_addr = PatternMatcher([(UPat(Ops.GETADDR, name="g"), input_addr)])
+pm_addrs_to_table = PatternMatcher([(UPat(Ops.GETADDR, name="g"), addrs_to_table)])
 
 def _is_link_patch(w:UOp) -> bool:
   if w.op is Ops.GETADDR: return True
@@ -292,7 +292,7 @@ def encode_submit(hq:HWQueue) -> UOp:
   buf = UOp.placeholder((len(hq.blob),), dtypes.uint8, device=hq.devs, tag=to_name("cmdbuf", hq.queue))
 
   words = UOp.sink(*[w for _, w in hq.patches]).substitute({l: buf[o:e] for l, (o, e) in views.items()})
-  words = graph_rewrite(words, pm_input_addr, ctx=hq.ctx, name="input addrs").src
+  words = graph_rewrite(words, pm_addrs_to_table, ctx=hq.ctx, name="addrs to table").src
 
   links, runtime = partition(list(zip([o for o, _ in hq.patches], words)), lambda r: _is_link_patch(r[1]))
   hq.ctx.lt_patches.append(patch(buf, links, buf.store(UOp(Ops.BINARY, arg=bytes(hq.blob)).bitcast(buf.dtype))))
