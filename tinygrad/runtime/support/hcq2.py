@@ -338,39 +338,45 @@ def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp:
     base, off = unwrap_view(sig)
     last = (base.after(*last).index(off // sig.dtype.itemsize).store(0),)
   return last[0].barrier(*last[1:])
-
 pm_hcq_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name="f"), hcq_fence)])
 
 # *****************
-# 3.1. lower: the batch call to a body program and its args
+# 4. lower call
 
 def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.args: return None # not an hcq call, or lowered already
 
-  # one ctx for the whole call: the body encodes with the hcq rules plus every device's own
-  ctx = EncodeCtx(devs:=call.arg.aux.device)
-  pms = [Device[d].pm_encode for d in dedup([d.split(":")[0] for d in devs])]
-  body = graph_rewrite(call.src[0], functools.reduce(lambda a, b: a + b, pms, pm_hcq_encode), ctx=ctx, walk=True, name="encode body")
-  body = body.substitute({ctx.table: (table:=UOp.placeholder((len(ctx.inputs),), dtypes.uint64, device="CPU", tag="inputs"))}) # sized now
+  # encode bodies
+  ctx = EncodeCtx(call.arg.aux.device)
+  pm = sum([Device[d].pm_encode for d in dedup([d.split(":")[0] for d in ctx.devs])], pm_hcq_encode)
+  body = graph_rewrite(call.src[0], pm, ctx=ctx, walk=True, name="encode body")
 
-  # the placeholders become the body's params in visit order, a cmdbuf as its patched form; variables bind by name after them, ranges renumber
+  # resize table
+  body = body.substitute({ctx.table: (table:=UOp.placeholder((len(ctx.inputs),), dtypes.uint64, device="CPU", tag="inputs"))})
+
+  # the placeholders become the body's params in visit order, variables bind by name after them, the ranges renumber
   tops = body.toposort()
   bufs, alus = partition([u for u in tops if u.op is Ops.PARAM], lambda u: u.tag is not None)
   names = dedup([a.arg.name for a in alus])
+  # bufs to params
   args = {b: UOp.param(i, b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for i, b in enumerate(bufs)}
+  # new slots for vars
   vals = {a: a.replace(arg=replace(a.arg, slot=len(bufs) + names.index(a.arg.name))) for a in alus}
+  # reenum ranges
   rngs = {r: r.replace(arg=(i,)+r.arg[1:]) for i, r in enumerate(sorted([u for u in tops if u.op is Ops.RANGE], key=lambda r: r.arg))}
+  # and sub all of them
   sink = body.substitute(args | vals | rngs).replace(arg=KernelInfo("hcq_submit"), tag=1)
-  patched = {p.src[0]: p for p in ctx.lt_patches}
-  srcs = [patched.get(b, b) for b in bufs]
 
-  if VIZ: graph_rewrite(UOp.sink(*srcs), PatternMatcher([]), name="View Link-Time Patches")
+  # move all lt-patches to the args
+  patched = {p.src[0]: p for p in ctx.lt_patches}
+  args = [patched.get(b, b) for b in bufs]
+
+  if VIZ: graph_rewrite(UOp.sink(*args), PatternMatcher([]), name="View Link-Time Patches")
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Body")
 
-  info = replace(call.arg.aux, args=tuple(srcs), table=bufs.index(table) if ctx.inputs else -1, inputs=tuple(ctx.inputs),
+  info = replace(call.arg.aux, args=tuple(args), table=bufs.index(table) if table in bufs else -1, inputs=tuple(ctx.inputs),
                  slots=tuple((to_tuple(b.device)[0], i) for i, b in enumerate(bufs) if b.tag == "slots"))
-  return call.replace(src=(sink, *srcs), arg=replace(call.arg, aux=info))
-
+  return call.replace(src=(sink, *args), arg=replace(call.arg, aux=info))
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
 
 hcq_compile_cache:dict[tuple[UOp, bool, bool], UOp] = {} # uops are hash-consed: the linear itself is the key, plus whether inputs bind
@@ -381,13 +387,11 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
     linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffer")
 
-  # the schedule and encode see the real buffers: their views are the deps, their addresses bake at link. unbound params (the jit's
-  # inputs) are read from the inputs table at exec instead. the cache holds the input-agnostic param form, each call binds its own
+  # TODO: this needs a cleanup
   bufmap = {s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}
   if (final_linear:=(hcq_compile_cache.get(cache_key:=(linear, profile, input_uops is None)))) is None:
     linear = graph_rewrite(linear.substitute(bufmap, walk=True), pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
     linear = sched_batches(linear, profile)
-    if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View Schedule")
     linear = graph_rewrite(linear, pm_encode, walk=True, name="encode")
     with Context(EMULATED_DTYPES=""):
       final_linear = hcq_compile_cache[cache_key] = lower_and_compile(linear).substitute({v: k for k, v in bufmap.items()}, walk=True)
