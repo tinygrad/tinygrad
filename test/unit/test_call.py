@@ -257,6 +257,15 @@ class TestCallSchedule(unittest.TestCase):
     # the function bodies (src[0]) should have identical keys
     self.assertEqual(c0.src[0].key, c1.src[0].key)
 
+  def test_precompile_consumes_call_output(self):
+    """a precompiled function consuming the output of a non-precompiled function"""
+    @function
+    def inner(x:Tensor) -> Tensor: return x * 2
+    @function(precompile=True)
+    def outer(x:Tensor) -> Tensor: return x + 1
+    x = Tensor.arange(8).float().contiguous().realize()
+    np.testing.assert_equal(outer(inner(x)).numpy(), np.arange(8, dtype=np.float32) * 2 + 1)
+
   def test_precompile_symbolic_2d(self):
     """precompile with symbolic shapes in 2D (tests debuf reshape with symbolic PARAM)"""
     @function(precompile=True)
