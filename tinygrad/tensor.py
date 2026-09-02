@@ -12,6 +12,7 @@ from tinygrad.uop.ops import resolve_returned_after, remove_all_tags
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
+from tinygrad.schedule.multi import multi_pm
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 
@@ -77,7 +78,6 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   unshard = None
   if buf.op is Ops.UNSHARD:
     if isinstance(c.device, str): return None
-    from tinygrad.schedule.multi import multi_pm
     if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
     src = unshard.src[0]
 
