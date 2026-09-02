@@ -518,34 +518,15 @@ jobs:
       - name: Run LLVM test
         run: DEV=MOCKKFD+AMD:LLVM python test/device/test_amd_llvm.py
 
-  hcq2:
-    name: hcq2
-    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
-    timeout-minutes: 5
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: hcq2
-          deps: testing_unit
-          amd: 'true'
-      - name: Run HCQ2 tests
-        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/test_tiny.py
-      - name: Run HCQ2 multi-device tests
-        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python -m pytest -n=auto test/backend/test_multitensor.py
-      - name: Run HCQ2 JIT tests
-        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python test/unit/test_jit.py
-      - name: Run HCQ2 unit tests
-        run: HCQ_RUNTIME_DEV=PYTHON HCQ2=1 DEV=MOCKKFD+AMD FORWARD_ONLY=1 PYTHONPATH=. python -m pytest test/device/test_hcq2.py
-
   testmockam:
     name: Linux (am)
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 15
     env:
       DEV: MOCKPCI+AMD
+      HCQ2: 1
+      HCQ_RUNTIME_DEV: PYTHON
+      PYTHONPATH: .
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -555,15 +536,17 @@ jobs:
           key: mockam
           deps: testing_unit
           amd: 'true'
-      - name: Run test_tiny on MOCKAM
-        run: python test/test_tiny.py
+      - name: Run tests on MOCKAM
+        run: python -m pytest test/test_tiny.py test/unit/test_jit.py
       - name: Run test_tiny on MOCKUSB
-        run: GMMU=0 DEV=MOCKUSB+AMD python test/test_tiny.py
-      - name: Run test_hcq on MOCKPCI
-        run: python -m pytest test/device/test_hcq.py
+        run: HCQ2=0 GMMU=0 DEV=MOCKUSB+AMD python test/test_tiny.py
+      - name: Run test_hcq2 on MOCKPCI
+        run: python -m pytest test/device/test_hcq2.py
       - name: Run disk copy tests on MOCKPCI
         run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
       - name: Run test_tiny on MOCKPCI Remote
+        env:
+          HCQ2: 0
         run: |
           python extra/remote/serve.py 6667 &
           sleep 2
@@ -583,6 +566,9 @@ jobs:
     env:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
+      HCQ2: 1
+      HCQ_RUNTIME_DEV: PYTHON
+      PYTHONPATH: .
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -599,9 +585,9 @@ jobs:
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run MXFP4 Llama training on NULL backend
         if: ${{ matrix.backend == 'amd' && matrix.arch == 'gfx950' }}
-        run: PYTHONPATH=. DEV=NULL:HIP:gfx950 MXFP4=1 LLAMA_LAYERS=2 BENCHMARK=3 NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 ROCM_PATH=/opt/rocm JITBEAM=0 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
+        run: HCQ2=0 PYTHONPATH=. DEV=NULL:HIP:gfx950 MXFP4=1 LLAMA_LAYERS=2 BENCHMARK=3 NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 ROCM_PATH=/opt/rocm JITBEAM=0 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
       - name: Run pytest (amd)
-        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq.py test/external/external_test_am.py test/backend/test_asm_gemm.py::TestAsmGEMM --durations=20
+        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq2.py test/external/external_test_am.py test/backend/test_asm_gemm.py::TestAsmGEMM --durations=20
       - name: Run disk copy tests
         run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
       - name: Run TRANSCENDENTAL math
