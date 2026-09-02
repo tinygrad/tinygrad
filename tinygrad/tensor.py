@@ -208,7 +208,8 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   strip_after = {a:a.src[0] for a in nodes if a.op is Ops.AFTER}  # AFTERs only sequence stores, storage keeps the views
   # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
   for u in nodes:
-    if u.op is Ops.COPY and on_disk(u) or u.op is Ops.AFTER and not u.is_bound_var and u.src[0].unsharded_base.op is not Ops.RETURNED:
+    if (u.op is Ops.COPY and on_disk(u)) or \
+       (u.op is Ops.AFTER and not u.is_bound_var and u.src[0].unsharded_base.op is not Ops.RETURNED):
       ctx.stores.append(u)
       if u.tag: ctx.buffer_map.update({t:u.src[0].substitute(strip_after).shrink_to(t.shape) for t in u.tag})
   ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
