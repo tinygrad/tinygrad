@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, USE_TC, IMAGE
+from tinygrad.helpers import getenv, DEBUG, prod, TC_OPT, TC_SELECT, TC_MIN_GLOBALS, USE_TC, IMAGE
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.late.coalesce import image_valid_dims
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -10,19 +10,19 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
   Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
 
-  Keyword arguments:
-  use_tensor_cores -- controls how tensor cores are applied (default 1)
+  ContextVars:
+  USE_TC -- controls how tensor cores are applied (default 1)
     0: will disable any tensor core matching
     1: enable tensor cores
     2: apply tensor core shape but don't use UOp.WMMA
-  extra_opts -- additional Opt's to apply after the tensor core instead of the hand-coded additional Opt's (default None)
-  tc_select -- specifies which tensor core(s) to use for optimization (default -1)
+  TC_SELECT -- specifies which tensor core(s) to use for optimization (default -1)
     -1: iterates through all available tensor cores in order and uses the first one that matches the requirements (dims and dtypes)
     [0-N]: uses only the n'th tensor core available; useful for search
-  tc_opt -- controls which kinds of kernels may be eligible for tensor cores application (default 2 during BEAM, 0 otherwise)
+  TC_OPT -- controls which kinds of kernels may be eligible for tensor cores application (default 2 during BEAM, 0 otherwise)
     0: applies to only kernels with a single reduce axis and direct Ops.LOAD into Ops.MUL
     1: allows kernels with multiple reduce axes and also multiplication of Ops.CAST'd buffers
     2: allows kernels with M, N, K axes that are not multiples of the tensor core dimensions by applying padding those axes as needed
+  TC_MIN_GLOBALS -- do not upcast N when it would drop the specified global count
   """
   # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
   if USE_TC > 0 and (len(k.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (TC_OPT.value >= 1)):
@@ -31,13 +31,16 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       # check TC first and apply hand-coded opts if successful
       try: rngs = tk.apply_opt(Opt(OptOps.TC, axis, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
       except KernelOptError: continue
-      for tc_dim in [1,0]: # attempt to upcast M and N
-        szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
-        if szs:
-          # set it to the replaced range
-          rngs[tc_dim] = tk.apply_opt(Opt(OptOps.SPLIT, tk.rngs.index(rngs[tc_dim]), (szs[0], AxisType.UPCAST)))[0]
-      if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
-        tk.apply_opt(Opt(OptOps.SPLIT, tk.rngs.index(rngs[0]), (szs[0], AxisType.LOCAL)))
+      def split(idx, size, atype): rngs[idx] = tk.apply_opt(Opt(OptOps.SPLIT, tk.rngs.index(rngs[idx]), (size, atype)))[0]
+      if TC_MIN_GLOBALS: # attempt to upcast M, local N, upcast N, skipping upcast N if we'd end up with too few globals
+        if (size:=next(filter(lambda sz: rngs[1].src[0].divides(sz) is not None, [5,4,3,2]), None)) is not None: split(1, size, AxisType.UPCAST)
+        if (size:=next(filter(lambda sz: rngs[0].src[0].divides(sz) is not None, [4,2]), None)) is not None: split(0, size, AxisType.LOCAL)
+        if ((size:=next(filter(lambda sz: rngs[0].src[0].divides(sz) is not None, [5,4,3,2]), None)) is not None and
+            resolve(prod(tk.full_shape[i] for i in tk.axes_of(AxisType.GLOBAL)) >= size*TC_MIN_GLOBALS.value, False)): split(0, size, AxisType.UPCAST)
+      else: # attempt to upcast M, N, local N
+        for i in [1,0]:
+          if (size:=next(filter(lambda sz: rngs[i].src[0].divides(sz) is not None, [5,4,3,2]), None)) is not None: split(i, size, AxisType.UPCAST)
+        if (size:=next(filter(lambda sz: rngs[0].src[0].divides(sz) is not None, [4,2]), None)) is not None: split(0, size, AxisType.LOCAL)
       return tk
 
   # make a copy so it does not mutate the input
