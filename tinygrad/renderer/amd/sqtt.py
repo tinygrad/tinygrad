@@ -659,6 +659,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   wave_pc:dict[tuple[int, int], int] = {}
   simd:int = 0
   for p in decode(data):
+    if not getattr(p, "cu", 0) == 0: continue
     if isinstance(p, LAYOUT_HEADER): simd = p.simd
     if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
       if (key:=(p.simd, p.wave)) in wave_pc: raise AssertionError("only one inflight wave per unit")
