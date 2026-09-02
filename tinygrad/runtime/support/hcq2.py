@@ -156,10 +156,10 @@ class BatchCtx:
   def sched_timeline(self, devs:tuple[str, ...]) -> UOp: return self.slot(devs, len(self.queues[devs[0]]))
   def stamps(self, devs:tuple[str, ...], tag:int) -> tuple[int, ...]: return (st:=len(self.queues[devs[0]])+1+2*tag, st + 1) if self.profile else ()
 
-def _call_bufs(call:UOp) -> list[Any]: # the dep resources: a param (or its mselect lane) as is, anything real as its Buffer
+def _call_bufs(call:UOp) -> list[Any]:
   def dep_buf(b:UOp) -> Any:
-    base = (b.src[0] if b.op is Ops.MSELECT else b).base
-    return (b if b.op is Ops.MSELECT else base) if base.op is Ops.PARAM else b.buffer
+    if (base:=(b.src[0] if b.op is Ops.MSELECT else b).storage_base).op is Ops.PARAM: return b if b.op is Ops.MSELECT else base
+    return base.buffer.bufs[b.arg] if b.op is Ops.MSELECT else base.buffer
   return [dep_buf(a) for a in get_call_arg_uops(call)]
 
 def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UOp]:
