@@ -63,8 +63,10 @@ class TestHCQ2(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "sharding needs a non-CPU hcq2 device")
   def test_shard_from_host(self): # the host copy, the p2p copy of its second half and the lane kernels are one batch: the deps must chain
+    try: Device[d1:=f"{Device.DEFAULT}:1"]
+    except RuntimeError: self.skipTest("needs a second device")
     a = np.arange(64*64, dtype=np.float32).reshape(64, 64)
-    np.testing.assert_equal(Tensor(a).shard((Device.DEFAULT, f"{Device.DEFAULT}:1"), axis=0).realize().numpy(), a)
+    np.testing.assert_equal(Tensor(a).shard((Device.DEFAULT, d1), axis=0).realize().numpy(), a)
 
 if __name__ == "__main__":
   unittest.main()
