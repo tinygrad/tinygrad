@@ -245,11 +245,11 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
 # 3. encode
 
 @dataclass
-class EncodeCtx: # the batch's devices, the blobs its queues render and the inputs its body reads
+class EncodeCtx:
   devs:tuple[str, ...]
-  blobs:dict[UOp, tuple[bytes, list[tuple[int, UOp]]]] = field(default_factory=dict) # placeholder -> (its bytes, the link rows to fold in)
-  inputs:dict[tuple[UOp, str], int] = field(default_factory=dict) # (input, device) -> its slot in the table the body reads addresses from
-  table:UOp = field(default_factory=lambda: UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="inputs")) # sized once encoded
+  inputs:dict[tuple[UOp, str], int] = field(default_factory=dict)
+  table:UOp = field(default_factory=lambda: UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="inputs"))
+  lt_patches:list[UOp] = field(default_factory=list)
 
 class HWQueue:
   q_rewrite:PatternMatcher
@@ -313,18 +313,21 @@ def encode_submit(hq:HWQueue) -> UOp:
   words = graph_rewrite(words, pm_input_addr, ctx=hq.ctx, name="input addrs").src
 
   links, runtime = partition(list(zip([o for o, _ in hq.patches], words)), lambda r: _is_link_patch(r[1]))
-  hq.ctx.blobs[buf] = (bytes(hq.blob), links)
+  hq.ctx.lt_patches.append(patch(buf, links, buf.store(UOp(Ops.BINARY, arg=bytes(hq.blob)).bitcast(buf.dtype))))
   return hq.submit(patch(buf, runtime, *hq.deps).shrink(((0, stream),)))
 
 # *****************
 # 3.1. hcq special functions
 
-def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp: # per device: wait for what this batch's last run signaled, take the next value; re-arm its signals
+def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp:
   lasts, sigs = f.src[:len(ctx.devs)], f.src[len(ctx.devs):]
   last:tuple[UOp, ...] = ()
+
+  # wait for prev schedule to not collide
+  # TODO: timeout?
   for i, dev in enumerate(ctx.devs):
     slots, off = unwrap_view(lasts[i])
-    ctx.blobs[slots] = (bytes(slots.max_numel() * slots.dtype.itemsize), []) # the slots link zeroed: no run yet, nothing to wait for
+    ctx.lt_patches.append(slots.after(slots.store(UOp(Ops.BINARY, arg=bytes(slots.max_numel() * slots.dtype.itemsize)).bitcast(slots.dtype))))
     done = timeline((dev,)).after(*last, loop:=UOp.loop(i)).index(0).load()
     waited = done.end(loop, done < slots.index(off // slots.dtype.itemsize).load())
     nxt = timeline_value((dev,)) + UOp.const(1, dtypes.uint64)
@@ -340,9 +343,6 @@ pm_hcq_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name
 
 # *****************
 # 3.1. lower: the batch call to a body program and its args
-
-def patch_cmdbuf(cmdbuf:UOp, blob:bytes, links:list[tuple[int, UOp]]) -> UOp:
-  return patch(cmdbuf.after(cmdbuf.store(UOp(Ops.BINARY, arg=blob).bitcast(cmdbuf.dtype))), links)
 
 def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.args: return None # not an hcq call, or lowered already
@@ -361,9 +361,12 @@ def lower_call(call:UOp) -> UOp|None:
   vals = {a: a.replace(arg=replace(a.arg, slot=len(bufs) + names.index(a.arg.name))) for a in alus}
   rngs = {r: r.replace(arg=(i,)+r.arg[1:]) for i, r in enumerate(sorted([u for u in tops if u.op is Ops.RANGE], key=lambda r: r.arg))}
   sink = body.substitute(args | vals | rngs).replace(arg=KernelInfo("hcq_submit"), tag=1)
-  srcs = [patch_cmdbuf(b, *ctx.blobs[b]) if b in ctx.blobs else b for b in bufs]
+  patched = {p.src[0]: p for p in ctx.lt_patches}
+  srcs = [patched.get(b, b) for b in bufs]
+
   if VIZ: graph_rewrite(UOp.sink(*srcs), PatternMatcher([]), name="View Link-Time Patches")
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Body")
+
   info = replace(call.arg.aux, args=tuple(srcs), table=bufs.index(table) if ctx.inputs else -1, inputs=tuple(ctx.inputs),
                  slots=tuple((to_tuple(b.device)[0], i) for i, b in enumerate(bufs) if b.tag == "slots"))
   return call.replace(src=(sink, *srcs), arg=replace(call.arg, aux=info))
