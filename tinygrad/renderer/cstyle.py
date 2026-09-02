@@ -1,7 +1,7 @@
 from typing import Literal, Callable
 import math, sys, struct
 from collections import defaultdict, Counter
-from tinygrad.codegen.opt import tc
+from tinygrad.renderer import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
 from tinygrad.uop.weak import commit_weak_consts
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape

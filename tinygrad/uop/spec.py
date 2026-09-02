@@ -1,4 +1,4 @@
-import math
+import math, functools
 from typing import Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
 from tinygrad.uop.render import print_uops, pyrender
@@ -270,17 +270,19 @@ spec_kernel_graph = PatternMatcher([
 
 # **** pyrender (move this) ****
 
-# late imports to avoid circular import
-from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.schedule.rangeify import BufferizeOpts
-from tinygrad.renderer import Estimates
-glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
-                        "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
-                        "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-                        "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates}
+# circular-import-safe eval globals for pyrender round-tripping (lazy: codegen/schedule/renderer are heavy)
+@functools.cache
+def pyrender_globals() -> dict[str, Any]:
+  from tinygrad.codegen.opt import Opt, OptOps
+  from tinygrad.schedule.rangeify import BufferizeOpts
+  from tinygrad.renderer import Estimates
+  return {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
+          "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
+          "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
+          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
-  exec(code, glbls, lcls)
+  exec(code, pyrender_globals(), lcls)
   return lcls['ast']
 
 def test_pyrender(test_ast:UOp, assert_parents=True):
