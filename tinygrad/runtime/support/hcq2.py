@@ -1,12 +1,12 @@
 from __future__ import annotations
 from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
-import functools, time, itertools, decimal, weakref, collections, os
+import functools, time, itertools, decimal, weakref, collections, os, statistics
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ
-from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition
+from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator
-from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent
-from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, CallInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
+from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
+from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.renderer import Renderer, Estimates
@@ -27,11 +27,12 @@ class HCQInfo:
   device:tuple[str, ...]
   estimates:Estimates = Estimates()
 
-  kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = ()
+  kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = () # (devices, name, estimates, timestamp slots, profile key)
 
   args:tuple[UOp, ...] = () # the placeholders the call binds, in the body's param order
   table:int = -1 # the inputs table's position in the args: the exec fills it with the address of every (input, device) in inputs
   inputs:tuple[tuple[UOp, str], ...] = ()
+  slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -43,21 +44,14 @@ def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte o
 
 def _lane(u:UOp, lane:int) -> UOp: return u.src[lane] if u.op is Ops.MSTACK else u.mselect(lane) if len(to_tuple(u.device)) > 1 else u
 
-def to_name(*parts) -> str: # lowercase, "_"-joined: "AMD:1" gives amd_1, a queue its type and index, a device tuple its first device
-  return "_".join(p for x in parts for p in str(x[0] if isinstance(x, tuple) else x).split(":") if p).lower()
+def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower() # a c identifier: "signal", "COPY:0" gives signal_copy_0
 
-def is_signal(tag) -> bool: return isinstance(tag, int) or tag.split("_")[0] in {"signal", "done", "timeline"}
-
-def signal(devs, kind:str|int, queue:str="") -> UOp: # a u64 slot tagged {kind}_{device}_{queue}, an int kind is a profile timestamp
-  tag = kind if isinstance(kind, int) else to_name(kind, to_tuple(devs), queue)
-  return UOp.placeholder((1,), dtypes.uint64, 0, device=to_tuple(devs), volatile=True, tag=tag)
+def timeline(devs:tuple[str, ...]) -> UOp: return UOp.placeholder((2,), dtypes.uint64, 0, device=devs, volatile=True, tag="timeline")
+def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp: # named submit_{base device}_{queue type}, the backend pm matches it
   fn = to_name("submit", (devs:=to_tuple(devs))[0].split(":")[0], queue.split(":")[0])
   return UOp.custom_function(fn, UOp(Ops.LINEAR, src=tuple(cmds), arg=(devs, queue)))
-
-def make_call(name:str, body:UOp, info:HCQInfo) -> UOp: # a bare opaque CALL: .call would walk the whole body for its ranges assert
-  return UOp(Ops.CALL, src=(body,), arg=CallInfo(None, name, False, False, info))
 
 # *****************
 # 0.1. prep: replace buffers with params
@@ -149,12 +143,34 @@ class HCQDepsTracker: # per buffer base, the last write and the last read of eve
 
 @dataclass
 class BatchCtx:
-  batch:list[tuple[UOp, tuple[str, ...], str]]; profile:bool # noqa: E702 # (call, devices, queue) per enqueued call
-  tracker:HCQDepsTracker = field(default_factory=HCQDepsTracker); signal_tags:set[int] = field(default_factory=set) # noqa: E702
-  uid:int = field(default_factory=lambda: next(UOp.unique_num)) # the batch's slot number: it owns its signals like an hcq1 graph does
+  batch:list[tuple[UOp, tuple[str, ...], str]] # (call, devices, queue) per enqueued call
+  profile:bool
+  tracker:HCQDepsTracker = field(default_factory=HCQDepsTracker)
+  queues:dict[str, list[str]] = field(init=False)
+  first:dict[tuple[str, str], int] = field(init=False); last:dict[tuple[str, str], int] = field(init=False) # noqa: E702
+  signal_tags:set[int] = field(init=False)
+  slot_uid:int = field(default_factory=lambda: next(UOp.unique_num))
 
-  def signal(self, devs, kind:str, queue:str) -> UOp:
-    return UOp.placeholder((1,), dtypes.uint64, self.uid, device=to_tuple(devs), volatile=True, tag=to_name(kind, to_tuple(devs), queue))
+  def __post_init__(self):
+    self.queues, self.first, self.last = {}, {}, {}
+    for tag, (_, devs, q) in enumerate(self.batch):
+      if q not in self.queues.setdefault(devs[0], []): self.queues[devs[0]].append(q)
+      self.first.setdefault((devs[0], q), tag)
+      self.last[(devs[0], q)] = tag
+    self.signal_tags = {tag for (dev, q), tag in self.last.items() if q != self.epilogue_queue(dev)}
+
+  def epilogue_queue(self, dev:str) -> str: return "COMPUTE:0" if len(self.queues[dev]) > 1 else self.queues[dev][0] # closes the device
+
+  def slots(self, devs:tuple[str, ...]) -> UOp:
+    n = len(self.queues[devs[0]]) + 1 + (2 * len(self.batch) if self.profile else 0)
+    return UOp.placeholder((n,), dtypes.uint64, self.uid, device=devs, volatile=True, tag="slots")
+
+  def queue_signal(self, devs:tuple[str, ...], queue:str) -> UOp: return self.slots(devs)[(i:=self.queues[devs[0]].index(queue)):i+1]
+
+  def sched_timeline(self, devs:tuple[str, ...]) -> UOp: return self.slots(devs)[(i:=len(self.queues[devs[0]])):i+1]
+
+  def stamps(self, devs:tuple[str, ...], tag:int) -> tuple[int, ...]:
+    return (st:=len(self.queues[devs[0]]) + 1 + 2 * tag, st + 1) if self.profile else ()
 
 def _call_bufs(call:UOp) -> list[Any]: # the dep resources: a param (or its mselect lane) as is, anything real as its Buffer
   def dep_buf(b:UOp) -> Any:
@@ -168,70 +184,60 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   for d, q, t in ctx.tracker.access_resources(bufs, list(range(len(bufs)) if write is None else write), (device, queue, tag)):
     if t < tag and (d, q) != (device, queue): latest[(d, q)] = max(latest.get((d, q), 0), t)
   ctx.signal_tags |= set(latest.values())
-  return [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.signal(d, "signal", q), UOp.const(t + 1, dtypes.uint64))) for (d, q), t in latest.items()]
+  return [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64))) for (d, q), t in latest.items()]
 
-def _merge_queues(submits:list[UOp]) -> list[UOp]: # one submit per queue, the blocks only order through their gpu waits
+def _merge_queues(submits:list[UOp]) -> list[UOp]:
+  # grouped by queues. can be sent in any order, sync convers that
   return [make_submit(*[c for s in submits if s.src[0].arg == k for c in s.src[0].src], devs=k[0], queue=k[1])
           for k in dedup([s.src[0].arg for s in submits])]
 
 def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], list[tuple]]:
   # one submit per call: timeline sync on first queue use, timestamps, the call, and a signal if someone waits on it
-  src, kerns, seen_queues = [], [], set()
+  src, kerns = [], []
   for tag, ((call, devices, queue), q) in enumerate(zip(ctx.batch, call_waits)):
     # first queue use, sync prior device work with the device timeline
-    if (devices, queue) not in seen_queues:
-      seen_queues.add((devices, queue))
-      epoch = signal(devices, "value").index(0) - 1
+    if ctx.first[(devices[0], queue)] == tag:
       q = [UOp(Ops.INS, arg=("barrier", dtypes.void), src=()),
-           UOp(Ops.INS, arg=("wait", dtypes.void), src=(signal(devices, "timeline"), epoch))] + q
+           UOp(Ops.INS, arg=("wait", dtypes.void), src=(timeline(devices), timeline_value(devices)))] + q
 
     # and make hcq call
     name, info = get_call_name(call, get_call_arg_uops(call)), HCQInfo(devices, estimates=estimate_uop(call))
-    ts_ids = [next(UOp.unique_num) for _ in range(2)] if ctx.profile else []
-    kerns.append((devices, name, info.estimates, tuple(ts_ids), getattr(call.src[0].arg, "profile_key", None)))
+    kerns.append((devices, name, info.estimates, ctx.stamps(devices, tag), getattr(call.src[0].arg, "profile_key", None)))
 
-    ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(signal(devices, s),)) for s in ts_ids]
+    ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slots(devices)[i:i+1],)) for i in ctx.stamps(devices, tag)]
     q += ts_ins[:1] + [call.replace(arg=replace(call.arg, aux=info))] + ts_ins[1:]
 
     # signal the queue if someone waits for us
     if tag in ctx.signal_tags:
-      q += [UOp(Ops.INS, arg=("store", dtypes.void), src=(ctx.signal(devices, "signal", queue), UOp.const(tag + 1, dtypes.uint64)))]
+      q += [UOp(Ops.INS, arg=("store", dtypes.void), src=(ctx.queue_signal(devices, queue), UOp.const(tag + 1, dtypes.uint64)))]
     src.append(make_submit(*q, devs=devices, queue=queue))
   return src, kerns
 
-def _finalize_batch(batch:list[tuple[UOp, tuple[str, ...], str]], profile:bool) -> list[UOp]:
-  if not batch: return []
-  ctx, devices = BatchCtx(batch, profile), tuple(dedup([d for _, devs, _ in batch for d in devs]))
-  call_waits = [_wait_ins(ctx, c, d[0], q, tag) for tag, (c, d, q) in enumerate(batch)]
+def _epilogue(ctx:BatchCtx, dev:str) -> UOp:
+  # one queue signals the timeline once the last call of every other queue signaled
+  waits = [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((dev,), q), UOp.const(ctx.last[(dev, q)] + 1, dtypes.uint64)))
+           for q in ctx.queues[dev] if q != ctx.epilogue_queue(dev)]
+  bump = UOp(Ops.INS, arg=("store", dtypes.void), src=(timeline((dev,)), timeline_value((dev,)) + UOp.const(1, dtypes.uint64)))
+  return make_submit(*waits, bump, devs=dev, queue=ctx.epilogue_queue(dev))
+
+def _finalize_batch(ctx:BatchCtx) -> UOp: # the batch as one call: every wait is known before any submit, a call signals only if a later one waits
+  call_waits = [_wait_ins(ctx, c, d[0], q, tag) for tag, (c, d, q) in enumerate(ctx.batch)]
   submits, kerns = _emit_submits(ctx, call_waits)
-
-  sigs:list[UOp] = [] # every slot the batch stores to, the fence re-arms them
-  for dev in devices: # per device: every queue flags done, then one queue bumps the timeline
-    queues = dedup([q for _, bdevs, q in batch if dev in bdevs])
-    sigs += [ctx.signal(dev, kind, q) for q in queues for kind in ("signal", "done")]
-    submits += [make_submit(UOp(Ops.INS, arg=("store", dtypes.void), src=(ctx.signal(dev, "done", q), UOp.const(1, dtypes.uint64))),
-                            devs=dev, queue=q) for q in queues]
-    submits += [make_submit(*[UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.signal(dev, "done", q), UOp.const(1, dtypes.uint64))) for q in queues],
-                UOp(Ops.INS, arg=("store", dtypes.void), src=(signal(dev, "timeline"), signal(dev, "value").index(0).load())),
-                devs=dev, queue="COMPUTE:0" if len(queues) > 1 else queues[0])]
-
-  fence = UOp.custom_function("hcq_fence", *sigs)
+  submits += [_epilogue(ctx, dev) for dev in ctx.queues]
+  fence = UOp.custom_function("hcq_fence", *[ctx.sched_timeline((dev,)) for dev in ctx.queues],
+                              *[ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs])
   merged = [m.replace(src=(m.src[0].barrier(fence),)) for m in _merge_queues(submits)]
-  fin = UOp.custom_function("hcq_finalizer")
-
-  estimates = sum((estimate_uop(call) for call, _, _ in batch), start=Estimates()).simplify()
-  return [make_call(f"hcq batch ({len(batch)})", UOp.sink(*merged, fin),
-                    HCQInfo(devices, estimates, kernels=tuple(kerns)))]
+  estimates = sum((estimate_uop(call) for call, _, _ in ctx.batch), start=Estimates()).simplify()
+  return UOp.sink(*merged).call(name=f"hcq batch ({len(ctx.batch)})", aux=HCQInfo(tuple(ctx.queues), estimates, kernels=tuple(kerns)))
 
 @rewrite_group(new_ctx=False)
 def sched_batches(l:UOp, profile:bool) -> UOp:
+  devs = [() if (d:=_get_enqueue_devs(c)) is None else tuple(Device.canonicalize(x) for x in to_tuple(d)) for c in l.src]
+  queues = ["COMPUTE:0" if c.src[0].op is Ops.PROGRAM else "COPY:0" for c in l.src]
   srcs:list[UOp] = []
-  batch:list[tuple[UOp, tuple[str, ...], str]] = []
-  for call in l.src:
-    if (devs:=_get_enqueue_devs(call)) is not None: # canonical device names: "AMD:0" and "AMD" are one device with one set of signals
-      batch.append((call, tuple(Device.canonicalize(d) for d in to_tuple(devs)), "COMPUTE:0" if call.src[0].op is Ops.PROGRAM else "COPY:0"))
-    else: srcs, batch = srcs + _finalize_batch(batch, profile) + [call], []
-  return l.replace(src=tuple(srcs + _finalize_batch(batch, profile)))
+  for hcq, grp in itertools.groupby(zip(l.src, devs, queues), key=lambda e: bool(e[1])):
+    srcs += [_finalize_batch(BatchCtx(list(grp), profile))] if hcq else [c for c, _, _ in grp]
+  return l.replace(src=tuple(srcs))
 
 # *****************
 # 3. encode
@@ -243,14 +249,10 @@ class EncodeCtx: # the batch's devices, the blobs its queues render and the inpu
   inputs:list[tuple[UOp, str]] = field(default_factory=list) # (input, device) per slot of the table the body reads addresses from
   table:UOp = field(default_factory=lambda: UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="inputs")) # sized once encoded
 
-  def new_buf(self, devs:tuple[str, ...], shape:tuple[int, ...], dtype:DType, tag:str) -> UOp: # a scratch buffer owned by this linear
-    return UOp.placeholder(shape, dtype, next(UOp.unique_num), device=devs, tag=tag)
-
-class HWQueue: # a renderer for queues: q_rewrite turns each submit op into words, the blob packs them as they come
+class HWQueue:
   q_rewrite:PatternMatcher
 
-  def __init__(self, ctx:EncodeCtx):
-    self.ctx, self.blob, self.patches, self.deps = ctx, bytearray(), list[tuple[int, UOp]](), list[UOp]()
+  def __init__(self, ctx:EncodeCtx): self.ctx, self.blob, self.patches, self.deps = ctx, bytearray(), list[tuple[int, UOp]](), list[UOp]()
   def __getattr__(self, name): return getattr(self.dev, name) # the hardware bits of the submit's device
 
   def encode(self, submit:UOp) -> UOp: return self.submit(self.render(submit.src[0]))
@@ -284,7 +286,7 @@ class HWQueue: # a renderer for queues: q_rewrite turns each submit op into word
 
     # the blob is plain bytes on a fresh placeholder: the link words ride the ctx as (offset, word) rows,
     # the runtime ones the body stores every call, before the submit reads the stream
-    buf = self.ctx.new_buf(self.devs, (len(self.blob),), dtypes.uint8, to_name("cmdbuf", self.devs, self.queue))
+    buf = UOp.placeholder((len(self.blob),), dtypes.uint8, device=self.devs, tag=to_name("cmdbuf", self.queue))
     placed = UOp(Ops.SINK, src=tuple(w for _, w in self.patches)).substitute({l: buf[o:e] for l, (o, e) in offs.items()})
     placed = graph_rewrite(placed, pm_input_addr, ctx=self.ctx, name="input addrs").src
     links, runtime = partition(list(zip([o for o, _ in self.patches], placed)), lambda p: is_link_value(p[1]))
@@ -306,25 +308,24 @@ def is_link_value(w:UOp) -> bool: # resolvable when the linear links: no variabl
   if w.op in {Ops.LOAD, Ops.INDEX, Ops.PARAM} or w.is_variable: return False
   return all(is_link_value(s) for s in w.src)
 
-def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp: # spin until every device's timeline reaches its last epoch, then re-arm the batch's signals
+def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp: # per device: wait for what this batch's last run signaled, take the next value; re-arm its signals
+  lasts, sigs = f.src[:len(ctx.devs)], f.src[len(ctx.devs):]
   last:tuple[UOp, ...] = ()
   for i, dev in enumerate(ctx.devs):
-    done = signal(dev, "timeline").after(*last, loop:=UOp.loop(i)).index(0).load()
-    last = (done.end(loop, done < signal(dev, "epoch").index(0).load()),)
-  for sig in f.src: last = (sig.after(*last).index(0).store(0),)
-  return last[0].barrier()
+    slots, off = unwrap_view(lasts[i])
+    ctx.blobs[slots] = (bytes(slots.max_numel() * slots.dtype.itemsize), []) # the slots link zeroed: no run yet, nothing to wait for
+    done = timeline((dev,)).after(*last, loop:=UOp.loop(i)).index(0).load()
+    waited = done.end(loop, done < slots.index(off // slots.dtype.itemsize).load())
+    nxt = timeline_value((dev,)) + UOp.const(1, dtypes.uint64)
+    last = (timeline((dev,)).after(waited).index(1).store(nxt), slots.after(waited).index(off // slots.dtype.itemsize).store(nxt))
 
-def hcq_finalizer(ctx:EncodeCtx, fin:UOp) -> UOp: # per device: bump the epoch the next fence waits for
-  stores = []
-  for dev in ctx.devs:
-    epoch = (epoch_slot:=signal(dev, "value").index(0)).load()
-    stores += [epoch_slot.store(epoch + UOp.const(1, dtypes.uint64)), signal(dev, "epoch").index(0).store(epoch)]
-  return UOp.barrier(*stores)
+  # re-arm the signals
+  for sig in sigs:
+    base, off = unwrap_view(sig)
+    last = (base.after(*last).index(off // sig.dtype.itemsize).store(0),)
+  return last[0].barrier(*last[1:])
 
-pm_hcq_encode = PatternMatcher([
-  (UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name="f"), hcq_fence),
-  (UPat(Ops.CUSTOM_FUNCTION, arg="hcq_finalizer", name="fin"), hcq_finalizer),
-])
+pm_hcq_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name="f"), hcq_fence)])
 
 # *****************
 # 3.1. split: the body's placeholders become its params in visit order, a cmdbuf as its patched form; its variables and ranges collect
@@ -345,7 +346,8 @@ def split_param(ctx:SplitCtx, p:UOp) -> UOp|None: # a tagged param is a placehol
   if p.addrspace is AddrSpace.ALU: ctx.alus.append(p)
   if p.tag is None: return None
   ctx.args.append(patch_cmdbuf(p, *ctx.blobs[p]) if p in ctx.blobs else p)
-  return UOp.param(len(ctx.args) - 1, p.dtype, shape=p.shape, device=HCQ_RUNTIME_DEV.value, volatile=p.arg.volatile, name=p.arg.name)
+  slot = len(ctx.args) - 1 # in the name too: a tag repeats across the batch's devices
+  return UOp.param(slot, p.dtype, shape=p.shape, device=HCQ_RUNTIME_DEV.value, volatile=p.arg.volatile, name=f"{p.arg.name}_{slot}")
 
 def split_range(ctx:SplitCtx, r:UOp) -> None: ctx.ranges.append(r)
 
@@ -369,7 +371,8 @@ def lower_call(call:UOp) -> UOp|None:
   sink = body.substitute(vals | rngs).replace(arg=KernelInfo("hcq_submit"), tag=1)
   if VIZ: graph_rewrite(UOp.sink(*split.args), PatternMatcher([]), name="View Link-Time Patches")
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Body")
-  info = replace(call.arg.aux, args=tuple(split.args), table=split.args.index(table) if ctx.inputs else -1, inputs=tuple(ctx.inputs))
+  info = replace(call.arg.aux, args=tuple(split.args), table=split.args.index(table) if ctx.inputs else -1, inputs=tuple(ctx.inputs),
+                 slots=tuple((to_tuple(a.device)[0], i) for i, a in enumerate(split.args) if unwrap_view(a)[0].tag == "slots"))
   return call.replace(src=(sink, *split.args), arg=replace(call.arg, aux=info))
 
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
@@ -460,39 +463,42 @@ class HCQ2Compiled(Compiled):
 
   def __init__(self, device:str, allocator:HCQAllocator, compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
     self.can_recover = can_recover
-
-    dev = (device,)
+    # a placeholder's slot is its lifetime: 0 is device state a rule names (queues prepend theirs), any other slot is the linear's own
     self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag=to_name("value", dev), name="b"), lambda ctx, b: ctx.signal(b.tag, 1, device="CPU")),
-      (UPat(Ops.PARAM, tag=to_name("epoch", dev), name="b"), lambda ctx, b: ctx.signal(b.tag, device="CPU")),
-      (UPat(Ops.PARAM, tag="program", name="b"), lambda ctx, b: ctx.prog_buffer(b)),
-      (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.signal(b.tag) if is_signal(b.tag) and not b.arg.slot else ctx.new_buffer(b)),
+      (UPat(Ops.PARAM, tag="timeline"), lambda ctx: ctx.timeline),
+      (UPat(Ops.PARAM, tag="program", name="b"), # shared across linears, keyed on the placeholder
+       lambda ctx, b: ctx.prog_bufs.setdefault(b, Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)))),
+      (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile) if b.arg.slot else
+       panic(RuntimeError, f"no rule names the device state {b.tag} on {ctx.device}")),
     ])
     super().__init__(device, allocator, compilers, runtime, None, arch=arch)
 
     self.prog_bufs:dict[UOp, Buffer] = {}
-    self.prof_ents:dict[int, ProfileGraphEntry] = {}
+    self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
+
+  @functools.cached_property
+  def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]: zeroed host memory
+    return Buffer(self.device, 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
 
   def collect_prof(self):
     if PROFILE:
-      es = list(self.prof_ents.values())
-      sigs = [self.signal(i)._buf.cpu_view().view(fmt='Q')[0]/decimal.Decimal(self.timestamp_divider) for e in es for i in (e.st_id, e.en_id)]
-      Compiled.profile_events.append(ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,e in enumerate(es)], [], sigs))
+      es = list(self.prof_ents.items())
+      sigs = [buf._buf.cpu_view().view(fmt='Q')[i]/decimal.Decimal(self.timestamp_divider) for (buf, _), e in es for i in (e.st_id, e.en_id)]
+      Compiled.profile_events.append(ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,(_, e) in enumerate(es)], [], sigs))
     self.prof_ents.clear()
 
-  def _at_profile_finalize(self):
-    pass
-    # from tinygrad.tensor import Tensor
-    # tdiffs = []
-    # for _ in range(5):
-    #   with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
-    #   if not (ents:=list(self.prof_ents.values())): return
-    #   self.prof_ents.clear()
-    #   st = perf_counter_us()
-    #   self.synchronize()
-    #   gpu = max(self.signal(e.en_id)._buf.cpu_view().view(fmt='Q')[0] for e in ents)/decimal.Decimal(self.timestamp_divider)
-    #   tdiffs.append((st+perf_counter_us())/2 - gpu)
-    # Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
+  def _at_profile_finalize(self): # the device clock against the host's: the median offset over a few tiny kernels
+    from tinygrad.tensor import Tensor
+    tdiffs = []
+    for _ in range(5):
+      with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
+      if not (ents:=list(self.prof_ents.items())): return
+      self.prof_ents.clear()
+      st = perf_counter_us()
+      self.synchronize()
+      gpu = max(buf._buf.cpu_view().view(fmt='Q')[e.en_id] for (buf, _), e in ents)/decimal.Decimal(self.timestamp_divider)
+      tdiffs.append((st+perf_counter_us())/2 - gpu)
+    Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
 
   @functools.cache
   def rt_allocator(self, uncached:bool=True, host:bool=False) -> BumpAllocator: return BumpAllocator(self.rt_nbytes >> (6 if host else 0))
@@ -506,20 +512,6 @@ class HCQ2Compiled(Compiled):
     off = self.rt_allocator(uncached, host).alloc(max(nbytes, 1), alignment=128)
     return self.rt_buffer(uncached, host).view(nbytes // dtype.itemsize, dtype, off).ensure_allocated()
 
-  def prog_buffer(self, b:UOp) -> Buffer: # program buffers are shared across linears, keyed on the placeholder
-    if (buf:=self.prog_bufs.get(b)) is None:
-      buf = self.prog_bufs[b] = Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
-    return buf
-
-  def new_buffer(self, b:UOp) -> Buffer: # signals live in host memory: a peer polls them over pcie, not through its p2p window
-    return self.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=is_signal(b.tag))
-
-  @functools.cache
-  def signal(self, name:str|int, init_value:int=0, device:str|None=None) -> Buffer:
-    buf = Buffer(device or self.device, 1, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
-    buf._buf.cpu_view().view(fmt='Q')[0] = init_value
-    return buf
-
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
     timeout = timeout if timeout is not None and self.can_recover else None
     st, done = time.perf_counter(), sig[0]
@@ -528,9 +520,7 @@ class HCQ2Compiled(Compiled):
       elif time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
 
   def synchronize(self, timeout:int|None=None):
-    sig = self.signal(to_name("timeline", (self.device,)))._buf.cpu_view().view(fmt='Q')
-    tl = self.signal(to_name("value", (self.device,)), 1, device="CPU")._buf.cpu_view().view(fmt='Q')
-    self._wait_signal(sig, tl[0] - 1, timeout)
+    self._wait_signal(tl:=self.timeline._buf.cpu_view().view(fmt='Q'), tl[1], timeout)
     if self.prof_ents: self.collect_prof()
 
   def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")

@@ -201,11 +201,12 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     cast(Buffer, call.src[1 + info.table].buffer)._buf.cpu_view().view(fmt='Q')[:] = array.array('Q', addrs)
   exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,)) # the body runs on the runtime device, it drives every device's queues
 
+  slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots} # the batch's timestamps live in its slots
   def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:
-    (d:=cast(Any, Device[device])).prof_ents[prof[0]] = ProfileGraphEntry(device, name, prof[0], prof[1], profile_key)
+    (d:=cast(Any, Device[device])).prof_ents[(slots[device], prof[0])] = ProfileGraphEntry(device, name, prof[0], prof[1], profile_key)
     if not ctx.wait: return None
     d.synchronize(timeout=ctx.timeout)
-    st, en = (d.signal(x)._buf.cpu_view().view(fmt='Q')[0] for x in prof)
+    st, en = (slots[device]._buf.cpu_view().view(fmt='Q')[x] for x in prof)
     return float(en-st)/d.timestamp_divider/1e6
   return [_prof_tm(device, name, prof, profile_key) for devices,name,_,prof,profile_key in info.kernels
           if prof for device in devices] if PROFILE or ctx.wait else []
