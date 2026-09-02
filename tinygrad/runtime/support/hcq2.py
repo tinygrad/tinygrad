@@ -273,9 +273,9 @@ def patch(buf:UOp, rows:list[tuple[int, UOp]], *deps:UOp) -> UOp: # the buffer a
   groups:dict[tuple[DType, int], list[tuple[int, UOp]]] = {}
   for o, w in rows: groups.setdefault((w.dtype, o % w.dtype.itemsize), []).append((o, w))
 
-  stores = []
+  base, stores = buf.after(*deps), [] # the views hang off the buffer after its deps: the stores wait for them, the caller's after keeps the base flat
   for (dt, phase), grp in groups.items():
-    view = buf[phase:phase + (buf.max_numel() - phase) // dt.itemsize * dt.itemsize].bitcast(dt).after(*deps)
+    view = base[phase:phase + (buf.max_numel() - phase) // dt.itemsize * dt.itemsize].bitcast(dt)
     stores.append(view.index(UOp.stack(*[UOp.const((o - phase) // dt.itemsize) for o, _ in grp])).store(UOp.stack(*[w for _, w in grp])))
   return buf.after(*deps, *stores)
 
@@ -379,47 +379,51 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
       final_linear = hcq_compile_cache[cache_key] = lower_and_compile(linear).substitute({v: k for k, v in bufmap.items()}, walk=True)
   return final_linear.substitute(bufmap, walk=True)
 
+# *****************
+# 5. bufferize placeholders
+
+def bufferize_buf(ctx:bool, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
+  if b.tag is None: return None # a param, not a placeholder
+
+  dev = cast(HCQ2Compiled, Device[to_tuple(b.device)[0]])
+
+  if b.arg.slot == 0 or b.tag == "program": r = unwrap(dev.pm_bufferize.rewrite(b, ctx=dev)) # device state and programs are the device's
+  elif ctx: r = Buffer(dev.device, b.max_numel(), b.dtype, options=BufferSpec(host=b.arg.volatile, uncached=True, cpu_access=True), preallocate=True)
+  else: r = dev.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile)
+
+  return UOp.from_buffer(r, HCQ_RUNTIME_DEV.value)
+pm_bufferize_placeholders = PatternMatcher([(UPat(Ops.PARAM, name="b"), bufferize_buf)])
 
 # *****************
-# 9. bufferize placeholders: replace placeholders with real buffers
+# 6. link
 
-def bufferize_buf(buf:UOp) -> UOp|None:
-  if buf.tag is None: return None
-  return UOp.from_buffer((dev:=Device[to_tuple(buf.device)[0]]).pm_bufferize.rewrite(buf, ctx=dev), HCQ_RUNTIME_DEV.value)
-
-# *****************
-# 10. link: bufferize the placeholders, resolve the addresses, fold the words, the stores write the bytes
-
-def resolve_getaddr(ctx:list[UOp], g:UOp) -> UOp|None: # the address once the base is a real buffer
+def resolve_getaddr(ctx:list[UOp], g:UOp) -> UOp|None:
   buf, off = unwrap_view(g.src[0])
   if buf.op not in {Ops.BUFFER, Ops.MSELECT}: return None
-  ctx.append(buf) # the address bakes into the blob: the linked linear refholds the buffer (the amd scratch outlives its realloc)
+  ctx.append(buf) # add to refs
   return UOp.const(cast(Buffer, buf.buffer).get_buf(to_tuple(g.arg)[0]).va_addr + off, dtypes.uint64)
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
-  if getattr(b:=cast(Buffer, buf.buffer), '_hcq_written', None) is not blob.arg: # programs are shared across linears, write them once
+  if getattr(b:=cast(Buffer, buf.buffer), '_hcq_written', None) is not blob.arg: # TODO: remove me
     cast(Any, b.ensure_allocated())._hcq_written = blob.arg
     b._buf.cpu_view().view(fmt='B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
-def fold_words(buf:UOp, offs:UOp, words:UOp) -> UOp: # every word folded to a const: write it at its byte offset in the view
+def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
   base, off = unwrap_view(buf)
   mv = cast(Buffer, base.buffer).ensure_allocated()._buf.cpu_view().view(fmt='B')
-  for o, w in zip(offs.src, words.src):
+  for o, w in zip(offs.src, ws.src):
     n, at = w.dtype.itemsize, off + o.val * w.dtype.itemsize
     mv[at:at + n] = (w.val & (1 << 8 * n) - 1).to_bytes(n, 'little')
   return UOp(Ops.NOOP)
 
-def fold_alu(a:UOp) -> UOp: return UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)
-
-word = UPat.cvar().or_casted()
 pm_link = PatternMatcher([
-  (UPat(Ops.PARAM, name="buf"), bufferize_buf),
   (UPat(Ops.GETADDR, name="g"), resolve_getaddr),
-  (UPat(GroupOp.ALU, src=word, name="a"), fold_alu),
+  (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"),
+    lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)),
   (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast())), fold_binary),
-  (UPat(name="buf").index(UPat(Ops.STACK, src=word, name="offs")).store(UPat(Ops.STACK, src=word, name="words")), fold_words),
-  # written stores fold away, anything else left (but a bound variable) is a word the link couldn't resolve
+  (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")),
+    fold_words),
   (UPat(Ops.AFTER, name="a"), lambda a: None if a.is_bound_var else a.src[0] if all(s.op is Ops.NOOP for s in a.src[1:]) else
    panic(RuntimeError, f"unresolved link words on {a.src[0].op}")),
 ])
@@ -429,8 +433,8 @@ link_linear_cache:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionar
 @rewrite_group(lambda _,cache,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, cache=True) -> UOp:
   if (linked:=link_linear_cache.get(linear)) is not None: return linked
-  refs:list[UOp] = []
-  linked = graph_rewrite(linear, pm_link, ctx=refs, bottom_up=False, name="link")
+  bufferized = graph_rewrite(linear, pm_bufferize_placeholders, ctx=cache, name="bufferize")
+  linked = graph_rewrite(bufferized, pm_link, ctx=(refs:=[]), bottom_up=False, name="link")
   if refs: linked = linked.replace(src=(linked.src[0].replace(src=linked.src[0].src + tuple(dedup(refs))), *linked.src[1:]))
   if cache: link_linear_cache[linear] = linked
   return linked
@@ -446,13 +450,11 @@ class HCQ2Compiled(Compiled):
 
   def __init__(self, device:str, allocator:HCQAllocator, compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
     self.can_recover = can_recover
-    # a placeholder's slot is its lifetime: 0 is device state a rule names (queues prepend theirs), any other slot is the linear's own
+
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.PARAM, tag="timeline"), lambda ctx: ctx.timeline),
-      (UPat(Ops.PARAM, tag="program", name="b"), # shared across linears, keyed on the placeholder
+      (UPat(Ops.PARAM, tag="program", name="b"),
        lambda ctx, b: ctx.prog_bufs.setdefault(b, Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)))),
-      (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile) if b.arg.slot else
-       panic(RuntimeError, f"no rule names the device state {b.tag} on {ctx.device}")),
     ])
     super().__init__(device, allocator, compilers, runtime, None, arch=arch)
 
@@ -484,7 +486,7 @@ class HCQ2Compiled(Compiled):
     Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
 
   @functools.cache
-  def rt_allocator(self, uncached:bool=True, host:bool=False) -> BumpAllocator: return BumpAllocator(self.rt_nbytes >> (6 if host else 0))
+  def rt_allocator(self, uncached:bool=True, host:bool=False) -> BumpAllocator: return BumpAllocator(self.rt_nbytes)
 
   @functools.cache
   def rt_buffer(self, uncached:bool=True, host:bool=False) -> Buffer:
