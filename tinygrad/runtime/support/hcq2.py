@@ -105,7 +105,7 @@ def _get_enqueue_devs(call:UOp) -> Any|None:
   if not (bufs:=get_call_arg_uops(call)) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
   devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
-  # cpu-only calls don't batch: the host runs them synchronously, it has no queue (yet)
+  # cpu has no queue (yet)
   return devs if all_devices_in(devs, HCQ_DEVS) and not to_tuple(devs)[0].startswith("CPU") else None
 
 def copy_with_kernel(call:UOp, dst:UOp, src:UOp) -> UOp|None:
