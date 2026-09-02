@@ -29,7 +29,7 @@ class HCQInfo:
 
   kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = () # (devices, name, estimates, timestamp slots, profile key)
 
-  args:tuple[UOp, ...] = () # the placeholders the call binds, in the body's param order
+  nargs:int = 0 # how many placeholders the call binds: a uop kept here would outlive the template (aux is not substituted)
   table:int = -1 # the inputs table's position in the args: the exec fills it with the address of every (input, device) in inputs
   inputs:tuple[tuple[UOp, str], ...] = ()
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
@@ -141,7 +141,7 @@ class HCQDepsTracker: # per buffer base, the last write and the last read of eve
       (self.writes if i in write else self.reads)[key][dep[:2]] = dep
     return dedup(waits)
 
-@dataclass(eq=False)
+@dataclass
 class BatchCtx:
   batch:list[tuple[UOp, tuple[str, ...], str]] # (call, devices, queue) per enqueued call
   profile:bool
@@ -149,6 +149,7 @@ class BatchCtx:
   queues:dict[str, list[str]] = field(init=False)
   first:dict[tuple[str, str], int] = field(init=False); last:dict[tuple[str, str], int] = field(init=False) # noqa: E702
   signal_tags:set[int] = field(init=False)
+  slots:dict[str, UOp] = field(init=False)
 
   def __post_init__(self):
     self.queues, self.first, self.last = {}, {}, {}
@@ -157,22 +158,15 @@ class BatchCtx:
       self.first.setdefault((devs[0], q), tag)
       self.last[(devs[0], q)] = tag
     self.signal_tags = {tag for (dev, q), tag in self.last.items() if q != self.epilogue_queue(dev)}
+    self.slots = {dev: UOp.placeholder((len(qs) + 1 + (2 * len(self.batch) if self.profile else 0),), dtypes.uint64, device=(dev,), volatile=True,
+                                       tag="slots") for dev, qs in self.queues.items()}
 
   def epilogue_queue(self, dev:str) -> str: return "COMPUTE:0" if len(self.queues[dev]) > 1 else self.queues[dev][0] # closes the device
 
-  @functools.cache
-  def slots(self, devs:tuple[str, ...]) -> UOp:
-    n = len(self.queues[devs[0]]) + 1 + (2 * len(self.batch) if self.profile else 0)
-    return UOp.placeholder((n,), dtypes.uint64, next(UOp.unique_num), device=devs, volatile=True, tag="slots")
-
-  @functools.cache
-  def queue_signal(self, devs:tuple[str, ...], queue:str) -> UOp: return self.slots(devs)[(i:=self.queues[devs[0]].index(queue)):i+1]
-
-  @functools.cache
-  def sched_timeline(self, devs:tuple[str, ...]) -> UOp: return self.slots(devs)[(i:=len(self.queues[devs[0]])):i+1]
-
-  def stamps(self, devs:tuple[str, ...], tag:int) -> tuple[int, ...]:
-    return (st:=len(self.queues[devs[0]]) + 1 + 2 * tag, st + 1) if self.profile else ()
+  def slot(self, devs:tuple[str, ...], i:int) -> UOp: return self.slots[devs[0]].shrink(((i, i + 1),)) # not [i:i+1]: the slice path is 10x the cost
+  def queue_signal(self, devs:tuple[str, ...], queue:str) -> UOp: return self.slot(devs, self.queues[devs[0]].index(queue))
+  def sched_timeline(self, devs:tuple[str, ...]) -> UOp: return self.slot(devs, len(self.queues[devs[0]]))
+  def stamps(self, devs:tuple[str, ...], tag:int) -> tuple[int, ...]: return (st:=len(self.queues[devs[0]])+1+2*tag, st + 1) if self.profile else ()
 
 def _call_bufs(call:UOp) -> list[Any]: # the dep resources: a param (or its mselect lane) as is, anything real as its Buffer
   def dep_buf(b:UOp) -> Any:
@@ -206,7 +200,7 @@ def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], 
     name, info = get_call_name(call, get_call_arg_uops(call)), HCQInfo(devices, estimates=estimate_uop(call))
     kerns.append((devices, name, info.estimates, ctx.stamps(devices, tag), getattr(call.src[0].arg, "profile_key", None)))
 
-    ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slots(devices)[i:i+1],)) for i in ctx.stamps(devices, tag)]
+    ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slot(devices, i),)) for i in ctx.stamps(devices, tag)]
     q += ts_ins[:1] + [call.replace(arg=replace(call.arg, aux=info))] + ts_ins[1:]
 
     # signal the queue if someone waits for us
@@ -344,7 +338,7 @@ pm_hcq_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name
 # 4. lower call
 
 def lower_call(call:UOp) -> UOp|None:
-  if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.args: return None # not an hcq call, or lowered already
+  if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.nargs: return None # not an hcq call, or lowered already
 
   # encode bodies
   ctx = EncodeCtx(call.arg.aux.device)
@@ -359,13 +353,13 @@ def lower_call(call:UOp) -> UOp|None:
   bufs, alus = partition([u for u in tops if u.op is Ops.PARAM], lambda u: u.tag is not None)
   names = dedup([a.arg.name for a in alus])
   # bufs to params
-  args = {b: UOp.param(i, b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for i, b in enumerate(bufs)}
+  params = {b: UOp.param(i, b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for i, b in enumerate(bufs)}
   # new slots for vars
   vals = {a: a.replace(arg=replace(a.arg, slot=len(bufs) + names.index(a.arg.name))) for a in alus}
   # reenum ranges
   rngs = {r: r.replace(arg=(i,)+r.arg[1:]) for i, r in enumerate(sorted([u for u in tops if u.op is Ops.RANGE], key=lambda r: r.arg))}
   # and sub all of them
-  sink = body.substitute(args | vals | rngs).replace(arg=KernelInfo("hcq_submit"), tag=1)
+  sink = body.substitute(params | vals | rngs).replace(arg=KernelInfo("hcq_submit"), tag=1)
 
   # move all lt-patches to the args
   patched = {p.src[0]: p for p in ctx.lt_patches}
@@ -374,7 +368,7 @@ def lower_call(call:UOp) -> UOp|None:
   if VIZ: graph_rewrite(UOp.sink(*args), PatternMatcher([]), name="View Link-Time Patches")
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Body")
 
-  info = replace(call.arg.aux, args=tuple(args), table=bufs.index(table) if table in bufs else -1, inputs=tuple(ctx.inputs),
+  info = replace(call.arg.aux, nargs=len(args), table=bufs.index(table) if table in bufs else -1, inputs=tuple(ctx.inputs),
                  slots=tuple((to_tuple(b.device)[0], i) for i, b in enumerate(bufs) if b.tag == "slots"))
   return call.replace(src=(sink, *args), arg=replace(call.arg, aux=info))
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])

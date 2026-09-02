@@ -194,7 +194,7 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   info = call.arg.aux
-  assert len(ast.arg.globals) == len(info.args), f"{call.arg.name}: an arg is dead in the rendered body, the args after it would mis-bind"
+  assert len(ast.arg.globals) == info.nargs, f"{call.arg.name}: an arg is dead in the rendered body, the args after it would mis-bind"
 
   if info.inputs: # the body reads every input's device address from its table, filled here from this call's buffers
     addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(dev).va_addr for u, dev in info.inputs]
