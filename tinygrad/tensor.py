@@ -12,6 +12,7 @@ from tinygrad.uop.ops import resolve_returned_after, remove_all_tags
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
+from tinygrad.schedule.multi import multi_pm
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 
@@ -77,7 +78,6 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   unshard = None
   if buf.op is Ops.UNSHARD:
     if isinstance(c.device, str): return None
-    from tinygrad.schedule.multi import multi_pm
     if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
     src = unshard.src[0]
 
@@ -164,6 +164,9 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 ])
 
+# a store's storage keeps the views and drops AFTERs (they only sequence stores)
+pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
+
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
   return b.param_like(len(ctx.replacements)-1)
@@ -204,19 +207,11 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
 
   # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
+  # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
   for u in big_sink.toposort(enter_calls=False):
-    if u.op is Ops.COPY and on_disk(u): ctx.stores.append(u)  # copies to disk are stores to the disk buffer
-    # bound Variables are call inputs and RETURNEDs are call outputs: only other AFTERs are stores
-    elif u.op is Ops.AFTER and not u.is_bound_var and u.src[0].unsharded_base.op is not Ops.RETURNED:
+    if (u.op is Ops.COPY and on_disk(u)) or (u.op is Ops.AFTER and not u.is_bound_var and u.src[0].unsharded_base.op is not Ops.RETURNED):
       ctx.stores.append(u)
-      if u.tag is not None:
-        # map each original UOp in the tag to its final storage: the assigned buffer with any views added back
-        buf, views = u.rtag(None), []
-        while buf.op in GroupOp.Movement|{Ops.UNSHARD, Ops.BITCAST, Ops.AFTER}:
-          if buf.op is not Ops.AFTER: views.append(buf)
-          buf = buf.src[0]
-        for v in reversed(views): buf = v.replace(src=(buf,)+v.src[1:])
-        for t in u.tag: ctx.buffer_map[t] = buf.shrink_to(t.shape)
+      if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
   ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
