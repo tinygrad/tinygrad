@@ -202,7 +202,7 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
     # if there's already a buffer, we just use it
     return existing_buf.flatten().store(input_src)
   # create the output buffer
-  buf = UOp(Ops.BUFFER, arg=ParamArg(next(ctx), copy.dtype, size=prod(input_src.max_shape), device=copy.device))
+  buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), copy.dtype, size=prod(input_src.max_shape), device=copy.device))
   # reshape back to input
   return buf.reshape(input_src.max_shape).after(buf.store(input_src)).reshape(copy.shape)
 

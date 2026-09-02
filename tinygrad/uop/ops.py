@@ -1227,7 +1227,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     default_dev = next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None)
     # the output storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
     def returned(o:UOp, i:int) -> UOp:
-      return UOp.returned(len(srcs)+i, o.dtype, None if (shp:=o._shape) is None else
+      return UOp.returned(next(UOp.unique_num), o.dtype, None if (shp:=o._shape) is None else
                           tuple(graph_rewrite(s, _pm_resolve_params, srcs, walk=True) if isinstance(s, UOp) else s for s in shp),
                           dev if (dev:=o.device) is not None else default_dev, o.axis if isinstance(o.device, tuple) else None)
     rets = tuple(returned(o, i) for i, o in enumerate(values))
