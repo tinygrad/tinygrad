@@ -168,6 +168,8 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
   return b.param_like(len(ctx.replacements)-1)
 
+# unbound BUFFER identities are unique at creation (outputs of different calls never alias); here they get canonical
+# scope-local ids (negative, so already-canonical ones are skipped) so identical calls hash identically for the schedule cache
 def canonicalize_unbound_buffer(ctx:AllocCtx, b:UOp):
   if b.arg.slot < -1: return None
   if b not in ctx.unbound: ctx.unbound[b] = b.replace(arg=replace(b.arg, slot=-2-len(ctx.unbound)))

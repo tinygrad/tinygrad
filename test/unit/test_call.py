@@ -3,6 +3,7 @@ import numpy as np
 from tinygrad import Tensor, function, Device
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
+from tinygrad.tensor import transform_to_call
 
 class TestCall(unittest.TestCase):
   def test_call_plus(self):
@@ -223,10 +224,6 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.ones(3)
     x = f(a, UOp.variable("scale_a", 1, 100).bind(2))
     y = f(a, UOp.variable("scale_b", 1, 100).bind(3))
-    fx = next(u for u in x.uop.toposort() if u.op is Ops.CALL and u.num_returned)
-    fy = next(u for u in y.uop.toposort() if u.op is Ops.CALL and u.num_returned)
-    self.assertIsNot(fx.returned_bufs[0].unsharded_base, fy.returned_bufs[0].unsharded_base)
-    from tinygrad.tensor import transform_to_call
     self.assertEqual(transform_to_call(UOp.sink(x.uop))[0].src[0].key, transform_to_call(UOp.sink(y.uop))[0].src[0].key)
     np.testing.assert_equal(x.numpy(), [2, 2, 2])
     np.testing.assert_equal(y.numpy(), [3, 3, 3])
@@ -257,7 +254,6 @@ class TestCallSchedule(unittest.TestCase):
     c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.num_returned)
     self.assertIsNot(c0.returned_bufs[0].unsharded_base, c1.returned_bufs[0].unsharded_base)
     # output identities are canonicalized only after calls are combined into a scheduling scope
-    from tinygrad.tensor import transform_to_call
     f0, _ = transform_to_call(UOp.sink(r0.uop))
     f1, _ = transform_to_call(UOp.sink(r1.uop))
     self.assertEqual(f0.src[0].key, f1.src[0].key)
