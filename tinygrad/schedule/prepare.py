@@ -1,12 +1,17 @@
 import itertools
 from tinygrad.dtype import dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
-from tinygrad.uop.ops import graph_rewrite, rewrite_group, shape_to_shape_arg, ParamArg, identity_element
+from tinygrad.uop.ops import graph_rewrite, rewrite_group, ParamArg, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
 from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
+
+def walk_mop(u:UOp):
+  if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD, Ops.BITCAST}: return walk_mop(u.src[0])
+  if u.op is Ops.AFTER and (b:=walk_mop(u.src[0])) is not u.src[0]: return b.after(*u.src[1:])
+  return u
 
 def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
   if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, after = x.src[0], after.cast(dtypes.float)
@@ -33,7 +38,7 @@ def _mop_index(r:UOp, idx:UOp):
   if r.op is Ops.RESHAPE:
     src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
     if src_prefix >= 0 and r.src[0].shape[src_prefix:] == r.shape[len(idxs):]:
-      if src_prefix == 0: return r.src[0] if r.src[0].dtype == idx.dtype else None
+      if src_prefix == 0: return r.src[0]
       ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs), arg=idx.arg)
       return ret if ret.shape == idx.shape else None
 
@@ -88,6 +93,7 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   params: list[UOp] = []
   graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")
   params = sorted(params, key=lambda x: x.arg.slot)
+  # the RETURNED inputs bind positionally to the output PARAMs, just like the args bind to the input PARAMs
   args = c.src[1:]
 
   # NOTE: this isn't really needed. it's okay if there's unused args in the function
@@ -95,17 +101,26 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
     if [x.arg.slot for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg.slot for x in params]}")
     if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
 
+  # params have a flat storage size in the arg, the logical shape is a view (RESHAPE/SHRINK/UNSHARD) on top of it.
+  # substitute args by their flat max-shaped storage view so the movement views on the params stay valid
+  def flat_storage(a:UOp) -> tuple[int, UOp]:  # returns (size, view of a as flat max-shaped storage)
+    shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
+    return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
   dict_map = {x:args[x.arg.slot] for x in params}
   for i, (p, a) in enumerate(dict_map.items()):
-    if p.axis != a.axis: raise TypeError(f"arg {i} axis mismatch: expected {p.axis}, got {a.axis}")
-    if p.max_shape != a.max_shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
+    if p.arg.size is not None:
+      n, flat = flat_storage(a)
+      if p.arg.size != n: raise TypeError(f"arg {i} shape mismatch: expected size {p.arg.size}, got {a.shape}")
+      dict_map[p] = flat
+    elif a.shape != ():
+      raise TypeError(f"arg {i} shape mismatch: expected scalar, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   return c.src[0].substitute(dict_map, walk=True)
 
 # shape-changing bitcast
 def expand_bitcast(bc:UOp) -> UOp|None:
   x = bc.src[0]
-  if (ns:=bc.dtype.itemsize) == (os:=x.dtype.itemsize) or (isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS"))): return None
+  if (ns:=bc.dtype.itemsize) == (os:=x.dtype.itemsize) or (isinstance(x.device, str) and x.device.startswith("DISK")): return None
   new_uint, tmp = to_dtype(f"uint{8*ns}"), x.bitcast(to_dtype(f"uint{8*os}"))
   if ns > os:
     tmp = tmp.reshape(x.shape[:-1] + (x.shape[-1]//(rate := ns//os), rate))
@@ -115,11 +130,11 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
-  # resolve FUNCTION calls (inline the body)
-  (UPat(Ops.FUNCTION, name="c"), resolve_function),
+  # resolve calls with RETURNED inputs (inline the body)
+  (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.num_returned else None),
 
-  # resolve TUPLE+GETTUPLE
-  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
+  # resolve AFTER on RETURNED (call outputs)
+  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
 
   # resolve allreduce (must be bottom up)
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
@@ -134,10 +149,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple(y.unsharded_base for y in x.src))),
 
   # ** copy rules **
-
-  # COPY transfers a contiguous range, so materialize a source that's resized (shrink/pad/expand) or reordered (permute/flip)
-  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"),), name="c"),
-   lambda c,r: c.replace(src=(r.contiguous(),)) if resolve(r.numel() != r.base.numel(), False) or r.contiguous_view_offset() is None else None),
 
   # copy to same device is a no-op
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
@@ -174,11 +185,16 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if 0 in x.shape and 0 not in reduce.shape else None),
   # handle size 0
   (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and 0 in x.shape else None),
+
+  # remove movement ops from SINK/AFTER. TODO: should be generic
+  (UPat(Ops.SINK, name="s"), lambda s: s.replace(src=tuple(walk_mop(u) for u in s.src if u.op is not Ops.NOOP))),
+  (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u) for u in s.src[1:] if u.op is not Ops.NOOP))),
 ])
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   input_src = copy.src[0]
-  if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
+  # if it's a COPY, we need to give the input buffer identity
+  if not input_src.has_buffer_identity(after_ok=True) and copy.op is Ops.COPY: input_src = input_src.contiguous()
   input_src = input_src.flatten()
   if existing_buf is not None:
     # if the existing buffer is not a full buffer, we can't use it
@@ -186,9 +202,9 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
     # if there's already a buffer, we just use it
     return existing_buf.flatten().store(input_src)
   # create the output buffer
-  buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg(input_src.max_shape),), arg=ParamArg(next(ctx), copy.dtype, device=copy.device))
+  buf = UOp(Ops.BUFFER, arg=ParamArg(next(ctx), copy.dtype, size=prod(input_src.max_shape), device=copy.device))
   # reshape back to input
-  return buf.after(buf.store(input_src)).reshape(copy.shape)
+  return buf.reshape(input_src.max_shape).after(buf.store(input_src)).reshape(copy.shape)
 
 pm_copy_to_store = PatternMatcher([
   (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),

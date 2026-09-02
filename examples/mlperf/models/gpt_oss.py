@@ -61,7 +61,25 @@ def dequant_weight(w_q:Tensor, w_scale:Tensor) -> Tensor:
   call = UOp.maketuple(fxn.uop).call(w_q.uop, w_scale.uop, grad_fxn=_dequant_bwd)
   return Tensor(call.gettuple(0))
 
-def matmul_mx(x:Tensor, w_q:Tensor, w_scale:Tensor) -> Tensor:
+def matmul_mx(x:Tensor|tuple[Tensor, Tensor], w_q:Tensor, w_scale:Tensor) -> Tensor:
+  if isinstance(x, tuple):
+    assert ASM_GEMM, "pre-quantized MXFP8 input requires ASM_GEMM"
+    from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm, mx_pack
+    x_q, x_e8 = x
+    l_shape, padded = x_q.shape[:-1], x_q.shape[-1]
+    x_q, x_e8 = x_q.reshape(-1, padded), x_e8.reshape(-1, padded // 32)
+    K, N = w_q.shape[1], w_q.shape[0]
+    assert padded >= K and (padded - K) % 32 == 0 and x_e8.shape[-1] == padded // 32
+    wq, ws = w_q, w_scale
+    if (pad := padded - K):
+      wq = wq.pad(((0, 0), (0, pad)))
+      ws = ws.pad(((0, 0), (0, pad // 32)), value=127).cast(dtypes.uint8)
+    if (npad := (-N) % 256):
+      wq = wq.pad(((0, npad), (0, 0)))
+      ws = ws.pad(((0, npad), (0, 0)), value=127).cast(dtypes.uint8)
+    assert can_use_asm_gemm(x_q, wq.T)
+    out = asm_gemm(x_q, wq.T, mx=True, mx_scales=(mx_pack(x_e8), x_e8, mx_pack(ws), ws), mx_w_stored=True)
+    return (out[:, :N] if npad else out).reshape(*l_shape, N).cast(dtypes.bfloat16)
   l_shape = x.shape[:-1]
   if ASM_GEMM:
     from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm, mx_pack
@@ -175,8 +193,16 @@ class GPTOSS:
   def attention(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, sliding:bool, *, attention_norm:Tensor, wqkv:Tensor,
                 wqkv_scale:Tensor, wqkv_bias:Tensor, wo:Tensor, wo_scale:Tensor, wo_bias:Tensor, sinks:Tensor):
     bsz, seqlen, _ = x.shape
-    x_normed, rrms = rmsnorm(x, self.norm_eps)
-    qkv = matmul_mx(x_normed * attention_norm, wqkv, wqkv_scale) + wqkv_bias
+
+    if getenv("FUSED_RMSNORM_MUL", 0):
+      from extra.gptoss_kernels.rmsnorm import rmsnorm_mul
+      x_normed, rrms = rmsnorm_mul(x, attention_norm, self.norm_eps)
+      norm_saves = [x_normed, rrms]
+    else:
+      x_normed, rrms = rmsnorm(x, self.norm_eps)
+      qkv = matmul_mx(x_normed * attention_norm, wqkv, wqkv_scale) + wqkv_bias
+      norm_saves = [x_normed, rrms]
+
     qkv = qkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
     xq = qkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
     xk, xv = qkv[:, :, :, self.n_rep], qkv[:, :, :, self.n_rep + 1]
@@ -202,13 +228,19 @@ class GPTOSS:
       attn = (w @ xvm).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
 
     out = matmul_mx(attn, wo, wo_scale) + wo_bias
-    return out, [x_normed, rrms, attn] + fa_saves
+    return out, [attn] + norm_saves + fa_saves
 
   def feed_forward(self, x:Tensor, *, ffn_norm:Tensor, gate:Tensor, gate_bias:Tensor,
                    w_gate_up:Tensor, w_gate_up_scale:Tensor, w_gate_up_bias:Tensor,
                    w_down:Tensor, w_down_scale:Tensor, w_down_bias:Tensor):
-    x_normed, rrms = rmsnorm(x, self.norm_eps)
-    inp = x_normed * ffn_norm
+    if getenv("FUSED_RMSNORM_MUL", 0):
+      from extra.gptoss_kernels.rmsnorm import rmsnorm_mul
+      x_normed, rrms = rmsnorm_mul(x, ffn_norm, self.norm_eps)
+      inp = x_normed
+    else:
+      x_normed, rrms = rmsnorm(x, self.norm_eps)
+      inp = x_normed * ffn_norm
+
     logits = inp.float() @ gate.float().T + gate_bias.float()
     dim, inter = self.dim, self.intermediate_size
 
@@ -282,14 +314,14 @@ def apply_grad(grad_buf:Tensor, new_grad:UOp):
   pads = _get_pads(new_grad)
   if len(pads) <= 1:
     new_grad = new_grad.cast(grad_buf.dtype)
-    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad))
+    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(new_grad))
     return
   cur = grad_buf.uop
   for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
     if pad.op == Ops.PAD:
-      grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg)])
+      grad_shrink = tuple((p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg))
       buf_slice = cur.shrink(grad_shrink)
-      cur = cur.after(buf_slice.store(buf_slice + pad.src[0].cast(cur.dtype)))
+      cur = cur.after(buf_slice.store(pad.src[0].cast(cur.dtype)))
     else:
       cur = cur.after(cur.store(cur + pad.cast(cur.dtype)))
   grad_buf.uop = cur

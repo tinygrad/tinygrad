@@ -2,11 +2,12 @@
 # allow semicolons to put multiple ops on one line
 import sys, struct, functools
 from typing import cast
+from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext, greg
-from tinygrad.helpers import getenv, NUM_CPU_THREADS, unwrap, Target
+from tinygrad.helpers import unwrap, Target
 
 # ***** X86 Ops *****
 
@@ -33,14 +34,11 @@ class X86Ops(FastEnum):
   # bitcasts
   VMOVD = auto(); VMOVQ = auto(); VMOVDm = auto(); VMOVQm = auto()
   # comparisons
-  VUCOMISS = auto(); VUCOMISD = auto()
   VCMPSS = auto(); VCMPSD = auto(); VCMPPS = auto(); VCMPPD = auto()
-  VPCMPGTB = auto(); VPCMPGTW = auto(); VPCMPGTD = auto(); VPCMPGTQ = auto()
-  VPCMPEQB = auto(); VPCMPEQW = auto(); VPCMPEQD = auto(); VPCMPEQQ = auto()
   SETNE = auto(); SETE = auto(); SETL = auto(); SETB = auto()
   # where
   CMOVNE = auto(); CMOVE = auto(); CMOVL = auto(); CMOVB = auto()
-  VPBLENDVB = auto(); VBLENDVPS = auto(); VBLENDVPD = auto()
+  VBLENDVPS = auto(); VBLENDVPD = auto()
   # jumps
   JNE = auto(); JE = auto(); JL = auto(); JB = auto(); JGE = auto(); JMP = auto()
   # vectorize / gep
@@ -90,12 +88,11 @@ class X86GroupOp:
                 X86Ops.VADDSS, X86Ops.VADDSD, X86Ops.VADDPS, X86Ops.VADDPD, X86Ops.VSUBSS, X86Ops.VSUBSD, X86Ops.VSUBPS, X86Ops.VSUBPD,
                 X86Ops.VMULSS, X86Ops.VMULSD, X86Ops.VMULPS, X86Ops.VMULPD, X86Ops.VDIVSS, X86Ops.VDIVSD, X86Ops.VDIVPS, X86Ops.VDIVPD,
                 X86Ops.VPADDB, X86Ops.VPADDW, X86Ops.VPADDD, X86Ops.VPADDQ, X86Ops.VPSUBB, X86Ops.VPSUBW, X86Ops.VPSUBD, X86Ops.VPSUBQ,
-                X86Ops.VPCMPEQB, X86Ops.VPCMPEQW, X86Ops.VPCMPEQD, X86Ops.VPCMPEQQ, X86Ops.VPBLENDVB, X86Ops.VBLENDVPS, X86Ops.VBLENDVPD,
-                X86Ops.VPCMPGTB, X86Ops.VPCMPGTW, X86Ops.VPCMPGTD, X86Ops.VPCMPGTQ, X86Ops.VCMPSS, X86Ops.VCMPSD, X86Ops.VCMPPS, X86Ops.VCMPPD,
+                X86Ops.VBLENDVPS, X86Ops.VBLENDVPD, X86Ops.VCMPSS, X86Ops.VCMPSD, X86Ops.VCMPPS, X86Ops.VCMPPD,
                 X86Ops.VPMULLW, X86Ops.VPMULLD, X86Ops.VROUNDSS, X86Ops.VROUNDSD, X86Ops.VSQRTSS, X86Ops.VSQRTSD, X86Ops.VINSERTPS,
                 X86Ops.VPINSRB, X86Ops.VPINSRW, X86Ops.VPINSRD, X86Ops.VPINSRQ, X86Ops.VPAND, X86Ops.VPOR, X86Ops.VPXOR, X86Ops.VPSLLVD,
                 X86Ops.VPSLLVQ, X86Ops.VPSRLVD, X86Ops.VPSRLVQ, X86Ops.VPSRAVD, X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB,
-                X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS, X86Ops.VUCOMISS, X86Ops.VUCOMISD, X86Ops.IDIV, X86Ops.DIV}
+                X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS, X86Ops.IDIV, X86Ops.DIV}
 
   # X86Ops that can write to memory
   WriteMem = {X86Ops.MOVm, X86Ops.MOVi, X86Ops.VMOVSSm, X86Ops.VMOVSDm, X86Ops.VMOVUPSm, X86Ops.VMOVDm, X86Ops.VMOVQm,
@@ -110,15 +107,13 @@ class X86GroupOp:
   # X86Ops that write flags or can modify flags to undefined values
   WriteFlags = {X86Ops.CMP, X86Ops.CMPi, X86Ops.ADD, X86Ops.ADDi, X86Ops.SUB, X86Ops.SUBi, X86Ops.IMUL, X86Ops.IMULi, X86Ops.IDIV, X86Ops.DIV,
                 X86Ops.SHL, X86Ops.SHLi, X86Ops.SHR, X86Ops.SHRi, X86Ops.SAR, X86Ops.SARi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi,
-                X86Ops.OR, X86Ops.ORi, X86Ops.VUCOMISS, X86Ops.VUCOMISD}
+                X86Ops.OR, X86Ops.ORi}
 
   # X86Ops whose first src is the rm field
   Rm1st = ReadMem1st | (ReadMem2nd & TwoAddress) | {X86Ops.VPSRLDQ}
 
   # X86Ops whose second src is the rm field
   Rm2nd = ReadMem2nd
-
-  All = set(X86Ops)
 
 # ***** X86 legalization *****
 
@@ -145,14 +140,14 @@ extra_matcher = PatternMatcher([
   # float16 alus are done in float32
   (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op,
    src=tuple(s.cast(dtypes.float) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
-  (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
-   lambda x,a,b: UOp(x.op, src=(a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
+  (UPat(GroupOp.Comparison, src=[UPat(dtype=dtypes.float16), UPat()], name="x"),
+   lambda x: UOp(x.op, src=tuple(s.cast(dtypes.float32) for s in x.src)).cast(x.dtype)),
   # no cmpne for packed ints, y != x => !(y==x)
   (UPat(Ops.CMPNE, src=(UPat.var("y", dtypes.ints), UPat.var("x")), name="cmp"),
    lambda y,x,cmp: UOp(Ops.CMPEQ, src=(y,x))^True if y.max_numel() > 1 else None),
-  # float WHERE needs a mask unless its comparison already has a float operand
+  # a float WHERE blends at the width of its value, so it needs a comparison at that width to make the mask
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats+(dtypes.weakfloat,)), UPat.var("b")).named("w"),
-   lambda m,a,b,w: m.cast(w.dtype).ne(0).where(a, b) if w.dtype in dtypes.floats and not dtypes.is_float(m.src[0].dtype) else None),
+   lambda m,a,b,w: m.cast(w.dtype).ne(0).where(a, b) if w.dtype in dtypes.floats and promo_dtype(m.src) is not w.dtype else None),
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, src=(x.const_like(0),) + x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
@@ -166,36 +161,34 @@ def scratch_buffer(elem_dt:DType, count:int, slot:int) -> UOp:
 
 def gated_load(ctx, addr:UOp, alt:UOp, gate:UOp, x:UOp):
   local = scratch_buffer(addr.src[0].dtype, x.max_numel(), next(ctx))
-  local_idx = local.index(UOp.cconst(0, dtypes.int32), dtype=dtypes.uint64)
-  # the selected address is a 64bit value, the AFTER orders the load after the scratch store and carries the element dtype for the encoder
-  sel = gate.where(addr.replace(dtype=dtypes.uint64), local_idx)
-  ptr = UOp(Ops.AFTER, addr.dtype, (sel, (local_idx if x.max_numel() == 1 else local).store(alt)))
-  return ptr.load(dtype=x.dtype)
+  local_idx = local.index(UOp.cconst(0, dtypes.int32))
+  # the AFTER orders the load after the scratch store
+  sel = gate.where(addr, local_idx)
+  return UOp(Ops.AFTER, src=(sel, (local_idx if x.max_numel() == 1 else local).store(alt))).load()
 
 def gated_store(addr:UOp, gate:UOp, val:UOp):
   local = scratch_buffer(addr.src[0].dtype, val.max_numel(), -1)
-  sel = gate.where(addr.replace(dtype=dtypes.uint64), local.index(UOp.cconst(0, dtypes.int32), dtype=dtypes.uint64))
-  return UOp(Ops.AFTER, addr.dtype, (sel,)).store(val)
+  sel = gate.where(addr, local.index(UOp.cconst(0, dtypes.int32)))
+  return UOp(Ops.AFTER, src=(sel,)).store(val)
+
+# a gate the flags can be picked with, or the bool compared to zero that replaces one they can't: only an integer
+# comparison sets the flags, see cmp. NOTE: the 0 is int so the bool zero-extends and compares as int (a byte compare renders
+# different kernels)
+def flag_gate(m:UOp) -> UOp|None:
+  return None if m.op in GroupOp.Comparison and m.src[0].dtype not in dtypes.floats else m.ne(UOp.cconst(0, dtypes.int))
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
-  # noop casts: zero extending scalar 32bit int, same-width signed/unsigned, narrowing scalar int
-  (UPat.var("y", dtypes.uint32).cast(dtypes.int64s, name="x"), lambda y,x: x.replace(op=Ops.NOOP, arg=None) if y.max_numel() == 1 else None),
+  # widening a scalar uint32 is free, the 32bit write that produced it already zeroed the upper half
+  (UPat.var("y", dtypes.uint32).cast(dtypes.int64s, name="x"), lambda y,x: x.replace(op=Ops.BITCAST) if y.max_numel() == 1 else None),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
-   lambda y,x: x.replace(op=Ops.NOOP, arg=None) if x.dtype.itemsize == y.dtype.itemsize and y.max_numel() == 1 else None),
-  (UPat.var("y", dtypes.ints).cast(dtypes.ints, name="x"),
-   lambda y,x: x.replace(op=Ops.NOOP, arg=None) if x.dtype.itemsize < y.dtype.itemsize and y.max_numel() == 1 else None),
-  # bitcasts between scalar floats and ints are real, rest are noops
-  (UPat.var("y").bitcast().named("x"), lambda y,x: None if y.dtype in dtypes.floats and x.dtype in dtypes.ints or \
-   y.dtype in dtypes.ints and x.dtype in dtypes.floats else x.replace(op=Ops.NOOP, arg=None)),
+   lambda y,x: x.replace(op=Ops.BITCAST) if x.dtype.itemsize == y.dtype.itemsize else None),
   # gated load/store become a conditional move on the address, the load/store are unconditional
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate")), gated_store),
-  # TODO: remove this once we allow all flag producing ops in cmove
-  # if gate in scalar int cmove is not a comparison need to add one to set the flag
-  # NOTE: the 0 is int so the bool gate zero-extends and compares as int (a byte compare renders different kernels)
-  (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")),
-   lambda m,a,b: m.ne(UOp.cconst(0, dtypes.int)).where(a,b) if m.op not in GroupOp.Comparison else None),
+  # a conditional backedge picks with the flags, and so does the cmove, which is legalized in isel
+  (UPat(Ops.END, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
+   lambda m,x: x.replace(src=x.src[:2]+(g,)) if (g:=flag_gate(m)) is not None else None),
 ])
 
 # ***** X86 registers *****
@@ -217,27 +210,29 @@ CALLEE_SAVED = (RBX, RBP, GPR[12], GPR[13], GPR[14], GPR[15]) + ((RSI, RDI) + XM
 
 reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, "rdx": {4:"edx", 2:"dx", 1:"dl"}, "rbx": {4:"ebx", 2:"bx", 1:"bl"},
         "rsp": {4:"esp", 2:"sp", 1:"spl"}, "rbp": {4:"ebp", 2:"bp", 1:"bpl"}, "rsi": {4:"esi", 2:"si", 1:"sil"}, "rdi": {4:"edi", 2:"di", 1:"dil"},
-        **{f"r{i}": {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"} for i in range(8, 16)}, **{f"xmm{i}": {64:f"zmm{i}", 32:f"ymm{i}"} for i in range(16)}}
+        **{f"r{i}": {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"} for i in range(8, 16)}}
 
 # ***** X86 instruction selection *****
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX else s
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
-def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, dt, arg=X86Ops.DEFINE, tag=None if reg is None else (reg,))
+def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, arg=(X86Ops.DEFINE, dt), tag=None if reg is None else (reg,))
 def imm(dt:DType, v:int) -> UOp: return UOp.cconst(truncate[dt](v), dt).rtag()
 def to_imm(c:UOp) -> UOp|None:
   if not (c.op is Ops.CAST and (v:=c.src[0]).op is Ops.CONST): return None
   if c.dtype in dtypes.int64s: return imm(dtypes.int32, v.val) if not v.overflows(dtypes.int32) else None
   if c.dtype in dtypes.ints+(dtypes.bool,): return imm(c.dtype, v.val)
   return None
+# the flag path, which only an integer comparison can take: an x86 float compare sets carry, zero and parity together when an
+# operand is NaN, so a NaN reads as "below" and as "equal", and it clears sign and overflow, so nothing reads as "less"
 def cmp(x:UOp) -> UOp:
-  if x.src[0].dtype is dtypes.float32: return x.ins(X86Ops.VUCOMISS, dtype=dtypes.void)
-  if x.src[0].dtype is dtypes.float64: return x.ins(X86Ops.VUCOMISD, dtype=dtypes.void)
+  if x.src[0].dtype in dtypes.floats: raise RuntimeError(f"no flag compare for {x.src[0].dtype}, a float gate must be a mask")
   return x.ins(X86Ops.CMP, dtype=dtypes.void) if (i:=to_imm(x.src[1])) is None else x.ins(X86Ops.CMPi, dtype=dtypes.void, src=(x.src[0], i))
-def vcmp(x:UOp) -> UOp:
-  v = imm(dtypes.uint8, {Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op])
-  if x.dtype is dtypes.float32: return x.ins(X86Ops.VCMPSS if x.max_numel() == 1 else X86Ops.VCMPPS, src=x.src + (v,))
-  return x.ins(X86Ops.VCMPSD if x.max_numel() == 1 else X86Ops.VCMPPD, src=x.src + (v,))
+# comparisons that produce masks, the mask has the width of the operands
+def mask(x:UOp) -> UOp:
+  dt, v = x.src[0].dtype, imm(dtypes.uint8, {Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op])
+  if dt is dtypes.float32: return x.ins(X86Ops.VCMPSS if x.max_numel() == 1 else X86Ops.VCMPPS, dtype=dt, src=x.src + (v,))
+  return x.ins(X86Ops.VCMPSD if x.max_numel() == 1 else X86Ops.VCMPPD, dtype=dt, src=x.src + (v,))
 
 # vinsertps xmm2, xmm0, xmm1, imm
 # inserts any 32 bit element in xmm1 into any position in xmm0 according to immm, result is written to xmm2
@@ -250,9 +245,9 @@ def vinsertps(x:UOp) -> UOp:
 
 # vpinsq xmm2, xmm0, rax, imm
 # inserts element in rax into any position in xmm0, result is written to xmm2 according to imm
-def vpins(x:UOp) -> UOp:
+def vpins(x:UOp, srcs:tuple[UOp, ...]) -> UOp:
   op = {1: X86Ops.VPINSRB, 2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD, 8: X86Ops.VPINSRQ}[x.dtype.itemsize]
-  return functools.reduce(lambda ret,i: x.ins(op, src=(ret, x.src[i], imm(dtypes.uint8, i))), range(len(x.src)), def_reg(x.dtype))
+  return functools.reduce(lambda ret,i: x.ins(op, src=(ret, srcs[i], imm(dtypes.uint8, i))), range(len(srcs)), def_reg(x.dtype))
 
 # we don't call ctx.vreg on the srcs to avoid duplicates, a rewrite will assign the tuple of valid registers to a vreg
 def idiv(ctx:IselContext, x:UOp) -> UOp:
@@ -262,8 +257,8 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
   elif x.dtype in dtypes.uints: ext = [x.ins(X86Ops.MOVi, src=(imm(min(dtypes.uint32, x.dtype), 0),), tag=(RDX,))]
   else: ext = [x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=(RDX,))]
   # for 8bit need to zero/sign extend al to ah
-  if x.dtype is dtypes.uint8: dividend = UOp(Ops.INS, arg=X86Ops.MOVZX, dtype=dtypes.int16, src=(x.src[0],), tag=(RAX,))
-  elif x.dtype is dtypes.int8: dividend = UOp(Ops.INS, arg=X86Ops.MOVSX, dtype=dtypes.int16, src=(x.src[0],), tag=(RAX,))
+  if x.dtype is dtypes.uint8: dividend = UOp(Ops.INS, arg=(X86Ops.MOVZX, dtypes.int16), src=(x.src[0],), tag=(RAX,))
+  elif x.dtype is dtypes.int8: dividend = UOp(Ops.INS, arg=(X86Ops.MOVSX, dtypes.int16), src=(x.src[0],), tag=(RAX,))
   else: dividend = x.ins(X86Ops.MOV, src=(x.src[0],), tag=(RAX,))
   # divisor can't be in rax or rdx
   divisor = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
@@ -282,7 +277,7 @@ def shift(x:UOp, op:X86Ops) -> UOp:
 # it is materialized as an immediate so the address stays correct if the base register is ever spilled and refilled
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.int8.max else dtypes.int8, v)
-  def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v
+  def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v.cast(dtypes.uint32) if v.dtype.itemsize < 4 else v
   if x.op not in {Ops.INDEX, Ops.SHRINK}: return (x, UOp(Ops.NOOP), _disp(0), imm(dtypes.uint8, x.dtype.itemsize))
   base, idx = x.src[0], x.src[1]
   # buffers are indexed by element, everything else (the stack pointer) by byte
@@ -293,15 +288,19 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   if idx.op is Ops.CAST and idx.src[0].op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.src[0].val * scale), sz)
   return (base, _cast(idx), _disp(0), sz)
 
+# addresses are 64bit values
+def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, dtype=dtypes.uint64, src=fold_address(x))
+
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple): return None
   i = ctx.func_args.index(x)
   # buffer params hold addresses, their value moves as a 64bit int
   dt = dtypes.uint64 if x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.GLOBAL else x.dtype
+  arg = replace(x.arg, dtype=dt) if x.op is Ops.PARAM else x.arg
   # the shape srcs of a PARAM are not values, tag them so they aren't materialized into registers
-  def _reg_arg(r:Register) -> tuple[UOp, ...]: return (x.replace(dtype=dt, src=tuple(s.rtag() for s in x.src), tag=(r,)),)
+  def _reg_arg(r:Register) -> tuple[UOp, ...]: return (x.replace(arg=arg, src=tuple(s.rtag() for s in x.src), tag=(r,)),)
   def _stack_arg(disp:int):
-    return (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, dtype=dtypes.int32, tag=disp), imm(dtypes.uint8, 8))
+    return (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=(X86Ops.FRAME_INDEX, dtypes.int32), tag=disp), imm(dtypes.uint8, 8))
   if sys.platform == "win32": src = _reg_arg((RCX, RDX, GPR[8], GPR[9])[i]) if i < 4 else _stack_arg((i-3)*8+32)
   else: src = _reg_arg((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]) if i < 6 else _stack_arg((i-5)*8)
   # this move "cleanses" the abi register constraint
@@ -312,7 +311,7 @@ GPR_DEST_OPS = {X86Ops.VPEXTRB, X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VPEXTRQ, 
 XMM_OPS = {op for op in X86Ops if op.name.startswith('V')} - GPR_DEST_OPS
 
 def _is_vec_xmm(y: UOp) -> bool:
-  return (y.op is Ops.INS and y.arg in XMM_OPS) or (y.op not in (Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.INS) and y.max_numel() > 1)
+  return (y.op is Ops.INS and y.arg[0] in XMM_OPS) or (y.op not in (Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.INS) and y.max_numel() > 1)
 
 def _xmm_sz(x: UOp) -> X86Ops:
   bits = x.max_numel() * x.dtype.itemsize
@@ -328,10 +327,10 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # register placeholders with real registers
-  if x.arg is X86Ops.DEFINE and x.tag is not None: return None
-  if x.arg is X86Ops.LOOP_CMP: return None
+  if x.op is Ops.INS and x.arg[0] is X86Ops.DEFINE and x.tag is not None: return None
+  if x.op is Ops.INS and x.arg[0] is X86Ops.LOOP_CMP: return None
   # this is an immediate
-  if x.arg is X86Ops.FRAME_INDEX: return None
+  if x.op is Ops.INS and x.arg[0] is X86Ops.FRAME_INDEX: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -340,18 +339,16 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   defs = []
   if isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag)]
   elif x.op is Ops.BUFFER: defs = [ctx.vreg(WGPR)]
-  elif x.dtype in dtypes.floats or (x.op is Ops.INS and x.arg in XMM_OPS) or x.max_numel() > 1: defs = [ctx.vreg(XMM)]
+  elif x.dtype in dtypes.floats or (x.op is Ops.INS and x.arg[0] in XMM_OPS) or x.max_numel() > 1: defs = [ctx.vreg(XMM)]
   elif x.dtype in dtypes.ints+(dtypes.bool,): defs = [ctx.vreg(WGPR)]
   # TODO: add this once the scheduler can track register pressure
-  # if x.arg in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
+  # if x.arg[0] in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   # the size src of a BUFFER is not a value, tag it so it isn't materialized into a register
   if x.op is Ops.BUFFER: return x.replace(src=tuple(s.rtag() for s in x.src), tag=tuple(defs))
   return x.replace(tag=tuple(defs))
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  # cast of void is a noop
-  (UPat.var("y").cast(name="x"), lambda y,x: y if y.dtype == dtypes.void else None),
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
@@ -363,25 +360,29 @@ isel_matcher = PatternMatcher([
   # so regalloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x:
    x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64, r) for r in CALLEE_SAVED)),)) \
-    if not x.src or x.src[0].arg is not X86Ops.RET else None),
+    if not x.src or x.src[0].op is not Ops.INS or x.src[0].arg[0] is not X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
+  # conditional moves between addresses, lea both srcs
+  (UPat.var("m").where(UPat((Ops.INDEX, Ops.SHRINK), name="a"), UPat((Ops.INDEX, Ops.SHRINK), name="b")), lambda m,a,b:
+   m.where(lea(a), lea(b)) if not _is_vec_xmm(a.src[0]) else None),
   # constants that can't be immediates, move them to registers
   (UPat.cvar("c").cast(dtypes.int64s, name="x"), lambda c,x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, c.val),)) if not x.tag else None),
   (UPat.cvar("c").cast(dtypes.ints+(dtypes.bool,), name="x"), lambda c,x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, c.val),)) if not x.tag else None),
   (UPat.cvar("c").cast(dtypes.floats, name="x"), lambda c,x:
    UOp.cconst(struct.unpack((dt:=to_int(x.dtype)).fmt, struct.pack(x.dtype.fmt, c.val))[0], dt).bitcast(x.dtype) if not x.tag else None),
-  # conditional moves that use masks NOTE: these currently assume a mask producing cmp exists
-  (UPat.var("m").where(UPat.var("a", dtypes.int8s+dtypes.int16s+dtypes.int32s+(dtypes.int64,)), UPat.var("b")), lambda m,a,b:
-   a.ins(X86Ops.VPBLENDVB, src=(b, a, m.replace(dtype=m.src[0].dtype))) if a.max_numel() > 1 else None),
-  (UPat.var("m").where(UPat.var("a", dtypes.float32), UPat.var("b")), lambda m,a,b:
-   a.ins(X86Ops.VBLENDVPS, src=(b, a, m.replace(dtype=m.src[0].dtype)))),
-  (UPat.var("m").where(UPat.var("a", dtypes.float64), UPat.var("b")), lambda m,a,b:
-   a.ins(X86Ops.VBLENDVPD, src=(b, a, m.replace(dtype=m.src[0].dtype)))),
+  # conditional moves that use masks, the mask has the width of the values
+  (UPat(GroupOp.Comparison, src=(UPat(dtype=dtypes.float32), UPat()), name="m").where(UPat.var("a", dtypes.float32), UPat.var("b")), lambda m,a,b:
+   a.ins(X86Ops.VBLENDVPS, src=(b, a, mask(m)))),
+  (UPat(GroupOp.Comparison, src=(UPat(dtype=dtypes.float64), UPat()), name="m").where(UPat.var("a", dtypes.float64), UPat.var("b")), lambda m,a,b:
+   a.ins(X86Ops.VBLENDVPD, src=(b, a, mask(m)))),
   # in this case we have a mask producing comparison whose user expects a bool, so we convert to bool
-  (UPat(GroupOp.Comparison, dtypes.bool, (UPat.var("y", (dtypes.float32, dtypes.float64)), UPat()), name="x"), lambda y,x:
-   UOp(Ops.AND, src=(x.replace(dtype=y.dtype).bitcast(dt:=to_int(y.dtype)), UOp.cconst(1, dt))).f(Ops.NOOP, dtype=dtypes.bool)),
+  (UPat(GroupOp.Comparison, src=(UPat.var("y", (dtypes.float32, dtypes.float64)), UPat()), name="x"), lambda y,x:
+   UOp(Ops.AND, src=(mask(x).bitcast(dt:=to_int(y.dtype)), UOp.cconst(1, dt))).bitcast(dtypes.bool)),
   # conditional moves that use flags
+  # TODO: remove this once we allow all flag producing ops in cmove
+  # the blends took every float gate a mask can serve, so a gate that is still not an integer comparison becomes one here
+  (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")), lambda m,a,b: g.where(a, b) if (g:=flag_gate(m)) is not None else None),
   (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.sints), UPat()), name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b:
    a.ins(X86Ops.CMOVL, src=(b, a, cmp(m)))),
   (UPat(Ops.CMPLT, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVB, src=(b, a, cmp(m)))),
@@ -393,20 +394,10 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.IF, src=(UPat(Ops.CMPEQ, name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JE, src=(cmp(y),))),
   (UPat(Ops.IF, src=(UPat(Ops.CMPNE, name="y"),), name="x"), lambda y,x: x.ins(X86Ops.JNE, src=(cmp(y),))),
   # comparisons whose user doesn't use the flag, move flag result to register
-  (UPat(Ops.CMPLT, dtypes.bool, (UPat(dtype=dtypes.uints), UPat()), name="x"), lambda x: x.ins(X86Ops.SETB, src=(cmp(x),))),
-  (UPat(Ops.CMPLT, dtypes.bool, name="x"), lambda x: x.ins(X86Ops.SETL, src=(cmp(x),))),
-  (UPat(Ops.CMPEQ, dtypes.bool, name="x"), lambda x: x.ins(X86Ops.SETE, src=(cmp(x),))),
-  (UPat(Ops.CMPNE, dtypes.bool, name="x"), lambda x: x.ins(X86Ops.SETNE, src=(cmp(x),))),
-  # comparisons that produce masks (these aren't bool dtype)
-  (UPat(GroupOp.Comparison, src=(UPat(dtype=(dtypes.float32, dtypes.float64)), UPat()), name="x"), vcmp),
-  (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.int8s), UPat()), name="x"), lambda x: x.ins(X86Ops.VPCMPEQB)),
-  (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.int16s), UPat()), name="x"), lambda x: x.ins(X86Ops.VPCMPEQW)),
-  (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.int32s), UPat()), name="x"), lambda x: x.ins(X86Ops.VPCMPEQD)),
-  (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.int64s), UPat()), name="x"), lambda x: x.ins(X86Ops.VPCMPEQQ)),
-  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.int8s), UPat.var("b")), name="x"), lambda a,b,x: x.ins(X86Ops.VPCMPGTB, src=(b, a))),
-  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.int16s), UPat.var("b")), name="x"), lambda a,b,x: x.ins(X86Ops.VPCMPGTW, src=(b, a))),
-  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.int32s), UPat.var("b")), name="x"), lambda a,b,x: x.ins(X86Ops.VPCMPGTD, src=(b, a))),
-  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.int64s), UPat.var("b")), name="x"), lambda a,b,x: x.ins(X86Ops.VPCMPGTQ, src=(b, a))),
+  (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.uints), UPat()), name="x"), lambda x: x.ins(X86Ops.SETB, src=(cmp(x),))),
+  (UPat(Ops.CMPLT, name="x"), lambda x: x.ins(X86Ops.SETL, src=(cmp(x),))),
+  (UPat(Ops.CMPEQ, name="x"), lambda x: x.ins(X86Ops.SETE, src=(cmp(x),))),
+  (UPat(Ops.CMPNE, name="x"), lambda x: x.ins(X86Ops.SETNE, src=(cmp(x),))),
   # float unary
   (UPat.var("y", dtypes.float32).sqrt().named("x"), lambda y,x: x.ins(X86Ops.VSQRTSS, src=(y, y)) if x.max_numel() == 1 else x.ins(X86Ops.VSQRTPS)),
   (UPat.var("y", dtypes.float64).sqrt().named("x"), lambda y,x: x.ins(X86Ops.VSQRTSD, src=(y, y)) if x.max_numel() == 1 else x.ins(X86Ops.VSQRTPD)),
@@ -415,10 +406,9 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.float64).trunc().named("x"), lambda y,x:
    x.ins(X86Ops.VROUNDSD, src=(y, y, imm(dtypes.uint8, 3))) if x.max_numel() == 1 else x.ins(X86Ops.VROUNDPD, src=(y, imm(dtypes.uint8, 3)))),
   # for float16 we route the srcs through gprs, this is suboptimal for values in xmms, in that case we want vpunpcklwd
-  (UPat(Ops.STACK, dtypes.float16, name="x"), lambda x:
-   vpins(x.replace(src=tuple(s.bitcast(dtypes.int16) for s in x.src)))),
+  (UPat(Ops.STACK, dtypes.float16, name="x"), lambda x: vpins(x, tuple(s.bitcast(dtypes.int16) for s in x.src))),
   (UPat(Ops.STACK, dtypes.float32, name="x"), vinsertps),
-  (UPat(Ops.STACK, dtypes.ints+(dtypes.bool,), name="x"), vpins),
+  (UPat(Ops.STACK, dtypes.ints+(dtypes.bool,), name="x"), lambda x: vpins(x, x.src)),
   # INDEX on a vector register value extracts a single element
   (UPat.var("y", dtypes.int8s+(dtypes.bool,)).index(UPat.cvar("c").cast(), name="x"),
    lambda y,c,x: x.ins(X86Ops.VPEXTRB, src=(y, imm(dtypes.uint8, c.val))) if _is_vec_xmm(y) else None),
@@ -500,11 +490,12 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.float64).cast(dtypes.float32, name="x"), lambda y,x: x.ins(X86Ops.VCVTSD2SS, src=(y, y))),
   (UPat.var("y", (dtypes.int32, dtypes.int64)).cast(dtypes.float32, name="x"), lambda y,x: x.ins(X86Ops.VCVTSI2SS, src=(def_reg(x.dtype), y))),
   (UPat.var("y", (dtypes.int32, dtypes.int64)).cast(dtypes.float64, name="x"), lambda y,x: x.ins(X86Ops.VCVTSI2SD, src=(def_reg(x.dtype), y))),
-  (UPat(dtype=dtypes.uints+(dtypes.bool,)).cast(dtypes.ints, name="x"), lambda x:
+  (UPat(dtype=(dtypes.uint8, dtypes.uint16, dtypes.bool)).cast(dtypes.ints, name="x"), lambda x:
    x.ins(X86Ops.MOVZX) if x.max_numel() == 1 and x.src[0].dtype.itemsize < x.dtype.itemsize else None),
   (UPat(dtype=dtypes.int32).cast(dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.MOVSXD) if x.max_numel() == 1 else None),
   (UPat(dtype=dtypes.sints).cast(dtypes.ints, name="x"), lambda x:
    x.ins(X86Ops.MOVSX) if x.max_numel() == 1 and x.src[0].dtype.itemsize < x.dtype.itemsize else None),
+  (UPat(dtype=dtypes.ints).cast(dtypes.ints, name="x"), lambda x: x.ins(X86Ops.MOV) if x.max_numel() == 1 else None),
   (UPat(dtype=(dtypes.uint8, dtypes.bool)).cast(dtypes.int16s, name="x"), lambda x: x.ins(X86Ops.VPMOVZXBW)),
   (UPat(dtype=(dtypes.uint8, dtypes.bool)).cast(dtypes.int32s, name="x"), lambda x: x.ins(X86Ops.VPMOVZXBD)),
   (UPat(dtype=(dtypes.uint8, dtypes.bool)).cast(dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.VPMOVZXBQ)),
@@ -519,14 +510,13 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.int32).cast(dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.VPMOVSXDQ)),
   # bitcasts between scalar floats and ints
   (UPat.var("y", dtypes.float16).bitcast(dtypes.int16s).named("x"), lambda y,x: x.ins(X86Ops.VPEXTRW, src=(y, imm(dtypes.uint8, 0)))),
-  (UPat(dtype=dtypes.int16s).bitcast(dtypes.float16).named("x"), vpins),
+  (UPat(dtype=dtypes.int16s).bitcast(dtypes.float16).named("x"), lambda x: vpins(x, x.src)),
   (UPat(dtype=dtypes.int32s).bitcast(dtypes.float32).named("x"), lambda x: x.ins(X86Ops.VMOVD)),
   (UPat(dtype=dtypes.int64s).bitcast(dtypes.float64).named("x"), lambda x: x.ins(X86Ops.VMOVQ)),
   (UPat(dtype=dtypes.float32).bitcast(dtypes.int32s).named("x"), lambda x: x.ins(X86Ops.VMOVDm)),
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.ins(X86Ops.VMOVQm)),
   # index on a buffer (or the stack pointer) computes an address, addresses are 64bit values
-  (UPat((Ops.INDEX, Ops.SHRINK), name="x"),
-   lambda x: x.ins(X86Ops.LEA, dtype=dtypes.uint64, src=fold_address(x)) if not _is_vec_xmm(x.src[0]) else None),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="x"), lambda x: lea(x) if not _is_vec_xmm(x.src[0]) else None),
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
   # copy, load, store
   # NOTE: copy here violates the spec, it only happens post register allocation when a reg to reg move needs to be inserted
@@ -555,7 +545,7 @@ isel_matcher = PatternMatcher([
 # so we rematerialize. This is different from rematerialization you might want to do in regalloc because it is not optional,
 # regalloc shouldn't rematerialize if a src of the instruction is dead, but here you need to as there's no fallback load from stack
 def flag_rematerialize(ctx:PreRegAllocContext, x:UOp):
-  flag_def = x if x.arg in X86GroupOp.WriteFlags or x.op in (Ops.RANGE, Ops.END) else x.src[-1] if x.arg in X86GroupOp.ReadFlags else None
+  flag_def = x if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags else x.src[-1] if x.arg[0] in X86GroupOp.ReadFlags else None
   if flag_def is None: return None
   if ctx.lock is not None and ctx.lock is not flag_def: ctx.clobbered.add(ctx.lock)
   ctx.lock = flag_def
@@ -571,19 +561,19 @@ pre_regalloc_matcher = PatternMatcher([
 # TODO: control flow should be overhauled so that this isn't necessary
 def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   loop_label = "_".join(str(i) for i in x.arg[:-1])
-  label = UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_{loop_label}")
+  label = UOp(Ops.INS, arg=(X86Ops.LABEL, dtypes.void), tag=f".LOOP_{loop_label}")
   # loop, cmp on backedge all we need is a jmp tag
   if x.dtype is dtypes.void: return (label, [label])
   else:
     acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + x.src[1:])
-    cmp = UOp(Ops.INS, arg=X86Ops.CMPi if x.src[0].op is Ops.CAST else X86Ops.CMP, src=(acc, x.src[0]))
-    jump_out = UOp(Ops.INS, arg=X86Ops.JGE, src=(cmp,), tag=f".LOOP_OUT_{loop_label}")
+    cmp = UOp(Ops.INS, arg=(X86Ops.CMPi if x.src[0].op is Ops.CAST else X86Ops.CMP, dtypes.void), src=(acc, x.src[0]))
+    jump_out = UOp(Ops.INS, arg=(X86Ops.JGE, dtypes.void), src=(cmp,), tag=f".LOOP_OUT_{loop_label}")
     ctx.loop_label[acc] = loop_label
     return (acc, [acc, label, cmp, jump_out])
 
 def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  end_label = UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")
-  jmp = UOp(Ops.INS, arg=X86Ops.JMP, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
+  end_label = UOp(Ops.INS, arg=(X86Ops.LABEL, dtypes.void), tag=f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")
+  jmp = UOp(Ops.INS, arg=(X86Ops.JMP, dtypes.void), tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
   inc = x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),))
   return (inc, [inc, jmp, end_label])
 
@@ -595,16 +585,16 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   # rewrite FRAME_INDEX to IMM now that the stack size is known
-  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=UOp.cconst(ctx.stack_size + x.tag, x.dtype), [nx])),
+  (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=UOp.cconst(ctx.stack_size + x.tag, x.dtype), [nx]) if x.arg[0] is X86Ops.FRAME_INDEX else None),
   # expand the cmp here so we can preserve rng src edge to get label from ctx
-  (UPat(Ops.INS, arg=X86Ops.LOOP_CMP, name="x"), lower_loop),
+  (UPat(Ops.INS, name="x"), lambda ctx,x: lower_loop(ctx, x) if x.arg[0] is X86Ops.LOOP_CMP else None),
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
   (UPat(Ops.RANGE, name="x"), lower_range),
   # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
   (UPat(Ops.END, name="x"), lower_end),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
-   [ctx.ren.copy(x.src[0], greg(x)), nx] if greg(x) != greg(x.src[0]) else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
+   [ctx.ren.copy(x.src[0], greg(x)), nx] if greg(x) != greg(x.src[0]) else [nx]) if x.arg[0] in X86GroupOp.TwoAddress else None),
 ])
 
 # ***** X86 instruction encoding *****
@@ -629,16 +619,15 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     r, _x, b = reg >> 3, idx >> 3, rm >> 3
     if sel: # VEX bytes
       vvvv = cast(Register, greg(vvvv_uop)).index if vvvv_uop is not None else 0
-      l = (max(reg_sz, rm_sz) > 16) & 0b1
-      if sel == 1 and _x == b == we == 0: inst += bytes([0xC5, (~r & 0b1) << 7 | (~vvvv & 0b1111) << 3 | l << 2 | pp])
-      else: inst += bytes([0xC4, (~r & 0b1) << 7 | (~_x & 0b1) << 6 | (~b & 0b1) << 5 | sel, we << 7 | (~vvvv & 0b1111) << 3 | l << 2 | pp])
+      if sel == 1 and _x == b == we == 0: inst += bytes([0xC5, (~r & 0b1) << 7 | (~vvvv & 0b1111) << 3 | pp])
+      else: inst += bytes([0xC4, (~r & 0b1) << 7 | (~_x & 0b1) << 6 | (~b & 0b1) << 5 | sel, we << 7 | (~vvvv & 0b1111) << 3 | pp])
     else: # optional PREFIX and REX bytes
       # PREFIX byte signaling 16 bit variant of instruction
       if sz == 2: inst += bytes([0x66])
       # bit signaling 64 bit variant of instruction
       w = sz == 8
       # legacy 8bit opcode is 1 less than 16-64bit variants
-      demote = (rm_sz == 1 or reg_sz == 1) and x.arg not in X86GroupOp.ReadFlags | {X86Ops.LEA}
+      demote = (rm_sz == 1 or reg_sz == 1) and x.arg[0] not in X86GroupOp.ReadFlags | {X86Ops.LEA}
       # REX byte is required when 64 bit or an extended reg is used (index 8 - 15) or lower 8 bits of (rsp, rbp, rsi, rdi) are accessed
       if w | r | _x | b | (reg_sz == 1 & reg >> 2) | (rm_sz == 1 & rm >> 2) | (demote and disp_uop is None and rm >= 4):
         inst += bytes([0b0100 << 4 | w << 3 | r << 2 | _x << 1 | b])
@@ -680,22 +669,22 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
   # get the encoding structure of the uop
   # when a uop writes to memory it takes the form of a store, dtype is void, no definition
   address:tuple[UOp|None, ...]
-  if x.arg in X86GroupOp.WriteMem:
+  if x.arg[0] in X86GroupOp.WriteMem:
     if len(x.src) > 4: address, rest = x.src[:4], x.src[4:]
     else: address, rest = (x, None, None, None), x.src
     imm_uop = rest[:1] if rest and rest[0].op is Ops.CAST else (None,)
     return _encode(rest[0], *address, *(None, *rest[1:])) if reg is None else _encode(None, *address, *(None, *imm_uop))
 
-  if x.arg in X86GroupOp.Rm1st:
+  if x.arg[0] in X86GroupOp.Rm1st:
     if len(x.src) > 3: address, rest = x.src[:4], x.src[4:]
     else: address, rest = (x.src[0], None, None, None), x.src[1:]
     imm_uop = rest[:1] if rest and rest[0].op is Ops.CAST else (None,)
     return _encode(x, *address, *(None, *imm_uop)) if reg is None else _encode(None, *address, *(x if sel else None, *imm_uop))
 
-  if x.arg in X86GroupOp.Rm2nd:
+  if x.arg[0] in X86GroupOp.Rm2nd:
     if len(x.src) > 4: address, rest = x.src[1:5], x.src[:1] + x.src[5:]
     else: address, rest = (x.src[1], None, None, None), x.src[:1] + x.src[2:]
-    # cmp/vucomiss reg, rm don't define a new register
+    # cmp reg, rm doesn't define a new register
     return _encode(x, *address, *rest) if x.dtype is not dtypes.void else _encode(rest[0], *address)
 
   return None
@@ -760,18 +749,12 @@ encodings = {
   # packed int binary
   X86Ops.VPSLLVD: lambda x: encode(x, 0x47, pp=1, sel=2), X86Ops.VPSLLVQ: lambda x: encode(x, 0x47, pp=1, sel=2, we=1),
   X86Ops.VPSRLVD: lambda x: encode(x, 0x45, pp=1, sel=2), X86Ops.VPSRLVQ: lambda x: encode(x, 0x45, pp=1, sel=2, we=1),
-  X86Ops.VPCMPGTB: lambda x: encode(x, 0x64, pp=1, sel=1), X86Ops.VPCMPGTW: lambda x: encode(x, 0x65, pp=1, sel=1),
-  X86Ops.VPCMPGTD: lambda x: encode(x, 0x66, pp=1, sel=1), X86Ops.VPCMPGTQ: lambda x: encode(x, 0x37, pp=1, sel=2),
-  X86Ops.VPCMPEQB: lambda x: encode(x, 0x74, pp=1, sel=1), X86Ops.VPCMPEQW: lambda x: encode(x, 0x75, pp=1, sel=1),
-  X86Ops.VPCMPEQD: lambda x: encode(x, 0x76, pp=1, sel=1), X86Ops.VPCMPEQQ: lambda x: encode(x, 0x29, pp=1, sel=2),
   X86Ops.VPMULLW: lambda x: encode(x, 0xD5, pp=1, sel=1), X86Ops.VPMULLD: lambda x: encode(x, 0x40, pp=1, sel=2),
   X86Ops.VPADDB: lambda x: encode(x, 0xFC, pp=1, sel=1), X86Ops.VPADDW: lambda x: encode(x, 0xFD, pp=1, sel=1),
   X86Ops.VPADDD: lambda x: encode(x, 0xFE, pp=1, sel=1), X86Ops.VPADDQ: lambda x: encode(x, 0xD4, pp=1, sel=1),
   X86Ops.VPSUBB: lambda x: encode(x, 0xF8, pp=1, sel=1), X86Ops.VPSUBW: lambda x: encode(x, 0xF9, pp=1, sel=1),
   X86Ops.VPSUBD: lambda x: encode(x, 0xFA, pp=1, sel=1), X86Ops.VPSUBQ: lambda x: encode(x, 0xFB, pp=1, sel=1),
   X86Ops.VPSRAVD: lambda x: encode(x, 0x46, pp=1, sel=2),
-  # float cmp
-  X86Ops.VUCOMISS: lambda x: encode(x, 0x2E, pp=0, sel=1), X86Ops.VUCOMISD: lambda x: encode(x, 0x2E, pp=1, sel=1),
   # scalar / packed float binary
   X86Ops.VADDSS: lambda x: encode(x, 0x58, pp=2, sel=1), X86Ops.VADDPS: lambda x: encode(x, 0x58, pp=0, sel=1),
   X86Ops.VADDSD: lambda x: encode(x, 0x58, pp=3, sel=1), X86Ops.VADDPD: lambda x: encode(x, 0x58, pp=1, sel=1),
@@ -787,7 +770,6 @@ encodings = {
   X86Ops.CMOVB: lambda x: encode(x, 0x0F42), X86Ops.CMOVL: lambda x: encode(x, 0x0F4C),
   X86Ops.CMOVE: lambda x: encode(x, 0x0F44), X86Ops.CMOVNE: lambda x: encode(x, 0x0F45),
   X86Ops.VBLENDVPS: lambda x: encode(x, 0x4A, pp=1, sel=3), X86Ops.VBLENDVPD: lambda x: encode(x, 0x4B, pp=1, sel=3),
-  X86Ops.VPBLENDVB: lambda x: encode(x, 0x4C, pp=1, sel=3),
   # shuffles
   X86Ops.VPSRLDQ: lambda x: encode(x, 0x73, reg=3, pp=1, sel=1),
   X86Ops.VPINSRB: lambda x: encode(x, 0x20, pp=1, sel=3), X86Ops.VPINSRW: lambda x: encode(x, 0xC4, pp=1, sel=1),
@@ -809,9 +791,7 @@ encodings = {
 class X86Renderer(ISARenderer):
   device = "CPU"
   has_local = False
-  has_threads = bool(getenv("THREADS", 1))
-  @property
-  def global_max(self): return (NUM_CPU_THREADS.value, 0, 0)  # type: ignore[override]
+  global_max = (1, 0, 0)
   extra_matcher = extra_matcher
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
@@ -823,28 +803,28 @@ class X86Renderer(ISARenderer):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
-  def is_two_address(self, x:UOp) -> bool: return x.arg in X86GroupOp.TwoAddress
+  def is_two_address(self, x:UOp) -> bool: return x.op is Ops.INS and x.arg[0] in X86GroupOp.TwoAddress
   def stack_pointer(self) -> UOp: return def_reg(dtypes.uint64, RSP)
   # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
   def copy(self, x:UOp, reg:Register):
-    dt = dtypes.uint64 if x.op is Ops.BUFFER else x.dtype
-    ret = isel_matcher.rewrite(UOp(Ops.COPY, dt, (x,), tag=reg))
+    if x.op is Ops.BUFFER: x = x.replace(arg=replace(x.arg, dtype=dtypes.uint64))
+    ret = isel_matcher.rewrite(UOp(Ops.COPY, src=(x,), tag=reg))
     assert ret is not None, f"failed to copy {x}"
     return ret
 
   def spill(self, disp:UOp, x:UOp) -> UOp:
-    if x.op is Ops.BUFFER: x = x.replace(dtype=dtypes.uint64)
+    if x.op is Ops.BUFFER: x = x.replace(arg=replace(x.arg, dtype=dtypes.uint64))
     is_xmm = isinstance(x.tag, tuple) and x.tag[0].cons[0].size == 16
     op = X86Ops.VMOVUPSm if is_xmm else X86Ops.MOVm
-    return UOp(Ops.INS, src=fold_address(self.stack_pointer().index(disp)) + (x,), arg=op, tag=x.tag)
+    return UOp(Ops.INS, src=fold_address(self.stack_pointer().index(disp)) + (x,), arg=(op, dtypes.void), tag=x.tag)
 
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp:
     is_xmm = reg.cons[0].size == 16
     dt = dtypes.uint64 if x.op is Ops.BUFFER else x.dtype
-    return UOp(Ops.INS, dt, fold_address(self.stack_pointer().index(disp)), X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, (reg,))
+    return UOp(Ops.INS, src=fold_address(self.stack_pointer().index(disp)), arg=(X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, dt), tag=(reg,))
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
-    def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg))[-1] in ('i', 'm') else o[7:]).lower():7s}"
+    def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg[0]))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
       def _format(src:tuple[UOp, ...]) -> list[str]:
         return [str(s.src[0].val) if s.op is Ops.CAST else reg_strs[o].get(s.dtype.itemsize, o) if \
@@ -852,17 +832,17 @@ class X86Renderer(ISARenderer):
       def _mem_adress(base:UOp, idx:UOp, disp:UOp, sz:UOp) -> list[str]:
         return [f"[{greg(base)}" + (f" + {greg(idx)}*{sz.src[0].val}" if greg(idx) else "") + (f" + {d}" if (d:=disp.src[0].val) else "") + "]"]
 
-      if len(x.src) > 4 and x.arg in X86GroupOp.WriteMem: ret = _mem_adress(*x.src[:4]) + _format(x.src[4:])
-      elif len(x.src) > 3 and x.arg in X86GroupOp.Rm1st: ret = _format((x,)) + _mem_adress(*x.src[:4]) + _format(x.src[4:])
-      elif len(x.src) > 4 and x.arg in X86GroupOp.Rm2nd: ret = _format((x, x.src[0])) + _mem_adress(*x.src[1:5]) + _format(x.src[5:])
+      if len(x.src) > 4 and x.arg[0] in X86GroupOp.WriteMem: ret = _mem_adress(*x.src[:4]) + _format(x.src[4:])
+      elif len(x.src) > 3 and x.arg[0] in X86GroupOp.Rm1st: ret = _format((x,)) + _mem_adress(*x.src[:4]) + _format(x.src[4:])
+      elif len(x.src) > 4 and x.arg[0] in X86GroupOp.Rm2nd: ret = _format((x, x.src[0])) + _mem_adress(*x.src[1:5]) + _format(x.src[5:])
       else: ret = _format((x,) + x.src)
       return ", ".join(ret)
 
     asm = [f".{function_name}:"]
     for u in uops:
-      if u.op is not Ops.INS or u.arg is X86Ops.DEFINE: continue
-      if u.arg is X86Ops.LABEL: asm.append(f"{str(u.tag)}:")
-      elif u.arg is X86Ops.RET: asm.append(_format_op(u))
+      if u.op is not Ops.INS or u.arg[0] is X86Ops.DEFINE: continue
+      if u.arg[0] is X86Ops.LABEL: asm.append(f"{str(u.tag)}:")
+      elif u.arg[0] is X86Ops.RET: asm.append(_format_op(u))
       else: asm.append(_format_op(u) + " " + _format_operands(u))
     return "\n".join(asm)
 
@@ -871,15 +851,15 @@ class X86Renderer(ISARenderer):
     jumps: dict[UOp, int] = {}
     binary = bytearray()
     for u in uops:
-      if u.op is not Ops.INS or u.arg is X86Ops.DEFINE: continue
-      if u.arg is X86Ops.LOOP_CMP: continue
-      if u.arg is X86Ops.LABEL:
+      if u.op is not Ops.INS or u.arg[0] is X86Ops.DEFINE: continue
+      if u.arg[0] is X86Ops.LOOP_CMP: continue
+      if u.arg[0] is X86Ops.LABEL:
         targets[u.tag] = len(binary)
         continue
-      if u.arg not in encodings or (l:=encodings[u.arg](u)) is None:
-        raise RuntimeError(f"failed to encode {u.arg} with {u.dtype} srcs {[x.dtype for x in u.src]}")
+      if u.arg[0] not in encodings or (l:=encodings[u.arg[0]](u)) is None:
+        raise RuntimeError(f"failed to encode {u.arg[0]} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       binary.extend(l)
-      if u.arg in (X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JMP): jumps[u] = len(binary)
+      if u.arg[0] in (X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JMP): jumps[u] = len(binary)
     # fixup jump targets now that encoding size is known
     for u in uops:
       if (t:=jumps.get(u)) is not None: binary[t-4:t] = (targets[u.tag] - t).to_bytes(4, 'little', signed=True)

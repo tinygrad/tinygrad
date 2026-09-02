@@ -1,7 +1,7 @@
 from dataclasses import replace, dataclass
 import itertools, functools
-from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
-from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, NUM_CPU_THREADS, TC_SELECT, TC_OPT, TracingKey, Context, panic
+from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
+from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import pyrender
@@ -12,7 +12,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid
+from tinygrad.uop.symbolic import sym, symbolic_simple, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid, invalid_gate
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
@@ -126,7 +126,7 @@ def do_devectorize(b:UOp):
   if not all(x.shape == b.shape or x.base.is_invalid for x in b.src): return None
   src = []
   for idx_c in itertools.product(*[[UOp.const(i) for i in range(x)] for x in b.shape]):
-    src.append(b.replace(dtype=None, src=tuple(x.base if x.base.is_invalid else x.index(*idx_c) for x in b.src)))
+    src.append(b.replace(src=tuple(x.base if x.base.is_invalid else x.index(*idx_c) for x in b.src)))
   return UOp.stack(*src).reshape(b.shape) if b.op is not Ops.STORE else UOp.group(*src)
 
 def do_stack_wmma(u:UOp):
@@ -173,7 +173,7 @@ def fix_group_for_reduce(x:UOp):
   if len(reduce_gfr) == 0: return None
 
   # NOTE: if there's other locals here, we need them in the buffer too
-  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] == AxisType.LOCAL]
+  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] in (AxisType.WARP, AxisType.LOCAL)]
 
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
@@ -224,6 +224,16 @@ def expand_horizontal_reduce(r:UOp):
   inp = r.src[0]
   vals = [inp.index(*idx) for idx in itertools.product(*[range(inp.max_shape[a]) for a in range(r.arg[1])])]
   return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
+
+# an Invalid in a REDUCE source is that reduce's identity. a WMMA is a rangeless reduce, so it takes the ADD identity
+pm_reduce_identity = PatternMatcher([
+  (invalid_gate.reduce(allow_any_len=True, name="red"), lambda red,cond,x,i:
+   red.replace(src=(cond.where(x, x.const_like(identity_element(red.arg[0], red.dtype))),)+red.src[1:])),
+  (UPat(Ops.WMMA, src=(invalid_gate, UPat.var("b"), UPat.var("acc")), name="w"),
+   lambda w,cond,x,i,b,acc: w.replace(src=(cond.where(x, x.const_like(0)), b, acc))),
+  (UPat(Ops.WMMA, src=(UPat.var("a"), invalid_gate, UPat.var("acc")), name="w"),
+   lambda w,cond,x,i,a,acc: w.replace(src=(a, cond.where(x, x.const_like(0)), acc))),
+])
 
 pm_reduce_local = pm_wmma_add+PatternMatcher([
   # fix group for reduce
@@ -313,7 +323,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # ** expander (expand_rewrite) **
   # reduce_unparented: a REDUCE whose src folded to a CONST (e.g. x*0) has no parented ranges, collapse it before the expander
-  sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range+pm_reduce_unparented, name="postopt symbolic")
+  sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range+pm_reduce_unparented+pm_reduce_identity, name="postopt symbolic")
 
   # expand
   sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander")
@@ -391,7 +401,15 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
-  if SPEC: type_verify(sink, spec_program)
+  if SPEC:
+    import os
+    if os.environ.get("DBGTV"):
+      try: type_verify(sink, spec_program)
+      except RuntimeError:
+        from tinygrad.uop.render import print_uops
+        print_uops(list(sink.toposort()))
+        raise
+    else: type_verify(sink, spec_program)
 
   # return the rewritten sink
   return sink
@@ -435,7 +453,7 @@ def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
   return prg.replace(src=(sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(lin.src, ignore_indexing=True))),)+prg.src[1:])
 
 def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
-  src = "\n".join(str(u.arg) for u in lin.src)
+  src = "\n".join(str(u.arg[0]) for u in lin.src)
   if DEBUG >= 4: print(src)
   binary = ctx.asm(prg, lin)
   return prg.replace(src=prg.src[:2]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
@@ -488,8 +506,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   return prg
 
 # config affects generated programs and cache keys; context also carries compile-only behavior to workers
-to_program_config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32,
-                     DEFAULT_FLOAT, DEFAULT_INT, NUM_CPU_THREADS, TC_SELECT, TC_OPT)
+to_program_config = (NOOPT, EMULATED_DTYPES, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32,
+                     DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS)
 to_program_context = (*to_program_config, SPEC, DEBUG)
 def to_program_key(ast:UOp, renderer:Renderer) -> tuple:
   return (ast.key, type(renderer), renderer.target, *[x.value for x in to_program_config])

@@ -51,7 +51,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff", Ops.INS: "#eec4ff",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
                Ops.BUFFER: "#B0BDFF", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#a040a0", Ops.CUSTOM_FUNCTION: "#bf71b6",
-               Ops.CALL: "#00B7C8", Ops.FUNCTION: "#C07788", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
+               Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.RETURNED: "#C07788", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
                Ops.LINEAR: "#7DF4FF",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
                Ops.STAGE: "#AC640D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
@@ -145,7 +145,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         label += f"\n({multirange_str(rngs, color=True)})"
       if u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
-      if u.op in {Ops.CALL, Ops.FUNCTION}:
+      if u.op is Ops.CALL:
         label += f"\n{u.src[0].key.hex()[:8]}\n{u.src[0].op}"
       if u.op in {Ops.INDEX, Ops.STAGE}:
         label += f"\n{u.render()}" if sum(len(s.toposort()) for s in u.src[1:]) < 30 else "\nINDEX TOO LARGE"
@@ -156,10 +156,10 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
-    ref = data.ref_map.get(canonicalize_ast(u.src[0])) if u.op in {Ops.CALL, Ops.FUNCTION} else None
+    ref = data.ref_map.get(canonicalize_ast(u.src[0])) if u.op is Ops.CALL else None
     if ref is not None: label += f"\ncodegen@{fmt_colored(data.ctxs[ref]['name'])}"
     # NOTE: kernel already has metadata in arg
-    if TRACEMETA >= 2 and u.metadata is not None and u.op not in {Ops.CALL, Ops.FUNCTION}: label += "\n"+str(u.metadata)
+    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.CALL: label += "\n"+str(u.metadata)
     # limit SOURCE labels line count
     if u.op is Ops.SOURCE and len(lines:=label.split("\n")) > 40:
       label = "\n".join(lines[:30]) + "\n..."
@@ -171,9 +171,9 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
 
 def _reconstruct(data:VizData, a:int, depth:int|None=None):
   if depth is None and a in data.all_uops: return data.all_uops[a]
-  op, dtype, src, arg, *rest = data.trace.uop_fields[a]
-  if depth is not None and depth <= 0: return UOp(op, dtype, (), arg, *rest)
-  ret = UOp(op, dtype, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
+  op, src, arg, *rest = data.trace.uop_fields[a]
+  if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
+  ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
   if depth is None: data.all_uops[a] = ret
   return ret
 
@@ -359,11 +359,6 @@ def load_amd_counters(data:VizData, profile:list) -> None:
     if (sqtt:=v.get("ProfileSQTTEvent")):
       for e in sqtt:
         if e.itrace: steps.append(create_step(f"SE:{e.se} PKTS", (f"/sqtt-{e.se}",len(data.ctxs),len(steps)), data=(e.blob,prg_events[k].lib,arch)))
-      try:
-        with Context(DEBUG=0): from extra.sqtt.roc import unpack_occ
-        steps.append(create_step("OCC", ("/amd-sqtt-occ", len(data.ctxs), len(steps)),
-                                 data={"fxn":unpack_occ, "args":((k, tag), sqtt, prg_events[k], arch)}))
-      except Exception: pass
     data.ctxs.append({"name":f"SQTT {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 wave_colors = {"WMMA": "#1F7857", **{x:"#ffffc0" for x in ["VALU", "VINTERP"]}, "SALU": "#cef263", "SMEM": "#ffc0c0", "STORE": "#4fa3cc",
@@ -383,6 +378,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
   def add(name:str, p:PacketType, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name.replace('_ALT', '')}"
+    if (simd:=getattr(p, "simd", None)) is not None: row += f" SIMD:{simd}"
     # by default we extend the packet to one cycle after timestamp
     start_time, end_time = p._time, p._time+1
     # exec links to dispatch, dispatch links to PC
@@ -470,11 +466,12 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
   start_ts:int|None = None
   end_ts:int|None = None
   for ts,en,e in flatten_events(profile, device_ts_diffs):
-    dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
-    if start_ts is None or st < start_ts: start_ts = st
-    if end_ts is None or et > end_ts: end_ts = et
-    if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
     if isinstance(e, ProfilePointEvent) and e.name == "JSON": ext_data[e.key] = e.arg
+    else:
+      dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
+      if start_ts is None or st < start_ts: start_ts = st
+      if end_ts is None or et > end_ts: end_ts = et
+      if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
   if start_ts is None: return None
   # return layout of per device events
   layout:dict[str, bytes|None] = {}
@@ -650,9 +647,6 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
         ret = {"value":events, "content_type":"application/octet-stream"}
       else: ret = {"src":"No SQTT trace on this SE."}
     return ret
-  # viewers for the amd decoder in extra
-  if fmt.startswith("amd-sqtt"): return data["fxn"](viz_data, i, j, *data["args"])
-  if fmt == "cu-sqtt": return {"value":get_profile(viz_data, data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "prg-pma-pkts":
     ret = {}
     with soft_err(lambda err:ret.update(err)):

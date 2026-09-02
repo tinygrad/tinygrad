@@ -147,7 +147,7 @@ class TestSchedule(unittest.TestCase):
     devs = ("CPU:0", "CPU:1")
     x = Tensor.ones(2, device="CPU").shard(devs, axis=0).realize()
     out = (x.sum()*2).reshape(1).to("CPU")
-    run_linear(*check_schedule(out, 5))
+    run_linear(*check_schedule(out, 3))
     np.testing.assert_equal(out.numpy(), [4.])
 
 class TestLimitBufs(unittest.TestCase):
@@ -365,16 +365,6 @@ class TestCopyFolding(unittest.TestCase):
     b = a.to("CPU")
     self.assertListEqual(b.tolist(), [2.])
 
-  def test_copy_to_same_device(self):
-    a = Tensor.empty(4).uop
-    b = a.copy_to_device(a.device)
-    check_schedule(b, 1, filter_sink=False) # TODO: 0?
-
-  def test_copy_to_same_device_alt(self):
-    a = Tensor.empty(4, 4).uop
-    b = a.copy_to_device(a.device)
-    check_schedule(b, 1, filter_sink=False) # TODO: 0?
-
   def test_copy_to_same_device_sched(self):
     a = Tensor.ones(4).contiguous().realize().uop.buf_uop
     t = Tensor(a.copy_to_device(a.device))
@@ -384,40 +374,35 @@ class TestCopyFolding(unittest.TestCase):
     assert t.uop.is_realized, f"didn't realize Tensor {t}"
     self.assertListEqual(t.tolist(), [1.,1.,1.,1.])
 
-  @unittest.skip("same-device copies are no-ops")
-  def test_self_assign_same_device_copy(self):
-    a = Tensor.ones(4, 4).contiguous().realize()
-    # use copy_to_device to bypass Tensor.to() shortcircuit and force a real same-device COPY in the graph
-    a.assign(Tensor(a.uop.copy_to_device(a.device), a.device))
-    run_linear(*check_schedule(a, 2, filter_sink=False))
-    self.assertListEqual(a.tolist(), [[1.]*4]*4)
-
   def test_clone(self):
     a = Tensor.empty(4)
     check_schedule(a.clone(), 1, filter_sink=False)
 
   def test_shrink_copy(self):
-    a = Tensor.arange(4)
-    view = a.shrink(((0, 2),))
-    b = view.clone()
-    run_linear(*check_schedule(b, 1, filter_sink=False))
-    self.assertEqual(b.uop.base.buffer.size, 2)
-    self.assertEqual(b.uop.numel(), 2)
-    self.assertListEqual(b.tolist(), [0, 1])
+    a = Tensor.arange(4).clone("CPU:1").realize()
+    b = a.to("CPU:2").shrink(((1, 3),)).to("CPU:3")
+    GlobalCounters.reset()
+    run_linear(*check_schedule(b, 3, filter_sink=False))
+    # extra E kernel, copy exactly 4 bytes
+    self.assertEqual(GlobalCounters.global_mem, 4*4 + 2*4*2 + 2*4)
+    self.assertListEqual(b.tolist(), [1, 2])
 
   def test_expanded_copy(self):
-    a = Tensor.arange(2)
-    view = a.reshape(2, 1).expand(2, 2)
-    b = view.clone()
-    run_linear(*check_schedule(b, 1, filter_sink=False))
-    self.assertEqual(b.uop.base.buffer.size, 4)
-    self.assertEqual(b.uop.numel(), 4)
-    self.assertListEqual(b.tolist(), [[0, 0], [1, 1]])
+    a = Tensor.arange(4).clone("CPU:1").realize()
+    b = a.to("CPU:2").reshape(4, 1).expand(4, 2).to("CPU:3")
+    GlobalCounters.reset()
+    run_linear(*check_schedule(b, 3, filter_sink=False))
+    # TODO: expands before copy
+    self.assertEqual(GlobalCounters.global_mem, 4*4 + (4*4 + 8*4) + 8*4)
+    self.assertListEqual(b.tolist(), [[0, 0], [1, 1], [2, 2], [3, 3]])
 
   def test_permuted_copy(self):
-    a = Tensor.arange(4)
-    b = a.reshape(2, 2).permute(1, 0)
-    b.realize()
+    a = Tensor.arange(4).clone("CPU:1").realize()
+    b = a.to("CPU:2").reshape(2, 2).permute(1, 0).to("CPU:3")
+    GlobalCounters.reset()
+    run_linear(*check_schedule(b, 3, filter_sink=False))
+    # permutes before copy
+    self.assertEqual(GlobalCounters.global_mem, 4*4 + (4*4 + 4*4) + 4*4)
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
   def test_permute_on_disk(self):

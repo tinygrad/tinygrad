@@ -656,40 +656,41 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   # map pcs to insts
   from tinygrad.viz.serve import amd_decode
   pc_map = amd_decode(lib, target)
-  wave_pc:dict[int, int] = {}
-  # only processing packets on one [CU, SIMD] unit
-  def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
+  wave_pc:dict[tuple[int, int], int] = {}
+  # RDNA selects one SIMD for instruction tracing, CDNA traces multiple SIMDs
+  simd:int = 0
   for p in decode(data):
-    if not simd_select(p): continue
+    if not getattr(p, "cu", 0) == 0: continue
+    if isinstance(p, LAYOUT_HEADER): simd = p.simd
     if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
-      assert p.wave not in wave_pc, "only one inflight wave per unit"
-      wave_pc[p.wave] = next(iter(pc_map))
-    elif isinstance(p, (WAVEEND, WAVEEND_RDNA4)):
-      pc = wave_pc.pop(p.wave)
+      if (key:=(p.simd, p.wave)) in wave_pc: raise AssertionError("only one inflight wave per unit")
+      wave_pc[key] = next(iter(pc_map))
+    elif isinstance(p, (WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)):
+      pc = wave_pc.pop((p.simd, p.wave))
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
     elif isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
         if p.mask & (1 << wave):
-          inst = pc_map[pc:=wave_pc[wave]]
-          wave_pc[wave] += inst.size()
+          inst = pc_map[pc:=wave_pc[(simd, wave)]]
+          wave_pc[(simd, wave)] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
     # map INST events on this SIMD to the program counter, we know the waves
     elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)) and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_")):
-      inst = pc_map[pc:=wave_pc[p.wave]]
+      inst = pc_map[pc:=wave_pc[(simd, p.wave)]]
       # s_delay_alu, s_wait_alu and s_barrier_wait instructions are skipped
       while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU", "S_BARRIER_WAIT"}:
-        wave_pc[p.wave] += inst.size()
-        inst = pc_map[pc:=wave_pc[p.wave]]
+        wave_pc[(simd, p.wave)] += inst.size()
+        inst = pc_map[pc:=wave_pc[(simd, p.wave)]]
       # assert branch always has a JUMP packet
       if "BRANCH" in inst_op and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("JUMP")):
         raise AssertionError(f"{inst_op} can only be followed by JUMP, got {p}")
       # JUMP handling
       if isinstance(p, (INST, INST_RDNA4)) and p.op in {InstOp.JUMP, InstOpRDNA4.JUMP}:
         x = getattr(inst, 'simm16') & 0xffff
-        wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
+        wave_pc[(simd, p.wave)] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
       else:
-        wave_pc[p.wave] += inst.size()
+        wave_pc[(simd, p.wave)] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
     # for all other packets (VMEMEXEC, ALUEXEC, OTHER_ INST, etc.), yield with None
     else: yield (p, None)
@@ -724,22 +725,17 @@ def format_packet(p) -> str:
 def print_packets(packets) -> None:
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {"NOP"}
-  for data in packets:
-    p, inst = data if isinstance(data, tuple) else (data, None)
-    if type(p).__name__.replace("_RDNA4", "") not in skip: print(format_packet(p), f"inst={inst.inst}" if inst is not None else '')
+  for p in packets:
+    if type(p).__name__.replace("_RDNA4", "") not in skip: print(format_packet(p))
 
 if __name__ == "__main__":
   import sys, pickle
   from tinygrad.helpers import temp
   with open(temp("profile.pkl", append_user=True) if len(sys.argv) < 2 else sys.argv[1], "rb") as f:
     data = pickle.load(f)
-  prg_events = {e.tag: e for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
+  prg_names = {e.tag: e.name for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
-  dev_targets = {e.device:f"gfx{e.props['gfx_target_version']//1000}" for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.props}
   evt_num = getenv("SQTT_EVENT", -1)
   for i, event in enumerate(sqtt_events):
-    prg = prg_events.get(event.kern)
-    print(f"=== event {i} {prg.name if prg is not None else ''} ===")
-    if evt_num == -1 or i == evt_num:
-      print_packets(map_insts(event.blob, prg.lib, dev_targets[prg.device]) if prg is not None else decode(event.blob))
-      print("\n")
+    print(f"\n=== event {i} {prg_names.get(event.kern, '')} ===")
+    print_packets(decode(event.blob))

@@ -135,7 +135,7 @@ class TestNN(unittest.TestCase):
   def test_conv2d_same_padding_large_kernel(self):
     self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=16, DIMS=[28, 33], C2=32, K=9, S=1, P='same')
   def test_conv2d_same_padding_with_dilation(self):
-    self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=3, DIMS=[28, 28], C2=32, K=3, S=1, P='same', D=3)
+    self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=3, DIMS=[28, 31], C2=32, K=(3,5), S=1, P='same', D=(2,3))
 
   def test_conv2d_same_padding_invalid_stride(self):
     self.assertRaises(ValueError, Conv2d, in_channels=16, out_channels=32, kernel_size=2, stride=2, padding='same')

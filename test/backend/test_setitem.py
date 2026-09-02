@@ -18,13 +18,16 @@ class TestSetitem(unittest.TestCase):
       ((4,4,4,4), (slice(1,3), slice(None), slice(None), slice(0,3)), 4),
       ((6,6), (slice(1,5,2), slice(0,5,3)), 1.0),
       ((6,6), (slice(5,1,-2), slice(5,0,-3)), 1.0),
+      ((6,6), (slice(None), slice(0,6,2)), 1.0),
     )
     for shp, slc, val in cases:
-      t = Tensor.zeros(shp).contiguous()
-      t[slc] = val
-      n = np.zeros(shp)
-      n[slc] = val.numpy() if isinstance(val, Tensor) else val
-      np.testing.assert_allclose(t.numpy(), n)
+      for realize in (False, True):
+        t = Tensor.zeros(shp).contiguous()
+        if realize: t.realize()
+        t[slc] = val
+        n = np.zeros(shp)
+        n[slc] = val.numpy() if isinstance(val, Tensor) else val
+        np.testing.assert_allclose(t.numpy(), n)
 
   def test_padded_setitem(self):
     t = Tensor.arange(10)
@@ -300,6 +303,14 @@ class TestSetitem(unittest.TestCase):
     z.realize()
     self.assertListEqual(z[2:5].tolist(), [2, 2, 2])
     self.assertListEqual(z[6:7].tolist(), [3])
+
+class TestAssignBitcast(unittest.TestCase):
+  def test_assign_through_bitcast(self):
+    # the dest is unrealized, so callify cannot fold the BITCAST into a buffer view and the STORE keeps a
+    # BITCAST dest; the bitcast has to move to the value side or the store never reaches the buffer
+    a = Tensor.full((4,), 1.0, dtype=dtypes.float32).contiguous()
+    a.bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.uint32)).realize()
+    np.testing.assert_allclose(a.numpy(), [4.0, 3.0, 2.0, 1.0])
 
 class TestWithGrad(unittest.TestCase):
   def test_basic_setitem_works(self):

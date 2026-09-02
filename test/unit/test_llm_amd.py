@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor, UOp, dtypes, nn
+from tinygrad import Tensor, UOp, dtypes, nn, function
 from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, flash_attention
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
@@ -20,13 +20,15 @@ class TestQ8Quantize(unittest.TestCase):
   def test_values_and_scales(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     x = np.linspace(-3.1, 2.7, 64, dtype=np.float32).reshape(2, 32)
-    quant, scale = q8_quantize(Tensor(x), 2, 32)
+    quant, scale, gsum = q8_quantize(Tensor(x), 2, 32)
     scale_np = np.maximum(np.max(np.abs(x), axis=-1, keepdims=True) / 127, 1e-8)
     expected = np.clip(np.rint(x / scale_np), -127, 127).astype(np.int8)
     np.testing.assert_array_equal(quant.bitcast(dtypes.int8).reshape(2, 32).numpy(), expected)
     np.testing.assert_allclose(scale.numpy(), scale_np, rtol=1e-6)
+    # xsum holds the two per-16 sums per 32-wide group
+    np.testing.assert_array_equal(gsum.numpy().reshape(2, 2), expected.reshape(2, 2, 16).sum(-1).astype(np.float32))
 
-  def test_q6_linear_compiles(self):
+  def test_q6_linear_compiles_in_function(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
     packed = rng.integers(0, 256, 210, dtype=np.uint8)
@@ -35,8 +37,12 @@ class TestQ8Quantize(unittest.TestCase):
     decoded = ggml_data_to_tensor(raw, 256, 14).reshape(1, 256)
     linear = Linear(256, 1, bias=False)
     nn.state.load_state_dict(linear, {"weight":decoded}, verbose=False, realize=False)
-    self.assertTrue(np.isfinite(linear(Tensor.randn(1, 256)).realize().item()))
-    self.assertEqual(linear.weight.uop.buf_uop.buffer.offset, 4)
+    @function(allow_implicit=True)
+    def run(x:Tensor): return linear(x)
+    self.assertTrue(np.isfinite(run(Tensor.randn(1, 256)).realize().item()))
+    # the Q6 weight is repacked: 210-byte blocks padded to 212 (one block = 53 words)
+    self.assertEqual(linear.weight.uop.buf_uop.buffer.nbytes, 53*4)
+    self.assertEqual(linear.weight.dtype, dtypes.uint32)
 
   def test_q4_k_linear(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
@@ -87,6 +93,15 @@ class TestQ8Quantize(unittest.TestCase):
     assigned = Tensor(cache.uop.after(cache[:, :, :, 0:1, :].uop.store(Tensor.stack(k, v).cast(dtypes.half).uop)))
     out = flash_attention(q, assigned, 1).realize()
     np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
+
+  def test_flash_attention_decode_gqa_output_layout(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    Tensor.manual_seed(42)
+    q = Tensor.randn(1, 4, 1, 128, dtype=dtypes.half).realize()
+    cache = Tensor.randn(2, 1, 1, 256, 128, dtype=dtypes.half).realize()
+    out = flash_attention(q, cache, 3).realize()
+    expected = q.scaled_dot_product_attention(cache[0, :, :, :3], cache[1, :, :, :3], enable_gqa=True)
+    np.testing.assert_allclose(out.numpy(), expected.numpy(), rtol=2e-3, atol=2e-3)
 
   def test_prefill_attention_unaligned_start(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")

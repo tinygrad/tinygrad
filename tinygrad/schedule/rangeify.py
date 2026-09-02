@@ -1,12 +1,12 @@
 from dataclasses import dataclass, field, replace
 from typing import cast
 import itertools
-from tinygrad.dtype import dtypes, AddrSpace, Invalid, strong_dtype
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg, shape_to_shape_arg
+from tinygrad.dtype import dtypes, AddrSpace, Invalid
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, KernelInfo, ParamArg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, rewrite_group
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, dedup, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS, SPEC
-from tinygrad.helpers import PCONTIG, partition, get_single_element
+from tinygrad.helpers import get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, apply_movement_op
@@ -83,7 +83,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   accessed_buffers = dedup(accessed_buffers)
 
   # if this is generated from multiple buffers, don't remove this buffer
-  if len(accessed_buffers) > 3 and not (PCONTIG > 2): return None
+  if len(accessed_buffers) > 3: return None
 
   # if any reduces access a buffer, don't remove this buffer
   buffer_in_reduce = False
@@ -94,22 +94,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
   del buf_gate
   if buffer_in_reduce:
-    if PCONTIG > 2:
-      out_in_ratio = (prod(buf.shape)+1) / (sum([x.numel() for x in accessed_buffers])+1)
-      if out_in_ratio < 10: return None
-      # here we have to check the indexes, we might do a partial contig here
-      local_indexes = [x for x in indexes if x.src[0].op is Ops.STAGE and x.src[0].arg.addrspace == AddrSpace.LOCAL]
-      exclude_ranges = UOp.group(*[UOp.group(*x.src[1:]) for x in local_indexes]).ranges
-      subs = [(k,v) for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST]
-      # if it's bufferized or a reduce, it's pcontig
-      is_pcontig, is_subs = partition(subs, lambda x: x[0] in exclude_ranges or any([r.arg[-1] == AxisType.REDUCE for r in x[1].ranges]))
-      if not len(is_subs):
-        return None
-      if len(is_pcontig):
-        ret = src.substitute(dict(is_subs), extra_pm=pm_gate_substitute)
-        return ret.bufferize(*[x[0] for x in is_pcontig], arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*[x[1] for x in is_pcontig])
-    else:
-      return None
+    return None
 
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
@@ -132,8 +117,6 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.STAGE, name="b"), cleanup_dead_axes),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.STAGE, allow_any_len=True, name="b2"), remove_noop_bufferize),
-  (UPat(Ops.INDEX, src=(UPat(Ops.STAGE),), allow_any_len=True, name="idx").f(Ops.NOOP).f(Ops.STAGE, allow_any_len=True, name="b2"),
-   remove_noop_bufferize),
   # no buffers for a const, in either spelling
   (UPat.cvar('c').or_casted().f(Ops.STAGE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.val)),
   # indexing a const is the const
@@ -141,8 +124,6 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   # indexing an after with all fully invalid stores is invalid
   (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, name="after"),), allow_any_len=True, name="idx"),
    lambda idx,after: idx.const_like(Invalid) if after_all_invalid(after) else None),
-  # hack if a noop turned to a const
-  (UPat(Ops.NOOP, src=(UPat.cvar().or_casted("c"),)), lambda c: c),
   # a deviceless MSTACK src is the same value on every device, so indexing the stack is just indexing that value
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True, name="idx"),
    lambda s,idx: idx.replace(src=(s,)+idx.src[1:]) if s.device is None else None),
@@ -179,6 +160,12 @@ def no_indexing_calls(u:UOp):
 
 pm_no_indexing_calls = PatternMatcher([
   (UPat(Ops.CALL, name="u"), no_indexing_calls),
+])
+
+# the kernel graph is what gets executed: no shape views left in it, the storage of a value is just the storage
+pm_no_views = PatternMatcher([
+  (UPat((Ops.RESHAPE, Ops.SHRINK), name="v", src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER)),), allow_any_len=True), lambda v:
+   v.src[0]),
 ])
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8, "CPU": 31} # TODO: get from device?
@@ -221,7 +208,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 
 def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   size = prod(x.shape)
-  dtype = strong_dtype(x.dtype)  # a BUFFER is never weak: store at the concrete dtype, the .cast(x.dtype) on the result keeps readers unchanged
+  dtype = x.commit_dtype()  # a BUFFER is never weak: store at the committed dtype, the .cast(x.dtype) on the result keeps readers unchanged
   rngs = sorted(idx.ranges, key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
@@ -242,7 +229,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
 
   # NOTE: the local BUFFER needs to be disambiguated here
   if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp(Ops.BUFFER, src=(shape_to_shape_arg((size,)),), arg=ParamArg(next(ctx), dtype, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
+    buf = UOp(Ops.BUFFER, arg=ParamArg(next(ctx), dtype, size=size, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
     do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
     return buf.after(do_store).cast(x.dtype)
 
@@ -278,7 +265,7 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
   # INDEX of a buffer through the weak cast added above: index the buffer directly and cast the loaded value instead.
   # this must run in the same rewrite that adds the cast, or the expander expands the whole casted buffer into one big VECTORIZE
   (UPat(Ops.INDEX, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("buf"),)),), allow_any_len=True, name="u"),
-   lambda u,buf: u.replace(dtype=None, src=(buf,)+u.src[1:]).cast(u.dtype)),
+   lambda u,buf: u.replace(src=(buf,)+u.src[1:]).cast(u.dtype)),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
@@ -306,8 +293,7 @@ class LocalAddBufferContext:
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   # Variables (ALU buffers with a value range) are scalar symbolic values, not real buffers: they become ALU params with no slot
   if buf.is_variable: return buf.replace(op=Ops.PARAM)
-  param = UOp(Ops.PARAM, src=(UOp.const(prod(buf.max_shape)),),
-              arg=ParamArg(ctx.dg, buf.dtype, addrspace=buf.addrspace, device=buf.device))
+  param = UOp(Ops.PARAM, arg=ParamArg(ctx.dg, buf.dtype, prod(buf.max_shape), addrspace=buf.addrspace, device=buf.device))
   ret = param.reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
   if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
@@ -364,10 +350,6 @@ def get_contiguous(ctx:LocalAddBufferContext, x:UOp):
 
 rangeify_codegen = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="x"), get_contiguous),
-
-  # no NOOP in the kernel graph
-  # TODO: this can be moved into codegen?
-  (UPat(Ops.NOOP, name="x"), lambda x: x.src[0] if len(x.src) else None),
 ])
 
 pm_add_param_range_tags = PatternMatcher([
@@ -411,6 +393,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_param_range_tags, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
   tsink = graph_rewrite(tsink, pm_no_indexing_calls, name="remove indexing from call args")
+  tsink = graph_rewrite(tsink, pm_no_views, name="remove views from the kernel graph")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
   if SPEC:

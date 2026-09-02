@@ -228,8 +228,7 @@ class TestViz(unittest.TestCase):
     with save_viz() as viz:
       inner = UOp.const(3)
       call = UOp(Ops.CALL, src=(UOp(Ops.SINK, src=(inner,)),))
-      func = UOp(Ops.FUNCTION, src=(UOp(Ops.TUPLE, src=(call,)),))
-      graph_rewrite(func, TrackedPatternMatcher(pm.patterns), enter_calls=True)
+      graph_rewrite(call, TrackedPatternMatcher(pm.patterns), enter_calls=True)
     details = list(viz.get_details(0, 0))
     self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
 
@@ -244,7 +243,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in viz.get_details(0, 0)]
     # const is always in the graph, client side hides exclude=True nodes by default
-    self.assertEqual(list(graphs[0]), [id(a.src[0]), id(a), id(z), id(alu), id(y), id(sink)])
+    self.assertEqual(list(graphs[0]), [id(a), id(z), id(alu), id(y), id(sink)])
     self.assertTrue(graphs[0][id(z)]["exclude"])
     self.assertTrue(graphs[0][id(y)]["exclude"])
     self.assertFalse(graphs[0][id(alu)]["exclude"])
@@ -841,7 +840,7 @@ class TestCfg(unittest.TestCase):
       lidx = UOp.special(1, "lidx0")
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
     with save_viz() as viz:
       with Context(DEV="NULL::gfx1100"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]

@@ -1,5 +1,5 @@
 from dataclasses import replace
-from tinygrad.dtype import dtypes, DType, truncate
+from tinygrad.dtype import dtypes, DType, AddrSpace, truncate
 from tinygrad.helpers import flatten, DEBUG, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
@@ -80,6 +80,11 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case Ops.MAX: return l2i(Ops.WHERE, dt, l2i(Ops.CMPLT, dt, *uops), b0, b1, a0, a1)
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
+def l2i_define(x:UOp) -> UOp:
+  # cannot decomp a Variable
+  if x.addrspace == AddrSpace.ALU: raise RuntimeError(f"long decomposition of variable {x.arg.name} unsupported")
+  return UOp(x.op, arg=replace(x.arg, dtype=l2i_dt[x.dtype], size=None if x.arg.size is None else x.arg.size*2), tag=x.tag)
+
 def split_l2i(ctx:dict, op: Ops, dt: DType, *uops:UOp):
   # l2i does arithmetic on its inputs; rules enter here to split them to 32-bit words first, l2i recurses on itself.
   # both word halves of a node ask for the same split, so ctx memos it for the pass
@@ -140,8 +145,7 @@ def f2f_store(st, idx, val, fr:DType, to:DType):
 pm_long_decomp: PatternMatcher = PatternMatcher([
   # the decomp's own bottom-up rewrite can mint bare consts mid-flight: word splitting commits them at the long sibling's dtype
   (UPat(GroupOp.All, name='x'), lambda x: commit_weak_consts(x, next((s.dtype for s in x.src if s.dtype in l2i_dt), None))),
-  (UPat(GroupOp.Defines, tuple(l2i_dt.keys()), src=(UPat.var("sz"),), name="x"), lambda x,sz:
-   UOp(x.op, src=(sz*2,), arg=replace(x.arg, dtype=l2i_dt[x.dtype]), tag=x.tag)),
+  (UPat(GroupOp.Defines, tuple(l2i_dt.keys()), name="x"), l2i_define),
   (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x:
    reindex(x, x.tag[0]).replace(tag=None) if x.tag is not None else None),
   (UPat(Ops.STORE, src=(UPat.var('idx', tuple(l2i_dt.keys())), UPat.var('val')), name='st'), lambda st,idx,val:

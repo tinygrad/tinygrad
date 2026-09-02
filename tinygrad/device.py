@@ -22,7 +22,7 @@ class _Device:
   def canonicalize(self, device:str|None) -> str: return self._canonicalize(device if device is not None else Device.DEFAULT)
   def __getitem__(self, ix:str) -> Compiled:
     ix = self.canonicalize(ix)
-    assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "TINYFS", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
+    assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
     return self.__get_canonicalized_item(ix)
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def get_class(self, ix:str):
@@ -46,7 +46,7 @@ class _Device:
   def DEFAULT(self, v): raise AttributeError(f'setting Device.DEFAULT is deprecated, use "with Context(DEV={v!r})" or "DEV.value = {v!r}"')
   @functools.cached_property
   def _select_device(self) -> str:
-    assert (dev:=next((d for d in self._devices if d not in ["DISK", "TINYFS", "NPY"] and getenv(d) == 1), None)) is None, \
+    assert (dev:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)) is None, \
       f"{dev}=1 is deprecated, use DEV={dev} instead"
     try:
       device = next(self.get_available_devices())
@@ -54,7 +54,7 @@ class _Device:
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device: _Device = _Device()
-atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices])
+atexit.register(lambda: [Device[dn].finalize() for dn in tuple(Device._opened_devices)])
 
 def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
   if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
@@ -346,7 +346,8 @@ class Compiled:
 
   has_copy_queue:bool = True
 
-  pm_lower:Any = None
+  pm_encode:Any = None # per queue kind: queue ops -> flat command words
+  pm_lower:Any = None # per queue kind: custom_function(submit, cmdbuf) -> the queue push
   pm_bufferize:Any = None
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, graph=None, arch=None):

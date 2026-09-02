@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype, commit_int
 from tinygrad.helpers import all_int, argfix, argsort, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, merge_dicts, prod
 from tinygrad.helpers import resolve_pool_pads, round_up, IMAGE, FLOAT16, WINO
 
@@ -82,8 +82,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       parsed = {"size":size, "boundary":(0, size), "stride":1, "collapse_dim":False}
       if isinstance(index,(list,tuple)):
         flat = fully_flatten(index)
-        inferred = dtypes.bool if (flat and all(isinstance(s,bool) for s in flat)) else \
-          (dtypes.default_int if flat and all_int(flat) else dtypes.default_float)
+        inferred = dtypes.from_py(flat)
         if not dtypes.is_int(inferred): raise IndexError(f"{index=} contains non-int element")
         index = self._wrap_uop(UOp._frompy([i+size if i<0 else i for i in flat], inferred, self.device)).reshape(get_shape(index))
       elif is_adv(index):
@@ -186,9 +185,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if stop is None: stop, start = start, 0
     lo, hi = (start, stop-step) if step > 0 else (stop-step, start)
     if dtype is None:
-      dtype = dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int
-      # an int range too large for default_int picks int64
-      if dtype is dtypes.default_int and (lo < dtype.min or dtype.max < hi): dtype = dtypes.int64
+      dtype = dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else commit_int(lo, hi)
     if lo < (dt:=to_dtype(dtype)).min or dt.max < hi: raise OverflowError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, buffer=False)
@@ -519,7 +516,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
-    numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
+    numerator = self.cast(sum_acc_dtype(self.commit_dtype())).sum(axis=axis, keepdim=keepdim)
     denominator = prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
     return numerator.div(denominator).cast(output_dtype)
 
@@ -548,7 +545,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
-    numerator = squares.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
+    numerator = squares.cast(sum_acc_dtype(self.commit_dtype())).sum(axis=axis, keepdim=keepdim)
     return numerator.div(smax(n - correction, 0)).cast(output_dtype)
 
   def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
@@ -654,7 +651,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.logsumexp(axis=1).numpy())
     ```
     """
-    m = self.max(axis=axis, keepdim=True).detach()
+    m = (mx:=self.max(axis=axis, keepdim=True).detach()).isfinite().where(mx, 0)
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Self, Self, Self]:
@@ -755,7 +752,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
   def _cumalu(self, axis:int, op:Ops) -> Self:
     assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
     pads = (None,)*(self.ndim-1) + ((self.shape[axis]-1, 0),)
-    pooled = self.transpose(axis,-1)._pad_constant(pads, identity_element(op, self.dtype))._pool((self.shape[axis],))
+    pooled = self.transpose(axis,-1)._pad_constant(pads, identity_element(op, self.commit_dtype()))._pool((self.shape[axis],))
     return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
 
   def _split_cumalu(self, axis:int, op:Ops) -> Self:
@@ -764,7 +761,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # TODO: someday the optimizer will find this on its own
     # for now this is a two stage cumsum
     SPLIT = 256
-    value = identity_element(op, self.dtype)
+    value = identity_element(op, self.commit_dtype())
     if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumalu(axis, op)
     chunks = self.transpose(axis,-1)._pad_constant((None,)*(self.ndim-1)+((round_up(s,SPLIT)-s,0),), value).unflatten(-1,(-1,SPLIT))._cumalu(-1, op)
     base = chunks[..., -1]._cumalu(-1, op)._pad_constant((None,)*(chunks.ndim-2) + ((1, -1),), value)
@@ -812,7 +809,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), type(self).zeros(self.shape, dtype=dtypes.int32, buffer=False)
     values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
     x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
-    match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * type(self).ones(n, n, dtype=dtypes.bool, buffer=False).triu()
+    match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * self._tri(n, n)
     idx = (-(match * type(self).arange(n, 0, -1).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
     return values, idx.transpose(-1, axis)
 
@@ -858,8 +855,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     x = self.transpose(axis, -1)
     last_dim_size = x.shape[-1]
     x_unsqueezed = x.unsqueeze(-2)
-    x_cummax = x.cummax(-1)[0].detach()
-    mask = type(self).ones(last_dim_size, last_dim_size, buffer=False, dtype=dtypes.bool).tril()
+    x_cummax = (mx:=x.cummax(-1)[0].detach()).isfinite().where(mx, 0)
+    mask = self._tri(last_dim_size, last_dim_size, 1).logical_not()
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)
 
@@ -956,7 +953,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
     x = x.flatten(dim, dim+n_stages-1).shrink_to(self.shape)
     # compute indices for sorted values
-    mask = type(self).ones(orig_len, orig_len, dtype=dtypes.bool, buffer=False).tril()
+    mask = self._tri(orig_len, orig_len, 1).logical_not()
     mask = mask.reshape((None, None) + (1,)*(self.ndim-dim-1))
     def compute_counts(t:Self): return (mask & t.unsqueeze(dim).eq(t.unsqueeze(dim+1))).sum(dim+1)
     count_orig, count_sorted = compute_counts(self), compute_counts(x)
@@ -1067,7 +1064,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       reshape[i] = expand[i] = size[i]
       if mode == "linear":
         arr = type(self).arange(size[i])
-        num, den = (arr*(in_sz-1), size[i]-1) if align_corners else ((arr*2+1)*in_sz - size[i], size[i]*2)
+        num, den = (arr*(in_sz-1), max(size[i]-1, 1)) if align_corners else ((arr*2+1)*in_sz - size[i], size[i]*2)
         num = num.clip(0, (in_sz-1)*den)
         low, high, perc = [y.reshape(reshape).expand(expand) for y in (num//den, (num+den-1)//den, (num % den).cast(dtypes.float32)/den)]
         x = x.gather(i, low).lerp(x.gather(i, high), perc)
@@ -1129,8 +1126,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     def _inv_mask(a:Self|PyConst, b:Self|PyConst) -> Self: return mask.any(-1).logical_not().where(a, b)
     if reduce == "sum": return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0))
     if reduce == "prod": return mask.where(src, 1).prod(-1).mul(self if include_self else _inv_mask(self, 1))
-    if reduce == "amax": return mask.where(src, m := src.dtype.min).max(-1).maximum(self if include_self else _inv_mask(self, m))
-    if reduce == "amin": return mask.where(src, m := src.dtype.max).min(-1).minimum(self if include_self else _inv_mask(self, m))
+    if reduce == "amax": return mask.where(src, m := src.commit_dtype().min).max(-1).maximum(self if include_self else _inv_mask(self, m))
+    if reduce == "amin": return mask.where(src, m := src.commit_dtype().max).min(-1).minimum(self if include_self else _inv_mask(self, m))
     if reduce == "mean":
       count = mask.where(1, 0).sum(-1).add(1 if include_self else _inv_mask(1, 0))
       return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0)).div(count)
@@ -1372,7 +1369,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     s_ = stride if stride is not None else k_
     pads = resolve_pool_pads(padding, len(k_))
     if ceil_mode: pads = self._apply_ceil_mode(pads, k_, s_, dilation)
-    pooled = self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(pads), self.dtype.min)._pool(k_, s_, dilation)
+    pooled = self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(pads), self.commit_dtype().min)._pool(k_, s_, dilation)
     if not return_indices: return pooled.max(axis)
     spatial_sz = int(prod(spatial_shape := self.shape[-len(k_):]))
     idx = type(self).arange(spatial_sz, 0, -1).reshape(spatial_shape)
