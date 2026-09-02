@@ -125,7 +125,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     if v in ctx.spills and x.op is not Ops.BUFFER:
       after.extend(ctx.ren.spill(ctx.spills[v], nx, None))
   for v,rs in ctx.insert_before.get(i, []):
-    before.extend(ctx.ren.fill(ctx.spills[v], None, ctx.vdef(v), rs)[1])
+    before.extend(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), rs)[1])
 
   return nx, before + [nx] + after
 

@@ -199,11 +199,32 @@ def fold_lds(base:UOp, idx:UOp): # (vaddr, ioffs)
 
 def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(*x.src[:2])
 
+def batch_scratch(store:bool, base:int, dt:DType, regs:VRegister|tuple[Register,...]) -> list[UOp]:
+  batches = []
+  # batch registers into groups of 4 dwords per copy in/out
+  if isinstance(regs, VRegister):
+    batches = [regs] if regs.width <= 4 else [regs[i*4:(i+1)*4] for i in range(regs.width//4)]
+  else: batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
+  ops = []
+  for j,b in enumerate(batches):
+    mop = "store" if store else "load"
+    n = b.width if isinstance(b, VRegister) else len(b)
+    opc = getattr(RDNA3Ops, f"scratch_{mop}_b{n*32}")
+    u = UOp(Ops.INS, arg=(opc, dtypes.void if store else dt), src=(const(base+j*16),))
+    if store: u = u.replace(src=(*u.src, def_reg(dt, b)))
+    else: u = u.replace(tag=b)
+    ops.append(u)
+  return ops
+
 def load(ctx, x:UOp, idx:UOp):
   if idx.addrspace is AddrSpace.REG:
     if (buf := rafter(idx.src[0])).arg in ctx.overflows:
-      raise Exception("overflowed BUFFER")
-    return ctx.bufreg(idx).after(idx)
+      slot = ctx.overflows[buf.arg][idx.src[1].src[0].val]
+      vr = ctx.vreg(ctx.gp_vgprs, width=(buf.dtype.itemsize+3)//4)
+      op = batch_scratch(False, slot, buf.dtype, vr)[0]
+      return op.replace(src=(op.src[0].after(idx),))
+    else:
+      return ctx.bufreg(idx).after(idx)
 
   n = idx.src[-1].src[0].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.src[0].dtype.itemsize
@@ -215,9 +236,11 @@ def load(ctx, x:UOp, idx:UOp):
 def store(ctx, x:UOp, idx:UOp, val:UOp):
   if idx.addrspace is AddrSpace.REG:
     if (buf := rafter(idx.src[0])).arg in ctx.overflows:
-      raise Exception("overflowed BUFFER")
-    defs = ctx.bufreg(idx)
-    return ctx.ren.copy(val.after(idx), rdefs(defs))[0]
+      slot = ctx.overflows[buf.arg][idx.src[1].src[0].val]
+      assert buf.dtype.itemsize == 4, "single dword BUFFER spill items only"
+      return UOp(Ops.INS, arg=(RDNA3Ops.scratch_store_b32, dtypes.void), src=(const(slot), to_vgpr(val).after(idx)))
+    else:
+      return ctx.ren.copy(val.after(idx), rdefs(ctx.bufreg(idx)))[0]
 
   n = idx.src[-1].src[0].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.dtype.itemsize
@@ -265,7 +288,6 @@ def mul64(ctx, x:UOp):
   return _mad(gep(a,0), gep(b,0), p1 + p2).bitcast(x.dtype)
 
 def mulhi32(a:UOp, b:UOp) -> UOp: return ((a.cast(dtypes.uint64) * b.cast(dtypes.uint64)) >> 32).cast(dtypes.uint32)
-	# return UOp(Ops.INS, dtypes.uint32, src=(a,b), arg=RDNA3Ops.v_mul_hi_u32)
 def mulhi64(a:UOp, b:UOp) -> UOp:
   def mul32(a:UOp, b:UOp) -> UOp: return multireg(a*b, mulhi32(a,b), dtype=dtypes.uint64)
   a0, a1, b0, b1 = gep(a,0), gep(a,1), gep(b,0), gep(b,1)
@@ -584,13 +606,12 @@ class RDNA3PreLinearKernelCtx(PreLinearKernelCtx):
     rbufs: dict[int, UOp] = {u.arg.size*u.dtype.itemsize:u for u in sink.toposort() if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG}
     sizes = list(sorted(rbufs.keys(), reverse=True))
     spill_before = next((i for i,sz in enumerate(sizes) if sum(sizes[i:]) < len(self.gp_vgprs)*4), len(sizes))
-    self.overflows: dict[UOp, int] = {}
+    self.overflows: dict[UOp, list[int]] = {}
 
     for sz in sizes[:spill_before]:
-      raise Exception()
       buf = rbufs[sz]
-      vr = self.vreg(self.gp_vgprs, width=(buf.dtype.itemsize+3)//4)
-      self.overflows[buf.arg] = self.assign_spill_slot(vr, buf)
+      vrs = [self.vreg(self.gp_vgprs, width=(buf.dtype.itemsize+3)//4) for i in range(buf.arg.size)]
+      self.overflows[buf.arg] = [self.assign_spill_slot(vr, buf) for vr in vrs]
 
   def bufreg(self, idx:UOp) -> UOp:
     buf, idx = rafter(idx, True).src
@@ -636,29 +657,23 @@ class RDNA3Renderer(ISARenderer):
   def spill(self, spill_offset:any, x:UOp, sub_idx:int|None=None) -> list[UOp]:
     regs = rdefs(x)
     if regs[0].name[0] == 'v':
-      if sub_idx is not None:
-        return [UOp(Ops.INS, arg=(RDNA3Ops.scratch_store_b32, dtypes.void), src=(const(spill_offset+sub_idx*4), def_reg(x.dtype, regs)))]
-      batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
-      return [UOp(Ops.INS, arg=(getattr(RDNA3Ops, f"scratch_store_b{len(b)*32}"), dtypes.void), \
-        src=(const(spill_offset+j*16), def_reg(x.dtype, b))) for j,b in enumerate(batches)]
+      if sub_idx is not None: spill_offset += sub_idx*4
+      return batch_scratch(True, spill_offset, x.dtype, regs)
     else:
       vgpr,lane = spill_offset
       return [UOp(Ops.INS, arg=(RDNA3Ops.v_writelane_b32, dtypes.void), src=(def_reg(x.dtype, r),
         const(lane+i+(sub_idx or 0))), tag=vgpr) for i,r in enumerate(regs)]
 
-  def fill(self, spill_offset:any, sub_idx:int|None, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
-    if regs[0].name[0] == 'v':
-      if sub_idx is not None:
-        return (ld := UOp(Ops.INS, src=(const(spill_offset+sub_idx*4),), arg=(RDNA3Ops.scratch_load_b32, x.dtype), tag=regs)), [ld]
-      batches = [regs[i*4:(i+1)*4] for i in range((len(regs)+3)//4)]
-      ops = [UOp(Ops.INS, src=(const(spill_offset+j*16),), \
-        arg=(getattr(RDNA3Ops, f"scratch_load_b{len(b)*32}"), x.dtype), tag=b) for j,b in enumerate(batches)]
-      return UOp(Ops.STACK, src=tuple(ops), tag=regs), ops
+  def fill(self, spill_offset:any, x:UOp, dst:tuple[Register,...], sub_idx:int|None=None) -> tuple[UOp, list[UOp]]:
+    if dst[0].name[0] == 'v':
+      if sub_idx is not None: spill_offset += sub_idx*4
+      ops = batch_scratch(False, spill_offset, x.dtype, dst)
+      return UOp(Ops.STACK, src=tuple(ops), tag=dst) if len(ops) > 1 else ops[0], ops
     else:
       vgpr,lane = spill_offset
       movs = [UOp(Ops.INS, src=(def_reg(x.dtype, vgpr),
-        const(lane+i+(sub_idx or 0))), arg=(RDNA3Ops.v_readlane_b32, x.dtype), tag=(r,)) for i,r in enumerate(regs)]
-      return UOp(Ops.STACK, src=tuple(movs), tag=regs), movs
+        const(lane+i+(sub_idx or 0))), arg=(RDNA3Ops.v_readlane_b32, x.dtype), tag=(r,)) for i,r in enumerate(dst)]
+      return UOp(Ops.STACK, src=tuple(movs), tag=dst), movs
 
   def copy(self, u:UOp, dst:VRegister|Register|tuple[Register,...]) -> tuple[UOp, list[UOp]]:
     slots, tag = copy_dst(dst)
