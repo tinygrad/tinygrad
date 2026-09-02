@@ -590,8 +590,8 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
   for opcode, pkt_cls in packet_types.items():
     delta_field = getattr(pkt_cls, 'delta', delta_base)
     special = _special.get(pkt_cls, 0)
-    decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_field.lo if delta_field else 0, delta_field.mask if delta_field else 0, delta_mul,
-                           special)  # type: ignore[attr-defined]
+    decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_field.lo if delta_field else 0, delta_field.mask if delta_field else 0, delta_mul,  # type: ignore[attr-defined]
+                           special)
   return decode_info, state_table
 
 _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3 = _build_decode_tables(PACKET_TYPES_RDNA3)
