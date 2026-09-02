@@ -93,23 +93,19 @@ class MultiBuffer:
   def size(self): return self.bufs[0].size
   @property
   def dtype(self): return self.bufs[0].dtype
-  def ref(self, cnt):
-    for b in self.bufs: b.ref(cnt)
-    return self
   def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
   def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
 
 class Buffer:
   profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
-               initial_value:bytes|pickle.PickleBuffer|None=None, uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
+               initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = Device.canonicalize(device), size, dtype, options, offset, 0
     self._bufs: dict[str, Any] = {}
     if base is None:
       assert offset == 0, "base buffers can't have offset"
       self._base = None
-      self._uop_refcount = uop_refcount
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
@@ -123,12 +119,7 @@ class Buffer:
   @property
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
-  def uop_refcount(self): return self.base._uop_refcount
-  @property
   def _buf(self) -> Any: return self._bufs[self.device]
-  def ref(self, cnt):
-    self.base._uop_refcount += cnt
-    return self
   # check if the underlying buffer is allocated and the current buffer/view is initialized
   def is_initialized(self) -> bool: return self.is_allocated() and self.device in self._bufs
   # check if the underlying buffer is allocated, possibly from the base object
@@ -176,11 +167,11 @@ class Buffer:
   def __reduce_ex__(self, protocol):
     buf:bytearray|pickle.PickleBuffer|None = None
     if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.uop_refcount)
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, self.base, self.offset, self.is_allocated())
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None)
     if self.is_allocated():
       buf = pickle.PickleBuffer(self.as_memoryview()) if protocol >= 5 else bytearray(self.as_memoryview())
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.uop_refcount)
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
   @property
   def trace_num(self) -> int:
     if not hasattr(self, '_trace_num'): self._trace_num = len(Buffer.profile_events)
