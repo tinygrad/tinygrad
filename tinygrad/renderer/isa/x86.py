@@ -7,7 +7,7 @@ from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype
-from tinygrad.renderer.isa import ISARenderer, Register, PreLinearKernelCtx, rdef, rdefs, VRegister
+from tinygrad.renderer.isa import ISARenderer, Register, PreLinearKernelCtx, rdef, rdefs, copy_dst, VRegister
 from tinygrad.helpers import getenv, NUM_CPU_THREADS, unwrap, Target
 
 # ***** X86 Ops *****
@@ -593,7 +593,7 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.END, name="x"), lower_end),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
-   [ctx.ren.copy(x.src[0], rdef(x)), nx] if rdef(x) != rdef(x.src[0]) else [nx]) if x.arg[0] in X86GroupOp.TwoAddress else None),
+   ctx.ren.copy(x.src[0], rdef(x))[1] + [nx] if rdef(x) != rdef(x.src[0]) else [nx]) if x.arg[0] in X86GroupOp.TwoAddress else None),
 ])
 
 # ***** X86 instruction encoding *****
@@ -837,12 +837,13 @@ class X86Renderer(ISARenderer):
   def is_two_address(self, x:UOp) -> bool: return x.arg[0] in X86GroupOp.TwoAddress
   def spill_pointer(self) -> UOp: return def_reg(dtypes.uint64, RSP)
   # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
-  def copy(self, x:UOp, regs:tuple[Register,...]) -> list[UOp]:
-    if x.op is Ops.BUFFER: x = x.replace(arg=replace(x.arg, dtype=dtypes.uint64))
-    assert len(regs) == 1, "x86 is single reg values"
-    ret = isel_matcher.rewrite(UOp(Ops.COPY, src=(x,), tag=regs[0]))
-    assert ret is not None, f"failed to copy {x}"
-    return [ret]
+  def copy(self, u:UOp, dst:VRegister|Register|tuple[Register,...]) -> tuple[UOp, list[UOp]]:
+    if u.op is Ops.BUFFER: u = u.replace(arg=replace(u.arg, dtype=dtypes.uint64))
+    slots, _ = copy_dst(dst)
+    assert len(slots) == 1, "x86 is single reg values"
+    ret = isel_matcher.rewrite(UOp(Ops.COPY, src=(u,), tag=slots[0]))
+    assert ret is not None, f"failed to copy {u}"
+    return ret, [ret]
 
   def spill(self, spill_offset:int, x:UOp) -> list[UOp]:
     disp = UOp.cconst(spill_offset, dtypes.uint32)

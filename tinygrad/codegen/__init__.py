@@ -18,14 +18,13 @@ from tinygrad.codegen.decomp.dtype import pm_dtype_decomps
 from tinygrad.codegen.decomp.op import get_late_rewrite_patterns, get_simplifying_rewrite_patterns
 from tinygrad.codegen.decomp.transcendental import get_transcendental_patterns
 from tinygrad.codegen.late.coalesce import indexing_simplify
-from tinygrad.codegen.late.mem2reg import Mem2regContext, pm_promote_regbufs
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
-from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite, pm_index_subregisters, pm_prepare_regalloc
+from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite, pm_prepare_regalloc, pm_index_subregisters
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, all_int, flatten, argsort, partition
 from tinygrad.uop.ops import _broadcast_shape, identity_element
@@ -431,7 +430,6 @@ def do_regalloc(kctx:PreLinearKernelCtx, lst:list[UOp]) -> list[UOp]:
   lst = line_rewrite(lst, ren.pre_regalloc_matcher, kctx)
   # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
   lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
-  lst = line_rewrite(lst, pm_promote_regbufs, Mem2regContext(lst, kctx))
   lst = line_rewrite(lst, pm_index_subregisters)
   lst = line_rewrite(lst, pm_regalloc_rewrite, LinearScanRegallocContext(lst, kctx))
   # the stack frame is only known after regalloc has assigned every spill slot
@@ -443,14 +441,19 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
 
   # instruction selection. NOTE: this must run on the sink we linearize, the ProgramInfo is already computed from the pre isel sink
   kctx: PreLinearKernelCtx|None = None
+  ins_schedule: dict[any, Ops]|None = None
   if isinstance(ctx, ISARenderer):
     kctx = ctx.kernel_ctx_type(sink, ctx, prg.arg)
     sink = graph_rewrite(sink, ctx.pre_isel_matcher, ctx=kctx, name="pre instruction selection", bottom_up=True)
-    sink = graph_rewrite(sink, ctx.isel_matcher, ctx=kctx, name="instruction selection", bottom_up=True)
-    sink = graph_rewrite(sink, pm_prepare_regalloc, ctx=ctx, name="assign children regs")
+    sink, rewrite_ctx = graph_rewrite(sink, ctx.isel_matcher, ctx=kctx, name="instruction selection", bottom_up=True, return_ctx=True)
+    # map arbitrary Ops.INS opcodes to equivalent rewritten Ops IR to preserve metadata for scheduling etc..
+    ins_schedule: dict[any, Ops] = {mc.arg[0]:u.op for u,mc in rewrite_ctx.replace.items() if mc.op is Ops.INS}
+    kctx.ins_schedule = ins_schedule
+    sink = graph_rewrite(sink, pm_prepare_regalloc, ctx=kctx, name="assign children regs")
+    # TODO: perform do_estimates by caching representative INS UOps and retrieving them post-linearize?
 
   # linearize graph
-  lst = line_rewrite(linearize(sink, ctx), pm_linearize_cleanups)
+  lst = line_rewrite(linearize(sink, ins_schedule), pm_linearize_cleanups)
 
   # isa renderers need to allocate registers
   if kctx is not None:
