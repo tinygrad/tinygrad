@@ -12,11 +12,6 @@ class LinearScanRegallocContext:
     self.uops, self.ren, self.idx = [u for u in uops if u.op in REG_OPS], ctx.ren, itertools.count()
     self.live_intervals: dict[VRegister, list[int]] = {}
 
-    # TODO: can still support some dynamic planning by popping from reserved when its lifetime is completely over
-    # NOTE: a bufblock is a reserved register block, or a UOp when the reg BUFFER was spilled to LOCAL and reserves nothing
-    reserved: set[Register] = {r for blk in ctx.bufblocks.values() if isinstance(blk, tuple) for r in blk}
-    reserved |= {r for u in uops if u.op is Ops.BUFFER for r in rdefs(u) if isinstance(r, Register)}
-
     lr = self.live_intervals
     range_vars: list[VRegister] = []
     def live_edge(u:UOp) -> tuple[VRegister,...]: return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))
@@ -42,7 +37,7 @@ class LinearScanRegallocContext:
     # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
     def alloc(v:VRegister, cons:list[tuple[Register, ...]]|None, i:int) -> tuple[Register,...]:
       cons = cons or v.candidates()
-      cons = [block for block in cons if all(r not in reserved for r in block)]
+      cons = [block for block in cons if all(r not in ctx.reserved_regs for r in block)]
       assert len(cons), f"no candidate register blocks provided for {v}"
       live_inv = {r:k for k,v in live.items() for r in v}
 

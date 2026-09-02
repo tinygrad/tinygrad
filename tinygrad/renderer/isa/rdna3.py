@@ -201,7 +201,9 @@ def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace
 
 def load(ctx, x:UOp, idx:UOp):
   if idx.addrspace is AddrSpace.REG:
-    return ctx.bufreg(idx, lambda x: ctx.gp_vgprs).after(idx)
+    if (buf := rafter(idx.src[0])).arg in ctx.overflows:
+      raise Exception("overflowed BUFFER")
+    return ctx.bufreg(idx).after(idx)
 
   n = idx.src[-1].src[0].val if idx.op is Ops.SHRINK else 1
   sz = n * idx.src[0].dtype.itemsize
@@ -212,7 +214,9 @@ def load(ctx, x:UOp, idx:UOp):
 
 def store(ctx, x:UOp, idx:UOp, val:UOp):
   if idx.addrspace is AddrSpace.REG:
-    defs = ctx.bufreg(idx, lambda x: ctx.gp_vgprs)
+    if (buf := rafter(idx.src[0])).arg in ctx.overflows:
+      raise Exception("overflowed BUFFER")
+    defs = ctx.bufreg(idx)
     return ctx.ren.copy(val.after(idx), rdefs(defs))[0]
 
   n = idx.src[-1].src[0].val if idx.op is Ops.SHRINK else 1
@@ -560,7 +564,7 @@ class CntType(Enum):
 
 class RDNA3PreLinearKernelCtx(PreLinearKernelCtx):
   def __init__(self, sink:UOp, ren:RDNA3Renderer, info:ProgramInfo):
-    super().__init__(sink, ren, info, 200)
+    super().__init__(sink, ren, info)
     # NOTE: entire kernel must fit on single CU? (WGP?)
     # 1536 vgprs per SIMD, 2 SIMD per CU
     # constrain waves*vgpr_limit <<< 1536*2, prevent dispatch hang
@@ -572,6 +576,32 @@ class RDNA3PreLinearKernelCtx(PreLinearKernelCtx):
     self.gp_vgprs, self.gp_sgprs = VGPRS[1:max_per_thread-n_spill_vgprs], SGPRS[5:]
     self.spill_vgprs: dict[Register, int] = {r:0 for r in VGPRS[max_per_thread-n_spill_vgprs:max_per_thread]}
     self.execop, self.vccop = self.reserved(EXEC, dtypes.uint32), self.reserved(VCC, dtypes.uint32)
+
+    self.bufregs: dict[tuple[ParamArg, int], UOp] = {}
+    self.n_reserved = 0
+
+    # detect buffer overflows, pre-allocate scratch space
+    rbufs: dict[int, UOp] = {u.arg.size*u.dtype.itemsize:u for u in sink.toposort() if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG}
+    sizes = list(sorted(rbufs.keys(), reverse=True))
+    spill_before = next((i for i,sz in enumerate(sizes) if sum(sizes[i:]) < len(self.gp_vgprs)*4), len(sizes))
+    self.overflows: dict[UOp, int] = {}
+
+    for sz in sizes[:spill_before]:
+      raise Exception()
+      buf = rbufs[sz]
+      vr = self.vreg(self.gp_vgprs, width=(buf.dtype.itemsize+3)//4)
+      self.overflows[buf.arg] = self.assign_spill_slot(vr, buf)
+
+  def bufreg(self, idx:UOp) -> UOp:
+    buf, idx = rafter(idx, True).src
+    while buf.op is not Ops.BUFFER: buf=buf.src[0]
+    ptr = (buf.arg, idx.src[0].val)
+    if ptr not in self.bufregs:
+      i, width = self.n_reserved, (buf.dtype.itemsize+3)//4
+      r = self.gp_vgprs[i:i+width]
+      self.n_reserved += width
+      self.bufregs[ptr] = self.reserved(r, buf.dtype)
+    return self.bufregs[ptr]
 
   def assign_spill_slot(self, v:VRegister, vdef:UOp) -> int|tuple[Register, int]:
     if v.cons[0] in VGPRS:

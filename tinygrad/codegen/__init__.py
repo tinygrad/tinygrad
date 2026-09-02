@@ -439,9 +439,9 @@ def do_regalloc(kctx:PreLinearKernelCtx, lst:list[UOp]) -> list[UOp]:
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
 
-  # instruction selection. NOTE: this must run on the sink we linearize, the ProgramInfo is already computed from the pre isel sink
   kctx: PreLinearKernelCtx|None = None
   ins_schedule: dict[any, Ops]|None = None
+  # instruction selection
   if isinstance(ctx, ISARenderer):
     kctx = ctx.kernel_ctx_type(sink, ctx, prg.arg)
     sink = graph_rewrite(sink, ctx.pre_isel_matcher, ctx=kctx, name="pre instruction selection", bottom_up=True)
@@ -449,17 +449,16 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
     # map arbitrary Ops.INS opcodes to equivalent rewritten Ops IR to preserve metadata for scheduling etc..
     ins_schedule: dict[any, Ops] = {mc.arg[0]:u.op for u,mc in rewrite_ctx.replace.items() if mc.op is Ops.INS}
     kctx.ins_schedule = ins_schedule
-    sink = graph_rewrite(sink, pm_prepare_regalloc, ctx=kctx, name="assign children regs")
-    # TODO: perform do_estimates by caching representative INS UOps and retrieving them post-linearize?
+    sink = graph_rewrite(sink, pm_prepare_regalloc, ctx=kctx, name="prepare regalloc")
 
   # linearize graph
   lst = line_rewrite(linearize(sink, ins_schedule), pm_linearize_cleanups)
 
   # isa renderers need to allocate registers
-  if kctx is not None:
+  if isinstance(ctx, ISARenderer):
     lst = do_regalloc(kctx, lst)
     if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
-  # NOTE: the LINEAR arg is the size of the stack frame, the assembler needs it to reserve scratch
+  # TODO: find cleaner way to pass spill_size seperate from renderer state??
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst), arg=kctx.spill_size if kctx is not None else None),))
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
