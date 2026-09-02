@@ -162,6 +162,20 @@ class TestMultiOutputGradient(unittest.TestCase):
     np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), rtol=1e-5)
     np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), rtol=1e-5)
 
+  def test_custom_kernel_aliased_output_views_backward(self):
+    def kernel(c:UOp, d:UOp, a:UOp) -> UOp:
+      c, d, a = c.flatten(), d.flatten(), a.flatten()
+      i = UOp.range(2, 0)
+      return UOp.group(c[i].store(a[i] * 2), d[i].store(a[i] * 3)).end(i).sink(arg=KernelInfo(name="aliased_outputs"))
+    def backward(grad_c:UOp, call:UOp): return (None, None, grad_c)
+
+    a = Tensor([1., 2.]).contiguous().realize()
+    a.requires_grad = True
+    out = Tensor.empty(4).contiguous().realize()
+    c, _, _ = Tensor.custom_kernel(out[:2], out[2:], a, fxn=kernel, grad_fxn=backward)
+    c.sum().backward()
+    np.testing.assert_equal(a.grad.numpy(), [1., 1.])
+
   def test_custom_kernel_multi_output_backward_interacting(self):
     a_np, b_np = np.random.randn(4, 4).astype(np.float32), np.random.randn(4, 4).astype(np.float32)
     a_ref, b_ref = Tensor(a_np), Tensor(b_np)
