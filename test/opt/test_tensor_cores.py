@@ -93,6 +93,15 @@ class TestTensorCores(unittest.TestCase):
         helper_tc_allclose(tc.dims[0]*8, tc.dims[1]*8, tc.dims[2], tc.dtype_in, tc.dtype_out,
                            extra_opts=[Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))]*3)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_padto_warp(self):
+    # the WARP is the hardware simdgroup width, it can't be padded
+    tc = Device[Device.DEFAULT].renderer.tensor_cores[0]
+    sche = Scheduler(Tensor.empty(64, 64, dtype=tc.dtype_in).matmul(Tensor.empty(64, 64, dtype=tc.dtype_in), dtype=tc.dtype_out)
+                     .schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
+    sche.apply_opt(Opt(OptOps.TC, 0, (-1, 0, 1)))
+    with self.assertRaises(KernelOptError): sche.apply_opt(Opt(OptOps.PADTO, sche.axis_types.index(AxisType.WARP), 7))
+
   @Context(ALLOW_TF32=1)
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_group_reduce(self):
