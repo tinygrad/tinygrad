@@ -93,7 +93,7 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   params: list[UOp] = []
   graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")
   params = sorted(params, key=lambda x: x.arg.slot)
-  # the unbound BUFFER inputs bind positionally to the output PARAMs, just like the args bind to the input PARAMs
+  # call arguments bind to the body's input PARAMs; outputs are unbound BUFFER declarations already shared by identity
   args = c.src[1:]
 
   # NOTE: this isn't really needed. it's okay if there's unused args in the function
@@ -130,7 +130,7 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
-  # resolve calls with unbound BUFFER inputs (inline the body)
+  # resolve calls with unbound BUFFER output declarations (inline the body)
   (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.num_returned else None),
 
   # resolve AFTER on unbound BUFFER (call outputs)

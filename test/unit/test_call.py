@@ -276,50 +276,42 @@ class TestCallSchedule(unittest.TestCase):
     out = f(a) + 2
     np.testing.assert_allclose(out.numpy(), np.arange(8, dtype=np.float32).reshape(4, 2) + 3)
 
-class TestArgOrder(unittest.TestCase):
-  """RETURNED placeholders can appear anywhere in a call's srcs: slots are src positions, nothing reorders"""
-  def make_intersperse_call(self, x, precompile=False):
-    # call with sources (body, returned(slot=0), input(slot=1)): the input is the input, the output binds the RETURNED
+class TestOutputIdentity(unittest.TestCase):
+  """call outputs are unbound BUFFER declarations in the body, never positional call arguments"""
+  def make_call(self, x, precompile=False):
     dev = x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
-    r0 = UOp.returned(0, x.dtype, x.shape, device=dev)
-    o0 = UOp.param(0, x.dtype, x.shape, dev)
-    p1 = UOp.param(1, x.dtype, x.shape, dev)
+    out = UOp.returned(x.dtype, x.shape, device=dev)
+    inp = UOp.param(0, x.dtype, x.shape, dev)
     from tinygrad.uop.ops import CallInfo
-    return UOp(Ops.CALL, src=(UOp.sink(o0.store(p1.reshape(x.shape) * 2)), r0, x.uop),
+    return UOp(Ops.CALL, src=(UOp.sink(out.store(inp.reshape(x.shape) * 2)), x.uop),
                arg=CallInfo(None, 't', precompile, False, None))
 
-  def test_intersperse_returned(self):
+  def test_output_is_body_declaration(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
-    call = self.make_intersperse_call(x)
+    call = self.make_call(x)
+    self.assertEqual(len(call.src), 2)
+    self.assertIs(call.returned_bufs[0].unsharded_base, call.src[0].src[0].src[0].unsharded_base)
     out = Tensor(call.returned_outputs[0], device=x.device) + 1
     np.testing.assert_equal(out.numpy(), [1, 3, 5])
 
-  def test_intersperse_returned_precompile(self):
+  def test_output_precompile(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
-    call = self.make_intersperse_call(x, precompile=True)
-    # the transform must preserve the RETURNED's src position: its placeholder is at src 1, the input stays at src 2
+    call = self.make_call(x, precompile=True)
     from tinygrad.tensor import transform_precompiled_call
     new = transform_precompiled_call(call)
-    new_call = new.src[0].src[1].src[1]
-    # the out buffer takes the RETURNED's position (src 1), the input value keeps its position (src 2)
-    self.assertEqual(new_call.src[1].op, Ops.BUFFER)
-    self.assertEqual(new_call.src[1].arg.size, 3)
-    self.assertEqual(new_call.src[2].op, Ops.ADD)
-    # the body binds positionally: store dest at slot 0 (the RETURNED's position), input param at slot 1
-    store = [u for u in new_call.src[0].toposort(enter_calls=False) if u.op is Ops.STORE][0]
-    self.assertEqual(store.src[0].arg.slot, 0)
-    self.assertEqual([u.arg.slot for u in store.src[1].toposort(enter_calls=False) if u.op is Ops.PARAM], [1])
+    new_call = next(u for u in new.toposort() if u.op is Ops.CALL)
+    self.assertEqual(len(new_call.src), 3)  # body, bound input, bound output storage
+    self.assertEqual(new_call.num_returned, 0)
+    self.assertTrue(new_call.src[2].has_buffer_identity())
 
-  def test_intersperse_returned_gradient(self):
+  def test_output_gradient(self):
     x = Tensor([1.0, 2.0, 3.0]).realize()
     x.requires_grad = True
     dev = x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
-    r0 = UOp.returned(0, dtypes.float, x.shape, device=dev)
-    o0 = UOp.param(0, dtypes.float, x.shape, dev)
-    p1 = UOp.param(1, dtypes.float, x.shape, dev)
+    out = UOp.returned(dtypes.float, x.shape, device=dev)
+    inp = UOp.param(0, dtypes.float, x.shape, dev)
     from tinygrad.uop.ops import CallInfo
-    body = UOp.sink(o0.store(p1.reshape(x.shape) * p1.reshape(x.shape)))
-    call = UOp(Ops.CALL, src=(body, r0, x.uop), arg=CallInfo(None, 't', False, False, None))
+    call = UOp(Ops.CALL, src=(UOp.sink(out.store(inp * inp)), x.uop), arg=CallInfo(None, 't', False, False, None))
     y = Tensor(call.returned_outputs[0], device=x.device)
     y.sum().backward()
     np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])

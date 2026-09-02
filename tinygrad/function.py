@@ -3,7 +3,7 @@ from dataclasses import replace
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, AllocCtx, pm_canonicalize_unbound
 from tinygrad.nn.state import get_state_dict
 
 def add_to_ctx(ctx, x:UOp):
@@ -13,8 +13,8 @@ def add_to_ctx(ctx, x:UOp):
   return ret
 
 pm_ctx = PatternMatcher([
-  # optional BUFFERs are scoped inside their CALL: they are never implicit inputs
-  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: None if x.is_optional_buf else add_to_ctx(ctx,x)),
+  # unbound BUFFERs are scoped inside their CALL: they are never implicit inputs
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: None if x.is_unbound else add_to_ctx(ctx,x)),
   (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"),
    lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
 ])
@@ -81,6 +81,7 @@ class _function(Generic[ReturnType]):
 
     fret = UOp.call_outputs(uret.src if isinstance(ret, tuple) else (uret,), *call_uops, grad_fxn=self.grad_fxn, name=name,
                             precompile=self.precompile, precompile_backward=self.precompile_backward)
+    fret = graph_rewrite(fret, pm_canonicalize_unbound, AllocCtx(), bottom_up=True)
 
     if DEBUG >= 2:
       print("  "*_function.depth+f"function {uret.key.hex()[:8]} in {(time.perf_counter()-st)*1000:8.2f} ms: {name}")

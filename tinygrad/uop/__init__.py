@@ -23,7 +23,7 @@ class Ops(FastEnum):
 
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
-  # CALL is a kernel invocation; calls with optional BUFFER inputs are value-producing (and gradient-able), the rest are opaque
+  # CALL is a kernel invocation; bodies with unbound BUFFER output declarations are value-producing (and gradient-able)
   PARAM = auto(); CALL = auto()
 
   # renderer

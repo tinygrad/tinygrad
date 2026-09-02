@@ -138,9 +138,9 @@ spec_tensor = PatternMatcher([
   (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(),), name="u"),
    lambda u: dtypes.is_float(u.dtype) or u.src[0].base.is_invalid),
 
-  # BUFFER (optional buffers are unbound declarations whose storage is bound later: like RETURNED, they can be scalar)
+  # BUFFER (unbound buffers are declarations whose storage is bound later, and can be scalar)
   (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf:
-   True if buf.is_optional_buf else (isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device))
+   True if buf.is_unbound else (isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device))
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
   # a Variable is a 0-d ALU BUFFER with a value range and no device
