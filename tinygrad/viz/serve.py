@@ -368,7 +368,7 @@ wave_colors = {"WMMA": "#1F7857", **{x:"#ffffc0" for x in ["VALU", "VINTERP"]}, 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, None, None]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
-                                          WAVEEND, WAVEEND_RDNA4, CDNA_TIMESTAMP, CDNA_WAVEEND, WAVERDY)
+                                          WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND, WAVERDY)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
@@ -416,8 +416,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   yield ProfilePointEvent("", "JSON", "waveColors", list(wave_colors.items()), ts=Decimal(0))
   for p, info in map_insts(data, lib, target):
-    if (isinstance(p, CDNA_TIMESTAMP) and p._reserved == 0) or (isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) and p.is_marker):
-      pair = (p._time, p.timestamp if isinstance(p, CDNA_TIMESTAMP) else p.delta)
+    if isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) and p.is_marker:
+      pair = (p._time, p.delta)
       if prev_pair is None: prev_pair = pair
       else:
         (s0, r0), (s1, r1) = prev_pair, pair
