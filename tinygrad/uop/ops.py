@@ -779,6 +779,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.UNSHARD: return self.src[0].base
     return self
 
+  # the storage this uop ultimately targets: base with UNSHARD, BITCAST and AFTER stripped
+  @property
+  def storage_base(self) -> UOp:
+    b = self.unsharded_base
+    while b.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: b = b.src[0].unsharded_base
+    return b
+
   # cached property here makes external_uop_gc fail, why?
   @property
   def as_shape(self) -> tuple[sint, ...]:

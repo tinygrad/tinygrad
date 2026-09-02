@@ -173,7 +173,7 @@ def fix_group_for_reduce(x:UOp):
   if len(reduce_gfr) == 0: return None
 
   # NOTE: if there's other locals here, we need them in the buffer too
-  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] == AxisType.LOCAL]
+  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] in (AxisType.WARP, AxisType.LOCAL)]
 
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
@@ -225,10 +225,14 @@ def expand_horizontal_reduce(r:UOp):
   vals = [inp.index(*idx) for idx in itertools.product(*[range(inp.max_shape[a]) for a in range(r.arg[1])])]
   return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
 
-# an Invalid in a REDUCE source is that reduce's identity
+# an Invalid in a REDUCE source is that reduce's identity. a WMMA is a rangeless reduce, so it takes the ADD identity
 pm_reduce_identity = PatternMatcher([
   (invalid_gate.reduce(allow_any_len=True, name="red"), lambda red,cond,x,i:
    red.replace(src=(cond.where(x, x.const_like(identity_element(red.arg[0], red.dtype))),)+red.src[1:])),
+  (UPat(Ops.WMMA, src=(invalid_gate, UPat.var("b"), UPat.var("acc")), name="w"),
+   lambda w,cond,x,i,b,acc: w.replace(src=(cond.where(x, x.const_like(0)), b, acc))),
+  (UPat(Ops.WMMA, src=(UPat.var("a"), invalid_gate, UPat.var("acc")), name="w"),
+   lambda w,cond,x,i,a,acc: w.replace(src=(a, cond.where(x, x.const_like(0)), acc))),
 ])
 
 pm_reduce_local = pm_wmma_add+PatternMatcher([

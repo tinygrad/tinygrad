@@ -6,9 +6,10 @@ from typing import Any, Callable, cast, get_args, ParamSpec, TypeGuard, TypeVar,
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize
+from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
 from tinygrad.uop.ops import resolve_returned_after, remove_all_tags
+from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -28,12 +29,11 @@ class AllocCtx:
 def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
 
 def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
-def disk_like(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS"))
-def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS", "NPY", "PYTHON"))
+def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
 def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   # copies to disk are replaced with the disk buffer
-  if disk_like(u) and u.tag is None:
+  if on_disk(u) and u.tag is None:
     ctx.buffer_map[u] = u.empty_like()
     return u.rtag(())
   # all copies from disk/numpy are realized into a real buffer
@@ -54,8 +54,8 @@ def replace_contig_with_store_after(u:UOp):
   if u.is_virtual: return None
   # if size is 0, remove the contig
   if 0 in u.shape: return u.src[0]
-  # no real contig for DISK/TINYFS tensors, they are left alone
-  if disk_like(u): return u.rtag(None)
+  # no real contig for DISK tensors, they are left alone
+  if on_disk(u): return u.rtag(None)
   buf = u.empty_like()
   return buf.after(buf.store(u.src[0])).rtag(u.tag)
 
@@ -65,11 +65,6 @@ def wrap_tagged_in_contig(x:UOp):
   # () is falsy but not None, so it isn't re-tagged like a bare (tag=None) node would be; just strip it here
   if not x.tag: return x.rtag(None)
   return x.rtag(None).contiguous(tag=x.tag)  # the tag moves onto the wrapping CONTIGUOUS
-
-def replace_store_after_with_contig(u:UOp, src:UOp):
-  assigned_to = u
-  while assigned_to.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -163,8 +158,6 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # remove extra CONTIGUOUS on AFTER (only when target is contiguous)
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
-  # replace AFTER+STORE with CONTIGUOUS when target is not a buffer
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat(name="src")))), name="u"), replace_store_after_with_contig),
   # replace CONTIGUOUS with STORE+AFTER
   (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_store_after),
   # remove DETACH/CONTIGUOUS_BACKWARD (allows more contiguous removal)
@@ -187,6 +180,7 @@ pm_replace_buf = PatternMatcher([
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
+  if SPEC: type_verify(big_sink, spec_tensor)
   # bases to realize: same predicate as Tensor.realize
   ctx = AllocCtx(bases={base for x in big_sink.src if not (base:=x.base).is_virtual and not base.has_buffer_identity()
                         and base.op is not Ops.AFTER and base.addrspace is not AddrSpace.ALU})
@@ -211,7 +205,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
   # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
   for u in big_sink.toposort(enter_calls=False):
-    if u.op is Ops.COPY and disk_like(u): ctx.stores.append(u)  # copies to disk are stores to the disk buffer
+    if u.op is Ops.COPY and on_disk(u): ctx.stores.append(u)  # copies to disk are stores to the disk buffer
     # bound Variables are call inputs and RETURNEDs are call outputs: only other AFTERs are stores
     elif u.op is Ops.AFTER and not u.is_bound_var and u.src[0].unsharded_base.op is not Ops.RETURNED:
       ctx.stores.append(u)
@@ -423,7 +417,7 @@ class Tensor(RandMixin):
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
     if self.dtype in dtypes.weaks: self.uop = self.uop.clone()
-    is_disk = isinstance(self.device, str) and self.device.startswith(("DISK", "TINYFS"))
+    is_disk = on_disk(self.uop)
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
     # broadcast x (shape only, dtype must match)
@@ -438,6 +432,16 @@ class Tensor(RandMixin):
     # TODO: this is a hack for writing to DISK. remove with working assign
     if is_disk:
       (b:=self._buffer()).copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=x._data()))
+      return self
+    # a STORE can only write into storage: the target must be backed by a BUFFER (possibly under views)
+    assigned_to = self.uop.storage_base
+    # assigning to a value (not storage-backed and not a CONTIGUOUS realization point) is initialization,
+    # not a write: a Tensor.assign always overwrites the whole tensor, so the pending value is dead
+    if assigned_to.op not in {Ops.BUFFER, Ops.CONTIGUOUS}:
+      # x is the new value: alias it if it materializes on its own (a CONTIGUOUS or a load from a creation device),
+      # otherwise give it a realization point so this tensor gets storage of its own
+      if x.uop.op is not Ops.CONTIGUOUS and not (x.uop.op is Ops.COPY and is_creation_device(x.uop.src[0])): x = x.contiguous()
+      self.uop = x.uop
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
@@ -682,7 +686,7 @@ class Tensor(RandMixin):
              if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
         raise RuntimeError("can't setitem on a tensor with other uses")
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
-    is_disk = isinstance(self.device, str) and self.device.startswith("DISK")
+    is_disk = on_disk(self.uop)
     advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
     realized = is_disk or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized()
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):

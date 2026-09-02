@@ -1,4 +1,4 @@
-import math
+import math, functools
 from typing import Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
 from tinygrad.uop.render import print_uops, pyrender
@@ -122,8 +122,10 @@ spec_shared = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
-  # STORE in tensor graph: store a value into a target
-  (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
+  # STORE: the target must be storage or a CONTIGUOUS realization point (or an AFTER/BITCAST/view of one);
+  # CONTIGUOUS targets are written into the buffer the CONTIGUOUS creates. INDEX stores are checked above
+  (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x:
+   True if (b:=x.storage_base).op in {Ops.BUFFER, Ops.PARAM, Ops.RETURNED, Ops.CONTIGUOUS} else None if b.op is Ops.INDEX else False),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 5),
@@ -270,17 +272,19 @@ spec_kernel_graph = PatternMatcher([
 
 # **** pyrender (move this) ****
 
-# late imports to avoid circular import
-from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.schedule.rangeify import BufferizeOpts
-from tinygrad.renderer import Estimates
-glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
-                        "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
-                        "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-                        "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates}
+# circular-import-safe eval globals for pyrender round-tripping (lazy: codegen/schedule/renderer are heavy)
+@functools.cache
+def pyrender_globals() -> dict[str, Any]:
+  from tinygrad.codegen.opt import Opt, OptOps
+  from tinygrad.schedule.rangeify import BufferizeOpts
+  from tinygrad.renderer import Estimates
+  return {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
+          "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
+          "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
+          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
-  exec(code, glbls, lcls)
+  exec(code, pyrender_globals(), lcls)
   return lcls['ast']
 
 def test_pyrender(test_ast:UOp, assert_parents=True):

@@ -68,6 +68,14 @@ bare_const = UPat.any(UPat(Ops.CONST), UPat(Ops.STACK, src=UPat(Ops.CONST)))
 casted_const = UPat.any(p:=UPat(Ops.CAST, src=(UPat(Ops.CONST),)), UPat(Ops.STACK, src=UPat.any(p, UPat(Ops.CONST, arg=Invalid))))
 def const_arg(u:UOp):
   return tuple(const_arg(s) for s in u.src) if u.op is Ops.STACK else u.val
+
+def lift_reduce_gate(red:UOp, cond:UOp, x:UOp, i:UOp) -> UOp|None:
+  # a REDUCE moves inside the gate clauses without its ranges: they invalidate every lane at once, so that gate lifts out
+  if red.arg[1] != 0: return None
+  keep, lift = partition(cond.split_uop(Ops.AND), lambda c: any(rr in c.ranges for r in red.src[1:] for rr in r.ranges))
+  inner = keep[0].uprod(*keep[1:]).where(x, i) if keep else x
+  return lift[0].uprod(*lift[1:]).where(red.replace(src=(inner,)+red.src[1:]), i) if lift else None
+
 pm_data_invalid = PatternMatcher([
   (invalid_pat.broadcast(), lambda i: i),
   (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_pat,)), lambda i: i),
@@ -77,6 +85,7 @@ pm_data_invalid = PatternMatcher([
   (UPat(GroupOp.Binary, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i)),
   (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i)),
   (UPat(GroupOp.Binary-GroupOp.Comparison, src=[invalid_pat, UPat()]), lambda i: i),
+  (invalid_gate.reduce(allow_any_len=True, name="red"), lift_reduce_gate),
   # an Invalid condition poisons the whole where; a gated Invalid condition lifts the gate out
   (invalid_pat.where(UPat(), UPat()), lambda i: i),
   (invalid_gate.where(UPat.var("a"), UPat.var("b")), lambda cond,x,i,a,b: cond.where(x.where(a,b), i)),

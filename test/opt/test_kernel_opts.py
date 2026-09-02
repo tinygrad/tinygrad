@@ -275,6 +275,28 @@ class TestKernelOpts(unittest.TestCase):
     with Context(ALLOW_TF32=1):
       helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out), [[Opt(OptOps.TC, 0, (-1, 2, 2))]], check_default_opt=False, atol=3e-2, rtol=1e-3)
 
+  @unittest.skipUnless(any(tc.dtype_in in (dtypes.half, dtypes.float) for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                       "test requires half or float tensor cores")
+  def test_tc_padto_full_upcast(self):
+    # a fully upcast pad lane makes a WMMA operand entirely Invalid
+    tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in in (dtypes.half, dtypes.float))
+    Tensor.manual_seed(3)
+    a, b = Tensor.rand(17, 23, dtype=tc.dtype_in).realize(), Tensor.rand(23, 29, dtype=tc.dtype_in).realize()
+    with Context(ALLOW_TF32=1):
+      helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out),
+                            [[Opt(OptOps.TC, 0, (-1, 2, 1)), Opt(OptOps.PADTO, 0, 4), Opt(OptOps.SPLIT, 0, (0, AxisType.UPCAST))]],
+                            check_default_opt=False, atol=3e-2, rtol=1e-3)
+
+  def test_padto_nested_reduce(self):
+    a = (Tensor.arange(2*3, dtype=dtypes.float).reshape(2, 3) + 1).clone().realize()  # [[1, 2, 3], [4, 5, 6]]
+    # the pad gate has the outer reduce's range, the inner reduce must not resolve it with its own identity
+    pad_outer = [[Opt(OptOps.PADTO, 1, 4)]]
+    helper_linearizer_opt(a.max(1).sum(0), pad_outer, wanna_output=[[3+6]])
+    helper_linearizer_opt((-a).sum(1).max(0), pad_outer, wanna_output=[[-6]])
+    helper_linearizer_opt(a.prod(1).sum(0), pad_outer, wanna_output=[[6+120]])
+    # both reduce axes padded: the outer clause lifts out, the inner clause is the inner reduce's identity
+    helper_linearizer_opt(a.max(1).sum(0), [[Opt(OptOps.PADTO, 0, 4), Opt(OptOps.PADTO, 1, 4)]], wanna_output=[[3+6]])
+
   def test_padto_unrolled_prod(self):
     a = (Tensor.arange(4*17, dtype=dtypes.float).reshape(4, 17) / 100 + 1).clone().realize()
     helper_linearizer_opt(a.prod(1), [[Opt(OptOps.PADTO, 1, 32), Opt(OptOps.SPLIT, 1, (0, AxisType.UNROLL)),

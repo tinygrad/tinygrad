@@ -11,7 +11,8 @@ from test.helpers import slow, replace_opts
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.codegen.opt.tc import amd_cdna_1616128
+from tinygrad.codegen.opt.postrange import Scheduler
+from tinygrad.renderer.tc import amd_cdna_1616128
 
 # TODO: write a clean version of this
 from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_opt
@@ -91,6 +92,23 @@ class TestTensorCores(unittest.TestCase):
       with self.subTest(tc=tc):
         helper_tc_allclose(tc.dims[0]*8, tc.dims[1]*8, tc.dims[2], tc.dtype_in, tc.dtype_out,
                            extra_opts=[Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))]*3)
+
+  @Context(ALLOW_TF32=1)
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_group_reduce(self):
+    tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in not in dtypes.fp8s)
+    sche = Scheduler(Tensor.empty(16, 64, dtype=tc.dtype_in).matmul(Tensor.empty(64, 16, dtype=tc.dtype_in), dtype=tc.dtype_out)
+                      .schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
+    sche.apply_opt(Opt(OptOps.TC, 0, (-1, 0, 1)))
+    axis = sche.axis_types.index(AxisType.REDUCE)
+    if AxisType.UNROLL in sche.axis_types:
+      # this tc keeps an unrolled reduce outside the WMMA, grouping inside it must be rejected
+      with self.assertRaises(KernelOptError): sche.apply_opt(Opt(OptOps.SPLIT, axis, (2, AxisType.GROUP_REDUCE)))
+    else:
+      x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
+      helper_linearizer_opt(x.matmul(y, dtype=tc.dtype_out),
+                            [[Opt(OptOps.SPLIT, axis, (amt, AxisType.GROUP_REDUCE, top))] for amt in (2, 4) for top in (False, True)],
+                            apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_nested_reduce(self):
