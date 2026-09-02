@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
-import functools, time, itertools, decimal, weakref, collections
+import functools, time, itertools, decimal, weakref, collections, os
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition
@@ -72,7 +72,7 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_
 # *****************
 # 1.1. prep: staging copies
 
-STAGING_SIZE, STAGING_SLOTS = 128 << 20, 2
+STAGING_SIZE, STAGING_SLOTS = (4 if os.getenv("CI") else 128) << 20, 2 # the staging mlocks into the device: ci runners cap locked memory at 8mb
 
 @functools.cache
 def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
