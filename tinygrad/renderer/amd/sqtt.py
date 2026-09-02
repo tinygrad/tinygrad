@@ -656,40 +656,41 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   # map pcs to insts
   from tinygrad.viz.serve import amd_decode
   pc_map = amd_decode(lib, target)
-  wave_pc:dict[int, int] = {}
-  # only processing packets on one [CU, SIMD] unit
-  def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
+  wave_pc:dict[tuple[int, int], int] = {}
+  # RDNA selects one SIMD for instruction tracing, CDNA traces multiple SIMDs
+  simd:int = 0
   for p in decode(data):
-    if not simd_select(p): continue
+    if not getattr(p, "cu", 0) == 0: continue
+    if isinstance(p, LAYOUT_HEADER): simd = p.simd
     if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
-      assert p.wave not in wave_pc, "only one inflight wave per unit"
-      wave_pc[p.wave] = next(iter(pc_map))
+      if (key:=(p.simd, p.wave)) in wave_pc: raise AssertionError("only one inflight wave per unit")
+      wave_pc[key] = next(iter(pc_map))
     elif isinstance(p, (WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)):
-      pc = wave_pc.pop(p.wave)
+      pc = wave_pc.pop((p.simd, p.wave))
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
     elif isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
         if p.mask & (1 << wave):
-          inst = pc_map[pc:=wave_pc[wave]]
-          wave_pc[wave] += inst.size()
+          inst = pc_map[pc:=wave_pc[(simd, wave)]]
+          wave_pc[(simd, wave)] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
     # map INST events on this SIMD to the program counter, we know the waves
     elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)) and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_")):
-      inst = pc_map[pc:=wave_pc[p.wave]]
+      inst = pc_map[pc:=wave_pc[(simd, p.wave)]]
       # s_delay_alu, s_wait_alu and s_barrier_wait instructions are skipped
       while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU", "S_BARRIER_WAIT"}:
-        wave_pc[p.wave] += inst.size()
-        inst = pc_map[pc:=wave_pc[p.wave]]
+        wave_pc[(simd, p.wave)] += inst.size()
+        inst = pc_map[pc:=wave_pc[(simd, p.wave)]]
       # assert branch always has a JUMP packet
       if "BRANCH" in inst_op and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("JUMP")):
         raise AssertionError(f"{inst_op} can only be followed by JUMP, got {p}")
       # JUMP handling
       if isinstance(p, (INST, INST_RDNA4)) and p.op in {InstOp.JUMP, InstOpRDNA4.JUMP}:
         x = getattr(inst, 'simm16') & 0xffff
-        wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
+        wave_pc[(simd, p.wave)] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
       else:
-        wave_pc[p.wave] += inst.size()
+        wave_pc[(simd, p.wave)] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
     # for all other packets (VMEMEXEC, ALUEXEC, OTHER_ INST, etc.), yield with None
     else: yield (p, None)
