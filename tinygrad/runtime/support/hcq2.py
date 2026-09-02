@@ -141,7 +141,7 @@ class HCQDepsTracker: # per buffer base, the last write and the last read of eve
       (self.writes if i in write else self.reads)[key][dep[:2]] = dep
     return dedup(waits)
 
-@dataclass
+@dataclass(eq=False)
 class BatchCtx:
   batch:list[tuple[UOp, tuple[str, ...], str]] # (call, devices, queue) per enqueued call
   profile:bool
@@ -149,7 +149,6 @@ class BatchCtx:
   queues:dict[str, list[str]] = field(init=False)
   first:dict[tuple[str, str], int] = field(init=False); last:dict[tuple[str, str], int] = field(init=False) # noqa: E702
   signal_tags:set[int] = field(init=False)
-  slots_uid:int = field(default_factory=lambda: next(UOp.unique_num))
 
   def __post_init__(self):
     self.queues, self.first, self.last = {}, {}, {}
@@ -161,12 +160,15 @@ class BatchCtx:
 
   def epilogue_queue(self, dev:str) -> str: return "COMPUTE:0" if len(self.queues[dev]) > 1 else self.queues[dev][0] # closes the device
 
+  @functools.cache
   def slots(self, devs:tuple[str, ...]) -> UOp:
     n = len(self.queues[devs[0]]) + 1 + (2 * len(self.batch) if self.profile else 0)
-    return UOp.placeholder((n,), dtypes.uint64, self.slots_uid, device=devs, volatile=True, tag="slots")
+    return UOp.placeholder((n,), dtypes.uint64, next(UOp.unique_num), device=devs, volatile=True, tag="slots")
 
+  @functools.cache
   def queue_signal(self, devs:tuple[str, ...], queue:str) -> UOp: return self.slots(devs)[(i:=self.queues[devs[0]].index(queue)):i+1]
 
+  @functools.cache
   def sched_timeline(self, devs:tuple[str, ...]) -> UOp: return self.slots(devs)[(i:=len(self.queues[devs[0]])):i+1]
 
   def stamps(self, devs:tuple[str, ...], tag:int) -> tuple[int, ...]:
@@ -220,7 +222,7 @@ def _epilogue(ctx:BatchCtx, dev:str) -> UOp:
   bump = UOp(Ops.INS, arg=("store", dtypes.void), src=(timeline((dev,)), timeline_value((dev,)) + UOp.const(1, dtypes.uint64)))
   return make_submit(*waits, bump, devs=dev, queue=ctx.epilogue_queue(dev))
 
-def _finalize_batch(ctx:BatchCtx) -> UOp: # the batch as one call: every wait is known before any submit, a call signals only if a later one waits
+def _finalize_batch(ctx:BatchCtx) -> UOp:
   call_waits = [_wait_ins(ctx, c, d[0], q, tag) for tag, (c, d, q) in enumerate(ctx.batch)]
   submits, kerns = _emit_submits(ctx, call_waits)
   submits += [_epilogue(ctx, dev) for dev in ctx.queues]
@@ -245,8 +247,8 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
 @dataclass
 class EncodeCtx: # the batch's devices, the blobs its queues render and the inputs its body reads
   devs:tuple[str, ...]
-  blobs:dict[UOp, tuple[bytes, list[tuple[int, UOp]]]] = field(default_factory=dict) # cmdbuf placeholder -> (bytes, link words at offsets)
-  inputs:list[tuple[UOp, str]] = field(default_factory=list) # (input, device) per slot of the table the body reads addresses from
+  blobs:dict[UOp, tuple[bytes, list[tuple[int, UOp]]]] = field(default_factory=dict) # placeholder -> (its bytes, the link rows to fold in)
+  inputs:dict[tuple[UOp, str], int] = field(default_factory=dict) # (input, device) -> its slot in the table the body reads addresses from
   table:UOp = field(default_factory=lambda: UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="inputs")) # sized once encoded
 
 class HWQueue:
@@ -258,7 +260,7 @@ class HWQueue:
     self.dev = Device[self.devs[0]]
     self.blob, self.patches = bytearray(), list[tuple[int, UOp]]()
 
-  def q(self, *words): # a word is an int, a const uop, or a patch uop the blob keeps a slot for
+  def q(self, *words) -> int:
     for w in words:
       c = w
       while isinstance(c, UOp) and c.op is Ops.CAST: c = c.src[0]
@@ -268,38 +270,54 @@ class HWQueue:
       else:
         v, n = (c.val, w.dtype.itemsize) if isinstance(w, UOp) else (c, 4)
         self.blob += (v & (1 << 8 * n) - 1).to_bytes(n, 'little')
+    return len(self.blob)
 
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
 
 def input_addr(ctx:EncodeCtx, g:UOp) -> UOp|None: # an input's address is only known at exec: the body reads it from the table
   base, off = unwrap_view(g.src[0])
-  if (param:=base.src[0].base if base.op is Ops.MSELECT else base).op is not Ops.PARAM or param.tag is not None: return None
-  if (key:=(base, to_tuple(g.arg)[0])) not in ctx.inputs: ctx.inputs.append(key)
-  return ctx.table.index(ctx.inputs.index(key)).load() + UOp.const(off, dtypes.uint64)
+  param = base.src[0].base if base.op is Ops.MSELECT else base # an input is an untagged param, or a lane of one
+  if param.op is not Ops.PARAM or param.tag is not None: return None
+  slot = ctx.inputs.setdefault((base, to_tuple(g.arg)[0]), len(ctx.inputs))
+  return ctx.table.index(slot).load() + UOp.const(off, dtypes.uint64)
 pm_input_addr = PatternMatcher([(UPat(Ops.GETADDR, name="g"), input_addr)])
 
-def is_link_value(w:UOp) -> bool: # resolvable when the linear links: no variables, memory reads, or value params
+def _is_link_patch(w:UOp) -> bool:
   if w.op is Ops.GETADDR: return True
   if w.op in {Ops.LOAD, Ops.INDEX, Ops.PARAM} or w.is_variable: return False
-  return all(is_link_value(s) for s in w.src)
+  return all(_is_link_patch(s) for s in w.src)
+
+def patch(buf:UOp, rows:list[tuple[int, UOp]], *deps:UOp) -> UOp: # the buffer after every row's word is stored at its byte offset
+  groups:dict[tuple[DType, int], list[tuple[int, UOp]]] = {}
+  for o, w in rows: groups.setdefault((w.dtype, o % w.dtype.itemsize), []).append((o, w))
+
+  stores = []
+  for (dt, phase), grp in groups.items():
+    view = buf[phase:phase + (buf.max_numel() - phase) // dt.itemsize * dt.itemsize].bitcast(dt).after(*deps)
+    stores.append(view.index(UOp.stack(*[UOp.const((o - phase) // dt.itemsize) for o, _ in grp])).store(UOp.stack(*[w for _, w in grp])))
+  return buf.after(*deps, *stores)
 
 def encode_submit(hq:HWQueue) -> UOp:
+  # applying the rewrite
   for u in hq.lin.src: hq.q_rewrite.rewrite(u, ctx=hq)
+
+  # merge blobs into one
   stream, views = len(hq.blob), {}
   for l in dedup([g.src[0] for _, w in hq.patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR]):
     hq.blob += bytes(-len(hq.blob) % 128)
-    start = len(hq.blob)
-    hq.q(*l.src)
-    views[l] = (start, len(hq.blob))
+    views[l] = (len(hq.blob), hq.q(*l.src))
 
-  # the link words ride the ctx as (offset, word) rows, the runtime ones the body stores every call before the submit reads the stream
   buf = UOp.placeholder((len(hq.blob),), dtypes.uint8, device=hq.devs, tag=to_name("cmdbuf", hq.queue))
+
   words = UOp.sink(*[w for _, w in hq.patches]).substitute({l: buf[o:e] for l, (o, e) in views.items()})
   words = graph_rewrite(words, pm_input_addr, ctx=hq.ctx, name="input addrs").src
-  links, runtime = partition(list(zip([o for o, _ in hq.patches], words)), lambda p: is_link_value(p[1]))
+
+  links, runtime = partition(list(zip([o for o, _ in hq.patches], words)), lambda r: _is_link_patch(r[1]))
   hq.ctx.blobs[buf] = (bytes(hq.blob), links)
-  stores = [buf.after(*hq.deps).shrink(((o, o + w.dtype.itemsize),)).bitcast(w.dtype).index(0).store(w) for o, w in runtime]
-  return hq.submit(buf.after(*stores).shrink(((0, stream),)))
+  return hq.submit(patch(buf, runtime, *hq.deps).shrink(((0, stream),)))
+
+# *****************
+# 3.1. hcq special functions
 
 def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp: # per device: wait for what this batch's last run signaled, take the next value; re-arm its signals
   lasts, sigs = f.src[:len(ctx.devs)], f.src[len(ctx.devs):]
@@ -323,12 +341,8 @@ pm_hcq_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name
 # *****************
 # 3.1. lower: the batch call to a body program and its args
 
-def patch_cmdbuf(cmdbuf:UOp, blob:bytes, links:list[tuple[int, UOp]]) -> UOp: # the bytes, then one stacked store per word width at byte offsets
-  stores = []
-  for _, grp in itertools.groupby(sorted(links, key=lambda p: p[1].dtype.itemsize), key=lambda p: p[1].dtype.itemsize):
-    offs, words = zip(*grp)
-    stores.append(cmdbuf.index(UOp.stack(*[UOp.const(o) for o in offs])).store(UOp.stack(*words)))
-  return cmdbuf.after(cmdbuf.store(UOp(Ops.BINARY, arg=blob).bitcast(cmdbuf.dtype)), *stores)
+def patch_cmdbuf(cmdbuf:UOp, blob:bytes, links:list[tuple[int, UOp]]) -> UOp:
+  return patch(cmdbuf.after(cmdbuf.store(UOp(Ops.BINARY, arg=blob).bitcast(cmdbuf.dtype))), links)
 
 def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.args: return None # not an hcq call, or lowered already
@@ -399,11 +413,12 @@ def fold_binary(buf:UOp, blob:UOp) -> UOp:
     b._buf.cpu_view().view(fmt='B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
-def fold_words(buf:UOp, offs:UOp, words:UOp) -> UOp: # every word folded to a const: write it at its byte offset
-  mv = cast(Buffer, buf.buffer).ensure_allocated()._buf.cpu_view().view(fmt='B')
+def fold_words(buf:UOp, offs:UOp, words:UOp) -> UOp: # every word folded to a const: write it at its byte offset in the view
+  base, off = unwrap_view(buf)
+  mv = cast(Buffer, base.buffer).ensure_allocated()._buf.cpu_view().view(fmt='B')
   for o, w in zip(offs.src, words.src):
-    n = w.dtype.itemsize
-    mv[o.val:o.val + n] = (w.val & (1 << 8 * n) - 1).to_bytes(n, 'little')
+    n, at = w.dtype.itemsize, off + o.val * w.dtype.itemsize
+    mv[at:at + n] = (w.val & (1 << 8 * n) - 1).to_bytes(n, 'little')
   return UOp(Ops.NOOP)
 
 def fold_alu(a:UOp) -> UOp: return UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)
