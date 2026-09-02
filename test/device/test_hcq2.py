@@ -60,5 +60,11 @@ class TestHCQ2(unittest.TestCase):
     dts = (dtypes.int8, dtypes.uint8, dtypes.int16, dtypes.uint16, dtypes.int32)
     self.assertEqual([self.relowers(src.cast(dt).contiguous())[0] for dt in dts], [1] * len(dts))
 
+
+  @unittest.skipIf(Device.DEFAULT == "CPU", "sharding needs a non-CPU hcq2 device")
+  def test_shard_from_host(self): # the host copy, the p2p copy of its second half and the lane kernels are one batch: the deps must chain
+    a = np.arange(64*64, dtype=np.float32).reshape(64, 64)
+    np.testing.assert_equal(Tensor(a).shard((Device.DEFAULT, f"{Device.DEFAULT}:1"), axis=0).realize().numpy(), a)
+
 if __name__ == "__main__":
   unittest.main()

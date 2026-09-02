@@ -32,7 +32,7 @@ from tinygrad.uop.ops import Ops, UPat, PatternMatcher
 
 def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, tagged {name}_{device}_{queue} like the device's bufferize rules
   shapes = [("ring", (q.ring.size,), q.ring.dtype)] + [(n, (1,), dtypes.uint64) for n in ("write_ptr", "doorbell", "put_value")]
-  return [hq.ctx.new_arg(UOp.placeholder(s, d, 0, device=hq.devs, volatile=True, tag=to_name(n, hq.devs, hq.queue))) for n, s, d in shapes]
+  return [UOp.placeholder(s, d, 0, device=hq.devs, volatile=True, tag=to_name(n, hq.devs, hq.queue)) for n, s, d in shapes]
 
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 

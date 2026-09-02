@@ -119,7 +119,7 @@ class CPUAllocator(HCQAllocator['CPUDevice']):
   def _do_map(self, buf:HCQBuffer):
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
     return HCQBuffer(buf.view.addr, buf.size, view=buf.view, owner=buf.owner)
-  def _unmap(self, mb): pass  # CPU _do_map returns a view wrapper, nothing to release
+  def _do_unmap(self, mb): pass  # CPU _do_map returns a view wrapper, nothing to release
 
 class CPUDevice(HCQ2Compiled):
   wait_timeout_ms, has_copy_queue = 30000, False
