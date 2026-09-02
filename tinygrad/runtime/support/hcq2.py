@@ -1,10 +1,10 @@
 from __future__ import annotations
 from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
-import functools, time, itertools, decimal, weakref, collections, os, statistics
+import functools, time, itertools, decimal, weakref, os, statistics
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType
@@ -123,22 +123,11 @@ pm_insert_copy_staging = PatternMatcher([
 # *****************
 # 2. deps
 
-class HCQDepsTracker: # per buffer base, the last write and the last read of every (dev, queue): fifo queues imply the earlier ones
-  def __init__(self):
-    self.writes:dict[Any, dict[Any, Any]] = collections.defaultdict(dict)
-    self.reads:dict[Any, dict[Any, Any]] = collections.defaultdict(dict)
-
+class HCQDepsTracker(DepsTracker):
+  # TODO: optimize
   @staticmethod
-  def _key(buf:Any) -> Any: # a real buffer is its base, a param is its slot (per lane once mselected)
-    if not isinstance(buf, UOp): return id(buf.base)
-    return (buf.src[0].base.arg.slot, buf.arg) if buf.op is Ops.MSELECT else buf.arg.slot
-
-  def access_resources(self, bufs:list[Any], write:list[int], dep:tuple[str, str, int]) -> list[tuple[str, str, int]]:
-    waits:list[Any] = [] # a read waits for the writes, a write also for the reads: a superset of the exact ranges, never a miss
-    for i, key in enumerate(map(self._key, bufs)):
-      waits += list(self.writes[key].values()) + (list(self.reads[key].values()) if i in write else [])
-      (self.writes if i in write else self.reads)[key][dep[:2]] = dep
-    return dedup(waits)
+  def _key(buf:Any) -> tuple[Any, int, int]:
+    return (buf, 0, buf.max_numel() * buf.dtype.itemsize) if isinstance(buf, UOp) else DepsTracker._key(buf)
 
 @dataclass
 class BatchCtx:
