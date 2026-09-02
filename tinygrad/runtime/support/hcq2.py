@@ -28,8 +28,8 @@ class HCQInfo:
 
   kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = () # (devices, name, estimates, timestamp slots, profile key)
 
-  nargs:int = 0 # how many placeholders the call binds: a uop kept here would outlive the template (aux is not substituted)
-  table:int = -1 # the inputs table's position in the args: the exec fills it with the address of every (input, device) in inputs
+  nargs:int = 0
+  table:int = -1
   inputs:tuple[tuple[UOp, str], ...] = ()
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
 
