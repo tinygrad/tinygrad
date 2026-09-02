@@ -13,8 +13,8 @@ def add_to_ctx(ctx, x:UOp):
   return ret
 
 pm_ctx = PatternMatcher([
-  # optional BUFFERs are scoped inside their CALL: they are never implicit inputs
-  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: None if x.is_optional_buf else add_to_ctx(ctx,x)),
+  # unbound BUFFERs are scoped inside their CALL: they are never implicit inputs
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: None if x.is_unbound else add_to_ctx(ctx,x)),
   (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"),
    lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
 ])

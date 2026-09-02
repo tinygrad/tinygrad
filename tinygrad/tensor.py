@@ -94,7 +94,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or c.num_returned == 0: return None
   assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
   # the unbound (optional) BUFFER srcs are the call outputs (slots are src positions)
-  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_optional_buf]
+  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
   srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
 
   # add the outputs to the call
@@ -173,9 +173,9 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
 
 pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay,
-  # and optional BUFFERs stay: they are scoped inside their CALL and are never call args)
+  # and unbound BUFFERs stay: they are scoped inside their CALL and are never call args)
   (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
-   replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL and not b.arg.optional else None),
+   replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL and not b.is_unbound else None),
   # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
   # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
@@ -197,7 +197,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # final outputs of value calls materialize with fresh storage
   srcs:list[UOp] = []
   for u in big_sink.src:
-    if u.op is Ops.AFTER and u.src[0].unsharded_base.is_optional_buf:
+    if u.op is Ops.AFTER and u.src[0].unsharded_base.is_unbound:
       # precompiled calls don't need this: transform_precompiled_call gives their outputs real buffers
       call = u.src[1]
       if not (call.op is Ops.CALL and call.arg is not None and call.arg.precompile and call.num_returned):
@@ -211,7 +211,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
   # copies to disk are stores to the disk buffer; bound Variables are call inputs and unbound BUFFERs are call outputs
   for u in big_sink.toposort(enter_calls=False):
-    if (u.op is Ops.COPY and on_disk(u)) or (u.op is Ops.AFTER and not u.is_bound_var and not u.src[0].unsharded_base.is_optional_buf):
+    if (u.op is Ops.COPY and on_disk(u)) or (u.op is Ops.AFTER and not u.is_bound_var and not u.src[0].unsharded_base.is_unbound):
       ctx.stores.append(u)
       if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
   ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
