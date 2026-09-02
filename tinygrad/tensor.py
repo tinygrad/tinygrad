@@ -93,14 +93,14 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or c.num_returned == 0: return None
-  assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into unbound BUFFERs"
-  rets = c.resolved_returned_bufs
+  assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
+  # the unbound BUFFER srcs are the call outputs
+  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
   srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
-  assert len(rets) == len(srcs)
 
-  # bind the output declarations to fresh storage appended after the input arguments
-  outs = tuple(r.empty_like() for r in rets)
-  targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
+  # add the outputs to the call
+  outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
+  targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
 
   # how each stored value lands in its bound output target: a CONTIGUOUS materializes straight into the target and
   # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
@@ -121,15 +121,18 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # swap every placed value for its target storage, also inside other stores' AFTER deps
   fxn = UOp.sink(*(x.substitute(placed) for x in items))
 
-  # all bodies are SINKs now, the node just becomes an opaque CALL: its inputs and fresh output storage are all bound
-  new_call = UOp(Ops.CALL, src=(fxn, *[a if a.has_buffer_identity(after_ok=True) else a.contiguous() for a in c.src[1:]], *outs), arg=c.arg)
-  realized = tuple(o.after(new_call) for o in outs)
+  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the unbound BUFFERs' places; afters on real
+  # buffers are the input storage, afters on unbound BUFFER placeholders have no storage yet, materialize them
+  rmap = dict(zip(ret_pos, outs))
+  new_call = UOp(Ops.CALL, src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                     for i, a in enumerate(c.src[1:])]), arg=c.arg)
+  rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  realized = tuple(r.shrink_to(decl.shape) for r,decl in zip(realized, rets))
+  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
 
-  # the original AFTER outputs resolve by identity against these stores into their unbound BUFFER declarations
-  return UOp.sink(*[decl.store(v) for decl,v in zip(rets, realized)])
+  # the AFTER outputs resolve against this: stores of each real output into its unbound BUFFER placeholder
+  return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([

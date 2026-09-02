@@ -5,6 +5,8 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.tensor import transform_to_call
 
+def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop))[0].src[0].key
+
 class TestCall(unittest.TestCase):
   def test_call_plus(self):
     a = Tensor.randn(10, 10)
@@ -224,7 +226,7 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.ones(3)
     x = f(a, UOp.variable("scale_a", 1, 100).bind(2))
     y = f(a, UOp.variable("scale_b", 1, 100).bind(3))
-    self.assertEqual(transform_to_call(UOp.sink(x.uop))[0].src[0].key, transform_to_call(UOp.sink(y.uop))[0].src[0].key)
+    self.assertEqual(sched_key(x), sched_key(y))
     np.testing.assert_equal(x.numpy(), [2, 2, 2])
     np.testing.assert_equal(y.numpy(), [3, 3, 3])
 
@@ -252,11 +254,9 @@ class TestCallSchedule(unittest.TestCase):
     r0, r1 = f(a), f(b)
     c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.num_returned)
     c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.num_returned)
-    self.assertIsNot(c0.returned_bufs[0].unsharded_base, c1.returned_bufs[0].unsharded_base)
-    # output identities are canonicalized only after calls are combined into a scheduling scope
-    f0, _ = transform_to_call(UOp.sink(r0.uop))
-    f1, _ = transform_to_call(UOp.sink(r1.uop))
-    self.assertEqual(f0.src[0].key, f1.src[0].key)
+    # output identities stay unique per call; they canonicalize only when combined into a scheduling scope
+    self.assertIsNot(c0.src[-1], c1.src[-1])
+    self.assertEqual(sched_key(r0), sched_key(r1))
 
   def test_precompile_consumes_unbound_call_output(self):
     @function
@@ -295,20 +295,21 @@ class TestCallSchedule(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), np.arange(8, dtype=np.float32).reshape(4, 2) + 3)
 
 class TestOutputIdentity(unittest.TestCase):
-  """call outputs are unbound BUFFER declarations in the body, never positional call arguments"""
+  """call outputs are unbound BUFFER inputs to the call, bound positionally to the body's output PARAMs"""
   def make_call(self, x, precompile=False):
     dev = x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
     out = UOp.returned(x.dtype, x.shape, device=dev)
     inp = UOp.param(0, x.dtype, x.shape, dev)
+    op = UOp.param(1, x.dtype, x.shape, dev)
     from tinygrad.uop.ops import CallInfo
-    return UOp(Ops.CALL, src=(UOp.sink(out.store(inp.reshape(x.shape) * 2)), x.uop),
+    return UOp(Ops.CALL, src=(UOp.sink(op.store(inp.reshape(x.shape) * 2)), x.uop, out),
                arg=CallInfo(None, 't', precompile, False, None))
 
-  def test_output_is_body_declaration(self):
+  def test_output_is_call_input(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
     call = self.make_call(x)
-    self.assertEqual(len(call.src), 2)
-    self.assertIs(call.returned_bufs[0].unsharded_base, call.src[0].src[0].src[0].unsharded_base)
+    self.assertEqual(len(call.src), 3)
+    self.assertEqual(call.num_returned, 1)
     out = Tensor(call.returned_outputs[0], device=x.device) + 1
     np.testing.assert_equal(out.numpy(), [1, 3, 5])
 
@@ -328,8 +329,9 @@ class TestOutputIdentity(unittest.TestCase):
     dev = x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
     out = UOp.returned(dtypes.float, x.shape, device=dev)
     inp = UOp.param(0, dtypes.float, x.shape, dev)
+    op = UOp.param(1, dtypes.float, x.shape, dev)
     from tinygrad.uop.ops import CallInfo
-    call = UOp(Ops.CALL, src=(UOp.sink(out.store(inp * inp)), x.uop), arg=CallInfo(None, 't', False, False, None))
+    call = UOp(Ops.CALL, src=(UOp.sink(op.store(inp * inp)), x.uop, out), arg=CallInfo(None, 't', False, False, None))
     y = Tensor(call.returned_outputs[0], device=x.device)
     y.sum().backward()
     np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])

@@ -527,8 +527,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     num = next(ucount)
     # tags can contain UOps (callify tags nodes with their originals): store them as trace_nums, same as srcs
     tag = tuple(t.trace_num if isinstance(t, UOp) else t for t in self.tag) if isinstance(self.tag, tuple) else self.tag
-    # the trace must not retain the device Buffer: drop it from the stored arg (it would pin the memory and fail trace pickling)
-    arg = replace(self.arg, buffer=None) if isinstance(self.arg, ParamArg) and self.arg.buffer is not None else self.arg
+    # the trace must not retain the device Buffer: store a placeholder instead (the real one would pin memory and fail pickling),
+    # keeping bound and unbound buffers distinguishable in viz
+    arg = replace(self.arg, buffer=cast("Buffer", object())) if isinstance(self.arg, ParamArg) and self.arg.buffer is not None else self.arg
     uop_fields[num] = (self.op, tuple(s.trace_num for s in self.src), arg, tag)+((self.metadata,) if TRACEMETA>=2 else ())
     return num
 
@@ -538,7 +539,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.SINK, src=tuple([x for x in srcs if x is not None]), **kwargs)
   @staticmethod
   def returned(dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, axis:int|None=None) -> UOp:
-    """create an unbound BUFFER declaration for storage a call writes and returns; its identity is a slot minted from the global counter
+    """create an unbound BUFFER declaration for a buffer a call writes and returns: it's an input to the call and you AFTER on
+    it like a normal buffer. its identity is unique (minted from the global counter): outputs of different calls never alias
     like PARAM, the arg only stores the concrete max size: a shape is a view (RESHAPE/SHRINK/UNSHARD) on the flat placeholder"""
     if isinstance(shape, (int, UOp)): shape = (shape,)
     slot = next(UOp.unique_num)
@@ -548,20 +550,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, prod(to_max_shape(shp)), device=device))
     return ret.view_as(shp, axis)
   @property
-  def returned_bufs(self) -> tuple[UOp, ...]:
-    """the unbound BUFFER store targets declared by a value-producing call body"""
-    if self.op is not Ops.CALL or self.src[0].op is not Ops.SINK: return ()
-    return tuple(st.src[0] for st in self.src[0].src if st.op is Ops.STORE and st.src[0].unsharded_base.is_unbound)
-  @property
-  def num_returned(self) -> int: return len(self.returned_bufs)
-  @property
-  def resolved_returned_bufs(self) -> tuple[UOp, ...]:
-    """the body declarations with their PARAM-shaped views resolved against the call arguments"""
-    return tuple(graph_rewrite(x, _pm_resolve_params, self.src[1:], walk=True) for x in self.returned_bufs)
+  def num_returned(self) -> int:
+    # a value-producing call: an unannotated value SINK body (kernel bodies have KernelInfo) with unbound BUFFER output args
+    if self.op is not Ops.CALL or self.src[0].op is not Ops.SINK or self.src[0].arg is not None: return 0
+    return sum(x.unsharded_base.is_unbound for x in self.src[1:])
   @property
   def returned_outputs(self) -> tuple[UOp, ...]:
-    """the outputs of a value-producing call: an AFTER on each resolved unbound BUFFER declaration"""
-    return tuple(x.after(self) for x in self.resolved_returned_bufs)
+    """the outputs of a value-producing call: an AFTER on each unbound BUFFER input, usable like a normal buffer"""
+    return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.is_unbound)
   # legacy compatibility: TUPLE/GETTUPLE are gone. a tuple of values called is call_outputs, gettuple is returned_outputs[i]
   @staticmethod
   def maketuple(*srcs:UOp) -> _LegacyTupleValues: return _LegacyTupleValues(srcs)
@@ -1211,7 +1207,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)
 
-  # opaque bodies are just CALLs; value-producing bodies store into unbound BUFFER declarations
+  # opaque bodies are just CALLs; value-producing bodies become CALLs with unbound BUFFER declarations as extra inputs
   _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}
   def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
@@ -1228,16 +1224,19 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def call_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
                    name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
-    """call a body producing the given values: the body stores into unbound BUFFER declarations, which are
-    shared by identity with the output AFTERs. only the bound input buffers are passed as call arguments"""
+    """call a body producing the given values: the body stores into output PARAMs, and the outputs are unbound BUFFER
+    declarations that are inputs to the call (you AFTER on them like normal buffers). they are bound to the
+    output PARAMs positionally wherever the call is resolved, just like the args are bound to the input PARAMs"""
     # the device defaults to the first device in the values or args, like srcs-based device resolution
     default_dev = next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None)
-    # the body keeps its PARAM-shaped view; returned_outputs resolves that view against the call arguments
-    rets = tuple(UOp.returned(o.dtype, o._shape, o.device if o.device is not None else default_dev,
-                              o.axis if isinstance(o.device, tuple) else None) for o in values)
-    # unbound outputs stay BUFFERs in the body; the body and returned AFTERs share their identity
-    body = UOp.sink(*[r.store(v) for r,v in zip(rets, values)])
-    return UOp(Ops.CALL, src=(body,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
+    # the output storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
+    rets = tuple(UOp.returned(o.dtype, None if (shp:=o._shape) is None else
+                              tuple(graph_rewrite(s, _pm_resolve_params, srcs, walk=True) if isinstance(s, UOp) else s for s in shp),
+                              o.device if o.device is not None else default_dev, o.axis if isinstance(o.device, tuple) else None)
+                 for o in values)
+    # the body only knows PARAMs: the output PARAMs get the slots right after the input PARAM slots
+    body = UOp.sink(*[v.param_like(len(srcs)+i).store(v) for i, v in enumerate(values)])
+    return UOp(Ops.CALL, src=(body,)+srcs+rets, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
     kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
@@ -1700,7 +1699,7 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        # calls with unbound BUFFER outputs are always inlined into the enclosing graph, their bodies are never rewritten separately
+        # calls with unbound BUFFER inputs are always inlined into the enclosing graph, their bodies are never rewritten separately
         if n.op is Ops.CALL and (n.num_returned or (not self.enter_calls and n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
           self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
@@ -1740,7 +1739,7 @@ class RewriteContext:
             continue
         stack.append((n, 1, new_n))
         # NOTE: CALLs are handled as a special case: the call body is not included in the graph_rewrite (a CALL of an
-        # address is not a body, its srcs are regular dataflow). calls with unbound BUFFER outputs are always inlined into the
+        # address is not a body, its srcs are regular dataflow). calls with unbound BUFFER inputs are always inlined into the
         # enclosing graph, their bodies are never rewritten separately
         if new_n.op is Ops.CALL and (new_n.num_returned or (not self.enter_calls and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
           self.replace[new_n.src[0]] = new_n.src[0]

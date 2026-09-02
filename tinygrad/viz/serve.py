@@ -165,7 +165,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       label = "\n".join(lines[:30]) + "\n..."
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
-    graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":uops_colors.get(u.op, "#ffffff"),
+    graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded,
+                    "color":"#C07788" if u.is_unbound else uops_colors.get(u.op, "#ffffff"),
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
   return graph
 

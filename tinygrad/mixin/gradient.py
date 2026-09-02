@@ -24,43 +24,45 @@ def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp,
 def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fxn, args = k.src[0], k.src[1:]
   if k.arg.grad_fxn is not None:
-    # put const on the corresponding output/argument device, also TODO why do we still have NOOP...
-    grad_targets = k.returned_bufs or args
-    def on_dev(g, i): return g.clone(device=grad_targets[i].device) if g.device is None else g
-    # grads align with the body followed by the call's input arguments
+    # put const on a device, also TODO why do we still have NOOP...
+    def on_dev(g, i): return g.clone(device=args[i].device) if g.device is None else g
+    # grads align with the call's src positions (None for the body and for unbound BUFFER outputs, wherever they are)
+    def arg_grads(g):
+      git = iter(g)
+      return (None,) + tuple(next(git) if not a.unsharded_base.is_unbound else None for a in k.src[1:])
     if ctx.op is Ops.SINK:
       real = [on_dev(g, i) for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
-      return (None,) + tuple(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
-    return (None,) + tuple(k.arg.grad_fxn(on_dev(ctx, 0), k))
-  # the body stores each returned value into its unbound BUFFER declaration
-  assert fxn.op is Ops.SINK and k.num_returned, f"expected a CALL with unbound BUFFER outputs or a grad_fxn, got {fxn.op}"
+      return arg_grads(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
+    return arg_grads(k.arg.grad_fxn(on_dev(ctx, 0), k))
+  # the unbound BUFFER inputs are the call outputs: their positions in the args get the output gradients from the AFTER rule
+  assert fxn.op is Ops.SINK and k.num_returned, f"expected a CALL with unbound BUFFER inputs or a grad_fxn, got {fxn.op}"
+  ret_pos = [i for i, a in enumerate(args) if a.unsharded_base.is_unbound]
+  # the body stores the outputs into output PARAMs: the values are the stored values in slot order
   values = UOp.sink(*[st.src[1] for st in fxn.src if st.op is Ops.STORE])
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   # grads are collected at the flat param storage: reshape to each arg's view (max view shrunk to symbolic)
   def shaped_grad(grad:UOp, i:int) -> UOp:
     a = args[i]
     return grad.view_as(a.shard_shape, a.axis) if a.axis is not None and isinstance(a.device, tuple) else grad.view_as(a._shape)
+  grad_args = tuple(ctx.src[i] for i in ret_pos)
   root_grad = UOp.sink(*[UOp(Ops.NOOP) if g.op is Ops.NOOP else
-    g if g.device is None else g.param_like(len(args)+i) for i,g in enumerate(ctx.src)])
+    g if g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)])
   grads = compute_gradient(values, root_grad, set(params.values()))
   # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
-  fwd_subs = {src: src.param_like(len(args)+len(ctx.src)+i) for i, src in enumerate(values.src)} if k.arg.precompile else {}
+  fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(values.src)} if k.arg.precompile else {}
   fwd_outs = k.returned_outputs if k.arg.precompile else ()
   # collect needed gradient bodies, compact unused params, create a single backward CALL
   grad_bodies = [(i, shaped_grad(grads[p], i)) for i in needed if (p:=params.get(i)) is not None and p in grads]
   bwd_body = UOp.sink(*[gb for _, gb in grad_bodies]).substitute(fwd_subs, walk=True)
   bwd_body = renumber_invalid_outputs(bwd_body)
-  bwd_body, compact_args = _compact_params(bwd_body, (*args, *ctx.src, *fwd_outs))
+  # NOTE: args includes the unbound BUFFER inputs so the param slots above line up; they are unused and compacted away
+  bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))
   bwd_outs = UOp.call_outputs(bwd_body.src, *compact_args, name=(k.arg.name or "")+"_backward",
                               precompile=k.arg.precompile_backward).returned_outputs
   gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
-  # align gradients with the body followed by the call's input arguments
-  return (None,) + tuple(bwd_outs[gb_map[i]] if i in gb_map else None for i in range(len(args)))
-
-def call_output_gradient(ctx:UOp, d:UOp, k:UOp) -> tuple[UOp, UOp]:
-  if rets:=k.returned_bufs:
-    return ctx, UOp.sink(*[ctx if x.unsharded_base is d.unsharded_base else UOp(Ops.NOOP) for x in rets])
-  return ctx, UOp.sink(*[ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1)])
+  # align gradients with the original source positions: None at unbound BUFFER positions, gradients elsewhere
+  ret_set = set(ret_pos)
+  return (None,) + tuple(None if i in ret_set else (bwd_outs[gb_map[i]] if i in gb_map else None) for i in range(len(args)))
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
@@ -92,7 +94,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),)),
   (UPat(Ops.UNSHARD, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   (UPat(Ops.SINK), lambda ctx: ctx.src),
-  (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), call_output_gradient),
+  (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
+    (ctx, UOp.sink(*([ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1)])))),
   # clone/assign gradient passes through to val
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE))), lambda ctx: (None, ctx)),
   (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
