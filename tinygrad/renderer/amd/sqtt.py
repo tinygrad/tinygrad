@@ -582,14 +582,15 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
   # Build state table: byte -> opcode. Sort by mask specificity (more bits first), NOP last
   sorted_types = sorted(packet_types.items(), key=lambda x: (-bin(x[1].encoding.mask).count('1'), x[0] == 16))
   state_table = bytes(next((op for op, cls in sorted_types if (b & cls.encoding.mask) == cls.encoding.default), 16) for b in range(256))
-  # Build decode info: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
-  # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 4), 3=CDNA_MISC (*4), 4=CDNA_TIMESTAMP (absolute)
-  _special = {TS_DELTA_OR_MARK: 1, TS_DELTA_OR_MARK_RDNA4: 1, TS_DELTA_SHORT: 2, CDNA_MISC: 3, CDNA_TIMESTAMP: 4}
+  # Build decode info: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case, delta_mul)
+  # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 4), 4=CDNA_TIMESTAMP (absolute)
+  _special = {TS_DELTA_OR_MARK: 1, TS_DELTA_OR_MARK_RDNA4: 1, TS_DELTA_SHORT: 2, CDNA_TIMESTAMP: 4}
   decode_info = {}
   for opcode, pkt_cls in packet_types.items():
     delta_field = getattr(pkt_cls, 'delta', None)
     special = _special.get(pkt_cls, 0)
-    decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_field.lo if delta_field else 0, delta_field.mask if delta_field else 0, special)  # type: ignore[attr-defined]
+    delta_lo, delta_mask = (delta_field.lo, delta_field.mask) if delta_field else ((4, 1) if packet_types is PACKET_TYPES_CDNA else (0, 0))
+    decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_lo, delta_mask, special, 4 if packet_types is PACKET_TYPES_CDNA else 1)  # type: ignore[attr-defined]
   return decode_info, state_table
 
 _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3 = _build_decode_tables(PACKET_TYPES_RDNA3)
@@ -614,13 +615,12 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if (nib_off := need & 1): reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
 
     opcode = state_table[reg & 0xFF]
-    pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
-    delta = (reg >> delta_lo) & delta_mask
+    pkt_cls, nib_count, delta_lo, delta_mask, special, delta_mul = decode_info[opcode]
+    delta = ((reg >> delta_lo) & delta_mask) * delta_mul
     if special == 1:  # TS_DELTA_OR_MARK
       pkt = pkt_cls.from_raw(reg, 0)  # create packet to check is_marker
       if pkt.is_marker: delta = 0
     elif special == 2: delta += 4  # TS_DELTA_SHORT
-    elif special == 3: delta *= 4  # CDNA_DELTA
     elif special == 4:  # CDNA_TIMESTAMP (absolute timestamp anchoring)
       if (reg >> 4) & 0xfff == 0:  # unk_0 == 0 means absolute timestamp
         abs_ts = reg >> 16
@@ -635,7 +635,7 @@ def decode(data: bytes) -> Iterator[PacketType]:
       elif pkt.layout != 3:  # not a real LAYOUT_HEADER — switch to CDNA and re-decode first packet
         decode_info, state_table = _DECODE_INFO_CDNA, _STATE_TABLE_CDNA
         opcode = state_table[reg & 0xFF]
-        pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
+        pkt_cls, nib_count, delta_lo, delta_mask, special, delta_mul = decode_info[opcode]
         if special == 4 and (reg >> 4) & 0xfff == 0:  # CDNA_TIMESTAMP absolute
           ts_offset = (reg >> 16) - time
         pkt = pkt_cls.from_raw(reg, time)
