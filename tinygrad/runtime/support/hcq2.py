@@ -25,7 +25,6 @@ HCQ_DEVS = frozenset(("AMD", "CPU"))
 @dataclass(frozen=True)
 class HCQInfo:
   device:tuple[str, ...]
-  estimates:Estimates = Estimates()
 
   kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = () # (devices, name, estimates, timestamp slots, profile key)
 
@@ -197,11 +196,11 @@ def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], 
            UOp(Ops.INS, arg=("wait", dtypes.void), src=(timeline(devices), timeline_value(devices)))] + q
 
     # and make hcq call
-    name, info = get_call_name(call, get_call_arg_uops(call)), HCQInfo(devices, estimates=estimate_uop(call))
-    kerns.append((devices, name, info.estimates, ctx.stamps(devices, tag), getattr(call.src[0].arg, "profile_key", None)))
+    name, est = get_call_name(call, get_call_arg_uops(call)), estimate_uop(call)
+    kerns.append((devices, name, est, ctx.stamps(devices, tag), getattr(call.src[0].arg, "profile_key", None)))
 
     ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slot(devices, i),)) for i in ctx.stamps(devices, tag)]
-    q += ts_ins[:1] + [call.replace(arg=replace(call.arg, aux=info))] + ts_ins[1:]
+    q += ts_ins[:1] + [call] + ts_ins[1:]
 
     # signal the queue if someone waits for us
     if tag in ctx.signal_tags:
@@ -224,7 +223,7 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
                               *[ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs])
   merged = [m.replace(src=(*m.src, fence)) for m in _merge_queues(submits)]
   estimates = sum((estimate_uop(call) for call, _, _ in ctx.batch), start=Estimates()).simplify()
-  return UOp.sink(*merged).call(name=f"hcq batch ({len(ctx.batch)})", aux=HCQInfo(tuple(ctx.queues), estimates, kernels=tuple(kerns)))
+  return UOp.sink(*merged, arg=KernelInfo("hcq_submit", estimates=estimates), tag=1).call(aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns)))
 
 @rewrite_group(new_ctx=False)
 def sched_batches(l:UOp, profile:bool) -> UOp:
@@ -359,7 +358,7 @@ def lower_call(call:UOp) -> UOp|None:
   # reenum ranges
   rngs = {r: r.replace(arg=(i,)+r.arg[1:]) for i, r in enumerate(sorted([u for u in tops if u.op is Ops.RANGE], key=lambda r: r.arg))}
   # and sub all of them
-  sink = body.substitute(params | vals | rngs).replace(arg=KernelInfo("hcq_submit"), tag=1)
+  sink = body.substitute(params | vals | rngs)
 
   # move all lt-patches to the args
   patched = {p.src[0]: p for p in ctx.lt_patches}

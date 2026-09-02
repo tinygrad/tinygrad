@@ -30,8 +30,9 @@ def get_call_written_bufs(call:UOp) -> list[UOp]:
   return dedup([b for k in outs if k not in ins and (b:=u if (cv:=(u:=arg_uops[k]).contiguous_view()) is None else cv[0]).op is Ops.BUFFER])
 
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]]:
-  if isinstance(call.arg.aux, HCQInfo):
-    return [(d, call, (name, estimates, profile_key)) for devices,name,estimates,_,profile_key in call.arg.aux.kernels for d in devices]
+  if isinstance(call.arg.aux, HCQInfo): # the submitter itself, then every kernel it enqueues
+    kernels:list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]] = [(HCQ_RUNTIME_DEV.value, call, None)]
+    return kernels + [(d, call, (name, estimates, profile_key)) for devices,name,estimates,_,profile_key in call.arg.aux.kernels for d in devices]
   ast = call.src[0]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call, None)]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "validate": return []
@@ -42,7 +43,6 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
   def _dev_str(buf:Buffer|UOp) -> str: return ', '.join(d[:7] for d in to_tuple(buf.device))
 
   ast, arg_uops = call.src[0], get_call_arg_uops(call)
-  if isinstance(call.arg.aux, HCQInfo): return cast(str, call.arg.name)
   if ast.op is Ops.PROGRAM: return ast.arg.name
   if ast.op is Ops.COPY: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {_dev_str(bufs[0]):>7s} <- {_dev_str(bufs[1]):7s}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
@@ -52,7 +52,6 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
 # **************** Stat ****************
 
 def estimate_uop(call:UOp) -> Estimates:
-  if isinstance(call.arg.aux, HCQInfo): return call.arg.aux.estimates
   if (ast:=call.src[0]).op is Ops.PROGRAM: return ast.src[0].arg.estimates or Estimates()
   if ast.op is Ops.COPY or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec"):
     return Estimates(lds=(nbytes:=prod(call.src[1].shape) * call.src[1].dtype.itemsize), mem=nbytes)
@@ -193,13 +192,11 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return [get_graph_runtime(ast, ctx.input_uops)(ctx.input_uops, ctx.var_vals, wait=ctx.wait)]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
-  info = call.arg.aux
-  assert len(ast.arg.globals) == info.nargs, f"{call.arg.name}: an arg is dead in the rendered body, the args after it would mis-bind"
-
-  if info.inputs: # the body reads every input's device address from its table, filled here from this call's buffers
+  if (info:=call.arg.aux).inputs:
     addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(dev).va_addr for u, dev in info.inputs]
     cast(Buffer, call.src[1 + info.table].buffer)._buf.cpu_view().view(fmt='Q')[:] = array.array('Q', addrs)
-  exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,)) # the body runs on the runtime device, it drives every device's queues
+  ets = exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,)) # the body runs on the runtime device, it drives every device's queues
+  if not (ctx.wait or PROFILE): return ets
 
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots} # the batch's timestamps live in its slots
   def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:
@@ -207,9 +204,8 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     if not ctx.wait: return None
     d.synchronize(timeout=ctx.timeout)
     st, en = (slots[device]._buf.cpu_view().view(fmt='Q')[x] for x in prof)
-    return float(en-st)/d.timestamp_divider/1e6
-  return [_prof_tm(device, name, prof, profile_key) for devices,name,_,prof,profile_key in info.kernels
-          if prof for device in devices] if PROFILE or ctx.wait else []
+    return float(en-st) / d.timestamp_divider / 1e6
+  return ets + [_prof_tm(device, name, prof, profile_key) for devices,name,_,prof,profile_key in info.kernels if prof for device in devices]
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
