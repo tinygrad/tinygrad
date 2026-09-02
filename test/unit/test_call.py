@@ -225,7 +225,9 @@ class TestCallSchedule(unittest.TestCase):
     y = f(a, UOp.variable("scale_b", 1, 100).bind(3))
     fx = next(u for u in x.uop.toposort() if u.op is Ops.CALL and u.num_returned)
     fy = next(u for u in y.uop.toposort() if u.op is Ops.CALL and u.num_returned)
-    self.assertEqual(fx.src[0].key, fy.src[0].key)
+    self.assertIsNot(fx.returned_bufs[0].unsharded_base, fy.returned_bufs[0].unsharded_base)
+    from tinygrad.tensor import transform_to_call
+    self.assertEqual(transform_to_call(UOp.sink(x.uop))[0].src[0].key, transform_to_call(UOp.sink(y.uop))[0].src[0].key)
     np.testing.assert_equal(x.numpy(), [2, 2, 2])
     np.testing.assert_equal(y.numpy(), [3, 3, 3])
 
@@ -245,17 +247,28 @@ class TestCallSchedule(unittest.TestCase):
     np.testing.assert_equal(cache.numpy()[8:], np.zeros(8))
 
   def test_precompile_schedule_cache_hit(self):
-    """two instances of the same @function should produce identical function body keys (schedule cache hit)"""
+    """two instances of the same @function should produce identical scheduled function keys without aliasing their outputs"""
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x + Tensor.full(x.shape, -1.0)
     a = Tensor.empty(4, 8)
     b = Tensor.empty(4, 8)
     r0, r1 = f(a), f(b)
-    # find the call nodes
     c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.num_returned)
     c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.num_returned)
-    # the function bodies (src[0]) should have identical keys
-    self.assertEqual(c0.src[0].key, c1.src[0].key)
+    self.assertIsNot(c0.returned_bufs[0].unsharded_base, c1.returned_bufs[0].unsharded_base)
+    # output identities are canonicalized only after calls are combined into a scheduling scope
+    from tinygrad.tensor import transform_to_call
+    f0, _ = transform_to_call(UOp.sink(r0.uop))
+    f1, _ = transform_to_call(UOp.sink(r1.uop))
+    self.assertEqual(f0.src[0].key, f1.src[0].key)
+
+  def test_precompile_consumes_unbound_call_output(self):
+    @function
+    def inner(x:Tensor) -> Tensor: return x * 2
+    @function(precompile=True)
+    def outer(x:Tensor) -> Tensor: return x + 1
+    x = Tensor.arange(8).float().contiguous().realize()
+    np.testing.assert_equal(outer(inner(x)).numpy(), np.arange(8, dtype=np.float32) * 2 + 1)
 
   def test_precompile_symbolic_2d(self):
     """precompile with symbolic shapes in 2D (tests debuf reshape with symbolic PARAM)"""
