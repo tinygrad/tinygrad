@@ -11,10 +11,12 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
 
+split_targets = {AxisType.UPCAST: (AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK), AxisType.UNROLL: (AxisType.REDUCE, AxisType.GROUP_REDUCE),
+                 AxisType.LOCAL: (AxisType.GLOBAL, AxisType.WEAK), AxisType.GROUP_REDUCE: (AxisType.REDUCE,)}
+
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
     self.ast, self.ren = ast, ren
-    self.dont_use_locals = self.ast.arg.dont_use_locals if self.ast.arg is not None else False
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
     self.opt_range = count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
 
@@ -42,7 +44,6 @@ class Scheduler:
 
   def copy(self) -> Scheduler:
     ret = Scheduler(self.ast, self.ren)
-    ret.dont_use_locals = self.dont_use_locals
     ret.applied_opts = self.applied_opts[:]
     if hasattr(self, 'tensor_core'): ret.tensor_core = self.tensor_core
     return ret
@@ -55,7 +56,7 @@ class Scheduler:
       special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
-    return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
+    return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts)), tag=1)
 
   def _output_rngs(self) -> list[UOp]:
     return flatten([[r for r in UOp.sink(*s.src[1:]).ranges if r.arg[-1] != AxisType.REDUCE] for s in self.ast.src if s.op is Ops.END])
@@ -80,8 +81,7 @@ class Scheduler:
     globalizible_rngs = self._globalizable_rngs()
     ret = []
     for x,r in zip(self.axis_types, self.rngs):
-      if self.dont_use_locals and x == AxisType.GLOBAL: ret.append("BLUE")
-      elif r not in output_rngs and x == AxisType.WEAK: ret.append("BLACK")
+      if r not in output_rngs and x == AxisType.WEAK: ret.append("BLACK")
       elif r not in globalizible_rngs and x == AxisType.WEAK: ret.append("white")
       else: ret.append(axis_colors[x])
     return ret
@@ -101,7 +101,6 @@ class Scheduler:
 
   def upcast_size(self): return prod(self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
 
-  # copied from kernel.py
   @property
   def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK) \
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
@@ -110,69 +109,40 @@ class Scheduler:
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
 
   def real_axis(self, op:OptOps, axis:int|None) -> int:
-    try:
-      if axis is None or op is OptOps.TC: return -1
-      if op is OptOps.UNROLL: return self.unrollable_dims[axis]
-      if op in {OptOps.GROUP, OptOps.GROUPTOP}: return self.axes_of(AxisType.REDUCE)[axis]
-      check(axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
-      return axis
-    except IndexError as e: raise KernelOptError from e
+    if axis is None or op is OptOps.TC: return -1
+    check(0 <= axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
+    return axis
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
-    if opt.op is OptOps.NOLOCALS:
-      check(all(x not in {AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE} for x in self.axis_types), "no locals can't have locals")
-      if append_opt: self.applied_opts.append(opt)
-      self.dont_use_locals = True
-      return
-
-    if opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}:
-      check(self.ren.has_local, "locals needed for opt")
-
     rng = self.rngs[real_axis] if (real_axis:=self.real_axis(opt.op, opt.axis)) >= 0 else UOp(Ops.NOOP)
 
-    opt_to_at = {
-      OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST,
-      OptOps.UNROLL: AxisType.UNROLL, OptOps.GROUP: AxisType.GROUP_REDUCE,
-      OptOps.GROUPTOP: AxisType.GROUP_REDUCE, OptOps.THREAD: AxisType.THREAD}
-
     ret = None
-    if opt.op in opt_to_at:
-      amt:int = int(rng.vmax+1) if opt.arg == 0 else cast(int, opt.arg)
+    if opt.op is OptOps.SPLIT:
+      check(isinstance(opt.arg, tuple) and len(opt.arg) in (2, 3), f"split arg is (amt, target) or (amt, target, top), not {opt.arg}")
+      amt, new_type, top = (*cast(tuple, opt.arg), False)[0:3]
+      check(type(amt) is int and (amt == 0 or amt > 1) and isinstance(new_type, AxisType) and new_type in split_targets and isinstance(top, bool),
+            f"invalid split arg {opt.arg}")
+      check(not top or new_type is AxisType.GROUP_REDUCE, "top is only for group reduce")
+      if new_type in (AxisType.LOCAL, AxisType.GROUP_REDUCE): check(self.ren.has_local, "locals needed for opt")
+      check(rng.arg[-1] in split_targets[new_type], f"{new_type} is from {split_targets[new_type]}, not {rng.arg[-1]}")
 
-      # copied from kernel.py. prevents METAL compiler hangs
-      if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
-                                        (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
+      if amt == 0: amt = int(rng.vmax+1)
+      if new_type is AxisType.UNROLL: check(amt <= 32, "don't unroll more than 32")
+      if new_type is AxisType.UPCAST: check(self.ren.target.device == "DSP" or amt <= 16, "don't upcast more than 16")
+      # prevents METAL compiler hangs
+      if self.reduceop is not None and (new_type is AxisType.GROUP_REDUCE or self.group_for_reduces):
         upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
         smem_sz = amt*upcast_local_sz*self.reduceop.dtype.itemsize
         check(smem_sz <= self.ren.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.ren.shared_max}")
-      if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP}):
+      if self.reduceop is not None and new_type is AxisType.GROUP_REDUCE:
         # We currently dont support a group within another rudece, TODO: fix if-contexts
         reduce = [u for u in self.ast.backward_slice if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
         check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
           "cannot have a GROUP_REDUCE inside another reduce")
-
-      if opt.op is OptOps.UNROLL:
-        check(amt <= 32, "don't unroll more than 32")
-        check(rng.arg[-1] in {AxisType.GROUP_REDUCE, AxisType.REDUCE}, "unroll is for GROUP_REDUCE/REDUCE")
-      if opt.op is OptOps.UPCAST:
-        check((self.ren is not None and self.ren.target.device == "DSP") or amt <= 16, "don't upcast more than 16")
-        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK}, f"upcast is for GLOBAL/LOCAL/LOOP, not {rng.arg[-1]}")
-      if opt.op is OptOps.LOCAL:
-        check(not self.dont_use_locals, "can't use locals")
-        check(rng.arg[-1] in {AxisType.GLOBAL, AxisType.WEAK}, "local is for globals")
-      if opt.op is OptOps.THREAD:
-        check(self.ren is not None and self.ren.has_threads, "target does not support threads")
-        check(self.ren is not None and self.ren.global_max is not None and amt <= self.ren.global_max[0], "too many threads")
-        check(all(x is not AxisType.THREAD for x in self.axis_types), "already threaded")
-        check(rng in self._globalizable_rngs(), "can't apply range to this dim")
-      if opt.op in {OptOps.GROUP, OptOps.GROUPTOP}:
-        check(all(x.op is not OptOps.TC for x in self.applied_opts), "no grouping with tensor cores")  # TODO: why is this wrong?
-        check(not self.dont_use_locals, "can't use locals")
-        check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
-      ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op in {OptOps.GROUPTOP, OptOps.THREAD})
+      ret = self.shift_to(rng, amt, new_type, top=top)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
-      check(opt.axis is not None, "tensor core opts must have an axis")
+      check(opt.axis is not None and opt.axis >= 0, "tensor core opts must have an axis")
       check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "tensor core opts must have valid arg")
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.ren.tensor_cores), "tensor core opts must have valid tc_select")
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
@@ -181,9 +151,9 @@ class Scheduler:
       except ValueError as e: raise KernelOptError(str(e))
       check(ret is not None, "no tensor core available")
     elif opt.op is OptOps.PADTO:
+      check(type(opt.arg) is int and opt.arg > 1, f"padto arg is a multiple > 1, not {opt.arg}")
       check(rng.src[0].op is Ops.CONST, "only pad const axes")
       check(rng.arg[-1] not in {AxisType.UPCAST, AxisType.UNROLL}, "cannot pad upcasted") # TODO: why is this wrong?
-      check(rng.arg[-1] is not AxisType.THREAD, "cannot pad thread")
       new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
       replaced_rng = UOp.range(new_sz, *rng.arg, dtype=rng.dtype)

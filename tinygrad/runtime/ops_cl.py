@@ -52,7 +52,7 @@ class CLProgram(Program['CLDevice']):
     try: check(cl.clReleaseProgram(self.program))
     except (TypeError, AttributeError): pass
 
-  def __call__(self, *bufs:cl.cl_mem, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None, vals:tuple[int, ...]=(),
+  def __call__(self, *bufs:cl.cl_mem, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
                wait=False, **kw) -> float|None:
     for i, (_, slot, dt, shape) in enumerate(self.signature):
       b = bufs[slot] if slot < len(bufs) else getattr(ctypes, f"c_int{dt.bitsize}")(vals[slot-len(bufs)])
@@ -63,10 +63,10 @@ class CLProgram(Program['CLDevice']):
         img = checked(cl.clCreateImage(self.dev.context, cl.CL_MEM_READ_WRITE, fmt, desc, None, status:=ctypes.c_int32()), status)
         check(cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(img), ctypes.byref(img)))
       else: check(cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b)))
-    if local_size is not None: global_size = cast(tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
+    global_size = cast(tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
     event = cl.cl_event() if wait else None
     check(cl.clEnqueueNDRangeKernel(self.dev.queue, self.kernel, len(global_size), None, (ctypes.c_size_t * len(global_size))(*global_size),
-                                    (ctypes.c_size_t * len(local_size))(*local_size) if local_size else None, 0, None, event))
+                                    (ctypes.c_size_t * len(local_size))(*local_size), 0, None, event))
     if wait:
       assert event is not None
       check(cl.clWaitForEvents(1, event))

@@ -175,8 +175,16 @@ class GPTOSS:
   def attention(self, x:Tensor, freqs_cis:Tensor, mask:Tensor, sliding:bool, *, attention_norm:Tensor, wqkv:Tensor,
                 wqkv_scale:Tensor, wqkv_bias:Tensor, wo:Tensor, wo_scale:Tensor, wo_bias:Tensor, sinks:Tensor):
     bsz, seqlen, _ = x.shape
-    x_normed, rrms = rmsnorm(x, self.norm_eps)
-    qkv = matmul_mx(x_normed * attention_norm, wqkv, wqkv_scale) + wqkv_bias
+
+    if getenv("FUSED_RMSNORM_MUL", 0):
+      from extra.gptoss_kernels.rmsnorm import rmsnorm_mul
+      x_normed, rrms = rmsnorm_mul(x, attention_norm, self.norm_eps)
+      norm_saves = [x_normed, rrms]
+    else:
+      x_normed, rrms = rmsnorm(x, self.norm_eps)
+      qkv = matmul_mx(x_normed * attention_norm, wqkv, wqkv_scale) + wqkv_bias
+      norm_saves = [x_normed, rrms]
+
     qkv = qkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
     xq = qkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
     xk, xv = qkv[:, :, :, self.n_rep], qkv[:, :, :, self.n_rep + 1]
@@ -202,13 +210,19 @@ class GPTOSS:
       attn = (w @ xvm).permute(0, 3, 1, 2, 4).reshape(bsz, seqlen, self.n_heads * self.head_dim)
 
     out = matmul_mx(attn, wo, wo_scale) + wo_bias
-    return out, [x_normed, rrms, attn] + fa_saves
+    return out, [attn] + norm_saves + fa_saves
 
   def feed_forward(self, x:Tensor, *, ffn_norm:Tensor, gate:Tensor, gate_bias:Tensor,
                    w_gate_up:Tensor, w_gate_up_scale:Tensor, w_gate_up_bias:Tensor,
                    w_down:Tensor, w_down_scale:Tensor, w_down_bias:Tensor):
-    x_normed, rrms = rmsnorm(x, self.norm_eps)
-    inp = x_normed * ffn_norm
+    if getenv("FUSED_RMSNORM_MUL", 0):
+      from extra.gptoss_kernels.rmsnorm import rmsnorm_mul
+      x_normed, rrms = rmsnorm_mul(x, ffn_norm, self.norm_eps)
+      inp = x_normed
+    else:
+      x_normed, rrms = rmsnorm(x, self.norm_eps)
+      inp = x_normed * ffn_norm
+
     logits = inp.float() @ gate.float().T + gate_bias.float()
     dim, inter = self.dim, self.intermediate_size
 

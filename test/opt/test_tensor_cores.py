@@ -3,7 +3,7 @@ import unittest
 
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.uop.ops import Ops, UOp, buffers
+from tinygrad.uop.ops import Ops, UOp, AxisType, buffers
 from tinygrad.dtype import DType
 from tinygrad.device import Buffer
 from tinygrad.helpers import DEV, Context
@@ -11,7 +11,8 @@ from test.helpers import slow, replace_opts
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.codegen.opt.tc import amd_cdna_1616128
+from tinygrad.codegen.opt.postrange import Scheduler
+from tinygrad.renderer.tc import amd_cdna_1616128
 
 # TODO: write a clean version of this
 from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_opt
@@ -52,14 +53,15 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
       assert False, "OptOps.TC triggered, expected KernelOptError"
     except KernelOptError: pass
 
-def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1):
+def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0, use_tensor_cores:int=1,
+                       extra_opts:list[Opt]=[]):
   _skip_unsupported_tc_dtypes(dtype_in, dtype_out)
   a, b = _tc_rand(M, K, dtype=dtype_in), _tc_rand(K, N, dtype=dtype_in)
   np_a, np_b = a.numpy(), b.numpy()
   r = a.matmul(b, dtype=dtype_out)
   if dtype_in == dtypes.bfloat16: r = r.float()
   realized_ast, bufs = helper_realized_ast(r)
-  opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))]
+  opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))] + extra_opts
   ast = replace_opts(realized_ast, opts)
   pu = to_program(ast, Device[Device.DEFAULT].renderer)
   if use_tensor_cores == 1: assert len([uop for uop in pu.src[1].src if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
@@ -81,6 +83,32 @@ class TestTensorCores(unittest.TestCase):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       with self.subTest(tc=tc):
         helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
+
+  @Context(ALLOW_TF32=1)
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_extra_locals(self):
+    # LOCAL splits after the TC opt: the WARP must keep a whole hardware local dim, its lanes are consecutive threads
+    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
+      with self.subTest(tc=tc):
+        helper_tc_allclose(tc.dims[0]*8, tc.dims[1]*8, tc.dims[2], tc.dtype_in, tc.dtype_out,
+                           extra_opts=[Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))]*3)
+
+  @Context(ALLOW_TF32=1)
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_group_reduce(self):
+    tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in not in dtypes.fp8s)
+    sche = Scheduler(Tensor.empty(16, 64, dtype=tc.dtype_in).matmul(Tensor.empty(64, 16, dtype=tc.dtype_in), dtype=tc.dtype_out)
+                      .schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
+    sche.apply_opt(Opt(OptOps.TC, 0, (-1, 0, 1)))
+    axis = sche.axis_types.index(AxisType.REDUCE)
+    if AxisType.UNROLL in sche.axis_types:
+      # this tc keeps an unrolled reduce outside the WMMA, grouping inside it must be rejected
+      with self.assertRaises(KernelOptError): sche.apply_opt(Opt(OptOps.SPLIT, axis, (2, AxisType.GROUP_REDUCE)))
+    else:
+      x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
+      helper_linearizer_opt(x.matmul(y, dtype=tc.dtype_out),
+                            [[Opt(OptOps.SPLIT, axis, (amt, AxisType.GROUP_REDUCE, top))] for amt in (2, 4) for top in (False, True)],
+                            apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_nested_reduce(self):
@@ -113,16 +141,6 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipIf((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and Device.default.renderer.target.device == "AMD"), "broken for AMD")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
-    for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      helper_tc_allclose(tc.dims[0]+(pad:=1), tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
-
-  # AMD compiler bug: AMD miscompiles non-zero padded tc kernels with -O3, producing wrong results, nans or hang (see #9606)
-  # Internal bug: zero-stride dimensions combined with a mask may produce wrong index/valid for pad == 1 on AMD
-  @unittest.skipUnless((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and Device.default.renderer.target.device == "AMD"),
-                       "test for AMD's tc")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skip("warp elements not duplicated properly across lanes")
-  def test_tensor_cores_padded_amd(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       helper_tc_allclose(tc.dims[0]+(pad:=1), tc.dims[1]+pad, tc.dims[2]+pad, tc.dtype_in, tc.dtype_out, tc_opt=2)
 
@@ -188,11 +206,11 @@ class TestTensorCores(unittest.TestCase):
     tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in not in dtypes.fp8s)
     x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
-    opts = [Opt(OptOps.UNROLL, 0, 2)]
-    ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src):
-      if u.op is Ops.WMMA:
-        assert u.src[-1].src[0].op != Ops.STORE
+    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, 4, (2, AxisType.UNROLL))]
+    ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
+    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
+    self.assertGreater(len(wmmas), 0)
+    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
@@ -202,12 +220,11 @@ class TestTensorCores(unittest.TestCase):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
     x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
-    opts = [Opt(OptOps.UNROLL, 0, 2)]
-    ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src):
-      if u.op is Ops.WMMA:
-        #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != Ops.STORE
+    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, 4, (2, AxisType.UNROLL))]
+    ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
+    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
+    self.assertGreater(len(wmmas), 0)
+    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
@@ -218,12 +235,11 @@ class TestTensorCores(unittest.TestCase):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
     x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out).relu()
-    opts = [Opt(OptOps.UNROLL, 0, 2)]
-    ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src):
-      if u.op is Ops.WMMA:
-        #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != Ops.STORE
+    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, 4, (2, AxisType.UNROLL))]
+    ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
+    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
+    self.assertGreater(len(wmmas), 0)
+    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
 
 if __name__ == '__main__':
   unittest.main()

@@ -228,8 +228,7 @@ class TestViz(unittest.TestCase):
     with save_viz() as viz:
       inner = UOp.const(3)
       call = UOp(Ops.CALL, src=(UOp(Ops.SINK, src=(inner,)),))
-      func = UOp(Ops.CALL, src=(UOp(Ops.TUPLE, src=(call,)),))
-      graph_rewrite(func, TrackedPatternMatcher(pm.patterns), enter_calls=True)
+      graph_rewrite(call, TrackedPatternMatcher(pm.patterns), enter_calls=True)
     details = list(viz.get_details(0, 0))
     self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
 

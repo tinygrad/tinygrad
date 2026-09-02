@@ -1,4 +1,4 @@
-import math
+import math, functools
 from typing import Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
 from tinygrad.uop.render import print_uops, pyrender
@@ -93,9 +93,9 @@ spec_shared = PatternMatcher([
   # GROUP of stores (or groups, or NOOPs)
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
 
-  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
+  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, RETURNED, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX,
-                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
+                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS, Ops.RETURNED})),),
         allow_any_len=True), lambda: True),
 
   # CUSTOM (inline and non inline): the arg is the source string and the dtype it produces, void for a bare statement
@@ -122,16 +122,16 @@ spec_shared = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
-  # STORE in tensor graph: store a value into a target
-  (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
+  # STORE: the target must be storage or a CONTIGUOUS realization point (or an AFTER/BITCAST/view of one);
+  # CONTIGUOUS targets are written into the buffer the CONTIGUOUS creates. INDEX stores are checked above
+  (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x:
+   True if (b:=x.storage_base).op in {Ops.BUFFER, Ops.PARAM, Ops.RETURNED, Ops.CONTIGUOUS} else None if b.op is Ops.INDEX else False),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 5),
 ])
 
 def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isinstance(s, str) for s in d))
-
-def valid_gettuple(g:UOp, t:UOp): return isinstance(g.arg, int) and 0 <= g.arg < len(t.src)
 
 # these ops can exist in tensor but not programs. example: movement
 spec_tensor = PatternMatcher([
@@ -152,11 +152,8 @@ spec_tensor = PatternMatcher([
   # CALL
   (UPat(Ops.CALL, dtypes.void, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
 
-  # value-producing CALLs and TUPLEs must have void dtype, GETTUPLE can only appear on CALL or TUPLE
-  (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
-  (UPat(Ops.TUPLE, dtypes.void), lambda: True),
-  (UPat(Ops.GETTUPLE, src=(UPat(Ops.CALL, src=(UPat(Ops.TUPLE, name="t"),), allow_any_len=True),), name="g"), valid_gettuple),
-  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), valid_gettuple),
+  # RETURNED is a placeholder for a buffer a call writes and returns: it has a size in the arg, no shape input
+  (UPat(Ops.RETURNED, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
 
   # SPECIAL is index before index lowering. custom_kernel currently has this
   (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.weakint),), name="s"), lambda s: isinstance(s.arg, str)),
@@ -275,17 +272,19 @@ spec_kernel_graph = PatternMatcher([
 
 # **** pyrender (move this) ****
 
-# late imports to avoid circular import
-from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.schedule.rangeify import BufferizeOpts
-from tinygrad.renderer import Estimates
-glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
-                        "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
-                        "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-                        "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates}
+# circular-import-safe eval globals for pyrender round-tripping (lazy: codegen/schedule/renderer are heavy)
+@functools.cache
+def pyrender_globals() -> dict[str, Any]:
+  from tinygrad.codegen.opt import Opt, OptOps
+  from tinygrad.schedule.rangeify import BufferizeOpts
+  from tinygrad.renderer import Estimates
+  return {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
+          "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
+          "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
+          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
-  exec(code, glbls, lcls)
+  exec(code, pyrender_globals(), lcls)
   return lcls['ast']
 
 def test_pyrender(test_ast:UOp, assert_parents=True):

@@ -22,7 +22,7 @@ class _Device:
   def canonicalize(self, device:str|None) -> str: return self._canonicalize(device if device is not None else Device.DEFAULT)
   def __getitem__(self, ix:str) -> Compiled:
     ix = self.canonicalize(ix)
-    assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "TINYFS", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
+    assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
     return self.__get_canonicalized_item(ix)
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def get_class(self, ix:str):
@@ -46,7 +46,7 @@ class _Device:
   def DEFAULT(self, v): raise AttributeError(f'setting Device.DEFAULT is deprecated, use "with Context(DEV={v!r})" or "DEV.value = {v!r}"')
   @functools.cached_property
   def _select_device(self) -> str:
-    assert (dev:=next((d for d in self._devices if d not in ["DISK", "TINYFS", "NPY"] and getenv(d) == 1), None)) is None, \
+    assert (dev:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)) is None, \
       f"{dev}=1 is deprecated, use DEV={dev} instead"
     try:
       device = next(self.get_available_devices())

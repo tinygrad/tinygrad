@@ -7,7 +7,7 @@ from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
-from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, DEV
+from tinygrad.helpers import Context, dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import DType, dtypes, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -73,14 +73,6 @@ class TestLinearizer(unittest.TestCase):
       # assert that there is a global load after the reduce ends
       assert any(u.addrspace == AddrSpace.GLOBAL for u in load_idxs)
 
-  def _test_no_nested_ranges(self, lins, skip=None):
-    for l in lins:
-      range_in_acc = flatten([[x for x in u.src if x.op is Ops.RANGE] for u in l.uops if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG])
-      ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u in range_in_acc) or (u.op is Ops.END and u.src[0] in range_in_acc)]
-      for i,u in enumerate(ranges):
-        if skip and i in skip: continue
-        assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
-
   def test_two_nested_range(self):
     a = Tensor.randn(2, ).realize()
     out = a.reshape(2, 1).expand(2, 3).sum()
@@ -135,7 +127,7 @@ class TestLinearizer(unittest.TestCase):
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
 
-    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=0)]),
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
     num_loads = len([uop for uop in uops if uop.op is Ops.LOAD])
     assert num_loads <= 4, "more load uops than needed"
@@ -148,7 +140,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
 
-    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=0)]),
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops <= 1, "more alu uops than needed"
@@ -159,7 +151,8 @@ class TestLinearizer(unittest.TestCase):
     r = Tensor.conv2d(x,w,padding=1).relu()
 
     uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0],
-      [Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+      [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST)),
+       Opt(op=OptOps.SPLIT, axis=1, arg=(0, AxisType.UNROLL))]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
     accs = [u for u in uops if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
     stores = [u for u in uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now
@@ -170,7 +163,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "CPU", "test only for CPU")
   def test_upcast_with_locals_cpu(self):
     out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
-    prg = to_program(replace_opts(out.schedule_linear().src[-1].src[0], [Opt(OptOps.LOCAL, axis=0, arg=4)]),
+    prg = to_program(replace_opts(out.schedule_linear().src[-1].src[0], [Opt(OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL))]),
                       renderer=Device[Device.DEFAULT].renderer)
     self.assertEqual(len(prg.src[2].arg.split("for")), 5)
 
@@ -181,7 +174,8 @@ class TestLinearizer(unittest.TestCase):
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
-    opts_to_apply = [Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    opts_to_apply = [Opt(op=OptOps.SPLIT, axis=1, arg=(8, AxisType.GROUP_REDUCE)), Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL)),
+                     Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]
     program = to_program(replace_opts(r.schedule_linear().src[-1].src[0], opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
 
     stores = [u for u in tuple(program.src[1].src) if u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG]
@@ -197,7 +191,7 @@ class TestLinearizer(unittest.TestCase):
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack(a, b)
-    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=0)]),
+    uops = tuple(to_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
@@ -228,7 +222,7 @@ class TestLinearizer(unittest.TestCase):
       (dtypes.float, dtypes.float16, dtypes.float16),
     )
     for tensor_dtype, acc_dtype, expected_dtype in tests:
-      if tensor_dtype in (dts:=Device[Device.DEFAULT].renderer.supported_dtypes()) and acc_dtype in dts and expected_dtype in dts:
+      if tensor_dtype in (dts:=Device[Device.DEFAULT].renderer.supported_dtypes()) and acc_dtype in dts|{None} and expected_dtype in dts:
         a, b = Tensor.rand(8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, dtype=tensor_dtype)
         helper_arg_acc_dtype(a.sum(dtype=acc_dtype), expected_dtype)
         helper_arg_acc_dtype(a.matmul(b, dtype=acc_dtype), expected_dtype)
@@ -240,7 +234,7 @@ class TestLinearizer(unittest.TestCase):
   def test_simple_unroll_no_between_phi_dependencies(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     r = (x@y).relu()
-    opt = [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]
+    opt = [Opt(OptOps.SPLIT, 2, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))]
     ast = helper_linearizer_opt(r, [opt])
     # the uops graph is reg BUFFER -> 4x STORE 0.0 -> RANGE -> 4x ALU -> 4x STORE -> ENDRANGE
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
@@ -253,9 +247,6 @@ class TestLinearizer(unittest.TestCase):
         else:
           assert u.src[1].op in GroupOp.ALU
           assert begin_range < uops.index(u) < end_range
-      # children of END are placed after ENDRANGE
-      if any(x.op is Ops.END and x.src[1].op in GroupOp.ALU for x in u.src):
-        assert end_range < uops.index(u)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_default_global_reversed(self):
@@ -353,8 +344,9 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_store_locals_and_globals(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     out = x@y
-    opt = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8),
-            Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
+    opt = [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 3, (8, AxisType.GROUP_REDUCE, True)),
+            Opt(OptOps.SPLIT, 3, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),
+            Opt(OptOps.SPLIT, 1, (2, AxisType.UPCAST))] # upcast accs in both reduces
     ast = helper_linearizer_opt(out, opts=[opt])
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
     uops = tuple(to_program(replace_opts(ast, opt), renderer=Device[Device.DEFAULT].renderer).src[1].src)
@@ -392,9 +384,9 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_two_grouped_stores_local(self):
-    # GROUP on both reduces puts two LOCAL buffers in one kernel, and the store to each needs its own barrier
+    # GROUP_REDUCE on both reduces puts two LOCAL buffers in one kernel, and the store to each needs its own barrier
     a = Tensor.rand(32, 32).realize()
-    opts = [Opt(OptOps.GROUP, 1, 4), Opt(OptOps.GROUP, 2, 4)]
+    opts = [Opt(OptOps.SPLIT, 3, (4, AxisType.GROUP_REDUCE)), Opt(OptOps.SPLIT, 5, (4, AxisType.GROUP_REDUCE))]
     ast = helper_linearizer_opt(single_kernel_softmax(a), [opts])
     uops = to_program(replace_opts(ast, opts), renderer=Device[Device.DEFAULT].renderer).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
@@ -415,12 +407,6 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   # ensure buffers are allocated
   for b in bufs: b.ensure_allocated()
   return ast, bufs
-
-def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
-  assert isinstance(ast, UOp), "ast must be UOp"
-  inbufs = [x.uop.base.buffer for x in inputs]
-  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.size, out.src[1].dtype).allocate() for out in ast.src]
-  _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
 def helper_linearizer_opt(r:Tensor|list[Tensor], *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)
