@@ -967,6 +967,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.atan(), low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.atan(), low=300, high=303)
     helper_test_op(None, lambda x: x.atan(), vals=[[-0.5, 0., 0.5]])
+    helper_test_op([(45,65)], lambda x: x.atan(), low=-1e20, high=-1e19)
+    helper_test_op([(45,65)], lambda x: x.atan(), low=1e19, high=1e20)
 
   def test_relu(self):
     helper_test_op([(64,64)], lambda x: x.relu())

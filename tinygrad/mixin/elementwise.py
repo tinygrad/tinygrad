@@ -959,7 +959,9 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).atan().numpy())
     ```
     """
-    return (self / (1 + self * self).sqrt()).asin()
+    x = (big:=self.abs() > 1).where(big.where(self, 1).reciprocal(), self)
+    y = (x / (1 + x*x).sqrt()).asin()
+    return big.where(self.sign() * (math.pi/2) - y, y)
 
   def elu(self, alpha=1.0) -> Self:
     """
