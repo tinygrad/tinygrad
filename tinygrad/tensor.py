@@ -172,13 +172,11 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
   return b.param_like(len(ctx.replacements)-1)
 
-# unbound BUFFER identities are unique at creation (outputs of different calls never alias): here they get canonical
-# scope-local ids, so identical calls hash identically for the schedule cache. fresh slots are all positive (global
-# counter), so canonical slots are negative and the guard below just checks the sign (nothing else reads BUFFER slots)
+# unbound BUFFERs get canonical scope-local id slots here so structurally identical calls hash identically for the
+# schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
 def canonicalize_unbound_buffer(ctx:AllocCtx, b:UOp):
-  if b.arg.slot < 0: return None
-  if b not in ctx.unbound: ctx.unbound[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.unbound)))
-  return ctx.unbound[b]
+  if b.arg.slot >= 0 and b not in ctx.unbound: ctx.unbound[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.unbound)))
+  return ctx.unbound.get(b)
 
 def canonicalize_call_body(ctx:AllocCtx, c:UOp):
   body = graph_rewrite(c.src[0], pm_canonicalize_unbound, ctx=ctx, bottom_up=True)

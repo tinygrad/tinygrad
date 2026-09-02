@@ -79,7 +79,6 @@ class _function(Generic[ReturnType]):
         buf_strs = '\n  '.join(f"{i}: dtype={b.dtype}, size={b.max_numel()}, device={b.device}" for i,b in enumerate(implicit_buffers))
         raise RuntimeError(f"function {name} has {len(implicit_buffers)} implicit buffer(s), but allow_implicit=False\n  {buf_strs}")
 
-    # keep output declarations unique across calls; transform_to_call canonicalizes them together in their scheduling scope
     fret = UOp.call_outputs(uret.src if isinstance(ret, tuple) else (uret,), *call_uops, grad_fxn=self.grad_fxn, name=name,
                             precompile=self.precompile, precompile_backward=self.precompile_backward)
 
