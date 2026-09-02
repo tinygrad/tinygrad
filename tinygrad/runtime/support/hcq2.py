@@ -7,7 +7,7 @@ from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, pe
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
-from tinygrad.dtype import dtypes, DType, AddrSpace
+from tinygrad.dtype import dtypes, DType
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear
@@ -226,7 +226,7 @@ def _finalize_batch(ctx:BatchCtx) -> UOp: # the batch as one call: every wait is
   submits += [_epilogue(ctx, dev) for dev in ctx.queues]
   fence = UOp.custom_function("hcq_fence", *[ctx.sched_timeline((dev,)) for dev in ctx.queues],
                               *[ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs])
-  merged = [m.replace(src=(m.src[0].barrier(fence),)) for m in _merge_queues(submits)]
+  merged = [m.replace(src=(*m.src, fence)) for m in _merge_queues(submits)]
   estimates = sum((estimate_uop(call) for call, _, _ in ctx.batch), start=Estimates()).simplify()
   return UOp.sink(*merged).call(name=f"hcq batch ({len(ctx.batch)})", aux=HCQInfo(tuple(ctx.queues), estimates, kernels=tuple(kerns)))
 
@@ -252,10 +252,11 @@ class EncodeCtx: # the batch's devices, the blobs its queues render and the inpu
 class HWQueue:
   q_rewrite:PatternMatcher
 
-  def __init__(self, ctx:EncodeCtx): self.ctx, self.blob, self.patches, self.deps = ctx, bytearray(), list[tuple[int, UOp]](), list[UOp]()
-  def __getattr__(self, name): return getattr(self.dev, name) # the hardware bits of the submit's device
-
-  def encode(self, submit:UOp) -> UOp: return self.submit(self.render(submit.src[0]))
+  def __init__(self, ctx:EncodeCtx, submit:UOp):
+    self.ctx, self.lin, self.deps = ctx, submit.src[0], list(submit.src[1:])
+    self.devs, self.queue = self.lin.arg
+    self.dev = Device[self.devs[0]]
+    self.blob, self.patches = bytearray(), list[tuple[int, UOp]]()
 
   def q(self, *words): # a word is an int, a const uop, or a patch uop the blob keeps a slot for
     for w in words:
@@ -267,32 +268,6 @@ class HWQueue:
       else:
         v, n = (c.val, w.dtype.itemsize) if isinstance(w, UOp) else (c, 4)
         self.blob += (v & (1 << 8 * n) - 1).to_bytes(n, 'little')
-
-  def render(self, lin:UOp) -> UOp: # the blob bakes on a fresh placeholder, shrunk to the stream the submit copies
-    if lin.op is Ops.BARRIER: self.deps, lin = list(lin.src[1:]), lin.src[0] # the barrier chains this submit on the prior phase
-    self.devs, self.queue = lin.arg
-    self.dev = Device[self.devs[0]]
-    for u in lin.src:
-      if u.op in {Ops.INS, Ops.CALL}: self.q_rewrite.rewrite(u, ctx=self)
-      else: self.deps.append(u) # lowered sync blocks this submit pushes after
-
-    # nested word linears (kernargs) pack into the tail, their getaddrs re-target to views of the buffer
-    stream, offs = len(self.blob), {}
-    for l in dedup([g.src[0] for _, w in self.patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR]):
-      self.blob += bytes(-len(self.blob) % 128)
-      start = len(self.blob)
-      self.q(*l.src)
-      offs[l] = (start, len(self.blob))
-
-    # the blob is plain bytes on a fresh placeholder: the link words ride the ctx as (offset, word) rows,
-    # the runtime ones the body stores every call, before the submit reads the stream
-    buf = UOp.placeholder((len(self.blob),), dtypes.uint8, device=self.devs, tag=to_name("cmdbuf", self.queue))
-    placed = UOp(Ops.SINK, src=tuple(w for _, w in self.patches)).substitute({l: buf[o:e] for l, (o, e) in offs.items()})
-    placed = graph_rewrite(placed, pm_input_addr, ctx=self.ctx, name="input addrs").src
-    links, runtime = partition(list(zip([o for o, _ in self.patches], placed)), lambda p: is_link_value(p[1]))
-    self.ctx.blobs[buf] = (bytes(self.blob), links)
-    stores = [buf.after(*self.deps).shrink(((o, o + w.dtype.itemsize),)).bitcast(w.dtype).index(0).store(w) for o, w in runtime]
-    return buf.after(*stores).shrink(((0, stream),))
 
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
 
@@ -307,6 +282,24 @@ def is_link_value(w:UOp) -> bool: # resolvable when the linear links: no variabl
   if w.op is Ops.GETADDR: return True
   if w.op in {Ops.LOAD, Ops.INDEX, Ops.PARAM} or w.is_variable: return False
   return all(is_link_value(s) for s in w.src)
+
+def encode_submit(hq:HWQueue) -> UOp:
+  for u in hq.lin.src: hq.q_rewrite.rewrite(u, ctx=hq)
+  stream, views = len(hq.blob), {}
+  for l in dedup([g.src[0] for _, w in hq.patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR]):
+    hq.blob += bytes(-len(hq.blob) % 128)
+    start = len(hq.blob)
+    hq.q(*l.src)
+    views[l] = (start, len(hq.blob))
+
+  # the link words ride the ctx as (offset, word) rows, the runtime ones the body stores every call before the submit reads the stream
+  buf = UOp.placeholder((len(hq.blob),), dtypes.uint8, device=hq.devs, tag=to_name("cmdbuf", hq.queue))
+  words = UOp.sink(*[w for _, w in hq.patches]).substitute({l: buf[o:e] for l, (o, e) in views.items()})
+  words = graph_rewrite(words, pm_input_addr, ctx=hq.ctx, name="input addrs").src
+  links, runtime = partition(list(zip([o for o, _ in hq.patches], words)), lambda p: is_link_value(p[1]))
+  hq.ctx.blobs[buf] = (bytes(hq.blob), links)
+  stores = [buf.after(*hq.deps).shrink(((o, o + w.dtype.itemsize),)).bitcast(w.dtype).index(0).store(w) for o, w in runtime]
+  return hq.submit(buf.after(*stores).shrink(((0, stream),)))
 
 def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp: # per device: wait for what this batch's last run signaled, take the next value; re-arm its signals
   lasts, sigs = f.src[:len(ctx.devs)], f.src[len(ctx.devs):]
@@ -328,12 +321,7 @@ def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp: # per device: wait for what this bat
 pm_hcq_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name="f"), hcq_fence)])
 
 # *****************
-# 3.1. split: the body's placeholders become its params in visit order, a cmdbuf as its patched form; its variables and ranges collect
-
-@dataclass
-class SplitCtx:
-  blobs:dict[UOp, tuple[bytes, list[tuple[int, UOp]]]]
-  args:list[UOp] = field(default_factory=list); alus:list[UOp] = field(default_factory=list); ranges:list[UOp] = field(default_factory=list) # noqa: E702
+# 3.1. lower: the batch call to a body program and its args
 
 def patch_cmdbuf(cmdbuf:UOp, blob:bytes, links:list[tuple[int, UOp]]) -> UOp: # the bytes, then one stacked store per word width at byte offsets
   stores = []
@@ -342,17 +330,6 @@ def patch_cmdbuf(cmdbuf:UOp, blob:bytes, links:list[tuple[int, UOp]]) -> UOp: # 
     stores.append(cmdbuf.index(UOp.stack(*[UOp.const(o) for o in offs])).store(UOp.stack(*words)))
   return cmdbuf.after(cmdbuf.store(UOp(Ops.BINARY, arg=blob).bitcast(cmdbuf.dtype)), *stores)
 
-def split_param(ctx:SplitCtx, p:UOp) -> UOp|None: # a tagged param is a placeholder: the body's next param, bound by the call
-  if p.addrspace is AddrSpace.ALU: ctx.alus.append(p)
-  if p.tag is None: return None
-  ctx.args.append(patch_cmdbuf(p, *ctx.blobs[p]) if p in ctx.blobs else p)
-  slot = len(ctx.args) - 1 # in the name too: a tag repeats across the batch's devices
-  return UOp.param(slot, p.dtype, shape=p.shape, device=HCQ_RUNTIME_DEV.value, volatile=p.arg.volatile, name=f"{p.arg.name}_{slot}")
-
-def split_range(ctx:SplitCtx, r:UOp) -> None: ctx.ranges.append(r)
-
-pm_split_body = PatternMatcher([(UPat(Ops.PARAM, name="p"), split_param), (UPat(Ops.RANGE, name="r"), split_range)])
-
 def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.args: return None # not an hcq call, or lowered already
 
@@ -360,20 +337,22 @@ def lower_call(call:UOp) -> UOp|None:
   ctx = EncodeCtx(devs:=call.arg.aux.device)
   pms = [Device[d].pm_encode for d in dedup([d.split(":")[0] for d in devs])]
   body = graph_rewrite(call.src[0], functools.reduce(lambda a, b: a + b, pms, pm_hcq_encode), ctx=ctx, walk=True, name="encode body")
+  body = body.substitute({ctx.table: (table:=UOp.placeholder((len(ctx.inputs),), dtypes.uint64, device="CPU", tag="inputs"))}) # sized now
 
-  # the table is sized now that every input is known, then the placeholders split out as the body's params
-  table = UOp.placeholder((len(ctx.inputs),), dtypes.uint64, device="CPU", tag="inputs")
-  body = graph_rewrite(body.substitute({ctx.table: table}), pm_split_body, split:=SplitCtx(ctx.blobs), name="split body")
-  # a variable binds by name at exec: every program's copy of it is one param after the buffers; the ranges renumber in order
-  names = dedup([a.arg.name for a in split.alus])
-  vals = {a: a.replace(arg=replace(a.arg, slot=len(split.args) + names.index(a.arg.name))) for a in split.alus}
-  rngs = {r: r.replace(arg=(i,)+r.arg[1:]) for i, r in enumerate(sorted(split.ranges, key=lambda r: r.arg))}
-  sink = body.substitute(vals | rngs).replace(arg=KernelInfo("hcq_submit"), tag=1)
-  if VIZ: graph_rewrite(UOp.sink(*split.args), PatternMatcher([]), name="View Link-Time Patches")
+  # the placeholders become the body's params in visit order, a cmdbuf as its patched form; variables bind by name after them, ranges renumber
+  tops = body.toposort()
+  bufs, alus = partition([u for u in tops if u.op is Ops.PARAM], lambda u: u.tag is not None)
+  names = dedup([a.arg.name for a in alus])
+  args = {b: UOp.param(i, b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for i, b in enumerate(bufs)}
+  vals = {a: a.replace(arg=replace(a.arg, slot=len(bufs) + names.index(a.arg.name))) for a in alus}
+  rngs = {r: r.replace(arg=(i,)+r.arg[1:]) for i, r in enumerate(sorted([u for u in tops if u.op is Ops.RANGE], key=lambda r: r.arg))}
+  sink = body.substitute(args | vals | rngs).replace(arg=KernelInfo("hcq_submit"), tag=1)
+  srcs = [patch_cmdbuf(b, *ctx.blobs[b]) if b in ctx.blobs else b for b in bufs]
+  if VIZ: graph_rewrite(UOp.sink(*srcs), PatternMatcher([]), name="View Link-Time Patches")
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Body")
-  info = replace(call.arg.aux, args=tuple(split.args), table=split.args.index(table) if ctx.inputs else -1, inputs=tuple(ctx.inputs),
-                 slots=tuple((to_tuple(a.device)[0], i) for i, a in enumerate(split.args) if unwrap_view(a)[0].tag == "slots"))
-  return call.replace(src=(sink, *split.args), arg=replace(call.arg, aux=info))
+  info = replace(call.arg.aux, args=tuple(srcs), table=bufs.index(table) if ctx.inputs else -1, inputs=tuple(ctx.inputs),
+                 slots=tuple((to_tuple(b.device)[0], i) for i, b in enumerate(bufs) if b.tag == "slots"))
+  return call.replace(src=(sink, *srcs), arg=replace(call.arg, aux=info))
 
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
 
