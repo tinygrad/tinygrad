@@ -4,7 +4,7 @@ import functools, time, itertools, decimal, weakref, os, statistics
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
+from tinygrad.device import Device, Buffer, MultiBuffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType
@@ -159,7 +159,7 @@ class BatchCtx:
 def _call_bufs(call:UOp) -> list[Any]:
   def dep_buf(b:UOp) -> Any:
     if (base:=(b.src[0] if b.op is Ops.MSELECT else b).storage_base).op is Ops.PARAM: return b if b.op is Ops.MSELECT else base
-    return base.buffer.bufs[b.arg] if b.op is Ops.MSELECT else base.buffer
+    return cast(MultiBuffer, base.buffer).bufs[b.arg] if b.op is Ops.MSELECT else base.buffer
   return [dep_buf(a) for a in get_call_arg_uops(call)]
 
 def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UOp]:
