@@ -549,11 +549,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, prod(to_max_shape(shp)), device=device, optional=True))
     return ret.view_as(shp, axis)
   @property
-  def num_returned(self) -> int: return sum(x.unsharded_base.is_unbound for x in self.src[1:])
+  def num_returned(self) -> int: return sum(x.unsharded_base.is_optional_buf for x in self.src[1:])
   @property
   def returned_outputs(self) -> tuple[UOp, ...]:
     """the outputs of a value-producing call: an AFTER on each unbound BUFFER input, usable like a normal buffer"""
-    return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.is_unbound)
+    return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.is_optional_buf)
   # legacy compatibility: TUPLE/GETTUPLE are gone. a tuple of values called is call_outputs, gettuple is returned_outputs[i]
   @staticmethod
   def maketuple(*srcs:UOp) -> _LegacyTupleValues: return _LegacyTupleValues(srcs)
@@ -925,12 +925,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
     # unbound (optional) buffers are placeholders for storage that will exist later: they have no concrete identity
-    return self.op in {Ops.BUFFER, Ops.PARAM} and not self.is_unbound
+    return self.op in {Ops.BUFFER, Ops.PARAM} and not self.is_optional_buf
   @property
-  def is_unbound(self) -> bool:
-    # an unbound GLOBAL BUFFER: a storage declaration with no device Buffer yet. the scheduler never claims it and callify
-    # never params it: binding happens when the owning construct attaches the Buffer (e.g. call outputs, was RETURNED)
-    return self.op is Ops.BUFFER and self.addrspace is AddrSpace.GLOBAL and self.arg.buffer is None
+  def is_optional_buf(self) -> bool:
+    # an optional BUFFER: an unbound symbolic buffer scoped inside a CALL, never callified, bound with storage at resolve time
+    return self.op is Ops.BUFFER and isinstance(self.arg, ParamArg) and self.arg.optional
 
   def _base_buffer_is_realized(self) -> bool:
     """Walk through AFTER chain to find if the underlying buffer is realized (has allocated memory)."""
@@ -1794,7 +1793,7 @@ def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
   """AFTER on an optional BUFFER placeholder extracts the call output value: the value of its matching store in a SINK body
   (called from patterns that bind t to a SINK)"""
   vals = [st.src[1] for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is r.unsharded_base] \
-    if r.unsharded_base.is_unbound else []
+    if r.unsharded_base.is_optional_buf else []
   return vals[0] if len(vals) == 1 else None
 remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 

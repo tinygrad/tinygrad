@@ -29,14 +29,14 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     # grads align with the call's src positions (None for the body and for unbound BUFFER outputs, wherever they are)
     def arg_grads(g):
       git = iter(g)
-      return (None,) + tuple(next(git) if not a.unsharded_base.is_unbound else None for a in k.src[1:])
+      return (None,) + tuple(next(git) if not a.unsharded_base.is_optional_buf else None for a in k.src[1:])
     if ctx.op is Ops.SINK:
       real = [on_dev(g, i) for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
       return arg_grads(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return arg_grads(k.arg.grad_fxn(on_dev(ctx, 0), k))
   # the unbound BUFFER inputs are the call outputs: their positions in the args get the output gradients from the AFTER rule
   assert fxn.op is Ops.SINK and k.num_returned, f"expected a CALL with unbound BUFFER inputs or a grad_fxn, got {fxn.op}"
-  ret_pos = [i for i, a in enumerate(args) if a.unsharded_base.is_unbound]
+  ret_pos = [i for i, a in enumerate(args) if a.unsharded_base.is_optional_buf]
   # the body stores the outputs into output PARAMs: the values are the stored values in slot order
   values = UOp.sink(*[st.src[1] for st in fxn.src if st.op is Ops.STORE])
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
