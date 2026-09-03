@@ -365,7 +365,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
     lin = graph_rewrite(linear.substitute(bufmap, walk=True), pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
     lin = sched_batches(lin, profile)
     lin = graph_rewrite(lin, pm_encode, walk=True, name="encode")
-    with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(l).substitute({v: k for k, v in bufmap.items()}, walk=True)
+    with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin).substitute({v: k for k, v in bufmap.items()}, walk=True)
     if final_linear is not linear: hcq_compile_cache[cache_key] = final_linear
   return final_linear.substitute(bufmap, walk=True)
 
