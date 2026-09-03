@@ -260,11 +260,10 @@ runs:
       run: |
         cuda_root=/usr/local/cuda/targets/x86_64-linux
         sudo mkdir -p "$cuda_root"
-        for archive in \
-          cuda_nvrtc-linux-x86_64-12.9.86-archive.tar.xz \
-          cuda_cudart-linux-x86_64-12.9.37-archive.tar.xz; do
-          curl -fL "https://developer.download.nvidia.com/compute/cuda/redist/${archive%%-linux-x86_64-*}/linux-x86_64/$archive" \
-            | sudo tar -xJ -C "$cuda_root" --strip-components=1
+        for url in \
+          https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.9.86-archive.tar.xz \
+          https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-12.9.37-archive.tar.xz; do
+          curl -fL "$url" | sudo tar -xJ -C "$cuda_root" --strip-components=1
         done
         echo "CUDA_PATH=$cuda_root" >> "$GITHUB_ENV"
         echo "$cuda_root/lib" | sudo tee /etc/ld.so.conf.d/cuda-nvrtc.conf
@@ -276,7 +275,7 @@ runs:
       shell: bash
       run: |
         sudo mkdir -p /usr/local/lib
-        sudo curl --output-dir /usr/local/lib -fLO https://github.com/li0nr/gpuocelot/releases/download/cuda-12-support-sm86/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
+        sudo curl --output-dir /usr/local/lib -fLO https://github.com/li0nr/gpuocelot/releases/download/cuda-12-sm86/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
 
     # **** WebGPU ****
 
