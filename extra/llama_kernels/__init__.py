@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, pathlib
-from tinygrad import Tensor
+from tinygrad import Tensor, UOp
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 
 FP8_MAX = 448.0
