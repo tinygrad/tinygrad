@@ -202,6 +202,7 @@ class GPTOSS:
     if getenv("FUSED_RMSNORM_MUL", 0):
       from extra.gptoss_kernels.rmsnorm import rmsnorm_mul
       x_normed, rrms = rmsnorm_mul(x, attention_norm, self.norm_eps)
+      qkv = matmul_mx(x_normed, wqkv, wqkv_scale) + wqkv_bias
       norm_saves = [x_normed, rrms]
     else:
       x_normed, rrms = rmsnorm(x, self.norm_eps)
