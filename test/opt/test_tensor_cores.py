@@ -288,8 +288,8 @@ class TestTensorCores(unittest.TestCase):
                       "test requires tensor cores with accumulation in half") # testing with half suffices.
   @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx12"),
                    "TODO: two UPCASTs plus an UNROLL give 100% wrong output on MOCKKFD gfx1201, gfx1100 and gfx950 pass")
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   def test_tensor_core_opts(self):
-    _skip_unsupported_tc_dtypes(dtypes.half, dtypes.half)
     N = 128
     Tensor.manual_seed(1552)
     a, b = Tensor.rand(N, N, dtype=dtypes.half).realize(), Tensor.rand(N, N, dtype=dtypes.half).realize()
@@ -313,8 +313,8 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx12"),
                    "TODO: two UPCASTs plus an UNROLL give 100% wrong output on MOCKKFD gfx1201, gfx1100 and gfx950 pass")
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   def test_tensor_core_opts_locals(self):
-    _skip_unsupported_tc_dtypes(dtypes.half, dtypes.half)
     N = 128
     Tensor.manual_seed(1552)
     a, b = Tensor.rand(N, N, dtype=dtypes.half).realize(), Tensor.rand(N, N, dtype=dtypes.half).realize()
