@@ -301,15 +301,28 @@ class TestArgOrder(unittest.TestCase):
     np.testing.assert_equal(out.numpy(), [1, 3, 5])
 
   def test_outputs_arbitrary_order(self):
-    x = Tensor.arange(3, dtype=dtypes.int).realize()
-    y = Tensor.arange(3, 6, dtype=dtypes.int).realize()
+    x = Tensor([1.0, 2.0, 3.0])
+    y = Tensor([4.0, 5.0, 6.0])
+    x.requires_grad = True
+    y.requires_grad = True
+    x, y = x.realize(), y.realize()
     dev = self._dev(x)
     # args (out0, in0, out1, in1): outputs at positions 0 and 2, input params slotted at their final positions 1 and 3
     p1, p3 = UOp.param(1, x.dtype, x.shape, dev), UOp.param(3, y.dtype, y.shape, dev)
     outs = UOp.call_with_outputs((p1.reshape(x.shape) * 2, p3.reshape(y.shape) + p1.reshape(y.shape)), x.uop, y.uop,
                                  output_pos=(0, 2))
-    np.testing.assert_equal(Tensor(outs[0]).numpy(), [0, 2, 4])
-    np.testing.assert_equal(Tensor(outs[1]).numpy(), [3, 5, 7])
+    np.testing.assert_equal(Tensor(outs[0]).numpy(), [2, 4, 6])
+    np.testing.assert_equal(Tensor(outs[1]).numpy(), [5, 7, 9])
+    # the auto gradient path (no grad_fxn) resolves outputs and gradients positionally at any position
+    (Tensor(outs[0]).sum() + Tensor(outs[1]).sum()).backward()
+    np.testing.assert_equal(x.grad.numpy(), [3, 3, 3])
+    np.testing.assert_equal(y.grad.numpy(), [1, 1, 1])
+
+  def test_output_pos_must_be_ascending(self):
+    x = Tensor.arange(3, dtype=dtypes.int).realize()
+    p1 = UOp.param(1, x.dtype, x.shape, self._dev(x))
+    with self.assertRaises(AssertionError):
+      UOp.call_with_outputs((p1.reshape(x.shape) * 2, p1.reshape(x.shape) + 1), x.uop, output_pos=(1, 0))
 
   def test_intersperse_returned_precompile(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()

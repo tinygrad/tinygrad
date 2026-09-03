@@ -1203,7 +1203,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     outputs are unbound BUFFER placeholders passed as extra inputs to the call (you AFTER on them like normal buffers).
     the buffers are bound to the output PARAMs positionally wherever the call is resolved, just like the args.
     output_pos gives the position of each output in the arg list (default: a block after the inputs), the inputs take
-    the remaining positions in order; when it's given, input params must already be slotted at their final positions"""
+    the remaining positions in order; when it's given, input params must already be slotted at their final positions.
+    output_pos must be strictly ascending: the body's stores and the call args pair positionally by values order"""
     # the device defaults to the first device in the values or args, like srcs-based device resolution
     default_dev = next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None)
     def mint(o:UOp) -> UOp:
@@ -1222,6 +1223,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     rets = tuple(mint(o) for o in values)
     pos = tuple(range(len(srcs), len(srcs)+len(values))) if output_pos is None else output_pos
     assert len(pos) == len(values) and len(set(pos)) == len(pos), "output_pos must be one distinct position per output"
+    assert all(a < b for a, b in zip(pos, pos[1:])), f"output_pos {output_pos} must be strictly ascending"
     assert all(0 <= p < len(srcs)+len(values) for p in pos), f"output_pos {output_pos} must be within the arg list"
     # the body only knows PARAMs: the output PARAMs get the slots of the outputs' positions in the arg list
     body = UOp.sink(*[v.param_like(p).store(v) for v, p in zip(values, pos)])
