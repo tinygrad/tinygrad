@@ -131,7 +131,7 @@ def expand_bitcast(bc:UOp) -> UOp|None:
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls with RETURNED inputs (inline the body)
-  (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.num_returned else None),
+  (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.has_unbound_outputs else None),
 
   # resolve AFTER on RETURNED (call outputs)
   (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
