@@ -40,8 +40,7 @@ class RandMixin(OpMixin):
   def _rand(cls, key:Self, counter:Self, shape:tuple[int, ...], dtype:DType, contiguous:bool=True) -> Self:
     bits = cls.random_bits(key, counter, ceildiv(prod(shape) * dtype.itemsize, 4))
     out = cls._bits_to_rand(bits, shape, dtype)
-    # the rand pins its storage to a real buffer in the graph, so re-reading the graph never re-rolls it
-    return out.clone() if contiguous else out
+    return out.contiguous() if contiguous else out
 
   @staticmethod
   def _next_counter(device:str, num:int):

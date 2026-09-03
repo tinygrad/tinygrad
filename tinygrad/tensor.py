@@ -114,6 +114,13 @@ def _needs_storage(base:UOp) -> bool:
   call = base.src[1] if len(base.src) > 1 else None
   return not (call is not None and call.op is Ops.CALL and call.arg is not None and call.arg.precompile)
 
+def _has_persistent_storage(u:UOp) -> bool:
+  # the value already sits in real storage, readable through views (views of buffers don't need their own storage)
+  # NOTE: strict identity (after_ok=False): a SHARD/UNSHARD on a WRITE state is not per-shard storage, it materializes
+  if u.has_buffer_identity(): return True
+  if u.op in GroupOp.Movement or u.op in {Ops.BITCAST, Ops.UNSHARD}: return _has_persistent_storage(u.src[0])
+  return False
+
 def storage_subs(outs) -> dict[UOp, UOp]:
   """subs giving every out lacking storage real storage in the graph (a clone), inner outputs first so nested graphs
   reference the storage of the outputs they consume instead of recomputing them"""
@@ -123,17 +130,23 @@ def storage_subs(outs) -> dict[UOp, UOp]:
   # copies that are direct store values fold into their store: one copy kernel lands there, no clone needed
   stored = {st.src[1] for st in sink.toposort(enter_calls=False) if st.op is Ops.STORE}
   for u in UOp.sink(*bases).toposort(enter_calls=False):
-    if u.op is Ops.CONTIGUOUS:
+    if u.op is Ops.CONTIGUOUS_BACKWARD:
+      # a scheduling barrier only: it dissolves to its (materialized) source, like the old strip rule
+      subs[u] = u.src[0].substitute(subs, walk=True) if subs else u.src[0]
+    elif u.op is Ops.CONTIGUOUS:
       # a CONTIGUOUS on storage that is already materialized resolves to the storage state (like the old rule); a
       # CONTIGUOUS on a size-0 value resolves to nothing, there's no storage to allocate
-      if u.src[0].op is Ops.AFTER and u.src[0].has_buffer_identity(after_ok=True): subs[u] = u.src[0]
+      src = u.src[0]
+      while src.op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: src = src.src[0]  # detach is stripped, like the old rule
+      if src.op is Ops.AFTER and src.has_buffer_identity(after_ok=True): subs[u] = src
       elif 0 in u.shape: subs[u] = u.src[0]
       # every other CONTIGUOUS becomes real storage in the graph (a clone): the user asked for a materialization point
       elif _needs_storage(u): subs[u] = (u.substitute(subs, walk=True) if subs else u).clone()
     # copies from creation devices (disk/npy/python loads) want to persist in the scheduled scope, insert a clone
     elif u.op is Ops.COPY and is_creation_device(u.src[0]) and u not in stored:
       subs[u] = (u.substitute(subs, walk=True) if subs else u).clone()
-    elif u in bases and _needs_storage(u): subs[u] = (u.substitute(subs, walk=True) if subs else u).clone()
+    elif u in bases and _needs_storage(u) and not _has_persistent_storage(u):
+      subs[u] = (u.substitute(subs, walk=True) if subs else u).clone()
   return subs
 
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
@@ -323,8 +336,12 @@ class Tensor(RandMixin):
 
   def _materialize(self, *lst:Tensor) -> tuple[UOp, dict[UOp, UOp]]:
     """inserts the storage (a clone) for every lacking out into the graph and returns the call + its storage map"""
-    _apply_map_to_tensors(storage_subs((self,)+lst), name="materialize")
-    return transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
+    outs = (self,)+lst
+    # fold MOPS over buffers into views first: a CONTIGUOUS on a contiguous view of a real buffer is a view (no storage)
+    sink = graph_rewrite(UOp.sink(*[x.uop for x in outs]), pm_mops_to_view, ctx=AllocCtx(), bottom_up=True, name="fold mops to view")
+    _apply_map_to_tensors({x.uop: s for x, s in zip(outs, sink.src) if x.uop is not s}, name="fold mops to view")
+    _apply_map_to_tensors(storage_subs(outs), name="materialize")
+    return transform_to_call(UOp.sink(*[x.uop for x in outs]))
 
   def callify(self, *lst:Tensor) -> Tensor:
     big_sink, becomes_map = self._materialize(*lst)
