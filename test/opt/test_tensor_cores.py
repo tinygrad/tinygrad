@@ -92,6 +92,16 @@ class TestTensorCores(unittest.TestCase):
         helper_tc_allclose(tc.dims[0]*8, tc.dims[1]*8, tc.dims[2], tc.dtype_in, tc.dtype_out,
                            extra_opts=[Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))]*3)
 
+  @Context(ALLOW_TF32=1)
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_upcast_shared_axis(self):
+    # same operand shapes
+    tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in not in dtypes.fp8s)
+    N, M, K = tc.dims
+    a, b = Tensor.rand(3, M*2, K*2, dtype=tc.dtype_in), Tensor.rand(3, K*2, N*2, dtype=tc.dtype_in)
+    helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out), [[Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, 0, (0, AxisType.UPCAST))]],
+                          atol=3e-2, rtol=1e-3, check_default_opt=False)
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padto_warp(self):
     # the WARP is the hardware simdgroup width, it can't be padded
