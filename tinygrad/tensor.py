@@ -378,8 +378,7 @@ class Tensor(RandMixin):
     return Tensor(self.uop.param_like(slot))
 
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
-    outs = UOp.call_with_outputs((fxn._uop,), *[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
-    return Tensor(outs[0])
+    return Tensor(fxn._uop.call_with_output(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn))
 
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
