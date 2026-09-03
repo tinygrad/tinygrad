@@ -10,11 +10,11 @@ from tinygrad.uop.ops import KernelInfo, Ops
 @function(in_kernel=True)
 def add_one(a:UOp) -> UOp: return a + 1
 
-@function(in_kernel=True)
-def add_two(a:UOp) -> UOp: return a + 2
-
 def simple_kernel(A:UOp, B:UOp) -> UOp:
   return B.index(0).store(add_one(A[0].load())).sink(arg=KernelInfo(name="test"))
+
+@function(in_kernel=True)
+def add_two(a:UOp) -> UOp: return a + 2
 
 def simple_nested_kernel(A:UOp, B:UOp) -> UOp:
   return B.index(0).store(add_two(add_one(A[0].load()))).sink(arg=KernelInfo(name="test"))

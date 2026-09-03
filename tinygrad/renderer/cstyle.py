@@ -137,7 +137,7 @@ class CStyleLanguage(Renderer):
   barrier: str = ""
   code_for_workitem: dict[Literal["g", "l"], Callable] = {}
   extra_args: list[str] = []
-  function_typedef: str = "void" # a function of the kernel, rendered above it
+  function_typedef: str = "void"
   float4: str|None = None
   float4_style: tuple[str, str] = ('(', ')')
   gep_arr_threshold: int = 4
@@ -161,7 +161,7 @@ class CStyleLanguage(Renderer):
                        self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
                        (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
     return f"{typedef} {function_name}(" + ', '.join([f'{t} {name}' for name,t in buftypes] + list(extra_args)) + ")"
-  def render_function(self, signature:str, kernel:list[str], tmp:str="") -> str: return signature + " {\n" + tmp + '\n'.join(kernel) + "\n}"
+  def render_function(self, signature:str, body:list[str], tmp:str="") -> str: return signature + " {\n" + tmp + '\n'.join(body) + "\n}"
 
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[UOp,bool]]], uops:list[UOp], prefix=None) -> str:
     tmp = ""
@@ -169,12 +169,11 @@ class CStyleLanguage(Renderer):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
-    # declare helpers first, but define them after the kernel so the kernel stays the entry point of the text
-    fns = [(self.render_signature(self.function_typedef, name, fbufs), body)
-           for name, body, fbufs in [self._render(list(u.src)) for u in uops if u.op is Ops.LINEAR]]
+    fns = [self._render(list(u.src)) for u in uops if u.op is Ops.LINEAR]
+    sigs = [self.render_signature(self.function_typedef, name, fbufs) for name, _, fbufs in fns]
     kernel_sig = self.render_signature(self.kernel_typedef.format(launch_bounds=launch_bounds), function_name, bufs, self.extra_args)
     prg = self.render_function(kernel_sig, kernel, tmp)
-    return "\n".join((prefix or []) + [sig + ";" for sig,_ in fns] + [prg] + [self.render_function(sig, body) for sig,body in fns])
+    return "\n".join((prefix or []) + [sig + ";" for sig in sigs] + [prg] + [self.render_function(sig, body) for sig, (_, body, _) in zip(sigs, fns)])
 
   def render_index(self, x:UOp, buf:UOp, idx:UOp):
     if buf.addrspace == AddrSpace.ALU:
@@ -220,7 +219,6 @@ class CStyleLanguage(Renderer):
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
-    # find which PARAMs are stored to with a single toposort
     written = [u.src[0] for u in uops if u.op is Ops.STORE] + [s for u in uops if u.op is Ops.CALL for s in u.src[1:]]
     writable_params = {u for u in UOp.sink(*written).toposort(lambda u: u.op != Ops.END) if u.op is Ops.PARAM}
     bufs: dict[UOp, tuple[str, tuple[UOp, bool]]] = {}
