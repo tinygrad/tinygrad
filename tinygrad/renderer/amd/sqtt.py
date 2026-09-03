@@ -582,14 +582,16 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
   # Build state table: byte -> opcode. Sort by mask specificity (more bits first), NOP last
   sorted_types = sorted(packet_types.items(), key=lambda x: (-bin(x[1].encoding.mask).count('1'), x[0] == 16))
   state_table = bytes(next((op for op, cls in sorted_types if (b & cls.encoding.mask) == cls.encoding.default), 16) for b in range(256))
-  # Build decode info: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
-  # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 4), 3=CDNA_MISC (*4), 4=CDNA_TIMESTAMP (absolute)
-  _special = {TS_DELTA_OR_MARK: 1, TS_DELTA_OR_MARK_RDNA4: 1, TS_DELTA_SHORT: 2, CDNA_MISC: 3, CDNA_TIMESTAMP: 4}
+  # Build decode info: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, delta_mul, special_case)
+  # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 4), 4=CDNA_TIMESTAMP (absolute)
+  _special = {TS_DELTA_OR_MARK: 1, TS_DELTA_OR_MARK_RDNA4: 1, TS_DELTA_SHORT: 2, CDNA_TIMESTAMP: 4}
+  delta_base, delta_mul = (bits[4:4], 4) if packet_types is PACKET_TYPES_CDNA else (None, 1)
   decode_info = {}
   for opcode, pkt_cls in packet_types.items():
-    delta_field = getattr(pkt_cls, 'delta', None)
+    delta_field = getattr(pkt_cls, 'delta', delta_base)
     special = _special.get(pkt_cls, 0)
-    decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_field.lo if delta_field else 0, delta_field.mask if delta_field else 0, special)  # type: ignore[attr-defined]
+    decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_field.lo if delta_field else 0, delta_field.mask if delta_field else 0, delta_mul,  # type: ignore[attr-defined]
+                           special)
   return decode_info, state_table
 
 _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3 = _build_decode_tables(PACKET_TYPES_RDNA3)
@@ -614,13 +616,12 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if (nib_off := need & 1): reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
 
     opcode = state_table[reg & 0xFF]
-    pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
-    delta = (reg >> delta_lo) & delta_mask
+    pkt_cls, nib_count, delta_lo, delta_mask, delta_mul, special = decode_info[opcode]
+    delta = ((reg >> delta_lo) & delta_mask) * delta_mul
     if special == 1:  # TS_DELTA_OR_MARK
       pkt = pkt_cls.from_raw(reg, 0)  # create packet to check is_marker
       if pkt.is_marker: delta = 0
     elif special == 2: delta += 4  # TS_DELTA_SHORT
-    elif special == 3: delta *= 4  # CDNA_DELTA
     elif special == 4:  # CDNA_TIMESTAMP (absolute timestamp anchoring)
       if (reg >> 4) & 0xfff == 0:  # unk_0 == 0 means absolute timestamp
         abs_ts = reg >> 16
@@ -635,7 +636,7 @@ def decode(data: bytes) -> Iterator[PacketType]:
       elif pkt.layout != 3:  # not a real LAYOUT_HEADER — switch to CDNA and re-decode first packet
         decode_info, state_table = _DECODE_INFO_CDNA, _STATE_TABLE_CDNA
         opcode = state_table[reg & 0xFF]
-        pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
+        pkt_cls, nib_count, delta_lo, delta_mask, delta_mul, special = decode_info[opcode]
         if special == 4 and (reg >> 4) & 0xfff == 0:  # CDNA_TIMESTAMP absolute
           ts_offset = (reg >> 16) - time
         pkt = pkt_cls.from_raw(reg, time)
@@ -656,40 +657,41 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   # map pcs to insts
   from tinygrad.viz.serve import amd_decode
   pc_map = amd_decode(lib, target)
-  wave_pc:dict[int, int] = {}
-  # only processing packets on one [CU, SIMD] unit
-  def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
+  wave_pc:dict[tuple[int, int], int] = {}
+  # RDNA selects one SIMD for instruction tracing, CDNA traces multiple SIMDs
+  simd:int = 0
   for p in decode(data):
-    if not simd_select(p): continue
+    if not getattr(p, "cu", 0) == 0: continue
+    if isinstance(p, LAYOUT_HEADER): simd = p.simd
     if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
-      assert p.wave not in wave_pc, "only one inflight wave per unit"
-      wave_pc[p.wave] = next(iter(pc_map))
-    elif isinstance(p, (WAVEEND, WAVEEND_RDNA4)):
-      pc = wave_pc.pop(p.wave)
+      if (key:=(p.simd, p.wave)) in wave_pc: raise AssertionError("only one inflight wave per unit")
+      wave_pc[key] = next(iter(pc_map))
+    elif isinstance(p, (WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)):
+      pc = wave_pc.pop((p.simd, p.wave))
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
     elif isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
         if p.mask & (1 << wave):
-          inst = pc_map[pc:=wave_pc[wave]]
-          wave_pc[wave] += inst.size()
+          inst = pc_map[pc:=wave_pc[(simd, wave)]]
+          wave_pc[(simd, wave)] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
     # map INST events on this SIMD to the program counter, we know the waves
     elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)) and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_")):
-      inst = pc_map[pc:=wave_pc[p.wave]]
+      inst = pc_map[pc:=wave_pc[(simd, p.wave)]]
       # s_delay_alu, s_wait_alu and s_barrier_wait instructions are skipped
       while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU", "S_BARRIER_WAIT"}:
-        wave_pc[p.wave] += inst.size()
-        inst = pc_map[pc:=wave_pc[p.wave]]
+        wave_pc[(simd, p.wave)] += inst.size()
+        inst = pc_map[pc:=wave_pc[(simd, p.wave)]]
       # assert branch always has a JUMP packet
       if "BRANCH" in inst_op and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("JUMP")):
         raise AssertionError(f"{inst_op} can only be followed by JUMP, got {p}")
       # JUMP handling
       if isinstance(p, (INST, INST_RDNA4)) and p.op in {InstOp.JUMP, InstOpRDNA4.JUMP}:
         x = getattr(inst, 'simm16') & 0xffff
-        wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
+        wave_pc[(simd, p.wave)] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
       else:
-        wave_pc[p.wave] += inst.size()
+        wave_pc[(simd, p.wave)] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
     # for all other packets (VMEMEXEC, ALUEXEC, OTHER_ INST, etc.), yield with None
     else: yield (p, None)
@@ -724,22 +726,17 @@ def format_packet(p) -> str:
 def print_packets(packets) -> None:
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {"NOP"}
-  for data in packets:
-    p, inst = data if isinstance(data, tuple) else (data, None)
-    if type(p).__name__.replace("_RDNA4", "") not in skip: print(format_packet(p), f"inst={inst.inst}" if inst is not None else '')
+  for p in packets:
+    if type(p).__name__.replace("_RDNA4", "") not in skip: print(format_packet(p))
 
 if __name__ == "__main__":
   import sys, pickle
   from tinygrad.helpers import temp
   with open(temp("profile.pkl", append_user=True) if len(sys.argv) < 2 else sys.argv[1], "rb") as f:
     data = pickle.load(f)
-  prg_events = {e.tag: e for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
+  prg_names = {e.tag: e.name for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
-  dev_targets = {e.device:f"gfx{e.props['gfx_target_version']//1000}" for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.props}
   evt_num = getenv("SQTT_EVENT", -1)
   for i, event in enumerate(sqtt_events):
-    prg = prg_events.get(event.kern)
-    print(f"=== event {i} {prg.name if prg is not None else ''} ===")
-    if evt_num == -1 or i == evt_num:
-      print_packets(map_insts(event.blob, prg.lib, dev_targets[prg.device]) if prg is not None else decode(event.blob))
-      print("\n")
+    print(f"\n=== event {i} {prg_names.get(event.kern, '')} ===")
+    print_packets(decode(event.blob))

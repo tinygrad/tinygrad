@@ -1066,7 +1066,8 @@ class AMDDevice(HCQCompiled):
       for k in (PMC_COUNTERS:=getenv("PMC_COUNTERS", pmc_default).split(",")):
         if k not in self.pmc_counters: raise RuntimeError(f"PMC counter {k} is not supported. Available: {','.join(self.pmc_counters.keys())}")
 
-      cast(AMDComputeQueue, unwrap(self.hw_compute_queue_t)()).pmc_start([(k, *self.pmc_counters[k]) for k in PMC_COUNTERS]).submit(self)
+      with (q:=cast(AMDComputeQueue, unwrap(self.hw_compute_queue_t)())).pred_exec((1 << self.xccs) - 1):
+        q.pmc_start([(k, *self.pmc_counters[k]) for k in PMC_COUNTERS]).submit(self)
       self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(nolru=True, uncached=True))
       self.allocator._copyin(self.pmc_buffer, memoryview(bytearray(self.pmc_buffer.size))) # zero pmc buffers, some counters have only lo part.
 

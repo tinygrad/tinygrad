@@ -6,7 +6,7 @@ from tinygrad.dtype import PyConst, dtypes, can_lossless_cast, Invalid, bitcast,
 from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 from tinygrad.uop.movement import mop_cleanup
-from tinygrad.uop.weak import pm_uncast_const, commit_weak
+from tinygrad.uop.weak import pm_uncast_const
 
 # TODO: symbolic shouldn't be importing from codegen
 from tinygrad.codegen.decomp.transcendental import xpow
@@ -68,6 +68,14 @@ bare_const = UPat.any(UPat(Ops.CONST), UPat(Ops.STACK, src=UPat(Ops.CONST)))
 casted_const = UPat.any(p:=UPat(Ops.CAST, src=(UPat(Ops.CONST),)), UPat(Ops.STACK, src=UPat.any(p, UPat(Ops.CONST, arg=Invalid))))
 def const_arg(u:UOp):
   return tuple(const_arg(s) for s in u.src) if u.op is Ops.STACK else u.val
+
+def lift_reduce_gate(red:UOp, cond:UOp, x:UOp, i:UOp) -> UOp|None:
+  # a REDUCE moves inside the gate clauses without its ranges: they invalidate every lane at once, so that gate lifts out
+  if red.arg[1] != 0: return None
+  keep, lift = partition(cond.split_uop(Ops.AND), lambda c: any(rr in c.ranges for r in red.src[1:] for rr in r.ranges))
+  inner = keep[0].uprod(*keep[1:]).where(x, i) if keep else x
+  return lift[0].uprod(*lift[1:]).where(red.replace(src=(inner,)+red.src[1:]), i) if lift else None
+
 pm_data_invalid = PatternMatcher([
   (invalid_pat.broadcast(), lambda i: i),
   (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_pat,)), lambda i: i),
@@ -77,6 +85,7 @@ pm_data_invalid = PatternMatcher([
   (UPat(GroupOp.Binary, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i)),
   (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i)),
   (UPat(GroupOp.Binary-GroupOp.Comparison, src=[invalid_pat, UPat()]), lambda i: i),
+  (invalid_gate.reduce(allow_any_len=True, name="red"), lift_reduce_gate),
   # an Invalid condition poisons the whole where; a gated Invalid condition lifts the gate out
   (invalid_pat.where(UPat(), UPat()), lambda i: i),
   (invalid_gate.where(UPat.var("a"), UPat.var("b")), lambda cond,x,i,a,b: cond.where(x.where(a,b), i)),
@@ -101,7 +110,7 @@ pm_remove_invalid = PatternMatcher([
 def fold_const_where(gate:UOp, c0:UOp, c1:UOp, w:UOp) -> UOp:
   # folding a strong dtype WHERE to a weak const branch keeps the strong dtype
   ret = c0 if gate.val else c1
-  return commit_weak(ret, w.dtype) if ret.op is Ops.CONST and ret.dtype in dtypes.weaks and w.dtype not in dtypes.weaks else ret
+  return ret.ccast(w.dtype) if ret.op is Ops.CONST and ret.dtype in dtypes.weaks and w.dtype not in dtypes.weaks else ret
 
 symbolic_simple = pm_data_invalid + PatternMatcher([
   # ** self folding **
@@ -149,7 +158,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat(GroupOp.ALU-{Ops.THREEFRY}, src=bare_const, name="a"), fold_const_alu),
   (UPat(GroupOp.ALU-{Ops.THREEFRY}, src=casted_const, name="a"), fold_const_alu),
   (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=[casted_const, bare_const], name="a"), lambda a:
-   a.replace(src=tuple(commit_weak(s, dt) if s.dtype in dtypes.weaks else s for s in a.src))
+   a.replace(src=tuple(s.ccast(dt) if s.dtype in dtypes.weaks else s for s in a.src))
    if (dt:=promo_dtype(a.src)) not in dtypes.weaks else None),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
@@ -296,9 +305,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # cast/long folding
   # if the intermediate cast doesnt narrow we can do it in one cast
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_lossless_cast(x.dtype, a.dtype) else None),
-  # commit_weak, not .cast: a weak b.dtype is not a const spelling, and a CAST(weakfloat, CONST) reaches no commit round
   (UPat.var('x', dtypes.ints+(dtypes.weakint,)).cast(dtypes.ints+(dtypes.weakint,), name="a").cast(name="b"),
-    lambda x,a,b: commit_weak(x, b.dtype) if a.dtype.min<=x.vmin and x.vmax<=a.dtype.max else None),
+    lambda x,a,b: x.ccast(b.dtype) if not x.overflows(a.dtype) else None),
   # try to do math in int instead of long, keep weak const weak
   (UPat(GroupOp.Binary, src=(UPat.var("x", (dtypes.long, dtypes.weakint)), UPat.var("y", (dtypes.long, dtypes.weakint))), name="u"), lambda u,x,y:
     (UOp.const(x.val) if x.op is Ops.CONST else x.cast(dtypes.int)).alu(u.op,
@@ -449,7 +457,7 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   # ** where **
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"),
-   lambda s,a,b,cast: s.where(commit_weak(a, cast.dtype), commit_weak(b, cast.dtype))),
+   lambda s,a,b,cast: s.where(a.ccast(cast.dtype), b.ccast(cast.dtype))),
   # ** pow **
   ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
   # ** load/store folding **

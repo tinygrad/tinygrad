@@ -1,10 +1,10 @@
 from typing import Literal, Callable
 import math, sys, struct
 from collections import defaultdict, Counter
-from tinygrad.codegen.opt import tc
+from tinygrad.renderer import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
 from tinygrad.uop.weak import commit_weak_consts
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, NUM_CPU_THREADS, IMAGE, FLOAT16, is_image_shape
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
 
@@ -65,9 +65,9 @@ base_rewrite = PatternMatcher([
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[v] for v in x.src]), x.dtype)),
 
-  # call an external function
-  (UPat(Ops.CALL, src=(UPat(),), allow_any_len=True, name="x"), lambda ctx,x:
-   f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[1:])}))({ctx[x.src[0]]}))" +
+  # call an external function: the CUSTOM_FUNCTION body holds the callee (a function pointer), the other srcs are the args
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, src=(UPat(name="fptr"),)),), allow_any_len=True, name="x"), lambda ctx,x,fptr:
+   f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[1:])}))({ctx[fptr]}))" +
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])}))" + (";" if x.dtype is dtypes.void else "")),
 
   # custom passes through with format
@@ -128,7 +128,7 @@ class CStyleLanguage(Renderer):
   var_prefix: str = "const "
   var_suffix: str = ""
   barrier: str = ""
-  code_for_workitem: dict[Literal["g", "l", "i"], Callable] = {}
+  code_for_workitem: dict[Literal["g", "l"], Callable] = {}
   extra_args: list[str] = []
   float4: str|None = None
   float4_style: tuple[str, str] = ('(', ')')
@@ -214,7 +214,7 @@ class CStyleLanguage(Renderer):
     c: defaultdict[str, int] = defaultdict(int)
     name = "test"
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST}: continue
+      if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST, Ops.CUSTOM_FUNCTION}: continue
       if u.op == Ops.STACK and len(u.src) == 0: continue
       if u.op is Ops.AFTER:
         r[u] = r[u.src[0]]
@@ -223,7 +223,8 @@ class CStyleLanguage(Renderer):
         if u.arg is not None: name = u.arg.function_name
         continue
       if u.op is Ops.PARAM:
-        r[u] = f"data{u.arg.slot}_" + '_'.join([str(x) for x in u.shape])
+        r[u] = (u.arg.name.replace(":", "_") if u.arg.name is not None else f"data{u.arg.slot}") + \
+          "_" + '_'.join([str(x) for x in u.shape])
         bufs[u] = (r[u], (u, u in writable_params))
         continue
 
@@ -263,9 +264,7 @@ class ClangRenderer(CStyleLanguage):
   float4_style = ('{', '}')
   gep_arr_threshold = 0
   has_local = False
-  has_threads = bool(getenv("THREADS", 1))
-  @property
-  def global_max(self): return (NUM_CPU_THREADS.value, 0, 0)  # type: ignore[override]
+  global_max = (1, 0, 0)
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
 
@@ -318,7 +317,7 @@ class OpenCLRenderer(CStyleLanguage):
   smem_prefix = "__local "
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   float4 = "(float4)"
-  code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
+  code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})"}
   type_map = { dtypes.int8: "char", dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong",
               dtypes.bfloat16: "ushort" }
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
@@ -419,8 +418,7 @@ class CUDARenderer(CStyleLanguage):
   barrier = "__syncthreads();"
   float4 = "make_float4"
   gep_arr_threshold = 8
-  code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
-                       "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
+  code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}"}
   code_for_op = { **CStyleLanguage.code_for_op,
     Ops.TRUNC: lambda x,dtype: f"htrunc({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"trunc({x})",
     Ops.SIN: lambda x,dtype: f"hsin({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sin({x})",
@@ -518,8 +516,7 @@ class HIPRenderer(CStyleLanguage):
   # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
   # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
   kernel_typedef = 'extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, {launch_bounds})))'
-  code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
-                       "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
+  code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})"}
   code_for_op = {**CStyleLanguage.code_for_op, Ops.TRUNC: _ocml("trunc"), Ops.SIN: _ocml("sin"),
                  Ops.LOG2: _ocml("log2"), Ops.EXP2: _ocml("exp2"), Ops.SQRT: _ocml("sqrt")}
   smem_prefix = "__attribute__((shared, aligned(16)))"

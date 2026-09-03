@@ -1,6 +1,6 @@
-import math
+import math, functools
 from typing import Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, OPAQUE_CALL_BODIES
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
@@ -93,7 +93,7 @@ spec_shared = PatternMatcher([
   # GROUP of stores (or groups, or NOOPs)
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
 
-  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
+  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, RETURNED, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX,
                                                      Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
         allow_any_len=True), lambda: True),
@@ -102,9 +102,11 @@ spec_shared = PatternMatcher([
   (UPat((Ops.CUSTOMI, Ops.CUSTOM), name="x"),
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and isinstance(x.arg[0], str) and isinstance(x.arg[1], DType)),
 
-  # CALL of an external function
-  (UPat(Ops.CALL, src=(UPat(),), allow_any_len=True, name="x"),
-   lambda x: matches_dtype(x.src[0], dtypes.uint64) and isinstance(x.arg, DType) if x.src[0].dtype is not dtypes.void else None),
+  # a CUSTOM_FUNCTION with srcs is the body of an external call, holding the callee (a function pointer)
+  (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, str)),
+  # CALL: the body is always an opaque body, the arg is a CallInfo stating the (possibly void) dtype
+  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"),
+   lambda x: isinstance(x.arg, CallInfo) and x.dtype is x.arg.dtype),
 
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),
@@ -122,16 +124,16 @@ spec_shared = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
-  # STORE in tensor graph: store a value into a target
-  (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
+  # STORE: the target must be storage or a CONTIGUOUS realization point (or an AFTER/BITCAST/view of one);
+  # CONTIGUOUS targets are written into the buffer the CONTIGUOUS creates. INDEX stores are checked above
+  (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x:
+   True if (b:=x.storage_base).op in {Ops.BUFFER, Ops.PARAM, Ops.CONTIGUOUS} else None if b.op is Ops.INDEX else False),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 5),
 ])
 
 def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isinstance(s, str) for s in d))
-
-def valid_gettuple(g:UOp, t:UOp): return isinstance(g.arg, int) and 0 <= g.arg < len(t.src)
 
 # these ops can exist in tensor but not programs. example: movement
 spec_tensor = PatternMatcher([
@@ -140,7 +142,7 @@ spec_tensor = PatternMatcher([
 
   # BUFFER
   (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf:
-   (isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device))
+   True if buf.is_unbound else (isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device))
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
   # a Variable is a 0-d ALU BUFFER with a value range and no device
@@ -148,15 +150,6 @@ spec_tensor = PatternMatcher([
 
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
-
-  # CALL
-  (UPat(Ops.CALL, dtypes.void, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
-
-  # value-producing CALLs and TUPLEs must have void dtype, GETTUPLE can only appear on CALL or TUPLE
-  (UPat(Ops.CALL, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
-  (UPat(Ops.TUPLE, dtypes.void), lambda: True),
-  (UPat(Ops.GETTUPLE, src=(UPat(Ops.CALL, src=(UPat(Ops.TUPLE, name="t"),), allow_any_len=True),), name="g"), valid_gettuple),
-  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), valid_gettuple),
 
   # SPECIAL is index before index lowering. custom_kernel currently has this
   (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.weakint),), name="s"), lambda s: isinstance(s.arg, str)),
@@ -226,7 +219,8 @@ spec_program = PatternMatcher([
 ])+spec_shared
 
 spec_hcq = PatternMatcher([
-  (UPat(Ops.GETADDR, dtypes.uint64, src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.SHRINK, Ops.BITCAST, Ops.MSTACK)).or_after(),), name="x"),
+  (UPat(Ops.GETADDR, dtypes.uint64, name="x",
+        src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.SHRINK, Ops.BITCAST, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR)).or_after(),)),
    lambda x: is_device(x.arg)),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),)), lambda: True),
 ])+spec_shared
@@ -265,8 +259,8 @@ spec_kernel_graph = PatternMatcher([
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
-  # all calls are on various sinks
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
+  # all calls are on opaque bodies
+  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True), lambda: True),
   # after on PARAM or AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),),
         allow_any_len=True), lambda: True),
@@ -274,17 +268,19 @@ spec_kernel_graph = PatternMatcher([
 
 # **** pyrender (move this) ****
 
-# late imports to avoid circular import
-from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.schedule.rangeify import BufferizeOpts
-from tinygrad.renderer import Estimates
-glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
-                        "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
-                        "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-                        "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates}
+# circular-import-safe eval globals for pyrender round-tripping (lazy: codegen/schedule/renderer are heavy)
+@functools.cache
+def pyrender_globals() -> dict[str, Any]:
+  from tinygrad.codegen.opt import Opt, OptOps
+  from tinygrad.schedule.rangeify import BufferizeOpts
+  from tinygrad.renderer import Estimates
+  return {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
+          "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
+          "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
+          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
-  exec(code, glbls, lcls)
+  exec(code, pyrender_globals(), lcls)
   return lcls['ast']
 
 def test_pyrender(test_ast:UOp, assert_parents=True):

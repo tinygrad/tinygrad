@@ -18,13 +18,16 @@ class TestSetitem(unittest.TestCase):
       ((4,4,4,4), (slice(1,3), slice(None), slice(None), slice(0,3)), 4),
       ((6,6), (slice(1,5,2), slice(0,5,3)), 1.0),
       ((6,6), (slice(5,1,-2), slice(5,0,-3)), 1.0),
+      ((6,6), (slice(None), slice(0,6,2)), 1.0),
     )
     for shp, slc, val in cases:
-      t = Tensor.zeros(shp).contiguous()
-      t[slc] = val
-      n = np.zeros(shp)
-      n[slc] = val.numpy() if isinstance(val, Tensor) else val
-      np.testing.assert_allclose(t.numpy(), n)
+      for realize in (False, True):
+        t = Tensor.zeros(shp).contiguous()
+        if realize: t.realize()
+        t[slc] = val
+        n = np.zeros(shp)
+        n[slc] = val.numpy() if isinstance(val, Tensor) else val
+        np.testing.assert_allclose(t.numpy(), n)
 
   def test_padded_setitem(self):
     t = Tensor.arange(10)

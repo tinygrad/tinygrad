@@ -341,7 +341,7 @@ def lower_end(ctx, x:UOp):
 
 # ---- lowering passes ----
 int1regs = dtypes.int8s + dtypes.int16s + dtypes.int32s
-from tinygrad.codegen.opt.tc import pm_validate_wmma_rdna3
+from tinygrad.renderer.tc import pm_validate_wmma_rdna3
 extra_matcher = PatternMatcher([
   (UPat.cvar("c", dtypes.bfloat16), lambda c: UOp.const(c.val if isinstance(c.val, InvalidType) else
     to_storage_scalar(c.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
@@ -599,7 +599,7 @@ class RDNA3Renderer(ISARenderer):
   kernel_ctx_type = RDNA3PreLinearKernelCtx
   def __init__(self, target:Target):
     super().__init__(target)
-    from tinygrad.codegen.opt.tc import get_amd
+    from tinygrad.renderer.tc import get_amd
     self.shared_max, self.tensor_cores = HIPRenderer.shared_max, get_amd(target.arch)
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}

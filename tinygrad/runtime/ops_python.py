@@ -8,14 +8,15 @@ from dataclasses import replace
 from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile, mv_address
 from tinygrad.device import Buffer, Compiled, Compiler, Allocator, Program, TinyELF
-from tinygrad.codegen.opt import tc
+from tinygrad.renderer import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 
 def _load(m, i, dtype: DType):
   if i is None: return 0.0
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
-  return from_storage_scalar(m[i], dtype)
+  if (w:=m.nbytes // len(m)) >= dtype.itemsize: return from_storage_scalar(m[i], dtype)
+  return sum(m[i+k] << (8*w*k) for k in range(dtype.itemsize // w)) # a bitcast can read wider than the buffer, _store splits it the same way
 
 def load(inp, j, dtype: DType):
   if len(inp) >= 3: return [_load(m, x+j if x is not None else None, dtype) if gate else default for (m,x),default,gate in zip(*inp[:3])]

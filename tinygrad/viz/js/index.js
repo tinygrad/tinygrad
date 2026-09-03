@@ -230,7 +230,7 @@ const waveColor = (op) => {
 };
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["precompile","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"],
   GPC:new Map([["NONE","#1a7a2e"],["MEMORY_DEPENDENCY","#8b1a00"],["EXEC_DEPENDENCY","#006b6b"],["INST_FETCH","#7a7a00"],["SYNC","#6b006b"],
     ["PIPE_BUSY","#7a4a00"],["MEMORY_THROTTLE","#5c0000"],["CONSTANT_MEMORY","#1a3d7a"],["NOT_SELECTED","#2e2e3a"],["OTHER","#4a4a55"],
     ["SLEEPING","#1a1a2a"],["DEFAULT","#3a3a45"]]), WAVE:waveColor, VMEMEXEC:waveColor, ALUEXEC:waveColor}
@@ -486,13 +486,6 @@ async function renderProfiler(path, opts) {
           const steps = ctxs[ref.ctx+1].steps;
           for (let si=start; si<steps.length; si++) {
             if (steps[si].name == e.name) { ref.step = si; shapeRef = ref; break; }
-          }
-        } else {
-          const steps = ctxs[state.currentCtx].steps;
-          for (let i=state.currentStep+1; i<steps.length; i++) {
-            const loc = steps[i].loc;
-            if (loc == null) break;
-            if (loc === e.name) { shapeRef = {ctx:state.currentCtx-1, step:i}; break; }
           }
         }
         // tiny device events go straight to the rewrite rule
@@ -999,15 +992,6 @@ async function main() {
   }
   if (!ckey.startsWith("/graph")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
-    if (ret.steps?.length > 0) {
-      const el = select(state.currentCtx, state.currentStep);
-      if (el.step.querySelectorAll("ul").length === ret.steps.length) return;
-      // re render the list with new items
-      ctx.steps.push(...ret.steps);
-      while (el.ctx.children.length > 1) el.ctx.children[1].remove();
-      appendSteps(el.ctx, state.currentCtx, ctx.steps);
-      return setState({ currentStep:state.currentStep+1, expandSteps:true });
-    }
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
       const pkts = step.query.includes("sqtt");
@@ -1049,10 +1033,6 @@ async function main() {
         }
       }
       return table;
-    }
-    if (ret.ref != null) {
-      const disasmIdx = ctxs[ret.ref+1].steps.findIndex(s => s.name === "View Disassembly")
-      metadata.appendChild(d3.create("a").text("View Disassembly").on("click", () => switchCtx(ret.ref, disasmIdx)).node());
     }
     if (ret.cols != null) renderTable(root, ret);
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));

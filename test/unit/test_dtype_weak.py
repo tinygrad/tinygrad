@@ -54,6 +54,13 @@ class TestWeakPromotion(unittest.TestCase):
       self.assertEqual((r.dtype, r.tolist()), (dt, [1]))
       self.assertNotIn(Ops.CAST, [u.op for u in r._uop.toposort()])
 
+  def test_promote_keeps_shape_args(self):
+    # the shape arg is the same CONST as the value, only the value lifts
+    self.assertEqual((Tensor(5).expand(5) + 1.5).tolist(), [6.5]*5)
+    self.assertEqual((Tensor(2).reshape(1,1).expand(2,2).pad(((0,2),(0,0))) + 0.5).tolist(), [[2.5,2.5],[2.5,2.5],[0.5,0.5],[0.5,0.5]])
+    x, _ = Tensor(5).reshape(1).pad((1,1))._broadcasted(0.5)
+    self.assertEqual((x._uop.op, x._uop.base.dtype, x._uop.src[1].dtype), (Ops.PAD, dtypes.weakfloat, dtypes.weakint))
+
   def test_broadcasted_keeps_const_weak(self):
     # a python scalar stays a bare weak CONST through _broadcasted, lifted only to the KIND of the lub
     x, y = Tensor([1], dtype=dtypes.int8)._broadcasted(3)

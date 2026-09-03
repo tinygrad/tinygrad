@@ -24,7 +24,7 @@ def _make_linear(buffer_lists, copies=None):
       src0 = bufs[0].copy_to_device(bufs[1].device)
     else:
       src0 = UOp(Ops.SINK, src=tuple(bufs))
-    calls.append(UOp(Ops.CALL, src=(src0, *bufs)))
+    calls.append(src0.call(*bufs))
   return UOp(Ops.LINEAR, src=tuple(calls))
 
 def _get_planned_view(buf:UOp) -> tuple[UOp, int, int]|None:
