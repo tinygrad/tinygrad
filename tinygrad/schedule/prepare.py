@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.dtype import dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
-from tinygrad.uop.ops import graph_rewrite, rewrite_group, ParamArg, identity_element, resolve_returned_after
+from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
 from tinygrad.schedule.indexing import apply_movement_op
@@ -202,7 +202,7 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
     # if there's already a buffer, we just use it
     return existing_buf.flatten().store(input_src)
   # create the output buffer
-  buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), copy.dtype, size=prod(input_src.max_shape), device=copy.device))
+  buf = UOp.new_buffer(copy.device, prod(input_src.max_shape), copy.dtype)
   # reshape back to input
   return buf.reshape(input_src.max_shape).after(buf.store(input_src)).reshape(copy.shape)
 

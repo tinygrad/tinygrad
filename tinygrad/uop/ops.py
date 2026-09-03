@@ -1699,8 +1699,9 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        # calls with RETURNED inputs are always inlined into the enclosing graph, their bodies are never rewritten separately
-        if n.op is Ops.CALL and (n.num_returned or (not self.enter_calls and n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
+        # program bodies (kernels, value calls) are never rewritten separately unless the rewrite explicitly enters
+        # calls; other call graphs (dtype-arg calls) are plain dataflow and always rewritten
+        if n.op is Ops.CALL and not self.enter_calls and n.src[0].op in UOp._OPAQUE_CALL_BODIES:
           self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
           if x not in self.replace: stack.append((x, False))
@@ -1738,10 +1739,9 @@ class RewriteContext:
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
-        # NOTE: CALLs are handled as a special case: the call body is not included in the graph_rewrite (a CALL of an
-        # address is not a body, its srcs are regular dataflow). calls with RETURNED inputs are always inlined into the
-        # enclosing graph, their bodies are never rewritten separately
-        if new_n.op is Ops.CALL and (new_n.num_returned or (not self.enter_calls and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
+        # NOTE: CALLs are handled as a special case: program bodies are not included in the graph_rewrite unless the
+        # rewrite explicitly enters calls (a CALL of an address is not a body, its srcs are regular dataflow)
+        if new_n.op is Ops.CALL and not self.enter_calls and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES:
           self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
