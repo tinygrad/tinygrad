@@ -194,6 +194,11 @@ class GPTOSS:
                 wqkv_scale:Tensor, wqkv_bias:Tensor, wo:Tensor, wo_scale:Tensor, wo_bias:Tensor, sinks:Tensor):
     bsz, seqlen, _ = x.shape
 
+    if getenv("FUSED_RMSNORM_MX", 0):
+      from extra.gptoss_kernels.rmsnorm import rmsnorm_mul_quantize_mxfp8
+      x_q, x_e8, rrms = rmsnorm_mul_quantize_mxfp8(x, attention_norm, self.norm_eps)
+      qkv = matmul_mx((x_q, x_e8), wqkv, wqkv_scale) + wqkv_bias
+      norm_saves = [x_q, x_e8, rrms]
     if getenv("FUSED_RMSNORM_MUL", 0):
       from extra.gptoss_kernels.rmsnorm import rmsnorm_mul
       x_normed, rrms = rmsnorm_mul(x, attention_norm, self.norm_eps)
