@@ -1803,7 +1803,7 @@ def gate_kernel_sink(x:UOp) -> bool:
   if x.op is Ops.LINEAR: return False
   if x.op is Ops.SINK and isinstance(x.arg, KernelInfo): return False
   return True
-def gate_called_sink(sink:UOp) -> Callable[[UOp], bool]: return lambda x: x is sink or x.op is not Ops.SINK
+def gate_called_sink(sink:UOp) -> Callable[[UOp], bool]: return lambda x: x is sink or gate_kernel_sink(x)
 
 def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()
