@@ -34,9 +34,9 @@ ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
   depth = 0
   def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool, precompile_backward:bool, allow_implicit:bool, grad_fxn:Callable|None,
-               inline_in_kernel:bool=False):
+               in_kernel:bool=False):
     self.fxn = fxn
-    self.inline_in_kernel = inline_in_kernel
+    self.in_kernel = in_kernel
     self.precompile = precompile
     self.precompile_backward = precompile_backward
     self.allow_implicit = allow_implicit
@@ -56,8 +56,8 @@ class _function(Generic[ReturnType]):
     return reg.after(call)[0].load()
 
   def __call__(self, *args, **kwargs) -> ReturnType:
-    if self.inline_in_kernel:
-      if kwargs: raise TypeError("inline_in_kernel functions do not support keyword arguments")
+    if self.in_kernel:
+      if kwargs: raise TypeError("in_kernel functions do not support keyword arguments")
       return cast(ReturnType, self.kernel_call(*args))
     st = time.perf_counter()
 
@@ -111,14 +111,14 @@ class _function(Generic[ReturnType]):
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload
 def function(fxn:Callable[..., ReturnType], *, precompile:bool=False, precompile_backward:bool=False,
-             allow_implicit:bool=False, grad_fxn:Callable|None=None, inline_in_kernel:bool=False) -> _function[ReturnType]: ...
+             allow_implicit:bool=False, grad_fxn:Callable|None=None, in_kernel:bool=False) -> _function[ReturnType]: ...
 @overload
 def function(fxn:None=None, *, precompile:bool=False, precompile_backward:bool=False, allow_implicit:bool=False, grad_fxn:Callable|None=None,
-             inline_in_kernel:bool=False) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
+             in_kernel:bool=False) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
 def function(fxn=None, *, precompile:bool=False, precompile_backward:bool=False,
-             allow_implicit:bool=False, grad_fxn:Callable|None=None, inline_in_kernel:bool=False):
+             allow_implicit:bool=False, grad_fxn:Callable|None=None, in_kernel:bool=False):
   if fxn is None:
     return lambda f: _function(f, precompile=precompile, precompile_backward=precompile_backward,
-                               allow_implicit=allow_implicit, grad_fxn=grad_fxn, inline_in_kernel=inline_in_kernel)
+                               allow_implicit=allow_implicit, grad_fxn=grad_fxn, in_kernel=in_kernel)
   return _function(fxn, precompile=precompile, precompile_backward=precompile_backward,
-                   allow_implicit=allow_implicit, grad_fxn=grad_fxn, inline_in_kernel=inline_in_kernel)
+                   allow_implicit=allow_implicit, grad_fxn=grad_fxn, in_kernel=in_kernel)

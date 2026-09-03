@@ -26,7 +26,7 @@ from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, flatten, argsort, partition, dedup
+from tinygrad.helpers import all_same, all_int, flatten, argsort, partition
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -436,18 +436,16 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 
 def lines(sink:UOp) -> list[UOp]: return line_rewrite(linearize(sink), pm_linearize_cleanups)
 
-def lower_functions(ctx:Renderer, sink:UOp, fns:dict[UOp, UOp]) -> None: # the functions a sink calls, as LINEAR sections: callees first, once each
-  for fn in dedup([u.src[0] for u in sink.toposort(enter_calls=False) if u.op is Ops.CALL and u.src[0].op is Ops.SINK]):
-    if fn in fns: continue
-    lowered = full_rewrite_to_sink(fn, ctx, optimize=False) # a function renders as written
-    lower_functions(ctx, lowered, fns)
-    fns[fn] = UOp(Ops.LINEAR, src=tuple(lines(lowered)))
+def lower_functions(ctx:Renderer, sink:UOp) -> list[UOp]:
+  fns: dict[UOp, UOp] = {}
+  for call in sink.toposort(): # entering toposort orders nested callees first
+    if call.op is not Ops.CALL or (fn:=call.src[0]).op is not Ops.SINK or fn in fns: continue
+    fns[fn] = UOp(Ops.LINEAR, src=tuple(lines(full_rewrite_to_sink(fn, ctx, optimize=False))))
+  return list(fns.values())
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  fns: dict[UOp, UOp] = {}
-  lower_functions(ctx, sink, fns)
-  lst = list(fns.values()) + lines(sink)
+  lst = lower_functions(ctx, sink) + lines(sink)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
     if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())

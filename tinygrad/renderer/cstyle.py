@@ -169,12 +169,12 @@ class CStyleLanguage(Renderer):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
-    # the kernel's functions: declared above the kernel, defined below it, so the kernel stays the entry point of the text
+    # declare helpers first, but define them after the kernel so the kernel stays the entry point of the text
     fns = [(self.render_signature(self.function_typedef, name, fbufs), body)
            for name, body, fbufs in [self._render(list(u.src)) for u in uops if u.op is Ops.LINEAR]]
     kernel_sig = self.render_signature(self.kernel_typedef.format(launch_bounds=launch_bounds), function_name, bufs, self.extra_args)
     prg = self.render_function(kernel_sig, kernel, tmp)
-    return "\n".join((prefix or []) + [sig + ";" for sig, _ in fns] + [prg] + [self.render_function(sig, body) for sig, body in fns])
+    return "\n".join((prefix or []) + [sig + ";" for sig,_ in fns] + [prg] + [self.render_function(sig, body) for sig,body in fns])
 
   def render_index(self, x:UOp, buf:UOp, idx:UOp):
     if buf.addrspace == AddrSpace.ALU:
@@ -221,7 +221,7 @@ class CStyleLanguage(Renderer):
 
     child_count = Counter(v for ru in uops for v in ru.src)
     # find which PARAMs are stored to with a single toposort
-    written = [u.src[0] for u in uops if u.op is Ops.STORE] + [u for u in uops if u.op is Ops.CALL] # a function may write what it is handed
+    written = [u.src[0] for u in uops if u.op is Ops.STORE] + [s for u in uops if u.op is Ops.CALL for s in u.src[1:]]
     writable_params = {u for u in UOp.sink(*written).toposort(lambda u: u.op != Ops.END) if u.op is Ops.PARAM}
     bufs: dict[UOp, tuple[str, tuple[UOp, bool]]] = {}
     kernel = []
