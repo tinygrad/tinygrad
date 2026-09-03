@@ -4,6 +4,7 @@ from tinygrad.device import Device
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.engine.realize import run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.uop.ops import KernelInfo, Ops
 
 @function(in_kernel=True)
@@ -42,7 +43,8 @@ def double_kernel(B:UOp, A:UOp) -> UOp:
   return B[r].store(mul2(A[r].load())).end(r).sink(arg=KernelInfo(name="mul2_kernel"))
 def double_backward(gradient:UOp, kernel:UOp) -> tuple: return (None, (Tensor(gradient) * 2).uop)
 
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "TODO: a called SINK is rendered in C style only")
+@unittest.skipUnless(isinstance(r:=Device[Device.DEFAULT].renderer, CStyleLanguage) and not isinstance(r, WGSLRenderer),
+                     "TODO: a called SINK is rendered in C style only, and WGSL renders its own kernel")
 class TestCallSink(unittest.TestCase):
   def test_simple(self):
     a, b = Tensor([1], dtype=dtypes.int).contiguous(), Tensor.zeros(1, dtype=dtypes.int).contiguous()
