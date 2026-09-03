@@ -57,8 +57,8 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   bwd_body = renumber_invalid_outputs(bwd_body)
   # NOTE: args includes the RETURNED inputs so the param slots above line up; they are unused and compacted away
   bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))
-  bwd_outs = bwd_body.call(*compact_args, name=(k.arg.name or "")+"_backward",
-                           precompile=k.arg.precompile_backward).returned_outputs
+  bwd_outs = UOp.call_outputs(bwd_body.src, *compact_args, name=(k.arg.name or "")+"_backward",
+                              precompile=k.arg.precompile_backward).returned_outputs
   gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
   # align gradients with the original source positions: None at RETURNED positions, gradients elsewhere
   ret_set = set(ret_pos)

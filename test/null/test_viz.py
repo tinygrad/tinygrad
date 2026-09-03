@@ -228,7 +228,7 @@ class TestViz(unittest.TestCase):
     pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype))])
     with save_viz() as viz:
       inner = UOp.const(3)
-      call = UOp.sink(inner, arg=KernelInfo()).call()
+      call = UOp.sink(inner).call()
       graph_rewrite(call, TrackedPatternMatcher(pm.patterns), enter_calls=True)
     details = list(viz.get_details(0, 0))
     self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
