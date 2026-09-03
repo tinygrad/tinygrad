@@ -46,7 +46,7 @@ def custom_add_one_cdna(A:UOp) -> UOp:
     cdna.global_store_dword(addr=cdna.v[0], data=cdna.v[1], saddr=cdna.s[0:1]),
     cdna.s_endpgm(),
   ]
-  sink = UOp.sink(A.base, threads, arg=KernelInfo(f"custom_add_one_cdna_{A.numel()}"))
+  sink = UOp.sink(A.base, threads, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
 
 def custom_add_var(A:UOp, B:UOp) -> UOp:
@@ -183,21 +183,14 @@ class TestAsmKernel(unittest.TestCase):
   def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
 
   def test_simple(self):
-    if self.arch != "rdna3": self.skipTest("only rdna3")
+    if self.arch not in {"rdna3","cdna"}: self.skipTest("only rdna3/cdna")
     a = Tensor(np.full((16, 16), 1., dtype=np.float32)).realize()
-    a = Tensor.custom_kernel(a, fxn=custom_add_one)[0]
+    a = Tensor.custom_kernel(a, fxn=custom_add_one if self.arch == "rdna3" else custom_add_one_cdna)[0]
     linear = compile_linear(a.schedule_linear())
     est = estimate_uop(linear.src[-1])
     self.assertEqual(est.ops, a.numel())
     self.assertEqual(est.mem, a.nbytes()*2)
     run_linear(linear)
-    self.assertTrue((a.numpy() == 2.).all())
-
-  def test_simple_cdna(self):
-    if self.arch != "cdna": self.skipTest("only cdna")
-    a = Tensor.full((16, 16), 1.).contiguous().realize()
-    a = Tensor.custom_kernel(a, fxn=custom_add_one_cdna)[0]
-    a.realize()
     self.assertTrue((a.numpy() == 2.).all())
 
   def test_variable(self):
