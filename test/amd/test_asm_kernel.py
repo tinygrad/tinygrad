@@ -10,6 +10,7 @@ from tinygrad.helpers import getenv
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
+import tinygrad.runtime.autogen.amd.cdna.ins as cdna
 from tinygrad.renderer.amd.dsl import s, v, NULL
 from test.amd.helpers import TARGET_TO_ARCH
 from extra.gemm.amd_asm_matmul import Kernel
@@ -30,6 +31,22 @@ def custom_add_one(A:UOp) -> UOp:
     s_endpgm(),
   ]
   sink = UOp.sink(A.base, threads, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+
+def custom_add_one_cdna(A:UOp) -> UOp:
+  A = A.flatten()
+  threads = UOp.special(A.numel(), "lidx0")
+  insts = [
+    cdna.s_load_dwordx2(cdna.s[0:1], cdna.s[0:1], soffset=cdna.s[0], offset=0, imm=1),
+    cdna.v_lshlrev_b32_e32(cdna.v[0], 2, cdna.v[0]),
+    cdna.s_waitcnt(0),
+    cdna.global_load_dword(vdst=cdna.v[1], addr=cdna.v[0], saddr=cdna.s[0:1]),
+    cdna.s_waitcnt(0),
+    cdna.v_add_f32_e32(cdna.v[1], 1.0, cdna.v[1]),
+    cdna.global_store_dword(addr=cdna.v[0], data=cdna.v[1], saddr=cdna.s[0:1]),
+    cdna.s_endpgm(),
+  ]
+  sink = UOp.sink(A.base, threads, arg=KernelInfo(f"custom_add_one_cdna_{A.numel()}"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
 
 def custom_add_var(A:UOp, B:UOp) -> UOp:
@@ -174,6 +191,13 @@ class TestAsmKernel(unittest.TestCase):
     self.assertEqual(est.ops, a.numel())
     self.assertEqual(est.mem, a.nbytes()*2)
     run_linear(linear)
+    self.assertTrue((a.numpy() == 2.).all())
+
+  def test_simple_cdna(self):
+    if self.arch != "cdna": self.skipTest("only cdna")
+    a = Tensor.full((16, 16), 1.).contiguous().realize()
+    a = Tensor.custom_kernel(a, fxn=custom_add_one_cdna)[0]
+    a.realize()
     self.assertTrue((a.numpy() == 2.).all())
 
   def test_variable(self):
