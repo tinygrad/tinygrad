@@ -3,7 +3,7 @@ from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
 import functools, time, itertools, decimal, weakref, os, statistics, ctypes, importlib
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ
-from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us, round_up
+from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us
 from tinygrad.device import Device, Buffer, MultiBuffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
@@ -223,11 +223,10 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
   submits += [_epilogue(ctx, dev) for dev in ctx.queues]
   fence = UOp.custom_function("hcq_fence", *[ctx.sched_timeline((dev,)) for dev in ctx.queues],
                               *[ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs])
-  merged:list[UOp] = [] # the host runs the submits in batch order, after the fence
-  for m in _merge_queues(submits): merged.append(m.replace(src=(*m.src, fence, *merged[-1:])))
-  host = UOp.custom_function("hcq_host", UOp(Ops.LINEAR, src=tuple(c for c, _, _ in ctx.batch)), *merged) # host work once every queue is running
+  host = UOp.custom_function("hcq_host", UOp(Ops.LINEAR, src=tuple(c for c, _, _ in ctx.batch))) # host work once every queue is running
+  blocks = UOp(Ops.LINEAR, src=(fence, *_merge_queues(submits), host))
   estimates = sum((estimate_uop(call) for call, _, _ in ctx.batch), start=Estimates()).simplify()
-  return UOp.sink(*merged, host, arg=KernelInfo("hcq_submit", estimates=estimates), tag=1).call(aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns)))
+  return UOp.sink(blocks, arg=KernelInfo("hcq_submit", estimates=estimates), tag=1).call(aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns)))
 
 @rewrite_group(new_ctx=False)
 def sched_batches(l:UOp, profile:bool) -> UOp:
@@ -246,21 +245,16 @@ class EncodeCtx:
   devs:tuple[str, ...]
   inputs:dict[tuple[UOp, str], int] = field(default_factory=dict)
   table:UOp = field(default_factory=lambda: UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="inputs"))
+  tail:tuple[UOp, ...] = () # the block encoded before this one: the next block comes after it
   links:dict[tuple[UOp, str], int] = field(default_factory=dict) # the placeholder addresses the body loads: patched at link time
   ltable:UOp = field(default_factory=lambda: UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="links"))
-  scratch:UOp = field(default_factory=lambda: UOp.placeholder((1 << 20,), dtypes.uint8, device="CPU", tag="scratch")) # sized once the body is lowered
-  scratch_size:int = 0
   lt_patches:list[UOp] = field(default_factory=list)
-
-  def alloc(self, nbytes:int) -> int: # the offset of nbytes of host scratch for the body, 8 byte aligned
-    self.scratch_size = (off:=round_up(self.scratch_size, 8)) + nbytes
-    return off
 
 class HWQueue:
   q_rewrite:PatternMatcher
 
   def __init__(self, ctx:EncodeCtx, submit:UOp):
-    self.ctx, self.lin, self.deps = ctx, submit.src[0], list(submit.src[1:])
+    self.ctx, self.lin = ctx, submit.src[0]
     self.devs, self.queue = self.lin.arg
     self.dev = Device[self.devs[0]]
     self.blob, self.patches = bytearray(), list[tuple[int, UOp]]()
@@ -324,14 +318,14 @@ def encode_submit(hq:HWQueue) -> UOp:
 
   links, runtime = partition(list(zip([o for o, _ in hq.patches], words)), lambda r: _is_link_patch(r[1]))
   hq.ctx.lt_patches.append(patch(buf, links, buf.store(UOp(Ops.BINARY, arg=bytes(hq.blob)).bitcast(buf.dtype))))
-  return hq.submit(patch(buf, runtime, *hq.deps).shrink(((0, stream),)))
+  return hq.submit(patch(buf, runtime, *hq.ctx.tail).shrink(((0, stream),)))
 
 # *****************
 # 3.1. hcq special functions
 
 def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp:
   lasts, sigs = f.src[:len(ctx.devs)], f.src[len(ctx.devs):]
-  last:tuple[UOp, ...] = ()
+  last = ctx.tail
 
   # wait for prev schedule to not collide
   # TODO: timeout?
@@ -352,7 +346,7 @@ def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp:
   return last[0]
 pm_hcq_encode = PatternMatcher([
   (UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name="f"), hcq_fence),
-  (UPat(Ops.CUSTOM_FUNCTION, arg="hcq_host"), lambda: UOp(Ops.NOOP)), # a device that needs the host after its submits overrides this
+  (UPat(Ops.CUSTOM_FUNCTION, arg="hcq_host"), lambda ctx: ctx.tail[0]), # nothing to do: a device that needs the host after its submits overrides this
 ])
 
 # *****************
@@ -361,19 +355,18 @@ pm_hcq_encode = PatternMatcher([
 def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.nargs: return None # not an hcq call, or lowered already
 
-  # encode bodies
+  # encode the blocks in order, each after the tail of the one before: the last one reaches them all. a device's rules come first
   ctx = EncodeCtx(call.arg.aux.device)
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in ctx.devs])]
-  body = graph_rewrite(call.src[0], sum([d.pm_encode for d in devs], PatternMatcher([])) + pm_hcq_encode, ctx=ctx, walk=True, name="encode body")
-
+  pm = sum([d.pm_encode for d in devs], PatternMatcher([])) + pm_hcq_encode
+  for b in call.src[0].src[0].src: ctx.tail = (graph_rewrite(b, pm, ctx=ctx, walk=True, name="encode block"),)
   # lower the host's accesses to device memory, then table the addresses it loads
-  body = graph_rewrite(body, sum([d.pm_lower for d in devs], PatternMatcher([])), ctx=ctx, walk=True, name="lower host access")
+  body = graph_rewrite(call.src[0].replace(src=ctx.tail), sum([d.pm_lower for d in devs], PatternMatcher([])), ctx=ctx, walk=True, name="lower")
   body = graph_rewrite(body, pm_body_addrs, ctx=ctx, walk=True, name="body addrs")
 
-  # resize the tables and the scratch, the link table is patched at link time
+  # resize the tables, the link table is patched at link time
   ltable = UOp.placeholder((len(ctx.links),), dtypes.uint64, device="CPU", tag="links")
-  body = body.substitute({ctx.table: (table:=UOp.placeholder((len(ctx.inputs),), dtypes.uint64, device="CPU", tag="inputs")), ctx.ltable: ltable,
-                          ctx.scratch: UOp.placeholder((ctx.scratch_size,), dtypes.uint8, device="CPU", tag="scratch")})
+  body = body.substitute({ctx.table: (table:=UOp.placeholder((len(ctx.inputs),), dtypes.uint64, device="CPU", tag="inputs")), ctx.ltable: ltable})
   if ctx.links: ctx.lt_patches.append(patch(ltable, [(8 * i, b.getaddr(d)) for (b, d), i in ctx.links.items()]))
 
   # the placeholders become the body's params in visit order, variables bind by name after them, the ranges renumber
@@ -489,8 +482,6 @@ class HCQ2Compiled(Compiled):
   timestamp_divider: float = 1000.0
   wait_timeout_ms: float = 30000.0
   rt_nbytes: int = 64 << 20 # the pool every per-linear buffer is carved out of
-  pm_encode: PatternMatcher = PatternMatcher([]) # the backend's own encode rules, matched by its submit names
-  pm_lower: PatternMatcher = PatternMatcher([]) # the runtime device's accesses to this device's memory, direct by default
 
   def __init__(self, device:str, allocator:HCQAllocator, compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
     self.can_recover = can_recover

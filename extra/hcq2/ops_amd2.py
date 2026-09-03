@@ -3,7 +3,7 @@ from typing import cast
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, itertools, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue, encode_submit, to_name, HCQ_RUNTIME_DEV, unwrap_view
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue, encode_submit, to_name, HCQ_RUNTIME_DEV
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import BufferSpec, Buffer
 from tinygrad.dtype import dtypes
@@ -18,7 +18,7 @@ from tinygrad.runtime.support.hcq import FileIOInterface, HCQBuffer, MMIOInterfa
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
-from tinygrad.runtime.support.usb import USB3, usb_buf, usb_link, usb_scratch, usb_push, usb_wire, usb_sentinel
+from tinygrad.runtime.support.usb import USB3, usb_reg, usb_push, usb_chunks
 from tinygrad.runtime.support.usb import pm_usb_lower, pm_usb_stage, pm_usb_encode, pm_usb_bufferize
 from tinygrad.runtime.support.memory import AddrSpace, BumpAllocator
 from tinygrad.runtime.ops_amd import SQTT, PMC
@@ -159,7 +159,7 @@ class AMDComputeQueue(HWQueue):
     ring, wptr, doorbell, put = _queue_args(self, q)
 
     size_dw = cmdbuf.max_numel() // 4
-    p = put.after(*self.deps).index(0).load()
+    p = put.after(*self.ctx.tail).index(0).load()
     i = UOp.range(size_dw, 10, dtype=dtypes.int, src=(cmdbuf,))
     copy = ring.index(((p + i.cast(p.dtype)) % q.ring.size).cast(dtypes.int)).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
     next_put = p + size_dw
@@ -214,7 +214,7 @@ class AMDSDMAQueue(HWQueue):
     ring, wptr, doorbell, put = _queue_args(self, q)
 
     rs, size_dw = q.ring.size, cmdbuf.max_numel() // 4
-    put_b = put.after(*self.deps).index(0).load()
+    put_b = put.after(*self.ctx.tail).index(0).load()
     tail = ((put_b % (rs * 4)) // 4).cast(dtypes.int)
     fits = (size_dw <= rs - tail).cast(dtypes.int)
     start_dw, zero_amt = fits * tail, (1 - fits) * (rs - tail)
@@ -232,37 +232,29 @@ class AMDSDMAQueue(HWQueue):
 class AMDUSBComputeQueue(AMDComputeQueue): # the cmdbuf stays in vram: linked once, its runtime words poked, the ring gets an indirect packet
   def submit(self, cmdbuf:UOp) -> UOp:
     ib = cmdbuf.getaddr(self.devs)
-    pkt = usb_scratch(self.ctx, (UOp.const(self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), dtypes.uint32), dtypes.uint32),
-                      (ib.cast(dtypes.uint32), dtypes.uint32), ((ib >> 32).cast(dtypes.uint32), dtypes.uint32),
-                      (UOp.const(cmdbuf.max_numel() // 4 | self.pm4.INDIRECT_BUFFER_VALID, dtypes.uint32), dtypes.uint32))
-    return usb_push(self.ctx, usb_link(self.devs[0]).after(*self.deps, cmdbuf), pkt, _queue_args(self, self.dev.compute_queue), 4) # put counts dwords
+    pkt = usb_reg(dtypes.uint32, self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), ib.cast(dtypes.uint32), (ib >> 32).cast(dtypes.uint32),
+                  cmdbuf.max_numel() // 4 | self.pm4.INDIRECT_BUFFER_VALID)
+    return usb_push(self, pkt.after(cmdbuf), _queue_args(self, self.dev.compute_queue), 4)
 
-class AMDUSBSDMAQueue(AMDSDMAQueue):
+class AMDUSBSDMAQueue(AMDSDMAQueue): # the chunks of the host copies sync with the host through the sram window
   q_rewrite = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True),
-     lambda ctx, call: ctx.chunk(call) if call.arg.name in ("usb_copyin", "usb_copyout") else None),
+    (UPat(Ops.INS, arg=("wait_eq", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))),
+     lambda ctx, dst, val: ctx.poll(dst.getaddr(ctx.devs), val, WAIT_REG_MEM_FUNCTION_EQ)),
   ]) + AMDSDMAQueue.q_rewrite
 
-  chunks = 0 # the copy chunks so far: their host side counts the same way
+  def __init__(self, ctx, submit):
+    super().__init__(ctx, submit)
+    self.lin = usb_chunks(self.lin)
+
+  def signal(self, signal:UOp, value:UOp): # a fence packet lands after the copies before it. no trap: nothing sleeps on usb
+    op = self.sdma.SDMA_OP_FENCE | (self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.target[0] != 9 else 0)
+    self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32))
 
   def cmdbuf(self, nbytes:int) -> tuple[UOp, UOp]:
     return (buf:=UOp.placeholder((nbytes,), dtypes.uint8, device=HCQ_RUNTIME_DEV.value, tag=to_name("cmdbuf", self.queue))), buf
 
-  def chunk(self, call:UOp): # a chunk of a host copy: the queue and the host program sync through the sram window
-    dev, g = self.devs[0], usb_link(self.devs[0]).index(2).load() + self.chunks
-    self.chunks += 1
-    if call.arg.name == "usb_copyin": # the host streamed the chunk once its sentinel landed
-      sbase, soff = unwrap_view(call.src[2])
-      self.poll(sbase.getaddr(self.devs) + (soff + usb_wire(call.src[2].nbytes()) - 4), usb_sentinel(g), WAIT_REG_MEM_FUNCTION_EQ)
-    else: self.poll(usb_buf(dev, "go", 1, dtypes.uint32).getaddr(self.devs), g + 1) # the host armed a read of the window
-    self.copy(call)
-    self.write(usb_buf(dev, "fence", 1, dtypes.uint32).getaddr(self.devs), g + 1) # the chunk is done with the sram
-    if call.arg.name == "usb_copyout": # release the armed read
-      self.write(usb_buf(dev, "cq", 0x1000).getaddr(self.devs) + 12, UOp.const(0, dtypes.uint32))
-
   def submit(self, cmdbuf:UOp) -> UOp:
-    q = _queue_args(self, unwrap(self.dev.sdma_queue(int(self.queue.split(":")[1]))))
-    return usb_push(self.ctx, usb_link(self.devs[0]).after(*self.deps, cmdbuf), cmdbuf, q, 1)
+    return usb_push(self, cmdbuf, _queue_args(self, unwrap(self.dev.sdma_queue(int(self.queue.split(":")[1])))), 1)
 
 @dataclass(frozen=True)
 class AMDProgramData:
