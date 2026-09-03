@@ -322,7 +322,7 @@ def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp:
   return last[0].barrier(*last[1:])
 pm_hcq_encode = PatternMatcher([
   (UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name="f"), hcq_fence),
-  (UPat(Ops.AFTER, src=(UPat(dtype=dtypes.void, name="root"),), allow_any_len=True, name="a"), # an encoded block: a buffer view is never void
+  (UPat(Ops.AFTER, src=(UPat(dtype=dtypes.void, name="root"),), allow_any_len=True, name="a"),
     lambda root, a: root.substitute({s.buf_uop: s.buf_uop.after(*a.src[1:]) for s in root.toposort() if s.op is Ops.STORE}, walk=True)),
 ])
 
