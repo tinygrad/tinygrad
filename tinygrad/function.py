@@ -44,21 +44,17 @@ class _function(Generic[ReturnType]):
 
   def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
 
-  def kernel_call(self, *args:UOp) -> UOp:
-    params = [UOp.param(i, strong_dtype(a.dtype), addrspace=AddrSpace.ALU) if a.addrspace is AddrSpace.ALU else a.param_like(i)
-              for i,a in enumerate(args)]
-    ret, name = cast(UOp, self.fxn(*params)), self.fxn.__name__
-    if ret.dtype is dtypes.void:
-      return (ret if ret.op is Ops.SINK else ret.sink()).replace(arg=KernelInfo(name=name)).call(*args)
-    dtype = strong_dtype(ret.dtype)
-    out, reg = UOp.param(len(args), dtype), UOp.placeholder((1,), dtype, addrspace=AddrSpace.REG)
-    call = out.index(0).store(ret.cast(dtype) if ret.dtype is not dtype else ret).sink(arg=KernelInfo(name=name)).call(*args, reg)
-    return reg.after(call)[0].load()
-
   def __call__(self, *args, **kwargs) -> ReturnType:
     if self.in_kernel:
-      if kwargs: raise TypeError("in_kernel functions do not support keyword arguments")
-      return cast(ReturnType, self.kernel_call(*args))
+      params = [UOp.param(i, strong_dtype(a.dtype), addrspace=a.addrspace) if a.addrspace is AddrSpace.ALU else a.param_like(i)
+                for i,a in enumerate(args)]
+      ret, name = cast(UOp, self.fxn(*params)), self.fxn.__name__
+      if ret.dtype is dtypes.void: return (ret if ret.op is Ops.SINK else ret.sink()).replace(arg=KernelInfo(name=name)).call(*args)
+
+      out, reg = UOp.param(len(args), ret_dtype:=strong_dtype(ret.dtype)), UOp.placeholder((1,), ret_dtype, addrspace=AddrSpace.REG)
+      call = out.index(0).store(ret.cast(ret_dtype) if ret.dtype is not ret_dtype else ret).sink(arg=KernelInfo(name=name)).call(*args, reg)
+      return cast(ReturnType, reg.after(call)[0].load())
+
     st = time.perf_counter()
 
     params = get_state_dict((args, kwargs), tensor_type=(Tensor, UOp)).values()

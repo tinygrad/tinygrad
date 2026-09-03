@@ -154,8 +154,7 @@ def pyrender(ast:UOp) -> str:
     if u.op is Ops.STORE: to_render.add(u.src[1])
     if u.op is Ops.REDUCE: to_render.add(u.src[0])
     # a call of a SINK inside a kernel is code; a scheduled call carries global storage and a gradient function can't be reconstructed
-    if u.op is Ops.CALL and (u.src[0].op is not Ops.SINK or u.arg.grad_fxn is not None or
-                             any(s.buf_uop.op is Ops.BUFFER and s.buf_uop.addrspace is AddrSpace.GLOBAL for s in u.src[1:])):
+    if u.op is Ops.CALL and (u.src[0].op is not Ops.SINK or u.arg.grad_fxn is not None or any(s.buf_uop.is_unbound for s in u.src[1:])):
       raise NotImplementedError("call can't be pyrendered")
     # a BUFFER carrying a device Buffer can't be pyrendered: the Buffer object can't be reconstructed from code
     if u.op is Ops.BUFFER and isinstance(u.arg, ParamArg) and u.arg.buffer is not None: raise NotImplementedError("buffer can't be pyrendered")
