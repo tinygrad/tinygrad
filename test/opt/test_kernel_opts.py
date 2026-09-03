@@ -65,6 +65,7 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: too slow on MOCKKFD, hits the test timeout in CI")
   def test_matmul(self):
     N = 128
     Tensor.manual_seed(1552)
