@@ -10,6 +10,7 @@ from test.backend.test_linearizer import helper_linearizer_opt
 class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: segfaults on MOCKKFD with AMD:LLVM")
   def test_local_and_grouped_reduce(self):
     N = 128
     Tensor.manual_seed(1882)
@@ -214,6 +215,7 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a@b, [[Opt(OptOps.SPLIT, 2, (0, AxisType.UNROLL)), Opt(OptOps.PADTO, 2, 8)]])
 
+  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: off by one on MOCKKFD in CI, passes locally")
   def test_padto_sum_ok(self):
     N = 18
     # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension

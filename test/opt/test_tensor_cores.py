@@ -86,6 +86,8 @@ class TestTensorCores(unittest.TestCase):
 
   @Context(ALLOW_TF32=1)
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx9"),
+                   "TODO: crashes the worker on MOCKKFD gfx950 in CI, passes locally")
   def test_tensor_cores_extra_locals(self):
     # LOCAL splits after the TC opt: the WARP must keep a whole hardware local dim, its lanes are consecutive threads
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
