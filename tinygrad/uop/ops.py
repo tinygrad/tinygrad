@@ -465,7 +465,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def ended_ranges(self) -> tuple[UOp, ...]:
     if self.op in range_start: return self.src[range_start[self.op]:]
-    if self.op is Ops.CALL: # a value arg holds the call in its loops; a buffer arg is used whole, its ranges and the device axis end here
+    if self.op is Ops.CALL: # a call stays in the loops of its value args, buffer args and the device axis end at it
       return tuple(r for s in self.src[1:] for r in s.ranges if s.addrspace is not AddrSpace.ALU or r.arg[-1] is AxisType.DEVICE)
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
     # UNSHARD ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
