@@ -286,8 +286,6 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                       "test requires tensor cores with accumulation in half") # testing with half suffices.
-  @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx12"),
-                   "TODO: two UPCASTs plus an UNROLL give 100% wrong output on MOCKKFD gfx1201, gfx1100 and gfx950 pass")
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   def test_tensor_core_opts(self):
     N = 128
@@ -311,8 +309,6 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                       "test requires tensor cores with accumulation in half") # testing with half suffices.
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx12"),
-                   "TODO: two UPCASTs plus an UNROLL give 100% wrong output on MOCKKFD gfx1201, gfx1100 and gfx950 pass")
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   def test_tensor_core_opts_locals(self):
     N = 128
