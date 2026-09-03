@@ -539,6 +539,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     """does this call still have unresolved outputs: unbound BUFFERs among its inputs (minted by call_with_outputs,
     resolved when the call is inlined or the outputs are materialized). a lifecycle query, not a call type"""
     return self.op is Ops.CALL and any(x.unsharded_base.is_unbound for x in self.src[1:])
+  @property
+  def unbound_outputs(self) -> tuple[UOp, ...]:
+    """the unresolved outputs of this call: an AFTER on each unbound BUFFER input, usable like a normal buffer"""
+    return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.is_unbound)
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].val]
@@ -1193,10 +1197,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def call_with_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
-                        name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> tuple[UOp, ...]:
+                        name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None,
+                        output_pos:tuple[int, ...]|None=None) -> tuple[UOp, ...]:
     """call a body producing the given values, returning the outputs. the body stores into output PARAMs, and the
     outputs are unbound BUFFER placeholders passed as extra inputs to the call (you AFTER on them like normal buffers).
-    the buffers are bound to the output PARAMs positionally wherever the call is resolved, just like the args"""
+    the buffers are bound to the output PARAMs positionally wherever the call is resolved, just like the args.
+    output_pos gives the position of each output in the arg list (default: a block after the inputs), the inputs take
+    the remaining positions in order; when it's given, input params must already be slotted at their final positions"""
     # the device defaults to the first device in the values or args, like srcs-based device resolution
     default_dev = next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None)
     def mint(o:UOp) -> UOp:
@@ -1213,9 +1220,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), o.dtype, None if not shp else prod(to_max_shape(shp)), device=dev))
       return ret if not shp else ret.view_as(shp, axis)
     rets = tuple(mint(o) for o in values)
-    # the body only knows PARAMs: the output PARAMs get the slots right after the input PARAM slots
-    body = UOp.sink(*[v.param_like(len(srcs)+i).store(v) for i, v in enumerate(values)])
-    call = body.call(*srcs, *rets, grad_fxn=grad_fxn, name=name, precompile=precompile,
+    pos = tuple(range(len(srcs), len(srcs)+len(values))) if output_pos is None else output_pos
+    assert len(pos) == len(values) and len(set(pos)) == len(pos), "output_pos must be one distinct position per output"
+    assert all(0 <= p < len(srcs)+len(values) for p in pos), f"output_pos {output_pos} must be within the arg list"
+    # the body only knows PARAMs: the output PARAMs get the slots of the outputs' positions in the arg list
+    body = UOp.sink(*[v.param_like(p).store(v) for v, p in zip(values, pos)])
+    args: list[UOp|None] = [None] * (len(srcs) + len(values))
+    for p, r in zip(pos, rets): args[p] = r
+    it = iter(srcs)
+    call = body.call(*[r if r is not None else next(it) for r in args], grad_fxn=grad_fxn, name=name, precompile=precompile,
                      precompile_backward=precompile_backward, aux=aux)
     return tuple(r.after(call) for r in rets)
 

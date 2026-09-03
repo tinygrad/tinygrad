@@ -17,7 +17,7 @@ def _rmsnorm_mul_fwd_fxn(x_in_p, w_p, eps, device):
 
 def _rmsnorm_mul_bwd(grad:UOp, call:UOp) -> tuple:
   x = Tensor(call.src[1]).float(); weight = Tensor(call.src[2]).float()
-  rrms = Tensor([x.after(call) for x in call.src[1:] if x.unsharded_base.is_unbound][1])
+  rrms = Tensor(call.unbound_outputs[1])
   x_normed = x * rrms                                  # recompute unweighted normed (x is call.src[1])
   d_y = Tensor(grad).float()
   dxn = d_y * weight                                   # d/d(x_normed)

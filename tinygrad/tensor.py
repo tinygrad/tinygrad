@@ -124,9 +124,8 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
   # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
   rmap = dict(zip(ret_pos, outs))
-  new_call = fxn.call(*[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
-                        for i, a in enumerate(c.src[1:])], grad_fxn=c.arg.grad_fxn, name=c.arg.name,
-                      precompile=c.arg.precompile, precompile_backward=c.arg.precompile_backward, aux=c.arg.aux)
+  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                   for i, a in enumerate(c.src[1:])]))
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape

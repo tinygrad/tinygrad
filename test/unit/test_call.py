@@ -2,13 +2,8 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, function, Device
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, ParamArg
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.tensor import transform_to_call
-from tinygrad.helpers import prod
-
-# mint an unbound BUFFER placeholder, like UOp.call_with_outputs mints for its outputs (unique slot from the global counter)
-def returned(dtype, shape, device) -> UOp:
-  return UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), dtype, prod(shape), device=device)).reshape(shape)
 
 def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop))[0].src[0].key
 
@@ -292,26 +287,33 @@ class TestCallSchedule(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), np.arange(8, dtype=np.float32).reshape(4, 2) + 3)
 
 class TestArgOrder(unittest.TestCase):
-  """RETURNED placeholders can appear anywhere in a call's srcs: slots are src positions, nothing reorders"""
+  """outputs can appear anywhere in a call's srcs (output_pos): slots are src positions, nothing reorders"""
+  def _dev(self, x): return x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
   def make_intersperse_call(self, x, precompile=False):
-    # call with sources (body, returned, input(slot=1)): the input is the input, the output binds the RETURNED
-    dev = x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
-    r0 = returned(x.dtype, x.shape, dev)
-    o0 = UOp.param(0, x.dtype, x.shape, dev)
-    p1 = UOp.param(1, x.dtype, x.shape, dev)
-    from tinygrad.uop.ops import CallInfo
-    return UOp(Ops.CALL, src=(UOp.sink(o0.store(p1.reshape(x.shape) * 2)), r0, x.uop),
-               arg=CallInfo(None, 't', precompile, False, None))
+    # the output is at position 0, the input (param slot 1) at position 1 in the call's args
+    val = UOp.param(1, x.dtype, x.shape, self._dev(x)).reshape(x.shape) * 2
+    return UOp.call_with_outputs((val,), x.uop, name='t', output_pos=(0,), precompile=precompile)
 
   def test_intersperse_returned(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
-    call = self.make_intersperse_call(x)
-    out = Tensor(call.src[1].after(call), device=x.device) + 1
+    outs = self.make_intersperse_call(x)
+    out = Tensor(outs[0], device=x.device) + 1
     np.testing.assert_equal(out.numpy(), [1, 3, 5])
+
+  def test_outputs_arbitrary_order(self):
+    x = Tensor.arange(3, dtype=dtypes.int).realize()
+    y = Tensor.arange(3, 6, dtype=dtypes.int).realize()
+    dev = self._dev(x)
+    # args (out0, in0, out1, in1): outputs at positions 0 and 2, input params slotted at their final positions 1 and 3
+    p1, p3 = UOp.param(1, x.dtype, x.shape, dev), UOp.param(3, y.dtype, y.shape, dev)
+    outs = UOp.call_with_outputs((p1.reshape(x.shape) * 2, p3.reshape(y.shape) + p1.reshape(y.shape)), x.uop, y.uop,
+                                 output_pos=(0, 2))
+    np.testing.assert_equal(Tensor(outs[0]).numpy(), [0, 2, 4])
+    np.testing.assert_equal(Tensor(outs[1]).numpy(), [3, 5, 7])
 
   def test_intersperse_returned_precompile(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
-    call = self.make_intersperse_call(x, precompile=True)
+    call = self.make_intersperse_call(x, precompile=True)[0].src[1]
     # the transform must preserve the RETURNED's src position: its placeholder is at src 1, the input stays at src 2
     from tinygrad.tensor import transform_precompiled_call
     new = transform_precompiled_call(call)
@@ -328,14 +330,10 @@ class TestArgOrder(unittest.TestCase):
   def test_intersperse_returned_gradient(self):
     x = Tensor([1.0, 2.0, 3.0]).realize()
     x.requires_grad = True
-    dev = x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
-    r0 = returned(dtypes.float, x.shape, dev)
-    o0 = UOp.param(0, dtypes.float, x.shape, dev)
-    p1 = UOp.param(1, dtypes.float, x.shape, dev)
-    from tinygrad.uop.ops import CallInfo
-    body = UOp.sink(o0.store(p1.reshape(x.shape) * p1.reshape(x.shape)))
-    call = UOp(Ops.CALL, src=(body, r0, x.uop), arg=CallInfo(None, 't', False, False, None))
-    y = Tensor(call.src[1].after(call), device=x.device)
+    p1 = UOp.param(1, dtypes.float, x.shape, self._dev(x))
+    val = p1.reshape(x.shape) * p1.reshape(x.shape)
+    outs = UOp.call_with_outputs((val,), x.uop, name='t', output_pos=(0,))
+    y = Tensor(outs[0], device=x.device)
     y.sum().backward()
     np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])
 
