@@ -28,7 +28,7 @@ def _rmsnorm_mul_bwd(grad:UOp, call:UOp) -> tuple:
 
 def rmsnorm_mul(x_in:Tensor, weight:Tensor, eps:float) -> tuple[Tensor, Tensor]:
   fxn = _rmsnorm_mul_fwd_fxn(x_in.as_param(0).uop, weight.as_param(1).uop, eps, x_in.device)
-  call = UOp.call_outputs((fxn[0].uop, fxn[1].uop), x_in.uop, weight.uop, grad_fxn=_rmsnorm_mul_bwd)
+  call = UOp.sink(fxn[0].uop, fxn[1].uop).call(x_in.uop, weight.uop, grad_fxn=_rmsnorm_mul_bwd)
   return Tensor(call.returned_outputs[0]), Tensor(call.returned_outputs[1])
 
 @functools.cache

@@ -1191,31 +1191,28 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)
 
-  # opaque bodies are just CALLs; value-producing bodies become CALLs with unbound BUFFER placeholders as extra inputs
+  # opaque bodies are just CALLs; value-producing bodies become CALLs with unbound BUFFER placeholders as extra inputs.
+  # a body is value-producing if it's a value graph or a plain SINK of values (no KernelInfo and no STOREs, those are programs)
   def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
+    """call a body with the given args. opaque bodies become plain CallInfo CALLs; value-producing bodies are wrapped
+    in a SINK of stores into output PARAMs, and the outputs are unbound BUFFER placeholders passed as extra inputs to
+    the call (you AFTER on them like normal buffers). the buffers are bound to the output PARAMs positionally wherever
+    the call is resolved, just like the args are bound to the input PARAMs"""
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
-    # non-opaque bodies are value graphs: they are wrapped in a SINK of stores into output PARAMs (call_outputs)
-    if self.op not in OPAQUE_CALL_BODIES:
-      assert ret_dtype is None, "ret_dtype requires an opaque body, use a CUSTOM_FUNCTION body for external calls"
-      return UOp.call_outputs((self,), *srcs, grad_fxn=grad_fxn, name=name, precompile=precompile,
-                              precompile_backward=precompile_backward, aux=aux)
-    # opaque bodies are plain CallInfo CALLs; the (possibly void) return dtype lives in the CallInfo.
-    # an external C call is a CALL on a CUSTOM_FUNCTION body holding the callee, rendered as an indirect call
-    return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux,
-                                                        ret_dtype if ret_dtype is not None else dtypes.void))
-
-  @staticmethod
-  def call_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
-                   name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
-    """call a body producing the given values: the body stores into output PARAMs, and the outputs are RETURNED
-    placeholders that are inputs to the call (you AFTER on them like normal buffers). the RETURNEDs are bound to the
-    output PARAMs positionally wherever the call is resolved, just like the args are bound to the input PARAMs"""
+    if self.op in OPAQUE_CALL_BODIES and not (self.op is Ops.SINK and self.arg is None and \
+                                              all(s.op not in (Ops.STORE, Ops.AFTER, Ops.COPY, Ops.CALL) for s in self.src)):
+      # the (possibly void) return dtype lives in the CallInfo; an external C call is a CALL on a CUSTOM_FUNCTION
+      # body holding the callee (a function pointer), rendered as an indirect call
+      return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux,
+                                                          ret_dtype if ret_dtype is not None else dtypes.void))
+    assert ret_dtype is None, "ret_dtype requires an opaque body, use a CUSTOM_FUNCTION body for external calls"
+    values = self.src if self.op is Ops.SINK else (self,)
     # the device defaults to the first device in the values or args, like srcs-based device resolution
     default_dev = next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None)
-    # the RETURNED storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
+    # the output storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
     rets = tuple(UOp.returned(o.dtype, None if (shp:=o._shape) is None else
                               tuple(graph_rewrite(s, _pm_resolve_params, srcs, walk=True) if isinstance(s, UOp) else s for s in shp),
                               o.device if o.device is not None else default_dev, o.axis if isinstance(o.device, tuple) else None)
