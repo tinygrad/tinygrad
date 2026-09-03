@@ -1,9 +1,10 @@
 from __future__ import annotations
-from typing import Callable
+from typing import Callable, Any
 import itertools, functools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort, ProgramInfo, ParamArg, AddrSpace
+from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
 class Register:
@@ -22,11 +23,11 @@ class VRegister:
   parent: VRegister|None = None
   pos: int|None = None
   def __repr__(self): return f"{self.name}({self.width})"
-  def is_sub(self) -> bool: return self.parent is not None
-  def or_parent(self) -> VRegister: return self.parent if self.is_sub() else self
+  def is_sub(self) -> bool: return self.parent is not None and self.pos is not None
+  def or_parent(self) -> VRegister: return self.parent if self.parent is not None else self
   def sub(self, i:int, length:int=1) -> VRegister:
     assert i+length <= self.width, f"sub-register index out of width range ({i} >= {self.width})"
-    if self.is_sub(): return self.parent.sub(self.pos + i, length)
+    if self.parent is not None and self.pos is not None: return self.parent.sub(self.pos + i, length)
     return VRegister(f"{self.name}.{i}", self.cons, length, self.alignment, self, i)
   def __getitem__(self, idx):
     return self.sub(idx.start, idx.stop - idx.start + 1) if isinstance(idx, slice) else self.sub(idx)
@@ -59,18 +60,18 @@ class PreLinearKernelCtx:
       if u.op is Ops.SPECIAL: return (2, u.arg)
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
     self.func_args = sorted([u for u in self.uses if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
-    self.ins_schedule: dict[any, Ops] = {}
+    self.ins_schedule: dict[Any, Ops] = {}
     self.reserved_regs: set[Register] = set()
 
   def reserved(self, regs: Register|tuple[Register,...], dt:DType) -> UOp:
     self.reserved_regs.update((regs := (regs,) if isinstance(regs, Register) else regs))
     return UOp.placeholder((1,), dt, next(self.buf_slot), AddrSpace.REG).replace(tag=regs)
 
-  def vreg(self, cons:tuple[Register, ...], **kwargs) -> VRegister:
+  def vreg(self, cons:Register|tuple[Register, ...], **kwargs) -> VRegister:
     return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
 
   # returns arch specific placement information for the spilled virtual register and grows stack frame
-  def assign_spill_slot(self, v:VRegister, vdef:UOp) -> any: raise NotImplementedError("arch specific")
+  def assign_spill_slot(self, v:VRegister, vdef:UOp) -> Any: raise NotImplementedError("arch specific")
   # runs after regalloc, when the size of the stack frame is known
   def stack_alloc(self, uops:list[UOp]) -> list[UOp]: return uops
 
@@ -83,8 +84,7 @@ class ISARenderer(Renderer):
 
   def is_two_address(self, x:UOp) -> bool: return False
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
-  # copy u into dst, returns the node defining dst and the instructions to emit for it (line rewrites need both, isel only the node)
   def copy(self, u:UOp, dst:VRegister|Register|tuple[Register,...]) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
-  def spill(self, spill_offset:int, x:UOp, sub_idx:int|None=None) -> list[UOp]: raise NotImplementedError("arch specific")
-  def fill(self, spill_offset:int, sub_idx:int|None, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
+  def spill(self, spill_offset:Any, x:UOp, sub_idx:int|None=None) -> list[UOp]: raise NotImplementedError("arch specific")
+  def fill(self, spill_offset:Any, x:UOp, regs:tuple[Register,...], sub_idx:int|None=None) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")

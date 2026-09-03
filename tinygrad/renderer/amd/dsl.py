@@ -329,7 +329,8 @@ class Inst:
     if opsel_bits: vals['opsel'] = (vals.get('opsel') or 0) | opsel_bits
     # For _LIT classes, capture literal value from SrcFields that encode to 255
     literal_val = None
-    op_operands = OPERANDS.get(vals.get('op'), {})
+    assert (opp := vals.get('op', None)) is not None
+    op_operands = OPERANDS.get(opp, {})
     for name, field in self._fields:
       val = vals[name]
       if isinstance(field, SrcField) and val is not None and _needs_literal(val):

@@ -1,4 +1,5 @@
 import itertools
+from typing import Any
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import Register, VRegister, rdefs, rdef, PreLinearKernelCtx
@@ -6,7 +7,7 @@ from tinygrad.renderer.isa import Register, VRegister, rdefs, rdef, PreLinearKer
 REG_OPS = {Ops.INS, Ops.STACK, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.INDEX}
 
 class LinearScanRegallocContext:
-  def vdef(self, v:VRegister) -> UOp: return self.uops[self.live_intervals[v.parent if v.is_sub() else v][0]]
+  def vdef(self, v:VRegister) -> UOp: return self.uops[self.live_intervals[v.or_parent()][0]]
 
   def __init__(self, uops:list[UOp], ctx:PreLinearKernelCtx):
     self.uops, self.ren, self.idx = [u for u in uops if u.op in REG_OPS], ctx.ren, itertools.count()
@@ -14,9 +15,10 @@ class LinearScanRegallocContext:
 
     lr = self.live_intervals
     range_vars: list[VRegister] = []
-    def live_edge(u:UOp) -> tuple[VRegister,...]: return tuple(r.parent if r.is_sub() else r for r in rdefs(u) if isinstance(r, VRegister))
+    def live_edge(u:UOp) -> tuple[VRegister,...]: return tuple(r.or_parent() for r in rdefs(u) if isinstance(r, VRegister))
     for i, u in enumerate(reversed(self.uops)):
-      defs, uses = live_edge(u), []
+      uses: list[VRegister] = []
+      defs = live_edge(u)
       for s in dedup(u.src): uses.extend(live_edge(s))
       for v in defs + tuple(uses):
         lr.setdefault(v, []).insert(0, len(self.uops) - i - 1)
@@ -25,11 +27,11 @@ class LinearScanRegallocContext:
           lr[v].append(n)
       if u.op is Ops.RANGE:
         # NOTE: cant derive range lifetime like this because of boundless LOOP
-        range_vars.append(rdef(u))
+        range_vars.append(defs[0])
 
-    self.spills: dict[Register, any] = {} # mapping from virtual to generic stack placement information (arch specific)
+    self.spills: dict[VRegister, Any] = {} # mapping from virtual to generic stack placement information (arch specific)
     self.reals: dict[int, dict[VRegister, tuple[Register,...]]] = {} # mapping from virtual to real at each program point
-    self.insert_before: dict[int, list[tuple[Register, tuple[Register,...]]]] = {} # fills to be inserted at each program point
+    self.insert_before: dict[int, list[tuple[VRegister, tuple[Register,...]]]] = {} # fills to be inserted at each program point
     live: dict[VRegister, tuple[Register,...]] = {} # mapping from virtual to real that's currently assigned to it
     live_ins: list[dict[VRegister, tuple[Register,...]]] = [] # mapping from virtual to real at loop entry
 
@@ -57,33 +59,35 @@ class LinearScanRegallocContext:
       self.insert_before.setdefault(i, []).append((v, rs))
       return rs
 
+    def lslot(v:VRegister, rs:tuple[Register,...]) -> tuple[Register,...]:
+      return rs[v.pos:v.pos+v.width] if v.is_sub() and v.pos is not None else rs
     for i,u in enumerate(self.uops):
       # allocate uses
       for s in u.src:
         # HACK: cause of later hacks to lower range
         if u.op is Ops.END: continue
-        if not isinstance(v:=rdef(s), VRegister): continue
-        if (vv := v.or_parent()) not in live: live[vv] = fill(vv,i)
-        self.reals.setdefault(i, {})[v] = live[vv][v.pos:v.pos+v.width] if v.is_sub() else live[vv]
+        if not isinstance((sv:=rdef(s)), VRegister): continue
+        if (vv := sv.or_parent()) not in live: live[vv] = fill(vv,i)
+        self.reals.setdefault(i, {})[sv] = lslot(sv, live[vv])
 
       # allocate defs
-      for j,v in enumerate(rdefs(u)):
-        if not isinstance(v, VRegister): continue
-        cons = None
+      vdefs = [v for v in rdefs(u) if isinstance(v, VRegister)]
+      for j,v in enumerate(vdefs):
+        cons: list[tuple[Register,...]]|None = None
         if self.ren.is_two_address(u) and j == 0:
-          uses = []
-          for s in u.src:
-            if rdef(s) in live: uses.extend(live.get(rdef(s)))
-          cons = ([(uses[0],)] if uses[0] in v.cons else []) + [r for r in v.candidates() if r[0] not in uses]
+          pin: tuple[Register,...]|None = next((rs for s in u.src if isinstance((vr := rdef(s)), VRegister) and (rs := live.get(vr, None)) is not None), None)
+          if pin is not None:
+            cons = ([pin] if pin[0] in v.cons else []) + v.candidates()
         # parents can be defined by premature subregister op ex. collect then store
         if (vv := v.or_parent()) not in live:
           live[vv] = alloc(vv, cons, i+1 if u.op is not Ops.RANGE else i)
-        self.reals.setdefault(i, {})[v] = live[vv][v.pos:v.pos+v.width] if v.is_sub() else live[vv]
+        self.reals.setdefault(i, {})[v] = lslot(v, live[vv])
 
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
         # we move to registers vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
-        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < lr[rdef(u)][-1] for l in lr[v])]
+        assert isinstance((rvr := rdef(u)), VRegister)
+        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < lr[rvr][-1] for l in lr[v])]
         sorted_uses = sorted(used_in_loop, key=lambda k: (next(l-i for l in lr[k] if l >= i), lr[k][0], k.name, k.cons[0].index))
         live_in: dict[VRegister, tuple[Register,...]] = {}
         for v in sorted_uses:
@@ -106,14 +110,14 @@ def retag(s:UOp, tag:tuple) -> UOp:
   return s.replace(tag=tag)
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
-  i, nsrc, before = next(ctx.idx), [], []
+  i, nsrc, before, after = next(ctx.idx), [], [], []
   for j,s in enumerate(x.src):
     if i in ctx.reals and isinstance((v := rdef(ctx.uops[i].src[j])), VRegister) and (vv := v.or_parent()) in ctx.spills:
       nsrc.append(retag(s, ctx.reals[i][v]))
     else:
       nsrc.append(s)
 
-  ndefs, after = [], []
+  ndefs: list[Any] = []
   for v in rdefs(x):
     if isinstance(v, VRegister): ndefs.extend(ctx.reals[i][v])
     else: ndefs.append(v)
@@ -150,11 +154,13 @@ def _strip(x:UOp):
 def propogate_subs(ctx, x:UOp):
   # a STACK over pinned defs (reg BUFFER loads) needs no virtual register, it just collects the pinned srcs
   if len(x.src) and all(isinstance(rdef(s), Register) for s in x.src):
-    defs = tuple(r for s in x.src for r in rdefs(s))
-    if all(b.index == a.index+1 for a,b in zip(defs, defs[1:])): return x.replace(tag=defs)
+    defs = tuple(r for s in x.src for r in rdefs(s) if isinstance(r, Register))
+    assert all(b.index == a.index+1 for a,b in zip(defs, defs[1:]))
+    return x.replace(tag=defs)
 
   vr, nsrc = rdef(x), []
-  n = vr.width//len(x.src) if isinstance(vr, VRegister) and len(x.src) and vr.width%len(x.src) == 0 else max(x.dtype.itemsize//4, 1)
+  assert isinstance(vr, VRegister)
+  n = vr.width//len(x.src) if len(x.src) and vr.width%len(x.src) == 0 else max(x.dtype.itemsize//4, 1)
   for i,s in enumerate(x.src):
     # pinned defs and INDEX/reg LOAD srcs have to become copies, can be redundant but must enforce contiguity restraint.
     # Optimization would have to identify equivalent STACKs and tie register blocks

@@ -1,7 +1,7 @@
 from tinygrad.dtype import dtypes, AddrSpace, truncate, DType, InvalidType, to_storage_scalar, ConstFloat
-from tinygrad.codegen.opt import tc
+from typing import Any
 from tinygrad.helpers import Target
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp, graph_rewrite
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp, graph_rewrite, ProgramInfo
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef, copy_dst, PreLinearKernelCtx
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
@@ -57,7 +57,7 @@ S_CMP = { Ops.CMPNE:RDNA3Ops.s_xor_b32, Ops.XOR:RDNA3Ops.s_xor_b32, Ops.OR: RDNA
 
 # ---- helpers ----
 lane_ctr = itertools.count(-1, -1)
-def def_reg(dt, reg:Register|tuple[Register,...]): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=(reg,) if isinstance(reg,Register) else reg)
+def def_reg(dt:DType, defs:Any): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=defs if isinstance(defs, tuple) else (defs,))
 def const(v, dt:DType=dtypes.uint32) -> UOp: return UOp.cconst((v if isinstance(v, InvalidType) else truncate[dt](v)), dt).rtag()
 def gep(u:UOp, i:int) -> UOp: return u.bitcast(dtypes.uint32).index(UOp.cconst(i, dtypes.uint32))
 def const_val(x:UOp):
@@ -156,11 +156,11 @@ def abi(ctx, x:UOp) -> UOp|None:
     if x.arg[0] == 'g': return vmov(ctx.reserved(WGIDS[int(x.arg[-1])], dtypes.uint32)).after(x.rtag())
     src = (ctx.reserved(WIIDS, dtypes.uint32), const(10*int(x.arg[-1])), const(10))
     return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=src)
-
-  offs = const(sum(8 if u.op == Ops.PARAM else u.dtype.itemsize for u in ctx.func_args[:ctx.func_args.index(x)]))
-  src = (ctx.reserved(KERNARG_PTR, dtypes.uint64), offs)
-  if x.addrspace is AddrSpace.ALU: out = vmov(UOp(Ops.INS, src=src, arg=(RDNA3Ops.s_load_b32, x.dtype)))
-  else: out = UOp(Ops.INS, src=src, arg=(RDNA3Ops.s_load_b64, dtypes.ulong))
+  else:
+    offs = const(sum(8 if u.op == Ops.PARAM else u.dtype.itemsize for u in ctx.func_args[:ctx.func_args.index(x)]))
+    psrc = (ctx.reserved(KERNARG_PTR, dtypes.uint64), offs)
+    if x.addrspace is AddrSpace.ALU: out = vmov(UOp(Ops.INS, src=psrc, arg=(RDNA3Ops.s_load_b32, x.dtype)))
+    else: out = UOp(Ops.INS, src=psrc, arg=(RDNA3Ops.s_load_b64, dtypes.ulong))
   return out.after(x.rtag()) # preserve PARAM scheduling
 
 # ----- memory access ----
@@ -341,6 +341,7 @@ def lower_end(ctx, x:UOp):
 
 # ---- lowering passes ----
 int1regs = dtypes.int8s + dtypes.int16s + dtypes.int32s
+from tinygrad.codegen.opt.tc import pm_validate_wmma_rdna3
 extra_matcher = PatternMatcher([
   (UPat.cvar("c", dtypes.bfloat16), lambda c: UOp.const(c.val if isinstance(c.val, InvalidType) else
     to_storage_scalar(c.val, dtypes.bfloat16), dtypes.uint16).bitcast(dtypes.bfloat16)),
@@ -350,7 +351,7 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.CDIV, dtypes.ints, (UPat.var("a"), UPat.var("b")), name="x"), idiv),
   (UPat(Ops.EXP2, dtypes.double, src=(UPat.var("d"),)), xexp2),
   (UPat(Ops.LOG2, dtypes.double, src=(UPat.var("d"),)), xlog2),
-]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,)) + tc.pm_validate_wmma_rdna3
+]) + pm_manual_bf16_cast + create_non_native_float_pats((dtypes.bfloat16,)) + pm_validate_wmma_rdna3
 
 pm_float_to_int = PatternMatcher([
   (UPat.var("y", dtypes.half).cast((dtypes.double,)+dtypes.int32s+dtypes.int64s, name="x"),
@@ -487,7 +488,8 @@ def encode(x:UOp):
     if is_const(x): return const_val(rafter(x))
     r, rs = rdef(x), rdefs(x)
     assert isinstance(r, Register), f"expect Register to encode, got {r} from {x}"
-    for i,g in enumerate(rs[1:]): assert g.index == rs[i].index+1, "wide registers must be contiguous"
+    for i,g in enumerate(rs[1:]):
+      assert isinstance(g, Register) and isinstance((nxt := rs[i]), Register) and g.index == nxt.index+1, "wide registers must be contiguous"
     dmap = { "vcc":dsl.VCC, "exec_lo":dsl.EXEC_LO, "v":dsl.v, "s":dsl.s }
     base = next(v for k,v in dmap.items() if k in r.name)
     return base[r.index] if len(rs) == 1 else base[r.index:r.index+len(rs)-1]
@@ -526,6 +528,7 @@ def encode(x:UOp):
 class CntType(Enum):
   DS_CNT = auto(); LOAD_CNT = auto(); STORE_CNT = auto()
 
+  @staticmethod
   def get(u:UOp):
     op = u.arg[0]
     if op.func in { RDNA3Ops.GLOBAL, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }:
@@ -555,7 +558,7 @@ class RDNA3PreLinearKernelCtx(PreLinearKernelCtx):
     rbufs: dict[int, UOp] = {u.arg.size*u.dtype.itemsize:u for u in sink.toposort() if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG}
     sizes = list(sorted(rbufs.keys(), reverse=True))
     spill_before = next((i for i,sz in enumerate(sizes) if sum(sizes[i:]) < len(self.gp_vgprs)*4), len(sizes))
-    self.overflows: dict[UOp, list[int]] = {}
+    self.overflows: dict[UOp, Any] = {}
 
     for sz in sizes[:spill_before]:
       buf = rbufs[sz]
@@ -581,7 +584,7 @@ class RDNA3PreLinearKernelCtx(PreLinearKernelCtx):
       return offset
     else:
       vgpr,lane = next(((r,l) for r,l in self.spill_vgprs.items() if 32 - l >= v.width), (None, None))
-      assert vgpr is not None, "ran out of reserved SGPR spill lanes"
+      assert vgpr is not None and lane is not None, "ran out of reserved SGPR spill lanes"
       self.spill_vgprs[vgpr] += v.width
       return (vgpr,lane)
 
@@ -596,15 +599,16 @@ class RDNA3Renderer(ISARenderer):
   kernel_ctx_type = RDNA3PreLinearKernelCtx
   def __init__(self, target:Target):
     super().__init__(target)
-    self.shared_max, self.tensor_cores = HIPRenderer.shared_max, tc.get_amd(target.arch)
+    from tinygrad.codegen.opt.tc import get_amd
+    self.shared_max, self.tensor_cores = HIPRenderer.shared_max, get_amd(target.arch)
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
   def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     return '\n'.join(str(encode(u).arg[0]) for u in uops)
 
-  def spill(self, spill_offset:any, x:UOp, sub_idx:int|None=None) -> list[UOp]:
-    regs = rdefs(x)
+  def spill(self, spill_offset:Any, x:UOp, sub_idx:int|None=None) -> list[UOp]:
+    regs = tuple(r for r in rdefs(x) if isinstance(r, Register))
     if regs[0].name[0] == 'v':
       if sub_idx is not None: spill_offset += sub_idx*4
       return batch_scratch(True, spill_offset, x.dtype, regs)
@@ -613,7 +617,7 @@ class RDNA3Renderer(ISARenderer):
       return [UOp(Ops.INS, arg=(RDNA3Ops.v_writelane_b32, dtypes.void), src=(def_reg(x.dtype, r),
         const(lane+i+(sub_idx or 0))), tag=vgpr) for i,r in enumerate(regs)]
 
-  def fill(self, spill_offset:any, x:UOp, dst:tuple[Register,...], sub_idx:int|None=None) -> tuple[UOp, list[UOp]]:
+  def fill(self, spill_offset:Any, x:UOp, dst:tuple[Register,...], sub_idx:int|None=None) -> tuple[UOp, list[UOp]]:
     if dst[0].name[0] == 'v':
       if sub_idx is not None: spill_offset += sub_idx*4
       ops = batch_scratch(False, spill_offset, x.dtype, dst)
@@ -668,9 +672,9 @@ class RDNA3Renderer(ISARenderer):
             elif pending_lds:
               nuops.append(waitcnt())
               pending_lds = False
-          deps.update(rdefs(u))
+          deps.update([r for r in rdefs(u) if isinstance(r, Register)])
           if u.arg[1] is dtypes.void: # protect address registers?
-            for s in u.src: deps.update(rdefs(s))
+            for s in u.src: deps.update([r for r in rdefs(u) if isinstance(r, Register)])
         elif u.arg[0].func is RDNA3Ops.SCRATCH: pending_scratch = True
       nuops.append(u)
 

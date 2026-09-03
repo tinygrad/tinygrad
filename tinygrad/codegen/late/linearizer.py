@@ -5,7 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
-def linearize(sink:UOp, ins_schedule:dict[any, Ops]|None=None) -> list[UOp]:
+def linearize(sink:UOp, ins_schedule:dict[Any, Ops]|None=None) -> list[UOp]:
   # this is a toposort with priority
   lst = list(sink.toposort())
   out_degree:defaultdict[UOp, int] = defaultdict(int)
@@ -21,7 +21,7 @@ def linearize(sink:UOp, ins_schedule:dict[any, Ops]|None=None) -> list[UOp]:
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     extra = None
-    match (ins_schedule.get(u.arg[0], u.op) if u.op is Ops.INS else u.op):
+    match (ins_schedule.get(u.arg[0], u.op) if ins_schedule is not None and u.op is Ops.INS else u.op):
       # the order and placement of these defines is important
       case Ops.PARAM: priority, extra = -20, u.arg.slot
       case Ops.BUFFER: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18

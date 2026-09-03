@@ -1,5 +1,6 @@
 from dataclasses import replace, dataclass
 import itertools, functools
+from typing import Any
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, NUM_CPU_THREADS, TC_SELECT, TC_OPT, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
@@ -440,14 +441,14 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
 
   kctx: PreLinearKernelCtx|None = None
-  ins_schedule: dict[any, Ops]|None = None
+  ins_schedule: dict[Any, Ops]|None = None
   # instruction selection
   if isinstance(ctx, ISARenderer):
     kctx = ctx.kernel_ctx_type(sink, ctx, prg.arg)
     sink = graph_rewrite(sink, ctx.pre_isel_matcher, ctx=kctx, name="pre instruction selection", bottom_up=True)
     sink, rewrite_ctx = graph_rewrite(sink, ctx.isel_matcher, ctx=kctx, name="instruction selection", bottom_up=True, return_ctx=True)
     # map arbitrary Ops.INS opcodes to equivalent rewritten Ops IR to preserve metadata for scheduling etc..
-    ins_schedule: dict[any, Ops] = {mc.arg[0]:u.op for u,mc in rewrite_ctx.replace.items() if mc.op is Ops.INS}
+    ins_schedule = {mc.arg[0]:u.op for u,mc in rewrite_ctx.replace.items() if mc.op is Ops.INS}
     kctx.ins_schedule = ins_schedule
     sink = graph_rewrite(sink, pm_prepare_regalloc, ctx=kctx, name="prepare regalloc")
 
@@ -455,7 +456,7 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink, ins_schedule), pm_linearize_cleanups)
 
   # isa renderers need to allocate registers
-  if isinstance(ctx, ISARenderer):
+  if isinstance(ctx, ISARenderer) and kctx is not None:
     lst = do_regalloc(kctx, lst)
     if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
   # TODO: find cleaner way to pass spill_size seperate from renderer state??
