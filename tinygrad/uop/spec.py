@@ -1,6 +1,6 @@
 import math, functools
 from typing import Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, OPAQUE_CALL_BODIES
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
@@ -105,7 +105,7 @@ spec_shared = PatternMatcher([
   # a CUSTOM_FUNCTION with srcs is the body of an external call, holding the callee (a function pointer)
   (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, str)),
   # CALL: the body is always an opaque body, the arg is a CallInfo stating the (possibly void) dtype
-  (UPat(Ops.CALL, src=(UPat(tuple(UOp._OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"),
+  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"),
    lambda x: isinstance(x.arg, CallInfo) and x.dtype is x.arg.dtype),
 
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
@@ -260,7 +260,7 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   # all calls are on opaque bodies
-  (UPat(Ops.CALL, src=(UPat(tuple(UOp._OPAQUE_CALL_BODIES)),), allow_any_len=True), lambda: True),
+  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True), lambda: True),
   # after on PARAM or AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),),
         allow_any_len=True), lambda: True),
