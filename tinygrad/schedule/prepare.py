@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.dtype import dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
-from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
+from tinygrad.uop.ops import graph_rewrite, rewrite_group, ParamArg, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
 from tinygrad.schedule.indexing import apply_movement_op
@@ -89,7 +89,7 @@ def split_reduceop(reduce:UOp, x:UOp):
 
 pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p) if p.arg.slot >= 0 else None), ])
 def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
-  if c.arg.precompile or not any(x.unsharded_base.is_unbound for x in c.src[1:]): return None
+  if c.arg.precompile: return None
   params: list[UOp] = []
   graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")
   params = sorted(params, key=lambda x: x.arg.slot)
@@ -131,7 +131,7 @@ def expand_bitcast(bc:UOp) -> UOp|None:
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls with RETURNED inputs (inline the body)
-  (UPat(Ops.CALL, name="c"), resolve_function),
+  (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.num_returned else None),
 
   # resolve AFTER on RETURNED (call outputs)
   (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
@@ -202,7 +202,7 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
     # if there's already a buffer, we just use it
     return existing_buf.flatten().store(input_src)
   # create the output buffer
-  buf = UOp.new_buffer(copy.device, prod(input_src.max_shape), copy.dtype)
+  buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), copy.dtype, size=prod(input_src.max_shape), device=copy.device))
   # reshape back to input
   return buf.reshape(input_src.max_shape).after(buf.store(input_src)).reshape(copy.shape)
 
