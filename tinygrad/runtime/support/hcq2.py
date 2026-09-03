@@ -362,11 +362,11 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
   # TODO: this needs a cleanup
   bufmap = {s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}
   if (final_linear:=(hcq_compile_cache.get(cache_key:=(linear, profile, input_uops is None)))) is None:
-    linear = graph_rewrite(linear.substitute(bufmap, walk=True), pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
-    linear = sched_batches(linear, profile)
-    linear = graph_rewrite(linear, pm_encode, walk=True, name="encode")
-    with Context(EMULATED_DTYPES=""):
-      final_linear = hcq_compile_cache[cache_key] = lower_and_compile(linear).substitute({v: k for k, v in bufmap.items()}, walk=True)
+    lin = graph_rewrite(linear.substitute(bufmap, walk=True), pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
+    lin = sched_batches(lin, profile)
+    lin = graph_rewrite(lin, pm_encode, walk=True, name="encode")
+    with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(l).substitute({v: k for k, v in bufmap.items()}, walk=True)
+    if final_linear is not linear: hcq_compile_cache[cache_key] = final_linear
   return final_linear.substitute(bufmap, walk=True)
 
 # *****************
