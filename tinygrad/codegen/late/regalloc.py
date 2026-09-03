@@ -155,8 +155,7 @@ def propogate_subs(ctx, x:UOp):
   # a STACK over pinned defs (reg BUFFER loads) needs no virtual register, it just collects the pinned srcs
   if len(x.src) and all(isinstance(rdef(s), Register) for s in x.src):
     defs = tuple(r for s in x.src for r in rdefs(s) if isinstance(r, Register))
-    assert all(b.index == a.index+1 for a,b in zip(defs, defs[1:]))
-    return x.replace(tag=defs)
+    if all(b.index == a.index+1 for a,b in zip(defs, defs[1:])): return x.replace(tag=defs)
 
   vr, nsrc = rdef(x), []
   assert isinstance(vr, VRegister)
