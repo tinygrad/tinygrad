@@ -299,64 +299,63 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if SPEC: type_verify(ast, spec_tensor)
 
   # resolve UNSHARDs (multi-device UNSHARDs are already resolved by the scheduler; this handles in-kernel shards, e.g. fragments)
-  sink = graph_rewrite(ast, multi_pm, name="multi_pm", enter_calls=True)
+  sink = graph_rewrite(ast, multi_pm, name="multi_pm")
 
   # preprocess
-  sink = graph_rewrite(sink, pm_mops, name="early movement ops", bottom_up=True, enter_calls=True)
+  sink = graph_rewrite(sink, pm_mops, name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:
     # collapse loads reduce (indexing by a tensor)
-    sink = graph_rewrite(sink, pm_load_collapse, name="load collapse", enter_calls=True)
+    sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
 
     # split ranges
-    sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges", enter_calls=True)
+    sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
-    sink = graph_rewrite(sink, sym+pm_flatten_range, name="initial symbolic", enter_calls=True)
+    sink = graph_rewrite(sink, sym+pm_flatten_range, name="initial symbolic")
 
     # optimize (schedule) the AST
-    sink = graph_rewrite(sink, pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges", enter_calls=True)
+    sink = graph_rewrite(sink, pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges")
 
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
   # ** expander (expand_rewrite) **
   # reduce_unparented: a REDUCE whose src folded to a CONST (e.g. x*0) has no parented ranges, collapse it before the expander
-  sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range+pm_reduce_unparented+pm_reduce_identity,
-                       name="postopt symbolic", enter_calls=True)
+  sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range+pm_reduce_unparented+pm_reduce_identity, name="postopt symbolic")
 
   # expand
-  sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander", enter_calls=True)
+  sink = graph_rewrite(sink, expander2, ctx=build_range_map(sink), name="expander")
 
   # remove reduce
-  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove reduces", enter_calls=True)
+  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove reduces")
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers", enter_calls=True)
+  sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
-  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims", enter_calls=True)
+  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads", enter_calls=True)
+  sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
 
   # devectorize
-  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, ctx=ren, name="devectorize2", enter_calls=True)
+  sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, ctx=ren, name="devectorize2")
 
   # some coalescing misses without this
-  sink = graph_rewrite(sink, sym, name="early symbolic", enter_calls=True)
+  sink = graph_rewrite(sink, sym, name="early symbolic")
 
   # do memory coalescing (late)
   sink = memory_coalescing(sink, ren)
   sink = graph_rewrite(sink, symbolic_simple+ew_devectorizer+pm_simplify_add_image,
-                       name="add images", ctx=({}, ren), bottom_up=True, enter_calls=True)
+                       name="add images", ctx=({}, ren), bottom_up=True)
 
   # extra symbolic before decomp. crashes without this?
   # NOTE: also run indexing_simplify here, while the index is still weakint and (x+y)*c -> x*c+y*c applies
   # commit widths minted in this fixpoint before lowering inspects INDEX shapes
-  sink = graph_rewrite(sink, sym+indexing_simplify+pm_commit_weak, name="extra symbolic", enter_calls=True)
+  sink = graph_rewrite(sink, sym+indexing_simplify+pm_commit_weak, name="extra symbolic")
 
   # the boundary: required compute dtypes settle here; derivable const edges may stay bare
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
@@ -364,42 +363,42 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_lower_weak+indexing_simplify, name="lower all index dtypes", enter_calls=True)
 
   # final symbolic before decomp
-  sink = graph_rewrite(sink, symbolic, name="final symbolic", enter_calls=True)
+  sink = graph_rewrite(sink, symbolic, name="final symbolic")
 
-  sink = graph_rewrite(sink, pm_cast_float_alu, name="cast float alu operands", enter_calls=True)
+  sink = graph_rewrite(sink, pm_cast_float_alu, name="cast float alu operands")
 
   # **** decomps ****
 
   # floordiv+mod / dtype decomp (early)
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_simplifying_rewrite_patterns(supported_ops)
-  sink = graph_rewrite(sink, pm_decomp, name="early decompositions", enter_calls=True)
+  sink = graph_rewrite(sink, pm_decomp, name="early decompositions")
 
   # late decomps + move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_dtype_decomps+pm_commit_weak, ctx=(set(), ren), name="decomp dtypes", enter_calls=True)
+  sink = graph_rewrite(sink, pm_dtype_decomps+pm_commit_weak, ctx=(set(), ren), name="decomp dtypes")
   pm_decomp = pm_decomp+\
     get_late_rewrite_patterns(supported_ops, bool(DISABLE_FAST_IDIV))+\
     get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
-  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions", enter_calls=True)
-  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index", enter_calls=True)
+  sink = graph_rewrite(sink, pm_decomp, ctx=ren, name="late decompositions")
+  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
   pm_final_rewrite = pm_commit_weak+pm_decomp+extra_matcher+pm_split_ends
-  sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite", enter_calls=True)
+  sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # commit every const still bare so no renderer reads one
-  sink = graph_rewrite(sink, pm_cast_const, name="cast consts", enter_calls=True)
+  sink = graph_rewrite(sink, pm_cast_const, name="cast consts")
 
   # add implicit barriers (stores/loads through LOCAL memory ordered by AFTER or across loop iterations need workgroup barriers)
-  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers", enter_calls=True)
+  sink = graph_rewrite(sink, pm_implicit_barriers, name="add implicit barriers")
 
   # this was the linearizer
-  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True, enter_calls=True)
+  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   # put unnumbered variable PARAMs in slots
   num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
-  sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True, enter_calls=True)
+  sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC:
@@ -497,10 +496,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
     # instruction selection
     if isinstance(renderer, ISARenderer):
-      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1),
-                                name="pre instruction selection", bottom_up=True, enter_calls=True)
-      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink),
-                                name="instruction selection", bottom_up=True, enter_calls=True)
+      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
+      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))
