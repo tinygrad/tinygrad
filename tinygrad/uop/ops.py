@@ -122,12 +122,9 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | Ops.NOOP | \
-         Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR | Ops.PYLITERAL:
+         Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR | Ops.PYLITERAL | Ops.CALL:
       # always void
       return dtypes.void
-    case Ops.CALL:
-      # a CALL of an opaque body (CallInfo arg) is void, a CALL of an address states its return dtype in the arg
-      return arg if isinstance(arg, DType) else dtypes.void
     case Ops.CUSTOM | Ops.CUSTOMI:
       assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"CUSTOM/CUSTOMI arg must be (str, DType), got {arg}"
       return arg[1]
@@ -1202,11 +1199,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)
 
-  # opaque bodies are just CALLs; value-producing bodies become CALLs with RETURNED placeholders as extra inputs
+  # opaque bodies are just CALLs; value-producing bodies become CALLs with unbound BUFFER placeholders as extra inputs
   _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}
-  def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
+  def call(self, *srcs:UOp, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
-    if ret_dtype is not None: return UOp(Ops.CALL, src=(self,)+srcs, arg=ret_dtype)
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
@@ -1694,8 +1690,7 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        # program bodies (kernels, value calls) are never rewritten separately unless the rewrite explicitly enters
-        # calls; other call graphs (dtype-arg calls) are plain dataflow and always rewritten
+        # CALL bodies are never rewritten separately unless the rewrite explicitly enters calls
         if n.op is Ops.CALL and not self.enter_calls and n.src[0].op in UOp._OPAQUE_CALL_BODIES:
           self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
@@ -1734,8 +1729,8 @@ class RewriteContext:
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
-        # NOTE: CALLs are handled as a special case: program bodies are not included in the graph_rewrite unless the
-        # rewrite explicitly enters calls (a CALL of an address is not a body, its srcs are regular dataflow)
+        # NOTE: CALLs are handled as a special case: their bodies are not included in the graph_rewrite unless the
+        # rewrite explicitly enters calls
         if new_n.op is Ops.CALL and not self.enter_calls and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES:
           self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):

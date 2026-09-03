@@ -1,6 +1,6 @@
 import math, functools
 from typing import Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
@@ -102,10 +102,6 @@ spec_shared = PatternMatcher([
   (UPat((Ops.CUSTOMI, Ops.CUSTOM), name="x"),
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and isinstance(x.arg[0], str) and isinstance(x.arg[1], DType)),
 
-  # CALL of an external function
-  (UPat(Ops.CALL, src=(UPat(),), allow_any_len=True, name="x"),
-   lambda x: matches_dtype(x.src[0], dtypes.uint64) and isinstance(x.arg, DType) if x.src[0].dtype is not dtypes.void else None),
-
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),
 
@@ -149,8 +145,9 @@ spec_tensor = PatternMatcher([
   # custom function
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
 
-  # CALL
-  (UPat(Ops.CALL, dtypes.void, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
+  # CALL: the body is always an opaque body, the arg is CallInfo
+  (UPat(Ops.CALL, dtypes.void, src=(UPat(tuple(UOp._OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"),
+   lambda x: isinstance(x.arg, CallInfo)),
 
   # SPECIAL is index before index lowering. custom_kernel currently has this
   (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.weakint),), name="s"), lambda s: isinstance(s.arg, str)),
@@ -260,8 +257,9 @@ spec_kernel_graph = PatternMatcher([
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
-  # all calls are on various sinks
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
+  # all calls are on opaque bodies
+  (UPat(Ops.CALL, dtypes.void, src=(UPat(tuple(UOp._OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"),
+   lambda x: isinstance(x.arg, CallInfo)),
   # after on PARAM or AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),),
         allow_any_len=True), lambda: True),
