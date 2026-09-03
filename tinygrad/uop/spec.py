@@ -277,7 +277,7 @@ def pyrender_globals() -> dict[str, Any]:
   return {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
           "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
           "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates, "CallInfo": CallInfo}
+          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
   exec(code, pyrender_globals(), lcls)

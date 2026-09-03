@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, UOp, function
+from tinygrad import Tensor, UOp, function, Context
 from tinygrad.device import Device
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.engine.realize import run_linear
@@ -34,6 +34,14 @@ def var_loop_kernel(A:UOp, B:UOp) -> UOp:
   n = UOp.variable("n", 1, 4, param=True)
   return B[0].store(handmade_reduce(A, n)).sink(arg=KernelInfo(name="test"))
 
+@function(in_kernel=True)
+def mul2(a:UOp) -> UOp: return a * 2
+
+def double_kernel(B:UOp, A:UOp) -> UOp:
+  r = UOp.range(4, 0)
+  return B[r].store(mul2(A[r].load())).end(r).sink(arg=KernelInfo(name="mul2_kernel"))
+def double_backward(gradient:UOp, kernel:UOp) -> tuple: return (None, (Tensor(gradient) * 2).uop)
+
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "TODO: a called SINK is rendered in C style only")
 class TestCallSink(unittest.TestCase):
   def test_simple(self):
@@ -54,5 +62,17 @@ class TestCallSink(unittest.TestCase):
     for n, expected in ((2, 5), (4, 14)):
       run_linear(UOp(Ops.LINEAR, src=(kernel,)), var_vals={"n": n})
       self.assertEqual(b.item(), expected)
+
+  def test_grad_fxn(self):
+    a = Tensor([1., 2, 3, 4])
+    b = Tensor.custom_kernel(Tensor.empty(4), a, fxn=double_kernel, grad_fxn=double_backward)[0]
+    b.sum().backward()
+    self.assertEqual(b.tolist(), [2., 4, 6, 8])
+    self.assertEqual(a.grad.tolist(), [2., 2, 2, 2])
+
+  def test_beam(self): # a kernel with calls renders as written: the search has nothing to vectorize across a call
+    with Context(BEAM=1):
+      self.test_loop()
+      self.test_var_loop()
 
 if __name__ == "__main__": unittest.main()
