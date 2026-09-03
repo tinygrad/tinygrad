@@ -318,6 +318,21 @@ class TestArgOrder(unittest.TestCase):
     np.testing.assert_equal(x.grad.numpy(), [3, 3, 3])
     np.testing.assert_equal(y.grad.numpy(), [1, 1, 1])
 
+  def test_output_pos_symbolic_shape(self):
+    # symbolic output shapes resolve against the final arg slots, not the input order (PARAM(2) in the shape, output at 0)
+    x = Tensor.empty(8).realize()
+    sz = UOp.variable('sz', 1, 8)
+    dev = self._dev(x)
+    p1, p2 = UOp.param(1, x.dtype, x.shape, dev), sz.param_like(2)
+    value = p1.reshape(x.shape).shrink_to((p2,))
+    bound = sz.bind(5)
+    outs = UOp.call_with_outputs((value,), x.uop, bound, output_pos=(0,))
+    # the minted output's shape substituted PARAM(2) with the bind arg from position 2 in the arg list
+    shp = outs[0].shape[0]
+    self.assertIsInstance(shp, UOp)
+    self.assertNotEqual(shp.op, Ops.PARAM)
+    self.assertEqual(shp, bound)
+
   def test_output_pos_must_be_ascending(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
     p1 = UOp.param(1, x.dtype, x.shape, self._dev(x))
