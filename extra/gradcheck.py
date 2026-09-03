@@ -17,10 +17,7 @@ def jacobian(func, input):
     input.grad = None
     output = func(input)
 
-    # tinygrad doesn't support slicing, tiny-hack to select
-    # the needed scalar an backpropagate only through it
-    o_scalar = Tensor(mask_like(output, o, 1.)).mul(output).sum()
-    o_scalar = Tensor(mask_like(output, o, 1.)).mul(output).sum()
+    o_scalar = output.reshape(-1)[o]
     o_scalar.backward()
 
     for i, grad in enumerate(input.grad.numpy().reshape(-1)):
