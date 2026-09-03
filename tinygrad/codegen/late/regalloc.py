@@ -75,7 +75,7 @@ class LinearScanRegallocContext:
       for j,v in enumerate(vdefs):
         cons: list[tuple[Register,...]]|None = None
         if self.ren.is_two_address(u) and j == 0:
-          pin: tuple[Register,...]|None = next((rs for s in u.src if isinstance((vr := rdef(s)), VRegister) and (rs := live.get(vr, None)) is not None), None)
+          pin: tuple[Register,...]|None = next((rs for s in u.src if (rs := live.get(rdef(s), None)) is not None), None)
           if pin is not None:
             cons = ([pin] if pin[0] in v.cons else []) + v.candidates()
         # parents can be defined by premature subregister op ex. collect then store
@@ -86,7 +86,8 @@ class LinearScanRegallocContext:
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
         # we move to registers vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
-        assert isinstance((rvr := rdef(u)), VRegister)
+        rvr = rdef(u)
+        assert isinstance(rvr, VRegister)
         used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < lr[rvr][-1] for l in lr[v])]
         sorted_uses = sorted(used_in_loop, key=lambda k: (next(l-i for l in lr[k] if l >= i), lr[k][0], k.name, k.cons[0].index))
         live_in: dict[VRegister, tuple[Register,...]] = {}
@@ -112,7 +113,7 @@ def retag(s:UOp, tag:tuple) -> UOp:
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i, nsrc, before, after = next(ctx.idx), [], [], []
   for j,s in enumerate(x.src):
-    if i in ctx.reals and isinstance((v := rdef(ctx.uops[i].src[j])), VRegister) and (vv := v.or_parent()) in ctx.spills:
+    if i in ctx.reals and isinstance((v := rdef(ctx.uops[i].src[j])), VRegister) and v.or_parent() in ctx.spills:
       nsrc.append(retag(s, ctx.reals[i][v]))
     else:
       nsrc.append(s)

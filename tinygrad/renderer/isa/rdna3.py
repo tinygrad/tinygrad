@@ -1,21 +1,23 @@
+from __future__ import annotations
+# flake8: noqa: E702
 from tinygrad.dtype import dtypes, AddrSpace, truncate, DType, InvalidType, to_storage_scalar, ConstFloat
 from typing import Any
 from tinygrad.helpers import Target
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp, graph_rewrite, ProgramInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, ParamArg, range_str, GroupOp, ProgramInfo
 from tinygrad.renderer.isa import ISARenderer, Register, VRegister, rdefs, rdef, copy_dst, PreLinearKernelCtx
 from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.codegen.decomp.transcendental import xexp2, xlog2
 from tinygrad.codegen.decomp.op import fast_idiv
-from tinygrad.codegen.late.regalloc import LinearScanRegallocContext
 from tinygrad.renderer.amd.elf import assemble_linear
 from tinygrad.renderer.cstyle import HIPRenderer
 import tinygrad.renderer.amd.dsl as dsl
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
-import itertools, functools, struct, math
+import itertools, struct, math
 from enum import Enum, auto
 
 # ---- (UOp, dtype) -> Instruction tables ----
-dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", dtypes.int64:"i64", dtypes.bfloat16:"bf16", dtypes.uint8:"u8", dtypes.int8:"i8" }
+dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16",
+              dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", dtypes.int64:"i64", dtypes.bfloat16:"bf16", dtypes.uint8:"u8", dtypes.int8:"i8" }
 isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 
 # (uop, prefix, opcodes, support 32 and 64 bit encoding (e32/e64 branches with keys))
@@ -42,8 +44,8 @@ def _build_ins_table(srcs):
     return getattr(RDNA3Ops, s)
   tbl = {}
   for op, pref, codes, bothenc in srcs:
-    if bothenc: tbl[op] = { n : { _extract_dt(code) : _extract_ins(pref, code, n) for code in codes } for n in [32, 64] }
-    else: tbl[op] = { _extract_dt(code) : _extract_ins(pref, code) for code in codes }
+    if bothenc: tbl[op] = { n:{ _extract_dt(code):_extract_ins(pref, code, n) for code in codes } for n in [32, 64] }
+    else: tbl[op] = { _extract_dt(code):_extract_ins(pref, code) for code in codes }
   return tbl
 
 OP_INS = _build_ins_table(insdefs)
@@ -53,11 +55,14 @@ V_LSHL = { 2:RDNA3Ops.v_lshlrev_b16, 4:RDNA3Ops.v_lshlrev_b32_e32, 8:RDNA3Ops.v_
 V_LSHR = { 2:RDNA3Ops.v_lshrrev_b16, 4:RDNA3Ops.v_lshrrev_b32_e32, 8:RDNA3Ops.v_lshrrev_b64 }
 V_ASHR = { dtypes.int16:RDNA3Ops.v_ashrrev_i16, dtypes.int32:RDNA3Ops.v_ashrrev_i32_e32, dtypes.int64:RDNA3Ops.v_ashrrev_i64 }
 V_LDEXP = { dtypes.float16:RDNA3Ops.v_ldexp_f16_e32, dtypes.float32:RDNA3Ops.v_ldexp_f32, dtypes.float64:RDNA3Ops.v_ldexp_f64 }
-S_CMP = { Ops.CMPNE:RDNA3Ops.s_xor_b32, Ops.XOR:RDNA3Ops.s_xor_b32, Ops.OR: RDNA3Ops.s_or_b32, Ops.AND:RDNA3Ops.s_and_b32, Ops.CMPLT: RDNA3Ops.s_and_not1_b32, Ops.CMPEQ:RDNA3Ops.s_xnor_b32 }
+S_CMP = { Ops.CMPNE:RDNA3Ops.s_xor_b32, Ops.XOR:RDNA3Ops.s_xor_b32, Ops.OR: RDNA3Ops.s_or_b32, Ops.AND:RDNA3Ops.s_and_b32,
+          Ops.CMPLT: RDNA3Ops.s_and_not1_b32, Ops.CMPEQ:RDNA3Ops.s_xnor_b32 }
 
 # ---- helpers ----
 lane_ctr = itertools.count(-1, -1)
-def def_reg(dt:DType, defs:Any): return UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG).replace(tag=defs if isinstance(defs, tuple) else (defs,))
+def def_reg(dt:DType, defs:Any):
+  buf = UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG)
+  return buf.replace(tag=defs if isinstance(defs, tuple) else (defs,))
 def const(v, dt:DType=dtypes.uint32) -> UOp: return UOp.cconst((v if isinstance(v, InvalidType) else truncate[dt](v)), dt).rtag()
 def gep(u:UOp, i:int) -> UOp: return u.bitcast(dtypes.uint32).index(UOp.cconst(i, dtypes.uint32))
 def const_val(x:UOp):
@@ -124,7 +129,8 @@ def lvop3(x:UOp):
   lits = [s for s in x.src if is_const(s) and not can_fold_lit(s)]
   return None if len(lits) == 1 else x.replace(src=tuple([vmov(s) if s in lits[1:] else s for s in x.src]))
 
-rev_op_order = { RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshlrev_b16, RDNA3Ops.v_lshlrev_b64, RDNA3Ops.v_lshrrev_b32_e32, RDNA3Ops.v_lshrrev_b16, RDNA3Ops.v_lshrrev_b64, RDNA3Ops.v_ashrrev_i32_e32, RDNA3Ops.v_ashrrev_i64 }
+rev_op_order = {  RDNA3Ops.v_lshlrev_b32_e32, RDNA3Ops.v_lshlrev_b16, RDNA3Ops.v_lshlrev_b64, RDNA3Ops.v_lshrrev_b32_e32,
+                  RDNA3Ops.v_lshrrev_b16, RDNA3Ops.v_lshrrev_b64, RDNA3Ops.v_ashrrev_i32_e32, RDNA3Ops.v_ashrrev_i64 }
 commutative_ins = {i for op in (Ops.ADD, Ops.MUL, Ops.MAX) for i in OP_INS[op].values()}
 def lvop2(x:UOp, swap_only=False):
   if not is_const(x.src[1]): return None
@@ -595,7 +601,8 @@ class RDNA3Renderer(ISARenderer):
   extra_matcher = extra_matcher
   post_regalloc_matcher = post_regalloc_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL, Ops.MAX, Ops.MULACC)}
+  code_for_op = {x: lambda: None for x in ( Ops.SQRT, Ops.LOG2, Ops.EXP2, Ops.SUB, Ops.RECIPROCAL, Ops.TRUNC, Ops.CMPLT,
+                                            Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL, Ops.MAX, Ops.MULACC)}
   kernel_ctx_type = RDNA3PreLinearKernelCtx
   def __init__(self, target:Target):
     super().__init__(target)

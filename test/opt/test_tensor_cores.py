@@ -14,7 +14,6 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.renderer.tc import amd_cdna_1616128
 from tinygrad.renderer.llvmir import LLVMRenderer, AMDLLVMRenderer
-from tinygrad.renderer import isa
 
 # TODO: write a clean version of this
 from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_opt
@@ -22,7 +21,7 @@ from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_
 # NOTE: to_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
 
 def contains_wmma(uops: list[UOp]) -> bool:
-  if Device.DEFAULT == "AMD" and DEV.renderer == "RDNA3": nwmmas = len([uop for uop in uops if "v_wmma" in uop.arg[0].args[0].name.lower()])
+  if Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer == "RDNA3": nwmmas = len([uop for uop in uops if "v_wmma" in uop.arg[0].args[0].name.lower()])
   else: nwmmas = len([uop for uop in uops if uop.op is Ops.WMMA]) > 0
   return nwmmas > 0
 
@@ -161,7 +160,7 @@ class TestTensorCores(unittest.TestCase):
         assert "0x201000" in prg.src[2].arg
       elif Device[Device.DEFAULT].renderer.suffix == "PTX":
         assert "mma.sync.aligned" in prg.src[2].arg
-      elif Device.DEFAULT == "AMD" and DEV.renderer == "RDNA3":
+      elif Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer == "RDNA3":
         assert "V_WMMA" in prg.src[2].arg
       else:
         assert "__WMMA_" in prg.src[2].arg

@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import Callable, Any
+from typing import Any
 import itertools, functools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort, ProgramInfo, ParamArg, AddrSpace
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort, ProgramInfo, AddrSpace
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
@@ -86,5 +86,6 @@ class ISARenderer(Renderer):
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, u:UOp, dst:VRegister|Register|tuple[Register,...]) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
   def spill(self, spill_offset:Any, x:UOp, sub_idx:int|None=None) -> list[UOp]: raise NotImplementedError("arch specific")
-  def fill(self, spill_offset:Any, x:UOp, regs:tuple[Register,...], sub_idx:int|None=None) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
+  def fill(self, spill_offset:Any, x:UOp, regs:tuple[Register,...], sub_idx:int|None=None) -> tuple[UOp, list[UOp]]:
+    raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")

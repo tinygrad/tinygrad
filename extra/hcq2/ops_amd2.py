@@ -11,6 +11,7 @@ from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, lo32, 
 from tinygrad.helpers import ceildiv, unwrap, pluralize
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
+from tinygrad.renderer.isa.rdna3 import RDNA3Renderer
 from tinygrad.runtime.autogen import kfd, hsa, amdgpu_kd, amdgpu_drm
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
@@ -586,7 +587,7 @@ class AMDDevice(HCQ2Compiled):
     self.sdma_queues:dict = {}
     self.has_copy_queue = not getenv("AMD_DISABLE_SDMA")
 
-    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, can_recover=self.is_am(), arch=self.arch)
+    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer, RDNA3Renderer], None, can_recover=self.is_am(), arch=self.arch)
 
     # Scratch setup
     self.max_private_segment_size = 0

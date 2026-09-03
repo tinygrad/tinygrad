@@ -2,7 +2,7 @@
 import ctypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import ceildiv, round_up
-from tinygrad.uop.ops import ProgramInfo, UOp, Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 from tinygrad.renderer.amd.dsl import Reg, FixedBitField
 from tinygrad.runtime.autogen.amd.common import OpType
