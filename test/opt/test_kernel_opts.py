@@ -164,7 +164,6 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a@b, [[Opt(OptOps.SPLIT, 2, (0, AxisType.UNROLL)), Opt(OptOps.PADTO, 2, 8)]])
 
-  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: off by one on MOCKKFD in CI, passes locally")
   def test_padto_sum_ok(self):
     N = 18
     # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
