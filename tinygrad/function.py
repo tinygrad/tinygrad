@@ -47,6 +47,7 @@ class _function(Generic[ReturnType]):
   def __call__(self, *args, **kwargs) -> ReturnType:
     if self.in_kernel:
       kparams = [UOp.param(i, strong_dtype(a.dtype), a._shape, addrspace=AddrSpace.ALU if a.addrspace is AddrSpace.ALU else AddrSpace.GLOBAL,
+                           vmin_vmax=(a.vmin, a.vmax) if a.addrspace is AddrSpace.ALU else None,
                            volatile=a.addrspace is not AddrSpace.ALU and a.buf_uop.arg.volatile) for i,a in enumerate(args)]
       kret, name = cast(UOp, self.fxn(*kparams)), self.fxn.__name__
       if kret.dtype is dtypes.void:
