@@ -535,8 +535,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]), **kwargs)
   @property
-  def has_outputs(self) -> bool:
-    """does this call produce values: it has unbound BUFFERs among its inputs (minted by call_with_outputs)"""
+  def has_unbound_outputs(self) -> bool:
+    """does this call still have unresolved outputs: unbound BUFFERs among its inputs (minted by call_with_outputs,
+    resolved when the call is inlined or the outputs are materialized). a lifecycle query, not a call type"""
     return self.op is Ops.CALL and any(x.unsharded_base.is_unbound for x in self.src[1:])
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]

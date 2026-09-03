@@ -35,7 +35,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
       return arg_grads(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return arg_grads(k.arg.grad_fxn(on_dev(ctx, 0), k))
   # the RETURNED inputs are the call outputs: their positions in the args get the output gradients from the AFTER rule
-  assert fxn.op is Ops.SINK and k.has_outputs, f"expected a CALL with unbound BUFFER outputs or a grad_fxn, got {fxn.op}"
+  assert fxn.op is Ops.SINK and k.has_unbound_outputs, f"expected a CALL with unbound BUFFER outputs or a grad_fxn, got {fxn.op}"
   ret_pos = [i for i, a in enumerate(args) if a.unsharded_base.is_unbound]
   # the body stores the outputs into output PARAMs: the values are the stored values in slot order
   values = UOp.sink(*[st.src[1] for st in fxn.src if st.op is Ops.STORE])

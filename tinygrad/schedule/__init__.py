@@ -121,7 +121,7 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.src[0]
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo): return None
   # value calls (with unbound outputs) are inlined positionally during prepare: their bodies are not programs to schedule
-  if call.has_outputs: return None
+  if call.has_unbound_outputs: return None
   st = time.perf_counter()
   cache_key = function.key
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:

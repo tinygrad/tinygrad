@@ -92,7 +92,7 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
-  if c.arg is None or not c.arg.precompile or not c.has_outputs: return None
+  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
   assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
   # the RETURNED srcs are the call outputs (slots are src positions)
   ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
@@ -216,7 +216,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
     if u.op is Ops.AFTER and u.src[0].unsharded_base.is_unbound:
       # precompiled calls don't need this: transform_precompiled_call gives their outputs real buffers
       call = u.src[1]
-      if not (call.op is Ops.CALL and call.arg is not None and call.arg.precompile and call.has_outputs):
+      if not (call.op is Ops.CALL and call.arg is not None and call.arg.precompile):
         u = u.rtag(None).contiguous(tag=u.tag)
     srcs.append(u)
   big_sink = big_sink.replace(src=tuple(srcs))
