@@ -2,8 +2,13 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, function, Device
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, ParamArg
 from tinygrad.tensor import transform_to_call
+from tinygrad.helpers import prod
+
+# mint an unbound BUFFER placeholder, like UOp.call_with_outputs mints for its outputs (unique slot from the global counter)
+def returned(dtype, shape, device) -> UOp:
+  return UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), dtype, prod(shape), device=device)).reshape(shape)
 
 def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop))[0].src[0].key
 
@@ -252,8 +257,8 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.empty(4, 8)
     b = Tensor.empty(4, 8)
     r0, r1 = f(a), f(b)
-    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.num_returned)
-    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.num_returned)
+    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and any(a.unsharded_base.is_unbound for a in u.src[1:]))
+    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and any(a.unsharded_base.is_unbound for a in u.src[1:]))
     # output identities stay unique per call; they canonicalize only when combined into a scheduling scope
     self.assertIsNot(c0.src[-1], c1.src[-1])
     self.assertEqual(sched_key(r0), sched_key(r1))
@@ -291,7 +296,7 @@ class TestArgOrder(unittest.TestCase):
   def make_intersperse_call(self, x, precompile=False):
     # call with sources (body, returned, input(slot=1)): the input is the input, the output binds the RETURNED
     dev = x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
-    r0 = UOp.returned(x.dtype, x.shape, device=dev)
+    r0 = returned(x.dtype, x.shape, dev)
     o0 = UOp.param(0, x.dtype, x.shape, dev)
     p1 = UOp.param(1, x.dtype, x.shape, dev)
     from tinygrad.uop.ops import CallInfo
@@ -301,7 +306,7 @@ class TestArgOrder(unittest.TestCase):
   def test_intersperse_returned(self):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
     call = self.make_intersperse_call(x)
-    out = Tensor(call.returned_outputs[0], device=x.device) + 1
+    out = Tensor(call.src[1].after(call), device=x.device) + 1
     np.testing.assert_equal(out.numpy(), [1, 3, 5])
 
   def test_intersperse_returned_precompile(self):
@@ -324,13 +329,13 @@ class TestArgOrder(unittest.TestCase):
     x = Tensor([1.0, 2.0, 3.0]).realize()
     x.requires_grad = True
     dev = x.device if isinstance(x.device, str) else (x.device or (Device.DEFAULT,))[0]
-    r0 = UOp.returned(dtypes.float, x.shape, device=dev)
+    r0 = returned(dtypes.float, x.shape, dev)
     o0 = UOp.param(0, dtypes.float, x.shape, dev)
     p1 = UOp.param(1, dtypes.float, x.shape, dev)
     from tinygrad.uop.ops import CallInfo
     body = UOp.sink(o0.store(p1.reshape(x.shape) * p1.reshape(x.shape)))
     call = UOp(Ops.CALL, src=(body, r0, x.uop), arg=CallInfo(None, 't', False, False, None))
-    y = Tensor(call.returned_outputs[0], device=x.device)
+    y = Tensor(call.src[1].after(call), device=x.device)
     y.sum().backward()
     np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])
 
