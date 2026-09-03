@@ -287,7 +287,7 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                       "test requires tensor cores with accumulation in half") # testing with half suffices.
-  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: the UNROLL axis is hardcoded for the METAL tensor core shape")
+  @unittest.skipUnless(Device.DEFAULT == "METAL", "TODO: the UNROLL axis is hardcoded for the METAL tensor core shape")
   def test_tensor_core_opts(self):
     N = 128
     Tensor.manual_seed(1552)
@@ -309,7 +309,7 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                       "test requires tensor cores with accumulation in half") # testing with half suffices.
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: the UNROLL axis is hardcoded for the METAL tensor core shape")
+  @unittest.skipUnless(Device.DEFAULT == "METAL", "TODO: the UNROLL axis is hardcoded for the METAL tensor core shape")
   def test_tensor_core_opts_locals(self):
     N = 128
     Tensor.manual_seed(1552)
