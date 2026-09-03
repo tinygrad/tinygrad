@@ -3,10 +3,12 @@ from tinygrad import Device, Tensor, Variable, dtypes
 from tinygrad.uop.ops import UOp, Ops, AxisType
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.renderer.isa import ISARenderer
 
 from test.helpers import replace_opts
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "ISA backends dont preserve UOp spec post-linearize")
 class TestFloat4(unittest.TestCase):
   @staticmethod
   def count_float4(uops: list[UOp], n=4):

@@ -16,8 +16,8 @@ import itertools, struct, math
 from enum import Enum, auto
 
 # ---- (UOp, dtype) -> Instruction tables ----
-dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16",
-              dtypes.int16:"i16", dtypes.uint16:"u16", dtypes.uint64:"u64", dtypes.int64:"i64", dtypes.bfloat16:"bf16", dtypes.uint8:"u8", dtypes.int8:"i8" }
+dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16",
+              dtypes.uint16:"u16", dtypes.uint64:"u64", dtypes.int64:"i64", dtypes.bfloat16:"bf16", dtypes.uint8:"u8", dtypes.int8:"i8" }
 isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 
 # (uop, prefix, opcodes, support 32 and 64 bit encoding (e32/e64 branches with keys))

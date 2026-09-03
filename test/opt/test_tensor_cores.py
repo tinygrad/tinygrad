@@ -14,6 +14,7 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.renderer.tc import amd_cdna_1616128
 from tinygrad.renderer.llvmir import LLVMRenderer, AMDLLVMRenderer
+from tinygrad.renderer.isa.rdna3 import RDNA3Renderer
 
 # TODO: write a clean version of this
 from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_opt
@@ -21,7 +22,8 @@ from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_
 # NOTE: to_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
 
 def contains_wmma(uops: list[UOp]) -> bool:
-  if Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer == "RDNA3": nwmmas = len([uop for uop in uops if "v_wmma" in uop.arg[0].args[0].name.lower()])
+  if isinstance(Device[Device.DEFAULT].renderer, RDNA3Renderer):
+    nwmmas = len([uop for uop in uops if "v_wmma" in uop.arg[0].args[0].name.lower()])
   else: nwmmas = len([uop for uop in uops if uop.op is Ops.WMMA]) > 0
   return nwmmas > 0
 
@@ -160,7 +162,7 @@ class TestTensorCores(unittest.TestCase):
         assert "0x201000" in prg.src[2].arg
       elif Device[Device.DEFAULT].renderer.suffix == "PTX":
         assert "mma.sync.aligned" in prg.src[2].arg
-      elif Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer == "RDNA3":
+      elif isinstance(Device[Device.DEFAULT].renderer, RDNA3Renderer):
         assert "V_WMMA" in prg.src[2].arg
       else:
         assert "__WMMA_" in prg.src[2].arg
@@ -254,9 +256,10 @@ class TestTensorCores(unittest.TestCase):
     r = x.matmul(y, dtype=tc.dtype_out)
     opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, 4, (2, AxisType.UNROLL))]
     ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
-    self.assertGreater(len(wmmas), 0)
-    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
+    uops = tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src)
+    assert contains_wmma(uops)
+    for u in uops:
+      if u.op is Ops.WMMA: assert u.src[-1].src[0].op != Ops.STORE
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
@@ -270,9 +273,10 @@ class TestTensorCores(unittest.TestCase):
     r = x.matmul(y, dtype=tc.dtype_out)
     opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, 4, (2, AxisType.UNROLL))]
     ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
-    self.assertGreater(len(wmmas), 0)
-    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
+    uops = tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src)
+    assert contains_wmma(uops)
+    for u in uops:
+      if u.op is Ops.WMMA: assert u.src[-1].src[0].op != Ops.STORE
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
@@ -287,9 +291,10 @@ class TestTensorCores(unittest.TestCase):
     r = x.matmul(y, dtype=tc.dtype_out).relu()
     opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, 4, (2, AxisType.UNROLL))]
     ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
-    self.assertGreater(len(wmmas), 0)
-    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
+    uops = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src)]
+    assert contains_wmma(uops)
+    for u in uops:
+      if u.op is Ops.WMMA: assert u.src[-1].src[0].op != Ops.STORE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
