@@ -360,7 +360,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # the boundary: required compute dtypes settle here; derivable const edges may stay bare
   # NOTE: we need indexing_simplify to remove the cast to long using the Invalid
   # NOTE: symbolic must NOT be composed here -- pm_data_invalid pushes the weak result CAST into a gated WHERE, remaking the weak node, and it cycles
-  sink = graph_rewrite(sink, pm_lower_weak+indexing_simplify, name="lower all index dtypes")
+  sink = graph_rewrite(sink, pm_lower_weak+indexing_simplify, name="lower all index dtypes", enter_calls=True)
 
   # final symbolic before decomp
   sink = graph_rewrite(sink, symbolic, name="final symbolic")
