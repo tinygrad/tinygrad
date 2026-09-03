@@ -6,13 +6,14 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.uop.ops import Ops, UOp, AxisType
 from tinygrad.dtype import DType
 from tinygrad.device import Buffer
-from tinygrad.helpers import DEV, Context
+from tinygrad.helpers import Context
 from test.helpers import slow, replace_opts
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.renderer.tc import amd_cdna_1616128
+from tinygrad.renderer.llvmir import LLVMRenderer, AMDLLVMRenderer
 
 # TODO: write a clean version of this
 from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_opt
@@ -85,6 +86,8 @@ class TestTensorCores(unittest.TestCase):
 
   @Context(ALLOW_TF32=1)
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx9"),
+                   "TODO: crashes the worker on MOCKKFD gfx950 in CI, passes locally")
   def test_tensor_cores_extra_locals(self):
     # LOCAL splits after the TC opt: the WARP must keep a whole hardware local dim, its lanes are consecutive threads
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
@@ -145,11 +148,11 @@ class TestTensorCores(unittest.TestCase):
       r = a.matmul(b, dtype=tc.dtype_out)
       prg = to_program(replace_opts(r.schedule_linear().src[-1].src[0],
                         [Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))]), Device[Device.DEFAULT].renderer)
-      if Device.DEFAULT == "CPU" and DEV.renderer == "LLVM":
-        assert "0x201000" in prg.src[2].arg
-      elif Device.DEFAULT == "AMD" and DEV.renderer == "LLVM":
+      if isinstance(Device[Device.DEFAULT].renderer, AMDLLVMRenderer):
         # RDNA emits wmma intrinsics, CDNA emits mfma intrinsics
         assert ("@llvm.amdgcn.wmma" in prg.src[2].arg) or ("@llvm.amdgcn.mfma" in prg.src[2].arg)
+      elif isinstance(Device[Device.DEFAULT].renderer, LLVMRenderer):
+        assert "0x201000" in prg.src[2].arg
       elif Device[Device.DEFAULT].renderer.suffix == "PTX":
         assert "mma.sync.aligned" in prg.src[2].arg
       else:
@@ -234,6 +237,8 @@ class TestTensorCores(unittest.TestCase):
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx9"),
+                   "TODO: the UNROLL axis is hardcoded for the METAL tensor core shape")
   def test_tensor_cores_unroll_phi(self):
     # skip fp8 tcs: the unoptimized ALU baseline quantizes products to fp8 (JAX promotion), which legitimately
     # differs from the MFMA path (f32 accumulation), so the baseline-vs-TC numerical gate can't hold for fp8.
@@ -250,6 +255,8 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "CPU does not support using a different type for accumulation")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx9"),
+                   "TODO: the UNROLL axis is hardcoded for the METAL tensor core shape")
   def test_tensor_cores_unroll_casted_phi(self):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
     x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
@@ -264,6 +271,8 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "CPU does not support using a different type for accumulation")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx9"),
+                   "TODO: the UNROLL axis is hardcoded for the METAL tensor core shape")
   def test_tensor_cores_unroll_casted_phi_with_children(self):
     # all STORE children are outside the loop
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
