@@ -269,7 +269,7 @@ def passthrough_multi(root:UOp, multi:UOp):
   return UOp(root.op, src=new_src, arg=root.arg).unshard(multi.arg, multi.src[1:])
 
 def rewrite_into_function(call:UOp):
-  if call.arg is None or call.arg.precompile: return None
+  if call.arg is None or call.arg.precompile or not any(x.unsharded_base.is_unbound for x in call.src[1:]): return None
   # the call body is a plain parametric program: multi rewrites it like anything else (the output PARAM dests sub-view per
   # shard through the normal store rules), and all srcs (args and RETURNEDs) become their per-shard views
   new_body = graph_rewrite(call.src[0], multi_pm, name="subcall")
@@ -294,11 +294,12 @@ multi_pm = PatternMatcher([
     lambda multi,red: multi.src[0].allreduce(*red.arg).unshard(multi.arg, multi.src[1:])),
 
   # rewrite value-producing calls explicitly for UNSHARD
-  (UPat(Ops.CALL, name="call"), lambda call: rewrite_into_function(call) if call.num_returned else None),
+  (UPat(Ops.CALL, name="call"), rewrite_into_function),
   (UPat((Ops.CALL, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
-    UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg) if root.num_returned == 0 else None),
+    UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg)
+    if not any(x.unsharded_base.is_unbound for x in root.src[1:]) else None),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), passthrough_multi),
   # STORE of a sharded value into an unsharded dest (e.g. a fragment into a full output tile)

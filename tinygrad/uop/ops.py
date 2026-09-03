@@ -549,13 +549,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, prod(to_max_shape(shp)), device=device))
     return ret.view_as(shp, axis)
   @property
-  def num_returned(self) -> int:
-    # a value-producing call: a SINK of stores into output PARAMs (not KernelInfo kernels, not stores to buffers),
-    # with the outputs as extra unbound BUFFER args
-    if self.op is not Ops.CALL or self.src[0].op is not Ops.SINK or self.src[0].arg is not None: return 0
-    if not any(st.op is Ops.STORE and st.src[0].storage_base.op is Ops.PARAM for st in self.src[0].src): return 0
-    return sum(x.unsharded_base.is_unbound for x in self.src[1:])
-  @property
   def returned_outputs(self) -> tuple[UOp, ...]:
     """the outputs of a value-producing call: an AFTER on each RETURNED input, usable like a normal buffer"""
     return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.is_unbound)
@@ -563,7 +556,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def maketuple(*srcs:UOp) -> _LegacyTupleValues: return _LegacyTupleValues(srcs)
   def gettuple(self, idx:int) -> UOp:
-    assert self.op is Ops.CALL and self.num_returned, f"gettuple requires a CALL with RETURNED outputs, got {self.op}"
+    assert self.op is Ops.CALL, f"gettuple requires a CALL, got {self.op}"
     return self.returned_outputs[idx]
   def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
@@ -1700,7 +1693,8 @@ class RewriteContext:
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
         # calls with RETURNED inputs are always inlined into the enclosing graph, their bodies are never rewritten separately
-        if n.op is Ops.CALL and (n.num_returned or (not self.enter_calls and n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
+        if n.op is Ops.CALL and \
+          (any(x.unsharded_base.is_unbound for x in n.src[1:]) or (not self.enter_calls and n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
           self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
           if x not in self.replace: stack.append((x, False))
@@ -1741,7 +1735,8 @@ class RewriteContext:
         # NOTE: CALLs are handled as a special case: the call body is not included in the graph_rewrite (a CALL of an
         # address is not a body, its srcs are regular dataflow). calls with RETURNED inputs are always inlined into the
         # enclosing graph, their bodies are never rewritten separately
-        if new_n.op is Ops.CALL and (new_n.num_returned or (not self.enter_calls and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
+        if new_n.op is Ops.CALL and \
+          (any(x.unsharded_base.is_unbound for x in new_n.src[1:]) or (not self.enter_calls and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES)):
           self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
