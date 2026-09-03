@@ -257,8 +257,8 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.empty(4, 8)
     b = Tensor.empty(4, 8)
     r0, r1 = f(a), f(b)
-    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and any(a.unsharded_base.is_unbound for a in u.src[1:]))
-    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and any(a.unsharded_base.is_unbound for a in u.src[1:]))
+    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.has_outputs)
+    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.has_outputs)
     # output identities stay unique per call; they canonicalize only when combined into a scheduling scope
     self.assertIsNot(c0.src[-1], c1.src[-1])
     self.assertEqual(sched_key(r0), sched_key(r1))

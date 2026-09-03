@@ -534,6 +534,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]), **kwargs)
+  @property
+  def has_outputs(self) -> bool:
+    """does this call produce values: it has unbound BUFFERs among its inputs (minted by call_with_outputs)"""
+    return self.op is Ops.CALL and any(x.unsharded_base.is_unbound for x in self.src[1:])
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].val]
