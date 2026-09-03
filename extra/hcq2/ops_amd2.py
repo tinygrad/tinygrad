@@ -249,7 +249,7 @@ class AMDUSBSDMAQueue(AMDSDMAQueue):
     return (buf:=UOp.placeholder((nbytes,), dtypes.uint8, device=HCQ_RUNTIME_DEV.value, tag=to_name("cmdbuf", self.queue))), buf
 
   def chunk(self, call:UOp): # a chunk of a host copy: the queue and the host program sync through the sram window
-    dev, g = self.devs[0], usb_buf(self.devs[0], "seq", 1, dtypes.uint64).index(0).load() + self.chunks
+    dev, g = self.devs[0], usb_link(self.devs[0]).index(2).load() + self.chunks
     self.chunks += 1
     if call.arg.name == "usb_copyin": # the host streamed the chunk once its sentinel landed
       sbase, soff = unwrap_view(call.src[2])

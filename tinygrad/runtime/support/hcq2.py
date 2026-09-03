@@ -282,18 +282,20 @@ class HWQueue:
 
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
 
-def addrs_to_table(ctx:EncodeCtx, g:UOp, links:bool=False) -> UOp|None:
-  base, off = unwrap_view(g.src[0])
-  param = base.src[0].base if base.op is Ops.MSELECT else base # unwrap mselects
-  linked = param.op is Ops.BUFFER or param.tag is not None # a buffer or a placeholder is a link-time address
-  if param.op not in (Ops.PARAM, Ops.BUFFER) or (linked and not links): return None
-  table, slots = (ctx.ltable, ctx.links) if linked else (ctx.table, ctx.inputs)
-  return table.index(slots.setdefault((base, to_tuple(g.arg)[0]), len(slots))).load() + UOp.const(off, dtypes.uint64)
-pm_addrs_to_table = PatternMatcher([(UPat(Ops.GETADDR, name="g"), addrs_to_table)]) # patch words: a placeholder address stays a link word
-pm_body_addrs = PatternMatcher([(UPat(Ops.GETADDR, name="g"), lambda ctx, g: addrs_to_table(ctx, g, True))]) # the body loads it from the link table
+def _addr_param(g:UOp) -> UOp: # what an address points into, through views and mselects
+  base = unwrap_view(g.src[0])[0]
+  return base.src[0].base if base.op is Ops.MSELECT else base
+def _linked(p:UOp) -> bool: return p.op is not Ops.PARAM or p.tag is not None # anything but an input is known at link time
 
-def _is_link_patch(w:UOp) -> bool:
-  if w.op is Ops.GETADDR: return True
+def addrs_to_table(ctx:EncodeCtx, g:UOp) -> UOp|None: # the body loads an address from a table: the link table or the inputs table
+  base, off = unwrap_view(g.src[0])
+  if (param:=_addr_param(g)).op not in (Ops.PARAM, Ops.BUFFER): return None
+  table, slots = (ctx.ltable, ctx.links) if _linked(param) else (ctx.table, ctx.inputs)
+  return table.index(slots.setdefault((base, to_tuple(g.arg)[0]), len(slots))).load() + UOp.const(off, dtypes.uint64)
+pm_body_addrs = PatternMatcher([(UPat(Ops.GETADDR, name="g"), addrs_to_table)])
+
+def _is_link_patch(w:UOp) -> bool: # a word of link-time addresses and constants is patched at link, the rest at runtime
+  if w.op is Ops.GETADDR: return _linked(_addr_param(w))
   if w.op in {Ops.LOAD, Ops.INDEX, Ops.PARAM} or w.is_variable: return False
   return all(_is_link_patch(s) for s in w.src)
 
@@ -318,9 +320,7 @@ def encode_submit(hq:HWQueue) -> UOp:
     views[l] = (len(hq.blob), hq.q(*l.src))
 
   buf, image = hq.cmdbuf(len(hq.blob))
-
-  words = UOp.sink(*[w for _, w in hq.patches]).substitute({l: image[o:e] for l, (o, e) in views.items()})
-  words = graph_rewrite(words, pm_addrs_to_table, ctx=hq.ctx, name="addrs to table").src
+  words = UOp.sink(*[w for _, w in hq.patches]).substitute({l: image[o:e] for l, (o, e) in views.items()}).src
 
   links, runtime = partition(list(zip([o for o, _ in hq.patches], words)), lambda r: _is_link_patch(r[1]))
   hq.ctx.lt_patches.append(patch(buf, links, buf.store(UOp(Ops.BINARY, arg=bytes(hq.blob)).bitcast(buf.dtype))))
