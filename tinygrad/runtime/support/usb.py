@@ -253,16 +253,11 @@ class USBMMIOInterface(MMIOInterface):
 # TODO: unported to the hcq2 rewrite, keeps the old signal placeholder helper alive
 def make_buf(devs, slot:int=0, tag:str="signal") -> UOp: return UOp.placeholder((1,), dtypes.uint64, slot, device=devs, volatile=True, tag=tag)
 
-# the C type of a call argument for the indirect call below, an INDEX is an address
-_C_DTYPES = {dtypes.int: "int", dtypes.uint: "unsigned int", dtypes.int64: "long", dtypes.uint64: "unsigned long"}
-def _c_type(a:UOp) -> str: return _C_DTYPES[a.dtype] + ("*" if a.op is Ops.INDEX else "")
-
 def _libusb(devs, dep:tuple[UOp, ...], fn:str, *args) -> UOp:
-  # there is no dtype-arg CALL: the indirect call through the function pointer is inline CUSTOM code for the C renderer
+  # the CUSTOM_FUNCTION body holds the callee (the loaded function pointer), the call args are plain dataflow
   fptr = make_buf(devs, tag=f"func:{fn}").after(*dep).index(0).load()
-  cargs = tuple([make_buf(devs, tag="usb_handle").index(0).load()]+[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args])
-  fmt = f"((void(*)({', '.join(map(_c_type, cargs))}))({{0}}))" + f"({', '.join(f'({_c_type(a)})({{{i+1}}})' for i,a in enumerate(cargs))});"
-  return UOp(Ops.CUSTOM, src=(fptr,)+cargs, arg=(fmt, dtypes.void))
+  return UOp.custom_function(fn, fptr).call(make_buf(devs, tag="usb_handle").index(0).load(),
+    *[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args], ret_dtype=dtypes.void)
 
 def usb_bulk(devs, dep, endpoint:int, data:UOp, length, timeout:int=1000) -> UOp: # NULL actual_length out param
   return _libusb(devs, dep, "libusb_bulk_transfer", endpoint, data, length, UOp.const(0, dtypes.uint64), timeout)

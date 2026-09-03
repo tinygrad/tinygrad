@@ -3,19 +3,18 @@ from tinygrad import Tensor, UOp
 from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.uop.ops import KernelInfo, Ops
+from tinygrad.uop.ops import KernelInfo
 
-# an indirect call through a function pointer is inline CUSTOM code for the C renderer
+# an external call is a CALL on a CUSTOM_FUNCTION body holding the callee (the loaded function pointer)
 def call_out_kernel(F:UOp, C:UOp) -> UOp:
-  call = UOp(Ops.CUSTOM, src=(F[0].load(), UOp.const(3).cast(dtypes.int), C[0]),
-             arg=("((void(*)(int, int*))({0}))({1}, {2});", dtypes.void))
+  call = UOp.custom_function("callback", F[0].load()).call(UOp.const(3).cast(dtypes.int), C[0], ret_dtype=dtypes.void)
   return C.after(call)[1].store(C.after(call)[0].load() + 1).sink(arg=KernelInfo(name="call_out"))
 
 def call_ret_kernel(F:UOp, C:UOp) -> UOp:
-  val = UOp(Ops.CUSTOM, src=(F[0].load(), UOp.const(21).cast(dtypes.int)), arg=("((int(*)(int))({0}))({1})", dtypes.int))
+  val = UOp.custom_function("callback", F[0].load()).call(UOp.const(21).cast(dtypes.int), ret_dtype=dtypes.int)
   return C[0].store(val * 2).sink(arg=KernelInfo(name="call_ret"))
 
-@unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "TODO: indirect calls are rendered in C style only")
+@unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "TODO: CALL is rendered in C style only")
 class TestCall(unittest.TestCase):
   def test_call_out_param(self):
     called = []
