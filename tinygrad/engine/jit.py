@@ -172,7 +172,7 @@ class CapturedJit(Generic[ReturnType]):
 
   @functools.cached_property
   def _written_uops(self) -> set[UOp]:
-    return {b for call in self.linear.toposort() if call.op is Ops.CALL for b in get_call_written_bufs(call)}
+    return {b for call in self.linear.toposort(enter_calls=False) if call.op is Ops.CALL for b in get_call_written_bufs(call)}
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
     concrete = tuple(_copy_input(u) if u in self._written_uops else u for u in input_uops)

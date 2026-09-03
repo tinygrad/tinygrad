@@ -463,6 +463,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def ended_ranges(self) -> tuple[UOp, ...]:
+    if self.op is Ops.CALL and isinstance(self.arg, DType): return () # a CALL of an address is plain dataflow, not a range boundary
+    if self.op is Ops.END: return tuple(r for r in self.src[1:] if r.op is Ops.RANGE) # a loop condition is not a range the END ends
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
     # UNSHARD ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
@@ -1144,7 +1146,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, volatile=False, tag=None):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if slot is None: slot = next(UOp.unique_num)
-    name = tag if isinstance(tag, str) else None # a string tag names the param
+    name = tag if isinstance(tag, str) else "_".join(map(str, tag)) if isinstance(tag, tuple) else None # a tag names the param
     if addrspace is AddrSpace.GLOBAL:
       ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, size=prod(shape), name=name, addrspace=addrspace, device=device, volatile=volatile))
     else:

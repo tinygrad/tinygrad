@@ -1,11 +1,10 @@
 import ctypes, struct, time, functools, itertools
-from typing import Any, cast
-from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG, DEV, to_mv, from_mv, round_up, ceildiv, unwrap, to_tuple
-from tinygrad.dtype import dtypes
+from tinygrad.runtime.autogen import libusb, libc
+from tinygrad.helpers import DEBUG, DEV, to_mv, from_mv, round_up, ceildiv, to_tuple, unwrap
+from tinygrad.dtype import dtypes, DType
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
-from tinygrad.device import Buffer, BufferSpec, Device
-from tinygrad.runtime.support.hcq2 import HCQInfo, make_submit, HCQ_RUNTIME_DEV
+from tinygrad.runtime.support.hcq2 import HCQ_RUNTIME_DEV, EncodeCtx, ccall, all_devices_in, unwrap_view
+from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support import c
 
@@ -227,7 +226,6 @@ class USBMMIOInterface(MMIOInterface):
     return (index * self.el_sz, self.el_sz)
 
   def __getitem__(self, index):
-    Device[HCQ_RUNTIME_DEV.value].synchronize() # one driver on the link: drain the compiled submits before python touches it
     off, sz = self._off_from_index(index)
     if self.pcimem:
       assert sz % 4 == 0 and off % 4 == 0, f"pcie_mem_read requires 4-byte aligned access, got off={off}, sz={sz}"
@@ -236,7 +234,6 @@ class USBMMIOInterface(MMIOInterface):
     return data if isinstance(index, slice) else int.from_bytes(data, "little")
 
   def __setitem__(self, index, data):
-    Device[HCQ_RUNTIME_DEV.value].synchronize()
     off, _ = self._off_from_index(index)
     data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
     if not self.pcimem: self.usb.scsi_write(data) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)
@@ -249,73 +246,180 @@ class USBMMIOInterface(MMIOInterface):
     return USBMMIOInterface(self.usb, self.addr+offset, self.nbytes-offset if size is None else size, fmt=fmt or self.fmt, pcimem=self.pcimem)
 
 # *****************
+# hcq2: the host program drives the board over libusb. the link is the handle buffer: a transfer takes it after the one before and returns it after
 
-# TODO: unported to the hcq2 rewrite, keeps the old signal placeholder helper alive
-def make_buf(devs, slot:int=0, tag:str="signal") -> UOp: return UOp.placeholder((1,), dtypes.uint64, slot, device=devs, volatile=True, tag=tag)
+HALF, PENDING = 0x40000, 0xff # copies stage through the two 256KB halves of the controller sram; a transfer status libusb never sets
+CHUNK = HALF - 512 # the payload of a chunk: with the block holding its sentinel it fills a half
+USB_HOST = ("usb_handle", "usb_ctx", "usb_seq", "usb_stage", "usb_xfer", "put_value") # the device's placeholders that live in host memory
+RT = HCQ_RUNTIME_DEV.value
 
-def _libusb(devs, dep:tuple[UOp, ...], fn:str, *args) -> UOp:
-  return make_buf(devs, tag=f"func:{fn}").after(*dep).index(0).load().call(make_buf(devs, tag="usb_handle").index(0).load(),
-    *[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args], ret_dtype=dtypes.void)
+def usb_buf(dev, tag:str, n:int=1, dt:DType=dtypes.uint8) -> UOp: return UOp.placeholder((n,), dt, 0, device=to_tuple(dev)[0], tag=f"usb_{tag}")
+def usb_link(dev) -> UOp: return usb_buf(dev, "handle", 1, dtypes.uint64)
+def usb_scratch(ctx:EncodeCtx, *words:tuple[UOp, DType]) -> UOp: # host scratch holding the words back to back
+  off, ends = ctx.alloc(sum(dt.itemsize for _, dt in words)), list(itertools.accumulate(dt.itemsize for _, dt in words))
+  stores = [ctx.scratch[off + e - dt.itemsize:off + e].bitcast(dt).index(0).store(w) for (w, dt), e in zip(words, ends)]
+  return ctx.scratch.after(*stores)[off:off + ends[-1]]
 
-def usb_bulk(devs, dep, endpoint:int, data:UOp, length, timeout:int=1000) -> UOp: # NULL actual_length out param
-  return _libusb(devs, dep, "libusb_bulk_transfer", endpoint, data, length, UOp.const(0, dtypes.uint64), timeout)
+def usb_ctrl(h:UOp, rtype:int, req:int, val:UOp|int, idx:UOp|int, data:UOp, n:UOp|int, timeout:int=1000) -> UOp:
+  return h.after(ccall(libusb.libusb_control_transfer, h.index(0).load(), rtype, req, val, idx, data, n, timeout))
+def usb_bulk(h:UOp, ep:int, data:UOp, n:UOp|int, timeout:int=10000) -> UOp: # NULL actual_length
+  return h.after(ccall(libusb.libusb_bulk_transfer, h.index(0).load(), ep, data, n, UOp.const(0, dtypes.uint64), timeout))
+def usb_stream(ctx:EncodeCtx, h:UOp, addr:UOp, data:UOp, n:UOp|int, write:bool) -> UOp:
+  # 0xF0 mode 1/2: a control transfer carries the [address, dwords] header, the payload follows on the bulk endpoint
+  n = n if isinstance(n, UOp) else UOp.const(n, dtypes.int)
+  hdr = usb_scratch(ctx, (addr, dtypes.uint64), ((n // 4).cast(dtypes.uint32), dtypes.uint32))
+  h = usb_ctrl(h, 0x40, 0xF0, (0x60 if write else 0x20) | 0x0F00, 1 if write else 2, hdr.index(0), 12, 5000)
+  return usb_bulk(h, 0x02 if write else 0x81, data, n)
+def usb_poke(ctx:EncodeCtx, h:UOp, addr:UOp, val:UOp) -> UOp: # 0xF0 mode 0: a dword write in one control transfer
+  return usb_ctrl(h, 0x40, 0xF0, 0x60 | 0x0F00, 0, usb_scratch(ctx, (addr, dtypes.uint64), (val, dtypes.uint32)).index(0), 12, 5000)
 
-def usb_stream(devs, dep:tuple[UOp, ...], addr:UOp, data:UOp, nbytes:int, write:bool) -> UOp:
-  hdr = UOp.placeholder((2,), dtypes.uint64, device=devs, tag="usb_scratch").after(*dep)
-  arm = _libusb(devs, (hdr.index(0).store(addr), hdr.index(1).store(UOp.const(nbytes // 4, dtypes.uint64))), "libusb_control_transfer",
-                0x40, 0xF0, (0x60 if write else 0x20) | (0x0F << 8), 1 if write else 2, hdr.index(0), 12, 5000)
-  return usb_bulk(devs, (arm,), 0x02 if write else 0x81, data, nbytes)
+# host access to device memory: a load streams the value into the scratch, a store streams it out. the link comes after what the view is after
+def _deps(b:UOp) -> tuple[UOp, ...]: # what a buffer view is after
+  return (b.src[1:] if b.op is Ops.AFTER else ()) + (_deps(b.src[0]) if b.op in (Ops.BITCAST, Ops.SHRINK, Ops.AFTER) else ())
+def _host(b:UOp) -> bool: return all_devices_in(b.device, frozenset({RT.split(":")[0]}))
+def _remote(b:UOp) -> bool: return (p:=unwrap_view(b)[0]).op is Ops.PARAM and not _host(p) and not str(p.tag).startswith(USB_HOST)
+def _addr(b:UOp, idx:UOp, dt:DType) -> UOp: return b.getaddr(RT) + (idx * dt.itemsize).cast(dtypes.uint64)
 
-def usb_load(b:UOp, idx:UOp, dt) -> UOp:
-  got = UOp.placeholder((1,), dt, device=(devs:=to_tuple(b.device)), tag="usb_scratch")
-  addr = b.getaddr((HCQ_RUNTIME_DEV.value,)) + (idx*dt.itemsize).cast(dtypes.uint64)
-  return got.after(usb_stream(devs, b.src[1:] if b.op is Ops.AFTER else (), addr, got.index(0), dt.itemsize, False)).index(0).load()
+def usb_load(ctx:EncodeCtx, b:UOp, idx:UOp, ld:UOp) -> UOp:
+  slot = ctx.scratch[(off:=ctx.alloc(ld.dtype.itemsize)):off + ld.dtype.itemsize].bitcast(ld.dtype)
+  h = usb_stream(ctx, usb_link(b.device).after(*_deps(b)), _addr(b, idx, ld.dtype), slot.index(0), ld.dtype.itemsize, False)
+  return slot.after(h).index(0).load()
+def usb_store(ctx:EncodeCtx, b:UOp, idx:UOp, v:UOp) -> UOp:
+  if idx.op is Ops.STACK: # a patch: word by word, each after the one before
+    h = usb_store(ctx, b, idx.src[0], v.src[0])
+    for i, w in zip(idx.src[1:], v.src[1:]): h = usb_store(ctx, b.after(h), i, w)
+    return h
+  h = usb_link(b.device).after(*_deps(b))
+  if v.dtype.itemsize == 4: return usb_poke(ctx, h, _addr(b, idx, v.dtype), v)
+  return usb_stream(ctx, h, _addr(b, idx, v.dtype), usb_scratch(ctx, (v, v.dtype)).index(0), v.dtype.itemsize, True)
+pm_usb_lower = PatternMatcher([
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(name="b"), UPat(name="idx"))),), name="ld"),
+   lambda ctx, b, idx, ld: usb_load(ctx, b, idx, ld) if _remote(b) else None),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(name="b"), UPat(name="idx"))), UPat(name="v"))),
+   lambda ctx, b, idx, v: usb_store(ctx, b, idx, v) if _remote(b) else None),
+])
 
-def usb_write(b:UOp, idx:UOp, v:UOp) -> UOp:
-  val = (s:=UOp.placeholder((1,), v.dtype, device=(devs:=to_tuple(b.device)), tag="usb_scratch")).after(s.index(0).store(v))
-  addr = b.getaddr((HCQ_RUNTIME_DEV.value,)) + (idx*v.dtype.itemsize).cast(dtypes.uint64)
-  return usb_stream(devs, b.src[1:] if b.op is Ops.AFTER else (), addr, val.index(0), v.dtype.itemsize, True)
+def usb_push(ctx:EncodeCtx, h:UOp, data:UOp, q:list[UOp], unit:int) -> UOp:
+  # the packets stream into the ring at put, wrapping at the ring end, then the write pointer and the doorbell: put counts units of bytes
+  (ring, wptr, doorbell, put), n, rs = q, data.nbytes(), q[0].nbytes()
+  ra, p = ring.getaddr(RT), put.after(h).index(0).load()
+  tail = (p * unit) % rs
+  first = (UOp.const(rs, dtypes.uint64) - tail).minimum(n).cast(dtypes.int)
+  h = usb_stream(ctx, h, ra + tail, data.index(0), first, True)
+  i = UOp.range((first < n).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int)
+  h = h.after(usb_stream(ctx, h.after(i), ra, data.index(first), n - first, True).end(i))
+  h = h.after(wptr.after(h).index(0).store(p + n // unit))
+  h = h.after(doorbell.after(h).index(0).store(p + n // unit))
+  return put.after(h).index(0).store(p + n // unit)
 
-def usb_idle(devs) -> UOp:
-  v = usb_load(make_buf(devs, tag="timeline_signal").after(loop:=UOp.loop(0)), UOp.const(0, dtypes.int), dtypes.uint64)
-  return v.end(loop, v + 1 < make_buf(devs, tag="timeline_value").index(0).load())
+# copies stage through the sram: the queue moves the chunks between the sram window and vram, the host streams them over the bulk endpoint
+def usb_wire(size:UOp|int) -> UOp|int: return (size + 4 + 511) // 512 * 512 # a chunk on the wire: the payload, then its sentinel in the last dword
+def usb_sentinel(g:UOp) -> UOp: return ((g & 0xFFFFFF) | 0x51000000).cast(dtypes.uint32)
 
-def usb_scsi(devs, read:bool, nbytes:int) -> UOp:
-  return _libusb(devs, (usb_idle(devs),), "libusb_control_transfer", 0x40, 0xF2, ceildiv(nbytes, 512) | (0x8000 if read else 0),
-                 (ceildiv(nbytes, 0x4000) & 0xFF) << 8, UOp.const(0, dtypes.uint64), 0, 1000)
-
-def usb_stage_copy(dst:UOp, src:UOp) -> UOp|None:
-  if (cin:=to_tuple(src.device)[0].startswith("CPU")) == to_tuple(dst.device)[0].startswith("CPU"): return None
-
-  total, ops, win = dst.nbytes(), [], cast(Any, Device[(devs:=to_tuple((dst if cin else src).device))[0]]).iface.usb_sram
-  for off in range(0, total, win.size): # off and nb are bytes, the two ends of the copy can have different dtypes
-    sram = UOp.from_buffer(win)[0:(nb:=min(win.size, total - off))]
+def usb_stage_copy(dst:UOp, src:UOp) -> UOp|None: # a copy is chunks the queue moves through the sram, the host side rides along as an operand
+  if (cin:=_host(src)) == _host(dst): return None
+  dev, total, win, ops = (dst if cin else src).device, dst.nbytes(), CHUNK if cin else 2 * HALF, []
+  sram = usb_buf(dev, "sram", 2 * HALF)
+  for k, off in enumerate(range(0, total, win)): # off and nb are bytes, the two ends of the copy can have different dtypes
+    w = sram[(wo:=(k & 1) * HALF if cin else 0):wo + (nb:=min(win, total - off))]
     s, d = src[off // src.dtype.itemsize:(off + nb) // src.dtype.itemsize], dst[off // dst.dtype.itemsize:(off + nb) // dst.dtype.itemsize]
-    if cin:
-      push = usb_bulk(devs, (usb_scsi(devs, False, nb),), 0x02, s.getaddr((HCQ_RUNTIME_DEV.value,)), round_up(nb, 512), 10000)
-      ops += [UOp.custom_function("hcq", push.sink()).call(sram, s, name="hcq_copyin", aux=HCQInfo(devs)),
-              sram.copy_to_device(d.device).call(d, sram)]
-    else:
-      pad = UOp.new_buffer("CPU", round_up(nb, 512), dtypes.uint8)[0:nb]
-      submit = make_submit(s.copy_to_device(sram.device).call(sram, s), devs=devs, queue="COPY:0")
-      pull = usb_bulk(devs, (submit,), 0x81, pad.getaddr((HCQ_RUNTIME_DEV.value,)), round_up(nb, 512), 10000)
-      ops += [UOp.custom_function("hcq", pull.sink()).call(pad, sram, s, name="hcq_copyout", aux=HCQInfo(devs)),
-              pad.copy_to_device("CPU").call(d, pad)]
+    chunk = w.copy_to_device(d.device).call(d, w, src, name="usb_copyin") if cin else s.copy_to_device(w.device).call(w, s, dst, name="usb_copyout")
+    ops.append(chunk)
   return UOp(Ops.LINEAR, src=tuple(ops))
 pm_usb_stage = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), usb_stage_copy)])
 
-USB_HOST_TAGS = {"signal", "timeline_signal"}
-pm_usb_hostio = PatternMatcher([
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(Ops.PARAM, tag=USB_HOST_TAGS).or_after(name="b"), UPat(name="idx"))),),
-        name="ld"), lambda b, idx, ld: usb_load(b, idx, ld.dtype)),
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.PARAM, tag=USB_HOST_TAGS).or_after(name="b"), UPat(name="idx"))), UPat(name="v"))), usb_write)])
+def usb_submit(h:UOp, xfer:UOp) -> UOp: # start the async transfer
+  status = xfer.after(h)[16:20].bitcast(dtypes.uint32).index(0).store(PENDING)
+  return h.after(ccall(libusb.libusb_submit_transfer, xfer.after(status).index(0)))
+def usb_reap(ctx:EncodeCtx, h:UOp, xfer:UOp) -> UOp: # poll the event loop until the async transfer is done
+  loop, tv = UOp.loop(next(UOp.unique_num)), usb_scratch(ctx, *[(UOp.const(0, dtypes.uint64), dtypes.uint64)] * 2)
+  hl = h.after(ccall(libusb.libusb_handle_events_timeout, usb_buf(h.device, "ctx", 1, dtypes.uint64).after(h, loop).index(0).load(), tv.index(0)))
+  st = xfer.after(hl)[16:20].bitcast(dtypes.uint32).index(0).load()
+  return h.after(st.end(loop, st.eq(PENDING)))
+def usb_drained(ctx:EncodeCtx, h:UOp, need:UOp) -> UOp: # wait until the queue is done with the chunks before need: 0xE4 reads the controller's memory
+  loop, slot = UOp.loop(next(UOp.unique_num)), ctx.scratch[(off:=ctx.alloc(4)):off + 4].bitcast(dtypes.uint32)
+  hl = usb_ctrl(h.after(loop), 0xC0, 0xE4, usb_buf(h.device, "fence", 1, dtypes.uint32).getaddr(RT), 0, slot.index(0), 4)
+  fence = slot.after(hl).index(0).load()
+  return h.after(fence.end(loop, fence.cast(dtypes.uint64) + 1 < need))
 
+def usb_chunk(ctx:EncodeCtx, h:UOp, src:UOp, k:UOp, half:int) -> UOp: # stream chunk k of src into a half of the sram
+  xfer, stage = usb_buf(h.device, f"xfer{half}", 64), usb_buf(h.device, "stage", 2 * HALF)
+  g = usb_buf(h.device, "seq", 1, dtypes.uint64).index(0).load() + k.cast(dtypes.uint64)
+  size = (UOp.const(src.nbytes(), dtypes.int) - k * CHUNK).minimum(CHUNK)
+  wire = usb_wire(size)
+  h = usb_reap(ctx, h, xfer) # the transfer that used this half before
+  h = h.after(ccall(libc.memcpy, stage.after(h).index(half * HALF), src.getaddr(RT) + (k * CHUNK).cast(dtypes.uint64), size.cast(dtypes.uint64)))
+  h = h.after(stage.after(h).bitcast(dtypes.uint32).index((half * HALF + wire - 4) // 4).store(usb_sentinel(g)))
+  h = usb_drained(ctx, h, g) # the chunk before the one that used this half is done with it
+  h = usb_ctrl(h, 0x40, 0xF2, wire // 512, half * 16 | ((wire + 0x3fff) // 0x4000 << 8), UOp.const(0, dtypes.uint64), 0)
+  h = h.after(xfer.after(h)[20:24].bitcast(dtypes.int32).index(0).store(wire),
+              xfer.after(h)[48:56].bitcast(dtypes.uint64).index(0).store(stage.getaddr(RT) + half * HALF))
+  return usb_submit(h, xfer)
+
+def usb_copyin(ctx:EncodeCtx, h:UOp, src:UOp, k0:int) -> UOp:
+  # the chunks alternate the sram halves, two transfers in flight, the queue drains a half once it sees its sentinel
+  n, first = ceildiv(src.nbytes(), CHUNK), UOp.const(k0, dtypes.int)
+  h = usb_drained(ctx, h, usb_buf(h.device, "seq", 1, dtypes.uint64).index(0).load() + (k0 + 1)) # the sram is free
+  if n // 2 > 1: # a loop over pairs of chunks, the halves are static. a single pair is unrolled: a one trip loop folds away
+    j = UOp.range(n // 2, next(UOp.unique_num), dtype=dtypes.int)
+    h = h.after(usb_chunk(ctx, usb_chunk(ctx, h.after(j), src, first + j * 2, 0), src, first + j * 2 + 1, 1).end(j))
+  for k in range(0 if n // 2 == 1 else n - n % 2, n): h = usb_chunk(ctx, h, src, first + k, k & 1)
+  for half in range(2): h = usb_reap(ctx, h, usb_buf(h.device, f"xfer{half}", 64))
+  return h
+
+def usb_copyout(ctx:EncodeCtx, h:UOp, dst:UOp, k0:int) -> UOp: # arm a read of the sram, release the queue to fill it, pull it
+  n, stage, seq = ceildiv(dst.nbytes(), 2 * HALF), usb_buf(h.device, "stage", 2 * HALF), usb_buf(h.device, "seq", 1, dtypes.uint64).index(0).load()
+  h = usb_drained(ctx, h, seq + (k0 + 1)) # the sram is free and nothing else writes the controller's memory
+  k = UOp.range(n, next(UOp.unique_num), dtype=dtypes.int)
+  size = (UOp.const(dst.nbytes(), dtypes.int) - k * (2 * HALF)).minimum(2 * HALF)
+  wire = (size + 511) // 512 * 512
+  hk = usb_ctrl(h.after(k), 0x40, 0xF2, (wire // 512) | 0x8000, (wire + 0x3fff) // 0x4000 << 8, UOp.const(0, dtypes.uint64), 0)
+  hk = hk.after(usb_buf(h.device, "go", 1, dtypes.uint32).after(hk).index(0).store((seq + (k + k0 + 1).cast(dtypes.uint64)).cast(dtypes.uint32)))
+  hk = usb_bulk(hk, 0x81, stage.index(0), wire)
+  hk = hk.after(ccall(libc.memcpy, dst.getaddr(RT) + (k * (2 * HALF)).cast(dtypes.uint64), stage.after(hk).index(0), size.cast(dtypes.uint64)))
+  return h.after(hk.end(k))
+
+def usb_host(ctx:EncodeCtx, f:UOp) -> UOp: # the host side of the batch's copies, once every queue is running: k0 counts chunks like the sdma queue
+  calls, dev, k0 = [c for c in f.src[0].src if c.op is Ops.CALL and c.arg.name in ("usb_copyin", "usb_copyout")], ctx.devs[0], 0
+  h = usb_link(dev).after(*f.src[1:])
+  for (name, host), chunks in itertools.groupby(calls, key=lambda c: (c.arg.name, c.src[3])): # a copy's chunks all carry its whole host side
+    h, k0 = (usb_copyin if name == "usb_copyin" else usb_copyout)(ctx, h, host, k0), k0 + len(list(chunks))
+  return usb_buf(dev, "seq", 1, dtypes.uint64).after(h).index(0).store(usb_buf(dev, "seq", 1, dtypes.uint64).index(0).load() + k0)
+pm_usb_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq_host", name="f"), usb_host)])
+
+# the device's usb state: a placeholder binds once, for the life of the device
+def _once(ctx, b:UOp, make) -> Buffer:
+  if b not in ctx.prog_bufs: ctx.prog_bufs[b] = make()
+  return ctx.prog_bufs[b]
+def _word(x) -> Buffer: # a host word, x a pointer or an int
+  v = x if isinstance(x, int) else unwrap(ctypes.cast(x, ctypes.c_void_p).value)
+  (b:=Buffer("CPU", 1, dtypes.uint64, preallocate=True))._buf.view.view(fmt='Q')[0] = v
+  return b
+def _zeroed(b:Buffer) -> Buffer:
+  b.ensure_allocated()._buf.cpu_view().view(fmt='B')[:b.nbytes] = bytes(b.nbytes)
+  return b
+def _region(ctx, b) -> Buffer: # a window of the controller's memory: not ours to free
+  return Buffer(ctx.device, b.size, dtypes.uint8, options=BufferSpec(external_ptr=b.va_addr, nolru=True)).allocate(opaque=b)
+def _go(ctx) -> Buffer: return _zeroed(Buffer(ctx.device, 1, dtypes.uint32, options=BufferSpec(uncached=True, cpu_access=True, nolru=True)))
+def _sram(ctx) -> Buffer:
+  for half in range(2): ctx.iface.pci_dev.usb.scsi_write(bytes(HALF), slot_start=half * 16) # no stale sentinel from an earlier process
+  return _region(ctx, ctx.iface.sram)
+def _xfer(ctx) -> Buffer: # an async bulk out: the program sets its buffer and length, then reaps its status
+  t = libusb.libusb_alloc_transfer(0).contents
+  t.dev_handle, t.endpoint, t.type, t.timeout = ctx.iface.pci_dev.usb.usb.handle, 0x02, libusb.LIBUSB_TRANSFER_TYPE_BULK, 10000
+  return Buffer("CPU", ctypes.sizeof(t), dtypes.uint8, options=BufferSpec(external_ptr=ctypes.addressof(t), nolru=True), preallocate=True)
 pm_usb_bufferize = PatternMatcher([
-  (UPat(Ops.PARAM, tag={"systems", "runtime", "inputs", "usb_scratch"}, name="b"),
-   lambda ctx, b: Buffer("CPU", b.max_numel(), b.dtype, options=BufferSpec(nolru=True), preallocate=True)),
-  (UPat(Ops.PARAM, tag="usb_handle", name="b"), lambda ctx, b: ctx.signal(b.tag, ctx.iface.usb_handle, device="CPU")),
-  (UPat(Ops.PARAM, name="b"), lambda ctx, b: None if not isinstance(b.tag, str) or not b.tag.startswith("func:") else
-   ctx.signal(b.tag, unwrap(ctypes.cast(getattr(libusb.dll, b.tag[5:]), ctypes.c_void_p).value), device="CPU")),
+  (UPat(Ops.PARAM, tag="usb_handle", name="b"), lambda ctx, b: _once(ctx, b, lambda: _word(ctx.iface.pci_dev.usb.usb.handle))),
+  (UPat(Ops.PARAM, tag="usb_ctx", name="b"), lambda ctx, b: _once(ctx, b, lambda: _word(USB3.ctx()))),
+  (UPat(Ops.PARAM, tag="usb_seq", name="b"), lambda ctx, b: _once(ctx, b, lambda: _word(0))),
+  (UPat(Ops.PARAM, tag="usb_stage", name="b"),
+   lambda ctx, b: _once(ctx, b, lambda: Buffer("CPU", 2 * HALF, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True))),
+  (UPat(Ops.PARAM, tag={"usb_xfer0", "usb_xfer1"}, name="b"), lambda ctx, b: _once(ctx, b, lambda: _xfer(ctx))),
+  (UPat(Ops.PARAM, tag="usb_go", name="b"), lambda ctx, b: _once(ctx, b, lambda: _go(ctx))),
+  (UPat(Ops.PARAM, tag="usb_fence", name="b"),
+   lambda ctx, b: _once(ctx, b, lambda: _zeroed(_region(ctx, ctx.iface.sys_buf).view(1, dtypes.uint32, 0x800)))),
+  (UPat(Ops.PARAM, tag="usb_sram", name="b"), lambda ctx, b: _once(ctx, b, lambda: _sram(ctx))),
+  (UPat(Ops.PARAM, tag="usb_cq", name="b"), lambda ctx, b: _once(ctx, b, lambda: _region(ctx, ctx.iface.cq_buf))),
 ])
 
 if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811
