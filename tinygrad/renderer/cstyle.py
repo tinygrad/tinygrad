@@ -70,6 +70,10 @@ base_rewrite = PatternMatcher([
    f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[1:])}))({ctx[fptr]}))" +
    f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])}))" + (";" if x.dtype is dtypes.void else "")),
 
+  # call a function of this kernel: the SINK body names it, the other srcs are the args
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="fn"),), allow_any_len=True, name="x"),
+   lambda ctx,x,fn: f"{fn.arg.function_name}({', '.join(ctx[y] for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
+
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
 ])
@@ -104,8 +108,11 @@ pm_manual_bf16_cast = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16),
 ])
 
+def all_lines(uops:list[UOp]) -> list[UOp]: return [x for u in uops for x in (u.src if u.op is Ops.LINEAR else (u,))] # the functions' lines too
+
 def uops_to_dtypes(uops:list[UOp]) -> list[tuple[DType, int]]:
-  return dedup((u.dtype, u.max_numel()) for u in uops if u.addrspace in (AddrSpace.ALU, None) and u.dtype != dtypes.void and u._shape is not None)
+  return dedup((u.dtype, u.max_numel()) for u in all_lines(uops)
+               if u.addrspace in (AddrSpace.ALU, None) and u.dtype != dtypes.void and u._shape is not None)
 
 def _wmma_name(u:UOp) -> str:
   # sanitize spaces in DType.name (int8 = "signed char")
@@ -115,7 +122,7 @@ def _wmma_name(u:UOp) -> str:
 def wmma_args(uops:list[UOp]):
   return dedup((_wmma_name(uop), uop.arg[0], uop.arg[1], uop.dtype, *(uop.arg[2:4]),
                tuple(uop.src[i].shape[-1] for i in range(3)))
-              for uop in uops if uop.op is Ops.WMMA)
+              for uop in all_lines(uops) if uop.op is Ops.WMMA)
 
 class CStyleLanguage(Renderer):
   abi: str = ""
@@ -130,6 +137,7 @@ class CStyleLanguage(Renderer):
   barrier: str = ""
   code_for_workitem: dict[Literal["g", "l"], Callable] = {}
   extra_args: list[str] = []
+  function_typedef: str = "void" # a function of the kernel, rendered above it
   float4: str|None = None
   float4_style: tuple[str, str] = ('(', ')')
   gep_arr_threshold: int = 4
@@ -148,19 +156,25 @@ class CStyleLanguage(Renderer):
 
   string_rewrite = base_rewrite
 
+  def render_signature(self, typedef:str, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]], extra_args=()) -> str:
+    buftypes = [(name, ("volatile " if u.arg.volatile else "")+(self.var_prefix if u.addrspace == AddrSpace.ALU else "")+
+                       self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
+                       (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
+    return f"{typedef} {function_name}(" + ', '.join([f'{t} {name}' for name,t in buftypes] + list(extra_args)) + ")"
+  def render_function(self, signature:str, kernel:list[str], tmp:str="") -> str: return signature + " {\n" + tmp + '\n'.join(kernel) + "\n}"
+
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[UOp,bool]]], uops:list[UOp], prefix=None) -> str:
     tmp = ""
     if any(is_image_shape(u._shape) for _,(u,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
-    buftypes = [(name, ("volatile " if u.arg.volatile else "")+(self.var_prefix if u.addrspace == AddrSpace.ALU else "")+
-                       self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
-                       (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
-    prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
-    [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
-    [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
+    # the kernel's functions: declared above the kernel, defined below it, so the kernel stays the entry point of the text
+    fns = [(self.render_signature(self.function_typedef, name, fbufs), body)
+           for name, body, fbufs in [self._render(list(u.src)) for u in uops if u.op is Ops.LINEAR]]
+    kernel_sig = self.render_signature(self.kernel_typedef.format(launch_bounds=launch_bounds), function_name, bufs, self.extra_args)
+    prg = self.render_function(kernel_sig, kernel, tmp)
+    return "\n".join((prefix or []) + [sig + ";" for sig, _ in fns] + [prg] + [self.render_function(sig, body) for sig, body in fns])
 
   def render_index(self, x:UOp, buf:UOp, idx:UOp):
     if buf.addrspace == AddrSpace.ALU:
@@ -207,14 +221,15 @@ class CStyleLanguage(Renderer):
 
     child_count = Counter(v for ru in uops for v in ru.src)
     # find which PARAMs are stored to with a single toposort
-    writable_params = {u for u in UOp.sink(*[u.src[0] for u in uops if u.op is Ops.STORE]).toposort(lambda u: u.op != Ops.END) if u.op is Ops.PARAM}
+    written = [u.src[0] for u in uops if u.op is Ops.STORE] + [u for u in uops if u.op is Ops.CALL] # a function may write what it is handed
+    writable_params = {u for u in UOp.sink(*written).toposort(lambda u: u.op != Ops.END) if u.op is Ops.PARAM}
     bufs: dict[UOp, tuple[str, tuple[UOp, bool]]] = {}
     kernel = []
     depth = 1
     c: defaultdict[str, int] = defaultdict(int)
     name = "test"
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST, Ops.CUSTOM_FUNCTION}: continue
+      if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST, Ops.CUSTOM_FUNCTION, Ops.LINEAR}: continue
       if u.op == Ops.STACK and len(u.src) == 0: continue
       if u.op is Ops.AFTER:
         r[u] = r[u.src[0]]
@@ -413,6 +428,7 @@ class CUDARenderer(CStyleLanguage):
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
   kernel_typedef = "extern \"C\" __global__ void __launch_bounds__({launch_bounds})"
+  function_typedef = "__device__ void"
   smem_prefix = "__shared__ __align__(16) "
   smem_prefix_for_cast = False
   barrier = "__syncthreads();"
@@ -516,6 +532,7 @@ class HIPRenderer(CStyleLanguage):
   # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
   # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
   kernel_typedef = 'extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, {launch_bounds})))'
+  function_typedef = "__attribute__((device)) void"
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})"}
   code_for_op = {**CStyleLanguage.code_for_op, Ops.TRUNC: _ocml("trunc"), Ops.SIN: _ocml("sin"),
                  Ops.LOG2: _ocml("log2"), Ops.EXP2: _ocml("exp2"), Ops.SQRT: _ocml("sqrt")}

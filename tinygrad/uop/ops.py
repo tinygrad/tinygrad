@@ -296,7 +296,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(node.src if enter_calls or node.op is not Ops.CALL else node.src[1:]):
+          # a CUSTOM_FUNCTION under a call is an operation over its srcs, not a body: always entered
+          for s in reversed(node.src if enter_calls or node.op is not Ops.CALL or node.src[0].op is Ops.CUSTOM_FUNCTION else node.src[1:]):
             stack.append((s, False)) # push srcs on the stack
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
     return cache
@@ -1012,7 +1013,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def variables(self) -> list[Variable]:
     return sorted({x if x.op in {Ops.PARAM, Ops.BUFFER} else UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype, param=True)
                    for x in self.backward_slice_with_self if (x.op is Ops.RANGE and x.arg[-1] is AxisType.DEVICE) or
-                   (x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.ALU) or x.is_variable}, key=lambda v: v.expr)
+                   (x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.ALU and x.arg.name is not None) or x.is_variable}, key=lambda v: v.expr)
 
   # *** uop symbolic stuff ***
 
@@ -1287,7 +1288,7 @@ class ProgramInfo:
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int] = [1, 1, 1]
-    for u in sink.toposort():
+    for u in sink.toposort(enter_calls=False): # a called SINK is a function, not the kernel's own uops
       if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):

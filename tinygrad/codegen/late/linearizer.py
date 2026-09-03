@@ -7,7 +7,7 @@ from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(sink.toposort())
+  lst = list(sink.toposort(enter_calls=False)) # a called SINK is a function, not a line
   out_degree:defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, tuple[int, int, Any]] = {}
 
@@ -42,7 +42,7 @@ def linearize(sink:UOp) -> list[UOp]:
     newlst.append(u:=heapq.heappop(heap)[1])
     for v in u.src:
       out_degree[v] -= 1
-      if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
+      if out_degree[v] == 0 and v in nkey: heapq.heappush(heap, (-nkey[v],v)) # a called SINK is not a line
   newlst = newlst[::-1]
 
   if getenv("DEBUG_LINEARIZE"):
@@ -59,10 +59,10 @@ class CFGContext:
     # everything is nested inside the sink
     deps: dict[UOp, dict[UOp, None]] = {}
     nesting: dict[UOp, UOp] = {}
-    for u in sink.toposort():
+    for u in sink.toposort(enter_calls=False):
       # get the deps from the src
       deps[u] = {}
-      for s in u.src: deps[u] |= deps[s]
+      for s in u.src: deps[u] |= deps.get(s, {}) # a called SINK is not a line
 
       if u.op in (Ops.END, Ops.SINK):
         nesting |= {x:u for x in deps[u] if x.op is Ops.END and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
