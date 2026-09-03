@@ -128,6 +128,7 @@ class CStyleLanguage(Renderer):
   abi: str = ""
   kernel_typedef: str = "void"
   buffer_prefix: str = ""
+  reg_prefix: str = ""
   buffer_suffix: str = ""
   smem_align: str = ""
   smem_prefix: str = ""
@@ -194,6 +195,7 @@ class CStyleLanguage(Renderer):
     if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL):
       if addrspace == AddrSpace.LOCAL and self.smem_prefix_for_cast: prefix = self.smem_prefix
       if addrspace == AddrSpace.GLOBAL: prefix = self.buffer_prefix
+    if addrspace == AddrSpace.REG and override_ptr: prefix = self.reg_prefix
     if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL) or override_ptr:
       suffix = "*"
     if sz > 1:
@@ -367,6 +369,7 @@ class MetalRenderer(CStyleLanguage):
   # language options
   kernel_typedef = "kernel void"
   buffer_prefix = "device "
+  reg_prefix = "thread "
   smem_prefix = "threadgroup __attribute__((aligned(16))) "
   var_prefix = "constant "
   var_suffix = "&"
