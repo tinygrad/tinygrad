@@ -1,6 +1,7 @@
 from tinygrad import Tensor, dtypes, Context
 from tinygrad.helpers import getenv
 from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.uop.ops import AxisType
 from tinygrad.engine.realize import run_linear
 from dataclasses import replace
 
@@ -13,17 +14,17 @@ if __name__ == "__main__":
   C = A.matmul(B)
   if getenv("GEMV"):
     opts = [
-      Opt(op=OptOps.UNROLL, axis=0, amt=8),
-      Opt(op=OptOps.GROUP, axis=0, amt=32),
+      Opt(op=OptOps.SPLIT, axis=1, arg=(8, AxisType.UNROLL)),
+      Opt(op=OptOps.SPLIT, axis=1, arg=(32, AxisType.GROUP_REDUCE)),
     ]
   else:
     opts = [
       Opt(op=OptOps.TC, axis=0, amt=0),
-      Opt(op=OptOps.UPCAST, axis=0, amt=4),
-      Opt(op=OptOps.UPCAST, axis=1, amt=8),
-      Opt(op=OptOps.LOCAL, axis=0, amt=2),
-      Opt(op=OptOps.LOCAL, axis=1, amt=2),
-      Opt(op=OptOps.LOCAL, axis=0, amt=2),
+      Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST)),
+      Opt(op=OptOps.SPLIT, axis=1, arg=(8, AxisType.UPCAST)),
+      Opt(op=OptOps.SPLIT, axis=0, arg=(2, AxisType.LOCAL)),
+      Opt(op=OptOps.SPLIT, axis=1, arg=(2, AxisType.LOCAL)),
+      Opt(op=OptOps.SPLIT, axis=0, arg=(2, AxisType.LOCAL)),
     ]
   linear = C.schedule_linear()
   call = linear.src[-1]

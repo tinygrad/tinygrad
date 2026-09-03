@@ -133,6 +133,26 @@ class TestPickle(unittest.TestCase):
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t.numpy(), t2.numpy())
 
+  def test_pickle_no_storage_aliasing(self):
+    # loading the same pickle twice gives fully independent storage: the buffers (and their BUFFER uops) are never shared
+    t = Tensor([1,2,3,4]).realize()
+    st = pickle.dumps(t)
+    t1, t2 = pickle.loads(st), pickle.loads(st)
+    self.assertIsNot(t1.uop, t2.uop)
+    self.assertIsNot(t1.uop.base.buffer, t2.uop.base.buffer)
+    t1.assign(Tensor([9,9,9,9])).realize()
+    self.assertListEqual(t1.tolist(), [9,9,9,9])
+    self.assertListEqual(t2.tolist(), [1,2,3,4])
+
+  def test_pickle_view_is_self_contained(self):
+    # a pickled graph carries its own buffer: data from earlier loads of related graphs must not leak into it
+    t = Tensor([1,2,3,4]).realize()
+    t1 = pickle.loads(pickle.dumps(t))
+    t1.assign(Tensor([9,9,9,9])).realize()
+    # loading a view of the original tensor must give the pickled values ([2,3]), not the mutated values from the other load
+    v2 = pickle.loads(pickle.dumps(t[1:3]))
+    self.assertListEqual(v2.realize().tolist(), [2,3])
+
   def test_pickle_jit(self):
     @TinyJit
     def add(a, b): return a.sum()+b+1

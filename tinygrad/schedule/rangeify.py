@@ -229,7 +229,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
 
   # NOTE: the local BUFFER needs to be disambiguated here
   if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp(Ops.BUFFER, arg=ParamArg(next(ctx), dtype, size=size, device=x.arg.device, addrspace=AddrSpace.GLOBAL))
+    buf = UOp.new_buffer(x.arg.device, size, dtype)
     do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
     return buf.after(do_store).cast(x.dtype)
 

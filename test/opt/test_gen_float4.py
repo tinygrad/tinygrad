@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Device, Tensor, Variable, dtypes
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, AxisType
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 
@@ -24,7 +24,7 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule_linear().src[0]
     realized_ast = s.src[0]
-    opts_to_apply = [Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    opts_to_apply = [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]
     program = to_program(replace_opts(realized_ast, opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
 
     assert TestFloat4.count_float4(tuple(program.src[1].src)) == (2, 1)
@@ -35,7 +35,8 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule_linear().src[0]
-    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=2)]),
+    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST)),
+                                                    Opt(op=OptOps.SPLIT, axis=0, arg=(2, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
     assert TestFloat4.count_float4(uops) == (4, 2)
 
@@ -46,7 +47,7 @@ class TestFloat4(unittest.TestCase):
 
     s = c.schedule_linear().src[0]
     realized_ast = s.src[0]
-    opts_to_apply = [Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    opts_to_apply = [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]
     program = to_program(replace_opts(realized_ast, opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
 
     assert TestFloat4.count_float4(tuple(program.src[1].src)) == (0, 1)
@@ -57,7 +58,8 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule_linear().src[0]
-    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=2)]),
+    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=1, arg=(4, AxisType.UPCAST)),
+                                                    Opt(op=OptOps.SPLIT, axis=1, arg=(2, AxisType.UPCAST))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
     assert TestFloat4.count_float4(uops) == (0, 2)
@@ -70,7 +72,8 @@ class TestFloat4(unittest.TestCase):
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
 
     s = c.schedule_linear().src[0]
-    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.UNROLL, axis=0, arg=4)]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=1, arg=(4, AxisType.UNROLL))]),
+                            renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
     assert TestFloat4.count_float4(uops) == (0, 0)
 
@@ -84,7 +87,8 @@ class TestFloat4(unittest.TestCase):
     # UPDATE: now we do this fusion
 
     s = c.schedule_linear().src[0]
-    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]),
+    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST)),
+                                                    Opt(op=OptOps.SPLIT, axis=1, arg=(0, AxisType.UNROLL))]),
                        renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
     assert TestFloat4.count_float4(uops) in {(0,1), (1,1)}
@@ -98,7 +102,8 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.schedule_linear().src[0]
-    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=4)]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]),
+                            renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
     assert TestFloat4.count_float4(uops) == (0, 1)
 
@@ -110,7 +115,8 @@ class TestFloat4(unittest.TestCase):
     # should float4 b but not a
 
     s = c.schedule_linear().src[0]
-    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=4)]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]),
+                            renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
     assert TestFloat4.count_float4(uops) == (1, 1)
 
@@ -123,7 +129,8 @@ class TestFloat4(unittest.TestCase):
     # should float4 both
 
     s = c.linear_with_vars()[0].src[0]
-    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=4)]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]),
+                            renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
     assert TestFloat4.count_float4(uops) == (2, 1)
 
@@ -136,7 +143,8 @@ class TestFloat4(unittest.TestCase):
     # should float4 a but not b
 
     s = c.linear_with_vars()[0].src[0]
-    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=4)]), renderer=Device[Device.DEFAULT].renderer).src[1].src)
+    uops = tuple(to_program(replace_opts(s.src[0], [Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]),
+                            renderer=Device[Device.DEFAULT].renderer).src[1].src)
 
     assert TestFloat4.count_float4(uops) == (1, 1)
 

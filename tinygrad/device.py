@@ -22,7 +22,7 @@ class _Device:
   def canonicalize(self, device:str|None) -> str: return self._canonicalize(device if device is not None else Device.DEFAULT)
   def __getitem__(self, ix:str) -> Compiled:
     ix = self.canonicalize(ix)
-    assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "TINYFS", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
+    assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
     return self.__get_canonicalized_item(ix)
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def get_class(self, ix:str):
@@ -46,7 +46,7 @@ class _Device:
   def DEFAULT(self, v): raise AttributeError(f'setting Device.DEFAULT is deprecated, use "with Context(DEV={v!r})" or "DEV.value = {v!r}"')
   @functools.cached_property
   def _select_device(self) -> str:
-    assert (dev:=next((d for d in self._devices if d not in ["DISK", "TINYFS", "NPY"] and getenv(d) == 1), None)) is None, \
+    assert (dev:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)) is None, \
       f"{dev}=1 is deprecated, use DEV={dev} instead"
     try:
       device = next(self.get_available_devices())
@@ -54,7 +54,7 @@ class _Device:
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device: _Device = _Device()
-atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices])
+atexit.register(lambda: [Device[dn].finalize() for dn in tuple(Device._opened_devices)])
 
 def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
   if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
@@ -93,23 +93,19 @@ class MultiBuffer:
   def size(self): return self.bufs[0].size
   @property
   def dtype(self): return self.bufs[0].dtype
-  def ref(self, cnt):
-    for b in self.bufs: b.ref(cnt)
-    return self
   def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
   def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
 
 class Buffer:
   profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
-               initial_value:bytes|pickle.PickleBuffer|None=None, uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
+               initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = Device.canonicalize(device), size, dtype, options, offset, 0
     self._bufs: dict[str, Any] = {}
     if base is None:
       assert offset == 0, "base buffers can't have offset"
       self._base = None
-      self._uop_refcount = uop_refcount
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
@@ -123,12 +119,7 @@ class Buffer:
   @property
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
-  def uop_refcount(self): return self.base._uop_refcount
-  @property
   def _buf(self) -> Any: return self._bufs[self.device]
-  def ref(self, cnt):
-    self.base._uop_refcount += cnt
-    return self
   # check if the underlying buffer is allocated and the current buffer/view is initialized
   def is_initialized(self) -> bool: return self.is_allocated() and self.device in self._bufs
   # check if the underlying buffer is allocated, possibly from the base object
@@ -176,11 +167,11 @@ class Buffer:
   def __reduce_ex__(self, protocol):
     buf:bytearray|pickle.PickleBuffer|None = None
     if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.uop_refcount)
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, self.base, self.offset, self.is_allocated())
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None)
     if self.is_allocated():
       buf = pickle.PickleBuffer(self.as_memoryview()) if protocol >= 5 else bytearray(self.as_memoryview())
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.uop_refcount)
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
   @property
   def trace_num(self) -> int:
     if not hasattr(self, '_trace_num'): self._trace_num = len(Buffer.profile_events)
@@ -346,7 +337,8 @@ class Compiled:
 
   has_copy_queue:bool = True
 
-  pm_lower:Any = None
+  pm_encode:Any = None # per queue kind: queue ops -> flat command words
+  pm_lower:Any = None # per queue kind: custom_function(submit, cmdbuf) -> the queue push
   pm_bufferize:Any = None
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, graph=None, arch=None):

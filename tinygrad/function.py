@@ -13,9 +13,10 @@ def add_to_ctx(ctx, x:UOp):
   return ret
 
 pm_ctx = PatternMatcher([
-  (UPat(Ops.BUFFER, name="x"), add_to_ctx),
-  (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"),
-   lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
+  # unbound BUFFERs and their AFTER outputs are scoped inside their CALL: they are never implicit inputs
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: None if x.is_unbound else add_to_ctx(ctx,x)),
+  (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if not x.buf_uop.is_unbound and
+   not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
 ])
 
 def invalid_outputs(uret:UOp) -> set[UOp]:
@@ -59,7 +60,7 @@ class _function(Generic[ReturnType]):
     if isinstance(ret, Tensor):
       uret = ret.uop
     elif isinstance(ret, tuple) and all(isinstance(x, Tensor) for x in ret):
-      uret = UOp.maketuple(*[x.uop for x in ret])
+      uret = UOp.sink(*[x.uop for x in ret])
     else:
       raise RuntimeError(f"function return type {type(ret)} not supported")
 
@@ -78,16 +79,17 @@ class _function(Generic[ReturnType]):
         buf_strs = '\n  '.join(f"{i}: dtype={b.dtype}, size={b.max_numel()}, device={b.device}" for i,b in enumerate(implicit_buffers))
         raise RuntimeError(f"function {name} has {len(implicit_buffers)} implicit buffer(s), but allow_implicit=False\n  {buf_strs}")
 
-    fret = uret.call(*call_uops, grad_fxn=self.grad_fxn, name=name, precompile=self.precompile,
-                     precompile_backward=self.precompile_backward)
+    fret = UOp.call_outputs(uret.src if isinstance(ret, tuple) else (uret,), *call_uops, grad_fxn=self.grad_fxn, name=name,
+                            precompile=self.precompile, precompile_backward=self.precompile_backward)
 
     if DEBUG >= 2:
       print("  "*_function.depth+f"function {uret.key.hex()[:8]} in {(time.perf_counter()-st)*1000:8.2f} ms: {name}")
 
+    outs = fret.returned_outputs
     if isinstance(ret, tuple):
-      return cast(ReturnType, tuple(Tensor(fret.gettuple(i)) for i in range(len(ret))))
+      return cast(ReturnType, tuple(Tensor(o) for o in outs))
     else:
-      return cast(ReturnType, Tensor(fret.gettuple(0)))
+      return cast(ReturnType, Tensor(outs[0]))
 
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload
