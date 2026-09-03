@@ -168,20 +168,15 @@ def abi(ctx, x:UOp) -> UOp|None:
   return out.after(x.rtag()) # preserve PARAM scheduling
 
 # ----- memory access ----
+# global address = saddr (base sgpr pair) + 32 bit unsigned vgpr byte offset the hardware zero-extends.
+# NOTE: the old path folded a constant term into a 64 bit vaddr via int_to_int64; that mishandled the carry into
+# the high dword and produced base+2**32 out-of-bounds reads, so the whole index stays in the 32 bit vgpr offset instead.
 def fold_global(base:UOp, idx:UOp):
-  disp_scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
-  shft = const(disp_scale.bit_length() - 1, dtypes.int32)
-  vaddr, offs = idx, const(0, dtypes.uint16)
-  def foldable(v:int) -> bool: return -(1 << 12) <= v < (1 << 12)
-  if idx.op is Ops.ADD and is_const(idx.src[1]) and foldable((_offs := idx.src[1].src[0].val * disp_scale)):
-    vaddr, offs = idx.src[0], const(_offs, dtypes.int16)
-    if shft.src[0].val > 0: vaddr <<= shft
-    vaddr = int_to_int64(vaddr, dtypes.uint64)
-    return (vaddr + base.bitcast(dtypes.uint64), offs)
-  else:
-    vaddr = to_vgpr(vaddr)
-    if shft.src[0].val > 0: vaddr <<= shft
-    return (vaddr, base)
+  scale = base.dtype.itemsize if base.op in {Ops.PARAM, Ops.BUFFER, Ops.AFTER} else 1
+  shft = const(scale.bit_length() - 1, dtypes.int32)
+  vaddr = to_vgpr(idx)
+  if shft.src[0].val > 0: vaddr <<= shft
+  return (vaddr, base)
 
 # TODO: actually calculate lds offset per seperate BUFFER, (ctx.func_args)
 def fold_lds(base:UOp, idx:UOp): # (vaddr, ioffs)
@@ -535,9 +530,7 @@ def encode(x:UOp):
       if rdef(x) is None: fields["data"] = encfield(x.src[1])
       else: fields["vdst"] = encfield(x)
     case RDNA3Ops.GLOBAL:
-      fields = dict(addr=encfield(x.src[0]))
-      if is_const(x.src[1]): fields["offset"] = encfield(x.src[1])
-      else: fields["saddr"] = encfield(x.src[1])
+      fields = dict(addr=encfield(x.src[0]), saddr=encfield(x.src[1]))
       if rdef(x) is None: fields["data"]=encfield(x.src[2])
       else: fields["vdst"]=encfield(x)
     case RDNA3Ops.DS:
