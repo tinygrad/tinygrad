@@ -284,5 +284,69 @@ class TestTensorCores(unittest.TestCase):
     self.assertGreater(len(wmmas), 0)
     for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                      "test requires tensor cores with accumulation in half") # testing with half suffices.
+  @unittest.skipUnless(Device.DEFAULT == "METAL", "TODO: the UNROLL axis is hardcoded for the METAL tensor core shape")
+  def test_tensor_core_opts(self):
+    N = 128
+    Tensor.manual_seed(1552)
+    a, b = Tensor.rand(N, N, dtype=dtypes.half), Tensor.rand(N, N, dtype=dtypes.half)
+    r = a.matmul(b, dtype=dtypes.half)
+    atol, rtol = 0.25, 0.01
+    helper_linearizer_opt(r, [
+      [],
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))],
+      [Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST))],
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST))], # check upcasts
+      [Opt(OptOps.SPLIT, 4, (2, AxisType.UNROLL))], # check unroll
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 5, (2, AxisType.UNROLL))], # check combo of unroll and upcast
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 6, (2, AxisType.UNROLL))],
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 6, (4, AxisType.UNROLL))],
+    ], apply_tc=True, atol=atol, rtol=rtol)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                      "test requires tensor cores with accumulation in half") # testing with half suffices.
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device.DEFAULT == "METAL", "TODO: the UNROLL axis is hardcoded for the METAL tensor core shape")
+  def test_tensor_core_opts_locals(self):
+    N = 128
+    Tensor.manual_seed(1552)
+    a, b = Tensor.rand(N, N, dtype=dtypes.half), Tensor.rand(N, N, dtype=dtypes.half)
+    r = a.matmul(b, dtype=dtypes.half)
+    atol, rtol = 0.25, 0.01
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.SPLIT, 4, (0, AxisType.UNROLL))], # check full unroll of reduce with locals
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL))], # check local
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 6, (4, AxisType.UNROLL)),
+       Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))],
+      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 6, (2, AxisType.UNROLL)),
+       Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))],
+    ], apply_tc=True, atol=atol, rtol=rtol)
+
+  @unittest.skipUnless(any(tc.dtype_in in (dtypes.half, dtypes.float) for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                       "test requires half or float tensor cores")
+  def test_tc_shape_padded(self):
+    tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in in (dtypes.half, dtypes.float))
+    Tensor.manual_seed(3)
+    a, b = Tensor.rand(17, 23, dtype=tc.dtype_in).realize(), Tensor.rand(23, 29, dtype=tc.dtype_in).realize()
+    with Context(ALLOW_TF32=1):
+      helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out), [[Opt(OptOps.TC, 0, (-1, 2, 2))]], check_default_opt=False, atol=3e-2, rtol=1e-3)
+
+  @unittest.skipUnless(any(tc.dtype_in in (dtypes.half, dtypes.float) for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                       "test requires half or float tensor cores")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith(("gfx11", "gfx12")),
+                   "TODO: LLVM AMDGPU miscompiles RDNA WMMA with masked operands, passes on PYTHON::gfx1100")
+  def test_tc_padto_full_upcast(self):
+    # a fully upcast pad lane makes a WMMA operand entirely Invalid
+    tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in in (dtypes.half, dtypes.float))
+    Tensor.manual_seed(3)
+    a, b = Tensor.rand(17, 23, dtype=tc.dtype_in).realize(), Tensor.rand(23, 29, dtype=tc.dtype_in).realize()
+    with Context(ALLOW_TF32=1):
+      helper_linearizer_opt(a.matmul(b, dtype=tc.dtype_out),
+                            [[Opt(OptOps.TC, 0, (-1, 2, 1)), Opt(OptOps.PADTO, 0, 4), Opt(OptOps.SPLIT, 0, (0, AxisType.UPCAST))]],
+                            check_default_opt=False, atol=3e-2, rtol=1e-3)
+
 if __name__ == '__main__':
   unittest.main()
