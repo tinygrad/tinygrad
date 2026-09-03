@@ -56,7 +56,10 @@ class Linear(nn.Linear):
   def set_quantized(self, decoded:Tensor):
     packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in QUANT_SIZES.items()}
     graph = decoded.uop.toposort()
-    raw = next((u for u in graph if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
+    # the packed region is a uint8 view of the superblocks: a [4:] SHRINK of the 4-byte padded source, a compact
+    # BUFFER of it, or a RESHAPE of one of those (any realization spelled this way contains the same bytes)
+    raw = next((u for u in graph if u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes and
+                (u.op is Ops.SHRINK or (u.op is Ops.RESHAPE and u.src[0].op in {Ops.BUFFER, Ops.SHRINK}) or u.op is Ops.BUFFER)), None)
     if raw is None: return
     ggml_type = packed_sizes[prod(raw.shape)]
     # the packed byte rate alone can't distinguish same-rate formats (Q4_0 vs Q4_K, Q5_0 vs Q5_K, MXFP4 vs IQ4_XS).
@@ -74,7 +77,7 @@ class Linear(nn.Linear):
       nbytes, nblocks = raw.max_numel(), raw.max_numel() // Q6_BYTES
       byte_view = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer).view(nbytes, dtypes.uint8, raw_offset)))
       padded = byte_view.reshape((nblocks, Q6_BYTES)).pad_to((nblocks, Q6_PADDED)).bitcast(dtypes.uint32)
-      self.weight = padded.contiguous().reshape(nblocks * Q6_WORDS)
+      self.weight = padded.clone().reshape(nblocks * Q6_WORDS)
     else:
       self.weight = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer)
         .view(raw.max_numel() * raw.dtype.itemsize // dtypes.uint32.itemsize, dtypes.uint32, raw_offset)))

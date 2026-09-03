@@ -8,6 +8,52 @@ from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
+def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
+
+def transform_precompiled_call(c:UOp) -> UOp|None:
+  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
+  assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
+  # the unbound BUFFER srcs are the call outputs (slots are src positions)
+  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
+  srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
+
+  # add the outputs to the call
+  outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
+  targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
+
+  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
+  # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
+  placed:dict[UOp, UOp] = {}
+  items:list[UOp] = []
+  for s, t in zip(srcs, targets):
+    deps:list[UOp] = []
+    while s.op is Ops.AFTER:
+      deps.extend(s.src[1:])
+      s = s.src[0]
+    if s not in placed:
+      if s.op is Ops.CONTIGUOUS: placed[s] = t.after(t.store(s.src[0]))
+      elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = t
+      if s in placed:
+        items.append(s.after(*deps))
+        continue
+    items.append(t.after(t.store(s.after(*deps))))
+  # swap every placed value for its target storage, also inside other stores' AFTER deps
+  fxn = UOp.sink(*(x.substitute(placed) for x in items))
+
+  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
+  # buffers are the input storage, afters on unbound BUFFER placeholders have no storage yet, materialize them
+  rmap = dict(zip(ret_pos, outs))
+  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                   for i, a in enumerate(c.src[1:])]))
+  rets = tuple(o.after(new_call) for o in outs)
+
+  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
+  # NOTE: must use the resolved shapes of the unbound placeholders (which substitute PARAMs with external args), not raw body shapes
+  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
+
+  # the AFTER outputs resolve against this: stores of each real output into its unbound placeholder
+  return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
+
 def walk_mop(u:UOp):
   if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD, Ops.BITCAST}: return walk_mop(u.src[0])
   if u.op is Ops.AFTER and (b:=walk_mop(u.src[0])) is not u.src[0]: return b.after(*u.src[1:])
@@ -130,6 +176,9 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
+  # transform precompiled value-producing calls into opaque CALLs (outputs become real buffers)
+  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
+
   # resolve calls with RETURNED inputs (inline the body)
   (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.has_unbound_outputs else None),
 

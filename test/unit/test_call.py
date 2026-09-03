@@ -343,7 +343,7 @@ class TestArgOrder(unittest.TestCase):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
     call = self.make_intersperse_call(x, precompile=True)[0].src[1]
     # the transform must preserve the RETURNED's src position: its placeholder is at src 1, the input stays at src 2
-    from tinygrad.tensor import transform_precompiled_call
+    from tinygrad.schedule.prepare import transform_precompiled_call
     new = transform_precompiled_call(call)
     new_call = new.src[0].src[1].src[1]
     # the out buffer takes the RETURNED's position (src 1), the input value keeps its position (src 2)
