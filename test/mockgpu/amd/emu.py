@@ -1323,7 +1323,8 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   vdst_reg = ctx.inst_field(type(inst).vdst)
   src0_r, src1_r = ctx.inst_field(type(inst).src0) - _c(256), ctx.inst_field(type(inst).src1) - _c(256)
   src2_r = ctx.inst_field(type(inst).src2)
-  src2_r = (src2_r >= 256).where(src2_r - _c(256), src2_r)
+  is_c_vgpr = src2_r >= _c(256)
+  src2_r = is_c_vgpr.where(src2_r - _c(256), src2_r)  # also keeps the unused VGPR-side index in bounds when src2 is a constant
   output_type = op_name.split("WMMA_", 1)[1].split("_", 1)[0]
   is_bf16, is_rdna4 = 'BF16' in op_name, isinstance(inst, ir4.VOP3P)
   cvt = _FUNCS['bf16_to_f32' if is_bf16 else 'f16_to_f32']
@@ -1353,12 +1354,15 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
     return n + lane_bit * 16, vgpr
 
   # Accumulator C. RDNA4 f16/bf16 packs two f32 accumulator VGPRs into one f16 VGPR; RDNA3 uses the lo half of each.
+  # src2 may be a VGPR or an inline/scalar constant (128 = int 0, the usual ", 0" C form); the runner must handle both dynamically
+  out_dt = dtypes.float32 if output_type == "F32" else dtypes.int32
+  cbits = ctx.rsrc_dyn(src2_r, None, 32)
+  cval_const = cvt(cbits & UOp.const(0xFFFF, dtypes.uint32)) if output_type in ("F16", "BF16") else cbits.bitcast(out_dt)
   if output_type in ("F16", "BF16"):
-    mat_c = [gval(src2_r, *((lane, vgpr // 2, vgpr % 2) if is_rdna4 else (lane, vgpr, 0)))
+    mat_c = [is_c_vgpr.where(gval(src2_r, *((lane, vgpr // 2, vgpr % 2) if is_rdna4 else (lane, vgpr, 0))), cval_const)
              for m in range(16) for n in range(16) for lane, vgpr in [d_map(m, n)]]
   else:
-    out_dt = dtypes.float32 if output_type == "F32" else dtypes.int32
-    mat_c = [ctx.rvgpr_dyn(src2_r + _c(vgpr), UOp.const(lane, dtypes.int)).bitcast(out_dt)
+    mat_c = [is_c_vgpr.where(ctx.rvgpr_dyn(src2_r + _c(vgpr), UOp.const(lane, dtypes.int)).bitcast(out_dt), cval_const)
              for m in range(16) for n in range(16) for lane, vgpr in [d_map(m, n)]]
   mat_d = [sum(mat_a[r*16+k] * mat_b[c*16+k] for k in range(16)) + mat_c[r*16+c] for r in range(16) for c in range(16)]
 

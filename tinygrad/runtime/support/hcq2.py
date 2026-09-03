@@ -210,7 +210,7 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
   submits += [_epilogue(ctx, dev) for dev in ctx.queues]
   fence = UOp.custom_function("hcq_fence", *[ctx.sched_timeline((dev,)) for dev in ctx.queues],
                               *[ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs])
-  merged = [m.replace(src=(*m.src, fence)) for m in _merge_queues(submits)]
+  merged = [m.after(fence) for m in _merge_queues(submits)]
   estimates = sum((estimate_uop(call) for call, _, _ in ctx.batch), start=Estimates()).simplify()
   return UOp.sink(*merged, arg=KernelInfo("hcq_submit", estimates=estimates), tag=1).call(aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns)))
 
@@ -237,7 +237,7 @@ class HWQueue:
   q_rewrite:PatternMatcher
 
   def __init__(self, ctx:EncodeCtx, submit:UOp):
-    self.ctx, self.lin, self.deps = ctx, submit.src[0], list(submit.src[1:])
+    self.ctx, self.lin = ctx, submit.src[0]
     self.devs, self.queue = self.lin.arg
     self.dev = Device[self.devs[0]]
     self.blob, self.patches = bytearray(), list[tuple[int, UOp]]()
@@ -296,7 +296,7 @@ def encode_submit(hq:HWQueue) -> UOp:
 
   links, runtime = partition(list(zip([o for o, _ in hq.patches], words)), lambda r: _is_link_patch(r[1]))
   hq.ctx.lt_patches.append(patch(buf, links, buf.store(UOp(Ops.BINARY, arg=bytes(hq.blob)).bitcast(buf.dtype))))
-  return hq.submit(patch(buf, runtime, *hq.deps).shrink(((0, stream),)))
+  return hq.submit(patch(buf, runtime).shrink(((0, stream),)))
 
 # *****************
 # 3.1. hcq special functions
@@ -320,7 +320,11 @@ def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp:
     base, off = unwrap_view(sig)
     last = (base.after(*last).index(off // sig.dtype.itemsize).store(0),)
   return last[0].barrier(*last[1:])
-pm_hcq_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name="f"), hcq_fence)])
+pm_hcq_encode = PatternMatcher([
+  (UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name="f"), hcq_fence),
+  (UPat(Ops.AFTER, src=(UPat(dtype=dtypes.void, name="root"),), allow_any_len=True, name="a"),
+    lambda root, a: root.substitute({s.buf_uop: s.buf_uop.after(*a.src[1:]) for s in root.toposort() if s.op is Ops.STORE}, walk=True)),
+])
 
 # *****************
 # 4. lower call
