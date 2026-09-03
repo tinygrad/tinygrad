@@ -189,11 +189,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   if op in GroupOp.Movement: return src[0].dtype
   raise RuntimeError(f"no dtype for {op} with arg {arg}")
 
-class _LegacyTupleValues:
-  """legacy compatibility shim: TUPLE is gone, a tuple-of-values just holds the values until they are called"""
-  def __init__(self, srcs:tuple[UOp, ...]): self.srcs = srcs
-  def call(self, *args:UOp, **kwargs) -> UOp: return UOp.call_outputs(self.srcs, *args, **kwargs)
-
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None, metadata:tuple[Metadata,...]|None=None):
@@ -556,12 +551,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def returned_outputs(self) -> tuple[UOp, ...]:
     """the outputs of a value-producing call: an AFTER on each RETURNED input, usable like a normal buffer"""
     return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.is_unbound)
-  # legacy compatibility: TUPLE/GETTUPLE are gone. a tuple of values called is call_outputs, gettuple is returned_outputs[i]
-  @staticmethod
-  def maketuple(*srcs:UOp) -> _LegacyTupleValues: return _LegacyTupleValues(srcs)
-  def gettuple(self, idx:int) -> UOp:
-    assert self.op is Ops.CALL and self.num_returned, f"gettuple requires a CALL with RETURNED outputs, got {self.op}"
-    return self.returned_outputs[idx]
   def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]), **kwargs)
@@ -1205,21 +1194,20 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)
 
   # opaque bodies are just CALLs; value-producing bodies become CALLs with unbound BUFFER placeholders as extra inputs
-  _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}
   def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
-    if self.op in UOp._OPAQUE_CALL_BODIES:
-      # the (possibly void) return dtype lives in the CallInfo; an external C call is a CALL on a CUSTOM_FUNCTION
-      # body holding the callee (a function pointer), rendered as an indirect call
-      return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux,
-                                                          ret_dtype if ret_dtype is not None else dtypes.void))
-    assert ret_dtype is None, "ret_dtype requires an opaque body, use a CUSTOM_FUNCTION body for external calls"
-    # value-producing bodies delegate to call_outputs with a single output
-    return UOp.call_outputs((self,), *srcs, grad_fxn=grad_fxn, name=name, precompile=precompile,
-                            precompile_backward=precompile_backward, aux=aux)
+    # non-opaque bodies are value graphs: they are wrapped in a SINK of stores into output PARAMs (call_outputs)
+    if self.op not in OPAQUE_CALL_BODIES:
+      assert ret_dtype is None, "ret_dtype requires an opaque body, use a CUSTOM_FUNCTION body for external calls"
+      return UOp.call_outputs((self,), *srcs, grad_fxn=grad_fxn, name=name, precompile=precompile,
+                              precompile_backward=precompile_backward, aux=aux)
+    # opaque bodies are plain CallInfo CALLs; the (possibly void) return dtype lives in the CallInfo.
+    # an external C call is a CALL on a CUSTOM_FUNCTION body holding the callee, rendered as an indirect call
+    return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux,
+                                                        ret_dtype if ret_dtype is not None else dtypes.void))
 
   @staticmethod
   def call_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
@@ -1299,6 +1287,9 @@ class ProgramInfo:
     return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size), tuple(local_size),
                        tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),
                        tuple(sorted(dedup(ins))), target)
+
+# the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), copies, and function references
+OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}
 
 @dataclass(frozen=True)
 class CallInfo:
