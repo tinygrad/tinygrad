@@ -26,7 +26,7 @@ from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, flatten, argsort, partition
+from tinygrad.helpers import all_same, all_int, flatten, argsort, partition, dedup
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -437,11 +437,8 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 def lines(sink:UOp) -> list[UOp]: return line_rewrite(linearize(sink), pm_linearize_cleanups)
 
 def lower_functions(ctx:Renderer, sink:UOp) -> list[UOp]:
-  fns: dict[UOp, UOp] = {}
-  for call in sink.toposort(): # entering toposort orders nested callees first
-    if call.op is not Ops.CALL or (fn:=call.src[0]).op is not Ops.SINK or fn in fns: continue
-    fns[fn] = UOp(Ops.LINEAR, src=tuple(lines(full_rewrite_to_sink(fn, ctx, optimize=False))))
-  return list(fns.values())
+  fns = dedup(call.src[0] for call in sink.toposort() if call.op is Ops.CALL and call.src[0].op is Ops.SINK)
+  return [UOp(Ops.LINEAR, src=tuple(lines(full_rewrite_to_sink(fn, ctx, optimize=False)))) for fn in fns]
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
