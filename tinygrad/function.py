@@ -53,7 +53,8 @@ class _function(Generic[ReturnType]):
       if kret.dtype is dtypes.void:
         return cast(ReturnType, (kret if kret.op is Ops.SINK else kret.sink()).replace(arg=KernelInfo(name=name)).call(*args))
 
-      out, reg = UOp.param(len(args), ret_dtype:=strong_dtype(kret.dtype)), UOp.placeholder((1,), ret_dtype, addrspace=AddrSpace.REG)
+      out = UOp.param(len(args), ret_dtype:=strong_dtype(kret.dtype), addrspace=AddrSpace.REG) # a pointer to the caller's register
+      reg = UOp.placeholder((1,), ret_dtype, addrspace=AddrSpace.REG)
       call = out.index(0).store(kret.cast(ret_dtype) if kret.dtype is not ret_dtype else kret).sink(arg=KernelInfo(name=name)).call(*args, reg)
       return cast(ReturnType, reg.after(call)[0].load())
 

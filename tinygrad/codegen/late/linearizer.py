@@ -1,13 +1,13 @@
 import heapq
 from typing import Any
 from collections import defaultdict
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str, gate_called_sink
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(sink.toposort(enter_calls=False))
+  lst = list(sink.toposort(gate_called_sink(sink)))
   out_degree:defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, tuple[int, int, Any]] = {}
 
@@ -59,7 +59,7 @@ class CFGContext:
     # everything is nested inside the sink
     deps: dict[UOp, dict[UOp, None]] = {}
     nesting: dict[UOp, UOp] = {}
-    for u in sink.toposort(enter_calls=False):
+    for u in sink.toposort(gate_called_sink(sink)):
       # get the deps from the src
       deps[u] = {}
       for s in u.src: deps[u] |= deps.get(s, {})

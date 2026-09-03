@@ -296,8 +296,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
-          # a CUSTOM_FUNCTION under a call is an operation over its srcs, not a body: always entered
-          for s in reversed(node.src if enter_calls or node.op is not Ops.CALL or node.src[0].op is Ops.CUSTOM_FUNCTION else node.src[1:]):
+          for s in reversed(node.src if enter_calls or node.op is not Ops.CALL else node.src[1:]):
             stack.append((s, False)) # push srcs on the stack
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
     return cache
@@ -1290,7 +1289,7 @@ class ProgramInfo:
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int] = [1, 1, 1]
-    for u in sink.toposort(enter_calls=False): # a called SINK is a function, not the kernel's own uops
+    for u in sink.toposort(gate_called_sink(sink)):
       if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
@@ -1804,6 +1803,7 @@ def gate_kernel_sink(x:UOp) -> bool:
   if x.op is Ops.LINEAR: return False
   if x.op is Ops.SINK and isinstance(x.arg, KernelInfo): return False
   return True
+def gate_called_sink(sink:UOp) -> Callable[[UOp], bool]: return lambda x: x is sink or x.op is not Ops.SINK
 
 def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()

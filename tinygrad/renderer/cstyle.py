@@ -156,12 +156,13 @@ class CStyleLanguage(Renderer):
 
   string_rewrite = base_rewrite
 
-  def render_signature(self, typedef:str, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]], extra_args=()) -> str:
-    buftypes = [(name, ("volatile " if u.arg.volatile else "")+(self.var_prefix if u.addrspace == AddrSpace.ALU else "")+
-                       self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable, shape=u._shape)+
-                       (self.var_suffix if u.addrspace == AddrSpace.ALU else self.buffer_suffix)) for name,(u,mutable) in bufs]
-    return f"{typedef} {function_name}(" + ', '.join([f'{t} {name}' for name,t in buftypes] + list(extra_args)) + ")"
-  def render_function(self, signature:str, body:list[str], tmp:str="") -> str: return signature + " {\n" + tmp + '\n'.join(body) + "\n}"
+  def render_function(self, typedef:str, fn:str, body:list[str], bufs:list[tuple[str,tuple[UOp,bool]]], extra_args=(), tmp="", kernel=False):
+    pre, suf = (self.var_prefix, self.var_suffix) if kernel else ("", "")
+    types = [("volatile " if u.arg.volatile else "") + (pre if u.addrspace == AddrSpace.ALU else "") +
+             self._render_dtype(u.dtype, addrspace=u.addrspace, mutable=m, override_ptr=u.addrspace == AddrSpace.REG, shape=u._shape) +
+             (suf if u.addrspace == AddrSpace.ALU else self.buffer_suffix) for _, (u, m) in bufs]
+    sig = f"{typedef} {fn}(" + ', '.join([f"{t} {n}" for t, (n, _) in zip(types, bufs)] + list(extra_args)) + ")"
+    return sig + ";", sig + " {\n" + tmp + '\n'.join(body) + "\n}"
 
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[UOp,bool]]], uops:list[UOp], prefix=None) -> str:
     tmp = ""
@@ -169,11 +170,10 @@ class CStyleLanguage(Renderer):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
-    fns = [self._render(list(u.src)) for u in uops if u.op is Ops.LINEAR]
-    sigs = [self.render_signature(self.function_typedef, name, fbufs) for name, _, fbufs in fns]
-    kernel_sig = self.render_signature(self.kernel_typedef.format(launch_bounds=launch_bounds), function_name, bufs, self.extra_args)
-    prg = self.render_function(kernel_sig, kernel, tmp)
-    return "\n".join((prefix or []) + [sig + ";" for sig in sigs] + [prg] + [self.render_function(sig, body) for sig, (_, body, _) in zip(sigs, fns)])
+    fns = [self.render_function(self.function_typedef, *self._render(list(u.src))) for u in uops if u.op is Ops.LINEAR]
+    kernel_typedef = self.kernel_typedef.format(launch_bounds=launch_bounds)
+    _, prg = self.render_function(kernel_typedef, function_name, kernel, bufs, self.extra_args, tmp, kernel=True)
+    return "\n".join((prefix or []) + [d for d, _ in fns] + [prg] + [f for _, f in fns]) # functions declared above the kernel, defined below it
 
   def render_index(self, x:UOp, buf:UOp, idx:UOp):
     if buf.addrspace == AddrSpace.ALU:
