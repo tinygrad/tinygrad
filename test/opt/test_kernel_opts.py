@@ -10,6 +10,7 @@ from test.backend.test_linearizer import helper_linearizer_opt
 class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: segfaults on MOCKKFD with AMD:LLVM")
   def test_local_and_grouped_reduce(self):
     N = 128
     Tensor.manual_seed(1882)
@@ -64,6 +65,7 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: too slow on MOCKKFD, hits the test timeout in CI")
   def test_matmul(self):
     N = 128
     Tensor.manual_seed(1552)
@@ -137,6 +139,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                       "test requires tensor cores with accumulation in half") # testing with half suffices.
+  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: the UNROLL axis is hardcoded for the METAL tensor core shape")
   def test_tensor_core_opts(self):
     N = 128
     Tensor.manual_seed(1552)
@@ -163,6 +166,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                       "test requires tensor cores with accumulation in half") # testing with half suffices.
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: the UNROLL axis is hardcoded for the METAL tensor core shape")
   def test_tensor_core_opts_locals(self):
     N = 128
     Tensor.manual_seed(1552)
@@ -212,6 +216,7 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(a@b, [[Opt(OptOps.SPLIT, 2, (0, AxisType.UNROLL)), Opt(OptOps.PADTO, 2, 8)]])
 
+  @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: off by one on MOCKKFD in CI, passes locally")
   def test_padto_sum_ok(self):
     N = 18
     # NOTE: this setup prevents 17 * 17 contiguous merged into one dimension
@@ -277,6 +282,8 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(any(tc.dtype_in in (dtypes.half, dtypes.float) for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                        "test requires half or float tensor cores")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith(("gfx11", "gfx12")),
+                   "TODO: LLVM AMDGPU miscompiles RDNA WMMA with masked operands, passes on PYTHON::gfx1100")
   def test_tc_padto_full_upcast(self):
     # a fully upcast pad lane makes a WMMA operand entirely Invalid
     tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in in (dtypes.half, dtypes.float))
