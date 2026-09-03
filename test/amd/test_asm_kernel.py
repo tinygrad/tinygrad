@@ -184,7 +184,7 @@ class TestAsmKernel(unittest.TestCase):
 
   def test_simple(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
-    a = Tensor.full((16, 16), 1.).contiguous().realize()
+    a = Tensor(np.full((16, 16), 1., dtype=np.float32)).realize()
     a = Tensor.custom_kernel(a, fxn=custom_add_one)[0]
     linear = compile_linear(a.schedule_linear())
     est = estimate_uop(linear.src[-1])
