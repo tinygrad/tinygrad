@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
 import functools, time, itertools, decimal, weakref, os, statistics
 from dataclasses import replace, dataclass, field
-from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ
+from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us
 from tinygrad.device import Device, Buffer, MultiBuffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
@@ -20,7 +20,7 @@ if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: rem
 
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
-HCQ_DEVS = frozenset(("AMD", "CPU"))
+HCQ_DEVS = frozenset(("AMD", "CPU")) if HCQ2 else frozenset()
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -108,16 +108,9 @@ def _get_enqueue_devs(call:UOp) -> Any|None:
   # cpu has no queue (yet)
   return devs if all_devices_in(devs, HCQ_DEVS) and not to_tuple(devs)[0].startswith("CPU") else None
 
-def copy_with_kernel(call:UOp, dst:UOp, src:UOp) -> UOp|None:
-  if (devs:=_get_enqueue_devs(call)) is None or Device[(dev:=to_tuple(devs)[0])].has_copy_queue: return None
-  d, s = (UOp.param(i, dst.dtype, n:=dst.max_numel(), device=devs) for i in range(2))
-  ast = d.index(r:=UOp.range(n, 0)).store(s.index(r).load()).end(r).sink(arg=KernelInfo(name="copy"), tag=1)
-  return call.replace(src=(to_program(ast, Device[dev].renderer), dst, src))
-
 pm_insert_copy_staging = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), stage_copy_ext),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), stage_copy),
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call"), copy_with_kernel)
 ])
 
 # *****************
