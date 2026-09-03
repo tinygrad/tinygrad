@@ -37,9 +37,6 @@ class Ops(FastEnum):
   # vector creation / item selection
   STACK = auto()
 
-  # RETURNED is a placeholder for a buffer a call writes and returns: it's an input to the call and you AFTER on it
-  RETURNED = auto()
-
   # hcq specific
   GETADDR = auto()
 
