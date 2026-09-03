@@ -2,7 +2,8 @@ import functools, time
 from dataclasses import replace
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, KernelInfo
+from tinygrad.dtype import dtypes, AddrSpace, strong_dtype
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
 
@@ -32,8 +33,10 @@ def renumber_invalid_outputs(uret:UOp) -> UOp:
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
   depth = 0
-  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool, precompile_backward:bool, allow_implicit:bool, grad_fxn:Callable|None):
+  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool, precompile_backward:bool, allow_implicit:bool, grad_fxn:Callable|None,
+               inline_in_kernel:bool=False):
     self.fxn = fxn
+    self.inline_in_kernel = inline_in_kernel
     self.precompile = precompile
     self.precompile_backward = precompile_backward
     self.allow_implicit = allow_implicit
@@ -41,7 +44,21 @@ class _function(Generic[ReturnType]):
 
   def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
 
+  def kernel_call(self, *args:UOp) -> UOp:
+    params = [UOp.param(i, strong_dtype(a.dtype), addrspace=AddrSpace.ALU) if a.addrspace is AddrSpace.ALU else a.param_like(i)
+              for i,a in enumerate(args)]
+    ret, name = cast(UOp, self.fxn(*params)), self.fxn.__name__
+    if ret.dtype is dtypes.void:
+      return (ret if ret.op is Ops.SINK else ret.sink()).replace(arg=KernelInfo(name=name)).call(*args)
+    dtype = strong_dtype(ret.dtype)
+    out, reg = UOp.param(len(args), dtype), UOp.placeholder((1,), dtype, addrspace=AddrSpace.REG)
+    call = out.index(0).store(ret.cast(dtype) if ret.dtype is not dtype else ret).sink(arg=KernelInfo(name=name)).call(*args, reg)
+    return reg.after(call)[0].load()
+
   def __call__(self, *args, **kwargs) -> ReturnType:
+    if self.inline_in_kernel:
+      if kwargs: raise TypeError("inline_in_kernel functions do not support keyword arguments")
+      return cast(ReturnType, self.kernel_call(*args))
     st = time.perf_counter()
 
     params = get_state_dict((args, kwargs), tensor_type=(Tensor, UOp)).values()
@@ -94,14 +111,14 @@ class _function(Generic[ReturnType]):
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload
 def function(fxn:Callable[..., ReturnType], *, precompile:bool=False, precompile_backward:bool=False,
-             allow_implicit:bool=False, grad_fxn:Callable|None=None) -> _function[ReturnType]: ...
+             allow_implicit:bool=False, grad_fxn:Callable|None=None, inline_in_kernel:bool=False) -> _function[ReturnType]: ...
 @overload
-def function(fxn:None=None, *, precompile:bool=False, precompile_backward:bool=False,
-             allow_implicit:bool=False, grad_fxn:Callable|None=None) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
+def function(fxn:None=None, *, precompile:bool=False, precompile_backward:bool=False, allow_implicit:bool=False, grad_fxn:Callable|None=None,
+             inline_in_kernel:bool=False) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
 def function(fxn=None, *, precompile:bool=False, precompile_backward:bool=False,
-             allow_implicit:bool=False, grad_fxn:Callable|None=None):
+             allow_implicit:bool=False, grad_fxn:Callable|None=None, inline_in_kernel:bool=False):
   if fxn is None:
     return lambda f: _function(f, precompile=precompile, precompile_backward=precompile_backward,
-                               allow_implicit=allow_implicit, grad_fxn=grad_fxn)
+                               allow_implicit=allow_implicit, grad_fxn=grad_fxn, inline_in_kernel=inline_in_kernel)
   return _function(fxn, precompile=precompile, precompile_backward=precompile_backward,
-                   allow_implicit=allow_implicit, grad_fxn=grad_fxn)
+                   allow_implicit=allow_implicit, grad_fxn=grad_fxn, inline_in_kernel=inline_in_kernel)

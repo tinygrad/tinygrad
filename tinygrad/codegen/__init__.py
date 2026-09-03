@@ -293,19 +293,7 @@ pm_implicit_barriers = PatternMatcher([
   (UPat(Ops.END, name="end"), add_war_barrier),
 ])
 
-def name_function(call:UOp, fn:UOp) -> UOp|None: # a called SINK is a function of the kernel: an unnamed one is named by its call or its content
-  if fn.arg is not None: return None
-  return call.replace(src=(fn.replace(arg=KernelInfo(name=call.arg.name or f"fn_{fn.key.hex()[:8]}")), *call.src[1:]))
-pm_functions = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="fn"),), allow_any_len=True, name="call"), name_function),
-  # a value a function returns inside a kernel lives in the caller's registers
-  (UPat(Ops.BUFFER, name="b"), lambda b: b.replace(arg=replace(b.arg, addrspace=AddrSpace.REG)) if b.is_unbound else None),
-  # a 0-d storage is its one element: a value function stores its result there
-  (UPat(Ops.STORE, src=(UPat((Ops.PARAM, Ops.BUFFER), name="b"), UPat(name="v"))), lambda b, v: b.index(0).store(v) if b._shape == () else None),
-])
-
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
-  ast = graph_rewrite(ast, pm_functions, name="functions")
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
@@ -457,7 +445,8 @@ def lower_functions(ctx:Renderer, sink:UOp, fns:dict[UOp, UOp]) -> None: # the f
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  lower_functions(ctx, sink, fns:={})
+  fns: dict[UOp, UOp] = {}
+  lower_functions(ctx, sink, fns)
   lst = list(fns.values()) + lines(sink)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
