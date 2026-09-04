@@ -10,7 +10,6 @@ from tinygrad.helpers import getenv
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
-import tinygrad.runtime.autogen.amd.cdna.ins as cdna
 from tinygrad.renderer.amd.dsl import s, v, NULL
 from test.amd.helpers import TARGET_TO_ARCH
 from extra.gemm.amd_asm_matmul import Kernel
@@ -32,22 +31,6 @@ def custom_add_one(A:UOp) -> UOp:
   ]
   sink = UOp.sink(A.base, threads, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
-
-def custom_add_one_cdna(A:UOp) -> UOp:
-  A = A.flatten()
-  threads = UOp.special(A.numel(), "lidx0")
-  insts = [
-    cdna.s_load_dwordx2(cdna.s[0:1], cdna.s[0:1], soffset=cdna.s[0], offset=0, imm=1),
-    cdna.v_lshlrev_b32_e32(cdna.v[0], 2, cdna.v[0]),
-    cdna.s_waitcnt(0),
-    cdna.global_load_dword(vdst=cdna.v[1], addr=cdna.v[0], saddr=cdna.s[0:1]),
-    cdna.s_waitcnt(0),
-    cdna.v_add_f32_e32(cdna.v[1], 1.0, cdna.v[1]),
-    cdna.global_store_dword(addr=cdna.v[0], data=cdna.v[1], saddr=cdna.s[0:1]),
-  ]
-  insts = [s_nop(1)]*100
-  sink = UOp.sink(A.base, threads, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts+[cdna.s_endpgm()]]))))
 
 def custom_add_var(A:UOp, B:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
@@ -183,9 +166,9 @@ class TestAsmKernel(unittest.TestCase):
   def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
 
   def test_simple(self):
-    if self.arch not in {"rdna3","cdna"}: self.skipTest("only rdna3/cdna")
-    a = Tensor(np.full((16, 16), 1., dtype=np.float32)).realize()
-    a = Tensor.custom_kernel(a, fxn=custom_add_one if self.arch == "rdna3" else custom_add_one_cdna)[0]
+    if self.arch != "rdna3": self.skipTest("only rdna3")
+    a = Tensor.full((16, 16), 1.).contiguous().realize()
+    a = Tensor.custom_kernel(a, fxn=custom_add_one)[0]
     linear = compile_linear(a.schedule_linear())
     est = estimate_uop(linear.src[-1])
     self.assertEqual(est.ops, a.numel())

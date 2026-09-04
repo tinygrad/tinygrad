@@ -249,8 +249,7 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
       if isinstance(e.name.ret, str): fmt.update(json.loads(e.name.ret[4:]) if e.name.ret.startswith("JSON") else {"metadata":e.name.ret})
       elif isinstance(e.name.ret, int): fmt["B/s"], fmt["B"] = int(e.name.ret/(dur*1e-6)), e.name.ret
       elif e.name.tb: fmt["tb"] = e.name.tb
-    fmt["ts"] = str(st)
-    events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), rel_ts(st, start_ts, f"'{name}' on {e.device}"),
+    events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), rel_ts(st,start_ts, f"'{name}' on {e.device}"),
                               dur, enum_str(json.dumps(fmt),scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 

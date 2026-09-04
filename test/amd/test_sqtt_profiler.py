@@ -34,11 +34,18 @@ def save_sqtt_blobs():
 def custom_asm_cdna(A:UOp):
   import tinygrad.runtime.autogen.amd.cdna.ins as cdna
   WAVE_SIZE = 64
-  t = UOp.special(WAVE_SIZE, "lidx0")
-  insts = []
   insts = [cdna.s_nop(0), cdna.s_nop(1), cdna.s_mov_b32(s[0], 10)]
-  insts += [cdna.s_endpgm()]
-  return UOp(Ops.PROGRAM, src=(UOp.sink(A, t, arg=KernelInfo("asm")), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS,arg=(x,dtypes.void)) for x in insts]))))
+  return custom_asm(A, insts+[cdna.s_endpgm()], WAVE_SIZE*2)
+
+def custom_asm_rdna(A:UOp):
+  import tinygrad.runtime.autogen.amd.rdna3.ins as rdna3
+  WAVE_SIZE = 32
+  insts = [rdna3.s_nop(0), rdna3.s_mov_b32(s[0], 10)]
+  return custom_asm(A, insts+[rdna3.s_endpgm()], WAVE_SIZE*2)
+
+def custom_asm(A, insts, num_threads) -> UOp:
+  return UOp(Ops.PROGRAM, src=(UOp.sink(A, UOp.special(num_threads, "lidx0"), arg=KernelInfo("asm")), \
+      UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS,arg=(x,dtypes.void)) for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "only runs on AMD")
 class TestSQTTProfiler(unittest.TestCase):
@@ -58,7 +65,7 @@ class TestSQTTProfiler(unittest.TestCase):
   def test_asm(self):
     t = Tensor.empty(1)
     with save_sqtt_blobs() as sqtt:
-      t.custom_kernel(fxn=custom_asm_cdna)[0].realize()
+      t.custom_kernel(fxn=custom_asm_cdna if self.arch == "cdna" else custom_asm_rdna)[0].realize()
     for event in sqtt:
       if not event.itrace: continue
       print(f"\n=== SE {event.se} ===")
