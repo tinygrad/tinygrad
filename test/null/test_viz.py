@@ -1073,10 +1073,11 @@ class TestCLI(unittest.TestCase):
       out = run_cli(*files, "-s", "NULL")
       aggregate = run_cli(*files, "-s", "NULL", "-t")
     self.assertEqual(len(out), 3*2)
-    # flops increases as N gets larger
+    # Operation count increases with N; FLOPS is a rate and also depends on the measured duration.
     gflops = [row["fmt"]["FLOPS"] for row in out]
-    self.assertGreater(gflops[4], gflops[2])
-    self.assertGreater(gflops[5], gflops[3])
+    flops = [rate * row["dur_ms"] * 1e-3 for rate, row in zip(gflops, out)]
+    self.assertGreater(flops[4], flops[2])
+    self.assertGreater(flops[5], flops[3])
     # aggregate flops
     self.assertEqual(len(aggregate), 2)
     agg_gflops = [row["fmt"]["FLOPS"] for row in aggregate]
