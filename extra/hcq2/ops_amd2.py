@@ -158,7 +158,7 @@ class AMDComputeQueue(HWQueue):
     ring, wptr, doorbell, put = _queue_args(self, q)
 
     size_dw = cmdbuf.max_numel() // 4
-    p = put.after(*self.deps).index(0).load()
+    p = put.index(0).load()
     i = UOp.range(size_dw, 10, dtype=dtypes.int, src=(cmdbuf,))
     copy = ring.index(((p + i.cast(p.dtype)) % q.ring.size).cast(dtypes.int)).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
     next_put = p + size_dw
@@ -210,7 +210,7 @@ class AMDSDMAQueue(HWQueue):
     ring, wptr, doorbell, put = _queue_args(self, q)
 
     rs, size_dw = q.ring.size, cmdbuf.max_numel() // 4
-    put_b = put.after(*self.deps).index(0).load()
+    put_b = put.index(0).load()
     tail = ((put_b % (rs * 4)) // 4).cast(dtypes.int)
     fits = (size_dw <= rs - tail).cast(dtypes.int)
     start_dw, zero_amt = fits * tail, (1 - fits) * (rs - tail)

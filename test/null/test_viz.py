@@ -509,10 +509,11 @@ class TestVizIntegration(unittest.TestCase):
     with save_viz() as viz:
       x.realize()
     lst = viz.list_items()
-    codegen_idx = len(lst)-1
+    # the codegen item is not the last one: the hcq compile and link groups come after it
+    codegen_idx = next((i for i,it in enumerate(lst) if any(s["name"] == "View Source" for s in it["steps"])), None)
+    assert codegen_idx is not None, "must have source rendering in list"
     steps = lst[codegen_idx]["steps"]
-    src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
-    assert src_idx is not None, "must have source rendering in list"
+    src_idx = next(i for i,s in enumerate(steps) if s["name"] == "View Source")
     src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
     self.assertEqual(src, src_render)
 

@@ -35,7 +35,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
       return arg_grads(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return arg_grads(k.arg.grad_fxn(on_dev(ctx, 0), k))
   # the RETURNED inputs are the call outputs: their positions in the args get the output gradients from the AFTER rule
-  assert fxn.op is Ops.SINK and k.num_returned, f"expected a CALL with RETURNED inputs or a grad_fxn, got {fxn.op}"
+  assert fxn.op is Ops.SINK and k.has_unbound_outputs, f"expected a CALL with unbound BUFFER outputs or a grad_fxn, got {fxn.op}"
   ret_pos = [i for i, a in enumerate(args) if a.unsharded_base.is_unbound]
   # the body stores the outputs into output PARAMs: the values are the stored values in slot order
   values = UOp.sink(*[st.src[1] for st in fxn.src if st.op is Ops.STORE])
@@ -50,15 +50,15 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   grads = compute_gradient(values, root_grad, set(params.values()))
   # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(values.src)} if k.arg.precompile else {}
-  fwd_outs = k.returned_outputs if k.arg.precompile else ()
+  fwd_outs = k.unbound_outputs if k.arg.precompile else ()
   # collect needed gradient bodies, compact unused params, create a single backward CALL
   grad_bodies = [(i, shaped_grad(grads[p], i)) for i in needed if (p:=params.get(i)) is not None and p in grads]
   bwd_body = UOp.sink(*[gb for _, gb in grad_bodies]).substitute(fwd_subs, walk=True)
   bwd_body = renumber_invalid_outputs(bwd_body)
   # NOTE: args includes the RETURNED inputs so the param slots above line up; they are unused and compacted away
   bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))
-  bwd_outs = UOp.call_outputs(bwd_body.src, *compact_args, name=(k.arg.name or "")+"_backward",
-                              precompile=k.arg.precompile_backward).returned_outputs
+  bwd_outs = UOp.call_with_outputs(bwd_body.src, *compact_args, name=(k.arg.name or "")+"_backward",
+                                   precompile=k.arg.precompile_backward)
   gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
   # align gradients with the original source positions: None at RETURNED positions, gradients elsewhere
   ret_set = set(ret_pos)
