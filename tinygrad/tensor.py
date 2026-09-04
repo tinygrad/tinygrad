@@ -36,17 +36,13 @@ def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_i
 def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
 def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
-def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
-  # copies to disk are replaced with the disk buffer
-  if on_disk(u) and u.tag is None:
-    ctx.buffer_map[u] = u.empty_like()
-    return u.rtag(())
+def creation_copy_is_realized(u:UOp):
   # all copies from disk/numpy are realized into a real buffer
   if is_creation_device(u.src[0]): return tag_uop(u)
 
 # CONTIGUOUS and AFTER + parents are the only nodes that get updated
 add_tags = PatternMatcher([
-  (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
+  (UPat(Ops.COPY, name="u"), creation_copy_is_realized),
   # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
@@ -546,7 +542,9 @@ class Tensor(RandMixin):
     """
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
-    ret = Tensor(self.uop.copy_to_device(device))
+    # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
+    if isinstance(device, str) and device.startswith("DISK"): ret = Tensor(self.uop.clone(device))
+    else: ret = Tensor(self.uop.copy_to_device(device))
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret.is_param_(self.is_param)
 
@@ -571,7 +569,9 @@ class Tensor(RandMixin):
     if not isinstance(self.device, str): raise RuntimeError("can't shard a multi-device tensor")
     if len(devices) == 1: return self.to(devices[0])
     devices = cast(tuple[str, ...], canonicalize_device(devices))
-    uop = self.uop.shard(devices, None if axis is None else self._resolve_dim(axis))
+    # a shard of a load from a creation device (disk/npy/python) wants the copy to persist, so it inserts a clone
+    src = self.uop.clone(devices) if is_creation_device(self.uop) else self.uop
+    uop = src.shard(devices, None if axis is None else self._resolve_dim(axis))
     return Tensor(uop).is_param_(self.is_param)
 
   def shard_(self, devices:tuple[str, ...], axis:int|None=None) -> Tensor:
@@ -699,8 +699,10 @@ class Tensor(RandMixin):
     realized = is_disk or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized()
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value
-      if v.uop.op is Ops.AFTER and any(s.op is Ops.STORE for s in v.uop.src[1:]): v = v._apply_uop(lambda x: x.src[1].src[1])
+      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value.
+      # the store is self-referential there (the computed value touches its target); clone stores are untouched
+      if v.uop.op is Ops.AFTER and len(v.uop.src) == 2 and (st:=v.uop.src[1]).op is Ops.STORE and \
+          st.src[0] in st.src[1].toposort(enter_calls=False): v = v._apply_uop(lambda x: st.src[1])
       self.replace(self._getitem(indices, v))
     elif advanced: # advanced setitem
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")
