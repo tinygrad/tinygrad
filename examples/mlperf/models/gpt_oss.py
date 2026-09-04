@@ -41,7 +41,7 @@ def _quant_dequant_bwd(grad:UOp, call:UOp) -> tuple:
 
 def quant_dequant_mx(x:Tensor) -> Tensor:
   fxn = _quant_dequant_fwd_fxn(x.as_param(0).uop, x.device)
-  return Tensor(fxn.uop.call(x.uop, grad_fxn=_quant_dequant_bwd).returned_outputs[0])
+  return Tensor(fxn.uop.call_with_output(x.uop, grad_fxn=_quant_dequant_bwd))
 
 def _mx_scale(e8:Tensor) -> Tensor:
   return _mx_block_scale(e8) if e8.ndim == 2 else _mx_block_scale_3d(e8)
@@ -58,8 +58,7 @@ def _dequant_bwd(grad:UOp, call:UOp) -> tuple:
 
 def dequant_weight(w_q:Tensor, w_scale:Tensor) -> Tensor:
   fxn = _dequant_fwd_fxn(w_q.as_param(0).uop, w_scale.as_param(1).uop, w_q.device)
-  call = fxn.uop.call(w_q.uop, w_scale.uop, grad_fxn=_dequant_bwd)
-  return Tensor(call.returned_outputs[0])
+  return Tensor(fxn.uop.call_with_output(w_q.uop, w_scale.uop, grad_fxn=_dequant_bwd))
 
 def matmul_mx(x:Tensor|tuple[Tensor, Tensor], w_q:Tensor, w_scale:Tensor) -> Tensor:
   if isinstance(x, tuple):

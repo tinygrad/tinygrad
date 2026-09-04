@@ -75,7 +75,7 @@ class LinearScanRegallocContext:
       for j,v in enumerate(vdefs):
         cons: list[tuple[Register,...]]|None = None
         if self.ren.is_two_address(u) and j == 0:
-          use_regs = [rs for s in u.src if (rs := live.get(rdef(s), None)) is not None]
+          use_regs = [rs for s in u.src if isinstance((vr := rdef(s)), VRegister) and (rs := live.get(vr, None)) is not None]
           if use_regs:
             pin, others = use_regs[0], {r for rs in use_regs[1:] for r in rs}
             cands = [b for b in v.candidates() if b != pin]
