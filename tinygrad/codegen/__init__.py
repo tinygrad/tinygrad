@@ -440,8 +440,6 @@ def do_regalloc(kctx:PreLinearKernelCtx, lst:list[UOp]) -> list[UOp]:
   lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
   lst = line_rewrite(lst, pm_index_subregisters)
   lst = line_rewrite(lst, pm_regalloc_rewrite, LinearScanRegallocContext(lst, kctx))
-  if kctx.stack_alloc_matcher is not None:
-    lst = line_rewrite(lst, kctx.stack_alloc_matcher, kctx)
   return line_rewrite(lst, kctx.ren.post_regalloc_matcher, kctx)
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
