@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
 import functools, time, itertools, decimal, weakref, os, statistics, ctypes, importlib
 from dataclasses import replace, dataclass, field
-from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2
+from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2, cpu_profile, mv_address
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us
 from tinygrad.device import Device, Buffer, MultiBuffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
@@ -20,7 +20,7 @@ if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: rem
 
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
-HCQ_DEVS = frozenset(("AMD", "CPU")) if HCQ2 else frozenset()
+HCQ_DEVS = frozenset(("QCOM", "CPU")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -41,7 +41,9 @@ def get_enqueue_devs(call:UOp) -> Any|None:
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
   devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
   # cpu has no queue (yet)
-  return devs if all_devices_in(devs, HCQ_DEVS) and not to_tuple(devs)[0].startswith("CPU") else None
+  if not all_devices_in(devs, HCQ_DEVS) or to_tuple(devs)[0].startswith("CPU"): return None
+  # a device without a copy queue leaves copies to its allocator
+  return devs if call.src[0].op is not Ops.COPY or Device[to_tuple(devs)[0]].has_copy_queue else None
 
 def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte offset)
   if v.op in (Ops.BITCAST, Ops.AFTER): return unwrap_view(v.src[0])
@@ -99,7 +101,8 @@ STAGING_SIZE, STAGING_SLOTS = (4 if os.getenv("CI") else 128) << 20, 2 # the sta
 @functools.cache
 def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
 
-def _need_staging(a, b): return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_DEVS)
+def _need_staging(a, b):
+  return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_DEVS) and Device[to_tuple(a.device)[0]].has_copy_queue
 
 def stage_copy_ext(call:UOp) -> UOp|None:
   if (d:=next((d for b in call.src[1:] for d in to_tuple(b.device) if not d.startswith("CPU")), None)) is None: return None
@@ -480,6 +483,7 @@ class HCQ2Compiled(Compiled):
   wait_timeout_ms: float = 30000.0
   rt_nbytes: int = 64 << 20 # the pool every per-linear buffer is carved out of
   pm_encode: PatternMatcher = PatternMatcher([]) # the backend's own encode rules, matched by its submit names
+  var_vals: dict[str, int] = {}
 
   def __init__(self, device:str, allocator:HCQAllocator, compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
     self.can_recover = can_recover
@@ -565,6 +569,10 @@ class HCQ2Buffer:
 class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
   def _as_buffer(self, buf:HCQBuffer) -> memoryview:
     return unwrap(buf.view).mv
+
+  def _copyout(self, dest:memoryview, src:HCQBuffer): # TODO: remove with memcpy on cpu worker?
+    self.dev.synchronize()
+    with cpu_profile(f"{self.dev.device} -> TINY", f"{self.dev.device}:COPY"): ctypes.memmove(mv_address(dest), src.cpu_view().addr, dest.nbytes)
 
   def _map(self, buf:HCQBuffer) -> HCQBuffer: # a mapping lives on the opaque, like hcq1: the lru hands the same one to many Buffers
     if self.dev not in buf.mapped_devs:

@@ -3,7 +3,7 @@ from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import HCQ2, Context, dedup, partition
+from tinygrad.helpers import Context, dedup, partition
 from tinygrad.uop.ops import Ops, UOp, KernelInfo
 from tinygrad.engine.realize import lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -31,7 +31,7 @@ def patch_words(batch:UOp) -> list[UOp]:
 def rt_params(batch:UOp) -> list[str]:
   return dedup([u.arg.name for w in patch_words(batch) for u in w.toposort() if u.op is Ops.PARAM and u.arg.addrspace is AddrSpace.GLOBAL])
 
-@unittest.skipUnless(HCQ2 and all_devices_in(Device.DEFAULT, HCQ_DEVS - {"CPU"}), "non-CPU hcq2 device required")
+@unittest.skipUnless(all_devices_in(Device.DEFAULT, HCQ_DEVS - {"CPU"}), "non-CPU hcq2 device required")
 class TestHCQ2Core(unittest.TestCase):
   def test_jit_has_no_rt_buffers(self):
     x = Tensor.ones(16).contiguous().realize()
@@ -124,6 +124,18 @@ class TestHCQ2Core(unittest.TestCase):
       return max(c.arg.aux.nargs for c in batches)
     self.assertEqual(nargs(2), nargs(12))
 
+  def test_device_state_survives_as_link_refs(self):
+    # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
+    dev, names = Device[Device.DEFAULT], {"AMD": ("scratch",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
+    @TinyJit
+    def f(a): return (a * 2 + 1).contiguous().realize()
+    x = Tensor.ones(16).contiguous().realize()
+    for _ in range(3): f(x)
+    call = f.captured.linear.src[0]
+    self.assertIs(call.op, Ops.AFTER, "the linked call sits after its refs")
+    refs = [u.buffer for u in call.src[1:] if u.op is Ops.BUFFER]
+    for n in names: self.assertTrue(any(r is getattr(dev, n) for r in refs), f"{n} is not a ref of the call")
+
 @unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
 class TestHCQ2FFI(unittest.TestCase):
   @staticmethod
@@ -150,17 +162,6 @@ class TestHCQ2FFI(unittest.TestCase):
     got = struct_t.from_buffer_copy(bytes(next(b for b in bufs if b.nbytes == ctypes.sizeof(struct_t))._buf.cpu_view()))
     self.assertEqual((got.u8, got.u16, got.u32, got.u64), (0x12, 0x3456, 0x789ABCDE, 0xFEDCBA9876543210))
 
-  def test_device_state_survives_as_link_refs(self):
-    # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
-    dev, names = Device[Device.DEFAULT], {"AMD": ("scratch",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
-    @TinyJit
-    def f(a): return (a * 2 + 1).contiguous().realize()
-    x = Tensor.ones(16).contiguous().realize()
-    for _ in range(3): f(x)
-    call = f.captured.linear.src[0]
-    self.assertIs(call.op, Ops.AFTER, "the linked call sits after its refs")
-    refs = [u.buffer for u in call.src[1:] if u.op is Ops.BUFFER]
-    for n in names: self.assertTrue(any(r is getattr(dev, n) for r in refs), f"{n} is not a ref of the call")
 
 if __name__ == "__main__":
   unittest.main()
