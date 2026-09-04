@@ -79,7 +79,7 @@ def cstruct(struct_t, **fields:UOp|int) -> UOp:
   flds = {n: (o, {1: dtypes.uchar, 2: dtypes.ushort, 4: dtypes.uint, 8: dtypes.ulong}[ctypes.sizeof(t)]) for n, t, o, *_ in struct_t._real_fields_}
   rows = [(flds[n][0], v.cast(flds[n][1]) if isinstance(v, UOp) else UOp.const(v, flds[n][1])) for n, v in fields.items()]
   buf = UOp.placeholder((ctypes.sizeof(struct_t),), dtypes.uint8, device=HCQ_RUNTIME_DEV.value, volatile=True, tag=struct_t.__name__)
-  return patch(buf, rows, buf.store(UOp(Ops.BINARY, arg=bytes(ctypes.sizeof(struct_t))).bitcast(buf.dtype)))
+  return patch(buf, rows, bytes(ctypes.sizeof(struct_t)))
 
 # *****************
 # 0.1. prep: replace buffers with params
@@ -279,7 +279,7 @@ def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp:
   # TODO: timeout?
   for i, dev in enumerate(ctx.devs):
     slots, off = unwrap_view(lasts[i])
-    slots = slots.after(slots.store(UOp(Ops.BINARY, arg=bytes(slots.max_numel() * slots.dtype.itemsize)).bitcast(slots.dtype))) # zeroed at link
+    slots = patch(slots, [], bytes(slots.max_numel() * slots.dtype.itemsize)) # zeroed at link
     done = timeline((dev,)).after(*last, loop:=UOp.loop(i)).index(0).load()
     waited = done.end(loop, done < slots.index(off // slots.dtype.itemsize).load())
     nxt = timeline_value((dev,)) + UOp.const(1, dtypes.uint64)
@@ -306,13 +306,13 @@ def addrs_to_table(ctx:EncodeCtx, g:UOp) -> UOp|None:
   slot = ctx.inputs.setdefault((base, to_tuple(g.arg)[0]), len(ctx.inputs))
   return ctx.table.index(slot).load() + UOp.const(off, dtypes.uint64)
 
-def _is_link_patch(w:UOp) -> bool: # known when the linear links: consts, addresses, and the placeholders' views and stores made only of those
+def _is_link_patch(w:UOp) -> bool:
   if w.op is Ops.GETADDR: return not _is_input_addr(w)
   if w.op is Ops.PARAM: return w.tag is not None
   if w.op in {Ops.LOAD, Ops.AFTER} or w.is_variable: return False
   return all(_is_link_patch(s) for s in w.src)
 
-def hoist_links(ctx:EncodeCtx, a:UOp) -> UOp|None: # a placeholder's link stores leave the body for the args, it stays after the rest
+def hoist_links(ctx:EncodeCtx, a:UOp) -> UOp|None:
   links, rest = partition(a.src[1:], lambda s: s.op is Ops.STORE and _is_link_patch(s))
   if not links: return None
   ctx.lt_patches.setdefault(unwrap_view(a.src[0])[0], []).extend(links)
@@ -325,15 +325,16 @@ pm_lower_body = PatternMatcher([
     lambda root, a: root.substitute({s.buf_uop: s.buf_uop.after(*a.src[1:]) for s in root.toposort() if s.op is Ops.STORE}, walk=True)),
 ])
 
-def patch(buf:UOp, rows:list[tuple[int, UOp]], *deps:UOp) -> UOp: # the buffer after every row's word is stored at its byte offset
-  groups:dict[tuple[DType, int, bool], list[tuple[int, UOp]]] = {} # link and run words never share a store
-  for o, w in rows: groups.setdefault((w.dtype, o % w.dtype.itemsize, _is_link_patch(w)), []).append((o, w))
+def patch(buf:UOp, rows:list[tuple[int, UOp]], blob:bytes|None=None) -> UOp:
+  groups:dict[tuple[DType, int, bool], list[tuple[int, UOp]]] = {} # split by: dtype, alignment, is_link (rt/lt can't share a store)
+  for offb, w in rows: groups.setdefault((w.dtype, offb % w.dtype.itemsize, _is_link_patch(w)), []).append((offb, w))
 
-  base, stores = buf.after(*deps), [] # the views hang off the buffer after its deps: the stores wait for them, the caller's after keeps the base flat
+  dep = [buf.store(UOp(Ops.BINARY, arg=blob).bitcast(buf.dtype))] if blob is not None else []
+  base, stores = buf.after(*dep), [] # keep buf.after to be sure that link applies patches after the blob
   for (dt, phase, _), grp in groups.items():
     view = base[phase:phase + (buf.max_numel() - phase) // dt.itemsize * dt.itemsize].bitcast(dt)
     stores.append(view.index(UOp.stack(*[UOp.const((o - phase) // dt.itemsize) for o, _ in grp])).store(UOp.stack(*[w for _, w in grp])))
-  return buf.after(*deps, *stores)
+  return buf.after(*dep, *stores)
 
 def encode_submit(hq:HWQueue) -> UOp:
   # applying the rewrite
@@ -348,8 +349,7 @@ def encode_submit(hq:HWQueue) -> UOp:
   buf = UOp.placeholder((len(hq.blob),), dtypes.uint8, device=hq.devs, tag=to_name("cmdbuf", hq.queue))
 
   words = UOp.sink(*[w for _, w in hq.patches]).substitute({l: buf[o:e] for l, (o, e) in views.items()}).src
-  return hq.submit(patch(buf, list(zip([o for o, _ in hq.patches], words)), buf.store(UOp(Ops.BINARY, arg=bytes(hq.blob)).bitcast(buf.dtype)))
-                   .shrink(((0, stream),)))
+  return hq.submit(patch(buf, list(zip([o for o, _ in hq.patches], words)), bytes(hq.blob)).shrink(((0, stream),)))
 
 # *****************
 # 4. lower call
@@ -376,10 +376,10 @@ def lower_call(call:UOp) -> UOp|None:
   vals = {a: a.replace(arg=replace(a.arg, slot=len(bufs) + names.index(a.arg.name))) for a in alus}
   # reenum ranges
   rngs = {r: r.replace(arg=(i,)+r.arg[1:]) for i, r in enumerate(sorted([u for u in tops if u.op is Ops.RANGE], key=lambda r: r.arg))}
-  # and sub all of them, entering the external calls: their callee is a function pointer loaded from one of the params
+  # and sub all of them
   sink = body.substitute(params | vals | rngs, enter_calls=True)
 
-  # the link-time patches are the args: a placeholder only they touch comes along (its address may be patched into another)
+  # move all lt-patches to the args
   patched = {b: b.after(*dedup(stores)) for b, stores in ctx.lt_patches.items()}
   args = [patched.get(b, b) for b in bufs] + [p for b, p in patched.items() if b not in bufs]
 
