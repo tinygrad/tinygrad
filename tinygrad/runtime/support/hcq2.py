@@ -315,7 +315,10 @@ def _is_link_patch(w:UOp) -> bool:
 def hoist_links(ctx:EncodeCtx, a:UOp) -> UOp|None:
   links, rest = partition(a.src[1:], lambda s: s.op is Ops.STORE and _is_link_patch(s))
   if not links: return None
-  ctx.lt_patches.setdefault(unwrap_view(a.src[0])[0], []).extend(links)
+  # nest the addr placeholders patches under their getaddr
+  ws = UOp.sink(*links)
+  sub = {g: g.replace(src=(g.src[0].after(*ctx.lt_patches[g.src[0]]),)) for g in ws.toposort() if g.op is Ops.GETADDR and g.src[0] in ctx.lt_patches}
+  ctx.lt_patches.setdefault(unwrap_view(a.src[0])[0], []).extend(ws.substitute(sub).src)
   return a.src[0].after(*rest)
 
 pm_lower_body = PatternMatcher([
@@ -381,7 +384,7 @@ def lower_call(call:UOp) -> UOp|None:
 
   # move all lt-patches to the args
   patched = {b: b.after(*dedup(stores)) for b, stores in ctx.lt_patches.items()}
-  args = [patched.get(b, b) for b in bufs] + [p for b, p in patched.items() if b not in bufs]
+  args = [patched.get(b, b) for b in bufs]
 
   if VIZ: graph_rewrite(UOp.sink(*args), PatternMatcher([]), name="View Link-Time Patches")
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Body")

@@ -111,9 +111,9 @@ class TestHCQ2Core(unittest.TestCase):
     self.assertTrue(any(n.startswith("inputs_") for c in jit for n in rt_params(c)), "the jit patches its input addresses in")
     self.assertFalse(any(n.startswith("inputs_") for c in eager for n in rt_params(c)), "eager bakes its input addresses")
 
-  def test_programs_are_args_not_body_params(self):
-    # a program is a link-time patched placeholder only the cmdbuf addresses: an arg of the call, never a param of the body
-    def counts(n):
+  def test_programs_are_not_call_args(self):
+    # a program is a link-time patch a cmdbuf word addresses: it rides inside that word, no arg or param of its own
+    def nargs(n):
       x = Tensor.ones(16).contiguous().realize()
       with encoded_batches() as batches:
         @TinyJit
@@ -121,11 +121,8 @@ class TestHCQ2Core(unittest.TestCase):
           for i in range(n): a = (a * (i + 1.5)).contiguous()
           return a.realize()
         for _ in range(3): f(x)
-      c = max(batches, key=lambda c: c.arg.aux.nargs)
-      return len([u for u in c.src[0].toposort() if u.op is Ops.PARAM and u.arg.addrspace is AddrSpace.GLOBAL]), c.arg.aux.nargs
-    (params2, args2), (params12, args12) = counts(2), counts(12)
-    self.assertEqual(params2, params12, "the body takes no pointer per program")
-    self.assertEqual(args12 - args2, 10, "each program is one more arg")
+      return max(c.arg.aux.nargs for c in batches)
+    self.assertEqual(nargs(2), nargs(12))
 
 @unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
 class TestHCQ2FFI(unittest.TestCase):
