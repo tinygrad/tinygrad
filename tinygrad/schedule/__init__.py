@@ -30,14 +30,14 @@ def create_schedule(sched_sink:UOp) -> UOp:
     # build kernel dependency graph: edges from producer kernel to consumer kernels
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
-    writes: dict[UOp, list[tuple[UOp, UOp, tuple[UOp, ...]]]] = {}  # buffer -> (AFTER, prior state, new kernels)
+    writes: dict[UOp, list[tuple[UOp, tuple[UOp, ...]]]] = {}  # superseded state -> (AFTER, new kernels)
     reads: list[tuple[UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read)
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       kernels, after_deps = _split_after(u)
       prev_state = _unwrap_src(u.src[0])
       prev_kernels = set(_split_after(prev_state)[0]) if prev_state.op is Ops.AFTER else set()
-      writes.setdefault(u.buf_uop, []).append((u, prev_state, tuple(k for k in kernels if k not in prev_kernels)))
+      writes.setdefault(prev_state, []).append((u, tuple(k for k in kernels if k not in prev_kernels)))
       for k in kernels:
         in_degree.setdefault(k, 0)
         if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
@@ -53,8 +53,8 @@ def create_schedule(sched_sink:UOp) -> UOp:
     # WAR deps: a kernel reading buffer state S must run before another write that supersedes S. an AFTER only
     # supersedes its immediate prior state; join members already present in that prior state are ordering deps, not writes
     for u, k, s in reads:
-      for a, prev_state, write_kernels in writes.get(s.buf_uop, []):
-        if a is u or prev_state is not s: continue
+      for a, write_kernels in writes.get(s, []):
+        if a is u: continue
         for t in write_kernels:
           if t is not k and t not in k.backward_slice:
             children.setdefault(k, []).append(t)
