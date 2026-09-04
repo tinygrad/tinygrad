@@ -128,9 +128,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   replacements = {}
   for (op,buf,base,valid,ld_arg),offsets in memory.items():
     # allowed lengths (copied in)
-    lengths = []
-    must_divide = True
-    sz, dword_align = buf.dtype.itemsize, 1
+    lengths, must_divide, sz, dword_align = [], True, buf.dtype.itemsize, 1
     if ctx is not None and ctx.target.device == "DSP":
       lengths = [128,64,32,16,8,4]
       must_divide = False

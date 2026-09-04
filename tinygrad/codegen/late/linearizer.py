@@ -20,8 +20,7 @@ def linearize(sink:UOp, ins_schedule:dict[Any, Ops]|None=None) -> list[UOp]:
     run_count = prod([int(r.vmax)+1 for r in u.ranges])
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
-    extra = None
-    effective_op = ins_schedule.get(u.arg[0], u.op) if ins_schedule is not None and u.op is Ops.INS else u.op
+    extra, effective_op = None, ins_schedule.get(u.arg[0], u.op) if ins_schedule is not None and u.op is Ops.INS else u.op
     if effective_op is Ops.PARAM and u.op is Ops.INS: effective_op = Ops.INS # cant recover ParamArg
     match effective_op:
       # the order and placement of these defines is important

@@ -1,6 +1,5 @@
 # dsl.py - clean DSL for AMD assembly
 from typing import Any
-from tinygrad.dtype import ConstFloat
 
 # ══════════════════════════════════════════════════════════════
 # Registers - unified src encoding space (0-511)
@@ -330,7 +329,7 @@ class Inst:
     for name, field in self._fields:
       val = vals[name]
       if isinstance(field, SrcField) and val is not None and _needs_literal(val):
-        literal_val = _f32(val) if isinstance(val, (float, ConstFloat)) else val & 0xFFFFFFFF
+        literal_val = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
     if literal_val is not None and 'literal' in vals:
       vals['literal'] = literal_val
     # Set all field values
