@@ -11,7 +11,7 @@ from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, HCQ2Compiled, all_devices_in, hcq_compile_cache, link_linear_cache
-from test.helpers import call_is_hcq
+from test.helpers import call_is_hcq, needs_second_gpu
 
 @contextlib.contextmanager
 def rt_views():
@@ -34,6 +34,11 @@ def encoded_batches():
 def eager_chain(x:Tensor, n:int=64) -> Tensor: # at hcq_compile's use_rt bound: an eager linear this big bakes its inputs and borrows ring slots
   for _ in range(n): x = (x + 1).contiguous()
   return x.realize()
+
+@contextlib.contextmanager
+def submit_linears():
+  lins, orig = [], hcq2.HWQueue.__init__
+  with patch.object(hcq2.HWQueue, "__init__", lambda self, ctx, submit: (lins.append(submit.src[0]), orig(self, ctx, submit))[1]): yield lins
 
 def patch_words(batch:UOp) -> list[UOp]:
   return [w for s in batch.src[0].toposort() if s.op is Ops.STORE and s.src[0].op is Ops.INDEX and s.src[0].src[1].op is Ops.STACK
