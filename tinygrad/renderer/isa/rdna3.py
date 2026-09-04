@@ -588,6 +588,7 @@ class RDNA3Renderer(ISARenderer):
                                             Ops.CMPEQ, Ops.CMPNE, Ops.XOR, Ops.SHR, Ops.SHL, Ops.MAX, Ops.MULACC)}
   kernel_ctx_type = RDNA3PreLinearKernelCtx
   def __init__(self, target:Target):
+    if target.arch.split(",")[0] != "gfx1100": raise RuntimeError(f"RDNA3Renderer only supports gfx1100, got {target.arch}")
     super().__init__(target)
     from tinygrad.renderer.tc import get_amd
     self.shared_max, self.tensor_cores = HIPRenderer.shared_max, get_amd(target.arch)
