@@ -69,6 +69,7 @@ def gep(u:UOp, i:int) -> UOp: return u.bitcast(dtypes.uint32).index(UOp.cconst(i
 def const_val(x:UOp):
   strong = x.dtype
   while x.op is not Ops.CONST: x = x.src[0]
+  # TODO: should probably be handled in dsl
   if isinstance(x.val, ConstFloat) and strong is dtypes.half: return struct.unpack('H', struct.pack('e', x.val))[0]
   return x.val
 def is_const(x:UOp) -> bool: return is_const(x.src[0]) if x.op in {Ops.CAST, Ops.BITCAST, Ops.AFTER} else x.op is Ops.CONST
@@ -525,17 +526,6 @@ def encode(x:UOp):
     case _: raise NotImplementedError(f"instruction type encoding unsupported, ins group={group}, opcode={x.arg[0].args[0].name.lower()}")
   return x.replace(arg=(x.arg[0](**fields), x.dtype))
 
-class CntType(Enum):
-  DS_CNT = auto(); LOAD_CNT = auto(); STORE_CNT = auto()
-
-  @staticmethod
-  def get(u:UOp):
-    op = u.arg[0]
-    if op.func in { RDNA3Ops.GLOBAL, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH }:
-      return CntType.STORE_CNT if u.dtype is dtypes.void else CntType.LOAD_CNT
-    if op.func in { RDNA3Ops.SMEM, RDNA3Ops.DS }: return CntType.DS_CNT
-    return None
-
 class RDNA3PreLinearKernelCtx(PreLinearKernelCtx):
   def __init__(self, sink:UOp, ren:RDNA3Renderer, info:ProgramInfo):
     super().__init__(sink, ren, info)
@@ -657,7 +647,8 @@ class RDNA3Renderer(ISARenderer):
       if ((is_barrier or is_backedge) and (deps or pending_store)) or (is_use and deps):
         nuops.append(waitcnt()); deps.clear()
 
-      if (tp := CntType.get(u)) is not None and tp in [CntType.DS_CNT, CntType.LOAD_CNT]:
+      ms = {RDNA3Ops.SMEM, RDNA3Ops.DS, RDNA3Ops.GLOBAL, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH}
+      if u.arg[0].func in ms and u.arg[1] is not dtypes.void:
         deps.update([r for r in rdefs(u) if isinstance(r, Register)])
       nuops.append(u)
 
