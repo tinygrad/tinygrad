@@ -468,7 +468,7 @@ def hcq_link(linear:UOp, cache=True) -> UOp:
   if (linked:=link_linear_cache.get(linear)) is not None: return linked
   bufferized = graph_rewrite(linear, pm_bufferize_placeholders, ctx=cache, name="bufferize")
   linked = graph_rewrite(bufferized, pm_link, ctx=(refs:=list[UOp]()), bottom_up=False, name="link")
-  if refs: linked = linked.replace(src=(linked.src[0].after(*dedup(refs)), *linked.src[1:])) # the addressed buffers live as long as the call
+  if refs: linked = linked.replace(src=(linked.src[0].after(*dedup(refs)), *linked.src[1:])) # attach refs to linear
   if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked
 
