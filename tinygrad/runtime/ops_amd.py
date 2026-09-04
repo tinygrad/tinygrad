@@ -684,23 +684,22 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
       q.write(dev.iface.sys_buf.offset(0x800, 8), seq + 1, b64=True)
     q.signal(ts, dev.next_timeline()).submit(dev)
 
-    # stream the chunks: stage the wire image [payload][sentinel], arm the window, send. A window is reusable once
-    # its previous occupant (seq-2) is both fully sent (tag reaped) and fully drained to VRAM (the fence).
-    inflight = [None, None]
+    # Stage the next window while USB sends the previous one. F2 configures a single engine shared by both windows.
+    inflight = None
     for c in range(nchunks):
       seq, size = self._usb_seq + c, min(CHUNK, src.nbytes - c * CHUNK)
-      if inflight[seq & 1] is not None: usb.usb.bulk_wait(inflight[seq & 1])
       buf = self._usb_stage[seq & 1][1]
       buf[:size] = src_mv[c * CHUNK : c * CHUNK + size]
       wire = round_up(size + 4, 512)  # payload plus the sentinel, padded to 512B sectors (full window for max chunks)
       struct.pack_into('<I', buf, wire - 4, 0x51000000 | (seq & 0xFFFFFF))  # the sentinel is the last dword of the wire
+      if inflight is not None: usb.usb.bulk_wait(inflight)
+      # Rearming F2 recycles the slots immediately, before bulk data arrives. Drain seq-2 before the arm itself.
+      # The first two windows are already drained by the previous synchronous copyin.
+      if c >= 2: wait_drain(seq - 1)
       arm_tag = usb.usb.control_write_async(0xF2, wire // 512, (seq & 1) * 16 | (ceildiv(wire, 0x4000) << 8))  # wValue=sectors, wIndex=slot|count
-      rd_tag, rd_mv = usb.usb.control_read_async(0xE4, 8, value=FENCE)  # arm and fence read fly in one round-trip window
       usb.usb.bulk_wait(arm_tag)
-      usb.usb.bulk_wait(rd_tag)
-      if int.from_bytes(rd_mv, 'little') < seq - 1: wait_drain(seq - 1)  # rare: the drain lagged; spin on fresh reads
-      inflight[seq & 1] = usb.usb.bulk_write_async(buf[:wire])
-    for tag in inflight: usb.usb.bulk_wait(tag)
+      inflight = usb.usb.bulk_write_async(buf[:wire])
+    if inflight is not None: usb.usb.bulk_wait(inflight)
     self._usb_seq += nchunks
     wait_drain(self._usb_seq)  # copyin is synchronous: everything must be in VRAM before returning
 

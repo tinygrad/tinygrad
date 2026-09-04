@@ -34,5 +34,22 @@ class TestDevCopySpeeds(unittest.TestCase):
     np.testing.assert_equal(t.numpy(), y.numpy())
     del x, y, t
 
+  def testCopyinRingWrap(self):
+    rng = np.random.default_rng(0)
+    a = rng.integers(0, 256, 1 << 20, dtype=np.uint8)
+    np.testing.assert_array_equal(a, Tensor(a, device="AMD").numpy())
+    ring = self.dev.sdma_queue(0)
+    for _ in range(3):
+      # Leave enough NOP padding to delay SDMA until both SRAM windows have received USB data.
+      target = ring.ring.nbytes - 0xe700
+      padding = target - ring.put_value % ring.ring.nbytes - 16  # four-dword timeline fence
+      self.assertGreaterEqual(padding, 0)
+      q = self.dev.hw_copy_queue_t()
+      q.q(*([0] * (padding // 4)))
+      q.signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+      self.dev.synchronize()
+      a = rng.integers(0, 256, 256 << 20, dtype=np.uint8)
+      np.testing.assert_array_equal(a, Tensor(a, device="AMD").numpy())
+
 if __name__ == "__main__":
   unittest.main()
