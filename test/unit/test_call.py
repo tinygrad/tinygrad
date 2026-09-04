@@ -144,6 +144,33 @@ class TestCallShape(unittest.TestCase):
     self.assertEqual(shape[0], sz.bind(5))
 
 class TestCallSchedule(unittest.TestCase):
+  def test_precompile_slice_assign(self):
+    @function(precompile=True)
+    def f(x:Tensor) -> Tensor: return x * 2 + 1
+    a = Tensor.arange(8).float().realize()
+    cache = Tensor.zeros(16)
+    # the output must land at the slice offset, not at the start of the base buffer
+    cache[4:12].assign(f(a)).realize()
+    np.testing.assert_equal(cache.numpy(), np.concatenate([np.zeros(4), np.arange(8)*2+1, np.zeros(4)]).astype(np.float32))
+
+  def test_precompile_slice_assign_2d(self):
+    @function(precompile=True)
+    def f(x:Tensor) -> Tensor: return x + 1
+    a = Tensor.arange(8).reshape(2, 4).float().realize()
+    big = Tensor.zeros(4, 8)
+    big[1:3, 2:6].assign(f(a)).realize()
+    ref = np.zeros((4, 8), dtype=np.float32)
+    ref[1:3, 2:6] = np.arange(8).reshape(2, 4) + 1
+    np.testing.assert_equal(big.numpy(), ref)
+
+  def test_precompile_full_buffer_assign(self):
+    @function(precompile=True)
+    def f(x:Tensor) -> Tensor: return x * 2 + 1
+    a = Tensor.arange(8).float().realize()
+    cache = Tensor.zeros(8).realize()
+    cache.assign(f(a)).realize()
+    np.testing.assert_equal(cache.numpy(), np.arange(8)*2+1)
+
   def test_reshape_precompile(self):
     a = Tensor.empty(4, 8).realize()
     a = a.reshape(4,4,2).assign(Tensor.empty(4,4,2)).reshape(8,4)

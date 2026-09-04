@@ -3,7 +3,7 @@ from typing import cast, Iterator, Any, Sequence
 import weakref, decimal, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, HCQ2, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.renderer import Estimates, Renderer
@@ -194,10 +194,11 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   if (info:=call.arg.aux).inputs:
     addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(dev).va_addr for u, dev in info.inputs]
     cast(Buffer, call.src[1 + info.table].buffer)._buf.cpu_view().view(fmt='Q')[:] = array.array('Q', addrs)
-  ets = exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,)) # the body runs on the runtime device, it drives every device's queues
+  ctx = replace(ctx, var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
+  ets = exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,))
   if not (ctx.wait or PROFILE): return ets
 
-  slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots} # the batch's timestamps live in its slots
+  slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
   def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:
     (d:=cast(Any, Device[device])).prof_ents[(slots[device], prof[0])] = ProfileGraphEntry(device, name, prof[0], prof[1], profile_key)
     if not ctx.wait: return None
@@ -279,16 +280,16 @@ def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:li
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = lower_and_compile(linear)
-  if HCQ2: linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
+  linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
   return linear
 
-def link_linear(linear:UOp, cache=True) -> UOp: return hcq_link(linear, cache=cache) if HCQ2 else linear
+def link_linear(linear:UOp, cache=True) -> UOp: return hcq_link(linear, cache=cache)
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   inputs = list(input_uops)
   if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs), cache=False) # a one-shot link
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
-  for call in linear.src: track_stats(ctx, call, perf_counter_us(), pm_exec.rewrite(call, ctx))
+  for call in linear.src: track_stats(ctx, call.without_after, perf_counter_us(), pm_exec.rewrite(call.without_after, ctx))
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
@@ -299,4 +300,4 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
       else:
         from tinygrad.tensor import Tensor
         with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
-    yield max(et for c in linear.src for et in pm_exec.rewrite(c, ctx) or [0.0])
+    yield max(pm_exec.rewrite(linear.src[0].without_after, ctx) or [0.0])

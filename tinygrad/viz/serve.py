@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, codecs, io, struct, re, traceback, itertools
-import socketserver
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, socket, argparse, codecs, io, struct, re, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from dataclasses import dataclass, field
@@ -370,7 +369,7 @@ wave_colors = {"WMMA": "#1F7857", **{x:"#ffffc0" for x in ["VALU", "VINTERP"]}, 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, None, None]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
-                                          WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND, WAVERDY)
+                                          CDNA_ISSUE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND, WAVERDY)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
@@ -381,8 +380,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   def add(name:str, p:PacketType, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name.replace('_ALT', '')}"
     if (simd:=getattr(p, "simd", None)) is not None: row += f" SIMD:{simd}"
-    # by default we extend the packet to one cycle after timestamp
-    start_time, end_time = p._time, p._time+1
+    # extend packets to the architectural instruction issue interval
+    start_time, end_time = p._time, p._time+(4 if target.startswith("gfx9") else 1)
     # exec links to dispatch, dispatch links to PC
     link:dict|None = {"pc":info.pc} if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
@@ -430,7 +429,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4, InstOpCDNA)) else f"0x{p.op:02x}"
       yield from add(name, p, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
-    if isinstance(p, IMMEDIATE_MASK): yield from add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
+    if isinstance(p, (IMMEDIATE_MASK, CDNA_ISSUE)): yield from add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, WAVERDY):
       for wave in range(16):
         if p.mask & (1 << wave):
@@ -729,7 +728,6 @@ if __name__ == "__main__":
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"), flush=True)
-  if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}")
   try: server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")
