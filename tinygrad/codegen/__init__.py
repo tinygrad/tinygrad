@@ -458,13 +458,12 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
     sink = graph_rewrite(sink, pm_prepare_regalloc, ctx=kctx, name="prepare regalloc")
 
   # linearize graph
-  lst = line_rewrite(linearize(sink, None), pm_linearize_cleanups)
+  lst = line_rewrite(linearize(sink, kctx.ins_schedule if kctx is not None else None), pm_linearize_cleanups)
 
-  # isa renderers need to allocate registers
+  # regalloc
   if isinstance(ctx, ISARenderer) and kctx is not None:
     lst = do_regalloc(kctx, lst)
     if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
-  # NOTE: is this the only way to safely pass spill size to renderer finalization safely with parallel compilation?
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst),),))
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
