@@ -614,7 +614,7 @@ class TestSchedule(unittest.TestCase):
 
       with Context(IMAGE=1):
         got = cnt()
-        if got != 6: raise KernelCountException(6, got)
+        if got != 5: raise KernelCountException(5, got)
 
   def test_image_f16_residual_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
@@ -1341,8 +1341,9 @@ class TestSchedule(unittest.TestCase):
       x = x.image_conv2d(w2, b2) + base
       x = x.image_conv2d(w3, b3)
 
-      # Intermediate CONTIGUOUS nodes remain scheduler hints instead of persistent stores.
-      check_schedule(x, 8)
+      # NOOP, 3 convs, contiguous
+      #check_schedule(x, 5)
+      check_schedule(x, 7)
 
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)

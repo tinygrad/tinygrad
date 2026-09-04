@@ -240,7 +240,8 @@ class Tensor(RandMixin):
     becomes_map = {u: graph_rewrite(u.src[0], pm_drop_after).shrink_to(u.shape)
                    for u in sink.toposort(enter_calls=False)
                    if u.op is Ops.AFTER and not u.is_bound_var and not u.src[0].unsharded_base.is_unbound}
-    return prepare_call_views(transform_to_call(prepare_to_call(sink))), becomes_map
+    held = tuple(t.uop for ref in list(all_tensors) if (t:=ref()) is not None)
+    return prepare_call_views(transform_to_call(prepare_to_call(sink, held))), becomes_map
 
   def callify(self, *lst:Tensor) -> Tensor:
     big_sink, becomes_map = self._materialize(*lst)

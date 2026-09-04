@@ -40,10 +40,28 @@ class TestAssign(unittest.TestCase):
   def test_assign_copy(self):
     a = Tensor([1.,2,3], device="PYTHON")
     c = Tensor.empty(3).assign(a.to(None))
-    # The creation copy owns storage; assign copies that value into the destination.
+    # it should copy into the empty buffer
     GlobalCounters.reset()
     c.realize()
-    assert_kernel_count(2)
+    assert_kernel_count(1)
+
+  def test_assign_temporary_copy_reshape(self):
+    a = Tensor([[1., 2], [3, 4]], device="PYTHON")
+    c = Tensor.empty(2, 2).assign(a.to(None))
+    GlobalCounters.reset()
+    c.realize()
+    assert_kernel_count(1)
+    self.assertEqual(c.tolist(), [[1., 2], [3, 4]])
+
+  def test_assign_copy_retained_uses(self):
+    for use in (lambda x: x.reshape(1, 3), lambda x: x + 1):
+      with self.subTest(use=use):
+        x = Tensor([1., 2, 3], device="PYTHON").to(None)
+        retained = use(x)
+        dest = Tensor.empty(3).assign(x)
+        del x
+        dest.realize().assign(0).realize()
+        self.assertEqual(retained.tolist(), [[1., 2, 3]] if retained.ndim == 2 else [2., 3, 4])
 
   def test_assign_slice(self):
     X = Tensor([1,2,3,4]).realize()
@@ -619,7 +637,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    assert_kernel_count(4)  # two persistent creation copies and two assignments
+    assert_kernel_count(2)  # TODO: first copy is dead, could be 1
     self.assertEqual(base.tolist(), [1,4,3])
 
   def test_nested_after_contiguous_store_no_init(self):
@@ -629,7 +647,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    assert_kernel_count(2)  # persistent creation copy and assignment
+    assert_kernel_count(1)
     self.assertEqual(base.tolist(), [1,4,3])
 
 class TestAssignOrdering(unittest.TestCase):

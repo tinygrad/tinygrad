@@ -114,7 +114,25 @@ def prepare_call_views(call:UOp) -> UOp:
     args.append(view.substitute({u: call.src[1+u.arg.slot] for u in view.toposort() if u.op is Ops.PARAM and u.arg.slot >= 0}))
   return call.replace(src=(body.substitute(subs, walk=True), *args))
 
-def prepare_to_call(sink:UOp) -> UOp:
+def prepare_to_call(sink:UOp, held:tuple[UOp, ...]=()) -> UOp:
+  # A copy used only to initialize another buffer can write directly into that destination.
+  # Include live Tensor graphs so retained copies and aliases keep their independent storage.
+  users:dict[UOp, set[UOp]] = {}
+  for u in UOp.sink(sink, *held).toposort(enter_calls=False):
+    for src in u.src: users.setdefault(src, set()).add(u)
+  subs = {}
+  for u in sink.toposort(enter_calls=False):
+    if u.op is not Ops.AFTER or len(u.src) != 2: continue
+    buf, st = u.src
+    if st.op is not Ops.STORE or len(st.src) != 2 or st.src[0] is not buf or st.src[1].op is not Ops.COPY: continue
+    if len(consumers:=users.get(u, set())) != 1: continue
+    consumer = next(iter(consumers))
+    if consumer.op is not Ops.STORE or consumer.src[1] is not u: continue
+    if users.get(buf) != {u, st}: continue
+    while buf.op is Ops.RESHAPE and users.get(buf.src[0]) == {buf}: buf = buf.src[0]
+    if buf.op is not Ops.BUFFER or buf.is_unbound or buf.buffer.is_allocated(): continue
+    subs[u] = st.src[1]
+  sink = sink.substitute(subs, walk=True)
   sink = graph_rewrite(sink, pm_resolve_call_outputs, bottom_up=True, name="resolve call outputs")
   return UOp.sink(*[u for u in sink.toposort(enter_calls=False)
                    if u.op is Ops.AFTER and not u.is_bound_var and not u.src[0].unsharded_base.is_unbound])
@@ -135,6 +153,8 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
   ctx[x] = after
 
 # *** fold moved AFTERs (hack for openpilot) ***
+# These temporary stores exist only in the schedule; they do not persist Tensor intermediates.
+pm_contiguous_to_store = PatternMatcher([(UPat(Ops.CONTIGUOUS, name="c"), lambda c: c.clone())])
 pm_fold_moved_after = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src")))), name="after"), found_after),
   # replace ALU sources with AFTER versions found above
@@ -330,7 +350,9 @@ def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
   tsink = graph_rewrite(sink, pm_resolve_call_outputs, bottom_up=True, name="resolve call outputs")
   tsink = graph_rewrite(tsink, multi_pm, name="multi_pm")
-  if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
+  if OPENPILOT_HACKS:
+    tsink = graph_rewrite(tsink, pm_contiguous_to_store, bottom_up=True, name="materialize contiguous")
+    tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
   return tsink
