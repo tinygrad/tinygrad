@@ -632,18 +632,18 @@ class RDNA3Renderer(ISARenderer):
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     deps: set[Register] = set()
-    nuops, pending_store = [], False
+    nuops = []
 
     # data dependency resolution
     # 1. flush at loop backedges (naive but avoid CF dependency analysis)
-    # 2. flush lds before barrier
+    # 2. always flush before barrier
     # 3. sync all outstanding when an instruction reads/writes a load dest
     def waitcnt(): return UOp(Ops.INS, src=(const(0),), arg=(RDNA3Ops.s_waitcnt, dtypes.void))
     for u in lin.src:
       reads, writes = set(r for s in u.src for r in rdefs(s)), set(rdefs(u))
       is_barrier, is_use = u.arg[0] is RDNA3Ops.s_barrier, not (reads | writes).isdisjoint(deps)
       is_backedge = isinstance(u.tag, str) and u.arg[0] is RDNA3Ops.s_cbranch_execnz
-      if ((is_barrier or is_backedge) and (deps or pending_store)) or (is_use and deps):
+      if is_barrier or (deps and (is_backedge or is_use)):
         nuops.append(waitcnt()); deps.clear()
 
       ms = {RDNA3Ops.SMEM, RDNA3Ops.DS, RDNA3Ops.GLOBAL, RDNA3Ops.FLAT, RDNA3Ops.SCRATCH}
