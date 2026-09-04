@@ -121,33 +121,38 @@ def _has_persistent_storage(u:UOp) -> bool:
   if u.op in GroupOp.Movement or u.op in {Ops.BITCAST, Ops.UNSHARD}: return _has_persistent_storage(u.src[0])
   return False
 
+def _is_storage_state(u:UOp) -> bool: return u.op is Ops.AFTER and u.has_buffer_identity(after_ok=True)
+
 def storage_subs(outs) -> dict[UOp, UOp]:
   """subs giving every out lacking storage real storage in the graph (a clone), inner outputs first so nested graphs
   reference the storage of the outputs they consume instead of recomputing them"""
   bases = set(x.uop.base if isinstance(x, Tensor) else x.base for x in outs)
   subs: dict[UOp, UOp] = {}
+  def sub(u:UOp) -> UOp: return u.substitute(subs, walk=True)  # apply inner materializations (toposort order)
   sink = UOp.sink(*bases)
   # copies that are direct store values fold into their store: one copy kernel lands there, no clone needed
   stored = {st.src[1] for st in sink.toposort(enter_calls=False) if st.op is Ops.STORE}
-  for u in UOp.sink(*bases).toposort(enter_calls=False):
+  for u in sink.toposort(enter_calls=False):
     if u.op is Ops.CONTIGUOUS_BACKWARD:
-      # a scheduling barrier only: it dissolves to its (materialized) source, like the old strip rule
-      subs[u] = u.src[0].substitute(subs, walk=True) if subs else u.src[0]
+      # forward it is the identity, dissolve it to the source (this lands on real storage when the source
+      # materializes, e.g. cb(CONTIGUOUS) resolves to the clone of the CONTIGUOUS, visited before this).
+      # the materialization cb asks for is in the backward pass: the gradient rule inserts a real CONTIGUOUS
+      subs[u] = sub(u.src[0])
     elif u.op is Ops.CONTIGUOUS:
       # a CONTIGUOUS on storage that is already materialized resolves to the storage state (like the old rule); a
       # CONTIGUOUS on a size-0 value resolves to nothing, there's no storage to allocate. check the substituted
       # source: materialization of inner nodes (a pinned copy) is storage the CONTIGUOUS can resolve to directly
-      src = (u.src[0].substitute(subs, walk=True) if subs else u.src[0])
-      while src.op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: src = src.src[0]  # detach is stripped, like the old rule
-      if src.op is Ops.AFTER and src.has_buffer_identity(after_ok=True): subs[u] = src
+      src = sub(u.src[0])
+      while src.op is Ops.DETACH: src = src.src[0]  # detach is stripped, like the old rule
+      if _is_storage_state(src): subs[u] = src
       elif 0 in u.shape: subs[u] = u.src[0]
       # every other CONTIGUOUS becomes real storage in the graph (a clone): the user asked for a materialization point
-      elif _needs_storage(u): subs[u] = (u.substitute(subs, walk=True) if subs else u).clone()
+      elif _needs_storage(u): subs[u] = sub(u).clone()
     # copies from creation devices (disk/npy/python loads) want to persist in the scheduled scope, insert a clone
     elif u.op is Ops.COPY and is_creation_device(u.src[0]) and u not in stored:
-      subs[u] = (u.substitute(subs, walk=True) if subs else u).clone()
+      subs[u] = sub(u).clone()
     elif u in bases and _needs_storage(u) and not _has_persistent_storage(u):
-      subs[u] = (u.substitute(subs, walk=True) if subs else u).clone()
+      subs[u] = sub(u).clone()
   return subs
 
 @rewrite_group(lambda *_, ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
@@ -411,8 +416,7 @@ class Tensor(RandMixin):
     # a CONTIGUOUS target is not storage: if it's already materialized, resolve to the storage state (like the old
     # remove-extra rule); otherwise commit it to a clone in the graph first, then write into that storage
     if assigned_to.op is Ops.CONTIGUOUS:
-      sub = {assigned_to: assigned_to.src[0] if assigned_to.src[0].op is Ops.AFTER and
-             assigned_to.src[0].has_buffer_identity(after_ok=True) else assigned_to.clone()}
+      sub = {assigned_to: assigned_to.src[0] if _is_storage_state(assigned_to.src[0]) else assigned_to.clone()}
       _apply_map_to_tensors(sub, name="commit contiguous")
       assigned_to = self.uop.storage_base
     # assigning to a value (not storage-backed, an unbound call-output placeholder counts as a value) is
