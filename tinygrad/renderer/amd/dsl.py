@@ -1,6 +1,5 @@
 # dsl.py - clean DSL for AMD assembly
 from typing import Any
-import tinygrad.dtype
 from tinygrad.dtype import ConstFloat
 
 # ══════════════════════════════════════════════════════════════
@@ -164,7 +163,6 @@ class SrcField(BitField):
 
   def encode(self, val) -> int:
     """Encode value. Returns 255 (literal marker) for out-of-range values."""
-    # elif isinstance(val, (float, tinygrad.dtype.ConstFloat)): offset = self._FLOAT_ENC.get(float(val), 255)
     if isinstance(val, Reg): offset = val.offset
     elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, 255)
     elif isinstance(val, int) and 0 <= val <= 64: offset = 128 + val
