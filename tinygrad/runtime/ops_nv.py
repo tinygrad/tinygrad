@@ -3,7 +3,7 @@ import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, time, it
 assert sys.platform != 'win32'
 from typing import Any
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue, encode_submit, patch, to_name, unwrap_view, timeline_value
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue, encode_submit, patch, to_name, unwrap_view
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface, FileIOInterface, BumpAllocator, hcq_filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
@@ -39,10 +39,10 @@ def nv_iowr(fd:FileIOInterface, nr, args, cmd=None):
   ret = fd.ioctl(cmd or ((3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF)), args)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
 
-def nvm(subc:int, mthd:int, *vals, typ=2) -> list: # one pushbuffer method, vals are dwords or 64 bit uops (which take two)
+def nvm(subc:int, mthd:int, *vals, typ=2) -> list:
   return [(typ << 28) | (sum(v.dtype.itemsize // 4 if isinstance(v, UOp) else 1 for v in vals) << 16) | (subc << 13) | (mthd >> 2), *vals]
 
-def hilo(addr:UOp) -> tuple[UOp, UOp]: return (addr >> 32).cast(dtypes.uint32), addr.cast(dtypes.uint32) # the copy engine takes the upper dword first
+def hilo(addr:UOp) -> tuple[UOp, UOp]: return (addr >> 32).cast(dtypes.uint32), addr.cast(dtypes.uint32)
 
 class QMD:
   fields: dict[str, dict[str, tuple[int, int]]] = {}
@@ -57,8 +57,9 @@ class QMD:
 
     self.mv, self.pref = (bytearray(self.sz * 4) if blob is None else blob), pref
     self.words:dict[int, UOp] = {} # the fields only known at link or at submit, as words by their byte offset
+    self.releases = 0
 
-  def write(self, **kwargs:int|UOp): # an int lands in the bits now, a uop becomes a word of the widest byte sized type that fits its field
+  def write(self, **kwargs:int|UOp):
     for k, v in kwargs.items():
       hi, lo = QMD.fields[self.pref][k.upper()]
       if isinstance(v, UOp):
@@ -75,10 +76,14 @@ class QMD:
   def set_program_addr(self, addr:UOp):
     self.set_addr("program_address", addr >> (4 if self.ver >= 4 else 0), "_shifted4" if self.ver >= 4 else "")
     self.set_addr("program_prefetch_addr", addr >> 8, "_shifted")
-  def set_release(self, addr:UOp, payload:UOp): # released once the grid completes
-    self.set_addr("release_semaphore0_addr" if self.ver >= 4 else "release0_address", addr)
-    self.set_addr("release_semaphore0_payload" if self.ver >= 4 else "release0_payload", payload)
-    self.write(release0_enable=1)
+  def set_release(self, addr:UOp, payload:UOp, timestamp:bool=False) -> bool:
+    if (i:=self.releases) == 2: return False
+    self.releases += 1
+    self.set_addr(f"release_semaphore{i}_addr" if self.ver >= 4 else f"release{i}_address", addr)
+    self.set_addr(f"release_semaphore{i}_payload" if self.ver >= 4 else f"release{i}_payload", payload)
+    self.write(**{f"release{i}_enable": 1, f"release_structure_size_{i}" if self.ver >= 4 else f"release{i}_structure_size": 0 if timestamp else 2},
+               **({} if self.ver >= 4 else {f"release{i}_payload64b": 1}))
+    return True
   @property
   def grid(self) -> tuple[str, ...]:
     return ("grid_width", "grid_height", "grid_depth") if self.ver >= 4 else ("cta_raster_width", "cta_raster_height", "cta_raster_depth")
@@ -88,7 +93,7 @@ class QMD:
 
 class NVQueue(HWQueue):
   dev:NVDevice
-  q_rewrite = PatternMatcher([ # the semaphore ops every channel has, the queues add what they run
+  q_rewrite = PatternMatcher([
     (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
     (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
     (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
@@ -96,26 +101,24 @@ class NVQueue(HWQueue):
 
   def nvm(self, subc:int, mthd:int, *vals, typ=2): self.q(*nvm(subc, mthd, *vals, typ=typ))
 
-  def sem(self, addr:UOp, value:UOp, **flags:str): # one host class semaphore op with a 64 bit payload
+  def sem(self, addr:UOp, value:UOp, **flags:str):
     self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, addr, value.ccast(dtypes.uint64), nv_flags("NVC56F_SEM_EXECUTE", payload_size="64bit", **flags))
 
   def wait(self, signal:UOp, value:UOp): self.sem(signal.getaddr(self.devs), value, operation="acq_circ_geq")
-  def timestamp(self, signal:UOp): # the release fills the whole slot: its payload, then the timestamp
-    self.sem(signal.getaddr(self.devs), UOp.const(0, dtypes.uint64), operation="release", release_wfi="en", release_timestamp="en")
   def signal(self, signal:UOp, value:UOp):
     self.sem(signal.getaddr(self.devs), value, operation="release", release_wfi="en")
     self.nvm(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 0x0)
+  def timestamp(self, signal:UOp):
+    self.sem(signal.getaddr(self.devs), UOp.const(0, dtypes.uint64), operation="release", release_wfi="en", release_timestamp="en")
 
-  def submit(self, cmdbuf:UOp) -> UOp: # the cmdbuf is on the device already: push one gpfifo entry that points at it and ring the doorbell
+  def submit(self, cmdbuf:UOp) -> UOp:
     fifo, ib, off = self.dev.fifos[self.queue], *unwrap_view(cmdbuf)
     ph = lambda n, dt=dtypes.uint32, shape=(1,): UOp.placeholder(shape, dt, 0, device=self.devs, volatile=True, tag=to_name(n, self.queue))
     ring, gpput, doorbell, put = ph("ring", dtypes.uint64, (fifo.entries,)), ph("gpput"), ph("doorbell"), ph("put_value", dtypes.uint64)
 
-    # the entry is fixed once the linear links: it is patched into a slot of its own, and the submit only copies it into the ring
     gpe = UOp.placeholder((1,), dtypes.uint64, device=self.devs, volatile=True, tag=to_name("gpentry", self.queue))
     entry = patch(gpe, [(0, ib.getaddr(self.devs) + UOp.const(off | (cmdbuf.max_numel() // 4 << 42) | (1 << 41), dtypes.uint64))], bytes(8))
 
-    # the cmdbuf is patched before the entry points at it, the entry lands before gpput moves, and gpput before the doorbell rings
     p = put.index(0).load()
     written = UOp.barrier(ring.after(cmdbuf).index((p % fifo.entries).cast(dtypes.int)).store(entry.index(0).load()), put.index(0).store(p + 1))
     queued = UOp.barrier(gpput.after(written).index(0).store(((p + 1) % fifo.entries).cast(dtypes.uint32)))
@@ -129,21 +132,24 @@ class NVComputeQueue(NVQueue):
 
   def __init__(self, ctx, submit):
     super().__init__(ctx, submit)
-    # a launch is a qmd, the semaphore it releases on completion, then its constant buffer 0. the launches of a submit sit at a fixed stride
-    # in one buffer, so a qmd can point at the one after it before that one is even encoded: that pointer is how a row of launches is ordered
+
     progs = [nv_build_program(self.dev, u.src[0], self.devs)[0] for u in self.lin.src if u.op is Ops.CALL]
-    self.sem_off = QMD(self.dev).sz * 4
-    self.qmd_sz = round_up(self.sem_off + 16, 256)
+    self.qmd_sz = round_up(QMD(self.dev).sz * 4, 256)
     self.stride = self.qmd_sz + max([p.kernargs_size for p in progs], default=0)
     self.qmd_buf = UOp.placeholder((len(progs) * self.stride,), dtypes.uint8, device=self.devs, tag=to_name("qmd", self.queue))
     self.qmds:list[QMD] = []
-    self.chain:int|None = None # the launch the next one chains onto, None once something else has been sent since
+    self.chain:QMD|None = None # the launch the next one chains onto
 
-  def nvm(self, subc:int, mthd:int, *vals, typ=2): # anything sent between two launches breaks the chain
+  def wait(self, signal:UOp, value:UOp):
     self.chain = None
-    super().nvm(subc, mthd, *vals, typ=typ)
+    super().wait(signal, value)
 
-  def qmd_addr(self, i:int, off:int=0) -> UOp: return self.qmd_buf.getaddr(self.devs) + UOp.const(i * self.stride + off, dtypes.uint64)
+  def signal(self, signal:UOp, value:UOp):
+    if self.chain is None or not self.chain.set_release(signal.getaddr(self.devs), value): super().signal(signal, value)
+
+  def timestamp(self, signal:UOp):
+    if self.chain is None or not self.chain.set_release(signal.getaddr(self.devs), UOp.const(0, dtypes.uint64), timestamp=True):
+      super().timestamp(signal)
 
   def submit(self, cmdbuf:UOp) -> UOp:
     if self.qmds:
@@ -152,6 +158,7 @@ class NVComputeQueue(NVQueue):
     return super().submit(cmdbuf)
 
   def memory_barrier(self):
+    self.chain = None
     self.nvm(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI,
              nv_flags("NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI", instruction="true", global_data="true", constant="true"))
 
@@ -164,27 +171,23 @@ class NVComputeQueue(NVQueue):
        any(l > mx for l,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
 
-    i, lib_addr = len(self.qmds), lib.getaddr(self.devs)
+    qmd_addr = self.qmd_buf.getaddr(self.devs) + UOp.const(len(self.qmds) * self.stride, dtypes.uint64)
     qmd = QMD(self.dev, data.qmd.mv.ljust(self.stride, b"\0")) # the program's template, in a slot of its own
     qmd.write(**dict(zip(qmd.grid, global_size)), **{f"cta_thread_dimension{j}": l for j, l in enumerate(local_size)})
-    qmd.set_program_addr(lib_addr + data.prog_off)
-    for j, (off, _) in data.constbufs.items(): qmd.set_constant_buf_addr(j, self.qmd_addr(i, self.qmd_sz) if j == 0 else lib_addr + off)
+    qmd.set_program_addr(lib.getaddr(self.devs) + data.prog_off)
+    for j, (off, _) in data.constbufs.items():
+      qmd.set_constant_buf_addr(j, qmd_addr + UOp.const(self.qmd_sz, dtypes.uint64) if j == 0 else lib.getaddr(self.devs) + off)
     bufs, vals = [get_call_arg_uops(call)[j] for j in prg.arg.globals], get_call_var_uops(call, prg)
     qmd.mv[self.qmd_sz:(at:=self.qmd_sz + len(data.cbuf_0) * 4)] = array.array('I', data.cbuf_0).tobytes() # constant buffer 0: the driver params
     qmd.words |= {at + j * 8: b.getaddr(self.devs) for j, b in enumerate(bufs)} | {at + o: v.ccast(dt) for v, (o, dt) in zip(vals, data.vars)}
-    self.qmds.append(qmd)
 
-    if self.dev.pma_enabled: self.nvm(1, nv_gpu.NVC6C0_PM_TRIGGER, 0)
     if self.chain is None:
-      if i: # a launch runs on its own once sent, so this one first waits for the last one to release its semaphore: this run's timeline value
-        self.qmds[i - 1].set_release(sem:=self.qmd_addr(i - 1, self.sem_off), nxt:=timeline_value(self.devs) + UOp.const(1, dtypes.uint64))
-        self.sem(sem, nxt, operation="acq_circ_geq")
-      self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, (self.qmd_addr(i) >> 8).cast(dtypes.uint32))
+      if self.dev.pma_enabled: self.nvm(1, nv_gpu.NVC6C0_PM_TRIGGER, 0)
+      self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, (qmd_addr >> 8).cast(dtypes.uint32))
       self.nvm(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B_PCAS_ACTION_PREFETCH_SCHEDULE)
-    else: # kicked off by the launch before it completing, which is what keeps the two in order
-      self.qmds[self.chain].write(dependent_qmd0_pointer=self.qmd_addr(i) >> 8, dependent_qmd0_action=1, dependent_qmd0_prefetch=1,
-                                  dependent_qmd0_enable=1)
-    self.chain = i
+    else: self.chain.write(dependent_qmd0_pointer=qmd_addr >> 8, dependent_qmd0_action=1, dependent_qmd0_prefetch=1, dependent_qmd0_enable=1)
+    self.qmds.append(qmd)
+    self.chain = qmd
 
 class NVCopyQueue(NVQueue):
   q_rewrite = PatternMatcher([

@@ -100,11 +100,11 @@ class GPFIFO:
     if qmd.release0_enable:
       rel0 = to_mv(qmd.release0_address_lower + (qmd.release0_address_upper << 32), 0x10).cast('Q')
       rel0[0] = qmd.release0_payload_lower + (qmd.release0_payload_upper << 32)
-      rel0[1] = int(time.perf_counter() * 1e9)
+      if qmd.release0_structure_size == 0: rel0[1] = int(time.perf_counter() * 1e9) # four words: the timestamp after the payload
     if qmd.release1_enable:
       rel1 = to_mv(qmd.release1_address_lower + (qmd.release1_address_upper << 32), 0x10).cast('Q')
       rel1[0] = qmd.release1_payload_lower + (qmd.release1_payload_upper << 32)
-      rel1[1] = int(time.perf_counter() * 1e9)
+      if qmd.release1_structure_size == 0: rel1[1] = int(time.perf_counter() * 1e9)
     if qmd.dependent_qmd0_enable:
       if qmd.dependent_qmd0_action == 1: self.execute_qmd(qmd.dependent_qmd0_pointer << 8)
       else: raise RuntimeError("unsupported dependent qmd action")
