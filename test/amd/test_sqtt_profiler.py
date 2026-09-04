@@ -7,7 +7,7 @@ from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.viz.serve import load_amd_counters, VizData
 from tinygrad.renderer.amd.sqtt import decode, print_packets
-from tinygrad.renderer.amd.dsl import s, v, NULL
+from tinygrad.renderer.amd.dsl import s
 
 @contextlib.contextmanager
 def save_sqtt():
@@ -111,7 +111,7 @@ class TestSQTTProfiler(unittest.TestCase):
         f(t).realize()
     self.assertEqual(len(sqtt), N)
     kernel_name = sqtt[0]["name"]
-    for i,s in enumerate(sqtt[1:], start=1): self.assertEqual(s["name"], f"{kernel_name} n{i+1}")
+    for i,e in enumerate(sqtt[1:], start=1): self.assertEqual(e["name"], f"{kernel_name} n{i+1}")
 
   # TODO: can we trace SQTT for graphed kernels?
   def test_jit_graph(self, kernel_count=3*1):
