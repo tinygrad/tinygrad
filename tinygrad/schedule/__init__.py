@@ -79,7 +79,6 @@ def create_schedule(sched_sink:UOp) -> UOp:
   return UOp(Ops.LINEAR, src=tuple(linearized))
 
 from tinygrad.schedule.memory import memory_plan_rewrite
-from tinygrad.device import canonicalize_device
 from tinygrad.engine.realize import capturing, pm_flatten_linear
 from tinygrad.schedule.prepare import prepare_rangeify
 from tinygrad.schedule.rangeify import get_kernel_graph
@@ -150,8 +149,7 @@ pm_schedule = PatternMatcher([
 ])
 
 def assert_all_same_devices(ast:UOp):
-  # canonicalize: 'DEV' and 'DEV:0' are the same device
-  devices = dedup([canonicalize_device(x.device) for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
+  devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
 
 def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
