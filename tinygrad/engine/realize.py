@@ -288,9 +288,7 @@ def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequenc
   inputs = list(input_uops)
   if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs), cache=False) # a one-shot link
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
-  for call in linear.src:
-    call = call.without_after # a linked call sits after the buffers its addresses resolved into
-    track_stats(ctx, call, perf_counter_us(), pm_exec.rewrite(call, ctx))
+  for call in linear.src: track_stats(ctx, call.without_after, perf_counter_us(), pm_exec.rewrite(call.without_after, ctx))
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
