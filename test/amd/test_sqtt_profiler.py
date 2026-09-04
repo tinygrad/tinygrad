@@ -52,6 +52,7 @@ class TestSQTTProfiler(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if not Device[Device.DEFAULT].sqtt_enabled: raise unittest.SkipTest("device must be in SQTT profiling mode")
+    cls.arch = Device[Device.DEFAULT].arch
 
   def test_simple(self):
     t = Tensor.empty(1) + 1
@@ -65,7 +66,7 @@ class TestSQTTProfiler(unittest.TestCase):
   def test_asm(self):
     t = Tensor.empty(1)
     with save_sqtt_blobs() as sqtt:
-      t.custom_kernel(fxn=custom_asm_cdna if self.arch == "cdna" else custom_asm_rdna)[0].realize()
+      t.custom_kernel(fxn=custom_asm_cdna if self.arch == "gfx950" else custom_asm_rdna)[0].realize()
     for event in sqtt:
       if not event.itrace: continue
       print(f"\n=== SE {event.se} ===")
