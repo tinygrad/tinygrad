@@ -439,7 +439,7 @@ def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
 
 pm_simplify_valid = PatternMatcher([
   # simplify valid
-  (UPat(Ops.AND, name="valid"), simplify_valid),
+  (UPat(Ops.AND, dtypes.bool, name="valid"), simplify_valid),
   (invalid_gate, gated_given_valid),
 ])
 
