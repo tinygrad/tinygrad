@@ -107,5 +107,16 @@ class TestCallify(unittest.TestCase):
     self.assertListEqual(c.tolist(), [5.0, 7.0, 9.0])
     self.assertListEqual(d.tolist(), [4.0, 10.0, 18.0])
 
+  def test_zero_size_cat_with_rng(self):
+    # regression: the size-0 CONTIGUOUS in a cat materializes by resolving to its source, and the RNG counter's
+    # creation COPY nested under that source is also a materialize key. if the CONTIGUOUS maps to its raw source,
+    # substitution replaces it without descending, leaving the counter's assign chain un-substituted in the graph:
+    # two writes race the same counter buffer and create_schedule fails with "cycle detected in assign graph"
+    a = Tensor.rand(2, 2)
+    b = Tensor.rand(2, 0)
+    t = a.cat(b, dim=1).realize()
+    self.assertEqual(t.shape, (2, 2))
+    self.assertListEqual(t.tolist(), a.tolist())
+
 if __name__ == "__main__":
   unittest.main()

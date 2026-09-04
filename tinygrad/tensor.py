@@ -128,7 +128,10 @@ def storage_subs(outs) -> dict[UOp, UOp]:
   reference the storage of the outputs they consume instead of recomputing them"""
   bases = set(x.uop.base if isinstance(x, Tensor) else x.base for x in outs)
   subs: dict[UOp, UOp] = {}
-  def sub(u:UOp) -> UOp: return u.substitute(subs, walk=True)  # apply inner materializations (toposort order)
+  # every stored value MUST be applied with inner subs (store-time substitute): application replaces a node with
+  # its value without descending into the value, so a value containing another key silently loses that key.
+  # toposort visits a node's subtree first, so at store time every key nested inside the value is already in subs
+  def sub(u:UOp) -> UOp: return u.substitute(subs, walk=True)
   sink = UOp.sink(*bases)
   # copies that are direct store values fold into their store: one copy kernel lands there, no clone needed
   stored = {st.src[1] for st in sink.toposort(enter_calls=False) if st.op is Ops.STORE}
@@ -145,7 +148,7 @@ def storage_subs(outs) -> dict[UOp, UOp]:
       src = sub(u.src[0])
       while src.op is Ops.DETACH: src = src.src[0]  # detach is stripped, like the old rule
       if _is_storage_state(src): subs[u] = src
-      elif 0 in u.shape: subs[u] = u.src[0]
+      elif 0 in u.shape: subs[u] = sub(u.src[0])
       # every other CONTIGUOUS becomes real storage in the graph (a clone): the user asked for a materialization point
       elif _needs_storage(u): subs[u] = sub(u).clone()
     # copies from creation devices (disk/npy/python loads) want to persist in the scheduled scope, insert a clone
