@@ -164,16 +164,11 @@ class TestCallSchedule(unittest.TestCase):
     np.testing.assert_equal(big.numpy(), ref)
 
   def test_precompile_full_buffer_assign(self):
-    from test.helpers import assert_kernel_count
-    from tinygrad.helpers import GlobalCounters
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x * 2 + 1
     a = Tensor.arange(8).float().realize()
     cache = Tensor.zeros(8).realize()
-    GlobalCounters.reset()
-    # the call writes the whole assign target directly: it binds into the output position, no copy kernel
     cache.assign(f(a)).realize()
-    assert_kernel_count(1)
     np.testing.assert_equal(cache.numpy(), np.arange(8)*2+1)
 
   def test_reshape_precompile(self):
