@@ -68,8 +68,8 @@ def cfunc_buf(lib:str, name:str) -> Buffer:
   (b:=Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, preallocate=True))._buf.view.view(fmt='Q')[0] = unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
   return b
 
-def ccall(fn:Any, *args:UOp|int, lib:str|None=None) -> UOp:
-  ptr = UOp.placeholder((1,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.value, tag=("cfunc", lib or fn.__module__.split(".")[-1], fn.__name__))
+def ccall(fn:Any, *args:UOp|int) -> UOp:
+  ptr = UOp.placeholder((1,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.value, tag=("cfunc", fn.__module__.split(".")[-1], fn.__name__))
   ret = dtypes.void if fn.restype is None else dtypes.uint64 if fn.restype is ctypes.c_void_p else \
     next(d for d in DTYPES_DICT.values() if d.fmt == fn.restype._type_)
   cargs = [UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args]
@@ -257,7 +257,8 @@ class HWQueue:
     for w in words:
       c = w
       while isinstance(c, UOp) and c.op is Ops.CAST: c = c.src[0]
-      if isinstance(c, UOp) and c.op is not Ops.CONST:
+      if isinstance(c, UOp) and c.op is Ops.BINARY: self.blob += c.arg
+      elif isinstance(c, UOp) and c.op is not Ops.CONST:
         self.patches.append((len(self.blob), w))
         self.blob += bytes(w.dtype.itemsize)
       else:

@@ -107,5 +107,21 @@ class TestHCQ2Core(unittest.TestCase):
     self.assertTrue(any(n.startswith("inputs_") for c in jit for n in rt_params(c)), "the jit patches its input addresses in")
     self.assertFalse(any(n.startswith("inputs_") for c in eager for n in rt_params(c)), "eager bakes its input addresses")
 
+  def test_programs_are_args_not_body_params(self):
+    # a program is a link-time patched placeholder only the cmdbuf addresses: an arg of the call, never a param of the body
+    def counts(n):
+      x = Tensor.ones(16).contiguous().realize()
+      with encoded_batches() as batches:
+        @TinyJit
+        def f(a):
+          for i in range(n): a = (a * (i + 1.5)).contiguous()
+          return a.realize()
+        for _ in range(3): f(x)
+      c = max(batches, key=lambda c: c.arg.aux.nargs)
+      return len([u for u in c.src[0].toposort() if u.op is Ops.PARAM and u.arg.addrspace is AddrSpace.GLOBAL]), c.arg.aux.nargs
+    (params2, args2), (params12, args12) = counts(2), counts(12)
+    self.assertEqual(params2, params12, "the body takes no pointer per program")
+    self.assertEqual(args12 - args2, 10, "each program is one more arg")
+
 if __name__ == "__main__":
   unittest.main()
