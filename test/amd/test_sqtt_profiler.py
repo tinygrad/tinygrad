@@ -58,8 +58,9 @@ class TestSQTTProfiler(unittest.TestCase):
     t = Tensor.empty(1)
     with save_sqtt_blobs() as sqtt:
       t.custom_kernel(fxn=custom_asm_cdna)[0].realize()
-    for i, event in enumerate(sqtt):
-      print(f"\n=== event {i} ===")
+    for event in sqtt:
+      if not event.itrace: continue
+      print(f"\n=== SE {event.se} ===")
       print_packets(decode(event.blob))
 
   def test_multiple_runs(self):
