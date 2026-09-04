@@ -27,7 +27,7 @@ def patch_words(batch:UOp) -> list[UOp]:
 def rt_params(batch:UOp) -> list[str]:
   return dedup([u.arg.name for w in patch_words(batch) for u in w.toposort() if u.op is Ops.PARAM and u.arg.addrspace is AddrSpace.GLOBAL])
 
-unittest.skipUnless(HCQ2 and all_devices_in(Device.DEFAULT, HCQ_DEVS - {"CPU"}), "non-CPU hcq2 device required")
+@unittest.skipUnless(HCQ2 and all_devices_in(Device.DEFAULT, HCQ_DEVS - {"CPU"}), "non-CPU hcq2 device required")
 class TestHCQ2Core(unittest.TestCase):
   def test_jit_has_no_rt_buffers(self):
     x = Tensor.ones(16).contiguous().realize()
