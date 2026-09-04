@@ -34,7 +34,7 @@ def save_sqtt_blobs():
 def custom_asm_cdna(A:UOp):
   import tinygrad.runtime.autogen.amd.cdna.ins as cdna
   WAVE_SIZE = 64
-  insts = [cdna.s_nop(0), cdna.s_nop(1), cdna.s_mov_b32(s[0], 10)]
+  insts = [cdna.s_nop(0), cdna.s_mov_b32(s[0], 10)]
   return custom_asm(A, insts+[cdna.s_endpgm()], WAVE_SIZE*2)
 
 def custom_asm_rdna(A:UOp):
