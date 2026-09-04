@@ -512,17 +512,7 @@ class CDNA_ISSUE(PacketType):
   """pkt_fmt=13: 32-bit (Issue)"""
   encoding = bits[3:0] == 13
   simd = bits[6:5]
-  _gap = bits[7:7]
-  inst0 = bits[9:8]
-  inst1 = bits[11:10]
-  inst2 = bits[13:12]
-  inst3 = bits[15:14]
-  inst4 = bits[17:16]
-  inst5 = bits[19:18]
-  inst6 = bits[21:20]
-  inst7 = bits[23:22]
-  inst8 = bits[25:24]
-  inst9 = bits[27:26]
+  inst = bits[27:8]
   _padding = bits[31:28]
 
 class CDNA_PERF(PacketType):
@@ -675,6 +665,12 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
         if p.mask & (1 << wave):
           inst = pc_map[pc:=wave_pc[(simd, wave)]]
           wave_pc[(simd, wave)] += inst.size()
+          yield (p, InstructionInfo(pc, wave, inst))
+    elif isinstance(p, CDNA_ISSUE):
+      for wave in range(10):
+        if (p.inst >> (wave * 2)) & 3 == 3:
+          inst = pc_map[pc:=wave_pc[(p.simd, wave)]]
+          wave_pc[(p.simd, wave)] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
     # map INST events on this SIMD to the program counter, we know the waves
     elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)) and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_")):
