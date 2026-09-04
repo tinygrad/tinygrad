@@ -603,7 +603,7 @@ class AM_PSP(AM_IP):
     self.ring_size = 0x10000
     self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=False, boot=True)
 
-    self.max_tmr_size, self.tmr_size = 0x1300000, 0
+    self.max_tmr_size, self.tmr_size = 0xa700000, 0
     self.boot_time_tmr = self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,14), (14,0,2), (14,0,3)}
     self.autoload_tmr = self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,14)}
     self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True) if not self.boot_time_tmr else 0
