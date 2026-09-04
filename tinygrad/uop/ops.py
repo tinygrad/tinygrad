@@ -815,7 +815,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # the opaque Buffer goes straight in the arg: the ucache dedups because the arg (and thus the Buffer) is part of the key
     return UOp(Ops.BUFFER, arg=ParamArg(-id(opaque), opaque.dtype, size=opaque.size, device=device or opaque.device, buffer=opaque))
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
-    device = canonicalize_device(device) if device is not None else self.device
+    device = canonicalize_device(self.device if device is None else device)
     dt = self.commit_dtype() if dtype is None else dtype
     if self.op is Ops.UNSHARD and isinstance(device, tuple):  # mirror the sharding on the fresh storage
       return UOp.empty(self.src[0].shape, dtype=dt, device=device).unshard(self.arg, self.src[1:])
