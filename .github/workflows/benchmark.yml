@@ -82,13 +82,16 @@ jobs:
   #      pytest -nauto --durations=20
 
   llmbenchmark:
-    name: LLM (DEV=${{ matrix.dev }})
+    name: Benchmark ${{ matrix.model }} (DEV=${{ matrix.dev }})
     runs-on: [self-hosted, "${{ matrix.dev == 'METAL' && 'macOS' || matrix.dev == 'AMD' && 'tinybox' || 'tinyboxgreen' }}"]
     strategy:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 30
+        model: ['llama3.2:3b-f16', 'qwen3.8:27b', 'olmoe']
+        # qwen3.8:27b doesn't fit on mac
+        exclude: [{ dev: 'METAL', model: 'qwen3.8:27b' }, { dev: 'AMD', model: 'olmoe' }, { dev: 'NV', model: 'olmoe' }]
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -114,16 +117,10 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: python3 test/external/process_replay/reset.py
-    - name: Run llama3.2
-      run: BENCHMARK_LOG=llama32_3b-f16 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m llama3.2:3b-f16 --benchmark --warmup
-    - name: Run qwen3.8
-      # qwen3.8:27b doesn't fit on mac
-      if: ${{ matrix.dev != 'METAL' }}
-      run: BENCHMARK_LOG=qwen38_27b JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m qwen3.8:27b --benchmark --warmup
-    - name: Run olmoe
-      # just metal for now
-      if: ${{ matrix.dev == 'METAL' }}
-      run: BENCHMARK_LOG=olmoe JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m olmoe --benchmark --warmup
+    - name: Run ${{ matrix.model }}
+      run: |
+        MODEL=${{ matrix.model }}
+        BENCHMARK_LOG=${MODEL//./} JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m $MODEL --benchmark --warmup
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -439,7 +436,7 @@ jobs:
     - name: UsbGPU tiny tests
       run: GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
     - name: UsbGPU copy speeds
-      run: SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
+      run: SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py
     - name: UsbGPU (USB4/TB) install script
       run: sh extra/setup_tinygpu_osx.sh
     - name: UsbGPU (USB4/TB) boot time
@@ -565,7 +562,7 @@ jobs:
     - name: openpilot run_pickle big_driving_supercombo
       run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_run_pickle RUN_PICKLE=1 PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py - openpilot.pkl
     - name: Test copy speeds
-      run: SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3 test/external/external_test_usb_asm24.py TestDevCopySpeeds
+      run: SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3 test/external/external_test_usb_asm24.py
 
   driverbenchmarks:
     name: PCI Driver Benchmark (DEV=${{ matrix.dev }})

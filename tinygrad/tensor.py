@@ -30,20 +30,19 @@ class AllocCtx:
 # a tag is the tuple of original pre-rewrite UOps a node provides storage for
 def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
 
+# a base needs storage of its own if it can back a buffer and doesn't already have one
+def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_identity()
+
 def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
 def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
-def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
-  # copies to disk are replaced with the disk buffer
-  if on_disk(u) and u.tag is None:
-    ctx.buffer_map[u] = u.empty_like()
-    return u.rtag(())
+def creation_copy_is_realized(u:UOp):
   # all copies from disk/numpy are realized into a real buffer
   if is_creation_device(u.src[0]): return tag_uop(u)
 
 # CONTIGUOUS and AFTER + parents are the only nodes that get updated
 add_tags = PatternMatcher([
-  (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
+  (UPat(Ops.COPY, name="u"), creation_copy_is_realized),
   # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
@@ -201,9 +200,8 @@ pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
-  # bases to realize: same predicate as Tensor.realize
-  ctx = AllocCtx(bases={base for x in big_sink.src if not (base:=x.base).is_virtual and not base.has_buffer_identity()
-                        and base.op is not Ops.AFTER})
+  # bases to realize. an AFTER already names the storage its store writes into
+  ctx = AllocCtx(bases={base for x in big_sink.src if needs_storage(base:=x.base) and base.op is not Ops.AFTER})
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
@@ -412,7 +410,7 @@ class Tensor(RandMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    to_realize = [x for x in (self,)+lst if not x.uop.is_virtual and not x.uop.has_buffer_identity()]
+    to_realize = [x for x in (self,)+lst if needs_storage(x.uop.base)]
     if len(to_realize):
       run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
@@ -444,22 +442,17 @@ class Tensor(RandMixin):
     if is_disk:
       (b:=self._buffer()).copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=x._data()))
       return self
-    # a STORE can only write into storage: the target must be backed by a BUFFER (possibly under views)
     assigned_to = self.uop.storage_base
-    # assigning to a value (not storage-backed and not a CONTIGUOUS realization point) is initialization,
-    # not a write: a Tensor.assign always overwrites the whole tensor, so the pending value is dead
-    if assigned_to.op not in {Ops.BUFFER, Ops.CONTIGUOUS}:
-      # x is the new value: alias it if it materializes on its own (a CONTIGUOUS or a load from a creation device),
-      # otherwise give it a realization point so this tensor gets storage of its own
-      if x.uop.op is not Ops.CONTIGUOUS and not (x.uop.op is Ops.COPY and is_creation_device(x.uop.src[0])): x = x.contiguous()
-      self.uop = x.uop
+    # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead
+    if not assigned_to.has_buffer_identity() and assigned_to.op is not Ops.CONTIGUOUS:
+      self.uop = (x.uop.src[0] if x.uop.op is Ops.CONTIGUOUS else x.uop).clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
     ib = self.uop
     while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
-    if ib is not self.uop and ib.has_buffer_identity(after_ok=True):
-      # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
+    if ib is not self.uop:
+      # view assign: replace the node under the views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign")
     else:
       # simple assign
@@ -549,7 +542,9 @@ class Tensor(RandMixin):
     """
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
-    ret = Tensor(self.uop.copy_to_device(device))
+    # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
+    if isinstance(device, str) and device.startswith("DISK"): ret = Tensor(self.uop.clone(device))
+    else: ret = Tensor(self.uop.copy_to_device(device))
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret.is_param_(self.is_param)
 
@@ -574,7 +569,9 @@ class Tensor(RandMixin):
     if not isinstance(self.device, str): raise RuntimeError("can't shard a multi-device tensor")
     if len(devices) == 1: return self.to(devices[0])
     devices = cast(tuple[str, ...], canonicalize_device(devices))
-    uop = self.uop.shard(devices, None if axis is None else self._resolve_dim(axis))
+    # a shard of a load from a creation device (disk/npy/python) wants the copy to persist, so it inserts a clone
+    src = self.uop.clone(devices) if is_creation_device(self.uop) else self.uop
+    uop = src.shard(devices, None if axis is None else self._resolve_dim(axis))
     return Tensor(uop).is_param_(self.is_param)
 
   def shard_(self, devices:tuple[str, ...], axis:int|None=None) -> Tensor:
@@ -702,8 +699,10 @@ class Tensor(RandMixin):
     realized = is_disk or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized()
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value
-      if v.uop.op is Ops.AFTER and any(s.op is Ops.STORE for s in v.uop.src[1:]): v = v._apply_uop(lambda x: x.src[1].src[1])
+      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value.
+      # the store is self-referential there (the computed value touches its target); clone stores are untouched
+      if v.uop.op is Ops.AFTER and len(v.uop.src) == 2 and (st:=v.uop.src[1]).op is Ops.STORE and \
+          st.src[0] in st.src[1].toposort(enter_calls=False): v = v._apply_uop(lambda x: st.src[1])
       self.replace(self._getitem(indices, v))
     elif advanced: # advanced setitem
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")

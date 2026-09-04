@@ -6,7 +6,8 @@ from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_
 from test.unit.test_jit import _simple_test
 from tinygrad import Tensor, TinyJit, Device, dtypes
 from tinygrad.engine.jit import graph_class
-from tinygrad.helpers import JIT, DEV, GlobalCounters, HCQ2
+from tinygrad.helpers import JIT, DEV, GlobalCounters
+from tinygrad.runtime.support.hcq2 import HCQ_DEVS
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer.isa import ISARenderer
 
@@ -222,7 +223,7 @@ class TestJitPrune(unittest.TestCase):
     assert_jit_cache_len(w2_prune, 1)
 
 class TestJitFree(unittest.TestCase):
-  @unittest.skipIf(HCQ2, "hcq2 keeps refs to intermediate buffers")
+  @unittest.skipIf(Device.DEFAULT.split(":")[0] in HCQ_DEVS - {"CPU"}, "hcq2 keeps refs to intermediate buffers")
   def test_free_intermediates(self):
     ext_tensor = Tensor([1,24,23,45,1])
     @TinyJit

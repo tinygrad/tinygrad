@@ -14,10 +14,6 @@ class TestFloat4(unittest.TestCase):
   def count_float4(uops: list[UOp], n=4):
     return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.float and uop.shape == (4,)]),
             len([uop for uop in uops if uop.op is Ops.STORE and uop.src[1].dtype == dtypes.float and uop.shape == (4,)]))
-  @staticmethod
-  def count_half4(uops: list[UOp]):
-    return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.half and uop.shape == (4,)]),
-            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[1].dtype == dtypes.half and uop.shape == (4,)]))
 
   def test_float4_basic(self):
     a = Tensor.empty(2, 8).realize()

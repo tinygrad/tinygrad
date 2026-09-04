@@ -71,7 +71,7 @@ def call_is_graph(call:UOp) -> bool:
 
 def call_is_hcq(call:UOp) -> bool: # an hcq2 batch: a compiled body whose aux lists the kernels it submits
   from tinygrad.runtime.support.hcq2 import HCQInfo
-  return isinstance(getattr(call.arg, "aux", None), HCQInfo)
+  return isinstance(getattr(call.without_after.arg, "aux", None), HCQInfo)
 
 def jit_cache_count(linear:UOp) -> int:
   n = 0
@@ -87,7 +87,7 @@ def assert_jit_cache_len(fxn, expected_len):
     if expected_len != 0: raise KernelCountException(expected_len, 0)
     return
   if expected_len and any(call_is_hcq(call) for call in linear.src): # HCQ2: kernels batch into submits, the finalizers carry the batch's kernels
-    count = sum(len(call.arg.aux.kernels) if call_is_hcq(call) else 1 for call in linear.src)
+    count = sum(len(call.without_after.arg.aux.kernels) if call_is_hcq(call) else 1 for call in linear.src)
     if count != expected_len: raise KernelCountException(expected_len, count)
     return
   if call_is_graph(linear.src[0]):

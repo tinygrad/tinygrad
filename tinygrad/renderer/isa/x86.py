@@ -355,7 +355,6 @@ isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
   # really all a backedge END is is an IF with a tag referencing the RANGE start label
   (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
     lambda x,cond: cond.ins(X86Ops.LOOP_CMP, src=cond.src + x.src[:2] + (UOp(Ops.NOOP, tag=cond.op),))),
@@ -542,7 +541,7 @@ isel_matcher = PatternMatcher([
    x.ins(_xmm_sz_m(b), src=fold_address(a) + (b,)) if b.max_numel() > 1 else
    x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,))),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.PARAM, Ops.SPECIAL, Ops.BUFFER), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.PARAM, Ops.SPECIAL, Ops.BUFFER, Ops.RANGE), name="x"), alloc_vregs),
 ])
 
 # ***** pre register allocation *****

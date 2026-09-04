@@ -107,5 +107,20 @@ class TestCallify(unittest.TestCase):
     self.assertListEqual(c.tolist(), [5.0, 7.0, 9.0])
     self.assertListEqual(d.tolist(), [4.0, 10.0, 18.0])
 
+  def test_intermediate_clone_persists(self):
+    x = (Tensor([1, 2, 3]).realize() + 1).clone()
+    y = (x * 2).realize()
+    self.assertTrue(x.uop.has_buffer_identity())
+    self.assertEqual(x.tolist(), [2, 3, 4])
+    self.assertEqual(y.tolist(), [4, 6, 8])
+
+  def test_zero_size_cat_with_rng(self):
+    # Empty outputs must not replay a pending RNG counter update.
+    a = Tensor.rand(2, 2)
+    b = Tensor.rand(2, 0)
+    t = a.cat(b, dim=1).realize()
+    self.assertEqual(t.shape, (2, 2))
+    self.assertListEqual(t.tolist(), a.tolist())
+
 if __name__ == "__main__":
   unittest.main()

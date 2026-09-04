@@ -11,23 +11,21 @@ class LinearScanRegallocContext:
 
   def __init__(self, uops:list[UOp], ctx:PreLinearKernelCtx):
     self.uops, self.ren, self.idx = [u for u in uops if u.op in REG_OPS], ctx.ren, itertools.count()
-    self.live_intervals: dict[VRegister, list[int]] = {}
 
+    # compute live ranges
+    self.live_intervals: dict[VRegister, list[int]] = {}
     lr = self.live_intervals
-    range_vars: list[VRegister] = []
+    loops: dict[int, int] = {} # the interval of each loop, from its RANGE to the last uop that reads that RANGE
     def live_edge(u:UOp) -> tuple[VRegister,...]: return tuple(r.or_parent() for r in rdefs(u) if isinstance(r, VRegister))
-    for i, u in enumerate(reversed(self.uops)):
+    for idx, u in reversed(list(enumerate(self.uops))):
       uses: list[VRegister] = []
       defs = live_edge(u)
       for s in dedup(u.src): uses.extend(live_edge(s))
       for v in defs + tuple(uses):
-        lr.setdefault(v, []).insert(0, len(self.uops) - i - 1)
-      for v in defs: # if lifetime of v ends during range, pick latest range and add to lr
-        if (n := max((lr[rv][-1] for rv in range_vars if lr[rv][0] <= lr[v][-1] < lr[rv][-1]), default=None)) is not None:
-          lr[v].append(n)
-      if u.op is Ops.RANGE:
-        # NOTE: cant derive range lifetime like this because of boundless LOOP
-        range_vars.append(defs[0])
+        lr.setdefault(v, []).insert(0, idx)
+      for v in defs:
+        if v in lr and (n:=max((e for s,e in loops.items() if s <= lr[v][-1] < e), default=None)): lr[v].append(n)
+      if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src)
 
     self.spills: dict[VRegister, Any] = {} # mapping from virtual to generic stack placement information (arch specific)
     self.reals: dict[int, dict[VRegister, tuple[Register,...]]] = {} # mapping from virtual to real at each program point
@@ -91,7 +89,7 @@ class LinearScanRegallocContext:
         # we move to registers vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
         rvr = rdef(u)
         assert isinstance(rvr, VRegister)
-        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < lr[rvr][-1] for l in lr[v])]
+        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < loops[i] for l in lr[v])]
         sorted_uses = sorted(used_in_loop, key=lambda k: (next(l-i for l in lr[k] if l >= i), lr[k][0], k.name, k.cons[0].index))
         live_in: dict[VRegister, tuple[Register,...]] = {}
         for v in sorted_uses:
