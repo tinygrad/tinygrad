@@ -6,7 +6,8 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import run_linear, lower_and_compile, pm_beam
 import numpy as np
 from hypothesis import given, strategies as strat, settings
-from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph, check_schedule, assert_kernel_count, KernelCountException
+from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph, check_schedule, assert_kernel_count, KernelCountException, \
+  is_hcq2_device
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -71,6 +72,7 @@ class TestMultiTensor(unittest.TestCase):
     (X + X).realize()
 
   # TODO: fix this to not copy on the src device
+  @unittest.skipIf(is_hcq2_device(), "the kernels are inside the submit program")
   @unittest.expectedFailure
   def test_shard_no_recompile(self):
     X = Tensor.ones(256).contiguous().realize()

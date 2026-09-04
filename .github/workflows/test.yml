@@ -611,7 +611,8 @@ jobs:
           cuda: 'true'
           ocelot: 'true'
       - name: Set env
-        run: printf "${{ matrix.backend == 'ptx' && 'DEV=MOCK+CUDA:PTX' || matrix.backend == 'nv' && 'DEV=MOCK+NV\nSKIP_SLOW_TEST=1' }}" >> $GITHUB_ENV
+        # the nv submit runs on the python interpreter: mockgpu only sees the doorbell if it is written through a memoryview
+        run: printf "${{ matrix.backend == 'ptx' && 'DEV=MOCK+CUDA:PTX' || matrix.backend == 'nv' && 'DEV=MOCK+NV\nSKIP_SLOW_TEST=1\nHCQ_RUNTIME_DEV=PYTHON' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CUDA','NV'], Device.DEFAULT"

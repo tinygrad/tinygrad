@@ -21,7 +21,7 @@ if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: rem
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("QCOM", "CPU")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
+HCQ_DEVS = frozenset(("NV", "QCOM", "CPU")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -37,6 +37,7 @@ class HCQInfo:
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
 def get_enqueue_devs(call:UOp) -> Any|None:
+  if isinstance(getattr(call.arg, "aux", None), HCQInfo): return None # a batch that already compiled is never enqueued into another one
   if call.src[0].op not in (Ops.PROGRAM, Ops.COPY): return None # only these bodies can be enqueued
   if not (bufs:=get_call_arg_uops(call)) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
@@ -162,12 +163,13 @@ class BatchCtx:
       self.first.setdefault((devs[0], q), tag)
       self.last[(devs[0], q)] = tag
     self.signal_tags = {tag for (dev, q), tag in self.last.items() if q != self.epilogue_queue(dev)}
-    self.slots = {dev: UOp.placeholder((len(qs) + 1 + (2 * len(self.batch) if self.profile else 0),), dtypes.uint64, device=(dev,), volatile=True,
-                                       tag="slots") for dev, qs in self.queues.items()}
+    # a slot is [signal][timestamp], 16 bytes: the queue signals, the timeline, then two per call if profiling
+    self.slots = {dev: UOp.placeholder((2 * (len(qs) + 1 + (2 * len(self.batch) if self.profile else 0)),), dtypes.uint64, device=(dev,),
+                                       volatile=True, tag="slots") for dev, qs in self.queues.items()}
 
   def epilogue_queue(self, dev:str) -> str: return "COMPUTE:0" if len(self.queues[dev]) > 1 else self.queues[dev][0] # closes the device
 
-  def slot(self, devs:tuple[str, ...], i:int) -> UOp: return self.slots[devs[0]].shrink(((i, i + 1),)) # not [i:i+1]: the slice path is 10x the cost
+  def slot(self, devs:tuple[str, ...], i:int) -> UOp: return self.slots[devs[0]].shrink(((2 * i, 2 * i + 2),)) # not a slice: 10x the cost
   def queue_signal(self, devs:tuple[str, ...], queue:str) -> UOp: return self.slot(devs, self.queues[devs[0]].index(queue))
   def sched_timeline(self, devs:tuple[str, ...]) -> UOp: return self.slot(devs, len(self.queues[devs[0]]))
   def stamps(self, devs:tuple[str, ...], tag:int) -> tuple[int, ...]: return (st:=len(self.queues[devs[0]])+1+2*tag, st + 1) if self.profile else ()
@@ -196,7 +198,7 @@ def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], 
 
     # and make hcq call
     name, est = get_call_name(call, get_call_arg_uops(call)), estimate_uop(call)
-    kerns.append((devices, name, est, ctx.stamps(devices, tag), getattr(call.src[0].arg, "profile_key", None)))
+    kerns.append((devices, name, est, tuple(2 * s + 1 for s in ctx.stamps(devices, tag)), getattr(call.src[0].arg, "profile_key", None)))
 
     ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slot(devices, i),)) for i in ctx.stamps(devices, tag)]
     q += ts_ins[:1] + [call] + ts_ins[1:]
@@ -535,7 +537,7 @@ class HCQ2Compiled(Compiled):
     return Buffer(self.device, self.rt_allocator(uncached, host).size, dtypes.uint8, options=spec, preallocate=True)
 
   def rt_view(self, nbytes:int, dtype:DType=dtypes.uint8, uncached:bool=True, host:bool=False) -> Buffer: # a slot of the ring, wraps silently
-    off = self.rt_allocator(uncached, host).alloc(max(nbytes, 1), alignment=128)
+    off = self.rt_allocator(uncached, host).alloc(max(nbytes, 1), alignment=256)
     return self.rt_buffer(uncached, host).view(nbytes // dtype.itemsize, dtype, off).ensure_allocated()
 
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
@@ -570,8 +572,7 @@ class HCQ2Buffer:
     return HCQ2Buffer(self.va_addr+offset, meta=self.meta, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
 
 class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
-  def _as_buffer(self, buf:HCQBuffer) -> memoryview:
-    return unwrap(buf.view).mv
+  def _as_buffer(self, buf:HCQBuffer) -> memoryview|None: return buf.view.mv if buf.view is not None else None # only mapped memory is zero copy
 
   def _copyout(self, dest:memoryview, src:HCQBuffer): # TODO: remove with memcpy on cpu worker?
     self.dev.synchronize()
