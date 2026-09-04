@@ -6,6 +6,7 @@ from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
+from tinygrad.renderer.cstyle import HIPRenderer
 
 BLOCK_M, BLOCK_N, WARP_SIZE = 32, 32, 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
@@ -31,7 +32,7 @@ def amd_custom_kernels_supported(device:str|tuple[str, ...]|None) -> bool:
   if device is None or device.split(":")[0] != "AMD": return False
   # @function contexts set ALLOW_DEVICE_USAGE=0 (scheduling must not open devices); the device is always open here
   with Context(ALLOW_DEVICE_USAGE=1):
-    return (t:=getattr(Device[device], "target", None)) is not None and t[0] == 11
+    return (t:=getattr(Device[device], "target", None)) is not None and t[0] == 11 and isinstance(Device[device].renderer, HIPRenderer)
 
 def warp_reduce(val:UOp, maximum:bool=False, full_wave:bool=False) -> UOp:
   for offset in ((16, 8, 4, 2, 1) if full_wave else (8, 4, 2, 1)):
