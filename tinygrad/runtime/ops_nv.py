@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, time, itertools
 assert sys.platform != 'win32'
-from typing import Any, cast
+from typing import Any
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue, encode_submit, patch, to_name, unwrap_view, timeline_value
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface, FileIOInterface, BumpAllocator, hcq_filter_visible_devices
@@ -58,22 +58,16 @@ class QMD:
     self.mv, self.pref = (bytearray(self.sz * 4) if blob is None else blob), pref
     self.words:dict[int, UOp] = {} # the fields only known at link or at submit, as words by their byte offset
 
-  def _rw_bits(self, hi:int, lo:int, value:int|None=None):
-    mask = ((1 << (width:=hi - lo + 1)) - 1) << (lo % 8)
-    num = int.from_bytes(self.mv[lo//8:hi//8+1], "little")
-
-    if value is None: return (num & mask) >> (lo % 8)
-
-    if value >= (1 << width): raise ValueError(f"{value:#x} does not fit.")
-    self.mv[lo//8:hi//8+1] = int((num & ~mask) | ((value << (lo % 8)) & mask)).to_bytes((hi//8 - lo//8 + 1), "little")
-
   def write(self, **kwargs:int|UOp): # an int lands in the bits now, a uop becomes a word of the widest byte sized type that fits its field
     for k, v in kwargs.items():
       hi, lo = QMD.fields[self.pref][k.upper()]
-      if isinstance(v, int): self._rw_bits(hi, lo, value=v)
-      else:
+      if isinstance(v, UOp):
         assert lo % 8 == 0, f"{k} is not byte aligned"
         self.words[lo // 8] = v.ccast(next(t for t in (dtypes.uint64, dtypes.uint32, dtypes.uint16, dtypes.uint8) if t.itemsize * 8 <= hi - lo + 1))
+      else:
+        if v >> (hi - lo + 1): raise ValueError(f"{k}={v:#x} does not fit")
+        mask, num = ((1 << (hi - lo + 1)) - 1) << (lo % 8), int.from_bytes(self.mv[lo//8:hi//8+1], "little")
+        self.mv[lo//8:hi//8+1] = ((num & ~mask) | (v << (lo % 8))).to_bytes(hi//8 - lo//8 + 1, "little")
 
   def set_addr(self, name:str, addr:UOp, sfx:str=""): self.write(**{f"{name}_lower{sfx}": addr, f"{name}_upper{sfx}": addr >> 32})
   def set_constant_buf_addr(self, i:int, addr:UOp):
@@ -82,37 +76,40 @@ class QMD:
     self.set_addr("program_address", addr >> (4 if self.ver >= 4 else 0), "_shifted4" if self.ver >= 4 else "")
     self.set_addr("program_prefetch_addr", addr >> 8, "_shifted")
   def set_release(self, addr:UOp, payload:UOp): # released once the grid completes
-    self.set_addr("release0_address" if self.ver < 4 else "release_semaphore0_addr", addr)
-    self.set_addr("release0_payload" if self.ver < 4 else "release_semaphore0_payload", payload)
+    self.set_addr("release_semaphore0_addr" if self.ver >= 4 else "release0_address", addr)
+    self.set_addr("release_semaphore0_payload" if self.ver >= 4 else "release0_payload", payload)
     self.write(release0_enable=1)
   @property
   def grid(self) -> tuple[str, ...]:
-    return ("cta_raster_width", "cta_raster_height", "cta_raster_depth") if self.ver < 4 else ("grid_width", "grid_height", "grid_depth")
+    return ("grid_width", "grid_height", "grid_depth") if self.ver >= 4 else ("cta_raster_width", "cta_raster_height", "cta_raster_depth")
 
 # *****************
 # queues
 
 class NVQueue(HWQueue):
   dev:NVDevice
+  q_rewrite = PatternMatcher([ # the semaphore ops every channel has, the queues add what they run
+    (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
+    (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
+    (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
+  ])
 
   def nvm(self, subc:int, mthd:int, *vals, typ=2): self.q(*nvm(subc, mthd, *vals, typ=typ))
 
-  def sem(self, addr:UOp, value:UOp|int, **flags:str): # one host class semaphore op on a 64 bit payload
-    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, addr, UOp.const(value, dtypes.uint64) if isinstance(value, int) else value.ccast(dtypes.uint64),
-             nv_flags("NVC56F_SEM_EXECUTE", payload_size="64bit", **flags))
+  def sem(self, addr:UOp, value:UOp, **flags:str): # one host class semaphore op with a 64 bit payload
+    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, addr, value.ccast(dtypes.uint64), nv_flags("NVC56F_SEM_EXECUTE", payload_size="64bit", **flags))
 
   def wait(self, signal:UOp, value:UOp): self.sem(signal.getaddr(self.devs), value, operation="acq_circ_geq")
   def timestamp(self, signal:UOp): # the release fills the whole slot: its payload, then the timestamp
-    self.sem(signal.getaddr(self.devs), 0, operation="release", release_wfi="en", release_timestamp="en")
+    self.sem(signal.getaddr(self.devs), UOp.const(0, dtypes.uint64), operation="release", release_wfi="en", release_timestamp="en")
   def signal(self, signal:UOp, value:UOp):
     self.sem(signal.getaddr(self.devs), value, operation="release", release_wfi="en")
     self.nvm(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 0x0)
 
   def submit(self, cmdbuf:UOp) -> UOp: # the cmdbuf is on the device already: push one gpfifo entry that points at it and ring the doorbell
     fifo, ib, off = self.dev.fifos[self.queue], *unwrap_view(cmdbuf)
-    ring, gpput, doorbell, put = [UOp.placeholder(shape, dt, 0, device=self.devs, volatile=True, tag=to_name(n, self.queue))
-      for n, shape, dt in (("ring", (fifo.entries,), dtypes.uint64), ("gpput", (1,), dtypes.uint32), ("doorbell", (1,), dtypes.uint32),
-                           ("put_value", (1,), dtypes.uint64))]
+    ph = lambda n, dt=dtypes.uint32, shape=(1,): UOp.placeholder(shape, dt, 0, device=self.devs, volatile=True, tag=to_name(n, self.queue))
+    ring, gpput, doorbell, put = ph("ring", dtypes.uint64, (fifo.entries,)), ph("gpput"), ph("doorbell"), ph("put_value", dtypes.uint64)
 
     # the entry is fixed once the linear links: it is patched into a slot of its own, and the submit only copies it into the ring
     gpe = UOp.placeholder((1,), dtypes.uint64, device=self.devs, volatile=True, tag=to_name("gpentry", self.queue))
@@ -128,10 +125,7 @@ class NVComputeQueue(NVQueue):
   q_rewrite = PatternMatcher([
     (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), lambda ctx, call, prg: ctx.exec(call, prg)),
     (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda ctx: ctx.memory_barrier()),
-    (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
-    (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
-    (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
-  ])
+  ]) + NVQueue.q_rewrite
 
   def __init__(self, ctx, submit):
     super().__init__(ctx, submit)
@@ -161,32 +155,23 @@ class NVComputeQueue(NVQueue):
     self.nvm(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI,
              nv_flags("NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI", instruction="true", global_data="true", constant="true"))
 
-  def kernargs(self, qmd:QMD, call:UOp, prg:UOp, data:NVProgramData): # constant buffer 0: the driver params, then the buffers and the vars
-    bufs, vals = [get_call_arg_uops(call)[i] for i in prg.arg.globals], get_call_var_uops(call, prg)
-    cbuf = list(data.cbuf_0)
-    if data.mock: cbuf[80:82] = [len(bufs), len(vals)] # mockgpu reads the arg counts out of cbuf0 and wants every var 64 bit
-    sig = [(i * 8, dtypes.uint64) for i in range(len(vals))] if data.mock else list(TinyELF.iter_sig(data.signature[len(bufs):], len(bufs) * 8))
-    qmd.mv[self.qmd_sz:self.qmd_sz + len(cbuf) * 4] = array.array('I', cbuf).tobytes()
-    at = self.qmd_sz + len(cbuf) * 4
-    qmd.words |= {at + i * 8: b.getaddr(self.devs) for i, b in enumerate(bufs)} | {at + o: v.ccast(dt) for v, (o, dt) in zip(vals, sig)}
-
   def exec(self, call:UOp, prg:UOp):
     data, lib = nv_build_program(self.dev, prg, self.devs)
     global_size, local_size = prg.arg.global_size, prg.arg.local_size
-    if prod(local_size) > 1024 or data.max_threads < prod(local_size) or data.lcmem_usage > self.dev.slm_per_thread:
+    if prod(local_size) > 1024 or data.max_threads < prod(local_size):
       raise RuntimeError(f"Too many resources requested for launch, {prod(local_size)=}, {data.max_threads=}")
     if any(g > mx for g,mx in zip(global_size, [2147483647, 65535, 65535]) if isinstance(g, int)) or \
        any(l > mx for l,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
 
     i, lib_addr = len(self.qmds), lib.getaddr(self.devs)
-    qmd = QMD(self.dev, bytearray(bytes(data.qmd.mv).ljust(self.stride, b"\0"))) # the program's template, in a slot of its own
+    qmd = QMD(self.dev, data.qmd.mv.ljust(self.stride, b"\0")) # the program's template, in a slot of its own
     qmd.write(**dict(zip(qmd.grid, global_size)), **{f"cta_thread_dimension{j}": l for j, l in enumerate(local_size)})
     qmd.set_program_addr(lib_addr + data.prog_off)
-    qmd.set_constant_buf_addr(0, self.qmd_addr(i, self.qmd_sz))
-    for j, (off, _) in data.constbufs.items():
-      if j: qmd.set_constant_buf_addr(j, lib_addr + off) # the other constant buffers live in the program image
-    self.kernargs(qmd, call, prg, data)
+    for j, (off, _) in data.constbufs.items(): qmd.set_constant_buf_addr(j, self.qmd_addr(i, self.qmd_sz) if j == 0 else lib_addr + off)
+    bufs, vals = [get_call_arg_uops(call)[j] for j in prg.arg.globals], get_call_var_uops(call, prg)
+    qmd.mv[self.qmd_sz:(at:=self.qmd_sz + len(data.cbuf_0) * 4)] = array.array('I', data.cbuf_0).tobytes() # constant buffer 0: the driver params
+    qmd.words |= {at + j * 8: b.getaddr(self.devs) for j, b in enumerate(bufs)} | {at + o: v.ccast(dt) for v, (o, dt) in zip(vals, data.vars)}
     self.qmds.append(qmd)
 
     if self.dev.pma_enabled: self.nvm(1, nv_gpu.NVC6C0_PM_TRIGGER, 0)
@@ -205,10 +190,7 @@ class NVCopyQueue(NVQueue):
   q_rewrite = PatternMatcher([
     (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), lambda ctx, call: ctx.copy(call)),
     (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda ctx: ()),
-    (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
-    (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
-    (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
-  ])
+  ]) + NVQueue.q_rewrite
 
   def copy(self, call:UOp):
     dest, src = (a.getaddr(self.devs) for a in call.src[1:3])
@@ -267,6 +249,12 @@ class NVProgramData:
       # Minimum cbuf_0 size for driver params: Blackwell needs index 223 (224 entries), older GPUs need index 11 (12 entries)
       min_cbuf0_entries = 224 if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else 12
       self.cbuf_0 = [0] * max(cbuf0_size // 4, min_cbuf0_entries)
+
+    # the arguments follow the driver params in constant buffer 0: the buffers as 64 bit addresses, then the vars packed by their width
+    nbufs = sum(name is None for name, *_ in self.signature)
+    self.vars = list(TinyELF.iter_sig(self.signature[nbufs:], nbufs * 8))
+    if self.mock: # mockgpu reads the arg counts out of cbuf0 and wants every var 64 bit
+      self.cbuf_0[80:82], self.vars = [nbufs, len(self.vars)], [(nbufs * 8 + i * 8, dtypes.uint64) for i in range(len(self.vars))]
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.image = image.ljust(round_up(len(image), 0x1000) + 0x1000, b'\x00')
@@ -440,7 +428,7 @@ class NVKIface:
     self.uvm(nv_gpu.UVM_REGISTER_GPU_VASPACE, nv_gpu.UVM_REGISTER_GPU_VASPACE_PARAMS(
       gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hVaSpace=vaspace))
 
-    for dev in [d for d in NVDevice.opened_devices() if not d.is_nvd()]:
+    for dev in [d for x in Device._opened_devices if isinstance(d:=Device[x], NVDevice) and not d.is_nvd()]:
       try: self.uvm(nv_gpu.UVM_ENABLE_PEER_ACCESS, nv_gpu.UVM_ENABLE_PEER_ACCESS_PARAMS(gpuUuidA=self.gpu_uuid, gpuUuidB=dev.iface.gpu_uuid))
       except RuntimeError as e: raise RuntimeError(f"{e}. Make sure GPUs #{self.gpu_minor} & #{dev.iface.gpu_minor} have P2P enabled.") from e
 
@@ -575,9 +563,6 @@ class NVDevice(HCQ2Compiled):
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy", name="submit"), lambda ctx, submit: encode_submit(NVCopyQueue(ctx, submit))),
   ])
 
-  @staticmethod
-  def opened_devices() -> list[NVDevice]: return [d for x in Device._opened_devices if isinstance(d:=Device[x], NVDevice)]
-
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
 
   def __init__(self, device:str=""):
@@ -616,7 +601,8 @@ class NVDevice(HCQ2Compiled):
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
-    self.slm_per_thread, self.shader_local_mem = 0, cast(Buffer|None, None)
+    self.slm_per_thread = 0
+    self.shader_local_mem:Buffer|None = None
     # Set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
