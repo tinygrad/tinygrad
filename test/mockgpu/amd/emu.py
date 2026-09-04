@@ -537,15 +537,20 @@ class _Ctx:
           stores.extend([self.wsgpr_dyn(_c(EXEC_LO.offset), lo), self.wsgpr_dyn(_c(EXEC_LO.offset + 1), hi)])
         else: stores.append(self.wsgpr_dyn(_c(EXEC_LO.offset), _to_u32(val)))
       elif dest.startswith('VCC'): stores.extend(self.wmask(_c(VCC_LO.offset), val))
+      elif dest.startswith('PC'):  # S_SETPC/S_SWAPPC jump: write PC directly (caller skips inc_pc)
+        lo, hi = _split64(val.cast(dtypes.uint64))
+        stores.extend([self.wsgpr_dyn(_c(PC_LO_IDX), lo), self.wsgpr_dyn(_c(PC_HI_IDX), hi)])
     return stores
 
   def compile_sop_pcode(self, op, srcs: dict[str, UOp | int], sdst_reg: UOp, sdst_size: int) -> UOp:
     """Compile a scalar instruction with dynamic destination register."""
     pcode = get_pcode(op)
-    srcs.update(self.base_srcs(self.rexec()), VCC=self.rmask(_c(VCC_LO.offset)))
+    srcs.update(self.base_srcs(self.rexec()), VCC=self.rmask(_c(VCC_LO.offset)), PC=self.rpc().cast(dtypes.int64))
     if 'D0' not in srcs: srcs['D0'] = self.rsgpr_dyn(sdst_reg)  # D0 is current dest value for read-modify-write ops
     _, assigns = parse_pcode(pcode, srcs)
-    return UOp.sink(*self.scalar_stores(assigns, sdst_reg, sdst_size), *self.inc_pc())
+    # PC-writing ops (S_SETPC/S_SWAPPC) jump instead of advancing to the next instruction
+    inc = [] if any(dest.startswith('PC') for dest, _ in assigns) else self.inc_pc()
+    return UOp.sink(*self.scalar_stores(assigns, sdst_reg, sdst_size), *inc)
 
   def compile_lane_pcode(self, op, inst) -> UOp:
     """Compile cross-lane ops (READLANE/WRITELANE/PERMLANE) using pcode parser."""
@@ -678,7 +683,7 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
             'VCCZ': vcc.eq(UOp.const(0, vcc.dtype)).cast(dtypes.uint32),
             'EXECZ': exec_val.eq(UOp.const(0, exec_val.dtype)).cast(dtypes.uint32)}
     for dest, val in parse_pcode(pcode, srcs)[1]:
-      if dest == 'PC' or dest.startswith('PC.'):
+      if dest.startswith('PC'):
         lo, hi = _split64(val.cast(dtypes.uint64))
         return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), lo), ctx.wsgpr_dyn(_c(PC_HI_IDX), hi))
   return UOp.sink(*ctx.inc_pc())
@@ -1951,7 +1956,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   # Use Buffer objects with external_ptr=0 for vmem
   vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
-  scratch_buf = Buffer('CPU', scratch_size * wave_size, dtypes.uint8).ensure_allocated() if scratch_size else None
+  # Scratch is per-lane private memory: each wave needs its own region so data spilled before s_barrier survives other waves' execution.
+  n_waves = -(-total_threads // wave_size)
+  scratch_buf = Buffer('CPU', scratch_size * wave_size * n_waves, dtypes.uint8).ensure_allocated() if scratch_size else None
 
   # Initialize SQTT encoder — emits packets inline as instructions execute (only when profiling)
   if PROFILE:
@@ -1975,9 +1982,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     waves: list[tuple[WaveState, list]] = []
     for wave_start in range(0, total_threads, wave_size):
       st = _init_wave(lib, wave_start, total_threads, lx, ly, lz, args_ptr, rsrc2, scratch_size, arch, gidx, gidy, gidz, user_data, wave_size)
+      scratch_base = scratch_buf._buf.va_addr + (wave_start // wave_size) * scratch_size * wave_size if scratch_buf else 0
       waves.append((st, [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
                          ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
-                         ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0),
+                         ctypes.c_uint64(scratch_base if scratch_buf else 0),
                          ctypes.c_uint64(st.accvgpr_buf._buf.va_addr)]))
     done = [False] * len(waves)
     for _ in range(10_000_000):
