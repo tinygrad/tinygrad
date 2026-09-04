@@ -694,14 +694,13 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
       buf[:size] = src_mv[c * CHUNK : c * CHUNK + size]
       wire = round_up(size + 4, 512)  # payload plus the sentinel, padded to 512B sectors (full window for max chunks)
       struct.pack_into('<I', buf, wire - 4, 0x51000000 | (seq & 0xFFFFFF))  # the sentinel is the last dword of the wire
-      if inflight is not None: usb.usb.bulk_wait(inflight)
       # Rearming F2 recycles the slots immediately, before bulk data arrives. Drain seq-2 before the arm itself.
       # The first two windows are already drained by the previous synchronous copyin.
       if c >= 2:
         usb.usb.bulk_wait(rd_tag)
         if int.from_bytes(rd_mv, 'little') < seq - 1: wait_drain(seq - 1)
-      arm_tag = usb.usb.control_write_async(0xF2, wire // 512, (seq & 1) * 16 | (ceildiv(wire, 0x4000) << 8))  # wValue=sectors, wIndex=slot|count
-      usb.usb.bulk_wait(arm_tag)
+      if inflight is not None: usb.usb.bulk_wait(inflight)
+      usb.usb.control_write(0xF2, wire // 512, (seq & 1) * 16 | (ceildiv(wire, 0x4000) << 8))  # wValue=sectors, wIndex=slot|count
       inflight = usb.usb.bulk_write_async(buf[:wire])
     if inflight is not None: usb.usb.bulk_wait(inflight)
     self._usb_seq += nchunks
