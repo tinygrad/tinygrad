@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, codecs, io, struct, re, traceback, itertools
-import socketserver
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, socket, argparse, codecs, io, struct, re, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from dataclasses import dataclass, field
@@ -729,7 +728,6 @@ if __name__ == "__main__":
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"), flush=True)
-  if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}")
   try: server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")
