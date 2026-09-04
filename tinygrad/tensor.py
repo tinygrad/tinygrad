@@ -400,19 +400,13 @@ class Tensor(RandMixin):
       return self
     # a STORE can only write into storage: the target must be backed by a BUFFER (possibly under views)
     assigned_to = self.uop.storage_base
-    # a CONTIGUOUS target is not storage: if it's already materialized, resolve to the storage state (like the old
-    # remove-extra rule); otherwise commit it to a clone in the graph first, then write into that storage
-    if assigned_to.op is Ops.CONTIGUOUS:
-      sub = {assigned_to: assigned_to.src[0] if assigned_to.src[0].op is Ops.AFTER and
-             assigned_to.src[0].has_buffer_identity(after_ok=True) else assigned_to.clone()}
-      _apply_map_to_tensors(sub, name="commit contiguous")
-      assigned_to = self.uop.storage_base
-    # assigning to a value (not storage-backed) is initialization, not a write: a Tensor.assign always overwrites
-    # the whole tensor, so the pending value is dead
-    if assigned_to.op is not Ops.BUFFER:
-      # x is the new value: alias it if it materializes on its own (a load from a creation device),
-      # otherwise give it real storage in the graph (a clone) so this tensor gets storage of its own
-      if not (x.uop.op is Ops.COPY and is_creation_device(x.uop.src[0])): x = x.clone()
+    # a CONTIGUOUS target counts as a realization point: the write lands in the storage the token materializes
+    # assigning to a value (not storage-backed and not a CONTIGUOUS realization point) is initialization,
+    # not a write: a Tensor.assign always overwrites the whole tensor, so the pending value is dead
+    if assigned_to.op not in {Ops.BUFFER, Ops.CONTIGUOUS}:
+      # x is the new value: alias it if it materializes on its own (a CONTIGUOUS or a load from a creation device),
+      # otherwise give it a realization point so this tensor gets storage of its own
+      if x.uop.op is not Ops.CONTIGUOUS and not (x.uop.op is Ops.COPY and is_creation_device(x.uop.src[0])): x = x.contiguous()
       self.uop = x.uop
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
