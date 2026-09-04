@@ -1,4 +1,4 @@
-import unittest
+import unittest, operator
 from tinygrad import Tensor, TinyJit, Variable, dtypes, Device
 from tinygrad.helpers import Context
 import numpy as np
@@ -349,6 +349,32 @@ class TestWithGrad(unittest.TestCase):
     z.sum().backward()
     np.testing.assert_allclose(z.grad.numpy(), np.ones(4))
     np.testing.assert_allclose(x.grad.numpy(), np.ones(2))
+
+  def test_unrealized_inplace_keeps_storage(self):
+    x = Tensor([1., 2.]).clone()
+    view = x[:1]
+    x += 3
+    x.realize()
+    self.assertEqual(x.tolist(), [4., 5.])
+    self.assertEqual(view.tolist(), [4.])
+
+  def test_unrealized_view_inplace_keeps_storage(self):
+    x = Tensor([1., 2.]).clone()
+    view = x[:1]
+    view += 3
+    view.realize()
+    self.assertEqual(x.tolist(), [4., 2.])
+    self.assertEqual(view.tolist(), [4.])
+
+  def test_set_augmented_backward(self):
+    for op, expected in ((operator.isub, [-1., -1.]), (operator.imul, [1., 2.]), (operator.itruediv, [-0.01, -0.005])):
+      with self.subTest(op=op.__name__):
+        z = Tensor([1.0, 2.0, 3.0, 4.0])
+        x = Tensor([10.0, 20.0])
+        z[:2] = op(z[:2], x)
+        z.sum().backward()
+        np.testing.assert_allclose(z.grad.numpy(), np.ones(4))
+        np.testing.assert_allclose(x.grad.numpy(), expected)
 
   def test_set_used_before_setitem(self):
     z = Tensor([1.0, 2.0, 3.0, 4.0])

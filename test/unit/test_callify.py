@@ -1,5 +1,7 @@
 import unittest
 from tinygrad import Tensor, dtypes
+from tinygrad.uop.ops import UOp, Ops
+from tinygrad.tensor import transform_to_call
 
 class TestCallify(unittest.TestCase):
   def test_basic(self):
@@ -107,11 +109,37 @@ class TestCallify(unittest.TestCase):
     self.assertListEqual(c.tolist(), [5.0, 7.0, 9.0])
     self.assertListEqual(d.tolist(), [4.0, 10.0, 18.0])
 
+  def test_only_replace_inputs(self):
+    x = Tensor.empty(4)
+    body = UOp.sink((x.uop + 1).contiguous().copy_to_device("CPU:1"))
+    call = transform_to_call(body)
+    self.assertEqual(call.src[1:], (x.uop,))
+    self.assertIs(call.src[0], body.substitute({x.uop: x.uop.param_like(0)}))
+
+  def test_intermediate_contiguous_stays_a_value(self):
+    x = (Tensor([1, 2, 3]).realize() + 1).contiguous()
+    original = x.uop
+    y = (x * 2).realize()
+    self.assertIs(x.uop, original)
+    self.assertIs(x.uop.op, Ops.CONTIGUOUS)
+    self.assertEqual(y.tolist(), [4, 6, 8])
+
+  def test_intermediate_clone_persists(self):
+    x = (Tensor([1, 2, 3]).realize() + 1).clone()
+    y = (x * 2).realize()
+    self.assertTrue(x.uop.has_buffer_identity())
+    self.assertEqual(x.tolist(), [2, 3, 4])
+    self.assertEqual(y.tolist(), [4, 6, 8])
+
+  def test_creation_copy_has_storage(self):
+    x = Tensor([1, 2, 3], device="PYTHON").to("CPU")
+    self.assertTrue(x.uop.has_buffer_identity(after_ok=True))
+    y = Tensor.empty(3, dtype=dtypes.int).assign(x).realize()
+    y.assign(0).realize()
+    self.assertEqual(x.tolist(), [1, 2, 3])
+
   def test_zero_size_cat_with_rng(self):
-    # regression: the size-0 CONTIGUOUS in a cat materializes by resolving to its source, and the RNG counter's
-    # creation COPY nested under that source is also a materialize key. if the CONTIGUOUS maps to its raw source,
-    # substitution replaces it without descending, leaving the counter's assign chain un-substituted in the graph:
-    # two writes race the same counter buffer and create_schedule fails with "cycle detected in assign graph"
+    # Empty outputs must not replay a pending RNG counter update.
     a = Tensor.rand(2, 2)
     b = Tensor.rand(2, 0)
     t = a.cat(b, dim=1).realize()

@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.tensor import transform_to_call
 
-def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop))[0].src[0].key
+def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop)).src[0].key
 
 class TestCall(unittest.TestCase):
   def test_call_plus(self):
