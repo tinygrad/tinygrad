@@ -19,12 +19,24 @@ GET_BOOT_PARTITION, GET_FB_STATE, GET_TRANSFER_TYPE = 0x01, 0x06, 0x07
 START_TRANSFER, DATA_TRANSFER, END_TRANSFER = 0x08, 0x09, 0x0A
 SPI_GET_MODEL_ID = 0x0B
 LIVE_ADDR_LO, LIVE_ADDR_HI, LIVE_UPDATE = 0x02, 0x03, 0x04
+PSP_ERRORS = {
+  0x01: "generic error", 0x02: "out of bounds", 0x03: "invalid parameter",
+  0x04: "off-chip boot error", 0x05: "address not set", 0x06: "parse off-chip error",
+  0x07: "address map error", 0x08: "parse on-chip error", 0x09: "full update error",
+  0x0A: "partition update error", 0x0B: "map on-chip error", 0x0C: "write to SPI error",
+  0x0D: "signature validation error", 0x0E: "invalid command", 0x0F: "signature not found",
+  0x10: "state machine not initialized", 0x11: "state machine transfer error",
+  0x12: "initialization error",
+}
 
 
 class PSPFlashMailbox:
   def __init__(self, pci_dev): self.mmio = MMIO(pci_dev)
 
   def command(self, command: int, data: int | None = None, *, timeout: float = 10.0) -> tuple[int, int]:
+    status = self.mmio.read32(COMMAND)
+    if not status & 0x80000000:
+      raise RuntimeError(f"PSP mailbox is not ready before command {command:#x}: status={status:#010x}")
     if data is not None: self.mmio.write32(COMMAND_DATA, data)
     self.mmio.write32(COMMAND, command << 16)
     self.mmio.write32(DOORBELL, 1)
@@ -36,8 +48,8 @@ class PSPFlashMailbox:
   def require(self, command: int, data: int | None = None, *, timeout: float = 10.0, name: str = '') -> int:
     error, response = self.command(command, data, timeout=timeout)
     if error:
-      hint = " (update interface is gated after SOS initialization)" if error == 0xA else ""
-      raise RuntimeError(f"PSP {name or hex(command)} failed: error={error:#x}{hint}")
+      detail = PSP_ERRORS.get(error, "unknown error")
+      raise RuntimeError(f"PSP {name or hex(command)} failed: error={error:#x} ({detail})")
     return response
 
   def probe(self) -> dict[str, tuple[int, int]]:
@@ -47,16 +59,14 @@ class PSPFlashMailbox:
       result[name] = self.command(command)
     return result
 
-  def stream(self, payload: bytes, item_type: int):
+  def stream(self, payload: bytes, item_type: int, transfer_type: int | None = None):
     if not payload: raise ValueError("payload is empty")
     if len(payload) > 0xFFFFFF: raise ValueError("payload exceeds the mailbox's 24-bit size field")
     if len(payload) & 3: raise ValueError("payload size must be divisible by four")
     if not 0 <= item_type <= 0xff: raise ValueError("item type must fit in eight bits")
-    transfer_type = self.require(GET_TRANSFER_TYPE, name="GET_TRANSFER_TYPE")
+    if transfer_type is None: transfer_type = self.require(GET_TRANSFER_TYPE, name="GET_TRANSFER_TYPE")
     requested = transfer_type & 0xff
     print(f"firmware transfer_type={transfer_type:#x}", flush=True)
-    if transfer_type & 0x200:
-      raise RuntimeError(f"firmware reports completion state {transfer_type:#x}; hard reset required")
     if requested != item_type:
       raise RuntimeError(f"firmware requests item {requested:#x}, not {item_type:#x}")
     self.require(START_TRANSFER, (len(payload) << 8) | item_type, name="START_TRANSFER")
@@ -79,9 +89,8 @@ class PSPFlashMailbox:
     print(f"stream complete: type={item_type:#x} size={sent:#x} elapsed={time.monotonic()-started:.1f}s")
 
 
-def resolve_ifwi_item(image: bytes, item_type: int, active: int) -> tuple[int, bytes]:
+def resolve_ifwi_item(image: bytes, item_type: int) -> tuple[int, bytes]:
   """Resolve AMDVBFlash recovery-layout item types to exact IFWI bytes."""
-  if active not in (1, 2): raise ValueError(f"unexpected one-based active partition {active}")
   if item_type == 0x01: offset, size = 0, 0x54
   elif item_type in (0x02, 0x03):
     offset = 0x2000 if item_type == 0x02 else 0x3000
@@ -107,11 +116,11 @@ def resolve_ifwi_item(image: bytes, item_type: int, active: int) -> tuple[int, b
     _, _, size, offset = match[0]
   elif item_type == 0x89: offset, size = 0x1f0000, 0x100
   elif item_type == 0x08:
-    # Firmware requests the inactive partition. A 0x2xx transfer state after
-    # this item is completion/reset-required status, not another item instance.
-    descriptor = 0x13000 if active == 1 else 0x12000
-    offset = struct.unpack_from('<I', image, descriptor + 0x10)[0]
-    size = struct.unpack_from('<I', image, descriptor + 0x18)[0]
+    # AMDVBFlash's GetPartitionDetails follows the first ISH entry (firmware ID
+    # 0x13c) and streams its payload. PSP, not the host resolver, selects the
+    # destination partition.
+    offset = struct.unpack_from('<I', image, 0x12000 + 0x10)[0]
+    size = struct.unpack_from('<I', image, 0x12000 + 0x18)[0]
   else:
     raise ValueError(f"IFWI resolver does not yet support requested item {item_type:#x}")
   payload = image[offset:offset+size]
@@ -139,6 +148,10 @@ class LivePSPFlash:
 def open_mailbox(args): return PSPFlashMailbox(open_gpu(args.device, args.transport))
 
 
+def reject_unvalidated_firmware_write():
+  raise RuntimeError("firmware writes are disabled: stock reflash validation failed; use romless.py for recovery")
+
+
 def cmd_probe(args):
   result = open_mailbox(args).probe()
   for name, (error, response) in result.items(): print(f"{name}: error={error:#x} response={response:#x}")
@@ -147,21 +160,21 @@ def cmd_probe(args):
 
 def cmd_stream(args):
   if not args.yes: raise RuntimeError("refusing to stream without --yes")
+  reject_unvalidated_firmware_write()
   payload = Path(args.image).read_bytes()
   open_mailbox(args).stream(payload, args.item_type)
 
 
 def cmd_ifwi_step(args):
   if not args.yes: raise RuntimeError("refusing to stream without --yes")
+  reject_unvalidated_firmware_write()
   image = Path(args.ifwi).read_bytes()
   if len(image) != 0x200000: raise ValueError("Navi31 IFWI image must be exactly 2 MiB")
   mailbox = open_mailbox(args)
-  active = mailbox.require(GET_BOOT_PARTITION, name="GET_BOOT_PARTITION")
   state = mailbox.require(GET_TRANSFER_TYPE, name="GET_TRANSFER_TYPE")
   request = state & 0xff
-  if state & 0x200: raise RuntimeError(f"firmware reports completion state {state:#x}; reset instead of streaming another item")
-  _, payload = resolve_ifwi_item(image, request, active)
-  mailbox.stream(payload, request)
+  _, payload = resolve_ifwi_item(image, request)
+  mailbox.stream(payload, request, transfer_type=state)
   next_request = mailbox.require(GET_TRANSFER_TYPE, name="GET_TRANSFER_TYPE")
   print(f"next firmware transfer_type={next_request:#x}")
 
@@ -171,22 +184,24 @@ def cmd_ifwi_all(args):
   image = Path(args.ifwi).read_bytes()
   if len(image) != 0x200000: raise ValueError("Navi31 IFWI image must be exactly 2 MiB")
   mailbox = open_mailbox(args)
-  active = mailbox.require(GET_BOOT_PARTITION, name="GET_BOOT_PARTITION")
   current = mailbox.require(GET_TRANSFER_TYPE, name="GET_TRANSFER_TYPE")
-  for step in range(32):
-    if current & 0x200:
-      print(f"IFWI update complete: firmware state={current:#x}; hard reset required")
+  for step in range(19):  # Navi31 ROMItemCount from AMDVBFlash ASICDetails.xml
+    request, phase = current & 0xff, current >> 8
+    print(f"IFWI step {step}: state={current:#x} item={request:#x} phase={phase}", flush=True)
+    _, payload = resolve_ifwi_item(image, request)
+    mailbox.stream(payload, request, transfer_type=current)
+    # AMDVBFlash tests the high byte belonging to the item just streamed. Phase
+    # 2 terminates the loop only after that item has completed successfully.
+    if phase == 2:
+      print(f"IFWI stream complete after terminal state {current:#x}; hard power cycle required")
       return
-    request = current & 0xff
-    print(f"IFWI step {step}: state={current:#x} item={request:#x}", flush=True)
-    _, payload = resolve_ifwi_item(image, request, active)
-    mailbox.stream(payload, request)
     current = mailbox.require(GET_TRANSFER_TYPE, name="GET_TRANSFER_TYPE")
-  raise RuntimeError(f"IFWI request cycle did not close after 32 items (state={current:#x})")
+  raise RuntimeError(f"IFWI stream did not reach terminal phase after 19 items (state={current:#x})")
 
 
 def cmd_live_flash(args):
   if not args.yes: raise RuntimeError("refusing to flash without --yes")
+  reject_unvalidated_firmware_write()
   image = Path(args.ifwi).read_bytes()
   if not image or len(image) > 16 * 1024 * 1024 or len(image) & 3:
     raise ValueError("live PSP image must be non-empty, 4-byte aligned, and at most 16 MiB")
