@@ -8,6 +8,61 @@ from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
+# args without storage: fold movement ops that collapse to a contiguous range over a buffer into a static view of
+# the base buffer (like contiguous_mops_to_view); everything else materializes with CONTIGUOUS
+def arg_with_storage(a:UOp) -> UOp:
+  if a.has_buffer_identity(after_ok=True): return a
+  src, buf = a, a.base
+  while buf.op is Ops.BITCAST: buf = buf.src[0].base
+  if all_int(a.shape) and len(a.shape) > 0 and buf.op in {Ops.BUFFER, Ops.PARAM} and (cv := src.contiguous_view()) is not None \
+      and (b := cv[0]).op in {Ops.BUFFER, Ops.PARAM}:
+    view = b[cv[1]:cv[1] + src.max_numel() * src.element_size() // b.element_size()].bitcast(src.dtype)
+    return view.reshape(a.shape)
+  return a.contiguous()
+
+def transform_precompiled_call(c:UOp) -> UOp|None:
+  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
+  assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
+  # the RETURNED srcs are the call outputs (slots are src positions)
+  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
+  srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
+
+  # add the outputs to the call
+  outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
+  targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
+
+  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
+  # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
+  placed:dict[UOp, UOp] = {}
+  items:list[UOp] = []
+  for s, t in zip(srcs, targets):
+    deps:list[UOp] = []
+    while s.op is Ops.AFTER:
+      deps.extend(s.src[1:])
+      s = s.src[0]
+    if s not in placed:
+      if s.op is Ops.CONTIGUOUS: placed[s] = t.after(t.store(s.src[0]))
+      elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = t
+      if s in placed:
+        items.append(s.after(*deps))
+        continue
+    items.append(t.after(t.store(s.after(*deps))))
+  # swap every placed value for its target storage, also inside other stores' AFTER deps
+  fxn = UOp.sink(*(x.substitute(placed) for x in items))
+
+  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
+  # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
+  rmap = dict(zip(ret_pos, outs))
+  new_call = c.replace(src=(fxn, *[rmap.get(i, arg_with_storage(a)) for i, a in enumerate(c.src[1:])]))
+  rets = tuple(o.after(new_call) for o in outs)
+
+  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
+  # NOTE: must use the resolved shapes of the RETURNED placeholders (which substitute PARAMs with external args), not raw body shapes
+  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
+
+  # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
+  return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
+
 def walk_mop(u:UOp):
   if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD, Ops.BITCAST}: return walk_mop(u.src[0])
   if u.op is Ops.AFTER and (b:=walk_mop(u.src[0])) is not u.src[0]: return b.after(*u.src[1:])
@@ -130,6 +185,9 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
+  # transform precompiled value-producing calls into opaque CALLs (outputs become real buffers)
+  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
+
   # resolve calls with RETURNED inputs (inline the body)
   (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.has_unbound_outputs else None),
 
@@ -211,10 +269,46 @@ pm_copy_to_store = PatternMatcher([
   (UPat(Ops.COPY, name="copy"), convert_copy_to_store),
 ])
 
+def bind_call_outputs(sink:UOp) -> UOp:
+  """fresh outputs of opaque precompiled calls directly stored into final storage: bind the storage into the call's
+  output positions and drop the stores; the call then writes the storage directly, no copy kernel (like
+  transform_precompiled_call giving outputs real buffers). done for all consumers of a call at once (all or
+  nothing) so the call stays a single kernel instance"""
+  parents: dict[UOp, list[UOp]] = {}
+  uses: dict[UOp, int] = {}
+  for u in sink.toposort(enter_calls=False):
+    for s in u.src:
+      parents.setdefault(s, []).append(u)
+      uses[s] = uses.get(s, 0)+1
+  subs: dict[UOp, UOp] = {}
+  for call in [u for u in uses if u.op is Ops.CALL and u.arg is not None and u.arg.precompile and not u.has_unbound_outputs]:
+    # every AFTER consumer of the call's outputs must be a single-use direct store into bindable final storage
+    items: list[tuple[UOp, UOp, UOp, UOp]] = []
+    for after in [a for a in parents.get(call, []) if a.op is Ops.AFTER and a.src[0] in call.src[1:]]:
+      out = after.src[0]
+      ok = out.has_buffer_identity() and uses.get(out, 0) == 2 and len(pars:=parents.get(after, [])) == 1 and pars[0].op is Ops.STORE \
+        and pars[0].src[1] is after and not (dst:=pars[0].src[0]).unsharded_base.is_unbound and dst.dtype is out.dtype \
+        and dst.device == out.device and dst._shape is not None and dst._shape == out._shape
+      if not ok: break
+      items.append((pars[0], dst, after, out))
+    else:
+      if not items: continue
+      new_call = call.substitute({out: dst for _, dst, _, out in items}, enter_calls=False)
+      for st, dst, after, out in items: subs[st] = after.substitute({out: dst, call: new_call}, enter_calls=False)
+  return sink.substitute(subs, name="bind call outputs") if subs else sink
+
+# resolve precompiled call outputs to real buffers before anything else sees the calls (like multi_pm)
+pm_resolve_call_outputs = PatternMatcher([
+  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
+  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
+])
+
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:
+  # transform precompiled value-producing calls into opaque CALLs (outputs become real buffers)
+  tsink = bind_call_outputs(graph_rewrite(sink, pm_resolve_call_outputs, bottom_up=True, name="resolve call outputs"))
   # prepare for rangeify
-  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
+  tsink = graph_rewrite(tsink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")

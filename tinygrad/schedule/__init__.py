@@ -126,8 +126,11 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   cache_key = function.key
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
     if SPEC: type_verify(function, spec_tensor)
+    # prepare can introduce new opaque CALLs (transform_precompiled_call turns precompiled calls opaque here): lower
+    # nested calls first so create_schedule doesn't look through their unscheduled bodies
     # support recursive CALLs
-    linear = create_schedule(get_kernel_graph(prepare_rangeify(function)))
+    prepared = graph_rewrite(prepare_rangeify(function), pm_schedule, name="schedule nested calls", enter_calls=True)
+    linear = create_schedule(get_kernel_graph(prepared))
     if SCACHE: schedule_cache[cache_key] = linear
   else:
     # schedule cache hit

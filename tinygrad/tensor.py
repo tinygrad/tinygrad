@@ -8,7 +8,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
-from tinygrad.uop.ops import resolve_returned_after, remove_all_tags
+from tinygrad.uop.ops import remove_all_tags
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
@@ -91,58 +91,8 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
-def transform_precompiled_call(c:UOp) -> UOp|None:
-  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
-  assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
-  # the RETURNED srcs are the call outputs (slots are src positions)
-  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
-  srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
-
-  # add the outputs to the call
-  outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
-  targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
-
-  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
-  # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
-  placed:dict[UOp, UOp] = {}
-  items:list[UOp] = []
-  for s, t in zip(srcs, targets):
-    deps:list[UOp] = []
-    while s.op is Ops.AFTER:
-      deps.extend(s.src[1:])
-      s = s.src[0]
-    if s not in placed:
-      if s.op is Ops.CONTIGUOUS: placed[s] = t.after(t.store(s.src[0]))
-      elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = t
-      if s in placed:
-        items.append(s.after(*deps))
-        continue
-    items.append(t.after(t.store(s.after(*deps))))
-  # swap every placed value for its target storage, also inside other stores' AFTER deps
-  fxn = UOp.sink(*(x.substitute(placed) for x in items))
-
-  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
-  # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
-  rmap = dict(zip(ret_pos, outs))
-  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
-                                   for i, a in enumerate(c.src[1:])]))
-  rets = tuple(o.after(new_call) for o in outs)
-
-  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  # NOTE: must use the resolved shapes of the RETURNED placeholders (which substitute PARAMs with external args), not raw body shapes
-  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
-
-  # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
-  return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
-
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
-  # transform precompiled value-producing calls into opaque CALLs (outputs become real buffers)
-  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
-
-  # resolve AFTER on RETURNED placeholders (for precompiled calls)
-  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
-
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
@@ -210,13 +160,16 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="add tags")
 
   # final outputs of value calls materialize with fresh storage
+  # precompiled calls resolve to opaque CALLs in prepare (after callify), not by inlining: their outputs need the
+  # storage minted now so the call survives in the call body (a CONTIGUOUS can't be minted on the device-less AFTER).
+  # no tag: the tensor keeps the AFTER(RETURNED, CALL) node; backward and later realizes resolve through it again
   srcs:list[UOp] = []
   for u in big_sink.src:
     if u.op is Ops.AFTER and u.src[0].unsharded_base.is_unbound:
-      # precompiled calls don't need this: transform_precompiled_call gives their outputs real buffers
-      call = u.src[1]
-      if not (call.op is Ops.CALL and call.arg is not None and call.arg.precompile):
-        u = u.rtag(None).contiguous(tag=u.tag)
+      if (call:=u.src[1]).op is Ops.CALL and call.arg is not None and call.arg.precompile:
+        buf = (val:=u.rtag(None)).empty_like()
+        u = buf.after(buf.store(val))
+      else: u = u.rtag(None).contiguous(tag=u.tag)
     srcs.append(u)
   big_sink = big_sink.replace(src=tuple(srcs))
 
