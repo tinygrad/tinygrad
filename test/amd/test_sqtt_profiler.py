@@ -7,6 +7,7 @@ from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.viz.serve import load_amd_counters, VizData
 from tinygrad.renderer.amd.sqtt import decode, print_packets
+from tinygrad.renderer.amd.dsl import s, v, NULL
 
 @contextlib.contextmanager
 def save_sqtt():
@@ -33,9 +34,9 @@ def save_sqtt_blobs():
 def custom_asm_cdna(A:UOp):
   import tinygrad.runtime.autogen.amd.cdna.ins as cdna
   WAVE_SIZE = 64
-  t = UOp.special(WAVE_SIZE*2, "lidx0")
+  t = UOp.special(WAVE_SIZE, "lidx0")
   insts = []
-  insts = [cdna.s_nop(1)]*100
+  insts = [cdna.s_nop(0), cdna.s_nop(1), cdna.s_mov_b32(s[0], 10)]
   insts += [cdna.s_endpgm()]
   return UOp(Ops.PROGRAM, src=(UOp.sink(A, t, arg=KernelInfo("asm")), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS,arg=(x,dtypes.void)) for x in insts]))))
 
