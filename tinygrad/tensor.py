@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from typing import Any, Callable, cast, get_args, ParamSpec, TypeGuard, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
@@ -11,57 +11,34 @@ from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, 
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
-from tinygrad.schedule.prepare import buffer_view_subs, prepare_to_call, prepare_call_views, on_disk
+from tinygrad.schedule.prepare import buffer_view_subs, prepare_to_call, on_disk
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 
 # *** callify: transform a tensor graph into a CALL UOp such that all state is properly scoped ***
 
-@dataclass
-class CallifyCtx:
-  inputs: list[UOp] = field(default_factory=list)
-  unbound: dict[UOp, UOp] = field(default_factory=dict)
+@rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret.src)-1)}")
+def transform_to_call(big_sink:UOp) -> UOp:
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
+  if SPEC: type_verify(big_sink, spec_tensor)
+  # Storage declarations have unique global IDs; canonicalize them, including declarations inside nested calls.
+  unbound = [u for u in big_sink.toposort() if u.is_unbound]
+  body = big_sink.substitute({u: u.replace(arg=replace(u.arg, slot=-1-i)) for i,u in enumerate(unbound)},
+                             enter_calls=True, walk=True, name="renumber buffers")
+  # PARAMs belong to the enclosing scope. Nested call bodies keep their own positional PARAMs.
+  inputs = [u for u in body.toposort(enter_calls=False)
+            if (u.op is Ops.PARAM and u.arg.slot >= 0) or u.is_bound_var or
+               (u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL and not u.is_unbound)]
+  params = {u: u.replace(arg=replace(u.arg, slot=i, name=f"p{i}" if u.addrspace is AddrSpace.ALU else u.arg.name))
+            if u.op is Ops.PARAM else u.param_like(i) for i,u in enumerate(inputs)}
+  ret = body.substitute(params, walk=True, name="replace inputs").call(*inputs)
+  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
+  return ret
 
 def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
 pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
-
-def replace_input_buffer(ctx:CallifyCtx, b:UOp):
-  ctx.inputs.append(b)
-  return b.param_like(len(ctx.inputs)-1)
-
-# unbound BUFFERs get canonical scope-local id slots here so structurally identical calls hash identically for the
-# schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
-def canonicalize_unbound_buffer(ctx:CallifyCtx, b:UOp):
-  if b.arg.slot >= 0 and b not in ctx.unbound: ctx.unbound[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.unbound)))
-  return ctx.unbound.get(b)
-
-def canonicalize_call_body(ctx:CallifyCtx, c:UOp):
-  body = graph_rewrite(c.src[0], pm_canonicalize_unbound, ctx=ctx, bottom_up=True)
-  return c.replace(src=(body,)+c.src[1:]) if body is not c.src[0] else None
-
-pm_canonicalize_unbound = PatternMatcher([
-  (UPat(Ops.CALL, name="c"), canonicalize_call_body),
-  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: canonicalize_unbound_buffer(ctx, b) if b.is_unbound else None),
-])
-
-pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
-  # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay, and unbound BUFFERs too)
-  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
-   replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL and not b.is_unbound else None),
-  # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
-  (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
-])
-
-@rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret.src)-1)}")
-def transform_to_call(big_sink:UOp) -> UOp:
-  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
-  if SPEC: type_verify(big_sink, spec_tensor)
-  ctx = CallifyCtx()
-  ret = graph_rewrite(big_sink, pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.inputs)
-  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
-  return ret
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -251,8 +228,7 @@ class Tensor(RandMixin):
                    for u in sink.toposort(enter_calls=False)
                    if u.op is Ops.AFTER and not u.is_bound_var and not u.src[0].unsharded_base.is_unbound}
     tensor_roots = tuple(t.uop for ref in list(all_tensors) if (t:=ref()) is not None)
-    call = transform_to_call(prepare_to_call(sink, tensor_roots))
-    return prepare_call_views(call), becomes_map
+    return transform_to_call(prepare_to_call(sink, tensor_roots)), becomes_map
 
   def callify(self, *lst:Tensor) -> Tensor:
     """Groups the computation for these tensors into a deferred call. Returns `self` without executing the call."""

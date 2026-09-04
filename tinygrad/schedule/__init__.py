@@ -80,7 +80,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
 
 from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear
-from tinygrad.schedule.prepare import prepare_rangeify
+from tinygrad.schedule.prepare import prepare_rangeify, prepare_call_views
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg
@@ -122,6 +122,8 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo): return None
   # value calls (with unbound outputs) are inlined positionally during prepare: their bodies are not programs to schedule
   if call.has_unbound_outputs: return None
+  call = prepare_call_views(call)
+  function = call.src[0]
   st = time.perf_counter()
   cache_key = function.key
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:

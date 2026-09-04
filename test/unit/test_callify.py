@@ -116,6 +116,45 @@ class TestCallify(unittest.TestCase):
     self.assertEqual(call.src[1:], (x.uop,))
     self.assertIs(call.src[0], body.substitute({x.uop: x.uop.param_like(0)}))
 
+  def test_existing_params_do_not_alias_buffers(self):
+    x = Tensor.empty(4)
+    param = UOp.param(0, x.dtype, x.shape, device=x.device)
+    body = UOp.sink(x.uop + param)
+    call = transform_to_call(body)
+    self.assertEqual(set(call.src[1:]), {x.uop, param})
+    params = [u for u in call.src[0].toposort() if u.op is Ops.PARAM]
+    self.assertEqual({u.arg.slot for u in params}, {0, 1})
+    self.assertIs(call.src[0].substitute({u: call.src[1+u.arg.slot] for u in params}, walk=True), body)
+
+  def test_scalar_param_binding_survives_renumbering(self):
+    from tinygrad.schedule import create_linear_with_vars
+    from tinygrad.engine.realize import run_linear
+    x = Tensor([1, 2, 3]).realize()
+    out = Tensor.empty_like(x)
+    binding = UOp.variable("amount", 1, 10, dtypes.int).bind(4)
+    param = binding.param_like(7)
+    call = transform_to_call(UOp.sink(out.uop.after(out.uop.store(x.uop + param))))
+    call = call.replace(src=(call.src[0], *(binding if arg is param else arg for arg in call.src[1:])))
+    run_linear(*create_linear_with_vars(call))
+    self.assertEqual(out.tolist(), [5, 6, 7])
+
+  def test_nested_params_keep_their_scope(self):
+    x = Tensor.empty(4)
+    param = UOp.param(7, x.dtype, x.shape, device=x.device)
+    nested_body = UOp.sink(param + 1)
+    nested = nested_body.call(*([x.uop] * 8))
+    call = transform_to_call(UOp.sink(x.uop + param, nested))
+    self.assertIs(call.src[0].src[1].src[0], nested_body)
+    self.assertEqual(set(call.src[1:]), {x.uop, param})
+
+  def test_unbound_renumbering_preserves_distinct_outputs(self):
+    def output(): return UOp.call_with_outputs((Tensor(1., dtype=dtypes.float, device="CPU").uop,))[0]
+    canonical = transform_to_call(UOp.sink(output())).src[0].src[0]
+    body = UOp.sink(canonical, output())
+    call = transform_to_call(body)
+    self.assertEqual(len([u for u in call.src[0].toposort() if u.is_unbound]), 2)
+    self.assertIs(transform_to_call(call.src[0]).src[0], call.src[0])
+
   def test_intermediate_contiguous_stays_a_value(self):
     x = (Tensor([1, 2, 3]).realize() + 1).contiguous()
     original = x.uop
