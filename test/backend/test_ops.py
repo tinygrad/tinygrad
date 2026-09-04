@@ -825,6 +825,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor&tor, lambda: ten&ten, forward_only=True)
     helper_test_op([], lambda: tor&0x1337, lambda: ten&0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337&tor, lambda: 0x1337&ten, forward_only=True)
+    helper_test_op([], lambda: (tor&12)&tor, lambda: (ten&12)&ten, forward_only=True)
 
     data = [[True, True, False, False], [True, False, True, False]]
     tor0, tor1 = torch.tensor(data[0], dtype=torch.bool),  torch.tensor(data[1], dtype=torch.bool)

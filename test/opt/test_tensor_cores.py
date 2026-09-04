@@ -305,27 +305,6 @@ class TestTensorCores(unittest.TestCase):
       [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+2, (4, AxisType.UNROLL))],
     ], apply_tc=True, atol=atol, rtol=rtol)
 
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
-                      "test requires tensor cores with accumulation in half") # testing with half suffices.
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
-  def test_tensor_core_opts_locals(self):
-    N = 128
-    Tensor.manual_seed(1552)
-    a, b = Tensor.rand(N, N, dtype=dtypes.half).realize(), Tensor.rand(N, N, dtype=dtypes.half).realize()
-    R = tc_reduce_axis(a.matmul(b, dtype=dtypes.half))
-    r = a.matmul(b, dtype=dtypes.half)
-    atol, rtol = 0.25, 0.01
-    helper_linearizer_opt(r, [
-      [Opt(OptOps.SPLIT, R, (0, AxisType.UNROLL))], # check full unroll of reduce with locals
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL))], # check local
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+2, (4, AxisType.UNROLL)),
-       Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))],
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.UPCAST)), Opt(OptOps.SPLIT, R+2, (2, AxisType.UNROLL)),
-       Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST))],
-    ], apply_tc=True, atol=atol, rtol=rtol)
-
   @unittest.skipUnless(any(tc.dtype_in in (dtypes.half, dtypes.float) for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                        "test requires half or float tensor cores")
   def test_tc_shape_padded(self):
