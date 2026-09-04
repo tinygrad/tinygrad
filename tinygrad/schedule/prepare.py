@@ -12,12 +12,8 @@ from tinygrad.schedule.multi import multi_pm
 # the base buffer (like contiguous_mops_to_view); everything else materializes with CONTIGUOUS
 def arg_with_storage(a:UOp) -> UOp:
   if a.has_buffer_identity(after_ok=True): return a
-  src, buf = a, a.base
-  while buf.op is Ops.BITCAST: buf = buf.src[0].base
-  if all_int(a.shape) and len(a.shape) > 0 and buf.op in {Ops.BUFFER, Ops.PARAM} and (cv := src.contiguous_view()) is not None \
-      and (b := cv[0]).op in {Ops.BUFFER, Ops.PARAM}:
-    view = b[cv[1]:cv[1] + src.max_numel() * src.element_size() // b.element_size()].bitcast(src.dtype)
-    return view.reshape(a.shape)
+  if all_int(a.shape) and len(a.shape) > 0 and (cv := a.contiguous_view()) is not None and (b := cv[0]).op in {Ops.BUFFER, Ops.PARAM}:
+    return b[cv[1]:cv[1] + a.max_numel() * a.element_size() // b.element_size()].bitcast(a.dtype).reshape(a.shape)
   return a.contiguous()
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
@@ -273,7 +269,11 @@ def bind_call_outputs(sink:UOp) -> UOp:
   """fresh outputs of opaque precompiled calls directly stored into final storage: bind the storage into the call's
   output positions and drop the stores; the call then writes the storage directly, no copy kernel (like
   transform_precompiled_call giving outputs real buffers). done for all consumers of a call at once (all or
-  nothing) so the call stays a single kernel instance"""
+  nothing) so the call stays a single kernel instance.
+
+  NOTE: output positions aren't recorded on the opaque call, so this treats any arg with an AFTER(call) consumer as
+  an output. that's sound here: the only AFTERs on call args come from the transform's resolved outputs — inputs
+  are read through their own states"""
   parents: dict[UOp, list[UOp]] = {}
   uses: dict[UOp, int] = {}
   for u in sink.toposort(enter_calls=False):
@@ -286,9 +286,10 @@ def bind_call_outputs(sink:UOp) -> UOp:
     items: list[tuple[UOp, UOp, UOp, UOp]] = []
     for after in [a for a in parents.get(call, []) if a.op is Ops.AFTER and a.src[0] in call.src[1:]]:
       out = after.src[0]
+      # dst must have buffer identity: kernel args bind via buf_uop (base buffer), which would drop a view's offset
       ok = out.has_buffer_identity() and uses.get(out, 0) == 2 and len(pars:=parents.get(after, [])) == 1 and pars[0].op is Ops.STORE \
-        and pars[0].src[1] is after and not (dst:=pars[0].src[0]).unsharded_base.is_unbound and dst.dtype is out.dtype \
-        and dst.device == out.device and dst._shape is not None and dst._shape == out._shape
+        and pars[0].src[1] is after and (dst:=pars[0].src[0]).has_buffer_identity(after_ok=True) and not dst.unsharded_base.is_unbound \
+        and dst.dtype is out.dtype and dst.device == out.device and dst._shape is not None and dst._shape == out._shape
       if not ok: break
       items.append((pars[0], dst, after, out))
     else:
