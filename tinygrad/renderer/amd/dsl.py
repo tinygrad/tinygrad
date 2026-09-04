@@ -1,6 +1,7 @@
 # dsl.py - clean DSL for AMD assembly
 from typing import Any
 import tinygrad.dtype
+from tinygrad.dtype import ConstFloat
 
 # ══════════════════════════════════════════════════════════════
 # Registers - unified src encoding space (0-511)
@@ -148,7 +149,6 @@ class EnumBitField(BitField):
 
 import struct
 def _f32(f: float) -> int: return struct.unpack('I', struct.pack('f', f))[0]
-def _f16(f: float) -> int: return struct.unpack('H', struct.pack('e', f))[0]
 
 class SrcField(BitField):
   _valid_range = (0, 511)  # inclusive
@@ -166,7 +166,7 @@ class SrcField(BitField):
     """Encode value. Returns 255 (literal marker) for out-of-range values."""
     # elif isinstance(val, (float, tinygrad.dtype.ConstFloat)): offset = self._FLOAT_ENC.get(float(val), 255)
     if isinstance(val, Reg): offset = val.offset
-    elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, 255) # how to tell if ConstFloat is fp16? consts are fp32??
+    elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, 255)
     elif isinstance(val, int) and 0 <= val <= 64: offset = 128 + val
     elif isinstance(val, int) and -16 <= val < 0: offset = 192 - val
     elif isinstance(val, int): offset = 255  # literal
@@ -329,16 +329,10 @@ class Inst:
     if opsel_bits: vals['opsel'] = (vals.get('opsel') or 0) | opsel_bits
     # For _LIT classes, capture literal value from SrcFields that encode to 255
     literal_val = None
-    opp = vals.get('op', None)
-    assert opp is not None
-    op_operands = OPERANDS.get(opp, {})
     for name, field in self._fields:
       val = vals[name]
       if isinstance(field, SrcField) and val is not None and _needs_literal(val):
-        if isinstance(val, (float, tinygrad.dtype.ConstFloat)):
-          # 16-bit operands (e.g. v_mov_b16) need the fp16 bit pattern in the low half of the literal
-          literal_val = _f16(val) if op_operands.get(name, (None, 32, None))[1] == 16 else _f32(val)
-        else: literal_val = val & 0xFFFFFFFF
+        literal_val = _f32(val) if isinstance(val, (float, ConstFloat)) else val & 0xFFFFFFFF
     if literal_val is not None and 'literal' in vals:
       vals['literal'] = literal_val
     # Set all field values
