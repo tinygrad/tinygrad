@@ -595,6 +595,8 @@ jobs:
       - name: Run pytest (amd)
         run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq2.py test/external/external_test_am.py test/backend/test_asm_gemm.py::TestAsmGEMM --durations=20
       - name: Run opt tests
+        env:
+          MAX_BUFFER_SIZE: ${{ matrix.renderer == 'RDNA3' && '0' || '300000000' }}
         run: python -m pytest -n=auto test/opt --durations=20
       - name: Run disk copy tests
         run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
