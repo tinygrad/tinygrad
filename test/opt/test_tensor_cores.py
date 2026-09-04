@@ -291,7 +291,7 @@ class TestTensorCores(unittest.TestCase):
     r = x.matmul(y, dtype=tc.dtype_out).relu()
     opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, 4, (2, AxisType.UNROLL))]
     ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    uops = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src)]
+    uops = tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src)
     assert contains_wmma(uops)
     for u in uops:
       if u.op is Ops.WMMA: assert u.src[-1].src[0].op != Ops.STORE

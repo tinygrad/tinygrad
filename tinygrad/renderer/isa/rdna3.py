@@ -21,16 +21,17 @@ dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dty
 isa_to_dt = { v:k for k,v in dt_to_isa.items() }
 
 # (uop, prefix, opcodes, support 32 and 64 bit encoding (e32/e64 branches with keys))
+# NOTE: 16 bit alu uses 64 bit encoding (VOP3) to bypass true 16 addressing (.hi/.lo)
 insdefs = [
-  (Ops.MAX, "v_max", ["f32_e32", "i32_e32", "u32_e32", "f64", "f16_e32"], False),
-  (Ops.ADD, "v_add", ["f16_e32", "f32_e32", "f64", "nc_i32", "nc_u32_e32", "nc_u16", "nc_i16"], False),
-  (Ops.SUB, "v_sub", ["f16_e32", "f32_e32", "nc_i32", "nc_i16", "nc_u16", "nc_u32_e32"], False),
-  (Ops.MUL, "v_mul", ["f16_e32", "f32_e32", "f64", "lo_u32", "lo_u16"], False),
-  (Ops.LOG2, "v_log", ["f16_e32", "f32_e32"], False),
-  (Ops.EXP2, "v_exp", ["f16_e32", "f32_e32"], False),
-  (Ops.SQRT, "v_sqrt", ["f16_e32", "f32_e32", "f64_e32"], False),
-  (Ops.RECIPROCAL, "v_rcp", ["f16_e32", "f32_e32", "f64_e32"], False),
-  (Ops.TRUNC, "v_trunc", ["f16_e32", "f32_e32", "f64_e32"], False),
+  (Ops.MAX, "v_max", ["f32_e32", "i32_e32", "u32_e32", "f64", "f16_e64"], False),
+  (Ops.ADD, "v_add", ["f16_e64", "f32_e32", "f64", "nc_i32", "nc_u32_e32", "nc_u16", "nc_i16"], False),
+  (Ops.SUB, "v_sub", ["f16_e64", "f32_e32", "nc_i32", "nc_i16", "nc_u16", "nc_u32_e32"], False),
+  (Ops.MUL, "v_mul", ["f16_e64", "f32_e32", "f64", "lo_u32", "lo_u16"], False),
+  (Ops.LOG2, "v_log", ["f16_e64", "f32_e32"], False),
+  (Ops.EXP2, "v_exp", ["f16_e64", "f32_e32"], False),
+  (Ops.SQRT, "v_sqrt", ["f16_e64", "f32_e32", "f64_e32"], False),
+  (Ops.RECIPROCAL, "v_rcp", ["f16_e64", "f32_e32", "f64_e32"], False),
+  (Ops.TRUNC, "v_trunc", ["f16_e64", "f32_e32", "f64_e32"], False),
   (Ops.CMPLT, "v_cmp_lt", ["f16", "f32", "f64", "u32", "u64", "i32", "i64", "u16", "i16"], True),
   (Ops.CMPNE, "v_cmp", ["neq_f16", "neq_f32", "neq_f64", "ne_u32", "ne_u64", "ne_i32", "ne_i64", "ne_i16", "ne_u16"], True),
   (Ops.CMPEQ, "v_cmp_eq", ["f16", "f32", "f64", "u16", "u32", "u64", "i16", "i32", "i64"], True)
