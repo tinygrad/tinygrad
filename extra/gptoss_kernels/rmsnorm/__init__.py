@@ -17,7 +17,7 @@ def _rmsnorm_mul_fwd_fxn(x_in_p, w_p, eps, device):
 
 def _rmsnorm_mul_bwd(grad:UOp, call:UOp) -> tuple:
   x = Tensor(call.src[1]).float(); weight = Tensor(call.src[2]).float()
-  rrms = Tensor(call.returned_outputs[1])
+  rrms = Tensor(call.unbound_outputs[1])
   x_normed = x * rrms                                  # recompute unweighted normed (x is call.src[1])
   d_y = Tensor(grad).float()
   dxn = d_y * weight                                   # d/d(x_normed)
@@ -28,8 +28,8 @@ def _rmsnorm_mul_bwd(grad:UOp, call:UOp) -> tuple:
 
 def rmsnorm_mul(x_in:Tensor, weight:Tensor, eps:float) -> tuple[Tensor, Tensor]:
   fxn = _rmsnorm_mul_fwd_fxn(x_in.as_param(0).uop, weight.as_param(1).uop, eps, x_in.device)
-  call = UOp.call_outputs((fxn[0].uop, fxn[1].uop), x_in.uop, weight.uop, grad_fxn=_rmsnorm_mul_bwd)
-  return Tensor(call.returned_outputs[0]), Tensor(call.returned_outputs[1])
+  outs = UOp.call_with_outputs((fxn[0].uop, fxn[1].uop), x_in.uop, weight.uop, grad_fxn=_rmsnorm_mul_bwd)
+  return Tensor(outs[0]), Tensor(outs[1])
 
 @functools.cache
 def _custom_rmsnorm_mul_quantize_mxfp8_fwd(q:UOp, e8:UOp, rrms:UOp, x:UOp, weight:UOp, *, dname:str, eps:float) -> UOp:

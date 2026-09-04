@@ -531,27 +531,18 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, src=tuple([x for x in srcs if x is not None]), **kwargs)
-  @staticmethod
-  def returned(dtype:DType, shape:tuple[sint, ...]|sint|None=None, device=None, axis:int|None=None) -> UOp:
-    """create an unbound BUFFER declaration for a buffer a call writes and returns: it's an input to the call and you AFTER on
-    it like a normal buffer. its identity is unique (minted from the global counter): outputs of different calls never alias
-    like PARAM, the arg only stores the concrete max size: a shape is a view (RESHAPE/SHRINK/UNSHARD) on the flat placeholder"""
-    if isinstance(shape, (int, UOp)): shape = (shape,)
-    slot = next(UOp.unique_num)
-    # multi-device values have a per-shard sized storage wrapped in UNSHARD: the sharding lives in the graph, not the arg
-    if shape is None or len(shape) == 0: return UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, None, device=device))
-    shp = tuple(s//len(device) if (i == axis and isinstance(device, tuple)) else s for i,s in enumerate(shape))
-    ret = UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, prod(to_max_shape(shp)), device=device))
-    return ret.view_as(shp, axis)
-  @property
-  def num_returned(self) -> int: return sum(x.unsharded_base.is_unbound for x in self.src[1:])
-  @property
-  def returned_outputs(self) -> tuple[UOp, ...]:
-    """the outputs of a value-producing call: an AFTER on each RETURNED input, usable like a normal buffer"""
-    return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.is_unbound)
   def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]), **kwargs)
+  @property
+  def has_unbound_outputs(self) -> bool:
+    """does this call still have unresolved outputs: unbound BUFFERs among its inputs (minted by call_with_outputs,
+    resolved when the call is inlined or the outputs are materialized). a lifecycle query, not a call type"""
+    return self.op is Ops.CALL and any(x.unsharded_base.is_unbound for x in self.src[1:])
+  @property
+  def unbound_outputs(self) -> tuple[UOp, ...]:
+    """the unresolved outputs of this call: an AFTER on each unbound BUFFER input, usable like a normal buffer"""
+    return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.is_unbound)
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].val]
@@ -1191,38 +1182,65 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)
 
-  # opaque bodies are just CALLs; value-producing bodies become CALLs with unbound BUFFER placeholders as extra inputs
   def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
+    """call a body with the given args: a plain CallInfo CALL. all inputs must be ready (buffers/params), this never
+    creates unbound buffers: use call_with_outputs for calls that produce values"""
+    assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
-    # non-opaque bodies are value graphs: they are wrapped in a SINK of stores into output PARAMs (call_outputs)
-    if self.op not in OPAQUE_CALL_BODIES:
-      assert ret_dtype is None, "ret_dtype requires an opaque body, use a CUSTOM_FUNCTION body for external calls"
-      return UOp.call_outputs((self,), *srcs, grad_fxn=grad_fxn, name=name, precompile=precompile,
-                              precompile_backward=precompile_backward, aux=aux)
-    # opaque bodies are plain CallInfo CALLs; the (possibly void) return dtype lives in the CallInfo.
-    # an external C call is a CALL on a CUSTOM_FUNCTION body holding the callee, rendered as an indirect call
+    # the (possibly void) return dtype lives in the CallInfo; an external C call is a CALL on a CUSTOM_FUNCTION
+    # body holding the callee (a function pointer), rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux,
                                                         ret_dtype if ret_dtype is not None else dtypes.void))
 
   @staticmethod
-  def call_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
-                   name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
-    """call a body producing the given values: the body stores into output PARAMs, and the outputs are RETURNED
-    placeholders that are inputs to the call (you AFTER on them like normal buffers). the RETURNEDs are bound to the
-    output PARAMs positionally wherever the call is resolved, just like the args are bound to the input PARAMs"""
+  def call_with_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
+                        name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None,
+                        output_pos:tuple[int, ...]|None=None) -> tuple[UOp, ...]:
+    """call a body producing the given values, returning the outputs. the body stores into output PARAMs, and the
+    outputs are unbound BUFFER placeholders passed as extra inputs to the call (you AFTER on them like normal buffers).
+    the buffers are bound to the output PARAMs positionally wherever the call is resolved, just like the args.
+    output_pos gives the position of each output in the arg list (default: a block after the inputs), the inputs take
+    the remaining positions in order; when it's given, input params must already be slotted at their final positions.
+    output_pos must be strictly ascending: the body's stores and the call args pair positionally by values order"""
     # the device defaults to the first device in the values or args, like srcs-based device resolution
     default_dev = next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None)
-    # the RETURNED storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
-    rets = tuple(UOp.returned(o.dtype, None if (shp:=o._shape) is None else
-                              tuple(graph_rewrite(s, _pm_resolve_params, srcs, walk=True) if isinstance(s, UOp) else s for s in shp),
-                              o.device if o.device is not None else default_dev, o.axis if isinstance(o.device, tuple) else None)
-                 for o in values)
-    # the body only knows PARAMs: the output PARAMs get the slots right after the input PARAM slots
-    body = UOp.sink(*[v.param_like(len(srcs)+i).store(v) for i, v in enumerate(values)])
-    return UOp(Ops.CALL, src=(body,)+srcs+rets, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
+    pos = tuple(range(len(srcs), len(srcs)+len(values))) if output_pos is None else output_pos
+    assert len(pos) == len(values) and len(set(pos)) == len(pos), "output_pos must be one distinct position per output"
+    assert all(a < b for a, b in zip(pos, pos[1:])), f"output_pos {output_pos} must be strictly ascending"
+    assert all(0 <= p < len(srcs)+len(values) for p in pos), f"output_pos {output_pos} must be within the arg list"
+    # the inputs take the slots not in pos, in order: symbolic output shapes resolve against the final argument slots
+    param_map: list[UOp|None] = [None] * (len(srcs) + len(values))
+    it = iter(srcs)
+    for i in range(len(param_map)):
+      if i not in pos: param_map[i] = next(it)
+    def mint(o:UOp) -> UOp:
+      """mint an unbound BUFFER declaration for a buffer this call writes and returns: its identity is unique (minted
+      from the global counter): outputs of different calls never alias. like PARAM, the arg only stores the concrete
+      max size: a shape is a view (RESHAPE/SHRINK/UNSHARD) on the flat storage"""
+      # the output storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
+      shp = None if (oshape:=o._shape) is None else tuple(graph_rewrite(s, _pm_resolve_params, param_map, walk=True)
+                                                          if isinstance(s, UOp) else s for s in oshape)
+      dev = o.device if o.device is not None else default_dev
+      axis = o.axis if isinstance(o.device, tuple) else None
+      # multi-device values have a per-shard sized storage: the sharding lives in the graph, not the arg
+      if shp and isinstance(dev, tuple): shp = tuple(s//len(dev) if i == axis else s for i,s in enumerate(shp))
+      ret = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), o.dtype, None if not shp else prod(to_max_shape(shp)), device=dev))
+      return ret if not shp else ret.view_as(shp, axis)
+    rets = tuple(mint(o) for o in values)
+    # the body only knows PARAMs: the output PARAMs get the slots of the outputs' positions in the arg list
+    body = UOp.sink(*[v.param_like(p).store(v) for v, p in zip(values, pos)])
+    args: list[UOp|None] = [None] * (len(srcs) + len(values))
+    for p, r in zip(pos, rets): args[p] = r
+    it = iter(srcs)
+    call = body.call(*[r if r is not None else next(it) for r in args], grad_fxn=grad_fxn, name=name, precompile=precompile,
+                     precompile_backward=precompile_backward, aux=aux)
+    return tuple(r.after(call) for r in rets)
+
+  # one-line convenience for the single-output case: self is the value
+  def call_with_output(self, *srcs:UOp, **kwargs) -> UOp: return UOp.call_with_outputs((self,), *srcs, **kwargs)[0]
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
     kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)

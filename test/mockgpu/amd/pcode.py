@@ -904,20 +904,16 @@ class Parser:
         idx2 = (addr + _const(adt, 4)) >> _const(adt, 2)
         val = val.cast(dtypes.uint64) | (mindex(idx2).cast(dtypes.uint64) << _u64(32))
       elif dt in (dtypes.uint8, dtypes.int8): val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))) & _u32(0xFF)
-      elif dt in (dtypes.uint16, dtypes.int16):
-        val = (val >> (((addr >> _const(adt, 1)) & _const(adt, 1)).cast(dtypes.uint32) * _u32(16))) & _u32(0xFFFF)
       else:
-        # Handle unaligned 32-bit loads: combine two consecutive dwords and shift.
-        # To avoid OOB at buffer boundaries for aligned loads, clamp idx_hi to idx (safe).
+        # Handle unaligned 16/32-bit loads: combine two consecutive dwords and shift.
+        # The next dword is only read when the value straddles into it, so a load at the end of a buffer stays in bounds.
         # Use int64 for the WHERE to avoid 32-bit int overflow in C pointer arithmetic (addr can be >8GB).
         byte_off = (addr & _const(adt, 3)).cast(dtypes.uint32)
-        is_unaligned = byte_off.ne(_u32(0))
         idx_native = (addr >> _const(adt, 2)).cast(dtypes.int64)
         idx_hi_native = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int64)
-        safe_idx_hi = is_unaligned.where(idx_hi_native, idx_native)
-        hi = mindex(safe_idx_hi)
+        hi = mindex((byte_off > _u32(4 - dt.itemsize)).where(idx_hi_native, idx_native))
         combined = val.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(32, dtypes.uint64))
-        val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(8, dtypes.uint64))).cast(dtypes.uint32), val)
+        val = (combined >> (byte_off.cast(dtypes.uint64) * UOp.const(8, dtypes.uint64))).cast(dtypes.uint32)
     return _cast_to(val, dt)
 
   def _coerce_cmp(self, l: UOp, r: UOp) -> tuple[UOp, UOp]:
