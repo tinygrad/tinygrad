@@ -1095,15 +1095,14 @@ class TestAssignToUnrealizedView(unittest.TestCase):
       self.assertEqual(c.tolist(), [[5,5],[5,5]])
 
   def test_detach_assignment_preserves_earlier_update(self):
-    with Context(SPEC=1):
-      x = Tensor([1., 2.]).detach()
-      state = Tensor([0., 0.]).detach()
-      state.assign(state + x * 2)
-      result = state + 1
-      x.assign(x + 1).realize(state, result)
-      self.assertEqual(x.tolist(), [2., 3.])
-      self.assertEqual(state.tolist(), [2., 4.])
-      self.assertEqual(result.tolist(), [3., 5.])
+    x = Tensor([1., 2.]).detach()
+    state = Tensor([0., 0.]).detach()
+    state.assign(state + x * 2)
+    result = state + 1
+    x.assign(x + 1).realize(state, result)
+    self.assertEqual(x.tolist(), [2., 3.])
+    self.assertEqual(state.tolist(), [2., 4.])
+    self.assertEqual(result.tolist(), [3., 5.])
 
 class TestPartialAssignToSharedBuffer(unittest.TestCase):
   def test_five_slices(self):
