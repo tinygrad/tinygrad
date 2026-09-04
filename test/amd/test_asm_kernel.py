@@ -44,10 +44,10 @@ def custom_add_one_cdna(A:UOp) -> UOp:
     cdna.s_waitcnt(0),
     cdna.v_add_f32_e32(cdna.v[1], 1.0, cdna.v[1]),
     cdna.global_store_dword(addr=cdna.v[0], data=cdna.v[1], saddr=cdna.s[0:1]),
-    cdna.s_endpgm(),
   ]
+  insts = [s_nop(1)]*100
   sink = UOp.sink(A.base, threads, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts+[cdna.s_endpgm()]]))))
 
 def custom_add_var(A:UOp, B:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()

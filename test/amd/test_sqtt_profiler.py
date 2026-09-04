@@ -1,9 +1,12 @@
 import unittest, contextlib
-from tinygrad import Device, Tensor, Context, TinyJit
+from tinygrad import Device, Tensor, Context, TinyJit, dtypes
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.device import Compiled, ProfileProgramEvent
+from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.viz.serve import load_amd_counters, VizData
+from tinygrad.renderer.amd.sqtt import decode, print_packets
 
 @contextlib.contextmanager
 def save_sqtt():
@@ -16,6 +19,25 @@ def save_sqtt():
   load_amd_counters(data, [e for e in Compiled.profile_events[:profile_start] if isinstance(e, ProfileProgramEvent)] +
                           Compiled.profile_events[profile_start:])
   data.ctxs[:] = [r for r in data.ctxs if r["name"].startswith("SQTT")]
+
+@contextlib.contextmanager
+def save_sqtt_blobs():
+  Device[Device.DEFAULT].synchronize()
+  profile_start = len(Compiled.profile_events)
+  data = []
+  yield data
+  Device[Device.DEFAULT].synchronize()
+  Device[Device.DEFAULT]._at_profile_finalize()
+  data[:] = [e for e in Compiled.profile_events[profile_start:] if isinstance(e, ProfileSQTTEvent)]
+
+def custom_asm_cdna(A:UOp):
+  import tinygrad.runtime.autogen.amd.cdna.ins as cdna
+  WAVE_SIZE = 64
+  t = UOp.special(WAVE_SIZE*2, "lidx0")
+  insts = []
+  insts = [cdna.s_nop(1)]*100
+  insts += [cdna.s_endpgm()]
+  return UOp(Ops.PROGRAM, src=(UOp.sink(A, t, arg=KernelInfo("asm")), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS,arg=(x,dtypes.void)) for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "only runs on AMD")
 class TestSQTTProfiler(unittest.TestCase):
@@ -31,6 +53,14 @@ class TestSQTTProfiler(unittest.TestCase):
     fn_name = to_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).arg.function_name
     self.assertEqual(len(sqtt), 1)
     self.assertEqual(sqtt[0]["name"], f"SQTT {fn_name}")
+
+  def test_asm(self):
+    t = Tensor.empty(1)
+    with save_sqtt_blobs() as sqtt:
+      t.custom_kernel(fxn=custom_asm_cdna)[0].realize()
+    for i, event in enumerate(sqtt):
+      print(f"\n=== event {i} ===")
+      print_packets(decode(event.blob))
 
   def test_multiple_runs(self):
     t = Tensor.empty(1) + 1
