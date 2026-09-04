@@ -374,7 +374,7 @@ class Tensor(RandMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    to_realize = [x for x in (self,)+lst if not x.uop.is_virtual and not x.uop.has_buffer_identity()]
+    to_realize = [x for x in (self,)+lst if needs_storage(x.uop.base)]
     if len(to_realize):
       run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
@@ -406,7 +406,6 @@ class Tensor(RandMixin):
     if is_disk:
       (b:=self._buffer()).copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=x._data()))
       return self
-    # a STORE can only write into storage: the target must be backed by a BUFFER (possibly under views)
     assigned_to = self.uop.storage_base
     # a CONTIGUOUS target counts as a realization point: the write lands in the storage the token materializes
     # assigning to a value (not storage-backed and not a CONTIGUOUS realization point) is initialization,
@@ -421,8 +420,8 @@ class Tensor(RandMixin):
     assign = self.uop.after(self.uop.store(x.uop))
     ib = self.uop
     while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
-    if ib is not self.uop and ib.has_buffer_identity(after_ok=True):
-      # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
+    if ib is not self.uop:
+      # view assign: replace the node under the views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign")
     else:
       # simple assign

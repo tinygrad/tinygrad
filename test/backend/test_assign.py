@@ -499,14 +499,10 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), [4.0, 3.0, 3.0, 4.0])
 
   def test_assign_bitcast_different_size(self):
-    # assign to a shape-changing bitcast view (only works on DISK currently)
+    # assign to a shape-changing bitcast view
     a = Tensor([0]*8, dtype=dtypes.uint8).realize()
     a.bitcast(dtypes.int64).assign(Tensor([12345], dtype=dtypes.int64)).realize()
-    try:
-      np.testing.assert_equal(a.numpy(), [57, 48, 0, 0, 0, 0, 0, 0])
-    except AssertionError:
-      # TODO: broken now
-      np.testing.assert_equal(a.numpy(), [0]*8)
+    np.testing.assert_equal(a.numpy(), [57, 48, 0, 0, 0, 0, 0, 0])
 
   def test_assign_dtype_mismatch(self):
     # assign should not implicitly cast dtypes - this can lose precision
@@ -969,20 +965,15 @@ class TestAssignOrdering(unittest.TestCase):
     b.assign(a)
     b.assign(Tensor.zeros(4))
     b.realize()
-    try:
-      self.assertListEqual(a.tolist(), [7., 7., 7., 7.])
-    except AssertionError:
-      # TODO: broken now, b shares a's buffer, so the second assign to b overwrites a
-      self.assertListEqual(a.tolist(), [0., 0., 0., 0.])
+    self.assertListEqual(a.tolist(), [7., 7., 7., 7.])
 
   def test_assign_to_function_output(self):
     from tinygrad import function
     @function
     def f(x:Tensor) -> Tensor: return x*2
     out = f(Tensor.ones(4).realize())
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):  # TODO: broken now, raises
-      out.assign(Tensor.full((4,), 9.).realize())
-      self.assertListEqual(out.tolist(), [9., 9., 9., 9.])
+    out.assign(Tensor.full((4,), 9.).realize())
+    self.assertListEqual(out.tolist(), [9., 9., 9., 9.])
 
   def test_nested_function_assign(self):
     from tinygrad import function
@@ -1020,11 +1011,7 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     c = t.permute(1,0).contiguous()  # unrealized CONTIGUOUS
     self.assertIs(c.uop.base.op, Ops.CONTIGUOUS)
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
-    try:
-      self.assertEqual(c.tolist(), [[1,1],[2,1]])
-    except AssertionError:
-      # TODO: broken now
-      self.assertEqual(c.tolist(), [[1,3],[2,4]])
+    self.assertEqual(c.tolist(), [[1,1],[2,1]])
 
   def test_contiguous_backward(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
@@ -1053,11 +1040,7 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     d = t.permute(1,0).contiguous().detach()  # DETACH(unrealized CONTIGUOUS)
     self.assertIs(d.uop.base.op, Ops.CONTIGUOUS)
     d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
-    try:
-      self.assertEqual(d.tolist(), [[1,1],[2,1]])
-    except AssertionError:
-      # TODO: broken now
-      self.assertEqual(d.tolist(), [[1,3],[2,4]])
+    self.assertEqual(d.tolist(), [[1,1],[2,1]])
 
   def test_alu(self):
     a = Tensor([1,2,3,4]).contiguous().realize()
