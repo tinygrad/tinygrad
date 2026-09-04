@@ -36,6 +36,8 @@ jobs:
         deps: testing_unit
     - name: Run unit tests
       run: DEV=METAL python -m pytest -n=auto test/unit/ --durations=20
+    - name: Run opt tests
+      run: DEV=METAL python -m pytest -n=auto test/opt --durations=20
     - name: Test tensor core ops (fake)
       run: DEV=METAL DEBUG=3 TC=2 python test/backend/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)

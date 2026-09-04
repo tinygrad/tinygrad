@@ -254,7 +254,9 @@ class USBMMIOInterface(MMIOInterface):
 def make_buf(devs, slot:int=0, tag:str="signal") -> UOp: return UOp.placeholder((1,), dtypes.uint64, slot, device=devs, volatile=True, tag=tag)
 
 def _libusb(devs, dep:tuple[UOp, ...], fn:str, *args) -> UOp:
-  return make_buf(devs, tag=f"func:{fn}").after(*dep).index(0).load().call(make_buf(devs, tag="usb_handle").index(0).load(),
+  # the CUSTOM_FUNCTION body holds the callee (the loaded function pointer), the call args are plain dataflow
+  fptr = make_buf(devs, tag=f"func:{fn}").after(*dep).index(0).load()
+  return UOp.custom_function(fn, fptr).call(make_buf(devs, tag="usb_handle").index(0).load(),
     *[UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args], ret_dtype=dtypes.void)
 
 def usb_bulk(devs, dep, endpoint:int, data:UOp, length, timeout:int=1000) -> UOp: # NULL actual_length out param
