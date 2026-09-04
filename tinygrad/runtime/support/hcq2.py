@@ -182,7 +182,7 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   for d, q, t in ctx.tracker.access_resources(bufs, list(range(len(bufs)) if write is None else write), (device, queue, tag)):
     if t < tag and (d, q) != (device, queue): latest[(d, q)] = max(latest.get((d, q), 0), t)
 
-  # NV waits break QMD chaining, so also wait for the previous launch.
+  # NV waits break QMD chaining, so also wait for the previous launch
   if latest and device.split(":")[0] == "NV" and queue.startswith("COMPUTE") and (p:=ctx.prev[tag]) is not None: latest[(device, queue)] = p
 
   ctx.signal_tags |= set(latest.values())
@@ -428,7 +428,7 @@ def bufferize_buf(ctx:bool, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) o
 
   dev = cast(HCQ2Compiled, Device[to_tuple(b.device)[0]])
 
-  # the device owns the placeholders it names, everything else is per linear
+  # device owns the placeholders it names
   if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
   elif ctx: r = Buffer(dev.device, b.max_numel(), b.dtype, options=BufferSpec(host=b.arg.volatile, uncached=True, cpu_access=True), preallocate=True)
   else: r = dev.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile)
@@ -572,7 +572,7 @@ class HCQ2Buffer:
     return HCQ2Buffer(self.va_addr+offset, meta=self.meta, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
 
 class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
-  def _as_buffer(self, buf:HCQBuffer) -> memoryview|None: return buf.view.mv if buf.view is not None else None # only mapped memory is zero copy
+  def _as_buffer(self, buf:HCQBuffer) -> memoryview|None: return buf.view.mv if buf.view is not None else None
 
   def _copyout(self, dest:memoryview, src:HCQBuffer): # TODO: remove with memcpy on cpu worker?
     self.dev.synchronize()

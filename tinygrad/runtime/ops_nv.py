@@ -57,7 +57,10 @@ class QMD:
 
     self.mv, self.pref = (bytearray(self.sz * 4) if blob is None else blob), pref
     self.words:dict[int, UOp] = {} # the fields only known at link or at submit, as words by their byte offset
-    self.releases = 0
+
+  def read(self, k:str) -> int:
+    hi, lo = QMD.fields[self.pref][k.upper()]
+    return (int.from_bytes(self.mv[lo//8:hi//8+1], "little") >> (lo % 8)) & ((1 << (hi - lo + 1)) - 1)
 
   def write(self, **kwargs:int|UOp):
     for k, v in kwargs.items():
@@ -77,8 +80,7 @@ class QMD:
     self.set_addr("program_address", addr >> (4 if self.ver >= 4 else 0), "_shifted4" if self.ver >= 4 else "")
     self.set_addr("program_prefetch_addr", addr >> 8, "_shifted")
   def set_release(self, addr:UOp, payload:UOp, timestamp:bool=False) -> bool:
-    if (i:=self.releases) == 2: return False
-    self.releases += 1
+    if (i:=next((i for i in range(2) if not self.read(f"release{i}_enable")), None)) is None: return False
     self.set_addr(f"release_semaphore{i}_addr" if self.ver >= 4 else f"release{i}_address", addr)
     self.set_addr(f"release_semaphore{i}_payload" if self.ver >= 4 else f"release{i}_payload", payload)
     self.write(**{f"release{i}_enable": 1, f"release_structure_size_{i}" if self.ver >= 4 else f"release{i}_structure_size": 0 if timestamp else 2},
@@ -105,15 +107,15 @@ class NVQueue(HWQueue):
     self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, addr, value.ccast(dtypes.uint64), nv_flags("NVC56F_SEM_EXECUTE", payload_size="64bit", **flags))
 
   def wait(self, signal:UOp, value:UOp): self.sem(signal.getaddr(self.devs), value, operation="acq_circ_geq")
-  def signal(self, signal:UOp, value:UOp):
-    self.sem(signal.getaddr(self.devs), value, operation="release", release_wfi="en")
-    self.nvm(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 0x0)
-  def timestamp(self, signal:UOp):
-    self.sem(signal.getaddr(self.devs), UOp.const(0, dtypes.uint64), operation="release", release_wfi="en", release_timestamp="en")
+  def signal(self, signal:UOp, value:UOp): self.release(signal, value)
+  def timestamp(self, signal:UOp): self.release(signal, UOp.const(0, dtypes.uint64), timestamp=True)
+  def release(self, signal:UOp, value:UOp, timestamp:bool=False):
+    self.sem(signal.getaddr(self.devs), value, operation="release", release_wfi="en", release_timestamp="en" if timestamp else "dis")
+    if not timestamp: self.nvm(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 0x0)
 
   def submit(self, cmdbuf:UOp) -> UOp:
     fifo, ib, off = self.dev.fifos[self.queue], *unwrap_view(cmdbuf)
-    ph = lambda n, dt=dtypes.uint32, shape=(1,): UOp.placeholder(shape, dt, 0, device=self.devs, volatile=True, tag=to_name(n, self.queue))
+    def ph(n, dt=dtypes.uint32, shape=(1,)): return UOp.placeholder(shape, dt, 0, device=self.devs, volatile=True, tag=to_name(n, self.queue))
     ring, gpput, doorbell, put = ph("ring", dtypes.uint64, (fifo.entries,)), ph("gpput"), ph("doorbell"), ph("put_value", dtypes.uint64)
 
     gpe = UOp.placeholder((1,), dtypes.uint64, device=self.devs, volatile=True, tag=to_name("gpentry", self.queue))
@@ -144,12 +146,8 @@ class NVComputeQueue(NVQueue):
     self.chain = None
     super().wait(signal, value)
 
-  def signal(self, signal:UOp, value:UOp):
-    if self.chain is None or not self.chain.set_release(signal.getaddr(self.devs), value): super().signal(signal, value)
-
-  def timestamp(self, signal:UOp):
-    if self.chain is None or not self.chain.set_release(signal.getaddr(self.devs), UOp.const(0, dtypes.uint64), timestamp=True):
-      super().timestamp(signal)
+  def release(self, signal:UOp, value:UOp, timestamp:bool=False):
+    if self.chain is None or not self.chain.set_release(signal.getaddr(self.devs), value, timestamp): super().release(signal, value, timestamp)
 
   def submit(self, cmdbuf:UOp) -> UOp:
     if self.qmds:
@@ -214,7 +212,7 @@ class NVCopyQueue(NVQueue):
 
 class NVProgramData:
   def __init__(self, dev:NVDevice, obj:TinyELF):
-    self.name, self.signature, self.mock = obj.name, obj.signature, isinstance(dev.iface, MOCKIface)
+    name, signature, mock = obj.name, obj.signature, isinstance(dev.iface, MOCKIface)
     self.constbufs: dict[int, tuple[int, int]] = {0: (0, 0x160)} # dict[constbuf index, tuple[offset in the image, size]]
     self.relocs: list[tuple[int, int, DType, int]] = [] # (byte offset in the image, symbol offset, width, shift) of the program's address
     self.prog_off, self.cbuf_0, sections, relocs = 0, [], list[Any](), list[Any]()
@@ -222,8 +220,8 @@ class NVProgramData:
 
     if (NAK:=isinstance(dev.renderer, NAKRenderer)):
       image = obj.lib[ctypes.sizeof(info:=mesa.struct_nak_shader_info.from_buffer_copy(obj.lib)):]
-      self.regs_usage, self.shmem_usage, self.lcmem_usage = info.num_gprs, round_up(info.cs.smem_size, 128), round_up(info.slm_size, 16)
-    elif self.mock: image = obj.lib.ljust(round_up(len(obj.lib), 4), b'\x00') # for MOCKGPU the lib is PTX code, not an elf
+      regs, shmem, lcmem = info.num_gprs, round_up(info.cs.smem_size, 128), round_up(info.slm_size, 16)
+    elif mock: image = obj.lib.ljust(round_up(len(obj.lib), 4), b'\x00') # for MOCKGPU the lib is PTX code, not an elf
     else:
       img, sections, relocs = elf_loader(obj.lib, force_section_align=128)
       image = bytes(img)
@@ -231,16 +229,16 @@ class NVProgramData:
 
     if not NAK:
       # For MOCKGPU, the lib is PTX code, so some values are emulated.
-      self.regs_usage, self.shmem_usage, self.lcmem_usage, cbuf0_size = 0, 0x400, 0x240, 0x160 if self.mock else 0
+      regs, shmem, lcmem, cbuf0_size = 0, 0x400, 0x240, 0x160 if mock else 0
       for sh in sections:
-        if sh.name == f".nv.shared.{self.name}": self.shmem_usage = round_up(0x400 + sh.header.sh_size, 128)
-        if sh.name == f".text.{self.name}": self.prog_off, prog_sz = sh.header.sh_addr, sh.header.sh_size
+        if sh.name == f".nv.shared.{name}": shmem = round_up(0x400 + sh.header.sh_size, 128)
+        if sh.name == f".text.{name}": self.prog_off, prog_sz = sh.header.sh_addr, sh.header.sh_size
         elif m:=re.match(r'\.nv\.constant(\d+)', sh.name): self.constbufs[int(m.group(1))] = (sh.header.sh_addr, sh.header.sh_size)
         elif sh.name.startswith(".nv.info"):
           for typ, param, data in self._parse_elf_info(sh):
             if sh.name == f".nv.info.{obj.name}" and param == 0xa: cbuf0_size = struct.unpack_from("IH", data)[1] # EIATTR_PARAM_CBANK
-            elif sh.name == ".nv.info" and param == 0x12: self.lcmem_usage = struct.unpack_from("II", data)[1] + 0x240 # EIATTR_MIN_STACK_SIZE
-            elif sh.name == ".nv.info" and param == 0x2f: self.regs_usage = struct.unpack_from("II", data)[1] # EIATTR_REGCOUNT
+            elif sh.name == ".nv.info" and param == 0x12: lcmem = struct.unpack_from("II", data)[1] + 0x240 # EIATTR_MIN_STACK_SIZE
+            elif sh.name == ".nv.info" and param == 0x2f: regs = struct.unpack_from("II", data)[1] # EIATTR_REGCOUNT
 
       # These reloc types are CUDA-specific: they all want the program's own address, which is only known once the linear links.
       for apply_image_offset, rel_sym_offset, typ, _ in relocs:
@@ -254,29 +252,29 @@ class NVProgramData:
       self.cbuf_0 = [0] * max(cbuf0_size // 4, min_cbuf0_entries)
 
     # the arguments follow the driver params in constant buffer 0: the buffers as 64 bit addresses, then the vars packed by their width
-    nbufs = sum(name is None for name, *_ in self.signature)
-    self.vars = list(TinyELF.iter_sig(self.signature[nbufs:], nbufs * 8))
-    if self.mock: # mockgpu reads the arg counts out of cbuf0 and wants every var 64 bit
+    nbufs = sum(name is None for name, *_ in signature)
+    self.vars = list(TinyELF.iter_sig(signature[nbufs:], nbufs * 8))
+    if mock: # mockgpu reads the arg counts out of cbuf0 and wants every var 64 bit
       self.cbuf_0[80:82], self.vars = [nbufs, len(self.vars)], [(nbufs * 8 + i * 8, dtypes.uint64) for i in range(len(self.vars))]
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.image = image.ljust(round_up(len(image), 0x1000) + 0x1000, b'\x00')
     # constant buffer 0 holds the driver params and every argument after them, and starts 256 aligned like all constant buffers
-    self.kernargs_size = round_up(max(self.constbufs[0][1], len(self.cbuf_0) * 4 + len(self.signature) * 8), 256)
+    self.kernargs_size = round_up(max(self.constbufs[0][1], len(self.cbuf_0) * 4 + len(signature) * 8), 256)
 
     # Ensure device has enough local memory to run the program
-    dev._ensure_has_local_memory(self.lcmem_usage)
+    dev._ensure_has_local_memory(lcmem)
 
     if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A:
       if not NAK: self.cbuf_0[188:192], self.cbuf_0[223] = [*data64_le(dev.shared_mem_window), *data64_le(dev.local_mem_window)], 0xfffdc0
-      qmd = {'qmd_major_version':5, 'qmd_type':nv_gpu.NVCEC0_QMDV05_00_QMD_TYPE_GRID_CTA, 'register_count':self.regs_usage,
-        'shared_memory_size_shifted7':self.shmem_usage>>7, f'shader_local_memory_{"low" if NAK else "high"}_size_shifted4':dev.slm_per_thread>>4}
+      qmd = {'qmd_major_version':5, 'qmd_type':nv_gpu.NVCEC0_QMDV05_00_QMD_TYPE_GRID_CTA, 'register_count':regs,
+        'shared_memory_size_shifted7':shmem>>7, f'shader_local_memory_{"low" if NAK else "high"}_size_shifted4':dev.slm_per_thread>>4}
     else:
       if not NAK: self.cbuf_0[6:12] = [*data64_le(dev.shared_mem_window), *data64_le(dev.local_mem_window), *data64_le(0xfffdc0)]
-      qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'shared_memory_size':self.shmem_usage, 'register_count_v':self.regs_usage,
+      qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'shared_memory_size':shmem, 'register_count_v':regs,
         f'shader_local_memory_{"low" if NAK else "high"}_size':dev.slm_per_thread}
 
-    smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
+    smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= shmem) // 4096 + 1
 
     # the program and constant buffer addresses are patched into a copy of this at exec, everything else is the same for every launch
     self.qmd = QMD(dev)
@@ -288,7 +286,7 @@ class NVProgramData:
     for i,(_,sz) in self.constbufs.items(): self.qmd.write(**{f'constant_buffer_size_shifted4_{i}': sz, f'constant_buffer_valid_{i}': 1})
 
     # Registers allocation granularity per warp is 256, warp allocation granularity is 4. Register file size is 65536.
-    self.max_threads = ((65536 // round_up(max(1, self.regs_usage) * 32, 256)) // 4) * 4 * 32
+    self.max_threads = ((65536 // round_up(max(1, regs) * 32, 256)) // 4) * 4 * 32
 
   def _parse_elf_info(self, sh, start_off=0):
     while start_off < sh.header.sh_size:
