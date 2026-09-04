@@ -7,15 +7,19 @@ from tinygrad.runtime.support.hcq import HCQBuffer
 from tinygrad.runtime.support.usb import alloc_cbuffer
 
 class CopyinUSB:
-  def __init__(self, delayed_bulk=False, delayed_drain=False):
+  def __init__(self, delayed_bulk=False, delayed_drain=False, delayed_read=False):
     self.usb = self
     self.delayed_bulk, self.delayed_drain = delayed_bulk, delayed_drain
+    self.delayed_read = delayed_read
     self.fence, self.seq, self.slot, self.reads = 0, 0, 0, 0
     self.pending, self.occupied, self.landed = {}, set(), []
+    self.pending_reads = {}
+    self.read_tag = -2
 
   def control_write_async(self, request, value=0, index=0):
     assert request == 0xF2
     assert not self.pending, "F2 reconfigured with a bulk transfer still pending"
+    assert not self.pending_reads, "F2 armed before its drain fence read completed"
     self.slot = index & 0xFF
     assert self.slot not in self.occupied, "F2 recycled a window before SDMA drained it"
     return -1
@@ -28,6 +32,10 @@ class CopyinUSB:
     return tag
 
   def bulk_wait(self, tag):
+    if tag in self.pending_reads:
+      buf, value, length = self.pending_reads.pop(tag)
+      buf[:] = self.read(value, length)
+      return
     if tag not in self.pending: return
     slot, buf, expected = self.pending.pop(tag)
     assert bytes(buf) == expected, "staging buffer modified while USB still owns it"
@@ -50,6 +58,12 @@ class CopyinUSB:
 
   def control_read_async(self, request, length, value=0):
     assert request == 0xE4
+    if self.delayed_read:
+      tag = self.read_tag
+      self.read_tag -= 1
+      buf = bytearray(length)
+      self.pending_reads[tag] = (buf, value, length)
+      return tag, memoryview(buf)
     return -1, memoryview(self.read(value, length))
 
 class TestAMDUSBCopyin(unittest.TestCase):
@@ -67,10 +81,12 @@ class TestAMDUSBCopyin(unittest.TestCase):
       allocator._copyin(HCQBuffer(0x100000, size), memoryview(bytearray(size)))
       self.assertEqual(usb.fence, allocator._usb_seq)
       self.assertFalse(usb.pending)
+      self.assertFalse(usb.pending_reads)
       self.assertFalse(usb.occupied)
 
   def test_delayed_drain(self): self.check_copyin(CopyinUSB(delayed_drain=True))
   def test_delayed_bulk(self): self.check_copyin(CopyinUSB(delayed_bulk=True))
   def test_delayed_bulk_and_drain(self): self.check_copyin(CopyinUSB(delayed_bulk=True, delayed_drain=True))
+  def test_delayed_fence_read(self): self.check_copyin(CopyinUSB(delayed_bulk=True, delayed_drain=True, delayed_read=True))
 
 if __name__ == '__main__': unittest.main()
