@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, codecs, io, struct, re, traceback, itertools
-import socketserver
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, socket, argparse, codecs, io, struct, re, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from dataclasses import dataclass, field
@@ -381,8 +380,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   def add(name:str, p:PacketType, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name.replace('_ALT', '')}"
     if (simd:=getattr(p, "simd", None)) is not None: row += f" SIMD:{simd}"
-    # by default we extend the packet to one cycle after timestamp
-    start_time, end_time = p._time, p._time+1
+    # extend packets to the architectural instruction issue interval
+    start_time, end_time = p._time, p._time+(4 if target.startswith("gfx9") else 1)
     # exec links to dispatch, dispatch links to PC
     link:dict|None = {"pc":info.pc} if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
@@ -729,7 +728,6 @@ if __name__ == "__main__":
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"), flush=True)
-  if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}")
   try: server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")
