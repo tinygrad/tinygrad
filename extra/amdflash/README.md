@@ -25,11 +25,9 @@ The paths are state-dependent and are not interchangeable:
   Use it only when an empty or corrupt flash has stalled the PSP PBL. Healthy
   autonomous boot gates this engine; the usual gated status is
   `ROM_SW_STATUS=0x04000800`.
-* **`fw_live.py probe`, `ifwi-step`, and `ifwi-all`** use the early PSP
-  boot-firmware mailbox. They must run after autonomous PSP boot but before a
-  host driver or `AMDev` initializes SOS.
-* **`fw_live.py live-flash`** boots `AMDev`, stages an image in trained VRAM,
-  and invokes the Linux PSP v13 live-update command sequence.
+* **`fw_live.py probe`** queries the early PSP boot-firmware mailbox.
+* Firmware-mediated write commands are retained for protocol documentation but
+  are disabled because an exact stock reflash did not validate safely.
 * **`fw_live.py dump`** reads an exact 2 MiB raw image through
   `ROM_INDEX/ROM_DATA`. It refuses devices where the raw SMUIO controller is
   unavailable; the NBIO SOC15 function-ROM aperture is not a physical SPI
@@ -78,55 +76,41 @@ Navi31 ROM_SW details used by the implementation:
 
 ## Firmware-mediated access
 
-Query the early mailbox without changing flash:
+The read-only commands are:
 
 ```sh
 python3 extra/amdflash/fw_live.py probe
-```
-
-Stream one exact item only when its type matches the firmware request:
-
-```sh
-python3 extra/amdflash/fw_live.py stream 0x37 vbios-item.bin --yes
-```
-
-For a complete 2 MiB IFWI, either perform one requested step or follow requests
-until firmware reports a `0x2xx` completion state:
-
-```sh
-python3 extra/amdflash/fw_live.py ifwi-step full-ifwi.bin --yes
-python3 extra/amdflash/fw_live.py ifwi-all full-ifwi.bin --yes
-```
-
-A completion state requires a hard reset; it is not another item request. The
-resolver supports recovery metadata types `0x01`-`0x08` and `0x80`-`0x89`,
-including the firmware-selected inactive partition. This path is signature
-enforcing and intentionally refuses mismatched item types.
-
-The early protocol is:
-
-* `START_TRANSFER`: `(size << 8) | item_type`
-* `DATA_TRANSFER`: one little-endian image dword per mailbox command
-* `END_TRANSFER`: `(bytes_sent << 8) | item_type`
-
-Each dword requires a firmware acknowledgement, so large partition transfers
-are slow through a USB-PCIe bridge.
-
-The fully initialized PSP path and the healthy-state dump are:
-
-```sh
-python3 extra/amdflash/fw_live.py live-flash signed-update.bin --yes
 python3 extra/amdflash/fw_live.py dump current-spi.bin
 ```
 
-The PSP validates live-update inputs and may reject an image even when its size
-and alignment are valid. `dump` produces exactly `0x200000` bytes, requires the
-raw IFWI magic at offset zero, rejects mirrored 1 MiB apertures, and restores
-the ROM controller/index state before writing output.
+`dump` produces exactly `0x200000` bytes, requires the raw IFWI magic at offset
+zero, rejects mirrored 1 MiB apertures, and restores the ROM controller/index
+state before writing output.
+
+The validated early-firmware sequence is available as:
+
+```sh
+python3 extra/amdflash/fw_live.py --transport usb ifwi-all full-ifwi.bin --yes
+```
+
+It resolves at most Navi31's configured 19 items, streams the item associated
+with terminal phase `0x2xx`, and then stops. PSP selects the destination
+partition; item `0x08` always comes from the payload referenced by the first
+ISH descriptor, matching AMDVBFlash. A hard power cycle is required afterward.
+
+A successful PSP update is not a byte-identical raw rewrite. On the validated
+stock test, both A/B payloads matched the source exactly, PSP selected and
+booted the updated B partition, and firmware changed only its update cookie,
+B descriptor counter/checksum, and generated metadata near `0x1ef000`.
+
+The `stream`, `ifwi-step`, and `live-flash` commands remain disabled. Testing
+showed that the PSP live path parses a raw stock IFWI but fails with status
+`0xC` (`PSP Write To SPI Error`) after writing an `$AMDVBFL` cookie. Use the
+verified ROM_SW path for recovery.
 
 ## Safety
 
-All erase, program, and firmware-streaming commands require `--yes`. Read-only
-commands still touch controller and mailbox registers but do not issue SPI
-program/erase or PSP transfer-start commands. Preserve a known-good full dump
-outside the repository.
+ROM_SW erase/program and `ifwi-all` commands require `--yes`; other
+firmware-streaming commands are disabled. Read-only commands still touch controller and mailbox registers but
+do not issue SPI program/erase or PSP transfer-start commands. Preserve a
+known-good full dump outside the repository.
