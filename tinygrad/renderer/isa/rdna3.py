@@ -699,4 +699,4 @@ class RDNA3Renderer(ISARenderer):
 
     lin = lin.replace(src=tuple([u if not isinstance(u.tag, str) else \
       u.replace(arg=(RDNA3Ops.SOPP(u.arg[0].op, (targets[u.tag] - upc[u]) // 4), u.dtype)) for u in nuops]))
-    return assemble_linear(prg, lin, self.target.arch, scratch_size=lin.arg or 0)
+    return assemble_linear(prg, lin, self.target.arch)

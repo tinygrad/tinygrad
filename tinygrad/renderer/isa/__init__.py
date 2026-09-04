@@ -51,6 +51,8 @@ def rdef(u:UOp) -> VRegister|Register|None: return rdefs(u)[0] if len(rdefs(u)) 
 
 # all per-kernel state of the ISA pipeline lives here to avoid shared device state overlap in renderer
 class PreLinearKernelCtx:
+  # optional line rewrite that runs after regalloc has assigned vre spill slots
+  stack_alloc_matcher: PatternMatcher|None = None
   def __init__(self, sink:UOp, ren:ISARenderer, info:ProgramInfo):
     self.ren, self.spill_size = ren, 0
     self.loop_label: dict[UOp, str] = {}
@@ -70,10 +72,7 @@ class PreLinearKernelCtx:
   def vreg(self, cons:Register|tuple[Register, ...], **kwargs) -> VRegister:
     return VRegister(f"vr{next(self.reg_n)}", cons if isinstance(cons, tuple) else (cons,), **kwargs)
 
-  # returns arch specific placement information for the spilled virtual register and grows stack frame
   def assign_spill_slot(self, v:VRegister, vdef:UOp) -> Any: raise NotImplementedError("arch specific")
-  # runs after regalloc, when the size of the stack frame is known
-  def stack_alloc(self, uops:list[UOp]) -> list[UOp]: return uops
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher

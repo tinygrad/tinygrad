@@ -361,9 +361,9 @@ isel_matcher = PatternMatcher([
     lambda x,cond: cond.ins(X86Ops.LOOP_CMP, src=cond.src + x.src[:2] + (UOp(Ops.NOOP, tag=cond.op),))),
   # **** Op -> X86Op ****
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
-  # so regalloc builds the prologue/epilogue naturally
+  # so regalloc builds the prologue/epilogue naturally. the stack pointer define is the anchor for the stack frame setup after regalloc
   (UPat(Ops.SINK, name="x"), lambda x:
-   x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_ret_reg(r) for r in CALLEE_SAVED)),)) \
+   x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_ret_reg(r) for r in (RSP,) + CALLEE_SAVED)),)) \
     if not x.src or x.src[0].op is not Ops.INS or x.src[0].arg[0] is not X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
@@ -588,6 +588,10 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
 
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
+  (UPat(Ops.INS, name="x"), lambda ctx,x: (x, [x, x.ins(X86Ops.SUBi, src=(imm(x.dtype, ctx.spill_size),))])
+    if ctx.spill_size and x.arg[0] is X86Ops.DEFINE and rdef(x) is RSP else None),
+  (UPat(Ops.INS, name="x"), lambda ctx,x: (x, [(sp:=ctx.ren.spill_pointer()).ins(X86Ops.ADDi, src=(imm(sp.dtype, ctx.spill_size),)), x])
+    if ctx.spill_size and x.arg[0] is X86Ops.RET else None),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(Ops.INS, src=(UPat.cvar("disp").cast(),), name="x"), lambda ctx,x,disp:
     (nx:=UOp.cconst(ctx.spill_size + disp.val, x.dtype), [nx]) if x.arg[0] is X86Ops.FRAME_INDEX else None),
@@ -600,6 +604,16 @@ post_regalloc_matcher = PatternMatcher([
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
    ctx.ren.copy(x.src[0], rdef(x))[1] + [nx] if rdef(x) != rdef(x.src[0]) else [nx]) if x.arg[0] in X86GroupOp.TwoAddress else None),
+])
+
+# ***** stack allocation *****
+def alloc_buffer(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
+  nx = ctx.ren.isel_matcher.rewrite(ctx.ren.spill_pointer().index(UOp.cconst(ctx.spill_size, dtypes.uint32), tag=x.tag))
+  ctx.spill_size += x.max_numel() * x.dtype.itemsize
+  return nx, [nx]
+
+stack_alloc_matcher = PatternMatcher([
+  (UPat(Ops.BUFFER, name="x"), alloc_buffer),
 ])
 
 # ***** X86 instruction encoding *****
@@ -794,6 +808,7 @@ encodings = {
 }
 
 class X86PreLinearKernelCtx(PreLinearKernelCtx):
+  stack_alloc_matcher = stack_alloc_matcher
   def __init__(self, sink:UOp, ren:X86Renderer, info:ProgramInfo):
     super().__init__(sink, ren, info)
     self.clobbered: set[UOp] = set()
@@ -805,21 +820,6 @@ class X86PreLinearKernelCtx(PreLinearKernelCtx):
     offset = self.spill_size + (sz - self.spill_size % sz) % sz
     self.spill_size = offset + sz
     return offset
-
-  # NOTE: buffers have to be rewritten and the stack size updated before post regalloc lowers FRAME_INDEX
-  def stack_alloc(self, uops:list[UOp]) -> list[UOp]:
-    sp = self.ren.spill_pointer()
-    # allocate buffers
-    for i, u in enumerate(uops):
-      if u.op is Ops.BUFFER:
-        uops[i] = self.ren.isel_matcher.rewrite(sp.index(UOp.cconst(self.spill_size, dtypes.uint32), tag=u.tag))
-        self.spill_size += u.max_numel() * u.dtype.itemsize
-
-    if self.spill_size > 0:
-      sz = UOp.cconst(self.spill_size, sp.dtype)
-      uops.insert(0, self.ren.isel_matcher.rewrite(UOp(Ops.SUB, src=(sp, sz), tag=sp.tag)))
-      uops.insert(len(uops) - 2, self.ren.isel_matcher.rewrite(UOp(Ops.ADD, src=(sp, sz), tag=sp.tag)))
-    return uops
 
 class X86Renderer(ISARenderer):
   device = "CPU"

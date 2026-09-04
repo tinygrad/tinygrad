@@ -6,21 +6,25 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 from tinygrad.renderer.amd.dsl import Reg, FixedBitField
 from tinygrad.runtime.autogen.amd.common import OpType
+from tinygrad.runtime.autogen.amd.rdna3.ins import SCRATCH
 
 # instructions used for padding
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end # same encoding as RDNA4
 from tinygrad.runtime.autogen.amd.cdna.ins import s_nop as s_nop_cdna
 
 _arch_map = {"gfx9": "cdna", "gfx10": "rdna3", "gfx11": "rdna3", "gfx12": "rdna4"}
-def assemble_linear(prg:UOp, lin:UOp, arch:str, scratch_size:int=0) -> bytes:
+def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   insts = [u.arg[0] for u in lin.src]
 
   # ** scan for max vgpr/sgpr/accvgpr
-  max_vgpr, max_sgpr, max_accvgpr = 0, 0, 0
+  max_vgpr, max_sgpr, max_accvgpr, scratch_size = 0, 0, 0, 0
   _ACCVGPR_TYPES = {OpType.OPR_ACCVGPR, OpType.OPR_SRC_ACCVGPR}
   for inst in insts:
     # build set of field names that are AccVGPR for this instruction
     accvgpr_fields: set[str] = set()
+    if isinstance(inst, SCRATCH):
+      nbytes = int(inst.op.name.rsplit('B')[-1])
+      scratch_size = max(scratch_size, inst.offset + nbytes//8)
     for opr_name, (_, _, opr_type) in inst.operands.items():
       if opr_type in _ACCVGPR_TYPES: accvgpr_fields.add(opr_name)
       elif opr_type in {OpType.OPR_VGPR_OR_ACCVGPR, OpType.OPR_SRC_VGPR_OR_ACCVGPR, OpType.OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST}:

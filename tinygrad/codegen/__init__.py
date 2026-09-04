@@ -1,6 +1,5 @@
 from dataclasses import replace, dataclass
 import itertools, functools
-from typing import Any
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
@@ -435,42 +434,38 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
-# NOTE: the per-kernel ctx is created for isel and threaded through the rest of the pipeline, it holds the spill state regalloc mutates
 def do_regalloc(kctx:PreLinearKernelCtx, lst:list[UOp]) -> list[UOp]:
-  ren = kctx.ren
-  lst = line_rewrite(lst, ren.pre_regalloc_matcher, kctx)
+  lst = line_rewrite(lst, kctx.ren.pre_regalloc_matcher, kctx)
   # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
   lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
   lst = line_rewrite(lst, pm_index_subregisters)
   lst = line_rewrite(lst, pm_regalloc_rewrite, LinearScanRegallocContext(lst, kctx))
-  # the stack frame is only known after regalloc has assigned every spill slot
-  lst = kctx.stack_alloc(lst)
-  return line_rewrite(lst, ren.post_regalloc_matcher, kctx)
+  if kctx.stack_alloc_matcher is not None:
+    lst = line_rewrite(lst, kctx.stack_alloc_matcher, kctx)
+  return line_rewrite(lst, kctx.ren.post_regalloc_matcher, kctx)
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
 
-  kctx: PreLinearKernelCtx|None = None
-  ins_schedule: dict[Any, Ops]|None = None
   # instruction selection
+  kctx: PreLinearKernelCtx|None = None
   if isinstance(ctx, ISARenderer):
     kctx = ctx.kernel_ctx_type(sink, ctx, prg.arg)
     sink = graph_rewrite(sink, ctx.pre_isel_matcher, ctx=kctx, name="pre instruction selection", bottom_up=True)
     sink, rewrite_ctx = graph_rewrite(sink, ctx.isel_matcher, ctx=kctx, name="instruction selection", bottom_up=True, return_ctx=True)
     # map arbitrary Ops.INS opcodes to equivalent rewritten Ops IR to preserve metadata for scheduling etc..
-    ins_schedule = {mc.arg[0]:u.op for u,mc in rewrite_ctx.replace.items() if mc.op is Ops.INS}
-    kctx.ins_schedule = ins_schedule
+    kctx.ins_schedule = {mc.arg[0]:u.op for u,mc in rewrite_ctx.replace.items() if mc.op is Ops.INS}
     sink = graph_rewrite(sink, pm_prepare_regalloc, ctx=kctx, name="prepare regalloc")
 
   # linearize graph
-  lst = line_rewrite(linearize(sink, ins_schedule), pm_linearize_cleanups)
+  lst = line_rewrite(linearize(sink, None), pm_linearize_cleanups)
 
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer) and kctx is not None:
     lst = do_regalloc(kctx, lst)
     if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
-  # TODO: find cleaner way to pass spill_size seperate from renderer state??
-  return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst), arg=kctx.spill_size if kctx is not None else None),))
+  # NOTE: is this the only way to safely pass spill size to renderer finalization safely with parallel compilation?
+  return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst),),))
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
   if sink.arg.estimates is not None: return None

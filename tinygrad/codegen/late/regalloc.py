@@ -108,7 +108,7 @@ class LinearScanRegallocContext:
         for v,rs in live_ins.pop().items():
           if v not in live or live[v] != rs: live[v] = fill(v, i, rs)
 
-# push the register down the wrapper chain so the use encodes the register the fill actually wrote, match rdefs() semantics
+# push the register down the chain, inverse rdef() semantics
 def retag(s:UOp, tag:tuple) -> UOp:
   if s.op in {Ops.AFTER, Ops.NOOP, Ops.BITCAST} and len(s.src): return s.replace(src=(retag(s.src[0], tag), *s.src[1:]))
   return s.replace(tag=tag)
@@ -150,28 +150,23 @@ def regspace(buf:UOp, c:UOp, x:UOp):
     nx = x.replace(tag=(vr[c.val*2:c.val*2+1] if x.dtype.itemsize > 4 else vr[c.val],))
   return nx, [nx]
 
-def _strip(x:UOp):
-  while x.op in {Ops.BITCAST, Ops.AFTER}: x = x.src[0]
-  return x
-
 def propogate_subs(ctx, x:UOp):
   # a STACK over pinned defs (reg BUFFER loads) needs no virtual register, it just collects the pinned srcs
   if len(x.src) and all(isinstance(rdef(s), Register) for s in x.src):
     defs = tuple(r for s in x.src for r in rdefs(s) if isinstance(r, Register))
     if all(b.index == a.index+1 for a,b in zip(defs, defs[1:])): return x.replace(tag=defs)
 
+  def _strip(x:UOp): return x.src[0] if x.op in {Ops.BITCAST, Ops.AFTER} else x
   vr, nsrc = rdef(x), []
   assert isinstance(vr, VRegister)
   n = vr.width//len(x.src) if len(x.src) and vr.width%len(x.src) == 0 else max(x.dtype.itemsize//4, 1)
   for i,s in enumerate(x.src):
-    # pinned defs and INDEX/reg LOAD srcs have to become copies, can be redundant but must enforce contiguity restraint.
-    # Optimization would have to identify equivalent STACKs and tie register blocks
     sub = vr[i*n:(i+1)*n-1]
-    nsrc.append(ctx.ren.copy(s, sub)[0] if isinstance(rdef(s), Register) or _strip(s).op in {Ops.INDEX, Ops.LOAD}
-                else s.replace(tag=(sub,)))
+    # pinned defs and INDEX srcs have to become copies, must enforce contiguity restraint.
+    if isinstance(rdef(s), Register) or _strip(s).op is Ops.INDEX: nsrc.append(ctx.ren.copy(s, sub)[0])
+    else: nsrc.append(s.replace(tag=(sub,)))
   return x.replace(src=tuple(nsrc))
 
-# NOTE: this has to be a graph rewrite
 pm_prepare_regalloc = PatternMatcher([
   (UPat(Ops.STACK, name="x"), propogate_subs),
   (UPat((Ops.AFTER, Ops.BITCAST), name="x"), lambda x:
