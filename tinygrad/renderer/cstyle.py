@@ -97,7 +97,7 @@ def cast_float_to_bf16(x: UOp) -> UOp:
   x = (-x & 0x7f800000).ne(0).where(x + ((x >> 16) & 1) + 0x7fff, (x & 0xffff).ne(0).where((x | 0x10000), x))
   return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
 
-# manual bfloat16 casting patterns (shared between LLVM, Clang, and AMD renderers to avoid compiler intrinsics)
+# manual bfloat16 casting patterns (shared between LLVM, Clang, AMD, and CUDA renderers to avoid compiler intrinsics)
 pm_manual_bf16_cast = PatternMatcher([
   (UPat(Ops.CAST, dtypes.float, (UPat.var("x", dtypes.bfloat16),)),
    lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
@@ -429,7 +429,7 @@ class CUDARenderer(CStyleLanguage):
   type_map = {dtypes.uint32: "uint", dtypes.bfloat16: "nv_bfloat16", dtypes.fp8e4m3: "__nv_fp8_e4m3", dtypes.fp8e5m2: "__nv_fp8_e5m2"}
   extra_matcher = create_non_native_float_pats(dtypes.fp8s, casting=False) + PatternMatcher([
     (UPat(Ops.CAST, dtypes.fp8s, UPat.var("x", dtypes.fp8s), name='y'), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=y.dtype else None),
-  ])
+  ]) + pm_manual_bf16_cast
   string_rewrite = PatternMatcher([
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"tg_bitcast<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"
      if x.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
