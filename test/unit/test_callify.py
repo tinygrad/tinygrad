@@ -134,7 +134,7 @@ class TestCallify(unittest.TestCase):
   def test_creation_copy_has_storage(self):
     x = Tensor([1, 2, 3], device="PYTHON").to("CPU")
     self.assertTrue(x.uop.has_buffer_identity(after_ok=True))
-    y = Tensor.empty(3, dtype=dtypes.int).assign(x).realize()
+    y = Tensor.empty(3, dtype=dtypes.int, device=x.device).assign(x).realize()
     y.assign(0).realize()
     self.assertEqual(x.tolist(), [1, 2, 3])
 

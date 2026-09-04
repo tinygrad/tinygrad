@@ -1025,7 +1025,7 @@ class TestAssignToUnrealizedView(unittest.TestCase):
       self.assertEqual(c.tolist(), [[0,0],[0,0]])
 
   def test_clone(self):
-    t = Tensor([[1,2],[3,4]]).realize()
+    t = Tensor([[1,2],[3,4]]).contiguous().realize()
     c = t.permute(1,0).clone()
     self.assertIs(c.uop.base.op, Ops.AFTER)
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
@@ -1042,6 +1042,28 @@ class TestAssignToUnrealizedView(unittest.TestCase):
       # TODO: broken now
       self.assertEqual(cb.tolist(), [[1,2],[3,4]])
 
+  def test_detach_buffer_assignment(self):
+    with Context(SPEC=1):
+      for realized in (False, True):
+        with self.subTest(realized=realized):
+          base = Tensor([1., 2., 3.])
+          if realized: base.realize()
+          detached = base.detach()
+          detached.assign(detached + 1).realize()
+          self.assertEqual(detached.tolist(), [2., 3., 4.])
+          self.assertEqual(base.tolist(), [2., 3., 4.])
+
+  def test_detach_assignment_preserves_earlier_update(self):
+    with Context(SPEC=1):
+      x = Tensor([1., 2.]).detach()
+      state = Tensor([0., 0.]).detach()
+      state.assign(state + x * 2)
+      result = state + 1
+      x.assign(x + 1).realize(state, result)
+      self.assertEqual(x.tolist(), [2., 3.])
+      self.assertEqual(state.tolist(), [2., 4.])
+      self.assertEqual(result.tolist(), [3., 5.])
+
   def test_detach_copy(self):
     t = Tensor.zeros(2,2, dtype=dtypes.int).to("CPU:0").contiguous().realize()
     d = t.to("CPU:1").detach()  # DETACH(unrealized COPY)
@@ -1054,7 +1076,7 @@ class TestAssignToUnrealizedView(unittest.TestCase):
       self.assertEqual(d.tolist(), [[0,0],[0,0]])
 
   def test_detach_clone(self):
-    t = Tensor([[1,2],[3,4]]).realize()
+    t = Tensor([[1,2],[3,4]]).contiguous().realize()
     d = t.permute(1,0).clone().detach()
     self.assertIs(d.uop.base.op, Ops.AFTER)
     d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
