@@ -632,6 +632,14 @@ class TestAssign(unittest.TestCase):
     assert_kernel_count(1)
     self.assertEqual(base.tolist(), [1,4,3])
 
+  def test_assign_temporary_copy_reshape(self):
+    a = Tensor([[1., 2], [3, 4]], device="PYTHON")
+    c = Tensor.empty(2, 2).assign(a.to(None))
+    GlobalCounters.reset()
+    c.realize()
+    assert_kernel_count(1)
+    self.assertEqual(c.tolist(), [[1., 2], [3, 4]])
+
 class TestAssignOrdering(unittest.TestCase):
   """Tests for complex assign orderings that could differ between lazy and eager execution.
 
@@ -1085,6 +1093,16 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     except AssertionError:
       # TODO: broken now, silently dropped
       self.assertEqual(c.tolist(), [[5,5],[5,5]])
+
+  def test_detach_assignment_preserves_earlier_update(self):
+    x = Tensor([1., 2.]).detach()
+    state = Tensor([0., 0.]).detach()
+    state.assign(state + x * 2)
+    result = state + 1
+    x.assign(x + 1).realize(state, result)
+    self.assertEqual(x.tolist(), [2., 3.])
+    self.assertEqual(state.tolist(), [2., 4.])
+    self.assertEqual(result.tolist(), [3., 5.])
 
 class TestPartialAssignToSharedBuffer(unittest.TestCase):
   def test_five_slices(self):
