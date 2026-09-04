@@ -149,11 +149,11 @@ def storage_subs(outs) -> dict[UOp, UOp]:
       subs[u] = (u.substitute(subs, walk=True) if subs else u).clone()
   return subs
 
-@rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
-def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+@rewrite_group(lambda *_, ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
+def transform_to_call(big_sink:UOp, ctx:AllocCtx|None=None) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
-  ctx = AllocCtx()
+  ctx = ctx or AllocCtx()
 
   # collect the stores (never entering call bodies): the stateful roots of the graph are the AFTERs on real storage.
   # bound Variables are call inputs and AFTERs on unbound BUFFERs are call outputs: they're not stores
@@ -165,6 +165,11 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # storage viewed at the root's (possibly symbolic) shape. collected before any rewrite: the keys must be the exact
   # nodes in the tensor graph so the map applies to it
   becomes_map = {u: graph_rewrite(u.src[0], pm_drop_after).shrink_to(u.shape) for u in collect_stores(big_sink)}
+  # a copy that is a direct store value is realized into the store destination: resolve it to the same storage, like
+  # the old tag-merging path did
+  for u, value in list(becomes_map.items()):
+    for st in (s for s in u.src[1:] if s.op is Ops.STORE and s.src[1].op is Ops.COPY and is_creation_device(s.src[1].src[0])):
+      becomes_map[st.src[1]] = value
 
   # below here we only rewrite the scheduled copy, the tensor graph is untouched
 
@@ -337,11 +342,13 @@ class Tensor(RandMixin):
   def _materialize(self, *lst:Tensor) -> tuple[UOp, dict[UOp, UOp]]:
     """inserts the storage (a clone) for every lacking out into the graph and returns the call + its storage map"""
     outs = (self,)+lst
-    # fold MOPS over buffers into views first: a CONTIGUOUS on a contiguous view of a real buffer is a view (no storage)
-    sink = graph_rewrite(UOp.sink(*[x.uop for x in outs]), pm_mops_to_view, ctx=AllocCtx(), bottom_up=True, name="fold mops to view")
+    # fold MOPS over buffers into views first: a CONTIGUOUS on a contiguous view of a real buffer is a view (no storage).
+    # the fold context is shared with the transform: registered views become call args (the offset stays out of the AST)
+    ctx = AllocCtx()
+    sink = graph_rewrite(UOp.sink(*[x.uop for x in outs]), pm_mops_to_view, ctx=ctx, bottom_up=True, name="fold mops to view")
     _apply_map_to_tensors({x.uop: s for x, s in zip(outs, sink.src) if x.uop is not s}, name="fold mops to view")
     _apply_map_to_tensors(storage_subs(outs), name="materialize")
-    return transform_to_call(UOp.sink(*[x.uop for x in outs]))
+    return transform_to_call(UOp.sink(*[x.uop for x in outs]), ctx)
 
   def callify(self, *lst:Tensor) -> Tensor:
     big_sink, becomes_map = self._materialize(*lst)
