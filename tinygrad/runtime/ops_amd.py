@@ -661,50 +661,58 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
     dev, usb, ts, sdma = self.dev, self.dev.iface.pci_dev.usb, self.dev.timeline_signal, self.dev.sdma
     CHUNK, src_mv = 0x40000 - 4, src.cast('B')  # payload per chunk: the 256KB window minus the 4B trailing sentinel
     nchunks = ceildiv(src.nbytes, CHUNK)
-    FENCE = 0xA800  # drain fence: the GPU writes it via sys_buf (PCIe 0x820800), the host reads it here (xdata)
-    if not hasattr(self, '_usb_seq'):  # one-time: clear the fence and zero both windows so garbage can't match a sentinel
+    if nchunks == 0: return
+    FENCE = 0xA800  # drain fence, followed by the initial-clear fence; GPU sys_buf offset 0x800, host xdata 0xA800
+    if not hasattr(self, '_usb_seq'):
       self._usb_seq, self._usb_stage = 0, [alloc_cbuffer(0x40000) for _ in range(2)]  # (backing array, memoryview) pairs
       self._usb_wins = (self.b[0].offset(0, 0x40000), self.b[0].offset(0x40000, 0x40000))  # two windows, engine slots 0/16
-      usb.write(FENCE, bytes(8))
-      for bi in range(2): usb.scsi_write(bytes(0x40000), slot_start=bi * 16)
+      usb.write(FENCE, bytes(16))
 
-    def wait_drain(count):  # spin until the drain fence reaches count, i.e. chunks 0..count-1 are fully in VRAM
+    def wait_fence(count, addr=FENCE):
       t0 = time.perf_counter()
-      while int.from_bytes(usb.read(FENCE, 8), 'little') < count:
-        if time.perf_counter() - t0 > 10: raise RuntimeError(f"GPU failed to drain USB copyin chunk {count - 1} (10s, hung GPU?)")
+      while int.from_bytes(usb.read(addr, 8), 'little') < count:
+        if time.perf_counter() - t0 > 10: raise RuntimeError(f"GPU failed to reach USB copyin fence {addr:#x} value {count} (10s, hung GPU?)")
 
     # build the whole ring upfront: per chunk, poll the sentinel, copy SRAM->VRAM, bump the fence; then one doorbell
     POLL_EQ = sdma.SDMA_OP_POLL_REGMEM | sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(3) | sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
     POLL_DW5 = sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)
+    def sentinel(c):
+      size = min(CHUNK, src.nbytes - c * CHUNK)
+      return self._usb_wins[(self._usb_seq + c) & 1].offset(round_up(size + 4, 512) - 4, 4)
+
     q = dev.hw_copy_queue_t().wait(ts, dev.timeline_value - 1)
+    # A short chunk's sentinel can lie in old payload (including copyout data). Clear it before USB can fill the window.
+    for c in range(min(2, nchunks)): q.write(sentinel(c), 0)
+    q.write(dev.iface.sys_buf.offset(0x808, 8), self._usb_seq + 1, b64=True)
     for c in range(nchunks):
       seq, size = self._usb_seq + c, min(CHUNK, src.nbytes - c * CHUNK)
-      q.q(POLL_EQ, *data64_le(self._usb_wins[seq & 1].va_addr + round_up(size + 4, 512) - 4), 0x51000000 | (seq & 0xFFFFFF), 0xFFFFFFFF, POLL_DW5)
+      q.q(POLL_EQ, *data64_le(sentinel(c).va_addr), 0x51000000 | (seq & 0xFFFFFF), 0xFFFFFFFF, POLL_DW5)
       q.copy(dest.offset(c * CHUNK), self._usb_wins[seq & 1], size)
+      # Clear the next occupant's sentinel only after this payload is copied, and before publishing the drain fence.
+      if c + 2 < nchunks: q.write(sentinel(c + 2), 0)
       q.write(dev.iface.sys_buf.offset(0x800, 8), seq + 1, b64=True)
     q.signal(ts, dev.next_timeline()).submit(dev)
+    wait_fence(self._usb_seq + 1, FENCE + 8)
 
     # Stage the next window while USB sends the previous one. F2 configures a single engine shared by both windows.
     inflight = None
     for c in range(nchunks):
       seq, size = self._usb_seq + c, min(CHUNK, src.nbytes - c * CHUNK)
       # Reading the drain fence does not reconfigure F2, so overlap it with USB sending the previous chunk and CPU staging.
-      if c >= 2: rd_tag, rd_mv = usb.usb.control_read_async(0xE4, 8, value=FENCE)
+      rd_tag, rd_mv = usb.usb.control_read_async(0xE4, 8, value=FENCE)
       buf = self._usb_stage[seq & 1][1]
       buf[:size] = src_mv[c * CHUNK : c * CHUNK + size]
       wire = round_up(size + 4, 512)  # payload plus the sentinel, padded to 512B sectors (full window for max chunks)
       struct.pack_into('<I', buf, wire - 4, 0x51000000 | (seq & 0xFFFFFF))  # the sentinel is the last dword of the wire
       # Rearming F2 recycles the slots immediately, before bulk data arrives. Drain seq-2 before the arm itself.
-      # The first two windows are already drained by the previous synchronous copyin.
-      if c >= 2:
-        usb.usb.bulk_wait(rd_tag)
-        if int.from_bytes(rd_mv, 'little') < seq - 1: wait_drain(seq - 1)
+      usb.usb.bulk_wait(rd_tag)
+      if int.from_bytes(rd_mv, 'little') < seq - 1: wait_fence(seq - 1)
       if inflight is not None: usb.usb.bulk_wait(inflight)
       usb.usb.control_write(0xF2, wire // 512, (seq & 1) * 16 | (ceildiv(wire, 0x4000) << 8))  # wValue=sectors, wIndex=slot|count
       inflight = usb.usb.bulk_write_async(buf[:wire])
     if inflight is not None: usb.usb.bulk_wait(inflight)
     self._usb_seq += nchunks
-    wait_drain(self._usb_seq)  # copyin is synchronous: everything must be in VRAM before returning
+    wait_fence(self._usb_seq)  # copyin is synchronous: everything must be in VRAM before returning
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     if not self.dev.is_usb(): return super()._copyout(dest, src)
