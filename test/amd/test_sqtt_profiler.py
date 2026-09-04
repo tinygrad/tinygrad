@@ -65,7 +65,7 @@ class TestSQTTProfiler(unittest.TestCase):
       print(f"\n=== SE {event.se} ===")
       print_packets(decode(event.blob))
     from test.null.test_viz import write_files, run_cli
-    with write_files(VizData(), profile=data) as files:
+    with write_files(profile=data) as files:
       out = run_cli(*files, "-s", "asm SQTT SE:0 PKTS", json_fmt=False)[0]["out"]
     print(out)
 

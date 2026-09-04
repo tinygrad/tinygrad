@@ -1025,9 +1025,9 @@ def run_cli(*cli_args, json_fmt=True) -> list[dict]:
   return [json.loads(line) for line in stdout.splitlines()] if json_fmt else [{"out":stdout}]
 
 @contextlib.contextmanager
-def write_files(viz, profile=cpu_events) -> list[str]:
+def write_files(rewrites=None, profile=cpu_events) -> list[str]:
   with tempfile.TemporaryDirectory() as tmpdir:
-    (r:=pathlib.Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.trace if isinstance(viz, VizData) else viz.data.trace))
+    (r:=pathlib.Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps((rewrites.data if rewrites is not None else VizData()).trace))
     (p:=pathlib.Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(profile))
     yield ["--rewrites-path", str(r), "--profile-path", str(p)]
 
