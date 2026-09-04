@@ -513,6 +513,7 @@ class CDNA_ISSUE(PacketType):
   encoding = bits[3:0] == 13
   simd = bits[6:5]
   inst = bits[27:8]
+  _padding = bits[31:28]
 
 class CDNA_PERF(PacketType):
   """pkt_fmt=14: 64-bit (MsgPerf)"""
