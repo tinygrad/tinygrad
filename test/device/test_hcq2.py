@@ -150,5 +150,17 @@ class TestHCQ2FFI(unittest.TestCase):
     got = struct_t.from_buffer_copy(bytes(next(b for b in bufs if b.nbytes == ctypes.sizeof(struct_t))._buf.cpu_view()))
     self.assertEqual((got.u8, got.u16, got.u32, got.u64), (0x12, 0x3456, 0x789ABCDE, 0xFEDCBA9876543210))
 
+  def test_device_state_survives_as_link_refs(self):
+    # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
+    dev, names = Device[Device.DEFAULT], {"AMD": ("scratch",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
+    @TinyJit
+    def f(a): return (a * 2 + 1).contiguous().realize()
+    x = Tensor.ones(16).contiguous().realize()
+    for _ in range(3): f(x)
+    call = f.captured.linear.src[0]
+    self.assertIs(call.op, Ops.AFTER, "the linked call sits after its refs")
+    refs = [u.buffer for u in call.src[1:] if u.op is Ops.BUFFER]
+    for n in names: self.assertTrue(any(r is getattr(dev, n) for r in refs), f"{n} is not a ref of the call")
+
 if __name__ == "__main__":
   unittest.main()
