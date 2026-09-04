@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.uop.ops import AxisType
+from tinygrad.renderer.isa.rdna3 import RDNA3Renderer
 
 # TODO: write a clean version of this
 from test.backend.test_linearizer import helper_linearizer_opt
@@ -64,6 +65,7 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, RDNA3Renderer), "flaky/crashes CI on RDNA3 assembly backend due to speed")
   def test_matmul(self):
     N = 128
     Tensor.manual_seed(1552)

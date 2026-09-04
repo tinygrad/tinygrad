@@ -13,7 +13,6 @@ from tinygrad.renderer.cstyle import HIPRenderer
 import tinygrad.renderer.amd.dsl as dsl
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 import itertools, struct, math
-from enum import Enum, auto
 
 # ---- (UOp, dtype) -> Instruction tables ----
 dt_to_isa = { dtypes.int32:"i32", dtypes.uint32:"u32", dtypes.float32:"f32", dtypes.float64:"f64", dtypes.float16:"f16", dtypes.int16:"i16",
