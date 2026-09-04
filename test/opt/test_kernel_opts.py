@@ -38,6 +38,32 @@ class TestKernelOpts(unittest.TestCase):
        Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 8, (2, AxisType.GROUP_REDUCE))],
     ])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_grouped_reduce_with_local_upcast_padto(self):
+    Tensor.manual_seed(7)
+    a = Tensor.rand(7, 11, 13)
+    helper_linearizer_opt(a.sum((1, 2)) + a.max((1, 2)), [
+      [Opt(OptOps.SPLIT, 0, (0, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (11, AxisType.UNROLL)),
+       Opt(OptOps.SPLIT, 2, (0, AxisType.GROUP_REDUCE, True)), Opt(OptOps.PADTO, 2, 32)],
+    ])
+    b = Tensor.rand(17, 19)
+    helper_linearizer_opt(b.flip(0).pad(((2, 3), (0, 0))).sum(0), [
+      [Opt(OptOps.SPLIT, 1, (0, AxisType.GROUP_REDUCE, True)), Opt(OptOps.PADTO, 0, 8),
+       Opt(OptOps.SPLIT, 0, (12, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (0, AxisType.LOCAL))],
+    ])
+    x, w = Tensor.rand(1, 3, 15, 15), Tensor.rand(4, 3, 3, 3)
+    helper_linearizer_opt(x.conv2d(w, padding=1, stride=2), [
+      [Opt(OptOps.SPLIT, 5, (0, AxisType.GROUP_REDUCE, True)), Opt(OptOps.SPLIT, 1, (0, AxisType.LOCAL))],
+    ])
+
+  def test_unrolled_padded_cumsum(self):
+    Tensor.manual_seed(7)
+    a = Tensor.rand(13, 17)
+    helper_linearizer_opt(a.cumsum(1), [
+      [Opt(OptOps.SPLIT, 2, (0, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (0, AxisType.UPCAST)), Opt(OptOps.PADTO, 0, 4)],
+    ])
+
   def test_upcasts(self):
     N = 16
     Tensor.manual_seed(1772)
