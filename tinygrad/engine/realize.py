@@ -194,10 +194,11 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   if (info:=call.arg.aux).inputs:
     addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(dev).va_addr for u, dev in info.inputs]
     cast(Buffer, call.src[1 + info.table].buffer)._buf.cpu_view().view(fmt='Q')[:] = array.array('Q', addrs)
-  ets = exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,)) # the body runs on the runtime device, it drives every device's queues
+  ctx = replace(ctx, var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
+  ets = exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,))
   if not (ctx.wait or PROFILE): return ets
 
-  slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots} # the batch's timestamps live in its slots
+  slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
   def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:
     (d:=cast(Any, Device[device])).prof_ents[(slots[device], prof[0])] = ProfileGraphEntry(device, name, prof[0], prof[1], profile_key)
     if not ctx.wait: return None
