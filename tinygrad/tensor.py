@@ -11,7 +11,7 @@ from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, 
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
-from tinygrad.schedule.prepare import buffer_view_subs, prepare_to_call, prepare_call_views
+from tinygrad.schedule.prepare import buffer_view_subs, prepare_to_call, prepare_call_views, on_disk
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 
@@ -19,18 +19,17 @@ from tinygrad.engine.realize import run_linear
 
 @dataclass
 class CallifyCtx:
-  replacements: list[UOp] = field(default_factory=list)
+  inputs: list[UOp] = field(default_factory=list)
   unbound: dict[UOp, UOp] = field(default_factory=dict)
 
-def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
 def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
 pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
 
 def replace_input_buffer(ctx:CallifyCtx, b:UOp):
-  ctx.replacements.append(b)
-  return b.param_like(len(ctx.replacements)-1)
+  ctx.inputs.append(b)
+  return b.param_like(len(ctx.inputs)-1)
 
 # unbound BUFFERs get canonical scope-local id slots here so structurally identical calls hash identically for the
 # schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
@@ -60,7 +59,7 @@ def transform_to_call(big_sink:UOp) -> UOp:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
   ctx = CallifyCtx()
-  ret = graph_rewrite(big_sink, pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
+  ret = graph_rewrite(big_sink, pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.inputs)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret
 
@@ -88,6 +87,15 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, *, view_base:UOp
 def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop is u for tref in list(all_tensors))
 
 # **** Tensor helper functions ****
+
+def _augmented_view_rhs(parent:UOp, value:UOp) -> UOp|None:
+  # Recognize the read-modify-write embedded by view.__iadd__ before Python calls parent.__setitem__.
+  if parent.op is not Ops.AFTER or len(parent.src) != 2: return None
+  update = parent.src[1]
+  if update.op is not Ops.AFTER or len(update.src) != 2 or update not in value.backward_slice: return None
+  store = update.src[1]
+  if store.op is not Ops.STORE or store.src[0] not in store.src[1].toposort(enter_calls=False): return None
+  return store.src[1]
 
 def is_numpy_ndarray(x) -> "TypeGuard[numpy.ndarray]": return str(type(x)) == "<class 'numpy.ndarray'>"
 
@@ -222,7 +230,7 @@ class Tensor(RandMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
-  def _materialize(self, *lst:Tensor) -> tuple[UOp, dict[UOp, UOp]]:
+  def _prepare_call(self, *lst:Tensor) -> tuple[UOp, dict[UOp, UOp]]:
     outs = (self,)+lst
     _apply_map_to_tensors(buffer_view_subs(UOp.sink(*[x.uop for x in outs])), name="fold buffer views")
     # Only requested outputs acquire storage. Intermediate values persist only when explicitly cloned.
@@ -242,12 +250,14 @@ class Tensor(RandMixin):
     becomes_map = {u: graph_rewrite(u.src[0], pm_drop_after).shrink_to(u.shape)
                    for u in sink.toposort(enter_calls=False)
                    if u.op is Ops.AFTER and not u.is_bound_var and not u.src[0].unsharded_base.is_unbound}
-    held = tuple(t.uop for ref in list(all_tensors) if (t:=ref()) is not None)
-    return prepare_call_views(transform_to_call(prepare_to_call(sink, held))), becomes_map
+    tensor_roots = tuple(t.uop for ref in list(all_tensors) if (t:=ref()) is not None)
+    call = transform_to_call(prepare_to_call(sink, tensor_roots))
+    return prepare_call_views(call), becomes_map
 
   def callify(self, *lst:Tensor) -> Tensor:
-    big_sink, becomes_map = self._materialize(*lst)
-    _apply_map_to_tensors({x:y.after(big_sink) for x,y in becomes_map.items()}, name="callify")
+    """Groups the computation for these tensors into a deferred call. Returns `self` without executing the call."""
+    call, becomes_map = self._prepare_call(*lst)
+    _apply_map_to_tensors({x:y.after(call) for x,y in becomes_map.items()}, name="callify")
     return self
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
@@ -255,9 +265,9 @@ class Tensor(RandMixin):
     # weakness ends where storage begins
     if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
-    big_sink, becomes_map = self._materialize(*lst)
+    call, becomes_map = self._prepare_call(*lst)
     _apply_map_to_tensors(becomes_map, name="buffers")
-    return create_linear_with_vars(big_sink)
+    return create_linear_with_vars(call)
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""
@@ -283,6 +293,12 @@ class Tensor(RandMixin):
     return self
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
+    """
+    Assigns `x` to this tensor and returns `self`. `x` must broadcast to this tensor's shape.
+    Tensor inputs must match its dtype and device, except that disk tensors accept inputs from any device.
+    Updates existing storage, or creates storage if this tensor is a computed value.
+    The write is deferred until realization, except for disk tensors.
+    """
     if self.dtype in dtypes.weaks: self.uop = self.uop.clone()
     is_disk = on_disk(self.uop)
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
@@ -388,7 +404,8 @@ class Tensor(RandMixin):
 
   def clone(self, device:str|tuple[str, ...]|None=None) -> Tensor:
     """
-    Creates a clone of this tensor allocating a separate buffer for the data.
+    Creates a tensor with independent storage, populated lazily when its value is needed.
+    Use this to retain an intermediate result across realizations or to modify it independently.
     If `device` is specified, the clone is placed on that device.
     """
     ret = Tensor(self.uop.clone(device=device))
@@ -397,7 +414,8 @@ class Tensor(RandMixin):
 
   def to(self, device:str|tuple[str, ...]|None) -> Tensor:
     """
-    Moves the tensor to the given device.
+    Returns this tensor on the given device, transferring its data lazily. Returns `self` if the device already matches.
+    Use `clone(device)` when the result needs independent, persistent storage.
     """
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
@@ -549,10 +567,9 @@ class Tensor(RandMixin):
     # before the functional setitem below, while retaining the computed RHS for autograd.
     if isinstance(v, Tensor) and self.is_floating_point() and not self.uop._base_buffer_is_realized():
       a = self.uop
-      if a.op is Ops.AFTER and len(a.src) == 2 and (update:=a.src[1]).op is Ops.AFTER and len(update.src) == 2 and \
-          (st:=update.src[1]).op is Ops.STORE and update in v.uop.backward_slice and st.src[0] in st.src[1].toposort(enter_calls=False):
+      if (rhs:=_augmented_view_rhs(a, v.uop)) is not None:
         _apply_map_to_tensors({a: a.src[0]}, name="functional setitem")
-        v = v._apply_uop(lambda _: st.src[1])
+        v = v._apply_uop(lambda _: rhs)
     # raise if mutation would diverge from eager (allow only pure views of a realized buffer; exclude +=/-= RHS via v_uop/v_bw)
     v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
     if self.uop.op_in_backward_slice_with_self(Ops.BUFFER):

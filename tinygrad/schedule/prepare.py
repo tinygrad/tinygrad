@@ -12,6 +12,7 @@ def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DI
 
 def contiguous_mops_to_view(ctx:set[UOp]|None, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
+  # A set collects views to lift into CALL arguments; None rewrites the live Tensor graph.
   # Ordinary copies keep their source graph so JIT can substitute its input buffer.
   if ctx is None and c.op is Ops.COPY and not on_disk(src): return None
   buf = src.base
@@ -114,11 +115,11 @@ def prepare_call_views(call:UOp) -> UOp:
     args.append(view.substitute({u: call.src[1+u.arg.slot] for u in view.toposort() if u.op is Ops.PARAM and u.arg.slot >= 0}))
   return call.replace(src=(body.substitute(subs, walk=True), *args))
 
-def prepare_to_call(sink:UOp, held:tuple[UOp, ...]=()) -> UOp:
+def prepare_to_call(sink:UOp, tensor_roots:tuple[UOp, ...]) -> UOp:
   # A copy used only to initialize another buffer can write directly into that destination.
   # Include live Tensor graphs so retained copies and aliases keep their independent storage.
   users:dict[UOp, set[UOp]] = {}
-  for u in UOp.sink(sink, *held).toposort(enter_calls=False):
+  for u in UOp.sink(sink, *tensor_roots).toposort(enter_calls=False):
     for src in u.src: users.setdefault(src, set()).add(u)
   subs = {}
   for u in sink.toposort(enter_calls=False):
@@ -260,15 +261,9 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
-earliest_rewrites = mop_cleanup+PatternMatcher([
-  # transform precompiled value-producing calls into opaque CALLs (outputs become real buffers)
-  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
-
-  # resolve calls with RETURNED inputs (inline the body)
+earliest_rewrites = mop_cleanup+pm_resolve_call_outputs+PatternMatcher([
+  # Inline calls with unbound outputs.
   (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.has_unbound_outputs else None),
-
-  # resolve AFTER on RETURNED (call outputs)
-  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
 
   # resolve allreduce (must be bottom up)
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),

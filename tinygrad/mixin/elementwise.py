@@ -42,7 +42,7 @@ class ElementwiseMixin(CreationMixin):
 
   def detach(self) -> Self:
     """
-    Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
+    Returns a new tensor detached from the autograd graph. It shares storage with this tensor.
     """
     return self.alu(Ops.DETACH)
 
@@ -58,7 +58,8 @@ class ElementwiseMixin(CreationMixin):
 
   def contiguous(self, **kwargs) -> Self:
     """
-    Returns a contiguous tensor.
+    Requests a contiguous layout for this value when it is computed.
+    This does not reserve independent storage or retain an intermediate result across realizations; use `clone()` for that.
     """
     if self.dtype in dtypes.weaks: return self
     uop = self._uop

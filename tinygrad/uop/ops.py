@@ -839,7 +839,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     device = device or self.device
     ret = self.empty_like(device=device)
     src = self if self.device is None or self.device == device else self.copy_to_device(device)
-    # a clone of a CONTIGUOUS is its materialization: the STORE is the buffer the CONTIGUOUS would have created
+    # The clone's STORE already materializes the value; a separate CONTIGUOUS is redundant.
     if src.op is Ops.CONTIGUOUS: src = src.src[0]
     return ret.after(ret.store(src.cast(ret.dtype)))
   @recursive_property
