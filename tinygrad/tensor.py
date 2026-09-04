@@ -135,8 +135,9 @@ def storage_subs(outs) -> dict[UOp, UOp]:
       subs[u] = u.src[0].substitute(subs, walk=True) if subs else u.src[0]
     elif u.op is Ops.CONTIGUOUS:
       # a CONTIGUOUS on storage that is already materialized resolves to the storage state (like the old rule); a
-      # CONTIGUOUS on a size-0 value resolves to nothing, there's no storage to allocate
-      src = u.src[0]
+      # CONTIGUOUS on a size-0 value resolves to nothing, there's no storage to allocate. check the substituted
+      # source: materialization of inner nodes (a pinned copy) is storage the CONTIGUOUS can resolve to directly
+      src = (u.src[0].substitute(subs, walk=True) if subs else u.src[0])
       while src.op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: src = src.src[0]  # detach is stripped, like the old rule
       if src.op is Ops.AFTER and src.has_buffer_identity(after_ok=True): subs[u] = src
       elif 0 in u.shape: subs[u] = u.src[0]
