@@ -91,7 +91,7 @@ jobs:
         model: ['llama3.2:3b-f16', 'qwen3.8:27b', 'olmoe']
         # qwen3.8:27b doesn't fit on mac
         exclude: [{ dev: 'METAL', model: 'qwen3.8:27b' }, { dev: 'AMD', model: 'olmoe' }, { dev: 'NV', model: 'olmoe' }]
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -118,7 +118,9 @@ jobs:
     - name: reset process replay
       run: python3 test/external/process_replay/reset.py
     - name: Run ${{ matrix.model }}
-      run: BENCHMARK_LOG=${{ matrix.model }} JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m ${{ matrix.model }} --benchmark --warmup
+      run: |
+        MODEL=${{ matrix.model }}
+        BENCHMARK_LOG=${MODEL//./} JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 -m tinygrad.llm -m $MODEL --benchmark --warmup
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
