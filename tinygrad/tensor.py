@@ -704,8 +704,10 @@ class Tensor(RandMixin):
     realized = is_disk or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized()
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value
-      if v.uop.op is Ops.AFTER and any(s.op is Ops.STORE for s in v.uop.src[1:]): v = v._apply_uop(lambda x: x.src[1].src[1])
+      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value.
+      # the store is self-referential there (the computed value touches its target); clone stores are untouched
+      if v.uop.op is Ops.AFTER and any(s.op is Ops.STORE and s.src[0] in s.src[1].toposort(enter_calls=False)
+                                       for s in v.uop.src[1:]): v = v._apply_uop(lambda x: x.src[1].src[1])
       self.replace(self._getitem(indices, v))
     elif advanced: # advanced setitem
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")
