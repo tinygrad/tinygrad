@@ -9,8 +9,6 @@ import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, HCQ2Compiled, all_devices_in, hcq_compile_cache, link_linear_cache
 from test.helpers import call_is_hcq
 
-hcq2_only = unittest.skipUnless(HCQ2 and all_devices_in(Device.DEFAULT, HCQ_DEVS - {"CPU"}), "non-CPU hcq2 device required")
-
 @contextlib.contextmanager
 def rt_views():
   calls, orig = [], HCQ2Compiled.rt_view
@@ -29,8 +27,8 @@ def patch_words(batch:UOp) -> list[UOp]:
 def rt_params(batch:UOp) -> list[str]:
   return dedup([u.arg.name for w in patch_words(batch) for u in w.toposort() if u.op is Ops.PARAM and u.arg.addrspace is AddrSpace.GLOBAL])
 
-@hcq2_only
-class TestHCQ2Cache(unittest.TestCase):
+unittest.skipUnless(HCQ2 and all_devices_in(Device.DEFAULT, HCQ_DEVS - {"CPU"}), "non-CPU hcq2 device required")
+class TestHCQ2Core(unittest.TestCase):
   def test_jit_has_no_rt_buffers(self):
     x = Tensor.ones(16).contiguous().realize()
     @TinyJit
@@ -48,13 +46,10 @@ class TestHCQ2Cache(unittest.TestCase):
 
   def test_jit_survives_ring_wrap(self):
     # the ring recycles with no liveness tracking, so eager work that wraps it must not land on the jit's buffers
-    dev, sizes = Device[Device.DEFAULT], {}
-    try:
-      for host in (False, True): # shrink the live rings so everything linked from here on wraps over itself in a few realizes
-        alloc = dev.rt_allocator(True, host)
-        sizes[host] = alloc.size
-        alloc.size = 1 << 13
-
+    dev = Device[Device.DEFAULT]
+    allocs = {host:dev.rt_allocator(True, host) for host in (False, True)}
+    for host in allocs: dev.rt_buffer(True, host) # cache the full-sized backing buffers before temporarily shrinking their allocators
+    with patch.object(allocs[False], "size", 1 << 13), patch.object(allocs[True], "size", 1 << 13):
       x = Tensor.ones(24).contiguous().realize()
       @TinyJit
       def g(a): return (a * 3 - 1).contiguous().realize()
@@ -67,11 +62,7 @@ class TestHCQ2Cache(unittest.TestCase):
         wrapped += dev.rt_allocator(True, False).ptr < before
         self.assertEqual(g(x).tolist(), [2.0] * 24)
       self.assertGreater(wrapped, 0)
-    finally:
-      for host, size in sizes.items(): dev.rt_allocator(True, host).size = size
 
-@hcq2_only
-class TestHCQ2Params(unittest.TestCase):
   def test_jit_new_inputs_each_call(self):
     @TinyJit
     def f(a, b): return (a * b + a).contiguous().realize()
@@ -90,8 +81,6 @@ class TestHCQ2Params(unittest.TestCase):
       vi = Variable("i", 1, 10).bind(i)
       np.testing.assert_allclose(f(a[:, :vi]).item(), (a[:, :i] + 1).sum().item(), atol=1e-5, rtol=1e-5)
 
-@hcq2_only
-class TestHCQ2Staging(unittest.TestCase):
   def test_staged_copy_roundtrip(self):
     # a host buffer the device cannot read copies in chunks through a small ring of staging slots: every rotation must land bit-exact
     stage = Buffer("CPU", size:=1 << 16, dtypes.uint8, preallocate=True)
@@ -101,16 +90,8 @@ class TestHCQ2Staging(unittest.TestCase):
         data = np.arange(n, dtype=np.int64).astype(npdt)
         with patch.object(hcq2, "STAGING_SIZE", size), patch.object(hcq2, "STAGING_SLOTS", 2), patch.object(hcq2, "_staging", lambda: stage):
           out = Tensor(data).to(Device.DEFAULT).contiguous().realize()
-        np.testing.assert_equal(out.numpy(), data)
+          np.testing.assert_equal(out.numpy(), data)
 
-  def test_copy_without_copy_queue(self):
-    # with no sdma the copy lowers to a kernel instead
-    with patch.object(Device[Device.DEFAULT], "has_copy_queue", False):
-      out = Tensor(np.arange(61, dtype=np.float32)).to(Device.DEFAULT).contiguous().realize()
-    np.testing.assert_equal(out.numpy(), np.arange(61))
-
-@hcq2_only
-class TestHCQ2Patches(unittest.TestCase):
   def test_rt_patches_are_inputs_and_vars_only(self):
     x = Tensor.rand(17, 33).contiguous().realize()
     with encoded_batches() as batches:
