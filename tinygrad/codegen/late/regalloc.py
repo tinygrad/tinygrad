@@ -75,9 +75,12 @@ class LinearScanRegallocContext:
       for j,v in enumerate(vdefs):
         cons: list[tuple[Register,...]]|None = None
         if self.ren.is_two_address(u) and j == 0:
-          pin: tuple[Register,...]|None = next((rs for s in u.src if (rs := live.get(rdef(s), None)) is not None), None)
-          if pin is not None:
-            cons = ([pin] if pin[0] in v.cons else []) + v.candidates()
+          use_regs = [rs for s in u.src if (rs := live.get(rdef(s), None)) is not None]
+          if use_regs:
+            pin, others = use_regs[0], {r for rs in use_regs[1:] for r in rs}
+            cands = [b for b in v.candidates() if b != pin]
+            free = [b for b in cands if others.isdisjoint(b)]
+            cons = ([pin] if pin[0] in v.cons else []) + (free or cands)
         # parents can be defined by premature subregister op ex. collect then store
         if (vv := v.or_parent()) not in live:
           live[vv] = alloc(vv, cons, i+1 if u.op is not Ops.RANGE else i)
@@ -126,8 +129,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
 
   for v in rdefs(x):
     if not isinstance(v, VRegister): continue
-    # only spill parents
-    if v in ctx.spills and x.op is not Ops.BUFFER:
+    if v in ctx.spills:
       after.extend(ctx.ren.spill(ctx.spills[v], nx, None))
   for v,rs in ctx.insert_before.get(i, []):
     before.extend(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), rs)[1])

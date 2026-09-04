@@ -218,6 +218,9 @@ def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.INDEX 
 def lane(x:UOp, i:int) -> int: return s.src[1].src[0].val if (s:=x.src[i]).op is Ops.INDEX else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
 def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, arg=(X86Ops.DEFINE, dt), tag=None if reg is None else (reg,))
+# the callee saved registers are also allocatable registers, so their defines go through regalloc as vregs
+def def_ret_reg(r:Register) -> UOp:
+  return UOp(Ops.INS, arg=(X86Ops.DEFINE, dtypes.uint64 if r in GPR else dtypes.float64), tag=(VRegister(r.name, (r,)),))
 def imm(dt:DType, v:int) -> UOp: return UOp.cconst(truncate[dt](v), dt).rtag()
 def to_imm(c:UOp) -> UOp|None:
   if not (c.op is Ops.CAST and (v:=c.src[0]).op is Ops.CONST): return None
@@ -360,7 +363,7 @@ isel_matcher = PatternMatcher([
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
   # so regalloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x:
-   x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64, r) for r in CALLEE_SAVED)),)) \
+   x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_ret_reg(r) for r in CALLEE_SAVED)),)) \
     if not x.src or x.src[0].op is not Ops.INS or x.src[0].arg[0] is not X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
