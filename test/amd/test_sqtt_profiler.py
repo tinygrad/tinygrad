@@ -64,8 +64,10 @@ class TestSQTTProfiler(unittest.TestCase):
       if not isinstance(event, ProfileSQTTEvent) or not event.itrace: continue
       print(f"\n=== SE {event.se} ===")
       print_packets(decode(event.blob))
-    sqtt = map_sqtt(data)
-    print(sqtt)
+    from test.null.test_viz import write_files, run_cli
+    with write_files(VizData(), profile=data) as files:
+      out = run_cli(*files, "-s", "asm SQTT SE:0 PKTS", json_fmt=False)[0]["out"]
+    print(out)
 
   def test_multiple_runs(self):
     t = Tensor.empty(1) + 1
