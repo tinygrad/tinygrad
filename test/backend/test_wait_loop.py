@@ -42,6 +42,19 @@ def nested_loop_kernel(C:UOp) -> UOp:
 
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="nested_loop", opts_to_apply=()))
 
+def pressure_loop_kernel(C:UOp) -> UOp:
+  vs = [C[j+1].load() for j in range(13)]
+  l = UOp.loop(0)
+
+  i = UOp.placeholder((1,), dtypes.int, 0, addrspace=AddrSpace.REG)
+  i = i.after(i[0].store(0))
+
+  inc = i.after(l)[0].load() + 1
+  st = i[0].store(inc)
+  i = i.after(st.end(l, inc < sum(v & inc for v in vs)))
+
+  return C[0].store(i[0].load()).sink(arg=KernelInfo(name="pressure_loop", opts_to_apply=()))
+
 def wait_ext_kernel() -> UOp:
   sig = UOp.param(0, dtypes.int, 1, volatile=True)
   l = UOp.loop(0)
@@ -99,6 +112,12 @@ class TestWaitLoop(unittest.TestCase):
     c = Tensor.custom_kernel(c, fxn=two_loops_kernel)[0]
     c.realize()
     self.assertEqual(c.item(), 25)
+
+  def test_register_pressure_loop(self):
+    c = Tensor.zeros(16, dtype=dtypes.int).contiguous()
+    c = Tensor.custom_kernel(c, fxn=pressure_loop_kernel)[0]
+    c.realize()
+    self.assertEqual(c[0].item(), 1)
 
   def test_loop_in_loop(self):
     c = Tensor.empty(1, dtype=dtypes.int)
