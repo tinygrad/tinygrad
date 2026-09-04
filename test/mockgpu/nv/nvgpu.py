@@ -192,11 +192,11 @@ class GPFIFO:
       sz = self._state(nv_gpu.NVC6B5_LINE_LENGTH_IN)
       assert flags == 0x182, f"unsupported flags in _exec_nvc6b5_dma: {flags}"
       ctypes.memmove(dst, src, sz)
-    elif ((flags >> 3) & 0b11) != 0:
-      src = to_mv(self._state64(nv_gpu.NVC6B5_SET_SEMAPHORE_A), 0x10).cast('Q')
-      val = self._state(nv_gpu.NVC6B5_SET_SEMAPHORE_PAYLOAD)
-      src[0] = val
-      src[1] = int(time.perf_counter() * 1e9)
+    elif (semaphore_type:=((flags >> 3) & 0b11)) != 0:
+      # a one word release writes just the payload, the four word one puts a timestamp 8 bytes past it
+      to_mv(addr:=self._state64(nv_gpu.NVC6B5_SET_SEMAPHORE_A), 4).cast('I')[0] = self._state(nv_gpu.NVC6B5_SET_SEMAPHORE_PAYLOAD)
+      if semaphore_type == nv_gpu.NVC6B5_LAUNCH_DMA_SEMAPHORE_TYPE_RELEASE_FOUR_WORD_SEMAPHORE:
+        to_mv(addr + 8, 8).cast('Q')[0] = int(time.perf_counter() * 1e9)
     else: raise RuntimeError("unknown nvc6b5_dma flags")
 
   def _exec_pcas2(self):
