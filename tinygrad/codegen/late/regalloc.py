@@ -75,7 +75,8 @@ class LinearScanRegallocContext:
       for j,v in enumerate(vdefs):
         cons: list[tuple[Register,...]]|None = None
         if self.ren.is_two_address(u) and j == 0:
-          pin: tuple[Register,...]|None = next((rs for s in u.src if (rs := live.get(rdef(s), None)) is not None), None)
+          pin: tuple[Register,...]|None = next(
+            (rs for s in u.src if isinstance((vr := rdef(s)), VRegister) and (rs := live.get(vr, None)) is not None), None)
           if pin is not None:
             cons = ([pin] if pin[0] in v.cons else []) + v.candidates()
         # parents can be defined by premature subregister op ex. collect then store

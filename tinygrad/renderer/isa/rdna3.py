@@ -192,7 +192,7 @@ def fold_lds(base:UOp, idx:UOp):
 def fold_address(x:UOp): return fold_lds(*x.src[:2]) if x.addrspace is AddrSpace.LOCAL else fold_global(*x.src[:2])
 
 def batch_scratch(store:bool, base:int, dt:DType, regs:VRegister|tuple[Register,...]) -> list[UOp]:
-  batches = []
+  batches: list[VRegister|tuple[Register,...]] = []
   # batch registers into groups of 4 dwords per copy in/out
   if isinstance(regs, VRegister):
     batches = [regs] if regs.width <= 4 else [regs[i*4:(i+1)*4] for i in range(regs.width//4)]
