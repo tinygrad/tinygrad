@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
 import functools, time, itertools, decimal, weakref, os, statistics
 from dataclasses import replace, dataclass, field
-from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ
+from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us
 from tinygrad.device import Device, Buffer, MultiBuffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
@@ -10,7 +10,7 @@ from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, G
 from tinygrad.dtype import dtypes, DType
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.engine.realize import to_program, get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear
+from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear
 from tinygrad.engine.realize import lower_and_compile
 
 if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: remove that
@@ -20,7 +20,7 @@ if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: rem
 
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
-HCQ_DEVS = frozenset(("AMD", "CPU"))
+HCQ_DEVS = frozenset(("AMD", "CPU")) if HCQ2 else frozenset()
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -34,6 +34,14 @@ class HCQInfo:
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
+
+def get_enqueue_devs(call:UOp) -> Any|None:
+  if call.src[0].op not in (Ops.PROGRAM, Ops.COPY): return None # only these bodies can be enqueued
+  if not (bufs:=get_call_arg_uops(call)) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
+  if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
+  devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
+  # cpu has no queue (yet)
+  return devs if all_devices_in(devs, HCQ_DEVS) and not to_tuple(devs)[0].startswith("CPU") else None
 
 def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte offset)
   if v.op in (Ops.BITCAST, Ops.AFTER): return unwrap_view(v.src[0])
@@ -87,38 +95,20 @@ def stage_copy(dst:UOp, src:UOp) -> UOp|None:
     copies += [src[off:off+n].copy_to_device("CPU").call(stage, src[off:off+n]), stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
   return UOp(Ops.LINEAR, src=tuple(copies))
 
+pm_insert_copy_staging = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), stage_copy_ext),
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), stage_copy),
+])
+
 # *****************
 # 1.2. prep: one call per device: the args pick their lane, the DEVICE axis binds to it
 
 def unwrap_call(call:UOp) -> UOp|None:
-  if call.src[0].op not in (Ops.PROGRAM, Ops.COPY) or (n:=max(len(to_tuple(a.device)) for a in get_call_arg_uops(call))) == 1: return None
+  if get_enqueue_devs(call) is None or (n:=max(len(to_tuple(a.device)) for a in get_call_arg_uops(call))) == 1: return None
   dnum = UOp.variable("_device_num", 0, n - 1, dtypes.int)
   return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.src[0], *[a if a.is_bound_var else select_lane(a, i) for a in call.src[1:]], dnum.bind(i)))
                                    for i in range(n)))
 pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
-
-# *****************
-# 1.3. prep: kernel copies
-
-def _get_enqueue_devs(call:UOp) -> Any|None:
-  if call.src[0].op not in (Ops.PROGRAM, Ops.COPY): return None # only these bodies can be enqueued
-  if not (bufs:=get_call_arg_uops(call)) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
-  if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
-  devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
-  # cpu has no queue (yet)
-  return devs if all_devices_in(devs, HCQ_DEVS) and not to_tuple(devs)[0].startswith("CPU") else None
-
-def copy_with_kernel(call:UOp, dst:UOp, src:UOp) -> UOp|None:
-  if (devs:=_get_enqueue_devs(call)) is None or Device[(dev:=to_tuple(devs)[0])].has_copy_queue: return None
-  d, s = (UOp.param(i, dst.dtype, n:=dst.max_numel(), device=devs) for i in range(2))
-  ast = d.index(r:=UOp.range(n, 0)).store(s.index(r).load()).end(r).sink(arg=KernelInfo(name="copy"), tag=1)
-  return call.replace(src=(to_program(ast, Device[dev].renderer), dst, src))
-
-pm_insert_copy_staging = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), stage_copy_ext),
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), stage_copy),
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call"), copy_with_kernel)
-])
 
 # *****************
 # 2. deps
@@ -216,7 +206,7 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
 
 @rewrite_group(new_ctx=False)
 def sched_batches(l:UOp, profile:bool) -> UOp:
-  devs = [() if (d:=_get_enqueue_devs(c)) is None else tuple(Device.canonicalize(x) for x in to_tuple(d)) for c in l.src]
+  devs = [() if (d:=get_enqueue_devs(c)) is None else tuple(Device.canonicalize(x) for x in to_tuple(d)) for c in l.src]
   queues = ["COMPUTE:0" if c.src[0].op is Ops.PROGRAM else "COPY:0" for c in l.src]
   srcs:list[UOp] = []
   for hcq, grp in itertools.groupby(zip(l.src, devs, queues), key=lambda e: bool(e[1])):
@@ -376,11 +366,11 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
   # TODO: this needs a cleanup
   bufmap = {s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}
   if (final_linear:=(hcq_compile_cache.get(cache_key:=(linear, profile, input_uops is None)))) is None:
-    linear = graph_rewrite(linear.substitute(bufmap, walk=True), pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
-    linear = sched_batches(linear, profile)
-    linear = graph_rewrite(linear, pm_encode, walk=True, name="encode")
-    with Context(EMULATED_DTYPES=""):
-      final_linear = hcq_compile_cache[cache_key] = lower_and_compile(linear).substitute({v: k for k, v in bufmap.items()}, walk=True)
+    lin = graph_rewrite(linear.substitute(bufmap, walk=True), pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
+    lin = sched_batches(lin, profile)
+    lin = graph_rewrite(lin, pm_encode, walk=True, name="encode")
+    with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin).substitute({v: k for k, v in bufmap.items()}, walk=True)
+    if final_linear is not linear: hcq_compile_cache[cache_key] = final_linear
   return final_linear.substitute(bufmap, walk=True)
 
 # *****************
@@ -440,7 +430,7 @@ def hcq_link(linear:UOp, cache=True) -> UOp:
   bufferized = graph_rewrite(linear, pm_bufferize_placeholders, ctx=cache, name="bufferize")
   linked = graph_rewrite(bufferized, pm_link, ctx=(refs:=list[UOp]()), bottom_up=False, name="link")
   if refs: linked = linked.replace(src=(linked.src[0].replace(src=linked.src[0].src + tuple(dedup(refs))), *linked.src[1:]))
-  if cache: link_linear_cache[linear] = linked
+  if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked
 
 # *****************
