@@ -14,7 +14,7 @@ from extra.models.llama import apply_rotary_emb
 from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8, asm_gemm, can_use_asm_gemm
 from extra.gemm.moe_gemm import grouped_mx_gemm
-from extra.gemm.moe_routing import route, dispatch, combine
+from extra.gemm.moe_routing import route, dispatch, combine, router_mfma
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_MAX = 448.0
@@ -246,7 +246,7 @@ class GPTOSS:
       x_normed, rrms = rmsnorm(x, self.norm_eps)
       inp = x_normed * ffn_norm
 
-    logits = inp.float() @ gate.float().T + gate_bias.float()
+    logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else inp.float() @ gate.float().T + gate_bias.float()
     dim, inter = self.dim, self.intermediate_size
 
     if getenv("GROUPED_MOE", 0):
