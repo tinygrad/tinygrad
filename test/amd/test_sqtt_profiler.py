@@ -61,7 +61,7 @@ class TestSQTTProfiler(unittest.TestCase):
     with save_sqtt() as data:
       t.custom_kernel(fxn=custom_asm_cdna if self.arch == "gfx950" else custom_asm_rdna)[0].realize()
     for event in data:
-      if not event.itrace: continue
+      if not isinstance(event, ProfileSQTTEvent) or not event.itrace: continue
       print(f"\n=== SE {event.se} ===")
       print_packets(decode(event.blob))
     sqtt = map_sqtt(data)
