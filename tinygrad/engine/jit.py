@@ -163,7 +163,7 @@ class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
   _linear: UOp
   expected_names: list[int|str]
-  expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
+  expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str, int]]  # (view, variables, dtype, device, base size) per input
 
   @functools.cached_property
   def linear(self) -> UOp: return link_linear(self._linear)
@@ -204,10 +204,10 @@ def _prepare_jit_inputs(args, kwargs):
   # collect buffer UOps (including MultiBuffer)
   input_buf_uops: list[UOp] = [u.base for u in input_uops if u.base.realized is not None]
   if len(set(input_buf_uops)) != len(input_buf_uops): raise JitError("duplicate inputs to JIT")
-  inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device) for u in input_uops]
+  inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device, u.base.max_numel()) for u in input_uops]
   _var_vals = merge_dicts([x[1] for x in inputs] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   var_vals = {k.expr:v for k,v in _var_vals.items()}
-  expected_input_info = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in inputs]
+  expected_input_info = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3], x[4]) for x in inputs]
   return input_buf_uops, var_vals, names, expected_input_info
 
 class _TinyJit(Generic[ReturnType]):

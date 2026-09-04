@@ -113,6 +113,13 @@ class TestJit(unittest.TestCase):
     with self.assertRaises(JitError):
       add(a, bad)
 
+  def test_jit_size_mismatch(self):
+    @TinyJit
+    def double_sum(a): return (a*2).sum().realize()
+    for _ in range(3): double_sum(Tensor.ones(4).contiguous().realize())
+    with self.assertRaises(JitError):
+      double_sum(Tensor.ones(8).contiguous().realize())
+
   def test_jit_shape_views_mismatch(self):
     @TinyJit
     def add(a): return (a+1).realize()
