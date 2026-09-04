@@ -336,7 +336,7 @@ function setFocus(key) {
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)]];
-    if (data.instSt != null) {
+    if (data.tracks.get("Shader Clock") != null) {
       const p = d3.create("p");
       p.append("span").text(timeAtCycle(e.x));
       p.append("span").style("margin-left", "8px").style("color", "#f0f0f566").text(formatTime(e.x));
@@ -423,7 +423,7 @@ async function renderProfiler(path, opts) {
   for (const [k,v] of Object.entries(extData)) data[k] = v;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
-  const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
+  const secondaryTick = data.tracks.get("Shader Clock") != null ? timeAtCycle : null;
   const axisHeight = secondaryTick != null ? tickSize*2+(padding*2) : tickSize;
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", axisHeight+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
@@ -590,7 +590,7 @@ async function renderProfiler(path, opts) {
   if (data.pcMap != null) setFocus(focusedShape);
   // secondary axis mapping
   let instRange = null;
-  for (const [k, { shapes }] of data.tracks) if (!k.includes("Clock") && path.includes("sqtt")) {
+  for (const [k, { shapes }] of data.tracks) if (k !== "Shader Clock" && path.includes("sqtt")) {
     const first = shapes[0].x, last = shapes.at(-1).x+shapes.at(-1).width;
     instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])];
   }
@@ -993,10 +993,7 @@ async function main() {
   if (!ckey.startsWith("/graph")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     // timeline with cycles on the x axis
-    if (ret instanceof ArrayBuffer) {
-      const pkts = step.query.includes("sqtt");
-      return renderProfiler(ckey, {unit:"clk", heightScale:0.5, hideLabels:true, colorByName:pkts});
-    }
+    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, {heightScale:0.5, hideLabels:true, colorByName:true});
     metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
       return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)]));
     })));
