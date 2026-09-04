@@ -1,10 +1,14 @@
-import unittest, contextlib, numpy as np
+import unittest, contextlib, ctypes, numpy as np
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import HCQ2, dedup, partition
-from tinygrad.uop.ops import Ops, UOp
+from tinygrad.helpers import HCQ2, Context, dedup, partition
+from tinygrad.uop.ops import Ops, UOp, KernelInfo
+from tinygrad.engine.realize import lower_and_compile, run_linear
+from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.runtime.autogen import libc
+from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, HCQ2Compiled, all_devices_in, hcq_compile_cache, link_linear_cache
 from test.helpers import call_is_hcq
@@ -106,6 +110,45 @@ class TestHCQ2Core(unittest.TestCase):
       self.assertFalse([u for w in patch_words(c) for u in w.toposort() if u.op is Ops.GETADDR], "addresses bake at link time")
     self.assertTrue(any(n.startswith("inputs_") for c in jit for n in rt_params(c)), "the jit patches its input addresses in")
     self.assertFalse(any(n.startswith("inputs_") for c in eager for n in rt_params(c)), "eager bakes its input addresses")
+
+  def test_programs_are_not_call_args(self):
+    # a program is a link-time patch a cmdbuf word addresses: it rides inside that word, no arg or param of its own
+    def nargs(n):
+      x = Tensor.ones(16).contiguous().realize()
+      with encoded_batches() as batches:
+        @TinyJit
+        def f(a):
+          for i in range(n): a = (a * (i + 1.5)).contiguous()
+          return a.realize()
+        for _ in range(3): f(x)
+      return max(c.arg.aux.nargs for c in batches)
+    self.assertEqual(nargs(2), nargs(12))
+
+@unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
+class TestHCQ2FFI(unittest.TestCase):
+  @staticmethod
+  def _run(body:UOp) -> list[Buffer]:
+    call = hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test_ffi")).call(aux=hcq2.HCQInfo(("CPU",))))
+    assert call is not None
+    linear = hcq2.hcq_link(lower_and_compile(UOp(Ops.LINEAR, src=(call,))), cache=False)
+    run_linear(linear, jit=True)
+    return [u.buffer for u in linear.src[0].without_after.src[1:] if u.op is Ops.BUFFER]
+
+  def test_ffi_ccall(self):
+    with Context(HCQ_RUNTIME_DEV="CPU"):
+      out = UOp.placeholder((1,), dtypes.int32, slot=1, device="CPU", volatile=True, tag="ffi_result")
+      bufs = self._run(out.index(0).store(hcq2.ccall(libc.dll.ffs, 0x10)))
+    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.int)._buf.cpu_view().view(fmt='i')[0], 5)
+
+  def test_ffi_cstruct(self):
+    struct_t = init_c_struct_t(16, (("u8", ctypes.c_uint8, 0), ("u16", ctypes.c_uint16, 2),
+                                  ("u32", ctypes.c_uint32, 4), ("u64", ctypes.c_uint64, 8)))
+    UOp.placeholder((1,), dtypes.uint8, device="CPU") # reserve slot zero for device-owned placeholders
+    with Context(HCQ_RUNTIME_DEV="CPU"):
+      s = hcq2.cstruct(struct_t, u8=0x12, u16=UOp.const(0x3456, dtypes.uint16), u32=0x789ABCDE, u64=0xFEDCBA9876543210)
+      bufs = self._run(s.index(0).load())
+    got = struct_t.from_buffer_copy(bytes(next(b for b in bufs if b.nbytes == ctypes.sizeof(struct_t))._buf.cpu_view()))
+    self.assertEqual((got.u8, got.u16, got.u32, got.u64), (0x12, 0x3456, 0x789ABCDE, 0xFEDCBA9876543210))
 
 if __name__ == "__main__":
   unittest.main()
