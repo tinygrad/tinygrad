@@ -130,7 +130,7 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   for v in rdefs(x):
     if not isinstance(v, VRegister): continue
     if v in ctx.spills:
-      after.extend(ctx.ren.spill(ctx.spills[v], nx, None))
+      after.extend(ctx.ren.spill(ctx.spills[v], nx))
   for v,rs in ctx.insert_before.get(i, []):
     before.extend(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), rs)[1])
 
@@ -150,7 +150,7 @@ def regspace(buf:UOp, c:UOp, x:UOp):
     nx = x.replace(tag=(vr[c.val*2:c.val*2+1] if x.dtype.itemsize > 4 else vr[c.val],))
   return nx, [nx]
 
-def propogate_subs(ctx, x:UOp):
+def propagate_subs(ctx, x:UOp):
   # a STACK over pinned defs (reg BUFFER loads) needs no virtual register, it just collects the pinned srcs
   if len(x.src) and all(isinstance(rdef(s), Register) for s in x.src):
     defs = tuple(r for s in x.src for r in rdefs(s) if isinstance(r, Register))
@@ -168,7 +168,7 @@ def propogate_subs(ctx, x:UOp):
   return x.replace(src=tuple(nsrc))
 
 pm_prepare_regalloc = PatternMatcher([
-  (UPat(Ops.STACK, name="x"), propogate_subs),
+  (UPat(Ops.STACK, name="x"), propagate_subs),
   (UPat((Ops.AFTER, Ops.BITCAST), name="x"), lambda x:
     x.replace(src=(x.src[0].replace(tag=x.tag), *x.src[1:])) if x.tag is not None else None),
 ])

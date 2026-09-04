@@ -560,6 +560,8 @@ jobs:
         backend: [amd, amdllvm]
         arch: [gfx1100, gfx1201, gfx950]
         include:
+          - backend: amd
+            renderer: HIP
           - backend: amdllvm
             renderer: LLVM
           - backend: rdna3

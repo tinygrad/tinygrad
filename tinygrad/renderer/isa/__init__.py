@@ -55,7 +55,7 @@ class PreLinearKernelCtx:
     self.ren, self.spill_size = ren, 0
     self.loop_label: dict[UOp, str] = {}
     self.uses = consumer_map_from_toposort(sink.toposort())
-    self.reg_n, self.named_n, self.buf_slot = itertools.count(), 0, itertools.count(-1, -1)
+    self.reg_n, self.buf_slot = itertools.count(), itertools.count(-1, -1)
     def arg_key(u:UOp):
       if u.op is Ops.SPECIAL: return (2, u.arg)
       return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
@@ -82,7 +82,7 @@ class ISARenderer(Renderer):
   def is_two_address(self, x:UOp) -> bool: return False
   def spill_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, u:UOp, dst:VRegister|Register|tuple[Register,...]) -> tuple[UOp, list[UOp]]: raise NotImplementedError("arch specific")
-  def spill(self, spill_offset:Any, x:UOp, sub_idx:int|None=None) -> list[UOp]: raise NotImplementedError("arch specific")
-  def fill(self, spill_offset:Any, x:UOp, regs:tuple[Register,...], sub_idx:int|None=None) -> tuple[UOp, list[UOp]]:
+  def spill(self, spill_offset:Any, x:UOp) -> list[UOp]: raise NotImplementedError("arch specific")
+  def fill(self, spill_offset:Any, x:UOp, regs:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
     raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")

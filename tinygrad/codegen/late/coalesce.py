@@ -134,8 +134,8 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       must_divide = False
     elif buf.addrspace == AddrSpace.REG:
       pass
-    elif "AMD" == ctx.target.device and ctx.target.renderer == "RDNA3" and buf.dtype is not dtypes.bool and \
-         not (buf.dtype in dtypes.int64s and dtypes.long in EMULATED_DTYPES.tolist(dtypes)):
+    elif ctx is not None and "AMD" == ctx.target.device and ctx.target.renderer == "RDNA3" and buf.dtype is not dtypes.bool \
+        and not (buf.dtype in dtypes.int64s and dtypes.long in EMULATED_DTYPES.tolist(dtypes)):
       # NOTE: odd loads/stores must still be aligned on dword (b32) boundary
       must_divide, dword_align = False, max(4//sz, 1)
       lengths = [b//(sz*8) for b in [128,96,64,32,16,8] if b >= sz*8]

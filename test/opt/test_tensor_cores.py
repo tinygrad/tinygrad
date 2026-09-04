@@ -24,7 +24,7 @@ from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_
 def contains_wmma(uops: list[UOp]) -> bool:
   if isinstance(Device[Device.DEFAULT].renderer, RDNA3Renderer):
     nwmmas = len([uop for uop in uops if "v_wmma" in uop.arg[0].args[0].name.lower()])
-  else: nwmmas = len([uop for uop in uops if uop.op is Ops.WMMA]) > 0
+  else: nwmmas = len([uop for uop in uops if uop.op is Ops.WMMA])
   return nwmmas > 0
 
 def _tc_rand(*shape, dtype:DType) -> Tensor:

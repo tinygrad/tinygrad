@@ -59,9 +59,9 @@ S_CMP = { Ops.CMPNE:RDNA3Ops.s_xor_b32, Ops.XOR:RDNA3Ops.s_xor_b32, Ops.OR: RDNA
           Ops.CMPLT: RDNA3Ops.s_and_not1_b32, Ops.CMPEQ:RDNA3Ops.s_xnor_b32 }
 
 # ---- helpers ----
-lane_ctr = itertools.count(-1, -1)
 def def_reg(dt:DType, defs:Any) -> UOp:
-  buf = UOp.placeholder((1,), dt, next(lane_ctr), AddrSpace.REG)
+  # NOTE: fixed slot to avoid global counter cause tag makes them distinct
+  buf = UOp.placeholder((1,), dt, -999, AddrSpace.REG)
   return buf.replace(tag=defs if isinstance(defs, tuple) else (defs,))
 def const(v, dt:DType=dtypes.uint32) -> UOp: return UOp.cconst((v if isinstance(v, InvalidType) else truncate[dt](v)), dt).rtag()
 def gep(u:UOp, i:int) -> UOp: return u.bitcast(dtypes.uint32).index(UOp.cconst(i, dtypes.uint32))
@@ -162,7 +162,7 @@ def abi(ctx, x:UOp) -> UOp|None:
     src = (ctx.reserved(WIIDS, dtypes.uint32), const(10*int(x.arg[-1])), const(10))
     return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=src)
   else:
-    offs = const(sum(8 if u.op == Ops.PARAM else u.dtype.itemsize for u in ctx.func_args[:ctx.func_args.index(x)]))
+    offs = const(sum(8 if u.op == Ops.PARAM and u.addrspace is not AddrSpace.ALU else u.dtype.itemsize for u in ctx.func_args[:ctx.func_args.index(x)]))
     psrc = (ctx.reserved(KERNARG_PTR, dtypes.uint64), offs)
     if x.addrspace is AddrSpace.ALU: out = vmov(UOp(Ops.INS, src=psrc, arg=(RDNA3Ops.s_load_b32, x.dtype)))
     else: out = UOp(Ops.INS, src=psrc, arg=(RDNA3Ops.s_load_b64, dtypes.ulong))
@@ -478,8 +478,8 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm)])),
   (UPat(Ops.RANGE, name="x"), lower_range),
   (UPat(Ops.END, name="x"), lower_end),
-  # NOTE: forces do_assemble in codegen but might hide incomplete lowering
-  (UPat(GroupOp.All - {Ops.INS}, name="x"), lambda x: (x, [])),
+  (UPat((Ops.CONST, Ops.CAST, Ops.BITCAST, Ops.AFTER, Ops.NOOP, Ops.INDEX,
+        Ops.GROUP, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL, Ops.STACK), name="x"), lambda x: (x, []))
 ])
 
 def encode(x:UOp):
@@ -510,7 +510,7 @@ def encode(x:UOp):
       else: fields["vdst"]=encfield(x)
     case RDNA3Ops.SMEM: fields = dict(sdata=encfield(x), sbase=encfield(x.src[0]), offset=encfield(x.src[1]))
     case RDNA3Ops.SOPK: fields = dict(sdst=dsl.NULL, simm16=x.src[0].src[0].val)
-    case RDNA3Ops.SOPP: fields = dict(simm16=(x.src[0].val if len(x.src) > 0 and x.src[0].op is Ops.CONST else 0))
+    case RDNA3Ops.SOPP: fields = dict(simm16=(encfield(x.src[0]) if bool(x.src) and is_const(x.src[0]) else 0))
     case RDNA3Ops.VOPC: fields = dict(src0=encfield(x.src[0]), vsrc1=encfield(x.src[1]))
     case RDNA3Ops.VOP3SD: fields = dict(sdst=dsl.VCC, vdst=encfield(x), **{f"src{i}":encfield(u) for i,u in enumerate(x.src[:3])})
     case RDNA3Ops.VOP3P:
@@ -544,13 +544,12 @@ class RDNA3PreLinearKernelCtx(PreLinearKernelCtx):
     self.n_reserved = 0
 
     # detect buffer overflows, pre-allocate scratch space
-    rbufs: dict[int, UOp] = {u.arg.size*u.dtype.itemsize:u for u in sink.toposort() if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG}
-    sizes = list(sorted(rbufs.keys(), reverse=True))
-    spill_before = next((i for i,sz in enumerate(sizes) if sum(sizes[i:]) < len(self.gp_vgprs)*4), len(sizes))
+    bufsz: dict[UOp, int] = {u:u.arg.size*u.dtype.itemsize for u in sink.toposort() if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG}
+    bs = list(sorted(bufsz.keys(), reverse=True, key=lambda x: bufsz[x]))
+    spill_before = next((i for i in range(len(bs)) if sum([bufsz[b] for b in bs[i:]]) < len(self.gp_vgprs)*4), len(bs))
     self.overflows: dict[UOp, Any] = {}
 
-    for sz in sizes[:spill_before]:
-      buf = rbufs[sz]
+    for buf in bs[:spill_before]:
       vrs = [self.vreg(self.gp_vgprs, width=(buf.dtype.itemsize+3)//4) for i in range(buf.arg.size)]
       self.overflows[buf.arg] = [self.assign_spill_slot(vr, buf) for vr in vrs]
 
@@ -569,6 +568,7 @@ class RDNA3PreLinearKernelCtx(PreLinearKernelCtx):
     if v.cons[0] in VGPRS:
       sz = v.cons[0].size * v.width
       offset = self.spill_size + (sz - self.spill_size % sz) % sz
+      assert offset < (1 << 12), f"cant encode scratch offset, {offset} >= 4096"
       self.spill_size = offset + sz
       return offset
     else:
@@ -593,29 +593,26 @@ class RDNA3Renderer(ISARenderer):
     self.shared_max, self.tensor_cores = HIPRenderer.shared_max, get_amd(target.arch)
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s}
-  def is_two_address(self, x:UOp) -> bool: return False
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     return '\n'.join(str(encode(u).arg[0]) for u in uops)
 
-  def spill(self, spill_offset:Any, x:UOp, sub_idx:int|None=None) -> list[UOp]:
+  def spill(self, spill_offset:Any, x:UOp) -> list[UOp]:
     regs = tuple(r for r in rdefs(x) if isinstance(r, Register))
     if regs[0].name[0] == 'v':
-      if sub_idx is not None: spill_offset += sub_idx*4
       return batch_scratch(True, spill_offset, x.dtype, regs)
     else:
       vgpr,lane = spill_offset
       return [UOp(Ops.INS, arg=(RDNA3Ops.v_writelane_b32, dtypes.void), src=(def_reg(x.dtype, r),
-        const(lane+i+(sub_idx or 0))), tag=vgpr) for i,r in enumerate(regs)]
+        const(lane+i)), tag=vgpr) for i,r in enumerate(regs)]
 
-  def fill(self, spill_offset:Any, x:UOp, dst:tuple[Register,...], sub_idx:int|None=None) -> tuple[UOp, list[UOp]]:
+  def fill(self, spill_offset:Any, x:UOp, dst:tuple[Register,...]) -> tuple[UOp, list[UOp]]:
     if dst[0].name[0] == 'v':
-      if sub_idx is not None: spill_offset += sub_idx*4
       ops = batch_scratch(False, spill_offset, x.dtype, dst)
       return UOp(Ops.STACK, src=tuple(ops), tag=dst) if len(ops) > 1 else ops[0], ops
     else:
       vgpr,lane = spill_offset
-      movs = [UOp(Ops.INS, src=(def_reg(x.dtype, vgpr),
-        const(lane+i+(sub_idx or 0))), arg=(RDNA3Ops.v_readlane_b32, x.dtype), tag=(r,)) for i,r in enumerate(dst)]
+      movs = [UOp(Ops.INS, src=(def_reg(x.dtype, vgpr), const(lane+i)),
+        arg=(RDNA3Ops.v_readlane_b32, x.dtype), tag=(r,)) for i,r in enumerate(dst)]
       return UOp(Ops.STACK, src=tuple(movs), tag=dst), movs
 
   def copy(self, u:UOp, dst:VRegister|Register|tuple[Register,...]) -> tuple[UOp, list[UOp]]:

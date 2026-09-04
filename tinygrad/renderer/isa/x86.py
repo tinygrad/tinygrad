@@ -845,13 +845,13 @@ class X86Renderer(ISARenderer):
     assert ret is not None, f"failed to copy {u}"
     return ret, [ret]
 
-  def spill(self, spill_offset:Any, x:UOp, sub_idx:int|None=None) -> list[UOp]:
+  def spill(self, spill_offset:Any, x:UOp) -> list[UOp]:
     disp = UOp.cconst(spill_offset, dtypes.uint32)
     is_xmm = x.tag[0].size == 16
     op = X86Ops.VMOVUPSm if is_xmm else X86Ops.MOVm
     return [UOp(Ops.INS, src=fold_address(self.spill_pointer().index(disp)) + (x,), arg=(op, dtypes.void), tag=x.tag)]
 
-  def fill(self, spill_offset:Any, x:UOp, regs:VRegister|tuple[Register,...], sub_idx:int|None=None) -> tuple[UOp, list[UOp]]:
+  def fill(self, spill_offset:Any, x:UOp, regs:VRegister|tuple[Register,...]) -> tuple[UOp, list[UOp]]:
     assert isinstance(regs, tuple) and isinstance(regs[0], Register)
     is_xmm = regs[0].size == 16
     disp = UOp.cconst(spill_offset, dtypes.uint32)

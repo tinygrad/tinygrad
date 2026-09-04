@@ -26,7 +26,7 @@ def full_rewrite(sink:UOp, ren:Renderer|None=None) -> UOp:
 def get_uops(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   """Extract linearized UOps from a sink. Test helper that only does linearization (no render)."""
   full_sink = full_rewrite(sink, ren)
-  return line_rewrite(linearize(full_sink, ren), pm_linearize_cleanups)
+  return line_rewrite(linearize(full_sink), pm_linearize_cleanups)
 
 def replace_opts(ast:UOp, opts:list) -> UOp: return ast.replace(arg=replace(ast.arg, opts_to_apply=tuple(opts)))
 
