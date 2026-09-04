@@ -1,7 +1,7 @@
 from typing import Any, cast
 import ctypes, decimal, struct
 from tinygrad.helpers import dedup, getenv, unwrap, PROFILE
-from tinygrad.device import Buffer, Device, ProfileGraphEntry, ProfileGraphEvent
+from tinygrad.device import Buffer, Device, TinyELF, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.runtime.ops_metal import MetalDevice, MetalAllocator, wait_check, to_ns_str
@@ -26,7 +26,7 @@ class MetalGraph(GraphRunner):
 
     self.var_bind_data = []
     if len(self.vars):
-      self.var_buf = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s) in unwrap(r).signature if s == ()))
+      self.var_buf = self.dev.allocator.alloc(sum(a.dtype.itemsize for r in self.runtimes for a in unwrap(r).signature if a.is_val))
       self.var_buf_view, var_buf_offset = cast(MetalAllocator, self.dev.allocator)._as_buffer(self.var_buf), 0
 
     all_pipelines, all_resources = [], [self.var_buf.buf] if len(self.vars) else []
@@ -35,14 +35,15 @@ class MetalGraph(GraphRunner):
       icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
       icb_command.setComputePipelineState(runtime.pipeline_state)
       all_pipelines.append(runtime.pipeline_state)
-      for i, b in enumerate(bufs):
+      for i, _, b in TinyELF.zip_bufs(runtime.signature, bufs):
         if not any(pos == i for pos, _ in replace):
           icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
-      for nm,i,dt,_ in runtime.signature[len(bufs):]:
-        icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, var_buf_offset, i)
-        self.var_bind_data.append((nm, var_buf_offset, dt.fmt))
-        var_buf_offset += dt.itemsize
+      for i, a in enumerate(runtime.signature):
+        if a.is_val:
+          icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, var_buf_offset, i)
+          self.var_bind_data.append((a.name, var_buf_offset, a.dtype.fmt))
+          var_buf_offset += a.dtype.itemsize
       global_size, local_size = ast.arg.launch_dims({v: 0 for v in self.vars})
       icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
       icb_command.setBarrier()

@@ -138,9 +138,9 @@ class MetalProgram(Program[MetalDevice]):
     command_buffer = self.dev.mtl_queue.commandBuffer().retained()
     encoder = command_buffer.computeCommandEncoder().retained()
     encoder.setComputePipelineState(self.pipeline_state)
-    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
-    for a,(_,i,dt,_) in zip(vals, self.signature[len(bufs):]):
-      encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{dt.bitsize}")(a)), dt.itemsize, i)
+    for i,_,b in TinyELF.zip_bufs(self.signature, bufs): encoder.setBuffer_offset_atIndex(b.buf, b.offset, i)
+    for i, _,a,v in TinyELF.zip_vals(self.signature, vals):
+      encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{a.dtype.bitsize}")(v)), a.dtype.itemsize, i)
     encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?

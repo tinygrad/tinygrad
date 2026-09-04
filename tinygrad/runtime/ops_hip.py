@@ -38,7 +38,8 @@ class HIPProgram(Program[HIPDevice]):
     check(hip.hipSetDevice(self.dev.device_id))
     if not hasattr(self, "vargs"):
       fields = ([(f'f{i}', hip.hipDeviceptr_t, i*8) for i in range(len(args))] +
-        [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), o) for i,(o,dt) in enumerate(TinyELF.iter_sig(self.signature[len(args):], len(args)*8))])
+        [(f'v{i}', getattr(ctypes, f"c_int{a.dtype.bitsize}"), o)
+        for i, (_, o, a, _) in enumerate(TinyELF.zip_vals(self.signature, vals, len(args)*8))])
       self.c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
       self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
                                          ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)

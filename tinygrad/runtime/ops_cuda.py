@@ -16,8 +16,9 @@ def check(status):
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
 def encode_args(args, vals, signature) -> tuple[ctypes.Structure, ctypes.Array]:
-  fields = ([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
-            [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), off) for i,(off,dt) in enumerate(TinyELF.iter_sig(signature[len(args):], len(args)*8))])
+  fields = ([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i,_ in enumerate(TinyELF.zip_bufs(signature, args))] +
+            [(f'v{i}', getattr(ctypes, f"c_int{a.dtype.bitsize}"), off)
+            for i, (_, off, a, _) in enumerate(TinyELF.zip_vals(signature, vals, len(args)*8))])
   c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))

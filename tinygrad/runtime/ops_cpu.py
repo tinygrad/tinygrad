@@ -62,12 +62,15 @@ class CPUProgram(Program['CPUDevice']):
     if self.lvp:
       lvp_args = bytearray(12 + (len(bufs) + len(vals)) * 8)
       addr = mv_address(lvp_args)
-      struct.pack_into(f'<3I{len(bufs)}Q', lvp_args, 0, *data64_le(addr+12), (len(bufs)+len(vals))*2, *[b.va_addr for b in bufs])
-      for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs)*8)): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, v)
+      struct.pack_into(f'<3I{len(bufs)}Q', lvp_args, 0, *data64_le(addr+12), (len(bufs)+len(vals))*2,
+                       *[b.va_addr for _, _, b in TinyELF.zip_bufs(self.signature, bufs)])
+      for _, off, a, v in TinyELF.zip_vals(self.signature, vals, len(bufs)*8): struct.pack_into(f'<{a.dtype.fmt}', lvp_args, 12+off, v)
       self.fxn(addr)
     else:
-      args = [*[cast(int, b.va_addr) for b in bufs], *cast(tuple[int, ...], vals)]
-      self.fxn(*[ctypes.c_uint64(x) for x in args])
+      args = [None] * len(self.signature)
+      for i, _, b in TinyELF.zip_bufs(self.signature, bufs): args[i] = b.va_addr
+      for i, _, _, v in TinyELF.zip_vals(self.signature, vals): args[i] = v
+      self.fxn(*[ctypes.c_uint64(cast(int, x)) for x in args])
     return time.perf_counter() - st if wait else None
 
   @suppress_finalizing

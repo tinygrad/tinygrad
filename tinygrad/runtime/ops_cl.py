@@ -54,12 +54,13 @@ class CLProgram(Program['CLDevice']):
 
   def __call__(self, *bufs:cl.cl_mem, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
                wait=False, **kw) -> float|None:
-    for i, (_, slot, dt, shape) in enumerate(self.signature):
-      b = bufs[slot] if slot < len(bufs) else getattr(ctypes, f"c_int{dt.bitsize}")(vals[slot-len(bufs)])
-      if is_image_shape(shape):
-        pitch = (round_up(shape[1], 256) if OSX else shape[1]) * 4 * dt.itemsize
-        fmt = cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize])
-        desc = cl.cl_image_desc(cl.CL_MEM_OBJECT_IMAGE2D, shape[1], shape[0], image_row_pitch=pitch, buffer=b)
+    buf_it, val_it = iter(bufs), iter(vals)
+    for i, arg in enumerate(self.signature):
+      b = next(buf_it) if arg.is_buffer else getattr(ctypes, f"c_int{arg.dtype.bitsize}")(next(val_it))
+      if is_image_shape(arg.shape):
+        pitch = (round_up(arg.shape[1], 256) if OSX else arg.shape[1]) * 4 * arg.dtype.itemsize
+        fmt = cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[arg.dtype.itemsize])
+        desc = cl.cl_image_desc(cl.CL_MEM_OBJECT_IMAGE2D, arg.shape[1], arg.shape[0], image_row_pitch=pitch, buffer=b)
         img = checked(cl.clCreateImage(self.dev.context, cl.CL_MEM_READ_WRITE, fmt, desc, None, status:=ctypes.c_int32()), status)
         check(cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(img), ctypes.byref(img)))
       else: check(cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b)))

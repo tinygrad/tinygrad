@@ -6,7 +6,8 @@ import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickl
 from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up
-from tinygrad.dtype import DType, _to_np_dtype
+from tinygrad.dtype import DType, _to_np_dtype, AddrSpace
+
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -311,20 +312,42 @@ class Compiler:
     raise CompileError("Compilation Error")
 
 
+@dataclass(frozen=True)
+class SigArg:
+  name: str|None
+  slot: int
+  dtype: DType
+  shape: tuple|None = None
+  addrspace: AddrSpace = AddrSpace.GLOBAL
+
+  @property
+  def is_buffer(self) -> bool: return self.addrspace != AddrSpace.ALU
+  @property
+  def is_val(self) -> bool: return self.addrspace == AddrSpace.ALU
+
 @dataclass
 class TinyELF:
   lib: bytes
   name: str
   target: Target
-  # tuple of (name, slot, dtype, shape)
-  signature: tuple[tuple[str|None, int, DType, tuple], ...]
+  # tuple of SigArg (name, slot, dtype, shape, addrspace)
+  signature: tuple[SigArg, ...]
   profile_key: bytes|None = None
 
   @staticmethod
-  def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
-    for _,_,dt,_ in signature:
-      yield (offset:=round_up(offset, dt.itemsize)), dt
-      offset += dt.itemsize
+  def zip_bufs(signature:tuple[SigArg, ...], bufs:tuple|list) -> Generator[tuple[int, SigArg, Any], None, None]:
+    buf_it = iter(bufs)
+    for i, arg in enumerate(signature):
+      if arg.is_buffer: yield i, arg, next(buf_it)
+
+  @staticmethod
+  def zip_vals(signature:tuple[SigArg, ...], vals:tuple|list, offset:int=0) -> Generator[tuple[int, int, SigArg, Any], None, None]:
+    val_it = iter(vals)
+    for i, arg in enumerate(signature):
+      if arg.is_val:
+        yield i, (offset:=round_up(offset, arg.dtype.itemsize)), arg, next(val_it)
+        offset += arg.dtype.itemsize
+
 
 class Program(Generic[DeviceType]):
   def __init__(self, dev:DeviceType, obj:TinyELF): pass
