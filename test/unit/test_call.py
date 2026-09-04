@@ -392,6 +392,40 @@ class TestArgOrder(unittest.TestCase):
     y.sum().backward()
     np.testing.assert_equal(x.grad.numpy(), [2, 4, 6])
 
+  def test_interleaved_scalars_and_buffers(self):
+    x = Tensor([1.0, 2.0, 3.0]).realize()
+    y = Tensor([10.0, 20.0, 30.0]).realize()
+    s1 = UOp.variable("s1", 1, 10)
+    s2 = UOp.variable("s2", 1, 10)
+    dev = self._dev(x)
+    p0 = s1.param_like(0)
+    p2 = UOp.param(2, x.dtype, x.shape, dev)
+    p3 = s2.param_like(3)
+    p4 = UOp.param(4, y.dtype, y.shape, dev)
+    value = p2.reshape(x.shape) * p0 + p4.reshape(y.shape) * p3
+    outs = UOp.call_with_outputs((value,), s1.bind(2), x.uop, s2.bind(3), y.uop, output_pos=(1,))
+    out = Tensor(outs[0])
+    np.testing.assert_equal(out.numpy(), [32.0, 64.0, 96.0])
+
+  def test_scalar_first(self):
+    x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
+    s = UOp.variable("s", 1, 10)
+    dev = self._dev(x)
+    p0 = s.param_like(0)
+    p2 = UOp.param(2, x.dtype, x.shape, dev)
+    value = p2.reshape(x.shape) + p0
+    outs = UOp.call_with_outputs((value,), s.bind(5), x.uop, output_pos=(1,))
+    out = Tensor(outs[0])
+    np.testing.assert_equal(out.numpy(), [6.0, 7.0, 8.0, 9.0])
+
+  def test_scalar_only_no_buffers(self):
+    s = UOp.variable("s", 1, 10)
+    p0 = s.param_like(0)
+    value = (p0.cast(dtypes.float) + UOp.const(0.0)).reshape((1,)).expand((4,))
+    outs = UOp.call_with_outputs((value,), s.bind(7), output_pos=(1,))
+    out = Tensor(outs[0])
+    np.testing.assert_equal(out.numpy(), [7.0, 7.0, 7.0, 7.0])
+
 class TestCallMultiSharded(unittest.TestCase):
   # TODO: multi-output + sharded needs per-device CALL execution, which requires reworking how MULTI propagates through TUPLE bodies
   def test_tuple_sharded(self):
