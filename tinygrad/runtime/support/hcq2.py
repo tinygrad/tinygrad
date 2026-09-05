@@ -4,7 +4,7 @@ import functools, time, itertools, decimal, weakref, os, statistics, ctypes, imp
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2, cpu_profile, mv_address
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us
-from tinygrad.device import Device, Buffer, MultiBuffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT
@@ -84,14 +84,15 @@ def cstruct(struct_t, **fields:UOp|int) -> UOp:
   return patch(buf, rows, bytes(ctypes.sizeof(struct_t)))
 
 # *****************
-# 0.1. prep: replace buffers with params
+# 0.1. prep: eager buffers become tagged params
 
-def replace_call_buffers(ctx:tuple[list[UOp], dict[UOp, int]], call:UOp) -> UOp|None:
+def input_param(slot:int, b:UOp) -> UOp: return UOp.param(slot, b.dtype, b.max_numel(), b.device).replace(tag="lt_input")
+
+def replace_buffer(ctx:tuple[list[UOp], dict[UOp, int]], b:UOp) -> UOp:
   bufs, slots = ctx
-  for s in call.src[1:]:
-    if s.op is not Ops.PARAM and not s.is_bound_var and slots.setdefault(s, len(bufs)) == len(bufs): bufs.append(s)
-  return call.replace(src=call.src[:1] + tuple(s if s.op is Ops.PARAM or s.is_bound_var else s.param_like(slots[s]) for s in call.src[1:]))
-pm_replace_buffers = PatternMatcher([(UPat(Ops.CALL, name="call"), replace_call_buffers)])
+  if slots.setdefault(b, len(bufs)) == len(bufs): bufs.append(b)
+  return input_param(slots[b], b)
+pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), replace_buffer)])
 
 # *****************
 # 1.1. prep: staging copies
@@ -138,10 +139,11 @@ pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 # 2. deps
 
 class HCQDepsTracker(DepsTracker):
-  # TODO: optimize
   @staticmethod
-  def _key(buf:Any) -> tuple[Any, int, int]:
-    return (buf, 0, buf.max_numel() * buf.dtype.itemsize) if isinstance(buf, UOp) else DepsTracker._key(buf)
+  def _key(a:UOp) -> tuple[Any, int, int]: # (base, lane) and the byte range: overlapping views of one base depend
+    lane, view = (a.arg, a.src[0]) if a.op is Ops.MSELECT else (None, a)
+    base, off = unwrap_view(view)
+    return (base, lane), off, off + view.max_numel() * view.dtype.itemsize
 
 @dataclass
 class BatchCtx:
@@ -170,14 +172,8 @@ class BatchCtx:
   def sched_timeline(self, devs:tuple[str, ...]) -> UOp: return self.slot(devs, len(self.queues[devs[0]]))
   def stamps(self, devs:tuple[str, ...], tag:int) -> tuple[int, ...]: return (st:=len(self.queues[devs[0]])+1+2*tag, st + 1) if self.profile else ()
 
-def _call_bufs(call:UOp) -> list[Any]:
-  def dep_buf(b:UOp) -> Any:
-    if (base:=(b.src[0] if b.op is Ops.MSELECT else b).storage_base).op is Ops.PARAM: return b if b.op is Ops.MSELECT else base
-    return cast(MultiBuffer, base.buffer).bufs[b.arg] if b.op is Ops.MSELECT else base.buffer
-  return [dep_buf(a) for a in get_call_arg_uops(call)]
-
 def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UOp]:
-  bufs, write = _call_bufs(call), get_call_outs_ins(call)[0]
+  bufs, write = list(get_call_arg_uops(call)), get_call_outs_ins(call)[0]
   latest:dict[tuple[str, str], int] = {} # (producer device, queue) -> the latest submit tag to wait on, same-queue submits are fifo
   for d, q, t in ctx.tracker.access_resources(bufs, list(range(len(bufs)) if write is None else write), (device, queue, tag)):
     if t < tag and (d, q) != (device, queue): latest[(d, q)] = max(latest.get((d, q), 0), t)
@@ -300,8 +296,8 @@ pm_hcq_encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="hcq_fence", name
 
 def _is_input_addr(g:UOp) -> bool:
   base = unwrap_view(g.src[0])[0]
-  param = base.src[0].base if base.op is Ops.MSELECT else base # unwrap mselects
-  return param.op is Ops.PARAM and param.tag is None
+  if base.op is Ops.MSELECT: base = unwrap_view(base.src[0])[0] # a lane of a view
+  return base.op is Ops.PARAM and base.tag is None
 
 def addrs_to_table(ctx:EncodeCtx, g:UOp) -> UOp|None:
   if not _is_input_addr(g): return None
@@ -397,23 +393,21 @@ def lower_call(call:UOp) -> UOp|None:
   return call.replace(src=(sink, *args), arg=replace(call.arg, aux=info))
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
 
-hcq_compile_cache:dict[tuple[UOp, bool, bool], UOp] = {} # uops are hash-consed: the linear itself is the key, plus whether inputs bind
+hcq_compile_cache:dict[tuple[UOp, bool], UOp] = {} # eager templates: a buffer-free linear (uops are hash-consed) to its compiled form
 
 @rewrite_group(lambda linear,input_uops,profile,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
+  # eager linears hand their buffers to input_uops and cache as buffer-free templates, the jit's linear compiles once and owns its buffers
   if input_uops is not None:
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
-    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffer")
-
-  # TODO: this needs a cleanup
-  bufmap = {s.param_like(i): s for i,s in enumerate(input_uops)} if input_uops is not None else {}
-  if (final_linear:=(hcq_compile_cache.get(cache_key:=(linear, profile, input_uops is None)))) is None:
-    lin = graph_rewrite(linear.substitute(bufmap, walk=True), pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
-    lin = sched_batches(lin, profile)
-    lin = graph_rewrite(lin, pm_encode, walk=True, name="encode")
-    with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin).substitute({v: k for k, v in bufmap.items()}, walk=True)
-    if final_linear is not linear: hcq_compile_cache[cache_key] = final_linear
-  return final_linear.substitute(bufmap, walk=True)
+    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffers")
+    if (cached:=hcq_compile_cache.get(key:=(linear, profile))) is not None: return cached
+  lin = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
+  lin = sched_batches(lin, profile)
+  lin = graph_rewrite(lin, pm_encode, walk=True, name="encode")
+  with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin)
+  if input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
+  return final_linear
 
 # *****************
 # 5. bufferize placeholders
@@ -466,9 +460,10 @@ pm_link = PatternMatcher([
 
 link_linear_cache:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary() # a baked link lives as long as its bound linear
 
-@rewrite_group(lambda _,cache,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
-def hcq_link(linear:UOp, cache=True) -> UOp:
+@rewrite_group(lambda _,cache,input_uops,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
+def hcq_link(linear:UOp, cache=True, input_uops:list[UOp]|None=None) -> UOp:
   if (linked:=link_linear_cache.get(linear)) is not None: return linked
+  if input_uops: linear = linear.substitute({input_param(i, b): b for i, b in enumerate(input_uops)}, walk=True) # an eager template binds its buffers
   bufferized = graph_rewrite(linear, pm_bufferize_placeholders, ctx=cache, name="bufferize")
   linked = graph_rewrite(bufferized, pm_link, ctx=(refs:=list[UOp]()), bottom_up=False, name="link")
   if refs: linked = linked.replace(src=(linked.src[0].after(*dedup(refs)), *linked.src[1:])) # attach refs to linear
