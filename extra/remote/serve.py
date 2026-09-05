@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import socket, struct, sys
-from tinygrad.runtime.support.system import PCIDevice, RemoteCmd, System
+from tinygrad.runtime.support.system import PCIDevice, System
+from extra.remote.hcq1_remote import RemoteCmd
 from tinygrad.helpers import DEBUG, OSX
 
 def resp(resp0=0, resp1=0, status=0): return struct.pack('<BQQ', status, resp0, resp1)
