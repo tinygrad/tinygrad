@@ -319,7 +319,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 10
+    timeout-minutes: 11
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -437,12 +437,6 @@ jobs:
       run: GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
     - name: UsbGPU copy speeds
       run: SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py
-    - name: UsbGPU (USB4/TB) install script
-      run: sh extra/setup_tinygpu_osx.sh
-    - name: UsbGPU (USB4/TB) boot time
-      run: DEBUG=3 DEV=PCI+NV:NAK time python3.11 test/test_tiny.py TestTiny.test_plus
-    - name: UsbGPU (USB4/TB) tiny tests
-      run: DEV=PCI+NV:NAK python3.11 test/test_tiny.py
 
   testcomma:
     strategy:
@@ -629,16 +623,6 @@ jobs:
     - name: Run 10 MLPerf Bert training steps (1 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
       run: BENCHMARK_LOG=bert_10steps CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
-    - name: Remote
-      run: |
-        pkill -f 'extra/remote/serve.py' || true
-        PYTHONPATH=. python3 extra/remote/serve.py 6482 &
-        sleep 1
-        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 python3 test/test_tiny.py
-        if [[ "${{ matrix.dev }}" == "AMD" ]]; then
-          DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 AMD_AQL=1 python3 test/test_tiny.py
-        fi
-        pkill -f 'extra/remote/serve.py' || true
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 

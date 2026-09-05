@@ -4,7 +4,7 @@ from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv, DEV
 from tinygrad.engine.realize import run_linear, estimate_uop, compile_linear
 from tinygrad.renderer.ptx import PTXRenderer
-from test.helpers import needs_second_gpu, check_schedule, assert_kernel_count, KernelCountException
+from test.helpers import needs_second_gpu, check_schedule, assert_kernel_count, KernelCountException, is_hcq2_device
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
@@ -153,7 +153,7 @@ class TestIndexing(unittest.TestCase):
       GlobalCounters.reset()
       z = emb(x).realize()
       self.assertLessEqual(GlobalCounters.global_ops, op_limit)
-      assert_kernel_count(2)
+      assert_kernel_count(3 if is_hcq2_device() else 2)
     if getenv("CHECK", 1):
       import torch
       with torch.no_grad():

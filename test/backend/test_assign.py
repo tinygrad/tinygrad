@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad import Device, dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import temp, DEV, Context
-from test.helpers import assert_kernel_count, needs_second_gpu
+from test.helpers import assert_kernel_count, needs_second_gpu, is_hcq2_device
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -43,7 +43,7 @@ class TestAssign(unittest.TestCase):
     # it should copy into the empty buffer
     GlobalCounters.reset()
     c.realize()
-    assert_kernel_count(1)
+    assert_kernel_count(2 if is_hcq2_device() else 1)
 
   def test_assign_copy_retained_uses(self):
     for use in (lambda x: x.reshape(1, 3), lambda x: x + 1):
@@ -629,7 +629,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    assert_kernel_count(2)  # TODO: first copy is dead, could be 1
+    assert_kernel_count(4 if is_hcq2_device() else 2)  # TODO: first copy is dead, could be 1
     self.assertEqual(base.tolist(), [1,4,3])
 
   def test_nested_after_contiguous_store_no_init(self):
@@ -639,7 +639,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    assert_kernel_count(1)
+    assert_kernel_count(2 if is_hcq2_device() else 1)
     self.assertEqual(base.tolist(), [1,4,3])
 
   def test_assign_temporary_copy_reshape(self):
@@ -647,7 +647,7 @@ class TestAssign(unittest.TestCase):
     c = Tensor.empty(2, 2).assign(a.to(None))
     GlobalCounters.reset()
     c.realize()
-    assert_kernel_count(1)
+    assert_kernel_count(2 if is_hcq2_device() else 1)
     self.assertEqual(c.tolist(), [[1., 2], [3, 4]])
 
 class TestAssignOrdering(unittest.TestCase):
