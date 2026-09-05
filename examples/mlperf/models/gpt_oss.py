@@ -12,7 +12,7 @@ from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker
 from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb
 from extra.llama_kernels.rmsnorm import rmsnorm
-from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8, asm_gemm, can_use_asm_gemm
+from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8, asm_gemm, can_use_asm_gemm, mx_pack
 from extra.gemm.moe_gemm import grouped_mx_gemm
 from extra.gemm.moe_routing import route, dispatch, combine, router_mfma
 
@@ -307,7 +307,6 @@ class GPTOSS:
     h_normed = self.norm(h)
 
     if getenv("FP8_LMHEAD", 0) and ASM_GEMM:
-      from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm, quantize_mxfp8, mx_pack
       pad = (-self.dim) % 256
       h2 = h_normed.reshape(-1, self.dim).pad(((0, 0), (0, pad)))
       w2 = self.output.pad(((0, 0), (0, pad)))
@@ -319,7 +318,6 @@ class GPTOSS:
       else:
         logits = h_normed @ self.output.T
     elif ASM_GEMM:
-      from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm
       pad = (-self.dim) % 256
       h_padded, w_padded = h_normed.pad((None, None, (0, pad))), self.output.pad(((0, 0), (0, pad)))
       logits = asm_gemm(h_padded, w_padded.T) if can_use_asm_gemm(h_padded, w_padded.T) and getenv("VOCAB_ASM", 1) else h_normed @ self.output.T
