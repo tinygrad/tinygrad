@@ -3,7 +3,7 @@ from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variab
 from tinygrad.uop.ops import Ops, UOp, AxisType, graph_rewrite
 from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters
-from tinygrad.engine.realize import run_linear, compile_linear, lower_and_compile, pm_beam
+from tinygrad.engine.realize import run_linear, lower_and_compile, pm_beam
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph, check_schedule, assert_kernel_count, KernelCountException
@@ -76,7 +76,7 @@ class TestMultiTensor(unittest.TestCase):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
     out = (X + X)
-    linear = compile_linear(out.schedule_linear())
+    linear = lower_and_compile(out.schedule_linear())
     uops = [call.src[0].src[0] for call in linear.src if call.src[0].op is Ops.PROGRAM]
     run_linear(linear)
     self.assertEqual(len(set(uops)), 1, "function was relinearized")
