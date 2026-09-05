@@ -404,6 +404,8 @@ hcq_compile_cache:dict[tuple[UOp, bool], UOp] = {} # eager templates: a buffer-f
 
 @rewrite_group(lambda linear,input_uops,profile,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
+  if any(isinstance(getattr(c.arg, "aux", None), HCQInfo) for c in linear.src): return linear # compiled already
+
   if input_uops is not None:
     use_rt = len(linear.src) < 64 # use rt addr patches if schedules are small. this allows to cache linears, since they won't contain any buffers
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
