@@ -39,7 +39,7 @@ if __name__ == "__main__":
     c = a.matmul(b, dtype=acc_dtype).realize()
 
   if getenv("SHOULD_USE_TC"):
-    linear = compile_linear(a.matmul(b, dtype=acc_dtype).schedule_linear())
+    linear = lower_and_compile(a.matmul(b, dtype=acc_dtype).schedule_linear())
     call = get_single_element(list(linear.src))
     applied_opts = call.src[0].src[0].arg.applied_opts
     assert any(opt.op is OptOps.TC for opt in applied_opts), f"TC not triggered, {applied_opts}"
