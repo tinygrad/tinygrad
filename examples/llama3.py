@@ -5,7 +5,7 @@ from extra.models.llama import Transformer, convert_from_huggingface, convert_fr
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
-from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm
+from tinygrad.helpers import getenv, Profiling, Timing, DEBUG, colored, fetch, tqdm
 from extra.bench_log import BenchEvent, WallTimeEvent
 
 class Tokenizer:
@@ -201,7 +201,11 @@ MODEL_PARAMS = {
 }
 def build_transformer(model_path: Path, model_size="8B", quantize=None, scale_dtype=dtypes.float16, device=None, max_context=8192, load_weights=True):
   # build model
-  if quantize == "int8": linear, embedding, quantize_embeds = Int8Linear, Int8Embedding, True
+  # NOQE=1: do not quantize the embedding/output matrix. int8 quantises it by default (and the output
+  # projection reuses it: output.weight = tok_embeddings.weight), which makes the logits noisy and the
+  # generation degenerate into garbage. nf4 sets this to False and its output is coherent, so this isolates
+  # whether the embedding/output quantisation is what breaks int8.
+  if quantize == "int8": linear, embedding, quantize_embeds = Int8Linear, Int8Embedding, not getenv("NOQE", 0)
   elif quantize == "nf4": linear, embedding, quantize_embeds = NF4Linear(64), nn.Embedding, False
   elif quantize == "fp8": linear, embedding, quantize_embeds = FP8Linear, nn.Embedding, False
   else: linear, embedding, quantize_embeds = nn.Linear, nn.Embedding, False
