@@ -20,7 +20,7 @@ if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: rem
 
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
-HCQ_DEVS = frozenset(("QCOM", "CPU")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
+HCQ_DEVS = frozenset(("NV", "QCOM", "CPU")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -36,6 +36,7 @@ class HCQInfo:
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
 def get_enqueue_devs(call:UOp) -> Any|None:
+  if isinstance(getattr(call.arg, "aux", None), HCQInfo): return None # a batch that already compiled is never enqueued into another one
   if call.src[0].op not in (Ops.PROGRAM, Ops.COPY): return None # only these bodies can be enqueued
   if not (bufs:=get_call_arg_uops(call)) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
@@ -86,18 +87,17 @@ def cstruct(struct_t, **fields:UOp|int) -> UOp:
 # *****************
 # 0.1. prep: eager buffers become tagged params
 
-def input_param(slot:int, b:UOp) -> UOp: return UOp.param(slot, b.dtype, b.max_numel(), b.device).replace(tag="lt_input")
-
-def replace_buffer(ctx:tuple[list[UOp], dict[UOp, int]], b:UOp) -> UOp:
-  bufs, slots = ctx
+def replace_buffer(ctx:tuple[bool, list[UOp], dict[UOp, int]], b:UOp) -> UOp:
+  use_rt, bufs, slots = ctx
   if slots.setdefault(b, len(bufs)) == len(bufs): bufs.append(b)
-  return input_param(slots[b], b)
+  param = UOp.param(slots[b], b.dtype, b.max_numel(), b.device)
+  return param if use_rt else param.replace(tag="lt_input")
 pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), replace_buffer)])
 
 # *****************
 # 1.1. prep: staging copies
 
-STAGING_SIZE, STAGING_SLOTS = (4 if os.getenv("CI") else 128) << 20, 2 # the staging mlocks into the device: ci runners cap locked memory at 8mb
+STAGING_SIZE, STAGING_SLOTS = (4 if os.getenv("CI") else 128) << 20, 2
 
 @functools.cache
 def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
@@ -152,22 +152,25 @@ class BatchCtx:
   tracker:HCQDepsTracker = field(default_factory=HCQDepsTracker)
   queues:dict[str, list[str]] = field(init=False)
   first:dict[tuple[str, str], int] = field(init=False); last:dict[tuple[str, str], int] = field(init=False) # noqa: E702
+  prev:list[int|None] = field(init=False)
   signal_tags:set[int] = field(init=False)
   slots:dict[str, UOp] = field(init=False)
 
   def __post_init__(self):
-    self.queues, self.first, self.last = {}, {}, {}
+    self.queues, self.first, self.last, self.prev = {}, {}, {}, []
     for tag, (_, devs, q) in enumerate(self.batch):
       if q not in self.queues.setdefault(devs[0], []): self.queues[devs[0]].append(q)
       self.first.setdefault((devs[0], q), tag)
+      self.prev.append(self.last.get((devs[0], q)))
       self.last[(devs[0], q)] = tag
     self.signal_tags = {tag for (dev, q), tag in self.last.items() if q != self.epilogue_queue(dev)}
-    self.slots = {dev: UOp.placeholder((len(qs) + 1 + (2 * len(self.batch) if self.profile else 0),), dtypes.uint64, device=(dev,), volatile=True,
-                                       tag="slots") for dev, qs in self.queues.items()}
+    # a slot is [signal][timestamp], 16 bytes: the queue signals, the timeline, then two per call if profiling
+    self.slots = {dev: UOp.placeholder((2 * (len(qs) + 1 + (2 * len(self.batch) if self.profile else 0)),), dtypes.uint64, device=(dev,),
+                                       volatile=True, tag="slots") for dev, qs in self.queues.items()}
 
   def epilogue_queue(self, dev:str) -> str: return "COMPUTE:0" if len(self.queues[dev]) > 1 else self.queues[dev][0] # closes the device
 
-  def slot(self, devs:tuple[str, ...], i:int) -> UOp: return self.slots[devs[0]].shrink(((i, i + 1),)) # not [i:i+1]: the slice path is 10x the cost
+  def slot(self, devs:tuple[str, ...], i:int) -> UOp: return self.slots[devs[0]].shrink(((2 * i, 2 * i + 2),)) # not a slice: 10x the cost
   def queue_signal(self, devs:tuple[str, ...], queue:str) -> UOp: return self.slot(devs, self.queues[devs[0]].index(queue))
   def sched_timeline(self, devs:tuple[str, ...]) -> UOp: return self.slot(devs, len(self.queues[devs[0]]))
   def stamps(self, devs:tuple[str, ...], tag:int) -> tuple[int, ...]: return (st:=len(self.queues[devs[0]])+1+2*tag, st + 1) if self.profile else ()
@@ -177,6 +180,10 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   latest:dict[tuple[str, str], int] = {} # (producer device, queue) -> the latest submit tag to wait on, same-queue submits are fifo
   for d, q, t in ctx.tracker.access_resources(bufs, list(range(len(bufs)) if write is None else write), (device, queue, tag)):
     if t < tag and (d, q) != (device, queue): latest[(d, q)] = max(latest.get((d, q), 0), t)
+
+  # NV waits break QMD chaining, so also wait for the previous launch
+  if latest and device.split(":")[0] == "NV" and queue.startswith("COMPUTE") and (p:=ctx.prev[tag]) is not None: latest[(device, queue)] = p
+
   ctx.signal_tags |= set(latest.values())
   return [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64))) for (d, q), t in latest.items()]
 
@@ -196,7 +203,7 @@ def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], 
 
     # and make hcq call
     name, est = get_call_name(call, get_call_arg_uops(call)), estimate_uop(call)
-    kerns.append((devices, name, est, ctx.stamps(devices, tag), getattr(call.src[0].arg, "profile_key", None)))
+    kerns.append((devices, name, est, tuple(2 * s + 1 for s in ctx.stamps(devices, tag)), getattr(call.src[0].arg, "profile_key", None)))
 
     ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slot(devices, i),)) for i in ctx.stamps(devices, tag)]
     q += ts_ins[:1] + [call] + ts_ins[1:]
@@ -397,10 +404,12 @@ hcq_compile_cache:dict[tuple[UOp, bool], UOp] = {} # eager templates: a buffer-f
 
 @rewrite_group(lambda linear,input_uops,profile,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
-  # eager linears hand their buffers to input_uops and cache as buffer-free templates, the jit's linear compiles once and owns its buffers
+  if any(isinstance(getattr(c.arg, "aux", None), HCQInfo) for c in linear.src): return linear # compiled already
+
   if input_uops is not None:
+    use_rt = len(linear.src) < 64 # use rt addr patches if schedules are small. this allows to cache linears, since they won't contain any buffers
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
-    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffers")
+    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(use_rt, input_uops, slots), walk=True, name="replace buffers")
     if (cached:=hcq_compile_cache.get(key:=(linear, profile))) is not None: return cached
   lin = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
   lin = sched_batches(lin, profile)
@@ -415,13 +424,14 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
 @dataclass
 class LinkCtx: cache:bool; inputs:dict[UOp, UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
-def bufferize_buf(ctx:bool, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
+def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
   if b.tag is None: return None # a param, not a placeholder
 
   dev = cast(HCQ2Compiled, Device[to_tuple(b.device)[0]])
 
-  if b.arg.slot == 0 or b.tag == "program": r = cast(Buffer, unwrap(dev.pm_bufferize.rewrite(b, ctx=dev))) # device state and programs
-  elif ctx: r = Buffer(dev.device, b.max_numel(), b.dtype, options=BufferSpec(host=b.arg.volatile, uncached=True, cpu_access=True), preallocate=True)
+  # device owns the placeholders it names
+  if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
+  elif ctx.cache: r = Buffer(dev.device, b.max_numel(), b.dtype, options=BufferSpec(host=b.arg.volatile, uncached=True, cpu_access=True), preallocate=True)
   else: r = dev.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile)
 
   return UOp.from_buffer(r, HCQ_RUNTIME_DEV.value)
@@ -447,7 +457,8 @@ def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
   return UOp(Ops.NOOP)
 
 pm_link = PatternMatcher([
-  (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.inputs[b] if b in ctx.inputs else bufferize_buf(ctx.cache, b)),
+  (UPat(Ops.CAST, src=(UPat(Ops.CAST, src=(UPat.cvar(),), name="inner"),), name="c"), lambda c, inner: inner.src[0].cast(c.dtype)),
+  (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.inputs[b] if b in ctx.inputs else bufferize_buf(ctx, b)),
   (UPat(Ops.GETADDR, name="g"), resolve_getaddr),
   (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"),
     lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)),
@@ -460,11 +471,14 @@ pm_link = PatternMatcher([
 
 link_linear_cache:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary() # a baked link lives as long as its bound linear
 
-@rewrite_group(lambda _,cache,input_uops,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
-def hcq_link(linear:UOp, cache=True, input_uops:list[UOp]|None=None) -> UOp:
+@rewrite_group(lambda _,input_uops=None,allow_cache=True,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
+def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UOp:
   if (linked:=link_linear_cache.get(linear)) is not None: return linked
 
-  inputs = {input_param(i, b): b for i, b in enumerate(input_uops or ())}
+  # if we have any link time buffers, do not cache this linear
+  cache = allow_cache and not any(u.tag == "lt_input" for u in linear.toposort() if u.op is Ops.PARAM)
+
+  inputs = {UOp.param(i, b.dtype, b.max_numel(), b.device).replace(tag="lt_input"): b for i, b in enumerate(input_uops or ())}
   linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(cache, inputs)), walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   if cache and linked is not linear: link_linear_cache[linear] = linked
@@ -527,7 +541,7 @@ class HCQ2Compiled(Compiled):
     return Buffer(self.device, self.rt_allocator(uncached, host).size, dtypes.uint8, options=spec, preallocate=True)
 
   def rt_view(self, nbytes:int, dtype:DType=dtypes.uint8, uncached:bool=True, host:bool=False) -> Buffer: # a slot of the ring, wraps silently
-    off = self.rt_allocator(uncached, host).alloc(max(nbytes, 1), alignment=128)
+    off = self.rt_allocator(uncached, host).alloc(max(nbytes, 1), alignment=256)
     return self.rt_buffer(uncached, host).view(nbytes // dtype.itemsize, dtype, off).ensure_allocated()
 
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
@@ -562,8 +576,7 @@ class HCQ2Buffer:
     return HCQ2Buffer(self.va_addr+offset, meta=self.meta, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
 
 class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
-  def _as_buffer(self, buf:HCQBuffer) -> memoryview:
-    return unwrap(buf.view).mv
+  def _as_buffer(self, buf:HCQBuffer) -> memoryview|None: return buf.view.mv if buf.view is not None else None
 
   def _copyout(self, dest:memoryview, src:HCQBuffer): # TODO: remove with memcpy on cpu worker?
     self.dev.synchronize()

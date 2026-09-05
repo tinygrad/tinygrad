@@ -187,7 +187,7 @@ class Buffer:
     # zero copy with as_memoryview (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer'):
       if not no_sync: self.allocator.dev.synchronize()
-      return self.allocator._as_buffer(self._buf)
+      if (mv:=self.allocator._as_buffer(self._buf)) is not None: return mv
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
     Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv
@@ -201,8 +201,7 @@ class Buffer:
     from tinygrad.engine.realize import run_linear
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self), UOp.from_buffer(src)
-    run_linear(UOp(Ops.LINEAR, src=(su.param_like(1).copy_to_device(self.device).call(du.param_like(0), su.param_like(1)),)),
-               input_uops=(du, su), update_stats=False)
+    run_linear(UOp(Ops.LINEAR, src=(su.param_like(1).copy_to_device(self.device).call(du, su),)), update_stats=False)
     return self
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"

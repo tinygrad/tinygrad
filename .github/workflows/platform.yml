@@ -76,11 +76,12 @@ jobs:
     - name: Run pytest (ptx)
       env:
         DEV: "MOCK+NV:PTX"
+        HCQ_RUNTIME_DEV: PYTHON
         FORWARD_ONLY: 1
         # TODO: failing due to library loading error
         CAPTURE_PROCESS_REPLAY: 0
       run: |
-        python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py \
+        python3 -m pytest -n=auto test/device/test_hcq2.py test/test_tiny.py \
           test/testextra/test_hevc.py::TestHevc::test_hevc_decode_compile --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay

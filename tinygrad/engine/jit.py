@@ -166,7 +166,7 @@ class CapturedJit(Generic[ReturnType]):
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
 
   @functools.cached_property
-  def linear(self) -> UOp: return link_linear(self._linear)
+  def linear(self) -> UOp: return link_linear(self._linear, allow_cache=False) # do not cache jit
 
   def __reduce__(self): return self.__class__, (self.ret, self._linear, self.expected_names, self.expected_input_info)
 
