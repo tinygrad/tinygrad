@@ -162,7 +162,8 @@ def abi(ctx, x:UOp) -> UOp|None:
     src = (ctx.reserved(WIIDS, dtypes.uint32), const(10*int(x.arg[-1])), const(10))
     return x.ins(RDNA3Ops.v_bfe_u32, dtype=dtypes.uint32, src=src)
   else:
-    offs = const(sum(8 if u.op == Ops.PARAM and u.addrspace is not AddrSpace.ALU else u.dtype.itemsize for u in ctx.func_args[:ctx.func_args.index(x)]))
+    offs = const(sum(8 if u.op == Ops.PARAM and u.addrspace is not AddrSpace.ALU
+      else u.dtype.itemsize for u in ctx.func_args[:ctx.func_args.index(x)]))
     psrc = (ctx.reserved(KERNARG_PTR, dtypes.uint64), offs)
     if x.addrspace is AddrSpace.ALU: out = vmov(UOp(Ops.INS, src=psrc, arg=(RDNA3Ops.s_load_b32, x.dtype)))
     else: out = UOp(Ops.INS, src=psrc, arg=(RDNA3Ops.s_load_b64, dtypes.ulong))
