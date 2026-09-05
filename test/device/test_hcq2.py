@@ -29,6 +29,10 @@ def submit_linears():
   lins, orig = [], hcq2.HWQueue.__init__
   with patch.object(hcq2.HWQueue, "__init__", lambda self, ctx, submit: (lins.append(submit.src[0]), orig(self, ctx, submit))[1]): yield lins
 
+def eager_chain(x:Tensor, n:int=64) -> Tensor: # at hcq_compile's use_rt bound: an eager linear this big bakes its inputs and borrows ring slots
+  for _ in range(n): x = (x + 1).contiguous()
+  return x.realize()
+
 def patch_words(batch:UOp) -> list[UOp]:
   return [w for s in batch.src[0].toposort() if s.op is Ops.STORE and s.src[0].op is Ops.INDEX and s.src[0].src[1].op is Ops.STACK
           and s.src[1].op is Ops.STACK for w in s.src[1].src]
@@ -42,14 +46,14 @@ class TestHCQ2Core(unittest.TestCase):
     x = Tensor.ones(16).contiguous().realize()
     @TinyJit
     def f(a): return (a + 2).contiguous().realize()
-    f(x)
+    for _ in range(2): f(x)
 
     before = len(link_linear_cache)
     with rt_views() as calls:
       out = f(x)
       self.assertGreater(len(link_linear_cache), before)
       self.assertEqual(len(calls), 0)
-      (x + 1).contiguous().realize()
+      eager_chain(x)
       self.assertGreater(len(calls), 0)
     self.assertEqual(out.tolist(), [3.0] * 16)
 
@@ -58,7 +62,7 @@ class TestHCQ2Core(unittest.TestCase):
     dev = Device[Device.DEFAULT]
     allocs = {host:dev.rt_allocator(True, host) for host in (False, True)}
     for host in allocs: dev.rt_buffer(True, host) # cache the full-sized backing buffers before temporarily shrinking their allocators
-    with patch.object(allocs[False], "size", 1 << 13), patch.object(allocs[True], "size", 1 << 13):
+    with patch.object(allocs[False], "size", 1 << 17), patch.object(allocs[True], "size", 1 << 13):
       x = Tensor.ones(24).contiguous().realize()
       @TinyJit
       def g(a): return (a * 3 - 1).contiguous().realize()
@@ -67,7 +71,7 @@ class TestHCQ2Core(unittest.TestCase):
       wrapped = 0
       for i in range(48):
         before = dev.rt_allocator(True, False).ptr
-        (x + i).contiguous().realize()
+        eager_chain(x + i)
         wrapped += dev.rt_allocator(True, False).ptr < before
         self.assertEqual(g(x).tolist(), [2.0] * 24)
       self.assertGreater(wrapped, 0)
@@ -107,6 +111,7 @@ class TestHCQ2Core(unittest.TestCase):
       @TinyJit
       def f(a): return (a.sin() * 3).contiguous().realize()
       for _ in range(3): f(x)
+      eager_chain(x)
 
     jit, eager = partition(batches, lambda c: c.arg.aux.table >= 0)
     self.assertTrue(jit and eager, f"want both kinds of batch, got {len(jit)} jit and {len(eager)} eager")

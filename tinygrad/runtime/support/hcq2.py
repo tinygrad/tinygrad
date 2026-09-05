@@ -97,7 +97,7 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), replace_buffer
 # *****************
 # 1.1. prep: staging copies
 
-STAGING_SIZE, STAGING_SLOTS = 128 << 20, 2
+STAGING_SIZE, STAGING_SLOTS = (4 if os.getenv("CI") else 128) << 20, 2
 
 @functools.cache
 def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
