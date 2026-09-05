@@ -11,7 +11,7 @@ from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, HCQ2Compiled, all_devices_in, hcq_compile_cache, link_linear_cache
-from test.helpers import call_is_hcq, needs_second_gpu
+from test.helpers import call_is_hcq
 
 @contextlib.contextmanager
 def rt_views():

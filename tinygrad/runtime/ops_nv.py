@@ -56,7 +56,7 @@ class QMD:
         **{name[len(pref)+1:]+f"_{i}": dt(i) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith(pref) and callable(dt)}}
 
     self.mv, self.pref = (bytearray(self.sz * 4) if blob is None else blob), pref
-    self.words:dict[int, UOp] = {} # the fields only known at link or at submit, as words by their byte offset
+    self.patches:dict[int, UOp] = {}
 
   def read(self, k:str) -> int:
     hi, lo = QMD.fields[self.pref][k.upper()]
@@ -67,7 +67,7 @@ class QMD:
       hi, lo = QMD.fields[self.pref][k.upper()]
       if isinstance(v, UOp):
         assert lo % 8 == 0, f"{k} is not byte aligned"
-        self.words[lo // 8] = v.ccast(next(t for t in (dtypes.uint64, dtypes.uint32, dtypes.uint16, dtypes.uint8) if t.itemsize * 8 <= hi - lo + 1))
+        self.patches[lo // 8] = v.ccast(next(t for t in (dtypes.uint64, dtypes.uint32, dtypes.uint16, dtypes.uint8) if t.itemsize * 8 <= hi - lo + 1))
       else:
         if v >> (hi - lo + 1): raise ValueError(f"{k}={v:#x} does not fit")
         mask, num = ((1 << (hi - lo + 1)) - 1) << (lo % 8), int.from_bytes(self.mv[lo//8:hi//8+1], "little")
@@ -115,14 +115,14 @@ class NVQueue(HWQueue):
 
   def submit(self, cmdbuf:UOp) -> UOp:
     fifo, ib, off = self.dev.fifos[self.queue], *unwrap_view(cmdbuf)
-    def ph(n, dt=dtypes.uint32, shape=(1,)): return UOp.placeholder(shape, dt, 0, device=self.devs, volatile=True, tag=to_name(n, self.queue))
-    ring, gpput, doorbell, put = ph("ring", dtypes.uint64, (fifo.entries,)), ph("gpput"), ph("doorbell"), ph("put_value", dtypes.uint64)
 
-    gpe = UOp.placeholder((1,), dtypes.uint64, device=self.devs, volatile=True, tag=to_name("gpentry", self.queue))
-    entry = patch(gpe, [(0, ib.getaddr(self.devs) + UOp.const(off | (cmdbuf.max_numel() // 4 << 42) | (1 << 41), dtypes.uint64))], bytes(8))
+    ring, gpput, doorbell, put, gpentry = [UOp.placeholder((sz,), dt, device=self.devs, volatile=True, tag=to_name(nm, self.queue))
+      for nm, dt, sz in (("ring", dtypes.uint64, fifo.entries), ("gpput", dtypes.uint32, 1), ("doorbell", dtypes.uint32, 1),
+                         ("put_value", dtypes.uint64, 1), ("gpentry", dtypes.uint64, 1))]
+    gpentry = patch(gpentry, [(0, ib.getaddr(self.devs) + UOp.const(off | (cmdbuf.max_numel() // 4 << 42) | (1 << 41), dtypes.uint64))])
 
     p = put.index(0).load()
-    written = UOp.barrier(ring.after(cmdbuf).index((p % fifo.entries).cast(dtypes.int)).store(entry.index(0).load()), put.index(0).store(p + 1))
+    written = UOp.barrier(ring.after(cmdbuf).index((p % fifo.entries).cast(dtypes.int)).store(gpentry.index(0).load()), put.index(0).store(p + 1))
     queued = UOp.barrier(gpput.after(written).index(0).store(((p + 1) % fifo.entries).cast(dtypes.uint32)))
     return doorbell.after(queued).index(0).store(UOp.const(fifo.token, dtypes.uint32))
 
@@ -140,25 +140,25 @@ class NVComputeQueue(NVQueue):
     self.stride = self.qmd_sz + max([p.kernargs_size for p in progs], default=0)
     self.qmd_buf = UOp.placeholder((len(progs) * self.stride,), dtypes.uint8, device=self.devs, tag=to_name("qmd", self.queue))
     self.qmds:list[QMD] = []
-    self.chain:QMD|None = None # the launch the next one chains onto
+    self.prev_qmd:QMD|None = None # the launch the next one chains onto
 
   def wait(self, signal:UOp, value:UOp):
-    self.chain = None
+    self.prev_qmd = None
     super().wait(signal, value)
 
   def release(self, signal:UOp, value:UOp, timestamp:bool=False):
-    if self.chain is None or not self.chain.set_release(signal.getaddr(self.devs), value, timestamp):
-      self.chain = None
+    if self.prev_qmd is None or not self.prev_qmd.set_release(signal.getaddr(self.devs), value, timestamp):
+      self.prev_qmd = None
       super().release(signal, value, timestamp)
 
   def submit(self, cmdbuf:UOp) -> UOp:
     if self.qmds:
-      words = [(i * self.stride + off, w) for i, q in enumerate(self.qmds) for off, w in q.words.items()]
-      cmdbuf = cmdbuf.after(patch(self.qmd_buf, words, b"".join(q.mv for q in self.qmds)))
+      patches = [(i * self.stride + off, w) for i, q in enumerate(self.qmds) for off, w in q.patches.items()]
+      cmdbuf = cmdbuf.after(patch(self.qmd_buf, patches, b"".join(q.mv for q in self.qmds)))
     return super().submit(cmdbuf)
 
   def memory_barrier(self):
-    self.chain = None
+    self.prev_qmd = None
     self.nvm(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI,
              nv_flags("NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI", instruction="true", global_data="true", constant="true"))
 
@@ -179,15 +179,15 @@ class NVComputeQueue(NVQueue):
       qmd.set_constant_buf_addr(j, qmd_addr + UOp.const(self.qmd_sz, dtypes.uint64) if j == 0 else lib.getaddr(self.devs) + off)
     bufs, vals = [get_call_arg_uops(call)[j] for j in prg.arg.globals], get_call_var_uops(call, prg)
     qmd.mv[self.qmd_sz:(at:=self.qmd_sz + len(data.cbuf_0) * 4)] = array.array('I', data.cbuf_0).tobytes() # constant buffer 0: the driver params
-    qmd.words |= {at + j * 8: b.getaddr(self.devs) for j, b in enumerate(bufs)} | {at + o: v.ccast(dt) for v, (o, dt) in zip(vals, data.vars)}
+    qmd.patches |= {at + j * 8: b.getaddr(self.devs) for j, b in enumerate(bufs)} | {at + o: v.ccast(dt) for v, (o, dt) in zip(vals, data.vars)}
 
-    if self.chain is None:
+    if self.prev_qmd is None:
       if self.dev.pma_enabled: self.nvm(1, nv_gpu.NVC6C0_PM_TRIGGER, 0)
       self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, (qmd_addr >> 8).cast(dtypes.uint32))
       self.nvm(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B_PCAS_ACTION_PREFETCH_SCHEDULE)
-    else: self.chain.write(dependent_qmd0_pointer=qmd_addr >> 8, dependent_qmd0_action=1, dependent_qmd0_prefetch=1, dependent_qmd0_enable=1)
+    else: self.prev_qmd.write(dependent_qmd0_pointer=qmd_addr >> 8, dependent_qmd0_action=1, dependent_qmd0_prefetch=1, dependent_qmd0_enable=1)
     self.qmds.append(qmd)
-    self.chain = qmd
+    self.prev_qmd = qmd
 
 class NVCopyQueue(NVQueue):
   q_rewrite = PatternMatcher([
@@ -307,7 +307,6 @@ def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVPro
 
 class NVAllocator(HCQAllocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    # uncached is not honored: cmdbufs and qmds are read by the gpu every launch, so they belong in cpu visible vram, not in sysmem
     return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host, zero=options.zero)
 
   def _do_free(self, opaque:HCQBuffer, options:BufferSpec): self.dev.iface.free(opaque)
@@ -561,7 +560,7 @@ class MOCKIface(NVKIface): count = 1
 
 class NVDevice(HCQ2Compiled):
   ifaces = [NVKIface, PCIIface, MOCKIface]
-  sleep_timeout_ms = 200 # drain GSP status responses during long waits
+  sleep_timeout_ms = 200
   pm_encode = PatternMatcher([
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute", name="submit"), lambda ctx, submit: encode_submit(NVComputeQueue(ctx, submit))),
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy", name="submit"), lambda ctx, submit: encode_submit(NVCopyQueue(ctx, submit))),
@@ -615,8 +614,7 @@ class NVDevice(HCQ2Compiled):
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 
   @functools.cached_property
-  def fifos(self) -> dict[str, GPFifo]: # the channels come up on first use: buffers can only be made once the device is registered
-    # the gpfifo rings live in one write combined page: wrap it so the queues can address the rings and their put pointers as buffers
+  def fifos(self) -> dict[str, GPFifo]:
     self.gpfifo_buf = Buffer(self.device, self.gpfifo_mem.size, dtypes.uint8, options=BufferSpec(external_ptr=self.gpfifo_mem.va_addr, nolru=True)) \
                         .allocate(opaque=self.gpfifo_mem)
     compute = self._new_gpu_fifo("COMPUTE:0", self.ctxshare, self.channel_group, offset=0, entries=0x10000, compute=True)
