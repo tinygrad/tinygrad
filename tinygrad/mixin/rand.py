@@ -52,6 +52,7 @@ class RandMixin(OpMixin):
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    By default, the random values get persistent storage when computed. `contiguous=False` leaves them as an expression.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -65,7 +66,8 @@ class RandMixin(OpMixin):
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     device = cast(str, canonicalize_device(device))
     key, counter = cls._next_counter(device, ceildiv(prod(shape) * dt.itemsize, 4))
-    return cls._rand(key, counter, shape, dt, contiguous=contiguous)
+    out = cls._rand(key, counter, shape, dt, contiguous=False)
+    return cls._wrap_uop(out._uop.clone()) if contiguous else out
 
   def rand_like(self, **kwargs) -> Self:
     """
@@ -293,7 +295,8 @@ class RandMixin(OpMixin):
     if not 0 <= p <= 1: raise ValueError(f"{p=} is out of range [0, 1]")
     if not TRAINING or p == 0: return self
     if p == 1: return self.const_like(0)
-    return (self.rand_like(dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
+    mask = self.rand_like(dtype=dtypes.default_float, contiguous=False) >= p
+    return self._wrap_uop(mask._uop.clone()).where(self, 0) / (1.0 - p)
 
   def scaled_dot_product_attention(self, key:Self, value:Self, attn_mask:Self|None=None, dropout_p:float=0.0,
                                    is_causal:bool=False, enable_gqa:bool=False) -> Self:

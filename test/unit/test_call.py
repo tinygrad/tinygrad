@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.tensor import transform_to_call
 
-def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop))[0].src[0].key
+def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop)).src[0].key
 
 class TestCall(unittest.TestCase):
   def test_call_plus(self):
@@ -370,7 +370,7 @@ class TestArgOrder(unittest.TestCase):
     x = Tensor.arange(3, dtype=dtypes.int).realize()
     call = self.make_intersperse_call(x, precompile=True)[0].src[1]
     # the transform must preserve the RETURNED's src position: its placeholder is at src 1, the input stays at src 2
-    from tinygrad.tensor import transform_precompiled_call
+    from tinygrad.schedule.prepare import transform_precompiled_call
     new = transform_precompiled_call(call)
     new_call = new.src[0].src[1].src[1]
     # the out buffer takes the RETURNED's position (src 1), the input value keeps its position (src 2)
