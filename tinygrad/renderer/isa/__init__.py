@@ -2,7 +2,7 @@ from __future__ import annotations
 import itertools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, consumer_map_from_toposort
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops
 
 @dataclass(frozen=True)
 class Register:
@@ -16,12 +16,9 @@ class Register:
 
 class IselContext:
   def __init__(self, sink:UOp):
-    self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n = itertools.count()
-    def arg_key(u:UOp):
-      if u.op is Ops.SPECIAL: return (2, u.arg)
-      return (0, u.arg.slot) if u.arg.addrspace is not None else (1, u.expr)
-    self.func_args = sorted([u for u in self.uses if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
+    def arg_key(u:UOp): return (1, u.arg) if u.op is Ops.SPECIAL else (0, u.arg.slot)
+    self.func_args = sorted([u for u in sink.toposort() if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
 
   def vreg(self, cons:tuple[Register, ...]|Register):
     return Register(f"v{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
@@ -44,7 +41,6 @@ class ISARenderer(Renderer):
 
   def is_two_address(self, x:UOp) -> bool: return False
   def stack_pointer(self) -> UOp: raise NotImplementedError("arch specific")
-  def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def spill(self, disp:UOp, x:UOp) -> UOp: raise NotImplementedError("arch specific")
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
