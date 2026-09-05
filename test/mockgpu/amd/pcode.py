@@ -630,6 +630,10 @@ class Parser:
         self.eat('DOT')
         dt_name = self.eat('IDENT').val
         return self._handle_mem_load(addr, DTYPES.get(dt_name, dtypes.uint32))
+      if name in self.funcs and self.try_eat('LBRACKET'):
+        index = self.parse()
+        self.eat('RBRACKET')
+        return self.funcs[name](index)
       if name == 'VGPR' and self.at('LBRACKET'):
         self.eat('LBRACKET')
         lane = self.parse()
@@ -1006,20 +1010,24 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
 
     # for loop
     if first == 'for':
-      # Parse: for VAR in [SIZE']START : [SIZE']END do
-      p = Parser(toks, env, funcs)
-      p.eat_val('for', 'IDENT')
-      loop_var = p.eat('IDENT').val
-      p.eat_val('in', 'IDENT')
-      def parse_bound():
-        if p.at('NUM') and p.peek(1).type == 'QUOTE':
-          p.eat('NUM')
-          p.eat('QUOTE')
-        if p.at('NUM'): return int(p.eat('NUM').val.rstrip('UuLl'))
-        return int(p.parse())
-      start_val = parse_bound()
-      p.eat('COLON')
-      end_val = parse_bound()
+      # C-style loops use an exclusive bound; for/in loops use an inclusive bound.
+      if m := re.fullmatch(r'for\s*\(\s*(\w+)\s*=\s*(\d+);\s*\1\s*<\s*(\d+);\s*\1\s*(\+\+|\+=\s*\d+)\s*\)', line):
+        loop_var, start_val, end_val = m[1], int(m[2]), int(m[3]) - 1
+        step = 1 if m[4] == '++' else int(m[4][2:])
+      else:
+        p = Parser(toks, env, funcs)
+        p.eat_val('for', 'IDENT')
+        loop_var = p.eat('IDENT').val
+        p.eat_val('in', 'IDENT')
+        def parse_bound():
+          if p.at('NUM') and p.peek(1).type == 'QUOTE':
+            p.eat('NUM')
+            p.eat('QUOTE')
+          if p.at('NUM'): return int(p.eat('NUM').val.rstrip('UuLl'))
+          return int(p.parse())
+        start_val = parse_bound()
+        p.eat('COLON')
+        end_val, step = parse_bound(), 1
       # Collect body
       i += 1
       body_lines: list[str] = []
@@ -1035,7 +1043,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       has_break = any('break' in bl.lower() for bl in body_lines)
       found_var = f'_found_{next(_break_var_ids)}' if has_break else None
       if found_var: env[found_var] = block_assigns[found_var] = _const(dtypes.bool, False)
-      for loop_i in range(start_val, end_val + 1):
+      for loop_i in range(start_val, end_val + 1, step):
         subst_lines = [_subst_loop_var(bl, loop_var, loop_i) for bl in body_lines if not (has_break and bl.strip().lower() == 'break')]
         _, iter_assigns, _ = parse_block(subst_lines, 0, {**env, **block_assigns}, funcs, assigns)
         if has_break:
@@ -1225,8 +1233,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       j, idx_toks = _match_bracket(toks, 1)
       if j < len(toks) and toks[j].type == 'EQUALS':
         # Static index: var[NUM] = value
-        if len(idx_toks) == 1 and idx_toks[0].type == 'NUM':
-          idx = int(idx_toks[0].val.rstrip('UuLl'))
+        if isinstance(idx := _single_value(parse_tokens(idx_toks, env, funcs)), int):
           val = parse_tokens(toks[j+1:], env, funcs)
           existing = block_assigns.get(var, env.get(var))
           if existing is not None and isinstance(existing, UOp):
@@ -1407,16 +1414,29 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
 def parse_expr(expr: str, env: dict[str, VarVal], funcs: dict | None = None) -> UOp:
   return parse_tokens(tokenize(expr.strip().rstrip(';')), env, funcs)
 
-def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None) -> tuple[dict, list]:
+def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None, funcs: dict | None = None) -> tuple[dict, list]:
   env: dict = srcs.copy() if srcs else {}
   assigns: list[tuple[str, UOp]] = []
-  raw_lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
-  # TODO: pcode.py should tokenize full pcode string instead of line-by-line, then this hack can be removed
   lines: list[str] = []
-  for l in raw_lines:
-    if lines and re.search(r'(&&|\|\||[&|+\-*/^])\s*$', lines[-1]): lines[-1] = lines[-1] + ' ' + l
-    else: lines.append(l)
-  _, final, _ = parse_block(lines, 0, env, assigns=assigns)
+  blocks: list[str] = []
+  for raw in pcode.splitlines():
+    line = raw.split('//')[0].strip().rstrip(';')
+    if not line: continue
+    # Both block syntaxes share the same parser; braces supply the implicit end markers.
+    if line.startswith('}') and blocks:
+      end = blocks.pop()
+      line = line[1:].strip()
+      if not line.startswith(('elsif', 'else')): lines.append(end)
+    if m := re.match(r'(if|elsif|else|for)\b.*\{$', line):
+      blocks.append('endfor' if m[1] == 'for' else 'endif')
+      line = line[:-1].rstrip()
+      if m[1] in ('if', 'elsif'): line += ' then'
+    if not line: continue
+    line = re.sub(r'=\s*(\w+):(\w+)$', r'= {\1, \2}', line)
+    if lines and re.search(r'(&&|\|\||[&|+\-*/^])\s*$', lines[-1]): lines[-1] += ' ' + line
+    else: lines.append(line)
+  assert not blocks, "unclosed pcode block"
+  _, final, _ = parse_block(lines, 0, env, {**_FUNCS, **(funcs or {})}, assigns=assigns)
   sliced = set(d.split('[')[0] for d, _ in assigns if '[' in d)
   for var, val in final.items():
     if var in ['D0', 'S0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA'] and isinstance(val, UOp):
