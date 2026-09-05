@@ -10,9 +10,9 @@ from tinygrad.schedule.multi import multi_pm
 
 def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
 
-def contiguous_mops_to_view(ctx:set[UOp]|None, c:UOp, src:UOp):
+def contiguous_mops_to_view(ctx:list[UOp]|None, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
-  # A set collects views to lift into CALL arguments; None rewrites the live Tensor graph.
+  # A list holds CALL arguments; None rewrites views in the live Tensor graph.
   # Ordinary copies keep their source graph so JIT can substitute its input buffer.
   if ctx is None and c.op is Ops.COPY and not on_disk(src): return None
   buf = src.base
@@ -30,7 +30,10 @@ def contiguous_mops_to_view(ctx:set[UOp]|None, c:UOp, src:UOp):
   # offset the base buffer by the collapsed movement ops and view it
   if (cv := src.contiguous_view()) is None or (buf := cv[0]).op not in {Ops.BUFFER, Ops.PARAM}: return None
   view = buf[cv[1]:cv[1] + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
-  if ctx is not None and view.op in {Ops.SHRINK, Ops.BITCAST}: ctx.add(view)
+  if ctx is not None and view.op in {Ops.SHRINK, Ops.BITCAST}:
+    arg = view.substitute({u: ctx[u.arg.slot] for u in view.toposort() if u.op is Ops.PARAM and u.arg.slot >= 0})
+    if arg not in ctx: ctx.append(arg)
+    view = view.param_like(ctx.index(arg))
   elif on_disk(buf) and buf.op is Ops.BUFFER and not buf.is_unbound: view = UOp.from_buffer(view.buffer, device=buf.device)
   view = view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:]) if unshard is not None else view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
@@ -51,46 +54,22 @@ pm_mops_to_view = PatternMatcher([
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
   assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
-  # the unbound BUFFER srcs are the call outputs (slots are src positions)
-  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
-  srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
-
-  # add the outputs to the call
-  outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
-  targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
-
-  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
-  # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
+  # Bind output storage at the existing argument positions.
+  outs = {p: a.empty_like() for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound}
   placed:dict[UOp, UOp] = {}
-  items:list[UOp] = []
-  for s, t in zip(srcs, targets):
-    deps:list[UOp] = []
-    while s.op is Ops.AFTER:
-      deps.extend(s.src[1:])
-      s = s.src[0]
-    if s not in placed:
-      if s.op is Ops.CONTIGUOUS: placed[s] = t.after(t.store(s.src[0]))
-      elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = t
-      if s in placed:
-        items.append(s.after(*deps))
-        continue
-    items.append(t.after(t.store(s.after(*deps))))
-  # swap every placed value for its target storage, also inside other stores' AFTER deps
-  fxn = UOp.sink(*(x.substitute(placed) for x in items))
-
-  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
-  # buffers are the input storage, afters on unbound BUFFER placeholders have no storage yet, materialize them
-  rmap = dict(zip(ret_pos, outs))
-  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
-                                   for i, a in enumerate(c.src[1:])]))
-  rets = tuple(o.after(new_call) for o in outs)
-
-  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  # NOTE: must use the resolved shapes of the unbound placeholders (which substitute PARAMs with external args), not raw body shapes
-  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
-
-  # the AFTER outputs resolve against this: stores of each real output into its unbound placeholder
-  return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
+  items = []
+  for st in c.src[0].src:
+    value = st.src[1]
+    while value.op is Ops.AFTER: value = value.src[0]
+    # A custom kernel's output buffer can be the call output directly. Rebind each buffer only once.
+    if value.op in {Ops.BUFFER, Ops.UNSHARD} and value.has_buffer_identity() and value not in placed:
+      placed[value] = st.src[0]
+      items.append(st.src[1])
+    else: items.append(st.src[0].after(st))
+  body = UOp.sink(*items).substitute(placed)
+  call = c.replace(src=(body, *(outs.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                   for i, a in enumerate(c.src[1:]))))
+  return UOp.sink(*(c.src[1+p].store(o.after(call).shrink_to(c.src[1+p].shape)) for p,o in outs.items()))
 
 pm_resolve_call_outputs = PatternMatcher([
   (UPat(Ops.CALL, name="c"), transform_precompiled_call),
@@ -105,15 +84,9 @@ def buffer_view_subs(sink:UOp) -> dict[UOp, UOp]:
 
 def prepare_call_views(call:UOp) -> UOp:
   # Lift contiguous views into call arguments, preserving their buffer/offset graph for JIT input substitution.
-  views:set[UOp] = set()
-  body = graph_rewrite(call.src[0], pm_mops_to_view, ctx=views, bottom_up=True, name="prepare call views")
   args = list(call.src[1:])
-  subs = {}
-  for view in body.toposort(enter_calls=False):
-    if view not in views: continue
-    subs[view] = view.param_like(len(args))
-    args.append(view.substitute({u: call.src[1+u.arg.slot] for u in view.toposort() if u.op is Ops.PARAM and u.arg.slot >= 0}))
-  return call.replace(src=(body.substitute(subs, walk=True), *args))
+  body = graph_rewrite(call.src[0], pm_mops_to_view, ctx=args, bottom_up=True, name="prepare call views")
+  return call.replace(src=(body, *args))
 
 def prepare_to_call(sink:UOp, tensor_roots:tuple[UOp, ...]) -> UOp:
   # A copy used only to initialize another buffer can write directly into that destination.
