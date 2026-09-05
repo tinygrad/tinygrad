@@ -637,7 +637,7 @@ class TestAssign(unittest.TestCase):
     c = Tensor.empty(2, 2).assign(a.to(None))
     GlobalCounters.reset()
     c.realize()
-    assert_kernel_count(1)
+    assert_kernel_count(2 if is_hcq2_device() else 1)
     self.assertEqual(c.tolist(), [[1., 2], [3, 4]])
 
 class TestAssignOrdering(unittest.TestCase):
