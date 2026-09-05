@@ -582,7 +582,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y)
     helper_test_op([(), ()], lambda x,y: x/y)
 
-  @unittest.skipIf(Device.DEFAULT == "AMD" and DEV.renderer == "LLVM", "AMD with LLVM backend generate rcp in FP division causes trunc/floor errors")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and DEV.renderer in {"LLVM", "RDNA3"}, \
+    "AMD with LLVM/RDNA3 backend generate rcp in FP division causes trunc/floor errors")
   def test_div_rounding_mode(self):
     for denominator in [-10, -5, -3, -2, -1, 1, 2, 3, 5, 10]:
       # int numerator

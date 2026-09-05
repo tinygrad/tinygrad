@@ -7,7 +7,7 @@ from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
+from tinygrad.renderer.isa import ISARenderer, PreLinearKernelCtx
 from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
@@ -24,7 +24,7 @@ from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_s
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
-from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
+from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite, pm_prepare_regalloc, pm_index_subregisters
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, all_int, flatten, argsort, partition
 from tinygrad.uop.ops import _broadcast_shape, identity_element
@@ -434,17 +434,33 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
+def do_regalloc(kctx:PreLinearKernelCtx, lst:list[UOp]) -> list[UOp]:
+  lst = line_rewrite(lst, kctx.ren.pre_regalloc_matcher, kctx)
+  # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
+  lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
+  lst = line_rewrite(lst, pm_index_subregisters)
+  lst = line_rewrite(lst, pm_regalloc_rewrite, LinearScanRegallocContext(lst, kctx))
+  return line_rewrite(lst, kctx.ren.post_regalloc_matcher, kctx)
+
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
-  # isa renderers need to allocate registers
+
+  # instruction selection
+  kctx: PreLinearKernelCtx|None = None
   if isinstance(ctx, ISARenderer):
-    if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
-    # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
-    lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
-    regalloc_ctx = LinearScanRegallocContext(lst, ctx)
-    lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
-    lst = line_rewrite(lst, ctx.post_regalloc_matcher, regalloc_ctx)
+    kctx = ctx.kernel_ctx_type(sink, ctx, prg.arg)
+    sink = graph_rewrite(sink, ctx.pre_isel_matcher, ctx=kctx, name="pre instruction selection", bottom_up=True)
+    sink, rewrite_ctx = graph_rewrite(sink, ctx.isel_matcher, ctx=kctx, name="instruction selection", bottom_up=True, return_ctx=True)
+    # map arbitrary Ops.INS opcodes to equivalent rewritten Ops IR to preserve metadata for scheduling etc..
+    kctx.ins_schedule = {mc.arg[0]:u.op for u,mc in rewrite_ctx.replace.items() if mc.op is Ops.INS}
+    sink = graph_rewrite(sink, pm_prepare_regalloc, ctx=kctx, name="prepare regalloc")
+
+  # linearize graph
+  lst = line_rewrite(linearize(sink, kctx.ins_schedule if kctx is not None else None), pm_linearize_cleanups)
+
+  # regalloc
+  if isinstance(ctx, ISARenderer) and kctx is not None:
+    lst = do_regalloc(kctx, lst)
     if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
@@ -494,10 +510,6 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
     prog_info = ProgramInfo.from_sink(full_sink, renderer.target)
-    # instruction selection
-    if isinstance(renderer, ISARenderer):
-      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
-      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
     prg = UOp(Ops.PROGRAM, src=(full_sink,), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], renderer.target))

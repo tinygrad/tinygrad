@@ -14,11 +14,18 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.renderer.tc import amd_cdna_1616128
 from tinygrad.renderer.llvmir import LLVMRenderer, AMDLLVMRenderer
+from tinygrad.renderer.isa.rdna3 import RDNA3Renderer
 
 # TODO: write a clean version of this
 from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_opt
 
 # NOTE: to_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
+
+def contains_wmma(uops: list[UOp]) -> bool:
+  if isinstance(Device[Device.DEFAULT].renderer, RDNA3Renderer):
+    nwmmas = len([uop for uop in uops if "v_wmma" in uop.arg[0].args[0].name.lower()])
+  else: nwmmas = len([uop for uop in uops if uop.op is Ops.WMMA])
+  return nwmmas > 0
 
 def _tc_rand(*shape, dtype:DType) -> Tensor:
   return Tensor.randint(*shape, low=dtype.min, high=dtype.max+1, dtype=dtype) if dtypes.is_int(dtype) else Tensor.rand(*shape, dtype=dtype)
@@ -48,9 +55,8 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
 
   if ensure_triggered:
     program = to_program(replace_opts(realized_ast, opts_to_apply), Device[Device.DEFAULT].renderer)
-    wmmas = len([uop for uop in tuple(program.src[1].src) if uop.op is Ops.WMMA])
     tcs = len([x for x in program.src[0].arg.applied_opts if x.op is OptOps.TC])
-    assert wmmas > 0, "tensor core not triggered"
+    assert contains_wmma(program.src[1].src), "tensor core not triggered"
     assert tcs == 1, "tensor core opt not included"
   else:
     try:
@@ -69,7 +75,8 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))] + extra_opts
   ast = replace_opts(realized_ast, opts)
   pu = to_program(ast, Device[Device.DEFAULT].renderer)
-  if use_tensor_cores == 1: assert len([uop for uop in pu.src[1].src if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
+  if use_tensor_cores == 1:
+    assert contains_wmma(pu.src[1].src), "wmma not triggered"
   assert len([x for x in pu.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   run_program(ast, bufs)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
@@ -160,6 +167,8 @@ class TestTensorCores(unittest.TestCase):
         assert "0x201000" in prg.src[2].arg
       elif Device[Device.DEFAULT].renderer.suffix == "PTX":
         assert "mma.sync.aligned" in prg.src[2].arg
+      elif isinstance(Device[Device.DEFAULT].renderer, RDNA3Renderer):
+        assert "V_WMMA" in prg.src[2].arg
       else:
         assert "__WMMA_" in prg.src[2].arg
 
@@ -250,9 +259,10 @@ class TestTensorCores(unittest.TestCase):
     opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, tc_reduce_axis(x.matmul(y, dtype=tc.dtype_out)), (2, AxisType.UNROLL))]
     r = x.matmul(y, dtype=tc.dtype_out)
     ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
-    self.assertGreater(len(wmmas), 0)
-    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
+    uops = tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src)
+    assert contains_wmma(uops)
+    for u in uops:
+      if u.op is Ops.WMMA: assert u.src[-1].src[0].op != Ops.STORE
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
@@ -264,9 +274,10 @@ class TestTensorCores(unittest.TestCase):
     opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, tc_reduce_axis(x.matmul(y, dtype=tc.dtype_out)), (2, AxisType.UNROLL))]
     r = x.matmul(y, dtype=tc.dtype_out)
     ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
-    self.assertGreater(len(wmmas), 0)
-    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
+    uops = tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src)
+    assert contains_wmma(uops)
+    for u in uops:
+      if u.op is Ops.WMMA: assert u.src[-1].src[0].op != Ops.STORE
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
@@ -279,9 +290,10 @@ class TestTensorCores(unittest.TestCase):
     opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.SPLIT, tc_reduce_axis(x.matmul(y, dtype=tc.dtype_out).relu()), (2, AxisType.UNROLL))]
     r = x.matmul(y, dtype=tc.dtype_out).relu()
     ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
-    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
-    self.assertGreater(len(wmmas), 0)
-    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
+    uops = tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src)
+    assert contains_wmma(uops)
+    for u in uops:
+      if u.op is Ops.WMMA: assert u.src[-1].src[0].op != Ops.STORE
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),

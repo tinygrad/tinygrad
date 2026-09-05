@@ -66,6 +66,8 @@ class Reg:
 src = Reg(0, 512)
 
 # Slices for each region (inclusive end)
+FLAT_SCRATCH_LO = src[102]
+FLAT_SCRATCH_HI = src[103]
 s = src[0:105]           # SGPR0-105
 VCC_LO = src[106]
 VCC_HI = src[107]
@@ -148,7 +150,7 @@ def _f32(f: float) -> int: return struct.unpack('I', struct.pack('f', f))[0]
 
 class SrcField(BitField):
   _valid_range = (0, 511)  # inclusive
-  _FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
+  _FLOAT_ENC = {0.0: 128, 0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 
   def __init__(self, hi: int, lo: int, default=s[0]):
     super().__init__(hi, lo, default)
