@@ -469,7 +469,7 @@ pm_link = PatternMatcher([
 
 link_linear_cache:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary() # a baked link lives as long as its bound linear
 
-@rewrite_group(lambda _,input_uops,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
+@rewrite_group(lambda _,input_uops=None,allow_cache=True,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UOp:
   if (linked:=link_linear_cache.get(linear)) is not None: return linked
 
