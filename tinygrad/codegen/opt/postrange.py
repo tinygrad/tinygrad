@@ -52,7 +52,7 @@ class Scheduler:
     if name_override is not None: name = name_override
     else:
       k_type = "r" if self.reduceop is not None else "E"
-      special_uops = sorted([x for x in self.ast.toposort() if x.op is Ops.SPECIAL], key=lambda x: x.arg)
+      special_uops = sorted([x for x in self.ast.toposort(enter_calls=False) if x.op is Ops.SPECIAL], key=lambda x: x.arg)
       special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
@@ -63,7 +63,7 @@ class Scheduler:
   def _globalizable_rngs(self) -> list[UOp]:
     ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.WEAK]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
-    for x in self.ast.toposort():
+    for x in self.ast.toposort(enter_calls=False):
       if x.op is Ops.STAGE:
         ret = [r for r in ret if r in x.ranges]
     return ret
@@ -245,7 +245,7 @@ class Scheduler:
 
           if use_tensor_cores != 2:
             # fix the srcs
-            reduceop = get_single_element([x for x in self.ast.toposort() if x.op is Ops.REDUCE and x.tag == "TC"])
+            reduceop = get_single_element([x for x in self.ast.toposort(enter_calls=False) if x.op is Ops.REDUCE and x.tag == "TC"])
             tne = [x.replace(tag=1) for x in ne]
             ret = reduceop.substitute(dict(zip(ne, tne)))
             srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
@@ -289,7 +289,7 @@ class Scheduler:
     if not (red := self.reduceops): return None
     return UOp(Ops.REDUCE, src=red[0].src, arg=red[0].arg)
   @property
-  def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.INDEX][::-1]
+  def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort(enter_calls=False) if x.op is Ops.INDEX][::-1]
   @property
   def output_shape(self):
     return [s if at not in {AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE} else 1 for s,at in zip(self.full_shape, self.axis_types)]
@@ -303,7 +303,7 @@ def args_from_ast(ast:UOp, dname:str) -> tuple[list[Buffer], dict[str, int]]:
   return [Buffer(dname, x.max_numel(), x.dtype) for x in glbls], {k.expr:int(k.vmax+k.vmin)//2 for k in ast.variables()}
 
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
-  if ast.tag is not None: return ast
+  if ast.tag is not None or any(u.op is Ops.CALL for u in ast.toposort(enter_calls=False)): return ast # a call can't be vectorized
   k = Scheduler(ast, ren)
   k.convert_loop_to_global()
   if ast.arg is not None and ast.arg.opts_to_apply is not None:

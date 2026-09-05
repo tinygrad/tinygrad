@@ -3,6 +3,7 @@ import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
+from tinygrad.uop.ops import gate_called_sink
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
@@ -26,7 +27,7 @@ from tinygrad.schedule.prepare import pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, flatten, argsort, partition
+from tinygrad.helpers import all_same, all_int, flatten, argsort, partition, dedup
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -41,7 +42,7 @@ pm_number_params = PatternMatcher([
 
 def build_range_map(sink:UOp) -> dict[int, int]:
   ctx: dict[int, int] = {}
-  for x in sink.toposort():
+  for x in sink.toposort(enter_calls=False):
     if x.op is Ops.RANGE and x.arg[1] in {AxisType.UNROLL, AxisType.UPCAST}:
       ctx[x.arg[0]] = len(ctx)
   return ctx
@@ -173,7 +174,7 @@ def fix_group_for_reduce(x:UOp):
   if len(reduce_gfr) == 0: return None
 
   # NOTE: if there's other locals here, we need them in the buffer too
-  upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] in (AxisType.WARP, AxisType.LOCAL)]
+  upstream_locals = [u for u in x.toposort(enter_calls=False) if u.op is Ops.RANGE and u.arg[1] in (AxisType.WARP, AxisType.LOCAL)]
 
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
@@ -211,7 +212,7 @@ def merge_reduce_ends(sink:UOp):
 def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
   acc = UOp.placeholder_like(r, ctx.acc_num, AddrSpace.REG)
   ctx.acc_num += 1
-  topo = r.src[0].toposort()
+  topo = r.src[0].toposort(enter_calls=False)
   ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
   input_ranges = tuple(x for x in topo if x.op is Ops.RANGE and x not in r.src[1:] and x not in ended_ranges)
   acc_init = acc.after(*input_ranges).store(UOp.const(identity_element(r.arg[0], r.dtype)))
@@ -397,19 +398,19 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   # put unnumbered variable PARAMs in slots
-  num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
+  num_params = len([x for x in sink.toposort(gate_called_sink(sink)) if x.op is Ops.PARAM and x.arg.slot != -1])
   sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC:
     import os
     if os.environ.get("DBGTV"):
-      try: type_verify(sink, spec_program)
+      try: type_verify(sink, spec_program, enter_calls=False)
       except RuntimeError:
         from tinygrad.uop.render import print_uops
         print_uops(list(sink.toposort()))
         raise
-    else: type_verify(sink, spec_program)
+    else: type_verify(sink, spec_program, enter_calls=False)
 
   # return the rewritten sink
   return sink
@@ -434,9 +435,15 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
+def lines(sink:UOp) -> list[UOp]: return line_rewrite(linearize(sink), pm_linearize_cleanups)
+
+def lower_functions(ctx:Renderer, sink:UOp) -> list[UOp]:
+  fns = dedup(call.src[0] for call in sink.toposort() if call.op is Ops.CALL and call.src[0].op is Ops.SINK)
+  return [UOp(Ops.LINEAR, src=tuple(lines(full_rewrite_to_sink(fn, ctx, optimize=False)))) for fn in fns]
+
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
-  lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
+  lst = lower_functions(ctx, sink) + lines(sink)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
     if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())

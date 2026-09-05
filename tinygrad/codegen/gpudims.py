@@ -40,7 +40,7 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
 
 def add_gpudims(ctx:Renderer, s:UOp):
   if s.arg is None: return None
-  s_topo = list(s.toposort())
+  s_topo = list(s.toposort(enter_calls=False))
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
 
   # get ranges

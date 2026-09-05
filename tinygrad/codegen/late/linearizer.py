@@ -1,13 +1,13 @@
 import heapq
 from typing import Any
 from collections import defaultdict
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str, gate_called_sink
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(sink.toposort())
+  lst = list(sink.toposort(gate_called_sink(sink)))
   out_degree:defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, tuple[int, int, Any]] = {}
 
@@ -42,7 +42,7 @@ def linearize(sink:UOp) -> list[UOp]:
     newlst.append(u:=heapq.heappop(heap)[1])
     for v in u.src:
       out_degree[v] -= 1
-      if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
+      if out_degree[v] == 0 and v in nkey: heapq.heappush(heap, (-nkey[v],v))
   newlst = newlst[::-1]
 
   if getenv("DEBUG_LINEARIZE"):
@@ -59,10 +59,10 @@ class CFGContext:
     # everything is nested inside the sink
     deps: dict[UOp, dict[UOp, None]] = {}
     nesting: dict[UOp, UOp] = {}
-    for u in sink.toposort():
+    for u in sink.toposort(gate_called_sink(sink)):
       # get the deps from the src
       deps[u] = {}
-      for s in u.src: deps[u] |= deps[s]
+      for s in u.src: deps[u] |= deps.get(s, {})
 
       if u.op in (Ops.END, Ops.SINK):
         nesting |= {x:u for x in deps[u] if x.op is Ops.END and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
