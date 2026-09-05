@@ -537,7 +537,10 @@ jobs:
           deps: testing_unit
           amd: 'true'
       - name: Run tests on MOCKAM
-        run: python -m pytest test/test_tiny.py test/unit/test_jit.py
+        run: |
+          ulimit -Sl
+          ulimit -Hl
+          python -m pytest test/test_tiny.py test/unit/test_jit.py
       - name: Run test_tiny on MOCKUSB
         run: HCQ2=0 GMMU=0 DEV=MOCKUSB+AMD python test/test_tiny.py
       - name: Run test_hcq2 on MOCKPCI
