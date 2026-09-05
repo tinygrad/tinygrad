@@ -42,7 +42,7 @@ class ElementwiseMixin(CreationMixin):
 
   def detach(self) -> Self:
     """
-    Returns a new tensor detached from the autograd graph. It shares storage with this tensor.
+    Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
     """
     return self.alu(Ops.DETACH)
 

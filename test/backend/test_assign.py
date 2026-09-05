@@ -1043,15 +1043,14 @@ class TestAssignToUnrealizedView(unittest.TestCase):
       self.assertEqual(cb.tolist(), [[1,2],[3,4]])
 
   def test_detach_buffer_assignment(self):
-    with Context(SPEC=1):
-      for realized in (False, True):
-        with self.subTest(realized=realized):
-          base = Tensor([1., 2., 3.])
-          if realized: base.realize()
-          detached = base.detach()
-          detached.assign(detached + 1).realize()
-          self.assertEqual(detached.tolist(), [2., 3., 4.])
-          self.assertEqual(base.tolist(), [2., 3., 4.])
+    for realized in (False, True):
+      with self.subTest(realized=realized):
+        base = Tensor([1., 2., 3.])
+        if realized: base.realize()
+        detached = base.detach()
+        detached.assign(detached + 1).realize()
+        self.assertEqual(detached.tolist(), [2., 3., 4.])
+        self.assertEqual(base.tolist(), [2., 3., 4.])
 
   def test_detach_copy(self):
     t = Tensor.zeros(2,2, dtype=dtypes.int).to("CPU:0").contiguous().realize()

@@ -206,7 +206,7 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
-    h = self.tok_embeddings(tokens).clone()
+    h = self.tok_embeddings(tokens).contiguous()
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
 
     if self.max_context != 0 and seqlen > 1:
