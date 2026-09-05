@@ -583,6 +583,14 @@ class NV_GSP(NV_IP):
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
     res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
+    # The control's own return status lives in the response header (rpc_gsp_rm_control_v.status); only the
+    # transport-level hdr.rpc_result was ever checked, so a control that RM rejects looked like a success.
+    # That hid NV2080_CTRL_CMD_GPU_PROMOTE_CTX failing with NV_ERR_INVALID_ARGUMENT on every run, leaving the
+    # GR context uninitialised and the channel unable to context switch at all. Surfaced rather than raised:
+    # several controls on this path legitimately return non-zero (e.g. 0x56 NOT_SUPPORTED from the TSG
+    # GPFIFO_SCHEDULE) and the driver is expected to carry on.
+    if (ctl_status := nv.rpc_gsp_rm_control_v.from_buffer_copy(res).status) != 0 and DEBUG >= 2:
+      print(f"nv {self.nvdev.devfmt}: RM control {cmd:#x} on {hObject:#x} returned status {ctl_status:#x}")
     st = type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
 
     # NOTE: gsp only fills in the channel id, the runlist id (and, on gb20x, the doorbell enable bit) are added by the driver.
