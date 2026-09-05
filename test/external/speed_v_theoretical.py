@@ -1,6 +1,10 @@
 import unittest
-from tinygrad import Tensor, TinyJit, Device
-from tinygrad.helpers import Context, DEBUG, GlobalCounters
+from dataclasses import replace
+from itertools import islice
+from tinygrad import Tensor, Device
+from tinygrad.codegen import to_program
+from tinygrad.engine.realize import time_call
+from tinygrad.helpers import Context, DEBUG
 from tinygrad.nn import Conv2d
 from tinygrad.nn.state import get_parameters
 
@@ -9,6 +13,13 @@ class TestKernelSpeed(unittest.TestCase):
     with Context(BEAM=0, DEBUG=0):
       # TODO: randn is 20% faster than rand for gemv
       return Tensor.randn(shape, dtype="half").realize()
+
+  def _time_kernel(self, out:Tensor, beam:int):
+    linear = out.schedule_linear()
+    self.assertEqual(len(linear.src), 1, "expected a single kernel")
+    call = linear.src[0]
+    prg = to_program(call.src[0].replace(arg=replace(call.src[0].arg, beam=beam)), Device[out.device].renderer)
+    return min(islice(time_call(call.replace(src=(prg, *call.src[1:])), clear_l2=True), 3, 10))
 
   def _compare(self, tm, tflops, gbs, nv_tflops=None, nv_gbs=None, amd_tflops=None, amd_gbs=None):
       if DEBUG >= 1:
@@ -34,53 +45,30 @@ class TestKernelSpeed(unittest.TestCase):
 
   def _test_matmul(self, M, K=None, N=None, nv_tflops=None, nv_gbs=None, amd_tflops=None, amd_gbs=None):
     # (MxK) @ (KxN)
-    @TinyJit
-    def f(a, b) -> Tensor: return (a @ b).realize()
-
     if N is None: N = M
     if K is None: K = M
-    tms = []
-    with Context(BEAM=3, PROFILE=1):
-      for i in range(10):
-        a = self._get_tensor(M, K)
-        b = self._get_tensor(K, N)
-        if i >= 3:
-          GlobalCounters.time_sum_s = 0
-          with Context(DEBUG=max(DEBUG.value, 2)): c = f(a, b)
-          tms.append(GlobalCounters.time_sum_s)
-        else:
-          c = f(a, b)
+    a = self._get_tensor(M, K)
+    b = self._get_tensor(K, N)
+    tm = self._time_kernel(c:=a @ b, beam=3)
 
     ops = 2 * M * N * K
     mems = a.dtype.itemsize * M * K + b.dtype.itemsize * K * N + c.dtype.itemsize * M * N
-    tm = min(tms)
     tflops = ops / tm / 1e12
     gbs = mems / tm / 1e9
     self._compare(tm, tflops, gbs, nv_tflops, nv_gbs, amd_tflops, amd_gbs)
 
   def _test_conv_3x3(self, BS, CIN, COUT, H, W, nv_tflops=None, nv_gbs=None, amd_tflops=None, amd_gbs=None):
-    @TinyJit
-    def f(conv, x) -> Tensor: return conv(x).realize()
-    tms = []
     K = 3
     with Context(BEAM=0, DEBUG=0):
       conv = Conv2d(CIN, COUT, K, padding=1)
       Tensor.realize(*get_parameters(conv))
 
-    with Context(BEAM=2, PROFILE=1):
-      for i in range(10):
-        x = self._get_tensor(BS, CIN, H, W)
-        if i >= 3:
-          GlobalCounters.time_sum_s = 0
-          with Context(DEBUG=max(DEBUG.value, 2)): _c = f(conv, x)
-          tms.append(GlobalCounters.time_sum_s)
-        else:
-          _c = f(conv, x)
+    x = self._get_tensor(BS, CIN, H, W)
+    tm = self._time_kernel(_c:=conv(x), beam=2)
 
     # naive algo
     ops = 2 * BS * CIN * COUT * K * K * H * W
     mems = x.nbytes() + conv.weight.nbytes() + conv.bias.nbytes() + _c.nbytes()
-    tm = min(tms)
     tflops = ops / tm / 1e12
     gbs = mems / tm / 1e9
     self._compare(tm, tflops, gbs, nv_tflops, nv_gbs, amd_tflops, amd_gbs)
