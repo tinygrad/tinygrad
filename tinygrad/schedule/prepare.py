@@ -122,17 +122,17 @@ def prepare_to_call(sink:UOp, tensor_roots:tuple[UOp, ...]) -> UOp:
   for u in UOp.sink(sink, *tensor_roots).toposort(enter_calls=False):
     for src in u.src: users.setdefault(src, set()).add(u)
   subs = {}
-  for u in sink.toposort(enter_calls=False):
-    if u.op is not Ops.AFTER or len(u.src) != 2: continue
-    buf, st = u.src
-    if st.op is not Ops.STORE or len(st.src) != 2 or st.src[0] is not buf or st.src[1].op is not Ops.COPY: continue
-    if len(consumers:=users.get(u, set())) != 1: continue
-    consumer = next(iter(consumers))
-    if consumer.op is not Ops.STORE or consumer.src[1] is not u: continue
-    if users.get(buf) != {u, st}: continue
+  for store in sink.toposort(enter_calls=False):
+    if store.op is not Ops.STORE: continue
+    value = store.src[1]
+    if value.op is not Ops.AFTER or len(value.src) != 2: continue
+    buf, init = value.src
+    if init.op is not Ops.STORE or len(init.src) != 2 or init.src[0] is not buf or init.src[1].op is not Ops.COPY: continue
+    # Only this assignment may consume the copy, and only the initialization may use its storage.
+    if users.get(value) != {store} or users.get(buf) != {value, init}: continue
     while buf.op is Ops.RESHAPE and users.get(buf.src[0]) == {buf}: buf = buf.src[0]
     if buf.op is not Ops.BUFFER or buf.is_unbound or buf.buffer.is_allocated(): continue
-    subs[u] = st.src[1]
+    subs[value] = init.src[1]
   sink = sink.substitute(subs, walk=True)
   sink = graph_rewrite(sink, pm_resolve_call_outputs, bottom_up=True, name="resolve call outputs")
   return UOp.sink(*[u for u in sink.toposort(enter_calls=False)

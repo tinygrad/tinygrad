@@ -43,14 +43,13 @@ pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])]
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, *, view_base:UOp|None=None) -> None:
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, *, tensors:list[Tensor]|None=None) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
     in_scope: dict[UOp, bool] = {}
     def visitor(node: UOp) -> bool: return True if node in applied_map else any(in_scope.get(s, False) for s in node.src)
-    scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
-
-    if view_base is not None: scope_tensors = [t for t in scope_tensors if t.uop.storage_base is view_base]
+    if tensors is None: tensors = [t for tref in list(all_tensors) if (t:=tref()) is not None]
+    scope_tensors = [t for t in tensors if t.uop.topovisit(visitor, in_scope)]
 
     # get all Tensors and apply the map. always walk: replace exactly the nodes the map names, values are final
     sink = UOp.sink(*[t.uop for t in scope_tensors])
@@ -60,8 +59,6 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, *, view_base:UOp
     for t,s,ns in zip(scope_tensors, sink.src, new_sink.src):
       if s is ns: continue
       t.uop = ns
-
-def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop is u for tref in list(all_tensors))
 
 # **** Tensor helper functions ****
 
@@ -296,18 +293,24 @@ class Tensor(RandMixin):
     if not self.uop.storage_base.has_buffer_identity():
       self.uop = x.uop.clone()
       return self
-    # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
-    assign = self.uop.after(self.uop.store(x.uop))
-    ib = self.uop
-    while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
-    if ib is not self.uop and ib.has_buffer_identity(after_ok=True):
-      # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
-      # A detached whole-tensor assignment updates aliases, not computations built from the old value.
-      _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign",
-                            view_base=ib.storage_base if self.uop.op is Ops.DETACH else None)
+    update = self.uop.after(self.uop.store(x.uop))
+    # Direct assignments need no alias search. A held reshape of a buffer also owns its update.
+    if self.uop.has_buffer_identity() or self.uop.op not in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}:
+      self.uop = update
+      return self
+    tensors = [t for ref in list(all_tensors) if (t:=ref()) is not None]
+    held = {t.uop for t in tensors}
+    base = self.uop
+    # Find the owning Tensor's buffer or pending write, preserving its shape for function argument substitution.
+    while base.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}:
+      if base.has_buffer_identity() and base in held: break
+      base = base.src[0]
+    if not base.has_buffer_identity(after_ok=True):
+      self.uop = update
     else:
-      # simple assign
-      self.uop = assign
+      # Detach shares storage, but an assignment through it must not rewrite earlier computations using that storage.
+      if self.uop.op is Ops.DETACH: tensors = [t for t in tensors if t.uop.storage_base is base.storage_base]
+      _apply_map_to_tensors({base: base.after(update)}, name="Embed View Assign", tensors=tensors)
     return self
 
   def _buffer(self) -> Buffer:
