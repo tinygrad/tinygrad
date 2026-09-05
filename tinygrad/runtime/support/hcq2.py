@@ -84,7 +84,7 @@ def cstruct(struct_t, **fields:UOp|int) -> UOp:
   return patch(buf, rows, bytes(ctypes.sizeof(struct_t)))
 
 # *****************
-# 0.1. prep: eager buffers become tagged params (the views stay on top), the link puts the buffers back
+# 0.1. prep: eager buffers become tagged params
 
 def input_param(slot:int, b:UOp) -> UOp: return UOp.param(slot, b.dtype, b.max_numel(), b.device).replace(tag="lt_input")
 
