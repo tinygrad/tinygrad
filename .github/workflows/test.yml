@@ -627,6 +627,10 @@ jobs:
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
         run: python -m pytest -n=auto test/backend --ignore test/backend/test_multitensor.py --durations=20
+      - name: Run tensor core tests
+        run: |
+          python -m pytest test/opt/test_tensor_cores.py::TestTensorCores::test_tensor_cores \
+            test/opt/test_tensor_cores.py::TestTensorCores::test_tensor_cores_extra_locals
       - name: Run TestOps.test_add with PMA
         run: VIZ=-1 PMA=1 DEBUG=5 python3 test/backend/test_ops.py TestOps.test_add
       - name: Run process replay tests

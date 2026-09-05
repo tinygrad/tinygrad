@@ -3,7 +3,7 @@ from typing import Any
 import ctypes, time
 from test.mockgpu.helpers import ptx_run
 from tinygrad.runtime.autogen import cuda as orig_cuda
-from tinygrad.helpers import mv_address
+from tinygrad.helpers import DEV, mv_address
 
 for attr in dir(orig_cuda):
   if not attr.startswith('__'):
@@ -40,7 +40,7 @@ def cuDeviceGet(device, ordinal: int) -> int:
   if ordinal < 0:
     return orig_cuda.CUDA_ERROR_INVALID_VALUE
   device._obj.value = ordinal
-  cuda_state.devices[ordinal] = {"compute_capability": (3, 5)}
+  cuda_state.devices[ordinal] = {"compute_capability": divmod(int((DEV.arch or "sm_86")[3:]), 10)}
   return orig_cuda.CUDA_SUCCESS
 
 def cuCtxCreate_v2(pctx, flags: int, dev: int) -> int:
@@ -136,8 +136,7 @@ def cuLaunchKernel(f, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, shar
 def cuDeviceComputeCapability(major, minor, dev: int) -> int:
   if dev not in cuda_state.devices:
     return orig_cuda.CUDA_ERROR_INVALID_VALUE
-  major._obj.value = 3
-  minor._obj.value = 5
+  major._obj.value, minor._obj.value = cuda_state.devices[dev]["compute_capability"]
   return orig_cuda.CUDA_SUCCESS
 
 def cuDeviceCanAccessPeer(canAccessPeer, dev: int, peerDev: int) -> int:

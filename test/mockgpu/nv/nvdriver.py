@@ -1,7 +1,7 @@
 import ctypes, mmap, collections, functools, os
 from tinygrad.runtime.autogen import nv_570 as nv_gpu, libc
 from typing import cast, Any
-from tinygrad.helpers import to_mv
+from tinygrad.helpers import DEV, to_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, VirtFile
 from test.mockgpu.nv.nvgpu import NVGPU
 
@@ -168,7 +168,8 @@ class NVDriver(VirtDriver):
       else:
         for i,c in enumerate(classes): params.classList[i] = c
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_GR_GET_INFO:
-      info = {nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION: nv_gpu.NV2080_CTRL_GR_INFO_SM_VERSION_3_5,
+      major, minor = divmod(int((DEV.arch or "sm_86")[3:]), 10)
+      info = {nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION: (major << 8) | minor,
         nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS: 1,
         nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPC_PER_GPC: 1,
         nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_SM_PER_TPC: 1,
