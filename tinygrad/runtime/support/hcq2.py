@@ -410,7 +410,10 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
   return final_linear
 
 # *****************
-# 5. bufferize placeholders
+# 5. link
+
+@dataclass
+class LinkCtx: cache:bool; inputs:dict[UOp, UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
 def bufferize_buf(ctx:bool, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
   if b.tag is None: return None # a param, not a placeholder
@@ -422,15 +425,11 @@ def bufferize_buf(ctx:bool, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) o
   else: r = dev.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile)
 
   return UOp.from_buffer(r, HCQ_RUNTIME_DEV.value)
-pm_bufferize_placeholders = PatternMatcher([(UPat(Ops.PARAM, name="b"), bufferize_buf)])
 
-# *****************
-# 6. link
-
-def resolve_getaddr(ctx:list[UOp], g:UOp) -> UOp|None:
+def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
   buf, off = unwrap_view(g.src[0])
   if buf.op not in {Ops.BUFFER, Ops.MSELECT}: return None
-  ctx.append(buf) # add to refs
+  ctx.refs.append(buf) # add to refs
   return UOp.const(cast(Buffer, buf.buffer).get_buf(to_tuple(g.arg)[0]).va_addr + off, dtypes.uint64)
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
@@ -448,6 +447,7 @@ def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
   return UOp(Ops.NOOP)
 
 pm_link = PatternMatcher([
+  (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.inputs[b] if b in ctx.inputs else bufferize_buf(ctx.cache, b)),
   (UPat(Ops.GETADDR, name="g"), resolve_getaddr),
   (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"),
     lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)),
@@ -463,10 +463,10 @@ link_linear_cache:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionar
 @rewrite_group(lambda _,cache,input_uops,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, cache=True, input_uops:list[UOp]|None=None) -> UOp:
   if (linked:=link_linear_cache.get(linear)) is not None: return linked
-  if input_uops: linear = linear.substitute({input_param(i, b): b for i, b in enumerate(input_uops)}, walk=True) # an eager template binds its buffers
-  bufferized = graph_rewrite(linear, pm_bufferize_placeholders, ctx=cache, name="bufferize")
-  linked = graph_rewrite(bufferized, pm_link, ctx=(refs:=list[UOp]()), bottom_up=False, name="link")
-  if refs: linked = linked.replace(src=(linked.src[0].after(*dedup(refs)), *linked.src[1:])) # attach refs to linear
+
+  inputs = {input_param(i, b): b for i, b in enumerate(input_uops or ())}
+  linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(cache, inputs)), walk=True, name="link")
+  if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked
 
