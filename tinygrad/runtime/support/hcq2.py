@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
-import functools, time, itertools, decimal, weakref, os, statistics, ctypes, importlib
+import functools, time, itertools, decimal, weakref, statistics, ctypes, importlib
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2, cpu_profile, mv_address
-from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us
+from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us, DEV
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
@@ -97,7 +97,7 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), replace_buffer
 # *****************
 # 1.1. prep: staging copies
 
-STAGING_SIZE, STAGING_SLOTS = (4 if os.getenv("CI") else 128) << 20, 2
+STAGING_SIZE, STAGING_SLOTS = (4 if DEV.interface.startswith("MOCK") else 128) << 20, 2
 
 @functools.cache
 def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
