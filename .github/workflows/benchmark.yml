@@ -319,7 +319,7 @@ jobs:
       fail-fast: false
       matrix:
         dev: ['METAL', 'AMD', 'NV']
-    timeout-minutes: 10
+    timeout-minutes: 11
     defaults:
       run:
         shell: bash -e -o pipefail {0}

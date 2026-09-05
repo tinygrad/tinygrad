@@ -37,7 +37,6 @@ class HCQInfo:
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
 def get_enqueue_devs(call:UOp) -> Any|None:
-  if isinstance(getattr(call.arg, "aux", None), HCQInfo): return None # a batch that already compiled is never enqueued into another one
   if call.src[0].op not in (Ops.PROGRAM, Ops.COPY): return None # only these bodies can be enqueued
   if not (bufs:=get_call_arg_uops(call)) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
