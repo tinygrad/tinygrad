@@ -23,11 +23,11 @@ def transform_to_call(big_sink:UOp) -> UOp:
   if SPEC: type_verify(big_sink, spec_tensor)
   # Storage declarations have unique global IDs; canonicalize them, including declarations inside nested calls.
   unbound = [u for u in big_sink.toposort() if u.is_unbound]
-  body = big_sink.substitute({u: u.replace(arg=replace(u.arg, slot=-1-i)) for i,u in enumerate(unbound)},
+  body = big_sink.substitute({u: u.replace(arg=replace(u.arg, slot=i)) for i,u in enumerate(unbound)},
                              enter_calls=True, walk=True, name="renumber buffers")
   # PARAMs belong to the enclosing scope. Nested call bodies keep their own positional PARAMs.
   inputs = [u for u in body.toposort(enter_calls=False)
-            if (u.op is Ops.PARAM and u.arg.slot >= 0) or u.is_bound_var or
+            if (u.op is Ops.PARAM and (u.addrspace is not AddrSpace.ALU or u.arg.slot >= 0)) or u.is_bound_var or
                (u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL and not u.is_unbound)]
   params = {u: u.replace(arg=replace(u.arg, slot=i, name=f"p{i}" if u.addrspace is AddrSpace.ALU else u.arg.name))
             if u.op is Ops.PARAM else u.param_like(i) for i,u in enumerate(inputs)}

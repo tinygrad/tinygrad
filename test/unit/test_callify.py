@@ -147,6 +147,21 @@ class TestCallify(unittest.TestCase):
     self.assertIs(call.src[0].src[1].src[0], nested_body)
     self.assertEqual(set(call.src[1:]), {x.uop, param})
 
+  def test_fresh_slots_are_negative_and_canonical_slots_are_dense(self):
+    x = Tensor.empty(4)
+    param = UOp.placeholder((4,), x.dtype, device=x.device)
+    inner = x.uop.param_like(0)
+    outputs = UOp.call_with_outputs((inner + 1, inner + 2), x.uop)
+    fresh = [x.uop.arg.slot, param.arg.slot, *(out.src[0].arg.slot for out in outputs)]
+    self.assertLess(fresh[0], 0)
+    self.assertTrue(all(a > b for a, b in zip(fresh, fresh[1:])))
+    call = transform_to_call(UOp.sink(*outputs, param))
+    unbound = [u.arg.slot for u in call.src[0].toposort() if u.is_unbound]
+    self.assertEqual(unbound, list(range(len(outputs))))
+    params = [u.arg.slot for u in call.src[0].toposort(enter_calls=False) if u.op is Ops.PARAM]
+    self.assertEqual(params, list(range(len(call.src)-1)))
+    self.assertIn(param, call.src[1:])
+
   def test_unbound_renumbering_preserves_distinct_outputs(self):
     def output(): return UOp.call_with_outputs((Tensor(1., dtype=dtypes.float, device="CPU").uop,))[0]
     canonical = transform_to_call(UOp.sink(output())).src[0].src[0]

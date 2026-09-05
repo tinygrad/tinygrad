@@ -798,7 +798,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # *** uop Buffer stuff ***
 
-  unique_num = itertools.count(0)
+  # Fresh storage IDs decrease from -1; canonical slots are numbered from 0 within their scope.
+  unique_num = itertools.count(-1, -1)
 
   def getaddr(self, device=None) -> UOp:
     if self.without_after.op not in {Ops.BUFFER, Ops.SHRINK, Ops.BITCAST, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM, Ops.LINEAR}: return self
