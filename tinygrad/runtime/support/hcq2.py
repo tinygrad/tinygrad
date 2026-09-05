@@ -561,7 +561,7 @@ class HCQ2Compiled(Compiled):
   def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
 
   def on_sleep(self):
-    if hasattr(iface:=getattr(self, "iface", None), "sleep"): iface.sleep(self.sleep_timeout_ms)
+    if (iface:=getattr(self, "iface", None)) is not None and hasattr(iface, "sleep"): iface.sleep(self.sleep_timeout_ms)
 
   def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
 
