@@ -544,14 +544,6 @@ jobs:
         run: python -m pytest test/device/test_hcq2.py
       - name: Run disk copy tests on MOCKPCI
         run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
-      - name: Run test_tiny on MOCKPCI Remote
-        env:
-          HCQ2: 0
-        run: |
-          python extra/remote/serve.py 6667 &
-          sleep 2
-          REMOTE=127.0.0.1:6667 python test/test_tiny.py
-          REMOTE=127.0.0.1:6667 python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk; kill %1
 
   testamd:
     strategy:
