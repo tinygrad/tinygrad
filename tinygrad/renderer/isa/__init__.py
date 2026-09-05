@@ -31,12 +31,11 @@ def greg(u:UOp):
 @dataclass
 class PreRegAllocContext:
   lock: UOp|None = None
-  clobbered: set[UOp] = field(default_factory=set)
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
   isel_matcher: PatternMatcher
-  pre_regalloc_matcher: PatternMatcher|None = None
+  pre_regalloc_matcher: PatternMatcher
   post_regalloc_matcher: PatternMatcher
 
   def is_two_address(self, x:UOp) -> bool: return False
