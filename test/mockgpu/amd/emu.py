@@ -1566,6 +1566,25 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
   has_data1 = is_lds and hasattr(inst, 'data1') and inst.data1 is not None
   data1_reg = ctx.inst_field(type(inst).data1) if is_lds else _c(0)  # type: ignore[union-attr]
 
+  # The extracted DS_SWIZZLE pcode contains only a truncated FFT branch. All modes read the VGPR file, not LDS.
+  if is_lds and op_name == 'DS_SWIZZLE_B32':
+    mask, rotate = offset & _c(31), (offset >> _c(5)) & _c(31)
+    rotate = (offset & _c(0x400)).ne(_c(0)).where(_c(0) - rotate, rotate)
+    bits = sum(((mask >> _c(i)) & _c(1) for i in range(5)), _c(0))
+    values = []
+    for i in range(ctx.wave_size):
+      lane = _c(i)
+      fft = (_c(int(f'{i & 31:05b}'[::-1], 2)) >> bits) | (lane & mask)
+      rotated = (lane & mask) | ((lane + rotate) & (mask ^ _c(31)))
+      quad = _c(i & ~3) | ((offset >> _c(2 * (i & 3))) & _c(3))
+      bitmask = ((lane & mask) | ((offset >> _c(5)) & _c(31))) ^ ((offset >> _c(10)) & _c(31))
+      src_lane = (offset >= _c(0xe000)).where(fft, (offset >= _c(0xc000)).where(rotated,
+                  (offset >= _c(0x8000)).where(quad, bitmask))) | _c(i & 32)
+      values.append(_lane_active(exec_mask, src_lane).where(ctx.rvgpr_dyn(addr_reg, src_lane), _c(0)))
+    # Snapshot every source before writing: destination and source registers may be identical.
+    reads = UOp(Ops.STACK, src=tuple(values))
+    return UOp.sink(*(ctx.wvgpr_dyn(vdst_reg, _c(i), val, exec_mask, after=reads) for i, val in enumerate(values)), *ctx.inc_pc())
+
   # DS_PERMUTE/DS_BPERMUTE: cross-lane VGPR access via pcode
   if is_lds and 'PERMUTE' in op_name:
     pcode = get_pcode(inst.op)

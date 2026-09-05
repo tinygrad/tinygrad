@@ -126,6 +126,13 @@ class TestHCQ2Core(unittest.TestCase):
       vi = Variable("i", 1, 10).bind(i)
       np.testing.assert_allclose(f(a[:, :vi]).item(), (a[:, :i] + 1).sum().item(), atol=1e-5, rtol=1e-5)
 
+  def test_map_cpu_buffer_preserves_contents(self):
+    src = Buffer("CPU", 16, dtypes.uint8, preallocate=True)
+    data = bytes(range(16))
+    src.as_memoryview(force_zero_copy=True)[:] = data
+    src.get_buf(Device.DEFAULT)
+    self.assertEqual(bytes(src.as_memoryview(force_zero_copy=True)), data)
+
   def test_staged_copy_roundtrip(self):
     # a host buffer the device cannot read copies in chunks through a small ring of staging slots: every rotation must land bit-exact
     stage = Buffer("CPU", size:=1 << 16, dtypes.uint8, preallocate=True)
