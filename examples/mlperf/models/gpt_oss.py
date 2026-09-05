@@ -305,10 +305,27 @@ class GPTOSS:
       h, *_ = self.run_layer(h, freqs_cis, mask_full, i % 2 == 0, attn_kwargs, ffn_kwargs, save=save)
 
     h_normed = self.norm(h)
-    pad = (-self.dim) % 256
-    h_padded, w_padded = h_normed.pad((None, None, (0, pad))), self.output.pad(((0, 0), (0, pad)))
-    if ASM_GEMM and can_use_asm_gemm(h_padded, w_padded.T): logits = asm_gemm(h_padded, w_padded.T)
-    else: logits = h_normed @ self.output.T
+
+    if getenv("FP8_LMHEAD", 0) and ASM_GEMM:
+      from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm, quantize_mxfp8, mx_pack
+      pad = (-self.dim) % 256
+      h2 = h_normed.reshape(-1, self.dim).pad(((0, 0), (0, pad)))
+      w2 = self.output.pad(((0, 0), (0, pad)))
+      hq, he8, hsi = quantize_mxfp8(h2)
+      oq, oe8, _ = quantize_mxfp8(w2)
+      if hsi is not None and can_use_asm_gemm(hq, oq.T):
+        logits = asm_gemm(hq, oq.T, mx=True, mx_scales=(hsi, he8, mx_pack(oe8), oe8), mx_w_stored=False)
+        logits = logits.reshape(bsz, seqlen, self.vocab_size).cast(dtypes.bfloat16)
+      else:
+        logits = h_normed @ self.output.T
+    elif ASM_GEMM:
+      from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm
+      pad = (-self.dim) % 256
+      h_padded, w_padded = h_normed.pad((None, None, (0, pad))), self.output.pad(((0, 0), (0, pad)))
+      logits = asm_gemm(h_padded, w_padded.T) if can_use_asm_gemm(h_padded, w_padded.T) and getenv("VOCAB_ASM", 1) else h_normed @ self.output.T
+    else:
+      logits = h_normed @ self.output.T
+
     return logits
 
 def _get_pads(uop:UOp) -> list[UOp]:
