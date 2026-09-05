@@ -147,7 +147,9 @@ class NVComputeQueue(NVQueue):
     super().wait(signal, value)
 
   def release(self, signal:UOp, value:UOp, timestamp:bool=False):
-    if self.chain is None or not self.chain.set_release(signal.getaddr(self.devs), value, timestamp): super().release(signal, value, timestamp)
+    if self.chain is None or not self.chain.set_release(signal.getaddr(self.devs), value, timestamp):
+      self.chain = None
+      super().release(signal, value, timestamp)
 
   def submit(self, cmdbuf:UOp) -> UOp:
     if self.qmds:
