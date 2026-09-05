@@ -397,7 +397,7 @@ hcq_compile_cache:dict[tuple[UOp, bool], UOp] = {} # eager templates: a buffer-f
 
 @rewrite_group(lambda linear,input_uops,profile,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
-  if any(isinstance(getattr(c.arg, "aux", None), HCQInfo) for c in linear.src): return linear # compiled already
+  if any(isinstance(getattr(c.without_after.arg, "aux", None), HCQInfo) for c in linear.src): return linear # compiled already
 
   if input_uops is not None:
     use_rt = len(linear.src) < 64 # use rt addr patches if schedules are small. this allows to cache linears, since they won't contain any buffers
@@ -459,8 +459,8 @@ pm_link = PatternMatcher([
   (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast())), fold_binary),
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")),
     fold_words),
-  (UPat(Ops.AFTER, name="a"), lambda a: None if a.is_bound_var else a.src[0] if all(s.op is Ops.NOOP for s in a.src[1:]) else
-   panic(RuntimeError, f"unresolved link words on {a.src[0].op}")),
+  (UPat(Ops.AFTER, name="a"), lambda a: None if a.is_bound_var or a.src[0].op is Ops.CALL else
+   a.src[0] if all(s.op is Ops.NOOP for s in a.src[1:]) else panic(RuntimeError, f"unresolved link words on {a.src[0].op}")),
 ])
 
 link_linear_cache:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary() # a baked link lives as long as its bound linear
