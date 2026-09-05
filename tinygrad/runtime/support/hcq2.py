@@ -36,6 +36,7 @@ class HCQInfo:
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
 def get_enqueue_devs(call:UOp) -> Any|None:
+  if isinstance(getattr(call.arg, "aux", None), HCQInfo): return None # a batch that already compiled is never enqueued into another one
   if call.src[0].op not in (Ops.PROGRAM, Ops.COPY): return None # only these bodies can be enqueued
   if not (bufs:=get_call_arg_uops(call)) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
@@ -86,12 +87,11 @@ def cstruct(struct_t, **fields:UOp|int) -> UOp:
 # *****************
 # 0.1. prep: eager buffers become tagged params
 
-def input_param(slot:int, b:UOp) -> UOp: return UOp.param(slot, b.dtype, b.max_numel(), b.device).replace(tag="lt_input")
-
-def replace_buffer(ctx:tuple[list[UOp], dict[UOp, int]], b:UOp) -> UOp:
-  bufs, slots = ctx
+def replace_buffer(ctx:tuple[bool, list[UOp], dict[UOp, int]], b:UOp) -> UOp:
+  use_rt, bufs, slots = ctx
   if slots.setdefault(b, len(bufs)) == len(bufs): bufs.append(b)
-  return input_param(slots[b], b)
+  param = UOp.param(slots[b], b.dtype, b.max_numel(), b.device)
+  return param if use_rt else param.replace(tag="lt_input")
 pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), replace_buffer)])
 
 # *****************
@@ -397,10 +397,12 @@ hcq_compile_cache:dict[tuple[UOp, bool], UOp] = {} # eager templates: a buffer-f
 
 @rewrite_group(lambda linear,input_uops,profile,ret: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
-  # eager linears hand their buffers to input_uops and cache as buffer-free templates, the jit's linear compiles once and owns its buffers
+  if any(isinstance(getattr(c.arg, "aux", None), HCQInfo) for c in linear.src): return linear # compiled already
+
   if input_uops is not None:
+    use_rt = len(linear.src) < 64 # use rt addr patches if schedules are small. this allows to cache linears, since they won't contain any buffers
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
-    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(input_uops, slots), walk=True, name="replace buffers")
+    linear = graph_rewrite(linear, pm_replace_buffers, ctx=(use_rt, input_uops, slots), walk=True, name="replace buffers")
     if (cached:=hcq_compile_cache.get(key:=(linear, profile))) is not None: return cached
   lin = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
   lin = sched_batches(lin, profile)
@@ -415,13 +417,15 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
 @dataclass
 class LinkCtx: cache:bool; inputs:dict[UOp, UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
-def bufferize_buf(ctx:bool, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
+def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
   if b.tag is None: return None # a param, not a placeholder
 
   dev = cast(HCQ2Compiled, Device[to_tuple(b.device)[0]])
 
-  if b.arg.slot == 0 or b.tag == "program": r = cast(Buffer, unwrap(dev.pm_bufferize.rewrite(b, ctx=dev))) # device state and programs
-  elif ctx: r = Buffer(dev.device, b.max_numel(), b.dtype, options=BufferSpec(host=b.arg.volatile, uncached=True, cpu_access=True), preallocate=True)
+  # device owns the placeholders it names
+  if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
+  elif ctx.cache:
+    r = Buffer(dev.device, b.max_numel(), b.dtype, options=BufferSpec(host=b.arg.volatile, uncached=True, cpu_access=True), preallocate=True)
   else: r = dev.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile)
 
   return UOp.from_buffer(r, HCQ_RUNTIME_DEV.value)
@@ -447,7 +451,8 @@ def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
   return UOp(Ops.NOOP)
 
 pm_link = PatternMatcher([
-  (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.inputs[b] if b in ctx.inputs else bufferize_buf(ctx.cache, b)),
+  (UPat(Ops.CAST, src=(UPat(Ops.CAST, src=(UPat.cvar(),), name="inner"),), name="c"), lambda c, inner: inner.src[0].cast(c.dtype)),
+  (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.inputs[b] if b in ctx.inputs else bufferize_buf(ctx, b)),
   (UPat(Ops.GETADDR, name="g"), resolve_getaddr),
   (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"),
     lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)),
@@ -460,14 +465,17 @@ pm_link = PatternMatcher([
 
 link_linear_cache:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary() # a baked link lives as long as its bound linear
 
-@rewrite_group(lambda _,cache,input_uops,ret: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
-def hcq_link(linear:UOp, cache=True, input_uops:list[UOp]|None=None) -> UOp:
-  if (linked:=link_linear_cache.get(linear)) is not None: return linked
+@rewrite_group(lambda _,input_uops=None,allow_cache=True,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
+def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UOp:
+  if allow_cache and (linked:=link_linear_cache.get(linear)) is not None: return linked
 
-  inputs = {input_param(i, b): b for i, b in enumerate(input_uops or ())}
+  # if we have any link time buffers, do not cache this linear
+  cache = not any(u.tag == "lt_input" for u in linear.toposort() if u.op is Ops.PARAM)
+
+  inputs = {UOp.param(i, b.dtype, b.max_numel(), b.device).replace(tag="lt_input"): b for i, b in enumerate(input_uops or ())}
   linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(cache, inputs)), walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
-  if cache and linked is not linear: link_linear_cache[linear] = linked
+  if allow_cache and cache and linked is not linear: link_linear_cache[linear] = linked
   return linked
 
 # *****************
