@@ -144,7 +144,7 @@ class AMMemoryManager(MemoryManager):
     self.dev.gmc.flush_tlb(ip='MM', vmid=0)
 
 class AMDev:
-  Version = 0xA000000C
+  Version = 0xA000000D
 
   def _disable_aspm(self):
     # L1 across retimers makes reads oscillate to 0xffffffff; power on defaults it enabled. Clearing the GPU endpoint
@@ -200,9 +200,7 @@ class AMDev:
         self.smu.mode1_reset()
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
       self.init_hw(self.soc, self.gmc, self.ih, *(() if self.is_vf else (self.psp, self.smu)))
-    elif not self.is_vf and not self.psp.boot_time_tmr:
-      self.psp._ring_create()
-      self.psp._tmr_init()
+    elif not self.is_vf: self.psp._tmr_init()
 
     # Booting done
     self.is_booting = False
@@ -216,6 +214,7 @@ class AMDev:
         self.smu.set_clocks(level=None)
       else: self.smu.set_clocks(level=-1) # last level, max perf.
       for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
+      self.reg("regSCRATCH_REG5").write(self.psp.tmr_size) # scratch registers are writable after GFX initialization
       self.reg("regSCRATCH_REG7").write(AMDev.Version)
       self.reg("regSCRATCH_REG6").write(1) # set initialized state.
 

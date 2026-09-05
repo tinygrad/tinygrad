@@ -654,9 +654,11 @@ class AM_PSP(AM_IP):
     return self._wait_for_bootloader() if compid != am.PSP_BL__LOAD_SOSDRV else 0
 
   def _tmr_init(self):
-    # Load TOC and calculate TMR size
-    self._prep_msg1(fwm:=self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_TOC])
-    self.tmr_size = self._load_toc_cmd(len(fwm)).resp.tmr_size
+    if self.adev.partial_boot: self.tmr_size = self.adev.reg("regSCRATCH_REG5").read()
+    else:
+      # Load TOC and calculate TMR size
+      self._prep_msg1(fwm:=self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_TOC])
+      self.tmr_size = self._load_toc_cmd(len(fwm)).resp.tmr_size
     # First runtime allocation on both full and partial boots, so the resident TMR keeps the same address.
     if not self.boot_time_tmr: self.tmr_paddr = self.adev.mm.pa_allocator.alloc(self.tmr_size, am.PSP_TMR_ALIGNMENT)
 
