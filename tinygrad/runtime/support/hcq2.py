@@ -492,6 +492,7 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UO
 class HCQ2Compiled(Compiled):
   timestamp_divider: float = 1000.0
   wait_timeout_ms: float = 30000.0
+  sleep_timeout_ms: int|None = None
   rt_nbytes: int = 64 << 20 # the pool every per-linear buffer is carved out of
   pm_encode: PatternMatcher = PatternMatcher([]) # the backend's own encode rules, matched by its submit names
   var_vals: dict[str, int] = {}
@@ -551,13 +552,17 @@ class HCQ2Compiled(Compiled):
     st, done = time.perf_counter(), sig[0]
     while done < value:
       if done != (done:=sig[0]): st = time.perf_counter()
-      elif time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
+      elif (elapsed:=time.perf_counter() - st) > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
+      elif self.sleep_timeout_ms is not None and elapsed > self.sleep_timeout_ms / 1000: self.on_sleep()
 
   def synchronize(self, timeout:int|None=None):
     self._wait_signal(tl:=self.timeline._buf.cpu_view().view(fmt='Q'), tl[1], timeout)
     if self.prof_ents: self.collect_prof()
 
   def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
+
+  def on_sleep(self):
+    if hasattr(iface:=getattr(self, "iface", None), "sleep"): iface.sleep(self.sleep_timeout_ms)
 
   def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
 

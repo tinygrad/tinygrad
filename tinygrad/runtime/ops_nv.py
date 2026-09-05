@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, time, itertools
+import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, itertools
 assert sys.platform != 'win32'
 from typing import Any
 from dataclasses import dataclass
@@ -561,6 +561,7 @@ class MOCKIface(NVKIface): count = 1
 
 class NVDevice(HCQ2Compiled):
   ifaces = [NVKIface, PCIIface, MOCKIface]
+  sleep_timeout_ms = 200 # drain GSP status responses during long waits
   pm_encode = PatternMatcher([
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute", name="submit"), lambda ctx, submit: encode_submit(NVComputeQueue(ctx, submit))),
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy", name="submit"), lambda ctx, submit: encode_submit(NVCopyQueue(ctx, submit))),
@@ -723,13 +724,6 @@ class NVDevice(HCQ2Compiled):
     else:
       if coloc_sz > self.vid_coloc_buf.nbytes: self.vid_coloc_buf = _vid_buf(coloc_sz)
       if filter_sz > self.vid_filter_buf.nbytes: self.vid_filter_buf = _vid_buf(filter_sz)
-
-  def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
-    st = time.perf_counter()
-    while sig[0] < value:
-      # a long wait drains the gsp status queue: that is where nvd reports its faults
-      if (elapsed:=time.perf_counter() - st) > 0.2: self.iface.sleep(200)
-      if elapsed > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
 
   def collect_prof(self):
     # the pc samples of a whole batch come back as one stream, so they are reported against the first kernel of it
