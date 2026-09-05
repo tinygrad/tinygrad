@@ -316,8 +316,7 @@ pm_copy_to_store = PatternMatcher([
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
-  tsink = graph_rewrite(sink, pm_resolve_call_outputs, bottom_up=True, name="resolve call outputs")
-  tsink = graph_rewrite(tsink, multi_pm, name="multi_pm")
+  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS:
     tsink = graph_rewrite(tsink, pm_contiguous_to_store, bottom_up=True, name="materialize contiguous")
     tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")

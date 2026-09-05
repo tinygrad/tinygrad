@@ -62,11 +62,9 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, *, tensors:list[
 
 # **** Tensor helper functions ****
 
-def _augmented_view_rhs(parent:UOp, value:UOp) -> UOp|None:
-  # Recognize the read-modify-write embedded by view.__iadd__ before Python calls parent.__setitem__.
-  if parent.op is not Ops.AFTER or len(parent.src) != 2: return None
-  update = parent.src[1]
-  if update.op is not Ops.AFTER or len(update.src) != 2 or update not in value.backward_slice: return None
+def _inplace_rhs(update:UOp) -> UOp|None:
+  # Recover the computed value of a read-modify-write; ordinary clone stores are not self-referential.
+  if update.op is not Ops.AFTER or len(update.src) != 2: return None
   store = update.src[1]
   if store.op is not Ops.STORE or store.src[0] not in store.src[1].toposort(enter_calls=False): return None
   return store.src[1]
@@ -294,23 +292,21 @@ class Tensor(RandMixin):
       self.uop = x.uop.clone()
       return self
     update = self.uop.after(self.uop.store(x.uop))
-    # Direct assignments need no alias search. A held reshape of a buffer also owns its update.
-    if self.uop.has_buffer_identity() or self.uop.op not in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}:
-      self.uop = update
-      return self
-    tensors = [t for ref in list(all_tensors) if (t:=ref()) is not None]
-    held = {t.uop for t in tensors}
     base = self.uop
-    # Find the owning Tensor's buffer or pending write, preserving its shape for function argument substitution.
-    while base.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}:
-      if base.has_buffer_identity() and base in held: break
-      base = base.src[0]
-    if not base.has_buffer_identity(after_ok=True):
-      self.uop = update
-    else:
-      # Detach shares storage, but an assignment through it must not rewrite earlier computations using that storage.
-      if self.uop.op is Ops.DETACH: tensors = [t for t in tensors if t.uop.storage_base is base.storage_base]
-      _apply_map_to_tensors({base: base.after(update)}, name="Embed View Assign", tensors=tensors)
+    # Direct assignments need no alias search. A held reshape of a buffer also owns its update.
+    if not base.has_buffer_identity() and base.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}:
+      tensors = [t for ref in list(all_tensors) if (t:=ref()) is not None]
+      held = {t.uop for t in tensors}
+      # Find the owning Tensor's buffer or pending write, preserving its shape for function argument substitution.
+      while base.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}:
+        if base.has_buffer_identity() and base in held: break
+        base = base.src[0]
+      if base.has_buffer_identity(after_ok=True):
+        # Detach shares storage, but an assignment through it must not rewrite earlier computations using that storage.
+        if self.uop.op is Ops.DETACH: tensors = [t for t in tensors if t.uop.storage_base is base.storage_base]
+        _apply_map_to_tensors({base: base.after(update)}, name="Embed View Assign", tensors=tensors)
+        return self
+    self.uop = update
     return self
 
   def _buffer(self) -> Buffer:
@@ -546,9 +542,9 @@ class Tensor(RandMixin):
     # before the functional setitem below, while retaining the computed RHS for autograd.
     if isinstance(v, Tensor) and self.is_floating_point() and not self.uop._base_buffer_is_realized():
       a = self.uop
-      if (rhs:=_augmented_view_rhs(a, v.uop)) is not None:
+      if a.op is Ops.AFTER and len(a.src) == 2 and a.src[1] in v.uop.backward_slice and (view_rhs:=_inplace_rhs(a.src[1])) is not None:
         _apply_map_to_tensors({a: a.src[0]}, name="functional setitem")
-        v = v._apply_uop(lambda _: rhs)
+        v = v._apply_uop(lambda _: view_rhs)
     # raise if mutation would diverge from eager (allow only pure views of a realized buffer; exclude +=/-= RHS via v_uop/v_bw)
     v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
     if self.uop.op_in_backward_slice_with_self(Ops.BUFFER):
@@ -563,10 +559,7 @@ class Tensor(RandMixin):
     realized = is_disk or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized()
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value.
-      # the store is self-referential there (the computed value touches its target); clone stores are untouched
-      if v.uop.op is Ops.AFTER and len(v.uop.src) == 2 and (st:=v.uop.src[1]).op is Ops.STORE and \
-          st.src[0] in st.src[1].toposort(enter_calls=False): v = v._apply_uop(lambda x: st.src[1])
+      if (rhs:=_inplace_rhs(v.uop)) is not None: v = v._apply_uop(lambda _, rhs=rhs: rhs)
       self.replace(self._getitem(indices, v))
     elif advanced: # advanced setitem
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")
