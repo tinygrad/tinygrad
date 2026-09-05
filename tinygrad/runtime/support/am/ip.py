@@ -1,6 +1,6 @@
 import ctypes, time, contextlib, functools
 from typing import Any, Iterable, Literal
-from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits, round_up
+from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import import_soc
 from tinygrad.runtime.support.memory import AddrSpace
@@ -603,9 +603,10 @@ class AM_PSP(AM_IP):
     self.ring_size = 0x10000
     self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=False, boot=True)
 
-    self.tmr_size, self.tmr_paddr = 0x400000, 0
+    self.max_tmr_size, self.tmr_size = 0xa700000, 0
     self.boot_time_tmr = self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,14), (14,0,2), (14,0,3)}
     self.autoload_tmr = self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,14)}
+    self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True) if not self.boot_time_tmr else 0
 
   def init_hw(self):
     spl_key = am.PSP_FW_TYPE_PSP_SPL if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) else am.PSP_FW_TYPE_PSP_KDB
@@ -620,7 +621,6 @@ class AM_PSP(AM_IP):
 
     self._ring_create()
     if am.PSP_FW_TYPE_PSP_TOC in self.adev.fw.sos_fw: self._tmr_init()
-    self.alloc_tmr(self.tmr_size)
 
     # SMU fw should be loaded before TMR.
     if hasattr(self.adev.fw, 'smu_psp_desc'): self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
@@ -654,18 +654,11 @@ class AM_PSP(AM_IP):
 
     return self._wait_for_bootloader() if compid != am.PSP_BL__LOAD_SOSDRV else 0
 
-  def alloc_tmr(self, size:int):
-    assert self.adev.is_booting and self.tmr_paddr == 0
-    self.tmr_size = size
-    if not self.boot_time_tmr:
-      assert size > 0, "PSP returned an empty TMR size"
-      # Always the first non-boot allocation: replaying its size preserves resident firmware across sessions.
-      self.tmr_paddr = self.adev.mm.pa_allocator.alloc(round_up(size, 0x1000), am.PSP_TMR_ALIGNMENT)
-
   def _tmr_init(self):
     # Load TOC and calculate TMR size
     self._prep_msg1(fwm:=self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_TOC])
     self.tmr_size = self._load_toc_cmd(len(fwm)).resp.tmr_size
+    assert self.tmr_size <= self.max_tmr_size
 
   def _ring_create(self):
     # If the ring is already created, destroy it
