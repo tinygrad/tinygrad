@@ -162,7 +162,7 @@ class TestHCQ2FFI(unittest.TestCase):
   def _run(body:UOp) -> list[Buffer]:
     call = hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test_ffi")).call(aux=hcq2.HCQInfo(("CPU",))))
     assert call is not None
-    linear = hcq2.hcq_link(lower_and_compile(UOp(Ops.LINEAR, src=(call,))), cache=False)
+    linear = hcq2.hcq_link(lower_and_compile(UOp(Ops.LINEAR, src=(call,))), allow_cache=False)
     run_linear(linear, jit=True)
     return [u.buffer for u in linear.src[0].without_after.src[1:] if u.op is Ops.BUFFER]
 
