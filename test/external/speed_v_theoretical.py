@@ -40,7 +40,7 @@ class TestKernelSpeed(unittest.TestCase):
     if N is None: N = M
     if K is None: K = M
     tms = []
-    with Context(BEAM=3):
+    with Context(BEAM=3, PROFILE=1):
       for i in range(10):
         a = self._get_tensor(M, K)
         b = self._get_tensor(K, N)
@@ -67,7 +67,7 @@ class TestKernelSpeed(unittest.TestCase):
       conv = Conv2d(CIN, COUT, K, padding=1)
       Tensor.realize(*get_parameters(conv))
 
-    with Context(BEAM=2):
+    with Context(BEAM=2, PROFILE=1):
       for i in range(10):
         x = self._get_tensor(BS, CIN, H, W)
         if i >= 3:

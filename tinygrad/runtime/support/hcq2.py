@@ -422,7 +422,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
 # 5. link
 
 @dataclass
-class LinkCtx: cache:bool; inputs:dict[UOp, UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
+class LinkCtx: inputs:dict[UOp, UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
 def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
   if b.tag is None: return None # a param, not a placeholder
@@ -431,7 +431,8 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's
 
   # device owns the placeholders it names
   if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
-  elif ctx.cache: r = Buffer(dev.device, b.max_numel(), b.dtype, options=BufferSpec(host=b.arg.volatile, uncached=True, cpu_access=True), preallocate=True)
+  elif not ctx.use_rt:
+    r = Buffer(dev.device, b.max_numel(), b.dtype, options=BufferSpec(host=b.arg.volatile, uncached=True, cpu_access=True), preallocate=True)
   else: r = dev.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile)
 
   return UOp.from_buffer(r, HCQ_RUNTIME_DEV.value)
@@ -465,21 +466,21 @@ pm_link = PatternMatcher([
   (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast())), fold_binary),
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")),
     fold_words),
-  (UPat(Ops.AFTER, name="a"), lambda a: None if a.is_bound_var else a.src[0] if all(s.op is Ops.NOOP for s in a.src[1:]) else
-   panic(RuntimeError, f"unresolved link words on {a.src[0].op}")),
+  (UPat(Ops.AFTER, name="a"), lambda a: None if a.is_bound_var or a.src[0].op is Ops.CALL else
+   a.src[0] if all(s.op is Ops.NOOP for s in a.src[1:]) else panic(RuntimeError, f"unresolved link words on {a.src[0].op}")),
 ])
 
 link_linear_cache:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary() # a baked link lives as long as its bound linear
 
 @rewrite_group(lambda _,input_uops=None,allow_cache=True,ret=None: f"HCQ Link {pluralize('Kernel', len(ret.src))}")
 def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UOp:
-  if (linked:=link_linear_cache.get(linear)) is not None: return linked
+  if allow_cache and (linked:=link_linear_cache.get(linear)) is not None: return linked
 
   # if we have any link time buffers, do not cache this linear
   cache = allow_cache and not any(u.tag == "lt_input" for u in linear.toposort() if u.op is Ops.PARAM)
 
   inputs = {UOp.param(i, b.dtype, b.max_numel(), b.device).replace(tag="lt_input"): b for i, b in enumerate(input_uops or ())}
-  linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(cache, inputs)), walk=True, name="link")
+  linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(inputs, use_rt=allow_cache and not cache)), walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked
