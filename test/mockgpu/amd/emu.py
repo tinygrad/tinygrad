@@ -1571,8 +1571,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     funcs = {'reverse_bits': lambda x: _bitreverse(x, 32) >> _c(27), 'count_ones': _countbits,
              'thread_in': lambda x: ctx.rvgpr_dyn(addr_reg, x & _c(ctx.wave_size - 1)),
              'thread_valid': lambda x: _lane_active(exec_mask, x & _c(ctx.wave_size - 1))}
-    result, _ = parse_pcode(get_pcode(inst.op), {'offset0': (offset & _c(255)).cast(dtypes.uint8),
-                                              'offset1': (offset >> _c(8)).cast(dtypes.uint8)}, funcs)
+    result, _ = parse_pcode(pcode, {'offset0': offset0.cast(dtypes.uint8), 'offset1': offset1.cast(dtypes.uint8)}, funcs)
     values = [result[f'thread_out@{i}'] for i in range(ctx.wave_size)]
     # Snapshot every source before writing: destination and source registers may be identical.
     reads = UOp(Ops.STACK, src=tuple(values))
@@ -1580,7 +1579,6 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
 
   # DS_PERMUTE/DS_BPERMUTE: cross-lane VGPR access via pcode
   if is_lds and 'PERMUTE' in op_name:
-    pcode = get_pcode(inst.op)
     srcs = {'ADDR': addr_reg, 'DATA0': vdata_reg, 'VDST': vdst_reg, 'OFFSET': offset,
             'EXEC': exec_mask.cast(dtypes.uint64), '_vgpr': ctx.vgpr, '_wave_size': ctx.wave_size}
     _, assigns = parse_pcode(pcode, srcs)

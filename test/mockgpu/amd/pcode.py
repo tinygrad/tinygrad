@@ -1232,8 +1232,9 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       var = toks[0].val
       j, idx_toks = _match_bracket(toks, 1)
       if j < len(toks) and toks[j].type == 'EQUALS':
+        idx_expr = parse_tokens(idx_toks, env, funcs)
         # Static index: var[NUM] = value
-        if isinstance(idx := _single_value(parse_tokens(idx_toks, env, funcs)), int):
+        if isinstance(idx := _single_value(idx_expr), int):
           val = parse_tokens(toks[j+1:], env, funcs)
           existing = block_assigns.get(var, env.get(var))
           if existing is not None and isinstance(existing, UOp):
@@ -1245,7 +1246,6 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         # Dynamic index: var[expr] = value where var has @-elements
         elems = [(k.split('@')[1], v) for k, v in {**env, **block_assigns}.items() if k.startswith(f'{var}@') and isinstance(v, UOp)]
         if elems:
-          idx_expr = parse_tokens(idx_toks, env, funcs)
           val = parse_tokens(toks[j+1:], env, funcs)
           for elem_idx_str, old_elem in elems:
             elem_idx = int(elem_idx_str)
@@ -1436,7 +1436,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None, funcs: dic
     if lines and re.search(r'(&&|\|\||[&|+\-*/^])\s*$', lines[-1]): lines[-1] += ' ' + line
     else: lines.append(line)
   assert not blocks, "unclosed pcode block"
-  _, final, _ = parse_block(lines, 0, env, {**_FUNCS, **(funcs or {})}, assigns=assigns)
+  _, final, _ = parse_block(lines, 0, env, {**_FUNCS, **funcs} if funcs else None, assigns=assigns)
   sliced = set(d.split('[')[0] for d, _ in assigns if '[' in d)
   for var, val in final.items():
     if var in ['D0', 'S0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA'] and isinstance(val, UOp):
