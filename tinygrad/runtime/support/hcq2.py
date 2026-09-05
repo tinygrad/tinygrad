@@ -415,7 +415,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
 # 5. link
 
 @dataclass
-class LinkCtx: cache:bool; inputs:dict[UOp, UOp]; refs:list[UOp] = field(default_factory=list) # noqa: E702
+class LinkCtx: inputs:dict[UOp, UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
 def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
   if b.tag is None: return None # a param, not a placeholder
@@ -424,7 +424,7 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's
 
   # device owns the placeholders it names
   if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
-  elif ctx.cache:
+  elif not ctx.use_rt:
     r = Buffer(dev.device, b.max_numel(), b.dtype, options=BufferSpec(host=b.arg.volatile, uncached=True, cpu_access=True), preallocate=True)
   else: r = dev.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile)
 
@@ -470,12 +470,12 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UO
   if allow_cache and (linked:=link_linear_cache.get(linear)) is not None: return linked
 
   # if we have any link time buffers, do not cache this linear
-  cache = not any(u.tag == "lt_input" for u in linear.toposort() if u.op is Ops.PARAM)
+  cache = allow_cache and not any(u.tag == "lt_input" for u in linear.toposort() if u.op is Ops.PARAM)
 
   inputs = {UOp.param(i, b.dtype, b.max_numel(), b.device).replace(tag="lt_input"): b for i, b in enumerate(input_uops or ())}
-  linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(cache, inputs)), walk=True, name="link")
+  linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(inputs, use_rt=allow_cache and not cache)), walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
-  if allow_cache and cache and linked is not linear: link_linear_cache[linear] = linked
+  if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked
 
 # *****************
