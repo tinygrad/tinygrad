@@ -1,6 +1,6 @@
-import unittest, contextlib, ctypes, numpy as np
+import unittest, contextlib, ctypes, gc, numpy as np
 from unittest.mock import patch
-from tinygrad import Device, Tensor, TinyJit, Variable, dtypes
+from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, dedup, partition
@@ -123,6 +123,21 @@ class TestHCQ2Core(unittest.TestCase):
         for _ in range(3): f(x)
       return max(c.arg.aux.nargs for c in batches)
     self.assertEqual(nargs(2), nargs(12))
+
+  def test_caches_hold_no_buffers(self):
+    # an eager template caches without its buffers and the jit's linear compiles once uncached: freeing the tensors frees the device memory
+    def step(i):
+      x = Tensor(np.full(1024, i, np.float32)).to(Device.DEFAULT).realize()
+      @TinyJit
+      def f(a): return (a * 2 + 1).contiguous().realize()
+      for _ in range(3): out = f(x)
+      self.assertEqual(out.tolist(), [2.0 * i + 1] * 1024)
+    step(1) # warms the programs, templates and rings
+    gc.collect()
+    used = GlobalCounters.mem_used
+    for i in range(2, 5): step(i)
+    gc.collect()
+    self.assertEqual(GlobalCounters.mem_used, used)
 
   def test_device_state_survives_as_link_refs(self):
     # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
