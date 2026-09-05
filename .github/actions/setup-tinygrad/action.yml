@@ -281,7 +281,15 @@ runs:
       run: |
         if [[ "$RUNNER_OS" == "Linux" ]]; then
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake flex bison libfl-dev libboost-filesystem-dev libboost-thread-dev
+          sudo apt-get install -y --no-install-recommends cmake flex bison libfl-dev
+          cd "$RUNNER_TEMP"
+          curl -fLO https://archives.boost.io/release/1.90.0/source/boost_1_90_0.tar.bz2
+          echo '49551aff3b22cbc5c5a9ed3dbc92f0e23ea50a0f7325b0d198b705e8ee3fc305  boost_1_90_0.tar.bz2' | sha256sum -c -
+          tar -xf boost_1_90_0.tar.bz2
+          cd boost_1_90_0
+          ./bootstrap.sh --with-libraries=filesystem,thread --prefix="$RUNNER_TEMP/boost"
+          ./b2 -j2 install link=static runtime-link=shared threading=multi variant=release cxxflags=-fPIC
+          export CMAKE_PREFIX_PATH="$RUNNER_TEMP/boost"
         else
           brew install flex bison boost
         fi
