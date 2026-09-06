@@ -402,7 +402,7 @@ class AMDComputeQueue(HWQueue):
   def submit(self, cmdbuf:UOp) -> UOp: # the ring gets an indirect buffer packet: 4 dwords, put stays aligned so it never wraps mid packet
     base, off = unwrap_view(cmdbuf)
     blob = struct.pack("IIII", self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), 0, 0, cmdbuf.max_numel() // 4 | self.pm4.INDIRECT_BUFFER_VALID)
-    ib = patch(UOp.placeholder((16,), dtypes.uint8, device=self.devs, tag=to_name("ib", self.queue)), [(4, base.getaddr(self.devs) + off)], blob)
+    ib = patch(UOp.placeholder((16,), dtypes.uint8, device="CPU", tag=to_name("ib", self.queue)), [(4, base.getaddr(self.devs) + off)], blob)
     return self.push(self.prof_bump(cmdbuf), ib, self.dev.compute_queue)
 
   def push(self, cmdbuf:UOp, words:UOp, q, unit:int=4, doorbell_lag:int=0) -> UOp:
