@@ -442,7 +442,7 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's
 
   # device owns the placeholders it names
   if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
-  elif not ctx.use_rt: # a kept link's buffers live in vram like a graph's pages, the volatile ones in host memory
+  elif not ctx.use_rt:
     spec = BufferSpec(host=b.arg.volatile, uncached=b.arg.volatile, cpu_access=True)
     r = Buffer(dev.device, b.max_numel(), b.dtype, options=spec, preallocate=True)
   else: r = dev.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile)
