@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function
 from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill
@@ -215,12 +216,16 @@ class TestQ8Quantize(unittest.TestCase):
     out = flash_attention(q, assigned, 1).realize()
     np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
 
+  def test_flash_attention_decode_symbolic_gqa(self):
+    with patch.object(Tensor, "scaled_dot_product_attention", side_effect=AssertionError("expected custom decode")):
+      self._test_flash_decode(8, 2, 256, 128, 37, symbolic=True)
+
   def test_flash_attention_decode_gqa_tail(self): self._test_flash_decode(3, 1, 192, 64, 37)
 
   def test_flash_attention_decode_gqa_output_layout(self): self._test_flash_decode(4, 1, 128, 256, 3)
   def test_flash_attention_decode_large_gqa_group(self): self._test_flash_decode(8, 1, 256, 256, 73)
 
-  def _test_flash_decode(self, heads, kv_heads, dim, n, valid):
+  def _test_flash_decode(self, heads, kv_heads, dim, n, valid, symbolic=False):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
     q = rng.normal(size=(1, heads, 1, dim)).astype(np.float16)
@@ -229,7 +234,12 @@ class TestQ8Quantize(unittest.TestCase):
     scores = q[0].astype(np.float32) @ k.transpose(0, 2, 1) / np.sqrt(dim)
     probs = np.exp(scores - scores.max(-1, keepdims=True))
     expected = (probs / probs.sum(-1, keepdims=True)) @ v
-    np.testing.assert_allclose(flash_attention(Tensor(q), Tensor(cache), valid).numpy(), expected[None], rtol=2e-3, atol=2e-3)
+    cache_tensor = Tensor(cache)
+    if symbolic:
+      start_pos = UOp.variable("start_pos", 0, n-1).bind(valid-1)
+      valid = start_pos + 1
+      cache_tensor = Tensor(cache_tensor.realize().uop.after(Tensor(start_pos).uop))
+    np.testing.assert_allclose(flash_attention(Tensor(q), cache_tensor, valid).numpy(), expected[None], rtol=2e-3, atol=2e-3)
 
   def test_prefill_attention_nonfinite_cache_tail(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
