@@ -75,7 +75,7 @@ class Handler(HTTPRequestHandler):
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     def chunk(d:dict): return {"choices": [{"index":0, "delta":d, "finish_reason":None}], **tmpl}
     out: list[int] = []
-    finish_reason = "stop"
+    finish_reason = "length"
     st = pt = time.perf_counter()
     dec = tok.stream_decoder()
     router = StreamRouter(reasoning)
@@ -90,12 +90,12 @@ class Handler(HTTPRequestHandler):
       for next_id in model.generate(ids, temperature=temperature):
         if len(out) == 0:
           stderr_log(f"prefill:{(prompt_tokens-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-        if tok.is_end(next_id): break
+        if tok.is_end(next_id):
+          finish_reason = "stop"
+          break
         out.append(next_id)
         for field, delta in router.route(dec(next_id)): yield chunk({field:delta})
-        if max_tokens is not None and len(out) >= max_tokens:
-          finish_reason = "length"
-          break
+        if max_tokens is not None and len(out) >= max_tokens: break
       for field, delta in router.route(dec(), final=True): yield chunk({field:delta})
       tool_calls: list[dict] = []
       for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", router.buf, re.DOTALL):
