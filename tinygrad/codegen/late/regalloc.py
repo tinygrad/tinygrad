@@ -1,20 +1,18 @@
 import itertools
 from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.isa import ISARenderer, Register, greg
-from tinygrad.dtype import dtypes
+from tinygrad.renderer.isa import ISARenderer, Register, rdef, LinearContext
+from typing import Any
 
 PSEUDO_OPS = {Ops.CONST, Ops.CAST, Ops.BITCAST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
 
 class LinearScanRegallocContext:
   # returns the uop that defines the virtual register
   def vdef(self, v:Register) -> UOp: return self.uops[self.live_range[v][0]]
-  def __init__(self, uops:list[UOp], ren:ISARenderer):
+  def __init__(self, ctx:LinearContext, uops:list[UOp], ren:ISARenderer):
     self.uops = uops
     self.ren = ren
     self.idx = itertools.count()
-    # the label associated with each loop NOTE: this is only used post regalloc and should be removed
-    self.loop_label: dict[UOp, str] = {}
 
     # compute live ranges
     self.live_range: dict[Register, list[int]] = {}
@@ -23,16 +21,15 @@ class LinearScanRegallocContext:
     for idx,u in reversed(list(enumerate(uops))):
       if u.op in PSEUDO_OPS: continue
       defs = u.tag if isinstance(u.tag, tuple) else ()
-      for v in defs + tuple(greg(s) for s in dedup(u.src)):
+      for v in defs + tuple(rdef(s) for s in dedup(u.src)):
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, idx)
       for v in defs:
         if v in lr and (n:=max((e for s,e in loops.items() if s <= lr[v][-1] < e), default=None)): lr[v].append(n)
       if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src)
 
     # allocate registers
-    self.stack_size: int = 0
     self.locals: dict[UOp, UOp] = {}
-    self.spills: dict[Register, UOp] = {} # mapping from virtual to stack slot
+    self.spills: dict[Register, Any] = {} # mapping from virtual to arbitrary spill slot
     self.reals: dict[int, dict[Register, Register]] = {} # mapping from virtual to real at each program point
     self.insert_before: dict[int, list[tuple[Register, Register]]] = {} # fills to be inserted at each program point
     live: dict[Register, Register] = {} # mapping from virtual to real that's currently assigned to it
@@ -49,11 +46,7 @@ class LinearScanRegallocContext:
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
       if v not in self.spills:
-        # the value of a BUFFER is its 64bit address, XMM registers need 16 bytes
-        sz = 16 if v.cons[0].size == 16 else (8 if self.vdef(v).op is Ops.BUFFER else self.vdef(v).dtype.itemsize)
-        offset = self.stack_size + (sz - self.stack_size % sz) % sz
-        self.spills[v] = UOp.cconst(offset, dtypes.int32)
-        self.stack_size = offset + sz
+        self.spills[v] = ctx.assign_spill_slot(v, self.vdef(v))
       r = alloc(cons if cons is not None else v.cons, i)
       self.insert_before.setdefault(i, []).append((v, r))
       return r
@@ -64,7 +57,7 @@ class LinearScanRegallocContext:
       for s in u.src:
         # HACK: cause of later hacks to lower range
         if u.op is Ops.END: continue
-        if not isinstance(v:=greg(s), Register): continue
+        if not isinstance(v:=rdef(s), Register): continue
         if v not in live: live[v] = fill(v, i)
         self.reals.setdefault(i, {})[v] = live[v]
 
@@ -76,16 +69,11 @@ class LinearScanRegallocContext:
           cons = v.cons
           # two address instructions (src is reused by def) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
           if ren.is_two_address(u) and j == 0:
-            uses = tuple(live.get(greg(s)) for s in u.src)
+            uses = tuple(live.get(rdef(s)) for s in u.src)
             cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
           # HACK: cause the range is missing the comparison
           live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
           self.reals.setdefault(i, {})[v] = live[v]
-
-      # allocate stack array
-      if u.op is Ops.BUFFER:
-        self.locals[u] = UOp.cconst(self.stack_size, dtypes.int32)
-        self.stack_size += u.max_numel() * u.dtype.itemsize
 
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
@@ -113,21 +101,13 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nsrc = []
   for j,s in enumerate(x.src):
     # v here is the virtual defined by the original s as s is the rewritten version
-    if i in ctx.reals and (v:=greg(ctx.uops[i].src[j])) in ctx.spills: nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]))
+    if i in ctx.reals and (v:=rdef(ctx.uops[i].src[j])) in ctx.spills: nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]))
     else: nsrc.append(s)
   ndefs = tuple(ctx.reals[i][v] for v in x.tag) if isinstance(x.tag, tuple) else x.tag
-  if x.op is Ops.BUFFER: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], tag=ndefs))
-  else: nx = x.replace(src=tuple(nsrc), tag=ndefs)
+  nx = x.replace(src=tuple(nsrc), tag=ndefs)
 
   before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), r) for v,r in ctx.insert_before.get(i, [])]
   after = [ctx.ren.spill(ctx.spills[v], nx) for v in x.tag if v in ctx.spills] if isinstance(x.tag, tuple) else []
-
-  # alloc/dealloc stack
-  if ctx.stack_size > 0:
-    sp = ctx.ren.stack_pointer()
-    offset = UOp.cconst(ctx.stack_size, sp.dtype)
-    if i == 0: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, src=(sp, offset), tag=sp.tag))] + before
-    elif i == len(ctx.uops) - 2: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, src=(sp, offset), tag=sp.tag))]
 
   return nx, before + [nx] + after
 
