@@ -87,7 +87,7 @@ class CPUAllocator(HCQAllocator['CPUDevice']):
     ctypes.memmove(int(dest.va_addr), from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
-    ctypes.memmove(from_mv(dest), int(src.va_addr), len(dest))
+    dest[:] = self._as_buffer(src)[:len(dest)]
   def _do_map(self, buf:HCQBuffer):
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
     return HCQBuffer(buf.view.addr, buf.size, view=buf.view, owner=buf.owner)

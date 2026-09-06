@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os, sys, time
-from tinygrad.runtime.support.system import RemotePCIDevice
+from extra.remote.hcq1_remote import RemotePCIDevice
 
 LAT_N_RUNS = 500
 THROUGHPUT_N_RUNS = 8
@@ -18,7 +18,7 @@ if __name__ == "__main__":
   print(f"connected to {os.environ['REMOTE']}, device: {name}\n")
 
   # ping (minimal server round-trip, no device I/O)
-  from tinygrad.runtime.support.system import RemoteCmd
+  from extra.remote.hcq1_remote import RemoteCmd
   sock = pci.sock
   for _ in range(10): RemotePCIDevice._rpc(sock, 0, RemoteCmd.PING)
   st = time.perf_counter()

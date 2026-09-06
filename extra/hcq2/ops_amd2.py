@@ -146,7 +146,7 @@ class AMDComputeQueue(HWQueue):
   def wait(self, signal:UOp, value:UOp): self.wait_reg_mem(value.cast(dtypes.uint32), mem=signal.getaddr(self.devs))
 
   def timestamp(self, signal:UOp):
-    self.release_mem(signal.getaddr(self.devs), 0, self.pm4.data_sel__mec_release_mem__send_gpu_clock_counter,
+    self.release_mem(signal.getaddr(self.devs) + UOp.const(8, dtypes.uint64), 0, self.pm4.data_sel__mec_release_mem__send_gpu_clock_counter,
                      self.pm4.int_sel__mec_release_mem__none)
 
   def signal(self, signal:UOp, value:UOp):
@@ -198,7 +198,7 @@ class AMDSDMAQueue(HWQueue):
 
   def timestamp(self, signal:UOp):
     self.q(self.sdma.SDMA_OP_TIMESTAMP | self.sdma.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
-           signal.getaddr(self.devs))
+           signal.getaddr(self.devs) + UOp.const(8, dtypes.uint64))
 
   def signal(self, signal:UOp, value:UOp): # a fence packet then a trap
     op = self.sdma.SDMA_OP_FENCE | (self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.target[0] != 9 else 0)

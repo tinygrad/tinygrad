@@ -11,6 +11,7 @@ from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.runtime.ops_python import PythonRenderer
 from test.helpers import to_uops_list
 
 def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
@@ -56,8 +57,8 @@ def _test_uops_result(output_dtype, uops, res):
   run_uops([out], [buf])
   return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and
-                     dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires C-style pointer bitcast and 64-bit ints")
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, PythonRenderer)) and
+                     dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires buffer bitcast and 64-bit ints")
 class TestBitcastBufferView(unittest.TestCase):
   @Context(SPEC=2)
   def test_render(self):
@@ -84,6 +85,16 @@ class TestBitcastBufferView(unittest.TestCase):
     view = dst.shrink(((1, 5),)).bitcast(dtypes.uint64)  # two stores through one view: it must inline, not get a declared vector-pointer
     run_uops([view.index(0).store(val ^ 0xff), view.index(1).store(val)], [buf])
     self.assertEqual(np.frombuffer(buf.as_memoryview(), dtype=np.uint64, count=2, offset=4).tolist(), [val ^ 0xff, val])
+
+  def test_vector_load_store(self):
+    for src_dt, dst_dt in [(dtypes.uint8, dtypes.uint32), (dtypes.uint32, dtypes.uint8)]:
+      with self.subTest(src=src_dt, dst=dst_dt):
+        src, dst = [UOp.param(i, dt, 16 // dt.itemsize) for i, dt in enumerate((src_dt, dst_dt))]
+        src, dst = [b.bitcast(dtypes.uint32).index(UOp.stack(*[UOp.const(i) for i in range(4)])) for b in (src, dst)]
+        bufs = [Buffer(Device.DEFAULT, 16 // dt.itemsize, dt, initial_value=bytes(range(16)) if i == 0 else bytes(16))
+                for i, dt in enumerate((src_dt, dst_dt))]
+        run_uops([dst.store(src.load())], bufs)
+        self.assertEqual(bytes(bufs[1].as_memoryview()), bytes(range(16)))
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):

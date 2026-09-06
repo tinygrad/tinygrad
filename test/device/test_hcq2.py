@@ -1,11 +1,11 @@
-import unittest, contextlib, ctypes, numpy as np
+import unittest, contextlib, ctypes, gc, numpy as np
 from unittest.mock import patch
-from tinygrad import Device, Tensor, TinyJit, Variable, dtypes
+from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, dedup, partition
 from tinygrad.uop.ops import Ops, UOp, KernelInfo
-from tinygrad.engine.realize import lower_and_compile, run_linear
+from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
@@ -16,13 +16,24 @@ from test.helpers import call_is_hcq
 @contextlib.contextmanager
 def rt_views():
   calls, orig = [], HCQ2Compiled.rt_view
-  with patch.object(HCQ2Compiled, "rt_view", lambda s, *a, **kw: (calls.append(s), orig(s, *a, **kw))[1]): yield calls
+  def track(dev, *args, **kwargs):
+    calls.append(dev)
+    return orig(dev, *args, **kwargs)
+  with patch.object(HCQ2Compiled, "rt_view", track): yield calls
+
+def chain(x:Tensor, n:int) -> Tensor:
+  for _ in range(n): x = (x + 1).contiguous()
+  return x
 
 @contextlib.contextmanager
 def encoded_batches():
   batches, orig = [], hcq2.lower_and_compile
   with patch.object(hcq2, "lower_and_compile", lambda l, *a, **kw: (batches.extend(c for c in l.src if call_is_hcq(c)), orig(l, *a, **kw))[1]):
     yield batches
+
+def eager_chain(x:Tensor, n:int=64) -> Tensor: # at hcq_compile's use_rt bound: an eager linear this big bakes its inputs and borrows ring slots
+  for _ in range(n): x = (x + 1).contiguous()
+  return x.realize()
 
 def patch_words(batch:UOp) -> list[UOp]:
   return [w for s in batch.src[0].toposort() if s.op is Ops.STORE and s.src[0].op is Ops.INDEX and s.src[0].src[1].op is Ops.STACK
@@ -33,39 +44,69 @@ def rt_params(batch:UOp) -> list[str]:
 
 @unittest.skipUnless(all_devices_in(Device.DEFAULT, HCQ_DEVS - {"CPU"}), "non-CPU hcq2 device required")
 class TestHCQ2Core(unittest.TestCase):
+  @staticmethod
+  def input(value:int=2) -> Tensor: return Tensor.full((4,), value, dtype=dtypes.int32).contiguous().realize()
+
+  def compiled(self, n:int, jit=False):
+    x, inputs = self.input(), []
+    if jit:
+      f = TinyJit(lambda a: chain(a, n).realize())
+      f(x)
+      return f(x), f.captured._linear, [x.uop.base]
+    out = chain(x, n)
+    return out, compile_linear(out.schedule_linear(), input_uops=inputs), inputs
+
   def test_jit_has_no_rt_buffers(self):
-    x = Tensor.ones(16).contiguous().realize()
-    @TinyJit
-    def f(a): return (a + 2).contiguous().realize()
-    f(x)
-
-    before = len(link_linear_cache)
-    with rt_views() as calls:
-      out = f(x)
-      self.assertGreater(len(link_linear_cache), before)
-      self.assertEqual(len(calls), 0)
-      (x + 1).contiguous().realize()
-      self.assertGreater(len(calls), 0)
-    self.assertEqual(out.tolist(), [3.0] * 16)
-
-  def test_jit_survives_ring_wrap(self):
-    # the ring recycles with no liveness tracking, so eager work that wraps it must not land on the jit's buffers
     dev = Device[Device.DEFAULT]
-    allocs = {host:dev.rt_allocator(True, host) for host in (False, True)}
-    for host in allocs: dev.rt_buffer(True, host) # cache the full-sized backing buffers before temporarily shrinking their allocators
-    with patch.object(allocs[False], "size", 1 << 13), patch.object(allocs[True], "size", 1 << 13):
-      x = Tensor.ones(24).contiguous().realize()
-      @TinyJit
-      def g(a): return (a * 3 - 1).contiguous().realize()
-      for _ in range(3): g(x)
+    rings = [dev.rt_buffer(True, host) for host in (False, True)]
+    ranges = [(b._buf.va_addr, b._buf.va_addr + b.nbytes) for b in rings]
+    for n in (1, 65):
+      with self.subTest(kernels=n):
+        x, f = self.input(), TinyJit(lambda a: chain(a, n).realize())
+        for _ in range(2): f(x)
+        for u in f.captured.linear.toposort():
+          if u.op is Ops.BUFFER and (buf:=u.buffer).device == dev.device:
+            addr = buf._buf.va_addr
+            self.assertFalse(any(addr < end and start < addr + buf.nbytes for start, end in ranges))
 
-      wrapped = 0
-      for i in range(48):
-        before = dev.rt_allocator(True, False).ptr
-        (x + i).contiguous().realize()
-        wrapped += dev.rt_allocator(True, False).ptr < before
-        self.assertEqual(g(x).tolist(), [2.0] * 24)
-      self.assertGreater(wrapped, 0)
+  def test_small_eager_cached(self):
+    _, compiled, inputs = self.compiled(1)
+    linked = link_linear(compiled, input_uops=inputs)
+    self.assertIs(link_linear(compiled, input_uops=inputs), linked)
+
+  def test_large_eager_not_cached(self):
+    _, compiled, inputs = self.compiled(65)
+    linked = link_linear(compiled, input_uops=inputs)
+    self.assertIsNot(link_linear(compiled, input_uops=inputs), linked)
+    self.assertNotIn(compiled, link_linear_cache)
+
+  def test_double_compile(self):
+    for n in (1, 65):
+      for jit in (False, True):
+        with self.subTest(kernels=n, jit=jit):
+          out, compiled, inputs = self.compiled(n, jit=jit)
+          linked = link_linear(compiled, input_uops=inputs, allow_cache=not jit)
+          before = tuple(inputs)
+          with rt_views() as borrowed:
+            for linear in (compiled, linked):
+              self.assertIs(compile_linear(linear, input_uops=None if jit else inputs), linear)
+          self.assertEqual(tuple(inputs), before)
+          self.assertFalse(borrowed)
+          run_linear(linked, input_uops=inputs, jit=True, wait=True)
+          self.assertEqual(out.tolist(), [2 + n] * 4)
+
+  def test_double_link(self):
+    for n in (1, 65):
+      for jit in (False, True):
+        with self.subTest(kernels=n, jit=jit):
+          out, compiled, inputs = self.compiled(n, jit=jit)
+          linked = link_linear(compiled, input_uops=inputs, allow_cache=not jit)
+          with rt_views() as borrowed:
+            again = link_linear(linked, input_uops=inputs, allow_cache=not jit)
+          self.assertIs(again, linked)
+          self.assertFalse(borrowed)
+          run_linear(again, input_uops=inputs, jit=True, wait=True)
+          self.assertEqual(out.tolist(), [2 + n] * 4)
 
   def test_jit_new_inputs_each_call(self):
     @TinyJit
@@ -85,6 +126,13 @@ class TestHCQ2Core(unittest.TestCase):
       vi = Variable("i", 1, 10).bind(i)
       np.testing.assert_allclose(f(a[:, :vi]).item(), (a[:, :i] + 1).sum().item(), atol=1e-5, rtol=1e-5)
 
+  def test_map_cpu_buffer_preserves_contents(self):
+    src = Buffer("CPU", 16, dtypes.uint8, preallocate=True)
+    data = bytes(range(16))
+    src.as_memoryview(force_zero_copy=True)[:] = data
+    src.get_buf(Device.DEFAULT)
+    self.assertEqual(bytes(src.as_memoryview(force_zero_copy=True)), data)
+
   def test_staged_copy_roundtrip(self):
     # a host buffer the device cannot read copies in chunks through a small ring of staging slots: every rotation must land bit-exact
     stage = Buffer("CPU", size:=1 << 16, dtypes.uint8, preallocate=True)
@@ -102,6 +150,7 @@ class TestHCQ2Core(unittest.TestCase):
       @TinyJit
       def f(a): return (a.sin() * 3).contiguous().realize()
       for _ in range(3): f(x)
+      eager_chain(x)
 
     jit, eager = partition(batches, lambda c: c.arg.aux.table >= 0)
     self.assertTrue(jit and eager, f"want both kinds of batch, got {len(jit)} jit and {len(eager)} eager")
@@ -124,9 +173,24 @@ class TestHCQ2Core(unittest.TestCase):
       return max(c.arg.aux.nargs for c in batches)
     self.assertEqual(nargs(2), nargs(12))
 
+  def test_caches_hold_no_buffers(self):
+    # an eager template caches without its buffers and the jit's linear compiles once uncached: freeing the tensors frees the device memory
+    def step(i):
+      x = Tensor(np.full(1024, i, np.float32)).to(Device.DEFAULT).realize()
+      @TinyJit
+      def f(a): return (a * 2 + 1).contiguous().realize()
+      for _ in range(3): out = f(x)
+      self.assertEqual(out.tolist(), [2.0 * i + 1] * 1024)
+    step(1) # warms the programs, templates and rings
+    gc.collect()
+    used = GlobalCounters.mem_used
+    for i in range(2, 5): step(i)
+    gc.collect()
+    self.assertEqual(GlobalCounters.mem_used, used)
+
   def test_device_state_survives_as_link_refs(self):
     # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
-    dev, names = Device[Device.DEFAULT], {"AMD": ("scratch",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
+    dev, names = Device[Device.DEFAULT], {"AMD": ("scratch",), "NV": ("timeline",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
     @TinyJit
     def f(a): return (a * 2 + 1).contiguous().realize()
     x = Tensor.ones(16).contiguous().realize()
@@ -142,7 +206,7 @@ class TestHCQ2FFI(unittest.TestCase):
   def _run(body:UOp) -> list[Buffer]:
     call = hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test_ffi")).call(aux=hcq2.HCQInfo(("CPU",))))
     assert call is not None
-    linear = hcq2.hcq_link(lower_and_compile(UOp(Ops.LINEAR, src=(call,))), cache=False)
+    linear = hcq2.hcq_link(lower_and_compile(UOp(Ops.LINEAR, src=(call,))), allow_cache=False)
     run_linear(linear, jit=True)
     return [u.buffer for u in linear.src[0].without_after.src[1:] if u.op is Ops.BUFFER]
 
