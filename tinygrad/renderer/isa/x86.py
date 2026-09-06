@@ -717,7 +717,7 @@ class X86Renderer(ISARenderer):
   def is_two_address(self, x:UOp) -> bool: return x.op is Ops.INS and x.arg[0] in X86GroupOp.TwoAddress
   def spill_pointer(self) -> UOp: return def_reg(dtypes.uint64, RSP)
   def copy(self, u:UOp, dst:VRegister|Register|tuple[Register,...]) -> tuple[UOp, list[UOp]]:
-    return (nx := x.ins(X86Ops.MOV, src=(x,), tag=dst)), [nx]
+    return (nx := u.ins(X86Ops.MOV, src=(u,), tag=dst)), [nx]
 
   def spill(self, spill_offset:Any, x:UOp) -> list[UOp]:
     disp = UOp.cconst(spill_offset, dtypes.uint32)
