@@ -4,7 +4,7 @@ from typing import Callable, cast, NamedTuple
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import prod
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
 from tinygrad.renderer.cstyle import HIPRenderer
 
@@ -462,9 +462,8 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, m
   for i in range(-(-G*D//(WAVES*WARP_SIZE))):
     flat = tid + i*WAVES*WARP_SIZE
     h, d = flat // D, flat % D
-    lds_states = tuple(_SoftmaxState(ml_lds[w, h, 0].load(), ml_lds[w, h, 1].load(),
-                                     (acc_lds[w, h, d].load().float()*ml_lds[w, h, 1].load(),)) for w in range(WAVES))
-    _, _, (val,) = _softmax_reduce(lds_states)
+    _, _, (val,) = _softmax_reduce(tuple(_SoftmaxState(ml_lds[w, h, 0].load(), ml_lds[w, h, 1].load(),
+                                                        (acc_lds[w, h, d].load().float()*ml_lds[w, h, 1].load(),)) for w in range(WAVES)))
     oidx = out[b, kv_head*G + h, block_chunk, d]
     if G*D % (WAVES*WARP_SIZE): oidx = out[b, (kv_head*G + h).valid(flat < G*D), block_chunk, d]
     final_stores.append(oidx.store(val))
@@ -506,7 +505,7 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UO
 
 def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, max_kv_len:int) -> Tensor:
   B, H, D = cache_kv.shape[1], q.shape[1], cache_kv.shape[4]
-  chunks = min(getenv("AMD_FLASH_CHUNKS", 48), max_kv_len // 64)
+  chunks = min(48, max_kv_len // 64)
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device)
   stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device)
   fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=64, waves=16)

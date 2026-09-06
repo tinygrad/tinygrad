@@ -135,6 +135,16 @@ class TestQ8Quantize(unittest.TestCase):
     out = flash_attention(q, assigned, valid_kv_len).realize()
     np.testing.assert_allclose(out.numpy(), np.full(out.shape, 1/257, dtype=np.float32), rtol=2e-3, atol=2e-4)
 
+  def test_flash_attention_decode_long_context_random(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    Tensor.manual_seed(42)
+    n, valid = 257*64, 257*64 - 13  # past the old 256-chunk partial limit, with a ragged tail
+    q = Tensor.randn(1, 8, 1, 128, dtype=dtypes.half).realize()
+    cache = Tensor.randn(2, 1, 2, n, 128, dtype=dtypes.half).realize()
+    out = flash_attention(q, cache, valid).realize()
+    expected = q.scaled_dot_product_attention(cache[0, :, :, :valid], cache[1, :, :, :valid], enable_gqa=True)
+    np.testing.assert_allclose(out.numpy(), expected.numpy(), rtol=2e-3, atol=2e-3)
+
   def test_flash_attention_decode_chunk_round_accumulator_range(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     valid_kv_len, max_kv_len, chunks = 6749, 6784, 48
