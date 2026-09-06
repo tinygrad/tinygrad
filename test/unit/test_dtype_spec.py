@@ -228,6 +228,16 @@ class TestAutoCastType(unittest.TestCase):
     t = Tensor([[0.0, 1.0]], dtype=dtypes.half).expand(35000, 2).contiguous()
     np.testing.assert_allclose(t.var().numpy(), 0.25, rtol=1e-3)
 
+  @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
+  def test_loss_half_precision_large_n(self):
+    # the loss sum and masked count must divide at the accumulation dtype: counts > 65504 overflow half
+    N = 70000  # > half max (65504)
+    logits = np.zeros((N, 2), dtype=np.float16)  # deterministic: per-item loss is log1p(e)
+    logits[:, 0] = 1.0
+    ref = np.log1p(np.e)  # f32 reference: mean of -log_softmax([1, 0])[1]
+    np.testing.assert_allclose(Tensor(logits).sparse_categorical_crossentropy(Tensor(np.ones(N, dtype=np.int32))).numpy(), ref, rtol=1e-3)
+    np.testing.assert_allclose(Tensor(logits).log_softmax().nll_loss(Tensor(np.ones(N, dtype=np.int32))).numpy(), ref, rtol=1e-3)
+
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Precision error")
   @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
   def test_softmax_dtype(self):
