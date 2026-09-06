@@ -49,7 +49,7 @@ class TestSimpleProfiler(unittest.TestCase):
 # TODO: support these tests in HCQ2
 is_cpu_hcq = Device.DEFAULT in {"CPU"}
 
-@unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in {"METAL"}, "Dev not supported")
+@unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq, "Dev not supported")
 class TestProfiler(unittest.TestCase):
   @classmethod
   def setUpClass(self):
@@ -133,7 +133,7 @@ class TestProfiler(unittest.TestCase):
     kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith(TestProfiler.d0.device)]
     assert len(kernel_runs) == 1, "one kernel run is expected"
 
-  @unittest.skipIf(Device.DEFAULT in "METAL" or (MOCKGPU and Device.DEFAULT == "AMD"), "AMD mockgpu does not support queue wait interrupts")
+  @unittest.skipIf(MOCKGPU and Device.DEFAULT == "AMD", "AMD mockgpu does not support queue wait interrupts")
   def test_profile_graph(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
     except Exception as e: self.skipTest(f"second device not available {e}")

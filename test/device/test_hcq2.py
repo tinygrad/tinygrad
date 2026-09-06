@@ -77,16 +77,13 @@ class TestHCQ2Core(unittest.TestCase):
 
   def test_jit_has_no_rt_buffers(self):
     dev = Device[Device.DEFAULT]
-    rings = [dev.rt_buffer(True, host) for host in (False, True)]
-    ranges = [(b._buf.va_addr, b._buf.va_addr + b.nbytes) for b in rings]
+    rings = [dev.rt_buffer(True, host)._buf for host in (False, True)]
     for n in (1, 65):
       with self.subTest(kernels=n):
         x, f = self.input(), TinyJit(lambda a: chain(a, n).realize())
         for _ in range(2): f(x)
         for u in f.captured.linear.toposort():
-          if u.op is Ops.BUFFER and (buf:=u.buffer).device == dev.device:
-            addr = buf._buf.va_addr
-            self.assertFalse(any(addr < end and start < addr + buf.nbytes for start, end in ranges))
+          if u.op is Ops.BUFFER and (buf:=u.buffer).device == dev.device: self.assertFalse(any(buf._buf.base is r for r in rings))
 
   def test_small_eager_cached(self):
     _, compiled, inputs = self.compiled(1)
@@ -209,7 +206,8 @@ class TestHCQ2Core(unittest.TestCase):
 
   def test_device_state_survives_as_link_refs(self):
     # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
-    dev, names = Device[Device.DEFAULT], {"AMD": ("scratch",), "NV": ("timeline",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
+    names = {"AMD": ("scratch",), "NV": ("timeline",), "QCOM": ("_stack", "dummy"), "METAL": ("timeline",)}[Device.DEFAULT.split(":")[0]]
+    dev = Device[Device.DEFAULT]
     @TinyJit
     def f(a): return (a * 2 + 1).contiguous().realize()
     x = Tensor.ones(16).contiguous().realize()

@@ -65,9 +65,12 @@ def assert_kernel_count(expected:int):
   got = GlobalCounters.kernel_count
   if got != expected: raise KernelCountException(expected, got)
 
-def is_hcq2_device() -> bool: # an hcq2 device stages every copy from the host through a pinned buffer: such a copy is two calls, not one
+def is_hcq2_device() -> bool:
   from tinygrad.runtime.support.hcq2 import HCQ_DEVS
   return Device.DEFAULT.split(":")[0] in HCQ_DEVS - {"CPU"}
+
+def stages_host_copies() -> bool: # an hcq2 copy queue stages every copy from the host through a pinned buffer: such a copy is two calls, not one
+  return is_hcq2_device() and Device[Device.DEFAULT].has_copy_queue
 
 def call_is_graph(call:UOp) -> bool:
   ast = call.src[0]
