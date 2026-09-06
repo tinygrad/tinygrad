@@ -8,6 +8,7 @@ from tinygrad.uop.ops import Ops
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
+from tinygrad.renderer.isa.rdna3 import RDNA3Renderer
 from test.helpers import not_support_multi_device, needs_second_gpu
 from test.unit.test_randomness import equal_distribution, normal_test
 
@@ -71,6 +72,7 @@ class TestRandomness(unittest.TestCase):
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "PTX and NIR use pointer arithmetic")
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "X86 callee saved registers have ulong dtype")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, RDNA3Renderer), "RDNA3 uses ulong dtype for param addresses")
   def test_threefry_doesnt_use_long(self):
     linear = Tensor.rand(20).schedule_linear()
     for call in linear.src:

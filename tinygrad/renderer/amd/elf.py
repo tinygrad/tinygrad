@@ -6,6 +6,7 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 from tinygrad.renderer.amd.dsl import Reg, FixedBitField
 from tinygrad.runtime.autogen.amd.common import OpType
+from tinygrad.runtime.autogen.amd.rdna3.ins import SCRATCH
 
 # instructions used for padding
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end # same encoding as RDNA4
@@ -16,11 +17,14 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   insts = [u.arg[0] for u in lin.src]
 
   # ** scan for max vgpr/sgpr/accvgpr
-  max_vgpr, max_sgpr, max_accvgpr = 0, 0, 0
+  max_vgpr, max_sgpr, max_accvgpr, scratch_size = 0, 0, 0, 0
   _ACCVGPR_TYPES = {OpType.OPR_ACCVGPR, OpType.OPR_SRC_ACCVGPR}
   for inst in insts:
     # build set of field names that are AccVGPR for this instruction
     accvgpr_fields: set[str] = set()
+    if isinstance(inst, SCRATCH):
+      nbytes = int(inst.op.name.rsplit('B')[-1])
+      scratch_size = max(scratch_size, inst.offset + nbytes//8)
     for opr_name, (_, _, opr_type) in inst.operands.items():
       if opr_type in _ACCVGPR_TYPES: accvgpr_fields.add(opr_name)
       elif opr_type in {OpType.OPR_VGPR_OR_ACCVGPR, OpType.OPR_SRC_VGPR_OR_ACCVGPR, OpType.OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST}:
@@ -42,7 +46,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
     elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
   arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
-  is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
+  is_cdna, is_rdna4, is_rdna3 = arch == "cdna", arch == "rdna4", arch == "rdna3"
 
   # ** pad text to ISA alignment
   padding_inst = (s_nop_cdna(0) if is_cdna else s_code_end()).to_bytes()
@@ -59,6 +63,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   sgpr_granule = max(0, ceildiv(next_free_sgpr + 6, 8) - 1) if is_cdna else 0
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t()
   desc.group_segment_fixed_size = lds_size
+  desc.private_segment_fixed_size = scratch_size
   for sz in (param_sizes[i] for i in sorted(param_sizes)): desc.kernarg_size = round_up(desc.kernarg_size, sz) + sz
   desc.kernel_code_entry_byte_offset = -len(text)
 
@@ -69,8 +74,11 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
                             3 << amdgpu_kd.COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64_SHIFT |
                             (0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_DX10_CLAMP_SHIFT |
                             (0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_IEEE_MODE_SHIFT |
+                            (0 if is_cdna else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_WGP_MODE_SHIFT |
                             (0 if is_cdna else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_MEM_ORDERED_SHIFT)
-  desc.compute_pgm_rsrc2 = (2 << amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT |
+  desc.compute_pgm_rsrc2 = ((scratch_size > 0 and is_rdna3) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT_SHIFT |
+                            2 << amdgpu_kd.COMPUTE_PGM_RSRC2_USER_SGPR_COUNT_SHIFT |
+                            2 << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID_SHIFT |
                             int(0 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X_SHIFT |
                             int(1 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y_SHIFT |
                             int(2 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z_SHIFT)
