@@ -86,8 +86,8 @@ class TestReduceOpsConstFolding(unittest.TestCase):
   def test_zero_size_realize_folded(self):
     # non contiguous folded output doesn't realize
     _check_ast_count(0, Tensor.empty(1, 0).sum())
-    # An explicitly cloned folded constant still owns persistent storage.
-    a = Tensor.empty(1, 0).sum().clone()
+    # contiguous folded const can still schedule
+    a = Tensor.empty(1, 0).sum().contiguous()
     _check_ast_count(2, a+2)
     self.assertIs(a.uop.base.op, Ops.BUFFER)
     np.testing.assert_equal((Tensor.empty(1, 0).sum().contiguous()+2).numpy(), 2)

@@ -1,6 +1,6 @@
 from typing import cast
 import math, dataclasses
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, all_metadata, broadcast_axes
 from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
 from tinygrad.function import renumber_invalid_outputs
@@ -64,6 +64,14 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   ret_set = set(ret_pos)
   return (None,) + tuple(None if i in ret_set else (bwd_outs[gb_map[i]] if i in gb_map else None) for i in range(len(args)))
 
+def view_assign_gradient(ctx:UOp, base:UOp, view:UOp):
+  source = view
+  while source is not base and source.op in GroupOp.Movement: source = source.src[0]
+  if source is not base: return None
+  # Only the written region flows to the assignment; the rest flows to the previous value.
+  mask = compute_gradient(view, view.const_like(1), {base})[base]
+  return (mask.eq(0).where(ctx, 0), view.substitute({base: ctx}, walk=True))
+
 # ctx is grad_output
 pm_gradient = PatternMatcher([
   (UPat(Ops.CAST, name="ret"), lambda ctx, ret: (ctx.cast(ret.src[0].dtype),)),
@@ -96,6 +104,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.SINK), lambda ctx: ctx.src),
   (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
     (ctx, UOp.sink(*([ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1)])))),
+  (UPat(Ops.AFTER, src=(UPat(name="base"), UPat(name="view").after(UPat(name="view").store(UPat())))), view_assign_gradient),
   # clone/assign gradient passes through to val
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE))), lambda ctx: (None, ctx)),
   (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
@@ -140,4 +149,21 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
         # we add the backward metadata to everything new in the graph
         for bw_uop in v.toposort(lambda x: x not in (t0, *t0.src, grads[t0])):
           all_metadata[bw_uop] = all_metadata.get(bw_uop, ())+backward_metadata
+  # Gradients may outlive an in-place write. Read the previous value's expression, not its overwritten buffer.
+  overwritten = {u.src[0].base for u in walk if u.op is Ops.STORE}
+  values:dict[UOp, UOp] = {}
+  for u in UOp.sink(*overwritten).toposort():
+    if u.op is not Ops.AFTER or len(u.src) != 2: continue
+    base, effect = u.src
+    view = base
+    if effect.op is Ops.AFTER and len(effect.src) == 2: view, effect = effect.src
+    if effect.op is not Ops.STORE or effect.src[0] is not view: continue
+    value = effect.src[1]
+    if view is not base:
+      mask = compute_gradient(view, view.const_like(1), {base}).get(base)
+      if mask is None: continue
+      value = mask.eq(0).where(base, compute_gradient(view, value, {base})[base])
+    values[u] = value.substitute(values, walk=True)
+  if replacements := {u: values[u] for u in overwritten if u in values}:
+    grads = {u: v.substitute(replacements, walk=True) for u,v in grads.items()}
   return grads

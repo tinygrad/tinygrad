@@ -375,6 +375,57 @@ class TestWithGrad(unittest.TestCase):
     self.assertEqual(source.grad.tolist(), [1., 1., 1., 1.])
     self.assertEqual(increment.grad.tolist(), [1., 1.])
 
+  def test_set_imul_clone_backward(self):
+    source = Tensor([1., 2., 3., 4.]).realize()
+    x = source.clone()
+    factor = Tensor([10., 20.]).realize()
+    x[::2] *= factor
+    x.sum().backward()
+    self.assertEqual(x.tolist(), [10., 2., 60., 4.])
+    self.assertEqual(source.grad.tolist(), [10., 1., 20., 1.])
+    self.assertEqual(factor.grad.tolist(), [1., 3.])
+
+  def test_set_imul_clone_chained_backward(self):
+    source = Tensor([1., 2., 3., 4.]).realize()
+    x = source.clone()
+    f, g = Tensor([10., 20.]).realize(), Tensor([30., 40.]).realize()
+    x[:2] *= f
+    x[1:3] *= g
+    x.sum().backward()
+    self.assertEqual(x.tolist(), [10., 1200., 120., 4.])
+    self.assertEqual(source.grad.tolist(), [10., 600., 40., 1.])
+    self.assertEqual(f.grad.tolist(), [1., 60.])
+    self.assertEqual(g.grad.tolist(), [40., 3.])
+
+  def test_imul_clone_backward(self):
+    source = Tensor([1., 2., 3.]).realize()
+    x = source.clone()
+    factor = Tensor([10., 20., 30.]).realize()
+    x *= factor
+    x.sum().backward()
+    self.assertEqual(x.tolist(), [10., 40., 90.])
+    self.assertEqual(source.grad.tolist(), [10., 20., 30.])
+    self.assertEqual(factor.grad.tolist(), [1., 2., 3.])
+
+  def test_set_imul_transposed_clone_backward(self):
+    source = Tensor([[1., 2.], [3., 4.]]).realize()
+    x = source.clone()
+    factor = Tensor([[10., 20.]]).realize()
+    x.T[:1] *= factor
+    grad = x.sum().gradient(factor)[0]
+    self.assertEqual(x.tolist(), [[10., 2.], [60., 4.]])
+    self.assertEqual(grad.tolist(), [[1., 3.]])
+
+  def test_partial_assign_clone_backward(self):
+    source = Tensor([1., 2., 3., 4.]).realize()
+    x = source.clone()
+    replacement = Tensor([10., 20.]).realize()
+    x[::2].assign(replacement)
+    (x * Tensor([1., 2., 3., 4.])).sum().backward()
+    self.assertEqual(x.tolist(), [10., 2., 20., 4.])
+    self.assertEqual(source.grad.tolist(), [0., 2., 0., 4.])
+    self.assertEqual(replacement.grad.tolist(), [1., 3.])
+
   def test_set_iadd_backward(self):
     z = Tensor([1.0, 2.0, 3.0, 4.0])
     x = Tensor([10.0, 20.0])
