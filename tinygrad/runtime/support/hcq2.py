@@ -518,7 +518,7 @@ class HCQ2Compiled(Compiled):
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
 
   @functools.cached_property
-  def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]: zeroed, the lru may hand back a used buffer
+  def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]
     buf = Buffer(self.device, 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
     buf._buf.cpu_view().view(fmt='B')[:16] = bytes(16)
     return buf
