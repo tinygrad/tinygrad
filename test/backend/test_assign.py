@@ -1021,6 +1021,20 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(c.tolist(), [[1,1],[2,1]])
 
+  def test_detach_realized_buffer_assignment(self):
+    base = Tensor([1., 2., 3.]).realize()
+    detached = base.detach()
+    detached.assign(detached + 1).realize()
+    self.assertEqual(detached.tolist(), [2., 3., 4.])
+    self.assertEqual(base.tolist(), [2., 3., 4.])
+
+  def test_detach_write_visible_through_aliases(self):
+    base = Tensor([1., 2., 3.]).realize()
+    d1, d2 = base.detach(), base.detach()
+    d1.assign(Tensor([9., 9., 9.])).realize()
+    self.assertEqual(d2.tolist(), [9., 9., 9.])
+    self.assertEqual(base.tolist(), [9., 9., 9.])
+
   def test_contiguous_backward(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
     cb = t.contiguous_backward()  # unrealized CONTIGUOUS_BACKWARD
@@ -1049,6 +1063,13 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     self.assertIs(d.uop.base.op, Ops.CONTIGUOUS)
     d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(d.tolist(), [[1,1],[2,1]])
+
+  def test_detach_clone(self):
+    t = Tensor([[1,2],[3,4]]).contiguous().realize()
+    d = t.permute(1,0).clone().detach()
+    d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
+    self.assertEqual(d.tolist(), [[1,1],[2,1]])
+    self.assertEqual(t.tolist(), [[1,2],[3,4]])
 
   def test_alu(self):
     a = Tensor([1,2,3,4]).contiguous().realize()

@@ -75,6 +75,11 @@ class TestSetitem(unittest.TestCase):
     t.detach()[1, 2] = 5
     self.assertEqual(t[1, 2].item(), 5.0)
 
+  def test_setitem_detach_whole(self):
+    t = Tensor.zeros((3, 3)).realize()
+    t.detach()[:] = 5
+    np.testing.assert_equal(t.numpy(), np.full((3, 3), 5.))
+
   def test_setitem_permute(self):
     # setitem on permuted tensor should modify original
     t = Tensor.zeros((2, 3)).contiguous().realize()
