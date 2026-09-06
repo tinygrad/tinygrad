@@ -733,7 +733,7 @@ class X86Renderer(ISARenderer):
     dt = dtypes.uint64 if x.op is Ops.BUFFER else x.dtype
     nx = UOp(Ops.INS, src=fold_address(self.spill_pointer().index(disp)), arg=(X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, dt), tag=regs)
     return nx, [nx]
-  
+
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg[0]))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:

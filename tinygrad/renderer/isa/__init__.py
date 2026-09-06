@@ -3,7 +3,7 @@ from typing import Any
 import itertools, functools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, AddrSpace
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, AddrSpace, ProgramInfo
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
@@ -51,13 +51,12 @@ def rdef(u:UOp) -> VRegister|Register|None: return rdefs(u)[0] if len(rdefs(u)) 
 
 # all per-kernel state of the ISA pipeline lives here to avoid shared device state overlap in renderer
 class PreLinearKernelCtx:
-  def __init__(self, sink:UOp, ren:ISARenderer):
+  def __init__(self, sink:UOp, ren:ISARenderer, info:ProgramInfo):
     self.ren, self.spill_size = ren, 0
     self.loop_label: dict[UOp, str] = {}
-    self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n, self.buf_slot = itertools.count(), itertools.count(-1, -1)
     def arg_key(u:UOp): return (1, u.arg) if u.op is Ops.SPECIAL else (0, u.arg.slot)
-    self.func_args = sorted([u for u in self.uses if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
+    self.func_args = sorted([u for u in sink.toposort() if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
     self.ins_schedule: dict[Any, Ops] = {}
     self.reserved_regs: set[Register] = set()
 
