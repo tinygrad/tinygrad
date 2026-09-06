@@ -56,6 +56,7 @@ class Linear(nn.Linear):
     super().__init__(in_features, out_features, bias)
     self.in_features, self.out_features = in_features, out_features
   def set_quantized(self, decoded:Tensor):
+    if self.in_features % GGML_BLOCK_SIZE: return
     packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in QUANT_SIZES.items()}
     graph = decoded.uop.toposort()
     raw = next((u for u in graph if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
@@ -64,7 +65,8 @@ class Linear(nn.Linear):
     # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
     # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
     def unwrapped(u:UOp) -> UOp:
-      while u.op in (Ops.CAST, Ops.RESHAPE, Ops.CONTIGUOUS): u = u.src[0]
+      while u.op in (Ops.RESHAPE, Ops.CONTIGUOUS) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)):
+        u = u.src[0]
       return u
     expected = ggml_data_to_tensor(Tensor(raw), self.in_features * self.out_features, ggml_type)
     if unwrapped(decoded.uop).key != unwrapped(expected.uop).key: return
@@ -365,10 +367,9 @@ def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *rest:UOp, in_features:int, out_
   return out[token, out_row.valid(lane.eq(0))].store(total).end(token, out_row, lane).sink(arg=KernelInfo(name="linear_f16_gemv", opts_to_apply=()))
 
 def _view_back(t:Tensor) -> Tensor:
-  """strip top-of-chain CAST(s) from a lazy weight: reading the raw file bytes in the kernel instead of
-  materializing the cast into a fresh buffer every step"""
+  # Widening half to float is exact; preserve casts that round or change the values.
   uop = t.uop
-  while uop.op is Ops.CAST: uop = uop.src[0]
+  while uop.op is Ops.CAST and uop.dtype == dtypes.float32 and uop.src[0].dtype in (dtypes.half, dtypes.bfloat16): uop = uop.src[0]
   return Tensor(uop).reshape(t.shape)
 
 def f16_gemv(layer:Linear, x:Tensor) -> Tensor:
@@ -599,7 +600,15 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
 def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   # cached flash attention on the half KV cache (already written through assigned_kv); valid_end stays bound at the graph level
   T_real, q_start = q.shape[2], None
-  if resolve(T_real == 1): return amd_flash_attention_decode(q.half(), assigned_kv, valid_end, cast(int, assigned_kv.shape[3]))
+  D, N, group = q.shape[3], assigned_kv.shape[3], q.shape[1] // assigned_kv.shape[2]
+  decode = resolve(T_real == 1, False)
+  supported = D % 32 == 0 and (N % 64 == 0 and group*(D*2+8) <= 65536 if decode else
+    D >= 64 and 2*(BLOCK_M*(D+LDS_PAD) + D*(BLOCK_N+LDS_PAD)) <= 65536 and N % BLOCK_N == 0 and q.max_shape[2] % BLOCK_M == 0)
+  if not supported:
+    k, v = (assigned_kv[i, :, :, :valid_end].float() for i in range(2))
+    mask = None if decode else Tensor.full((T_real, valid_end), -math.inf, dtype=dtypes.float32, device=q.device).triu(valid_end-T_real+1)
+    return q.float().scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)
+  if decode: return amd_flash_attention_decode(q.half(), assigned_kv, valid_end, cast(int, N))
   if isinstance(T_real, UOp):
     # symbolic chunk: pad the queries to the static tile; garbage rows are sliced off
     T_pad = q.max_shape[2]

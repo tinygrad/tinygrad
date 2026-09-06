@@ -89,6 +89,29 @@ class TestQ8Quantize(unittest.TestCase):
                                        rtol=3e-3, atol=2e-2)
             self.assertIsNone(linear.ggml_type)
 
+  def test_quant_linear_rejects_unaligned_rows_and_integer_casts(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    for width in (128, 256):
+      with self.subTest(width=width):
+        packed = np.zeros((2*width//256, 136), dtype=np.uint8)
+        packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
+        packed[:, 8:] = np.arange(128, dtype=np.uint8)
+        raw = Tensor(np.pad(packed.flatten(), (4, 0))).realize()[4:]
+        weight = ggml_data_to_tensor(raw, 2*width, 23).reshape(2, width)
+        if width == 256: weight = weight.int().float()
+        expected = weight.numpy().sum(-1)[None]
+        linear = Linear(width, 2, bias=False)
+        linear.weight = weight
+        np.testing.assert_allclose(linear(Tensor.ones(1, width)).numpy(), expected, rtol=1e-3, atol=1e-3)
+        self.assertIsNone(linear.ggml_type)
+
+  def test_dense_gemv_preserves_integer_casts(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    linear = Linear(128, 1)
+    linear.weight = Tensor.full((1, 128), 0.75).contiguous().realize().int().float()
+    linear.bias = Tensor.full((1,), 0.75).contiguous().realize().int().float()
+    np.testing.assert_array_equal(linear(Tensor.ones(1, 128)).numpy(), 0)
+
   def test_dense_gemv_bias(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
@@ -147,6 +170,18 @@ class TestQ8Quantize(unittest.TestCase):
     np.testing.assert_allclose(generic(sym)[:3].numpy(), xq.reshape(3, in_features) @ weight.T, rtol=2e-3, atol=2e-2)
     self.assertTrue(generic.use_custom_quant)
     self.assertEqual(generic.ggml_type, 14)
+
+  def test_attention_fallback_shapes(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    for tokens, capacity, dim in ((1, 65, 64), (32, 64, 32), (32, 64, 512)):
+      with self.subTest(tokens=tokens, capacity=capacity, dim=dim):
+        valid = 33
+        cache = np.full((2, 1, 1, capacity, dim), np.nan, dtype=np.float16)
+        cache[0, :, :, :valid] = 0
+        cache[1, :, :, :valid] = np.arange(valid)[:, None]
+        q = Tensor.zeros(1, 2, tokens, dim, dtype=dtypes.half)
+        expected = np.broadcast_to(np.arange(valid-tokens, valid)[None, None, :, None]/2, q.shape)
+        np.testing.assert_allclose(flash_attention(q, Tensor(cache), valid).numpy(), expected, rtol=1e-3, atol=1e-3)
 
   def test_attention_uses_physical_cache_length(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
