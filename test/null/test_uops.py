@@ -7,9 +7,14 @@ from tinygrad.dtype import dtypes, AddrSpace, ConstFloat, Invalid  # noqa: F401
 from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, AxisType, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.uop.weak import pm_lower_weak
-from tinygrad.uop.spec import spec_program, spec_shared, type_verify
+from tinygrad.uop.spec import spec_program, spec_shared, spec_tensor, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
 from test.helpers import eval_uop, to_uops_list
+
+class TestStorageSpec(unittest.TestCase):
+  def test_contiguous_can_depend_on_other_storage_writes(self):
+    buf = Tensor.empty(4).uop
+    type_verify((buf + 1).contiguous().after(buf.store(buf + 1)), spec_tensor)
 
 class TestDTypeFromUOp(unittest.TestCase):
   def test_broadcastable_promotion(self):

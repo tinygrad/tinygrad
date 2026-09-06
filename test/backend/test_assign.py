@@ -1014,10 +1014,10 @@ class TestAssignToUnrealizedView(unittest.TestCase):
       # TODO: broken now
       self.assertEqual(c.tolist(), [[0,0],[0,0]])
 
-  def test_contiguous(self):
+  def test_clone(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
-    c = t.permute(1,0).contiguous()  # unrealized CONTIGUOUS
-    self.assertIs(c.uop.base.op, Ops.CONTIGUOUS)
+    c = t.permute(1,0).clone()
+    self.assertIs(c.uop.base.op, Ops.AFTER)
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(c.tolist(), [[1,1],[2,1]])
 
@@ -1043,10 +1043,10 @@ class TestAssignToUnrealizedView(unittest.TestCase):
       # TODO: broken now
       self.assertEqual(d.tolist(), [[0,0],[0,0]])
 
-  def test_detach_contiguous(self):
+  def test_detach_clone(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
-    d = t.permute(1,0).contiguous().detach()  # DETACH(unrealized CONTIGUOUS)
-    self.assertIs(d.uop.base.op, Ops.CONTIGUOUS)
+    d = t.permute(1,0).clone().detach()
+    self.assertIs(d.uop.base.op, Ops.AFTER)
     d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(d.tolist(), [[1,1],[2,1]])
 
