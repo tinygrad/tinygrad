@@ -194,6 +194,10 @@ def to_imm(c:UOp) -> UOp|None:
 def cmp(x:UOp) -> UOp:
   if x.src[0].dtype in dtypes.floats: raise RuntimeError(f"no flag compare for {x.src[0].dtype}, a float gate must be a mask")
   return x.ins(X86Ops.CMP, dtype=dtypes.void) if (i:=to_imm(x.src[1])) is None else x.ins(X86Ops.CMPi, dtype=dtypes.void, src=(x.src[0], i))
+
+# set flags from a value already in a register. Non-zero is true
+def cmp_zero(x:UOp) -> UOp: return x.ins(X86Ops.CMPi, dtype=dtypes.void, src=(x, imm(x.dtype, 0)), tag=None)
+
 # comparisons that produce masks, the mask has the width of the operands
 def mask(x:UOp) -> UOp:
   dt, v = x.src[0].dtype, imm(dtypes.uint8, {Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op])
@@ -343,8 +347,10 @@ isel_matcher = PatternMatcher([
   (UPat(GroupOp.Comparison, src=(UPat.var("y", (dtypes.float32, dtypes.float64)), UPat()), name="x"), lambda y,x:
    UOp(Ops.AND, src=(mask(x).bitcast(dt:=to_int(y.dtype)), UOp.cconst(1, dt))).bitcast(dtypes.bool)),
   # conditional moves that use flags
-  # TODO: remove this once we allow all flag producing ops in cmove
+  # and/or/xor set flags from their result, so cmove reads them directly
+  (UPat((Ops.AND, Ops.OR, Ops.XOR), dtypes.bool, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: a.ins(X86Ops.CMOVNE, src=(b, a, m))),
   # the blends took every float gate a mask can serve, so a gate that is still not an integer comparison becomes one here
+  # TODO: remove this once cmove can read flags set by all remaining flag producing ops (including loaded bools, float comparisons, casts to bool)
   (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")), lambda m,a,b: g.where(a, b) if (g:=flag_gate(m)) is not None else None),
   (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.sints), UPat()), name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b:
    a.ins(X86Ops.CMOVL, src=(b, a, cmp(m)))),
@@ -451,14 +457,17 @@ isel_matcher = PatternMatcher([
 ])
 
 # ***** pre register allocation *****
-# the flags belong to the last instruction that wrote them. x86 has no good way to store/restore them (then regalloc would
-# handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
-# optional, there is no fallback load from stack
+# the flags belong to the last instruction that wrote them. x86 has no good way to store/restore them (otherwise regalloc would
+# handle it), so a consumer that no longer owns its flags re-derives them.
+# a compare is re-emitted as is, it writes nothing besides the flags.
+# and/or/xor ops write to a register (in addition to setting flags), so re-emitting these ops would define that register twice.
+# instead, the and/or/xor output register is compared to zero to set the flags.
+# unlike a regalloc rematerialization this is not optional, there is no fallback load from stack
 def flag_rematerialize(ctx:PreRegAllocContext, x:UOp):
   if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
   elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
-    ctx.lock = flag_def
-    return (x, [flag_def, x])
+    ctx.lock = flag_def if flag_def.dtype is dtypes.void else cmp_zero(flag_def)
+    return (x, [ctx.lock, x])
   return None
 
 pre_regalloc_matcher = PatternMatcher([
@@ -708,7 +717,8 @@ class X86Renderer(ISARenderer):
       if len(x.src) > 4 and x.arg[0] in X86GroupOp.WriteMem: ret = _mem_adress(*x.src[:4]) + _format(x.src[4:])
       elif len(x.src) > 3 and x.arg[0] in X86GroupOp.Rm1st: ret = _format((x,)) + _mem_adress(*x.src[:4]) + _format(x.src[4:])
       elif len(x.src) > 4 and x.arg[0] in X86GroupOp.Rm2nd: ret = _format((x, x.src[0])) + _mem_adress(*x.src[1:5]) + _format(x.src[5:])
-      else: ret = _format((x,) + x.src)
+      # flags are implicit state, the source that wrote them is a dependency, not an operand
+      else: ret = _format((x,) + (x.src[:-1] if x.arg[0] in X86GroupOp.ReadFlags else x.src))
       return ", ".join(ret)
 
     asm = [f".{function_name}:"]
