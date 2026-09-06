@@ -1,10 +1,10 @@
 import unittest, contextlib, ctypes, gc, numpy as np
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, BufferSpec
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, dedup, partition
-from tinygrad.uop.ops import Ops, UOp, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.runtime.autogen import libc
@@ -204,7 +204,7 @@ class TestHCQ2Core(unittest.TestCase):
 class TestHCQ2FFI(unittest.TestCase):
   @staticmethod
   def _run(body:UOp) -> list[Buffer]:
-    call = hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test_ffi")).call(aux=hcq2.HCQInfo(("CPU",))))
+    call = hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test_ffi"), tag=1).call(aux=hcq2.HCQInfo(("CPU",))))
     assert call is not None
     linear = hcq2.hcq_link(lower_and_compile(UOp(Ops.LINEAR, src=(call,))), allow_cache=False)
     run_linear(linear, jit=True)
@@ -225,6 +225,61 @@ class TestHCQ2FFI(unittest.TestCase):
       bufs = self._run(s.index(0).load())
     got = struct_t.from_buffer_copy(bytes(next(b for b in bufs if b.nbytes == ctypes.sizeof(struct_t))._buf.cpu_view()))
     self.assertEqual((got.u8, got.u16, got.u32, got.u64), (0x12, 0x3456, 0x789ABCDE, 0xFEDCBA9876543210))
+
+  def test_ffi_register_pointer(self):
+    with Context(HCQ_RUNTIME_DEV="CPU"):
+      reg = UOp.placeholder((4,), dtypes.uint8, addrspace=AddrSpace.REG)
+      out = UOp.placeholder((4,), dtypes.uint8, device="CPU", tag="ffi_result")
+      filled = reg.after(hcq2.ccall(libc.dll.memset, reg, 0x5a, 4))
+      bufs = self._run(out.store(filled))
+    self.assertEqual(bytes(next(b for b in bufs if b.dtype is dtypes.uint8)._buf.cpu_view()), b'\x5a' * 4)
+
+  def test_ffi_call_in_loop(self):
+    with Context(HCQ_RUNTIME_DEV="CPU"):
+      out = UOp.placeholder((4,), dtypes.int32, device="CPU", tag="ffi_result")
+      i = UOp.range(4, 0, dtype=dtypes.int)
+      call = hcq2.ccall(libc.dll.ffs, UOp.const(1, dtypes.int) << i)
+      self.assertIn(i, call.ranges)
+      bufs = self._run(out.index(i).store(call).end(i))
+    self.assertEqual(list(next(b for b in bufs if b.dtype is dtypes.int)._buf.cpu_view().view(fmt='i')[:]), [1, 2, 3, 4])
+
+  def test_renumber_overlapping_ranges(self):
+    with Context(HCQ_RUNTIME_DEV="CPU"):
+      out = UOp.placeholder((16,), dtypes.int32, device="CPU", tag="result")
+      i, j = [UOp.range(4, n, dtype=dtypes.int) for n in (1, 2)]
+      bufs = self._run(out.index(i * 4 + j).store(i * 10 + j).end(i, j))
+    self.assertEqual(list(next(b for b in bufs if b.dtype is dtypes.int)._buf.cpu_view().view(fmt='i')[:]),
+                     [i * 10 + j for i in range(4) for j in range(4)])
+
+  def test_device_lower_after_encode(self):
+    with Context(HCQ_RUNTIME_DEV="CPU"):
+      out = UOp.placeholder((1,), dtypes.int32, device="CPU", tag="result")
+      encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="test_encode"), lambda: UOp.custom_function("test_lower"))])
+      lower = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="test_lower"), lambda out=out: out.index(0).store(42))])
+      with patch.object(Device["CPU"], "pm_encode", encode), patch.object(Device["CPU"], "pm_lower", lower):
+        bufs = self._run(UOp.custom_function("test_encode"))
+    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.int)._buf.cpu_view().view(fmt='i')[0], 42)
+
+  def test_nested_cstruct_patches(self):
+    with Context(HCQ_RUNTIME_DEV="CPU"):
+      inner = hcq2.cstruct(init_c_struct_t(4, (("value", ctypes.c_uint32, 0),)), value=42)
+      outer = hcq2.cstruct(init_c_struct_t(8, (("ptr", ctypes.c_uint64, 0),)), ptr=inner.getaddr("CPU"))
+      out = UOp.placeholder((1,), dtypes.uint32, device="CPU", tag="result")
+      copied = hcq2.ccall(libc.memcpy, out.index(0), outer.bitcast(dtypes.uint64).index(0).load(), 4)
+      bufs = self._run(out.after(copied).index(0).load())
+    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.uint32)._buf.cpu_view().view(fmt='I')[0], 42)
+
+
+class TestHCQ2Timeline(unittest.TestCase):
+  def test_reused_timeline_is_zeroed(self):
+    buf = Buffer("CPU", 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
+    addr = buf._buf.va_addr
+    buf._buf.cpu_view().view(fmt='B')[:] = b'\xff' * 16
+    buf.deallocate()
+    dev = HCQ2Compiled.__new__(HCQ2Compiled)
+    dev.device = "CPU"
+    self.assertEqual(dev.timeline._buf.va_addr, addr)
+    self.assertEqual(bytes(dev.timeline._buf.cpu_view()), bytes(16))
 
 
 if __name__ == "__main__":

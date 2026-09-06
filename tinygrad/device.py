@@ -337,8 +337,9 @@ class Compiled:
 
   has_copy_queue:bool = True
 
+  pm_batch:Any = None # a batch of submits -> the batch with the device's own work added
   pm_encode:Any = None # per queue kind: queue ops -> flat command words
-  pm_lower:Any = None # per queue kind: custom_function(submit, cmdbuf) -> the queue push
+  pm_lower:Any = None # the runtime device's accesses to a device it can't reach: loads and stores become transfers
   pm_bufferize:Any = None
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, graph=None, arch=None):

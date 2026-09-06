@@ -16,8 +16,8 @@ def linearize(sink:UOp) -> list[UOp]:
   for u in reversed(lst):
     for s in u.src: out_degree[s] += 1
 
-    # we place UOps with higher run_counts later
-    run_count = prod([int(r.vmax)+1 for r in u.ranges])
+    # we place UOps with higher run_counts later. a loop of one trip still runs its body after what's outside it
+    run_count = prod([max(int(r.vmax)+1, 2) for r in u.ranges])
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     extra = None

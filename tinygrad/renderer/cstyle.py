@@ -67,8 +67,8 @@ base_rewrite = PatternMatcher([
 
   # call an external function: the CUSTOM_FUNCTION body holds the callee (a function pointer), the other srcs are the args
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, src=(UPat(name="fptr"),)),), allow_any_len=True, name="x"), lambda ctx,x,fptr:
-   f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[1:])}))({ctx[fptr]}))" +
-   f"({', '.join(f'({ctx.render_type(y)})({ctx[y]})' for y in x.src[1:])}))" + (";" if x.dtype is dtypes.void else "")),
+   f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y, ptr=True) for y in x.src[1:])}))({ctx[fptr]}))" +
+   f"({', '.join(f'({ctx.render_type(y, ptr=True)})({ctx[y]})' for y in x.src[1:])}))" + (";" if x.dtype is dtypes.void else "")),
 
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg[0].format(*[ctx[y] for y in x.src])),
@@ -187,7 +187,9 @@ class CStyleLanguage(Renderer):
       return prefix + self.type_map.get(dtype, dtype.name).replace(" ", "_") + str(sz) + suffix
     return prefix + self.type_map.get(dtype, dtype.name) + suffix
 
-  def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace, shape=u._shape)
+  def render_type(self, u:UOp, ptr=False): # ptr: an address is a pointer whatever its addrspace (a register array passed to a function)
+    is_ptr = ptr and u.addrspace not in (None, AddrSpace.ALU)
+    return self._render_dtype(u.dtype, 1 if is_ptr else u.max_numel(), u.addrspace, override_ptr=is_ptr, shape=u._shape)
   def render_ptr(self, u:UOp):
     # the address of an access, vector-cast if the access reads/writes more lanes than the pointer's scalar type
     if u.max_numel() > 1 or u.dtype != u.src[0].dtype:
