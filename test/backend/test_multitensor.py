@@ -523,7 +523,8 @@ class TestMultiTransformer(unittest.TestCase):
       else: v.shard_(device, axis=None)
 
     last_tok = 0
-    for i in range(3):
+    # i=0: bypasses jit, i=1: jit warmup, i=2: capture and run, i>=3: re-execute jit with new start_pos (catches stale bindings)
+    for i in range(4):
       real_tok = real_model(Tensor([[last_tok]], device=Device.DEFAULT), i).item()
       shard_tok = shard_model(Tensor([[last_tok]], device=device), i).item()
 
