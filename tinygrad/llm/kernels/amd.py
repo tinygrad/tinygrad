@@ -3,6 +3,7 @@ import functools, math
 from typing import Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.device import Buffer
+from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
@@ -55,15 +56,20 @@ class Linear(nn.Linear):
     super().__init__(in_features, out_features, bias)
     self.in_features, self.out_features = in_features, out_features
   def set_quantized(self, decoded:Tensor):
+    if self.in_features % GGML_BLOCK_SIZE: return
     packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in QUANT_SIZES.items()}
     graph = decoded.uop.toposort()
     raw = next((u for u in graph if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
     if raw is None: return
     ggml_type = packed_sizes[prod(raw.shape)]
-    # the packed byte rate alone can't distinguish same-rate formats (Q4_0 vs Q4_K, Q5_0 vs Q5_K, MXFP4 vs IQ4_XS).
-    # the supported formats are 256-wide superblocks: their decode views the packed bytes at the superblock width
-    # (ggml_data_to_tensor reshapes to (-1, QUANT_SIZES[type])), while same-rate 32-wide formats reshape to 17-22
-    if not any(u.op is Ops.RESHAPE and u.shape[-1:] == (QUANT_SIZES[ggml_type],) for u in graph): return
+    # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
+    # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
+    def unwrapped(u:UOp) -> UOp:
+      while u.op in (Ops.RESHAPE, Ops.CONTIGUOUS) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)):
+        u = u.src[0]
+      return u
+    expected = ggml_data_to_tensor(Tensor(raw), self.in_features * self.out_features, ggml_type)
+    if unwrapped(decoded.uop).key != unwrapped(expected.uop).key: return
     raw_offset = raw.contiguous_view_offset()
     assert raw_offset is not None and raw_offset % 4 == 0 and raw.buf_uop.dtype == dtypes.uint8
     self.ggml_type = ggml_type
@@ -233,6 +239,7 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, out_features:
   return _decode_linear(out, out_features, group_count, group_dot, names[ggml_type])
 
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
+  if out_features % (16*output_tiles): output_tiles = 1
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
   token_block, output_block = UOp.range(out.shape[0]//token_tile, 0), UOp.range(out_features//(16*output_tiles*output_waves), 1)
   # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
@@ -311,15 +318,9 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
     d, scale = _iq4_scales(raw, base, subgroup)
     scale = scale * d
-    if out_features <= 6144:
-      pairs = tuple(lut[((raw[base + 2 + subgroup*4 + word] >> (byte*8)) & 255).cast(dtypes.weakint)]
-                    for word in range(4) for byte in range(4))
-      return tuple((_half((pair >> (half*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in pairs)
-    # a subgroup-half gathers the lo (half=0) or hi (half=1) nibbles of byte pairs of each packed word
-    lut_pairs = (lut[(((raw[base+2+subgroup*4+i] >> (8*j+4*half)) & 15) |
-                      (((raw[base+2+subgroup*4+i] >> (8*j+8+4*half)) & 15) << 4)).cast(dtypes.weakint)]
-                 for i in range(4) for j in (0, 2))
-    return tuple((_half((pair >> (i*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in lut_pairs for i in range(2))
+    pairs = tuple(lut[((raw[base + 2 + subgroup*4 + word] >> (byte*8)) & 255).cast(dtypes.weakint)]
+                  for word in range(4) for byte in range(4))
+    return tuple((_half((pair >> (half*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in pairs)
   return _quant_linear_wmma(out, x, out_features, in_features, IQ4_WORDS, layout, dequant, "linear_iq4_xs_f16_wmma")
 
 def q8_linear(layer:Linear, x:Tensor) -> Tensor:
@@ -362,21 +363,20 @@ def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *rest:UOp, in_features:int, out_
     for j in range(val_chunk):
       acc = acc + w[out_row, i, lane*val_chunk + j].load().float() * x[token, i, lane*val_chunk + j].load().float()
   total = warp_reduce(acc, full_wave=True)
-  if bias is not None: total = total + bias[token, out_row].load().float()
+  if bias is not None: total = total + bias[out_row].load().float()
   return out[token, out_row.valid(lane.eq(0))].store(total).end(token, out_row, lane).sink(arg=KernelInfo(name="linear_f16_gemv", opts_to_apply=()))
 
 def _view_back(t:Tensor) -> Tensor:
-  """strip top-of-chain CAST(s) from a lazy weight: reading the raw file bytes in the kernel instead of
-  materializing the cast into a fresh buffer every step"""
+  # Widening half to float is exact; preserve casts that round or change the values.
   uop = t.uop
-  while uop.op is Ops.CAST: uop = uop.src[0]
+  while uop.op is Ops.CAST and uop.dtype == dtypes.float32 and uop.src[0].dtype in (dtypes.half, dtypes.bfloat16): uop = uop.src[0]
   return Tensor(uop).reshape(t.shape)
 
 def f16_gemv(layer:Linear, x:Tensor) -> Tensor:
   tokens = prod(x.shape[:-1])
   assert isinstance(tokens, int)
   weight = _view_back(layer.weight)
-  x = x.contiguous() if x.dtype == dtypes.half else x.cast(dtypes.half).contiguous()
+  x = x.contiguous()
   out = Tensor.empty(tokens, layer.out_features, dtype=dtypes.float32, device=x.device)
   fxn = functools.partial(_amd_f16_gemv_kernel, in_features=layer.in_features, out_features=layer.out_features, tokens=tokens)
   srcs = (out, weight.reshape(-1), x.reshape(tokens, layer.in_features)) + (() if layer.bias is None else (_view_back(layer.bias),))
@@ -439,7 +439,8 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, m
                      max_reg.store(UOp.stack(*row_max)), sum_reg.store(UOp.stack(*row_sums))).end(chunk_round)
   acc_reg, max_reg, sum_reg = acc_reg.after(update), max_reg.after(update), sum_reg.after(update)
   # exchange across the block's waves through LDS (fp16 halves LDS so more blocks fit per CU)
-  acc_lds = UOp.placeholder((WAVES, G, D), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
+  # Matching cache/LDS strides can reuse a loop-local cache index outside the loop. Pad that layout.
+  acc_lds = UOp.placeholder((WAVES, G, D + (LDS_PAD if G == SEC else 0)), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)[:, :, :D]
   ml_lds = UOp.placeholder((WAVES, G, 2), dtypes.float, slot=1, addrspace=AddrSpace.LOCAL)
   lds_acc = acc_lds.reshape(WAVES, G, WARP_SIZE, DPL)
   # Normalize before fp16 to avoid overflow. Nonempty waves have sum >= 1; empty waves keep their zero accumulator.
@@ -502,7 +503,10 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   chunks = min(48, max_kv_len // 64)
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device)
   stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device)
-  fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=64, waves=16)
+  waves, group = 16, H // cache_kv.shape[2]
+  while waves * group * ((D+LDS_PAD)*2 + 8) > 65536: waves //= 2
+  assert waves > 0, "attention head group exceeds shared memory capacity"
+  fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=64, waves=waves)
   partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv, fxn=fxn)[:2]
   live = (valid_kv_len+63)//64
   live = min(live, chunks) if isinstance(live, int) else live.minimum(chunks)
@@ -518,7 +522,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   k, v = cache[0].reshape(B*H_KV, physical_n, cache_dim), cache[1].reshape(B*H_KV, physical_n, cache_dim)
   assert k.shape == v.shape and BH % k.shape[0] == 0 and k.shape[2] == D
   gqa_group = BH // k.shape[0]
-  if isinstance(M, int) and isinstance(valid_kv_len, int): assert M % BLOCK_M == 0 and valid_kv_len % BLOCK_N == 0
+  if isinstance(M, int): assert M % BLOCK_M == 0
   assert isinstance(D, int) and D % WMMA_K == 0 and D % LANES_PER_WAVE_N == 0
   TM, TN, TD, SCALE = BLOCK_M//(WAVES_M*LANES_PER_WAVE_M), BLOCK_N//LANES_PER_WAVE_N, D//(WAVES_N*LANES_PER_WAVE_N), 1/math.sqrt(D)
   # query row 0 sits at sequence position q_base (the queries may be padded beyond valid_kv_len - q_base rows)
@@ -574,7 +578,8 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   acc, l_i, m_i, beta_i = acc.after(correction), l_i.after(correction), m_i.after(correction), beta_i.after(correction)
   V_lds = UOp.placeholder((D, BLOCK_N + LDS_PAD), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)[:, :BLOCK_N]
   V_copy, load_v = V_lds.after(qk_done).permute(1, 0), UOp.range(KV_ELEMS_PER_THREAD, 390)
-  vval = v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v].float()
+  v_pos = n_tile*BLOCK_N + (tid*KV_ELEMS_PER_THREAD + load_v)//D
+  vval = (v_pos < valid_kv_len).where(v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v].float(), 0)
   V_store = V_copy.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_v].store(vval).end(load_v)
   pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
   P_lds, V_lds = P_lds.after(pv_barrier), V_lds.after(pv_barrier)
@@ -596,7 +601,16 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
 def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   # cached flash attention on the half KV cache (already written through assigned_kv); valid_end stays bound at the graph level
   T_real, q_start = q.shape[2], None
-  if resolve(T_real == 1): return amd_flash_attention_decode(q.half(), assigned_kv, valid_end, cast(int, assigned_kv.shape[3]))
+  D, N, group = q.shape[3], assigned_kv.shape[3], q.shape[1] // assigned_kv.shape[2]
+  decode = resolve(T_real == 1, False)
+  # Non-power-of-two decode dimensions can lose tail-store masks. Q/P, K, and V use separate LDS allocations.
+  supported = D % 32 == 0 and (D & (D-1) == 0 and N % 64 == 0 and group*((D+LDS_PAD)*2+8) <= 65536 if decode else
+    D >= 64 and 2*(2*BLOCK_M*(D+LDS_PAD) + D*(BLOCK_N+LDS_PAD)) <= 65536 and N % BLOCK_N == 0 and q.max_shape[2] % BLOCK_M == 0)
+  if not supported:
+    k, v = (assigned_kv[i, :, :, :valid_end].float() for i in range(2))
+    mask = None if decode else Tensor.full((T_real, valid_end), -math.inf, dtype=dtypes.float32, device=q.device).triu(valid_end-T_real+1)
+    return q.float().scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)
+  if decode: return amd_flash_attention_decode(q.half(), assigned_kv, valid_end, cast(int, N))
   if isinstance(T_real, UOp):
     # symbolic chunk: pad the queries to the static tile; garbage rows are sliced off
     T_pad = q.max_shape[2]
@@ -650,12 +664,14 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   assert q.shape == k.shape and v.shape[:3] == beta.shape == (batch, heads, tokens) and state.shape == (batch, heads, value_dim, key_dim)
   assert alpha.shape[:3] == (batch, heads, tokens) and (len(alpha.shape) == 3 or alpha.shape[-1] in (1, value_dim))
   assert key_dim % 32 == 0 and value_dim % 4 == 0
+  assert q.dtype == k.dtype == dtypes.float32, "recurrent Q/K must be float32"
+  assert state.uop.contiguous_view_offset() is not None, "recurrent state must be contiguous"
+  if start_pos is not None:
+    assert start_pos.uop.is_bound_var
+    state = Tensor(state.uop.after(start_pos.uop))
   core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
-  if start_pos is None: return Tensor.custom_kernel(*srcs, fxn=_gated_delta_prefill_kernel)[0]
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  assert start_pos.uop.is_bound_var
-  # the bound start_pos reaches the graph through the state AFTER chain, like the flash kernels' valid_end
-  call = _gated_delta_prefill_kernel(*params, kernel_var(start_pos.uop.src[0])).call(*contig)
+  call = _gated_delta_prefill_kernel(*params, None if start_pos is None else kernel_var(start_pos.uop.src[0])).call(*contig)
   return Tensor(contig[0].after(call))
