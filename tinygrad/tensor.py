@@ -445,7 +445,7 @@ class Tensor(RandMixin):
     assigned_to = self.uop.storage_base
     # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead
     if not assigned_to.has_buffer_identity() and assigned_to.op is not Ops.CONTIGUOUS:
-      self.uop = (x.uop.src[0] if x.uop.op is Ops.CONTIGUOUS else x.uop).clone()
+      self.uop = x.uop.clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))

@@ -1028,6 +1028,13 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     self.assertEqual(detached.tolist(), [2., 3., 4.])
     self.assertEqual(base.tolist(), [2., 3., 4.])
 
+  def test_clone(self):
+    t = Tensor([[1,2],[3,4]]).contiguous().realize()
+    c = t.permute(1,0).clone()
+    c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
+    self.assertEqual(c.tolist(), [[1,1],[2,1]])
+    self.assertEqual(t.tolist(), [[1,2],[3,4]])
+
   def test_detach_write_visible_through_aliases(self):
     base = Tensor([1., 2., 3.]).realize()
     d1, d2 = base.detach(), base.detach()
