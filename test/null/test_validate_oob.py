@@ -122,6 +122,10 @@ class TestValidateOOB(unittest.TestCase):
       r = UOp.range(20, 0)
       i = (r.cast(dtypes.float) * 0.68).trunc().cast(dtypes.int)
       to_uops_list([buf.index(i.valid((i >= 0) & (i < 16))).load()])
+      # a float entirely out of the int range has no value, not an empty one
+      f = UOp.variable("f", 3e9, 4e9, dtypes.float32, param=True).cast(dtypes.int)
+      with self.assertRaises(RuntimeError):
+        to_uops_list([buf.index(f).load()])
 
   def test_float_cast_in_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
