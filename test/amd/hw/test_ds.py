@@ -7,6 +7,29 @@ Includes: ds_store_b32, ds_load_b32, ds_store_2addr_*, ds_load_2addr_*,
 import unittest
 from test.amd.hw.helpers import *
 
+class TestDSSwizzle(unittest.TestCase):
+  def test_modes_and_overlapping_registers(self):
+    for offset in (0x041f, 0x401f, 0x7c1f, 0x00a0, 0x801b, 0xc020, 0xc420, 0xc021, 0xe000, 0xe010, 0xe01f):
+      for dst in (0, 1):
+        with self.subTest(offset=hex(offset), dst=dst):
+          st = run_program([
+            v_add_nc_u32_e32(v[0], 1, v[255]),
+            ds_swizzle_b32(vdst=v[dst], addr=v[0], offset0=offset & 255, offset1=offset >> 8),
+            s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+          ], n_lanes=32)
+          self.assertEqual(sorted(st.vgpr[i][dst] for i in range(32)), [6]*32 if offset == 0x00a0 else list(range(1, 33)))
+
+  def test_inactive_sources_and_destinations(self):
+    st = run_program([
+      v_add_nc_u32_e32(v[0], 1, v[255]),
+      v_mov_b32_e32(v[1], 99),
+      s_mov_b32(EXEC_LO, 0x55555555),
+      ds_swizzle_b32(vdst=v[1], addr=v[0], offset0=0x1f, offset1=4),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+      s_mov_b32(EXEC_LO, 0xffffffff),
+    ], n_lanes=32)
+    self.assertEqual([st.vgpr[i][1] for i in range(32)], [0, 99]*16)
+
 class TestDS2Addr(unittest.TestCase):
   """Tests for DS_*_2ADDR instructions."""
 
