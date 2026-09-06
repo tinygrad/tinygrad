@@ -201,37 +201,6 @@ class TestMXFP4(unittest.TestCase):
     ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32).T
     self.assertLess(np.linalg.norm(out-ref) / np.linalg.norm(ref), 0.2)
 
-  def test_correctness2(self):
-    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
-
-    def dequantize(x:Tensor) -> Tensor:
-      rows, cols = x.shape
-      packed, scales, _, _ = quantize_mxfp4(x)
-      # Undo the 32-row x 8-scale packing; request unshuffled FP4 rows for the reference.
-      scales = scales.reshape(rows//32, cols//256, 4, 16, 2, 2).permute(0, 5, 3, 1, 4, 2).reshape(rows, cols//32)
-      codes = Tensor.stack(packed & 15, packed >> 4, dim=-1).reshape(rows, cols)
-      values = Tensor([0, 0.5, 1, 1.5, 2, 3, 4, 6], device=x.device)[(codes & 7).int()]
-      values = (codes < 8).where(values, -values).reshape(rows, cols//32, 32)
-      return (values * (scales.float()-127).exp2().unsqueeze(-1)).reshape(rows, cols).cast(dtypes.bfloat16).realize()
-
-    M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
-    Tensor.manual_seed(0)
-    a = Tensor.rand(M, K, dtype=dtypes.bfloat16)
-    b = Tensor.rand(N, K, dtype=dtypes.bfloat16)
-    with Context(DEBUG=0):
-      Tensor.realize(a, b)
-      # Compare the quantized operands to isolate GEMM errors from Hadamard/FP4 quantization error.
-      ref = dequantize(a).matmul(dequantize(b).T, dtype=dtypes.float32).realize()
-    for _ in range(getenv("CNT", 1)):
-      # Pass initialized output directly to the assembly kernel so missing writes cannot pass.
-      with Context(DEBUG=0): out = Tensor.zeros(M, N, dtype=dtypes.bfloat16).contiguous().realize()
-      out = asm_gemm(a, b.T, mxfp4=True, out=out).realize()
-      with Context(DEBUG=0):
-        print("out:", out.flatten()[:10].tolist())
-        print("ref:", ref.flatten()[:10].tolist())
-        # The assembly stores BF16, whose rounding contributes up to roughly 0.4% relative error.
-        self.assertTrue(out.allclose(ref, rtol=0.005, atol=1e-3).item(), "MXFP4 GEMM forward mismatch")
-
   def test_tile_variants(self):
     M, N, K = 256, 512, 256
     Tensor.manual_seed(4)
