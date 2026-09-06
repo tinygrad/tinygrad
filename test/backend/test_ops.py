@@ -3107,6 +3107,13 @@ class TestOps(unittest.TestCase):
                          lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
                          vals=[[-float("inf"), 2., 3.]])
 
+  def test_gather_bool_index(self):
+    helper_test_op(None, lambda x,y: x.gather(dim=0, index=y.bool().long()),
+                         lambda x,y: x.gather(dim=0, index=y.cast(dtypes.bool).cast(dtypes.int)),
+                         vals=[[1., 2., 3.], [0.5, 0., 2.]], forward_only=True)
+    helper_test_op(None, lambda x,y: x[y.bool().long()], lambda x,y: x[y.cast(dtypes.bool).cast(dtypes.int)],
+                         vals=[[1., 2., 3.], [0.5, 0., 2.]], forward_only=True)
+
   def test_scatter(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32)
