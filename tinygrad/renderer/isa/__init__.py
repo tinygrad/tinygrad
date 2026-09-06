@@ -23,14 +23,16 @@ class IselContext:
   def vreg(self, cons:tuple[Register, ...]|Register):
     return Register(f"v{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
 
-def greg(u:UOp):
-  if u.op in {Ops.NOOP, Ops.AFTER, Ops.BITCAST} and u.src: return greg(u.src[0])
-  if isinstance(u.tag, tuple): return u.tag[0]
-  return u.tag
+def rdef(u:UOp):
+  if u.op in {Ops.NOOP, Ops.AFTER, Ops.BITCAST} and u.src: return rdef(u.src[0])
+  return u.tag[0] if isinstance(u.tag, tuple) else u.tag
 
 @dataclass
-class PreRegAllocContext:
+class LinearContext:
+  ren: ISARenderer
+  stack_size: int = 0
   lock: UOp|None = None
+  loop_label: dict[UOp, str] = field(default_factory=dict)
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
