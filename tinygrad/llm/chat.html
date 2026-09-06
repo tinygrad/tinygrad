@@ -16,7 +16,8 @@
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
   const msgs = [];
   let generating = false;
-  const inline = s => s.replace(/<pre>[\s\S]*?<\/pre>|<code>[\s\S]*?<\/code>|`([^`\n]+)`|\*\*(.+?)\*\*|\*(?!\s)([^*\n]+)\*/g,
+  const inline = s => s.replace(
+    /<pre>[\s\S]*?<\/pre>|<code>[\s\S]*?<\/code>|`([^`\n]+)`|\*\*((?:[^\n]|\n(?!\n))+?)\*\*|\*(?!\s)((?:[^*\n]|\n(?!\n))+)\*/g,
     (s, code, bold, em) => code !== undefined ? `<code>${code}</code>` : bold ? `<b>${inline(bold)}</b>` : em ? `<em>${inline(em)}</em>` : s);
   const md = s => inline(s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/```[^\n]*\n([\s\S]*?)(?:```|(?![\s\S]))|^(#{1,6}) (.+)$/gm,
