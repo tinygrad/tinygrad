@@ -12,6 +12,11 @@ def _ggml_iq_grid(device: str, grid: tuple[int, ...], grid_shape: tuple[int, int
   values = [float((w >> (8*i)) & 0xFF) for w in grid for i in range(grid_shape[1])]
   return Tensor(values, dtype=dtypes.float32, device=device).reshape(grid_shape)
 
+@functools.cache
+def _ggml_iq4_lut(device: str) -> Tensor:
+  from tinygrad.runtime.autogen import ggml_common as _ggml
+  return Tensor(list(_ggml.kvalues_iq4nl), dtype=dtypes.float32, device=device)
+
 # native types {ggml_type: dtype}
 _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtypes.int16,
                 26: dtypes.int32, 27: dtypes.int64, 28: dtypes.float64, 30: dtypes.bfloat16}
@@ -129,7 +134,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       return (dl * (grid + delta)).flatten(-3)
     if ggml_type == 20:
       d = blocks[:, :2].bitcast(dtypes.float16).cast(dtypes.float32)
-      return d * Tensor(list(_ggml.kvalues_iq4nl), dtype=dtypes.float32, device=t.device)[q_to_uint8(blocks[:, 2:], 4)]
+      return d * _ggml_iq4_lut(t.device)[q_to_uint8(blocks[:, 2:], 4)]
     if ggml_type == 21:
       d = blocks[:, :2].bitcast(dtypes.float16).cast(dtypes.float32).reshape((-1, 1, 1, 1))
       scales = (1 + 2 * q_to_uint8(blocks[:, 106:110].reshape((-1, 4, 1)), 4).reshape((-1, 8))).cast(dtypes.float32).reshape((-1, 8, 1, 1))
@@ -147,7 +152,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     if ggml_type == 23:
       d = blocks[:, :2].bitcast(dtypes.float16).cast(dtypes.float32).reshape((-1, 1, 1))
       scale_shifts = Tensor.const((0, 2, 4, 6, 8, 10, 12, 14), dtypes.uint16)
-      iq4_xs_lut = Tensor(list(_ggml.kvalues_iq4nl), dtype=dtypes.float32, device=t.device)
+      iq4_xs_lut = _ggml_iq4_lut(t.device)
       scales_l = Tensor.stack((sl:=blocks[:, 4:8]).bitwise_and(0xF), sl.rshift(4), dim=2).reshape((-1, 8))
       scales_h = blocks[:, 2:4].bitcast(dtypes.uint16).unsqueeze(-1).rshift(scale_shifts).bitwise_and(0x03).reshape((-1, 8)).cast(dtypes.uint8)
       scales = (scales_l.bitwise_or(scales_h.lshift(4)).bitcast(dtypes.int8) - 32).cast(dtypes.float32).reshape((-1, 8, 1))

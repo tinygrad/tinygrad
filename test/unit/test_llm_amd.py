@@ -55,10 +55,10 @@ class TestQ8Quantize(unittest.TestCase):
   def test_q5_linear(self): self._test_quant_linear(13, 176)
 
   def test_quant_linear_partial_output_tile(self):
-    for typ, size in ((12, 144), (13, 176), (23, 136)):
-      for out_features in (16, 48, 80, 4112):
-        with self.subTest(ggml_type=typ, out_features=out_features):
-          self._test_quant_linear(typ, size, in_features=256, out_features=out_features, token_counts=(16, 32, 64))
+    # Cover a sub-tile output, a trailing tile, and IQ4's larger-output tile selection.
+    for typ, size, outputs, tokens in ((12, 144, 16, 16), (12, 144, 48, 32), (13, 176, 48, 16), (23, 136, 4112, 32)):
+      with self.subTest(ggml_type=typ, out_features=outputs):
+        self._test_quant_linear(typ, size, in_features=256, out_features=outputs, token_counts=(tokens,))
 
   def test_quant_linear_preserves_rope_permutation(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
@@ -72,12 +72,22 @@ class TestQ8Quantize(unittest.TestCase):
         raw = Tensor(np.pad(packed.flatten(), (4, 0))).contiguous().realize()[4:]
         decoded = ggml_data_to_tensor(raw, 16*256, typ).reshape(16, 256).half()
         original = decoded.numpy()
-        permuted = original.reshape(2, 4, 2, 256).transpose(0, 2, 1, 3).reshape(16, 256)
         x = rng.normal(size=(3, 256)).astype(np.float16)
-        linear = Linear(256, 16, bias=False)
-        linear.weight = decoded.reshape(2, 4, 2, 256).permute(0, 2, 1, 3).reshape(16, 256)
-        np.testing.assert_allclose(linear(Tensor(x)).numpy(), x.astype(np.float32) @ permuted.astype(np.float32).T, rtol=3e-3, atol=2e-2)
-        self.assertIsNone(linear.ggml_type)
+        for prefix in (None, 0, 4):
+          with self.subTest(prefix=prefix):
+            w = decoded.reshape(2, 8, 256)
+            if prefix is None:
+              weight = w.rearrange("n (h two) d -> n (two h) d", two=2)
+            else:
+              weight = w[:, :prefix].cat(w[:, prefix:].rearrange("n (h two) d -> n (two h) d", two=2), dim=1)
+            start = prefix or 0
+            rows = np.arange(16).reshape(2, 8)
+            order = np.concatenate((rows[:, :start], rows[:, start:].reshape(2, -1, 2).transpose(0, 2, 1).reshape(2, -1)), axis=1)
+            linear = Linear(256, 16, bias=False)
+            linear.weight = weight.reshape(16, 256)
+            np.testing.assert_allclose(linear(Tensor(x)).numpy(), x.astype(np.float32) @ original[order.flatten()].astype(np.float32).T,
+                                       rtol=3e-3, atol=2e-2)
+            self.assertIsNone(linear.ggml_type)
 
   def test_dense_gemv_bias(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
@@ -146,23 +156,19 @@ class TestQ8Quantize(unittest.TestCase):
     out = flash_attention(q, assigned, 1).realize()
     np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
 
-  def test_flash_attention_decode_gqa_output_layout(self):
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
-    Tensor.manual_seed(42)
-    q = Tensor.randn(1, 4, 1, 128, dtype=dtypes.half).realize()
-    cache = Tensor.randn(2, 1, 1, 256, 128, dtype=dtypes.half).realize()
-    out = flash_attention(q, cache, 3).realize()
-    expected = q.scaled_dot_product_attention(cache[0, :, :, :3], cache[1, :, :, :3], enable_gqa=True)
-    np.testing.assert_allclose(out.numpy(), expected.numpy(), rtol=2e-3, atol=2e-3)
+  def test_flash_attention_decode_gqa_output_layout(self): self._test_flash_decode(4, 1, 128, 256, 3)
+  def test_flash_attention_decode_large_gqa_group(self): self._test_flash_decode(8, 1, 256, 256, 73)
 
-  def test_flash_attention_decode_large_gqa_group(self):
+  def _test_flash_decode(self, heads, kv_heads, dim, n, valid):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
-    Tensor.manual_seed(42)
-    q = Tensor.randn(1, 8, 1, 256, dtype=dtypes.half).realize()
-    cache = Tensor.randn(2, 1, 1, 256, 256, dtype=dtypes.half).realize()
-    out = flash_attention(q, cache, 73)
-    expected = q.scaled_dot_product_attention(cache[0, :, :, :73], cache[1, :, :, :73], enable_gqa=True)
-    np.testing.assert_allclose(out.numpy(), expected.numpy(), rtol=2e-3, atol=2e-3)
+    rng = np.random.default_rng(42)
+    q = rng.normal(size=(1, heads, 1, dim)).astype(np.float16)
+    cache = rng.normal(size=(2, 1, kv_heads, n, dim)).astype(np.float16)
+    k, v = (np.repeat(c[0, :, :valid].astype(np.float32), heads//kv_heads, axis=0) for c in cache)
+    scores = q[0].astype(np.float32) @ k.transpose(0, 2, 1) / np.sqrt(dim)
+    probs = np.exp(scores - scores.max(-1, keepdims=True))
+    expected = (probs / probs.sum(-1, keepdims=True)) @ v
+    np.testing.assert_allclose(flash_attention(Tensor(q), Tensor(cache), valid).numpy(), expected[None], rtol=2e-3, atol=2e-3)
 
   def test_prefill_attention_nonfinite_cache_tail(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
@@ -195,14 +201,7 @@ class TestQ8Quantize(unittest.TestCase):
         np.testing.assert_allclose(flash_attention(q, assigned, valid_kv_len).numpy(), expected, rtol=2e-3, atol=2e-4)
 
   def test_flash_attention_decode_long_context_random(self):
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
-    Tensor.manual_seed(42)
-    n, valid = 257*64, 257*64 - 13  # past the old 256-chunk partial limit, with a ragged tail
-    q = Tensor.randn(1, 8, 1, 128, dtype=dtypes.half).realize()
-    cache = Tensor.randn(2, 1, 2, n, 128, dtype=dtypes.half).realize()
-    out = flash_attention(q, cache, valid).realize()
-    expected = q.scaled_dot_product_attention(cache[0, :, :, :valid], cache[1, :, :, :valid], enable_gqa=True)
-    np.testing.assert_allclose(out.numpy(), expected.numpy(), rtol=2e-3, atol=2e-3)
+    self._test_flash_decode(8, 2, 128, 257*64, 257*64-13)  # past 256 chunks, with a ragged tail
 
   def test_flash_attention_decode_chunk_round_accumulator_range(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
