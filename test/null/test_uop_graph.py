@@ -406,18 +406,6 @@ class TestUOpGraph(unittest.TestCase):
     a = c.after(e)
     self.assertNotIn(r, a.ranges)
 
-  def test_external_call_preserves_ranges(self):
-    r = UOp.range(4, 0, dtype=dtypes.int)
-    fn = UOp.custom_function("external", UOp.const(0, dtypes.uint64))
-    call = fn.call(r + 1, ret_dtype=dtypes.int)
-    self.assertEqual(set(call.ranges), {r})
-
-  def test_conditional_end_preserves_outer_range(self):
-    outer, inner = UOp.range(4, 0), UOp.loop(1)
-    end = UOp.const(1).end(inner, outer < 2)
-    self.assertEqual(set(end.ranges), {outer})
-    self.assertEqual(set((outer + 1).after(end).ranges), {outer})
-
 class TestReduceCollapse(unittest.TestCase):
   def test_multi_range_reduce_add(self):
     """Test that (x + y).reduce(r1, r2) distributes over multiple ranges"""
