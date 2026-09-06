@@ -101,23 +101,18 @@ class Linear(nn.Linear):
     return super().__call__(x)
 
 def _amd_dp4a(a:UOp, b:UOp, c:UOp) -> UOp:
-  # int8 4-wide dot, widened to scalar multiply-adds (2% decode slower than the sudot4 builtin, but portable)
-  for i in range(4):
-    av = ((a >> (8*i)) & 255).cast(dtypes.uint8).bitcast(dtypes.int8).int()
-    bv = ((b >> (8*i)) & 255).cast(dtypes.uint8).bitcast(dtypes.int8).int()
-    c = c + av*bv
-  return c
+  return UOp(Ops.CUSTOMI, src=(a, b, c), arg=("__builtin_amdgcn_sudot4(true, {}, true, {}, {}, false)", dtypes.int32))
 
 def _amd_byte_perm(a:UOp, b:UOp, selectors:UOp) -> UOp:
   return UOp(Ops.CUSTOMI, src=tuple(x.cast(dtypes.uint32) for x in (a, b, selectors)), arg=("__builtin_amdgcn_perm({}, {}, {})", dtypes.uint32))
 
-def _amd_load(ptr:UOp, lanes:int|None=None) -> UOp:
+def _amd_load(ptr:UOp, lanes:int|None=None, stream:bool=False) -> UOp:
   assert ptr.op is Ops.INDEX
   # nontemporal scalar load: streamed weights must not evict the activations/KV cache from L2
   if lanes is None: return ptr.load(arg="nontemporal")
   buf, coords = ptr.src[0], ptr.src[1:]
   idx = sum((coord*math.prod(buf.shape[i+1:]) for i,coord in enumerate(coords)), UOp.const(0))
-  return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load()
+  return UOp(Ops.SHRINK, src=(buf.flatten(), idx, UOp.const(lanes))).load(arg="nontemporal" if stream else None)
 
 def _load_byte(raw:UOp, base:UOp, offset:UOp) -> UOp: return (raw[base + offset//4] >> ((offset&3)*8).cast(dtypes.uint32)) & 255
 def _half(value:UOp) -> UOp: return value.cast(dtypes.uint16).bitcast(dtypes.float16).float()
@@ -153,22 +148,19 @@ def iq4_half_lut(device:str) -> Tensor:
 @functools.cache
 def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int, in_features:int) -> UOp:
   groups = in_features//Q8_GROUP_SIZE
-  token_group, lane = UOp.range(tokens*groups, 0, axis_type=AxisType.GLOBAL), UOp.range(32, 1, axis_type=AxisType.LOCAL)
+  token_group, lane = UOp.range(tokens*groups, 0, AxisType.GLOBAL), UOp.range(32, -1, AxisType.WARP)
   token, group = token_group//groups, token_group%groups
-  x = x.reshape(tokens, groups, 32)
-  group_scale = (warp_reduce(x[token, group, lane].float().abs(), maximum=True, full_wave=True) / 127).maximum(1e-8)
-  word_lane = lane.minimum(7)
-  xs = tuple(x[token, group, word_lane*4+i].float() for i in range(4))
-  qs = tuple((v/group_scale).round().clip(-127, 127).cast(dtypes.int8) for v in xs)
-  word = sum((v.cast(dtypes.uint8).cast(dtypes.uint32) << (i*8) for i, v in enumerate(qs)), UOp.const(0, dtypes.uint32))
-  # per-16 sums of the quantized values (lanes 0-3 / 4-7): Q4_K/Q5_K need the 32-sum, Q6_K the 16-sums
-  part = (lane < 8).where(sum((v.cast(dtypes.int32) for v in qs), UOp.const(0, dtypes.int32)), UOp.const(0, dtypes.int32))
-  gsum = [warp_reduce(((lane & 4).eq(h*4)).where(part, UOp.const(0, dtypes.int32)), full_wave=True) for h in range(2)]
-  store_half = (lane & 4) >> 2
-  stores = (q[token, group, lane.valid(lane < 8)].store(word),
-            UOp.group(scale[token, group.valid(lane.eq(0))].store(group_scale),
-                      xsum[token, group, store_half.valid(lane.eq(0) | lane.eq(4))].store(
-                        store_half.eq(0).where(gsum[0].float(), gsum[1].float()))))
+  value = x.reshape(tokens, groups, 32)[token, group, lane].float()
+  # Quantize each input once, then pack four neighboring lanes into one word.
+  d = (warp_reduce(value.abs(), maximum=True, full_wave=True)/127).maximum(1e-8)
+  rounded = UOp(Ops.CUSTOM, src=(value/d,), arg=("__builtin_nearbyintf({0})", dtypes.float))
+  quant = rounded.clip(-127, 127).cast(dtypes.int8)
+  word = quant.cast(dtypes.uint8).cast(dtypes.uint32) << ((lane%4)*8).cast(dtypes.uint32)
+  for offset in (1, 2):
+    word |= UOp(Ops.CUSTOM, src=(word,), arg=(f"__builtin_amdgcn_ds_swizzle({{0}}, {0x1f | offset<<10})", dtypes.uint32))
+  stores = (q[token, group, (lane//4).valid((lane%4).eq(0))].store(word),
+            scale[token, group.valid(lane.eq(0))].store(d),
+            xsum[token, group, (lane//16).valid((lane%16).eq(0))].store(warp_reduce(quant.float())))
   return UOp.group(*stores).end(token_group, lane).sink(arg=KernelInfo(name="q8_quantize", opts_to_apply=()))
 
 def q8_quantize(x:Tensor, tokens:int, in_features:int) -> tuple[Tensor, Tensor, Tensor]:
@@ -222,8 +214,8 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, out_features:
     # the packed rows were padded to 212 bytes (53 words) per 256-block in set_quantized: everything is word-aligned
     base = (output*in_features//GGML_BLOCK_SIZE+block)*Q6_WORDS
     # the subgroup's 8 ql words and 8 qh words are contiguous: two 16-byte vector loads each
-    lows = tuple(_amd_load(raw[base + (subgroup//4)*16 + (subgroup%2)*8 + half*4], 4) for half in range(2))
-    highs = tuple(_amd_load(raw[base + 32 + (subgroup//4)*8 + half*4], 4) for half in range(2))
+    lows = tuple(_amd_load(raw[base + (subgroup//4)*16 + (subgroup%2)*8 + half*4], 4, stream=True) for half in range(2))
+    highs = tuple(_amd_load(raw[base + 32 + (subgroup//4)*8 + half*4], 4, stream=True) for half in range(2))
     dots = [UOp.const(0, dtypes.int32)] * 2
     for word_idx in range(8):
       within = (subgroup*32 + word_idx*4)%128
