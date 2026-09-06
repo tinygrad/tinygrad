@@ -187,7 +187,7 @@ class Buffer:
     # zero copy with as_memoryview (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer'):
       if not no_sync: self.allocator.dev.synchronize()
-      return self.allocator._as_buffer(self._buf)
+      if (mv:=self.allocator._as_buffer(self._buf)) is not None: return mv
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
     Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv

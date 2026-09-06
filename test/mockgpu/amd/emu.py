@@ -69,7 +69,7 @@ from tinygrad.runtime.autogen.amd.cdna import ins as irc
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp, Inst
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
-from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits, _ftz_f32
+from test.mockgpu.amd.pcode import parse_pcode, _FUNCS, _set_bits, _to_bool, _to_u32, _val_to_bits, _ftz_f32, _bitreverse, _countbits
 
 MASK32 = 0xFFFFFFFF
 
@@ -1566,9 +1566,19 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
   has_data1 = is_lds and hasattr(inst, 'data1') and inst.data1 is not None
   data1_reg = ctx.inst_field(type(inst).data1) if is_lds else _c(0)  # type: ignore[union-attr]
 
+  if is_lds and op_name == 'DS_SWIZZLE_B32':
+    # The manual's reverse_bits operates on five-bit lane indices; thread indices wrap within the wave.
+    funcs = {'reverse_bits': lambda x: _bitreverse(x, 32) >> _c(27), 'count_ones': _countbits,
+             'thread_in': lambda x: ctx.rvgpr_dyn(addr_reg, x & _c(ctx.wave_size - 1)),
+             'thread_valid': lambda x: _lane_active(exec_mask, x & _c(ctx.wave_size - 1))}
+    result, _ = parse_pcode(pcode, {'offset0': offset0.cast(dtypes.uint8), 'offset1': offset1.cast(dtypes.uint8)}, funcs)
+    values = [result[f'thread_out@{i}'] for i in range(ctx.wave_size)]
+    # Snapshot every source before writing: destination and source registers may be identical.
+    reads = UOp(Ops.STACK, src=tuple(values))
+    return UOp.sink(*(ctx.wvgpr_dyn(vdst_reg, _c(i), val, exec_mask, after=reads) for i, val in enumerate(values)), *ctx.inc_pc())
+
   # DS_PERMUTE/DS_BPERMUTE: cross-lane VGPR access via pcode
   if is_lds and 'PERMUTE' in op_name:
-    pcode = get_pcode(inst.op)
     srcs = {'ADDR': addr_reg, 'DATA0': vdata_reg, 'VDST': vdst_reg, 'OFFSET': offset,
             'EXEC': exec_mask.cast(dtypes.uint64), '_vgpr': ctx.vgpr, '_wave_size': ctx.wave_size}
     _, assigns = parse_pcode(pcode, srcs)

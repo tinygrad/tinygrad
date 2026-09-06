@@ -43,9 +43,16 @@ pm_commit_weak = PatternMatcher([
 # consumers absorb the weak CAST off their srcs and default underivable consts; dtype-producing ops settle here.
 # a weakfloat Unary (sin/exp2/...) must resolve before the transcendental decomposition.
 _lower_weak_ops = GroupOp.Binary|GroupOp.Unary|{Ops.WHERE, Ops.RANGE, Ops.STACK, Ops.SPECIAL}
+
+# only within the kind is a weak CAST a width statement: across kinds it converts the value, so it commits unless u recasts its srcs anyway
+def absorb_weak_src(u:UOp, s:UOp) -> UOp:
+  if s.op is not Ops.CAST or s.dtype not in dtypes.weaks: return s
+  if u.op in _lower_weak_ops or u.op is Ops.CAST or weak_dtype(s.src[0].dtype) is s.dtype: return s.src[0]
+  return s.src[0].cast(s.commit_dtype(dtypes.int))
+
 def lower_weak_node(u:UOp) -> UOp|None:
   if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return None  # a committed const, not a consumer
-  src = tuple(s.src[0] if s.op is Ops.CAST and s.dtype in dtypes.weaks else s for s in u.src)
+  src = tuple(absorb_weak_src(u, s) for s in u.src)
   if derived_dtypes(u, src) is None:
     src = tuple(s.ccast(s.commit_dtype(dtypes.int)) if s.op is Ops.CONST and s.dtype in dtypes.weaks else s for s in src)
   if src == u.src: return None

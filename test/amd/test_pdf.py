@@ -43,6 +43,16 @@ class TestPcodePDF(unittest.TestCase):
     self.assertEqual(pcode[('S_CMOVK_I32', 2)],
       "if SCC then\nD0.i32 = 32'I(signext(SIMM16.i16))\nendif")
 
+  def test_swizzle_spans_blocks_and_pages(self):
+    for arch in ('rdna3', 'rdna4'):
+      with self.subTest(arch=arch):
+        code = self.pcode[arch][('DS_SWIZZLE_B32', 53)]
+        self.assertIn('} elsif (offset >= 0xc000) {', code)
+        self.assertIn('thread_out[i+3]', code)
+        self.assertIn('xor_mask = offset[14:10];', code)
+        self.assertEqual(code.count('{'), code.count('}'))
+        self.assertTrue(code.endswith('\n}'))
+
   def test_pcode_no_examples(self):
     """Pseudocode should not contain example lines with '=>'."""
     for name in ARCHS:

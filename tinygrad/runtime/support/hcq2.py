@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
-import functools, time, itertools, decimal, weakref, os, statistics, ctypes, importlib
+import functools, time, itertools, decimal, weakref, statistics, ctypes, importlib
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2, cpu_profile, mv_address
-from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us
+from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us, DEV
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
@@ -21,7 +21,7 @@ if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: rem
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("QCOM", "CPU")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
+HCQ_DEVS = frozenset(("NV", "QCOM", "CPU")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -97,7 +97,7 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), replace_buffer
 # *****************
 # 1.1. prep: staging copies
 
-STAGING_SIZE, STAGING_SLOTS = (4 if os.getenv("CI") else 128) << 20, 2 # the staging mlocks into the device: ci runners cap locked memory at 8mb
+STAGING_SIZE, STAGING_SLOTS = (4 if DEV.interface.startswith("MOCK") else 128) << 20, 2
 
 @functools.cache
 def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
@@ -152,22 +152,25 @@ class BatchCtx:
   tracker:HCQDepsTracker = field(default_factory=HCQDepsTracker)
   queues:dict[str, list[str]] = field(init=False)
   first:dict[tuple[str, str], int] = field(init=False); last:dict[tuple[str, str], int] = field(init=False) # noqa: E702
+  prev:list[int|None] = field(init=False)
   signal_tags:set[int] = field(init=False)
   slots:dict[str, UOp] = field(init=False)
 
   def __post_init__(self):
-    self.queues, self.first, self.last = {}, {}, {}
+    self.queues, self.first, self.last, self.prev = {}, {}, {}, []
     for tag, (_, devs, q) in enumerate(self.batch):
       if q not in self.queues.setdefault(devs[0], []): self.queues[devs[0]].append(q)
       self.first.setdefault((devs[0], q), tag)
+      self.prev.append(self.last.get((devs[0], q)))
       self.last[(devs[0], q)] = tag
     self.signal_tags = {tag for (dev, q), tag in self.last.items() if q != self.epilogue_queue(dev)}
-    self.slots = {dev: UOp.placeholder((len(qs) + 1 + (2 * len(self.batch) if self.profile else 0),), dtypes.uint64, device=(dev,), volatile=True,
-                                       tag="slots") for dev, qs in self.queues.items()}
+    # a slot is [signal][timestamp], 16 bytes: the queue signals, the timeline, then two per call if profiling
+    self.slots = {dev: UOp.placeholder((2 * (len(qs) + 1 + (2 * len(self.batch) if self.profile else 0)),), dtypes.uint64, device=(dev,),
+                                       volatile=True, tag="slots") for dev, qs in self.queues.items()}
 
   def epilogue_queue(self, dev:str) -> str: return "COMPUTE:0" if len(self.queues[dev]) > 1 else self.queues[dev][0] # closes the device
 
-  def slot(self, devs:tuple[str, ...], i:int) -> UOp: return self.slots[devs[0]].shrink(((i, i + 1),)) # not [i:i+1]: the slice path is 10x the cost
+  def slot(self, devs:tuple[str, ...], i:int) -> UOp: return self.slots[devs[0]].shrink(((2 * i, 2 * i + 2),)) # not a slice: 10x the cost
   def queue_signal(self, devs:tuple[str, ...], queue:str) -> UOp: return self.slot(devs, self.queues[devs[0]].index(queue))
   def sched_timeline(self, devs:tuple[str, ...]) -> UOp: return self.slot(devs, len(self.queues[devs[0]]))
   def stamps(self, devs:tuple[str, ...], tag:int) -> tuple[int, ...]: return (st:=len(self.queues[devs[0]])+1+2*tag, st + 1) if self.profile else ()
@@ -177,6 +180,10 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   latest:dict[tuple[str, str], int] = {} # (producer device, queue) -> the latest submit tag to wait on, same-queue submits are fifo
   for d, q, t in ctx.tracker.access_resources(bufs, list(range(len(bufs)) if write is None else write), (device, queue, tag)):
     if t < tag and (d, q) != (device, queue): latest[(d, q)] = max(latest.get((d, q), 0), t)
+
+  # NV waits break QMD chaining, so also wait for the previous launch
+  if latest and device.split(":")[0] == "NV" and queue.startswith("COMPUTE") and (p:=ctx.prev[tag]) is not None: latest[(device, queue)] = p
+
   ctx.signal_tags |= set(latest.values())
   return [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64))) for (d, q), t in latest.items()]
 
@@ -196,7 +203,7 @@ def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], 
 
     # and make hcq call
     name, est = get_call_name(call, get_call_arg_uops(call)), estimate_uop(call)
-    kerns.append((devices, name, est, ctx.stamps(devices, tag), getattr(call.src[0].arg, "profile_key", None)))
+    kerns.append((devices, name, est, tuple(2 * s + 1 for s in ctx.stamps(devices, tag)), getattr(call.src[0].arg, "profile_key", None)))
 
     ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slot(devices, i),)) for i in ctx.stamps(devices, tag)]
     q += ts_ins[:1] + [call] + ts_ins[1:]
@@ -484,6 +491,7 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UO
 class HCQ2Compiled(Compiled):
   timestamp_divider: float = 1000.0
   wait_timeout_ms: float = 30000.0
+  sleep_timeout_ms: int|None = None
   rt_nbytes: int = 64 << 20 # the pool every per-linear buffer is carved out of
   pm_encode: PatternMatcher = PatternMatcher([]) # the backend's own encode rules, matched by its submit names
   var_vals: dict[str, int] = {}
@@ -535,7 +543,7 @@ class HCQ2Compiled(Compiled):
     return Buffer(self.device, self.rt_allocator(uncached, host).size, dtypes.uint8, options=spec, preallocate=True)
 
   def rt_view(self, nbytes:int, dtype:DType=dtypes.uint8, uncached:bool=True, host:bool=False) -> Buffer: # a slot of the ring, wraps silently
-    off = self.rt_allocator(uncached, host).alloc(max(nbytes, 1), alignment=128)
+    off = self.rt_allocator(uncached, host).alloc(max(nbytes, 1), alignment=256)
     return self.rt_buffer(uncached, host).view(nbytes // dtype.itemsize, dtype, off).ensure_allocated()
 
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
@@ -543,13 +551,17 @@ class HCQ2Compiled(Compiled):
     st, done = time.perf_counter(), sig[0]
     while done < value:
       if done != (done:=sig[0]): st = time.perf_counter()
-      elif time.perf_counter() - st > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
+      elif (elapsed:=time.perf_counter() - st) > (timeout or self.wait_timeout_ms) / 1000: self.on_device_hang()
+      elif self.sleep_timeout_ms is not None and elapsed > self.sleep_timeout_ms / 1000: self.on_sleep()
 
   def synchronize(self, timeout:int|None=None):
     self._wait_signal(tl:=self.timeline._buf.cpu_view().view(fmt='Q'), tl[1], timeout)
     if self.prof_ents: self.collect_prof()
 
   def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
+
+  def on_sleep(self):
+    if (iface:=getattr(self, "iface", None)) is not None and hasattr(iface, "sleep"): iface.sleep(self.sleep_timeout_ms)
 
   def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
 
@@ -570,8 +582,7 @@ class HCQ2Buffer:
     return HCQ2Buffer(self.va_addr+offset, meta=self.meta, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
 
 class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
-  def _as_buffer(self, buf:HCQBuffer) -> memoryview:
-    return unwrap(buf.view).mv
+  def _as_buffer(self, buf:HCQBuffer) -> memoryview|None: return buf.view.mv if buf.view is not None else None
 
   def _copyout(self, dest:memoryview, src:HCQBuffer): # TODO: remove with memcpy on cpu worker?
     self.dev.synchronize()

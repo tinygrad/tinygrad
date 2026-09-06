@@ -145,6 +145,13 @@ class TestHCQ2Core(unittest.TestCase):
       vi = Variable("i", 1, 10).bind(i)
       np.testing.assert_allclose(f(a[:, :vi]).item(), (a[:, :i] + 1).sum().item(), atol=1e-5, rtol=1e-5)
 
+  def test_map_cpu_buffer_preserves_contents(self):
+    src = Buffer("CPU", 16, dtypes.uint8, preallocate=True)
+    data = bytes(range(16))
+    src.as_memoryview(force_zero_copy=True)[:] = data
+    src.get_buf(Device.DEFAULT)
+    self.assertEqual(bytes(src.as_memoryview(force_zero_copy=True)), data)
+
   def test_staged_copy_roundtrip(self):
     # a host buffer the device cannot read copies in chunks through a small ring of staging slots: every rotation must land bit-exact
     stage = Buffer("CPU", size:=1 << 16, dtypes.uint8, preallocate=True)
@@ -202,7 +209,7 @@ class TestHCQ2Core(unittest.TestCase):
 
   def test_device_state_survives_as_link_refs(self):
     # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
-    dev, names = Device[Device.DEFAULT], {"AMD": ("scratch",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
+    dev, names = Device[Device.DEFAULT], {"AMD": ("scratch",), "NV": ("timeline",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
     @TinyJit
     def f(a): return (a * 2 + 1).contiguous().realize()
     x = Tensor.ones(16).contiguous().realize()
