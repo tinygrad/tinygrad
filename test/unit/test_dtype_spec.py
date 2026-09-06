@@ -151,6 +151,17 @@ class TestTypeSpec(unittest.TestCase):
     _assert_eq(Tensor.arange(5.0, 3.0), dtypes.default_float, np.arange(5.0, 3.0))
 
 class TestAutoCastType(unittest.TestCase):
+  @unittest.skipUnless(dtypes.float64 in supported_dtypes, "need float64")
+  def test_linspace_float64_precision(self):
+    for start, stop in ((1., 1.+1e-8), (1.+1e-8, 1.), (1e10, 1e10+1)):
+      with self.subTest(start=start, stop=stop):
+        out = Tensor.linspace(start, stop, 3, dtype=dtypes.float64)
+        self.assertEqual(out.dtype, dtypes.float64)
+        np.testing.assert_allclose(out.numpy(), np.linspace(start, stop, 3), rtol=1e-15, atol=0)
+    with Context(DEFAULT_FLOAT=dtypes.float64):
+      out = Tensor.linspace(10**10, 10**10+2, 3, dtype=dtypes.int64)
+      np.testing.assert_array_equal(out.numpy(), [10**10, 10**10+1, 10**10+2])
+
   def test_int_sqrt(self):
     _assert_eq(Tensor([1, 4, 9, 16]).sqrt(), dtypes.default_float, [1, 2, 3, 4])
 
@@ -221,6 +232,13 @@ class TestAutoCastType(unittest.TestCase):
     np.testing.assert_allclose(t.mean().numpy(), 60000)
     t.square().mean().backward()
     np.testing.assert_allclose(t.grad.numpy().flatten(), [60000 * 2 / (N*N)] * N*N)
+
+  def test_var_integer_fractional(self):
+    for dtype in [*dtype_ints, dtypes.bool]:
+      with self.subTest(dtype=dtype):
+        out = Tensor([0, 1], dtype=dtype).var()
+        self.assertEqual(out.dtype, dtypes.float32)
+        np.testing.assert_allclose(out.numpy(), 0.5)
 
   @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
   def test_var_half_precision_large_n(self):

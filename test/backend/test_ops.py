@@ -268,6 +268,11 @@ class TestOps(unittest.TestCase):
 
     self.helper_test_exception([], lambda: torch.meshgrid(x, indexing="bad"), lambda: xt.meshgrid(indexing="bad"), expected=RuntimeError)
 
+  def test_meshgrid_scalar(self):
+    for indexing in ("ij", "xy"):
+      with self.subTest(indexing=indexing):
+        helper_test_op([()], lambda x: torch.meshgrid(x, indexing=indexing)[0], lambda x: x.meshgrid(indexing=indexing)[0])
+
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10, dtype=torch.int32), lambda: Tensor.arange(10), forward_only=True)
     helper_test_op([], lambda: torch.arange(36, dtype=torch.int32), lambda: Tensor.arange(36), forward_only=True)
@@ -1183,6 +1188,20 @@ class TestOps(unittest.TestCase):
   def test_small_cummax(self):
     helper_test_op([(10)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
     helper_test_op([(10)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
+
+  def test_cumextrema_ties(self):
+    for op in ("cummax", "cummin"):
+      for axis in (0, 1, -1):
+        for values in ([[2, 2, 1, 3, 3, 0, 0]] * 2, [[0, 0, 0]] * 2):
+          with self.subTest(op=op, axis=axis, values=values):
+            helper_test_op(None, lambda x: getattr(torch, op)(x, dim=axis).indices.int(),
+                           lambda x: getattr(x, op)(axis)[1], vals=[values], forward_only=True)
+
+  def test_cumextrema_ties_split(self):
+    for op in ("cummax", "cummin"):
+      helper_test_op(None, lambda x: getattr(torch, op)(x, dim=-1).indices.int(), lambda x: getattr(x, op)(-1)[1],
+                     vals=[[[2.0, 2.0, 1.0, 3.0, 3.0, 0.0, 0.0] * 100] * 2], forward_only=True)
+
   @slow_test
   def test_simple_cummax(self):
     helper_test_op([(512)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
@@ -1649,6 +1668,10 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.isclose(torch.tensor(1.0)), lambda x: x.isclose(1.0),
                    vals=[[1.0, 1.0 + 1e-7, 2.0, math.inf, -math.inf, math.nan]], forward_only=True)
 
+  def test_isclose_overflow(self):
+    helper_test_op(None, lambda x,y: x.isclose(y, rtol=3),
+                   vals=[[3e38, -3e38, 3e38, 0.0], [-3e38, 3e38, 3e38, 1.0]], forward_only=True)
+
   def test_mean(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean())
     helper_test_op([()], lambda x: x.mean())
@@ -1692,6 +1715,16 @@ class TestOps(unittest.TestCase):
   def test_var_keepdim(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var(keepdim=True))
     helper_test_op([(15, 25, 35)], lambda x: x.var(0, keepdim=True, correction=0))
+
+  def test_var_std_integer(self):
+    for op in ("var", "std"):
+      for axis in (None, 0, 1):
+        for correction in (0, 1):
+          for keepdim in (False, True):
+            with self.subTest(op=op, axis=axis, correction=correction, keepdim=keepdim):
+              helper_test_op(None, lambda x: getattr(x.float(), op)(dim=axis, correction=correction, keepdim=keepdim),
+                             lambda x: getattr(x, op)(axis=axis, correction=correction, keepdim=keepdim),
+                             vals=[[[0, 1, 3], [1, 2, 4]]], forward_only=True)
 
   @slow_test
   def test_std(self):
@@ -1808,6 +1841,21 @@ class TestOps(unittest.TestCase):
   def test_logcumsumexp_numerical(self):
     helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7, vals=[[0.0, 100.0]])
     helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), vals=[[-math.inf, 0.0, 1.0]], forward_only=True)
+
+  def test_logcumsumexp_scalar_invalid_axis(self):
+    for axis in (-2, 1):
+      with self.subTest(axis=axis):
+        self.helper_test_exception([()], lambda x: torch.logcumsumexp(x, dim=axis), lambda x: x.logcumsumexp(axis), expected=IndexError)
+
+  def test_logcumsumexp_empty(self):
+    for shape, axis in (((0,), 0), ((2, 0, 3), 1), ((2, 0, 3), -1)):
+      with self.subTest(shape=shape, axis=axis):
+        helper_test_op([shape], lambda x: torch.logcumsumexp(x, dim=axis), lambda x: x.logcumsumexp(axis))
+
+  def test_logcumsumexp_nonfinite(self):
+    for values in ([-math.inf, -math.inf], [0., math.inf, -math.inf], [0., math.nan, 1.]):
+      with self.subTest(values=values):
+        helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), vals=[values], forward_only=True)
 
   def test_sinh(self):
     helper_test_op([(45,65)], lambda x: x.sinh(), grad_atol=1e-6)
@@ -2188,6 +2236,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(5,5)], lambda x: x.diagonal(offset=-1))  # negative offset
     helper_test_op([(3,5)], lambda x: x.diagonal(offset=2))  # offset on rectangular
     self.helper_test_exception([(3,3)], lambda x: x.diagonal(dim1=0, dim2=0), expected=RuntimeError)
+
+  def test_diagonal_outside_matrix(self):
+    for shape, dims in (((2, 3), (0, 1)), ((2, 3, 4), (-2, -1)), ((2, 3, 4), (2, 0))):
+      for offset in (-10, -4, 4, 10):
+        with self.subTest(shape=shape, dims=dims, offset=offset):
+          helper_test_op([shape], lambda x: x.diagonal(offset=offset, dim1=dims[0], dim2=dims[1]))
 
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))
@@ -3326,6 +3380,16 @@ class TestOps(unittest.TestCase):
       helper_test_op([(12,10)], lambda x: torch.nn.CrossEntropyLoss(label_smoothing=s)(x, torch.tensor(classes)),
                                 lambda x: x.sparse_categorical_crossentropy(Tensor(classes), label_smoothing=s))
 
+  def test_sparse_categorical_crossentropy_default_ignore_index(self):
+    classes = [-1, 0, 2, -1]
+    for reduction in ("none", "sum", "mean"):
+      for smoothing in (0.0, 0.3, 1.0):
+        with self.subTest(reduction=reduction, smoothing=smoothing):
+          helper_test_op([(4, 3)],
+                         lambda x: torch.nn.functional.cross_entropy(x, torch.tensor(classes), ignore_index=-1,
+                                                                     reduction=reduction, label_smoothing=smoothing),
+                         lambda x: x.sparse_categorical_crossentropy(Tensor(classes), reduction=reduction, label_smoothing=smoothing))
+
   def test_nll_loss(self):
     target = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
     helper_test_op([(32,10)],
@@ -3439,6 +3503,31 @@ class TestOps(unittest.TestCase):
     if not COMPILE_ONLY: assert t == -1
 
 class TestOpsUint8(unittest.TestCase):
+  def test_lerp_integer_end(self):
+    for dtype in dtypes.ints:
+      with self.subTest(dtype=dtype):
+        actual = Tensor([[10], [100]], dtype=dtypes.uint8).lerp(Tensor([20, 20, 100], dtype=dtype), Tensor([0., 0.5, 1.]))
+        self.assertEqual(actual.dtype, dtypes.uint8)
+        actual.realize()
+        if not COMPILE_ONLY: np.testing.assert_equal(actual.numpy(), [[10, 15, 100], [100, 60, 100]])
+
+  def test_lerp_float_end(self):
+    helper_test_op(None, lambda x,y,w: x.float().lerp(y, w), lambda x,y,w: x.cast(dtypes.uint8).lerp(y, w),
+                   vals=[[[10], [100]], [20.5, 9.5, -5.5], [0., 0.5, 1.]], forward_only=True)
+
+  def test_interpolate_bilinear_full_range(self):
+    for values in ([[0, 255]], [[255, 0]], [[1, 200]], [[0, 255], [255, 0]]):
+      for size in ((1, 3), (5, 10)):
+        for align_corners in (False, True):
+          with self.subTest(values=values, size=size, align_corners=align_corners):
+            image = torch.tensor([[values]], dtype=torch.uint8)
+            expected = torch.nn.functional.interpolate(image, size=size, mode="bilinear", align_corners=align_corners)
+            actual = Tensor(image.numpy()).interpolate(size, align_corners=align_corners)
+            self.assertEqual(actual.dtype, dtypes.uint8)
+            # Midpoints are exact; other weights can differ by one with 7-bit fixed-point coefficients.
+            actual.realize()
+            if not COMPILE_ONLY: np.testing.assert_allclose(actual.numpy(), expected.numpy(), rtol=0, atol=0 if size == (1, 3) else 1)
+
   def test_cast(self):
     helper_test_op([(2,3,64,64)], lambda x: x.type(torch.uint8), lambda x: x.cast('uint8'), forward_only=True, low=0, high=255)
 

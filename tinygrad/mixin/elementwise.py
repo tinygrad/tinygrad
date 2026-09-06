@@ -647,10 +647,9 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     other = self.ufix(other)
-    is_finite_close = self.isfinite() & other.isfinite() & ((self - other).abs() <= atol + rtol * other.abs())
-    is_infinite_close = (self.isinf() | other.isinf()) & self.eq(other)
-    is_nan_close = (self.isnan() & other.isnan()) & equal_nan
-    return is_finite_close | is_infinite_close | is_nan_close
+    error = (self - other).abs()
+    is_finite_close = error.isfinite() & (error <= atol + rtol * other.abs())
+    return self.eq(other) | is_finite_close | (self.isnan() & other.isnan() & equal_nan)
 
   def ceil(self) -> Self:
     """
@@ -1087,7 +1086,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([1., 2., 3.]).lerp(Tensor([4., 5., 6.]), 0.5).numpy())
     ```
     """
-    if self.dtype == dtypes.uint8 and not isinstance(weight, ConstType):
-      w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
-      return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
+    if self.dtype == dtypes.uint8 and not end.is_floating_point() and not isinstance(weight, ConstType):
+      weight_int = (weight * 128 + 0.5).cast(dtypes.int32)  # 7 fractional bits
+      return ((self * (128 - weight_int) + end.cast(dtypes.int32) * weight_int + 64) >> 7).cast(dtypes.uint8)
     return self + (end - self) * weight

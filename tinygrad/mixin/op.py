@@ -206,7 +206,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if steps < 0: raise ValueError("number of steps must be non-negative")
     if (dtype := to_dtype(dtype or dtypes.default_float)) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
     if steps == 1: return cls.full((1,), start, dtype=dtype, buffer=False)
-    return (start + cls.arange(steps, dtype=dtypes.default_float) * ((stop - start) / (steps - 1))).cast(dtype)
+    return (start + cls.arange(steps, dtype=least_upper_dtype(dtype, dtypes.default_float)) * ((stop - start) / (steps - 1))).cast(dtype)
 
   @classmethod
   def eye(cls, n:int, m:int|None=None, dtype:DTypeLike|None=None) -> Self:
@@ -542,11 +542,10 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.var(axis=1).numpy())
     ```
     """
-    output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
-    numerator = squares.cast(sum_acc_dtype(self.commit_dtype())).sum(axis=axis, keepdim=keepdim)
-    return numerator.div(smax(n - correction, 0)).cast(output_dtype)
+    numerator = squares.sum(axis=axis, keepdim=keepdim, dtype=sum_acc_dtype(squares.commit_dtype()))
+    return numerator.div(smax(n - correction, 0)).cast(squares.dtype)
 
   def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
     """
@@ -807,11 +806,10 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), type(self).zeros(self.shape, dtype=dtypes.int32, buffer=False)
-    values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
-    x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
-    match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * self._tri(n, n)
-    idx = (-(match * type(self).arange(n, 0, -1).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
-    return values, idx.transpose(-1, axis)
+    values = self._split_cumalu(axis, Ops.MAX)
+    # Record the latest index matching the running maximum, then carry it forward.
+    idx = self.eq(values).transpose(axis, -1) * type(self).arange(self.shape[axis], dtype=dtypes.int32)
+    return values, idx._split_cumalu(-1, Ops.MAX).transpose(-1, axis)
 
   def cummin(self, axis:int=0) -> tuple[Self, Self]:
     """
@@ -851,14 +849,12 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.logcumsumexp(axis=1).numpy())
     ```
     """
+    axis = self._resolve_dim(axis)
     if self.ndim == 0: return self
     x = self.transpose(axis, -1)
-    last_dim_size = x.shape[-1]
-    x_unsqueezed = x.unsqueeze(-2)
-    x_cummax = (mx:=x.cummax(-1)[0].detach()).isfinite().where(mx, 0)
-    mask = self._tri(last_dim_size, last_dim_size, 1).logical_not()
-    ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
-    return ret.transpose(-1, axis)
+    mask = self._tri(x.shape[-1], x.shape[-1], 1)
+    prefixes = mask.where(-math.inf, x.unsqueeze(-2))
+    return prefixes.logsumexp(-1).transpose(-1, axis)
 
   def argmax(self, axis=None, keepdim=False) -> Self:
     """
@@ -1738,10 +1734,10 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if Y.device is not None and self.device is not None and Y.device != self.device:
       raise RuntimeError(f"expected Y and self on the same device, {Y.device=}, {self.device=}")
     log_probs = self.log_softmax()
-    loss_mask = Y.ne(ignore_index) if ignore_index != -1 else Y.const_like(True, dtypes.bool)
-    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
-    smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
-    unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
+    loss_mask = Y.ne(ignore_index)
+    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1)
+    smoothing = label_smoothing * log_probs.mean(-1)
+    unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing) * loss_mask
     return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)
 
   def cross_entropy(self, Y:Self, reduction:ReductionStr="mean", label_smoothing:float=0.0) -> Self:
