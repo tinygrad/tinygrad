@@ -2,7 +2,8 @@ import functools, time
 from dataclasses import replace
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, KernelInfo
+from tinygrad.dtype import dtypes, AddrSpace, strong_dtype
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
 
@@ -33,8 +34,10 @@ def renumber_invalid_outputs(uret:UOp) -> UOp:
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
   depth = 0
-  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool, precompile_backward:bool, allow_implicit:bool, grad_fxn:Callable|None):
+  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool, precompile_backward:bool, allow_implicit:bool, grad_fxn:Callable|None,
+               in_kernel:bool=False):
     self.fxn = fxn
+    self.in_kernel = in_kernel
     self.precompile = precompile
     self.precompile_backward = precompile_backward
     self.allow_implicit = allow_implicit
@@ -43,6 +46,19 @@ class _function(Generic[ReturnType]):
   def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
 
   def __call__(self, *args, **kwargs) -> ReturnType:
+    if self.in_kernel:
+      kparams = [UOp.param(i, strong_dtype(a.dtype), a._shape, addrspace=AddrSpace.ALU if a.addrspace is AddrSpace.ALU else AddrSpace.GLOBAL,
+                           vmin_vmax=(a.vmin, a.vmax) if a.addrspace is AddrSpace.ALU else None,
+                           volatile=a.addrspace is not AddrSpace.ALU and a.buf_uop.arg.volatile) for i,a in enumerate(args)]
+      kret, name = cast(UOp, self.fxn(*kparams)), self.fxn.__name__
+      if kret.dtype is dtypes.void:
+        return cast(ReturnType, (kret if kret.op is Ops.SINK else kret.sink()).replace(arg=KernelInfo(name=name)).call(*args))
+
+      out = UOp.param(len(args), ret_dtype:=strong_dtype(kret.dtype), addrspace=AddrSpace.REG) # a pointer to the caller's register
+      reg = UOp.placeholder((1,), ret_dtype, addrspace=AddrSpace.REG)
+      call = out.index(0).store(kret.cast(ret_dtype) if kret.dtype is not ret_dtype else kret).sink(arg=KernelInfo(name=name)).call(*args, reg)
+      return cast(ReturnType, reg.after(call)[0].load())
+
     st = time.perf_counter()
 
     params = get_state_dict((args, kwargs), tensor_type=(Tensor, UOp)).values()
@@ -94,14 +110,14 @@ class _function(Generic[ReturnType]):
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload
 def function(fxn:Callable[..., ReturnType], *, precompile:bool=False, precompile_backward:bool=False,
-             allow_implicit:bool=False, grad_fxn:Callable|None=None) -> _function[ReturnType]: ...
+             allow_implicit:bool=False, grad_fxn:Callable|None=None, in_kernel:bool=False) -> _function[ReturnType]: ...
 @overload
-def function(fxn:None=None, *, precompile:bool=False, precompile_backward:bool=False,
-             allow_implicit:bool=False, grad_fxn:Callable|None=None) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
+def function(fxn:None=None, *, precompile:bool=False, precompile_backward:bool=False, allow_implicit:bool=False, grad_fxn:Callable|None=None,
+             in_kernel:bool=False) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
 def function(fxn=None, *, precompile:bool=False, precompile_backward:bool=False,
-             allow_implicit:bool=False, grad_fxn:Callable|None=None):
+             allow_implicit:bool=False, grad_fxn:Callable|None=None, in_kernel:bool=False):
   if fxn is None:
     return lambda f: _function(f, precompile=precompile, precompile_backward=precompile_backward,
-                               allow_implicit=allow_implicit, grad_fxn=grad_fxn)
+                               allow_implicit=allow_implicit, grad_fxn=grad_fxn, in_kernel=in_kernel)
   return _function(fxn, precompile=precompile, precompile_backward=precompile_backward,
-                   allow_implicit=allow_implicit, grad_fxn=grad_fxn)
+                   allow_implicit=allow_implicit, grad_fxn=grad_fxn, in_kernel=in_kernel)
