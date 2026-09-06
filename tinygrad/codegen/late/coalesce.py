@@ -4,7 +4,7 @@ from dataclasses import replace
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, graph_rewrite
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate, sym
-from tinygrad.helpers import getenv, IMAGE, OSX, EMULATED_DTYPES, ceildiv, is_image_shape
+from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv, is_image_shape
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
