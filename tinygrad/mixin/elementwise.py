@@ -58,8 +58,7 @@ class ElementwiseMixin(CreationMixin):
 
   def contiguous(self, **kwargs) -> Self:
     """
-    Requests a contiguous layout for this value when it is computed.
-    Use `clone()` to guarantee independent storage.
+    Returns a contiguous tensor.
     """
     if self.dtype in dtypes.weaks: return self
     uop = self._uop
