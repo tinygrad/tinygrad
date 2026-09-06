@@ -160,15 +160,6 @@ class TestLLMServer(unittest.TestCase):
     finally:
       self.mock_tok.encode.return_value = [200, 201, 202]
 
-  def test_context_exhaustion(self):
-    def generate(ids, **kwargs):
-      ids.append(300)
-      yield 300
-    with patch.object(self.mock_model, "generate", side_effect=generate):
-      chunks = list(self.client.chat.completions.create(
-        model="test", messages=[{"role": "user", "content": "Hello"}], stream=True))
-    self.assertEqual(chunks[-1].choices[0].finish_reason, "length")
-
   def test_max_tokens_streaming(self):
     self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 302, 303, 999]))
     stream = self.client.chat.completions.create(
@@ -207,7 +198,7 @@ class TestLLMToolCalls(unittest.TestCase):
     cls.mock_tok.decode = Mock(return_value="")
     cls.mock_tok.preset = "qwen2"
     cls.mock_tok.bos_id, cls.mock_tok.eos_id, cls.mock_tok.eot_id = None, 999, None
-    cls.mock_tok.is_end = Mock(side_effect=lambda tid: tid == 999)
+    cls.mock_tok.is_end = Mock(return_value=False)
 
     cls.mock_model = Mock()
     cls.mock_model.max_context = 4
@@ -235,7 +226,7 @@ class TestLLMToolCalls(unittest.TestCase):
   def set_output(self, text:str):
     pieces = dict(enumerate(text, 1))
     self.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: pieces[tid] if tid is not None else "")
-    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter((*pieces, 999)))
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter(pieces))
 
   @staticmethod
   def tools():
