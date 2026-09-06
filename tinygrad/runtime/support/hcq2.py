@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
 import functools, time, itertools, decimal, weakref, statistics, ctypes, importlib
 from dataclasses import replace, dataclass, field
-from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2, cpu_profile, mv_address
+from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, cpu_profile, mv_address
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us, DEV
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
@@ -21,7 +21,7 @@ if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: rem
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("NV", "QCOM", "CPU")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
+HCQ_DEVS = frozenset(("NV", "QCOM", "CPU", "AMD"))
 
 @dataclass(frozen=True)
 class HCQInfo:
