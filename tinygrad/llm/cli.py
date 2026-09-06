@@ -43,6 +43,27 @@ class SimpleTokenizer:
     self.preset = preset
     self.bos_id, self.eos_id, self.eot_id = bos_id, eos_id, eot_id
 
+  # todo remove
+  def role(self, role:str):
+    if self.preset == 'olmo': return self.encode("<|" + role + "|>\n")  # OLMoE Instruct format
+    if self.preset == 'kimi-k2': return self.encode("<|im_" + role + "|>" + role + "<|im_middle|>")
+    if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
+    if self.preset == 'glm4': return self.encode("<|" + role + "|>")
+    if self.preset == 'tekken':
+      if role == 'user': return self.encode("[INST]")
+      if role == 'assistant': return []
+      raise ValueError(f"Unsupported role '{role}' for tokenizer preset '{self.preset}'")
+    return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
+
+  # todo remove
+  def end_turn(self):
+    if self.preset == 'olmo': return self.encode("\n")
+    if self.preset == 'kimi-k2': return [self.eos_id]
+    if self.preset == 'qwen2': return [self.eos_id] + self.encode("\n")
+    if self.preset == 'glm4': return []
+    if self.preset == 'tekken': return self.encode("[/INST]")
+    return [self.eos_id]
+
   @staticmethod
   def from_gguf_kv(kv:dict):
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
@@ -100,6 +121,9 @@ models = {
   "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
   "moonlight": "https://huggingface.co/gabriellarson/Moonlight-16B-A3B-Instruct-GGUF/resolve/main/Moonlight-16B-A3B-Instruct-Q4_K_M.gguf",
   "glm-4.7-flash": "https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/resolve/main/GLM-4.7-Flash-Q4_K_M.gguf",
+  "qwen3-vl:2b":"https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3VL-2B-Instruct-F16.gguf",
+  "qwen3-vl:4b":"https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-F16.gguf",
+  "qwen3-vl:8b":"https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3VL-8B-Instruct-F16.gguf", # untested, not enough memory
 }
 
 class FallbackTemplate:
@@ -131,7 +155,8 @@ class FallbackTemplate:
       elif isinstance(content, list):
         for c in content:
           if c["type"] == "text": out += c["text"]
-          else: raise RuntimeError(f"unhandled type: {c['type']}")
+          elif c["type"] == "image_url": continue # todo
+          else:raise RuntimeError(f"unhandled type: {c['type']}")
       elif content is not None: raise RuntimeError(f"unknown content type: {type(content)}")
       out += self.end_turn()
     return out + self.role("assistant") if add_generation_prompt else out
@@ -158,6 +183,13 @@ def main():
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
+
+  if "qwen3-vl" in args.model:
+    from extra.models.qwen3vl import Qwen3VLVis
+    from tinygrad import Tensor, dtypes, Variable
+    model.vis = Qwen3VLVis(size="2B", tok=tok)
+    for _ in range(2):
+      model.vis.prefill(lang=model, image=Tensor.rand(*model.vis.res, 3).cast(dtypes.uint8), start_pos=Variable("pos", 0, model.max_context).bind(42))
 
   # use the model's chat template if jinja2 is available (enables model-specific formatting)
   template: jinja2.Template|FallbackTemplate = FallbackTemplate(tok)
