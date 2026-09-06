@@ -301,27 +301,13 @@ def debuf(ctx:LocalAddBufferContext, buf:UOp):
   ctx.dg += 1
   return ret
 
-def handle_after(ctx:LocalAddBufferContext, after:UOp):
-  if after.addrspace == AddrSpace.LOCAL: return None
-  buf = after.buf_uop
-  # NOTE: this is bottom up, so we only add it once
-  if buf not in ctx.map: ctx.map[buf] = after
-  return buf
-
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.tag != (): return None
   ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
   ctx.range += 1
   return ret
 
-def find_bufs(x:UOp):
-  idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
-  read_from: dict[UOp, Ops] = {}
-  if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.PARAM} and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
-    raise RuntimeError(f"cycle detected while indexing {buf}")
-
 to_define_global = PatternMatcher([
-  (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
   (UPat(Ops.PARAM, name="v"), lambda v:
    v.replace(arg=replace(v.arg, slot=-1)) if v.arg.name is not None and v.arg.vmin_vmax is not None and v.arg.slot != -1 else None),
@@ -335,7 +321,7 @@ to_define_global = PatternMatcher([
 
   # bound Variables are stores into Variable buffers: strip the store, the buffer becomes an ALU param via debuf
   (UPat(Ops.AFTER, name="b"), lambda b: b.src[0] if b.is_bound_var else None),
-  (UPat(Ops.AFTER, name="after"), handle_after),
+  (UPat(Ops.AFTER, name="buf"), lambda ctx,buf: debuf(ctx, buf) if buf.addrspace != AddrSpace.LOCAL else None),
 
   # remove device from local BUFFERIZE
   (UPat(Ops.STAGE, name="b"), lambda b: b.replace(arg=replace(b.arg, device=None))),

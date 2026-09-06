@@ -88,6 +88,35 @@ class TestTensorGradient(unittest.TestCase):
     np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])     # gradient flows through clone
     np.testing.assert_allclose(base.grad.numpy(), [0.0, 0.0, 0.0, 0.0])  # ...but detach blocks it from base
 
+  def test_gradient_through_single_assign(self):
+    x = Tensor([2., 3.]).realize()
+    y = x.clone()
+    y.assign(y.square())
+    self.assertEqual(y.sum().gradient(x)[0].tolist(), [4., 6.])
+
+  def test_gradient_through_assign_requires_old_versions(self):
+    for count in (2, 3):
+      with self.subTest(count=count):
+        x = Tensor([2., 3.]).realize()
+        y = x.clone()
+        for _ in range(count): y.assign(y.square())
+        g = y.sum().gradient(x)[0]
+        before = (x.uop, y.uop, g.uop)
+        # Reject incompatible versions, including on retry: failed scheduling must not replace them with buffers.
+        for _ in range(2):
+          with self.assertRaisesRegex(RuntimeError, "cycle"): g.realize()
+          self.assertEqual((x.uop, y.uop, g.uop), before)
+
+  def test_gradient_through_assign_with_snapshots(self):
+    x = Tensor([2., 3.]).realize()
+    y = x.clone()
+    for _ in range(2): y.assign(y.clone().square())
+    g = y.sum().gradient(x)[0]
+    gg = g.sum().gradient(x)[0]
+    Tensor.realize(g, gg)
+    self.assertEqual(g.tolist(), [32., 108.])
+    self.assertEqual(gg.tolist(), [48., 108.])
+
   def test_setitem_on_grad_used_tensor_raises(self):
     x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
     _ = (x * 2.0).sum()
@@ -136,6 +165,21 @@ class TestTensorGradient(unittest.TestCase):
     self.assertIsNone(w.grad)
 
 class TestMultiOutputGradient(unittest.TestCase):
+  def test_custom_kernel_inplace_gradient(self):
+    def double(x:UOp): return x[0].store(x[0]*2).sink(arg=KernelInfo(name="double_inplace"))
+    def backward(g:UOp, call:UOp): return (g*2,)
+    x = Tensor([2.]).realize()
+    y = x.custom_kernel(fxn=double, grad_fxn=backward)[0]
+    self.assertEqual(y.sum().gradient(x)[0].tolist(), [2.])
+    self.assertEqual(y.tolist(), [4.])
+
+  def test_custom_kernel_unchanged_output_gradient(self):
+    def noop(x:UOp): return x[0].store(x[0]).sink(arg=KernelInfo(name="identity"))
+    def backward(g:UOp, call:UOp): return (g,)
+    x = Tensor([2.]).realize()
+    y = x.custom_kernel(fxn=noop, grad_fxn=backward)[0]
+    self.assertEqual(y.sum().gradient(x)[0].tolist(), [1.])
+
   @staticmethod
   def addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:
     C, D, A, B = C.flatten(), D.flatten(), A.flatten(), B.flatten()

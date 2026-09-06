@@ -105,6 +105,47 @@ def backward_gemm_custom(gradient:UOp, kernel:UOp) -> tuple[UOp, UOp]:
 # **** tests ****
 
 class TestCustomKernel(unittest.TestCase):
+  def test_readonly_after_args(self):
+    for chained in (False, True):
+      for corealize in (False, True):
+        with self.subTest(chained=chained, corealize=corealize):
+          x = Tensor([2.]).realize()
+          a, x1 = Tensor.empty(1).custom_kernel(x, fxn=custom_add_one_kernel)
+          b, x2 = Tensor.empty(1).custom_kernel(x1 if chained else x, fxn=custom_add_one_kernel)
+          if corealize:
+            y = x1 + b
+            Tensor.realize(y, x2)
+            self.assertEqual(y.tolist(), [5.])
+          else:
+            self.assertEqual((x1 + x2).tolist(), [4.])
+          self.assertEqual(a.tolist(), [3.])
+          self.assertEqual(b.tolist(), [3.])
+          self.assertEqual(x.tolist(), [2.])
+
+  def test_aliased_args_different_sizes(self):
+    def kernel(out:UOp, a:UOp, b:UOp):
+      i = UOp.range(4, 0)
+      return out[i].store(a[i] + b[0]).end(i).sink(arg=KernelInfo(name="aliased_sizes"))
+    x = Tensor([1., 2., 3., 4.]).realize()
+    out = Tensor.empty(4).custom_kernel(x, x[:1], fxn=kernel)[0]
+    self.assertEqual(out.tolist(), [2., 3., 4., 5.])
+
+  def test_unindexed_access_before_assign(self):
+    def kernel(out:UOp, x:UOp): return out.store(x + 1).sink(arg=KernelInfo(name="unindexed"))
+    x = Tensor([2.]).realize()
+    y = Tensor.empty(1).custom_kernel(x, fxn=kernel)[0]
+    x.assign(x * 2)
+    Tensor.realize(x, y)
+    self.assertEqual(x.tolist(), [4.])
+    self.assertEqual(y.tolist(), [3.])
+
+  def test_readonly_after_does_not_hide_write(self):
+    x = Tensor([2.]).realize()
+    _, before = Tensor.empty(1).custom_kernel(x, fxn=custom_add_one_kernel)
+    x.assign(x * 2)
+    with self.assertRaisesRegex(RuntimeError, "cycle"):
+      (before + x).realize()
+
   def test_empty(self):
     a = Tensor.empty(1)
     a = Tensor.custom_kernel(a, fxn=lambda _: UOp.sink(arg=KernelInfo()))[0]

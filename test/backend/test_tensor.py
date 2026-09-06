@@ -737,6 +737,25 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_allclose(a.numpy(), b.numpy())
     self.assertIsNot(a.uop.base.buffer, b.uop.base.buffer)
 
+  def test_clone_unrealized_copy_does_not_alias(self):
+    for realize_clone in (False, True):
+      with self.subTest(realize_clone=realize_clone):
+        a = Tensor([2.])
+        b = a.clone()
+        if realize_clone: b.realize()
+        b.assign(7.).realize()
+        self.assertEqual(a.tolist(), [2.])
+        self.assertEqual(b.tolist(), [7.])
+        self.assertIsNot(a.uop.base.buffer, b.uop.base.buffer)
+
+  def test_clone_preserves_creation_copy(self):
+    source = Tensor([2.], device="PYTHON")
+    copied = source.to("CPU")
+    cloned = copied.clone().realize()
+    source.assign(7.).realize()
+    self.assertEqual(copied.tolist(), [2.])
+    self.assertEqual(cloned.tolist(), [2.])
+
   def test_clone_deviceless_const(self):
     t = Tensor(UOp.const(2.0).cast(dtypes.float)).clone()
     np.testing.assert_equal(t.numpy(), 2.0)
