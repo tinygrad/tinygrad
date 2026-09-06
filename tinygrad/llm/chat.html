@@ -7,28 +7,20 @@
   table { border-collapse: collapse; white-space: normal; table-layout: fixed; width: 100%; overflow-wrap: anywhere }
   th, td { border: 1px solid #555; padding: 6px 10px; text-align: left }
   a { color: #8ab4f8 } hr { border: 0; border-top: 1px solid #555; margin: 12px 0 }
+  .answer { white-space: normal } .answer pre { white-space: pre-wrap }
+  .answer p, .answer ul, .answer ol { margin: 8px 0 } .answer ul { list-style: none; padding-left: 0 }
   .user { background: #2f2f2f; margin-left: auto; width: fit-content; max-width: 70% }
   #input { max-width: 768px; width: 100%; margin: 20px auto; padding: 14px 20px;
            background: #2f2f2f; color: inherit; font: inherit;
            border: none; outline: none; resize: none; border-radius: 24px; field-sizing: content }
 </style></head><body><div id="chat"></div>
 <textarea id="input" rows="1" placeholder="Ask anything" autofocus></textarea>
+<script src="/assets/cdn.jsdelivr.net/npm/markdown-it@15.0.1/dist/browser/markdown-it.umd.min.js"></script>
 <script>
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
   const msgs = [];
   let generating = false;
-  const inline = s => s.replace(
-    /<pre>[\s\S]*?<\/pre>|<code>[\s\S]*?<\/code>|`([^`\n]+)`|\*\*((?:[^\n]|\n(?!\n))+?)\*\*|\*(?!\s)((?:[^*\n]|\n(?!\n))+)\*/g,
-    (s, code, bold, em) => code !== undefined ? `<code>${code}</code>` : bold ? `<b>${inline(bold)}</b>` : em ? `<em>${inline(em)}</em>` : s)
-    .replace(/<pre>[\s\S]*?<\/pre>|<code>[\s\S]*?<\/code>|\[([^\]\n]+)\]\(((?:https?:\/\/|#)[^\s)]*)\)|~{1,2}([^~\n]+)~{1,2}/g,
-      (s, label, url, del) => url ? `<a href="${url.replace(/"/g, '&quot;')}">${inline(label)}</a>` : del ? `<del>${inline(del)}</del>` : s);
-  const md = s => inline(s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/```[^\n]*\n([\s\S]*?)(?:```|(?![\s\S]))|^(#{1,6}) (.+)$|^-{3,}[ \t]*$/gm,
-      (_, pre, h, title) => pre !== undefined ? `<pre><code>${pre}</code></pre>` : h ? `<h${h.length}>${title}</h${h.length}>` : '<hr>')
-    .replace(/<pre>[\s\S]*?<\/pre>|(^\|[^\n]+\|\r?\n\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*(?:\r?\n\|[^\n]*)*)|^[-*] (.+)$/gm,
-      (s, t, li) => li !== undefined ? `&#8226; ${li}` : t === undefined ? s : '<table>' + t.split('\n').filter((_, i) => i !== 1)
-        .map((r, i) => '<tr>' + r.trim().slice(1).replace(/(?<!\\)\|$/, '').split(/(?<!\\)\|/)
-          .map(c => `<${i ? 'td' : 'th'}>${c.trim().replace(/\\\|/g, '|')}</${i ? 'td' : 'th'}>`).join('') + '</tr>').join('') + '</table>'));
+  const md = markdownit();
   async function send() {
     if (generating || !input.value.trim()) return;
     generating = true;
@@ -37,7 +29,7 @@
       chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
       input.value = '';
       const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
-      d.innerHTML = '<span style="color:#888"></span><div></div>'; const [thinking, answer] = d.children;
+      d.innerHTML = '<span style="color:#888"></span><div class="answer"></div>'; const [thinking, answer] = d.children;
       const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({model: 'llama', messages: msgs, stream: true, temperature: 0.7})});
       let buf = '', txt = '', rsn = '';
@@ -48,10 +40,11 @@
         const lines = buf.split('\n');
         buf = lines.pop();
         for (const ln of lines)
-          if (ln.startsWith('data: ') && !ln.includes('[DONE]'))
-            try { const dl = JSON.parse(ln.slice(6)).choices[0]?.delta;
-              if (dl?.reasoning_content) { rsn += dl.reasoning_content; thinking.textContent = rsn }
-              if (dl?.content) { txt += dl.content; answer.innerHTML = md(txt) } } catch {}
+          if (ln.startsWith('data: ') && !ln.includes('[DONE]')) {
+            const dl = JSON.parse(ln.slice(6)).choices[0]?.delta;
+            if (dl?.reasoning_content) { rsn += dl.reasoning_content; thinking.textContent = rsn }
+            if (dl?.content) { txt += dl.content; answer.innerHTML = md.render(txt) }
+          }
         chat.scrollTop = chat.scrollHeight;
       }
       const m = {role:'assistant', content:txt}; if (rsn) m.reasoning_content = rsn; msgs.push(m);
