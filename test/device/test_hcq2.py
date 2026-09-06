@@ -42,6 +42,25 @@ def patch_words(batch:UOp) -> list[UOp]:
 def rt_params(batch:UOp) -> list[str]:
   return dedup([u.arg.name for w in patch_words(batch) for u in w.toposort() if u.op is Ops.PARAM and u.arg.addrspace is AddrSpace.GLOBAL])
 
+class TestHCQ2Deps(unittest.TestCase):
+  def test_disjoint_write_preserves_dependencies(self):
+    b = UOp.param(0, dtypes.uint8, 16, device="CPU")
+    for write in ([], [0]):
+      tracker = hcq2.HCQDepsTracker()
+      tracker.access_resources([b.shrink(((0, 4),))], write, 0)
+      self.assertEqual(tracker.access_resources([b.shrink(((4, 8),))], [0], 1), [])
+      self.assertEqual(tracker.access_resources([b.shrink(((0, 4),))], [0], 2), [0])
+
+  def test_partial_write_preserves_dependencies(self):
+    b = UOp.param(0, dtypes.uint8, 16, device="CPU")
+    for write in ([], [0]):
+      tracker = hcq2.HCQDepsTracker()
+      tracker.access_resources([b], write, 0)
+      self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [0], 1), [0])
+      self.assertEqual(tracker.access_resources([b.shrink(((0, 4),))], [0], 2), [0])
+      self.assertEqual(tracker.access_resources([b.shrink(((12, 16),))], [0], 3), [0])
+      self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [], 4), [1])
+
 @unittest.skipUnless(all_devices_in(Device.DEFAULT, HCQ_DEVS - {"CPU"}), "non-CPU hcq2 device required")
 class TestHCQ2Core(unittest.TestCase):
   @staticmethod
