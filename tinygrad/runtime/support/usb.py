@@ -436,6 +436,7 @@ def _region(dev:str, b) -> Buffer: # a window of the controller's memory: not ou
   return Buffer(dev, b.size, dtypes.uint8, options=BufferSpec(external_ptr=b.va_addr, nolru=True)).allocate(opaque=b)
 
 def usb_bufferize(ctx, b:UOp) -> Buffer|None:
+  if str(b.tag).startswith("cmdbuf_copy"): return Buffer("CPU", b.max_numel(), b.dtype, preallocate=True)
   if not str(b.tag).startswith("usb_"): return None
   if b in ctx.prog_bufs: return ctx.prog_bufs[b]
   usb, dev = ctx.iface.pci_dev.usb, ctx.device
