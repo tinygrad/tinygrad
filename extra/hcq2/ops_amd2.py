@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, hashlib, itertools, collections, atexit
 assert sys.platform != 'win32'
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue, encode_submit, to_name, patch, unwrap_view, rt_addr
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferSpec, Buffer, Device, Compiled, ProfileProgramEvent
@@ -493,6 +493,8 @@ class AMDSDMAQueue(HWQueue):
     q = unwrap(self.dev.sdma_queue(int(self.queue.split(":")[1])))
 
     ring, wptr, doorbell, put = _queue_args(self, q)
+    base = unwrap_view(cmdbuf)[0] # in host memory: streamed into the ring, the device never reads it
+    cmdbuf = cmdbuf.substitute({base: base.replace(arg=replace(base.arg, device="CPU"))})
 
     rs, size_dw = q.ring.size, cmdbuf.max_numel() // 4
     put_b = put.index(0).load()
