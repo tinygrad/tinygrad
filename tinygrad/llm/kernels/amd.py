@@ -464,14 +464,14 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, m
     h, d = flat // D, flat % D
     lds_states = tuple(_SoftmaxState(ml_lds[w, h, 0].load(), ml_lds[w, h, 1].load(),
                                      (acc_lds[w, h, d].load().float()*ml_lds[w, h, 1].load(),)) for w in range(WAVES))
-    M, _, (val,) = _softmax_reduce(lds_states)
+    _, _, (val,) = _softmax_reduce(lds_states)
     oidx = out[b, kv_head*G + h, block_chunk, d]
     if G*D % (WAVES*WARP_SIZE): oidx = out[b, (kv_head*G + h).valid(flat < G*D), block_chunk, d]
     final_stores.append(oidx.store(val))
   hstat = tid
-  M, L, _ = _softmax_reduce(tuple(_SoftmaxState(ml_lds[w, hstat, 0].load(), ml_lds[w, hstat, 1].load(), ()) for w in range(WAVES)))
+  stat_m, stat_l, _ = _softmax_reduce(tuple(_SoftmaxState(ml_lds[w, hstat, 0].load(), ml_lds[w, hstat, 1].load(), ()) for w in range(WAVES)))
   q_head = (kv_head*G + hstat).valid(hstat < G) if WAVES*WARP_SIZE > G else kv_head*G + hstat
-  final_stores += [stats[b, q_head, block_chunk, 0].store(M), stats[b, q_head, block_chunk, 1].store(L)]
+  final_stores += [stats[b, q_head, block_chunk, 0].store(stat_m), stats[b, q_head, block_chunk, 1].store(stat_l)]
   return UOp.group(*final_stores).end(lane, wave, block_chunk, block_bhkv).sink(arg=KernelInfo(name="flash_decode_partial", opts_to_apply=()))
 
 @functools.cache

@@ -145,8 +145,8 @@ class TestQ8Quantize(unittest.TestCase):
     stats = Tensor.empty(1, 8, chunks, 2, dtype=dtypes.float32)
     fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=64, waves=16)
     partial, stats = Tensor.custom_kernel(partial, stats, q, cache, fxn=fxn)[:2]
-    partial, stats = partial.numpy(), stats.numpy()
-    out = partial.sum(axis=2) / stats[:, :, :, 1].sum(axis=2)[:, :, None]
+    partial_np, stats_np = partial.numpy(), stats.numpy()
+    out = partial_np.sum(axis=2) / stats_np[:, :, :, 1].sum(axis=2)[:, :, None]
     self.assertTrue(np.isfinite(out).all())
     np.testing.assert_allclose(out, 5500, rtol=2e-3, atol=2e-3)
 
