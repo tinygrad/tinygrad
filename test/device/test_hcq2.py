@@ -204,7 +204,7 @@ class TestHCQ2Core(unittest.TestCase):
 class TestHCQ2FFI(unittest.TestCase):
   @staticmethod
   def _run(body:UOp) -> list[Buffer]:
-    call = hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test_ffi"), tag=1).call(aux=hcq2.HCQInfo(("CPU",))))
+    call = hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test_ffi")).call(aux=hcq2.HCQInfo(("CPU",))))
     assert call is not None
     linear = hcq2.hcq_link(lower_and_compile(UOp(Ops.LINEAR, src=(call,))), allow_cache=False)
     run_linear(linear, jit=True)
@@ -225,23 +225,6 @@ class TestHCQ2FFI(unittest.TestCase):
       bufs = self._run(s.index(0).load())
     got = struct_t.from_buffer_copy(bytes(next(b for b in bufs if b.nbytes == ctypes.sizeof(struct_t))._buf.cpu_view()))
     self.assertEqual((got.u8, got.u16, got.u32, got.u64), (0x12, 0x3456, 0x789ABCDE, 0xFEDCBA9876543210))
-
-  def test_ffi_register_pointer(self):
-    with Context(HCQ_RUNTIME_DEV="CPU"):
-      reg = UOp.placeholder((4,), dtypes.uint8, addrspace=AddrSpace.REG)
-      out = UOp.placeholder((4,), dtypes.uint8, device="CPU", tag="ffi_result")
-      filled = reg.after(hcq2.ccall(libc.dll.memset, reg, 0x5a, 4))
-      bufs = self._run(out.store(filled))
-    self.assertEqual(bytes(next(b for b in bufs if b.dtype is dtypes.uint8)._buf.cpu_view()), b'\x5a' * 4)
-
-  def test_ffi_call_in_loop(self):
-    with Context(HCQ_RUNTIME_DEV="CPU"):
-      out = UOp.placeholder((4,), dtypes.int32, device="CPU", tag="ffi_result")
-      i = UOp.range(4, 0, dtype=dtypes.int)
-      call = hcq2.ccall(libc.dll.ffs, UOp.const(1, dtypes.int) << i)
-      self.assertIn(i, call.ranges)
-      bufs = self._run(out.index(i).store(call).end(i))
-    self.assertEqual(list(next(b for b in bufs if b.dtype is dtypes.int)._buf.cpu_view().view(fmt='i')[:]), [1, 2, 3, 4])
 
   def test_device_lower_after_encode(self):
     with Context(HCQ_RUNTIME_DEV="CPU"):
