@@ -59,6 +59,10 @@ def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.placeholder((2,), dtypes.uint64, 0, device=devs, volatile=True, tag="timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
 
+def rt_addr(b:UOp, dev) -> UOp:
+  base, off = unwrap_view(b)
+  return patch(UOp.placeholder((1,), dtypes.uint64, device=base.device, tag="addr"), [(0, base.getaddr(dev))]).index(0).load() + off
+
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   fn = to_name("submit", (devs:=to_tuple(devs))[0].split(":")[0], queue.split(":")[0])
   return UOp.custom_function(fn, UOp(Ops.LINEAR, src=tuple(cmds), arg=(devs, queue)))
