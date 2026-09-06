@@ -376,7 +376,7 @@ def f16_gemv(layer:Linear, x:Tensor) -> Tensor:
   tokens = prod(x.shape[:-1])
   assert isinstance(tokens, int)
   weight = _view_back(layer.weight)
-  x = x.contiguous() if x.dtype == dtypes.half else x.cast(dtypes.half).contiguous()
+  x = x.contiguous()
   out = Tensor.empty(tokens, layer.out_features, dtype=dtypes.float32, device=x.device)
   fxn = functools.partial(_amd_f16_gemv_kernel, in_features=layer.in_features, out_features=layer.out_features, tokens=tokens)
   srcs = (out, weight.reshape(-1), x.reshape(tokens, layer.in_features)) + (() if layer.bias is None else (_view_back(layer.bias),))
@@ -602,8 +602,9 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   T_real, q_start = q.shape[2], None
   D, N, group = q.shape[3], assigned_kv.shape[3], q.shape[1] // assigned_kv.shape[2]
   decode = resolve(T_real == 1, False)
-  supported = D % 32 == 0 and (N % 64 == 0 and group*(D*2+8) <= 65536 if decode else
-    D >= 64 and 2*(BLOCK_M*(D+LDS_PAD) + D*(BLOCK_N+LDS_PAD)) <= 65536 and N % BLOCK_N == 0 and q.max_shape[2] % BLOCK_M == 0)
+  # Non-power-of-two decode dimensions can lose tail-store masks. Q/P, K, and V use separate LDS allocations.
+  supported = D % 32 == 0 and (D & (D-1) == 0 and N % 64 == 0 and group*(D*2+8) <= 65536 if decode else
+    D >= 64 and 2*(2*BLOCK_M*(D+LDS_PAD) + D*(BLOCK_N+LDS_PAD)) <= 65536 and N % BLOCK_N == 0 and q.max_shape[2] % BLOCK_M == 0)
   if not supported:
     k, v = (assigned_kv[i, :, :, :valid_end].float() for i in range(2))
     mask = None if decode else Tensor.full((T_real, valid_end), -math.inf, dtype=dtypes.float32, device=q.device).triu(valid_end-T_real+1)
@@ -662,12 +663,14 @@ def gated_delta_prefill(q:Tensor, k:Tensor, v:Tensor, beta:Tensor, alpha:Tensor,
   assert q.shape == k.shape and v.shape[:3] == beta.shape == (batch, heads, tokens) and state.shape == (batch, heads, value_dim, key_dim)
   assert alpha.shape[:3] == (batch, heads, tokens) and (len(alpha.shape) == 3 or alpha.shape[-1] in (1, value_dim))
   assert key_dim % 32 == 0 and value_dim % 4 == 0
+  assert q.dtype == k.dtype == dtypes.float32, "recurrent Q/K must be float32"
+  assert state.uop.contiguous_view_offset() is not None, "recurrent state must be contiguous"
+  if start_pos is not None:
+    assert start_pos.uop.is_bound_var
+    state = Tensor(state.uop.after(start_pos.uop))
   core, kq = Tensor.empty_like(v), (q*k).sum(-1).contiguous()
   srcs = (core, q.contiguous(), k.contiguous(), v.contiguous(), beta.contiguous(), alpha.contiguous(), state, kq)
-  if start_pos is None: return Tensor.custom_kernel(*srcs, fxn=_gated_delta_prefill_kernel)[0]
   contig = tuple(x.uop if x.uop.op is Ops.AFTER else x.uop.contiguous() for x in srcs)
   params = tuple(UOp.placeholder_like(x, slot=i) for i,x in enumerate(contig))
-  assert start_pos.uop.is_bound_var
-  # the bound start_pos reaches the graph through the state AFTER chain, like the flash kernels' valid_end
-  call = _gated_delta_prefill_kernel(*params, kernel_var(start_pos.uop.src[0])).call(*contig)
+  call = _gated_delta_prefill_kernel(*params, None if start_pos is None else kernel_var(start_pos.uop.src[0])).call(*contig)
   return Tensor(contig[0].after(call))

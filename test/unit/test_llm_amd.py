@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function
-from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, flash_attention
+from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 class TestQ8Quantize(unittest.TestCase):
@@ -112,6 +112,30 @@ class TestQ8Quantize(unittest.TestCase):
     linear.bias = Tensor.full((1,), 0.75).contiguous().realize().int().float()
     np.testing.assert_array_equal(linear(Tensor.ones(1, 128)).numpy(), 0)
 
+  def test_dense_gemv_float32_range(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    linear = Linear(128, 1, bias=False)
+    linear.weight = Tensor.full((1, 128), 1/128, dtype=dtypes.float32).realize()
+    np.testing.assert_array_equal(linear(Tensor.full((1, 128), 65536, dtype=dtypes.float32)).numpy(), 65536)
+
+  def test_gated_delta_state_and_precision(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    for case in ("view", "reset", "half"):
+      with self.subTest(case=case):
+        q = Tensor.full((1, 1, 1, 32), 256 if case == "half" else 1, dtype=dtypes.half if case == "half" else dtypes.float32)
+        state = Tensor.full((1, 1, 32, 4), int(case == "reset"), dtype=dtypes.float32).contiguous().realize().transpose(-1, -2)
+        if case != "view": state = state.contiguous().realize()
+        start = Tensor(UOp.variable("start_pos", 0, 10).bind(0)) if case == "reset" else None
+        beta = Tensor.full((1, 1, 1), 1/2097152 if case == "half" else 1, dtype=dtypes.float32)
+        if case != "reset":
+          message = "recurrent state must be contiguous" if case == "view" else "recurrent Q/K must be float32"
+          with self.assertRaisesRegex(AssertionError, message):
+            gated_delta_prefill(q, q, Tensor.ones(1, 1, 1, 4), beta, Tensor.ones(1, 1, 1), state, start)
+          continue
+        out = gated_delta_prefill(q, q, Tensor.ones(1, 1, 1, 4), beta, Tensor.ones(1, 1, 1), state, start)
+        np.testing.assert_array_equal(out.numpy(), 32)
+        np.testing.assert_array_equal(state.numpy(), 1)
+
   def test_dense_gemv_bias(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
@@ -173,7 +197,7 @@ class TestQ8Quantize(unittest.TestCase):
 
   def test_attention_fallback_shapes(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
-    for tokens, capacity, dim in ((1, 65, 64), (32, 64, 32), (32, 64, 512)):
+    for tokens, capacity, dim in ((1, 65, 64), (32, 64, 32), (32, 64, 384), (32, 64, 512)):
       with self.subTest(tokens=tokens, capacity=capacity, dim=dim):
         valid = 33
         cache = np.full((2, 1, 1, capacity, dim), np.nan, dtype=np.float16)
@@ -190,6 +214,8 @@ class TestQ8Quantize(unittest.TestCase):
     assigned = Tensor(cache.uop.after(cache[:, :, :, 0:1, :].uop.store(Tensor.stack(k, v).cast(dtypes.half).uop)))
     out = flash_attention(q, assigned, 1).realize()
     np.testing.assert_allclose(out.numpy(), v.expand(1, 2, 1, 32).numpy(), rtol=2e-2, atol=2e-2)
+
+  def test_flash_attention_decode_gqa_tail(self): self._test_flash_decode(3, 1, 192, 64, 37)
 
   def test_flash_attention_decode_gqa_output_layout(self): self._test_flash_decode(4, 1, 128, 256, 3)
   def test_flash_attention_decode_large_gqa_group(self): self._test_flash_decode(8, 1, 256, 256, 73)
