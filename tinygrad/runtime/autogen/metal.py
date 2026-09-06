@@ -1717,9 +1717,132 @@ MTLCommandEncoder._methods_ = [
   ('label', NSString, []),
   ('setLabel:', None, [NSString]),
 ]
+MTLResidencySetDescriptor._bases_ = [NSObject]
+MTLResidencySetDescriptor._methods_ = [
+  ('label', NSString, []),
+  ('setLabel:', None, [NSString]),
+  ('initialCapacity', NSUInteger, []),
+  ('setInitialCapacity:', None, [NSUInteger]),
+]
+MTLResidencySet._bases_ = [NSObject]
+MTLResidencySet._methods_ = [
+  ('requestResidency', None, []),
+  ('endResidency', None, []),
+  ('addAllocation:', None, [MTLAllocation]),
+  ('addAllocations:count:', None, [c.POINTER[MTLAllocation], NSUInteger]),
+  ('removeAllocation:', None, [MTLAllocation]),
+  ('removeAllocations:count:', None, [c.POINTER[MTLAllocation], NSUInteger]),
+  ('removeAllAllocations', None, []),
+  ('containsAllocation:', BOOL, [MTLAllocation]),
+  ('commit', None, []),
+  ('device', MTLDevice, []),
+  ('label', NSString, []),
+  ('allocatedSize', uint64_t, [], True),
+  ('allocationCount', NSUInteger, [], True),
+]
+MTLCommonCounter: TypeAlias = NSString
+try: MTLCommonCounterTimestamp = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterTimestamp') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterTessellationInputPatches = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterTessellationInputPatches') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterVertexInvocations = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterVertexInvocations') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterPostTessellationVertexInvocations = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterPostTessellationVertexInvocations') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterClipperInvocations = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterClipperInvocations') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterClipperPrimitivesOut = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterClipperPrimitivesOut') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterFragmentInvocations = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterFragmentInvocations') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterFragmentsPassed = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterFragmentsPassed') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterComputeKernelInvocations = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterComputeKernelInvocations') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterTotalCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterTotalCycles') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterVertexCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterVertexCycles') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterTessellationCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterTessellationCycles') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterPostTessellationVertexCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterPostTessellationVertexCycles') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterFragmentCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterFragmentCycles') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterRenderTargetWriteCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterRenderTargetWriteCycles') # type: ignore
+except (ValueError,AttributeError): pass
+MTLCommonCounterSet: TypeAlias = NSString
+try: MTLCommonCounterSetTimestamp = MTLCommonCounterSet.in_dll(dll, 'MTLCommonCounterSetTimestamp') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterSetStageUtilization = MTLCommonCounterSet.in_dll(dll, 'MTLCommonCounterSetStageUtilization') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterSetStatistic = MTLCommonCounterSet.in_dll(dll, 'MTLCommonCounterSetStatistic') # type: ignore
+except (ValueError,AttributeError): pass
+@c.record
+class MTLCounterResultTimestamp(c.Struct):
+  SIZE = 8
+  timestamp: int
+MTLCounterResultTimestamp.register_fields([('timestamp', uint64_t, 0)])
+@c.record
+class MTLCounterResultStageUtilization(c.Struct):
+  SIZE = 48
+  totalCycles: int
+  vertexCycles: int
+  tessellationCycles: int
+  postTessellationVertexCycles: int
+  fragmentCycles: int
+  renderTargetCycles: int
+MTLCounterResultStageUtilization.register_fields([('totalCycles', uint64_t, 0), ('vertexCycles', uint64_t, 8), ('tessellationCycles', uint64_t, 16), ('postTessellationVertexCycles', uint64_t, 24), ('fragmentCycles', uint64_t, 32), ('renderTargetCycles', uint64_t, 40)])
+@c.record
+class MTLCounterResultStatistic(c.Struct):
+  SIZE = 64
+  tessellationInputPatches: int
+  vertexInvocations: int
+  postTessellationVertexInvocations: int
+  clipperInvocations: int
+  clipperPrimitivesOut: int
+  fragmentInvocations: int
+  fragmentsPassed: int
+  computeKernelInvocations: int
+MTLCounterResultStatistic.register_fields([('tessellationInputPatches', uint64_t, 0), ('vertexInvocations', uint64_t, 8), ('postTessellationVertexInvocations', uint64_t, 16), ('clipperInvocations', uint64_t, 24), ('clipperPrimitivesOut', uint64_t, 32), ('fragmentInvocations', uint64_t, 40), ('fragmentsPassed', uint64_t, 48), ('computeKernelInvocations', uint64_t, 56)])
+class MTLCounter(objc.Spec): pass
+MTLCounter._bases_ = [NSObject]
+MTLCounter._methods_ = [
+  ('name', NSString, []),
+]
+try: MTLCounterErrorDomain = NSErrorDomain.in_dll(dll, 'MTLCounterErrorDomain') # type: ignore
+except (ValueError,AttributeError): pass
+enum_MTLCounterSampleBufferError: dict[int, str] = {(MTLCounterSampleBufferErrorOutOfMemory:=0): 'MTLCounterSampleBufferErrorOutOfMemory', (MTLCounterSampleBufferErrorInvalid:=1): 'MTLCounterSampleBufferErrorInvalid', (MTLCounterSampleBufferErrorInternal:=2): 'MTLCounterSampleBufferErrorInternal'}
+MTLCounterSampleBufferError: TypeAlias = NSInteger
+MTLEvent._bases_ = [NSObject]
+MTLEvent._methods_ = [
+  ('device', MTLDevice, []),
+  ('label', NSString, []),
+  ('setLabel:', None, [NSString]),
+]
+class MTLSharedEventListener(objc.Spec): pass
+MTLSharedEventListener._bases_ = [NSObject]
+MTLSharedEventListener._methods_ = [
+  ('init', 'instancetype', []),
+]
+MTLSharedEventListener._classmethods_ = [
+  ('sharedListener', MTLSharedEventListener, []),
+]
+MTLSharedEventHandle._bases_ = [NSObject]
+MTLSharedEventHandle._methods_ = [
+  ('label', NSString, []),
+]
+MTLSharedEvent._bases_ = [MTLEvent]
+MTLSharedEvent._methods_ = [
+  ('newSharedEventHandle', MTLSharedEventHandle, [], True),
+  ('waitUntilSignaledValue:timeoutMS:', BOOL, [uint64_t, uint64_t]),
+  ('signaledValue', uint64_t, []),
+  ('setSignaledValue:', None, [uint64_t]),
+]
 MTLResourceCPUCacheModeShift = 0
 MTLResourceCPUCacheModeMask = (0xf << MTLResourceCPUCacheModeShift)
 MTLResourceStorageModeShift = 4
 MTLResourceStorageModeMask = (0xf << MTLResourceStorageModeShift)
 MTLResourceHazardTrackingModeShift = 8
 MTLResourceHazardTrackingModeMask = (0x3 << MTLResourceHazardTrackingModeShift)
+MTLCounterErrorValue = (~0)

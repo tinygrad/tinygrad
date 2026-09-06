@@ -1,10 +1,15 @@
-import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platform
-from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
+from __future__ import annotations
+import subprocess, pathlib, struct, ctypes, tempfile, functools, platform, weakref, threading, mmap
+from tinygrad.helpers import to_mv, round_up, cache_dir, unwrap, prod, to_tuple
 import tinygrad.runtime.support.objc as objc
-from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Compiler, CompileError, Program, TinyELF, Allocator, ProfileDeviceEvent
+from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, Compiler, CompileError, MMIOInterface
+from tinygrad.dtype import dtypes
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
+from tinygrad.runtime.support.hcq2 import HWQueue, EncodeCtx, encode_submit, ccall, patch, unwrap_view, timeline_value, host_buf
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
+from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 
 # 13 is requestType that metal uses to compile source code into MTLB, there aren't any docs or symbols.
 REQUEST_TYPE_COMPILE = 13
@@ -15,49 +20,13 @@ DLL("CoreGraphics", "CoreGraphics")
 # FIXME: these need autogen to support objc categories
 # https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjectiveC/Chapters/ocCategories.html
 @functools.cache
-def to_ns_str(s: str): return ctypes.cast(objc.msg("stringWithUTF8String:")(metal.NSString._objc_class_, s.encode()), metal.NSString)
-def from_ns_str(s): return bytes(objc.msg("UTF8String", ctypes.c_char_p)(s)).decode()
+def to_ns_str(s:str): return ctypes.cast(objc.msg("stringWithUTF8String:")(metal.NSString._objc_class_, s.encode()), metal.NSString).own()
+def checked(fn, *args): # fn(*args, &error), raised if set
+  ret = fn(*args, ctypes.byref(err:=metal.NSError()))
+  if err.value is not None: raise RuntimeError(bytes(objc.msg("UTF8String", ctypes.c_char_p)(err.localizedDescription())).decode())
+  return ret
 
-def wait_check(cbuf:metal.MTLCommandBuffer):
-  cbuf.waitUntilCompleted()
-  error_check(cbuf.error().retained())
-
-def cmdbuf_label(cbuf:metal.MTLCommandBuffer) -> str|None: return from_ns_str(label) if (label:=cbuf.label()).value is not None else None
-
-def error_check(error: metal.NSError, error_constructor: type[Exception] = RuntimeError):
-  if error.value is None: return None
-  raise error_constructor(from_ns_str(error.localizedDescription().retained()))
-
-class MetalDevice(Compiled):
-  def __init__(self, device:str):
-    self.sysdevice = metal.MTLCreateSystemDefaultDevice()
-    self.mtl_queue = self.sysdevice.newCommandQueueWithMaxCommandBufferCount(1024)
-    if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
-    self.mtl_buffers_in_flight: list[metal.MTLCommandBuffer] = []
-    self.mtl_profile_keys: dict[int, bytes] = {}
-    self.timeline_signal = self.sysdevice.newSharedEvent()
-    self.timeline_value = 0
-
-    # https://developer.apple.com/documentation/metal/mtlgpufamily
-    def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
-
-    Compiled.profile_events += [ProfileDeviceEvent(device)]
-
-    from tinygrad.runtime.graph.metal import MetalGraph
-    # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
-    # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
-    super().__init__(device, MetalAllocator(self), [MetalRenderer], MetalProgram,
-                     MetalGraph if 'virtual' not in from_ns_str(self.sysdevice.name()).lower() else None,
-                     arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
-
-  def synchronize(self, timeout:int|None=None):
-    for cbuf in self.mtl_buffers_in_flight:
-      wait_check(cbuf)
-      st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000
-      # NOTE: command buffers from MetalGraph are not profiled here
-      if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
-        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, self.mtl_profile_keys.pop(id(cbuf), None))]
-    self.mtl_buffers_in_flight.clear()
+pools = threading.local() # per thread, the autorelease pool the command buffers and encoders of its runs drain into at synchronize
 
 class MetalCompiler(Compiler):
   # Opening METAL after LLVM doesn't fail because ctypes.CDLL opens with RTLD_LOCAL but MTLCompiler opens it's own llvm with RTLD_GLOBAL
@@ -112,81 +81,197 @@ class MetalCompiler(Compiler):
       ret = proc.wait()
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
-class MetalProgram(Program[MetalDevice]):
-  def __init__(self, dev:MetalDevice, obj:TinyELF):
-    self.dev, self.name, self.lib, self.signature, self.profile_key = dev, obj.name, obj.lib, obj.signature, obj.profile_key
-    data = objc.dispatch_data_create(obj.lib, len(obj.lib), None, None)
-    self.library = self.dev.sysdevice.newLibraryWithData_error(data, ctypes.byref(error_lib:=metal.NSError().retained())).retained()
-    error_check(error_lib)
-    self.fxn = self.library.newFunctionWithName(to_ns_str(obj.name)).retained()
-    descriptor = metal.MTLComputePipelineDescriptor.new()
-    descriptor.setComputeFunction(self.fxn)
-    descriptor.setSupportIndirectCommandBuffers(True)
-    self.pipeline_state = self.dev.sysdevice.newComputePipelineStateWithDescriptor_options_reflection_error(descriptor, metal.MTLPipelineOptionNone,
-      None, ctypes.byref(error_pipeline_creation:=metal.NSError().retained()))
-    error_check(error_pipeline_creation)
-    # cache these msg calls
-    self.max_total_threads: int = self.pipeline_state.maxTotalThreadsPerThreadgroup()
+# *****************
+# queue: the body is a chain of objc calls, the kernels run from an indirect command buffer
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
-    if prod(local_size) > self.max_total_threads:
-      exec_width = self.pipeline_state.threadExecutionWidth()
-      memory_length = self.pipeline_state.staticThreadgroupMemoryLength()
-      raise RuntimeError(f"local size {local_size} bigger than {self.max_total_threads} with exec width {exec_width} memory length {memory_length}")
-    # commandBuffer/computeCommandEncoder returns +0 (autoreleased), so we can retain here.
-    # https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/MemoryMgmt/Articles/mmRules.html
-    command_buffer = self.dev.mtl_queue.commandBuffer().retained()
-    encoder = command_buffer.computeCommandEncoder().retained()
-    encoder.setComputePipelineState(self.pipeline_state)
-    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
-    for a,(_,i,dt,_) in zip(vals, self.signature[len(bufs):]):
-      encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{dt.bitsize}")(a)), dt.itemsize, i)
-    encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
-    encoder.endEncoding()
-    command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?
-    command_buffer.commit()
-    self.dev.mtl_buffers_in_flight.append(command_buffer)
-    if PROFILE and self.profile_key is not None: self.dev.mtl_profile_keys[id(command_buffer)] = self.profile_key
-    if wait:
-      wait_check(command_buffer)
-      return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
+HANDLES = ("queue", "event", "timeline_event", "fence")
+SELECTORS = ("commandBuffer", "computeCommandEncoder", "executeCommandsInBuffer:withRange:", "updateFence:", "endEncoding", "commit",
+  "setKernelBuffer:offset:atIndex:", "concurrentDispatchThreadgroups:threadsPerThreadgroup:", "encodeWaitForEvent:value:", "encodeSignalEvent:value:",
+  "blitCommandEncoder", "waitForFence:", "copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:")
+def mtl_const(name:str, devs:tuple[str, ...]) -> UOp: # a device's handles and the selectors: one host buffer the body loads from
+  i = (HANDLES + SELECTORS).index(name)
+  return UOp.placeholder((len(HANDLES) + len(SELECTORS),), dtypes.uint64, 0, device=devs, tag="mtl")[i:i + 1]
 
-class MetalBuffer:
-  def __init__(self, buf:metal.MTLBuffer, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
+class MetalQueue(HWQueue):
+  dev:MetalDevice
 
-class MetalAllocator(Allocator[MetalDevice]):
-  def _alloc(self, size:int, options) -> BufferStorage:
-    ret = metal.MTLBuffer(options.external_ptr) if options.external_ptr else \
-      self.dev.sysdevice.newBufferWithLength_options(size, metal.MTLResourceStorageModeShared)
-    setattr(ret, "retain", False) # Buffer is explicitly released in _free()
-    if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
-    return BufferStorage(MetalBuffer(ret, size), None, MMIOInterface(addr, size) if (addr:=ret.contents()) is not None else None)
+  def __init__(self, ctx:EncodeCtx, submit:UOp):
+    super().__init__(ctx, submit)
+    # a command per call: its pipeline and static sizes are set when the icb is made, the body binds the buffers before every run
+    cmds = []
+    for prg in [u.src[0] for u in self.lin.src if u.op is Ops.CALL]:
+      state, dims = self.dev.pipeline(prg.src[3].arg, prg.arg.function_name), tuple(1 if isinstance(d, UOp) else int(d) for d in self.dims(prg))
+      if prod(dims[3:]) > (mx:=state.maxTotalThreadsPerThreadgroup()): raise RuntimeError(f"local size {dims[3:]} bigger than {mx}")
+      cmds.append((state, dims))
+    self.icb = UOp.placeholder((1 + len(cmds),), dtypes.uint64, device=self.devs, tag=("icb", tuple(cmds))) # [the icb, its commands]
+    self.blob_buf = UOp.placeholder((8,), dtypes.uint8, device=self.devs) # stands in for the blob's buffer until submit
+    handles = UOp.placeholder((2,), dtypes.uint64, device=self.devs, volatile=True, tag="mtl_handles") # [command buffer, open encoder]
+    self.cb, self.enc, self.root = handles[:1], handles[1:2], handles.after(self.blob_buf)
+    self.tail, self.setups = self.root, list[UOp]() # the command buffer is encoded in order, the icb is written wide before the commit
+    self.count, self.done = 0, 0 # kernels queued, kernels handed to an encoder
+    self.words(0) # word 0: the blob's own mtlbuffer, patched at submit
+    self.msg(mtl_const("queue", self.devs), "commandBuffer", result=self.cb)
 
-  @suppress_finalizing
-  def _free(self, storage:BufferStorage, options): storage.buf.buf.release()
-  def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
-    dest_dev.synchronize()
-    src_command_buffer = src_dev.mtl_queue.commandBuffer().retained()
-    encoder = src_command_buffer.blitCommandEncoder().retained()
-    encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size(src.buf, src.offset, dest.buf, dest.offset, sz)
-    encoder.endEncoding()
-    if src_dev != dest_dev:
-      src_command_buffer.encodeSignalEvent_value(ctypes.cast(src_dev.timeline_signal, metal.MTLEvent), src_dev.timeline_value)
-      dest_command_buffer = dest_dev.mtl_queue.commandBuffer().retained()
-      dest_command_buffer.encodeWaitForEvent_value(ctypes.cast(src_dev.timeline_signal, metal.MTLEvent), src_dev.timeline_value)
-      dest_command_buffer.commit()
-      dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
-      src_dev.timeline_value += 1
-    src_command_buffer.setLabel(to_ns_str(f"COPY {src_dev.device} -> {dest_dev.device}"))
-    src_command_buffer.commit()
-    src_dev.mtl_buffers_in_flight.append(src_command_buffer)
-    # Transfers currently synchronize the completion. Otherwise, copies can sometimes lead to incorrect values.
-    # There is no real metal multidevice support for now, so transfer is used only for tests.
-    src_dev.synchronize()
-  def _cp_mv(self, dst, src, prof_desc):
+  @staticmethod
+  def dims(prg:UOp) -> tuple: return (*prg.arg.global_size, *prg.arg.local_size)
+  def words(self, *ws:UOp|int) -> int: # append 64-bit words to the blob, returns the offset of the first
+    return self.q(*[w.ccast(dtypes.uint64) if isinstance(w, UOp) else UOp.const(w, dtypes.uint64) for w in ws]) - 8 * len(ws)
+  def ptr(self, off:int) -> UOp: return self.blob_buf.after(self.root).bitcast(dtypes.uint64).index(off // 8) # into the blob, after its patches
+  def binding(self, buf:UOp) -> tuple[int, int]: # a buffer binds as its base's mtlbuffer: (the blob word holding it, the view's offset)
+    base, off = unwrap_view(buf)
+    if base.op is Ops.MSELECT: # a lane of a multi view
+      lane, lane_off = unwrap_view(base.src[0])
+      base, off = lane.mselect(base.arg), off + lane_off
+    return self.words(base.getaddr(self.devs)), off
+
+  def call(self, after:UOp, target:UOp, sel:str, *args:UOp|int, result:UOp|None=None) -> UOp: # one objc_msgSend, its return stored into result
+    fn = metal.dll.bind(ctypes.c_void_p if result is not None else None)(metal.dll.objc_msgSend)
+    cargs = [UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args]
+    ret = ccall(fn, target.after(after).index(0).load(), mtl_const(sel, self.devs).index(0).load(), *cargs)
+    return result.after(after).index(0).store(ret) if result is not None else ret
+  def msg(self, target:UOp, sel:str, *args:UOp|int, result:UOp|None=None):
+    self.tail = self.tail.after(self.call(self.tail, target, sel, *args, result=result))
+  def setup(self, cmd:UOp, sel:str, *args:UOp|int): self.setups.append(self.call(self.root, cmd, sel, *args))
+
+  def event(self, dst:UOp, val:UOp) -> tuple[UOp, UOp]: # a timeline signals its device's timeline event, a slot the other one with a per-run value
+    devs = to_tuple((base:=unwrap_view(dst)[0]).device)
+    event = mtl_const("timeline_event" if base.tag == "timeline" else "event", devs).index(0).load()
+    return event, val.ccast(dtypes.uint64) if base.tag == "timeline" else (timeline_value(devs) << 32) | val.ccast(dtypes.uint64)
+
+  def exec(self, call:UOp, prg:UOp):
+    if self.count == self.done: self.msg(self.cb, "computeCommandEncoder", result=self.enc)
+    cmd, bufs, vals = self.icb[1 + self.count:2 + self.count], get_call_arg_uops(call), get_call_var_uops(call, prg)
+    binds = [self.binding(bufs[i]) for i in prg.arg.globals] + [(0, self.words(v)) for v in vals] # a variable binds the blob at its word
+    for i, (word, off) in enumerate(binds): self.setup(cmd, "setKernelBuffer:offset:atIndex:", self.ptr(word).load(), off, i)
+    if any(isinstance(d, UOp) for d in self.dims(prg)): # arm64 passes MTLSize by reference
+      self.setup(cmd, "concurrentDispatchThreadgroups:threadsPerThreadgroup:", self.ptr(sizes:=self.words(*self.dims(prg))), self.ptr(sizes + 24))
+    self.count += 1
+
+  def flush(self): # the open encoder runs the kernels queued since the last one as one range of the icb
+    if self.count > self.done:
+      self.msg(self.enc, "executeCommandsInBuffer:withRange:", self.icb.index(0).load(), self.done, self.count - self.done)
+      self.msg(self.enc, "updateFence:", mtl_const("fence", self.devs).index(0).load())
+      self.msg(self.enc, "endEncoding")
+      self.done = self.count
+
+  def wait(self, dst:UOp, val:UOp):
+    self.flush()
+    self.msg(self.cb, "encodeWaitForEvent:value:", *self.event(dst, val))
+
+  def timestamp(self, dst:UOp): pass # TODO: counter sample buffers
+
+  def signal(self, dst:UOp, val:UOp):
+    self.flush()
+    base, off = unwrap_view(dst)
+    if base.tag == "timeline": # the host polls the timeline: a blit behind the fence writes the value once the kernels are done
+      src = self.words(val, base.getaddr(self.devs))
+      self.msg(self.cb, "blitCommandEncoder", result=self.enc)
+      self.msg(self.enc, "waitForFence:", mtl_const("fence", self.devs).index(0).load())
+      self.msg(self.enc, "copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:", self.ptr(0).load(), src, self.ptr(src + 8).load(), off, 8)
+      self.msg(self.enc, "endEncoding")
+    self.msg(self.cb, "encodeSignalEvent:value:", *self.event(dst, val))
+
+  def submit(self, cmdbuf:UOp) -> UOp:
+    self.flush()
+    self.tail = self.tail.after(*self.setups)
+    self.msg(self.cb, "commit")
+    buf = unwrap_view(cmdbuf)[0] # word 0: the blob's own mtlbuffer, a link patch on the bare placeholder
+    return self.tail.substitute({self.blob_buf: cmdbuf.after(patch(buf, [(0, buf.getaddr(self.devs))]))})
+
+# *****************
+# device
+
+class MetalAllocator(Allocator['MetalDevice']):
+  def __init__(self, dev:MetalDevice): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
+
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
+    mtl = metal.MTLBuffer(options.external_ptr) if options.external_ptr else \
+          self.dev.sysdevice.newBufferWithLength_options(size, metal.MTLResourceStorageModeShared)
+    if mtl.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
+    self.dev.resident(mtl)
+    return BufferStorage(mtl.value, mtl, MMIOInterface(c, size) if (c:=mtl.contents()) else None) # an external buffer may have no host side
+
+  def do_free(self, storage:BufferStorage, options:BufferSpec): # the icb doesn't retain what it binds: the gpu must be done with a buffer first
     self.dev.synchronize()
-    with cpu_profile(prof_desc, f"{self.dev.device}:COPY"): dst[:] = src
-  def _as_buffer(self, src:MetalBuffer) -> memoryview: return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]
-  def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(to_mv(dest.buf.contents()+dest.offset, dest.size), src, "TINY -> METAL")
-  def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, to_mv(src.buf.contents()+src.offset, src.size), "METAL -> TINY")
-  def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
+    self.dev.resident(storage.meta, False)
+    super().do_free(storage, options) # an external buffer only leaves the residency set
+  def _free(self, storage:BufferStorage, options:BufferSpec): # released now, not when the storage is collected
+    storage.meta.retain = False
+    storage.meta.release()
+
+  def _map(self, buf:Buffer) -> BufferStorage:
+    if isinstance(buf.allocator, MetalAllocator): mtl = buf.meta # every metal device is the same gpu: a mapping only adds to this device's residency
+    else: # page aligned host memory (a CPU buffer) wraps into a buffer of its own
+      wrap = objc.msg("newBufferWithBytesNoCopy:length:options:deallocator:", metal.MTLBuffer, [ctypes.c_void_p]*4, retain=True)
+      mtl = wrap(self.dev.sysdevice, buf.host.addr, round_up(buf.nbytes, mmap.PAGESIZE), metal.MTLResourceStorageModeShared, None)
+      if mtl.value is None: raise RuntimeError(f"metal can't map {buf.device} memory at {buf.host.addr:#x}: it must be page aligned")
+    self.dev.resident(mtl)
+    return BufferStorage(mtl.value, mtl)
+  def _unmap(self, mapping:BufferStorage): self.dev.resident(mapping.meta, False)
+  def _offset(self, buf:int, size:int, offset:int) -> int: return buf # a view binds its base's mtlbuffer, the offset rides with the Buffer
+
+class MetalDevice(Compiled):
+  has_copy_queue = False
+  pm_encode = PatternMatcher([
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_metal_compute", name="submit"), lambda ctx, submit: encode_submit(MetalQueue(ctx, submit))),
+  ])
+
+  def __init__(self, device:str=""):
+    if int(platform.mac_ver()[0].split('.')[0]) < 15: raise RuntimeError("METAL needs macOS 15 for residency sets")
+    self.sysdevice = metal.MTLCreateSystemDefaultDevice()
+    self.queue = self.sysdevice.newCommandQueueWithMaxCommandBufferCount(1024)
+    if self.queue.value is None: raise RuntimeError("Cannot allocate a new command queue")
+
+    # the buffers of an indirect command buffer must be resident: everything the device allocates is
+    self.residency = checked(self.sysdevice.newResidencySetWithDescriptor_error, metal.MTLResidencySetDescriptor.new())
+    self.queue.addResidencySet(self.residency)
+    self.event, self.timeline_event, self.fence = self.sysdevice.newSharedEvent(), self.sysdevice.newSharedEvent(), self.sysdevice.newFence()
+    self.icbs:weakref.WeakKeyDictionary[Buffer, tuple] = weakref.WeakKeyDictionary() # an icb and its commands live as long as their words
+
+    # https://developer.apple.com/documentation/metal/mtlgpufamily
+    def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
+    super().__init__(device, MetalAllocator(self), [MetalRenderer], None,
+                     arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
+    self.pm_bufferize = PatternMatcher([
+      (UPat(Ops.PARAM, tag="mtl"), lambda ctx: ctx.consts),
+      (UPat(Ops.PARAM, tag="cmdbuf_compute_0", name="b"), # the queue binds the blob by its mtlbuffer: it can't be a view of the pool
+       lambda ctx, b: Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(nolru=True), preallocate=True)),
+      (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.new_icb(b.tag[1]) if isinstance(b.tag, tuple) and b.tag[0] == "icb" else None),
+    ]) + self.pm_bufferize
+
+  @functools.cached_property
+  def consts(self) -> Buffer:
+    return host_buf(*[unwrap(getattr(self, n).value) for n in HANDLES], *[unwrap(objc.getsel(s.encode()).value) for s in SELECTORS])
+
+  @functools.cache
+  def pipeline(self, lib:bytes, name:str) -> metal.MTLComputePipelineState:
+    library = checked(self.sysdevice.newLibraryWithData_error, objc.dispatch_data_create(lib, len(lib), None, None))
+    descriptor = metal.MTLComputePipelineDescriptor.new()
+    descriptor.setComputeFunction(library.newFunctionWithName(to_ns_str(name)))
+    descriptor.setSupportIndirectCommandBuffers(True)
+    return checked(self.sysdevice.newComputePipelineStateWithDescriptor_options_reflection_error, descriptor, metal.MTLPipelineOptionNone, None)
+
+  def new_icb(self, cmds:tuple[tuple[metal.MTLComputePipelineState, tuple[int, ...]], ...]) -> Buffer:
+    descriptor = metal.MTLIndirectCommandBufferDescriptor.new()
+    descriptor.setCommandTypes(metal.MTLIndirectCommandTypeConcurrentDispatch)
+    descriptor.setMaxKernelBufferBindCount(31)
+    icb = self.sysdevice.newIndirectCommandBufferWithDescriptor_maxCommandCount_options(descriptor, max(len(cmds), 1), 0)
+    if icb.value is None: raise RuntimeError("create indirect command buffer failed, does your system support this?")
+    objs = [icb.indirectComputeCommandAtIndex(i).own() for i in range(len(cmds))]
+    for cmd, (state, dims) in zip(objs, cmds):
+      cmd.setComputePipelineState(state)
+      cmd.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*dims[:3]), metal.MTLSize(*dims[3:]))
+      cmd.setBarrier() # the kernels of a batch run in order
+    self.icbs[buf:=host_buf(icb.value, *[c.value for c in objs])] = (icb, objs)
+    return buf
+
+  def resident(self, mtl:metal.MTLBuffer, add:bool=True):
+    (self.residency.addAllocation if add else self.residency.removeAllocation)(ctypes.cast(mtl, metal.MTLAllocation))
+    self.residency.commit()
+
+  def synchronize(self, timeout:int|None=None):
+    if not self.timeline.is_allocated(): return
+    super().synchronize(timeout)
+    # the gpu is done with every command buffer: drain them. a nested synchronize (a free during collection) finds no pool to pop
+    if (pool:=getattr(pools, "pool", None)) is not None: objc.lib.objc_autoreleasePoolPop(pool)
+    pools.pool = objc.lib.objc_autoreleasePoolPush()

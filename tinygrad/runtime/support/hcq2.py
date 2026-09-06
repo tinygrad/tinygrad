@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Any
-import functools, itertools, weakref, ctypes, importlib
+import functools, itertools, weakref, ctypes, importlib, array
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import dedup, pluralize, unwrap, VIZ, HCQ2, to_tuple, ContextVar, Context, panic, partition, DEV, ALL2ALL, getenv
 from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker
@@ -15,7 +15,7 @@ from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_c
 
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "PYTHON" if DEV.interface.startswith("MOCK") else "CPU")
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("NV", "QCOM")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
+HCQ_DEVS = frozenset(("NV", "QCOM", "METAL")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -66,11 +66,14 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
 
 # C FFI
 
+def host_buf(*vals:int, dtype:DType=dtypes.uint64) -> Buffer: # constants a body loads from the host: function pointers, handles, selectors
+  (b:=Buffer(HCQ_RUNTIME_DEV.value, len(vals), dtype, preallocate=True)).host.view(fmt=dtype.fmt)[:] = array.array(unwrap(dtype.fmt), vals)
+  return b
+
 @functools.cache
 def cfunc_buf(lib:str, name:str) -> Buffer:
   fn = getattr(importlib.import_module(f"tinygrad.runtime.autogen.{lib}").dll, name)
-  (b:=Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, preallocate=True)).host.view(fmt='Q')[0] = unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
-  return b
+  return host_buf(unwrap(ctypes.cast(fn, ctypes.c_void_p).value))
 
 def ccall(fn:Any, *args:UOp|int) -> UOp:
   ptr = UOp.placeholder((1,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.value, tag=("cfunc", fn.__module__.split(".")[-1], fn.__name__))

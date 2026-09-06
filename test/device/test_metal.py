@@ -1,10 +1,26 @@
 import unittest
-from tinygrad.device import CompileError, Device, BufferSpec, TinyELF
-from tinygrad.helpers import Target
+from tinygrad import Tensor
+from tinygrad.engine.realize import compile_linear, link_linear, run_linear
+from tinygrad.uop.ops import Ops
+from tinygrad.device import CompileError, Device, BufferSpec
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
+  def test_icb_per_batch(self):
+    x = Tensor.full((4,), 2).contiguous().realize()
+    out = x
+    for _ in range(3): out = (out + 1).contiguous()
+    compiled = compile_linear(out.schedule_linear())
+    icbs = [u for u in compiled.toposort() if u.op is Ops.PARAM and isinstance(u.tag, tuple) and u.tag[0] == "icb"]
+    self.assertEqual(len(icbs), 1) # one batch, one icb
+    self.assertEqual(len(icbs[0].tag[1]), 3) # a command per call: repeated programs still need separate commands
+    self.assertEqual(icbs[0].arg.size, 4) # the icb and its commands
+    linked = link_linear(compiled)
+    self.assertFalse(any(u.op is Ops.PARAM and u.tag == icbs[0].tag for u in linked.toposort()))
+    run_linear(linked, jit=True, wait=True)
+    self.assertEqual(out.tolist(), [5] * 4)
+
   def test_alloc_oom(self):
     device = MetalDevice("metal")
     with self.assertRaises(MemoryError):
@@ -49,7 +65,7 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
 """)
     with self.assertRaises(RuntimeError):
       compiled = compiled[:40] # corrupt the compiled program
-      device.runtime(TinyELF(compiled, "r_5", Target("METAL"), ()))
+      device.pipeline(compiled, "r_5")
 
   def test_free(self):
     size = 2**16
