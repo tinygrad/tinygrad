@@ -26,8 +26,9 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
           if u.op is Ops.STORE and u.src[1].base.is_invalid and not u.src[0].buf_uop.is_realized}
 
 def renumber_invalid_outputs(uret:UOp) -> UOp:
+  invalid = invalid_outputs(uret)
   return uret.substitute({b:b.replace(arg=replace(b.arg, slot=i))
-                          for i,b in enumerate(x for x in uret.toposort(enter_calls=False) if x in invalid_outputs(uret))})
+                          for i,b in enumerate(x for x in uret.toposort(enter_calls=False) if x in invalid)})
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
