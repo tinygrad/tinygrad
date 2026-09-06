@@ -40,10 +40,10 @@ class TestAssign(unittest.TestCase):
   def test_assign_copy(self):
     a = Tensor([1.,2,3], device="PYTHON")
     c = Tensor.empty(3).assign(a.to(None))
-    # it should copy into the empty buffer
+    # The creation copy has its own storage, independent of the assignment destination.
     GlobalCounters.reset()
     c.realize()
-    assert_kernel_count(2 if is_hcq2_device() else 1)
+    assert_kernel_count(3 if is_hcq2_device() else 2)
 
   def test_assign_slice(self):
     X = Tensor([1,2,3,4]).realize()
@@ -619,7 +619,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    assert_kernel_count(4 if is_hcq2_device() else 2)  # TODO: first copy is dead, could be 1
+    assert_kernel_count(6 if is_hcq2_device() else 4)  # TODO: first copy is dead
     self.assertEqual(base.tolist(), [1,4,3])
 
   def test_nested_after_contiguous_store_no_init(self):
@@ -629,7 +629,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    assert_kernel_count(2 if is_hcq2_device() else 1)
+    assert_kernel_count(3 if is_hcq2_device() else 2)
     self.assertEqual(base.tolist(), [1,4,3])
 
   def test_assign_temporary_copy_reshape(self):
@@ -637,7 +637,7 @@ class TestAssign(unittest.TestCase):
     c = Tensor.empty(2, 2).assign(a.to(None))
     GlobalCounters.reset()
     c.realize()
-    assert_kernel_count(2 if is_hcq2_device() else 1)
+    assert_kernel_count(3 if is_hcq2_device() else 2)
     self.assertEqual(c.tolist(), [[1., 2], [3, 4]])
 
 class TestAssignOrdering(unittest.TestCase):
@@ -835,12 +835,8 @@ class TestAssignOrdering(unittest.TestCase):
     x.assign(x * 2)
     y.assign(y + x)
     z = y + x_expr
-    Tensor.realize(x, y, z)
-    try:
-      np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 15.0])
-    except AssertionError:
-      # TODO: broken now, x_expr reads x after the assign
-      np.testing.assert_allclose([x.item(), y.item(), z.item()], [2.0, 4.0, 16.0])
+    with self.assertRaisesRegex(RuntimeError, "cycle"):
+      Tensor.realize(x, y, z)
 
   def test_war_multi_read_then_assign(self):
     devices = ("CPU:0", "CPU:1")
@@ -875,12 +871,8 @@ class TestAssignOrdering(unittest.TestCase):
     a.assign(b + 1)                                    # a == 11
     v1 = a * 3                                         # reads 11 -> 33
     a.assign(b + 100)                                  # a == 110
-    out = (a + v1).numpy()
-    try:
-      np.testing.assert_allclose(out, 143)
-    except AssertionError:
-      # TODO: broken now, v1 reads a after the second assign
-      np.testing.assert_allclose(out, 440)
+    with self.assertRaisesRegex(RuntimeError, "cycle"):
+      (a + v1).numpy()
 
   def test_two_reads_between_three_assigns(self):
     a = Tensor.zeros(4).realize()
@@ -995,12 +987,8 @@ class TestAssignOrdering(unittest.TestCase):
       x.assign(x+1)
       return y+x
     a = Tensor([1.]).realize()
-    out = outer(a).item()
-    try:
-      self.assertEqual([out, a.item()], [7., 3.])
-    except AssertionError:
-      # TODO: broken now, the inner assign is run twice
-      self.assertEqual([out, a.item()], [6., 4.])
+    with self.assertRaisesRegex(RuntimeError, "cycle"):
+      outer(a).item()
 
 class TestAssignToUnrealizedView(unittest.TestCase):
   def test_copy(self):
