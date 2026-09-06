@@ -3,6 +3,7 @@ from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 
@@ -34,7 +35,18 @@ def helper_profile_filter_device(profile, device:str):
   assert len(dev_events) == 1, "only one device registration event is expected"
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT], (HCQCompiled, HCQ2Compiled)) or Device.DEFAULT == "METAL", "Dev not supported")
+class TestSimpleProfiler(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == "CPU", "fails in CPU")
+  def test_profiler(self):
+    start = len(Compiled.profile_events)
+    with Context(PROFILE=1):
+      Tensor.empty(32).add(1).realize()
+      Device[Device.DEFAULT].synchronize()
+    self.assertTrue(any(isinstance(e, (ProfileRangeEvent, ProfileGraphEvent)) for e in Compiled.profile_events[start:]))
+
 # TODO: support in HCQCompiled
+# TODO: support these tests in HCQ2
 is_cpu_hcq = Device.DEFAULT in {"CPU"}
 
 @unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in {"METAL"}, "Dev not supported")

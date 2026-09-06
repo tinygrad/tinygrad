@@ -192,7 +192,8 @@ class TestViz(unittest.TestCase):
   def test_colored_label_multiline(self):
     with save_viz() as viz:
       arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
-      src = [Tensor.empty(1).uop for _ in range(10)]
+      # NOTE: can't use BUFFER uops as srcs here, reconstructed traces don't retain their Buffers so identity with the live uops is lost
+      src = [UOp.const(i, dtypes.int) for i in range(10)]
       a = UOp(Ops.PYLITERAL, src=tuple(src), arg=arg)
       exec_rewrite(a, [PatternMatcher([])])
     a2 = next(viz.get_details(0, 0))["graph"][id(a)]
@@ -227,9 +228,8 @@ class TestViz(unittest.TestCase):
     pm = PatternMatcher([(UPat(Ops.CONST, arg=3, name="x"), lambda x: UOp.const(4, x.dtype))])
     with save_viz() as viz:
       inner = UOp.const(3)
-      call = UOp(Ops.CALL, src=(UOp(Ops.SINK, src=(inner,)),))
-      func = UOp(Ops.CALL, src=(UOp(Ops.TUPLE, src=(call,)),))
-      graph_rewrite(func, TrackedPatternMatcher(pm.patterns), enter_calls=True)
+      call = UOp.sink(inner).call()
+      graph_rewrite(call, TrackedPatternMatcher(pm.patterns), enter_calls=True)
     details = list(viz.get_details(0, 0))
     self.assertTrue(details[-1]["change"], "viz replay should detect change inside CALL")
 
@@ -509,10 +509,11 @@ class TestVizIntegration(unittest.TestCase):
     with save_viz() as viz:
       x.realize()
     lst = viz.list_items()
-    codegen_idx = len(lst)-1
+    # the codegen item is not the last one: the hcq compile and link groups come after it
+    codegen_idx = next((i for i,it in enumerate(lst) if any(s["name"] == "View Source" for s in it["steps"])), None)
+    assert codegen_idx is not None, "must have source rendering in list"
     steps = lst[codegen_idx]["steps"]
-    src_idx = next((i for i,s in enumerate(steps) if s["name"] == "View Source"), None)
-    assert src_idx is not None, "must have source rendering in list"
+    src_idx = next(i for i,s in enumerate(steps) if s["name"] == "View Source")
     src_render = get_render(viz.data, steps[src_idx]["query"])["src"]
     self.assertEqual(src, src_render)
 
@@ -1015,18 +1016,19 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("jump_back_to_end", k)
 
 # launch viz cli without subprocess
-def run_cli(*cli_args) -> list[dict]:
+def run_cli(*cli_args, json_fmt=True) -> list[dict]:
   from tinygrad.viz.cli import main, get_arg_parser
-  args = get_arg_parser().parse_args(cli_args+("--json",))
+  args = get_arg_parser().parse_args(cli_args+(("--json",) if json_fmt else ()))
   with contextlib.redirect_stdout(buf:=io.StringIO()):
     main(args)
-  return [json.loads(line) for line in buf.getvalue().strip().splitlines()]
+  stdout = buf.getvalue().strip()
+  return [json.loads(line) for line in stdout.splitlines()] if json_fmt else [{"out":stdout}]
 
 @contextlib.contextmanager
-def write_files(viz) -> list[str]:
+def write_files(rewrites=None, profile=cpu_events) -> list[str]:
   with tempfile.TemporaryDirectory() as tmpdir:
-    (r:=pathlib.Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
-    (p:=pathlib.Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+    (r:=pathlib.Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps((rewrites.data if rewrites is not None else VizData()).trace))
+    (p:=pathlib.Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(profile))
     yield ["--rewrites-path", str(r), "--profile-path", str(p)]
 
 class TestCLI(unittest.TestCase):
@@ -1071,10 +1073,11 @@ class TestCLI(unittest.TestCase):
       out = run_cli(*files, "-s", "NULL")
       aggregate = run_cli(*files, "-s", "NULL", "-t")
     self.assertEqual(len(out), 3*2)
-    # flops increases as N gets larger
+    # Operation count increases with N; FLOPS is a rate and also depends on the measured duration.
     gflops = [row["fmt"]["FLOPS"] for row in out]
-    self.assertGreater(gflops[4], gflops[2])
-    self.assertGreater(gflops[5], gflops[3])
+    flops = [rate * row["dur_ms"] * 1e-3 for rate, row in zip(gflops, out)]
+    self.assertGreater(flops[4], flops[2])
+    self.assertGreater(flops[5], flops[3])
     # aggregate flops
     self.assertEqual(len(aggregate), 2)
     agg_gflops = [row["fmt"]["FLOPS"] for row in aggregate]

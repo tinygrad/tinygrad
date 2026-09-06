@@ -60,6 +60,10 @@ class TestValidIdxSimplification(unittest.TestCase):
     valid = (alu0 < 57) & (alu0 >= 1)
     self.assertIsNone(simplify_valid(valid))
 
+  def test_bitwise_and_is_not_a_valid(self):
+    ridx0 = Range(0, 16)
+    self.assertEqual(simplify_valid_idx(UOp.sink((ridx0 & UOp.const(12, dtypes.int)) & ridx0)).src[0].render(), "((int)(r0)&12&(int)(r0))")
+
   def test_valid_order_matters1(self):
     ridx0 = Range(0, 2)
     v0 = ridx0<1

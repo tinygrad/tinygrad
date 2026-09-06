@@ -144,7 +144,7 @@ class AMMemoryManager(MemoryManager):
     self.dev.gmc.flush_tlb(ip='MM', vmid=0)
 
 class AMDev:
-  Version = 0xA0000008
+  Version = 0xA000000D
 
   def _disable_aspm(self):
     # L1 across retimers makes reads oscillate to 0xffffffff; power on defaults it enabled. Clearing the GPU endpoint
@@ -200,6 +200,7 @@ class AMDev:
         self.smu.mode1_reset()
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
       self.init_hw(self.soc, self.gmc, self.ih, *(() if self.is_vf else (self.psp, self.smu)))
+    elif not self.is_vf: self.psp._tmr_init()
 
     # Booting done
     self.is_booting = False
@@ -213,6 +214,7 @@ class AMDev:
         self.smu.set_clocks(level=None)
       else: self.smu.set_clocks(level=-1) # last level, max perf.
       for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
+      self.reg("regSCRATCH_REG5").write(self.psp.tmr_size) # scratch registers are writable after GFX initialization
       self.reg("regSCRATCH_REG7").write(AMDev.Version)
       self.reg("regSCRATCH_REG6").write(1) # set initialized state.
 
@@ -222,7 +224,7 @@ class AMDev:
     self.smi_dev, self.is_err_state = smi_dev, False
 
     # Memory manager & firmware
-    self.mm = AMMemoryManager(self, self.vram_size - self.reserved_vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39],
+    self.mm = AMMemoryManager(self, self.vram_size - self.reserved_vram_size, boot_size=(3 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39],
       va_bits=48, first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base, reserve_ptable=not self.large_bar,
       palloc_ranges=[(1 << (i + 12), (2 << 20) if i >= 9 else 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
     self.fw = AMFirmware(self)

@@ -138,4 +138,5 @@ class DLL(ctypes.CDLL):
 
   def __getattr__(self, nm):
     if self.nm not in self._loaded_: raise AttributeError(f"failed to load library {self.nm}: {self.emsg}")
-    return super().__getattr__(nm)
+    (fn:=super().__getattr__(nm)).__module__ = f"tinygrad.runtime.autogen.{self.nm}"
+    return fn

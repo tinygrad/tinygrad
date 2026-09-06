@@ -420,7 +420,7 @@ class ElementwiseMixin(CreationMixin):
     Calculates (self.exp()+other.exp()).log(), elementwise.
     """
     a, b = self._broadcasted(other)
-    m = a.maximum(b)
+    m = (mx:=a.maximum(b)).isfinite().where(mx, 0)
     return ((a-m).exp() + (b-m).exp()).log() + m
 
   def where(self, x: 'Self | ConstType | sint', y: 'Self | ConstType | sint') -> Self:
@@ -936,10 +936,10 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).asin().numpy())
     ```
     """
-    # https://personal.math.ubc.ca/~cbm/aands/page_81.htm 4.4.46
-    coefficients = [-0.0012624911, 0.0066700901, -0.0170881256, 0.0308918810, -0.0501743046, 0.0889789874, -0.2145988016, 1.5707963050]
-    x = math.pi / 2 - (1.0 - self.abs()).sqrt() * polyN(self.abs(), coefficients)
-    return self.sign() * x
+    # https://personal.math.ubc.ca/~cbm/aands/page_81.htm 4.4.46, with a0 = pi/2 so asin(0) is exactly 0
+    coefficients = [-0.0012624911, 0.0066700901, -0.0170881256, 0.0308918810, -0.0501743046, 0.0889789874, -0.2145988016, math.pi / 2]
+    a = (s:=(self >= 0).where(1.0, -1.0)) * self
+    return s * (math.pi / 2 - (1.0 - a).sqrt() * polyN(a, coefficients))
 
   def acos(self) -> Self:
     """
@@ -1066,8 +1066,8 @@ class ElementwiseMixin(CreationMixin):
     ```
     """
     # https://personal.math.ubc.ca/~cbm/aands/page_299.htm 7.1.26
-    t = 1.0 / (1.0 + 0.3275911 * self.abs())
-    return self.sign() * (1.0 - t * polyN(t, [1.061405429, -1.453152027, 1.421413741, -0.284496736, 0.254829592]) * (-self.square()).exp())
+    t = 1.0 / (1.0 + 0.3275911 * (s:=(self >= 0).where(1.0, -1.0)) * self)
+    return s * (1.0 - t * polyN(t, [1.061405429, -1.453152027, 1.421413741, -0.284496736, 0.254829592]) * (-self.square()).exp())
 
   def softsign(self) -> Self:
     """

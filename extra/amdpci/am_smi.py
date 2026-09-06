@@ -66,6 +66,8 @@ class AMSMI(AMDev):
   def __init__(self, pcibus, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
     self.pcibus, self.devfmt = pcibus, pcibus
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
+    self.is_vf = bool(self.mmio[am.mmRCC_IOV_FUNC_IDENTIFIER] & 1)
+    self.vf_rlc_gated:list[tuple[int, int]] = []
     self.pci_state = self.read_pci_state()
     if self.pci_state == "D0": self._init_from_d0()
 

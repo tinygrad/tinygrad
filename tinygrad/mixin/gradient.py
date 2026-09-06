@@ -49,7 +49,8 @@ def unshard_gradient(ctx:UOp, ret:UOp) -> tuple[UOp, ...]:
 
 def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp, ...]]:
   """Remove unused PARAMs from body and return compacted (body, args)."""
-  used = sorted({p.arg.slot: p for p in body.toposort() if p.op is Ops.PARAM}.items())
+  # NOTE: don't enter nested calls, their PARAMs are lexical params of the subprogram
+  used = sorted({p.arg.slot: p for p in body.toposort(enter_calls=False) if p.op is Ops.PARAM}.items())
   body = body.substitute({p: p.replace(arg=dataclasses.replace(p.arg, slot=j)) for j,(_, p) in enumerate(used)}, walk=True)
   return body, tuple(all_args[i] for i,_ in used)
 
@@ -57,23 +58,31 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fxn, args = k.src[0], k.src[1:]
   if k.arg.grad_fxn is not None:
     # put const on a device, also TODO why do we still have NOOP...
-    def on_dev(g, i): return g.clone(device=k.device if fxn.op is Ops.TUPLE else args[i].device) if g.device is None else g
-    if ctx.op is Ops.TUPLE:
+    def on_dev(g, i): return g.clone(device=args[i].device) if g.device is None else g
+    # grads align with the call's src positions (None for the body and for RETURNED outputs, wherever they are)
+    def arg_grads(g):
+      git = iter(g)
+      return (None,) + tuple(next(git) if not a.unsharded_base.is_unbound else None for a in k.src[1:])
+    if ctx.op is Ops.SINK:
       real = [on_dev(g, i) for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
-      return (None,) + (k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
-    return (None,) + k.arg.grad_fxn(on_dev(ctx, 0), k)
-  assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
+      return arg_grads(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
+    return arg_grads(k.arg.grad_fxn(on_dev(ctx, 0), k))
+  # the RETURNED inputs are the call outputs: their positions in the args get the output gradients from the AFTER rule
+  assert fxn.op is Ops.SINK and k.has_unbound_outputs, f"expected a CALL with unbound BUFFER outputs or a grad_fxn, got {fxn.op}"
+  ret_pos = [i for i, a in enumerate(args) if a.unsharded_base.is_unbound]
+  # the body stores the outputs into output PARAMs: the values are the stored values in slot order
+  values = UOp.sink(*[st.src[1] for st in fxn.src if st.op is Ops.STORE])
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   # grads are collected at the flat param storage: reshape to each arg's view (max view shrunk to symbolic)
   def shaped_grad(grad:UOp, i:int) -> UOp:
     a = args[i]
     return grad.view_as(a.shard_shape, a.axis) if a.axis is not None and isinstance(a.device, tuple) else grad.view_as(a._shape)
-  grad_args = ctx.src
-  # Precompiled forward outputs and gradient auxiliaries are additional backward-function inputs.
-  fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}
-  fwd_outs = tuple(k.gettuple(i) for i in range(len(fxn.src))) if k.arg.precompile else ()
+  grad_args = tuple(ctx.src[i] for i in ret_pos)
   root_grads = [UOp(Ops.NOOP) if g.op is Ops.NOOP else g if g.device is None else g.param_like(len(args)+i)
                 for i,g in enumerate(grad_args)]
+  # Precompiled forward outputs and gradient auxiliaries are additional backward-function inputs.
+  fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(values.src)} if k.arg.precompile else {}
+  fwd_outs = k.unbound_outputs if k.arg.precompile else ()
   aux_args:list[UOp] = []
   for grad_arg, root in zip(grad_args, root_grads):
     for mailbox in gradient_auxiliary_mailboxes.values():
@@ -85,8 +94,8 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
           aux_params.append(value.param_like(len(args)+len(grad_args)+len(fwd_outs)+len(aux_args)))
           aux_args.append(value)
       mailbox[root] = tuple(aux_params)
-  root_grad = UOp(Ops.TUPLE, src=tuple(root_grads))
-  grads = compute_gradient(fxn, root_grad, set(params.values()))
+  root_grad = UOp.sink(*root_grads)
+  grads = compute_gradient(values, root_grad, set(params.values()))
   # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   # collect needed gradient bodies, compact unused params, create a single backward CALL
   raw_grad_bodies = [(i, grads[p]) for i in needed if (p:=params.get(i)) is not None and p in grads]
@@ -103,15 +112,16 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
           slots.append(len(grad_bodies)+len(aux_bodies))
           aux_bodies.append(value)
       aux_returns.append((arg_idx, mailbox, tuple(slots)))
-  bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies), *aux_bodies).substitute(fwd_subs, walk=True)
+  bwd_body = UOp.sink(*(gb for _, gb in grad_bodies), *aux_bodies).substitute(fwd_subs, walk=True)
   bwd_body = renumber_invalid_outputs(bwd_body)
   bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs, *aux_args))
-  bwd_call = bwd_body.call(*compact_args, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
+  bwd_outs = UOp.call_with_outputs(bwd_body.src, *compact_args, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
   gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
   for arg_idx, mailbox, returned_slots in aux_returns:
-    returned_grad = bwd_call.gettuple(gb_map[arg_idx])
-    mailbox[returned_grad] = tuple(None if slot is None else bwd_call.gettuple(slot) for slot in returned_slots)
-  return (None,) + tuple(bwd_call.gettuple(gb_map[i]) if i in gb_map else None for i in range(len(args)))
+    returned_grad = bwd_outs[gb_map[arg_idx]]
+    mailbox[returned_grad] = tuple(None if slot is None else bwd_outs[slot] for slot in returned_slots)
+  ret_set = set(ret_pos)
+  return (None,) + tuple(None if i in ret_set else (bwd_outs[gb_map[i]] if i in gb_map else None) for i in range(len(args)))
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
@@ -142,9 +152,9 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.STACK, name="ret"), lambda ctx, ret: tuple(ctx[i] for i in range(len(ret.src)))),
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),)),
   (UPat(Ops.UNSHARD, name="ret"), unshard_gradient),
-  (UPat(Ops.TUPLE), lambda ctx: ctx.src),
+  (UPat(Ops.SINK), lambda ctx: ctx.src),
   (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
-    (ctx, UOp.maketuple(*(ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1))))),
+    (ctx, UOp.sink(*([ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1)])))),
   # clone/assign gradient passes through to val
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE))), lambda ctx: (None, ctx)),
   (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
@@ -164,17 +174,8 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
   grads: dict[UOp, UOp] = {root: root_grad}
   for t0 in reversed(walk):
     if t0 not in grads or grads[t0].op is Ops.NOOP: continue
-    # GETTUPLE: accumulate gradient into a TUPLE UOp on the value-producing call, process when we hit the call
-    if t0.op is Ops.GETTUPLE:
-      k = t0.src[0]  # the call
-      assert k.op is Ops.CALL and k.src[0].op is Ops.TUPLE
-      n_outputs = len(k.src[0].src)
-      prev = grads[k].src if k in grads else tuple(UOp(Ops.NOOP) for _ in range(n_outputs))
-      grads[k] = UOp.maketuple(*(prev[i] + grads[t0] if i == t0.arg and prev[i].op is not Ops.NOOP else
-                                 grads[t0] if i == t0.arg else prev[i] for i in range(n_outputs)))
-      continue
     # CALL: pass needed param set so backward only computes required gradients
-    # (value-producing calls use implicit TUPLE gradient or grad_fxn; opaque calls require an explicit grad_fxn)
+    # (calls with RETURNED inputs use the implicit body gradient or grad_fxn; opaque CALLs require an explicit grad_fxn)
     if t0.op is Ops.CALL:
       needed = {i for i, arg in enumerate(t0.src[1:]) if arg in targets or in_target_path.get(arg, False)}
       lgrads:tuple[UOp|None, ...]|None = call_gradient(grads[t0], t0, needed)
@@ -188,9 +189,9 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
       if k._shape is not None and v._shape is not None and k._shape != v._shape:
         v = v.cast(sum_acc_dtype(v.dtype))._rop(Ops.ADD, broadcast_axes(k.shape, v.shape)).reshape(k.shape).cast(v.dtype)
       if k in grads and grads[k].op is not Ops.NOOP:
-        if v.op is Ops.TUPLE and grads[k].op is Ops.TUPLE:
-          grads[k] = UOp.maketuple(*(p + n if (p.op is not Ops.NOOP and n.op is not Ops.NOOP) else
-                                     n if p.op is Ops.NOOP else p for p, n in zip(grads[k].src, v.src)))
+        if v.op is Ops.SINK and grads[k].op is Ops.SINK:
+          grads[k] = UOp.sink(*[p + n if (p.op is not Ops.NOOP and n.op is not Ops.NOOP) else
+                                 n if p.op is Ops.NOOP else p for p, n in zip(grads[k].src, v.src)])
         else: grads[k] = grads[k] + v
       else: grads[k] = v
       if len(forward_metadata:=all_metadata.get(t0, ())):

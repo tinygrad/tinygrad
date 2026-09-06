@@ -65,13 +65,17 @@ def assert_kernel_count(expected:int):
   got = GlobalCounters.kernel_count
   if got != expected: raise KernelCountException(expected, got)
 
+def is_hcq2_device() -> bool: # an hcq2 device stages every copy from the host through a pinned buffer: such a copy is two calls, not one
+  from tinygrad.runtime.support.hcq2 import HCQ_DEVS
+  return Device.DEFAULT.split(":")[0] in HCQ_DEVS - {"CPU"}
+
 def call_is_graph(call:UOp) -> bool:
   ast = call.src[0]
   return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph"
 
-def call_is_hcq(call:UOp) -> bool:
-  ast = call.src[0]
-  return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq"
+def call_is_hcq(call:UOp) -> bool: # an hcq2 batch: a compiled body whose aux lists the kernels it submits
+  from tinygrad.runtime.support.hcq2 import HCQInfo
+  return isinstance(getattr(call.without_after.arg, "aux", None), HCQInfo)
 
 def jit_cache_count(linear:UOp) -> int:
   n = 0
@@ -86,9 +90,10 @@ def assert_jit_cache_len(fxn, expected_len):
   if linear is None or not linear.src:
     if expected_len != 0: raise KernelCountException(expected_len, 0)
     return
-  if expected_len and all(call_is_hcq(call) for call in linear.src): # HCQ2: one batch submitter, or fence + reset + merged calls + finalizer
-    from tinygrad.runtime.support.hcq2 import HCQ_RUNTIME_DEV
-    expected_len = 1 if HCQ_RUNTIME_DEV.value == "CPU" else 4
+  if expected_len and any(call_is_hcq(call) for call in linear.src): # HCQ2: kernels batch into submits, the finalizers carry the batch's kernels
+    count = sum(len(call.without_after.arg.aux.kernels) if call_is_hcq(call) else 1 for call in linear.src)
+    if count != expected_len: raise KernelCountException(expected_len, count)
+    return
   if call_is_graph(linear.src[0]):
     if len(linear.src) != 1: raise KernelCountException(1, len(linear.src))
     inner = linear.src[0].src[0].src[0]  # LINEAR UOp inside CUSTOM_FUNCTION

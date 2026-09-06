@@ -19,15 +19,15 @@ class LinearScanRegallocContext:
     # compute live ranges
     self.live_range: dict[Register, list[int]] = {}
     lr = self.live_range
-    ranges: list[Register] = []
-    for i,u in enumerate(reversed(uops)):
+    loops: dict[int, int] = {} # the interval of each loop, from its RANGE to the last uop that reads that RANGE
+    for idx,u in reversed(list(enumerate(uops))):
       if u.op in PSEUDO_OPS: continue
       defs = u.tag if isinstance(u.tag, tuple) else ()
       for v in defs + tuple(greg(s) for s in dedup(u.src)):
-        if isinstance(v, Register): lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
+        if isinstance(v, Register): lr.setdefault(v, []).insert(0, idx)
       for v in defs:
-        if v in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] <= lr[v][-1] < lr[rng][-1]), default=None)): lr[v].append(n)
-      if u.op is Ops.RANGE: ranges.append(greg(u))
+        if v in lr and (n:=max((e for s,e in loops.items() if s <= lr[v][-1] < e), default=None)): lr[v].append(n)
+      if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src)
 
     # allocate registers
     self.stack_size: int = 0
@@ -90,7 +90,7 @@ class LinearScanRegallocContext:
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
         # we move to registers vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
-        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < lr[greg(u)][-1] for l in lr[v])]
+        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < loops[i] for l in lr[v])]
         sorted_uses = sorted(used_in_loop, key=lambda k: (next(l-i for l in lr[k] if l >= i), lr[k][0], k.name, k.index))
         live_in: dict[Register, Register] = {}
         for v in sorted_uses:

@@ -8,18 +8,21 @@ from dataclasses import replace
 from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile, mv_address
 from tinygrad.device import Buffer, Compiled, Compiler, Allocator, Program, TinyELF
-from tinygrad.codegen.opt import tc
+from tinygrad.renderer import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 
 def _load(m, i, dtype: DType):
   if i is None: return 0.0
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
-  return from_storage_scalar(m[i], dtype)
+  if (w:=m.nbytes // len(m)) >= dtype.itemsize: return from_storage_scalar(m[i], dtype)
+  return sum(m[i+k] << (8*w*k) for k in range(dtype.itemsize // w)) # a bitcast can read wider than the buffer, _store splits it the same way
+
+def _step(m, dtype: DType): return max(1, dtype.itemsize // (m.nbytes // len(m))) # storage elements per lane
 
 def load(inp, j, dtype: DType):
-  if len(inp) >= 3: return [_load(m, x+j if x is not None else None, dtype) if gate else default for (m,x),default,gate in zip(*inp[:3])]
-  return [_load(m, x+j if x is not None else None, dtype) for m,x in inp[0]]
+  if len(inp) >= 3: return [_load(m, x+j*_step(m, dtype) if x is not None else None, dtype) if gate else alt for (m,x),alt,gate in zip(*inp[:3])]
+  return [_load(m, x+j*_step(m, dtype) if x is not None else None, dtype) for m,x in inp[0]]
 
 def _store(m, i, v, dtype: DType):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
@@ -85,7 +88,7 @@ class PythonProgram(Program['PythonDevice']):
           store_gate = exec_masks[-1]
           for j,val in enumerate(src_values[1] if u.max_numel() > 1 else [src_values[1]]):
             for (m,o),v,g in zip(src_values[0], val, store_gate):
-              if g: _store(m, o+j, v, src_dtypes[1])
+              if g: _store(m, o+j*_step(m, src_dtypes[1]), v, src_dtypes[1])
           i += 1
           continue
         if u.op is Ops.AFTER or (u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]

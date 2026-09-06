@@ -6,7 +6,6 @@ from tinygrad.helpers import getenv, DEBUG, DEV, IMAGE, Context
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.renderer.nir import NIRRenderer
-from tinygrad.renderer.isa.x86 import X86Renderer
 
 TINY_BACKEND = getenv("TINY_BACKEND")
 if TINY_BACKEND:
@@ -816,8 +815,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor^0x1337, lambda: ten^0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337^tor, lambda: 0x1337^ten, forward_only=True)
 
-  # TODO: x86 PARAM dtype fails SPEC=2
-  @Context(SPEC=1 if isinstance(Device[Device.DEFAULT].renderer, X86Renderer) else 2)
   def test_and(self):
     data = [[1,-8,1],[32,1,6]]
     tor = torch.tensor(data, dtype=torch.int)
@@ -825,6 +822,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor&tor, lambda: ten&ten, forward_only=True)
     helper_test_op([], lambda: tor&0x1337, lambda: ten&0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337&tor, lambda: 0x1337&ten, forward_only=True)
+    helper_test_op([], lambda: (tor&12)&tor, lambda: (ten&12)&ten, forward_only=True)
 
     data = [[True, True, False, False], [True, False, True, False]]
     tor0, tor1 = torch.tensor(data[0], dtype=torch.bool),  torch.tensor(data[1], dtype=torch.bool)
@@ -955,15 +953,18 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.asin(), low=-1, high=1)
     helper_test_op([(45,65)], lambda x: x.asin(), low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.asin(), low=300, high=303)
+    helper_test_op(None, lambda x: x.asin(), vals=[[-0.5, 0., 0.5]])
   def test_acos(self):
     # high grad atol
     helper_test_op([(45,65)], lambda x: x.acos(), low=-1, high=1)
     helper_test_op([(45,65)], lambda x: x.acos(), low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.acos(), low=300, high=303)
+    helper_test_op(None, lambda x: x.acos(), vals=[[-0.5, 0., 0.5]])
   def test_atan(self):
     helper_test_op([(45,65)], lambda x: x.atan())
     helper_test_op([(45,65)], lambda x: x.atan(), low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.atan(), low=300, high=303)
+    helper_test_op(None, lambda x: x.atan(), vals=[[-0.5, 0., 0.5]])
 
   def test_relu(self):
     helper_test_op([(64,64)], lambda x: x.relu())
@@ -1050,6 +1051,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-1.], [-1.0, 2, 3]])
     helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-100.0, -200, -300], [-1.0, 2, 3]])
     helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[1.0, 2000, 30000], [-1.0, 2, 3]])
+    helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-math.inf, math.inf, 1.0, -math.inf], [-math.inf, math.inf, -math.inf, 1.0]])
 
   def test_softsign(self):
     helper_test_op([(45,65)], torch.nn.functional.softsign, Tensor.softsign)
@@ -1091,11 +1093,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6, low=300, high=400)
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6, low=-400, high=-300)
     helper_test_op([()], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
+    helper_test_op(None, torch.nn.functional.softplus, Tensor.softplus, vals=[[-math.inf, math.inf, 0.0]], forward_only=True)
 
   def test_erf(self):
     helper_test_op([(45,65)], torch.erf, Tensor.erf)
     helper_test_op([(45,65)], torch.erf, Tensor.erf, low=300, high=400)
     helper_test_op([(45,65)], torch.erf, Tensor.erf, low=-400, high=-300)
+    helper_test_op(None, torch.erf, Tensor.erf, vals=[[-1., 0., 1.]])
     helper_test_op([()], torch.erf, Tensor.erf)
 
   def test_gelu(self):
@@ -3102,6 +3106,13 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.gather(dim=0, index=torch.tensor([2, 1, 0, 1, 2], requires_grad=False)),
                          lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
                          vals=[[-float("inf"), 2., 3.]])
+
+  def test_gather_bool_index(self):
+    helper_test_op(None, lambda x,y: x.gather(dim=0, index=y.bool().long()),
+                         lambda x,y: x.gather(dim=0, index=y.cast(dtypes.bool).cast(dtypes.int)),
+                         vals=[[1., 2., 3.], [0.5, 0., 2.]], forward_only=True)
+    helper_test_op(None, lambda x,y: x[y.bool().long()], lambda x,y: x[y.cast(dtypes.bool).cast(dtypes.int)],
+                         vals=[[1., 2., 3.], [0.5, 0., 2.]], forward_only=True)
 
   def test_scatter(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)

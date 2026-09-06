@@ -603,10 +603,9 @@ class AM_PSP(AM_IP):
     self.ring_size = 0x10000
     self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=False, boot=True)
 
-    self.max_tmr_size, self.tmr_size = 0x1300000, 0
+    self.tmr_size, self.tmr_paddr = 0, 0
     self.boot_time_tmr = self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,14), (14,0,2), (14,0,3)}
     self.autoload_tmr = self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,14)}
-    self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True) if not self.boot_time_tmr else 0
 
   def init_hw(self):
     spl_key = am.PSP_FW_TYPE_PSP_SPL if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) else am.PSP_FW_TYPE_PSP_KDB
@@ -655,10 +654,13 @@ class AM_PSP(AM_IP):
     return self._wait_for_bootloader() if compid != am.PSP_BL__LOAD_SOSDRV else 0
 
   def _tmr_init(self):
-    # Load TOC and calculate TMR size
-    self._prep_msg1(fwm:=self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_TOC])
-    self.tmr_size = self._load_toc_cmd(len(fwm)).resp.tmr_size
-    assert self.tmr_size <= self.max_tmr_size
+    if self.adev.partial_boot: self.tmr_size = self.adev.reg("regSCRATCH_REG5").read()
+    else:
+      # Load TOC and calculate TMR size
+      self._prep_msg1(fwm:=self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_TOC])
+      self.tmr_size = self._load_toc_cmd(len(fwm)).resp.tmr_size
+    # First runtime allocation on both full and partial boots, so the resident TMR keeps the same address.
+    if not self.boot_time_tmr: self.tmr_paddr = self.adev.mm.pa_allocator.alloc(self.tmr_size, am.PSP_TMR_ALIGNMENT)
 
   def _ring_create(self):
     # If the ring is already created, destroy it

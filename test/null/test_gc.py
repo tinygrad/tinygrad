@@ -21,8 +21,9 @@ def tensors_allocated():
   return _allocations_of_type(Tensor)
 
 def bufs_allocated():
+  # count Buffer objects that own storage: a realized (or to-be-realized) BUFFER UOp owns one, views are transient and excluded
   gc.collect()
-  return _allocations_of_type(Buffer)
+  return sum(1 for x in gc.get_objects() if isinstance(x, Buffer) and x._base is None)
 
 class TestGC(unittest.TestCase):
 
@@ -86,35 +87,33 @@ class TestGC(unittest.TestCase):
       print(inspect.getclosurevars(UOp.toposort().fget))
       raise AssertionError(f"never gced {[x for x in gc.get_objects() if isinstance(x, Buffer)]}")
 
-  def test_buffer_refcount(self):
+  def test_buffer_ownership(self):
     init = bufs_allocated()
     a = Tensor.empty(10)
-    self.assertEqual(bufs_allocated()-init, 0)
+    # the Buffer object is owned by the BUFFER UOp 1:1, it exists from creation (device memory is still allocated lazily)
+    self.assertEqual(bufs_allocated()-init, 1)
     a.realize()
     real_buf = a.uop.buffer
-    # after the Tensor UOp is deleted there shouldn't be any references on the Buffer
-    self.assertEqual(real_buf.uop_refcount, 1)
+    self.assertIs(a.uop.arg.buffer, real_buf)
     self.assertEqual(bufs_allocated()-init, 1)
     del a.uop
-    self.assertEqual(real_buf.uop_refcount, 0)
-    self.assertEqual(bufs_allocated()-init, 1) # keep the buffer alive
+    self.assertEqual(bufs_allocated()-init, 1) # the Buffer object is still held here
     del real_buf
     self.assertEqual(bufs_allocated()-init, 0)
 
-  def test_assign_refcount(self):
+  def test_assign_keeps_buffer(self):
     init = bufs_allocated()
     a = Tensor.full((4,), 1.).contiguous()
     a.realize()
     real_buf = a.uop.buffer
-    self.assertEqual(real_buf.uop_refcount, 1)
     a.assign(Tensor.full((4,), 2.))
+    # assign writes in place: the AFTER still references the same Buffer
     self.assertIs(a.uop.src[0].buffer, real_buf)
-    # NOTE: this is still 1, we don't count the ASSIGN
-    self.assertEqual(real_buf.uop_refcount, 1)
     a.realize()
     del a
-    self.assertEqual(real_buf.uop_refcount, 0) # no UOps for this Buffer
-    self.assertEqual(bufs_allocated()-init, 1) # Buffer is alive
+    self.assertEqual(bufs_allocated()-init, 1) # the Buffer object is still held here
+    del real_buf
+    self.assertEqual(bufs_allocated()-init, 0)
 
 if __name__ == '__main__':
   unittest.main()

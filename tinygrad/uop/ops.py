@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 class AxisType(Enum):
   def __repr__(self): return str(self)
   DEVICE = auto(); GLOBAL = auto(); WARP = auto(); LOCAL = auto(); WEAK = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto() # noqa: E702
-  UNROLL = auto(); THREAD = auto(); PLACEHOLDER = auto(); LOOP = auto() # noqa: E702
+  UNROLL = auto(); PLACEHOLDER = auto(); LOOP = auto() # noqa: E702
 
 @dataclass(frozen=True, order=True)
 class ParamArg:
@@ -33,20 +33,22 @@ class ParamArg:
   volatile: bool = False
   # (h, w) if this is an image2d buffer, then size == h*w*4
   image: tuple[int, int]|None = None
+  # the device Buffer for a realized BUFFER. the UOp is the owner of the Buffer: they live and die together (1:1)
+  buffer: Buffer|MultiBuffer|None = None
   def __repr__(self):
     fields = (("vmin_vmax", None), ("multiple_of", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
               ("volatile", False), ("image", None))
     args = [repr(self.slot), repr(self.dtype)] + ([repr(self.size)] if self.size is not None else []) + \
       [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     return f"ParamArg({', '.join(args)})"
-axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
+axis_letters = {AxisType.DEVICE: "d", AxisType.GLOBAL: "g", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.WEAK: "L",
                 AxisType.LOOP: "L", AxisType.UPCAST: "u", AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
-axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN",
+axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN",
                AxisType.WEAK: "WHITE", AxisType.LOOP: "WHITE", AxisType.UPCAST: "yellow", AxisType.GROUP_REDUCE: "RED", AxisType.REDUCE: "red",
                AxisType.UNROLL: "magenta"}
 
 # NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
-axis_to_pos = {AxisType.DEVICE: -2, AxisType.WEAK: -1, AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1,
+axis_to_pos = {AxisType.DEVICE: -2, AxisType.WEAK: -1, AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.WARP: 1,
                AxisType.LOCAL: 2, AxisType.UPCAST: 3, AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
 range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.LINEAR: 0}
@@ -120,12 +122,12 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
          Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | Ops.NOOP | \
-         Ops.TUPLE | Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR | Ops.PYLITERAL:
+         Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR | Ops.PYLITERAL:
       # always void
       return dtypes.void
     case Ops.CALL:
-      # a CALL of an opaque body (CallInfo arg) is void, a CALL of an address states its return dtype in the arg
-      return arg if isinstance(arg, DType) else dtypes.void
+      # a call states its (possibly void) dtype in the CallInfo
+      return arg.dtype if isinstance(arg, CallInfo) else dtypes.void
     case Ops.CUSTOM | Ops.CUSTOMI:
       assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"CUSTOM/CUSTOMI arg must be (str, DType), got {arg}"
       return arg[1]
@@ -156,10 +158,6 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
     case Ops.WMMA:
       # WMMA output dtype is the accumulator dtype (src[2])
       return src[2].dtype
-    case Ops.GETTUPLE:
-      # GETTUPLE extracts from a TUPLE (possibly through a CALL body)
-      in_tuple = src[0].src[0] if src[0].op is Ops.CALL else src[0]
-      return in_tuple.src[arg].dtype
     case Ops.GETADDR:
       return dtypes.uint64
     case Ops.THREEFRY:
@@ -171,7 +169,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
         raise RuntimeError(f"shift operands must be int, got {[x.dtype for x in src]}")
       return src[0].dtype
     case Ops.BUFFER | Ops.PARAM:
-      assert isinstance(arg, ParamArg), "BUFFER/PARAM must have ParamArg"
+      assert isinstance(arg, ParamArg), f"{op} must have ParamArg"
       return arg.dtype
     case Ops.BINARY:
       return dtypes.uint8
@@ -193,16 +191,11 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
 
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
-  def __call__(cls, op:Ops, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
-               metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
+  def __call__(cls, op:Ops, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None, metadata:tuple[Metadata,...]|None=None):
     # NOTE: the key must separate nodes of different dtype: a CONST's dtype is the type of its arg, and True == 1 as dict keys
     if (wret:=UOpMetaClass.ucache.get(key:=(op, src, arg, tag, type(arg)), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(op, src, arg, tag))
     if metadata is not None: all_metadata[created] = metadata
-    # NOTE: this value is set by pickle when pickling a realized tensor
-    if _buffer is not None:
-      assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
-      buffers[created] = _buffer
     if SPEC > 1:
       from tinygrad.uop.spec import spec_full, test_pyrender
       if SPEC > 2:
@@ -215,7 +208,6 @@ class UOpMetaClass(type):
     return created
 
 # some uops map to other stuff
-buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER/view uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
@@ -244,13 +236,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def dtype(self) -> DType: return dtype_from_uop(self.op, self.src, self.arg)
   def __del__(self):
     # NOTE: getattr because this object may be partially constructed (e.g. if __init__ raised, like the BEAM timeout SIGALRM)
-    if Ops is not None and getattr(self, 'op', None) is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     try: del UOpMetaClass.ucache[(self.op, self.src, self.arg, self.tag, type(self.arg))]
     except (AttributeError, KeyError): pass
-  def __reduce__(self):
-    args = [self.op, self.src, self.arg, self.tag, self.metadata]
-    if self.op is Ops.BUFFER and self.realized is not None: args.append(self.realized)
-    return UOp, tuple(args)
+  def __reduce__(self): return UOp, (self.op, self.src, self.arg, self.tag, self.metadata)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg), kwargs.pop("tag", self.tag))
     assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
@@ -332,7 +320,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.GROUP | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.TUPLE:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE:
         return None
 
       # a void CALL has no shape, the return value of a CALL has the shape of its dtype
@@ -352,17 +340,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.NOOP:
         return self.src[0]._shape if len(self.src) >= 1 else None
 
-      case Ops.GETTUPLE:
-        # GETTUPLE extracts from a TUPLE (possibly through a CALL body)
-        in_tuple = self.src[0].src[0] if self.src[0].op is Ops.CALL else self.src[0]
-        assert in_tuple.op is Ops.TUPLE
-        inner_shape = in_tuple.src[self.arg]._shape
-        if inner_shape is None: return None
-        # if through a CALL, substitute internal PARAMs in the shape with corresponding args
-        if self.src[0].op is Ops.CALL:
-          return tuple(graph_rewrite(s, _pm_resolve_params, self.src[0].src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
-        return inner_shape
-
       case Ops.INDEX:
         shp:list[sint] = []
         for s in self.src[1:]: shp.extend(list(s.shape))
@@ -379,7 +356,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER | Ops.PARAM:
-        # PARAM/BUFFER don't have a shape input, they have a size in the arg: int gives shape (size,), None gives ()
+        # these don't have a shape input, they have a size in the arg: int gives shape (size,), None gives ()
         if (img:=self.arg.image) is not None: return (img[0], img[1], 4)
         return () if self.arg.size is None else (self.arg.size,)
       case Ops.CUSTOM | Ops.CUSTOMI:
@@ -421,7 +398,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       match self.op:
         case Ops.RESHAPE:
           if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
-          if prod(ps) != prod(self.marg): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
+          # with symbolic views prod equality can be true at runtime but unprovable, only reject provably unequal products
+          if resolve(prod(ps) != prod(self.marg), False): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
           return self.marg
         case Ops.EXPAND:
           return tuple(self.marg) + ps
@@ -548,22 +526,30 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @recursive_property
   def trace_num(self):
     num = next(ucount)
-    uop_fields[num] = (self.op, tuple(s.trace_num for s in self.src), self.arg, self.tag)+((self.metadata,) if TRACEMETA>=2 else ())
+    # tags can contain UOps (callify tags nodes with their originals): store them as trace_nums, same as srcs
+    tag = tuple(t.trace_num if isinstance(t, UOp) else t for t in self.tag) if isinstance(self.tag, tuple) else self.tag
+    # the trace must not retain the device Buffer: store a placeholder instead (the real one would pin memory and fail pickling),
+    # keeping bound and unbound buffers distinguishable in viz
+    arg = replace(self.arg, buffer=cast("Buffer", object())) if isinstance(self.arg, ParamArg) and self.arg.buffer is not None else self.arg
+    uop_fields[num] = (self.op, tuple(s.trace_num for s in self.src), arg, tag)+((self.metadata,) if TRACEMETA>=2 else ())
     return num
 
   # *** uop syntactic sugar ***
 
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, src=tuple([x for x in srcs if x is not None]), **kwargs)
-  def maketuple(*srcs:UOp):  # pylint: disable=no-self-argument
-    return UOp(Ops.TUPLE, src=srcs)
-  def gettuple(self, idx:int) -> UOp:
-    in_tuple = self.src[0] if self.op is Ops.CALL else self
-    assert in_tuple.op is Ops.TUPLE, f"gettuple requires CALL or TUPLE source, got {self.op}"
-    return UOp(Ops.GETTUPLE, src=(self,), arg=idx)
   def group(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]), **kwargs)
+  @property
+  def has_unbound_outputs(self) -> bool:
+    """does this call still have unresolved outputs: unbound BUFFERs among its inputs (minted by call_with_outputs,
+    resolved when the call is inlined or the outputs are materialized). a lifecycle query, not a call type"""
+    return self.op is Ops.CALL and any(x.unsharded_base.is_unbound for x in self.src[1:])
+  @property
+  def unbound_outputs(self) -> tuple[UOp, ...]:
+    """the unresolved outputs of this call: an AFTER on each unbound BUFFER input, usable like a normal buffer"""
+    return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.is_unbound)
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].val]
@@ -707,10 +693,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.UNSHARD:
       if len(self.arg) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {self.arg}, use .sharding")
       return self.arg[0]
-    # GETTUPLE: axis comes from the specific TUPLE element, not src[0]
-    if self.op is Ops.GETTUPLE:
-      in_tuple = self.src[0].src[0] if self.src[0].op is Ops.CALL else self.src[0]
-      return in_tuple.src[self.arg].axis if in_tuple.op is Ops.TUPLE else None
     if self.op is Ops.PARAM: return None
     # NOTE: they all have to share an axis, we always choose [-1]. src axes are right-aligned into the output shape
     if self.op in GroupOp.ALU.union({Ops.STACK}):
@@ -780,6 +762,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.UNSHARD: return self.src[0].base
     return self
 
+  # the storage this uop ultimately targets: base with UNSHARD, BITCAST and AFTER stripped
+  @property
+  def storage_base(self) -> UOp:
+    b = self.unsharded_base
+    while b.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: b = b.src[0].unsharded_base
+    return b
+
   # cached property here makes external_uop_gc fail, why?
   @property
   def as_shape(self) -> tuple[sint, ...]:
@@ -819,19 +808,19 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   unique_num = itertools.count(0)
 
   def getaddr(self, device=None) -> UOp:
-    if self.without_after.op not in {Ops.BUFFER, Ops.SHRINK, Ops.BITCAST, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM}: return self
+    if self.without_after.op not in {Ops.BUFFER, Ops.SHRINK, Ops.BITCAST, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM, Ops.LINEAR}: return self
     return UOp(Ops.GETADDR, src=(self,), arg=device or to_tuple(self.device)[0])
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     if dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {dtype}")
     assert isinstance(size, int), f"new_buffer size must be a concrete int, got {size}"
     slot = next(UOp.unique_num) if num is None else num
-    return UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, size=size, device=device))
+    buf = MultiBuffer(device, size, dtype) if isinstance(device, tuple) else Buffer(device, size, dtype)
+    return UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, size=size, device=device, buffer=buf))
   @staticmethod
   def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None):
-    if (uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype, num=-id(opaque))) not in buffers: buffers[uop] = opaque.ref(1)
-    else: assert buffers[uop] is opaque
-    return uop
+    # the opaque Buffer goes straight in the arg: the ucache dedups because the arg (and thus the Buffer) is part of the key
+    return UOp(Ops.BUFFER, arg=ParamArg(-id(opaque), opaque.dtype, size=opaque.size, device=device or opaque.device, buffer=opaque))
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
@@ -879,7 +868,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op is Ops.BUFFER: return self.arg.addrspace
-    if self.op in {Ops.SPECIAL, Ops.RANGE}: return AddrSpace.ALU
+    if self.op in {Ops.SPECIAL, Ops.RANGE, Ops.CONST}: return AddrSpace.ALU
     if self.op is Ops.LOAD: return AddrSpace.ALU # LOAD brings things into the ALU
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.STORE, Ops.MSTACK, Ops.MSELECT, Ops.END, Ops.UNSHARD}:
       return self.src[0].addrspace
@@ -933,7 +922,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
-    return self.op in {Ops.BUFFER, Ops.PARAM} or (self.op is Ops.SHRINK and self.tag == ("allreduce",))
+    return (self.op in {Ops.BUFFER, Ops.PARAM} and not self.is_unbound) or (self.op is Ops.SHRINK and self.tag == ("allreduce",))
+  @property
+  def is_unbound(self) -> bool:
+    # an unbound GLOBAL BUFFER has no storage bound yet: it's a declaration of storage (call output, scheduler temp)
+    return self.op is Ops.BUFFER and isinstance(self.arg, ParamArg) and self.addrspace is AddrSpace.GLOBAL and self.arg.buffer is None
 
   def _base_buffer_is_realized(self) -> bool:
     """Walk through AFTER chain to find if the underlying buffer is realized (has allocated memory)."""
@@ -944,18 +937,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def buffer(self) -> Buffer|MultiBuffer:
     if self.op in {Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
-    # this buffer can process disk tensors and simple movement ops
+    # this buffer can process disk tensors and simple movement ops.
+    # NOTE: the view Buffer returned here is transient (short-lived), it only wraps an offset into the base BUFFER's storage
     if self is not self.base or self.op is Ops.BITCAST:
-      if (cret:=buffers.get(self)) is not None: return cret
       if (cv := self.contiguous_view()) is None: raise RuntimeError(f"non-contiguous view is not supported for {self.device} buffer")
       buf, offset = (b:=cv[0]).base.buffer, cv[1]
       if isinstance(buf, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
         mbuf.bufs = [x.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize) for x in buf.bufs]
-        buffers[self] = mbuf
         return mbuf
-      buffers[self] = buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
-      return buffers[self]
+      return buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)
@@ -965,13 +956,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret.bufs = [cast(Buffer, x.buffer) for x in self.src]
       assert all_same([(x.size, x.dtype) for x in ret.bufs]), "multibuffers mismatch buffers"
       return ret
-    assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
-    if (cret:=buffers.get(self)) is not None: return cret
-    rdtype = self.dtype
-    if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.max_numel(), rdtype).ref(1)
-    else: ret = Buffer(self.device, self.max_numel(), rdtype).ref(1)
-    buffers[self] = ret
-    return ret
+    assert self.op is Ops.BUFFER and self.arg.buffer is not None, f"must be a realized BUFFER {self}"
+    return self.arg.buffer
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
     if self.op is Ops.UNSHARD: return self.src[0].realized
@@ -980,7 +966,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # LOCAL/REG scratch buffers are never realized, and Variables (ALU) have no real storage
     if self.op is Ops.BUFFER and self.addrspace in (AddrSpace.LOCAL, AddrSpace.REG, AddrSpace.ALU): return None
     # an unbacked intermediate BUFFER (directly or as an MSTACK source) is not realized
-    if any(b.op is Ops.BUFFER and buffers.get(b) is None for b in self.backward_slice_with_self): return None
+    if any(b.op is Ops.BUFFER and b.arg.buffer is None for b in self.backward_slice_with_self): return None
     # NOTE: this is used by the JIT to determine which inputs we capture
     return self.buffer if self.buffer.is_allocated() else None
   @property
@@ -1162,12 +1148,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int|None=None, addrspace=AddrSpace.GLOBAL, device=None, volatile=False, tag=None):
     dtype = strong_dtype(dtype)  # storage is never weak: a placeholder commits the width of what's put in it
     if slot is None: slot = next(UOp.unique_num)
+    name = tag if isinstance(tag, str) else None # a string tag names the param
     if addrspace is AddrSpace.GLOBAL:
-      ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, size=prod(shape), addrspace=addrspace, device=device, volatile=volatile))
+      ret = UOp(Ops.PARAM, arg=ParamArg(slot, dtype, size=prod(shape), name=name, addrspace=addrspace, device=device, volatile=volatile))
     else:
       assert addrspace in (AddrSpace.LOCAL, AddrSpace.REG)
       assert device is None, "LOCAL and REG placeholders cannot have a device"
-      ret = UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, size=prod(shape), addrspace=addrspace))
+      ret = UOp(Ops.BUFFER, arg=ParamArg(slot, dtype, size=prod(shape), name=name, addrspace=addrspace))
     if tag is not None: ret = ret.rtag(tag)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
@@ -1198,12 +1185,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.is_bound_var or self.is_variable:
       b = self.src[0] if self.op is Ops.AFTER else self
       return UOp(Ops.PARAM, arg=replace(b.arg, slot=slot, name=f"p{slot}"))
-    addrspace = self.addrspace if self.addrspace is not None else AddrSpace.GLOBAL
     # multi-device values become a per-shard sized param wrapped in UNSHARD: the sharding lives in the graph, not the arg
     if self.axis is not None and isinstance(self.device, tuple):
       return UOp(Ops.PARAM, arg=ParamArg(slot, self.dtype, prod(to_max_shape(self.shard_shape)),
-                                         addrspace=addrspace, device=self.device)).view_as(self.shard_shape, self.axis)
-    return UOp.param(slot, self.dtype, self._shape, self.device, addrspace=addrspace)
+                                         device=self.device)).view_as(self.shard_shape, self.axis)
+    return UOp.param(slot, self.dtype, self._shape, self.device)
   def view_as(self:UOp, shape:tuple[sint, ...], axis:int|None=None) -> UOp:
     """view flat storage as the given (possibly symbolic) shape, optionally sharded on axis, the UNSHARD gives back the multiplied shape"""
     max_shape = to_max_shape(shape)
@@ -1214,19 +1200,65 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @staticmethod
   def custom_function(name:str, *src:UOp) -> UOp: return UOp(Ops.CUSTOM_FUNCTION, src=src, arg=name)
 
-  # opaque bodies stay as plain CALLs; value-producing bodies get a TUPLE body on the CALL
-  _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}
   def call(self, *srcs:UOp, ret_dtype:DType|None=None, grad_fxn:Callable|None=None,
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None) -> UOp:
-    if ret_dtype is not None: return UOp(Ops.CALL, src=(self,)+srcs, arg=ret_dtype)
+    """call a body with the given args: a plain CallInfo CALL. all inputs must be ready (buffers/params), this never
+    creates unbound buffers: use call_with_outputs for calls that produce values"""
+    assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
     assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
-    if self.op in UOp._OPAQUE_CALL_BODIES:
-      return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
-    # value-producing bodies are always wrapped in TUPLE so the CALL dtype is always void
-    body = self if self.op is Ops.TUPLE else UOp.maketuple(self)
-    return UOp(Ops.CALL, src=(body,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux))
+    # the (possibly void) return dtype lives in the CallInfo; an external C call is a CALL on a CUSTOM_FUNCTION
+    # body holding the callee (a function pointer), rendered as an indirect call
+    return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux,
+                                                        ret_dtype if ret_dtype is not None else dtypes.void))
+
+  @staticmethod
+  def call_with_outputs(values:tuple[UOp, ...], *srcs:UOp, grad_fxn:Callable|None=None,
+                        name:str|None=None, precompile:bool=False, precompile_backward:bool=False, aux:Any=None,
+                        output_pos:tuple[int, ...]|None=None) -> tuple[UOp, ...]:
+    """call a body producing the given values, returning the outputs. the body stores into output PARAMs, and the
+    outputs are unbound BUFFER placeholders passed as extra inputs to the call (you AFTER on them like normal buffers).
+    the buffers are bound to the output PARAMs positionally wherever the call is resolved, just like the args.
+    output_pos gives the position of each output in the arg list (default: a block after the inputs), the inputs take
+    the remaining positions in order; when it's given, input params must already be slotted at their final positions.
+    output_pos must be strictly ascending: the body's stores and the call args pair positionally by values order"""
+    # the device defaults to the first device in the values or args, like srcs-based device resolution
+    default_dev = next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None)
+    pos = tuple(range(len(srcs), len(srcs)+len(values))) if output_pos is None else output_pos
+    assert len(pos) == len(values) and len(set(pos)) == len(pos), "output_pos must be one distinct position per output"
+    assert all(a < b for a, b in zip(pos, pos[1:])), f"output_pos {output_pos} must be strictly ascending"
+    assert all(0 <= p < len(srcs)+len(values) for p in pos), f"output_pos {output_pos} must be within the arg list"
+    # the inputs take the slots not in pos, in order: symbolic output shapes resolve against the final argument slots
+    param_map: list[UOp|None] = [None] * (len(srcs) + len(values))
+    it = iter(srcs)
+    for i in range(len(param_map)):
+      if i not in pos: param_map[i] = next(it)
+    def mint(o:UOp) -> UOp:
+      """mint an unbound BUFFER declaration for a buffer this call writes and returns: its identity is unique (minted
+      from the global counter): outputs of different calls never alias. like PARAM, the arg only stores the concrete
+      max size: a shape is a view (RESHAPE/SHRINK/UNSHARD) on the flat storage"""
+      # the output storage has the resolved shape: substitute internal PARAMs in the shapes with corresponding args
+      shp = None if (oshape:=o._shape) is None else tuple(graph_rewrite(s, _pm_resolve_params, param_map, walk=True)
+                                                          if isinstance(s, UOp) else s for s in oshape)
+      dev = o.device if o.device is not None else default_dev
+      axis = o.axis if isinstance(o.device, tuple) else None
+      # multi-device values have a per-shard sized storage: the sharding lives in the graph, not the arg
+      if shp and isinstance(dev, tuple): shp = tuple(s//len(dev) if i == axis else s for i,s in enumerate(shp))
+      ret = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), o.dtype, None if not shp else prod(to_max_shape(shp)), device=dev))
+      return ret if not shp else ret.view_as(shp, axis)
+    rets = tuple(mint(o) for o in values)
+    # the body only knows PARAMs: the output PARAMs get the slots of the outputs' positions in the arg list
+    body = UOp.sink(*[v.param_like(p).store(v) for v, p in zip(values, pos)])
+    args: list[UOp|None] = [None] * (len(srcs) + len(values))
+    for p, r in zip(pos, rets): args[p] = r
+    it = iter(srcs)
+    call = body.call(*[r if r is not None else next(it) for r in args], grad_fxn=grad_fxn, name=name, precompile=precompile,
+                     precompile_backward=precompile_backward, aux=aux)
+    return tuple(r.after(call) for r in rets)
+
+  # one-line convenience for the single-output case: self is the value
+  def call_with_output(self, *srcs:UOp, **kwargs) -> UOp: return UOp.call_with_outputs((self,), *srcs, **kwargs)[0]
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
     kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
@@ -1234,15 +1266,17 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
-    sig = tuple((u.arg.name, u.arg.slot, u.dtype, u._shape)
-                for u in tuple(filter(lambda u: u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU, self.src[1].src)) + self.arg.vars)
+    params = tuple(u for u in self.src[1].src if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU)
+    # sig slots are compact: buffers in globals order (runtimes launch buffers in that order), then vars. raw call-arg
+    # positions skip buffers for kernels using a sparse subset of the call's buffers (CL binds bufs[slot])
+    gmap = {s:j for j, s in enumerate(self.arg.globals)}
+    sig = tuple((u.arg.name, gmap[u.arg.slot], u.dtype, u._shape) for u in params) + \
+          tuple((v.arg.name, len(self.arg.globals)+j, v.dtype, v._shape) for j, v in enumerate(self.arg.vars))
     return TinyELF(self.src[3].arg, self.arg.function_name, self.arg.target, sig, self.key)
 
 @dataclass(frozen=True)
 class KernelInfo:
   name: str = "test"            # name of the kernel
-  axis_types: tuple[AxisType, ...] = tuple()
-  dont_use_locals: bool = False # don't use local indexing
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
   estimates: Estimates|None = None
@@ -1254,7 +1288,7 @@ class KernelInfo:
 class ProgramInfo:
   name: str = "test"
   global_size: tuple[int|float, ...] = (1, 1, 1)
-  local_size: tuple[int, ...]|None = None
+  local_size: tuple[int, ...] = (1, 1, 1)
   vars: tuple[UOp, ...] = ()
   globals: tuple[int, ...] = ()
   outs: tuple[int, ...] = ()
@@ -1264,16 +1298,13 @@ class ProgramInfo:
   @property
   def function_name(self): return to_function_name(self.name)
 
-  @property
-  def runtimevars(self) -> dict[str, int]: return {v.expr: i for i, v in enumerate(self.vars) if v.expr == 'core_id'}
-
-  def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]|None]:
+  def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
     global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
-    local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size]) if self.local_size is not None else None
+    local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size])
     return global_size, local_size
 
-  def vals(self, var_vals:dict[str, int]) -> tuple[int|None, ...]:
-    try: return tuple(var_vals[k.expr] if k.expr not in self.runtimevars else None for k in self.vars)
+  def vals(self, var_vals:dict[str, int]) -> tuple[int, ...]:
+    try: return tuple(var_vals[k.expr] for k in self.vars)
     except KeyError as e: raise RuntimeError(f"unbound Variable {e} used by {self.function_name}") from None
 
   @staticmethod
@@ -1283,21 +1314,20 @@ class ProgramInfo:
     outs: list[int] = []
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
-    local_size: list[int]|None = [1, 1, 1]
+    local_size: list[int] = [1, 1, 1]
     for u in sink.toposort():
       if u.op is Ops.PARAM and u.addrspace == AddrSpace.ALU: _vars.append(u)
       if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0].buf_uop).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
-      if u.op is Ops.SPECIAL:
-        if u.arg[0] == 'i': local_size = None
-        special_size = local_size if u.arg[0] == 'l' else global_size
-        if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
-      if u.op is Ops.PARAM and u in _vars and u.expr == 'core_id': global_size[0] = int(u.vmax) + 1
-    return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
-                       tuple(local_size) if local_size is not None else None, tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)),
-                       tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), target)
+      if u.op is Ops.SPECIAL: (local_size if u.arg[0] == 'l' else global_size)[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
+    return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size), tuple(local_size),
+                       tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),
+                       tuple(sorted(dedup(ins))), target)
+
+# the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), copies, and function references
+OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}
 
 @dataclass(frozen=True)
 class CallInfo:
@@ -1306,11 +1336,13 @@ class CallInfo:
   precompile: bool = False
   precompile_backward: bool = False
   aux: Any = None
+  dtype: DType = dtypes.void
   # grad_fxn can't be pickled
-  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.aux))
+  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.aux, self.dtype))
   def __repr__(self):
     gf = id(self.grad_fxn) if self.grad_fxn else None
-    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward})"
+    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward})" + \
+      (f", {self.dtype}" if self.dtype is not dtypes.void else "")
 
 # ******** ops in python ********
 
@@ -1397,6 +1429,7 @@ class UPat(RandMixin):
   @staticmethod
   def any(*src): return UPat(src=src, is_any=True)
   def or_casted(self, name:str|None=None): return UPat.any(self if name is None else self.named(name), UPat(Ops.CAST, name=name, src=(self,)))
+  def or_bitcasted(self, name:str|None=None): return UPat.any(self if name is None else self.named(name), UPat(Ops.BITCAST, name=name, src=(self,)))
   def or_after(self, name:str|None=None):
     return UPat.any(self if name is None else self.named(name), UPat(Ops.AFTER, name=name, src=(self,), allow_any_len=True))
   @staticmethod
@@ -1698,8 +1731,8 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        if not self.enter_calls and n.op is Ops.CALL and n.src[0].op in UOp._OPAQUE_CALL_BODIES|{Ops.TUPLE}:
-          self.replace[n.src[0]] = n.src[0]
+        # CALL bodies are never rewritten separately, rewrites that need them pass enter_calls=True
+        if n.op is Ops.CALL and not self.enter_calls: self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
           if x not in self.replace: stack.append((x, False))
       else:
@@ -1736,12 +1769,9 @@ class RewriteContext:
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
-        # NOTE: CALLs are handled as a special case.
-        # The function that is called is not included in the graph_rewrite.
-        # If you want to graph_rewrite a call, you can
-        # A CALL of an address is not a body, its srcs are regular dataflow
-        if not self.enter_calls and new_n.op is Ops.CALL and new_n.src[0].op in UOp._OPAQUE_CALL_BODIES|{Ops.TUPLE}:
-          self.replace[new_n.src[0]] = new_n.src[0]
+        # NOTE: CALLs are handled as a special case: their bodies are not included in the graph_rewrite,
+        # rewrites that need them pass enter_calls=True
+        if new_n.op is Ops.CALL and not self.enter_calls: self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
@@ -1790,6 +1820,13 @@ def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot])])
+
+def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
+  """AFTER on a RETURNED placeholder extracts the call output value: the value of its matching store in a SINK body
+  (called from patterns that bind t to a SINK)"""
+  vals = [st.src[1] for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is r.unsharded_base] \
+    if r.unsharded_base.is_unbound else []
+  return vals[0] if len(vals) == 1 else None
 remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool:
