@@ -21,12 +21,10 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.vmin and idx.vmax<sz: return True
 
-  # TODO: validate these
-  # WEBGPU has a BITCAST in the index, PTX casts pointer to long
-  # VECTORIZE can't be properly modeled in z3 since it doesn't support vectors
+  # TODO: validate STACK, z3 can't model vectors
   # don't descend into PARAM shape metadata; only the PARAM value participates in index arithmetic
   for x in idx.toposort(gate=lambda x: x.op is not Ops.PARAM) | gate.toposort(gate=lambda x: x.op is not Ops.PARAM):
-    if x.op in {Ops.BITCAST, Ops.STACK}: return True
+    if x.op is Ops.STACK: return True
 
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
