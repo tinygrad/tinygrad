@@ -186,40 +186,20 @@ class TestValidateOOB(unittest.TestCase):
       with self.assertRaises(RuntimeError):
         to_uops_list([buf_int.index(gidx.valid(ld_bool)).load()])  # gidx 0..15, buf_int size 8
 
-  # skipped tests (moved from test_uop_graph.py)
-  @unittest.skip("if not allowed in graph")
-  def test_in_bounds_access_gated_local(self):
-    with Context(CHECK_OOB=1):
-      # Define buffers
+  # local memory
+  def test_gated_local(self):
+    with Context(CHECK_OOB=1, SPEC=2):
       gbuf = UOp.param(0, dtypes.uint, 400)
       sbuf = UOp.placeholder((8,), dtypes.uint, slot=0, addrspace=AddrSpace.LOCAL)
-
-      # Define indices, valids and barrier
       gidx = UOp(Ops.SPECIAL, src=(UOp.const(416),), arg="gidx0")
       lidx = UOp(Ops.SPECIAL, src=(UOp.const(10),), arg="lidx0")
-
-      gate = (gidx<400) & (lidx<8)
-
-      local_store = sbuf.index(lidx.valid(lidx<8)).store(UOp.const(1))
-
-      barrier = UOp(Ops.BARRIER, src=(local_store,))
-      if_barrier = UOp(Ops.IF, src=(gate, barrier))
-
-      # Load from local memory (after the IF/barrier)
-      local_load = UOp(Ops.LOAD, src=(sbuf.index(lidx), if_barrier))
-
-      # Store to global memory
-      global_store = UOp(Ops.STORE, src=(gbuf.index(gidx), local_load))
-      to_uops_list([global_store])
-
-  @unittest.skip("Bool load is not supported yet")
-  def test_load_mask(self):
-    with Context(CHECK_OOB=1):
-      glbl0 = UOp.param(0, dtypes.int, 16)
-      mask = UOp.param(0, dtypes.bool, 16)
-      ridx = UOp.range(20, 0)
-      ld0 = UOp(Ops.LOAD, src=(glbl0.index(UOp.const(ridx<16&mask, ridx))))
-      to_uops_list([ld0])
+      store = sbuf.index(lidx.valid(lidx < 8)).store(UOp.const(1))
+      load = sbuf.after(store).index(lidx.valid(lidx < 8)).load()
+      to_uops_list([gbuf.index(gidx.valid(gidx < 400)).store(load)])  # valid: local store and load gated to 8, global store gated to 400
+      with self.assertRaises(RuntimeError):
+        to_uops_list([gbuf.index(gidx.valid(gidx < 400)).store(sbuf.after(store).index(lidx).load())])  # lidx 0..9 into 8
+      with self.assertRaises(RuntimeError):
+        to_uops_list([gbuf.index(gidx).store(load)])  # gidx 0..415 into 400
 
 if __name__ == "__main__":
   unittest.main()
