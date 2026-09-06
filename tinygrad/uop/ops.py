@@ -800,7 +800,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   # *** uop Buffer stuff ***
 
-  unique_num = itertools.count(0)
+  # Fresh storage IDs decrease from -1; canonical slots are numbered from 0 within their scope.
+  unique_num = itertools.count(-1, -1)
 
   def getaddr(self, device=None) -> UOp:
     if self.without_after.op not in {Ops.BUFFER, Ops.SHRINK, Ops.BITCAST, Ops.BINARY, Ops.MSTACK, Ops.MSELECT, Ops.PARAM, Ops.LINEAR}: return self
@@ -818,8 +819,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return UOp(Ops.BUFFER, arg=ParamArg(-id(opaque), opaque.dtype, size=opaque.size, device=device or opaque.device, buffer=opaque))
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
     device = canonicalize_device(self.device if device is None else device)
+    dt = self.commit_dtype() if dtype is None else dtype
+    if self.op is Ops.UNSHARD and isinstance(device, tuple):  # mirror the sharding on the fresh storage
+      return UOp.empty(self.src[0].shape, dtype=dt, device=device).unshard(self.arg, self.src[1:])
     axis = self.axis if isinstance(device, tuple) else None
-    ret = UOp.empty(self.shard_shape if axis is not None else self.shape, dtype=self.commit_dtype() if dtype is None else dtype, device=device)
+    ret = UOp.empty(self.shard_shape if axis is not None else self.shape, dtype=dt, device=device)
     return ret.unshard(axis) if axis is not None else ret
   @staticmethod
   def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str, ...]|None=None) -> UOp:
@@ -833,11 +837,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
     ret.buffer.allocate(memoryview(bytearray(data))) # fake realize. buffer storage must be writable, and bytes isn't
     if ret.dtype != dtype: ret = ret.cast(dtype)
-    return ret if ret.device == device else ret.copy_to_device(device)
+    return ret if ret.device == device else ret.clone(device)
   def clone(self, device=None) -> UOp:
     device = device or self.device
     ret = self.empty_like(device=device)
     src = self if self.device is None or self.device == device else self.copy_to_device(device)
+    # The clone's STORE already materializes the value; a separate CONTIGUOUS is redundant.
+    if src.op is Ops.CONTIGUOUS: src = src.src[0]
     return ret.after(ret.store(src.cast(ret.dtype)))
   @recursive_property
   def device(self) -> str|tuple[str, ...]|None:

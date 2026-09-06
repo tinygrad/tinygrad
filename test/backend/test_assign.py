@@ -45,6 +45,16 @@ class TestAssign(unittest.TestCase):
     c.realize()
     assert_kernel_count(2 if is_hcq2_device() else 1)
 
+  def test_assign_copy_retained_uses(self):
+    for use in (lambda x: x.reshape(1, 3), lambda x: x + 1):
+      with self.subTest(use=use):
+        x = Tensor([1., 2, 3], device="PYTHON").to(None)
+        retained = use(x)
+        dest = Tensor.empty(3).assign(x)
+        del x
+        dest.realize().assign(0).realize()
+        self.assertEqual(retained.tolist(), [[1., 2, 3]] if retained.ndim == 2 else [2., 3, 4])
+
   def test_assign_slice(self):
     X = Tensor([1,2,3,4]).realize()
     xs = X[2:4]
@@ -1014,10 +1024,10 @@ class TestAssignToUnrealizedView(unittest.TestCase):
       # TODO: broken now
       self.assertEqual(c.tolist(), [[0,0],[0,0]])
 
-  def test_contiguous(self):
+  def test_clone(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
-    c = t.permute(1,0).contiguous()  # unrealized CONTIGUOUS
-    self.assertIs(c.uop.base.op, Ops.CONTIGUOUS)
+    c = t.permute(1,0).clone()
+    self.assertIs(c.uop.base.op, Ops.AFTER)
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(c.tolist(), [[1,1],[2,1]])
 
@@ -1032,6 +1042,16 @@ class TestAssignToUnrealizedView(unittest.TestCase):
       # TODO: broken now
       self.assertEqual(cb.tolist(), [[1,2],[3,4]])
 
+  def test_detach_buffer_assignment(self):
+    for realized in (False, True):
+      with self.subTest(realized=realized):
+        base = Tensor([1., 2., 3.])
+        if realized: base.realize()
+        detached = base.detach()
+        detached.assign(detached + 1).realize()
+        self.assertEqual(detached.tolist(), [2., 3., 4.])
+        self.assertEqual(base.tolist(), [2., 3., 4.])
+
   def test_detach_copy(self):
     t = Tensor.zeros(2,2, dtype=dtypes.int).to("CPU:0").contiguous().realize()
     d = t.to("CPU:1").detach()  # DETACH(unrealized COPY)
@@ -1043,10 +1063,10 @@ class TestAssignToUnrealizedView(unittest.TestCase):
       # TODO: broken now
       self.assertEqual(d.tolist(), [[0,0],[0,0]])
 
-  def test_detach_contiguous(self):
+  def test_detach_clone(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
-    d = t.permute(1,0).contiguous().detach()  # DETACH(unrealized CONTIGUOUS)
-    self.assertIs(d.uop.base.op, Ops.CONTIGUOUS)
+    d = t.permute(1,0).clone().detach()
+    self.assertIs(d.uop.base.op, Ops.AFTER)
     d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(d.tolist(), [[1,1],[2,1]])
 

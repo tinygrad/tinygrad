@@ -139,7 +139,7 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
+    return (h + self.feed_forward(self.ffn_norm(h))).clone().contiguous_backward()
 
 # standard openai sampling
 def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
@@ -201,7 +201,7 @@ class Transformer:
     self.tok_embeddings = embedding(vocab_size, dim)
     self.output = nn.Linear(dim, vocab_size, bias=False) if embedding == nn.Embedding else linear(dim, vocab_size, bias=False)
     self.max_context = max_context
-    self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta).contiguous().is_param_(False)
+    self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta).clone().is_param_(False)
     self.forward_jit = TinyJit(self.forward) if jit else None
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):

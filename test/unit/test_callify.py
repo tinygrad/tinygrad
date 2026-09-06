@@ -1,5 +1,7 @@
 import unittest
 from tinygrad import Tensor, dtypes
+from tinygrad.uop.ops import UOp, Ops
+from tinygrad.tensor import transform_to_call
 
 class TestCallify(unittest.TestCase):
   def test_basic(self):
@@ -107,12 +109,88 @@ class TestCallify(unittest.TestCase):
     self.assertListEqual(c.tolist(), [5.0, 7.0, 9.0])
     self.assertListEqual(d.tolist(), [4.0, 10.0, 18.0])
 
+  def test_only_replace_inputs(self):
+    x = Tensor.empty(4)
+    body = UOp.sink((x.uop + 1).contiguous().copy_to_device("CPU:1"))
+    call = transform_to_call(body)
+    self.assertEqual(call.src[1:], (x.uop,))
+    self.assertIs(call.src[0], body.substitute({x.uop: x.uop.param_like(0)}))
+
+  def test_existing_params_do_not_alias_buffers(self):
+    x = Tensor.empty(4)
+    param = UOp.param(0, x.dtype, x.shape, device=x.device)
+    body = UOp.sink(x.uop + param)
+    call = transform_to_call(body)
+    self.assertEqual(set(call.src[1:]), {x.uop, param})
+    params = [u for u in call.src[0].toposort() if u.op is Ops.PARAM]
+    self.assertEqual({u.arg.slot for u in params}, {0, 1})
+    self.assertIs(call.src[0].substitute({u: call.src[1+u.arg.slot] for u in params}, walk=True), body)
+
+  def test_scalar_param_binding_survives_renumbering(self):
+    from tinygrad.schedule import create_linear_with_vars
+    from tinygrad.engine.realize import run_linear
+    x = Tensor([1, 2, 3]).realize()
+    out = Tensor.empty_like(x)
+    binding = UOp.variable("amount", 1, 10, dtypes.int).bind(4)
+    param = binding.param_like(7)
+    call = transform_to_call(UOp.sink(out.uop.after(out.uop.store(x.uop + param))))
+    call = call.replace(src=(call.src[0], *(binding if arg is param else arg for arg in call.src[1:])))
+    run_linear(*create_linear_with_vars(call))
+    self.assertEqual(out.tolist(), [5, 6, 7])
+
+  def test_nested_params_keep_their_scope(self):
+    x = Tensor.empty(4)
+    param = UOp.param(7, x.dtype, x.shape, device=x.device)
+    nested_body = UOp.sink(param + 1)
+    nested = nested_body.call(*([x.uop] * 8))
+    call = transform_to_call(UOp.sink(x.uop + param, nested))
+    self.assertIs(call.src[0].src[1].src[0], nested_body)
+    self.assertEqual(set(call.src[1:]), {x.uop, param})
+
+  def test_fresh_slots_are_negative_and_canonical_slots_are_dense(self):
+    x = Tensor.empty(4)
+    param = UOp.placeholder((4,), x.dtype, device=x.device)
+    inner = x.uop.param_like(0)
+    outputs = UOp.call_with_outputs((inner + 1, inner + 2), x.uop)
+    fresh = [x.uop.arg.slot, param.arg.slot, *(out.src[0].arg.slot for out in outputs)]
+    self.assertLess(fresh[0], 0)
+    self.assertTrue(all(a > b for a, b in zip(fresh, fresh[1:])))
+    call = transform_to_call(UOp.sink(*outputs, param))
+    unbound = [u.arg.slot for u in call.src[0].toposort() if u.is_unbound]
+    self.assertEqual(unbound, list(range(len(outputs))))
+    params = [u.arg.slot for u in call.src[0].toposort(enter_calls=False) if u.op is Ops.PARAM]
+    self.assertEqual(params, list(range(len(call.src)-1)))
+    self.assertIn(param, call.src[1:])
+
+  def test_unbound_renumbering_preserves_distinct_outputs(self):
+    def output(): return UOp.call_with_outputs((Tensor(1., dtype=dtypes.float, device="CPU").uop,))[0]
+    canonical = transform_to_call(UOp.sink(output())).src[0].src[0]
+    body = UOp.sink(canonical, output())
+    call = transform_to_call(body)
+    self.assertEqual(len([u for u in call.src[0].toposort() if u.is_unbound]), 2)
+    self.assertIs(transform_to_call(call.src[0]).src[0], call.src[0])
+
+  def test_intermediate_contiguous_stays_a_value(self):
+    x = (Tensor([1, 2, 3]).realize() + 1).contiguous()
+    original = x.uop
+    y = (x * 2).realize()
+    self.assertIs(x.uop, original)
+    self.assertIs(x.uop.op, Ops.CONTIGUOUS)
+    self.assertEqual(y.tolist(), [4, 6, 8])
+
   def test_intermediate_clone_persists(self):
     x = (Tensor([1, 2, 3]).realize() + 1).clone()
     y = (x * 2).realize()
     self.assertTrue(x.uop.has_buffer_identity())
     self.assertEqual(x.tolist(), [2, 3, 4])
     self.assertEqual(y.tolist(), [4, 6, 8])
+
+  def test_creation_copy_has_storage(self):
+    x = Tensor([1, 2, 3], device="PYTHON").to("CPU")
+    self.assertTrue(x.uop.has_buffer_identity(after_ok=True))
+    y = Tensor.empty(3, dtype=dtypes.int, device=x.device).assign(x).realize()
+    y.assign(0).realize()
+    self.assertEqual(x.tolist(), [1, 2, 3])
 
   def test_zero_size_cat_with_rng(self):
     # Empty outputs must not replay a pending RNG counter update.

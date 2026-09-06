@@ -75,7 +75,7 @@ class Linear(nn.Linear):
       nbytes, nblocks = raw.max_numel(), raw.max_numel() // Q6_BYTES
       byte_view = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer).view(nbytes, dtypes.uint8, raw_offset)))
       padded = byte_view.reshape((nblocks, Q6_BYTES)).pad_to((nblocks, Q6_PADDED)).bitcast(dtypes.uint32)
-      self.weight = padded.contiguous().reshape(nblocks * Q6_WORDS)
+      self.weight = padded.clone().reshape(nblocks * Q6_WORDS)
     else:
       self.weight = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer)
         .view(raw.max_numel() * raw.dtype.itemsize // dtypes.uint32.itemsize, dtypes.uint32, raw_offset)))

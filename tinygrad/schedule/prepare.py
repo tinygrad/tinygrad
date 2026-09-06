@@ -8,6 +8,109 @@ from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
+def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
+
+def contiguous_mops_to_view(ctx:list[UOp]|None, c:UOp, src:UOp):
+  """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
+  # A list holds CALL arguments; None rewrites views in the live Tensor graph.
+  # Ordinary copies keep their source graph so JIT can substitute its input buffer.
+  if ctx is None and c.op is Ops.COPY and not on_disk(src): return None
+  buf = src.base
+  while buf.op is Ops.BITCAST: buf = buf.src[0].base
+  # no symbolic shape
+  if buf.op not in {Ops.BUFFER, Ops.PARAM, Ops.UNSHARD} or not all_int(c.shape): return None
+
+  # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then view the resolved shard
+  unshard = None
+  if buf.op is Ops.UNSHARD:
+    if isinstance(c.device, str): return None
+    if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
+    src = unshard.src[0]
+
+  # offset the base buffer by the collapsed movement ops and view it
+  if (cv := src.contiguous_view()) is None or (buf := cv[0]).op not in {Ops.BUFFER, Ops.PARAM}: return None
+  view = buf[cv[1]:cv[1] + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
+  if ctx is not None and view.op in {Ops.SHRINK, Ops.BITCAST}:
+    arg = view.substitute({u: ctx[u.arg.slot] for u in view.toposort() if u.op is Ops.PARAM and u.arg.slot >= 0})
+    if arg not in ctx: ctx.append(arg)
+    view = view.param_like(ctx.index(arg))
+  elif on_disk(buf) and buf.op is Ops.BUFFER and not buf.is_unbound: view = UOp.from_buffer(view.buffer, device=buf.device)
+  view = view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:]) if unshard is not None else view.reshape(c.shape)
+  return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
+
+# Fold contiguous movement operations into buffer views.
+pm_mops_to_view = PatternMatcher([
+  (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
+  (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
+
+  # remove contiguous on movement ops before a copy on disk
+  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, name="copy"), lambda x,copy:
+   copy.replace(src=(x,), tag=None) if on_disk(x) else None),
+  # push copy past movement ops on disk
+  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
+   x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) if on_disk(x) else None),
+])
+
+def transform_precompiled_call(c:UOp) -> UOp|None:
+  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
+  assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
+  # Bind output storage at the existing argument positions.
+  outs = {p: a.empty_like() for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound}
+  placed:dict[UOp, UOp] = {}
+  items = []
+  for st in c.src[0].src:
+    value = st.src[1]
+    while value.op is Ops.AFTER: value = value.src[0]
+    # A custom kernel's output buffer can be the call output directly. Rebind each buffer only once.
+    if value.op in {Ops.BUFFER, Ops.UNSHARD} and value.has_buffer_identity() and value not in placed:
+      placed[value] = st.src[0]
+      items.append(st.src[1])
+    else: items.append(st.src[0].after(st))
+  body = UOp.sink(*items).substitute(placed)
+  call = c.replace(src=(body, *(outs.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                   for i, a in enumerate(c.src[1:]))))
+  return UOp.sink(*(c.src[1+p].store(o.after(call).shrink_to(c.src[1+p].shape)) for p,o in outs.items()))
+
+pm_resolve_call_outputs = PatternMatcher([
+  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
+  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
+])
+
+def buffer_view_subs(sink:UOp) -> dict[UOp, UOp]:
+  # Include intermediate nodes so every Tensor sharing a pending write receives the same view rewrite.
+  nodes = list(sink.toposort(enter_calls=False))
+  rewritten = graph_rewrite(UOp.sink(*nodes), pm_mops_to_view, bottom_up=True, name="fold buffer views")
+  return {u: v for u, v in zip(nodes, rewritten.src) if u is not v}
+
+def prepare_call_views(call:UOp) -> UOp:
+  # Lift contiguous views into call arguments, preserving their buffer/offset graph for JIT input substitution.
+  args = list(call.src[1:])
+  body = graph_rewrite(call.src[0], pm_mops_to_view, ctx=args, bottom_up=True, name="prepare call views")
+  return call.replace(src=(body, *args))
+
+def prepare_to_call(sink:UOp, tensor_roots:tuple[UOp, ...]) -> UOp:
+  # A copy used only to initialize another buffer can write directly into that destination.
+  # Include live Tensor graphs so retained copies and aliases keep their independent storage.
+  users:dict[UOp, set[UOp]] = {}
+  for u in UOp.sink(sink, *tensor_roots).toposort(enter_calls=False):
+    for src in u.src: users.setdefault(src, set()).add(u)
+  subs = {}
+  for store in sink.toposort(enter_calls=False):
+    if store.op is not Ops.STORE: continue
+    value = store.src[1]
+    if value.op is not Ops.AFTER or len(value.src) != 2: continue
+    buf, init = value.src
+    if init.op is not Ops.STORE or len(init.src) != 2 or init.src[0] is not buf or init.src[1].op is not Ops.COPY: continue
+    # Only this assignment may consume the copy, and only the initialization may use its storage.
+    if users.get(value) != {store} or users.get(buf) != {value, init}: continue
+    while buf.op is Ops.RESHAPE and users.get(buf.src[0]) == {buf}: buf = buf.src[0]
+    if buf.op is not Ops.BUFFER or buf.is_unbound or buf.buffer.is_allocated(): continue
+    subs[value] = init.src[1]
+  sink = sink.substitute(subs, walk=True)
+  sink = graph_rewrite(sink, pm_resolve_call_outputs, bottom_up=True, name="resolve call outputs")
+  return UOp.sink(*[u for u in sink.toposort(enter_calls=False)
+                   if u.op is Ops.AFTER and not u.is_bound_var and not u.src[0].unsharded_base.is_unbound])
+
 def walk_mop(u:UOp):
   if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD, Ops.BITCAST}: return walk_mop(u.src[0])
   if u.op is Ops.AFTER and (b:=walk_mop(u.src[0])) is not u.src[0]: return b.after(*u.src[1:])
@@ -24,6 +127,8 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
   ctx[x] = after
 
 # *** fold moved AFTERs (hack for openpilot) ***
+# These temporary stores exist only in the schedule; they do not persist Tensor intermediates.
+pm_contiguous_to_store = PatternMatcher([(UPat(Ops.CONTIGUOUS, name="c"), lambda c: c.clone())])
 pm_fold_moved_after = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src")))), name="after"), found_after),
   # replace ALU sources with AFTER versions found above
@@ -129,12 +234,9 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
-earliest_rewrites = mop_cleanup+PatternMatcher([
-  # resolve calls with RETURNED inputs (inline the body)
+earliest_rewrites = mop_cleanup+pm_resolve_call_outputs+PatternMatcher([
+  # Inline calls with unbound outputs.
   (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.has_unbound_outputs else None),
-
-  # resolve AFTER on RETURNED (call outputs)
-  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
 
   # resolve allreduce (must be bottom up)
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
@@ -215,7 +317,9 @@ pm_copy_to_store = PatternMatcher([
 def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
-  if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
+  if OPENPILOT_HACKS:
+    tsink = graph_rewrite(tsink, pm_contiguous_to_store, bottom_up=True, name="materialize contiguous")
+    tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
   return tsink
