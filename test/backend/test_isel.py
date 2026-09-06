@@ -33,6 +33,17 @@ class TestIselX86(unittest.TestCase):
     # both comparisons become the same instruction
     self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].arg[0] is X86Ops.CMP)
 
+  # cmove reads flags set by and/or/xor (instead of recomparing the and/or/xor result with 0)
+  def test_cmove_compound_gate(self):
+    a = UOp.variable("a", 0, 0, dtypes.int32)
+    b = UOp.variable("b", 0, 0, dtypes.int32)
+    c = UOp.variable("c", 0, 0, dtypes.int32)
+
+    for condition, op in [((a < b) & (a < c), X86Ops.AND), ((a < b) | (a < c), X86Ops.OR), ((a < b) ^ (a < c), X86Ops.XOR)]:
+      n = self.isel_rewrite(condition.where(a, b))
+      self.assertIs(n.arg[0], X86Ops.CMOVNE)
+      self.assertIs(n.src[2].arg[0], op)
+
   def test_vinsertps(self):
     a = UOp.variable("a", 0, 0, dtypes.float32)
     b = UOp.variable("b", 0, 0, dtypes.float32)
