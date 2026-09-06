@@ -135,24 +135,28 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
   N, half_k_b = math.prod(B.shape[:-1]), B.shape[-1]
   K = half_k * 2
   assert half_k == half_k_b and math.prod(C.shape[:-1]) == M and C.shape[-1] == N
-  threads = UOp.special(256, "lidx0")
-  logical_groups_x, logical_groups_y = ceildiv(N, tile_n), ceildiv(M, tile_m)
-  target_optimization = (M, N, K) in MXFP4_TARGET_SHAPES and (tile_m, tile_n) == (256, 256)
-  if target_optimization:
-    persist_groups = min(logical_groups_x * logical_groups_y, MXFP4_TARGET_GROUPS[N])
-    physical_groups_x, physical_groups_y = (32, persist_groups // 32) if persist_groups >= 32 else (persist_groups, 1)
-  else: physical_groups_x, physical_groups_y = logical_groups_x, logical_groups_y
+  short_k = (M, N, K) == (16384, 4096, 4096)
+  if short_k:
+    from extra.gemm.mxfp4_gemm_shortk import build_kernel as build_shortk, get_launch_config, LDS_BYTES
+    num_threads, (physical_groups_x, physical_groups_y) = get_launch_config(M, N, K)
+    lds_bytes = LDS_BYTES
+    insts = build_shortk(M, N, K)
+  else:
+    logical_groups_x, logical_groups_y = ceildiv(N, tile_n), ceildiv(M, tile_m)
+    target_optimization = (M, N, K) in MXFP4_TARGET_SHAPES and (tile_m, tile_n) == (256, 256)
+    if target_optimization:
+      persist_groups = min(logical_groups_x * logical_groups_y, MXFP4_TARGET_GROUPS[N])
+      physical_groups_x, physical_groups_y = (32, persist_groups // 32) if persist_groups >= 32 else (persist_groups, 1)
+    else: physical_groups_x, physical_groups_y = logical_groups_x, logical_groups_y
+    num_threads, lds_bytes = 256, 81920 if target_optimization else 163840
+    insts = build_kernel(M, N, K, tile_m, tile_n)
+  threads = UOp.special(num_threads, "lidx0")
   groups_x, groups_y = UOp.special(physical_groups_x, "gidx0"), UOp.special(physical_groups_y, "gidx1")
-  lds = UOp.placeholder((81920 if target_optimization else 163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
-  # TODO: this is saving extra copies, why?
-  zero = UOp.const(0)
-  sink = UOp.sink(C.flatten().index(zero).store(UOp.const(0, C.dtype)), A.flatten().index(zero).load(), B.flatten().index(zero).load(),
-                  scale_a.flatten().index(zero).load(), scale_b.flatten().index(zero).load(),
-                  *(x.flatten().index(zero).load() for x in extra), lds, threads, groups_x, groups_y,
-                  arg=KernelInfo(f"mxfp4_gemm_{M}_{N}_{K}_{tile_m}x{tile_n}",
+  lds = UOp.placeholder((lds_bytes,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  sink = UOp.sink(C.base, A.base, B.base, scale_a.base, scale_b.base, *(x.base for x in extra), lds, threads, groups_x, groups_y,
+                  arg=KernelInfo(f"mxfp4_gemm_sk_{M}_{N}_{K}" if short_k else f"mxfp4_gemm_{M}_{N}_{K}_{tile_m}x{tile_n}",
                                  estimates=Estimates(ops=2*M*N*K,
                                                      mem=(M*half_k+N*half_k)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
-  insts = build_kernel(M, N, K, tile_m, tile_n)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
 
 def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor) -> Tensor:
@@ -478,7 +482,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
              a_pretranspose:Tensor|None=None, mxfp4:bool=False, mxfp4_tile:tuple[int, int]|None=None,
              mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
              mxfp4_x:tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]|None=None, save_original_input:bool=False,
-             return_mxfp4_saves:bool=False) -> Tensor|tuple[Tensor, Tensor, Tensor]:
+             return_mxfp4_saves:bool=False, out:Tensor|None=None) -> Tensor|tuple[Tensor, Tensor, Tensor]:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   assert not return_mxfp4_saves or (mxfp4 and not save_original_input)
   if mxfp4:
@@ -502,7 +506,13 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   if (m_sharded:=is_multi and a.uop.axis == 1): M //= len(a.device)
   n_sharded = is_multi and b.uop.axis == 1
 
-  if is_multi:
+  if out is not None:
+    assert not is_multi, "provided output requires a single device"
+    assert out.shape == ((M, N) if squeeze else (batch, M, N)), "output shape mismatch"
+    assert out.dtype == out_dtype and out.device == a.device, "output dtype or device mismatch"
+    assert out.uop.contiguous_view() is not None, "output must be a contiguous buffer"
+    if squeeze: out = out.unsqueeze(0)
+  elif is_multi:
     if n_sharded:
       out = Tensor(Tensor.invalids(batch, M, N//len(a.device), dtype=out_dtype, device=a.device).uop.unshard(2), device=a.device)
     elif m_sharded:
