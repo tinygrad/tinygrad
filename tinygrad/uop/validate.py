@@ -65,8 +65,6 @@ def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:
                                       (x.dtype in dtypes.ints+(dtypes.bool, dtypes.weakint) or x.op is Ops.SINK)))[:-1]
   z3map: dict[UOp, z3.ExprRef] = {}
   for u in lst:
-    # NOTE: we skip STACK here, it can't actually be accessed
-    if u.op is Ops.STACK: continue
     if (z3_rewritten:=z3_renderer.rewrite(u, ctx=(solver, z3map))) is None: raise NotImplementedError(f"{u.op} is not supported by z3")
     z3map[u] = z3_rewritten
   assert all(u in z3map for u in uops), "UOp failed to rewrite to z3!"
