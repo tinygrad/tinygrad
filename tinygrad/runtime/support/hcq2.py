@@ -59,6 +59,10 @@ def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.placeholder((2,), dtypes.uint64, 0, device=devs, volatile=True, tag="timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
 
+def rt_addr(b:UOp, dev) -> UOp:
+  base, off = unwrap_view(b)
+  return patch(UOp.placeholder((1,), dtypes.uint64, device=base.device, tag="addr"), [(0, base.getaddr(dev))]).index(0).load() + off
+
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   fn = to_name("submit", (devs:=to_tuple(devs))[0].split(":")[0], queue.split(":")[0])
   return UOp.custom_function(fn, UOp(Ops.LINEAR, src=tuple(cmds), arg=(devs, queue)))
@@ -439,7 +443,8 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's
   # device owns the placeholders it names
   if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
   elif not ctx.use_rt:
-    r = Buffer(dev.device, b.max_numel(), b.dtype, options=BufferSpec(host=b.arg.volatile, uncached=True, cpu_access=True), preallocate=True)
+    spec = BufferSpec(host=b.arg.volatile, uncached=b.arg.volatile, cpu_access=True)
+    r = Buffer(dev.device, b.max_numel(), b.dtype, options=spec, preallocate=True)
   else: r = dev.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile)
 
   return UOp.from_buffer(r, HCQ_RUNTIME_DEV.value)
