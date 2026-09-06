@@ -89,7 +89,7 @@ class TestDevice(unittest.TestCase):
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
       imports = ("from tinygrad import Device; from tinygrad.runtime.support.compiler_amd import HIPCompiler; "
-                 "from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler")
+                 "from tinygrad.runtime.support.compiler_llvm import AMDLLVMCompiler")
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, AMDLLVMCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "AMD:LLVM"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
