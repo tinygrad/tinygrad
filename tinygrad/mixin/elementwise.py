@@ -58,13 +58,12 @@ class ElementwiseMixin(CreationMixin):
 
   def contiguous(self, **kwargs) -> Self:
     """
-    Returns a contiguous tensor.
+    Requests a contiguous layout for this value when it is computed.
+    Use `clone()` to guarantee independent storage.
     """
     if self.dtype in dtypes.weaks: return self
     uop = self._uop
-    src = uop
-    while src.op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: src = src.src[0]
-    if uop.op is Ops.CONTIGUOUS or self.device is None or src.has_buffer_identity(after_ok=True): return self._wrap_uop(uop)
+    if uop.op is Ops.CONTIGUOUS or self.device is None or uop.has_buffer_identity(): return self._wrap_uop(uop)
     return self._wrap_uop(uop.alu(Ops.CONTIGUOUS, **kwargs))
 
   def contiguous_backward(self) -> Self:

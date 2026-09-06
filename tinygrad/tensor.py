@@ -211,13 +211,12 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, *, tensors:list[Tensor]|None=None) -> None:
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
     in_scope: dict[UOp, bool] = {}
     def visitor(node: UOp) -> bool: return True if node in applied_map else any(in_scope.get(s, False) for s in node.src)
-    if tensors is None: tensors = [t for tref in list(all_tensors) if (t:=tref()) is not None]
-    scope_tensors = [t for t in tensors if t.uop.topovisit(visitor, in_scope)]
+    scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
 
     # get all Tensors and apply the map. always walk: replace exactly the nodes the map names, values are final
     sink = UOp.sink(*[t.uop for t in scope_tensors])
@@ -227,6 +226,8 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, *, tensors:list[
     for t,s,ns in zip(scope_tensors, sink.src, new_sink.src):
       if s is ns: continue
       t.uop = ns
+
+def _tensor_holds(u:UOp) -> bool: return any((t:=tref()) is not None and t.uop is u for tref in list(all_tensors))
 
 def _inplace_rhs(update:UOp) -> UOp|None:
   # Recover the computed value of a read-modify-write; ordinary clone stores are not self-referential.
@@ -430,19 +431,16 @@ class Tensor(RandMixin):
       return self
     update = self.uop.after(self.uop.store(x.uop))
     base = self.uop
-    # Direct assignments need no alias search. A held reshape of a buffer also owns its update.
-    if not base.has_buffer_identity() and base.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}:
-      tensors = [t for ref in list(all_tensors) if (t:=ref()) is not None]
-      held = {t.uop for t in tensors}
-      # Find the owning Tensor's buffer or pending write, preserving its shape for function argument substitution.
-      while base.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}:
-        if base.has_buffer_identity() and base in held: break
-        base = base.src[0]
-      if base.has_buffer_identity(after_ok=True) or base.storage_base.op is Ops.CONTIGUOUS:
-        # Detach shares storage, but an assignment through it must not rewrite earlier computations using that storage.
-        if self.uop.op is Ops.DETACH: tensors = [t for t in tensors if t.uop.storage_base is base.storage_base]
-        _apply_map_to_tensors({base: base.after(update)}, name="Embed View Assign", tensors=tensors)
-        return self
+    while base.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (base.has_buffer_identity() and _tensor_holds(base)):
+      base = base.src[0]
+    if base is not self.uop and (base.has_buffer_identity(after_ok=True) or base.storage_base.op is Ops.CONTIGUOUS):
+      # Detach shares storage, but its writes must not rewrite earlier computations using that storage.
+      if self.uop.op is Ops.DETACH:
+        for ref in list(all_tensors):
+          if (t:=ref()) is not None and t.uop.storage_base is base.storage_base:
+            t.uop = t.uop.substitute({base: base.after(update)}, walk=True)
+      else: _apply_map_to_tensors({base: base.after(update)}, name="Embed View Assign")
+      return self
     self.uop = update
     return self
 
@@ -687,7 +685,6 @@ class Tensor(RandMixin):
       shared = self.uop.base if self.uop.base.is_realized else None
       if any(self.uop in t.uop.backward_slice_with_self and t.uop.base is not shared for tref in all_tensors
              if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
-        self._getitem(indices)  # invalid indices take precedence over the mutation restriction
         raise RuntimeError("can't setitem on a tensor with other uses")
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
     is_disk = on_disk(self.uop)
