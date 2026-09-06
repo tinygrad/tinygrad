@@ -373,13 +373,11 @@ def encode_submit(hq:HWQueue) -> UOp:
 def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.nargs: return None # not an hcq call, or lowered already
 
-  # encode bodies, then lower them: a device the runtime device can't reach lowers the accesses to its memory
+  # encode bodies
   ctx = EncodeCtx(call.arg.aux.device)
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in ctx.devs])]
-  encode = sum([d.pm_encode for d in devs], PatternMatcher([])) + pm_hcq_encode
-  lower = sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([]))
-  body = graph_rewrite(call.src[0], encode, ctx=ctx, bpm=pm_patches, name="encode body")
-  body = graph_rewrite(body, lower, ctx=ctx, bpm=pm_patches, name="lower body")
+  body = graph_rewrite(call.src[0], sum([d.pm_encode for d in devs], PatternMatcher([])) + pm_hcq_encode, ctx=ctx, bpm=pm_patches, name="encode")
+  body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])), ctx=ctx, bpm=pm_patches, name="lower")
 
   # resize table
   body = body.substitute({ctx.table: (table:=UOp.placeholder((len(ctx.inputs),), dtypes.uint64, device="CPU", tag="inputs"))})
