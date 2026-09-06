@@ -13,6 +13,12 @@ class MTLDispatchThreadgroupsIndirectArguments(c.Struct):
 uint32_t: TypeAlias = ctypes.c_uint32
 MTLDispatchThreadgroupsIndirectArguments.register_fields([('threadgroupsPerGrid', c.Array[uint32_t, Literal[3]], 0)])
 @c.record
+class MTLDispatchThreadsIndirectArguments(c.Struct):
+  SIZE = 24
+  threadsPerGrid: c.Array[ctypes.c_uint32, Literal[3]]
+  threadsPerThreadgroup: c.Array[ctypes.c_uint32, Literal[3]]
+MTLDispatchThreadsIndirectArguments.register_fields([('threadsPerGrid', c.Array[uint32_t, Literal[3]], 0), ('threadsPerThreadgroup', c.Array[uint32_t, Literal[3]], 12)])
+@c.record
 class MTLStageInRegionIndirectArguments(c.Struct):
   SIZE = 24
   stageInOrigin: c.Array[ctypes.c_uint32, Literal[3]]
@@ -35,7 +41,7 @@ class MTLTexture(objc.Spec): pass
 class MTLTextureDescriptor(objc.Spec): pass
 enum_MTLTextureType: dict[int, str] = {(MTLTextureType1D:=0): 'MTLTextureType1D', (MTLTextureType1DArray:=1): 'MTLTextureType1DArray', (MTLTextureType2D:=2): 'MTLTextureType2D', (MTLTextureType2DArray:=3): 'MTLTextureType2DArray', (MTLTextureType2DMultisample:=4): 'MTLTextureType2DMultisample', (MTLTextureTypeCube:=5): 'MTLTextureTypeCube', (MTLTextureTypeCubeArray:=6): 'MTLTextureTypeCubeArray', (MTLTextureType3D:=7): 'MTLTextureType3D', (MTLTextureType2DMultisampleArray:=8): 'MTLTextureType2DMultisampleArray', (MTLTextureTypeTextureBuffer:=9): 'MTLTextureTypeTextureBuffer'}
 MTLTextureType: TypeAlias = NSUInteger
-enum_MTLPixelFormat: dict[int, str] = {(MTLPixelFormatInvalid:=0): 'MTLPixelFormatInvalid', (MTLPixelFormatA8Unorm:=1): 'MTLPixelFormatA8Unorm', (MTLPixelFormatR8Unorm:=10): 'MTLPixelFormatR8Unorm', (MTLPixelFormatR8Unorm_sRGB:=11): 'MTLPixelFormatR8Unorm_sRGB', (MTLPixelFormatR8Snorm:=12): 'MTLPixelFormatR8Snorm', (MTLPixelFormatR8Uint:=13): 'MTLPixelFormatR8Uint', (MTLPixelFormatR8Sint:=14): 'MTLPixelFormatR8Sint', (MTLPixelFormatR16Unorm:=20): 'MTLPixelFormatR16Unorm', (MTLPixelFormatR16Snorm:=22): 'MTLPixelFormatR16Snorm', (MTLPixelFormatR16Uint:=23): 'MTLPixelFormatR16Uint', (MTLPixelFormatR16Sint:=24): 'MTLPixelFormatR16Sint', (MTLPixelFormatR16Float:=25): 'MTLPixelFormatR16Float', (MTLPixelFormatRG8Unorm:=30): 'MTLPixelFormatRG8Unorm', (MTLPixelFormatRG8Unorm_sRGB:=31): 'MTLPixelFormatRG8Unorm_sRGB', (MTLPixelFormatRG8Snorm:=32): 'MTLPixelFormatRG8Snorm', (MTLPixelFormatRG8Uint:=33): 'MTLPixelFormatRG8Uint', (MTLPixelFormatRG8Sint:=34): 'MTLPixelFormatRG8Sint', (MTLPixelFormatB5G6R5Unorm:=40): 'MTLPixelFormatB5G6R5Unorm', (MTLPixelFormatA1BGR5Unorm:=41): 'MTLPixelFormatA1BGR5Unorm', (MTLPixelFormatABGR4Unorm:=42): 'MTLPixelFormatABGR4Unorm', (MTLPixelFormatBGR5A1Unorm:=43): 'MTLPixelFormatBGR5A1Unorm', (MTLPixelFormatR32Uint:=53): 'MTLPixelFormatR32Uint', (MTLPixelFormatR32Sint:=54): 'MTLPixelFormatR32Sint', (MTLPixelFormatR32Float:=55): 'MTLPixelFormatR32Float', (MTLPixelFormatRG16Unorm:=60): 'MTLPixelFormatRG16Unorm', (MTLPixelFormatRG16Snorm:=62): 'MTLPixelFormatRG16Snorm', (MTLPixelFormatRG16Uint:=63): 'MTLPixelFormatRG16Uint', (MTLPixelFormatRG16Sint:=64): 'MTLPixelFormatRG16Sint', (MTLPixelFormatRG16Float:=65): 'MTLPixelFormatRG16Float', (MTLPixelFormatRGBA8Unorm:=70): 'MTLPixelFormatRGBA8Unorm', (MTLPixelFormatRGBA8Unorm_sRGB:=71): 'MTLPixelFormatRGBA8Unorm_sRGB', (MTLPixelFormatRGBA8Snorm:=72): 'MTLPixelFormatRGBA8Snorm', (MTLPixelFormatRGBA8Uint:=73): 'MTLPixelFormatRGBA8Uint', (MTLPixelFormatRGBA8Sint:=74): 'MTLPixelFormatRGBA8Sint', (MTLPixelFormatBGRA8Unorm:=80): 'MTLPixelFormatBGRA8Unorm', (MTLPixelFormatBGRA8Unorm_sRGB:=81): 'MTLPixelFormatBGRA8Unorm_sRGB', (MTLPixelFormatRGB10A2Unorm:=90): 'MTLPixelFormatRGB10A2Unorm', (MTLPixelFormatRGB10A2Uint:=91): 'MTLPixelFormatRGB10A2Uint', (MTLPixelFormatRG11B10Float:=92): 'MTLPixelFormatRG11B10Float', (MTLPixelFormatRGB9E5Float:=93): 'MTLPixelFormatRGB9E5Float', (MTLPixelFormatBGR10A2Unorm:=94): 'MTLPixelFormatBGR10A2Unorm', (MTLPixelFormatBGR10_XR:=554): 'MTLPixelFormatBGR10_XR', (MTLPixelFormatBGR10_XR_sRGB:=555): 'MTLPixelFormatBGR10_XR_sRGB', (MTLPixelFormatRG32Uint:=103): 'MTLPixelFormatRG32Uint', (MTLPixelFormatRG32Sint:=104): 'MTLPixelFormatRG32Sint', (MTLPixelFormatRG32Float:=105): 'MTLPixelFormatRG32Float', (MTLPixelFormatRGBA16Unorm:=110): 'MTLPixelFormatRGBA16Unorm', (MTLPixelFormatRGBA16Snorm:=112): 'MTLPixelFormatRGBA16Snorm', (MTLPixelFormatRGBA16Uint:=113): 'MTLPixelFormatRGBA16Uint', (MTLPixelFormatRGBA16Sint:=114): 'MTLPixelFormatRGBA16Sint', (MTLPixelFormatRGBA16Float:=115): 'MTLPixelFormatRGBA16Float', (MTLPixelFormatBGRA10_XR:=552): 'MTLPixelFormatBGRA10_XR', (MTLPixelFormatBGRA10_XR_sRGB:=553): 'MTLPixelFormatBGRA10_XR_sRGB', (MTLPixelFormatRGBA32Uint:=123): 'MTLPixelFormatRGBA32Uint', (MTLPixelFormatRGBA32Sint:=124): 'MTLPixelFormatRGBA32Sint', (MTLPixelFormatRGBA32Float:=125): 'MTLPixelFormatRGBA32Float', (MTLPixelFormatBC1_RGBA:=130): 'MTLPixelFormatBC1_RGBA', (MTLPixelFormatBC1_RGBA_sRGB:=131): 'MTLPixelFormatBC1_RGBA_sRGB', (MTLPixelFormatBC2_RGBA:=132): 'MTLPixelFormatBC2_RGBA', (MTLPixelFormatBC2_RGBA_sRGB:=133): 'MTLPixelFormatBC2_RGBA_sRGB', (MTLPixelFormatBC3_RGBA:=134): 'MTLPixelFormatBC3_RGBA', (MTLPixelFormatBC3_RGBA_sRGB:=135): 'MTLPixelFormatBC3_RGBA_sRGB', (MTLPixelFormatBC4_RUnorm:=140): 'MTLPixelFormatBC4_RUnorm', (MTLPixelFormatBC4_RSnorm:=141): 'MTLPixelFormatBC4_RSnorm', (MTLPixelFormatBC5_RGUnorm:=142): 'MTLPixelFormatBC5_RGUnorm', (MTLPixelFormatBC5_RGSnorm:=143): 'MTLPixelFormatBC5_RGSnorm', (MTLPixelFormatBC6H_RGBFloat:=150): 'MTLPixelFormatBC6H_RGBFloat', (MTLPixelFormatBC6H_RGBUfloat:=151): 'MTLPixelFormatBC6H_RGBUfloat', (MTLPixelFormatBC7_RGBAUnorm:=152): 'MTLPixelFormatBC7_RGBAUnorm', (MTLPixelFormatBC7_RGBAUnorm_sRGB:=153): 'MTLPixelFormatBC7_RGBAUnorm_sRGB', (MTLPixelFormatPVRTC_RGB_2BPP:=160): 'MTLPixelFormatPVRTC_RGB_2BPP', (MTLPixelFormatPVRTC_RGB_2BPP_sRGB:=161): 'MTLPixelFormatPVRTC_RGB_2BPP_sRGB', (MTLPixelFormatPVRTC_RGB_4BPP:=162): 'MTLPixelFormatPVRTC_RGB_4BPP', (MTLPixelFormatPVRTC_RGB_4BPP_sRGB:=163): 'MTLPixelFormatPVRTC_RGB_4BPP_sRGB', (MTLPixelFormatPVRTC_RGBA_2BPP:=164): 'MTLPixelFormatPVRTC_RGBA_2BPP', (MTLPixelFormatPVRTC_RGBA_2BPP_sRGB:=165): 'MTLPixelFormatPVRTC_RGBA_2BPP_sRGB', (MTLPixelFormatPVRTC_RGBA_4BPP:=166): 'MTLPixelFormatPVRTC_RGBA_4BPP', (MTLPixelFormatPVRTC_RGBA_4BPP_sRGB:=167): 'MTLPixelFormatPVRTC_RGBA_4BPP_sRGB', (MTLPixelFormatEAC_R11Unorm:=170): 'MTLPixelFormatEAC_R11Unorm', (MTLPixelFormatEAC_R11Snorm:=172): 'MTLPixelFormatEAC_R11Snorm', (MTLPixelFormatEAC_RG11Unorm:=174): 'MTLPixelFormatEAC_RG11Unorm', (MTLPixelFormatEAC_RG11Snorm:=176): 'MTLPixelFormatEAC_RG11Snorm', (MTLPixelFormatEAC_RGBA8:=178): 'MTLPixelFormatEAC_RGBA8', (MTLPixelFormatEAC_RGBA8_sRGB:=179): 'MTLPixelFormatEAC_RGBA8_sRGB', (MTLPixelFormatETC2_RGB8:=180): 'MTLPixelFormatETC2_RGB8', (MTLPixelFormatETC2_RGB8_sRGB:=181): 'MTLPixelFormatETC2_RGB8_sRGB', (MTLPixelFormatETC2_RGB8A1:=182): 'MTLPixelFormatETC2_RGB8A1', (MTLPixelFormatETC2_RGB8A1_sRGB:=183): 'MTLPixelFormatETC2_RGB8A1_sRGB', (MTLPixelFormatASTC_4x4_sRGB:=186): 'MTLPixelFormatASTC_4x4_sRGB', (MTLPixelFormatASTC_5x4_sRGB:=187): 'MTLPixelFormatASTC_5x4_sRGB', (MTLPixelFormatASTC_5x5_sRGB:=188): 'MTLPixelFormatASTC_5x5_sRGB', (MTLPixelFormatASTC_6x5_sRGB:=189): 'MTLPixelFormatASTC_6x5_sRGB', (MTLPixelFormatASTC_6x6_sRGB:=190): 'MTLPixelFormatASTC_6x6_sRGB', (MTLPixelFormatASTC_8x5_sRGB:=192): 'MTLPixelFormatASTC_8x5_sRGB', (MTLPixelFormatASTC_8x6_sRGB:=193): 'MTLPixelFormatASTC_8x6_sRGB', (MTLPixelFormatASTC_8x8_sRGB:=194): 'MTLPixelFormatASTC_8x8_sRGB', (MTLPixelFormatASTC_10x5_sRGB:=195): 'MTLPixelFormatASTC_10x5_sRGB', (MTLPixelFormatASTC_10x6_sRGB:=196): 'MTLPixelFormatASTC_10x6_sRGB', (MTLPixelFormatASTC_10x8_sRGB:=197): 'MTLPixelFormatASTC_10x8_sRGB', (MTLPixelFormatASTC_10x10_sRGB:=198): 'MTLPixelFormatASTC_10x10_sRGB', (MTLPixelFormatASTC_12x10_sRGB:=199): 'MTLPixelFormatASTC_12x10_sRGB', (MTLPixelFormatASTC_12x12_sRGB:=200): 'MTLPixelFormatASTC_12x12_sRGB', (MTLPixelFormatASTC_4x4_LDR:=204): 'MTLPixelFormatASTC_4x4_LDR', (MTLPixelFormatASTC_5x4_LDR:=205): 'MTLPixelFormatASTC_5x4_LDR', (MTLPixelFormatASTC_5x5_LDR:=206): 'MTLPixelFormatASTC_5x5_LDR', (MTLPixelFormatASTC_6x5_LDR:=207): 'MTLPixelFormatASTC_6x5_LDR', (MTLPixelFormatASTC_6x6_LDR:=208): 'MTLPixelFormatASTC_6x6_LDR', (MTLPixelFormatASTC_8x5_LDR:=210): 'MTLPixelFormatASTC_8x5_LDR', (MTLPixelFormatASTC_8x6_LDR:=211): 'MTLPixelFormatASTC_8x6_LDR', (MTLPixelFormatASTC_8x8_LDR:=212): 'MTLPixelFormatASTC_8x8_LDR', (MTLPixelFormatASTC_10x5_LDR:=213): 'MTLPixelFormatASTC_10x5_LDR', (MTLPixelFormatASTC_10x6_LDR:=214): 'MTLPixelFormatASTC_10x6_LDR', (MTLPixelFormatASTC_10x8_LDR:=215): 'MTLPixelFormatASTC_10x8_LDR', (MTLPixelFormatASTC_10x10_LDR:=216): 'MTLPixelFormatASTC_10x10_LDR', (MTLPixelFormatASTC_12x10_LDR:=217): 'MTLPixelFormatASTC_12x10_LDR', (MTLPixelFormatASTC_12x12_LDR:=218): 'MTLPixelFormatASTC_12x12_LDR', (MTLPixelFormatASTC_4x4_HDR:=222): 'MTLPixelFormatASTC_4x4_HDR', (MTLPixelFormatASTC_5x4_HDR:=223): 'MTLPixelFormatASTC_5x4_HDR', (MTLPixelFormatASTC_5x5_HDR:=224): 'MTLPixelFormatASTC_5x5_HDR', (MTLPixelFormatASTC_6x5_HDR:=225): 'MTLPixelFormatASTC_6x5_HDR', (MTLPixelFormatASTC_6x6_HDR:=226): 'MTLPixelFormatASTC_6x6_HDR', (MTLPixelFormatASTC_8x5_HDR:=228): 'MTLPixelFormatASTC_8x5_HDR', (MTLPixelFormatASTC_8x6_HDR:=229): 'MTLPixelFormatASTC_8x6_HDR', (MTLPixelFormatASTC_8x8_HDR:=230): 'MTLPixelFormatASTC_8x8_HDR', (MTLPixelFormatASTC_10x5_HDR:=231): 'MTLPixelFormatASTC_10x5_HDR', (MTLPixelFormatASTC_10x6_HDR:=232): 'MTLPixelFormatASTC_10x6_HDR', (MTLPixelFormatASTC_10x8_HDR:=233): 'MTLPixelFormatASTC_10x8_HDR', (MTLPixelFormatASTC_10x10_HDR:=234): 'MTLPixelFormatASTC_10x10_HDR', (MTLPixelFormatASTC_12x10_HDR:=235): 'MTLPixelFormatASTC_12x10_HDR', (MTLPixelFormatASTC_12x12_HDR:=236): 'MTLPixelFormatASTC_12x12_HDR', (MTLPixelFormatGBGR422:=240): 'MTLPixelFormatGBGR422', (MTLPixelFormatBGRG422:=241): 'MTLPixelFormatBGRG422', (MTLPixelFormatDepth16Unorm:=250): 'MTLPixelFormatDepth16Unorm', (MTLPixelFormatDepth32Float:=252): 'MTLPixelFormatDepth32Float', (MTLPixelFormatStencil8:=253): 'MTLPixelFormatStencil8', (MTLPixelFormatDepth24Unorm_Stencil8:=255): 'MTLPixelFormatDepth24Unorm_Stencil8', (MTLPixelFormatDepth32Float_Stencil8:=260): 'MTLPixelFormatDepth32Float_Stencil8', (MTLPixelFormatX32_Stencil8:=261): 'MTLPixelFormatX32_Stencil8', (MTLPixelFormatX24_Stencil8:=262): 'MTLPixelFormatX24_Stencil8'}
+enum_MTLPixelFormat: dict[int, str] = {(MTLPixelFormatInvalid:=0): 'MTLPixelFormatInvalid', (MTLPixelFormatA8Unorm:=1): 'MTLPixelFormatA8Unorm', (MTLPixelFormatR8Unorm:=10): 'MTLPixelFormatR8Unorm', (MTLPixelFormatR8Unorm_sRGB:=11): 'MTLPixelFormatR8Unorm_sRGB', (MTLPixelFormatR8Snorm:=12): 'MTLPixelFormatR8Snorm', (MTLPixelFormatR8Uint:=13): 'MTLPixelFormatR8Uint', (MTLPixelFormatR8Sint:=14): 'MTLPixelFormatR8Sint', (MTLPixelFormatR16Unorm:=20): 'MTLPixelFormatR16Unorm', (MTLPixelFormatR16Snorm:=22): 'MTLPixelFormatR16Snorm', (MTLPixelFormatR16Uint:=23): 'MTLPixelFormatR16Uint', (MTLPixelFormatR16Sint:=24): 'MTLPixelFormatR16Sint', (MTLPixelFormatR16Float:=25): 'MTLPixelFormatR16Float', (MTLPixelFormatRG8Unorm:=30): 'MTLPixelFormatRG8Unorm', (MTLPixelFormatRG8Unorm_sRGB:=31): 'MTLPixelFormatRG8Unorm_sRGB', (MTLPixelFormatRG8Snorm:=32): 'MTLPixelFormatRG8Snorm', (MTLPixelFormatRG8Uint:=33): 'MTLPixelFormatRG8Uint', (MTLPixelFormatRG8Sint:=34): 'MTLPixelFormatRG8Sint', (MTLPixelFormatB5G6R5Unorm:=40): 'MTLPixelFormatB5G6R5Unorm', (MTLPixelFormatA1BGR5Unorm:=41): 'MTLPixelFormatA1BGR5Unorm', (MTLPixelFormatABGR4Unorm:=42): 'MTLPixelFormatABGR4Unorm', (MTLPixelFormatBGR5A1Unorm:=43): 'MTLPixelFormatBGR5A1Unorm', (MTLPixelFormatR32Uint:=53): 'MTLPixelFormatR32Uint', (MTLPixelFormatR32Sint:=54): 'MTLPixelFormatR32Sint', (MTLPixelFormatR32Float:=55): 'MTLPixelFormatR32Float', (MTLPixelFormatRG16Unorm:=60): 'MTLPixelFormatRG16Unorm', (MTLPixelFormatRG16Snorm:=62): 'MTLPixelFormatRG16Snorm', (MTLPixelFormatRG16Uint:=63): 'MTLPixelFormatRG16Uint', (MTLPixelFormatRG16Sint:=64): 'MTLPixelFormatRG16Sint', (MTLPixelFormatRG16Float:=65): 'MTLPixelFormatRG16Float', (MTLPixelFormatRGBA8Unorm:=70): 'MTLPixelFormatRGBA8Unorm', (MTLPixelFormatRGBA8Unorm_sRGB:=71): 'MTLPixelFormatRGBA8Unorm_sRGB', (MTLPixelFormatRGBA8Snorm:=72): 'MTLPixelFormatRGBA8Snorm', (MTLPixelFormatRGBA8Uint:=73): 'MTLPixelFormatRGBA8Uint', (MTLPixelFormatRGBA8Sint:=74): 'MTLPixelFormatRGBA8Sint', (MTLPixelFormatBGRA8Unorm:=80): 'MTLPixelFormatBGRA8Unorm', (MTLPixelFormatBGRA8Unorm_sRGB:=81): 'MTLPixelFormatBGRA8Unorm_sRGB', (MTLPixelFormatRGB10A2Unorm:=90): 'MTLPixelFormatRGB10A2Unorm', (MTLPixelFormatRGB10A2Uint:=91): 'MTLPixelFormatRGB10A2Uint', (MTLPixelFormatRG11B10Float:=92): 'MTLPixelFormatRG11B10Float', (MTLPixelFormatRGB9E5Float:=93): 'MTLPixelFormatRGB9E5Float', (MTLPixelFormatBGR10A2Unorm:=94): 'MTLPixelFormatBGR10A2Unorm', (MTLPixelFormatBGR10_XR:=554): 'MTLPixelFormatBGR10_XR', (MTLPixelFormatBGR10_XR_sRGB:=555): 'MTLPixelFormatBGR10_XR_sRGB', (MTLPixelFormatRG32Uint:=103): 'MTLPixelFormatRG32Uint', (MTLPixelFormatRG32Sint:=104): 'MTLPixelFormatRG32Sint', (MTLPixelFormatRG32Float:=105): 'MTLPixelFormatRG32Float', (MTLPixelFormatRGBA16Unorm:=110): 'MTLPixelFormatRGBA16Unorm', (MTLPixelFormatRGBA16Snorm:=112): 'MTLPixelFormatRGBA16Snorm', (MTLPixelFormatRGBA16Uint:=113): 'MTLPixelFormatRGBA16Uint', (MTLPixelFormatRGBA16Sint:=114): 'MTLPixelFormatRGBA16Sint', (MTLPixelFormatRGBA16Float:=115): 'MTLPixelFormatRGBA16Float', (MTLPixelFormatBGRA10_XR:=552): 'MTLPixelFormatBGRA10_XR', (MTLPixelFormatBGRA10_XR_sRGB:=553): 'MTLPixelFormatBGRA10_XR_sRGB', (MTLPixelFormatRGBA32Uint:=123): 'MTLPixelFormatRGBA32Uint', (MTLPixelFormatRGBA32Sint:=124): 'MTLPixelFormatRGBA32Sint', (MTLPixelFormatRGBA32Float:=125): 'MTLPixelFormatRGBA32Float', (MTLPixelFormatBC1_RGBA:=130): 'MTLPixelFormatBC1_RGBA', (MTLPixelFormatBC1_RGBA_sRGB:=131): 'MTLPixelFormatBC1_RGBA_sRGB', (MTLPixelFormatBC2_RGBA:=132): 'MTLPixelFormatBC2_RGBA', (MTLPixelFormatBC2_RGBA_sRGB:=133): 'MTLPixelFormatBC2_RGBA_sRGB', (MTLPixelFormatBC3_RGBA:=134): 'MTLPixelFormatBC3_RGBA', (MTLPixelFormatBC3_RGBA_sRGB:=135): 'MTLPixelFormatBC3_RGBA_sRGB', (MTLPixelFormatBC4_RUnorm:=140): 'MTLPixelFormatBC4_RUnorm', (MTLPixelFormatBC4_RSnorm:=141): 'MTLPixelFormatBC4_RSnorm', (MTLPixelFormatBC5_RGUnorm:=142): 'MTLPixelFormatBC5_RGUnorm', (MTLPixelFormatBC5_RGSnorm:=143): 'MTLPixelFormatBC5_RGSnorm', (MTLPixelFormatBC6H_RGBFloat:=150): 'MTLPixelFormatBC6H_RGBFloat', (MTLPixelFormatBC6H_RGBUfloat:=151): 'MTLPixelFormatBC6H_RGBUfloat', (MTLPixelFormatBC7_RGBAUnorm:=152): 'MTLPixelFormatBC7_RGBAUnorm', (MTLPixelFormatBC7_RGBAUnorm_sRGB:=153): 'MTLPixelFormatBC7_RGBAUnorm_sRGB', (MTLPixelFormatPVRTC_RGB_2BPP:=160): 'MTLPixelFormatPVRTC_RGB_2BPP', (MTLPixelFormatPVRTC_RGB_2BPP_sRGB:=161): 'MTLPixelFormatPVRTC_RGB_2BPP_sRGB', (MTLPixelFormatPVRTC_RGB_4BPP:=162): 'MTLPixelFormatPVRTC_RGB_4BPP', (MTLPixelFormatPVRTC_RGB_4BPP_sRGB:=163): 'MTLPixelFormatPVRTC_RGB_4BPP_sRGB', (MTLPixelFormatPVRTC_RGBA_2BPP:=164): 'MTLPixelFormatPVRTC_RGBA_2BPP', (MTLPixelFormatPVRTC_RGBA_2BPP_sRGB:=165): 'MTLPixelFormatPVRTC_RGBA_2BPP_sRGB', (MTLPixelFormatPVRTC_RGBA_4BPP:=166): 'MTLPixelFormatPVRTC_RGBA_4BPP', (MTLPixelFormatPVRTC_RGBA_4BPP_sRGB:=167): 'MTLPixelFormatPVRTC_RGBA_4BPP_sRGB', (MTLPixelFormatEAC_R11Unorm:=170): 'MTLPixelFormatEAC_R11Unorm', (MTLPixelFormatEAC_R11Snorm:=172): 'MTLPixelFormatEAC_R11Snorm', (MTLPixelFormatEAC_RG11Unorm:=174): 'MTLPixelFormatEAC_RG11Unorm', (MTLPixelFormatEAC_RG11Snorm:=176): 'MTLPixelFormatEAC_RG11Snorm', (MTLPixelFormatEAC_RGBA8:=178): 'MTLPixelFormatEAC_RGBA8', (MTLPixelFormatEAC_RGBA8_sRGB:=179): 'MTLPixelFormatEAC_RGBA8_sRGB', (MTLPixelFormatETC2_RGB8:=180): 'MTLPixelFormatETC2_RGB8', (MTLPixelFormatETC2_RGB8_sRGB:=181): 'MTLPixelFormatETC2_RGB8_sRGB', (MTLPixelFormatETC2_RGB8A1:=182): 'MTLPixelFormatETC2_RGB8A1', (MTLPixelFormatETC2_RGB8A1_sRGB:=183): 'MTLPixelFormatETC2_RGB8A1_sRGB', (MTLPixelFormatASTC_4x4_sRGB:=186): 'MTLPixelFormatASTC_4x4_sRGB', (MTLPixelFormatASTC_5x4_sRGB:=187): 'MTLPixelFormatASTC_5x4_sRGB', (MTLPixelFormatASTC_5x5_sRGB:=188): 'MTLPixelFormatASTC_5x5_sRGB', (MTLPixelFormatASTC_6x5_sRGB:=189): 'MTLPixelFormatASTC_6x5_sRGB', (MTLPixelFormatASTC_6x6_sRGB:=190): 'MTLPixelFormatASTC_6x6_sRGB', (MTLPixelFormatASTC_8x5_sRGB:=192): 'MTLPixelFormatASTC_8x5_sRGB', (MTLPixelFormatASTC_8x6_sRGB:=193): 'MTLPixelFormatASTC_8x6_sRGB', (MTLPixelFormatASTC_8x8_sRGB:=194): 'MTLPixelFormatASTC_8x8_sRGB', (MTLPixelFormatASTC_10x5_sRGB:=195): 'MTLPixelFormatASTC_10x5_sRGB', (MTLPixelFormatASTC_10x6_sRGB:=196): 'MTLPixelFormatASTC_10x6_sRGB', (MTLPixelFormatASTC_10x8_sRGB:=197): 'MTLPixelFormatASTC_10x8_sRGB', (MTLPixelFormatASTC_10x10_sRGB:=198): 'MTLPixelFormatASTC_10x10_sRGB', (MTLPixelFormatASTC_12x10_sRGB:=199): 'MTLPixelFormatASTC_12x10_sRGB', (MTLPixelFormatASTC_12x12_sRGB:=200): 'MTLPixelFormatASTC_12x12_sRGB', (MTLPixelFormatASTC_4x4_LDR:=204): 'MTLPixelFormatASTC_4x4_LDR', (MTLPixelFormatASTC_5x4_LDR:=205): 'MTLPixelFormatASTC_5x4_LDR', (MTLPixelFormatASTC_5x5_LDR:=206): 'MTLPixelFormatASTC_5x5_LDR', (MTLPixelFormatASTC_6x5_LDR:=207): 'MTLPixelFormatASTC_6x5_LDR', (MTLPixelFormatASTC_6x6_LDR:=208): 'MTLPixelFormatASTC_6x6_LDR', (MTLPixelFormatASTC_8x5_LDR:=210): 'MTLPixelFormatASTC_8x5_LDR', (MTLPixelFormatASTC_8x6_LDR:=211): 'MTLPixelFormatASTC_8x6_LDR', (MTLPixelFormatASTC_8x8_LDR:=212): 'MTLPixelFormatASTC_8x8_LDR', (MTLPixelFormatASTC_10x5_LDR:=213): 'MTLPixelFormatASTC_10x5_LDR', (MTLPixelFormatASTC_10x6_LDR:=214): 'MTLPixelFormatASTC_10x6_LDR', (MTLPixelFormatASTC_10x8_LDR:=215): 'MTLPixelFormatASTC_10x8_LDR', (MTLPixelFormatASTC_10x10_LDR:=216): 'MTLPixelFormatASTC_10x10_LDR', (MTLPixelFormatASTC_12x10_LDR:=217): 'MTLPixelFormatASTC_12x10_LDR', (MTLPixelFormatASTC_12x12_LDR:=218): 'MTLPixelFormatASTC_12x12_LDR', (MTLPixelFormatASTC_4x4_HDR:=222): 'MTLPixelFormatASTC_4x4_HDR', (MTLPixelFormatASTC_5x4_HDR:=223): 'MTLPixelFormatASTC_5x4_HDR', (MTLPixelFormatASTC_5x5_HDR:=224): 'MTLPixelFormatASTC_5x5_HDR', (MTLPixelFormatASTC_6x5_HDR:=225): 'MTLPixelFormatASTC_6x5_HDR', (MTLPixelFormatASTC_6x6_HDR:=226): 'MTLPixelFormatASTC_6x6_HDR', (MTLPixelFormatASTC_8x5_HDR:=228): 'MTLPixelFormatASTC_8x5_HDR', (MTLPixelFormatASTC_8x6_HDR:=229): 'MTLPixelFormatASTC_8x6_HDR', (MTLPixelFormatASTC_8x8_HDR:=230): 'MTLPixelFormatASTC_8x8_HDR', (MTLPixelFormatASTC_10x5_HDR:=231): 'MTLPixelFormatASTC_10x5_HDR', (MTLPixelFormatASTC_10x6_HDR:=232): 'MTLPixelFormatASTC_10x6_HDR', (MTLPixelFormatASTC_10x8_HDR:=233): 'MTLPixelFormatASTC_10x8_HDR', (MTLPixelFormatASTC_10x10_HDR:=234): 'MTLPixelFormatASTC_10x10_HDR', (MTLPixelFormatASTC_12x10_HDR:=235): 'MTLPixelFormatASTC_12x10_HDR', (MTLPixelFormatASTC_12x12_HDR:=236): 'MTLPixelFormatASTC_12x12_HDR', (MTLPixelFormatGBGR422:=240): 'MTLPixelFormatGBGR422', (MTLPixelFormatBGRG422:=241): 'MTLPixelFormatBGRG422', (MTLPixelFormatDepth16Unorm:=250): 'MTLPixelFormatDepth16Unorm', (MTLPixelFormatDepth32Float:=252): 'MTLPixelFormatDepth32Float', (MTLPixelFormatStencil8:=253): 'MTLPixelFormatStencil8', (MTLPixelFormatDepth24Unorm_Stencil8:=255): 'MTLPixelFormatDepth24Unorm_Stencil8', (MTLPixelFormatDepth32Float_Stencil8:=260): 'MTLPixelFormatDepth32Float_Stencil8', (MTLPixelFormatX32_Stencil8:=261): 'MTLPixelFormatX32_Stencil8', (MTLPixelFormatX24_Stencil8:=262): 'MTLPixelFormatX24_Stencil8', (MTLPixelFormatUnspecialized:=263): 'MTLPixelFormatUnspecialized'}
 MTLPixelFormat: TypeAlias = NSUInteger
 enum_MTLResourceOptions: dict[int, str] = {(MTLResourceCPUCacheModeDefaultCache:=0): 'MTLResourceCPUCacheModeDefaultCache', (MTLResourceCPUCacheModeWriteCombined:=1): 'MTLResourceCPUCacheModeWriteCombined', (MTLResourceStorageModeShared:=0): 'MTLResourceStorageModeShared', (MTLResourceStorageModeManaged:=16): 'MTLResourceStorageModeManaged', (MTLResourceStorageModePrivate:=32): 'MTLResourceStorageModePrivate', (MTLResourceStorageModeMemoryless:=48): 'MTLResourceStorageModeMemoryless', (MTLResourceHazardTrackingModeDefault:=0): 'MTLResourceHazardTrackingModeDefault', (MTLResourceHazardTrackingModeUntracked:=256): 'MTLResourceHazardTrackingModeUntracked', (MTLResourceHazardTrackingModeTracked:=512): 'MTLResourceHazardTrackingModeTracked', (MTLResourceOptionCPUCacheModeDefault:=0): 'MTLResourceOptionCPUCacheModeDefault', (MTLResourceOptionCPUCacheModeWriteCombined:=1): 'MTLResourceOptionCPUCacheModeWriteCombined'}
 MTLResourceOptions: TypeAlias = NSUInteger
@@ -62,6 +68,8 @@ uint8_t: TypeAlias = ctypes.c_ubyte
 enum_MTLTextureSwizzle: dict[int, str] = {(MTLTextureSwizzleZero:=0): 'MTLTextureSwizzleZero', (MTLTextureSwizzleOne:=1): 'MTLTextureSwizzleOne', (MTLTextureSwizzleRed:=2): 'MTLTextureSwizzleRed', (MTLTextureSwizzleGreen:=3): 'MTLTextureSwizzleGreen', (MTLTextureSwizzleBlue:=4): 'MTLTextureSwizzleBlue', (MTLTextureSwizzleAlpha:=5): 'MTLTextureSwizzleAlpha'}
 MTLTextureSwizzle: TypeAlias = uint8_t
 MTLTextureSwizzleChannels.register_fields([('red', MTLTextureSwizzle, 0), ('green', MTLTextureSwizzle, 1), ('blue', MTLTextureSwizzle, 2), ('alpha', MTLTextureSwizzle, 3)])
+enum_MTLSparsePageSize: dict[int, str] = {(MTLSparsePageSize16:=101): 'MTLSparsePageSize16', (MTLSparsePageSize64:=102): 'MTLSparsePageSize64', (MTLSparsePageSize256:=103): 'MTLSparsePageSize256'}
+MTLSparsePageSize: TypeAlias = NSInteger
 class NSObject(objc.Spec): pass
 IMP: TypeAlias = c.CFUNCTYPE[None, []]
 class NSInvocation(objc.Spec): pass
@@ -190,25 +198,94 @@ MTLTextureDescriptor._methods_ = [
   ('setCompressionType:', None, [MTLTextureCompressionType]),
   ('swizzle', MTLTextureSwizzleChannels, []),
   ('setSwizzle:', None, [MTLTextureSwizzleChannels]),
+  ('placementSparsePageSize', MTLSparsePageSize, []),
+  ('setPlacementSparsePageSize:', None, [MTLSparsePageSize]),
 ]
 MTLTextureDescriptor._classmethods_ = [
   ('texture2DDescriptorWithPixelFormat:width:height:mipmapped:', MTLTextureDescriptor, [MTLPixelFormat, NSUInteger, NSUInteger, BOOL]),
   ('textureCubeDescriptorWithPixelFormat:size:mipmapped:', MTLTextureDescriptor, [MTLPixelFormat, NSUInteger, BOOL]),
   ('textureBufferDescriptorWithPixelFormat:width:resourceOptions:usage:', MTLTextureDescriptor, [MTLPixelFormat, NSUInteger, MTLResourceOptions, MTLTextureUsage]),
 ]
-class MTLDevice(objc.Spec): pass
+class MTLTensor(objc.Spec): pass
+class MTLTensorExtents(objc.Spec): pass
+MTLTensorExtents._bases_ = [NSObject]
+MTLTensorExtents._methods_ = [
+  ('initWithRank:values:', 'instancetype', [NSUInteger, c.POINTER[NSInteger]]),
+  ('extentAtDimensionIndex:', NSInteger, [NSUInteger]),
+  ('rank', NSUInteger, []),
+]
+@c.record
+class struct_MTLResourceID(c.Struct):
+  SIZE = 8
+  _impl: int
+MTLResourceID: TypeAlias = struct_MTLResourceID
 uint64_t: TypeAlias = ctypes.c_uint64
+struct_MTLResourceID.register_fields([('_impl', uint64_t, 0)])
+enum_MTLTensorDataType: dict[int, str] = {(MTLTensorDataTypeNone:=0): 'MTLTensorDataTypeNone', (MTLTensorDataTypeFloat32:=3): 'MTLTensorDataTypeFloat32', (MTLTensorDataTypeFloat16:=16): 'MTLTensorDataTypeFloat16', (MTLTensorDataTypeBFloat16:=121): 'MTLTensorDataTypeBFloat16', (MTLTensorDataTypeInt8:=45): 'MTLTensorDataTypeInt8', (MTLTensorDataTypeUInt8:=49): 'MTLTensorDataTypeUInt8', (MTLTensorDataTypeInt16:=37): 'MTLTensorDataTypeInt16', (MTLTensorDataTypeUInt16:=41): 'MTLTensorDataTypeUInt16', (MTLTensorDataTypeInt32:=29): 'MTLTensorDataTypeInt32', (MTLTensorDataTypeUInt32:=33): 'MTLTensorDataTypeUInt32'}
+MTLTensorDataType: TypeAlias = NSInteger
+enum_MTLTensorUsage: dict[int, str] = {(MTLTensorUsageCompute:=1): 'MTLTensorUsageCompute', (MTLTensorUsageRender:=2): 'MTLTensorUsageRender', (MTLTensorUsageMachineLearning:=4): 'MTLTensorUsageMachineLearning'}
+MTLTensorUsage: TypeAlias = NSUInteger
+MTLTensor._bases_ = [MTLResource]
+MTLTensor._methods_ = [
+  ('replaceSliceOrigin:sliceDimensions:withBytes:strides:', None, [MTLTensorExtents, MTLTensorExtents, ctypes.c_void_p, MTLTensorExtents]),
+  ('getBytes:strides:fromSliceOrigin:sliceDimensions:', None, [ctypes.c_void_p, MTLTensorExtents, MTLTensorExtents, MTLTensorExtents]),
+  ('gpuResourceID', MTLResourceID, []),
+  ('buffer', MTLBuffer, []),
+  ('bufferOffset', NSUInteger, []),
+  ('strides', MTLTensorExtents, []),
+  ('dimensions', MTLTensorExtents, []),
+  ('dataType', MTLTensorDataType, []),
+  ('usage', MTLTensorUsage, []),
+]
+class MTLTensorDescriptor(objc.Spec): pass
+MTLTensorDescriptor._bases_ = [NSObject]
+MTLTensorDescriptor._methods_ = [
+  ('dimensions', MTLTensorExtents, []),
+  ('setDimensions:', None, [MTLTensorExtents]),
+  ('strides', MTLTensorExtents, []),
+  ('setStrides:', None, [MTLTensorExtents]),
+  ('dataType', MTLTensorDataType, []),
+  ('setDataType:', None, [MTLTensorDataType]),
+  ('usage', MTLTensorUsage, []),
+  ('setUsage:', None, [MTLTensorUsage]),
+  ('resourceOptions', MTLResourceOptions, []),
+  ('setResourceOptions:', None, [MTLResourceOptions]),
+  ('cpuCacheMode', MTLCPUCacheMode, []),
+  ('setCpuCacheMode:', None, [MTLCPUCacheMode]),
+  ('storageMode', MTLStorageMode, []),
+  ('setStorageMode:', None, [MTLStorageMode]),
+  ('hazardTrackingMode', MTLHazardTrackingMode, []),
+  ('setHazardTrackingMode:', None, [MTLHazardTrackingMode]),
+]
+class NSError(objc.Spec): pass
+NSErrorDomain: TypeAlias = NSString
+NSError._bases_ = [NSObject]
+NSError._methods_ = [
+  ('domain', NSErrorDomain, []),
+  ('code', NSInteger, []),
+  ('localizedDescription', NSString, []),
+  ('localizedFailureReason', NSString, []),
+  ('localizedRecoverySuggestion', NSString, []),
+  ('recoveryAttempter', objc.id_, []),
+  ('helpAnchor', NSString, []),
+]
+class MTLDevice(objc.Spec): pass
+MTLGPUAddress: TypeAlias = ctypes.c_uint64
+enum_MTLBufferSparseTier: dict[int, str] = {(MTLBufferSparseTierNone:=0): 'MTLBufferSparseTierNone', (MTLBufferSparseTier1:=1): 'MTLBufferSparseTier1'}
+MTLBufferSparseTier: TypeAlias = NSInteger
 MTLBuffer._bases_ = [MTLResource]
 MTLBuffer._methods_ = [
   ('contents', ctypes.c_void_p, []),
   ('didModifyRange:', None, [NSRange]),
   ('newTextureWithDescriptor:offset:bytesPerRow:', MTLTexture, [MTLTextureDescriptor, NSUInteger, NSUInteger], True),
+  ('newTensorWithDescriptor:offset:error:', MTLTensor, [MTLTensorDescriptor, NSUInteger, c.POINTER[NSError]], True),
   ('addDebugMarker:range:', None, [NSString, NSRange]),
   ('removeAllDebugMarkers', None, []),
   ('newRemoteBufferViewForDevice:', MTLBuffer, [MTLDevice], True),
   ('length', NSUInteger, []),
   ('remoteStorageBuffer', MTLBuffer, []),
-  ('gpuAddress', uint64_t, []),
+  ('gpuAddress', MTLGPUAddress, []),
+  ('sparseBufferTier', MTLBufferSparseTier, []),
 ]
 class MTLVisibleFunctionTable(objc.Spec): pass
 class MTLIntersectionFunctionTable(objc.Spec): pass
@@ -241,12 +318,13 @@ MTLFence._methods_ = [
   ('label', NSString, []),
   ('setLabel:', None, [NSString]),
 ]
+class MTLAllocation(objc.Spec): pass
 enum_MTLPurgeableState: dict[int, str] = {(MTLPurgeableStateKeepCurrent:=1): 'MTLPurgeableStateKeepCurrent', (MTLPurgeableStateNonVolatile:=2): 'MTLPurgeableStateNonVolatile', (MTLPurgeableStateVolatile:=3): 'MTLPurgeableStateVolatile', (MTLPurgeableStateEmpty:=4): 'MTLPurgeableStateEmpty'}
 MTLPurgeableState: TypeAlias = NSUInteger
 kern_return_t: TypeAlias = ctypes.c_int32
 task_id_token_t: TypeAlias = ctypes.c_uint32
 class MTLHeap(objc.Spec): pass
-MTLResource._bases_ = [NSObject]
+MTLResource._bases_ = [MTLAllocation]
 MTLResource._methods_ = [
   ('setPurgeableState:', MTLPurgeableState, [MTLPurgeableState]),
   ('makeAliasable', None, []),
@@ -330,7 +408,7 @@ enum_MTLArgumentType: dict[int, str] = {(MTLArgumentTypeBuffer:=0): 'MTLArgument
 MTLArgumentType: TypeAlias = NSUInteger
 enum_MTLBindingAccess: dict[int, str] = {(MTLBindingAccessReadOnly:=0): 'MTLBindingAccessReadOnly', (MTLBindingAccessReadWrite:=1): 'MTLBindingAccessReadWrite', (MTLBindingAccessWriteOnly:=2): 'MTLBindingAccessWriteOnly', (MTLArgumentAccessReadOnly:=0): 'MTLArgumentAccessReadOnly', (MTLArgumentAccessReadWrite:=1): 'MTLArgumentAccessReadWrite', (MTLArgumentAccessWriteOnly:=2): 'MTLArgumentAccessWriteOnly'}
 MTLBindingAccess: TypeAlias = NSUInteger
-enum_MTLDataType: dict[int, str] = {(MTLDataTypeNone:=0): 'MTLDataTypeNone', (MTLDataTypeStruct:=1): 'MTLDataTypeStruct', (MTLDataTypeArray:=2): 'MTLDataTypeArray', (MTLDataTypeFloat:=3): 'MTLDataTypeFloat', (MTLDataTypeFloat2:=4): 'MTLDataTypeFloat2', (MTLDataTypeFloat3:=5): 'MTLDataTypeFloat3', (MTLDataTypeFloat4:=6): 'MTLDataTypeFloat4', (MTLDataTypeFloat2x2:=7): 'MTLDataTypeFloat2x2', (MTLDataTypeFloat2x3:=8): 'MTLDataTypeFloat2x3', (MTLDataTypeFloat2x4:=9): 'MTLDataTypeFloat2x4', (MTLDataTypeFloat3x2:=10): 'MTLDataTypeFloat3x2', (MTLDataTypeFloat3x3:=11): 'MTLDataTypeFloat3x3', (MTLDataTypeFloat3x4:=12): 'MTLDataTypeFloat3x4', (MTLDataTypeFloat4x2:=13): 'MTLDataTypeFloat4x2', (MTLDataTypeFloat4x3:=14): 'MTLDataTypeFloat4x3', (MTLDataTypeFloat4x4:=15): 'MTLDataTypeFloat4x4', (MTLDataTypeHalf:=16): 'MTLDataTypeHalf', (MTLDataTypeHalf2:=17): 'MTLDataTypeHalf2', (MTLDataTypeHalf3:=18): 'MTLDataTypeHalf3', (MTLDataTypeHalf4:=19): 'MTLDataTypeHalf4', (MTLDataTypeHalf2x2:=20): 'MTLDataTypeHalf2x2', (MTLDataTypeHalf2x3:=21): 'MTLDataTypeHalf2x3', (MTLDataTypeHalf2x4:=22): 'MTLDataTypeHalf2x4', (MTLDataTypeHalf3x2:=23): 'MTLDataTypeHalf3x2', (MTLDataTypeHalf3x3:=24): 'MTLDataTypeHalf3x3', (MTLDataTypeHalf3x4:=25): 'MTLDataTypeHalf3x4', (MTLDataTypeHalf4x2:=26): 'MTLDataTypeHalf4x2', (MTLDataTypeHalf4x3:=27): 'MTLDataTypeHalf4x3', (MTLDataTypeHalf4x4:=28): 'MTLDataTypeHalf4x4', (MTLDataTypeInt:=29): 'MTLDataTypeInt', (MTLDataTypeInt2:=30): 'MTLDataTypeInt2', (MTLDataTypeInt3:=31): 'MTLDataTypeInt3', (MTLDataTypeInt4:=32): 'MTLDataTypeInt4', (MTLDataTypeUInt:=33): 'MTLDataTypeUInt', (MTLDataTypeUInt2:=34): 'MTLDataTypeUInt2', (MTLDataTypeUInt3:=35): 'MTLDataTypeUInt3', (MTLDataTypeUInt4:=36): 'MTLDataTypeUInt4', (MTLDataTypeShort:=37): 'MTLDataTypeShort', (MTLDataTypeShort2:=38): 'MTLDataTypeShort2', (MTLDataTypeShort3:=39): 'MTLDataTypeShort3', (MTLDataTypeShort4:=40): 'MTLDataTypeShort4', (MTLDataTypeUShort:=41): 'MTLDataTypeUShort', (MTLDataTypeUShort2:=42): 'MTLDataTypeUShort2', (MTLDataTypeUShort3:=43): 'MTLDataTypeUShort3', (MTLDataTypeUShort4:=44): 'MTLDataTypeUShort4', (MTLDataTypeChar:=45): 'MTLDataTypeChar', (MTLDataTypeChar2:=46): 'MTLDataTypeChar2', (MTLDataTypeChar3:=47): 'MTLDataTypeChar3', (MTLDataTypeChar4:=48): 'MTLDataTypeChar4', (MTLDataTypeUChar:=49): 'MTLDataTypeUChar', (MTLDataTypeUChar2:=50): 'MTLDataTypeUChar2', (MTLDataTypeUChar3:=51): 'MTLDataTypeUChar3', (MTLDataTypeUChar4:=52): 'MTLDataTypeUChar4', (MTLDataTypeBool:=53): 'MTLDataTypeBool', (MTLDataTypeBool2:=54): 'MTLDataTypeBool2', (MTLDataTypeBool3:=55): 'MTLDataTypeBool3', (MTLDataTypeBool4:=56): 'MTLDataTypeBool4', (MTLDataTypeTexture:=58): 'MTLDataTypeTexture', (MTLDataTypeSampler:=59): 'MTLDataTypeSampler', (MTLDataTypePointer:=60): 'MTLDataTypePointer', (MTLDataTypeR8Unorm:=62): 'MTLDataTypeR8Unorm', (MTLDataTypeR8Snorm:=63): 'MTLDataTypeR8Snorm', (MTLDataTypeR16Unorm:=64): 'MTLDataTypeR16Unorm', (MTLDataTypeR16Snorm:=65): 'MTLDataTypeR16Snorm', (MTLDataTypeRG8Unorm:=66): 'MTLDataTypeRG8Unorm', (MTLDataTypeRG8Snorm:=67): 'MTLDataTypeRG8Snorm', (MTLDataTypeRG16Unorm:=68): 'MTLDataTypeRG16Unorm', (MTLDataTypeRG16Snorm:=69): 'MTLDataTypeRG16Snorm', (MTLDataTypeRGBA8Unorm:=70): 'MTLDataTypeRGBA8Unorm', (MTLDataTypeRGBA8Unorm_sRGB:=71): 'MTLDataTypeRGBA8Unorm_sRGB', (MTLDataTypeRGBA8Snorm:=72): 'MTLDataTypeRGBA8Snorm', (MTLDataTypeRGBA16Unorm:=73): 'MTLDataTypeRGBA16Unorm', (MTLDataTypeRGBA16Snorm:=74): 'MTLDataTypeRGBA16Snorm', (MTLDataTypeRGB10A2Unorm:=75): 'MTLDataTypeRGB10A2Unorm', (MTLDataTypeRG11B10Float:=76): 'MTLDataTypeRG11B10Float', (MTLDataTypeRGB9E5Float:=77): 'MTLDataTypeRGB9E5Float', (MTLDataTypeRenderPipeline:=78): 'MTLDataTypeRenderPipeline', (MTLDataTypeComputePipeline:=79): 'MTLDataTypeComputePipeline', (MTLDataTypeIndirectCommandBuffer:=80): 'MTLDataTypeIndirectCommandBuffer', (MTLDataTypeLong:=81): 'MTLDataTypeLong', (MTLDataTypeLong2:=82): 'MTLDataTypeLong2', (MTLDataTypeLong3:=83): 'MTLDataTypeLong3', (MTLDataTypeLong4:=84): 'MTLDataTypeLong4', (MTLDataTypeULong:=85): 'MTLDataTypeULong', (MTLDataTypeULong2:=86): 'MTLDataTypeULong2', (MTLDataTypeULong3:=87): 'MTLDataTypeULong3', (MTLDataTypeULong4:=88): 'MTLDataTypeULong4', (MTLDataTypeVisibleFunctionTable:=115): 'MTLDataTypeVisibleFunctionTable', (MTLDataTypeIntersectionFunctionTable:=116): 'MTLDataTypeIntersectionFunctionTable', (MTLDataTypePrimitiveAccelerationStructure:=117): 'MTLDataTypePrimitiveAccelerationStructure', (MTLDataTypeInstanceAccelerationStructure:=118): 'MTLDataTypeInstanceAccelerationStructure', (MTLDataTypeBFloat:=121): 'MTLDataTypeBFloat', (MTLDataTypeBFloat2:=122): 'MTLDataTypeBFloat2', (MTLDataTypeBFloat3:=123): 'MTLDataTypeBFloat3', (MTLDataTypeBFloat4:=124): 'MTLDataTypeBFloat4'}
+enum_MTLDataType: dict[int, str] = {(MTLDataTypeNone:=0): 'MTLDataTypeNone', (MTLDataTypeStruct:=1): 'MTLDataTypeStruct', (MTLDataTypeArray:=2): 'MTLDataTypeArray', (MTLDataTypeFloat:=3): 'MTLDataTypeFloat', (MTLDataTypeFloat2:=4): 'MTLDataTypeFloat2', (MTLDataTypeFloat3:=5): 'MTLDataTypeFloat3', (MTLDataTypeFloat4:=6): 'MTLDataTypeFloat4', (MTLDataTypeFloat2x2:=7): 'MTLDataTypeFloat2x2', (MTLDataTypeFloat2x3:=8): 'MTLDataTypeFloat2x3', (MTLDataTypeFloat2x4:=9): 'MTLDataTypeFloat2x4', (MTLDataTypeFloat3x2:=10): 'MTLDataTypeFloat3x2', (MTLDataTypeFloat3x3:=11): 'MTLDataTypeFloat3x3', (MTLDataTypeFloat3x4:=12): 'MTLDataTypeFloat3x4', (MTLDataTypeFloat4x2:=13): 'MTLDataTypeFloat4x2', (MTLDataTypeFloat4x3:=14): 'MTLDataTypeFloat4x3', (MTLDataTypeFloat4x4:=15): 'MTLDataTypeFloat4x4', (MTLDataTypeHalf:=16): 'MTLDataTypeHalf', (MTLDataTypeHalf2:=17): 'MTLDataTypeHalf2', (MTLDataTypeHalf3:=18): 'MTLDataTypeHalf3', (MTLDataTypeHalf4:=19): 'MTLDataTypeHalf4', (MTLDataTypeHalf2x2:=20): 'MTLDataTypeHalf2x2', (MTLDataTypeHalf2x3:=21): 'MTLDataTypeHalf2x3', (MTLDataTypeHalf2x4:=22): 'MTLDataTypeHalf2x4', (MTLDataTypeHalf3x2:=23): 'MTLDataTypeHalf3x2', (MTLDataTypeHalf3x3:=24): 'MTLDataTypeHalf3x3', (MTLDataTypeHalf3x4:=25): 'MTLDataTypeHalf3x4', (MTLDataTypeHalf4x2:=26): 'MTLDataTypeHalf4x2', (MTLDataTypeHalf4x3:=27): 'MTLDataTypeHalf4x3', (MTLDataTypeHalf4x4:=28): 'MTLDataTypeHalf4x4', (MTLDataTypeInt:=29): 'MTLDataTypeInt', (MTLDataTypeInt2:=30): 'MTLDataTypeInt2', (MTLDataTypeInt3:=31): 'MTLDataTypeInt3', (MTLDataTypeInt4:=32): 'MTLDataTypeInt4', (MTLDataTypeUInt:=33): 'MTLDataTypeUInt', (MTLDataTypeUInt2:=34): 'MTLDataTypeUInt2', (MTLDataTypeUInt3:=35): 'MTLDataTypeUInt3', (MTLDataTypeUInt4:=36): 'MTLDataTypeUInt4', (MTLDataTypeShort:=37): 'MTLDataTypeShort', (MTLDataTypeShort2:=38): 'MTLDataTypeShort2', (MTLDataTypeShort3:=39): 'MTLDataTypeShort3', (MTLDataTypeShort4:=40): 'MTLDataTypeShort4', (MTLDataTypeUShort:=41): 'MTLDataTypeUShort', (MTLDataTypeUShort2:=42): 'MTLDataTypeUShort2', (MTLDataTypeUShort3:=43): 'MTLDataTypeUShort3', (MTLDataTypeUShort4:=44): 'MTLDataTypeUShort4', (MTLDataTypeChar:=45): 'MTLDataTypeChar', (MTLDataTypeChar2:=46): 'MTLDataTypeChar2', (MTLDataTypeChar3:=47): 'MTLDataTypeChar3', (MTLDataTypeChar4:=48): 'MTLDataTypeChar4', (MTLDataTypeUChar:=49): 'MTLDataTypeUChar', (MTLDataTypeUChar2:=50): 'MTLDataTypeUChar2', (MTLDataTypeUChar3:=51): 'MTLDataTypeUChar3', (MTLDataTypeUChar4:=52): 'MTLDataTypeUChar4', (MTLDataTypeBool:=53): 'MTLDataTypeBool', (MTLDataTypeBool2:=54): 'MTLDataTypeBool2', (MTLDataTypeBool3:=55): 'MTLDataTypeBool3', (MTLDataTypeBool4:=56): 'MTLDataTypeBool4', (MTLDataTypeTexture:=58): 'MTLDataTypeTexture', (MTLDataTypeSampler:=59): 'MTLDataTypeSampler', (MTLDataTypePointer:=60): 'MTLDataTypePointer', (MTLDataTypeR8Unorm:=62): 'MTLDataTypeR8Unorm', (MTLDataTypeR8Snorm:=63): 'MTLDataTypeR8Snorm', (MTLDataTypeR16Unorm:=64): 'MTLDataTypeR16Unorm', (MTLDataTypeR16Snorm:=65): 'MTLDataTypeR16Snorm', (MTLDataTypeRG8Unorm:=66): 'MTLDataTypeRG8Unorm', (MTLDataTypeRG8Snorm:=67): 'MTLDataTypeRG8Snorm', (MTLDataTypeRG16Unorm:=68): 'MTLDataTypeRG16Unorm', (MTLDataTypeRG16Snorm:=69): 'MTLDataTypeRG16Snorm', (MTLDataTypeRGBA8Unorm:=70): 'MTLDataTypeRGBA8Unorm', (MTLDataTypeRGBA8Unorm_sRGB:=71): 'MTLDataTypeRGBA8Unorm_sRGB', (MTLDataTypeRGBA8Snorm:=72): 'MTLDataTypeRGBA8Snorm', (MTLDataTypeRGBA16Unorm:=73): 'MTLDataTypeRGBA16Unorm', (MTLDataTypeRGBA16Snorm:=74): 'MTLDataTypeRGBA16Snorm', (MTLDataTypeRGB10A2Unorm:=75): 'MTLDataTypeRGB10A2Unorm', (MTLDataTypeRG11B10Float:=76): 'MTLDataTypeRG11B10Float', (MTLDataTypeRGB9E5Float:=77): 'MTLDataTypeRGB9E5Float', (MTLDataTypeRenderPipeline:=78): 'MTLDataTypeRenderPipeline', (MTLDataTypeComputePipeline:=79): 'MTLDataTypeComputePipeline', (MTLDataTypeIndirectCommandBuffer:=80): 'MTLDataTypeIndirectCommandBuffer', (MTLDataTypeLong:=81): 'MTLDataTypeLong', (MTLDataTypeLong2:=82): 'MTLDataTypeLong2', (MTLDataTypeLong3:=83): 'MTLDataTypeLong3', (MTLDataTypeLong4:=84): 'MTLDataTypeLong4', (MTLDataTypeULong:=85): 'MTLDataTypeULong', (MTLDataTypeULong2:=86): 'MTLDataTypeULong2', (MTLDataTypeULong3:=87): 'MTLDataTypeULong3', (MTLDataTypeULong4:=88): 'MTLDataTypeULong4', (MTLDataTypeVisibleFunctionTable:=115): 'MTLDataTypeVisibleFunctionTable', (MTLDataTypeIntersectionFunctionTable:=116): 'MTLDataTypeIntersectionFunctionTable', (MTLDataTypePrimitiveAccelerationStructure:=117): 'MTLDataTypePrimitiveAccelerationStructure', (MTLDataTypeInstanceAccelerationStructure:=118): 'MTLDataTypeInstanceAccelerationStructure', (MTLDataTypeBFloat:=121): 'MTLDataTypeBFloat', (MTLDataTypeBFloat2:=122): 'MTLDataTypeBFloat2', (MTLDataTypeBFloat3:=123): 'MTLDataTypeBFloat3', (MTLDataTypeBFloat4:=124): 'MTLDataTypeBFloat4', (MTLDataTypeDepthStencilState:=139): 'MTLDataTypeDepthStencilState', (MTLDataTypeTensor:=140): 'MTLDataTypeTensor'}
 MTLDataType: TypeAlias = NSUInteger
 class MTLStructType(objc.Spec): pass
 class MTLStructMember(objc.Spec): pass
@@ -359,12 +437,21 @@ MTLPointerType._methods_ = [
   ('dataSize', NSUInteger, []),
   ('elementIsArgumentBuffer', BOOL, []),
 ]
+class MTLTensorReferenceType(objc.Spec): pass
+MTLTensorReferenceType._bases_ = [MTLType]
+MTLTensorReferenceType._methods_ = [
+  ('tensorDataType', MTLTensorDataType, []),
+  ('indexType', MTLDataType, []),
+  ('dimensions', MTLTensorExtents, []),
+  ('access', MTLBindingAccess, []),
+]
 MTLArrayType._bases_ = [MTLType]
 MTLArrayType._methods_ = [
   ('elementStructType', MTLStructType, []),
   ('elementArrayType', MTLArrayType, []),
   ('elementTextureReferenceType', MTLTextureReferenceType, []),
   ('elementPointerType', MTLPointerType, []),
+  ('elementTensorReferenceType', MTLTensorReferenceType, []),
   ('elementType', MTLDataType, []),
   ('arrayLength', NSUInteger, []),
   ('stride', NSUInteger, []),
@@ -376,6 +463,7 @@ MTLStructMember._methods_ = [
   ('arrayType', MTLArrayType, []),
   ('textureReferenceType', MTLTextureReferenceType, []),
   ('pointerType', MTLPointerType, []),
+  ('tensorReferenceType', MTLTensorReferenceType, []),
   ('name', NSString, []),
   ('offset', NSUInteger, []),
   ('dataType', MTLDataType, []),
@@ -408,7 +496,7 @@ enum_MTLFunctionType: dict[int, str] = {(MTLFunctionTypeVertex:=1): 'MTLFunction
 MTLFunctionType: TypeAlias = NSUInteger
 enum_MTLPatchType: dict[int, str] = {(MTLPatchTypeNone:=0): 'MTLPatchTypeNone', (MTLPatchTypeTriangle:=1): 'MTLPatchTypeTriangle', (MTLPatchTypeQuad:=2): 'MTLPatchTypeQuad'}
 MTLPatchType: TypeAlias = NSUInteger
-enum_MTLFunctionOptions: dict[int, str] = {(MTLFunctionOptionNone:=0): 'MTLFunctionOptionNone', (MTLFunctionOptionCompileToBinary:=1): 'MTLFunctionOptionCompileToBinary', (MTLFunctionOptionStoreFunctionInMetalScript:=2): 'MTLFunctionOptionStoreFunctionInMetalScript'}
+enum_MTLFunctionOptions: dict[int, str] = {(MTLFunctionOptionNone:=0): 'MTLFunctionOptionNone', (MTLFunctionOptionCompileToBinary:=1): 'MTLFunctionOptionCompileToBinary', (MTLFunctionOptionStoreFunctionInMetalPipelinesScript:=2): 'MTLFunctionOptionStoreFunctionInMetalPipelinesScript', (MTLFunctionOptionStoreFunctionInMetalScript:=2): 'MTLFunctionOptionStoreFunctionInMetalScript', (MTLFunctionOptionFailOnBinaryArchiveMiss:=4): 'MTLFunctionOptionFailOnBinaryArchiveMiss', (MTLFunctionOptionPipelineIndependent:=8): 'MTLFunctionOptionPipelineIndependent'}
 MTLFunctionOptions: TypeAlias = NSUInteger
 MTLFunction._bases_ = [NSObject]
 MTLFunction._methods_ = [
@@ -494,6 +582,8 @@ MTLLinkedFunctions._bases_ = [NSObject]
 MTLLinkedFunctions._classmethods_ = [
   ('linkedFunctions', MTLLinkedFunctions, []),
 ]
+enum_MTLShaderValidation: dict[int, str] = {(MTLShaderValidationDefault:=0): 'MTLShaderValidationDefault', (MTLShaderValidationEnabled:=1): 'MTLShaderValidationEnabled', (MTLShaderValidationDisabled:=2): 'MTLShaderValidationDisabled'}
+MTLShaderValidation: TypeAlias = NSInteger
 MTLComputePipelineDescriptor._bases_ = [NSObject]
 MTLComputePipelineDescriptor._methods_ = [
   ('reset', None, []),
@@ -516,29 +606,33 @@ MTLComputePipelineDescriptor._methods_ = [
   ('setSupportAddingBinaryFunctions:', None, [BOOL]),
   ('maxCallStackDepth', NSUInteger, []),
   ('setMaxCallStackDepth:', None, [NSUInteger]),
+  ('shaderValidation', MTLShaderValidation, []),
+  ('setShaderValidation:', None, [MTLShaderValidation]),
+  ('requiredThreadsPerThreadgroup', MTLSize, []),
+  ('setRequiredThreadsPerThreadgroup:', None, [MTLSize]),
 ]
 class MTLFunctionHandle(objc.Spec): pass
+class MTL4BinaryFunction(objc.Spec): pass
 class MTLVisibleFunctionTableDescriptor(objc.Spec): pass
 class MTLIntersectionFunctionTableDescriptor(objc.Spec): pass
-@c.record
-class struct_MTLResourceID(c.Struct):
-  SIZE = 8
-  _impl: int
-MTLResourceID: TypeAlias = struct_MTLResourceID
-struct_MTLResourceID.register_fields([('_impl', uint64_t, 0)])
-MTLComputePipelineState._bases_ = [NSObject]
+MTLComputePipelineState._bases_ = [MTLAllocation, NSObject]
 MTLComputePipelineState._methods_ = [
+  ('functionHandleWithName:', MTLFunctionHandle, [NSString]),
+  ('functionHandleWithBinaryFunction:', MTLFunctionHandle, [MTL4BinaryFunction]),
   ('imageblockMemoryLengthForDimensions:', NSUInteger, [MTLSize]),
   ('functionHandleWithFunction:', MTLFunctionHandle, [MTLFunction]),
   ('newVisibleFunctionTableWithDescriptor:', MTLVisibleFunctionTable, [MTLVisibleFunctionTableDescriptor], True),
   ('newIntersectionFunctionTableWithDescriptor:', MTLIntersectionFunctionTable, [MTLIntersectionFunctionTableDescriptor], True),
   ('label', NSString, []),
+  ('reflection', MTLComputePipelineReflection, []),
   ('device', MTLDevice, []),
   ('maxTotalThreadsPerThreadgroup', NSUInteger, []),
   ('threadExecutionWidth', NSUInteger, []),
   ('staticThreadgroupMemoryLength', NSUInteger, []),
   ('supportIndirectCommandBuffers', BOOL, []),
   ('gpuResourceID', MTLResourceID, []),
+  ('shaderValidation', MTLShaderValidation, []),
+  ('requiredThreadsPerThreadgroup', MTLSize, []),
 ]
 class MTLCommandQueue(objc.Spec): pass
 class MTLCommandBuffer(objc.Spec): pass
@@ -574,6 +668,7 @@ MTLBlitCommandEncoder._methods_ = [
   ('optimizeIndirectCommandBuffer:withRange:', None, [MTLIndirectCommandBuffer, NSRange]),
   ('sampleCountersInBuffer:atSampleIndex:withBarrier:', None, [MTLCounterSampleBuffer, NSUInteger, BOOL]),
   ('resolveCounters:inRange:destinationBuffer:destinationOffset:', None, [MTLCounterSampleBuffer, NSRange, MTLBuffer, NSUInteger]),
+  ('copyFromTensor:sourceOrigin:sourceDimensions:toTensor:destinationOrigin:destinationDimensions:', None, [MTLTensor, MTLTensorExtents, MTLTensorExtents, MTLTensor, MTLTensorExtents, MTLTensorExtents]),
 ]
 class MTLRenderCommandEncoder(objc.Spec): pass
 class MTLRenderPassDescriptor(objc.Spec): pass
@@ -676,6 +771,8 @@ MTLRenderPassSampleBufferAttachmentDescriptorArray._methods_ = [
   ('objectAtIndexedSubscript:', MTLRenderPassSampleBufferAttachmentDescriptor, [NSUInteger]),
   ('setObject:atIndexedSubscript:', None, [MTLRenderPassSampleBufferAttachmentDescriptor, NSUInteger]),
 ]
+enum_MTLVisibilityResultType: dict[int, str] = {(MTLVisibilityResultTypeReset:=0): 'MTLVisibilityResultTypeReset', (MTLVisibilityResultTypeAccumulate:=1): 'MTLVisibilityResultTypeAccumulate'}
+MTLVisibilityResultType: TypeAlias = NSInteger
 MTLRenderPassDescriptor._bases_ = [NSObject]
 MTLRenderPassDescriptor._methods_ = [
   ('setSamplePositions:count:', None, [c.POINTER[MTLSamplePosition], NSUInteger]),
@@ -706,6 +803,10 @@ MTLRenderPassDescriptor._methods_ = [
   ('rasterizationRateMap', MTLRasterizationRateMap, []),
   ('setRasterizationRateMap:', None, [MTLRasterizationRateMap]),
   ('sampleBufferAttachments', MTLRenderPassSampleBufferAttachmentDescriptorArray, []),
+  ('visibilityResultType', MTLVisibilityResultType, []),
+  ('setVisibilityResultType:', None, [MTLVisibilityResultType]),
+  ('supportColorAttachmentMapping', BOOL, []),
+  ('setSupportColorAttachmentMapping:', None, [BOOL]),
 ]
 MTLRenderPassDescriptor._classmethods_ = [
   ('renderPassDescriptor', MTLRenderPassDescriptor, []),
@@ -823,23 +924,12 @@ MTLAccelerationStructurePassDescriptor._methods_ = [
 MTLAccelerationStructurePassDescriptor._classmethods_ = [
   ('accelerationStructurePassDescriptor', MTLAccelerationStructurePassDescriptor, []),
 ]
+class MTLResidencySet(objc.Spec): pass
 enum_MTLCommandBufferErrorOption: dict[int, str] = {(MTLCommandBufferErrorOptionNone:=0): 'MTLCommandBufferErrorOptionNone', (MTLCommandBufferErrorOptionEncoderExecutionStatus:=1): 'MTLCommandBufferErrorOptionEncoderExecutionStatus'}
 MTLCommandBufferErrorOption: TypeAlias = NSUInteger
 class MTLLogContainer(objc.Spec): pass
 enum_MTLCommandBufferStatus: dict[int, str] = {(MTLCommandBufferStatusNotEnqueued:=0): 'MTLCommandBufferStatusNotEnqueued', (MTLCommandBufferStatusEnqueued:=1): 'MTLCommandBufferStatusEnqueued', (MTLCommandBufferStatusCommitted:=2): 'MTLCommandBufferStatusCommitted', (MTLCommandBufferStatusScheduled:=3): 'MTLCommandBufferStatusScheduled', (MTLCommandBufferStatusCompleted:=4): 'MTLCommandBufferStatusCompleted', (MTLCommandBufferStatusError:=5): 'MTLCommandBufferStatusError'}
 MTLCommandBufferStatus: TypeAlias = NSUInteger
-class NSError(objc.Spec): pass
-NSErrorDomain: TypeAlias = NSString
-NSError._bases_ = [NSObject]
-NSError._methods_ = [
-  ('domain', NSErrorDomain, []),
-  ('code', NSInteger, []),
-  ('localizedDescription', NSString, []),
-  ('localizedFailureReason', NSString, []),
-  ('localizedRecoverySuggestion', NSString, []),
-  ('recoveryAttempter', objc.id_, []),
-  ('helpAnchor', NSString, []),
-]
 MTLCommandBuffer._bases_ = [NSObject]
 MTLCommandBuffer._methods_ = [
   ('enqueue', None, []),
@@ -864,6 +954,8 @@ MTLCommandBuffer._methods_ = [
   ('accelerationStructureCommandEncoderWithDescriptor:', MTLAccelerationStructureCommandEncoder, [MTLAccelerationStructurePassDescriptor]),
   ('pushDebugGroup:', None, [NSString]),
   ('popDebugGroup', None, []),
+  ('useResidencySet:', None, [MTLResidencySet]),
+  ('useResidencySets:count:', None, [c.POINTER[MTLResidencySet], NSUInteger]),
   ('device', MTLDevice, []),
   ('commandQueue', MTLCommandQueue, []),
   ('retainedReferences', BOOL, []),
@@ -879,12 +971,15 @@ MTLCommandBuffer._methods_ = [
   ('error', NSError, []),
 ]
 class MTLCommandBufferDescriptor(objc.Spec): pass
+class MTLLogState(objc.Spec): pass
 MTLCommandBufferDescriptor._bases_ = [NSObject]
 MTLCommandBufferDescriptor._methods_ = [
   ('retainedReferences', BOOL, []),
   ('setRetainedReferences:', None, [BOOL]),
   ('errorOptions', MTLCommandBufferErrorOption, []),
   ('setErrorOptions:', None, [MTLCommandBufferErrorOption]),
+  ('logState', MTLLogState, []),
+  ('setLogState:', None, [MTLLogState]),
 ]
 MTLCommandQueue._bases_ = [NSObject]
 MTLCommandQueue._methods_ = [
@@ -892,9 +987,21 @@ MTLCommandQueue._methods_ = [
   ('commandBufferWithDescriptor:', MTLCommandBuffer, [MTLCommandBufferDescriptor]),
   ('commandBufferWithUnretainedReferences', MTLCommandBuffer, []),
   ('insertDebugCaptureBoundary', None, []),
+  ('addResidencySet:', None, [MTLResidencySet]),
+  ('addResidencySets:count:', None, [c.POINTER[MTLResidencySet], NSUInteger]),
+  ('removeResidencySet:', None, [MTLResidencySet]),
+  ('removeResidencySets:count:', None, [c.POINTER[MTLResidencySet], NSUInteger]),
   ('label', NSString, []),
   ('setLabel:', None, [NSString]),
   ('device', MTLDevice, []),
+]
+class MTLCommandQueueDescriptor(objc.Spec): pass
+MTLCommandQueueDescriptor._bases_ = [NSObject]
+MTLCommandQueueDescriptor._methods_ = [
+  ('maxCommandBufferCount', NSUInteger, []),
+  ('setMaxCommandBufferCount:', None, [NSUInteger]),
+  ('logState', MTLLogState, []),
+  ('setLogState:', None, [MTLLogState]),
 ]
 enum_MTLIOCompressionMethod: dict[int, str] = {(MTLIOCompressionMethodZlib:=0): 'MTLIOCompressionMethodZlib', (MTLIOCompressionMethodLZFSE:=1): 'MTLIOCompressionMethodLZFSE', (MTLIOCompressionMethodLZ4:=2): 'MTLIOCompressionMethodLZ4', (MTLIOCompressionMethodLZMA:=3): 'MTLIOCompressionMethodLZMA', (MTLIOCompressionMethodLZBitmap:=4): 'MTLIOCompressionMethodLZBitmap'}
 MTLIOCompressionMethod: TypeAlias = NSInteger
@@ -912,11 +1019,11 @@ except (ValueError,AttributeError): pass
 def MTLRemoveDeviceObserver(observer:NSObject) -> None: ...
 enum_MTLFeatureSet: dict[int, str] = {(MTLFeatureSet_iOS_GPUFamily1_v1:=0): 'MTLFeatureSet_iOS_GPUFamily1_v1', (MTLFeatureSet_iOS_GPUFamily2_v1:=1): 'MTLFeatureSet_iOS_GPUFamily2_v1', (MTLFeatureSet_iOS_GPUFamily1_v2:=2): 'MTLFeatureSet_iOS_GPUFamily1_v2', (MTLFeatureSet_iOS_GPUFamily2_v2:=3): 'MTLFeatureSet_iOS_GPUFamily2_v2', (MTLFeatureSet_iOS_GPUFamily3_v1:=4): 'MTLFeatureSet_iOS_GPUFamily3_v1', (MTLFeatureSet_iOS_GPUFamily1_v3:=5): 'MTLFeatureSet_iOS_GPUFamily1_v3', (MTLFeatureSet_iOS_GPUFamily2_v3:=6): 'MTLFeatureSet_iOS_GPUFamily2_v3', (MTLFeatureSet_iOS_GPUFamily3_v2:=7): 'MTLFeatureSet_iOS_GPUFamily3_v2', (MTLFeatureSet_iOS_GPUFamily1_v4:=8): 'MTLFeatureSet_iOS_GPUFamily1_v4', (MTLFeatureSet_iOS_GPUFamily2_v4:=9): 'MTLFeatureSet_iOS_GPUFamily2_v4', (MTLFeatureSet_iOS_GPUFamily3_v3:=10): 'MTLFeatureSet_iOS_GPUFamily3_v3', (MTLFeatureSet_iOS_GPUFamily4_v1:=11): 'MTLFeatureSet_iOS_GPUFamily4_v1', (MTLFeatureSet_iOS_GPUFamily1_v5:=12): 'MTLFeatureSet_iOS_GPUFamily1_v5', (MTLFeatureSet_iOS_GPUFamily2_v5:=13): 'MTLFeatureSet_iOS_GPUFamily2_v5', (MTLFeatureSet_iOS_GPUFamily3_v4:=14): 'MTLFeatureSet_iOS_GPUFamily3_v4', (MTLFeatureSet_iOS_GPUFamily4_v2:=15): 'MTLFeatureSet_iOS_GPUFamily4_v2', (MTLFeatureSet_iOS_GPUFamily5_v1:=16): 'MTLFeatureSet_iOS_GPUFamily5_v1', (MTLFeatureSet_macOS_GPUFamily1_v1:=10000): 'MTLFeatureSet_macOS_GPUFamily1_v1', (MTLFeatureSet_OSX_GPUFamily1_v1:=10000): 'MTLFeatureSet_OSX_GPUFamily1_v1', (MTLFeatureSet_macOS_GPUFamily1_v2:=10001): 'MTLFeatureSet_macOS_GPUFamily1_v2', (MTLFeatureSet_OSX_GPUFamily1_v2:=10001): 'MTLFeatureSet_OSX_GPUFamily1_v2', (MTLFeatureSet_macOS_ReadWriteTextureTier2:=10002): 'MTLFeatureSet_macOS_ReadWriteTextureTier2', (MTLFeatureSet_OSX_ReadWriteTextureTier2:=10002): 'MTLFeatureSet_OSX_ReadWriteTextureTier2', (MTLFeatureSet_macOS_GPUFamily1_v3:=10003): 'MTLFeatureSet_macOS_GPUFamily1_v3', (MTLFeatureSet_macOS_GPUFamily1_v4:=10004): 'MTLFeatureSet_macOS_GPUFamily1_v4', (MTLFeatureSet_macOS_GPUFamily2_v1:=10005): 'MTLFeatureSet_macOS_GPUFamily2_v1', (MTLFeatureSet_tvOS_GPUFamily1_v1:=30000): 'MTLFeatureSet_tvOS_GPUFamily1_v1', (MTLFeatureSet_TVOS_GPUFamily1_v1:=30000): 'MTLFeatureSet_TVOS_GPUFamily1_v1', (MTLFeatureSet_tvOS_GPUFamily1_v2:=30001): 'MTLFeatureSet_tvOS_GPUFamily1_v2', (MTLFeatureSet_tvOS_GPUFamily1_v3:=30002): 'MTLFeatureSet_tvOS_GPUFamily1_v3', (MTLFeatureSet_tvOS_GPUFamily2_v1:=30003): 'MTLFeatureSet_tvOS_GPUFamily2_v1', (MTLFeatureSet_tvOS_GPUFamily1_v4:=30004): 'MTLFeatureSet_tvOS_GPUFamily1_v4', (MTLFeatureSet_tvOS_GPUFamily2_v2:=30005): 'MTLFeatureSet_tvOS_GPUFamily2_v2'}
 MTLFeatureSet: TypeAlias = NSUInteger
-enum_MTLGPUFamily: dict[int, str] = {(MTLGPUFamilyApple1:=1001): 'MTLGPUFamilyApple1', (MTLGPUFamilyApple2:=1002): 'MTLGPUFamilyApple2', (MTLGPUFamilyApple3:=1003): 'MTLGPUFamilyApple3', (MTLGPUFamilyApple4:=1004): 'MTLGPUFamilyApple4', (MTLGPUFamilyApple5:=1005): 'MTLGPUFamilyApple5', (MTLGPUFamilyApple6:=1006): 'MTLGPUFamilyApple6', (MTLGPUFamilyApple7:=1007): 'MTLGPUFamilyApple7', (MTLGPUFamilyApple8:=1008): 'MTLGPUFamilyApple8', (MTLGPUFamilyApple9:=1009): 'MTLGPUFamilyApple9', (MTLGPUFamilyMac1:=2001): 'MTLGPUFamilyMac1', (MTLGPUFamilyMac2:=2002): 'MTLGPUFamilyMac2', (MTLGPUFamilyCommon1:=3001): 'MTLGPUFamilyCommon1', (MTLGPUFamilyCommon2:=3002): 'MTLGPUFamilyCommon2', (MTLGPUFamilyCommon3:=3003): 'MTLGPUFamilyCommon3', (MTLGPUFamilyMacCatalyst1:=4001): 'MTLGPUFamilyMacCatalyst1', (MTLGPUFamilyMacCatalyst2:=4002): 'MTLGPUFamilyMacCatalyst2', (MTLGPUFamilyMetal3:=5001): 'MTLGPUFamilyMetal3'}
+enum_MTLGPUFamily: dict[int, str] = {(MTLGPUFamilyApple1:=1001): 'MTLGPUFamilyApple1', (MTLGPUFamilyApple2:=1002): 'MTLGPUFamilyApple2', (MTLGPUFamilyApple3:=1003): 'MTLGPUFamilyApple3', (MTLGPUFamilyApple4:=1004): 'MTLGPUFamilyApple4', (MTLGPUFamilyApple5:=1005): 'MTLGPUFamilyApple5', (MTLGPUFamilyApple6:=1006): 'MTLGPUFamilyApple6', (MTLGPUFamilyApple7:=1007): 'MTLGPUFamilyApple7', (MTLGPUFamilyApple8:=1008): 'MTLGPUFamilyApple8', (MTLGPUFamilyApple9:=1009): 'MTLGPUFamilyApple9', (MTLGPUFamilyApple10:=1010): 'MTLGPUFamilyApple10', (MTLGPUFamilyMac1:=2001): 'MTLGPUFamilyMac1', (MTLGPUFamilyMac2:=2002): 'MTLGPUFamilyMac2', (MTLGPUFamilyCommon1:=3001): 'MTLGPUFamilyCommon1', (MTLGPUFamilyCommon2:=3002): 'MTLGPUFamilyCommon2', (MTLGPUFamilyCommon3:=3003): 'MTLGPUFamilyCommon3', (MTLGPUFamilyMacCatalyst1:=4001): 'MTLGPUFamilyMacCatalyst1', (MTLGPUFamilyMacCatalyst2:=4002): 'MTLGPUFamilyMacCatalyst2', (MTLGPUFamilyMetal3:=5001): 'MTLGPUFamilyMetal3', (MTLGPUFamilyMetal4:=5002): 'MTLGPUFamilyMetal4'}
 MTLGPUFamily: TypeAlias = NSInteger
 enum_MTLDeviceLocation: dict[int, str] = {(MTLDeviceLocationBuiltIn:=0): 'MTLDeviceLocationBuiltIn', (MTLDeviceLocationSlot:=1): 'MTLDeviceLocationSlot', (MTLDeviceLocationExternal:=2): 'MTLDeviceLocationExternal', (MTLDeviceLocationUnspecified:=-1): 'MTLDeviceLocationUnspecified'}
 MTLDeviceLocation: TypeAlias = NSUInteger
-enum_MTLPipelineOption: dict[int, str] = {(MTLPipelineOptionNone:=0): 'MTLPipelineOptionNone', (MTLPipelineOptionArgumentInfo:=1): 'MTLPipelineOptionArgumentInfo', (MTLPipelineOptionBufferTypeInfo:=2): 'MTLPipelineOptionBufferTypeInfo', (MTLPipelineOptionFailOnBinaryArchiveMiss:=4): 'MTLPipelineOptionFailOnBinaryArchiveMiss'}
+enum_MTLPipelineOption: dict[int, str] = {(MTLPipelineOptionNone:=0): 'MTLPipelineOptionNone', (MTLPipelineOptionArgumentInfo:=1): 'MTLPipelineOptionArgumentInfo', (MTLPipelineOptionBindingInfo:=1): 'MTLPipelineOptionBindingInfo', (MTLPipelineOptionBufferTypeInfo:=2): 'MTLPipelineOptionBufferTypeInfo', (MTLPipelineOptionFailOnBinaryArchiveMiss:=4): 'MTLPipelineOptionFailOnBinaryArchiveMiss'}
 MTLPipelineOption: TypeAlias = NSUInteger
 enum_MTLReadWriteTextureTier: dict[int, str] = {(MTLReadWriteTextureTierNone:=0): 'MTLReadWriteTextureTierNone', (MTLReadWriteTextureTier1:=1): 'MTLReadWriteTextureTier1', (MTLReadWriteTextureTier2:=2): 'MTLReadWriteTextureTier2'}
 MTLReadWriteTextureTier: TypeAlias = NSUInteger
@@ -924,8 +1031,6 @@ enum_MTLArgumentBuffersTier: dict[int, str] = {(MTLArgumentBuffersTier1:=0): 'MT
 MTLArgumentBuffersTier: TypeAlias = NSUInteger
 enum_MTLSparseTextureRegionAlignmentMode: dict[int, str] = {(MTLSparseTextureRegionAlignmentModeOutward:=0): 'MTLSparseTextureRegionAlignmentModeOutward', (MTLSparseTextureRegionAlignmentModeInward:=1): 'MTLSparseTextureRegionAlignmentModeInward'}
 MTLSparseTextureRegionAlignmentMode: TypeAlias = NSUInteger
-enum_MTLSparsePageSize: dict[int, str] = {(MTLSparsePageSize16:=101): 'MTLSparsePageSize16', (MTLSparsePageSize64:=102): 'MTLSparsePageSize64', (MTLSparsePageSize256:=103): 'MTLSparsePageSize256'}
-MTLSparsePageSize: TypeAlias = NSInteger
 @c.record
 class MTLAccelerationStructureSizes(c.Struct):
   SIZE = 24
@@ -941,7 +1046,6 @@ class MTLSizeAndAlign(c.Struct):
   size: int
   align: int
 MTLSizeAndAlign.register_fields([('size', NSUInteger, 0), ('align', NSUInteger, 8)])
-class MTLRenderPipelineReflection(objc.Spec): pass
 class MTLArgumentDescriptor(objc.Spec): pass
 MTLArgumentDescriptor._bases_ = [NSObject]
 MTLArgumentDescriptor._methods_ = [
@@ -966,6 +1070,7 @@ MTLArchitecture._bases_ = [NSObject]
 MTLArchitecture._methods_ = [
   ('name', NSString, []),
 ]
+class MTLLogStateDescriptor(objc.Spec): pass
 class MTLHeapDescriptor(objc.Spec): pass
 class MTLDepthStencilState(objc.Spec): pass
 class MTLDepthStencilDescriptor(objc.Spec): pass
@@ -986,6 +1091,11 @@ MTLFunctionConstantValues._methods_ = [
   ('setConstantValues:type:withRange:', None, [ctypes.c_void_p, MTLDataType, NSRange]),
   ('setConstantValue:type:withName:', None, [ctypes.c_void_p, MTLDataType, NSString]),
   ('reset', None, []),
+]
+class MTLFunctionReflection(objc.Spec): pass
+MTLFunctionReflection._bases_ = [NSObject]
+MTLFunctionReflection._methods_ = [
+  ('userAnnotation', NSString, []),
 ]
 class MTLFunctionDescriptor(objc.Spec): pass
 MTLFunctionDescriptor._bases_ = [NSObject]
@@ -1009,6 +1119,7 @@ MTLLibrary._bases_ = [NSObject]
 MTLLibrary._methods_ = [
   ('newFunctionWithName:', MTLFunction, [NSString], True),
   ('newFunctionWithName:constantValues:error:', MTLFunction, [NSString, MTLFunctionConstantValues, c.POINTER[NSError]], True),
+  ('reflectionForFunctionWithName:', MTLFunctionReflection, [NSString]),
   ('newFunctionWithDescriptor:error:', MTLFunction, [MTLFunctionDescriptor, c.POINTER[NSError]], True),
   ('newIntersectionFunctionWithDescriptor:error:', MTLFunction, [MTLIntersectionFunctionDescriptor, c.POINTER[NSError]], True),
   ('label', NSString, []),
@@ -1188,7 +1299,11 @@ NSBundle._classmethods_ = [
   ('mainBundle', NSBundle, []),
 ]
 class MTLCompileOptions(objc.Spec): pass
-enum_MTLLanguageVersion: dict[int, str] = {(MTLLanguageVersion1_0:=65536): 'MTLLanguageVersion1_0', (MTLLanguageVersion1_1:=65537): 'MTLLanguageVersion1_1', (MTLLanguageVersion1_2:=65538): 'MTLLanguageVersion1_2', (MTLLanguageVersion2_0:=131072): 'MTLLanguageVersion2_0', (MTLLanguageVersion2_1:=131073): 'MTLLanguageVersion2_1', (MTLLanguageVersion2_2:=131074): 'MTLLanguageVersion2_2', (MTLLanguageVersion2_3:=131075): 'MTLLanguageVersion2_3', (MTLLanguageVersion2_4:=131076): 'MTLLanguageVersion2_4', (MTLLanguageVersion3_0:=196608): 'MTLLanguageVersion3_0', (MTLLanguageVersion3_1:=196609): 'MTLLanguageVersion3_1'}
+enum_MTLMathMode: dict[int, str] = {(MTLMathModeSafe:=0): 'MTLMathModeSafe', (MTLMathModeRelaxed:=1): 'MTLMathModeRelaxed', (MTLMathModeFast:=2): 'MTLMathModeFast'}
+MTLMathMode: TypeAlias = NSInteger
+enum_MTLMathFloatingPointFunctions: dict[int, str] = {(MTLMathFloatingPointFunctionsFast:=0): 'MTLMathFloatingPointFunctionsFast', (MTLMathFloatingPointFunctionsPrecise:=1): 'MTLMathFloatingPointFunctionsPrecise'}
+MTLMathFloatingPointFunctions: TypeAlias = NSInteger
+enum_MTLLanguageVersion: dict[int, str] = {(MTLLanguageVersion1_0:=65536): 'MTLLanguageVersion1_0', (MTLLanguageVersion1_1:=65537): 'MTLLanguageVersion1_1', (MTLLanguageVersion1_2:=65538): 'MTLLanguageVersion1_2', (MTLLanguageVersion2_0:=131072): 'MTLLanguageVersion2_0', (MTLLanguageVersion2_1:=131073): 'MTLLanguageVersion2_1', (MTLLanguageVersion2_2:=131074): 'MTLLanguageVersion2_2', (MTLLanguageVersion2_3:=131075): 'MTLLanguageVersion2_3', (MTLLanguageVersion2_4:=131076): 'MTLLanguageVersion2_4', (MTLLanguageVersion3_0:=196608): 'MTLLanguageVersion3_0', (MTLLanguageVersion3_1:=196609): 'MTLLanguageVersion3_1', (MTLLanguageVersion3_2:=196610): 'MTLLanguageVersion3_2', (MTLLanguageVersion4_0:=262144): 'MTLLanguageVersion4_0'}
 MTLLanguageVersion: TypeAlias = NSUInteger
 enum_MTLLibraryOptimizationLevel: dict[int, str] = {(MTLLibraryOptimizationLevelDefault:=0): 'MTLLibraryOptimizationLevelDefault', (MTLLibraryOptimizationLevelSize:=1): 'MTLLibraryOptimizationLevelSize'}
 MTLLibraryOptimizationLevel: TypeAlias = NSInteger
@@ -1198,6 +1313,10 @@ MTLCompileOptions._bases_ = [NSObject]
 MTLCompileOptions._methods_ = [
   ('fastMathEnabled', BOOL, []),
   ('setFastMathEnabled:', None, [BOOL]),
+  ('mathMode', MTLMathMode, []),
+  ('setMathMode:', None, [MTLMathMode]),
+  ('mathFloatingPointFunctions', MTLMathFloatingPointFunctions, []),
+  ('setMathFloatingPointFunctions:', None, [MTLMathFloatingPointFunctions]),
   ('languageVersion', MTLLanguageVersion, []),
   ('setLanguageVersion:', None, [MTLLanguageVersion]),
   ('libraryType', MTLLibraryType, []),
@@ -1214,10 +1333,15 @@ MTLCompileOptions._methods_ = [
   ('setAllowReferencingUndefinedSymbols:', None, [BOOL]),
   ('maxTotalThreadsPerThreadgroup', NSUInteger, []),
   ('setMaxTotalThreadsPerThreadgroup:', None, [NSUInteger]),
+  ('requiredThreadsPerThreadgroup', MTLSize, []),
+  ('setRequiredThreadsPerThreadgroup:', None, [MTLSize]),
+  ('enableLogging', BOOL, []),
+  ('setEnableLogging:', None, [BOOL]),
 ]
 class MTLStitchedLibraryDescriptor(objc.Spec): pass
 class MTLRenderPipelineState(objc.Spec): pass
 class MTLRenderPipelineDescriptor(objc.Spec): pass
+class MTLRenderPipelineReflection(objc.Spec): pass
 class MTLTileRenderPipelineDescriptor(objc.Spec): pass
 class MTLMeshRenderPipelineDescriptor(objc.Spec): pass
 class MTLRasterizationRateMapDescriptor(objc.Spec): pass
@@ -1259,10 +1383,89 @@ class MTLDynamicLibrary(objc.Spec): pass
 class MTLBinaryArchive(objc.Spec): pass
 class MTLBinaryArchiveDescriptor(objc.Spec): pass
 class MTLAccelerationStructureDescriptor(objc.Spec): pass
+class MTLResidencySetDescriptor(objc.Spec): pass
+class MTL4CommandAllocator(objc.Spec): pass
+class MTL4CommandAllocatorDescriptor(objc.Spec): pass
+class MTL4CommandQueue(objc.Spec): pass
+class MTL4CommandQueueDescriptor(objc.Spec): pass
+class MTL4CommandBuffer(objc.Spec): pass
+class MTL4ArgumentTable(objc.Spec): pass
+class MTL4ArgumentTableDescriptor(objc.Spec): pass
+class MTLTextureViewPool(objc.Spec): pass
+class MTLResourceViewPoolDescriptor(objc.Spec): pass
+class MTL4Compiler(objc.Spec): pass
+class MTL4LibraryDescriptor(objc.Spec): pass
+class MTL4ComputePipelineDescriptor(objc.Spec): pass
+class MTL4CompilerTaskOptions(objc.Spec): pass
+MTL4CompilerTaskOptions._bases_ = [NSObject]
+class MTL4PipelineStageDynamicLinkingDescriptor(objc.Spec): pass
+class MTL4PipelineDescriptor(objc.Spec): pass
+class MTL4RenderPipelineDynamicLinkingDescriptor(objc.Spec): pass
+class MTL4BinaryFunctionDescriptor(objc.Spec): pass
+class MTL4CompilerTask(objc.Spec): pass
+enum_MTL4CompilerTaskStatus: dict[int, str] = {(MTL4CompilerTaskStatusNone:=0): 'MTL4CompilerTaskStatusNone', (MTL4CompilerTaskStatusScheduled:=1): 'MTL4CompilerTaskStatusScheduled', (MTL4CompilerTaskStatusCompiling:=2): 'MTL4CompilerTaskStatusCompiling', (MTL4CompilerTaskStatusFinished:=3): 'MTL4CompilerTaskStatusFinished'}
+MTL4CompilerTaskStatus: TypeAlias = NSInteger
+MTL4CompilerTask._bases_ = [NSObject]
+MTL4CompilerTask._methods_ = [
+  ('waitUntilCompleted', None, []),
+  ('compiler', MTL4Compiler, []),
+  ('status', MTL4CompilerTaskStatus, []),
+]
+class MTL4MachineLearningPipelineState(objc.Spec): pass
+class MTL4MachineLearningPipelineDescriptor(objc.Spec): pass
+class MTL4PipelineDataSetSerializer(objc.Spec): pass
+MTL4Compiler._bases_ = [NSObject]
+MTL4Compiler._methods_ = [
+  ('newLibraryWithDescriptor:error:', MTLLibrary, [MTL4LibraryDescriptor, c.POINTER[NSError]], True),
+  ('newDynamicLibrary:error:', MTLDynamicLibrary, [MTLLibrary, c.POINTER[NSError]], True),
+  ('newDynamicLibraryWithURL:error:', MTLDynamicLibrary, [NSURL, c.POINTER[NSError]], True),
+  ('newComputePipelineStateWithDescriptor:compilerTaskOptions:error:', MTLComputePipelineState, [MTL4ComputePipelineDescriptor, MTL4CompilerTaskOptions, c.POINTER[NSError]], True),
+  ('newComputePipelineStateWithDescriptor:dynamicLinkingDescriptor:compilerTaskOptions:error:', MTLComputePipelineState, [MTL4ComputePipelineDescriptor, MTL4PipelineStageDynamicLinkingDescriptor, MTL4CompilerTaskOptions, c.POINTER[NSError]], True),
+  ('newRenderPipelineStateWithDescriptor:compilerTaskOptions:error:', MTLRenderPipelineState, [MTL4PipelineDescriptor, MTL4CompilerTaskOptions, c.POINTER[NSError]], True),
+  ('newRenderPipelineStateWithDescriptor:dynamicLinkingDescriptor:compilerTaskOptions:error:', MTLRenderPipelineState, [MTL4PipelineDescriptor, MTL4RenderPipelineDynamicLinkingDescriptor, MTL4CompilerTaskOptions, c.POINTER[NSError]], True),
+  ('newRenderPipelineStateBySpecializationWithDescriptor:pipeline:error:', MTLRenderPipelineState, [MTL4PipelineDescriptor, MTLRenderPipelineState, c.POINTER[NSError]], True),
+  ('newBinaryFunctionWithDescriptor:compilerTaskOptions:error:', MTL4BinaryFunction, [MTL4BinaryFunctionDescriptor, MTL4CompilerTaskOptions, c.POINTER[NSError]], True),
+  ('newMachineLearningPipelineStateWithDescriptor:error:', MTL4MachineLearningPipelineState, [MTL4MachineLearningPipelineDescriptor, c.POINTER[NSError]], True),
+  ('device', MTLDevice, []),
+  ('label', NSString, []),
+  ('pipelineDataSetSerializer', MTL4PipelineDataSetSerializer, []),
+]
+class MTL4CompilerDescriptor(objc.Spec): pass
+MTL4CompilerDescriptor._bases_ = [NSObject]
+MTL4CompilerDescriptor._methods_ = [
+  ('label', NSString, []),
+  ('setLabel:', None, [NSString]),
+  ('pipelineDataSetSerializer', MTL4PipelineDataSetSerializer, []),
+  ('setPipelineDataSetSerializer:', None, [MTL4PipelineDataSetSerializer]),
+]
+class MTL4Archive(objc.Spec): pass
+class MTL4PipelineDataSetSerializerDescriptor(objc.Spec): pass
+class MTL4CounterHeap(objc.Spec): pass
+enum_MTL4CounterHeapType: dict[int, str] = {(MTL4CounterHeapTypeInvalid:=0): 'MTL4CounterHeapTypeInvalid', (MTL4CounterHeapTypeTimestamp:=1): 'MTL4CounterHeapTypeTimestamp'}
+MTL4CounterHeapType: TypeAlias = NSInteger
+MTL4CounterHeap._bases_ = [NSObject]
+MTL4CounterHeap._methods_ = [
+  ('resolveCounterRange:', NSData, [NSRange]),
+  ('invalidateCounterRange:', None, [NSRange]),
+  ('label', NSString, []),
+  ('setLabel:', None, [NSString]),
+  ('count', NSUInteger, []),
+  ('type', MTL4CounterHeapType, []),
+]
+class MTL4CounterHeapDescriptor(objc.Spec): pass
+MTL4CounterHeapDescriptor._bases_ = [NSObject]
+MTL4CounterHeapDescriptor._methods_ = [
+  ('type', MTL4CounterHeapType, []),
+  ('setType:', None, [MTL4CounterHeapType]),
+  ('count', NSUInteger, []),
+  ('setCount:', None, [NSUInteger]),
+]
 MTLDevice._bases_ = [NSObject]
 MTLDevice._methods_ = [
+  ('newLogStateWithDescriptor:error:', MTLLogState, [MTLLogStateDescriptor, c.POINTER[NSError]], True),
   ('newCommandQueue', MTLCommandQueue, [], True),
   ('newCommandQueueWithMaxCommandBufferCount:', MTLCommandQueue, [NSUInteger], True),
+  ('newCommandQueueWithDescriptor:', MTLCommandQueue, [MTLCommandQueueDescriptor], True),
   ('heapTextureSizeAndAlignWithDescriptor:', MTLSizeAndAlign, [MTLTextureDescriptor]),
   ('heapBufferSizeAndAlignWithLength:options:', MTLSizeAndAlign, [NSUInteger, MTLResourceOptions]),
   ('newHeapWithDescriptor:', MTLHeap, [MTLHeapDescriptor], True),
@@ -1324,6 +1527,25 @@ MTLDevice._methods_ = [
   ('newAccelerationStructureWithDescriptor:', MTLAccelerationStructure, [MTLAccelerationStructureDescriptor], True),
   ('heapAccelerationStructureSizeAndAlignWithSize:', MTLSizeAndAlign, [NSUInteger]),
   ('heapAccelerationStructureSizeAndAlignWithDescriptor:', MTLSizeAndAlign, [MTLAccelerationStructureDescriptor]),
+  ('newResidencySetWithDescriptor:error:', MTLResidencySet, [MTLResidencySetDescriptor, c.POINTER[NSError]], True),
+  ('tensorSizeAndAlignWithDescriptor:', MTLSizeAndAlign, [MTLTensorDescriptor]),
+  ('newTensorWithDescriptor:error:', MTLTensor, [MTLTensorDescriptor, c.POINTER[NSError]], True),
+  ('functionHandleWithFunction:', MTLFunctionHandle, [MTLFunction]),
+  ('newCommandAllocator', MTL4CommandAllocator, [], True),
+  ('newCommandAllocatorWithDescriptor:error:', MTL4CommandAllocator, [MTL4CommandAllocatorDescriptor, c.POINTER[NSError]], True),
+  ('newMTL4CommandQueue', MTL4CommandQueue, [], True),
+  ('newMTL4CommandQueueWithDescriptor:error:', MTL4CommandQueue, [MTL4CommandQueueDescriptor, c.POINTER[NSError]], True),
+  ('newCommandBuffer', MTL4CommandBuffer, [], True),
+  ('newArgumentTableWithDescriptor:error:', MTL4ArgumentTable, [MTL4ArgumentTableDescriptor, c.POINTER[NSError]], True),
+  ('newTextureViewPoolWithDescriptor:error:', MTLTextureViewPool, [MTLResourceViewPoolDescriptor, c.POINTER[NSError]], True),
+  ('newCompilerWithDescriptor:error:', MTL4Compiler, [MTL4CompilerDescriptor, c.POINTER[NSError]], True),
+  ('newArchiveWithURL:error:', MTL4Archive, [NSURL, c.POINTER[NSError]], True),
+  ('newPipelineDataSetSerializerWithDescriptor:', MTL4PipelineDataSetSerializer, [MTL4PipelineDataSetSerializerDescriptor], True),
+  ('newBufferWithLength:options:placementSparsePageSize:', MTLBuffer, [NSUInteger, MTLResourceOptions, MTLSparsePageSize], True),
+  ('newCounterHeapWithDescriptor:error:', MTL4CounterHeap, [MTL4CounterHeapDescriptor, c.POINTER[NSError]], True),
+  ('sizeOfCounterHeapEntry:', NSUInteger, [MTL4CounterHeapType]),
+  ('queryTimestampFrequency', uint64_t, []),
+  ('functionHandleWithBinaryFunction:', MTLFunctionHandle, [MTL4BinaryFunction]),
   ('name', NSString, []),
   ('registryID', uint64_t, []),
   ('architecture', MTLArchitecture, []),
@@ -1383,6 +1605,18 @@ MTLIndirectCommandBufferDescriptor._methods_ = [
   ('setInheritPipelineState:', None, [BOOL]),
   ('inheritBuffers', BOOL, []),
   ('setInheritBuffers:', None, [BOOL]),
+  ('inheritDepthStencilState', BOOL, []),
+  ('setInheritDepthStencilState:', None, [BOOL]),
+  ('inheritDepthBias', BOOL, []),
+  ('setInheritDepthBias:', None, [BOOL]),
+  ('inheritDepthClipMode', BOOL, []),
+  ('setInheritDepthClipMode:', None, [BOOL]),
+  ('inheritCullMode', BOOL, []),
+  ('setInheritCullMode:', None, [BOOL]),
+  ('inheritFrontFacingWinding', BOOL, []),
+  ('setInheritFrontFacingWinding:', None, [BOOL]),
+  ('inheritTriangleFillMode', BOOL, []),
+  ('setInheritTriangleFillMode:', None, [BOOL]),
   ('maxVertexBufferBindCount', NSUInteger, []),
   ('setMaxVertexBufferBindCount:', None, [NSUInteger]),
   ('maxFragmentBufferBindCount', NSUInteger, []),
@@ -1401,10 +1635,20 @@ MTLIndirectCommandBufferDescriptor._methods_ = [
   ('setSupportRayTracing:', None, [BOOL]),
   ('supportDynamicAttributeStride', BOOL, []),
   ('setSupportDynamicAttributeStride:', None, [BOOL]),
+  ('supportColorAttachmentMapping', BOOL, []),
+  ('setSupportColorAttachmentMapping:', None, [BOOL]),
 ]
 class MTLIndirectRenderCommand(objc.Spec): pass
 enum_MTLPrimitiveType: dict[int, str] = {(MTLPrimitiveTypePoint:=0): 'MTLPrimitiveTypePoint', (MTLPrimitiveTypeLine:=1): 'MTLPrimitiveTypeLine', (MTLPrimitiveTypeLineStrip:=2): 'MTLPrimitiveTypeLineStrip', (MTLPrimitiveTypeTriangle:=3): 'MTLPrimitiveTypeTriangle', (MTLPrimitiveTypeTriangleStrip:=4): 'MTLPrimitiveTypeTriangleStrip'}
 MTLPrimitiveType: TypeAlias = NSUInteger
+enum_MTLDepthClipMode: dict[int, str] = {(MTLDepthClipModeClip:=0): 'MTLDepthClipModeClip', (MTLDepthClipModeClamp:=1): 'MTLDepthClipModeClamp'}
+MTLDepthClipMode: TypeAlias = NSUInteger
+enum_MTLCullMode: dict[int, str] = {(MTLCullModeNone:=0): 'MTLCullModeNone', (MTLCullModeFront:=1): 'MTLCullModeFront', (MTLCullModeBack:=2): 'MTLCullModeBack'}
+MTLCullMode: TypeAlias = NSUInteger
+enum_MTLWinding: dict[int, str] = {(MTLWindingClockwise:=0): 'MTLWindingClockwise', (MTLWindingCounterClockwise:=1): 'MTLWindingCounterClockwise'}
+MTLWinding: TypeAlias = NSUInteger
+enum_MTLTriangleFillMode: dict[int, str] = {(MTLTriangleFillModeFill:=0): 'MTLTriangleFillModeFill', (MTLTriangleFillModeLines:=1): 'MTLTriangleFillModeLines'}
+MTLTriangleFillMode: TypeAlias = NSUInteger
 MTLIndirectRenderCommand._bases_ = [NSObject]
 MTLIndirectRenderCommand._methods_ = [
   ('setRenderPipelineState:', None, [MTLRenderPipelineState]),
@@ -1422,6 +1666,12 @@ MTLIndirectRenderCommand._methods_ = [
   ('drawMeshThreads:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:', None, [MTLSize, MTLSize, MTLSize]),
   ('setBarrier', None, []),
   ('clearBarrier', None, []),
+  ('setDepthStencilState:', None, [MTLDepthStencilState]),
+  ('setDepthBias:slopeScale:clamp:', None, [ctypes.c_float, ctypes.c_float, ctypes.c_float]),
+  ('setDepthClipMode:', None, [MTLDepthClipMode]),
+  ('setCullMode:', None, [MTLCullMode]),
+  ('setFrontFacingWinding:', None, [MTLWinding]),
+  ('setTriangleFillMode:', None, [MTLTriangleFillMode]),
   ('reset', None, []),
 ]
 class MTLIndirectComputeCommand(objc.Spec): pass
@@ -1447,9 +1697,14 @@ MTLIndirectCommandBuffer._methods_ = [
   ('size', NSUInteger, []),
   ('gpuResourceID', MTLResourceID, []),
 ]
+enum_MTLTextureSparseTier: dict[int, str] = {(MTLTextureSparseTierNone:=0): 'MTLTextureSparseTierNone', (MTLTextureSparseTier1:=1): 'MTLTextureSparseTier1', (MTLTextureSparseTier2:=2): 'MTLTextureSparseTier2'}
+MTLTextureSparseTier: TypeAlias = NSInteger
+enum_MTLStages: dict[int, str] = {(MTLStageVertex:=1): 'MTLStageVertex', (MTLStageFragment:=2): 'MTLStageFragment', (MTLStageTile:=4): 'MTLStageTile', (MTLStageObject:=8): 'MTLStageObject', (MTLStageMesh:=16): 'MTLStageMesh', (MTLStageResourceState:=67108864): 'MTLStageResourceState', (MTLStageDispatch:=134217728): 'MTLStageDispatch', (MTLStageBlit:=268435456): 'MTLStageBlit', (MTLStageAccelerationStructure:=536870912): 'MTLStageAccelerationStructure', (MTLStageMachineLearning:=1073741824): 'MTLStageMachineLearning', (MTLStageAll:=9223372036854775807): 'MTLStageAll'}
+MTLStages: TypeAlias = NSUInteger
 MTLCommandEncoder._bases_ = [NSObject]
 MTLCommandEncoder._methods_ = [
   ('endEncoding', None, []),
+  ('barrierAfterQueueStages:beforeStages:', None, [MTLStages, MTLStages]),
   ('insertDebugSignpost:', None, [NSString]),
   ('pushDebugGroup:', None, [NSString]),
   ('popDebugGroup', None, []),
@@ -1457,9 +1712,132 @@ MTLCommandEncoder._methods_ = [
   ('label', NSString, []),
   ('setLabel:', None, [NSString]),
 ]
+MTLResidencySetDescriptor._bases_ = [NSObject]
+MTLResidencySetDescriptor._methods_ = [
+  ('label', NSString, []),
+  ('setLabel:', None, [NSString]),
+  ('initialCapacity', NSUInteger, []),
+  ('setInitialCapacity:', None, [NSUInteger]),
+]
+MTLResidencySet._bases_ = [NSObject]
+MTLResidencySet._methods_ = [
+  ('requestResidency', None, []),
+  ('endResidency', None, []),
+  ('addAllocation:', None, [MTLAllocation]),
+  ('addAllocations:count:', None, [c.POINTER[MTLAllocation], NSUInteger]),
+  ('removeAllocation:', None, [MTLAllocation]),
+  ('removeAllocations:count:', None, [c.POINTER[MTLAllocation], NSUInteger]),
+  ('removeAllAllocations', None, []),
+  ('containsAllocation:', BOOL, [MTLAllocation]),
+  ('commit', None, []),
+  ('device', MTLDevice, []),
+  ('label', NSString, []),
+  ('allocatedSize', uint64_t, [], True),
+  ('allocationCount', NSUInteger, [], True),
+]
+MTLCommonCounter: TypeAlias = NSString
+try: MTLCommonCounterTimestamp = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterTimestamp') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterTessellationInputPatches = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterTessellationInputPatches') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterVertexInvocations = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterVertexInvocations') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterPostTessellationVertexInvocations = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterPostTessellationVertexInvocations') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterClipperInvocations = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterClipperInvocations') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterClipperPrimitivesOut = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterClipperPrimitivesOut') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterFragmentInvocations = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterFragmentInvocations') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterFragmentsPassed = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterFragmentsPassed') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterComputeKernelInvocations = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterComputeKernelInvocations') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterTotalCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterTotalCycles') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterVertexCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterVertexCycles') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterTessellationCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterTessellationCycles') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterPostTessellationVertexCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterPostTessellationVertexCycles') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterFragmentCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterFragmentCycles') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterRenderTargetWriteCycles = MTLCommonCounter.in_dll(dll, 'MTLCommonCounterRenderTargetWriteCycles') # type: ignore
+except (ValueError,AttributeError): pass
+MTLCommonCounterSet: TypeAlias = NSString
+try: MTLCommonCounterSetTimestamp = MTLCommonCounterSet.in_dll(dll, 'MTLCommonCounterSetTimestamp') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterSetStageUtilization = MTLCommonCounterSet.in_dll(dll, 'MTLCommonCounterSetStageUtilization') # type: ignore
+except (ValueError,AttributeError): pass
+try: MTLCommonCounterSetStatistic = MTLCommonCounterSet.in_dll(dll, 'MTLCommonCounterSetStatistic') # type: ignore
+except (ValueError,AttributeError): pass
+@c.record
+class MTLCounterResultTimestamp(c.Struct):
+  SIZE = 8
+  timestamp: int
+MTLCounterResultTimestamp.register_fields([('timestamp', uint64_t, 0)])
+@c.record
+class MTLCounterResultStageUtilization(c.Struct):
+  SIZE = 48
+  totalCycles: int
+  vertexCycles: int
+  tessellationCycles: int
+  postTessellationVertexCycles: int
+  fragmentCycles: int
+  renderTargetCycles: int
+MTLCounterResultStageUtilization.register_fields([('totalCycles', uint64_t, 0), ('vertexCycles', uint64_t, 8), ('tessellationCycles', uint64_t, 16), ('postTessellationVertexCycles', uint64_t, 24), ('fragmentCycles', uint64_t, 32), ('renderTargetCycles', uint64_t, 40)])
+@c.record
+class MTLCounterResultStatistic(c.Struct):
+  SIZE = 64
+  tessellationInputPatches: int
+  vertexInvocations: int
+  postTessellationVertexInvocations: int
+  clipperInvocations: int
+  clipperPrimitivesOut: int
+  fragmentInvocations: int
+  fragmentsPassed: int
+  computeKernelInvocations: int
+MTLCounterResultStatistic.register_fields([('tessellationInputPatches', uint64_t, 0), ('vertexInvocations', uint64_t, 8), ('postTessellationVertexInvocations', uint64_t, 16), ('clipperInvocations', uint64_t, 24), ('clipperPrimitivesOut', uint64_t, 32), ('fragmentInvocations', uint64_t, 40), ('fragmentsPassed', uint64_t, 48), ('computeKernelInvocations', uint64_t, 56)])
+class MTLCounter(objc.Spec): pass
+MTLCounter._bases_ = [NSObject]
+MTLCounter._methods_ = [
+  ('name', NSString, []),
+]
+try: MTLCounterErrorDomain = NSErrorDomain.in_dll(dll, 'MTLCounterErrorDomain') # type: ignore
+except (ValueError,AttributeError): pass
+enum_MTLCounterSampleBufferError: dict[int, str] = {(MTLCounterSampleBufferErrorOutOfMemory:=0): 'MTLCounterSampleBufferErrorOutOfMemory', (MTLCounterSampleBufferErrorInvalid:=1): 'MTLCounterSampleBufferErrorInvalid', (MTLCounterSampleBufferErrorInternal:=2): 'MTLCounterSampleBufferErrorInternal'}
+MTLCounterSampleBufferError: TypeAlias = NSInteger
+MTLEvent._bases_ = [NSObject]
+MTLEvent._methods_ = [
+  ('device', MTLDevice, []),
+  ('label', NSString, []),
+  ('setLabel:', None, [NSString]),
+]
+class MTLSharedEventListener(objc.Spec): pass
+MTLSharedEventListener._bases_ = [NSObject]
+MTLSharedEventListener._methods_ = [
+  ('init', 'instancetype', []),
+]
+MTLSharedEventListener._classmethods_ = [
+  ('sharedListener', MTLSharedEventListener, []),
+]
+MTLSharedEventHandle._bases_ = [NSObject]
+MTLSharedEventHandle._methods_ = [
+  ('label', NSString, []),
+]
+MTLSharedEvent._bases_ = [MTLEvent]
+MTLSharedEvent._methods_ = [
+  ('newSharedEventHandle', MTLSharedEventHandle, [], True),
+  ('waitUntilSignaledValue:timeoutMS:', BOOL, [uint64_t, uint64_t]),
+  ('signaledValue', uint64_t, []),
+  ('setSignaledValue:', None, [uint64_t]),
+]
 MTLResourceCPUCacheModeShift = 0
 MTLResourceCPUCacheModeMask = (0xf << MTLResourceCPUCacheModeShift)
 MTLResourceStorageModeShift = 4
 MTLResourceStorageModeMask = (0xf << MTLResourceStorageModeShift)
 MTLResourceHazardTrackingModeShift = 8
 MTLResourceHazardTrackingModeMask = (0x3 << MTLResourceHazardTrackingModeShift)
+MTLCounterErrorValue = (~0)

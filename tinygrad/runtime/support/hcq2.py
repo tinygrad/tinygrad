@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
-import functools, time, itertools, decimal, weakref, statistics, ctypes, importlib
+import functools, time, itertools, decimal, weakref, statistics, ctypes, importlib, array
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2, cpu_profile, mv_address
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us, DEV
@@ -21,7 +21,7 @@ if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: rem
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("NV", "QCOM", "CPU")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
+HCQ_DEVS = frozenset(("NV", "QCOM", "METAL", "CPU")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -65,11 +65,14 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
 
 # C FFI
 
+def host_buf(*vals:int, dtype:DType=dtypes.uint64) -> Buffer: # constants a body loads from the host: function pointers, handles, selectors
+  (b:=Buffer(HCQ_RUNTIME_DEV.value, len(vals), dtype, preallocate=True))._buf.view.view(fmt=dtype.fmt)[:] = array.array(unwrap(dtype.fmt), vals)
+  return b
+
 @functools.cache
 def cfunc_buf(lib:str, name:str) -> Buffer:
   fn = getattr(importlib.import_module(f"tinygrad.runtime.autogen.{lib}").dll, name)
-  (b:=Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, preallocate=True))._buf.view.view(fmt='Q')[0] = unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
-  return b
+  return host_buf(unwrap(ctypes.cast(fn, ctypes.c_void_p).value))
 
 def ccall(fn:Any, *args:UOp|int) -> UOp:
   ptr = UOp.placeholder((1,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.value, tag=("cfunc", fn.__module__.split(".")[-1], fn.__name__))
@@ -248,7 +251,7 @@ class EncodeCtx:
   devs:tuple[str, ...]
   inputs:dict[tuple[UOp, str], int] = field(default_factory=dict)
   table:UOp = field(default_factory=lambda: UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="inputs"))
-  lt_patches:dict[UOp, list[UOp]] = field(default_factory=dict) # placeholder -> the stores into it that resolve when the linear links
+  lt_patches:dict[UOp, list[UOp]] = field(default_factory=dict) # placeholder -> dependencies that resolve when the linear links
 
 class HWQueue:
   q_rewrite:PatternMatcher
@@ -319,7 +322,7 @@ def _is_link_patch(w:UOp) -> bool:
   return all(_is_link_patch(s) for s in w.src)
 
 def hoist_links(ctx:EncodeCtx, a:UOp) -> UOp|None:
-  links, rest = partition(a.src[1:], lambda s: s.op is Ops.STORE and _is_link_patch(s))
+  links, rest = partition(a.src[1:], lambda s: s.op is Ops.LINEAR or (s.op is Ops.STORE and _is_link_patch(s)))
   if not links: return None
   # nest the addr placeholders patches under their getaddr
   ws = UOp.sink(*links)
@@ -425,12 +428,14 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool) -> UOp:
 class LinkCtx: inputs:dict[UOp, UOp]; use_rt:bool; refs:list[UOp] = field(default_factory=list) # noqa: E702
 
 def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
-  if b.tag is None: return None # a param, not a placeholder
+  if b in ctx.inputs: return ctx.inputs[b]
+  if (base:=b.without_after).tag is None: return None # a param, not a placeholder
 
-  dev = cast(HCQ2Compiled, Device[to_tuple(b.device)[0]])
+  dev = cast(HCQ2Compiled, Device[to_tuple(base.device)[0]])
 
   # device owns the placeholders it names
   if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
+  elif b.op is Ops.AFTER: return None # ordinary patches resolve after bufferizing the base
   elif not ctx.use_rt:
     r = Buffer(dev.device, b.max_numel(), b.dtype, options=BufferSpec(host=b.arg.volatile, uncached=True, cpu_access=True), preallocate=True)
   else: r = dev.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile)
@@ -457,9 +462,11 @@ def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
     mv[at:at + n] = (w.val & (1 << 8 * n) - 1).to_bytes(n, 'little')
   return UOp(Ops.NOOP)
 
+pm_link_bufferize = PatternMatcher([(p, bufferize_buf) for p in
+  (UPat(Ops.PARAM, name="b"), UPat(Ops.PARAM).after(name="b", allow_any_len=True))])
+
 pm_link = PatternMatcher([
   (UPat(Ops.CAST, src=(UPat(Ops.CAST, src=(UPat.cvar(),), name="inner"),), name="c"), lambda c, inner: inner.src[0].cast(c.dtype)),
-  (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.inputs[b] if b in ctx.inputs else bufferize_buf(ctx, b)),
   (UPat(Ops.GETADDR, name="g"), resolve_getaddr),
   (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"),
     lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)),
@@ -480,7 +487,7 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UO
   cache = allow_cache and not any(u.tag == "lt_input" for u in linear.toposort() if u.op is Ops.PARAM)
 
   inputs = {UOp.param(i, b.dtype, b.max_numel(), b.device).replace(tag="lt_input"): b for i, b in enumerate(input_uops or ())}
-  linked = graph_rewrite(linear, pm_link, ctx=(ctx:=LinkCtx(inputs, use_rt=allow_cache and not cache)), walk=True, name="link")
+  linked = graph_rewrite(linear, pm_link, bpm=pm_link_bufferize, ctx=(ctx:=LinkCtx(inputs, use_rt=allow_cache and not cache)), walk=True, name="link")
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked
