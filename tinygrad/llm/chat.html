@@ -6,6 +6,7 @@
   .msg { padding: 10px 16px; margin: 8px 0; white-space: pre-wrap; border-radius: 18px }
   table { border-collapse: collapse; white-space: normal; table-layout: fixed; width: 100%; overflow-wrap: anywhere }
   th, td { border: 1px solid #555; padding: 6px 10px; text-align: left }
+  a { color: #8ab4f8 } hr { border: 0; border-top: 1px solid #555; margin: 12px 0 }
   .user { background: #2f2f2f; margin-left: auto; width: fit-content; max-width: 70% }
   #input { max-width: 768px; width: 100%; margin: 20px auto; padding: 14px 20px;
            background: #2f2f2f; color: inherit; font: inherit;
@@ -18,10 +19,12 @@
   let generating = false;
   const inline = s => s.replace(
     /<pre>[\s\S]*?<\/pre>|<code>[\s\S]*?<\/code>|`([^`\n]+)`|\*\*((?:[^\n]|\n(?!\n))+?)\*\*|\*(?!\s)((?:[^*\n]|\n(?!\n))+)\*/g,
-    (s, code, bold, em) => code !== undefined ? `<code>${code}</code>` : bold ? `<b>${inline(bold)}</b>` : em ? `<em>${inline(em)}</em>` : s);
+    (s, code, bold, em) => code !== undefined ? `<code>${code}</code>` : bold ? `<b>${inline(bold)}</b>` : em ? `<em>${inline(em)}</em>` : s)
+    .replace(/<pre>[\s\S]*?<\/pre>|<code>[\s\S]*?<\/code>|\[([^\]\n]+)\]\(((?:https?:\/\/|#)[^\s)]*)\)|~{1,2}([^~\n]+)~{1,2}/g,
+      (s, label, url, del) => url ? `<a href="${url.replace(/"/g, '&quot;')}">${inline(label)}</a>` : del ? `<del>${inline(del)}</del>` : s);
   const md = s => inline(s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/```[^\n]*\n([\s\S]*?)(?:```|(?![\s\S]))|^(#{1,6}) (.+)$/gm,
-      (_, pre, h, title) => pre !== undefined ? `<pre><code>${pre}</code></pre>` : `<h${h.length}>${title}</h${h.length}>`)
+    .replace(/```[^\n]*\n([\s\S]*?)(?:```|(?![\s\S]))|^(#{1,6}) (.+)$|^-{3,}[ \t]*$/gm,
+      (_, pre, h, title) => pre !== undefined ? `<pre><code>${pre}</code></pre>` : h ? `<h${h.length}>${title}</h${h.length}>` : '<hr>')
     .replace(/<pre>[\s\S]*?<\/pre>|(^\|[^\n]+\|\r?\n\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*(?:\r?\n\|[^\n]*)*)|^[-*] (.+)$/gm,
       (s, t, li) => li !== undefined ? `&#8226; ${li}` : t === undefined ? s : '<table>' + t.split('\n').filter((_, i) => i !== 1)
         .map((r, i) => '<tr>' + r.trim().slice(1).replace(/(?<!\\)\|$/, '').split(/(?<!\\)\|/)
