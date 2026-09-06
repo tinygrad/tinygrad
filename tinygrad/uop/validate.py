@@ -50,8 +50,8 @@ z3_renderer = PatternMatcher([
   # casts from floats create new variables
   (UPat(Ops.CAST, dtypes.ints+(dtypes.weakint,), src=(UPat(dtype=dtypes.floats),), name="x"), lambda x,ctx:
     create_bounded(f"cast{len(ctx[1])}", x.dtype.min, x.dtype.max, ctx[0])),
-  # A comparison between floats introduces a new bool variable
-  (UPat(GroupOp.Comparison, src=UPat(dtype=dtypes.floats)), lambda ctx: (z3.Bool(f"float_cmp{len(ctx[1])}", ctx=ctx[0]), None)),
+  # a bool computed from floats (comparison or cast) is a new variable
+  (UPat((Ops.CAST,)+tuple(GroupOp.Comparison), src=UPat(dtype=dtypes.floats)), lambda ctx: (z3.Bool(f"float_bool{len(ctx[1])}", ctx=ctx[0]), None)),
   # a same-dtype cast states a width, which z3 does not model: identity. must precede the rules below (bool->bool)
   (UPat(Ops.CAST, name="x"), lambda x,ctx: (ctx[1][x.src[0]], None) if x.dtype == x.src[0].dtype else None),
   # casts from bool/int to int/bool
