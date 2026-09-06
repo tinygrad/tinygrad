@@ -15,37 +15,42 @@
 <script>
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
   const msgs = [];
-  const md = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/```[^\n]*\n([\s\S]*?)(?:```|(?![\s\S]))|`([^`\n]+)`|^(#{1,6}) (.+)$|\*\*(.+?)\*\*|\*(?!\s)([^*\n]+)\*/gm,
-      (_, pre, code, h, title, bold, em) => pre !== undefined ? `<pre><code>${pre}</code></pre>` : code !== undefined ? `<code>${code}</code>`
-        : h ? `<h${h.length}>${title}</h${h.length}>` : bold ? `<b>${bold}</b>` : `<em>${em}</em>`)
-    .replace(/<pre>[\s\S]*?<\/pre>|<code>[\s\S]*?<\/code>|(^\|[^\n]+\|\r?\n\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*(?:\r?\n\|[^\n]*)*)|^[-*] (.+)$/gm,
+  let generating = false;
+  const inline = s => s.replace(/<pre>[\s\S]*?<\/pre>|<code>[\s\S]*?<\/code>|`([^`\n]+)`|\*\*(.+?)\*\*|\*(?!\s)([^*\n]+)\*/g,
+    (s, code, bold, em) => code !== undefined ? `<code>${code}</code>` : bold ? `<b>${inline(bold)}</b>` : em ? `<em>${inline(em)}</em>` : s);
+  const md = s => inline(s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/```[^\n]*\n([\s\S]*?)(?:```|(?![\s\S]))|^(#{1,6}) (.+)$/gm,
+      (_, pre, h, title) => pre !== undefined ? `<pre><code>${pre}</code></pre>` : `<h${h.length}>${title}</h${h.length}>`)
+    .replace(/<pre>[\s\S]*?<\/pre>|(^\|[^\n]+\|\r?\n\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*(?:\r?\n\|[^\n]*)*)|^[-*] (.+)$/gm,
       (s, t, li) => li !== undefined ? `&#8226; ${li}` : t === undefined ? s : '<table>' + t.split('\n').filter((_, i) => i !== 1)
-        .map((r, i) => '<tr>' + r.trim().slice(1).replace(/\|$/, '').split('|')
-          .map(c => `<${i ? 'td' : 'th'}>${c.trim()}</${i ? 'td' : 'th'}>`).join('') + '</tr>').join('') + '</table>');
+        .map((r, i) => '<tr>' + r.trim().slice(1).replace(/(?<!\\)\|$/, '').split(/(?<!\\)\|/)
+          .map(c => `<${i ? 'td' : 'th'}>${c.trim().replace(/\\\|/g, '|')}</${i ? 'td' : 'th'}>`).join('') + '</tr>').join('') + '</table>'));
   async function send() {
-    if (!input.value.trim()) return;
-    msgs.push({role: 'user', content: input.value.trim()});
-    chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
-    input.value = '';
-    const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
-    d.innerHTML = '<span style="color:#888"></span><div></div>'; const [thinking, answer] = d.children;
-    const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model: 'llama', messages: msgs, stream: true, temperature: 0.7})});
-    let buf = '', txt = '', rsn = '';
-    for (const rd = r.body.getReader(), dec = new TextDecoder();;) {
-      const {done, value} = await rd.read();
-      if (done) break;
-      buf += dec.decode(value, {stream: true});
-      const lines = buf.split('\n');
-      buf = lines.pop();
-      for (const ln of lines)
-        if (ln.startsWith('data: ') && !ln.includes('[DONE]'))
-          try { const dl = JSON.parse(ln.slice(6)).choices[0]?.delta;
-            if (dl?.reasoning_content) { rsn += dl.reasoning_content; thinking.textContent = rsn }
-            if (dl?.content) { txt += dl.content; answer.innerHTML = md(txt) } } catch {}
-      chat.scrollTop = chat.scrollHeight;
-    }
-    const m = {role:'assistant', content:txt}; if (rsn) m.reasoning_content = rsn; msgs.push(m);
+    if (generating || !input.value.trim()) return;
+    generating = true;
+    try {
+      msgs.push({role: 'user', content: input.value.trim()});
+      chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
+      input.value = '';
+      const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
+      d.innerHTML = '<span style="color:#888"></span><div></div>'; const [thinking, answer] = d.children;
+      const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({model: 'llama', messages: msgs, stream: true, temperature: 0.7})});
+      let buf = '', txt = '', rsn = '';
+      for (const rd = r.body.getReader(), dec = new TextDecoder();;) {
+        const {done, value} = await rd.read();
+        if (done) break;
+        buf += dec.decode(value, {stream: true});
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const ln of lines)
+          if (ln.startsWith('data: ') && !ln.includes('[DONE]'))
+            try { const dl = JSON.parse(ln.slice(6)).choices[0]?.delta;
+              if (dl?.reasoning_content) { rsn += dl.reasoning_content; thinking.textContent = rsn }
+              if (dl?.content) { txt += dl.content; answer.innerHTML = md(txt) } } catch {}
+        chat.scrollTop = chat.scrollHeight;
+      }
+      const m = {role:'assistant', content:txt}; if (rsn) m.reasoning_content = rsn; msgs.push(m);
+    } finally { generating = false }
   }
 </script></body></html>
