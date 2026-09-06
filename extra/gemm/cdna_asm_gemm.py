@@ -135,20 +135,15 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
   N, half_k_b = math.prod(B.shape[:-1]), B.shape[-1]
   K = half_k * 2
   assert half_k == half_k_b and math.prod(C.shape[:-1]) == M and C.shape[-1] == N
-  short_k = getenv("MXFP4_SHORT_K", 1) and (M, N, K, tile_m, tile_n) == (16384, 4096, 4096, 256, 256)
-  tiles_per_wg = getenv("MXFP4_TILES_PER_WG", 8) if short_k else 1
-  assert tiles_per_wg in (1, 2, 4, 8)
   threads = UOp.special(256, "lidx0")
   logical_groups_x, logical_groups_y = ceildiv(N, tile_n), ceildiv(M, tile_m)
   target_optimization = (M, N, K) in MXFP4_TARGET_SHAPES and (tile_m, tile_n) == (256, 256)
-  if short_k:
-    physical_groups_x, physical_groups_y = logical_groups_x, logical_groups_y//tiles_per_wg
-  elif target_optimization:
+  if target_optimization:
     persist_groups = min(logical_groups_x * logical_groups_y, MXFP4_TARGET_GROUPS[N])
     physical_groups_x, physical_groups_y = (32, persist_groups // 32) if persist_groups >= 32 else (persist_groups, 1)
   else: physical_groups_x, physical_groups_y = logical_groups_x, logical_groups_y
   groups_x, groups_y = UOp.special(physical_groups_x, "gidx0"), UOp.special(physical_groups_y, "gidx1")
-  lds = UOp.placeholder((81920 if target_optimization and not short_k else 163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  lds = UOp.placeholder((81920 if target_optimization else 163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
   # TODO: this is saving extra copies, why?
   zero = UOp.const(0)
   sink = UOp.sink(C.flatten().index(zero).store(UOp.const(0, C.dtype)), A.flatten().index(zero).load(), B.flatten().index(zero).load(),
@@ -157,11 +152,7 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
                   arg=KernelInfo(f"mxfp4_gemm_{M}_{N}_{K}_{tile_m}x{tile_n}",
                                  estimates=Estimates(ops=2*M*N*K,
                                                      mem=(M*half_k+N*half_k)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
-  if short_k:
-    from extra.gemm.gemm_mxfp4_shortk import build_kernel as build_short_kernel
-    insts = build_short_kernel(tiles_per_wg, bool(getenv("MXFP4_PREFETCH", int(tiles_per_wg > 1))))
-  else:
-    insts = build_kernel(M, N, K, tile_m, tile_n)
+  insts = build_kernel(M, N, K, tile_m, tile_n)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
 
 def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor) -> Tensor:
