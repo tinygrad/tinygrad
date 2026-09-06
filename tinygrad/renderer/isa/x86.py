@@ -738,7 +738,7 @@ class X86Renderer(ISARenderer):
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg[0]))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
       def _format(src:tuple[UOp, ...]) -> list[str]:
-        return [str(s.arg) if s.op is Ops.CAST else reg_strs[o].get(s.dtype.itemsize, o) if \
+        return [str(s.src[0].val) if s.op is Ops.CAST else reg_strs[o].get(s.dtype.itemsize, o) if \
                 (o:=str(rdef(s))) in reg_strs else o for s in src if rdef(s) is not None]
       def _mem_adress(base:UOp, idx:UOp, disp:UOp, sz:UOp) -> list[str]:
         return [f"[{rdef(base)}" + (f" + {rdef(idx)}*{sz.src[0].val}" if rdef(idx) else "") + (f" + {d}" if (d := disp.src[0].val) else "") + "]"]
