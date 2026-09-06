@@ -3,6 +3,7 @@ from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register, rdef, LinearContext
 from tinygrad.dtype import dtypes
+from typing import Any
 
 PSEUDO_OPS = {Ops.CONST, Ops.CAST, Ops.BITCAST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP, Ops.STACK}
 
@@ -29,7 +30,7 @@ class LinearScanRegallocContext:
 
     # allocate registers
     self.locals: dict[UOp, UOp] = {}
-    self.spills: dict[Register, UOp] = {} # mapping from virtual to stack slot
+    self.spills: dict[Register, Any] = {} # mapping from virtual to arbitrary spill slot
     self.reals: dict[int, dict[Register, Register]] = {} # mapping from virtual to real at each program point
     self.insert_before: dict[int, list[tuple[Register, Register]]] = {} # fills to be inserted at each program point
     live: dict[Register, Register] = {} # mapping from virtual to real that's currently assigned to it
@@ -46,10 +47,7 @@ class LinearScanRegallocContext:
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
       if v not in self.spills:
-        sz = v.cons[0].size
-        offset = ctx.stack_size + (sz - ctx.stack_size % sz) % sz
-        self.spills[v] = UOp.cconst(offset, dtypes.int32)
-        ctx.stack_size = offset + sz
+        self.spills[v] = ctx.assign_spill_slot(v, self.vdef(v))
       r = alloc(cons if cons is not None else v.cons, i)
       self.insert_before.setdefault(i, []).append((v, r))
       return r

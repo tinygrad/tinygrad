@@ -3,6 +3,7 @@ import itertools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops
+from typing import Any
 
 @dataclass(frozen=True)
 class Register:
@@ -27,20 +28,20 @@ def rdef(u:UOp):
   if u.op in {Ops.NOOP, Ops.AFTER, Ops.BITCAST} and u.src: return rdef(u.src[0])
   return u.tag[0] if isinstance(u.tag, tuple) else u.tag
 
-@dataclass
 class LinearContext:
-  ren: ISARenderer
-  stack_size: int = 0
-  lock: UOp|None = None
-  loop_label: dict[UOp, str] = field(default_factory=dict)
+  def __init__(self, ren:ISARenderer):
+    self.ren, self.stack_size = ren, 0
+    self.loop_label: dict[UOp, str] = {}
+  def assign_spill_slot(self, r:Register, u:UOp) -> Any: raise NotImplementedError("arch specific")
 
 class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
   isel_matcher: PatternMatcher
   pre_regalloc_matcher: PatternMatcher
   post_regalloc_matcher: PatternMatcher
+  linear_ctx_type: type = LinearContext
 
   def is_two_address(self, x:UOp) -> bool: return False
-  def spill(self, disp:UOp, x:UOp) -> UOp: raise NotImplementedError("arch specific")
-  def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def spill(self, spill_slot:Any, x:UOp) -> UOp: raise NotImplementedError("arch specific")
+  def fill(self, spill_slot:Any, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")

@@ -1,3 +1,4 @@
+from __future__ import annotations
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
 import sys, struct, functools
@@ -458,7 +459,7 @@ isel_matcher = PatternMatcher([
 # the flags belong to the last instruction that wrote them. x86 has no good way to store/restore them (then regalloc would
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
-def flag_rematerialize(ctx:LinearContext, x:UOp):
+def flag_rematerialize(ctx:X86LinearContext, x:UOp):
   if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
   elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
     ctx.lock = flag_def
@@ -466,7 +467,7 @@ def flag_rematerialize(ctx:LinearContext, x:UOp):
   return None
 
 # TODO: dont use rewrite
-def alloc_buffer(ctx:LinearContext, x:UOp):
+def alloc_buffer(ctx:X86LinearContext, x:UOp):
   nx = isel_matcher.rewrite(stack_pointer.index(UOp.cconst(ctx.stack_size, dtypes.uint32), tag=x.tag))
   ctx.stack_size += x.max_numel() * x.dtype.itemsize
   return nx, [nx]
@@ -683,6 +684,16 @@ encodings = {
   X86Ops.RET: lambda x: bytes([0xC3]),
 }
 
+class X86LinearContext(LinearContext):
+  def __init__(self, ren:X86Renderer):
+    super().__init__(ren)
+    self.lock: UOp|None = None
+  def assign_spill_slot(self, r:Register, u:UOp) -> int:
+    sz = r.cons[0].size
+    offset = self.stack_size + (sz - self.stack_size % sz) %sz
+    self.stack_size = offset + sz
+    return offset
+
 class X86Renderer(ISARenderer):
   device = "CPU"
   has_local = False
@@ -693,6 +704,7 @@ class X86Renderer(ISARenderer):
   pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
+  linear_ctx_type = X86LinearContext
   def __init__(self, target:Target):
     if target.arch.split(",")[0] != "x86_64": raise RuntimeError(f"X86Renderer only supports x86_64, got {target.arch}")
     super().__init__(target)
@@ -701,15 +713,17 @@ class X86Renderer(ISARenderer):
   def is_two_address(self, x:UOp) -> bool: return x.op is Ops.INS and x.arg[0] in X86GroupOp.TwoAddress
   def copy(self, x:UOp, reg:Register) -> UOp: return x.ins(X86Ops.MOV, src=(x,), tag=reg)
 
-  def spill(self, disp:UOp, x:UOp) -> UOp:
+  def spill(self, spill_slot:int, x:UOp) -> UOp:
     is_xmm = isinstance(x.tag, tuple) and x.tag[0].cons[0].size == 16
     op = X86Ops.VMOVUPSm if is_xmm else X86Ops.MOVm
+    disp = UOp.cconst(spill_slot, dtypes.int32)
     return UOp(Ops.INS, src=fold_address(stack_pointer.index(disp)) + (x,), arg=(op, dtypes.void), tag=x.tag)
 
   # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
-  def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp:
+  def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
     is_xmm = reg.cons[0].size == 16
     dt = dtypes.uint64 if x.op is Ops.BUFFER else x.dtype
+    disp = UOp.cconst(spill_slot, dtypes.int32)
     return UOp(Ops.INS, src=fold_address(stack_pointer.index(disp)), arg=(X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, dt), tag=(reg,))
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
