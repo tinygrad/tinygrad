@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, math
-from typing import Callable, cast
+from typing import Callable, cast, NamedTuple
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
@@ -389,28 +389,43 @@ def _vec_load(ptr:UOp, lanes:int) -> tuple[UOp, ...]:
   vec = _amd_load(ptr, lanes)
   return tuple(vec[i].float() for i in range(lanes))
 
+class _SoftmaxState(NamedTuple):
+  m: UOp
+  l: UOp
+  acc: tuple[UOp, ...]
+
+def _softmax_reduce(states:tuple[_SoftmaxState, ...]) -> _SoftmaxState:
+  m = functools.reduce(UOp.maximum, (state.m for state in states))
+  zero = states[0].m.const_like(0)
+  weights = tuple(((state.m-m)*LOG2E).exp2() for state in states)
+  l = sum((weight*state.l for weight, state in zip(weights, states)), zero)
+  acc = tuple(sum((weight*state.acc[i] for weight, state in zip(weights, states)), zero) for i in range(len(states[0].acc)))
+  return _SoftmaxState(m, l, acc)
+
 @functools.cache
 def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, max_kv_len, block_n, waves=4):
   valid_kv_len = _unbind(valid_kv_len)
   _, B, H_KV, N, D = cast(tuple[int, int, int, int, int], cache_kv.shape)
   _, H, M, _ = cast(tuple[int, int, int, int], q.shape)
   assert M == 1 and H % H_KV == 0 and D % WARP_SIZE == 0 and max_kv_len <= N and max_kv_len % block_n == 0
-  G, CHUNK, DPL, WAVES = H // H_KV, block_n, D // WARP_SIZE, waves
+  G, CHUNK, DPL, WAVES, PARTIALS = H // H_KV, block_n, D // WARP_SIZE, waves, out.shape[2]
   assert CHUNK % WAVES == 0
   SEC = CHUNK // WAVES  # keys each wave scans independently
-  live_chunks = (valid_kv_len+CHUNK-1)//CHUNK
-  live_chunks = min(live_chunks, out.shape[2]) if isinstance(live_chunks, int) else live_chunks.minimum(out.shape[2])
+  total_chunks = (valid_kv_len+CHUNK-1)//CHUNK
+  live_chunks = min(total_chunks, PARTIALS) if isinstance(total_chunks, int) else total_chunks.minimum(PARTIALS)
   block_bhkv, block_chunk = UOp.range(B*H_KV, 0, AxisType.GLOBAL), UOp.range(live_chunks, 1, AxisType.GLOBAL)
   lane, wave = UOp.range(WARP_SIZE, -1, axis_type=AxisType.WARP), UOp.range(WAVES, 3, axis_type=AxisType.LOCAL)
   b, kv_head = block_bhkv // H_KV, block_bhkv % H_KV
   # per-lane query fragments for every GQA head, kept packed in registers; unpacked at use
   qf = tuple(_vec_load(q[b, kv_head*G+h, 0, lane*DPL], DPL) for h in range(G))
-  zerof = UOp.const(0, dtypes.float)
+  zerof, onef = UOp.const(0, dtypes.float), UOp.const(1, dtypes.float)
+  chunk_round = UOp.range((total_chunks-1-block_chunk)//PARTIALS+1, 4, AxisType.REDUCE)
+  chunk_id = block_chunk + chunk_round*PARTIALS
   valids: list[UOp] = []
   scores: list[list[UOp]] = [[zerof]*G for _ in range(SEC)]
   vfrags: list[tuple[UOp, ...]] = [()]*SEC
   for j in range(SEC):
-    key = block_chunk*CHUNK + wave*SEC + j
+    key = chunk_id*CHUNK + wave*SEC + j
     valid = key < valid_kv_len
     valids.append(valid)
     kfrag = _vec_load(cache_kv[0, b, kv_head, key, lane*DPL], DPL)
@@ -418,16 +433,19 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, m
     vfrags[j] = tuple(valid.where(v, zerof) for v in _vec_load(cache_kv[1, b, kv_head, key, lane*DPL], DPL))
     for h in range(G):
       s = warp_reduce(sum((qf[h][i]*kfrag[i] for i in range(DPL)), UOp.const(0, dtypes.float)), full_wave=True) * (1/math.sqrt(D))
-      scores[j][h] = valid.where(s, UOp.const(-math.inf, dtypes.float))
-  ninf = UOp.const(-math.inf, dtypes.float)
-  row_max = [functools.reduce(UOp.maximum, (scores[j][h] for j in range(SEC)), ninf) for h in range(G)]
-  accs:list[list[UOp]] = [[UOp.const(0, dtypes.float)] * DPL for _ in range(G)]
-  row_sums:list[UOp] = [UOp.const(0, dtypes.float) for _ in range(G)]
-  for j in range(SEC):
-    for h in range(G):
-      beta = valids[j].where(((scores[j][h]-row_max[h])*LOG2E).exp2(), UOp.const(0, dtypes.float))
-      accs[h] = [a + beta*v for a, v in zip(accs[h], vfrags[j])]
-      row_sums[h] = row_sums[h] + beta
+      scores[j][h] = valid.where(s, UOp.const(-1e30, dtypes.float))
+  states: list[_SoftmaxState] = []
+  acc_reg, max_reg, sum_reg = _reg((G, DPL), 2, 0), _reg((G,), 3, -1e30), _reg((G,), 4, 0)
+  prev_acc, prev_max, prev_sum = acc_reg.after(chunk_round), max_reg.after(chunk_round), sum_reg.after(chunk_round)
+  for h in range(G):
+    tile = _softmax_reduce(tuple(_SoftmaxState(scores[j][h], valids[j].where(onef, zerof), vfrags[j]) for j in range(SEC)))
+    prev = _SoftmaxState(prev_max[h].load(), prev_sum[h].load(), tuple(prev_acc[h, i].load() for i in range(DPL)))
+    states.append(_softmax_reduce((prev, tile)))
+  update = UOp.group(acc_reg.store(UOp.stack(*(x for state in states for x in state.acc)).reshape(G, DPL)),
+                     max_reg.store(UOp.stack(*(state.m for state in states))),
+                     sum_reg.store(UOp.stack(*(state.l for state in states)))).end(chunk_round)
+  row_max, row_sums = [max_reg.after(update)[h].load() for h in range(G)], [sum_reg.after(update)[h].load() for h in range(G)]
+  accs = [[acc_reg.after(update)[h, i].load() for i in range(DPL)] for h in range(G)]
   # exchange across the block's waves through LDS (fp16 halves LDS so more blocks fit per CU)
   acc_lds = UOp.placeholder((WAVES, G, D), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
   ml_lds = UOp.placeholder((WAVES, G, 2), dtypes.float, slot=1, addrspace=AddrSpace.LOCAL)
@@ -442,14 +460,13 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, m
   for i in range(-(-G*D//(WAVES*WARP_SIZE))):
     flat = tid + i*WAVES*WARP_SIZE
     h, d = flat // D, flat % D
-    M = functools.reduce(UOp.maximum, (ml_lds[w, h, 0].load() for w in range(WAVES)), ninf)
-    val = sum((((ml_lds[w, h, 0].load()-M)*LOG2E).exp2() * acc_lds[w, h, d].load().float() for w in range(WAVES)), UOp.const(0, dtypes.float))
+    M, _, (val,) = _softmax_reduce(tuple(_SoftmaxState(ml_lds[w, h, 0].load(), ml_lds[w, h, 1].load(),
+                                                        (acc_lds[w, h, d].load().float(),)) for w in range(WAVES)))
     oidx = out[b, kv_head*G + h, block_chunk, d]
     if G*D % (WAVES*WARP_SIZE): oidx = out[b, (kv_head*G + h).valid(flat < G*D), block_chunk, d]
     final_stores.append(oidx.store(val))
   hstat = tid
-  M = functools.reduce(UOp.maximum, (ml_lds[w, hstat, 0].load() for w in range(WAVES)), ninf)
-  L = sum((((ml_lds[w, hstat, 0].load()-M)*LOG2E).exp2() * ml_lds[w, hstat, 1].load() for w in range(WAVES)), UOp.const(0, dtypes.float))
+  M, L, _ = _softmax_reduce(tuple(_SoftmaxState(ml_lds[w, hstat, 0].load(), ml_lds[w, hstat, 1].load(), ()) for w in range(WAVES)))
   q_head = (kv_head*G + hstat).valid(hstat < G) if WAVES*WARP_SIZE > G else kv_head*G + hstat
   final_stores += [stats[b, q_head, block_chunk, 0].store(M), stats[b, q_head, block_chunk, 1].store(L)]
   return UOp.group(*final_stores).end(lane, wave, block_chunk, block_bhkv).sink(arg=KernelInfo(name="flash_decode_partial", opts_to_apply=()))
@@ -486,7 +503,7 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UO
 
 def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, max_kv_len:int) -> Tensor:
   B, H, D = cache_kv.shape[1], q.shape[1], cache_kv.shape[4]
-  chunks = min(256, max_kv_len // 64)
+  chunks = min(48, max_kv_len // 64)
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device)
   stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device)
   fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=64, waves=16)

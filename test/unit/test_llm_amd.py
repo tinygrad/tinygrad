@@ -120,6 +120,21 @@ class TestQ8Quantize(unittest.TestCase):
     expected = q.scaled_dot_product_attention(cache[0, :, :, :3], cache[1, :, :, :3], enable_gqa=True)
     np.testing.assert_allclose(out.numpy(), expected.numpy(), rtol=2e-3, atol=2e-3)
 
+  def test_flash_attention_decode_beyond_256_chunks(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    n = 257 * 64
+    q = Tensor.zeros(1, 1, 1, 32, dtype=dtypes.half).realize()
+    k = Tensor.zeros(1, 1, n, 32, dtype=dtypes.half)
+    v = Tensor.zeros(1, 1, n-64, 32, dtype=dtypes.half).cat(Tensor.ones(1, 1, 64, 32, dtype=dtypes.half), dim=2)
+    cache = Tensor.stack(k, v).contiguous().realize()
+    short_kv_len = UOp.variable("valid_kv_len", 1, n).bind(1)
+    short = flash_attention(q, Tensor(cache.uop.after(Tensor(short_kv_len).uop)), short_kv_len).realize()
+    np.testing.assert_allclose(short.numpy(), np.zeros(short.shape, dtype=np.float32), rtol=2e-3, atol=2e-4)
+    valid_kv_len = UOp.variable("valid_kv_len", 1, n).bind(n)
+    assigned = Tensor(cache.uop.after(Tensor(valid_kv_len).uop))
+    out = flash_attention(q, assigned, valid_kv_len).realize()
+    np.testing.assert_allclose(out.numpy(), np.full(out.shape, 1/257, dtype=np.float32), rtol=2e-3, atol=2e-4)
+
   def test_prefill_attention_unaligned_start(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
