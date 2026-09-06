@@ -8,6 +8,28 @@ from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
+def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
+
+def transform_precompiled_call(c:UOp) -> UOp|None:
+  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
+  assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
+  # Bind output storage at the existing argument positions.
+  outs = {p: a.empty_like() for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound}
+  placed:dict[UOp, UOp] = {}
+  items = []
+  for st in c.src[0].src:
+    value = st.src[1]
+    while value.op is Ops.AFTER: value = value.src[0]
+    # A custom kernel's output buffer can be the call output directly. Rebind each buffer only once.
+    if value.op in {Ops.BUFFER, Ops.UNSHARD} and value.has_buffer_identity() and value not in placed:
+      placed[value] = st.src[0]
+      items.append(st.src[1])
+    else: items.append(st.src[0].after(st))
+  body = UOp.sink(*items).substitute(placed)
+  call = c.replace(src=(body, *(outs.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                   for i, a in enumerate(c.src[1:]))))
+  return UOp.sink(*(c.src[1+p].store(o.after(call).shrink_to(c.src[1+p].shape)) for p,o in outs.items()))
+
 def walk_mop(u:UOp):
   if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD, Ops.BITCAST}: return walk_mop(u.src[0])
   if u.op is Ops.AFTER and (b:=walk_mop(u.src[0])) is not u.src[0]: return b.after(*u.src[1:])

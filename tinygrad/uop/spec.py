@@ -174,6 +174,9 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
 
+  # Detached storage may carry pending writes in the Tensor graph.
+  (UPat(Ops.AFTER, src=(UPat(Ops.DETACH, name="x"),), allow_any_len=True), lambda x: x.storage_base.op in {Ops.BUFFER, Ops.PARAM}),
+
   # CONTIGUOUS ensures the source UOp realizes
   (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD), src=(UPat(),), arg=None), lambda: True),
 

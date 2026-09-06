@@ -16,6 +16,14 @@ class TestStorageSpec(unittest.TestCase):
     buf = Tensor.empty(4).uop
     type_verify((buf + 1).contiguous().after(buf.store(buf + 1)), spec_tensor)
 
+  def test_detached_storage_can_carry_writes(self):
+    buf = Tensor.empty(4).uop
+    detached = buf.detach()
+    type_verify(detached.after(detached.store(buf + 1)), spec_tensor)
+    with self.assertRaises(RuntimeError):
+      type_verify((buf + 1).detach().after(buf.store(buf + 1)), spec_tensor)
+
+
 class TestDTypeFromUOp(unittest.TestCase):
   def test_broadcastable_promotion(self):
     self.assertEqual(dtype_from_uop(Ops.ADD, (UOp.const(1.0).cast(dtypes.float32), UOp.const(1.0).cast(dtypes.float16)), None), dtypes.float32)
