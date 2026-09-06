@@ -389,6 +389,7 @@ def lower_call(call:UOp) -> UOp|None:
   # the placeholders become the body's params in visit order, variables bind by name after them, the ranges renumber
   tops = body.toposort()
   bufs, alus = partition([u for u in tops if u.op is Ops.PARAM], lambda u: u.tag is not None)
+  bufs += [b for b in ctx.lt_patches if b not in bufs] # a patched placeholder is an arg, the link applies its patches through the args
   names = dedup([a.arg.name for a in alus])
   # bufs to params
   params = {b: UOp.param(i, b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for i, b in enumerate(bufs)}

@@ -18,7 +18,8 @@ from tinygrad.runtime.support.hcq import FileIOInterface, HCQBuffer, MMIOInterfa
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
-from tinygrad.runtime.support.usb import USB3, pm_usb_bufferize
+from tinygrad.runtime.support.usb import USB3, usb_chunks
+from tinygrad.runtime.support.usb import pm_usb_batch, pm_usb_encode, pm_usb_lower, pm_usb_bufferize
 from tinygrad.runtime.support.memory import AddrSpace
 from tinygrad.runtime.ops_amd import SQTT, PMC, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE, AQL_HDR
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent, PMCSample
@@ -409,7 +410,7 @@ class AMDComputeQueue(HWQueue):
     ring, wptr, doorbell, put = _queue_args(self, q)
     n, p = words.max_numel() // unit, put.index(0).load() # put counts units
     i = UOp.range(words.max_numel() // 4, 10, dtype=dtypes.int, src=(cmdbuf,))
-    at = ((p * (unit // 4) + i.cast(p.dtype)) % q.ring.size).cast(dtypes.int)
+    at = ((p * (unit // 4)) % q.ring.size).cast(dtypes.int) + i # a unit never wraps: the ring holds whole units
     written = ring.index(at).store(words.bitcast(dtypes.uint32).index(i).load()).end(i)
     w = wptr.after(written).index(0).store(p + n)
     return doorbell.after(put.after(w).index(0).store(p + n)).index(0).store(p + n - doorbell_lag)
@@ -474,9 +475,8 @@ class AMDSDMAQueue(HWQueue):
       self.q(hdr, self.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz-off, self.max_copy_size)-1), 0,
              *(a + UOp.const(off, dtypes.uint64) if off else a for a in (call.src[2].getaddr(self.devs), call.src[1].getaddr(self.devs))))
 
-  def wait(self, signal:UOp, value:UOp):
-    op = self.sdma.SDMA_OP_POLL_REGMEM | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) \
-       | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
+  def wait(self, signal:UOp, value:UOp, func:int=WAIT_REG_MEM_FUNCTION_GEQ):
+    op = self.sdma.SDMA_OP_POLL_REGMEM | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(func) | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
     self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), 0xffffffff,
            self.sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | self.sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
 
@@ -504,10 +504,23 @@ class AMDSDMAQueue(HWQueue):
     zi = UOp.range(zero_amt, 10, dtype=dtypes.int, src=(cmdbuf,))
     zero_tail = ring.index(tail + zi).store(UOp.const(0, dtypes.uint32)).end(zi)
     i = UOp.range(size_dw, 11, dtype=dtypes.int, src=(cmdbuf,))
-    copy = ring.index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
+    copy = ring.after(zero_tail).index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
     next_put = put_b + ((zero_amt + size_dw) * 4).cast(put_b.dtype)
-    flush = UOp.barrier(zero_tail, copy, put.index(0).store(next_put), wptr.index(0).store(next_put))
-    return doorbell.after(flush).index(0).store(next_put)
+    w = wptr.after(copy).index(0).store(next_put) # the pointers after the ring writes, then the doorbell
+    return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put)
+
+# *****************
+# USB: the submits write the rings over the link (usb.py)
+
+class AMDUSBSDMAQueue(AMDSDMAQueue): # the cmdbuf streams into the ring from the host, the copy chunks sync through the sram
+  q_rewrite = PatternMatcher([
+    (UPat(Ops.INS, arg=("wait_eq", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))),
+     lambda ctx, dst, val: ctx.wait(dst, val, WAIT_REG_MEM_FUNCTION_EQ)),
+  ]) + AMDSDMAQueue.q_rewrite
+
+  def __init__(self, ctx, submit):
+    super().__init__(ctx, submit)
+    self.lin = usb_chunks(self.lin)
 
 def amd_compute_queue(ctx, submit:UOp) -> HWQueue:
   return (AMDComputeAQLQueue if Device[submit.src[0].arg[0][0]].is_aql else AMDComputeQueue)(ctx, submit)
@@ -810,8 +823,8 @@ class USBIface(PCIIface):
     self.dev_impl = AMDev(self.pci_dev)
     self._compute_props()
     self.sram = self._dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x80000)
+    self.sys_buf = self._dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000) # +0x800 counts the copy chunks the queue is done with
     self.cq_buf = self._dma_region(ctrl_addr=0xb800, sys_addr=0x822000, size=0x1000) # +12 is the dword that releases an armed read
-    self.usb_handle = unwrap(ctypes.cast(self.pci_dev.usb.usb.handle, ctypes.c_void_p).value)
 
   def _dma_region(self, ctrl_addr, sys_addr, size):
     region = self.dev_impl.mm.map_range(vaddr:=self.dev_impl.mm.alloc_vaddr(size=size), size, [(sys_addr, size)], aspace=AddrSpace.SYS, uncached=True)
@@ -822,11 +835,6 @@ class USBIface(PCIIface):
     return super().alloc(size, host=False, uncached=uncached, cpu_access=cpu_access or host, contiguous=contiguous, force_devmem=True, **kwargs)
 
   def sleep(self, timeout): pass
-
-  # we don't own the sram region, so the buffer never frees it
-  @functools.cached_property
-  def usb_sram(self) -> Buffer:
-    return Buffer(self.dev.device, (b:=self.sram).size, dtypes.uint8, options=BufferSpec(external_ptr=b.va_addr, nolru=True)).allocate(opaque=b)
 
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
@@ -885,8 +893,12 @@ class AMDDevice(HCQ2Compiled):
     ]) + self.pm_bufferize
 
     if self.is_usb:
-      self.pm_bufferize = pm_usb_bufferize + self.pm_bufferize
-      raise NotImplementedError("usb amd is not migrated to sealed submits yet") # a usb pm_lower can override the whole submit graph
+      self.pm_encode = PatternMatcher([
+        (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy", name="submit"), lambda ctx, submit: encode_submit(AMDUSBSDMAQueue(ctx, submit))),
+      ]) + AMDDevice.pm_encode + pm_usb_encode
+      self.pm_batch, self.pm_lower = pm_usb_batch, pm_usb_lower
+      self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="b"), # sdma has no indirect buffer: its cmdbuf streams into the ring from the host
+        lambda b: Buffer("CPU", b.max_numel(), b.dtype, preallocate=True) if str(b.tag).startswith("cmdbuf_copy") else None)]) + pm_usb_bufferize + self.pm_bufferize
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.pmc_enabled, self.sqtt_enabled = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0
@@ -941,7 +953,7 @@ class AMDDevice(HCQ2Compiled):
     wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * self.cu_cnt, mmap.PAGESIZE)
     ctl_stack_size = round_up((12 if self.target[0] != 9 else 8) * self.wave_cnt + 8 + 40, mmap.PAGESIZE)
     return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
-      0x2000 if self.is_usb else (16 << 20), eop_buffer_size=0x1000,
+      (1 << 20) if self.is_usb else (16 << 20), eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size,
       debug_memory_size=round_up(self.wave_cnt * 32, 64))
 
@@ -949,7 +961,7 @@ class AMDDevice(HCQ2Compiled):
     if getenv("AMD_DISABLE_SDMA"): return None
     if idx in self.sdma_queues: return self.sdma_queues[idx]
     with contextlib.suppress(OSError):
-      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x2000 if self.is_usb else (16 << 20), idx=idx)
+      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, (1 << 20) if self.is_usb else (16 << 20), idx=idx)
     return self.sdma_queues.get(idx, None)
 
   def tmpring_size(self, private_segment_size):
