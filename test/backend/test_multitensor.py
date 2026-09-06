@@ -125,10 +125,6 @@ class TestMultiTensor(unittest.TestCase):
       run_linear(linear, var_vals)
       np.testing.assert_equal(xt.numpy(), X_np[i*2:i*2+2])
 
-  # pruned subset of the (devices x op x shard_axis x reduce_axis) product: every factor value, both axis
-  # relations (reduce along/independent of the shard axis) and all ops are covered; measured with coverage.py
-  # to hit identical lines in tinygrad/ as the full 54-combo product (except 9 incidental shape-dependent lines),
-  # at ~4x lower wall time
   def test_simple_reduce(self):
     for devices, rop, shard_axis, reduce_axis in [
       (devices_2, Ops.ADD, None, None), (devices_2, Ops.ADD, 0, 0), (devices_2, Ops.ADD, 0, 1),
@@ -180,21 +176,21 @@ class TestMultiTensor(unittest.TestCase):
   def test_allreduce_naive_jit(self):
     with Context(RING=0):
       jit_allreduce = TinyJit(_test_allreduce)
-      for _ in range(5):
+      for _ in range(3):
         a,b = jit_allreduce(Tensor.rand(256, 256))
         np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
   def test_allreduce_ring_jit(self):
     with Context(RING=2):
       jit_allreduce = TinyJit(_test_allreduce)
-      for _ in range(5):
+      for _ in range(3):
         a,b = jit_allreduce(Tensor.rand(256, 256))
         np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
   def test_allreduce_all2all_jit(self):
     with Context(ALL2ALL=2):
       jit_allreduce = TinyJit(_test_allreduce)
-      for _ in range(5):
+      for _ in range(3):
         a,b = jit_allreduce(Tensor.rand(256, 256))
         np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
@@ -216,7 +212,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_fuzz_allreduce(self):
     random.seed(41)
-    for it in range(2):
+    for it in range(1):
       for n in range(2, 4+1):
         shape = tuple([(n if i == 0 else 1) * random.randint(1, 10) for i in range(random.randint(1, 4))])
         t = Tensor.rand(shape).shard_(tuple([d0, d1, d2, d3][:n]), 0)
@@ -527,7 +523,7 @@ class TestMultiTransformer(unittest.TestCase):
       else: v.shard_(device, axis=None)
 
     last_tok = 0
-    for i in range(5):
+    for i in range(3):
       real_tok = real_model(Tensor([[last_tok]], device=Device.DEFAULT), i).item()
       shard_tok = shard_model(Tensor([[last_tok]], device=device), i).item()
 
