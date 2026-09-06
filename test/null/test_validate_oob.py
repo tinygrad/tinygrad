@@ -132,6 +132,22 @@ class TestValidateOOB(unittest.TestCase):
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(r.valid(unknown)).load()])
 
+  def test_bitcast_in_index(self):
+    with Context(CHECK_OOB=1, SPEC=2):
+      buf = UOp.param(0, dtypes.int, 16)
+      r = UOp.range(16, 0)
+      # the WEBGPU shift: int -> uint, shift, back to int
+      i = (r.cast(dtypes.int).bitcast(dtypes.uint) << UOp.const(1).cast(dtypes.uint)).bitcast(dtypes.int)
+      to_uops_list([buf.index(i.valid(i < 16)).load()])
+      with self.assertRaises(RuntimeError):
+        to_uops_list([buf.index(i).load()])  # 0..30 oob
+      # a negative char reads as a large uchar
+      c = Variable("c", -128, -113).cast(dtypes.char)
+      to_uops_list([UOp.param(1, dtypes.int, 144).index(c.bitcast(dtypes.uchar).cast(dtypes.int)).load()])  # 128..143 valid
+      # the bits of a float are any int
+      with self.assertRaises(RuntimeError):
+        to_uops_list([buf.index(r.cast(dtypes.float).bitcast(dtypes.int)).load()])
+
   def test_bool_cast_in_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp.param(0, dtypes.int, 1)

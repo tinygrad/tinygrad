@@ -50,8 +50,11 @@ z3_renderer = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda x,ctx: create_bounded(x.arg.name, x.vmin, x.vmax, ctx[0]) if x.is_variable else None),
   # loads are variables bounded by the min/max of the dtype. non-pointer INDEX is also a LOAD
   (UPat((Ops.LOAD, Ops.INDEX), name="x"), create_var),
-  # casts and comparisons from floats create new variables
-  (UPat((Ops.CAST,)+tuple(GroupOp.Comparison), src=UPat(dtype=dtypes.floats), name="x"), create_var),
+  # casts, bitcasts and comparisons from floats create new variables
+  (UPat((Ops.CAST, Ops.BITCAST)+tuple(GroupOp.Comparison), src=UPat(dtype=dtypes.floats), name="x"), create_var),
+  # a bitcast between ints wraps into the target range, z3 ints are unbounded
+  (UPat(Ops.BITCAST, dtypes.ints, src=(UPat.var("x", dtypes.ints),), name="c"),
+   lambda c,x,ctx: (ctx[1][x]-c.dtype.min) % 2**(8*c.dtype.itemsize) + c.dtype.min),
   # constants
   (UPat(Ops.CONST, arg=Invalid), lambda ctx: z3.Int("Invalid", ctx=ctx[0].ctx)),
   (UPat(Ops.CONST, name="x"), lambda x,ctx: z3.BoolVal(x.val, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else z3.IntVal(x.val, ctx=ctx[0].ctx)),
