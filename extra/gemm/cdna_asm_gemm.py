@@ -487,7 +487,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
              a_pretranspose:Tensor|None=None, mxfp4:bool=False, mxfp4_tile:tuple[int, int]|None=None,
              mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
              mxfp4_x:tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]|None=None, save_original_input:bool=False,
-             return_mxfp4_saves:bool=False) -> Tensor|tuple[Tensor, Tensor, Tensor]:
+             return_mxfp4_saves:bool=False, out:Tensor|None=None) -> Tensor|tuple[Tensor, Tensor, Tensor]:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   assert not return_mxfp4_saves or (mxfp4 and not save_original_input)
   if mxfp4:
@@ -511,7 +511,13 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   if (m_sharded:=is_multi and a.uop.axis == 1): M //= len(a.device)
   n_sharded = is_multi and b.uop.axis == 1
 
-  if is_multi:
+  if out is not None:
+    assert not is_multi, "provided output requires a single device"
+    assert out.shape == ((M, N) if squeeze else (batch, M, N)), "output shape mismatch"
+    assert out.dtype == out_dtype and out.device == a.device, "output dtype or device mismatch"
+    assert out.uop.contiguous_view() is not None, "output must be a contiguous buffer"
+    if squeeze: out = out.unsqueeze(0)
+  elif is_multi:
     if n_sharded:
       out = Tensor(Tensor.invalids(batch, M, N//len(a.device), dtype=out_dtype, device=a.device).uop.unshard(2), device=a.device)
     elif m_sharded:
