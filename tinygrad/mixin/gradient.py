@@ -18,6 +18,14 @@ def forward_gradient_auxiliaries(src:UOp, dst:UOp) -> UOp:
     if (aux:=mailbox.pop(src, None)) is not None: mailbox[dst] = aux
   return dst
 
+def pop_gradient_auxiliary(mailbox:dict[UOp, tuple[UOp|None, ...]], grad:UOp) -> tuple[UOp|None, ...]|None:
+  # Function PARAMs are flat storage in the new call representation. The logical gradient can therefore acquire only
+  # shape-preserving RESHAPEs before it reaches the flat PARAM target; these don't invalidate row/column auxiliaries.
+  while True:
+    if (aux:=mailbox.pop(grad, None)) is not None: return aux
+    if grad.op is not Ops.RESHAPE or grad.numel() != grad.src[0].numel(): return None
+    grad = grad.src[0]
+
 def forward_unshard_auxiliaries(ctx:UOp, ret:UOp, physical:UOp) -> UOp:
   # view_as(..., axis) creates UNSHARD(RESHAPE(...)). The next gradient rule will peel that storage RESHAPE, so attach
   # auxiliaries directly to the UOp it will produce. This deliberately does not preserve auxiliaries across arbitrary
@@ -86,7 +94,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   aux_args:list[UOp] = []
   for grad_arg, root in zip(grad_args, root_grads):
     for mailbox in gradient_auxiliary_mailboxes.values():
-      if (aux:=mailbox.pop(grad_arg, None)) is None: continue
+      if (aux:=pop_gradient_auxiliary(mailbox, grad_arg)) is None: continue
       aux_params:list[UOp|None] = []
       for value in aux:
         if value is None: aux_params.append(None)
@@ -104,7 +112,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   aux_returns:list[tuple[int, dict[UOp, tuple[UOp|None, ...]], tuple[int|None, ...]]] = []
   for arg_idx, grad_body in raw_grad_bodies:
     for mailbox in gradient_auxiliary_mailboxes.values():
-      if (aux:=mailbox.pop(grad_body, None)) is None: continue
+      if (aux:=pop_gradient_auxiliary(mailbox, grad_body)) is None: continue
       slots:list[int|None] = []
       for value in aux:
         if value is None: slots.append(None)

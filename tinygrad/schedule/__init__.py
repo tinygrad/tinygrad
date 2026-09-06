@@ -146,7 +146,7 @@ def resolve_linear_call(linear_call:UOp, outer_binds:dict[str, UOp]|None=None):
     # Substituting a precompiled LINEAR's params can expose caller AFTER states. Its calls are already ordered by the
     # LINEAR, so pass only their concrete storage views to the runtime, as create_schedule does for ordinary calls.
     if ret.op is Ops.CALL:
-      ret = ret.replace(src=(ret.src[0],)+tuple(_call_buf_uop(s) for s in ret.src[1:] if not s.is_bound_var))
+      ret = ret.replace(src=(ret.src[0],)+tuple(s if s.is_bound_var else _call_buf_uop(s) for s in ret.src[1:]))
     return ret
   return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
 
@@ -157,14 +157,19 @@ pm_resolve_linear_call = PatternMatcher([
 
 schedule_cache: dict[bytes, UOp] = {}
 schedule_cache_param_maps: dict[bytes, dict[int, int]] = {}
+schedule_cache_buffer_maps: dict[bytes, dict[int, ParamArg]] = {}
 
-def remap_paramarg_slots(root:UOp, param_map:dict[int, int], buffer_map:dict[int, int]|None=None) -> UOp:
+def remap_paramarg_slots(root:UOp, param_map:dict[int, int], buffer_map:dict[int, int|ParamArg]|None=None,
+                         clear_buffer:bool=False) -> UOp:
   """Simultaneously rename direct PARAM/BUFFER slots without fixed-point substitution cycling on permutations."""
   rebuilt:dict[UOp, UOp] = {}
   for x in root.toposort(enter_calls=False):
     src = tuple(rebuilt.get(s, s) for s in x.src)
     mapping = param_map if x.op is Ops.PARAM else buffer_map if x.op is Ops.BUFFER else None
-    arg = replace(x.arg, slot=mapping[x.arg.slot]) if mapping is not None and isinstance(x.arg, ParamArg) and x.arg.slot in mapping else x.arg
+    arg = x.arg
+    if mapping is not None and isinstance(arg, ParamArg) and arg.slot in mapping:
+      mapped = mapping[arg.slot]
+      arg = mapped if isinstance(mapped, ParamArg) else replace(arg, slot=mapped, buffer=None if clear_buffer else arg.buffer)
     rebuilt[x] = x.replace(src=src, arg=arg)
   return rebuilt[root]
 
@@ -179,7 +184,7 @@ def canonicalize_call_for_schedule_cache(call:UOp) -> UOp|None:
   buf_slots = list(dict.fromkeys(x.arg.slot for x in bufs))
   pmap, bmap = ({slot:i for i,slot in enumerate(param_slots)},
                 {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)})
-  body = remap_paramarg_slots(body, pmap, bmap)
+  body = remap_paramarg_slots(body, pmap, bmap, clear_buffer=True)
   arg = replace(call.arg, grad_fxn=None) if isinstance(call.arg, CallInfo) and call.arg.grad_fxn is not None else call.arg
   return call.replace(src=(body,)+tuple(call.src[1+slot] for slot in param_slots), arg=arg)
 
@@ -202,8 +207,9 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   bufs = [x for x in nodes if x.op is Ops.BUFFER and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
   param_slots, buf_slots = (list(dict.fromkeys(x.arg.slot for x in xs)) for xs in (params, bufs))
   pmap, bmap = ({slot:i for i,slot in enumerate(param_slots)}, {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)})
-  canonical = remap_paramarg_slots(canonical, pmap, bmap)
+  canonical = remap_paramarg_slots(canonical, pmap, bmap, clear_buffer=True)
   param_map = {pmap[x.arg.slot]:x.arg.slot for x in params}
+  buffer_map = {bmap[x.arg.slot]:x.arg for x in bufs}
   cache_key = canonical.key
   sc_ret = None
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
@@ -213,13 +219,17 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
     if SCACHE:
       schedule_cache[cache_key] = linear
       schedule_cache_param_maps[cache_key] = param_map
+      schedule_cache_buffer_maps[cache_key] = buffer_map
   else:
     # schedule cache hit
     linear = sc_ret
     old_map = schedule_cache_param_maps[cache_key]
     assert old_map.keys() == param_map.keys(), "canonical schedule cache hit has mismatched parameters"
     remap = {old_slot:param_map[canonical_slot] for canonical_slot,old_slot in old_map.items()}
-    linear = remap_paramarg_slots(linear, remap)
+    old_buffer_map = schedule_cache_buffer_maps[cache_key]
+    assert old_buffer_map.keys() == buffer_map.keys(), "canonical schedule cache hit has mismatched buffers"
+    buffer_remap = {old_arg.slot:buffer_map[canonical_slot] for canonical_slot,old_arg in old_buffer_map.items()}
+    linear = remap_paramarg_slots(linear, remap, buffer_remap)
   if (DEBUG >= 1 and len(linear.src) > 1) or DEBUG >= 3:
     for frm in inspect.stack():
       if frm.filename == "<string>": continue
