@@ -38,7 +38,7 @@ def _queue_args(hq:HWQueue, q) -> list[UOp]: # the ring and its pointers, tagged
 def _dw(vals) -> int: return sum(2 if isinstance(x, UOp) and x.dtype.itemsize == 8 else 1 for x in vals)
 
 def dispatch_packet(data:AMDProgramData, info:ProgramInfo, kernel_object:UOp=UOp.const(0, dtypes.uint64),
-                    kernarg_address:UOp=UOp.const(0, dtypes.uint64)) -> list: # hsa_kernel_dispatch_packet_t as words, the grid may be symbolic
+                    kernarg_address:UOp=UOp.const(0, dtypes.uint64)) -> list: # as words: the grid may be symbolic
   pkt = bytes(hsa.hsa_kernel_dispatch_packet_t(header=AQL_HDR | (hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE),
     setup=3 << hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS, private_segment_size=data.private_segment_size,
     group_segment_size=data.group_segment_size, **{f"workgroup_size_{d}": l for d, l in zip("xyz", info.local_size)}))
@@ -58,7 +58,7 @@ class AMDComputeQueue(HWQueue):
   def __init__(self, ctx, submit):
     super().__init__(ctx, submit)
     self.pm4, self.gc, self.soc, self.nbio, self.target = self.dev.pm4, self.dev.gc, self.dev.soc, self.dev.nbio, self.dev.target
-    self.profiled:list[UOp] = [] # a host store of the program tag per profiled kernel
+    self.profiled:list[UOp] = []
     if self.dev.pmc_enabled: self.pmc_start()
 
   def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, _dw(vals) - 1), *vals)
@@ -73,11 +73,11 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(set_packet, reg.addr[0] - set_packet_start, *(args or (reg.encode(**kwargs),)))
 
   @contextlib.contextmanager
-  def pred_exec(self, xcc_mask:int): # the packets inside run on the masked xccs only: the count fills in when the block closes
+  def pred_exec(self, xcc_mask:int): # the count fills in when the block closes
     if self.dev.xccs > 1: self.pkt3(self.pm4.PACKET3_PRED_EXEC, xcc_mask << 24)
     start = len(self.blob)
     yield
-    if self.dev.xccs > 1: # the count of the packets inside
+    if self.dev.xccs > 1:
       cnt, = struct.unpack("I", self.blob[start-4:start])
       self.blob[start-4:start] = struct.pack("I", cnt | (len(self.blob) - start) // 4)
 
@@ -135,15 +135,15 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regSPI_CONFIG_CNTL, ps_pkr_priority_cntl=3, exp_priority_order=3, gpr_write_priority=0x2c688,
               enable_sqg_bop_events=int(tracing), enable_sqg_top_events=int(tracing))
 
-  ### profiling: a kernel's counters and trace land in a slot of the device's profile buffers, python reads the slots back at synchronize
+  ### profiling: a kernel's slot holds its counters and trace until a synchronize reads them back
 
-  def prof_buf(self, name:str) -> UOp: # one of the device's profile buffers as a placeholder
+  def prof_buf(self, name:str) -> UOp:
     return UOp.placeholder((getattr(self.dev, name).size,), getattr(self.dev, name).dtype, 0, device=self.devs, tag=name)
 
-  def prof_start(self, data:AMDProgramData, info:ProgramInfo, lib:UOp) -> UOp|None: # the kernel's slot, the log remembers its program
+  def prof_start(self, data:AMDProgramData, info:ProgramInfo, lib:UOp) -> UOp|None:
     if not (self.dev.pmc_enabled or self.dev.sqtt_enabled): return None
     slot = (self.prof_buf("prof_log").index(0).load() + len(self.profiled)) % self.dev.prof_slots
-    tag = UOp.const(unwrap_view(lib)[0].arg.slot, dtypes.uint64) # the program's, its profile event carries the same
+    tag = UOp.const(unwrap_view(lib)[0].arg.slot, dtypes.uint64)
     self.profiled.append(self.prof_buf("prof_log").index(1 + slot.cast(dtypes.int)).store(tag))
     if self.dev.sqtt_enabled:
       self.sqtt_start(slot)
@@ -155,7 +155,7 @@ class AMDComputeQueue(HWQueue):
     if self.dev.pmc_enabled: self.pmc_read(slot)
     if self.dev.sqtt_enabled: self.sqtt_stop(slot)
 
-  def prof_bump(self, cmdbuf:UOp) -> UOp: # the profiled count moves once the slots are chosen
+  def prof_bump(self, cmdbuf:UOp) -> UOp:
     if not self.profiled: return cmdbuf
     log = self.prof_buf("prof_log")
     return cmdbuf.after(log.after(cmdbuf, *self.profiled).index(0).store(log.index(0).load() + len(self.profiled)))
@@ -167,7 +167,7 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCP_PERFMON_CNTL if self.target[0] <= 11 else self.gc.regCP_PERFMON_CNTL_1, perfmon_state=0)
     if en: self.wreg(self.gc.regCP_PERFMON_CNTL if self.target[0] <= 11 else self.gc.regCP_PERFMON_CNTL_1, perfmon_state=1)
 
-  def pmc_start(self): # every submit: the selects, then the counters from zero. the schedule says where each sample lands
+  def pmc_start(self): # every submit
     self.pmc_reset_counters(en=False)
     self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL, cs_en=1, ps_en=1, gs_en=1, hs_en=1, **({'vmid_mask':0xffff} if (gfx9:=self.target[0] == 9) else {}))
     if not gfx9: self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL2, force_en=1, vmid_en=0xffff)
@@ -194,7 +194,7 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regCOMPUTE_PERFCOUNT_ENABLE, 1)
     self.pmc_reset_counters(en=True)
 
-  def pmc_read(self, slot:UOp): # the counters into the slot's row of pmc_buf, then from zero again
+  def pmc_read(self, slot:UOp):
     buf = rt_addr(self.prof_buf("pmc_buf"), self.devs) + slot * self.dev.pmc_size
     self.set_grbm()
     self.wreg(self.gc.regCP_PERFMON_CNTL if self.target[0] <= 11 else self.gc.regCP_PERFMON_CNTL_1, perfmon_state=1, perfmon_sample_enable=1)
@@ -246,7 +246,7 @@ class AMDComputeQueue(HWQueue):
               mask = lo32((cu_mask & sa_mask) | (cu_mask & (sa_mask << 16)) << 16)
             self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), mask)
 
-  def sqtt_start(self, slot:UOp): # the windows of slot, one per se
+  def sqtt_start(self, slot:UOp):
     self.memory_barrier()
     win, ses = self.dev.sqtt_win, self.dev.sqtt_ses
     base = rt_addr(self.prof_buf("sqtt_buf"), self.devs) + slot * win
@@ -311,7 +311,7 @@ class AMDComputeQueue(HWQueue):
     self.memory_barrier()
 
   # Magic values from src/amd/common/ac_sqtt.c:ac_sqtt_emit_stop and src/amd/common/ac_sqtt.c:ac_sqtt_emit_wait
-  def sqtt_stop(self, slot:UOp): # the wptr of every se lands in the slot's row of sqtt_wptrs
+  def sqtt_stop(self, slot:UOp):
     self.memory_barrier()
     self.set_grbm()
     ses = self.dev.sqtt_ses
@@ -344,7 +344,7 @@ class AMDComputeQueue(HWQueue):
 
   ### exec
 
-  def kernargs(self, call:UOp, prg:UOp, data:AMDProgramData) -> list[UOp]: # the args, then the dispatch packet if the kernel reads its dims from it
+  def kernargs(self, call:UOp, prg:UOp, data:AMDProgramData) -> list[UOp]:
     words = [get_call_arg_uops(call)[gi].getaddr(self.devs) for gi in prg.arg.globals] + \
             [b.ccast(v.dtype) for v, b in zip(prg.arg.vars, get_call_var_uops(call, prg))] # a bound value is a bare const, the var has the width
     pad = data.kernargs_segment_size - sum(w.dtype.itemsize for w in words)
@@ -405,7 +405,7 @@ class AMDComputeQueue(HWQueue):
     ib = patch(UOp.placeholder((16,), dtypes.uint8, device=self.devs, tag=to_name("ib", self.queue)), [(4, base.getaddr(self.devs) + off)], blob)
     return self.push(self.prof_bump(cmdbuf), ib, self.dev.compute_queue)
 
-  def push(self, cmdbuf:UOp, words:UOp, q, unit:int=4, doorbell_lag:int=0) -> UOp: # the words into the ring at put, the pointers, the doorbell
+  def push(self, cmdbuf:UOp, words:UOp, q, unit:int=4, doorbell_lag:int=0) -> UOp:
     ring, wptr, doorbell, put = _queue_args(self, q)
     n, p = words.max_numel() // unit, put.index(0).load() # put counts units
     i = UOp.range(words.max_numel() // 4, 10, dtype=dtypes.int, src=(cmdbuf,))
@@ -419,9 +419,9 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     super().__init__(ctx, submit)
     self.cmd_addr = UOp.variable("cmdbuf", 0, 2**48, dtypes.uint64) # the packets point into the cmdbuf, its address binds at submit
     self.pkts:list[UOp] = []
-    self.run_start = 0 # of the pm4 since the last dispatch
+    self.run_start = 0
 
-  def close_run(self, end:int): # the pm4 run rides as a vendor packet: an indirect buffer into the cmdbuf
+  def close_run(self, end:int):
     if end > self.run_start:
       hdr = AQL_HDR | (hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE) | (1 << 16)
       ib = [self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), self.cmd_addr + self.run_start,
@@ -445,7 +445,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
   def submit(self, cmdbuf:UOp) -> UOp: # the doorbell is the last packet's index
     self.close_run(cmdbuf.max_numel())
     base, off = unwrap_view(cmdbuf)
-    self.blob, self.patches = bytearray(), [] # the aql stream: q again, into a buffer of its own
+    self.blob, self.patches = bytearray(), [] # q again, for the aql stream
     self.q(*UOp.sink(*self.pkts).substitute({self.cmd_addr: base.getaddr(self.devs) + off}).src)
     aql = UOp.placeholder((len(self.blob),), dtypes.uint8, device=self.devs, tag=to_name("aql", self.queue))
     return self.push(self.prof_bump(cmdbuf), patch(aql, self.patches, bytes(self.blob)), self.dev.compute_queue, unit=64, doorbell_lag=1)
@@ -507,7 +507,7 @@ class AMDSDMAQueue(HWQueue):
     flush = UOp.barrier(zero_tail, copy, put.index(0).store(next_put), wptr.index(0).store(next_put))
     return doorbell.after(flush).index(0).store(next_put)
 
-def amd_compute_queue(ctx, submit:UOp) -> HWQueue: # the device's kind of compute ring
+def amd_compute_queue(ctx, submit:UOp) -> HWQueue:
   return (AMDComputeAQLQueue if Device[submit.src[0].arg[0][0]].is_aql else AMDComputeQueue)(ctx, submit)
 
 @dataclass(frozen=True)
@@ -517,7 +517,7 @@ class AMDProgramData:
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int
 
 _amd_program_cache:dict[tuple[bytes, tuple[str, ...]], tuple[AMDProgramData, UOp]] = {}
-_amd_program_prof:dict[UOp, tuple[str, bytes, bytes]] = {} # program placeholder -> (name, lib, profile key): its profile event when it's placed
+_amd_program_prof:dict[UOp, tuple[str, bytes, bytes]] = {} # placeholder -> (name, lib, key) for its profile event
 def amd_build_program(dev, prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramData, UOp]:
   # the image parses once per lib, each device set gets its own program buffer of it
   if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[3].arg, devs))) is None:
@@ -785,7 +785,8 @@ class PCIIface(PCIIfaceBase):
       cq = d.compute_queue
       for b in (cq.put_value, cq.read_ptr, cq.write_ptr): b._buf.view.view(fmt='Q')[0] = 0
       d.iface.dev_impl.gfx.setup_ring(*cq.params)
-      (tl:=d.timeline._buf.cpu_view().view(fmt='Q'))[0] = tl[1]
+      tl = d.timeline._buf.cpu_view().view(fmt='Q')
+      tl[0] = tl[1]
 
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
@@ -887,7 +888,7 @@ class AMDDevice(HCQ2Compiled):
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.pmc_enabled, self.sqtt_enabled = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0
-    if self.pmc_enabled or self.sqtt_enabled: # a kernel profiles into a slot, the slots hold what it wrote until a synchronize reads them back
+    if self.pmc_enabled or self.sqtt_enabled:
       self.iface.require_profile_mode()
       self.prof_slots, self.prof_read, self.pmc_sched, self.sqtt_next_cmd_id = getenv("PROF_SLOTS", 32), 0, [], itertools.count(0)
       self.sqtt_ses, self.sqtt_win = self.se_cnt * self.xccs, (getenv("SQTT_BUFFER_SIZE", 256) << 20) // self.prof_slots # mb, per shader engine
@@ -977,7 +978,7 @@ class AMDDevice(HCQ2Compiled):
       if hasattr(self, 'aql_desc'): self.aql_scratch()
     return self.scratch
 
-  def aql_scratch(self): # the queue descriptor holds the scratch: the cp sets the waves up from it
+  def aql_scratch(self):
     gfx9_rsrc = {'NUM_FORMAT':hsa.BUF_NUM_FORMAT_UINT, 'DATA_FORMAT':hsa.BUF_DATA_FORMAT_32, 'ELEMENT_SIZE':1, 'INDEX_STRIDE':3}
     rsrc = {'DST_SEL_X':hsa.SQ_SEL_X, 'DST_SEL_Y':hsa.SQ_SEL_Y, 'DST_SEL_Z':hsa.SQ_SEL_Z, 'DST_SEL_W':hsa.SQ_SEL_W, 'ADD_TID_ENABLE':1,
             'TYPE':hsa.SQ_RSRC_BUF, **(gfx9_rsrc if self.target[0] == 9 else {'FORMAT':hsa.BUF_FORMAT_32_UINT, 'OOB_SELECT':2})}
@@ -992,7 +993,7 @@ class AMDDevice(HCQ2Compiled):
     self.aql_desc.compute_tmpring_size = self.tmpring_size(self.max_private_segment_size)
     self.aql_gart._buf.cpu_view()[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
 
-  def _prof_buffer(self, size:int, dtype, host:bool=False) -> Buffer: # zeroed
+  def _prof_buffer(self, size:int, dtype, host:bool=False) -> Buffer:
     buf = Buffer(self.device, size, dtype, options=BufferSpec(host=host, nolru=True, uncached=True, cpu_access=True), preallocate=True)
     buf._buf.cpu_view().view(fmt='B')[:buf.nbytes] = bytes(buf.nbytes)
     return buf
@@ -1000,15 +1001,15 @@ class AMDDevice(HCQ2Compiled):
   @functools.cached_property
   def prof_log(self) -> Buffer: return self._prof_buffer(1 + self.prof_slots, dtypes.uint64, host=True)
   @property
-  def pmc_size(self) -> int: return self.pmc_sched[-1].off + self.pmc_sched[-1].size # a slot's row, known once a queue scheduled the counters
+  def pmc_size(self) -> int: return self.pmc_sched[-1].off + self.pmc_sched[-1].size
   @functools.cached_property
-  def pmc_buf(self) -> Buffer: return self._prof_buffer(self.pmc_size * self.prof_slots, dtypes.uint8) # zeroed: some counters have only a lo part
+  def pmc_buf(self) -> Buffer: return self._prof_buffer(self.pmc_size * self.prof_slots, dtypes.uint8)
   @functools.cached_property
   def sqtt_buf(self) -> Buffer: return self._prof_buffer(self.sqtt_win * self.prof_slots * self.sqtt_ses, dtypes.uint8)
   @functools.cached_property
   def sqtt_wptrs(self) -> Buffer: return self._prof_buffer(self.prof_slots * self.sqtt_ses, dtypes.uint32)
 
-  def program_buffer(self, b:UOp) -> Buffer: # allocated once per program, its profile event carries the base the trace pcs are against
+  def program_buffer(self, b:UOp) -> Buffer:
     if b not in self.prog_bufs:
       buf = self.prog_bufs[b] = Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
       if PROFILE:
@@ -1026,12 +1027,12 @@ class AMDDevice(HCQ2Compiled):
     blob = bytes(self.sqtt_buf._buf.cpu_view()[off:off + wptr])
     return (struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (se << 24)) + blob) if self.target[0] == 9 else blob
 
-  def _at_profile_finalize(self): # what ran so far, then the calibration kernels: not profiles anyone asked for
+  def _at_profile_finalize(self): # the calibration kernels aren't profiles
     self.synchronize()
     super()._at_profile_finalize()
     if self.pmc_enabled or self.sqtt_enabled: self.prof_read = self.prof_log._buf.cpu_view().view(fmt='Q')[0]
 
-  def collect_prof(self): # the slots since the last read, the newest ones if more kernels ran than there are slots
+  def collect_prof(self):
     if self.pmc_enabled or self.sqtt_enabled:
       log = self.prof_log._buf.cpu_view().view(fmt='Q')
       if (lost:=log[0] - self.prof_read - self.prof_slots) > 0:

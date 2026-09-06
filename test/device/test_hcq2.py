@@ -210,7 +210,8 @@ class TestHCQ2Core(unittest.TestCase):
   def test_device_state_survives_as_link_refs(self):
     # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
     dev = Device[Device.DEFAULT]
-    names = {"AMD": () if dev.is_aql else ("scratch",), "NV": ("timeline",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
+    names = {"AMD": () if getattr(dev, "is_aql", False) else ("scratch",), # the aql descriptor holds the scratch, nothing addresses it
+             "NV": ("timeline",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
     @TinyJit
     def f(a): return (a * 2 + 1).contiguous().realize()
     x = Tensor.ones(16).contiguous().realize()
