@@ -407,6 +407,17 @@ class TestWithGrad(unittest.TestCase):
     self.assertEqual(source.grad.tolist(), [10., 20., 30.])
     self.assertEqual(factor.grad.tolist(), [1., 2., 3.])
 
+  def test_imul_clone_squared_backward(self):
+    for dtype in (dtypes.float32, dtypes.bfloat16):
+      with self.subTest(dtype=dtype):
+        source = Tensor([2., 3.], dtype=dtype).realize()
+        x = source.float().clone()
+        x *= source.float()
+        grad = (x*x).sum().gradient(source)[0]
+        self.assertEqual(x.tolist(), [4., 9.])
+        self.assertEqual(grad.tolist(), [32., 108.])
+        self.assertEqual(source.tolist(), [2., 3.])
+
   def test_set_imul_transposed_clone_backward(self):
     source = Tensor([[1., 2.], [3., 4.]]).realize()
     x = source.clone()

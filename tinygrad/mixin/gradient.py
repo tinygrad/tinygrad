@@ -72,6 +72,17 @@ def view_assign_gradient(ctx:UOp, base:UOp, view:UOp):
   mask = compute_gradient(view, view.const_like(1), {base})[base]
   return (mask.eq(0).where(ctx, 0), view.substitute({base: ctx}, walk=True))
 
+def substitute_values(root:UOp, values:dict[UOp, UOp]) -> UOp:
+  rewritten:dict[UOp, UOp] = {}
+  for u in root.toposort(enter_calls=False):
+    if u in values: rewritten[u] = values[u]
+    else:
+      src = tuple(rewritten.get(s, s) for s in u.src)
+      # STORE destinations and AFTER storage keep their identity; only value inputs are substituted.
+      if u.op in {Ops.STORE, Ops.AFTER}: src = (u.src[0], *src[1:])
+      rewritten[u] = u.replace(src=src)
+  return rewritten[root]
+
 # ctx is grad_output
 pm_gradient = PatternMatcher([
   (UPat(Ops.CAST, name="ret"), lambda ctx, ret: (ctx.cast(ret.src[0].dtype),)),
@@ -150,7 +161,7 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
         for bw_uop in v.toposort(lambda x: x not in (t0, *t0.src, grads[t0])):
           all_metadata[bw_uop] = all_metadata.get(bw_uop, ())+backward_metadata
   # Gradients may outlive an in-place write. Read the previous value's expression, not its overwritten buffer.
-  overwritten = {u.src[0].base for u in walk if u.op is Ops.STORE}
+  overwritten = {u.src[0].base for u in grads if u.op is Ops.STORE}
   values:dict[UOp, UOp] = {}
   for u in UOp.sink(*overwritten).toposort():
     if u.op is not Ops.AFTER or len(u.src) != 2: continue
@@ -163,7 +174,7 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
       mask = compute_gradient(view, view.const_like(1), {base}).get(base)
       if mask is None: continue
       value = mask.eq(0).where(base, compute_gradient(view, value, {base})[base])
-    values[u] = value.substitute(values, walk=True)
+    values[u] = substitute_values(value, values)
   if replacements := {u: values[u] for u in overwritten if u in values}:
-    grads = {u: v.substitute(replacements, walk=True) for u,v in grads.items()}
+    grads = {u: substitute_values(v, replacements) for u,v in grads.items()}
   return grads
