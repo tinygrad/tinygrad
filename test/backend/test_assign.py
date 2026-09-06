@@ -828,6 +828,13 @@ class TestAssignOrdering(unittest.TestCase):
       b_np *= 0.9
     np.testing.assert_allclose(param.item(), p_np, atol=1e-5)
 
+  def test_after_store_to_other_buffer(self):
+    x, state = Tensor([2.]).realize(), Tensor([0.]).realize()
+    ordered = Tensor(x.uop.after(state.uop.store(x.uop * 3)))
+    self.assertEqual((ordered + x).tolist(), [4.])
+    self.assertEqual(state.tolist(), [6.])
+    self.assertEqual(x.tolist(), [2.])
+
   def test_war_reader_already_depends_on_write(self):
     x = Tensor([1.0]).contiguous().realize()
     y = Tensor([2.0]).contiguous().realize()
