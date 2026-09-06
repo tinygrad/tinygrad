@@ -52,7 +52,6 @@ class RandMixin(OpMixin):
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    By default, the random values get persistent storage when computed. `contiguous=False` leaves them as an expression.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)

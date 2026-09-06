@@ -13,7 +13,6 @@ from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.schedule.prepare import on_disk, transform_precompiled_call
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 
@@ -34,6 +33,7 @@ def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
 # a base needs storage of its own if it can back a buffer and doesn't already have one
 def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_identity()
 
+def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
 def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
 def creation_copy_is_realized(u:UOp):
@@ -89,6 +89,26 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   if unshard is not None: return view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:])
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
+
+def transform_precompiled_call(c:UOp) -> UOp|None:
+  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
+  assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
+  # Bind output storage at the existing argument positions.
+  outs = {p: a.empty_like() for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound}
+  placed:dict[UOp, UOp] = {}
+  items = []
+  for st in c.src[0].src:
+    value = st.src[1]
+    while value.op is Ops.AFTER: value = value.src[0]
+    # A custom kernel's output buffer can be the call output directly. Rebind each buffer only once.
+    if value.op in {Ops.BUFFER, Ops.UNSHARD} and value.has_buffer_identity() and value not in placed:
+      placed[value] = st.src[0]
+      items.append(st.src[1])
+    else: items.append(st.src[0].after(st))
+  body = UOp.sink(*items).substitute(placed)
+  call = c.replace(src=(body, *(outs.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                   for i, a in enumerate(c.src[1:]))))
+  return UOp.sink(*(c.src[1+p].store(o.after(call).shrink_to(c.src[1+p].shape)) for p,o in outs.items()))
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
@@ -349,7 +369,6 @@ class Tensor(RandMixin):
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
   def callify(self, *lst:Tensor) -> Tensor:
-    """Groups the computation for these tensors into a deferred call. Returns `self` without executing the call."""
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
     big_sink, buffer_map = transform_to_call(big_sink)
     _apply_map_to_tensors({x:y.after(big_sink) for x,y in buffer_map.items()}, name="callify")
@@ -388,12 +407,6 @@ class Tensor(RandMixin):
     return self
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
-    """
-    Assigns `x` to this tensor and returns `self`. `x` must broadcast to this tensor's shape.
-    Tensor inputs must match its dtype and device, except that disk tensors accept inputs from any device.
-    Updates existing storage, or creates storage if this tensor is a computed value.
-    The write is deferred until realization, except for disk tensors.
-    """
     if self.dtype in dtypes.weaks: self.uop = self.uop.clone()
     is_disk = on_disk(self.uop)
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
@@ -425,7 +438,7 @@ class Tensor(RandMixin):
       while base.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}:
         if base.has_buffer_identity() and base in held: break
         base = base.src[0]
-      if base.has_buffer_identity(after_ok=True):
+      if base.has_buffer_identity(after_ok=True) or base.storage_base.op is Ops.CONTIGUOUS:
         # Detach shares storage, but an assignment through it must not rewrite earlier computations using that storage.
         if self.uop.op is Ops.DETACH: tensors = [t for t in tensors if t.uop.storage_base is base.storage_base]
         _apply_map_to_tensors({base: base.after(update)}, name="Embed View Assign", tensors=tensors)
@@ -503,8 +516,7 @@ class Tensor(RandMixin):
 
   def clone(self, device:str|tuple[str, ...]|None=None) -> Tensor:
     """
-    Creates a tensor with independent storage, populated lazily when its value is needed.
-    Use this to retain an intermediate result across realizations or to modify it independently.
+    Creates a clone of this tensor allocating a separate buffer for the data.
     If `device` is specified, the clone is placed on that device.
     """
     ret = Tensor(self.uop.clone(device=device))
@@ -513,8 +525,7 @@ class Tensor(RandMixin):
 
   def to(self, device:str|tuple[str, ...]|None) -> Tensor:
     """
-    Returns this tensor on the given device, transferring its data lazily. Returns `self` if the device already matches.
-    Use `clone(device)` when the result needs independent, persistent storage.
+    Moves the tensor to the given device.
     """
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
@@ -666,7 +677,8 @@ class Tensor(RandMixin):
     # before the functional setitem below, while retaining the computed RHS for autograd.
     if isinstance(v, Tensor) and self.is_floating_point() and not self.uop._base_buffer_is_realized():
       a = self.uop
-      if a.op is Ops.AFTER and len(a.src) == 2 and a.src[1] in v.uop.backward_slice and (view_rhs:=_inplace_rhs(a.src[1])) is not None:
+      if a.op is Ops.AFTER and len(a.src) == 2 and (view_rhs:=_inplace_rhs(a.src[1])) is not None and \
+          v.uop is self._getitem(indices).uop and v.uop.substitute({a: a.src[0]}) is a.src[1].src[0]:
         _apply_map_to_tensors({a: a.src[0]}, name="functional setitem")
         v = v._apply_uop(lambda _: view_rhs)
     # raise if mutation would diverge from eager (allow only pure views of a realized buffer; exclude +=/-= RHS via v_uop/v_bw)

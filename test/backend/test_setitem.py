@@ -75,6 +75,24 @@ class TestSetitem(unittest.TestCase):
     t.detach()[1, 2] = 5
     self.assertEqual(t[1, 2].item(), 5.0)
 
+  def test_setitem_depends_on_earlier_view_assignment(self):
+    x = Tensor.ones(4).clone()
+    x[:2].assign(x[:2] + 1)
+    x[2:] = x[:2] * 3
+    self.assertEqual(x.tolist(), [2., 2., 6., 6.])
+
+  def test_invalid_setitem_preserves_earlier_view_assignment(self):
+    x = Tensor.ones(4).clone()
+    x[:2].assign(x[:2] + 1)
+    with self.assertRaises(IndexError): x[99] = (x[:2] * 3).sum()
+    self.assertEqual(x.tolist(), [2., 2., 1., 1.])
+
+  def test_setitem_identity_after_other_view_assignment(self):
+    x = Tensor.ones(4).clone()
+    x[:2].assign(x[:2] + 1)
+    x[2:] = x[2:]
+    self.assertEqual(x.tolist(), [2., 2., 1., 1.])
+
   def test_setitem_detach_whole(self):
     t = Tensor.zeros((3, 3)).realize()
     t.detach()[:] = 5
@@ -346,6 +364,16 @@ class TestWithGrad(unittest.TestCase):
     z.sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), [1, 1, 0, 0])
     np.testing.assert_allclose(y.grad.numpy(), np.ones(4))
+
+  def test_set_iadd_clone_backward(self):
+    source = Tensor([1., 2., 3., 4.]).realize()
+    x = source.clone()
+    increment = Tensor([10., 20.]).realize()
+    x[:2] += increment
+    x.sum().backward()
+    self.assertEqual(x.tolist(), [11., 22., 3., 4.])
+    self.assertEqual(source.grad.tolist(), [1., 1., 1., 1.])
+    self.assertEqual(increment.grad.tolist(), [1., 1.])
 
   def test_set_iadd_backward(self):
     z = Tensor([1.0, 2.0, 3.0, 4.0])
