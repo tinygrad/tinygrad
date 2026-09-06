@@ -143,10 +143,16 @@ def resolve_linear_call(linear_call:UOp, outer_binds:dict[str, UOp]|None=None):
     if si.op is Ops.CALL and si.src[0].op is Ops.LINEAR: return resolve_linear_call(si, binds)
     subs = {v:binds[v.expr] for v in si.variables() if v.expr in binds}
     ret = si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
-    # Substituting a precompiled LINEAR's params can expose caller AFTER states. Its calls are already ordered by the
-    # LINEAR, so pass only their concrete storage views to the runtime, as create_schedule does for ordinary calls.
+    # Tagged all-reduce views are physical runtime arguments and must retain their offset while dropping the state
+    # wrapper. Preserve ordinary AFTER arguments: they carry producer dependencies across nested LINEAR boundaries.
     if ret.op is Ops.CALL:
-      ret = ret.replace(src=(ret.src[0],)+tuple(s if s.is_bound_var else _call_buf_uop(s) for s in ret.src[1:]))
+      def resolve_arg(s:UOp) -> UOp:
+        if s.is_bound_var: return s
+        u = _unwrap_src(s)
+        if ((u.op is Ops.AFTER and u.src[0].op is Ops.SHRINK and u.src[0].tag == ("allreduce",)) or
+            (u.op is Ops.SHRINK and u.tag == ("allreduce",))): return _call_buf_uop(s)
+        return s
+      ret = ret.replace(src=(ret.src[0],)+tuple(resolve_arg(s) for s in ret.src[1:]))
     return ret
   return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
 
