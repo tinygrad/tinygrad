@@ -1095,7 +1095,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       trunc = truncate.get(self.dtype) if dtypes.is_float(self.dtype) else math.trunc if dtypes.is_int(self.dtype) else None
       if trunc is not None and all(math.isfinite(v) for v in (smin, smax)): smin, smax = trunc(smin), trunc(smax)
       if dtypes.is_unsigned(self.dtype) and 0 <= smin and smax <= self.dtype.max: return smin, smax
-      if self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,): return max(self.dtype.min, smin), min(smax, self.dtype.max)
+      # a signed or float destination holds the part of the source that overlaps it: overflow is undefined, a nan bound overlaps nothing
+      if self.dtype in dtypes.floats+dtypes.sints+dtypes.weaks and smin <= self.dtype.max and self.dtype.min <= smax:
+        return max(self.dtype.min, smin), min(smax, self.dtype.max)
     return self.dtype.min, self.dtype.max
 
   @functools.cached_property

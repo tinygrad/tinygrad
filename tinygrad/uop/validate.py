@@ -34,8 +34,8 @@ def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:
   solver.add((vmin <= (s:=z3.Int(name, ctx=solver.ctx)))&(s <= vmax))
   return s
 def create_var(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
-  name = f"{x.op.name.lower()}{len(ctx[1])}"
-  return z3.Bool(name, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else create_bounded(name, x.dtype.min, x.dtype.max, ctx[0])
+  name = x.arg.name if x.op in {Ops.PARAM, Ops.BUFFER} else f"{x.op.name.lower()}{len(ctx[1])}"
+  return z3.Bool(name, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else create_bounded(name, x.vmin, x.vmax, ctx[0])
 # z3 does not model widths: a cast only converts between bool and int
 def z3_cast(c:UOp, x:z3.ExprRef) -> z3.ExprRef:
   if (c.src[0].dtype == dtypes.bool) == (c.dtype == dtypes.bool): return x
@@ -46,11 +46,8 @@ z3_renderer = PatternMatcher([
   (UPat.var("cond").where(UPat.var("x"), UPat(Ops.CONST, arg=Invalid)), lambda x,cond,ctx: ctx[0].add(ctx[1][cond]) or ctx[1][x]),
   # variables
   (UPat((Ops.SPECIAL, Ops.RANGE), name="x"), lambda x,ctx: create_bounded(x.render(simplify=False), 0, ctx[1][x.src[0]]-1, ctx[0])),
-  (UPat(Ops.PARAM, name="x"), lambda x,ctx: create_bounded(x.arg.name, x.vmin, x.vmax, ctx[0])),
-  (UPat(Ops.BUFFER, name="x"), lambda x,ctx: create_bounded(x.arg.name, x.vmin, x.vmax, ctx[0]) if x.is_variable else None),
-  # loads are variables bounded by the min/max of the dtype. non-pointer INDEX is also a LOAD
-  (UPat((Ops.LOAD, Ops.INDEX), name="x"), create_var),
-  # casts, bitcasts and comparisons from floats create new variables
+  # unknown values are variables bounded by their vmin/vmax: params, loads (non-pointer INDEX is a LOAD) and anything from floats
+  (UPat((Ops.PARAM, Ops.BUFFER, Ops.LOAD, Ops.INDEX), name="x"), create_var),
   (UPat((Ops.CAST, Ops.BITCAST)+tuple(GroupOp.Comparison), src=UPat(dtype=dtypes.floats), name="x"), create_var),
   # a bitcast between ints wraps into the target range, z3 ints are unbounded
   (UPat(Ops.BITCAST, dtypes.ints, src=(UPat.var("x", dtypes.ints),), name="c"),
