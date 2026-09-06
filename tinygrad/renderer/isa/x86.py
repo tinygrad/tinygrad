@@ -451,17 +451,15 @@ isel_matcher = PatternMatcher([
 ])
 
 # ***** pre register allocation *****
-# this handles flag clobbers. Unfortunately x86 doesn't have a good way to store/restore the flag register (then regalloc would handle it)
-# so we rematerialize. This is different from rematerialization you might want to do in regalloc because it is not optional,
-# regalloc shouldn't rematerialize if a src of the instruction is dead, but here you need to as there's no fallback load from stack
+# the flags belong to the last instruction that wrote them. x86 has no good way to store/restore them (then regalloc would
+# handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
+# optional, there is no fallback load from stack
 def flag_rematerialize(ctx:PreRegAllocContext, x:UOp):
-  flag_def = x if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags else x.src[-1] if x.arg[0] in X86GroupOp.ReadFlags else None
-  if flag_def is None: return None
-  if ctx.lock is not None and ctx.lock is not flag_def: ctx.clobbered.add(ctx.lock)
-  ctx.lock = flag_def
-  if flag_def not in ctx.clobbered: return None
-  ctx.clobbered.remove(flag_def)
-  return (x, [flag_def, x])
+  if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
+  elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
+    ctx.lock = flag_def
+    return (x, [flag_def, x])
+  return None
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat((Ops.INS, Ops.RANGE, Ops.END), name="x"), flag_rematerialize),
