@@ -120,6 +120,37 @@ class TestQ8Quantize(unittest.TestCase):
     expected = q.scaled_dot_product_attention(cache[0, :, :, :3], cache[1, :, :, :3], enable_gqa=True)
     np.testing.assert_allclose(out.numpy(), expected.numpy(), rtol=2e-3, atol=2e-3)
 
+  def test_flash_attention_decode_beyond_256_chunks(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    n = 257 * 64
+    q = Tensor.zeros(1, 1, 1, 32, dtype=dtypes.half).realize()
+    k = Tensor.zeros(1, 1, n, 32, dtype=dtypes.half)
+    v = Tensor.zeros(1, 1, n-64, 32, dtype=dtypes.half).cat(Tensor.ones(1, 1, 64, 32, dtype=dtypes.half), dim=2)
+    cache = Tensor.stack(k, v).contiguous().realize()
+    for valid, expected in ((1, 0), (n, 1/257)):
+      with self.subTest(valid=valid):
+        valid_kv_len = UOp.variable("valid_kv_len", 1, n).bind(valid)
+        assigned = Tensor(cache.uop.after(Tensor(valid_kv_len).uop))
+        np.testing.assert_allclose(flash_attention(q, assigned, valid_kv_len).numpy(), expected, rtol=2e-3, atol=2e-4)
+
+  def test_flash_attention_decode_long_context_random(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    Tensor.manual_seed(42)
+    n, valid = 257*64, 257*64 - 13  # past the old 256-chunk partial limit, with a ragged tail
+    q = Tensor.randn(1, 8, 1, 128, dtype=dtypes.half).realize()
+    cache = Tensor.randn(2, 1, 2, n, 128, dtype=dtypes.half).realize()
+    out = flash_attention(q, cache, valid).realize()
+    expected = q.scaled_dot_product_attention(cache[0, :, :, :valid], cache[1, :, :, :valid], enable_gqa=True)
+    np.testing.assert_allclose(out.numpy(), expected.numpy(), rtol=2e-3, atol=2e-3)
+
+  def test_flash_attention_decode_chunk_round_accumulator_range(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    valid_kv_len, max_kv_len = 6749, 6784  # three chunk rounds, with a ragged tail
+    q = Tensor.zeros(1, 8, 1, 32, dtype=dtypes.half).realize()
+    cache = Tensor.stack(Tensor.zeros(1, 1, max_kv_len, 32, dtype=dtypes.half),
+                         Tensor.full((1, 1, max_kv_len, 32), 5500, dtype=dtypes.half)).contiguous().realize()
+    np.testing.assert_allclose(flash_attention(q, cache, valid_kv_len).numpy(), 5500, rtol=2e-3, atol=2e-3)
+
   def test_prefill_attention_unaligned_start(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
