@@ -29,36 +29,34 @@ z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = python_alu | {Ops.CMOD: lambda a,
   Ops.FLOORMOD: lambda a,b: a-z3_floordiv(a,b)*b,
   Ops.SHR: lambda a,b: a/(2**b.as_long()), Ops.SHL: lambda a,b: a*(2**b.as_long()),
   Ops.AND: z3_and, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
-def create_bounded(name:str, vmin:int, vmax:int, z3ctx:z3.Context) -> tuple[z3.ArithRef, z3.BoolRef]:
-  return (s:=z3.Int(name, ctx=z3ctx)), (vmin <= s)&(s <= vmax)
+
+def create_bounded(name:str, vmin:int|z3.ArithRef, vmax:int|z3.ArithRef, solver:z3.Solver) -> z3.ArithRef:
+  solver.add((vmin <= (s:=z3.Int(name, ctx=solver.ctx)))&(s <= vmax))
+  return s
+def create_var(x:UOp, ctx:tuple[z3.Solver, dict[UOp, z3.ExprRef]]) -> z3.ExprRef:
+  name = f"{x.op.name.lower()}{len(ctx[1])}"
+  return z3.Bool(name, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else create_bounded(name, x.dtype.min, x.dtype.max, ctx[0])
+# z3 does not model widths: a cast only converts between bool and int
+def z3_cast(c:UOp, x:z3.ExprRef) -> z3.ExprRef:
+  if (c.src[0].dtype == dtypes.bool) == (c.dtype == dtypes.bool): return x
+  return x != 0 if c.dtype == dtypes.bool else z3.If(x, 1, 0)
 
 z3_renderer = PatternMatcher([
-  (UPat.var("cond").where(UPat.var("x"), UPat(Ops.CONST, arg=Invalid)), lambda x,cond,ctx: (ctx[1][x], ctx[1][cond])),
+  # the valid condition is a constraint
+  (UPat.var("cond").where(UPat.var("x"), UPat(Ops.CONST, arg=Invalid)), lambda x,cond,ctx: ctx[0].add(ctx[1][cond]) or ctx[1][x]),
   # variables
-  (UPat(Ops.SPECIAL, name="x"), lambda x,ctx: create_bounded(x.arg, 0, ctx[1][x.src[0]]-1, ctx[0])),
+  (UPat((Ops.SPECIAL, Ops.RANGE), name="x"), lambda x,ctx: create_bounded(x.render(simplify=False), 0, ctx[1][x.src[0]]-1, ctx[0])),
   (UPat(Ops.PARAM, name="x"), lambda x,ctx: create_bounded(x.arg.name, x.vmin, x.vmax, ctx[0])),
   (UPat(Ops.BUFFER, name="x"), lambda x,ctx: create_bounded(x.arg.name, x.vmin, x.vmax, ctx[0]) if x.is_variable else None),
-  (UPat(Ops.RANGE, name="x"), lambda x,ctx: create_bounded(x.render(simplify=False), 0, ctx[1][x.src[0]]-1, ctx[0])),
   # loads are variables bounded by the min/max of the dtype. non-pointer INDEX is also a LOAD
-  (UPat((Ops.LOAD, Ops.INDEX), dtypes.ints+(dtypes.weakint,), name="x"), lambda x,ctx:
-    create_bounded(f"load{len(ctx[1])}", x.dtype.min, x.dtype.max, ctx[0])),
-  (UPat((Ops.LOAD, Ops.INDEX), dtypes.bool), lambda ctx: (z3.Bool(f"load{len(ctx[1])}", ctx=ctx[0]), None)),
+  (UPat((Ops.LOAD, Ops.INDEX), name="x"), create_var),
+  # casts and comparisons from floats create new variables
+  (UPat((Ops.CAST,)+tuple(GroupOp.Comparison), src=UPat(dtype=dtypes.floats), name="x"), create_var),
   # constants
-  (UPat(Ops.CONST, arg=Invalid), lambda ctx: (z3.Int("Invalid", ctx=ctx[0]), None)),
-  (UPat(Ops.CONST, dtypes.weakint, name="x"), lambda x,ctx: (z3.IntVal(x.val, ctx=ctx[0]), None)),
-  (UPat(Ops.CONST, dtypes.bool, name="x"), lambda x,ctx: (z3.BoolVal(x.val, ctx=ctx[0]), None)),
-  # casts from floats create new variables
-  (UPat(Ops.CAST, dtypes.ints+(dtypes.weakint,), src=(UPat(dtype=dtypes.floats),), name="x"), lambda x,ctx:
-    create_bounded(f"cast{len(ctx[1])}", x.dtype.min, x.dtype.max, ctx[0])),
-  # a bool computed from floats (comparison or cast) is a new variable
-  (UPat((Ops.CAST,)+tuple(GroupOp.Comparison), src=UPat(dtype=dtypes.floats)), lambda ctx: (z3.Bool(f"float_bool{len(ctx[1])}", ctx=ctx[0]), None)),
-  # a same-dtype cast states a width, which z3 does not model: identity. must precede the rules below (bool->bool)
-  (UPat(Ops.CAST, name="x"), lambda x,ctx: (ctx[1][x.src[0]], None) if x.dtype == x.src[0].dtype else None),
-  # casts from bool/int to int/bool
-  (UPat(Ops.CAST, dtypes.ints+(dtypes.weakint,),src=(UPat.var("x", dtypes.bool),)), lambda x,ctx: (z3.If(ctx[1][x], 1, 0), None)),
-  (UPat(Ops.CAST, dtypes.ints+(dtypes.weakint,), src=(UPat.var("x", dtypes.ints+(dtypes.weakint,)),)), lambda x,ctx: (ctx[1][x], None)),
-  (UPat(Ops.CAST, dtypes.bool, name="x"), lambda x,ctx: (ctx[1][x.src[0]]!=0, None)),
-  (UPat(GroupOp.ALU, name="x"), lambda x,ctx: (z3_alu[x.op](*(ctx[1][s] for s in x.src)), None)),
+  (UPat(Ops.CONST, arg=Invalid), lambda ctx: z3.Int("Invalid", ctx=ctx[0].ctx)),
+  (UPat(Ops.CONST, name="x"), lambda x,ctx: z3.BoolVal(x.val, ctx=ctx[0].ctx) if x.dtype == dtypes.bool else z3.IntVal(x.val, ctx=ctx[0].ctx)),
+  (UPat(Ops.CAST, src=(UPat.var("x"),), name="c"), lambda c,x,ctx: z3_cast(c, ctx[1][x])),
+  (UPat(GroupOp.ALU, name="x"), lambda x,ctx: z3_alu[x.op](*(ctx[1][s] for s in x.src))),
 ])
 
 def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:
@@ -69,11 +67,8 @@ def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:
   for u in lst:
     # NOTE: we skip STACK here, it can't actually be accessed
     if u.op is Ops.STACK: continue
-    z3_rewritten: tuple[z3.ExprRef, z3.BoolRef|None]|None = z3_renderer.rewrite(u, ctx=(solver.ctx, z3map))
-    if z3_rewritten is None: raise NotImplementedError(f"{u.op} is not supported by z3")
-    new_u, constraint = z3_rewritten
-    if constraint is not None: solver.add(constraint)
-    z3map[u] = new_u
+    if (z3_rewritten:=z3_renderer.rewrite(u, ctx=(solver, z3map))) is None: raise NotImplementedError(f"{u.op} is not supported by z3")
+    z3map[u] = z3_rewritten
   assert all(u in z3map for u in uops), "UOp failed to rewrite to z3!"
   return [z3map[u] for u in uops]
 
