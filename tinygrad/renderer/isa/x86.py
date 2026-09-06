@@ -7,7 +7,7 @@ from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, ProgramInfo
-from tinygrad.renderer.isa import ISARenderer, Register, PreLinearKernelCtx, rdef, copy_dst, VRegister
+from tinygrad.renderer.isa import ISARenderer, Register, PreLinearKernelCtx, rdef, VRegister
 from tinygrad.helpers import unwrap, Target
 
 # ***** X86 Ops *****
