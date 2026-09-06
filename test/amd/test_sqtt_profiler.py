@@ -115,7 +115,7 @@ class TestSQTTProfiler(unittest.TestCase):
     kernel_name = sqtt[0]["name"]
     for i,e in enumerate(sqtt[1:], start=1): self.assertEqual(e["name"], f"{kernel_name} n{i+1}")
 
-  def test_jit_graph(self, kernel_count=None):
+  def test_jit_graph(self, kernel_count=3*(5 if is_hcq2_device() else 1)): # hcq2 traces the graphed kernels too
     @TinyJit
     def f(a): return ((a + 1).contiguous() + 2).contiguous().sum()
     t = Tensor.empty(32)
@@ -130,7 +130,7 @@ class TestSQTTProfiler(unittest.TestCase):
       self.assertEqual(names[i], f"{k0} n{n}")
       self.assertEqual(names[i+1], f"{k1} n{n}")
       self.assertEqual(names[i+2], f"{k2} n{n}")
-    self.assertEqual(len(sqtt), 3*(5 if is_hcq2_device() else 1) if kernel_count is None else kernel_count)
+    self.assertEqual(len(sqtt), kernel_count)
 
   @Context(JIT=2)
   def test_jit_multiple_kernels(self): self.test_jit_graph(kernel_count=3*5)
