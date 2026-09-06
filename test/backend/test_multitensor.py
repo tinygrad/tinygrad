@@ -445,6 +445,7 @@ class TestMultiBufferView(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class Test2DShard(unittest.TestCase):
+  @needs_second_gpu
   def setUp(self):
     self.devices_4 = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     self.rng = UOp.range(4, -1, AxisType.DEVICE)
@@ -459,6 +460,15 @@ class Test2DShard(unittest.TestCase):
     t = self._shard_2d(ref)
     out = t.contiguous().realize()
     np.testing.assert_equal(out.numpy(), ref.numpy())
+
+  def test_2d_shard_clone(self):
+    ref = Tensor.arange(16).reshape(4, 4).realize()
+    t = self._shard_2d(ref)
+    out = t.clone().realize()
+    np.testing.assert_equal(out.numpy(), ref.numpy())
+    out.assign(out + 1).realize()
+    np.testing.assert_equal(out.numpy(), ref.numpy() + 1)
+    np.testing.assert_equal(t.numpy(), ref.numpy())
 
   def test_2d_shard_elementwise(self):
     ref = Tensor.arange(16).reshape(4, 4).contiguous().realize()
