@@ -4,7 +4,7 @@ from typing import Callable, cast, NamedTuple
 from tinygrad import Tensor, UOp, nn, Device, Context
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.helpers import prod
+from tinygrad.helpers import getenv, prod
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops, resolve
 from tinygrad.renderer.cstyle import HIPRenderer
 
@@ -450,7 +450,9 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, m
   acc_lds = UOp.placeholder((WAVES, G, D), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
   ml_lds = UOp.placeholder((WAVES, G, 2), dtypes.float, slot=1, addrspace=AddrSpace.LOCAL)
   lds_acc = acc_lds.reshape(WAVES, G, WARP_SIZE, DPL)
-  stores = [lds_acc[wave, h, lane].store(UOp.stack(*accs[h]).cast(dtypes.half)) for h in range(G)]
+  # normalize before casting to fp16 to prevent overflow as chunk rounds grow, waves with L=0 store zero
+  stores = [lds_acc[wave, h, lane].store(UOp.stack(*(row_sums[h].ne(0).where(x/row_sums[h], zerof) for x in accs[h])).cast(dtypes.half))
+            for h in range(G)]
   # NOTE: duplicate stores of the same value from every lane are harmless here
   stores += [ml_lds[wave, h, i].store(x) for h in range(G) for i, x in enumerate((row_max[h], row_sums[h]))]
   barrier = UOp.barrier(UOp.group(*stores))
@@ -460,8 +462,9 @@ def _amd_flash_attention_decode_partial(out, stats, q, cache_kv, valid_kv_len, m
   for i in range(-(-G*D//(WAVES*WARP_SIZE))):
     flat = tid + i*WAVES*WARP_SIZE
     h, d = flat // D, flat % D
-    M, _, (val,) = _softmax_reduce(tuple(_SoftmaxState(ml_lds[w, h, 0].load(), ml_lds[w, h, 1].load(),
-                                                        (acc_lds[w, h, d].load().float(),)) for w in range(WAVES)))
+    lds_states = tuple(_SoftmaxState(ml_lds[w, h, 0].load(), ml_lds[w, h, 1].load(),
+                                     (acc_lds[w, h, d].load().float()*ml_lds[w, h, 1].load(),)) for w in range(WAVES))
+    M, _, (val,) = _softmax_reduce(lds_states)
     oidx = out[b, kv_head*G + h, block_chunk, d]
     if G*D % (WAVES*WARP_SIZE): oidx = out[b, (kv_head*G + h).valid(flat < G*D), block_chunk, d]
     final_stores.append(oidx.store(val))
@@ -503,7 +506,7 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UO
 
 def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, max_kv_len:int) -> Tensor:
   B, H, D = cache_kv.shape[1], q.shape[1], cache_kv.shape[4]
-  chunks = min(48, max_kv_len // 64)
+  chunks = min(getenv("AMD_FLASH_CHUNKS", 48), max_kv_len // 64)
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device)
   stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device)
   fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=64, waves=16)

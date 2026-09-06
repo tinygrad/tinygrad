@@ -1,7 +1,7 @@
-import unittest
+import functools, unittest
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function
-from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, flash_attention
+from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, _amd_flash_attention_decode_partial
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 class TestQ8Quantize(unittest.TestCase):
@@ -134,6 +134,21 @@ class TestQ8Quantize(unittest.TestCase):
     assigned = Tensor(cache.uop.after(Tensor(valid_kv_len).uop))
     out = flash_attention(q, assigned, valid_kv_len).realize()
     np.testing.assert_allclose(out.numpy(), np.full(out.shape, 1/257, dtype=np.float32), rtol=2e-3, atol=2e-4)
+
+  def test_flash_attention_decode_chunk_round_accumulator_range(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    valid_kv_len, max_kv_len, chunks = 6749, 6784, 48
+    q = Tensor.zeros(1, 8, 1, 32, dtype=dtypes.half).realize()
+    cache = Tensor.stack(Tensor.zeros(1, 1, max_kv_len, 32, dtype=dtypes.half),
+                         Tensor.full((1, 1, max_kv_len, 32), 5500, dtype=dtypes.half)).contiguous().realize()
+    partial = Tensor.empty(1, 8, chunks, 32, dtype=dtypes.float32)
+    stats = Tensor.empty(1, 8, chunks, 2, dtype=dtypes.float32)
+    fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=64, waves=16)
+    partial, stats = Tensor.custom_kernel(partial, stats, q, cache, fxn=fxn)[:2]
+    partial, stats = partial.numpy(), stats.numpy()
+    out = partial.sum(axis=2) / stats[:, :, :, 1].sum(axis=2)[:, :, None]
+    self.assertTrue(np.isfinite(out).all())
+    np.testing.assert_allclose(out, 5500, rtol=2e-3, atol=2e-3)
 
   def test_prefill_attention_unaligned_start(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
