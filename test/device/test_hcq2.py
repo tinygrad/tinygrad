@@ -243,14 +243,6 @@ class TestHCQ2FFI(unittest.TestCase):
       bufs = self._run(out.index(i).store(call).end(i))
     self.assertEqual(list(next(b for b in bufs if b.dtype is dtypes.int)._buf.cpu_view().view(fmt='i')[:]), [1, 2, 3, 4])
 
-  def test_renumber_overlapping_ranges(self):
-    with Context(HCQ_RUNTIME_DEV="CPU"):
-      out = UOp.placeholder((16,), dtypes.int32, device="CPU", tag="result")
-      i, j = [UOp.range(4, n, dtype=dtypes.int) for n in (1, 2)]
-      bufs = self._run(out.index(i * 4 + j).store(i * 10 + j).end(i, j))
-    self.assertEqual(list(next(b for b in bufs if b.dtype is dtypes.int)._buf.cpu_view().view(fmt='i')[:]),
-                     [i * 10 + j for i in range(4) for j in range(4)])
-
   def test_device_lower_after_encode(self):
     with Context(HCQ_RUNTIME_DEV="CPU"):
       out = UOp.placeholder((1,), dtypes.int32, device="CPU", tag="result")

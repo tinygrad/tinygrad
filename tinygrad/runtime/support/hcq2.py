@@ -392,10 +392,8 @@ def lower_call(call:UOp) -> UOp|None:
   params = {b: UOp.param(i, b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for i, b in enumerate(bufs)}
   # new slots for vars
   vals = {a: a.replace(arg=replace(a.arg, slot=len(bufs) + names.index(a.arg.name))) for a in alus}
-  # reenum ranges, through unique negative ids first: a new id must not meet another range's old one
-  order = sorted([u for u in tops if u.op is Ops.RANGE], key=lambda r: r.arg)
-  body = body.substitute({r: r.replace(arg=(~i,)+r.arg[1:]) for i, r in enumerate(order)})
-  rngs = {r: r.replace(arg=(~r.arg[0],)+r.arg[1:]) for r in body.toposort() if r.op is Ops.RANGE}
+  # reenum ranges
+  rngs = {r: r.replace(arg=(i,)+r.arg[1:]) for i, r in enumerate(sorted([u for u in tops if u.op is Ops.RANGE], key=lambda r: r.arg))}
   # and sub all of them
   sink = body.substitute(params | vals | rngs, enter_calls=True)
 
