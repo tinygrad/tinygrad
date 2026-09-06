@@ -93,46 +93,22 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
   assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
-  # the RETURNED srcs are the call outputs (slots are src positions)
-  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
-  srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
-
-  # add the outputs to the call
-  outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
-  targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
-
-  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
-  # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
+  # Bind output storage at the existing argument positions.
+  outs = {p: a.empty_like() for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound}
   placed:dict[UOp, UOp] = {}
-  items:list[UOp] = []
-  for s, t in zip(srcs, targets):
-    deps:list[UOp] = []
-    while s.op is Ops.AFTER:
-      deps.extend(s.src[1:])
-      s = s.src[0]
-    if s not in placed:
-      if s.op is Ops.CONTIGUOUS: placed[s] = t.after(t.store(s.src[0]))
-      elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = t
-      if s in placed:
-        items.append(s.after(*deps))
-        continue
-    items.append(t.after(t.store(s.after(*deps))))
-  # swap every placed value for its target storage, also inside other stores' AFTER deps
-  fxn = UOp.sink(*(x.substitute(placed) for x in items))
-
-  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
-  # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
-  rmap = dict(zip(ret_pos, outs))
-  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
-                                   for i, a in enumerate(c.src[1:])]))
-  rets = tuple(o.after(new_call) for o in outs)
-
-  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  # NOTE: must use the resolved shapes of the RETURNED placeholders (which substitute PARAMs with external args), not raw body shapes
-  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
-
-  # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
-  return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
+  items = []
+  for st in c.src[0].src:
+    value = st.src[1]
+    while value.op is Ops.AFTER: value = value.src[0]
+    # A custom kernel's output buffer can be the call output directly. Rebind each buffer only once.
+    if value.op in {Ops.BUFFER, Ops.UNSHARD} and value.has_buffer_identity() and value not in placed:
+      placed[value] = st.src[0]
+      items.append(st.src[1])
+    else: items.append(st.src[0].after(st))
+  body = UOp.sink(*items).substitute(placed)
+  call = c.replace(src=(body, *(outs.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                   for i, a in enumerate(c.src[1:]))))
+  return UOp.sink(*(c.src[1+p].store(o.after(call).shrink_to(c.src[1+p].shape)) for p,o in outs.items()))
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
@@ -445,7 +421,7 @@ class Tensor(RandMixin):
     assigned_to = self.uop.storage_base
     # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead
     if not assigned_to.has_buffer_identity() and assigned_to.op is not Ops.CONTIGUOUS:
-      self.uop = (x.uop.src[0] if x.uop.op is Ops.CONTIGUOUS else x.uop).clone()
+      self.uop = x.uop.clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
@@ -453,7 +429,12 @@ class Tensor(RandMixin):
     while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
     if ib is not self.uop:
       # view assign: replace the node under the views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
-      _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign")
+      if self.uop.op is Ops.DETACH:
+        # Detached writes update aliases, not earlier computations that read the storage.
+        for ref in list(all_tensors):
+          if (t:=ref()) is not None and t.uop.storage_base is ib.storage_base:
+            t.uop = t.uop.substitute({ib: ib.after(assign)}, walk=True)
+      else: _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign")
     else:
       # simple assign
       self.uop = assign
@@ -686,6 +667,7 @@ class Tensor(RandMixin):
     if isinstance(v, Tensor):
       if v.dtype in dtypes.weaks: v = v.cast(least_upper_dtype(self.dtype, v.dtype))
       if v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
+    if isinstance(v, Tensor) and v.uop is self._getitem(indices).uop: return
     # raise if mutation would diverge from eager (allow only pure views of a realized buffer; exclude +=/-= RHS via v_uop/v_bw)
     v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
     if self.uop.op_in_backward_slice_with_self(Ops.BUFFER):
@@ -699,10 +681,6 @@ class Tensor(RandMixin):
     realized = is_disk or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized()
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value.
-      # the store is self-referential there (the computed value touches its target); clone stores are untouched
-      if v.uop.op is Ops.AFTER and len(v.uop.src) == 2 and (st:=v.uop.src[1]).op is Ops.STORE and \
-          st.src[0] in st.src[1].toposort(enter_calls=False): v = v._apply_uop(lambda x: st.src[1])
       self.replace(self._getitem(indices, v))
     elif advanced: # advanced setitem
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")

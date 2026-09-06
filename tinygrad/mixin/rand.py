@@ -37,17 +37,17 @@ class RandMixin(OpMixin):
     return uint_bits.rshift(dtype.bitsize - nmant).bitwise_or(float_one_bits).bitcast(dtype)[:prod(shape)].sub(1).reshape(shape)
 
   @classmethod
-  def _rand(cls, key:Self, counter:Self, shape:tuple[int, ...], dtype:DType, contiguous:bool=True) -> Self:
+  def _rand(cls, key:Self, counter:Self, shape:tuple[int, ...], dtype:DType, clone:bool=True) -> Self:
     bits = cls.random_bits(key, counter, ceildiv(prod(shape) * dtype.itemsize, 4))
     out = cls._bits_to_rand(bits, shape, dtype)
-    return out.contiguous() if contiguous else out
+    return out.clone() if clone else out
 
   @staticmethod
   def _next_counter(device:str, num:int):
     raise NotImplementedError("_next_counter requires the stateful per-device RNG counter, only implemented on Tensor")
 
   @classmethod
-  def rand(cls, *shape, device:str|None=None, dtype:DTypeLike|None=None, contiguous:bool=True) -> Self:
+  def rand(cls, *shape, device:str|None=None, dtype:DTypeLike|None=None, clone:bool=True) -> Self:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
 
@@ -65,7 +65,7 @@ class RandMixin(OpMixin):
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     device = cast(str, canonicalize_device(device))
     key, counter = cls._next_counter(device, ceildiv(prod(shape) * dt.itemsize, 4))
-    return cls._rand(key, counter, shape, dt, contiguous=contiguous)
+    return cls._rand(key, counter, shape, dt, clone=clone)
 
   def rand_like(self, **kwargs) -> Self:
     """
@@ -293,7 +293,7 @@ class RandMixin(OpMixin):
     if not 0 <= p <= 1: raise ValueError(f"{p=} is out of range [0, 1]")
     if not TRAINING or p == 0: return self
     if p == 1: return self.const_like(0)
-    return (self.rand_like(dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
+    return (self.rand_like(dtype=dtypes.default_float, clone=False) >= p).clone().where(self, 0) / (1.0 - p)
 
   def scaled_dot_product_attention(self, key:Self, value:Self, attn_mask:Self|None=None, dropout_p:float=0.0,
                                    is_causal:bool=False, enable_gqa:bool=False) -> Self:
