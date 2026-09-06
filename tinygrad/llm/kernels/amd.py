@@ -55,6 +55,10 @@ class Linear(nn.Linear):
     super().__init__(in_features, out_features, bias)
     self.in_features, self.out_features = in_features, out_features
   def set_quantized(self, decoded:Tensor):
+    # The packed buffer cannot represent row permutations applied after dequantization (e.g. Llama RoPE).
+    view = decoded.uop
+    while view.op in (Ops.CAST, Ops.RESHAPE, Ops.CONTIGUOUS): view = view.src[0]
+    if view.op not in (Ops.MUL, Ops.ADD): return
     packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in QUANT_SIZES.items()}
     graph = decoded.uop.toposort()
     raw = next((u for u in graph if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
@@ -233,6 +237,7 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, out_features:
   return _decode_linear(out, out_features, group_count, group_dot, names[ggml_type])
 
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
+  if out_features % (16*output_tiles): output_tiles = 1
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
   token_block, output_block = UOp.range(out.shape[0]//token_tile, 0), UOp.range(out_features//(16*output_tiles*output_waves), 1)
   # lane is a hardware WARP range (like the flash kernel): the fragment math stays visible without being
@@ -311,15 +316,9 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
   def dequant(base:UOp, subgroup:UOp, half:int) -> tuple[UOp, ...]:
     d, scale = _iq4_scales(raw, base, subgroup)
     scale = scale * d
-    if out_features <= 6144:
-      pairs = tuple(lut[((raw[base + 2 + subgroup*4 + word] >> (byte*8)) & 255).cast(dtypes.weakint)]
-                    for word in range(4) for byte in range(4))
-      return tuple((_half((pair >> (half*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in pairs)
-    # a subgroup-half gathers the lo (half=0) or hi (half=1) nibbles of byte pairs of each packed word
-    lut_pairs = (lut[(((raw[base+2+subgroup*4+i] >> (8*j+4*half)) & 15) |
-                      (((raw[base+2+subgroup*4+i] >> (8*j+8+4*half)) & 15) << 4)).cast(dtypes.weakint)]
-                 for i in range(4) for j in (0, 2))
-    return tuple((_half((pair >> (i*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in lut_pairs for i in range(2))
+    pairs = tuple(lut[((raw[base + 2 + subgroup*4 + word] >> (byte*8)) & 255).cast(dtypes.weakint)]
+                  for word in range(4) for byte in range(4))
+    return tuple((_half((pair >> (half*16)) & 0xffff)*scale).cast(dtypes.float16) for pair in pairs)
   return _quant_linear_wmma(out, x, out_features, in_features, IQ4_WORDS, layout, dequant, "linear_iq4_xs_f16_wmma")
 
 def q8_linear(layer:Linear, x:Tensor) -> Tensor:
@@ -362,7 +361,7 @@ def _amd_f16_gemv_kernel(out:UOp, w:UOp, x:UOp, *rest:UOp, in_features:int, out_
     for j in range(val_chunk):
       acc = acc + w[out_row, i, lane*val_chunk + j].load().float() * x[token, i, lane*val_chunk + j].load().float()
   total = warp_reduce(acc, full_wave=True)
-  if bias is not None: total = total + bias[token, out_row].load().float()
+  if bias is not None: total = total + bias[out_row].load().float()
   return out[token, out_row.valid(lane.eq(0))].store(total).end(token, out_row, lane).sink(arg=KernelInfo(name="linear_f16_gemv", opts_to_apply=()))
 
 def _view_back(t:Tensor) -> Tensor:
@@ -502,7 +501,10 @@ def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, 
   chunks = min(48, max_kv_len // 64)
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device)
   stats = Tensor.empty(B, H, chunks, 2, dtype="float32", device=q.device)
-  fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=64, waves=16)
+  waves, group = 16, H // cache_kv.shape[2]
+  while waves * group * (D*2 + 8) > 65536: waves //= 2
+  assert waves > 0, "attention head group exceeds shared memory capacity"
+  fxn = functools.partial(_amd_flash_attention_decode_partial, valid_kv_len=valid_kv_len, max_kv_len=max_kv_len, block_n=64, waves=waves)
   partial, stats = Tensor.custom_kernel(partial, stats, q, cache_kv, fxn=fxn)[:2]
   live = (valid_kv_len+63)//64
   live = min(live, chunks) if isinstance(live, int) else live.minimum(chunks)
@@ -518,7 +520,7 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   k, v = cache[0].reshape(B*H_KV, physical_n, cache_dim), cache[1].reshape(B*H_KV, physical_n, cache_dim)
   assert k.shape == v.shape and BH % k.shape[0] == 0 and k.shape[2] == D
   gqa_group = BH // k.shape[0]
-  if isinstance(M, int) and isinstance(valid_kv_len, int): assert M % BLOCK_M == 0 and valid_kv_len % BLOCK_N == 0
+  if isinstance(M, int): assert M % BLOCK_M == 0
   assert isinstance(D, int) and D % WMMA_K == 0 and D % LANES_PER_WAVE_N == 0
   TM, TN, TD, SCALE = BLOCK_M//(WAVES_M*LANES_PER_WAVE_M), BLOCK_N//LANES_PER_WAVE_N, D//(WAVES_N*LANES_PER_WAVE_N), 1/math.sqrt(D)
   # query row 0 sits at sequence position q_base (the queries may be padded beyond valid_kv_len - q_base rows)
@@ -574,7 +576,8 @@ def _amd_flash_attention(o:UOp, q:UOp, cache:UOp, valid_kv_len:int|UOp, q_start:
   acc, l_i, m_i, beta_i = acc.after(correction), l_i.after(correction), m_i.after(correction), beta_i.after(correction)
   V_lds = UOp.placeholder((D, BLOCK_N + LDS_PAD), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)[:, :BLOCK_N]
   V_copy, load_v = V_lds.after(qk_done).permute(1, 0), UOp.range(KV_ELEMS_PER_THREAD, 390)
-  vval = v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v].float()
+  v_pos = n_tile*BLOCK_N + (tid*KV_ELEMS_PER_THREAD + load_v)//D
+  vval = (v_pos < valid_kv_len).where(v.reshape(physical_n*D)[n_tile*BLOCK_N*D + tid*KV_ELEMS_PER_THREAD + load_v].float(), 0)
   V_store = V_copy.reshape(THREADS_PER_BLOCK, KV_ELEMS_PER_THREAD)[tid, load_v].store(vval).end(load_v)
   pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
   P_lds, V_lds = P_lds.after(pv_barrier), V_lds.after(pv_barrier)

@@ -54,10 +54,45 @@ class TestQ8Quantize(unittest.TestCase):
   def test_iq4_linear(self): self._test_quant_linear(23, 136)
   def test_q5_linear(self): self._test_quant_linear(13, 176)
 
-  def _test_quant_linear(self, ggml_type, block_bytes):
+  def test_quant_linear_partial_output_tile(self):
+    for typ, size in ((12, 144), (13, 176), (23, 136)):
+      for out_features in (16, 48, 80, 4112):
+        with self.subTest(ggml_type=typ, out_features=out_features):
+          self._test_quant_linear(typ, size, in_features=256, out_features=out_features, token_counts=(16, 32, 64))
+
+  def test_quant_linear_preserves_rope_permutation(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
-    in_features, out_features = 2048, 64
+    for typ, size in ((12, 144), (13, 176), (14, 210), (23, 136)):
+      with self.subTest(ggml_type=typ):
+        packed = rng.integers(0, 256, (16, size), dtype=np.uint8)
+        packed[:, -2:] = np.array([0.001], dtype=np.float16).view(np.uint8)
+        if typ != 14: packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
+        if typ in (12, 13): packed[:, 2:4] = np.array([0.0002], dtype=np.float16).view(np.uint8)
+        raw = Tensor(np.pad(packed.flatten(), (4, 0))).contiguous().realize()[4:]
+        decoded = ggml_data_to_tensor(raw, 16*256, typ).reshape(16, 256).half()
+        original = decoded.numpy()
+        permuted = original.reshape(2, 4, 2, 256).transpose(0, 2, 1, 3).reshape(16, 256)
+        x = rng.normal(size=(3, 256)).astype(np.float16)
+        linear = Linear(256, 16, bias=False)
+        linear.weight = decoded.reshape(2, 4, 2, 256).permute(0, 2, 1, 3).reshape(16, 256)
+        np.testing.assert_allclose(linear(Tensor(x)).numpy(), x.astype(np.float32) @ permuted.astype(np.float32).T, rtol=3e-3, atol=2e-2)
+        self.assertIsNone(linear.ggml_type)
+
+  def test_dense_gemv_bias(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    rng = np.random.default_rng(42)
+    w, bias = rng.normal(size=(32, 128)).astype(np.float16), rng.normal(size=32).astype(np.float16)
+    linear = Linear(128, 32)
+    linear.weight, linear.bias = Tensor(w), Tensor(bias)
+    for tokens in (1, 3):
+      with self.subTest(tokens=tokens):
+        x = rng.normal(size=(tokens, 128)).astype(np.float16)
+        np.testing.assert_allclose(linear(Tensor(x)).numpy(), x.astype(np.float32) @ w.astype(np.float32).T + bias, rtol=2e-3, atol=2e-3)
+
+  def _test_quant_linear(self, ggml_type, block_bytes, in_features=2048, out_features=64, token_counts=(1, 3, 32, 64, 128)):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    rng = np.random.default_rng(42)
     packed = rng.integers(0, 256, (out_features*in_features//256, block_bytes), dtype=np.uint8)
     packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
     if ggml_type in (12, 13): packed[:, 2:4] = np.array([0.0002], dtype=np.float16).view(np.uint8)
@@ -66,7 +101,7 @@ class TestQ8Quantize(unittest.TestCase):
     weight = decoded.numpy()
     linear = Linear(in_features, out_features, bias=False)
     linear.weight = decoded
-    for tokens in (1, 3, 32, 64, 128):
+    for tokens in token_counts:
       with self.subTest(tokens=tokens):
         x = rng.normal(size=(tokens, in_features)).astype(np.float32 if tokens == 3 else np.float16)
         reference_x = x.astype(np.float32)
@@ -119,6 +154,32 @@ class TestQ8Quantize(unittest.TestCase):
     out = flash_attention(q, cache, 3).realize()
     expected = q.scaled_dot_product_attention(cache[0, :, :, :3], cache[1, :, :, :3], enable_gqa=True)
     np.testing.assert_allclose(out.numpy(), expected.numpy(), rtol=2e-3, atol=2e-3)
+
+  def test_flash_attention_decode_large_gqa_group(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    Tensor.manual_seed(42)
+    q = Tensor.randn(1, 8, 1, 256, dtype=dtypes.half).realize()
+    cache = Tensor.randn(2, 1, 1, 256, 256, dtype=dtypes.half).realize()
+    out = flash_attention(q, cache, 73)
+    expected = q.scaled_dot_product_attention(cache[0, :, :, :73], cache[1, :, :, :73], enable_gqa=True)
+    np.testing.assert_allclose(out.numpy(), expected.numpy(), rtol=2e-3, atol=2e-3)
+
+  def test_prefill_attention_nonfinite_cache_tail(self):
+    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+    rng = np.random.default_rng(42)
+    q = Tensor.zeros(1, 2, 32, 128, dtype=dtypes.half)
+    values = rng.normal(size=(33, 128)).astype(np.float16)
+    expected = np.stack([values[:i+2].astype(np.float32).mean(0) for i in range(32)])[None, None].repeat(2, axis=1)
+    for tail in (np.nan, np.inf, -np.inf):
+      with self.subTest(tail=tail):
+        cache = np.full((2, 1, 1, 64, 128), tail, dtype=np.float16)
+        cache[0, :, :, :33] = 0
+        cache[1, :, :, :33] = values
+        valid = UOp.variable("valid_end", 32, 64).bind(33)
+        cache_tensor = Tensor(cache).realize()
+        assigned = Tensor(cache_tensor.uop.after(Tensor(valid).uop))
+        out = flash_attention(q, assigned, valid)
+        np.testing.assert_allclose(out.numpy(), expected, rtol=2e-3, atol=2e-3)
 
   def test_flash_attention_decode_beyond_256_chunks(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
