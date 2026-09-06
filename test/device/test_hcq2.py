@@ -1,10 +1,10 @@
 import unittest, contextlib, ctypes, gc, numpy as np
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, BufferSpec
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, dedup, partition
-from tinygrad.uop.ops import Ops, UOp, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.runtime.autogen import libc
@@ -41,6 +41,25 @@ def patch_words(batch:UOp) -> list[UOp]:
 
 def rt_params(batch:UOp) -> list[str]:
   return dedup([u.arg.name for w in patch_words(batch) for u in w.toposort() if u.op is Ops.PARAM and u.arg.addrspace is AddrSpace.GLOBAL])
+
+class TestHCQ2Deps(unittest.TestCase):
+  def test_disjoint_write_preserves_dependencies(self):
+    b = UOp.param(0, dtypes.uint8, 16, device="CPU")
+    for write in ([], [0]):
+      tracker = hcq2.HCQDepsTracker()
+      tracker.access_resources([b.shrink(((0, 4),))], write, 0)
+      self.assertEqual(tracker.access_resources([b.shrink(((4, 8),))], [0], 1), [])
+      self.assertEqual(tracker.access_resources([b.shrink(((0, 4),))], [0], 2), [0])
+
+  def test_partial_write_preserves_dependencies(self):
+    b = UOp.param(0, dtypes.uint8, 16, device="CPU")
+    for write in ([], [0]):
+      tracker = hcq2.HCQDepsTracker()
+      tracker.access_resources([b], write, 0)
+      self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [0], 1), [0])
+      self.assertEqual(tracker.access_resources([b.shrink(((0, 4),))], [0], 2), [0])
+      self.assertEqual(tracker.access_resources([b.shrink(((12, 16),))], [0], 3), [0])
+      self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [], 4), [1])
 
 @unittest.skipUnless(all_devices_in(Device.DEFAULT, HCQ_DEVS - {"CPU"}), "non-CPU hcq2 device required")
 class TestHCQ2Core(unittest.TestCase):
@@ -225,6 +244,36 @@ class TestHCQ2FFI(unittest.TestCase):
       bufs = self._run(s.index(0).load())
     got = struct_t.from_buffer_copy(bytes(next(b for b in bufs if b.nbytes == ctypes.sizeof(struct_t))._buf.cpu_view()))
     self.assertEqual((got.u8, got.u16, got.u32, got.u64), (0x12, 0x3456, 0x789ABCDE, 0xFEDCBA9876543210))
+
+  def test_device_lower_after_encode(self):
+    with Context(HCQ_RUNTIME_DEV="CPU"):
+      out = UOp.placeholder((1,), dtypes.int32, device="CPU", tag="result")
+      encode = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="test_encode"), lambda: UOp.custom_function("test_lower"))])
+      lower = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="test_lower"), lambda out=out: out.index(0).store(42))])
+      with patch.object(Device["CPU"], "pm_encode", encode), patch.object(Device["CPU"], "pm_lower", lower):
+        bufs = self._run(UOp.custom_function("test_encode"))
+    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.int)._buf.cpu_view().view(fmt='i')[0], 42)
+
+  def test_nested_cstruct_patches(self):
+    with Context(HCQ_RUNTIME_DEV="CPU"):
+      inner = hcq2.cstruct(init_c_struct_t(4, (("value", ctypes.c_uint32, 0),)), value=42)
+      outer = hcq2.cstruct(init_c_struct_t(8, (("ptr", ctypes.c_uint64, 0),)), ptr=inner.getaddr("CPU"))
+      out = UOp.placeholder((1,), dtypes.uint32, device="CPU", tag="result")
+      copied = hcq2.ccall(libc.memcpy, out.index(0), outer.bitcast(dtypes.uint64).index(0).load(), 4)
+      bufs = self._run(out.after(copied).index(0).load())
+    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.uint32)._buf.cpu_view().view(fmt='I')[0], 42)
+
+
+class TestHCQ2Timeline(unittest.TestCase):
+  def test_reused_timeline_is_zeroed(self):
+    buf = Buffer("CPU", 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
+    addr = buf._buf.va_addr
+    buf._buf.cpu_view().view(fmt='B')[:] = b'\xff' * 16
+    buf.deallocate()
+    dev = HCQ2Compiled.__new__(HCQ2Compiled)
+    dev.device = "CPU"
+    self.assertEqual(dev.timeline._buf.va_addr, addr)
+    self.assertEqual(bytes(dev.timeline._buf.cpu_view()), bytes(16))
 
 
 if __name__ == "__main__":
