@@ -47,8 +47,6 @@ add_tags = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="x"), tag_uop),
-  # an interior contiguous is a scheduling annotation, not storage: only tag it if a live Tensor observes it
-  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: tag_uop(x) if _tensor_holds(x) else None),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
 
