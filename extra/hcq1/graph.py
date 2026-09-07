@@ -1,7 +1,8 @@
 import collections, time
 from typing import Any, cast
 from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, suppress_finalizing, TracingKey, unwrap
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator, MMIOInterface
+from extra.hcq1.hcq import HCQCompiled, HCQAllocator, HCQSignal, HWQueue, HCQArgsState
+from tinygrad.runtime.support.hcq import HCQBuffer, BumpAllocator, MMIOInterface
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, MultiBuffer, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable
@@ -96,14 +97,13 @@ class HCQGraph(MultiGraphRunner):
 
       # set any fixedvars on the device
       self.device_vars[enqueue_dev] = merge_dicts([self.device_vars.get(enqueue_dev, {}), device_vars])
-      if runtime is not None: self.device_vars[enqueue_dev] = merge_dicts([self.device_vars[enqueue_dev], {k: 0 for k in ast.arg.runtimevars}])
 
       if runtime is not None:
         enqueue_queue = self.comp_queues[enqueue_dev]
       elif is_rdma:
         enqueue_queue = self.comp_queues[enqueue_dev]
         rdma_key = (cast(HCQCompiled, Device[bufs[0].device]).rdma_dev(), enqueue_dev.rdma_dev())
-        from tinygrad.runtime.ops_rdma import RDMACopyQueue
+        from extra.hcq1.ops_rdma import RDMACopyQueue
         self.rdma_queues.setdefault(rdma_key, RDMACopyQueue(enqueue_dev.rdma_dev()))
       else:
         assert (enqueue_dev.hw_copy_queue_t is not None), "device must implement a copy queue"
@@ -173,7 +173,7 @@ class HCQGraph(MultiGraphRunner):
 
       # Encode main commands based on ji type.
       if runtime is not None:
-        enqueue_queue.exec(runtime, self.ji_args[j], ast.arg.global_size or (1,1,1), ast.arg.local_size or (1,1,1))
+        enqueue_queue.exec(runtime, self.ji_args[j], ast.arg.global_size, ast.arg.local_size)
       elif j in self.rdma_deps:
         dest_queue, dest_deps, dest_out_signal, dest_out_val = self.rdma_deps[j]
         for sig, val in dest_deps: dest_queue.wait(sig, val)

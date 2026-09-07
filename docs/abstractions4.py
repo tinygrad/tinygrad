@@ -122,7 +122,7 @@ def example_5_custom_assembly(a:Tensor, correct):
         offset_dwords = (self.labels[inst._target] - inst._pos - inst.size()) // 4
         if not -32768 <= offset_dwords <= 32767: raise ValueError(f"branch to '{inst._target}' offset {offset_dwords} exceeds simm16 range")
         inst.simm16 = offset_dwords
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in self.instructions]))))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in self.instructions]))))
 
   CU_COUNT = 32
   LANES = 64

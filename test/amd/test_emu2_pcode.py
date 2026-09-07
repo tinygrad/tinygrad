@@ -17,6 +17,34 @@ def _srcs():
 class TestBasicParsing(unittest.TestCase):
   """Test basic pcode parsing for common instruction patterns."""
 
+  def test_c_style_blocks_and_array_access(self):
+    code = """
+      for (i = 0; i < 4; i+=2) {
+        if (mode == 0) {
+          out[i+0] = input[i+1];
+          out[i+1] = input[i+0];
+        } elsif (mode == 1) {
+          out[i+0] = 7;
+          out[i+1] = 8;
+        } else { // identity
+          out[i+0] = input[i+0];
+          out[i+1] = input[i+1];
+        }
+      }
+    """
+    for mode, expected in enumerate(([11, 10, 13, 12], [7, 8, 7, 8], [10, 11, 12, 13])):
+      with self.subTest(mode=mode):
+        result, _ = parse_pcode(code, {'mode': UOp.const(mode, dtypes.uint32)}, {'input': lambda i: i + 10})
+        self.assertEqual([result[f'out@{i}'].simplify().val for i in range(4)], expected)
+
+  def test_colon_concatenation(self):
+    result, _ = parse_pcode('offset = hi:lo;', {'hi': UOp.const(0x12, dtypes.uint8), 'lo': UOp.const(0x34, dtypes.uint8)})
+    self.assertEqual(result['offset'].simplify().val, 0x1234)
+
+  def test_unclosed_c_block(self):
+    with self.assertRaisesRegex(AssertionError, 'unclosed pcode block'):
+      parse_pcode('if (1) {\nvalue = 2;')
+
   def test_v_add_f32(self):
     """Test parsing V_ADD_F32 pcode."""
     _, assigns = parse_pcode(PCODE[VOP2Op.V_ADD_F32_E32], _srcs())
@@ -152,7 +180,7 @@ class TestDSPcodePatterns(unittest.TestCase):
 
   def test_global_atomic_add_f32_parsing(self):
     """Test GLOBAL_ATOMIC_ADD_F32 keeps memory values in float dtype."""
-    vmem = UOp.param(2, dtypes.uint32, (1024,))
+    vmem = UOp.param(2, dtypes.uint32, 1024)
     srcs = {
       'ADDR': UOp.const(0, dtypes.uint64),
       'DATA': UOp.const(0x3f800000, dtypes.uint32),
@@ -183,7 +211,7 @@ class TestDSPcodePatterns(unittest.TestCase):
   def test_mem_read_parsing(self):
     """Test MEM[addr].type read expression parsing."""
     # Create a mock LDS buffer
-    lds = UOp.param(3, dtypes.uint32, (16384,))
+    lds = UOp.param(3, dtypes.uint32, 16384)
     addr = UOp.const(0, dtypes.uint32)
     vrs = {'_lds': lds, 'ADDR': addr, 'OFFSET': UOp.const(0, dtypes.uint32)}
 
@@ -218,7 +246,7 @@ class TestDSPcodePatterns(unittest.TestCase):
     pcode = PCODE.get(DSOp.DS_LOAD_2ADDR_B32)
     self.assertIsNotNone(pcode)
     assert pcode is not None
-    lds = UOp.param(3, dtypes.uint32, (16384,))
+    lds = UOp.param(3, dtypes.uint32, 16384)
     srcs = {
       'ADDR': UOp.const(0, dtypes.uint32),
       'OFFSET0': UOp.const(0, dtypes.uint32),
@@ -299,7 +327,7 @@ class TestConcatWidthParsing(unittest.TestCase):
       self.assertIs(parsed.simplify(), UOp.const(expected, dtypes.uint32))
 
   def test_permlane64_wave64_pcode_indices(self):
-    vgpr = UOp.param(0, dtypes.uint32, (256,))
+    vgpr = UOp.param(0, dtypes.uint32, 256)
     srcs = {
       'SRC0': UOp.const(0, dtypes.uint32),
       'VDST': UOp.const(1, dtypes.uint32),
@@ -330,7 +358,7 @@ class TestAllPcode(unittest.TestCase):
   def _make_srcs(self):
     """Create dummy source variables for pcode parsing."""
     u32, u64 = lambda v=0: UOp.const(v, dtypes.uint32), lambda v=0: UOp.const(v, dtypes.uint64)
-    lds = UOp.param(3, dtypes.uint32, (16384,))
+    lds = UOp.param(3, dtypes.uint32, 16384)
     return {'laneId': u32(), 'laneID': u32(), 'S0': u32(), 'S1': u32(), 'S2': u32(), 'S3': u32(), 'SRC0': u32(),
             'D0': u32(), 'D1': u32(), 'DST': u32(), 'VDST': u32(), 'SDST': u32(),
             'VCC': u64(), 'VCCZ': u32(), 'EXEC': u64(), 'EXEC_LO': u32(), 'EXECZ': u32(), 'SCC': u32(),

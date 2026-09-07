@@ -5,23 +5,23 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import Context, ceildiv
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType, buffers
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.runtime.ops_python import PythonRenderer
 from test.helpers import to_uops_list
 
 def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
-  buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in bufs]
-  for u,b in zip(buf_uops, bufs): buffers[u] = b
+  buf_uops = [UOp.from_buffer(b) for b in bufs]
   run_linear(UOp(Ops.LINEAR, src=(UOp.sink(*uops_list, arg=KernelInfo()).call(*buf_uops),)))
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   if op is Ops.CONST: uops.append(UOp.const(arg).cast(dtype))
-  elif op is Ops.PARAM: uops.append(UOp.param(arg, dtype, shape=(1,)))
-  else: uops.append(UOp(op, dtype, tuple(src), arg))
+  elif op is Ops.PARAM: uops.append(UOp.param(arg, dtype, 1))
+  else: uops.append(UOp(op, tuple(src), arg))
   return uops[-1]
 
 def _test_single_value(vals, op, dts):
@@ -57,12 +57,12 @@ def _test_uops_result(output_dtype, uops, res):
   run_uops([out], [buf])
   return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage) and
-                     dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires C-style pointer bitcast and 64-bit ints")
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, PythonRenderer)) and
+                     dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires buffer bitcast and 64-bit ints")
 class TestBitcastBufferView(unittest.TestCase):
   @Context(SPEC=2)
   def test_render(self):
-    buf = UOp.param(0, dtypes.uint32, (4,))
+    buf = UOp.param(0, dtypes.uint32, 4)
     uops = to_uops_list([buf.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0).store(1)], ren=Device[Device.DEFAULT].renderer)
     idx = next(u for u in uops if u.op is Ops.INDEX and u.src[0].op is Ops.BITCAST)
     self.assertEqual(idx.src[0].src[0].op, Ops.SHRINK)
@@ -71,7 +71,7 @@ class TestBitcastBufferView(unittest.TestCase):
   @Context(SPEC=2)
   def test_load(self):
     val = 0x1122334455667788
-    src, out = UOp.param(0, dtypes.uint32, (4,)), UOp.param(1, dtypes.uint64, (1,))
+    src, out = UOp.param(0, dtypes.uint32, 4), UOp.param(1, dtypes.uint64, 1)
     ibuf = Buffer(Device.DEFAULT, 4, dtypes.uint32, initial_value=np.array([0, 0x55667788, 0x11223344, 0], dtype=np.uint32).tobytes())
     obuf = Buffer(Device.DEFAULT, 1, dtypes.uint64).allocate()
     run_uops([out.index(0).store(src.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0))], [ibuf, obuf])
@@ -80,11 +80,21 @@ class TestBitcastBufferView(unittest.TestCase):
   @Context(SPEC=2)
   def test_store(self):
     val = 0x1122334455667788
-    dst = UOp.param(0, dtypes.uint32, (6,))
+    dst = UOp.param(0, dtypes.uint32, 6)
     buf = Buffer(Device.DEFAULT, 6, dtypes.uint32, initial_value=bytes(24))
     view = dst.shrink(((1, 5),)).bitcast(dtypes.uint64)  # two stores through one view: it must inline, not get a declared vector-pointer
     run_uops([view.index(0).store(val ^ 0xff), view.index(1).store(val)], [buf])
     self.assertEqual(np.frombuffer(buf.as_memoryview(), dtype=np.uint64, count=2, offset=4).tolist(), [val ^ 0xff, val])
+
+  def test_vector_load_store(self):
+    for src_dt, dst_dt in [(dtypes.uint8, dtypes.uint32), (dtypes.uint32, dtypes.uint8)]:
+      with self.subTest(src=src_dt, dst=dst_dt):
+        src, dst = [UOp.param(i, dt, 16 // dt.itemsize) for i, dt in enumerate((src_dt, dst_dt))]
+        src, dst = [b.bitcast(dtypes.uint32).index(UOp.stack(*[UOp.const(i) for i in range(4)])) for b in (src, dst)]
+        bufs = [Buffer(Device.DEFAULT, 16 // dt.itemsize, dt, initial_value=bytes(range(16)) if i == 0 else bytes(16))
+                for i, dt in enumerate((src_dt, dst_dt))]
+        run_uops([dst.store(src.load())], bufs)
+        self.assertEqual(bytes(bufs[1].as_memoryview()), bytes(range(16)))
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
@@ -249,8 +259,8 @@ class TestLocalAccess(unittest.TestCase):
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
-    g1 = UOp.param(0, dtypes.int32, shape=(3,))
-    out = UOp.param(1, dtypes.int32, shape=(2,))
+    g1 = UOp.param(0, dtypes.int32, 3)
+    out = UOp.param(1, dtypes.int32, 2)
     c1 = UOp.const(2)
     c2 = UOp.const(3)
     l1 = g1.index(c1)
@@ -271,14 +281,14 @@ class TestAssembly(unittest.TestCase):
     b = Tensor.empty(1024)
     c = (a*b).sum()
     ast = c.schedule_linear().src[-1].src[0]
-    opts_to_apply = [Opt(OptOps.UNROLL, 0, 4)]
+    opts_to_apply = [Opt(OptOps.SPLIT, 0, (4, AxisType.UNROLL))]
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
     program = to_program(ast, Device[Device.DEFAULT].renderer)
     uops = tuple(program.src[1].src)
     self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
   def test_mulacc_shl(self):
-    g1 = UOp.param(0, dtypes.int32, shape=(2,))
+    g1 = UOp.param(0, dtypes.int32, 2)
     c1 = UOp.const(0)
     c2 = UOp.const(1)
     expr = g1.index(c1) * UOp.const(4096) + g1.index(c2)
@@ -287,7 +297,7 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.MULACC, [x.op for x in uops])
 
   def test_use_cmpeq(self):
-    g = UOp.param(0, dtypes.uint32, shape=(8,))
+    g = UOp.param(0, dtypes.uint32, 8)
     c = UOp.const(7)
     comp = g.index(c).ne(c).ne(True)
     uops = to_uops_list([comp], ren=Device[Device.DEFAULT].renderer)

@@ -1,5 +1,5 @@
 import unittest, time, itertools
-from tinygrad import Tensor, Context
+from tinygrad import Tensor, Context, dtypes
 
 class TestScheduleScaling(unittest.TestCase):
   """Test that .schedule() scales linearly with graph size (no O(n^2) behavior)."""
@@ -138,7 +138,7 @@ class TestScheduleScaling(unittest.TestCase):
     def custom_kernel_assign(n):
       def custom_asm(out):
         return UOp(Ops.PROGRAM, src=(UOp.sink(out, arg=KernelInfo(f"fxn_{next(count)}")),
-                                     UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=s_nop(i)) for i in range(n*8)))))
+                                     UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(s_nop(i), dtypes.void)) for i in range(n*8)))))
       call = Tensor.custom_kernel(Tensor.empty(1), fxn=custom_asm)[0]
       return Tensor.cat(*[Tensor.empty(1).assign(call+i) for i in range(n)])
     self._assert_linear(custom_kernel_assign, n_small=50, n_large=500)

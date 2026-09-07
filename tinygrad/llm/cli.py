@@ -145,6 +145,7 @@ def main():
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
+  parser.add_argument("--no_chat_template", action="store_true", help="Don't use the model's chat template, always use the fallback template")
   args = parser.parse_args()
 
   # load the model
@@ -160,7 +161,7 @@ def main():
 
   # use the model's chat template if jinja2 is available (enables model-specific formatting)
   template: jinja2.Template|FallbackTemplate = FallbackTemplate(tok)
-  if (ct := kv.get('tokenizer.chat_template')) is not None:
+  if not args.no_chat_template and (ct := kv.get('tokenizer.chat_template')) is not None:
     try:
       import jinja2
       env = jinja2.Environment()

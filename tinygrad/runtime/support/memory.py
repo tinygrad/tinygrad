@@ -1,6 +1,15 @@
-import collections, functools, dataclasses, enum
+from __future__ import annotations
+import collections, functools, dataclasses, enum, struct
 from typing import Any, ClassVar
-from tinygrad.helpers import round_up, getenv
+from tinygrad.helpers import round_up, getenv, to_mv
+
+class MMIOInterface:
+  def __init__(self, addr:int, nbytes:int, fmt='B'): self.mv, self.addr, self.nbytes, self.fmt = to_mv(addr, nbytes).cast(fmt), addr, nbytes, fmt
+  def __len__(self): return self.nbytes // struct.calcsize(self.fmt)
+  def __getitem__(self, k): return (self.mv[k] if self.fmt == 'B' else self.mv[k].tolist()) if isinstance(k, slice) else self.mv[k]
+  def __setitem__(self, k, v): self.mv[k] = v
+  def view(self, offset:int=0, size:int|None=None, fmt=None) -> MMIOInterface:
+    return MMIOInterface(self.addr+offset, (self.nbytes - offset) if size is None else size, fmt=fmt or self.fmt)
 
 class BumpAllocator:
   def __init__(self, size:int, base:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, base, wrap

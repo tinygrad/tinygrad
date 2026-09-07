@@ -35,7 +35,7 @@ class WallTimeEvent:
     return self
   def __exit__(self, *_):
     self.time = time.monotonic() - self.start
-    _events[self.event]["wall"].append(self.time)
+    _events[self.event]["wall"].append((self.time, BENCHMARK_LOG.value))
     return False
 
 class KernelTimeEvent:
@@ -47,19 +47,19 @@ class KernelTimeEvent:
     self.start = GlobalCounters.time_sum_s
     return self
   def __exit__(self, *_):
-    _events[self.event]["kernel"].append(GlobalCounters.time_sum_s - self.start)
+    _events[self.event]["kernel"].append((GlobalCounters.time_sum_s - self.start, BENCHMARK_LOG.value))
     return False
 
 def log_event_instant(event:InstantBenchEvent, value:float):
-  _events[event].append(value)
+  _events[event].append((value, BENCHMARK_LOG.value))
 
 if BENCHMARK_LOG:
   INFLUXDB_HOST = getenv("INFLUXDB_HOST", "")
   INFLUXDB_ORG = getenv("INFLUXDB_ORG", "tiny")
   INFLUXDB_TOKEN = getenv("INFLUXDB_TOKEN", "")
 
-  def _create_point(run_id, i, attempt, ref, commit, name, value, run):
-    point = Point(BENCHMARK_LOG.value).tag("id", run_id).tag("index", i)
+  def _create_point(run_id, i, attempt, ref, commit, name, value, log_name, run):
+    point = Point(log_name.replace(':', '_').replace('.', '_')).tag("id", run_id).tag("index", i)
     point = point.tag("device", Device.DEFAULT)
     point = point.tag("attempt", attempt).tag("ref", ref).tag("commit", commit)
     point = point.field(name, value).field("x", run)
@@ -91,12 +91,12 @@ if BENCHMARK_LOG:
       run_id = str(uuid.uuid4())
       if isinstance(event, BenchEvent):
         for event_type, values in _events[event].items():
-          for i, value in enumerate(values):
-            point = _create_point(run_id, i, attempt, ref, commit, f"{event.value}_{event_type}", value, run)
+          for i, (value, log_name) in enumerate(values):
+            point = _create_point(run_id, i, attempt, ref, commit, f"{event.value}_{event_type}", value, log_name, run)
             points.append(point)
       else:
-        for i, value in enumerate(_events[event]):
-          point = _create_point(run_id, i, attempt, ref, commit, event.value, value, run)
+        for i, (value, log_name) in enumerate(_events[event]):
+          point = _create_point(run_id, i, attempt, ref, commit, event.value, value, log_name, run)
           points.append(point)
 
     write_options = WriteOptions(write_type=WriteType.synchronous, retry_interval=5000, max_retries=5, max_retry_delay=30000, exponential_base=2)

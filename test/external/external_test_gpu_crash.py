@@ -36,8 +36,8 @@ class TestGPUCrash(unittest.TestCase):
 
   def _run_insts(self, insts: list[Inst]):
     buf = UOp.new_buffer("AMD", 64, dtypes.uint8)
-    sink = UOp.sink(UOp.param(0, dtypes.uint8, (64,), device="AMD"), UOp.special(1, "lidx0"), arg=KernelInfo("test"))
-    prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=i) for i in insts))))
+    sink = UOp.sink(UOp.param(0, dtypes.uint8, 64, device="AMD"), UOp.special(1, "lidx0"), arg=KernelInfo("test"))
+    prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(i, dtypes.void)) for i in insts))))
     run_linear(UOp(Ops.LINEAR, src=(prg.call(buf),)), wait=True)
 
   def _assert_gpu_fault(self, func):

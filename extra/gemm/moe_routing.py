@@ -1,7 +1,52 @@
+import functools, math, pathlib
 from tinygrad import Tensor, dtypes
+from tinygrad.helpers import getenv
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.renderer import Estimates
+from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 
 BLOCK_ROW = 256
+
+@functools.cache
+def _router_mfma_fwd(out:UOp, x:UOp, weight:UOp, bias:UOp, *, dname:str) -> UOp:
+  *lead, K = x.shape
+  M = math.prod(lead)
+  E = weight.shape[0]
+  threads = UOp.special(256, "lidx0")
+  workgroups = UOp.special((M + 63) // 64, "gidx0")
+  sink = UOp.sink(out.base, x.base, weight.base, bias.base, threads, workgroups,
+                  arg=KernelInfo(f"moe_router_mfma_{M}_{K}_{E}", estimates=Estimates(ops=2*M*E*K, mem=(M*K+E*K+E)*2+M*E*4)))
+  amd = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
+  src = (amd/"moe_router_mfma.cpp").read_text()
+  lib = HIPCCCompiler("gfx950", [f"-I{(amd/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS",
+                                 f"-DROUTER_M={M}", f"-DROUTER_K={K}", f"-DROUTER_E={E}"]).compile_cached(src)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+
+def _router_mfma_bwd(gradient:UOp, kernel:UOp) -> tuple:
+  _, x_u, weight_u, bias_u = kernel.src[1:5]
+  x, weight, bias = (Tensor(u, device=u.device) for u in (x_u, weight_u, bias_u))
+  reference = x.float() @ weight.float().T + bias.float()
+  grad_x, grad_weight, grad_bias = reference.gradient(x, weight, bias, gradient=Tensor(gradient, device=x_u.device))
+  return None, grad_x.uop, grad_weight.uop, grad_bias.uop
+
+def router_mfma(x:Tensor, weight:Tensor, bias:Tensor) -> Tensor:
+  assert x.ndim >= 2 and weight.ndim == 2 and bias.ndim == 1
+  K = x.shape[-1]
+  E = weight.shape[0]
+  assert weight.shape == (E, K) and bias.shape == (E,)
+  assert x.dtype == weight.dtype == bias.dtype == dtypes.bfloat16
+  assert E == 32 and K % 64 == 0
+  if isinstance(x.device, tuple):
+    assert x.uop.axis == 0, f"router MFMA requires axis-0 sharding, got axis={x.uop.axis}"
+    local_shape = x.uop.shard_shape
+    assert local_shape[-1] == K and math.prod(local_shape[:-1]) % 64 == 0, f"unsupported local router shape {local_shape}"
+  else:
+    assert math.prod(x.shape[:-1]) % 64 == 0
+  x, weight, bias = x.contiguous(), weight.contiguous(), bias.contiguous()
+  out = _sharded_invalids((*x.shape[:-1], E), dtypes.float32, x.device)
+  out, *_ = Tensor.custom_kernel(out, x, weight, bias,
+    fxn=functools.partial(_router_mfma_fwd, dname=str(x.device)), grad_fxn=_router_mfma_bwd)
+  return out
 
 def _sharded_invalids(shape:tuple[int, ...], dtype, device) -> Tensor:
   if isinstance(device, tuple):

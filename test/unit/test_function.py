@@ -15,6 +15,16 @@ class TestFunction(unittest.TestCase):
     b = Tensor([4,5,6])
     np.testing.assert_equal(f(a,b).numpy(), [5,7,9])
 
+  def test_two_return(self, precompile=False):
+    @function(precompile=precompile)
+    def f(a:Tensor, b:Tensor) -> tuple[Tensor, Tensor]:
+      return (a+b, (a+b)*2)
+    a = Tensor([1,2,3])
+    b = Tensor([4,5,6])
+    c = f(a,b)
+    np.testing.assert_equal((c[0]+c[1]).numpy(), [5*3,7*3,9*3])
+  def test_two_return_precompiled(self): self.test_two_return(True)
+
   def test_simple_same(self):
     @function
     def f(a:Tensor, b:Tensor) -> Tensor: return a+b
@@ -174,13 +184,13 @@ class TestFunction(unittest.TestCase):
   def test_name(self):
     @function
     def f(a:Tensor) -> Tensor: return a + 1
-    assert f(Tensor([1])).uop.src[0].arg.name.endswith("f")
+    assert f(Tensor([1])).uop.src[1].arg.name.endswith("f")
 
   def test_method_name(self):
     class Foo:
       @function
       def __call__(self, x:Tensor) -> Tensor: return x + 1
-    assert Foo()(Tensor([1])).uop.src[0].arg.name.endswith("Foo.__call__")
+    assert Foo()(Tensor([1])).uop.src[1].arg.name.endswith("Foo.__call__")
 
   def test_callable_instance(self):
     class Foo:
@@ -189,7 +199,7 @@ class TestFunction(unittest.TestCase):
     foo = Foo()
     f = function(foo, allow_implicit=True)
     np.testing.assert_equal(f(Tensor([1,2,3])).numpy(), [11,22,33])
-    assert f(Tensor([1,2,3])).uop.src[0].arg.name.endswith("Foo")
+    assert f(Tensor([1,2,3])).uop.src[1].arg.name.endswith("Foo")
 
   def test_iadd(self):
     @function
@@ -424,6 +434,15 @@ class TestFunctionTuple(unittest.TestCase):
     (t1+t2).sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), [1., 1., 1.])
     np.testing.assert_allclose(y.grad.numpy(), [1., 1., 1.])
+
+  def test_grad_fxn_more_outputs_than_inputs(self):
+    def grad_fxn(grad:UOp, call:UOp): return (grad,)
+
+    x = Tensor([2.]).contiguous()
+    @function(grad_fxn=grad_fxn)
+    def f(x:Tensor): return (x+1, x+2)
+    _, y = f(x)
+    self.assertEqual(y.sum().gradient(x)[0].item(), 1.0)
 
   def test_grad_unused_tuple_output_recursive(self):
     # only one output is used

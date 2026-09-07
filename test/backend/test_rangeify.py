@@ -1,55 +1,16 @@
 import unittest
-from tinygrad import Tensor, nn, Device, dtypes, Variable
-from tinygrad.helpers import Context, GlobalCounters, getenv, PCONTIG, DEBUG
+from tinygrad import Tensor, dtypes, Variable
+from tinygrad.helpers import Context, GlobalCounters, getenv, DEBUG
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
-from tinygrad.codegen.opt import OptOps, Opt
-from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.renderer.nir import NIRRenderer
 
-@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
 class TestDoubleMatmul(unittest.TestCase):
-  def setUp(self):
+  def test_double_matmul(self):
     with Context(DEBUG=0):
-      self.a, self.b, self.c = [Tensor.randn(16, 16).contiguous().realize() for _ in range(3)]
-      self.ref = (self.a @ self.b @ self.c).realize()
-
-  def _test(self, opts):
-    with Context(PCONTIG=2, DEBUG=max(2, DEBUG.value)):
-      out = (self.a @ self.b @ self.c).contiguous(arg=opts).realize()
-
-    with Context(DEBUG=0):
-      err = (out-self.ref).square()
-      self.assertLess(err.max().item(), 1e-4)
-      self.assertLess(err.mean().item(), 1e-6)
-
-  def test_baseline(self): self._test(())
-  def test_upcast_0(self): self._test((Opt(OptOps.UPCAST, 0, 4),))
-  def test_upcast_1(self): self._test((Opt(OptOps.UPCAST, 1, 4),))
-  def test_upcast_2(self): self._test((Opt(OptOps.UPCAST, 2, 4),))
-  def test_upcast_01(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)))
-  def test_upcast_01_mismatch(self): self._test((Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 4)))
-  def test_upcast_02(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 2, 4)))
-  def test_upcast_12(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 2, 4)))
-
-  def test_unroll_0(self): self._test((Opt(OptOps.UNROLL, 0, 4),))
-  def test_unroll_1(self): self._test((Opt(OptOps.UNROLL, 1, 4),))
-  def test_unroll_01(self): self._test((Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
-
-  def test_upcast_0_unroll_0(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)))
-  def test_upcast_1_unroll_0(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)))
-  def test_upcast_2_unroll_0(self): self._test((Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UNROLL, 0, 4)))
-
-  def test_upcast_0_unroll_1(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
-  def test_upcast_1_unroll_1(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 1, 4)))
-  def test_upcast_2_unroll_1(self): self._test((Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UNROLL, 1, 4)))
-
-  def test_upcast_1_unroll_1_small(self): self._test((Opt(OptOps.UPCAST, 1, 2), Opt(OptOps.UNROLL, 1, 2)))
-  def test_upcast_1_unroll_1_rev(self): self._test((Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UPCAST, 1, 2)))
-
-  def test_upcast_01_unroll_01(self):
-    self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
-  def test_upcast_12_unroll_01(self):
-    self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
+      a, b, c = [Tensor.randn(16, 16).contiguous().realize() for _ in range(3)]
+      ref = a.numpy() @ b.numpy() @ c.numpy()
+    with Context(DEBUG=max(2, DEBUG.value)):
+      out = (a @ b @ c).numpy()
+    self.assertLess(abs(out-ref).max(), 1e-3)
 
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):
@@ -88,16 +49,15 @@ class TestRangeifyEdgeCase(unittest.TestCase):
     res = Tensor.cat(a, c, dim=0)
     self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
 
-  def test_pcontig_multi_gather(self):
+  def test_multi_gather(self):
     # regression test: local bufferize must have device set for const_like to work
-    with Context(PCONTIG=2):
-      # NOTE: with uint type, this will become a long and fail on WEBGPU
-      forest = Tensor(list(range(8)), dtype='int')
-      idx = Tensor([0, 0], dtype='int')
-      node_val = forest.gather(0, idx)
-      idx2 = idx * 2 + 1
-      node_val2 = forest.gather(0, idx2)
-      result = (node_val + node_val2).numpy()
+    # NOTE: with uint type, this will become a long and fail on WEBGPU
+    forest = Tensor(list(range(8)), dtype='int')
+    idx = Tensor([0, 0], dtype='int')
+    node_val = forest.gather(0, idx)
+    idx2 = idx * 2 + 1
+    node_val2 = forest.gather(0, idx2)
+    result = (node_val + node_val2).numpy()
     self.assertEqual(result.tolist(), [1, 1])
 
 if getenv("BIG") > 2:
@@ -117,65 +77,6 @@ def fa():
   with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
   GlobalCounters.reset()
   return q.scaled_dot_product_attention(k, v)
-
-def fa_bw():
-  Tensor.manual_seed(1337)
-  with Context(DEBUG=0):
-    q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
-    attn_output = nn.Linear(HEADS*EMB, HEADS*EMB, bias=False)
-    attn_output.weight.realize()
-    target = Tensor.rand(BS, SEQLEN, HEADS*EMB).contiguous().realize()
-
-  GlobalCounters.reset()
-  attn = q.scaled_dot_product_attention(k, v).contiguous().contiguous_backward()
-  attn = attn.transpose(1, 2).reshape(BS, SEQLEN, -1)
-  out = attn_output(attn)
-  loss = (out - target).square().mean()
-  loss.backward()
-  #ret = [out, Tensor.stack(q.grad, k.grad, v.grad, dim=-1)]
-  #ret = [out, Tensor.stack(q.grad, k.grad, dim=-1), v.grad]
-  ret = [out, q.grad, k.grad, v.grad]
-  Tensor.realize(*ret)
-  return ret
-
-@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
-class TestPcontig(unittest.TestCase):
-  def test_flash_attention_bw(self):
-    with Context(PCONTIG=max(2, PCONTIG.value), DEBUG=2):
-      grads = fa_bw()
-      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
-
-    with Context(PCONTIG=0, DEBUG=2):
-      cmp_grads = fa_bw()
-      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
-
-    with Context(DEBUG=0):
-      mses = [((x-y)**2).sum().item() for x,y in zip(grads, cmp_grads)]
-    mse = sum(mses)
-    print(f"mse: {mse}")
-    self.assertLessEqual(mse, 1e-6)
-
-  def test_flash_attention(self, opts=None):
-    with Context(PCONTIG=2, DEBUG=max(2, DEBUG.value)):
-      ret = fa().realize() if opts is None else fa().contiguous(arg=opts).realize()
-      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
-    with Context(DEBUG=2):
-      cmp = fa().realize()
-      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
-    with Context(DEBUG=0):
-      mse = ((cmp-ret)**2).sum().item()
-    print(f"mse: {mse}")
-    self.assertLessEqual(mse, 1e-6)
-
-  def test_flash_attention_opt(self):
-    opts = ()
-    # columns in top matrix
-    opts += (Opt(OptOps.UPCAST, 0, 4),)
-    # columns in bottom matrix
-    opts += (Opt(OptOps.UPCAST, 3, 4),)
-    # rows in all the matrix
-    opts += (Opt(OptOps.UPCAST, 4, 4),)
-    self.test_flash_attention(opts)
 
 # contiguous + reduce can support ranges?
 

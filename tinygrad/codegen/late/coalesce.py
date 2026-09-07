@@ -1,7 +1,8 @@
 import itertools, functools
 from collections import defaultdict
+from dataclasses import replace
 from tinygrad.dtype import dtypes, AddrSpace, Invalid, DType
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, shape_to_shape_arg, graph_rewrite
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, graph_rewrite
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate, sym
 from tinygrad.helpers import getenv, IMAGE, OSX, ceildiv, is_image_shape
 from tinygrad.renderer import Renderer
@@ -85,7 +86,8 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   if len(cands) == 0: return None
   # and tiebreak with indexing complexity (ie. number of nodes)
   h, w, cidx = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].index(1).simplify().backward_slice))
-  buf = buf.replace(src=(shape_to_shape_arg((h, w, 4)),))
+  # the image dims are stored in the param's arg, the size stays the flat buffer len
+  buf = buf.replace(arg=replace(buf.arg, image=(h, w)))
   shapes[buf.arg.slot] = (h, w)
   if valid.op is not Ops.CONST or valid.val is not True:
     return buf.index(cidx.src[1].valid(valid), cidx.src[0].valid(valid))
@@ -103,7 +105,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
   if getenv("DMC"): return sink
 
   # collect
-  memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp], dict[int, list[UOp]]] = defaultdict(dict)
+  memory: defaultdict[tuple[Ops, UOp, UOp|str, UOp, object], dict[int, list[UOp]]] = defaultdict(dict)
   for u in sink.toposort():
     # TODO: this should handle images too, it's just memory coalescing
     if u.op in {Ops.LOAD, Ops.STORE}:
@@ -111,6 +113,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
+      if buf.op is Ops.PARAM and buf.arg.volatile: continue # volatile accesses never merge
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
       root_src: UOp|str
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].val
@@ -118,11 +121,12 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       elif idx.op is Ops.CONST and idx.val is Invalid: root_src, arg = "INVALID", 0
       elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.val
       else: root_src, arg = idx, 0
-      memory[(u.op, buf, root_src, valid)].setdefault(arg, []).append(u)
+      # loads/stores only coalesce with others carrying the same arg (e.g. the nontemporal flag)
+      memory[(u.op, buf, root_src, valid, u.arg)].setdefault(arg, []).append(u)
 
   # build replacements
   replacements = {}
-  for (op,buf,base,valid),offsets in memory.items():
+  for (op,buf,base,valid,ld_arg),offsets in memory.items():
     # allowed lengths (copied in)
     lengths = []
     must_divide = True
@@ -157,7 +161,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
           store = idx.store(UOp.stack(*datas) if len(datas) > 1 else datas[0])
           for i,g in enumerate(grp): replacements[offsets[g][0]] = store
         else:
-          ld = idx.load()
+          ld = idx.load(arg=ld_arg)
           for i,g in enumerate(grp):
             for oo in offsets[g]:
               replacements[oo] = ld.index(i) if len(grp) > 1 else ld

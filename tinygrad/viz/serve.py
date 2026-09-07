@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, codecs, io, struct, re, traceback, itertools
-import socketserver
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, socket, argparse, codecs, io, struct, re, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from dataclasses import dataclass, field
@@ -51,7 +50,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.WMMA: "#efefc0", Ops.UNSHARD: "#f6ccff", Ops.INS: "#eec4ff",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
                Ops.BUFFER: "#B0BDFF", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#a040a0", Ops.CUSTOM_FUNCTION: "#bf71b6",
-               Ops.CALL: "#00B7C8", Ops.FUNCTION: "#C07788", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
+               Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
                Ops.LINEAR: "#7DF4FF",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
                Ops.STAGE: "#AC640D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
@@ -145,7 +144,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         label += f"\n({multirange_str(rngs, color=True)})"
       if u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
-      if u.op in {Ops.CALL, Ops.FUNCTION}:
+      if u.op is Ops.CALL:
         label += f"\n{u.src[0].key.hex()[:8]}\n{u.src[0].op}"
       if u.op in {Ops.INDEX, Ops.STAGE}:
         label += f"\n{u.render()}" if sum(len(s.toposort()) for s in u.src[1:]) < 30 else "\nINDEX TOO LARGE"
@@ -156,24 +155,26 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
-    ref = data.ref_map.get(canonicalize_ast(u.src[0])) if u.op in {Ops.CALL, Ops.FUNCTION} else None
+    ref = data.ref_map.get(canonicalize_ast(u.src[0])) if u.op is Ops.CALL else None
     if ref is not None: label += f"\ncodegen@{fmt_colored(data.ctxs[ref]['name'])}"
     # NOTE: kernel already has metadata in arg
-    if TRACEMETA >= 2 and u.metadata is not None and u.op not in {Ops.CALL, Ops.FUNCTION}: label += "\n"+str(u.metadata)
+    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.CALL: label += "\n"+str(u.metadata)
     # limit SOURCE labels line count
     if u.op is Ops.SOURCE and len(lines:=label.split("\n")) > 40:
       label = "\n".join(lines[:30]) + "\n..."
+    if u.is_unbound: label += "\nUNBOUND"
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
-    graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":uops_colors.get(u.op, "#ffffff"),
+    color = "#C07788" if u.is_unbound else uops_colors.get(u.op, "#ffffff")
+    graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":color,
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
   return graph
 
 def _reconstruct(data:VizData, a:int, depth:int|None=None):
   if depth is None and a in data.all_uops: return data.all_uops[a]
-  op, dtype, src, arg, *rest = data.trace.uop_fields[a]
-  if depth is not None and depth <= 0: return UOp(op, dtype, (), arg, *rest)
-  ret = UOp(op, dtype, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
+  op, src, arg, *rest = data.trace.uop_fields[a]
+  if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
+  ret = UOp(op, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
   if depth is None: data.all_uops[a] = ret
   return ret
 
@@ -359,11 +360,6 @@ def load_amd_counters(data:VizData, profile:list) -> None:
     if (sqtt:=v.get("ProfileSQTTEvent")):
       for e in sqtt:
         if e.itrace: steps.append(create_step(f"SE:{e.se} PKTS", (f"/sqtt-{e.se}",len(data.ctxs),len(steps)), data=(e.blob,prg_events[k].lib,arch)))
-      try:
-        with Context(DEBUG=0): from extra.sqtt.roc import unpack_occ
-        steps.append(create_step("OCC", ("/amd-sqtt-occ", len(data.ctxs), len(steps)),
-                                 data={"fxn":unpack_occ, "args":((k, tag), sqtt, prg_events[k], arch)}))
-      except Exception: pass
     data.ctxs.append({"name":f"SQTT {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 wave_colors = {"WMMA": "#1F7857", **{x:"#ffffc0" for x in ["VALU", "VINTERP"]}, "SALU": "#cef263", "SMEM": "#ffc0c0", "STORE": "#4fa3cc",
@@ -373,7 +369,7 @@ wave_colors = {"WMMA": "#1F7857", **{x:"#ffffc0" for x in ["VALU", "VINTERP"]}, 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, None, None]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
-                                          WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND, WAVERDY)
+                                          CDNA_ISSUE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND, WAVERDY)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
@@ -383,8 +379,9 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
   def add(name:str, p:PacketType, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name.replace('_ALT', '')}"
-    # by default we extend the packet to one cycle after timestamp
-    start_time, end_time = p._time, p._time+1
+    if (simd:=getattr(p, "simd", None)) is not None: row += f" SIMD:{simd}"
+    # extend packets to the architectural instruction issue interval
+    start_time, end_time = p._time, p._time+(4 if target.startswith("gfx9") else 1)
     # exec links to dispatch, dispatch links to PC
     link:dict|None = {"pc":info.pc} if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
@@ -432,7 +429,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4, InstOpCDNA)) else f"0x{p.op:02x}"
       yield from add(name, p, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
-    if isinstance(p, IMMEDIATE_MASK): yield from add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
+    if isinstance(p, (IMMEDIATE_MASK, CDNA_ISSUE)): yield from add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, WAVERDY):
       for wave in range(16):
         if p.mask & (1 << wave):
@@ -470,21 +467,23 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
   start_ts:int|None = None
   end_ts:int|None = None
   for ts,en,e in flatten_events(profile, device_ts_diffs):
-    dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
-    if start_ts is None or st < start_ts: start_ts = st
-    if end_ts is None or et > end_ts: end_ts = et
-    if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
     if isinstance(e, ProfilePointEvent) and e.name == "JSON": ext_data[e.key] = e.arg
+    else:
+      dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
+      if start_ts is None or st < start_ts: start_ts = st
+      if end_ts is None or et > end_ts: end_ts = et
+      if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
   if start_ts is None: return None
   # return layout of per device events
   layout:dict[str, bytes|None] = {}
   scache:dict[str, int] = {}
   peaks:list[int] = []
   dtype_size:dict[str, int] = {}
-  for k,v in dev_events.items():
-    v.sort(key=lambda e:e[0])
-    layout[k] = timeline_layout(data, v, start_ts, scache)
-    layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)])
+  with soft_err():
+    for k,v in dev_events.items():
+      v.sort(key=lambda e:e[0])
+      layout[k] = timeline_layout(data, v, start_ts, scache)
+      layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)])
   sorted_layout = sorted([k for k,v in layout.items() if v is not None], key=sort_fn)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), unwrap(layout[k])]) for k in sorted_layout]
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size,
@@ -650,9 +649,6 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
         ret = {"value":events, "content_type":"application/octet-stream"}
       else: ret = {"src":"No SQTT trace on this SE."}
     return ret
-  # viewers for the amd decoder in extra
-  if fmt.startswith("amd-sqtt"): return data["fxn"](viz_data, i, j, *data["args"])
-  if fmt == "cu-sqtt": return {"value":get_profile(viz_data, data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "prg-pma-pkts":
     ret = {}
     with soft_err(lambda err:ret.update(err)):
@@ -733,7 +729,6 @@ if __name__ == "__main__":
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"), flush=True)
-  if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}")
   try: server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")

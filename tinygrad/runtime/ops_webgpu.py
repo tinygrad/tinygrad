@@ -201,7 +201,7 @@ class WebGpuDevice(Compiled):
   def create_uniform(self, val:int|float) -> webgpu.WGPUBuffer:
     buf = webgpu.wgpuDeviceCreateBuffer(self.device_res,
                                         webgpu.WGPUBufferDescriptor(size=4, usage=webgpu.WGPUBufferUsage_Uniform | webgpu.WGPUBufferUsage_CopyDst))
-    self.write_buffer(buf, val.to_bytes(4, "little") if isinstance(val, int) else struct.pack('<f', val))
+    self.write_buffer(buf, val.to_bytes(4, "little", signed=val < 0) if isinstance(val, int) else struct.pack('<f', val))
     return buf
   def _readable_buffer(self, buf:webgpu.WGPUBuffer) -> webgpu.WGPUBuffer:
     size = webgpu.wgpuBufferGetSize(buf)

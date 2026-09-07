@@ -4,7 +4,7 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
 from tinygrad.renderer.isa.x86 import X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm, def_reg
 
-def ins(op, dt, src, tag=None): return UOp(Ops.INS, arg=op, dtype=dt, src=src, tag=tag)
+def ins(op, dt, src, tag=None): return UOp(Ops.INS, arg=(op, dt), src=src, tag=tag)
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only on x86")
 class TestEncodingsX86(unittest.TestCase):
@@ -100,13 +100,6 @@ class TestEncodingsX86(unittest.TestCase):
     # vaddss xmm0, xmm0, xmm8
     self.assertEqual(bytes.fromhex(self.encode(add)), bytes.fromhex("C4 C1 7A 58 C0"))
 
-  # test ymm encoding
-  def test_ymm_encoding(self):
-    xmm0, xmm1 = def_reg(dtypes._uint256, XMM[0]), def_reg(dtypes._uint256, XMM[1])
-    add = ins(X86Ops.VADDPS, dtypes._uint256, (xmm0, xmm1), XMM[0])
-    # vaddps ymm0, ymm0, ymm1
-    self.assertEqual(bytes.fromhex(self.encode(add)), bytes.fromhex("C5 FC 58 C1"))
-
   # test encoding where register is in the immediate field
   def test_reg_in_imm_field(self):
     xmm0, xmm1, xmm2 = def_reg(dtypes.float32, XMM[0]), def_reg(dtypes.float32, XMM[1]), def_reg(dtypes.float32, XMM[2])
@@ -143,7 +136,7 @@ class TestEncodingsX86(unittest.TestCase):
 
   # cmoves have the cmp as the last src even though it is not explicitly used, the cmp doesn't define a reg and is ignored in the encoding
   def test_cmove_ignore_cmp(self):
-    cmove = ins(X86Ops.CMOVE, dtypes.int32, (def_reg(dtypes.int32, RAX), UOp(Ops.INS, arg=X86Ops.CMP)), RDX)
+    cmove = ins(X86Ops.CMOVE, dtypes.int32, (def_reg(dtypes.int32, RAX), UOp(Ops.INS, arg=(X86Ops.CMP, dtypes.void))), RDX)
     # cmove edx, eax
     self.assertEqual(bytes.fromhex(self.encode(cmove)), bytes.fromhex("0F 44 D0"))
 

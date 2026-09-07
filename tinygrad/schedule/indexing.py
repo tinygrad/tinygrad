@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
+from tinygrad.helpers import argsort, all_same, cpu_profile, colored, Context, SPEC
 
 @dataclass
 class IndexingContext:
@@ -23,7 +23,7 @@ class IndexingContext:
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER,
                       Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
-                      Ops.LOAD, Ops.CALL, Ops.FUNCTION}
+                      Ops.LOAD, Ops.CALL}
 
 def realize(ctx:IndexingContext, tr:UOp) -> None: ctx.realize_map[tr] = None
 
@@ -204,7 +204,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in reversed(tsink_toposort):
     # no ranges on kernels, they are internal
-    if x.op in {Ops.CALL, Ops.FUNCTION, Ops.LINEAR}: continue
+    if x.op in {Ops.CALL, Ops.LINEAR}: continue
 
     # AFTER doesn't have range
     if x.op is Ops.AFTER: continue
@@ -248,13 +248,12 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
         local_rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
         rngs_valids.append((local_rngs, valids))
 
-      # TODO: in RANGEIFY > 1 all_all_same isn't required
       all_all_same = all(all_same(local_rngs) for local_rngs,_ in rngs_valids)
       _out_rngs = []
       _realize_axis = []
       for i,(local_rngs,valids) in enumerate(rngs_valids):
         # we compare the ranges without their valids
-        if all_all_same or (PCONTIG and all_same(local_rngs)):
+        if all_all_same:
           # the new valid is the OR of all the children valids
           minimum_valid = UOp.const(False).usum(valids)
           _out_rngs.append(graph_rewrite(local_rngs[0].valid(minimum_valid), symbolic, name="minimum_valid"))
@@ -268,15 +267,11 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> UOp:
 
     # if this element is a reduce and there's ended ranges, we might have to end some other ranges
     if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE}):
-      _realize_axis = rctx.realize_map.get(x) or []
-      for i,r in enumerate(out_rngs):
-        if i in _realize_axis: continue
-        if not (PCONTIG > 1) or any(any(rr.arg > e.arg for e in ending_ranges[x]) for rr in r.ranges):
-          _realize_axis.append(i)
+      _realize_axis = list(range(len(out_rngs)))
       ending_ranges[x] = []
       if len(_realize_axis):
         rctx.realize_map[x] = _realize_axis
-        out_rngs = tuple([(rctx.new_range(x.shape[i]) if i in _realize_axis else r) for i,r in enumerate(out_rngs)])
+        out_rngs = tuple(rctx.new_range(x.shape[i]) for i in range(len(out_rngs)))
     ending_ranges[x] += broadcast_ending_ranges
 
     # TODO: some ops don't have shape, enable this after the `.st` property is removed

@@ -23,6 +23,12 @@ class TestInvalidTensor(unittest.TestCase):
     out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid)
     self._invalid_test_helper(out, [1.0, 2.0, None, None])
 
+  def test_where_padded_invalid_cast(self):
+    # a padded Invalid is not Invalid: its zeros take the cast
+    a, b = Tensor.full((1,), Invalid).pad((1,1)), Tensor.full((1,), Invalid).pad((2,0))
+    out = Tensor([True, False, True]).where(a, b).cast(dtypes.float) + Tensor([1., 2., 3.])
+    self.assertEqual((out.dtype, out.tolist()), (dtypes.float, [1.0, 2.0, 3.0]))
+
   def test_where_invalid_x(self):
     mask = Tensor.arange(4) < 2
     out = mask.where(Invalid, Tensor([1.0, 2.0, 3.0, 4.0]))

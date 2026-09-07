@@ -1,7 +1,7 @@
 import itertools
 from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType
-from tinygrad.uop.symbolic import symbolic, invalid_gate
+from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
 
@@ -84,7 +84,7 @@ def reduce_unparented(red:UOp) -> UOp|None:
   assert all(x.op is Ops.RANGE for x in red.src[1:]), "some reduce srcs aren't ranges"
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].ranges)
   if len(reduce_unparented) == 0: return None
-  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
+  ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) else red.src[0]
   if red.arg[0] is Ops.ADD:
     for r in reduce_unparented: ret = ret * r.src[0]
   if red.arg[0] is Ops.MUL:
@@ -110,8 +110,6 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   ).reduce(UPat.var("r"), arg=Ops.ADD), lambda r,val,lower=None,upper=None:
     ((upper.minimum(r.src[0]) if upper is not None else r.src[0]) -
      (lower.maximum(0) if lower is not None else r.const_like(0))).maximum(0).minimum(r.src[0]) * val if no_range(val) else None),
-  (invalid_gate.reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
-   lambda cond,x,i,r: cond.where(x.reduce(*r.src[1:], arg=Ops.ADD), i) if no_range(cond) else None),
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
    lambda x,y,r: x.reduce(*r.src[1:], arg=Ops.ADD) + y.reduce(*r.src[1:],arg=Ops.ADD)),
   # AND on WHERE

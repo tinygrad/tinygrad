@@ -125,7 +125,7 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
                   arg=KernelInfo(f"mxfp4_gemm_{M}_{N}_{K}",
                                  estimates=Estimates(ops=2*M*N*K, mem=(M*half_k+N*half_k)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
   insts = build_kernel(M, N, K, tile_m, tile_n)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=x) for x in insts))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
 
 def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor) -> Tensor:
   M, half_k = a_q.shape
@@ -215,7 +215,7 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   k = UOp.range(K, 0, AxisType.REDUCE)
   mul = (A.flatten().index((m*UOp.const(K)+k))*
          B.flatten().index((k*UOp.const(N)+n))).cast(dtypes.float32)
-  red = mul.reduce(k, arg=Ops.ADD, dtype=dtypes.float32).cast(C.dtype)
+  red = mul.reduce(k, arg=Ops.ADD).cast(C.dtype)
   store = C.flatten().index((m*UOp.const(N)+n)).store(red).end(m, n)
   return store.sink(arg=KernelInfo(name=f'uop_gemm_{M}_{N}_{K}'))
 

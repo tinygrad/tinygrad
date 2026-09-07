@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING, Self
-from tinygrad.dtype import DType, DTypeLike, dtypes, to_dtype
+from tinygrad.dtype import DType, DTypeLike, dtypes, to_dtype, strong_dtype, commit_int
 from tinygrad.uop import Ops
 
 if TYPE_CHECKING:
@@ -12,6 +12,9 @@ class DTypeMixin:
   def _uop(self) -> 'UOp': raise NotImplementedError
   @classmethod
   def _wrap_uop(cls, u:'UOp') -> Self: raise NotImplementedError
+
+  def commit_dtype(self, default_int:DType|None=None) -> DType:
+    return commit_int(self._uop.vmin, self._uop.vmax, default_int) if self.dtype is dtypes.weakint else strong_dtype(self.dtype)
 
   def cast(self, dtype:DTypeLike) -> Self:
     """

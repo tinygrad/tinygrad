@@ -92,8 +92,6 @@ nload = nir_instr(nc=lambda u:u.max_numel(), bs=lambda u:u.dtype.bitsize, num_co
 
 ngid = nir_instr(nc=3, bs=32)(lambda b: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_workgroup_id))
 nlid = nir_instr(nc=3, bs=32)(lambda b: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_local_invocation_id))
-ngsz = nir_instr(nc=3, bs=32)(lambda b: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_workgroup_size))
-def nid(b): return nalu(b, "iadd", nalu(b, "imul", ngid(b), ngsz(b)), nlid(b))
 
 nbarrier = nir_instr(has_def=False, intrins={"EXECUTION_SCOPE":mesa.SCOPE_WORKGROUP})(
   lambda b: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_barrier))
@@ -125,7 +123,7 @@ class NIRRenderer(Renderer):
     (UPat.var('x', dtype=dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
     # a bool is one bit in NIR but a byte in memory, so every access to a bool buffer goes through a uint8 view of it
     (UPat(Ops.LOAD, dtypes.bool, name="x"),
-     lambda x: x.replace(dtype=None, src=(with_storage(x.src[0], dtypes.uint8),)+((x.src[1].cast(dtypes.uint8),) if len(x.src)>=2 else ())
+     lambda x: x.replace(src=(with_storage(x.src[0], dtypes.uint8),)+((x.src[1].cast(dtypes.uint8),) if len(x.src)>=2 else ())
       +x.src[2:]).cast(dtypes.bool)),
     (UPat(Ops.STORE, src=(UPat(name="idx"), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
      lambda x,idx: x.replace(src=(with_storage(idx, dtypes.uint8), x.src[1].cast(dtypes.uint8))+x.src[2:])),
@@ -136,8 +134,8 @@ class NIRRenderer(Renderer):
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
     # nor to REG/ALU register picks, which keep their own index dtype
-    (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
-      src=(buf,UOp.const(off.val, dtypes.long) if off.op is Ops.CONST else off.cast(dtypes.long))+x.src[2:])
+    (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"),
+     lambda x,buf,off: x.replace(src=(buf,off.ccast(dtypes.long))+x.src[2:])
       if buf.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) and not is_image_shape(buf._shape) else None),
     # images need index to be int for nir (coordinates only: the INDEX keeps its access dtype)
     (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x"), name="x"),
@@ -147,7 +145,7 @@ class NIRRenderer(Renderer):
   def_rewrite = PatternMatcher([
     (UPat.cvar("c").cast(name="x"), lambda ctx,x,c: nimm(ctx.b, c.val, x.dtype)),
     (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx.param(ctx.b, x, x.dtype.itemsize if x.addrspace is AddrSpace.ALU else 8)),
-    (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, {'g':ngid, 'l':nlid, 'i': nid}[x.arg[0]](ctx.b), int(x.arg[-1]))),
+    (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, {'g':ngid, 'l':nlid}[x.arg[0]](ctx.b), int(x.arg[-1]))),
     (UPat(Ops.STORE, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"),UPat.var("off")), allow_any_len=True), UPat.var("val"))),
      lambda ctx,buf,off,val: nstore(ctx.b, buf.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.addrspace, buf.dtype.itemsize), ctx.r[val])),
     (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.SHRINK), src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True), UPat.var("alt"),
@@ -181,7 +179,6 @@ class NIRRenderer(Renderer):
   def param(self, b:mesa.nir_builder, x, sz:int) -> mesa.nir_def: raise NotImplementedError("needs param")
   def prerender(self, uops:list[UOp]):
     self.b = mesa.nir_builder_init_simple_shader(mesa.MESA_SHADER_COMPUTE, mesa.nir_shader_compiler_options.from_buffer_copy(self.nir_options), None)
-    self.b.shader.contents.info.workgroup_size_variable = any([u.op == Ops.SPECIAL and u.arg[0] == 'i' for u in uops])
   def postrender(self, uops:list[UOp]): pass
 
   def render(self, uops:list[UOp]):

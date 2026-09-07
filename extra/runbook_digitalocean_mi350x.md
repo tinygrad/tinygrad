@@ -49,13 +49,13 @@ ldconfig
 curl -sL https://raw.githubusercontent.com/geohot/configuration/master/.tmux.conf -o ~/.tmux.conf
 ```
 
-### 1.6 Reload amdgpu driver
-tinygrad's HCQ backend needs `/dev/kfd` which is created by the amdgpu kernel driver.
-If the driver was unloaded, reload it:
+### 1.6 Verify GPU PCI access
+The AM userspace driver accesses the GPUs directly over PCI. Do not load `amdgpu`. `/dev/kfd` is not required.
 ```bash
-modprobe amdgpu
-ls /dev/kfd  # should exist
+rmmod amdgpu
+lspci -nnk -d 1002:
 ```
+The MI350X devices should not show a `Kernel driver in use: amdgpu`.
 
 ## Phase 2: Clone tinygrad
 ```bash
@@ -76,8 +76,23 @@ rclone config create mlc-training s3 provider=Cloudflare \
   endpoint=c2686074cb2caf5cbaf6d134bdba8b47.r2.cloudflarestorage.com
 
 mkdir -p /raid/datasets/c4-8b
-rclone copy mlc-training:mlcommons-training-wg-public/llama3_1/datasets/c4/llama3_1_8b/ /raid/datasets/c4-8b/ -P
+(rclone copy mlc-training:mlcommons-training-wg-public/llama3_1/datasets/c4/llama3_1_8b/ /raid/datasets/c4-8b/ -P && \
+  PYTHONPATH=. python3 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/buid_dataset_cache.py) \
+  > /root/dataset_cache.log 2>&1 &
 ```
+Leave this running and proceed to the beam step while the dataset downloads and its cache builds.
+
+### 3.1 Smoke test (beam search, 2 layers, fake data)
+Always run beam first to validate the pipeline:
+```bash
+tmux new-session -d -s beam 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=PCI+AMD:HIP ROCM_PATH=/opt/rocm bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_beam.sh 2>&1 | tee /root/beam.log'
+```
+
+The beam test runs 10 training steps with 2 layers. Expected results:
+- ~0.29s per step after warmup
+- ~700K GFLOPS, ~7% MFU (low because only 2 layers)
+- ~380 GB VRAM used
+- Loss stable at ~12.55 with random init
 
 Files downloaded (~85GB total, ~6 minutes):
 - `c4-train.en_6_text_document.bin` (79 GB)
@@ -106,25 +121,13 @@ wandb login <API_KEY>
 
 Run training in tmux so it survives SSH disconnects:
 ```bash
-tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=AMD:HIP ROCM_PATH=/opt/rocm WANDB=1 bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_run.sh 2>&1 | tee /root/train.log'
+tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=PCI+AMD:HIP ROCM_PATH=/opt/rocm WANDB=1 bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_run.sh 2>&1 | tee /root/train.log'
 ```
 Attach with `tmux attach -t train`.
 
-### 5.1 Smoke test (beam search, 2 layers, real data)
-Always run beam first to validate the pipeline:
+### 5.1 Full training run
 ```bash
-tmux new-session -d -s beam 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=AMD:HIP ROCM_PATH=/opt/rocm bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_beam.sh 2>&1 | tee /root/beam.log'
-```
-
-The beam test runs 10 training steps with 2 layers. Expected results:
-- ~0.29s per step after warmup
-- ~700K GFLOPS, ~7% MFU (low because only 2 layers)
-- ~380 GB VRAM used
-- Loss stable at ~12.55 with random init
-
-### 5.2 Full training run
-```bash
-tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=AMD:HIP ROCM_PATH=/opt/rocm WANDB=1 bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_run.sh 2>&1 | tee /root/train.log'
+tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/libamd_comgr.so COMGR_3_PATH=/opt/rocm/lib/libamd_comgr.so CC=/opt/rocm/core-7.14/lib/llvm/bin/clang DEV=PCI+AMD:HIP ROCM_PATH=/opt/rocm WANDB=1 bash examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/dev_run.sh 2>&1 | tee /root/train.log'
 ```
 
 ## Environment Variable Reference
@@ -134,7 +137,7 @@ tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/liba
 | `COMGR_PATH` | `/opt/rocm/lib/libamd_comgr.so` | tinygrad's DLL loader needs explicit path to find comgr 3.3 |
 | `COMGR_3_PATH` | `/opt/rocm/lib/libamd_comgr.so` | comgr 3.x uses a separate `comgr_3` module with its own path var |
 | `CC` | `/opt/rocm/core-7.14/lib/llvm/bin/clang` | System clang doesn't know gfx950; must use ROCm's bundled clang |
-| `DEV` | `AMD:HIP` | Force HIPRenderer (comgr-based) over HIPCCRenderer (hipcc subprocess) |
+| `DEV` | `PCI+AMD:HIP` | Force HIPRenderer (comgr-based) over HIPCCRenderer (hipcc subprocess) |
 | `ROCM_PATH` | `/opt/rocm` | Script defaults to `/opt/rocm-7.1.1` which doesn't exist |
 | `WANDB` | `1` | Enable wandb logging (off by default) |
 
@@ -150,7 +153,7 @@ tmux new-session -d -s train 'cd /root/tinygrad && COMGR_PATH=/opt/rocm/lib/liba
 | ASM GEMM | `extra/gemm/cdna_asm_gemm.py` — gfx950 MFMA assembly, MXFP4 |
 | Flash attention | `extra/thunder/amd/fa.py` |
 | Fused kernels | `extra/llama_kernels/` — rmsnorm, silu, quantize, fused_ce |
-| GPU driver | `tinygrad/runtime/ops_amd.py` — HCQ, direct KFD ioctl |
+| GPU driver | `tinygrad/runtime/ops_amd.py` — HCQ, using the AM userspace PCI interface |
 | Renderer | `tinygrad/renderer/cstyle.py` — HIPRenderer for gfx950 |
 | comgr compiler | `tinygrad/runtime/support/compiler_amd.py` — HIPCompiler using comgr 3.3 |
 
@@ -189,29 +192,6 @@ $ lspci -nn | grep AMD
 83:00.0 ... Device [1002:75b0]
 ```
 CPU flags include `hypervisor`. `dmesg` shows `Hypervisor detected: KVM`.
-
-### Working path: amdgpu driver (KFDIface)
-The amdgpu driver loads on boot and binds to all 8 GPUs, creating `/dev/kfd` and 64 renderD nodes (`/dev/dri/renderD128` through `/dev/dri/renderD191`). tinygrad's `KFDIface` enumerates GPUs through `/sys/devices/virtual/kfd/kfd/topology/nodes` and uses `/dev/kfd` for ioctl. No PCI device ID patching is needed — the KFD path does not use `PCIIface` or `AMDev._run_discovery()`.
-
-This is the working configuration. No code changes to tinygrad are required.
-
-### PCIIface path (does not work on this VM)
-For reference, the `PCIIface` path was also explored but does not work in this KVM guest:
-
-- `PCIIface` in `ops_amd.py` does not list device ID `0x75b0`. Adding it allows PCI detection but `AMDev._run_discovery()` fails because the VRAM BAR reads all `0xFF`.
-- This was observed with the GPU unbound from any driver, after PCI reset, and with VFIO bound.
-- VFIO binding (`vfio-pci` with `enable_unsafe_noiommu_mode=1`) succeeded but VRAM BAR still reads all `0xFF`.
-- No IOMMU in guest — `dmesg` has no `AMD-Vi` entries, PCI devices have no `iommu_group` symlink.
-
-### amdgpu driver behavior
-On first boot, amdgpu loaded and bound to all 8 GPUs. On one boot it failed to initialize:
-```
-[  799.780369] amdgpu 0000:83:00.0: Failed to alloc msi vectors
-[  799.781476] amdgpu 0000:83:00.0: sw_init of IP block <vega20_ih> failed -22
-[  799.782724] amdgpu 0000:83:00.0: amdgpu_device_ip_init failed
-[  799.793885] amdgpu 0000:83:00.0: Fatal error during GPU init
-```
-On a subsequent boot, amdgpu initialized successfully (SMU initialized, VRAM ready). After unbinding all 8 GPUs from amdgpu, `rmmod amdgpu` wedged the module (stuck in "Unloading" state in `/proc/modules`), requiring a full VM reboot.
 
 ### No fan control
 No `fan*` or `pwm*` hwmon entries exist. Only `temp*`, `power*`, `freq*` are exposed. GPU temps read 56-63°C, power ~265W per GPU.

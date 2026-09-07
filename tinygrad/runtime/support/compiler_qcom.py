@@ -14,7 +14,7 @@ class QCOMCompiler(Compiler):
     else:
       # extract once into the download cache, all processes share the rootfs (extract=True)
       self.arch, self.chip_id = arch, 0x6030001
-      fs, root = fetch('https://git.tinygrad.win/sirhcm/images/releases/download/v2/qcomcl.tar.gz', extract=True), pathlib.Path(__file__).parents[3]
+      fs, root = fetch('https://git.tinygrad.win/tinygrad/images/releases/download/v2/qcomcl.tar.gz', extract=True), pathlib.Path(__file__).parents[3]
       self.compiler_process = self.server(f"{qemu} -cpu max,pauth=off -L {fs} {fs}/usr/bin/python3" if (qemu:=shutil.which("qemu-aarch64-static"))
                                           else (f"docker run --rm -i --platform linux/aarch64 -v {fs}/usr:/usr -v {root}:{root} "
                                                 f"-e PYTHONPATH={root} -e QEMU_CPU=max,pauth=off gcr.io/distroless/static python3"), arch)

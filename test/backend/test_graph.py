@@ -7,7 +7,7 @@ from tinygrad.helpers import Context
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.engine.realize import run_linear, compile_linear
-from tinygrad.uop.ops import UOp, Ops, buffers
+from tinygrad.uop.ops import UOp, Ops
 
 from test.helpers import needs_second_gpu
 
@@ -39,8 +39,7 @@ def make_view(base, offset_elems, size_elems):
 
 def get_buf_uop(buf:Buffer, cache:dict[Buffer,UOp]) -> UOp:
   if buf not in cache:
-    cache[buf] = u = UOp.new_buffer(buf.device, buf.size, buf.dtype)
-    buffers[u] = buf
+    cache[buf] = UOp.from_buffer(buf)
   return cache[buf]
 
 def copy_call(dst:Buffer, src:Buffer, c:dict[Buffer,UOp]) -> UOp:

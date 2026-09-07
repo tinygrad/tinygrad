@@ -23,8 +23,8 @@ def _test_uop_result(inputs:list[Tensor], sink:UOp, local_size=None):
 
 def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
   dtype = alu_src_uops[0].dtype
-  a = UOp.param(0, dtype, (1,))
-  b = UOp.param(1, dtype, (1,))
+  a = UOp.param(0, dtype, 1)
+  b = UOp.param(1, dtype, 1)
   idx = UOp.const(0)
   ld = b.index(idx).load()
   alu = ld.alu(alu_op, *alu_src_uops)
@@ -34,7 +34,7 @@ def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
 class TestRendererFailures(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
   def test_gated_store_with_alu(self):
-    a = UOp.param(0, dtypes.int, (4,))
+    a = UOp.param(0, dtypes.int, 4)
     gate_alu = (lidx0:=UOp.special(4, 'lidx0')).ne(0)
     gated_alu_store = UOp(Ops.STORE, src=(a.index(lidx0.valid(gate_alu)), UOp.const(1).cast(dtypes.int)))
     sink = UOp(Ops.SINK, src=(gated_alu_store,), arg=KernelInfo())
@@ -43,7 +43,7 @@ class TestRendererFailures(unittest.TestCase):
 
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
   def test_gated_store_with_alu_2d(self):
-    a = UOp.param(0, dtypes.int, (8,))
+    a = UOp.param(0, dtypes.int, 8)
     gate_alu_0 = (lidx0:=UOp.special(4, 'lidx0')).ne(0)
     gate_alu_1 = (lidx1:=UOp.special(2, 'lidx1')).ne(0)
     gated_alu_store = UOp(Ops.STORE, src=(a.index((lidx0+lidx1*4).valid(gate_alu_0&gate_alu_1)), UOp.const(1).cast(dtypes.int)))
@@ -78,7 +78,7 @@ class TestCStyleFailures(unittest.TestCase):
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "tests for wgsl renderer")
 class TestWGSLFailures(unittest.TestCase):
   def test_folded_packed_store(self):
-    b = UOp.param(0, dtypes.char, (4,))
+    b = UOp.param(0, dtypes.char, 4)
     idx = b.index(UOp.const(0).cast(dtypes.int))
     store = UOp.store(idx, idx.cast(dtypes.uint32).load() & UOp.const(0xffffff00).cast(dtypes.uint32))
     src = Device[Device.DEFAULT].renderer.render(UOp.sink(store, arg=KernelInfo()).toposort())
@@ -93,9 +93,9 @@ class TestWGSLFailures(unittest.TestCase):
 
   # WGSL has a specific select(alt, val, gate) ternary operator instead of gate?val:alt
   def test_gated_load(self):
-    a = UOp.param(0, dtypes.int, (4,))
-    b = UOp.param(1, dtypes.int, (4,))
-    c = UOp.param(2, dtypes.int, (4,))
+    a = UOp.param(0, dtypes.int, 4)
+    b = UOp.param(1, dtypes.int, 4)
+    c = UOp.param(2, dtypes.int, 4)
     lidx0 = UOp.special(4, "lidx0")
     gate = lidx0.ne(0)
     alt = c.index(lidx0).load()
@@ -110,7 +110,7 @@ class TestWGSLFailures(unittest.TestCase):
 class TestPTXFailures(unittest.TestCase):
   @unittest.skip("INDEX can only have a gate ALU parent, not an IF")
   def test_gated_store_with_if(self):
-    a = UOp.param(0, dtypes.int, (4,))
+    a = UOp.param(0, dtypes.int, 4)
     gate_alu = (lidx0:=UOp.special(4, 'lidx0')).ne(0)
     val = UOp.const(1).cast(dtypes.int)
     if_uop = UOp(Ops.IF, src=(gate_alu,))

@@ -4,7 +4,8 @@ from tinygrad import Tensor, dtypes, Context
 from tinygrad.uop.ops import ParamArg, UOp, UPat, Ops, PatternMatcher, graph_rewrite
 
 _strip_unique_pm = PatternMatcher([
-  (UPat(Ops.BUFFER, name="b"), lambda b: b.replace(arg=replace(b.arg, slot=0)) if isinstance(b.arg, ParamArg) and b.arg.slot != 0 else None),
+  (UPat(Ops.BUFFER, name="b"), lambda b: b.replace(arg=replace(b.arg, slot=0, buffer=None)) if isinstance(b.arg, ParamArg) and \
+   (b.arg.slot != 0 or b.arg.buffer is not None) else None),
 ])
 def _strip_unique(u: UOp) -> UOp: return graph_rewrite(u, _strip_unique_pm)
 
