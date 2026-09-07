@@ -40,7 +40,7 @@ class RandMixin(OpMixin):
   def _rand(cls, key:Self, counter:Self, shape:tuple[int, ...], dtype:DType, contiguous:bool=True) -> Self:
     bits = cls.random_bits(key, counter, ceildiv(prod(shape) * dtype.itemsize, 4))
     out = cls._bits_to_rand(bits, shape, dtype)
-    return out.contiguous() if contiguous else out
+    return out.clone() if contiguous else out
 
   @staticmethod
   def _next_counter(device:str, num:int):
@@ -293,7 +293,7 @@ class RandMixin(OpMixin):
     if not 0 <= p <= 1: raise ValueError(f"{p=} is out of range [0, 1]")
     if not TRAINING or p == 0: return self
     if p == 1: return self.const_like(0)
-    return (self.rand_like(dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
+    return (self.rand_like(dtype=dtypes.default_float, contiguous=False) >= p).clone().where(self, 0) / (1.0 - p)
 
   def scaled_dot_product_attention(self, key:Self, value:Self, attn_mask:Self|None=None, dropout_p:float=0.0,
                                    is_causal:bool=False, enable_gqa:bool=False) -> Self:
