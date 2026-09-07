@@ -52,7 +52,7 @@ SUPPORTED = set(
     'mov swz nop end predt predf prede bar fence br brao braa jump call ret ldg stg ldg.a stg.a ldl stl ldp stp '
     'add.u add.s add.f sub.u sub.s sub.f mul.f mul.s24 mul.u24 mull.u madsh.m16 mad.u16 mad.s24 mad.f32 mad.f16 '
     'shl.b shr.b ashr.b shrg shrm shlm shlg andg and.b or.b xor.b not.b absneg.s absneg.f sign.f clz.b getbit.b '
-    'min.u min.s min.f max.u max.s max.f sel.b32 sel.b16 sel.s32 cmps.u cmps.s cmps.f cmpv.s cmpv.f cmpv.u '
+    'min.u min.s min.f max.u max.s max.f sel.b32 sel.b16 sel.s32 sel.f32 cmps.u cmps.s cmps.f cmpv.s cmpv.f cmpv.u '
     'floor.f ceil.f trunc.f rcp sqrt rsq exp2 log2 sin cos sad.s16 sad.s32'
   ).split()
 )
@@ -194,6 +194,14 @@ def _validate_operands(op, operands, fields, category):
   # Mesa ir3_cf.c and ir3_validate.c forbid 16-bit inputs/outputs for MAD.x24.
   if op == 'mad.s24' and any(operand.half for operand in operands.values()):
     raise RuntimeError('IR3 mad.s24 requires full registers')
+  if op == 'sel.f32':
+    # QCOMCL's sine reduction selects between one full register and its FNEG.
+    # Other operand layouts, modifiers and conversions need separate evidence.
+    first, condition, third = (operands[name] for name in ('SRC1', 'SRC2', 'SRC3'))
+    if (any(o.kind != 'register' or o.half or o.relative or o.repeat for o in operands.values()) or
+        first.index != third.index or (first.modifier, condition.modifier, third.modifier) != (1, 0, 0) or
+        fields.get('REPEAT', 0) or fields.get('SAT', 0) or fields.get('NOP', 0)):
+      raise RuntimeError('IR3 unsupported SEL.F32 form')
   if op == 'getbit.b':
     # QCOMCL restores loop-hoisted packed booleans with a half-register bit
     # test into p0.x..w. Other result representations are not qualified here.
@@ -549,6 +557,21 @@ class Workgroup:
   def alu(self, ins, lanes, repeat):
     op, fields, operands = ins.op, ins.fields, ins.operands
     dst = operands['DST']
+    if op == 'sel.f32':
+      payload = self.read(operands['SRC1'], lanes, repeat)
+      condition = self.read(operands['SRC2'], lanes, repeat)
+      # The traced comparison/COV/integer-minus-one producer emits only these
+      # two words. Ordered and sign predicates agree here, not on general F32.
+      if np.any((condition != 0x3f7fffff) & (condition != 0xffffffff)):
+        raise RuntimeError('IR3 SEL.F32 condition outside admitted domain')
+      # Only normal finite payloads are established. Do not guess signed-zero,
+      # denormal flushing or NaN propagation from ordinary sine observations.
+      exponent = (payload >> 23) & 255
+      if np.any((exponent == 0) | (exponent == 255)):
+        raise RuntimeError('IR3 SEL.F32 payload outside admitted domain')
+      value = np.where(condition == 0x3f7fffff, payload ^ np.uint32(0x80000000), payload)
+      self.write(dst, lanes, value, repeat)
+      return
     if op == 'mov':
       # MOV/COV has explicit source and destination types and a rounding mode.
       src = operands['SRC']
