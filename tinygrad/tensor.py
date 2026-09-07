@@ -46,26 +46,25 @@ add_tags = PatternMatcher([
   # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
-  (UPat((Ops.CONTIGUOUS, Ops.AFTER), name="x"), tag_uop),
+  (UPat(Ops.AFTER, name="x"), tag_uop),
+  # an interior contiguous is a scheduling annotation, not storage: only tag it if a live Tensor observes it
+  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: tag_uop(x) if _tensor_holds(x) else None),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
 
-def replace_contig_with_store_after(u:UOp):
-  # can't allocate a buffer for a virtual value
-  if u.is_virtual: return None
-  # if size is 0, remove the contig
-  if 0 in u.shape: return u.src[0]
-  # no real contig for DISK tensors, they are left alone
-  if on_disk(u): return u.rtag(None)
-  buf = u.empty_like()
-  return buf.after(buf.store(u.src[0])).rtag(u.tag)
-
-def wrap_tagged_in_contig(x:UOp):
+def mint_tagged_storage(x:UOp):
   if x.tag is None: return None          # untouched
   # empty tag from rtag(()): a COPY already handled via buffer_map or merged into a parent AFTER.
   # () is falsy but not None, so it isn't re-tagged like a bare (tag=None) node would be; just strip it here
   if not x.tag: return x.rtag(None)
-  return x.rtag(None).contiguous(tag=x.tag)  # the tag moves onto the wrapping CONTIGUOUS
+  # a tagged CONTIGUOUS is consumed by the mint: the buffer stores its source directly
+  src = x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag(None)
+  # virtual values and DISK tensors don't get real buffers: keep the annotation, drop the tag
+  if x.is_virtual or on_disk(x): return x.rtag(None).alu(Ops.CONTIGUOUS)
+  # if size is 0, remove the contig
+  if 0 in x.shape: return src
+  buf = x.empty_like()
+  return buf.after(buf.store(src)).replace(tag=x.tag)
 
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -153,13 +152,11 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
    x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) if on_disk(x) else None),
 
-  # add CONTIGUOUS to tagged UOps
-  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.AFTER, Ops.STORE}, name="x"), wrap_tagged_in_contig),
-  # remove extra CONTIGUOUS on AFTER (only when target is contiguous)
+  # contiguous of an already-materialized value is a no-op (tags carry over for held values)
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
-  # replace CONTIGUOUS with STORE+AFTER
-  (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_store_after),
+  # mint buffers for tagged values; an untagged CONTIGUOUS flows through to the scheduler, which bufferizes it
+  (UPat(GroupOp.All-{Ops.AFTER, Ops.STORE}, name="x"), mint_tagged_storage),
   # remove DETACH/CONTIGUOUS_BACKWARD (allows more contiguous removal)
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 ])
@@ -214,7 +211,8 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
       # precompiled calls don't need this: transform_precompiled_call gives their outputs real buffers
       call = u.src[1]
       if not (call.op is Ops.CALL and call.arg is not None and call.arg.precompile):
-        u = u.rtag(None).contiguous(tag=u.tag)
+        buf = u.empty_like()
+        u = buf.after(buf.store(u.rtag(None))).replace(tag=u.tag)
     srcs.append(u)
   big_sink = big_sink.replace(src=tuple(srcs))
 
