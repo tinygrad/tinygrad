@@ -279,10 +279,11 @@ nstore_img = nir_instr(has_def=False, df=lambda img:img, num_components=lambda v
   srcs=lambda b,img,idx_y,idx_x,val:[nsrc(x) for x in [img, tovec(b, idx_y, idx_x), nundef(b, dtypes.int), val, nimm(b, 0, dtypes.int)]])(
     lambda b,img,idx_y,idx_x,val,dtype:mesa.nir_intrinsic_instr_create(b.shader,g("nir_intrinsic_image_store")))
 
-_nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2D, 'ACCESS':mesa.ACCESS_CAN_REORDER, 'DEST_TYPE':nfloat(dtype)},
+_nload_img = nir_instr(intrins=lambda dtype,readonly:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2D,
+  'ACCESS':mesa.ACCESS_CAN_REORDER if readonly else 0, 'DEST_TYPE':nfloat(dtype)},
   nc=4, bs=32, num_components=4,
   srcs=lambda b,img,idx_y,idx_x:[nsrc(x) for x in [img, tovec(b, idx_y, idx_x), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
-      lambda b,img,idx_y,idx_x,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
+      lambda b,img,idx_y,idx_x,dtype,readonly=True: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
 
 class IR3Renderer(NIRRenderer):
   def nload_img(ctx,img,idx_y,idx_x):

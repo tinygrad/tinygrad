@@ -281,3 +281,23 @@ def test_image_store_filters_invalid_lanes_and_preserves_valid_lane_values():
   expected[0, 1] = [200, 201, 202, 203]
   actual = np.frombuffer(memory.read(image.base, 192), np.float32).reshape(3, 4, 4)
   np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize('readonly,access', [(None, mesa.ACCESS_CAN_REORDER), (True, mesa.ACCESS_CAN_REORDER), (False, 0)])
+def test_image_load_fixture_keyword_preserves_the_existing_renderer_default(readonly, access):
+  # The fixture may request a coherent load without changing any renderer call:
+  # omitted and explicit-True permissions must remain identical to the base.
+  renderer = IR3Renderer(Target(device='QCOM', renderer='IR3', arch='a630'))
+  renderer.prerender([])
+  builder = renderer.b
+  try:
+    zero = nimm(builder, 0, dtypes.int)
+    value = _nload_img(builder, zero, zero, zero, dtypes.float, **({} if readonly is None else {'readonly': readonly}))
+    instruction = ctypes.cast(value.parent_instr, ctypes.POINTER(mesa.nir_intrinsic_instr)).contents
+    info = mesa.nir_intrinsic_infos[instruction.intrinsic]
+    assert instruction.const_index[info.index_map[mesa.NIR_INTRINSIC_ACCESS] - 1] == access
+    assert instruction.const_index[info.index_map[mesa.NIR_INTRINSIC_IMAGE_DIM] - 1] == mesa.GLSL_SAMPLER_DIM_2D
+    assert instruction.const_index[info.index_map[mesa.NIR_INTRINSIC_DEST_TYPE] - 1] == mesa.nir_type_float32
+    assert value.num_components == 4 and value.bit_size == 32
+  finally:
+    mesa.ralloc_free(builder.shader)
