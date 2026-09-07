@@ -211,7 +211,9 @@ class ElementwiseMixin(CreationMixin):
     """
     a, b = self._broadcasted(x, reverse)
     if dtypes.is_int(a.dtype) and dtypes.is_int(b.dtype): return a.alu(Ops.FLOORMOD, b)
-    return a - a.div(b, rounding_mode="floor") * b
+    # a/b overflows to inf when |a| >> |b|, and a - inf*b leaves +-inf, outside [0,|b|)
+    r = a - a.div(b, rounding_mode="floor") * b
+    return r.isinf().where(a.const_like(0), r)
 
   def fmod(self, x: Self | ConstType) -> Self:
     """

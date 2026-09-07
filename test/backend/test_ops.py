@@ -647,6 +647,10 @@ class TestOps(unittest.TestCase):
         helper_test_op(None, lambda x: 100%x, forward_only=True, vals=[va])
         helper_test_op(None, lambda x: 100.5%x, lambda x: (100.5%x).clone(), forward_only=True, vals=[va])
 
+  def test_mod_large_ratio(self):
+    # a/b overflows to inf, a - inf*b used to leave +-inf which is outside [0,|b|)
+    np.testing.assert_equal(np.isfinite((Tensor([1e30, -1e30, 1e20]) % Tensor([1e-30, 1e-30, 1e-24])).numpy()), True)
+
   def test_fmod(self):
     a = [-4, 7, 5, 4, -7, 8, -9]
     b = [2, -3, 8, -2, 3, 5, -5]
