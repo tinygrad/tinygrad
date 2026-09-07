@@ -670,7 +670,6 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       for wave in range(10):
         if (p.inst >> (wave * 2)) & 3 == 3:
           inst = pc_map[pc:=wave_pc[(p.simd, wave)]]
-          wave_pc[(p.simd, wave)] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
     # map INST events on this SIMD to the program counter, we know the waves
     elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)) and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_")):
