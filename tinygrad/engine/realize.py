@@ -196,18 +196,17 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     cast(Buffer, call.src[1 + info.table].buffer)._buf.cpu_view().view(fmt='Q')[:] = array.array('Q', addrs)
   ctx = replace(ctx, var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
   ets = exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,))
-  if ctx.wait and not any(k[3] for k in info.kernels):
-    for device in info.device: cast(Any, Device[device]).synchronize(timeout=ctx.timeout)
   if not (ctx.wait or PROFILE): return ets
 
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
-  def _prof_tm(device:str, name:str, prof:tuple[int, ...], profile_key:bytes) -> float|None:
-    (d:=cast(Any, Device[device])).prof_ents[(slots[device], prof[0])] = ProfileGraphEntry(device, name, prof[0], prof[1], profile_key)
-    if not ctx.wait: return None
-    d.synchronize(timeout=ctx.timeout)
+  for devs, name, _, prof, pkey in info.kernels:
+    for d in (devs if prof else ()): cast(Any, Device[d]).prof_ents[(slots[d], prof[0])] = ProfileGraphEntry(d, name, prof[0], prof[1], pkey)
+  if ctx.wait:
+    for device in info.device: cast(Any, Device[device]).synchronize(timeout=ctx.timeout)
+  def _prof_tm(device:str, prof:tuple[int, ...]) -> float:
     st, en = (slots[device]._buf.cpu_view().view(fmt='Q')[x] for x in prof)
-    return float(en-st) / d.timestamp_divider / 1e6
-  return ets + [_prof_tm(device, name, prof, profile_key) for devices,name,_,prof,profile_key in info.kernels if prof for device in devices]
+    return float(en-st) / cast(Any, Device[device]).timestamp_divider / 1e6
+  return ets + [_prof_tm(device, prof) if ctx.wait else None for devices, _, _, prof, _ in info.kernels if prof for device in devices]
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
