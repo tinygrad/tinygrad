@@ -57,8 +57,8 @@ def mint_tagged_storage(x:UOp):
   if not x.tag: return x.rtag(None)
   # a tagged CONTIGUOUS is consumed by the mint: the buffer stores its source directly
   src = x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag(None)
-  # virtual values and DISK tensors don't get real buffers: keep the annotation, drop the tag
-  if x.is_virtual or on_disk(x): return x.rtag(None).alu(Ops.CONTIGUOUS)
+  # virtual values and DISK tensors don't get real buffers: keep the (single) annotation, drop the tag
+  if x.is_virtual or on_disk(x): return src.alu(Ops.CONTIGUOUS)
   # if size is 0, remove the contig
   if 0 in x.shape: return src
   buf = x.empty_like()
