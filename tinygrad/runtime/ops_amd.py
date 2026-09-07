@@ -1137,7 +1137,12 @@ class AMDDevice(HCQCompiled):
     mem_alignment_size = 256 if self.target[0] != 9 else 1024
     size_per_thread = round_up(private_segment_size, mem_alignment_size // lanes_per_wave)
     size_per_xcc = size_per_thread * lanes_per_wave * self.iface.props['max_slots_scratch_cu'] * self.cu_cnt
-    self.scratch, ok = self._realloc(getattr(self, 'scratch', None), size_per_xcc * self.xccs)
+    # HCQ graphs bake the scratch base into their dispatch packets (exec), so the old buffer must stay mapped after a regrowth
+    old = getattr(self, 'scratch', None)
+    try: self.scratch, ok = self.allocator.alloc(size_per_xcc * self.xccs), True
+    except MemoryError:
+      if old is None: raise
+      self.scratch, ok = old, False
     if ok:
       # NOTE: xcc logic is correct only for GFX9.
       max_scratch_waves = self.cu_cnt * self.iface.props['max_slots_scratch_cu'] * self.xccs
