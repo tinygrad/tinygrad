@@ -4,7 +4,7 @@ from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, dedup, partition, unwrap
-from tinygrad.uop.ops import Ops, UOp, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.codegen import do_to_program
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -100,6 +100,18 @@ class TestHCQ2Schedule(unittest.TestCase):
     _, compiled, inputs = self.compiled(1)
     linked = link_linear(compiled, input_uops=inputs)
     self.assertIs(link_linear(compiled, input_uops=inputs), linked)
+
+  def test_profile_slots_survive_indirect_access(self):
+    pm = PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat())),), allow_any_len=True),
+                          lambda buf: hcq2.rt_addr(buf, "CPU") if hcq2.unwrap_view(buf)[0].tag == "slots" else None)])
+    with patch.object(Device[Device.DEFAULT], "pm_lower", pm):
+      compiled = compile_linear(Tensor.ones(4).contiguous().schedule_linear(), profile=True)
+    self.assertFalse(any(param.op is Ops.PARAM and (param.arg.name or "").startswith("slots_")
+                         for param in compiled.src[0].without_after.src[0].toposort()))
+    call = link_linear(compiled).src[0].without_after
+    ((device, index),) = call.arg.aux.slots
+    self.assertEqual(device, Device.DEFAULT)
+    self.assertEqual(call.src[1 + index].buffer.dtype, dtypes.uint64)
 
   def test_host_copies(self):
     dev = Device[Device.DEFAULT]
