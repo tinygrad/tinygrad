@@ -1,3 +1,4 @@
+from typing import cast
 import ctypes, struct, time, functools, itertools
 from tinygrad.runtime.autogen import libusb, libc
 from tinygrad.helpers import DEBUG, DEV, to_mv, from_mv, round_up, ceildiv, to_tuple
@@ -369,7 +370,7 @@ def usb_drained(h:UOp, need:UOp) -> UOp: # until the queue is done with the chun
 
 def usb_chunk(h:UOp, table:UOp, i:UOp, half:int, run:int) -> UOp: # chunk i of the run into a half of the sram, an async bulk
   addr, size = table.index(2 * i).load(), table.index(2 * i + 1).load().cast(dtypes.int)
-  n, wire, end = (i + run).cast(dtypes.uint64), usb_wire(size), (half + 1) * HALF
+  n, wire, end = (i + run).cast(dtypes.uint64), cast(UOp, usb_wire(size)), (half + 1) * HALF
   xfer, stage = usb_xfer(h.device, half), usb_stage(h.device)
 
   # stage it, the sentinel last

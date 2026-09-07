@@ -809,7 +809,7 @@ class USBIface(PCIIface):
     maps = [self.dev_impl.mm.map_range(vaddr + off, n, [(sys, n)], aspace=AddrSpace.SYS, uncached=True) for off, sys, n in pieces]
     self.ctrl = HCQBuffer(vaddr, 0x85000, meta=PCIAllocationMeta(maps[0], has_cpu_mapping=False), view=self.pci_dev.dma_view(0xa000, 0x85000),
                           owner=self.dev)
-    for off, n in ((0x800, 4), (0x5000, 0x80000)): self.ctrl.view.view(off, n)[:] = bytes(n) # no stale count or sentinel from an earlier process
+    for off, n in ((0x800, 4), (0x5000, 0x80000)): unwrap(self.ctrl.view).view(off, n)[:] = bytes(n) # no stale fence or sentinel
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False, **kwargs) -> HCQBuffer:
     # everything, even host-style signals, lives in vram: gpu writes into the bridge's own memory collide with an armed 0xF2 read stream
