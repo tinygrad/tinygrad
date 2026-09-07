@@ -595,7 +595,7 @@ jobs:
       run: time DEBUG=3 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test GPU crash recovery
       if: ${{ matrix.dev == 'AMD' }}
-      run: python3 -m pytest -rA test/external/external_test_gpu_crash.py
+      run: HCQ2=1 python3 -m pytest -rA test/external/external_test_gpu_crash.py
     - name: Test tensor cores
       run: |
         if [[ "${{ matrix.dev }}" == "AMD" ]]; then
