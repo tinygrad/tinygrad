@@ -1,5 +1,6 @@
 import unittest, contextlib
 from tinygrad import Device, Tensor, Context, TinyJit, dtypes
+from test.helpers import is_hcq2_device
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.device import Compiled, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
@@ -114,8 +115,7 @@ class TestSQTTProfiler(unittest.TestCase):
     kernel_name = sqtt[0]["name"]
     for i,e in enumerate(sqtt[1:], start=1): self.assertEqual(e["name"], f"{kernel_name} n{i+1}")
 
-  # TODO: can we trace SQTT for graphed kernels?
-  def test_jit_graph(self, kernel_count=3*1):
+  def test_jit_graph(self, kernel_count=3*(5 if is_hcq2_device() else 1)): # hcq2 traces the graphed kernels too
     @TinyJit
     def f(a): return ((a + 1).contiguous() + 2).contiguous().sum()
     t = Tensor.empty(32)

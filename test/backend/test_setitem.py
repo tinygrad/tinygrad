@@ -1,6 +1,5 @@
 import unittest, operator
 from tinygrad import Tensor, TinyJit, Variable, dtypes, Device
-from tinygrad.helpers import Context
 import numpy as np
 
 class TestSetitem(unittest.TestCase):
@@ -163,21 +162,20 @@ class TestSetitem(unittest.TestCase):
       np.testing.assert_allclose(t.numpy(), n)
 
   def test_jit_setitem_variable_offset(self):
-    with Context(CHECK_OOB=0):
-      @TinyJit
-      def f(t:Tensor, a:Tensor, v:Variable):
-        t.shrink(((v,v+1), None)).assign(a).realize()
+    @TinyJit
+    def f(t:Tensor, a:Tensor, v:Variable):
+      t.shrink(((v,v+1), None)).assign(a).realize()
 
-      t = Tensor.zeros(6, 6).contiguous().realize()
-      n = np.zeros((6, 6))
+    t = Tensor.zeros(6, 6).contiguous().realize()
+    n = np.zeros((6, 6))
 
-      for i in range(6):
-        v = Variable("v", 0, 6).bind(i)
-        a = Tensor.full((1, 6), fill_value=i+1, dtype=dtypes.float).contiguous()
-        n[i, :] = i+1
-        f(t, a, v)
-        np.testing.assert_allclose(t.numpy(), n)
-      np.testing.assert_allclose(t.numpy(), [[1,1,1,1,1,1],[2,2,2,2,2,2],[3,3,3,3,3,3],[4,4,4,4,4,4],[5,5,5,5,5,5],[6,6,6,6,6,6]])
+    for i in range(6):
+      v = Variable("v", 0, 6).bind(i)
+      a = Tensor.full((1, 6), fill_value=i+1, dtype=dtypes.float).contiguous()
+      n[i, :] = i+1
+      f(t, a, v)
+      np.testing.assert_allclose(t.numpy(), n)
+    np.testing.assert_allclose(t.numpy(), [[1,1,1,1,1,1],[2,2,2,2,2,2],[3,3,3,3,3,3],[4,4,4,4,4,4],[5,5,5,5,5,5],[6,6,6,6,6,6]])
 
   def test_setitem_overlapping_inplace1(self):
     t = Tensor([[3.0], [2.0], [1.0]]).contiguous()

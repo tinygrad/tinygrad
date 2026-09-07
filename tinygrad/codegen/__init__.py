@@ -7,7 +7,7 @@ from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
+from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.dtype import dtypes, AddrSpace
 
 # import all pattern matchers here
@@ -439,12 +439,13 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   # isa renderers need to allocate registers
   if isinstance(ctx, ISARenderer):
-    lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
+    lin_ctx = ctx.linear_ctx_type(ctx)
+    lst = line_rewrite(lst, ctx.pre_regalloc_matcher, lin_ctx)
     # register definitions (INS without srcs) move to the top so regalloc sees their live ranges span the whole program (callee saved regs)
     lst = sorted(lst, key=lambda u: u.op is not Ops.INS or bool(u.src))
-    regalloc_ctx = LinearScanRegallocContext(lst, ctx)
+    regalloc_ctx = LinearScanRegallocContext(lin_ctx, lst, ctx)
     lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
-    lst = line_rewrite(lst, ctx.post_regalloc_matcher, regalloc_ctx)
+    lst = line_rewrite(lst, ctx.post_regalloc_matcher, lin_ctx)
     if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 

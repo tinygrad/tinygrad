@@ -108,6 +108,13 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertIs(stacked.dtype, dtypes.weakfloat)
     self.assertEqual(stacked.tolist(), [2.0, -3.0])
 
+  def test_weakint_cast_truncates_for_every_consumer(self):
+    # a weakint cast of a float is a truncation whether a cast, a compare or an arithmetic op consumes it
+    x = Tensor([2.5, -3.5], dtype=dtypes.float32, device="CPU")
+    self.assertEqual(x.cast(dtypes.weakint).cast(dtypes.float32).tolist(), [2.0, -3.0])
+    self.assertEqual((x.cast(dtypes.weakint) * x).tolist(), [5.0, 10.5])
+    self.assertEqual(Tensor([0.5, -0.5], dtype=dtypes.float32, device="CPU").cast(dtypes.weakint).cast(dtypes.bool).tolist(), [False, False])
+
   def test_uop_scalar_const_lifts_kind(self):
     for dtype, value, out_dtype, const_dtype in ((dtypes.weakint, 1, dtypes.weakint, dtypes.weakint),
                                                  (dtypes.int32, 1, dtypes.int32, dtypes.weakint),

@@ -479,10 +479,11 @@ def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str]
   scache:dict[str, int] = {}
   peaks:list[int] = []
   dtype_size:dict[str, int] = {}
-  for k,v in dev_events.items():
-    v.sort(key=lambda e:e[0])
-    layout[k] = timeline_layout(data, v, start_ts, scache)
-    layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)])
+  with soft_err():
+    for k,v in dev_events.items():
+      v.sort(key=lambda e:e[0])
+      layout[k] = timeline_layout(data, v, start_ts, scache)
+      layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)])
   sorted_layout = sorted([k for k,v in layout.items() if v is not None], key=sort_fn)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), unwrap(layout[k])]) for k in sorted_layout]
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size,
