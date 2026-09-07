@@ -5,11 +5,20 @@ from tinygrad.runtime.autogen import libc
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
 from test.mockgpu.am.amdriver import AMDriver, AMUSBDriver
+from test.mockgpu.qcom.qcomdriver import QCOMDriver, make_ioctl_callback
 start = time.perf_counter()
 
 drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCK+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
-                                              "MOCK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]
+                                              "MOCK+NV": NVDriver, "MOCK+QCOM": QCOMDriver}.get(f"{t.interface}+{t.device}"))]
 tracked_fds: dict[int, typing.Any] = {}
+# Native HCQ2 calls this retained callback; it routes QCOM descriptors to the
+# Python driver and lets unrelated descriptors continue through the real ioctl.
+ioctl_callback = make_ioctl_callback(tracked_fds, libc.dll.ioctl) if any(isinstance(d, QCOMDriver) for d in drivers) else None
+
+def check_qcom_errors():
+  # Recover a Python failure captured while execution was inside a C callback.
+  for driver in drivers:
+    if isinstance(driver, QCOMDriver): driver.check_error()
 
 original_memoryview = builtins.memoryview
 class TrackedMemoryView:

@@ -75,6 +75,11 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
 @functools.cache
 def cfunc_buf(lib:str, name:str) -> Buffer:
   fn = getattr(importlib.import_module(f"tinygrad.runtime.autogen.{lib}").dll, name)
+  # Give the generated HCQ2 graph the QCOM mock's native-compatible entrypoint.
+  # mockgpu retains its owner; the buffer below carries only the function address.
+  if (lib, name) == ("libc", "ioctl") and any(t.device == "QCOM" and t.interface == "MOCK" for t in DEV.value):
+    from test.mockgpu.mockgpu import ioctl_callback
+    fn = unwrap(ioctl_callback)
   (b:=Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, preallocate=True))._buf.view.view(fmt='Q')[0] = unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
   return b
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
 import weakref, decimal, array
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup, DEV
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
@@ -193,11 +193,18 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return [get_graph_runtime(ast, ctx.input_uops)(ctx.input_uops, ctx.var_vals, wait=ctx.wait)]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
+  # Native submission cannot carry a Python exception back through its C ABI.
+  # Check the mock driver's retained error before and after the native graph.
+  qcom_mock = any(t.device == "QCOM" and t.interface == "MOCK" for t in DEV.value)
+  if qcom_mock:
+    from test.mockgpu.mockgpu import check_qcom_errors
+    check_qcom_errors()
   if (info:=call.arg.aux).inputs:
     addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(dev).va_addr + off for u, dev, off in info.inputs]
     cast(Buffer, call.src[1 + info.table].buffer)._buf.cpu_view().view(fmt='Q')[:] = array.array('Q', addrs)
   ctx = replace(ctx, var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
   ets = exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,))
+  if qcom_mock: check_qcom_errors()
   if not (ctx.wait or PROFILE): return ets
 
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}

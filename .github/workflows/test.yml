@@ -546,6 +546,55 @@ jobs:
       - name: Run disk copy tests on MOCKPCI
         run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
 
+  testqcom:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - renderer: IR3
+            compiler_probe: test/mockgpu/qcom/test_integration.py::TestQCOMIntegration::test_emitted_instruction_bytes_are_required_for_execution
+          - renderer: CL
+            compiler_probe: >-
+              test/mockgpu/qcom/test_qcomcl.py::test_generated_add_uses_every_lane_and_workgroup
+              test/mockgpu/qcom/test_qcomcl.py::test_jit_refreshes_arguments_without_reusing_previous_values
+    name: Linux (QCOM A630 mock ${{ matrix.renderer }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DEV: MOCK+QCOM:${{ matrix.renderer }}
+      HCQ_RUNTIME_DEV: CPU
+      IMAGE: 0
+      FLOAT16: 0
+      RUN_SLOW: 1
+      SKIP_SLOW_TEST: 0
+      TEST_TIMEOUT: 7200
+      PARALLEL: 0
+      CACHELEVEL: 0
+      OMP_NUM_THREADS: 1
+      PYTHONPATH: .
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: qcom-mock-${{ matrix.renderer }}
+          deps: "testing_unit mesa"
+          llvm: 'true'
+          qemu: ${{ matrix.renderer == 'CL' }}
+      - name: Run representative QCOM compilation and submission regressions
+        # Image tests assert actual image instruction execution and FP16 storage.
+        # The broad execution/backend/image matrix is release/local qualification.
+        run: >-
+          python -m pytest -n 2 --dist worksteal
+          test/mockgpu/qcom/test_integration.py::TestQCOMIntegration::test_real_submissions_cover_odd_shapes_and_repeated_programs
+          'test/mockgpu/qcom/test_image_integration.py::test_image_matmul_preserves_nonuniform_values_and_odd_channels[False]'
+          'test/mockgpu/qcom/test_image_integration.py::test_image_matmul_preserves_nonuniform_values_and_odd_channels[True]'
+          test/backend/test_jit.py::TestJit::test_simple_jit
+          test/testextra/test_qcom_driver.py::QCOMDriverTests::test_native_callback_latches_failure_and_preserves_original_cause
+          test/testextra/test_qcom_driver.py::QCOMDriverTests::test_native_callback_forwards_real_descriptor
+          ${{ matrix.compiler_probe }}
+
   testamd:
     strategy:
       fail-fast: false
