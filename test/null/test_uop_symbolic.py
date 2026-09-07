@@ -919,6 +919,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a % -8) // 2, -4, 0, "(a%-8//2)")
     self.helper_test_variable((a % -8) % 2, 0, 1, "(a%2)")
 
+  def test_nested_div_mod_symbolic_inner_divisor(self):
+    a = Variable("a", 0, 100)
+    self.helper_test_variable((a % (Variable("n", 1, 10)*4)) // 2, 0, 19, "(a//2%(n*2))")
+    check_uop_against_string(self, (a % (Variable("n", 0, 10)*4) // 2).simplify(), "(a%(n*4)//2)")
+
   def test_floordiv_lt_negative_c(self):
     # x//d<c with negative c also reduces to x<c*d for d>0
     idx = Variable("idx", -20, 20)
