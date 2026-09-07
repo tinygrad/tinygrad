@@ -1250,6 +1250,27 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
     return [s.after(kernel) for s in srcs]
 
+  def call_access(self) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
+    body = self.src[0]
+    if body.op is Ops.SINK and not body.op_in_backward_slice_with_self(Ops.CALL, Ops.CUSTOM, Ops.CUSTOMI, Ops.INS):
+      from tinygrad.codegen import pm_add_loads
+      info = ProgramInfo.from_sink(graph_rewrite(body, pm_add_loads))
+      ins, outs = info.ins, info.outs
+    elif body.op is Ops.PROGRAM and isinstance(body.arg, ProgramInfo): ins, outs = body.arg.ins, body.arg.outs
+    elif body.op is Ops.COPY: ins, outs = (1,), (0,)
+    elif body.op is Ops.LINEAR:
+      ins, outs = (tuple(sorted({p.arg.slot for args in group for a in args for p in a.buf_uop.toposort() if p.op is Ops.PARAM}))
+                   for group in zip(*(c.call_access() for c in body.src))) if body.src else ((), ())
+    else: raise RuntimeError(f"cannot compute accesses for opaque {body.op}")
+    if any(i < 0 or i >= len(self.src)-1 or (body.op is Ops.PROGRAM and i not in body.arg.globals) for i in (*ins, *outs)):
+      raise RuntimeError("invalid CALL access slot")
+    if body.op is Ops.PROGRAM:
+      bufs = [s.buf_uop for s in self.src[1:]]
+      keys = [b.arg.buffer.base if b.op is Ops.BUFFER and isinstance(b.arg.buffer, Buffer) else b for b in bufs]
+      if any(i != j and keys[i] is keys[j] for i in outs for j in set(ins+outs)):
+        raise RuntimeError("aliased opaque kernel arguments are unsupported")
+    return tuple(self.src[i+1] for i in ins), tuple(self.src[i+1] for i in outs)
+
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
     params = tuple(u for u in self.src[1].src if u.op is Ops.PARAM and u.addrspace != AddrSpace.ALU)

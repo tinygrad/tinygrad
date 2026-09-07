@@ -117,6 +117,43 @@ class TestTensorGradient(unittest.TestCase):
     self.assertEqual(g.tolist(), [32., 108.])
     self.assertEqual(gg.tolist(), [48., 108.])
 
+  def test_gradient_after_unrelated_store(self):
+    x, v, dst = Tensor([2.]).realize(), Tensor([3.]).realize(), Tensor.empty(1)
+    y = Tensor(x.uop.after(dst.uop.store(v.uop)))
+    self.assertEqual([g.tolist() for g in y.sum().gradient(x, v)], [[1.], [0.]])
+    self.assertEqual(y.tolist(), [2.])
+    self.assertEqual(dst.tolist(), [3.])
+
+  def test_gradient_after_multiple_unrelated_stores(self):
+    x, a, b = Tensor([2.]).realize(), Tensor.empty(1), Tensor.empty(1)
+    y = Tensor(x.uop.after(a.uop.store(x.uop * 3), b.uop.store(x.uop * 4)))
+    self.assertEqual(y.sum().gradient(x)[0].tolist(), [1.])
+
+  def test_gradient_after_readonly_call(self):
+    x = Tensor([2.]).realize()
+    def kernel(dst, src): return dst.store(src * 3).sink(arg=KernelInfo())
+    for grad_fxn in (None, lambda g, k: (None, g * 3)):
+      _, unchanged = Tensor.empty(1).custom_kernel(x, fxn=kernel, grad_fxn=grad_fxn)
+      self.assertEqual(unchanged.sum().gradient(x)[0].tolist(), [1.])
+
+  def test_gradient_after_unrelated_call(self):
+    x, v, dst = Tensor([2.]).realize(), Tensor([3.]).realize(), Tensor.empty(1)
+    p, q = dst.uop.param_like(0), v.uop.param_like(1)
+    call = p.store(q * 3).sink(arg=KernelInfo()).call(dst.uop, v.uop, grad_fxn=lambda g, k: (None, g * 3))
+    y = Tensor(x.uop.after(call))
+    self.assertEqual([g.tolist() for g in y.sum().gradient(x, v)], [[1.], [0.]])
+
+  def test_gradient_after_aliased_store_view_rejects(self):
+    x = Tensor([2., 3.]).realize()
+    y = Tensor(x.uop.after(x.uop.shrink(((0, 1),)).store(4.)))
+    with self.assertRaisesRegex(RuntimeError, "aliased write"): y.sum().gradient(x)
+
+  def test_gradient_after_duplicate_call_output_rejects(self):
+    x = Tensor([2.]).realize()
+    def kernel(a, b): return a.store(b * 2).sink(arg=KernelInfo())
+    y = x.custom_kernel(x, fxn=kernel, grad_fxn=lambda g, k: (g, g))[0]
+    with self.assertRaisesRegex(RuntimeError, "ambiguous CALL"): y.sum().gradient(x)
+
   def test_setitem_on_grad_used_tensor_raises(self):
     x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
     _ = (x * 2.0).sum()

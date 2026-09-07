@@ -150,6 +150,18 @@ A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound
 
 \smallskip
 Assign is \op{Store} followed by \op{After}: write the value, then return the buffer with an ordering dependency.
+\op{After} orders consumers after its dependencies; it neither declares a write nor snapshots memory.
+In particular, \op{After}$(b, \op{Store}(d,v))$ returns $b$, not $v$, when $b$ and $d$ are disjoint.
+Views may share storage despite having different UOps. Differentiation follows the returned value:
+a matching unconditional full overwrite routes its gradient to the stored value; an unrelated write does not create a gradient path.
+Partial or uncertain aliased mutation gradients may be rejected.
+
+\smallskip
+\textbf{Tensor scheduling contract.} Within a lazy Tensor schedule, reads retain their assignment dependencies.
+A read must follow those dependencies and precede other writes that would destroy the required contents.
+Lowering must preserve these requirements until accesses are ordered, even when arguments share storage.
+Unsatisfiable requirements raise rather than read overwritten contents. This is a frontend requirement, not snapshot semantics for \op{After}.
+An executed \texttt{clone()} preserves data in fresh storage; \texttt{contiguous()} need not allocate.
 
 %% ============================================================
 \subsection*{{\color{elwyellow}Elementwise Ops} \normalfont\small--- all inputs same shape, output same shape, applied per-element}
@@ -236,7 +248,7 @@ Ternary & $(P, A, B)$
 \op{Custom} & (args\ldots) & fmt & Inject custom code string into generated source. \\
 \op{AtomicAdd} & (idx, val) & --- & Atomic read-modify-write: \texttt{buf[idx] += val}. \\[4pt]
 \op{CustomFunction} & (meta\ldots) & name & Opaque device function (e.g.\ HW decode). Via \op{Call}. \\
-\op{Program} & (linear, source, binary) & --- & Compiled kernel: instructions, source, and machine code. \\
+\op{Program} & (sink, \ldots) & metadata? & Kernel through compilation stages. \\
 \op{Source} & () & str & Human-readable rendered source code. \\
 \op{Binary} & () & bytes & Compiled machine code. \\
 \bottomrule
@@ -244,6 +256,11 @@ Ternary & $(P, A, B)$
 
 \smallskip
 These ops are not part of the core specification and are subject to change.
+\op{Program} contains a \op{Sink}, followed progressively by \op{Linear}, \op{Source}, and \op{Binary}.
+Access analysis derives reads and writes from the memory operands of \op{Load}/\op{Store}, resolving \op{Param}s through \op{Call} arguments.
+Compilation records these sets in \texttt{ProgramInfo.ins/outs} as zero-based argument slots; a read-modify-write belongs in both.
+Listing a parameter, returning an \op{After}, or declaring a write does not establish full initialization.
+Opaque code without computed access information is unsupported by assignment scheduling; its effects must not be guessed from its argument list.
 
 %% ============================================================
 \subsection*{Derived Properties}

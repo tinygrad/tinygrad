@@ -3,6 +3,7 @@ import math, dataclasses
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes
 from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
+from tinygrad.device import Buffer
 from tinygrad.function import renumber_invalid_outputs
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
@@ -64,6 +65,25 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   ret_set = set(ret_pos)
   return (None,) + tuple(None if i in ret_set else (bwd_outs[gb_map[i]] if i in gb_map else None) for i in range(len(args)))
 
+def after_gradient(ctx:UOp, ret:UOp):
+  value, *deps = ret.src
+  if len(deps) == 1:
+    dep = deps[0]
+    if dep.op is Ops.STORE and len(dep.src) == 2 and value is dep.src[0]: return (None, ctx)
+    if dep.op is Ops.CALL and (value.unsharded_base.is_unbound or value in dep.call_access()[1]):
+      if dep.src[1:].count(value) != 1: raise RuntimeError("ambiguous CALL output gradient")
+      return (None, UOp.sink(*(ctx if a is value else UOp(Ops.NOOP) for a in dep.src[1:])))
+  for dep in deps:
+    if dep.op is Ops.STORE: writes = dep.src[:1]
+    elif dep.op is Ops.CALL: _, writes = dep.call_access()
+    else: raise RuntimeError(f"gradient through {dep.op} ordering is unsupported")
+    for w in writes:
+      a, b = (u.storage_base.arg.buffer if u.storage_base.op is Ops.BUFFER else None for u in (value, w))
+      if not isinstance(a, Buffer) or not isinstance(b, Buffer) or a.base is b.base or \
+         any(buf.base.options is not None and buf.base.options.external_ptr is not None for buf in (a, b)):
+        raise RuntimeError("gradient through an aliased write is unsupported")
+  return (ctx,) + (None,)*len(deps)
+
 # ctx is grad_output
 pm_gradient = PatternMatcher([
   (UPat(Ops.CAST, name="ret"), lambda ctx, ret: (ctx.cast(ret.src[0].dtype),)),
@@ -94,10 +114,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),)),
   (UPat(Ops.UNSHARD, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   (UPat(Ops.SINK), lambda ctx: ctx.src),
-  (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
-    (None, UOp.sink(*([ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1)])))),
-  # clone/assign gradient passes through to val
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE))), lambda ctx: (None, ctx)),
+  (UPat(Ops.AFTER, name="ret"), after_gradient),
   (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),

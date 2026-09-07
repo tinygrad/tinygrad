@@ -1,6 +1,6 @@
 import time, inspect, dataclasses
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, dedup
 
@@ -18,20 +18,6 @@ def _states(s: UOp) -> list[UOp]:
   assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
 
-def _call_access(call:UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
-  body = call.src[0]
-  if body.op is Ops.SINK and not body.op_in_backward_slice_with_self(Ops.CALL, Ops.CUSTOM, Ops.CUSTOMI, Ops.INS):
-    from tinygrad.codegen import pm_add_loads
-    info = ProgramInfo.from_sink(graph_rewrite(body, pm_add_loads))
-    ins, outs = info.ins, info.outs
-  elif body.op is Ops.PROGRAM and isinstance(body.arg, ProgramInfo): ins, outs = body.arg.ins, body.arg.outs
-  elif body.op is Ops.COPY: ins, outs = (1,), (0,)
-  elif body.op is Ops.LINEAR:
-    ins, outs = (tuple(sorted({b.arg.slot for args in group for a in args if (b:=a.buf_uop).op is Ops.PARAM}))
-                 for group in zip(*(_call_access(c) for c in body.src))) if body.src else ((), ())
-  else: return call.src[1:], call.src[1:]  # opaque calls conservatively may read and write every argument
-  return tuple(call.src[i+1] for i in ins), tuple(call.src[i+1] for i in outs)
-
 def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
     afters = [u for u in sched_sink.toposort(gate_kernel_sink) if u.op is Ops.AFTER]
@@ -47,7 +33,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
         if st not in ancestors: ancestors[st] = kernels.keys() & st.toposort(enter_calls=False).keys()
       # AFTER supplies ordering dependencies, not evidence that its returned buffer was written.
       dependencies[k] = set().union(*(ancestors[st] for st in states))
-      read_args, write_args = _call_access(call)
+      read_args, write_args = call.call_access()
       reads += [(k, st) for s in read_args for st in _states(s)]
       for s in write_args:
         for st in _states(s): writes.setdefault(st.buf_uop, set()).add(k)
@@ -55,7 +41,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       for dep in (s for s in u.src[1:] if s.op is Ops.AFTER):
         for k in (s for s in u.src[1:] if s in kernels):
           dependencies[k].update(kernels.keys() & dep.toposort(enter_calls=False).keys() - {k})
-    # A read must precede writes which are not part of the state it requested.
+    # Tensor reads require the contents preceding writes absent from their argument ancestry (not an AFTER property).
     for k, st in reads:
       for writer in writes.get(st.buf_uop, set()):
         if writer is not k and writer not in ancestors[st]: dependencies[writer].add(k)
@@ -195,6 +181,8 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
 
   # this recursively resolves the linear_call and allocates buffers
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
+  for call in linear.src:
+    if call.src[0].op is Ops.PROGRAM: call.call_access()
 
   # create copies
   linear = graph_rewrite(linear, pm_copy_from_store, name="create COPY kernels for SDMA")
