@@ -85,11 +85,16 @@ def ccall(fn:Any, *args:UOp|int) -> UOp:
   cargs = [UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args]
   return UOp.custom_function(fn.__name__, ptr.index(0).load()).call(*cargs, ret_dtype=ret)
 
+CDTYPE = {1: dtypes.uchar, 2: dtypes.ushort, 4: dtypes.uint, 8: dtypes.ulong} # a C field as the unsigned int of its size
+
 def cstruct(struct_t, **fields:UOp|int) -> UOp:
-  flds = {n: (o, {1: dtypes.uchar, 2: dtypes.ushort, 4: dtypes.uint, 8: dtypes.ulong}[ctypes.sizeof(t)]) for n, t, o, *_ in struct_t._real_fields_}
+  flds = {n: (o, CDTYPE[ctypes.sizeof(t)]) for n, t, o, *_ in struct_t._real_fields_ if ctypes.sizeof(t)} # skips zero length arrays
   rows = [(flds[n][0], v.cast(flds[n][1]) if isinstance(v, UOp) else UOp.const(v, flds[n][1])) for n, v in fields.items()]
   buf = UOp.placeholder((ctypes.sizeof(struct_t),), dtypes.uint8, device=HCQ_RUNTIME_DEV.value, volatile=True, tag=struct_t.__name__)
   return patch(buf, rows, bytes(ctypes.sizeof(struct_t)))
+
+def cfield(buf:UOp, struct_t, name:str) -> UOp: # a field of the struct in buf, to load or store
+  return buf[(f:=getattr(struct_t, name)).offset:f.offset + f.size].bitcast(CDTYPE[f.size]).index(0)
 
 # *****************
 # 0.1. prep: eager buffers become tagged params
