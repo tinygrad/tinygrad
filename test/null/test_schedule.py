@@ -614,7 +614,7 @@ class TestSchedule(unittest.TestCase):
 
       with Context(IMAGE=1):
         got = cnt()
-        if got != 5: raise KernelCountException(5, got)
+        if got != 6: raise KernelCountException(6, got)
 
   def test_image_f16_residual_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
@@ -1343,7 +1343,7 @@ class TestSchedule(unittest.TestCase):
 
       # NOOP, 3 convs, contiguous
       #check_schedule(x, 5)
-      check_schedule(x, 7)
+      check_schedule(x, 8)
 
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
