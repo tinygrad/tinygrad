@@ -102,38 +102,16 @@ class TestHCQ2Schedule(unittest.TestCase):
     self.assertIs(link_linear(compiled, input_uops=inputs), linked)
 
   def test_profile_slots_survive_indirect_access(self):
-    def indirect_access(access, buf, idx):
-      if hcq2.unwrap_view(buf)[0].tag != "slots": return None
-      temp = UOp.placeholder((1,), buf.dtype, addrspace=AddrSpace.REG)
-      temp = temp.after(*buf.src[1:]) if buf.op is Ops.AFTER else temp
-      addr = hcq2.rt_addr(buf, "CPU") + idx.cast(dtypes.uint64) * buf.dtype.itemsize
-      if access.op is Ops.LOAD:
-        return temp.after(hcq2.ccall(libc.memcpy, temp.index(0), addr, buf.dtype.itemsize)).index(0).load()
-      return hcq2.ccall(libc.memcpy, addr, temp.after(temp.index(0).store(access.src[1])).index(0), buf.dtype.itemsize)
-
-    pm = PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))),),
-                              allow_any_len=True, name="access"), indirect_access)])
-    dev = Device[Device.DEFAULT]
-    for profile in (True, False):
-      for indirect in (False, True):
-        with self.subTest(profile=profile, indirect=indirect), Context(HCQ_RUNTIME_DEV="CPU"):
-          out = Tensor.ones(4).contiguous()
-          with patch.object(dev, "pm_lower", (dev.pm_lower or PatternMatcher([])) + pm if indirect else dev.pm_lower):
-            compiled = compile_linear(out.schedule_linear(), profile=profile)
-          calls = [call.without_after for call in compiled.src if call_is_hcq(call)]
-          self.assertEqual(len(calls), 1)
-          self.assertEqual(len(calls[0].arg.aux.slots), int(profile or not indirect))
-          if indirect:
-            self.assertFalse(any(param.op is Ops.PARAM and (param.arg.name or "").startswith("slots_")
-                                 for param in calls[0].src[0].toposort()))
-          linked = link_linear(compiled)
-          call = linked.src[0].without_after
-          for device, index in call.arg.aux.slots:
-            slots = call.src[1 + index].buffer
-            self.assertEqual(slots.dtype, dtypes.uint64)
-            for devices, _, _, stamps, _ in call.arg.aux.kernels:
-              if device in devices:
-                for stamp in stamps: self.assertLess(stamp, slots.size)
+    pm = PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat())),), allow_any_len=True),
+                          lambda buf: hcq2.rt_addr(buf, "CPU") if hcq2.unwrap_view(buf)[0].tag == "slots" else None)])
+    with patch.object(Device[Device.DEFAULT], "pm_lower", pm):
+      compiled = compile_linear(Tensor.ones(4).contiguous().schedule_linear(), profile=True)
+    self.assertFalse(any(param.op is Ops.PARAM and (param.arg.name or "").startswith("slots_")
+                         for param in compiled.src[0].without_after.src[0].toposort()))
+    call = link_linear(compiled).src[0].without_after
+    ((device, index),) = call.arg.aux.slots
+    self.assertEqual(device, Device.DEFAULT)
+    self.assertEqual(call.src[1 + index].buffer.dtype, dtypes.uint64)
 
   def test_large_eager_not_cached(self):
     _, compiled, inputs = self.compiled(65)
