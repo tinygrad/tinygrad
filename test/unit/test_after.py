@@ -2,6 +2,17 @@ import unittest
 from tinygrad import Tensor
 
 class TestAfterCounterexamples(unittest.TestCase):
+  def test_ordered_writes_allowed(self):
+    x = Tensor([0.]).realize().uop
+    a = x.after(x.store(1))
+    b = a.after(a.store(2))
+    self.assertEqual(Tensor(b).tolist(), [2.])
+
+  def test_disjoint_writes_allowed(self):
+    x = Tensor([0., 0.]).realize().uop
+    y = Tensor(x.after(x[:1].store(1), x[1:].store(2)))
+    self.assertEqual(y.tolist(), [1., 2.])
+
   @unittest.expectedFailure
   def test_chained_square_assign_gradient(self):
     x = Tensor([2.0])
