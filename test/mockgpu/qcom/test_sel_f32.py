@@ -109,7 +109,7 @@ def test_real_compiler_sine_range_and_original_cosine_reproduction(monkeypatch):
   expected = np.sin(values)
   scalar = np.array([math.sin(float(value)) for value in values], np.float32)
   np.testing.assert_allclose(expected, scalar, rtol=1e-6, atol=1e-7)
-  observed = set()
+  observed: set[int] = set()
   original = Workgroup.alu
 
   def record(self, instruction, lanes, repeat):
