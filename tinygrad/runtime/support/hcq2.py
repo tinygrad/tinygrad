@@ -21,7 +21,7 @@ if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: rem
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "CPU")
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("NV", "QCOM", "CPU")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
+HCQ_DEVS = frozenset(("NV", "QCOM")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
 
 @dataclass(frozen=True)
 class HCQInfo:
@@ -39,13 +39,14 @@ def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for
 
 def get_enqueue_devs(call:UOp) -> Any|None:
   if call.src[0].op not in (Ops.PROGRAM, Ops.COPY): return None # only these bodies can be enqueued
-  if not (bufs:=get_call_arg_uops(call)) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
+  if not (bufs:=get_call_arg_uops(call)): return None
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
-  devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
-  # cpu has no queue (yet)
-  if not all_devices_in(devs, HCQ_DEVS) or to_tuple(devs)[0].startswith("CPU"): return None
+  devs = min(bufs, key=lambda b: not all_devices_in(b.device, HCQ_DEVS)).device
+  if not all_devices_in(devs, HCQ_DEVS): return None
+  dev = cast(HCQ2Compiled, Device[to_tuple(devs)[0]])
+  if not all(all_devices_in(b.device, HCQ_DEVS | dev.host_devs) for b in bufs): return None
   # a device without a copy queue leaves copies to its allocator
-  return devs if call.src[0].op is not Ops.COPY or Device[to_tuple(devs)[0]].has_copy_queue else None
+  return devs if call.src[0].op is not Ops.COPY or dev.has_copy_queue else None
 
 def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte offset)
   if v.op in (Ops.BITCAST, Ops.AFTER): return unwrap_view(v.src[0])
@@ -60,9 +61,10 @@ def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.placeholder((2,), dtypes.uint64, 0, device=devs, volatile=True, tag="timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
 
-def rt_addr(b:UOp, dev) -> UOp:
+def rt_addr(b:UOp, dev="CPU") -> UOp:
   base, off = unwrap_view(b)
-  return patch(UOp.placeholder((1,), dtypes.uint64, device=base.device, tag="addr"), [(0, base.getaddr(dev))]).index(0).load() + off
+  word = UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="addr")
+  return patch(word, [(0, base.bitcast(dtypes.uint8)[off:off + b.nbytes()].getaddr(dev))]).index(0).load()
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   fn = to_name("submit", (devs:=to_tuple(devs))[0].split(":")[0], queue.split(":")[0])
@@ -108,11 +110,9 @@ STAGING_SIZE, STAGING_SLOTS = (4 if DEV.interface.startswith("MOCK") else 128) <
 def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
 
 def _need_staging(a, b):
-  return all_devices_in(a.device, HCQ_DEVS - {"CPU"}) and not all_devices_in(b.device, HCQ_DEVS) and Device[to_tuple(a.device)[0]].has_copy_queue
-
-def stage_copy_ext(call:UOp) -> UOp|None:
-  if (d:=next((d for b in call.src[1:] for d in to_tuple(b.device) if not d.startswith("CPU")), None)) is None: return None
-  return pm.rewrite(call) if (pm:=getattr(Device[d], "pm_stage_copy", None)) is not None else None
+  if not all_devices_in(a.device, HCQ_DEVS): return False
+  dev = cast(HCQ2Compiled, Device[to_tuple(a.device)[0]])
+  return not all_devices_in(b.device, HCQ_DEVS | dev.host_devs) and dev.has_copy_queue
 
 def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
@@ -126,7 +126,6 @@ def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   return UOp(Ops.LINEAR, src=tuple(copies))
 
 pm_insert_copy_staging = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), stage_copy_ext),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), stage_copy),
 ])
 
@@ -265,6 +264,7 @@ class HWQueue:
     (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), lambda ctx, call: ctx.copy(call)),
     (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda ctx: ctx.memory_barrier()),
     (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
+    (UPat(Ops.INS, arg=("wait_eq", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
     (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
     (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
   ])
@@ -513,6 +513,7 @@ class HCQ2Compiled(Compiled):
   wait_timeout_ms: float = 30000.0
   sleep_timeout_ms: int|None = None
   rt_nbytes: int = 64 << 20 # the pool every per-linear buffer is carved out of
+  host_devs: frozenset[str] = frozenset({"CPU"})
   pm_encode: PatternMatcher = PatternMatcher([]) # the backend's own encode rules, matched by its submit names
   var_vals: dict[str, int] = {}
 
