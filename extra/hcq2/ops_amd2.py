@@ -815,6 +815,7 @@ def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface
 
 class AMDDevice(HCQ2Compiled):
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
+  sleep_timeout_ms = 200
   max_scratch_psize = 0
   pm_encode = PatternMatcher([
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute", name="submit"), lambda ctx, submit: encode_submit(amd_compute_queue(ctx, submit))),
