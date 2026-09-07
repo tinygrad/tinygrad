@@ -712,6 +712,9 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]])
     helper_test_op(None, lambda x: 0.7**x, vals=[[-2.,-1,0,1,2,3]])
     helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]])
+    # 2**52+2 - 0.5 rounds back to itself
+    helper_test_op(None, lambda x: x**(2.0**52), vals=[[0.5, 1., 2.]], forward_only=True)
+    helper_test_op(None, lambda x: x**(2.0**52+2), vals=[[0.5, 1., 2.]], forward_only=True)
     # float to power of int
     helper_test_op(None, lambda x: 0.7**x, lambda x: (0.7**x).clone(), vals=[[-2,-1,0,1,2,3]], forward_only=True)
 
