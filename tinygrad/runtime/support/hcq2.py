@@ -93,8 +93,7 @@ def cstruct(struct_t, **fields:UOp|int) -> UOp:
   buf = UOp.placeholder((ctypes.sizeof(struct_t),), dtypes.uint8, device=HCQ_RUNTIME_DEV.value, volatile=True, tag=struct_t.__name__)
   return patch(buf, rows, bytes(ctypes.sizeof(struct_t)))
 
-def cfield(buf:UOp, struct_t, name:str) -> UOp: # a field of the struct in buf, to load or store
-  return buf[(f:=getattr(struct_t, name)).offset:f.offset + f.size].bitcast(CDTYPE[f.size]).index(0)
+def cfield(buf:UOp, struct_t, name:str) -> UOp: return buf[(f:=getattr(struct_t, name)).offset:f.offset + f.size].bitcast(CDTYPE[f.size]).index(0)
 
 # *****************
 # 0.1. prep: eager buffers become tagged params
