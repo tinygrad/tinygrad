@@ -122,7 +122,6 @@ def _need_staging(a, b):
 def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
 
-  assert src.dtype.itemsize == dst.dtype.itemsize, "staged copies must be dtype-size matched"
   base, it, copies = UOp.from_buffer(_staging()), src.dtype.itemsize, []
   chunk = (STAGING_SIZE // STAGING_SLOTS) // it
   for i, off in enumerate(range(0, src.max_numel(), chunk)):

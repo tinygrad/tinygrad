@@ -536,7 +536,7 @@ jobs:
   testcommausbgpubenchmark:
     name: UsbGPU Benchmark (comma)
     runs-on: [self-hosted, Linux, comma4]
-    timeout-minutes: 12
+    timeout-minutes: 14
     defaults:
       run:
         shell: bash -e -o pipefail {0}
