@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue, e
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferSpec, Buffer, Device, Compiled, ProfileProgramEvent
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, lo32, hi32, prod, colored
+from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, prod, colored
 from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, mv_address
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -20,13 +20,27 @@ from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_so
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import USB3, pm_usb_batch, pm_usb_lower, pm_usb_bufferize
 from tinygrad.runtime.support.memory import AddrSpace
-from tinygrad.runtime.support.amd import SQTT, PMC, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE, AQL_HDR
-from tinygrad.runtime.support.amd import ProfileSQTTEvent, ProfilePMCEvent, PMCSample
-from tinygrad.runtime.support.amd import EVENT_INDEX_PARTIAL_FLUSH, WAIT_REG_MEM_FUNCTION_GEQ, WAIT_REG_MEM_FUNCTION_EQ
+from tinygrad.runtime.support.amd import SQTT, PMC, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 from tinygrad.uop.ops import Ops, UPat, PatternMatcher
+
+EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
+WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
+WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
+WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
+AQL_HDR = (1 << hsa.HSA_PACKET_HEADER_BARRIER) | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) \
+        | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE)
+
+@dataclass(frozen=True)
+class ProfileSQTTEvent(ProfileEvent): device:str; kern:int; se:int; blob:bytes; itrace:bool; exec_tag:int # noqa: E702
+
+@dataclass(frozen=True)
+class PMCSample: name:str; block:str; xcc:int; inst:int; se:int; sa:int; wgp:int; off:int; size:int; regsample:str # noqa: E702
+
+@dataclass(frozen=True)
+class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]; blob:bytes; exec_tag:int # noqa: E702
 
 # *****************
 # PM4
