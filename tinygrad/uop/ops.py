@@ -942,6 +942,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops.
     # NOTE: the view Buffer returned here is transient (short-lived), it only wraps an offset into the base BUFFER's storag
+    # TODO: caching buffer views halves the python time in llama
     if self is not self.base or self.op is Ops.BITCAST:
       if (ret:=buffer_views.get(self)) is not None: return ret
       if (cv := self.contiguous_view()) is None: raise RuntimeError(f"non-contiguous view is not supported for {self.device} buffer")
