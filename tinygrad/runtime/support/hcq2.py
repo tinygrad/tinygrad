@@ -257,7 +257,7 @@ class EncodeCtx:
   devs:tuple[str, ...]
   inputs:dict[tuple[UOp, str, int], int] = field(default_factory=dict)
   table:UOp = field(default_factory=lambda: UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="inputs"))
-  lt_patches:dict[UOp, list[UOp]] = field(default_factory=dict) # placeholder -> the stores into it that resolve when the linear links
+  lt_patches:list[UOp] = field(default_factory=list)
 
 class HWQueue:
   q_rewrite = PatternMatcher([ # the ops of a queue: a queue defines the methods it supports
@@ -346,11 +346,7 @@ def _is_link_patch(w:UOp) -> bool:
 def hoist_links(ctx:EncodeCtx, a:UOp) -> UOp|None:
   links, rest = partition(a.src[1:], lambda s: s.op is Ops.STORE and _is_link_patch(s))
   if not links: return None
-  # nest the addr placeholders patches under their getaddr
-  ws = UOp.sink(*links)
-  sub = {g: g.replace(src=(g.src[0].after(*ctx.lt_patches[base]),)) for g in ws.toposort()
-         if g.op is Ops.GETADDR and (base:=unwrap_view(g.src[0])[0]) in ctx.lt_patches}
-  ctx.lt_patches.setdefault(unwrap_view(a.src[0])[0], []).extend(ws.substitute(sub).src)
+  ctx.lt_patches.extend(links)
   return a.src[0].after(*rest)
 
 pm_patches = PatternMatcher([(UPat(Ops.GETADDR, name="g"), addrs_to_table), (UPat(Ops.AFTER, name="a"), hoist_links)])
@@ -397,11 +393,7 @@ def lower_call(call:UOp) -> UOp|None:
   body = body.substitute({ctx.table: (table:=UOp.placeholder((len(ctx.inputs),), dtypes.uint64, device="CPU", tag="inputs"))})
 
   # the placeholders become the body's params in visit order, variables bind by name after them, the ranges renumber
-  tops = body.toposort()
-  bufs, alus = partition([u for u in tops if u.op is Ops.PARAM], lambda u: u.tag is not None)
-  addrs = [g.src[0] for g in UOp.sink(*(s for stores in ctx.lt_patches.values() for s in stores)).toposort() if g.op is Ops.GETADDR]
-  nested = UOp.sink(*addrs).toposort()
-  bufs += [b for b, stores in ctx.lt_patches.items() if b not in bufs and not all(s in nested for s in stores)]
+  bufs, alus = partition([u for u in body.toposort() if u.op is Ops.PARAM], lambda u: u.tag is not None)
   names = dedup([a.arg.name for a in alus])
   # bufs to params
   params = {b: UOp.param(i, b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for i, b in enumerate(bufs)}
@@ -412,16 +404,14 @@ def lower_call(call:UOp) -> UOp|None:
   sink = sink.substitute({u: u.replace(arg=(i,)+u.arg[1:] if u.op is Ops.RANGE else replace(u.arg, slot=i)) for i, u in enumerate(us)},
                          enter_calls=True)
 
-  # move all lt-patches to the args
-  patched = {b: b.after(*dedup(stores)) for b, stores in ctx.lt_patches.items()}
-  args = [patched.get(b, b) for b in bufs]
+  patches = dedup(ctx.lt_patches)
 
-  if VIZ: graph_rewrite(UOp.sink(*args), PatternMatcher([]), name="View Link-Time Patches")
+  if VIZ: graph_rewrite(UOp.sink(*patches), PatternMatcher([]), name="View Link-Time Patches")
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Body")
 
-  info = replace(call.arg.aux, nargs=len(args), table=bufs.index(table) if table in bufs else -1, inputs=tuple(ctx.inputs),
+  info = replace(call.arg.aux, nargs=len(bufs), table=bufs.index(table) if table in bufs else -1, inputs=tuple(ctx.inputs),
                  slots=tuple((to_tuple(b.device)[0], i) for i, b in enumerate(bufs) if b.tag == "slots"))
-  return call.replace(src=(sink, *args), arg=replace(call.arg, aux=info))
+  return call.replace(src=(sink, *bufs), arg=replace(call.arg, aux=info)).after(*patches)
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])
 
 hcq_compile_cache:dict[tuple[UOp, bool], UOp] = {} # eager templates: a buffer-free linear (uops are hash-consed) to its compiled form
@@ -491,6 +481,8 @@ pm_link = PatternMatcher([
   (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast())), fold_binary),
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")),
     fold_words),
+  (UPat(Ops.AFTER, src=(UPat(Ops.CALL),), allow_any_len=True, name="a"),
+    lambda a: a.src[0].after(*(s for s in a.src[1:] if s.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="a"), lambda a: None if a.is_bound_var or a.src[0].op is Ops.CALL else
    a.src[0] if all(s.op is Ops.NOOP for s in a.src[1:]) else panic(RuntimeError, f"unresolved link words on {a.src[0].op}")),
 ])
