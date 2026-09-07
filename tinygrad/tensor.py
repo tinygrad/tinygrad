@@ -46,7 +46,7 @@ add_tags = PatternMatcher([
   # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
-  (UPat(Ops.AFTER, name="x"), tag_uop),
+  (UPat((Ops.CONTIGUOUS, Ops.AFTER), name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
 
@@ -55,6 +55,8 @@ def mint_tagged_storage(x:UOp):
   # empty tag from rtag(()): a COPY already handled via buffer_map or merged into a parent AFTER.
   # () is falsy but not None, so it isn't re-tagged like a bare (tag=None) node would be; just strip it here
   if not x.tag: return x.rtag(None)
+  # CONTIGUOUS_BACKWARD is a pure annotation: strip it (tags carry over), the inner node mints the storage
+  if x.op is Ops.CONTIGUOUS_BACKWARD: return x.src[0].replace(tag=(x.src[0].tag or ())+(x.tag or ()))
   # a tagged CONTIGUOUS is consumed by the mint: the buffer stores its source directly
   src = x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag(None)
   # virtual values and DISK tensors don't get real buffers: keep the annotation, drop the tag
