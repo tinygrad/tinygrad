@@ -39,7 +39,7 @@ class TestAfterCounterexamples(unittest.TestCase):
     y = x.clone()
     y.assign(y*y)
     y.assign(y*y)
-    # y = x**4, so dy/dx = 4*x**3. Currently returns [64.] instead of [32.].
+    # y = x**4, so dy/dx = 4*x**3. Currently raises "cycle detected while indexing".
     self.assertEqual(y.sum().gradient(x)[0].tolist(), [32.])
 
   @unittest.expectedFailure
@@ -57,12 +57,11 @@ class TestAfterCounterexamples(unittest.TestCase):
     # x contributes once, not twice. Currently returns [2.].
     self.assertEqual(z.sum().gradient(x)[0].tolist(), [1.])
 
-  @unittest.expectedFailure
   def test_unrelated_store_gradient(self):
     x = Tensor([2.]).realize()
     y = x.clone()
     z = Tensor(x.uop.after(y.uop.store(0)))
-    # Zeroing y does not change x. Currently returns [0.].
+    # Zeroing y does not change x.
     self.assertEqual(z.sum().gradient(x)[0].tolist(), [1.])
 
   @unittest.expectedFailure
