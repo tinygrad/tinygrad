@@ -55,8 +55,6 @@ def mint_tagged_storage(x:UOp):
   # empty tag from rtag(()): a COPY already handled via buffer_map or merged into a parent AFTER.
   # () is falsy but not None, so it isn't re-tagged like a bare (tag=None) node would be; just strip it here
   if not x.tag: return x.rtag(None)
-  # CONTIGUOUS_BACKWARD is a pure annotation: strip it (tags carry over), the inner node mints the storage
-  if x.op is Ops.CONTIGUOUS_BACKWARD: return x.src[0].replace(tag=(x.src[0].tag or ())+(x.tag or ()))
   # a tagged CONTIGUOUS is consumed by the mint: the buffer stores its source directly
   src = x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag(None)
   # virtual values and DISK tensors don't get real buffers: keep the annotation, drop the tag
@@ -152,13 +150,14 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
    x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) if on_disk(x) else None),
 
+  # strip DETACH/CONTIGUOUS_BACKWARD before minting (tags carry over)
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"),
+   lambda x: x.src[0].replace(tag=(x.src[0].tag or ())+(x.tag or ())) if x.tag else x.src[0]),
   # contiguous of an already-materialized value is a no-op (tags carry over for held values)
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
   # mint buffers for tagged values; an untagged CONTIGUOUS flows through to the scheduler, which bufferizes it
   (UPat(GroupOp.All-{Ops.AFTER, Ops.STORE}, name="x"), mint_tagged_storage),
-  # remove DETACH/CONTIGUOUS_BACKWARD (allows more contiguous removal)
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 ])
 
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
