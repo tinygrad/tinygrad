@@ -292,7 +292,7 @@ class TestJitGraphSplit(unittest.TestCase):
     if graph_t is None: return
 
     got = f.captured.linear.src
-    from tinygrad.runtime.graph.hcq import HCQGraph
+    from extra.hcq1.graph import HCQGraph
     from tinygrad.engine.jit import MultiGraphRunner
     if graph_t is HCQGraph:
       validate = hcqgraph

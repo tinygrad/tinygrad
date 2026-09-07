@@ -2,7 +2,7 @@ import unittest, struct, contextlib, statistics, gc
 from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
-from tinygrad.runtime.support.hcq import HCQCompiled
+from extra.hcq1.hcq import HCQCompiled
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
