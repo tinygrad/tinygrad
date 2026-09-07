@@ -198,10 +198,18 @@ def _validate_operands(op, operands, fields, category):
     # QCOMCL's sine reduction selects between one full register and its FNEG.
     # Other operand layouts, modifiers and conversions need separate evidence.
     first, condition, third = (operands[name] for name in ('SRC1', 'SRC2', 'SRC3'))
-    if (any(o.kind != 'register' or o.half or o.relative or o.repeat for o in operands.values()) or
-        first.index != third.index or (first.modifier, condition.modifier, third.modifier) != (1, 0, 0) or
-        fields.get('REPEAT', 0) or fields.get('SAT', 0) or fields.get('NOP', 0)):
-      raise RuntimeError('IR3 unsupported SEL.F32 form')
+    if any(operand.kind != 'register' for operand in operands.values()):
+      raise RuntimeError('IR3 unsupported SEL.F32 form: every operand must be a register')
+    if any(operand.half for operand in operands.values()):
+      raise RuntimeError('IR3 unsupported SEL.F32 form: half registers')
+    if any(operand.relative or operand.repeat for operand in operands.values()):
+      raise RuntimeError('IR3 unsupported SEL.F32 form: relative or repeated operands')
+    if first.index != third.index:
+      raise RuntimeError('IR3 unsupported SEL.F32 form: sources are not one register and its own negation')
+    if (first.modifier, condition.modifier, third.modifier) != (1, 0, 0):
+      raise RuntimeError('IR3 unsupported SEL.F32 form: only the first source may be negated')
+    if marked := [name for name in ('REPEAT', 'SAT', 'NOP') if fields.get(name, 0)]:
+      raise RuntimeError(f'IR3 unsupported SEL.F32 form: {" ".join(marked)}')
   if op == 'getbit.b':
     # QCOMCL restores loop-hoisted packed booleans with a half-register bit
     # test into p0.x..w. Other result representations are not qualified here.
