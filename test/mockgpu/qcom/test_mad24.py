@@ -58,3 +58,29 @@ def test_compiler_generated_signed_mad24_with_negative_inputs_and_wrapping_sum(m
   expected = (left.astype(np.int64) * right + accumulator).astype(np.int32)
   np.testing.assert_array_equal(actual, expected)
   assert 'mad.s24' in executed, executed
+
+
+@pytest.mark.parametrize('factor', [1, 0xffff, 0x10000, 0x12345678, 0xabcd5678, 0x1234ffff])
+def test_constant_mad_u16_uses_full_banks_low_digits_and_full_accumulator(factor):
+  # Exact QCOMCL instruction from ulong multiplication: mad.u16 r0.w,c23.x,r1.z,r0.w.
+  # Ordinary masked-uint and ushort-cast kernels emit the same form with renamed
+  # GPRs. Complete compiler-image probes establish the reference, not this helper.
+  word = 0x600340030003105c
+  code = emu.decode(struct.pack('<2Q', word, 6 << 55))
+  assert code[0].op == 'mad.u16' and code[0].raw == word
+  assert [(code[0].operands[name].kind, code[0].operands[name].index, code[0].operands[name].half)
+          for name in ('DST', 'SRC1', 'SRC2', 'SRC3')] == [
+            ('register', 3, False), ('constant', 92, False), ('register', 6, False), ('register', 3, False)]
+  left = [0, 1, 0xffff, 0x10000, 0xffff0001, 0x12345678, 0x8000ffff, 0xffffffff]
+  accumulator = [0x12345678, 0xffffffff, 7, 0x80000000, 0xfeed0001, 0x10000, 0x89abcdef, 0xffff0000]
+  group = state(lanes=len(left))
+  group.constant_demotion = False
+  group.constants = np.zeros(128, dtype=np.uint32)
+  group.constants[92] = factor
+  group.constants[46] = 0xfacebeef  # Packed half slot 92 must not alias full slot 92.
+  group.registers[0][6], group.registers[0][3] = left, accumulator
+  group.registers[1][6] = np.arange(3, 3 + len(left), dtype=np.uint16)
+  group.registers[1][3] = np.arange(11, 11 + len(left), dtype=np.uint16)
+  group.run(code)
+  expected = [((factor & 0xffff) * (value & 0xffff) + addend) & 0xffffffff for value, addend in zip(left, accumulator)]
+  np.testing.assert_array_equal(group.registers[0][3], expected)
