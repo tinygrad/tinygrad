@@ -1,6 +1,7 @@
 import unittest
 from tinygrad.helpers import Timing, getenv
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, TinyJit
+from tinygrad.runtime.support.usb import HALF, CHUNK, SLOT
 import numpy as np
 
 class USBTestCase(unittest.TestCase):
@@ -8,7 +9,12 @@ class USBTestCase(unittest.TestCase):
   def setUpClass(cls):
     cls.sz = getenv("SIZE", 2000000)
     cls.dev = Device["AMD"]
-    if not cls.dev.is_usb(): raise unittest.SkipTest("only test this on USB devices")
+    if not cls.dev.is_usb: raise unittest.SkipTest("only test this on USB devices")
+    cls.rng = np.random.default_rng(0)
+
+  def roundtrip(self, a:np.ndarray): # a copy in, a kernel, a copy out: the queue must order them
+    np.testing.assert_array_equal(a, Tensor(a, device="NPY").to(Device.DEFAULT).numpy())
+    np.testing.assert_array_equal(a + 1, (Tensor(a, device="NPY").to(Device.DEFAULT) + 1).numpy())
 
 class TestDevCopySpeeds(USBTestCase):
   def testCopyCPUtoDefault(self):
@@ -30,73 +36,55 @@ class TestUSBIntegrity(USBTestCase):
     t = Tensor.randn(self.sz, device="CPU", dtype='uchar').contiguous().realize()
     x = t.to(Device.DEFAULT).realize()
     Device[Device.DEFAULT].synchronize()
-
     y = x.to('CPU').realize()
-
     np.testing.assert_equal(t.numpy(), y.numpy())
-    del x, y, t
 
-  def testCopyinBoundaries(self):
-    rng, chunk = np.random.default_rng(0), 0x40000 - 4
-    for size in (1, 3, 508, 509, 0x3ffc, 0x3ffd, chunk, chunk+1, 2*chunk+31):
-      with self.subTest(size=size):
-        a = rng.integers(0, 256, size, dtype=np.uint8)
-        np.testing.assert_array_equal(a, Tensor(a, device="AMD").numpy())
+  def testBoundaries(self): # around the slot, the chunk and the read window
+    for size in (1, 3, 508, 509, SLOT - 513, SLOT - 512, SLOT - 511, CHUNK - 1, CHUNK, CHUNK + 1, 2 * CHUNK - 1, 2 * CHUNK, 2 * CHUNK + 31, HALF,
+                 2 * HALF, 1 << 20):
+      with self.subTest(size=size): self.roundtrip(self.rng.integers(0, 256, size, dtype=np.uint8))
 
-  def testCopyinFenceWrap(self):
-    a = np.arange(2*(0x40000-4)+31, dtype=np.uint8)
-    np.testing.assert_array_equal(a[:31], Tensor(a[:31], device="AMD").numpy())
-    self.dev.synchronize()
-    alloc, usb = self.dev.allocator, self.dev.iface.pci_dev.usb
-    clear = usb.read(0xA808, 1)
-    # Model a completed 256-chunk copy instead of the one-chunk warmup. The next clear tag must still change.
-    alloc._usb_seq += 255
-    usb.write(0xA800, bytes([alloc._usb_seq & 0xff]))
-    np.testing.assert_array_equal(a[:31], Tensor(a[:31], device="AMD").numpy())
-    self.assertNotEqual(clear, usb.read(0xA808, 1))
-    for bits in (8, 24):
-      with self.subTest(bits=bits):
-        alloc._usb_seq = ((alloc._usb_seq >> bits)+2)*(1 << bits)-2
-        usb.write(0xA800, bytes([alloc._usb_seq & 0xff]))
-        np.testing.assert_array_equal(a, Tensor(a, device="AMD").numpy())
+  def testManyCopiesInABatch(self):
+    for n in (2, 7, 64, 300): # 300 chunks: the fence byte wraps
+      with self.subTest(n=n):
+        arrs = [self.rng.integers(0, 256, int(s), dtype=np.uint8) for s in self.rng.integers(1, 5000, n)]
+        ts = [Tensor(a, device="NPY").to(Device.DEFAULT) for a in arrs]
+        Tensor.realize(*ts)
+        for t, a in zip(ts, arrs): np.testing.assert_array_equal(a, t.numpy())
 
-  def testCopyinRingWrap(self):
-    rng = np.random.default_rng(0)
-    a = rng.integers(0, 256, 1 << 20, dtype=np.uint8)
-    np.testing.assert_array_equal(a, Tensor(a, device="AMD").numpy())
-    ring = self.dev.sdma_queue(0)
-    # A 16 MiB copyin needs more than 4 KiB of SDMA packets, forcing the submission to wrap.
-    target = ring.ring.nbytes - 0x1000
-    padding = target - ring.put_value % ring.ring.nbytes - 16  # four-dword timeline fence
-    self.assertGreaterEqual(padding, 0)
-    q = self.dev.hw_copy_queue_t()
-    q.q(*([0] * (padding // 4)))
-    q.signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
-    self.dev.synchronize()
-    before = ring.put_value // ring.ring.nbytes
-    a = rng.integers(0, 256, 16 << 20, dtype=np.uint8)
-    t = Tensor(a, device="AMD").realize()
-    self.assertGreater(ring.put_value // ring.ring.nbytes, before)
+  def testMixedBatch(self): # copies out and in, in one batch: runs of both directions
+    arrs = [self.rng.integers(0, 256, s, dtype=np.uint8) for s in (5, CHUNK + 7, 9, 2 * CHUNK + 3, 11)]
+    ts = [Tensor(a, device="NPY").to(Device.DEFAULT).realize() for a in arrs]
+    more = [self.rng.integers(0, 256, s, dtype=np.uint8) for s in (5, CHUNK + 7, 9, 2 * CHUNK + 3, 11)]
+    outs = [t.to("NPY") for t in ts] + [Tensor(a, device="NPY").to(Device.DEFAULT) for a in more]
+    Tensor.realize(*outs)
+    for o, a in zip(outs, arrs + more): np.testing.assert_array_equal(a, o.numpy())
+
+  def testRepeatedBatches(self): # a batch numbers its chunks from 0: the same batch again must not see what the last one left behind
+    a = self.rng.integers(0, 256, 2 * CHUNK + 31, dtype=np.uint8)
+    for _ in range(5): self.roundtrip(a)
+    @TinyJit
+    def step(x:Tensor) -> Tensor: return (x + 1).realize()
+    src = Tensor(a, device="NPY")
+    for i in range(5):
+      x = src.to(Device.DEFAULT)
+      np.testing.assert_array_equal(a + 1, step(x).numpy())
+
+  def testStaleSentinel(self): # payloads full of the tags the queue waits for, in both directions, before and around the real chunks
+    tags = np.array([0x51000000 | k for k in range(8)], dtype=np.uint32)
+    for tag in tags: # every dword of every chunk is the tag of some chunk of the copy
+      with self.subTest(payload=hex(tag)):
+        a = np.full((2 * CHUNK + 31) // 4, tag, dtype=np.uint32).view(np.uint8)
+        self.roundtrip(a)
+    with self.subTest(case="copyout residue"): # a read fills the sram with tags, then small chunks land in both halves
+      a = np.tile(tags, 2 * CHUNK // 32).view(np.uint8)
+      np.testing.assert_array_equal(a, (Tensor(a, device="NPY").to(Device.DEFAULT) * 1).numpy())
+      for size in (31, CHUNK + 31, 2 * CHUNK + 31): self.roundtrip(np.tile(tags, size // 32 + 1).view(np.uint8)[:size])
+
+  def testRingWrap(self): # 64MB of chunks: the sdma ring (1MB on usb) wraps within the copy
+    a = self.rng.integers(0, 256, 64 << 20, dtype=np.uint8)
+    t = Tensor(a, device="NPY").to(Device.DEFAULT).realize()
     np.testing.assert_array_equal(a, t.numpy())
-
-  def testCopyinStaleSentinel(self):
-    a = np.arange(16, dtype=np.uint8)
-    np.testing.assert_array_equal(a, Tensor(a, device="AMD").numpy())
-    chunk = 0x40000 - 4
-    for case in ("copyout", "reuse"):
-      with self.subTest(case=case):
-        if case == "copyout":
-          # A 512 KiB copyin takes three chunks. Copyout then fills both SRAM windows with the next expected tag.
-          tag = 0x51000000 | ((self.dev.allocator._usb_seq + 3) & 0xFFFFFF)
-          a = np.full(0x80000 // 4, tag, dtype=np.uint32)
-          np.testing.assert_array_equal(a, Tensor(a, device="AMD").numpy())
-          a = np.arange(31, dtype=np.uint8)
-        else:
-          # The first full chunk contains the tag expected by the short third chunk in the same window.
-          tag = 0x51000000 | ((self.dev.allocator._usb_seq + 2) & 0xFFFFFF)
-          a = np.arange(2 * chunk + 31, dtype=np.uint8)
-          a[:chunk].view(np.uint32)[:] = tag
-        np.testing.assert_array_equal(a, Tensor(a, device="AMD").numpy())
 
 if __name__ == "__main__":
   unittest.main()
