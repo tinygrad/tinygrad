@@ -1,6 +1,27 @@
 import functools, tinygrad.runtime.autogen.am
 from dataclasses import dataclass
-from tinygrad.helpers import getbits
+from tinygrad.helpers import getbits, ContextVar, VIZ, ProfileEvent
+from tinygrad.runtime.autogen import hsa
+
+SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
+SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE = \
+  ContextVar("SQTT_ITRACE_SE_MASK", 0b11), ContextVar("SQTT_LIMIT_SE", 0), ContextVar("SQTT_SIMD_SEL", 0), ContextVar("SQTT_TOKEN_EXCLUDE", 0)
+PMC = ContextVar("PMC", abs(VIZ.value)>=2)
+EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
+WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
+WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
+WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
+AQL_HDR = (1 << hsa.HSA_PACKET_HEADER_BARRIER) | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) \
+        | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE)
+
+@dataclass(frozen=True)
+class ProfileSQTTEvent(ProfileEvent): device:str; kern:int; se:int; blob:bytes; itrace:bool; exec_tag:int # noqa: E702
+
+@dataclass(frozen=True)
+class PMCSample: name:str; block:str; xcc:int; inst:int; se:int; sa:int; wgp:int; off:int; size:int; regsample:str # noqa: E702
+
+@dataclass(frozen=True)
+class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]; blob:bytes; exec_tag:int # noqa: E702
 
 @dataclass
 class AMDReg:

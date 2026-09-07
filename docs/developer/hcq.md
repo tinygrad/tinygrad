@@ -1,4 +1,6 @@
-# HCQ Compatible Runtime
+# Legacy HCQ1 Compatible Runtime
+
+This page describes the legacy HCQ1 runtime in `extra/hcq1`. HCQ2 is the default; use `HCQ2=0 DEV=AMD` to run the legacy AMD backend.
 
 ## Overview
 
@@ -6,7 +8,7 @@ The main aspect of HCQ-compatible runtimes is how they interact with devices. In
 
 ### Command Queues
 
-To interact with devices you create a `HWQueue`. Some methods are required, like timestamp and synchronization methods like [signal](#tinygrad.runtime.support.hcq.HWQueue.signal) and [wait](#tinygrad.runtime.support.hcq.HWQueue.wait), while others are dependent on it being a compute or copy queue.
+To interact with devices you create a `HWQueue`. Some methods are required, like timestamp and synchronization methods like [signal](#extra.hcq1.hcq.HWQueue.signal) and [wait](#extra.hcq1.hcq.HWQueue.wait), while others are dependent on it being a compute or copy queue.
 
 For example, the following Python code enqueues a wait, execute, and signal command on the HCQ-compatible device:
 ```python
@@ -18,7 +20,7 @@ HWQueue().wait(signal_to_wait, value_to_wait) \
 
 Each runtime should implement the required functions that are defined in the `HWQueue` classes.
 
-::: tinygrad.runtime.support.hcq.HWQueue
+::: extra.hcq1.hcq.HWQueue
     options:
         members: [
             "signal",
@@ -36,7 +38,7 @@ Each runtime should implement the required functions that are defined in the `HW
 
 The `HCQCompiled` class defines the API for HCQ-compatible devices. This class serves as an abstract base class that device-specific implementations should inherit from and implement.
 
-::: tinygrad.runtime.support.hcq.HCQCompiled
+::: extra.hcq1.hcq.HCQCompiled
     options:
         show_source: false
 
@@ -44,7 +46,7 @@ The `HCQCompiled` class defines the API for HCQ-compatible devices. This class s
 
 Signals are device-dependent structures used for synchronization and timing in HCQ-compatible devices. They should be designed to record both a `value` and a `timestamp` within the same signal. HCQ-compatible backend implementations should use `HCQSignal` as a base class.
 
-::: tinygrad.runtime.support.hcq.HCQSignal
+::: extra.hcq1.hcq.HCQSignal
     options:
         members: [value, timestamp, wait]
         show_source: false
@@ -71,7 +73,7 @@ Each HCQ-compatible device must allocate two signals for global synchronization 
 
 The `HCQAllocator` base class simplifies allocator logic by leveraging [command queues](#command-queues) abstractions. This class efficiently handles copy and transfer operations, leaving only the alloc and free functions to be implemented by individual backends.
 
-::: tinygrad.runtime.support.hcq.HCQAllocator
+::: extra.hcq1.hcq.HCQAllocator
     options:
         members: [
             "_alloc",
@@ -92,7 +94,7 @@ Backends must adhere to the `HCQBuffer` protocol when returning allocation resul
 
 `HCQProgram` is a base class for defining programs compatible with HCQ-enabled devices. It provides a flexible framework for handling different argument layouts (see `HCQArgsState`).
 
-::: tinygrad.runtime.support.hcq.HCQProgram
+::: extra.hcq1.hcq.HCQProgram
     options:
         members: true
         show_source: false
@@ -101,7 +103,7 @@ Backends must adhere to the `HCQBuffer` protocol when returning allocation resul
 
 `HCQArgsState` is a base class for managing the argument state for HCQ programs. Backend implementations should create a subclass of `HCQArgsState` to manage arguments for the given program.
 
-::: tinygrad.runtime.support.hcq.HCQArgsState
+::: extra.hcq1.hcq.HCQArgsState
     options:
         members: true
         show_source: false
@@ -124,5 +126,5 @@ your_device.timeline_signal.wait(your_device.timeline_value - 1)
 
 ## HCQGraph
 
-[HCQGraph](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/graph/hcq.py) is a core feature that implements `GraphRunner` for HCQ-compatible devices. `HCQGraph` builds static `HWQueue` for all operations per device. To optimize enqueue time, only the necessary parts of the queues are updated for each run using the symbolic variables, avoiding a complete rebuild.
+[HCQGraph](https://github.com/tinygrad/tinygrad/tree/master/extra/hcq1/graph.py) is a core feature that implements `GraphRunner` for HCQ-compatible devices. `HCQGraph` builds static `HWQueue` for all operations per device. To optimize enqueue time, only the necessary parts of the queues are updated for each run using the symbolic variables, avoiding a complete rebuild.
 Optionally, queues can implement a `bind` API, which allows further optimization by eliminating the need to copy the queues into the device ring.

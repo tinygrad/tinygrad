@@ -20,9 +20,9 @@ from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_so
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import USB3, pm_usb_batch, pm_usb_lower, pm_usb_bufferize
 from tinygrad.runtime.support.memory import AddrSpace
-from extra.hcq2.ops_amd_old import SQTT, PMC, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE, AQL_HDR # the legacy hcq runtime
-from extra.hcq2.ops_amd_old import ProfileSQTTEvent, ProfilePMCEvent, PMCSample
-from extra.hcq2.ops_amd_old import EVENT_INDEX_PARTIAL_FLUSH, WAIT_REG_MEM_FUNCTION_GEQ, WAIT_REG_MEM_FUNCTION_EQ
+from tinygrad.runtime.support.amd import SQTT, PMC, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE, AQL_HDR
+from tinygrad.runtime.support.amd import ProfileSQTTEvent, ProfilePMCEvent, PMCSample
+from tinygrad.runtime.support.amd import EVENT_INDEX_PARTIAL_FLUSH, WAIT_REG_MEM_FUNCTION_GEQ, WAIT_REG_MEM_FUNCTION_EQ
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
@@ -1045,4 +1045,4 @@ class AMDDevice(HCQ2Compiled):
 
   def on_device_hang(self): self.iface.on_device_hang()
 
-if not HCQ2: from extra.hcq2.ops_amd_old import * # noqa: F401, F403 # pylint: disable=unused-import
+if not HCQ2: from extra.hcq1.ops_amd_old import * # noqa: F401, F403 # pylint: disable=unused-import

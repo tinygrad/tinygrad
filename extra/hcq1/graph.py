@@ -1,7 +1,8 @@
 import collections, time
 from typing import Any, cast
 from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, suppress_finalizing, TracingKey, unwrap
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator, MMIOInterface
+from extra.hcq1.hcq import HCQCompiled, HCQAllocator, HCQSignal, HWQueue, HCQArgsState
+from tinygrad.runtime.support.hcq import HCQBuffer, BumpAllocator, MMIOInterface
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, MultiBuffer, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable
@@ -102,7 +103,7 @@ class HCQGraph(MultiGraphRunner):
       elif is_rdma:
         enqueue_queue = self.comp_queues[enqueue_dev]
         rdma_key = (cast(HCQCompiled, Device[bufs[0].device]).rdma_dev(), enqueue_dev.rdma_dev())
-        from tinygrad.runtime.ops_rdma import RDMACopyQueue
+        from extra.hcq1.ops_rdma import RDMACopyQueue
         self.rdma_queues.setdefault(rdma_key, RDMACopyQueue(enqueue_dev.rdma_dev()))
       else:
         assert (enqueue_dev.hw_copy_queue_t is not None), "device must implement a copy queue"
