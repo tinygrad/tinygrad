@@ -238,7 +238,7 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
   sink = UOp.sink(*merged, arg=KernelInfo("hcq_submit"), tag=1)
   for pm in [Device[d].pm_batch for d in ctx.queues if Device[d].pm_batch is not None]: # a device adds its own work to the batch
     if (r:=pm.rewrite(sink)) is not None: sink = r
-  return sink.call(aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns), estimates=estimates))
+  return sink.call(*(ctx.slots.values() if ctx.profile else ()), aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns), estimates=estimates))
 
 @rewrite_group(new_ctx=False)
 def sched_batches(l:UOp, profile:bool) -> UOp:
@@ -399,6 +399,7 @@ def lower_call(call:UOp) -> UOp|None:
 
   # the placeholders become the body's params in visit order, variables bind by name after them, the ranges renumber
   bufs, alus = partition([u for u in body.toposort() if u.op is Ops.PARAM], lambda u: u.tag is not None)
+  bufs = dedup([*call.src[1:], *bufs])
   names = dedup([a.arg.name for a in alus])
   # bufs to params
   params = {b: UOp.param(i, b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for i, b in enumerate(bufs)}
