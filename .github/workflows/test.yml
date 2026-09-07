@@ -505,7 +505,7 @@ jobs:
       - name: Run AMD renderer tests (AMD:LLVM)
         run: DEV=MOCKKFD+AMD:LLVM python -m pytest -n=auto test/amd/ --durations 20
       - name: Run SQTT profiling tests
-        run: VIZ=-2 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
+        run: SQTT_BUFFER_SIZE=16 VIZ=-2 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
       - name: Run AMD emulated tests on NULL backend
         env:
           AMD: 0
