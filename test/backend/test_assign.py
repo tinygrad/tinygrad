@@ -875,12 +875,8 @@ class TestAssignOrdering(unittest.TestCase):
     a.assign(b + 1)                                    # a == 11
     v1 = a * 3                                         # reads 11 -> 33
     a.assign(b + 100)                                  # a == 110
-    out = (a + v1).numpy()
-    try:
-      np.testing.assert_allclose(out, 143)
-    except AssertionError:
-      # TODO: broken now, v1 reads a after the second assign
-      np.testing.assert_allclose(out, 440)
+    with self.assertRaisesRegex(RuntimeError, "cycle"):  # TODO: broken now, ideally v1 is realized between the assigns
+      np.testing.assert_allclose((a + v1).numpy(), 143)
 
   def test_two_reads_between_three_assigns(self):
     a = Tensor.zeros(4).realize()
@@ -995,12 +991,9 @@ class TestAssignOrdering(unittest.TestCase):
       x.assign(x+1)
       return y+x
     a = Tensor([1.]).realize()
-    out = outer(a).item()
-    try:
+    with self.assertRaisesRegex(RuntimeError, "cycle"):  # TODO: broken now, ideally y is realized between the assigns
+      out = outer(a).item()
       self.assertEqual([out, a.item()], [7., 3.])
-    except AssertionError:
-      # TODO: broken now, the inner assign is run twice
-      self.assertEqual([out, a.item()], [6., 4.])
 
 class TestAssignToUnrealizedView(unittest.TestCase):
   def test_copy(self):
