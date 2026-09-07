@@ -230,9 +230,12 @@ runs:
         sudo chown -R $USER:$USER /var/cache/apt/archives/
 
     - name: Add clang to PATH (Linux)
-      if: inputs.llvm == 'true' && runner.os == 'Linux'
+      if: runner.os == 'Linux'
       shell: bash
-      run: echo "/usr/lib/llvm-20/bin" >> "$GITHUB_PATH"
+      run: |
+        if [ -d /usr/lib/llvm-20/bin ]; then
+          echo "/usr/lib/llvm-20/bin" >> "$GITHUB_PATH"
+        fi
 
     # **** AMD ****
     - name: Setup AMD (Linux)
