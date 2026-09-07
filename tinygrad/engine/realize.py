@@ -52,6 +52,7 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
 # **************** Stat ****************
 
 def estimate_uop(call:UOp) -> Estimates:
+  call = call.without_after
   if isinstance(call.arg.aux, HCQInfo): return call.arg.aux.estimates
   if (ast:=call.src[0]).op is Ops.PROGRAM: return ast.src[0].arg.estimates or Estimates()
   if ast.op is Ops.COPY or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec"):

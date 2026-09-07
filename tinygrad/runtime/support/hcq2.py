@@ -380,6 +380,11 @@ def encode_submit(hq:HWQueue) -> UOp:
 # *****************
 # 4. lower call
 
+pm_renumber = PatternMatcher([
+  (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(next(ctx),)+u.arg[1:])),
+  (UPat(Ops.BUFFER, name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
+])
+
 def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.nargs: return None # not an hcq call, or lowered already
 
@@ -399,10 +404,7 @@ def lower_call(call:UOp) -> UOp|None:
   params = {b: UOp.param(i, b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for i, b in enumerate(bufs)}
   # new slots for vars
   vals = {a: a.replace(arg=replace(a.arg, slot=len(bufs) + names.index(a.arg.name))) for a in alus}
-  sink = body.substitute(params | vals, enter_calls=True)
-  us = [u for u in sink.toposort() if u.op is Ops.RANGE or (u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG)]
-  sink = sink.substitute({u: u.replace(arg=(i,)+u.arg[1:] if u.op is Ops.RANGE else replace(u.arg, slot=i)) for i, u in enumerate(us)},
-                         enter_calls=True)
+  sink = graph_rewrite(body.substitute(params | vals, enter_calls=True), pm_renumber, ctx=itertools.count(), walk=True, enter_calls=True)
 
   patches = dedup(ctx.lt_patches)
 
