@@ -209,6 +209,7 @@ class UOpMetaClass(type):
 
 # some uops map to other stuff
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
+buffer_views:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary()
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 class recursive_property(property):
@@ -940,15 +941,17 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def buffer(self) -> Buffer|MultiBuffer:
     if self.op in {Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops.
-    # NOTE: the view Buffer returned here is transient (short-lived), it only wraps an offset into the base BUFFER's storage
+    # NOTE: the view Buffer returned here is transient (short-lived), it only wraps an offset into the base BUFFER's storag
     if self is not self.base or self.op is Ops.BITCAST:
+      if (ret:=buffer_views.get(self)) is not None: return ret
       if (cv := self.contiguous_view()) is None: raise RuntimeError(f"non-contiguous view is not supported for {self.device} buffer")
       buf, offset = (b:=cv[0]).base.buffer, cv[1]
       if isinstance(buf, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
         mbuf.bufs = [x.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize) for x in buf.bufs]
-        return mbuf
-      return buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
+        buffer_views[self] = mbuf
+      else: buffer_views[self] = buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
+      return buffer_views[self]
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)
