@@ -13,6 +13,26 @@ class TestAfterCounterexamples(unittest.TestCase):
     y = Tensor(x.after(x[:1].store(1), x[1:].store(2)))
     self.assertEqual(y.tolist(), [1., 2.])
 
+  def test_read_modify_write_chain(self):
+    x = Tensor([2.]).clone()
+    x.assign(x + 1)
+    x.assign(x * 2)
+    self.assertEqual(x.tolist(), [6.])
+
+  def test_overwrite_cuts_gradient(self):
+    x = Tensor([2.])
+    y = x.clone()
+    y.assign(3)  # overwriting with a constant makes y independent of x
+    self.assertEqual(y.sum().gradient(x)[0].tolist(), [0.])
+
+  def test_shared_state_readers(self):
+    x = Tensor([2.]).clone()
+    x.assign(x + 1)
+    a, b = x + 1, x * 2
+    Tensor.realize(a, b)
+    self.assertEqual(a.tolist(), [4.])
+    self.assertEqual(b.tolist(), [6.])
+
   @unittest.expectedFailure
   def test_chained_square_assign_gradient(self):
     x = Tensor([2.0])
