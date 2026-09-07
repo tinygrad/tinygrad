@@ -1468,6 +1468,10 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if not (self.ndim > 0 and w.ndim > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {self.ndim=}, {w.ndim=}")
     if self.shape[-1] != w.shape[-min(w.ndim, 2)]: raise RuntimeError(f"cannot image_dot {self.shape} and {w.shape}")
 
+    # w's batch dims become conv groups and self's batch is divided by them, so the two batch
+    # shapes must agree before folding. (3,5) @ (2,5,7) otherwise gives groups > bs and reshapes to 0.
+    if (batch := _broadcast_shape(self.shape[0:-2], w.shape[0:-2])) != self.shape[0:-2]:
+      self = self._broadcast_to(batch + self.shape[-2:])
     bs, groups, cin, cout = prod(self.shape[0:-2]), prod(w.shape[0:-2]), w.shape[-2], w.shape[-1]
     out_shape_t = self.shape[0:-2] + (cout,-1) if len(self.shape) > 1 else (cout,)
 
