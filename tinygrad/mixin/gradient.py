@@ -7,7 +7,10 @@ from tinygrad.function import renumber_invalid_outputs
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   if op == Ops.ADD: return (ctx._broadcast_to(ret.src[0].shape),)
-  if op == Ops.MAX: return (((mask:=ret.src[0].eq(ret).cast(ctx.dtype))/mask._rop(Ops.ADD, tuple(range(ret.arg[1])))) * ctx,)
+  if op == Ops.MAX:
+    # count the ties in the acc dtype, the count can overflow the gradient dtype
+    mask = ret.src[0].eq(ret).cast(sum_acc_dtype(ctx.dtype))
+    return ((mask/mask._rop(Ops.ADD, tuple(range(ret.arg[1])))).cast(ctx.dtype) * ctx,)
   if op == Ops.MUL:
     # d(prod x)/dx_j = prod_{i!=j} x_i: ret/x_j whenever x_j != 0 (any zero makes ret 0), else the product of the others
     safe_x, axes = (is_zero:=(x:=ret.src[0]).eq(0)).where(1, x), tuple(range(ret.arg[1]))
