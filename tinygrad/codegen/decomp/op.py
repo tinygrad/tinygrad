@@ -18,29 +18,19 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
   assert False
 
 def fast_idiv(ren: Renderer, x: UOp, d: int, dont_cast=False) -> UOp|None:
-  from tinygrad.renderer.cstyle import MetalRenderer
-  # NOTE: disable for METAL due to compiler bug. keccak with -O0 works but not with optimization
-  if isinstance(ren, MetalRenderer): return None
-  # If d is a power of two this is not valid for signed ints!
-  is_unsigned = x.vmin>=0 or x.dtype in dtypes.uints
-  assert d>0, "Sign should have been taken out of divisor"
-  vmin,vmax = max(x.vmin, x.dtype.min), min(x.vmax, x.dtype.max)
-  if vmin > -d and vmax < d: return x.const_like(0)
-  m,s = magicgu(max(vmax, abs(vmin)), d)
-  if m*vmin >= x.dtype.min and m*vmax <= x.dtype.max:
-    return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
+  if d <= 0 or x.vmin < 0: return None
+  if (vmax:=min(x.vmax, x.dtype.max)) < d: return x.const_like(0)
+  m,s = magicgu(vmax, d)
+  if m*vmax <= x.dtype.max: return (x*m) >> s
   # before we try casting to a larger dtype (slow), we see if there are powers of two in d we can shift to make x smaller
-  # use explicit Ops.CDIV (trunc) since the recursion assumes trunc semantics throughout
-  if (largest_factor_of_two_in_d := (d & -d)) > 1:
-    if (ret:=fast_idiv(ren, x.alu(Ops.CDIV, x.const_like(largest_factor_of_two_in_d)),
-                       d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
+  if (k := (d & -d).bit_length()-1) > 0:
+    if (ret:=fast_idiv(ren, x >> k, d >> k, dont_cast=True)) is not None: return ret
   if dont_cast: return None
   # the next integer width that holds x*m
   widen = {dtypes.int8:dtypes.int16, dtypes.int16:dtypes.int32, dtypes.int32:dtypes.int64, dtypes.int64:dtypes.uint64,
            dtypes.uint8:dtypes.uint16, dtypes.uint16:dtypes.uint32, dtypes.uint32:dtypes.uint64}
   if (next_dtype := widen.get(x.dtype)) is not None and next_dtype in ren.supported_dtypes():
-    if m*vmin >= next_dtype.min and m*vmax <= next_dtype.max:
-      return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
+    if m*vmax <= next_dtype.max: return ((x.cast(next_dtype)*m) >> s).cast(x.dtype)
   return None
 
 # ***** threefry *****
@@ -105,13 +95,12 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
       lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(c-1, 0)) >> v
         if (v:=powers_of_two.get(c.val, 0)) else None)]
     if not disable_fast_idiv:
-      # fast_idiv handles non-pow2: only fire on non-negative inputs (signed magic-mul is unreliable for x<0)
-      pat += [(UPat(Ops.CDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))),
-        lambda ctx, x, d: fast_idiv(ctx, x, d.val) if x.vmin >= 0 or x.dtype in dtypes.uints else None)]
-      # rewrite raw CMOD -> x - d*CDIV(x,d) so fast_idiv can pick up the CDIV. only on non-negative inputs;
+      # fast_idiv handles non-pow2 divisors on non-negative inputs
+      pat += [(UPat(Ops.CDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))), lambda ctx, x, d: fast_idiv(ctx, x, d.val))]
+      # rewrite raw CMOD -> x - d*fast_idiv(x,d), only when fast_idiv can actually divide;
       # avoids disturbing floormod_to_mod's general-path output (which uses a trunc Ops.CMOD as an implementation detail)
-      pat += [(UPat(Ops.CMOD, src=(UPat.var("x", dtypes.ints), UPat.var("d"))),
-        lambda x, d: x - d * x.alu(Ops.CDIV, d) if x.vmin >= 0 or x.dtype in dtypes.uints else None)]
+      pat += [(UPat(Ops.CMOD, src=(UPat.var("x", dtypes.ints), UPat.cvar("d"))),
+        lambda ctx, x, d: x - d * q if (q:=fast_idiv(ctx, x, d.val)) is not None else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda ctx,x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda ctx,x,y: x.alu(Ops.SUB, y))]
