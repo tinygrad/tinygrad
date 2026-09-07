@@ -8,7 +8,7 @@ from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferSpec, Buffer, Device, Compiled, ProfileProgramEvent
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, prod, colored
-from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, mv_address
+from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, mv_address, ContextVar, VIZ
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
@@ -20,11 +20,15 @@ from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_so
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import USB3, pm_usb_batch, pm_usb_lower, pm_usb_bufferize
 from tinygrad.runtime.support.memory import AddrSpace
-from tinygrad.runtime.support.amd import SQTT, PMC, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 from tinygrad.uop.ops import Ops, UPat, PatternMatcher
+
+SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
+SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE = \
+  ContextVar("SQTT_ITRACE_SE_MASK", 0b11), ContextVar("SQTT_LIMIT_SE", 0), ContextVar("SQTT_SIMD_SEL", 0), ContextVar("SQTT_TOKEN_EXCLUDE", 0)
+PMC = ContextVar("PMC", abs(VIZ.value)>=2)
 
 EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
 WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==

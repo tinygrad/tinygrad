@@ -3,7 +3,6 @@ from typing import cast
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.amd import SQTT, PMC, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE
 from extra.hcq1.hcq import HCQCompiled, HCQAllocator, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, hcq_profile
 from tinygrad.runtime.support.hcq import HCQBuffer, FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filter_visible_devices
@@ -1175,3 +1174,6 @@ class AMDDevice(HCQCompiled):
   def device_props(self): return self.iface.props
 
   def hw_copy_queues(self): return [(f"SDMA:{i}", functools.partial(unwrap(self.hw_copy_queue_t), queue_idx=i)) for i in self.sdma_queues]
+
+# Import after defining the legacy backend so either module can be imported first.
+from tinygrad.runtime.ops_amd import SQTT, PMC, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE

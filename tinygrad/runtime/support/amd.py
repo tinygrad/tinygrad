@@ -1,11 +1,6 @@
 import functools, tinygrad.runtime.autogen.am
 from dataclasses import dataclass
-from tinygrad.helpers import getbits, ContextVar, VIZ
-
-SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
-SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE = \
-  ContextVar("SQTT_ITRACE_SE_MASK", 0b11), ContextVar("SQTT_LIMIT_SE", 0), ContextVar("SQTT_SIMD_SEL", 0), ContextVar("SQTT_TOKEN_EXCLUDE", 0)
-PMC = ContextVar("PMC", abs(VIZ.value)>=2)
+from tinygrad.helpers import getbits
 
 @dataclass
 class AMDReg:

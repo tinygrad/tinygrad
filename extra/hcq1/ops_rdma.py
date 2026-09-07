@@ -1,5 +1,5 @@
 from __future__ import annotations
-import mmap, struct, functools
+import mmap, struct, functools, atexit
 from typing import cast
 from tinygrad.uop.ops import sint
 from extra.hcq1.hcq import HCQCompiled, HCQAllocatorBase, HCQAllocator, HWQueue
@@ -104,3 +104,9 @@ class RDMADevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.iface = MLXIface(self, int(device.split(":")[1]) if ":" in device else 0)
     super().__init__(device, RDMAAllocator(self), [], None, signal_t=None)
+
+@functools.cache
+def get_rdma_device(index:int) -> RDMADevice:
+  dev = RDMADevice(f"RDMA:{index}")
+  atexit.register(dev.finalize)
+  return dev

@@ -3,7 +3,7 @@ from typing import cast, Callable, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, collections, itertools
 from tinygrad.helpers import PROFILE, getenv, from_mv, cpu_profile, ProfileRangeEvent, unwrap
 from tinygrad.helpers import suppress_finalizing, TracingKey
-from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, Program, TinyELF
+from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, Program, TinyELF
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.renderer import Renderer
@@ -435,9 +435,10 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
   def rdma_dev(self):
+    from extra.hcq1.ops_rdma import get_rdma_device
     for i in itertools.count():
       if (dev:=next((d for d in HCQCompiled.peer_groups[self.peer_group] if type(d).__name__ == 'RDMADevice'), None)): return dev
-      try: Device[f'RDMA:{i}']
+      try: get_rdma_device(i)
       except IndexError: raise RuntimeError(f"No RDMA found for peer group '{self.peer_group}'")
 
   def finalize(self):
