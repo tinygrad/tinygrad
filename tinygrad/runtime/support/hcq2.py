@@ -259,7 +259,14 @@ class EncodeCtx:
   lt_patches:dict[UOp, list[UOp]] = field(default_factory=dict) # placeholder -> the stores into it that resolve when the linear links
 
 class HWQueue:
-  q_rewrite:PatternMatcher
+  q_rewrite = PatternMatcher([ # the ops of a queue: a queue defines the methods it supports
+    (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), lambda ctx, call, prg: ctx.exec(call, prg)),
+    (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), lambda ctx, call: ctx.copy(call)),
+    (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda ctx: ctx.memory_barrier()),
+    (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
+    (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
+    (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
+  ])
 
   def __init__(self, ctx:EncodeCtx, submit:UOp):
     self.ctx, self.lin = ctx, submit.src[0]
@@ -280,6 +287,7 @@ class HWQueue:
         self.blob += (v & (1 << 8 * n) - 1).to_bytes(n, 'little')
     return len(self.blob)
 
+  def memory_barrier(self): pass # a copy queue has nothing to flush
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
 
 # *****************

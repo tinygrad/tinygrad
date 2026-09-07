@@ -95,11 +95,6 @@ class QMD:
 
 class NVQueue(HWQueue):
   dev:NVDevice
-  q_rewrite = PatternMatcher([
-    (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
-    (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
-    (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
-  ])
 
   def nvm(self, subc:int, mthd:int, *vals, typ=2): self.q(*nvm(subc, mthd, *vals, typ=typ))
 
@@ -127,11 +122,6 @@ class NVQueue(HWQueue):
     return doorbell.after(queued).index(0).store(UOp.const(fifo.token, dtypes.uint32))
 
 class NVComputeQueue(NVQueue):
-  q_rewrite = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), lambda ctx, call, prg: ctx.exec(call, prg)),
-    (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda ctx: ctx.memory_barrier()),
-  ]) + NVQueue.q_rewrite
-
   def __init__(self, ctx, submit):
     super().__init__(ctx, submit)
 
@@ -190,11 +180,6 @@ class NVComputeQueue(NVQueue):
     self.prev_qmd = qmd
 
 class NVCopyQueue(NVQueue):
-  q_rewrite = PatternMatcher([
-    (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), lambda ctx, call: ctx.copy(call)),
-    (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda ctx: ()),
-  ]) + NVQueue.q_rewrite
-
   def copy(self, call:UOp):
     dest, src = (a.getaddr(self.devs) for a in call.src[1:3])
     for off in range(0, sz:=call.src[2].max_numel() * call.src[2].dtype.itemsize, step:=(1 << 31)):
