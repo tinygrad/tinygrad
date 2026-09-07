@@ -69,7 +69,7 @@ class TestHCQ2Deps(unittest.TestCase):
       self.assertEqual(tracker.access_resources([b.shrink(((12, 16),))], [0], 3), [0])
       self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [], 4), [1])
 
-@unittest.skipUnless(all_devices_in(Device.DEFAULT, HCQ_DEVS - {"CPU"}), "non-CPU hcq2 device required")
+@unittest.skipUnless(all_devices_in(Device.DEFAULT, HCQ_DEVS), "hcq2 device required")
 class TestHCQ2Schedule(unittest.TestCase):
   @staticmethod
   def input(value:int=2) -> Tensor: return Tensor.full((4,), value, dtype=dtypes.int32).contiguous().realize()
@@ -100,6 +100,21 @@ class TestHCQ2Schedule(unittest.TestCase):
     _, compiled, inputs = self.compiled(1)
     linked = link_linear(compiled, input_uops=inputs)
     self.assertIs(link_linear(compiled, input_uops=inputs), linked)
+
+  def test_host_copies(self):
+    dev = Device[Device.DEFAULT]
+    if not dev.has_copy_queue: self.skipTest("copy queue required")
+    for host_device in ("CPU", "NPY", "DISK"):
+      for direct in (False, True):
+        for upload in (False, True):
+          with self.subTest(host_device=host_device, direct=direct, upload=upload):
+            host, gpu = UOp.new_buffer(host_device, 4, dtypes.uint8), UOp.new_buffer(dev.device, 4, dtypes.uint8)
+            src, dst = (host, gpu) if upload else (gpu, host)
+            linear = UOp(Ops.LINEAR, src=(src.copy_to_device(dst.device).call(dst, src),))
+            with patch.object(dev, "host_devs", frozenset({"CPU", host_device}) if direct else frozenset({"CPU"})):
+              compiled = compile_linear(linear, profile=False)
+            self.assertEqual(len(compiled.src), 1 if direct or host_device == "CPU" else 2)
+            self.assertEqual(sum(call_is_hcq(call) for call in compiled.src), 1)
 
   def test_large_eager_not_cached(self):
     _, compiled, inputs = self.compiled(65)
