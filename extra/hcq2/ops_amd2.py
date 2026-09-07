@@ -398,12 +398,13 @@ class AMDComputeQueue(HWQueue):
 
   def push(self, cmdbuf:UOp, words:UOp, q, unit:int=4, doorbell_lag:int=0) -> UOp:
     ring, wptr, doorbell, put = _queue_args(self, q)
-    n, p = words.max_numel() // unit, put.index(0).load() # put counts units
-    i = UOp.range(words.max_numel() // 4, 10, dtype=dtypes.int, src=(cmdbuf,))
-    at = ((p * (unit // 4) + i.cast(p.dtype)) % q.ring.size).cast(dtypes.int)
-    written = ring.index(at).store(words.bitcast(dtypes.uint32).index(i).load()).end(i)
-    w = wptr.after(written).index(0).store(p + n)
-    return doorbell.after(put.after(w).index(0).store(p + n)).index(0).store(p + n - doorbell_lag)
+    rs, n, p = q.ring.size, words.max_numel() // 4, put.index(0).load() # put counts units, the ring dwords
+    first = (rs - (tail:=((p * (unit // 4)) % rs).cast(dtypes.int))).minimum(n)
+    for rid, (dst, src, count) in enumerate(((tail, 0, first), (0, first, n - first)), 10):
+      i = UOp.range(count, rid, dtype=dtypes.int, src=(cmdbuf,))
+      cmdbuf = ring.after(cmdbuf).index(dst + i).store(words.bitcast(dtypes.uint32).index(src + i).load()).end(i)
+    w = wptr.after(cmdbuf).index(0).store(nxt:=p + words.max_numel() // unit)
+    return doorbell.after(put.after(w).index(0).store(nxt)).index(0).store(nxt - doorbell_lag)
 
 class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets: a dispatch per kernel, the pm4 between them wrapped as an ib
   def __init__(self, ctx, submit):
@@ -486,10 +487,10 @@ class AMDSDMAQueue(HWQueue):
     zi = UOp.range(zero_amt, 10, dtype=dtypes.int, src=(cmdbuf,))
     zero_tail = ring.index(tail + zi).store(UOp.const(0, dtypes.uint32)).end(zi)
     i = UOp.range(size_dw, 11, dtype=dtypes.int, src=(cmdbuf,))
-    copy = ring.index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
+    copy = ring.after(zero_tail).index(start_dw + i).store(cmdbuf.bitcast(dtypes.uint32).index(i).load()).end(i)
     next_put = put_b + ((zero_amt + size_dw) * 4).cast(put_b.dtype)
-    flush = UOp.barrier(zero_tail, copy, put.index(0).store(next_put), wptr.index(0).store(next_put))
-    return doorbell.after(flush).index(0).store(next_put)
+    w = wptr.after(copy).index(0).store(next_put)
+    return doorbell.after(put.after(w).index(0).store(next_put)).index(0).store(next_put)
 
 def amd_compute_queue(ctx, submit:UOp) -> HWQueue:
   return (AMDComputeAQLQueue if Device[submit.src[0].arg[0][0]].is_aql else AMDComputeQueue)(ctx, submit)
