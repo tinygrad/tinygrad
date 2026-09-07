@@ -28,10 +28,11 @@ class HCQInfo:
   device:tuple[str, ...]
 
   kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = () # (devices, name, estimates, timestamp slots, profile key)
+  estimates:Estimates = Estimates()
 
   nargs:int = 0
   table:int = -1
-  inputs:tuple[tuple[UOp, str], ...] = ()
+  inputs:tuple[tuple[UOp, str, int], ...] = ()
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
@@ -234,10 +235,10 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
   merged:list[UOp] = [] # the submits in order, after the fence
   for m in _merge_queues(submits): merged.append(m.after(fence, *merged[-1:]))
   estimates = sum((estimate_uop(call) for call, _, _ in ctx.batch), start=Estimates()).simplify()
-  sink = UOp.sink(*merged, arg=KernelInfo("hcq_submit", estimates=estimates), tag=1)
+  sink = UOp.sink(*merged, arg=KernelInfo("hcq_submit"), tag=1)
   for pm in [Device[d].pm_batch for d in ctx.queues if Device[d].pm_batch is not None]: # a device adds its own work to the batch
     if (r:=pm.rewrite(sink)) is not None: sink = r
-  return sink.call(aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns)))
+  return sink.call(aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns), estimates=estimates))
 
 @rewrite_group(new_ctx=False)
 def sched_batches(l:UOp, profile:bool) -> UOp:
@@ -254,7 +255,7 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
 @dataclass
 class EncodeCtx:
   devs:tuple[str, ...]
-  inputs:dict[tuple[UOp, str], int] = field(default_factory=dict)
+  inputs:dict[tuple[UOp, str, int], int] = field(default_factory=dict)
   table:UOp = field(default_factory=lambda: UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="inputs"))
   lt_patches:dict[UOp, list[UOp]] = field(default_factory=dict) # placeholder -> the stores into it that resolve when the linear links
 
@@ -332,8 +333,8 @@ def _is_input_addr(g:UOp) -> bool:
 def addrs_to_table(ctx:EncodeCtx, g:UOp) -> UOp|None:
   if not _is_input_addr(g): return None
   base, off = unwrap_view(g.src[0])
-  slot = ctx.inputs.setdefault((base, to_tuple(g.arg)[0]), len(ctx.inputs))
-  return ctx.table.index(slot).load() + UOp.const(off, dtypes.uint64)
+  slot = ctx.inputs.setdefault((base, to_tuple(g.arg)[0], off), len(ctx.inputs))
+  return ctx.table.index(slot).load()
 
 def _is_link_patch(w:UOp) -> bool:
   if w.op is Ops.GETADDR: return not _is_input_addr(w)
@@ -347,7 +348,8 @@ def hoist_links(ctx:EncodeCtx, a:UOp) -> UOp|None:
   if not links: return None
   # nest the addr placeholders patches under their getaddr
   ws = UOp.sink(*links)
-  sub = {g: g.replace(src=(g.src[0].after(*ctx.lt_patches[g.src[0]]),)) for g in ws.toposort() if g.op is Ops.GETADDR and g.src[0] in ctx.lt_patches}
+  sub = {g: g.replace(src=(g.src[0].after(*ctx.lt_patches[base]),)) for g in ws.toposort()
+         if g.op is Ops.GETADDR and (base:=unwrap_view(g.src[0])[0]) in ctx.lt_patches}
   ctx.lt_patches.setdefault(unwrap_view(a.src[0])[0], []).extend(ws.substitute(sub).src)
   return a.src[0].after(*rest)
 
@@ -397,15 +399,18 @@ def lower_call(call:UOp) -> UOp|None:
   # the placeholders become the body's params in visit order, variables bind by name after them, the ranges renumber
   tops = body.toposort()
   bufs, alus = partition([u for u in tops if u.op is Ops.PARAM], lambda u: u.tag is not None)
+  addrs = [g.src[0] for g in UOp.sink(*(s for stores in ctx.lt_patches.values() for s in stores)).toposort() if g.op is Ops.GETADDR]
+  nested = UOp.sink(*addrs).toposort()
+  bufs += [b for b, stores in ctx.lt_patches.items() if b not in bufs and not all(s in nested for s in stores)]
   names = dedup([a.arg.name for a in alus])
   # bufs to params
   params = {b: UOp.param(i, b.dtype, b.shape, HCQ_RUNTIME_DEV.value, volatile=b.arg.volatile, name=f"{b.arg.name}_{i}") for i, b in enumerate(bufs)}
   # new slots for vars
   vals = {a: a.replace(arg=replace(a.arg, slot=len(bufs) + names.index(a.arg.name))) for a in alus}
-  # reenum ranges
-  rngs = {r: r.replace(arg=(i,)+r.arg[1:]) for i, r in enumerate(sorted([u for u in tops if u.op is Ops.RANGE], key=lambda r: r.arg))}
-  # and sub all of them
-  sink = body.substitute(params | vals | rngs, enter_calls=True)
+  sink = body.substitute(params | vals, enter_calls=True)
+  us = [u for u in sink.toposort() if u.op is Ops.RANGE or (u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG)]
+  sink = sink.substitute({u: u.replace(arg=(i,)+u.arg[1:] if u.op is Ops.RANGE else replace(u.arg, slot=i)) for i, u in enumerate(us)},
+                         enter_calls=True)
 
   # move all lt-patches to the args
   patched = {b: b.after(*dedup(stores)) for b, stores in ctx.lt_patches.items()}
