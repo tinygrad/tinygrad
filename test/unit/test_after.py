@@ -1,0 +1,61 @@
+import unittest
+from tinygrad import Tensor
+
+class TestAfterCounterexamples(unittest.TestCase):
+  @unittest.expectedFailure
+  def test_chained_square_assign_gradient(self):
+    x = Tensor([2.0])
+    y = x.clone()
+    y.assign(y*y)
+    y.assign(y*y)
+    # y = x**4, so dy/dx = 4*x**3. Currently returns [64.] instead of [32.].
+    self.assertEqual(y.sum().gradient(x)[0].tolist(), [32.])
+
+  @unittest.expectedFailure
+  def test_partial_store_gradient(self):
+    x = Tensor([2., 3.]).realize()
+    y = Tensor(x.uop.after(x[:1].uop.store(4)))
+    # y = [4, x[1]]. Currently returns [0., 0.].
+    self.assertEqual(y.sum().gradient(x)[0].tolist(), [0., 1.])
+
+  @unittest.expectedFailure
+  def test_partial_store_source_gradient(self):
+    x = Tensor([4.])
+    y = Tensor([2., 3.]).realize()
+    z = Tensor(y.uop.after(y[:1].uop.store(x.uop)))
+    # x contributes once, not twice. Currently returns [2.].
+    self.assertEqual(z.sum().gradient(x)[0].tolist(), [1.])
+
+  @unittest.expectedFailure
+  def test_unrelated_store_gradient(self):
+    x = Tensor([2.]).realize()
+    y = x.clone()
+    z = Tensor(x.uop.after(y.uop.store(0)))
+    # Zeroing y does not change x. Currently returns [0.].
+    self.assertEqual(z.sum().gradient(x)[0].tolist(), [1.])
+
+  @unittest.expectedFailure
+  def test_after_dependency_gradient(self):
+    x = Tensor([2., 3.])
+    y = x.clone()
+    y[:1].assign(0)
+    # View assign creates a nested AFTER; currently raises in backward.
+    self.assertEqual(y.sum().gradient(x)[0].tolist(), [0., 1.])
+
+  @unittest.expectedFailure
+  def test_unordered_overlapping_stores_rejected(self):
+    x = Tensor([0.]).realize().uop
+    # No ordering between the writes. Currently succeeds with [2.].
+    with self.assertRaises(RuntimeError):
+      Tensor(x.after(x.store(1), x.store(2))).realize()
+
+  @unittest.expectedFailure
+  def test_gradient_after_callify(self):
+    x = Tensor([2.]).realize()
+    y = x * 2
+    y.callify()
+    # Currently raises: "expected a CALL with unbound BUFFER outputs or a grad_fxn".
+    self.assertEqual(y.sum().gradient(x)[0].tolist(), [2.])
+
+if __name__ == "__main__":
+  unittest.main()
