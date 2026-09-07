@@ -705,7 +705,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-9., -6., -3., 0., 3., 6., 9.]).relu6().numpy())
     ```
     """
-    return self.relu().minimum(6)
+    return ((r:=self.relu()) < 6).where(r, 6)
 
   def hardswish(self) -> Self:
     """

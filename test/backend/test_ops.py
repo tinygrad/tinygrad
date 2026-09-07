@@ -1130,9 +1130,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.nn.functional.relu6, Tensor.relu6)
     helper_test_op([()], torch.nn.functional.relu6, Tensor.relu6)
     helper_test_op(None, torch.nn.functional.relu6, Tensor.relu6, vals=[[6.71089e7, 2.68435e8, 1e9]])
+    helper_test_op(None, torch.nn.functional.relu6, Tensor.relu6, vals=[[0., 6.]])
   def test_hardswish(self):
     helper_test_op([(45,65)], torch.nn.functional.hardswish, Tensor.hardswish, grad_atol=1e-6)
     helper_test_op([()], torch.nn.functional.hardswish, Tensor.hardswish, grad_atol=1e-6)
+    helper_test_op(None, torch.nn.functional.hardswish, Tensor.hardswish, vals=[[-3., 3.]], grad_atol=1e-6)
   def test_mish(self):
     helper_test_op([(45,65)], torch.nn.functional.mish, Tensor.mish)
     helper_test_op([()], torch.nn.functional.mish, Tensor.mish)
