@@ -16,7 +16,7 @@ from tinygrad.codegen.decomp.transcendental import xpow
 def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   if c.val < 0: return x.reciprocal().pow(-c.val)
   if c.val == 0: return x.const_like(1)
-  if int(c.val-0.5)+0.5 == c.val: return x.pow(c.val-0.5) * x.sqrt()
+  if (h := c.val-0.5) < c.val and int(h)+0.5 == c.val: return x.pow(h) * x.sqrt()
   if int(c.val) == c.val: return (y := x.pow(c.val//2)) * y * (x if c.val%2 == 1 else 1)
   return None
 
@@ -227,8 +227,7 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.weakint, name='x'), lambda x:
-    x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize and not x.src[0].tuplize < x.src[1].tuplize else None),
+  (UPat(GroupOp.Commutative, dtype=dtypes.weakint, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
 def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
