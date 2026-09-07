@@ -56,14 +56,14 @@ class ElementwiseMixin(CreationMixin):
     """
     return self.cast(dtypes.bool).ne(True)
 
-  def contiguous(self, **kwargs) -> Self:
+  def contiguous(self) -> Self:
     """
     Returns a contiguous tensor.
     """
     if self.dtype in dtypes.weaks: return self
     uop = self._uop
     if uop.op is Ops.CONTIGUOUS or self.device is None or uop.has_buffer_identity(): return self._wrap_uop(uop)
-    return self._wrap_uop(uop.alu(Ops.CONTIGUOUS, **kwargs))
+    return self._wrap_uop(uop.alu(Ops.CONTIGUOUS))
 
   def contiguous_backward(self) -> Self:
     """
