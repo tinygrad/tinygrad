@@ -552,9 +552,21 @@ jobs:
       matrix:
         include:
           - renderer: IR3
-            compiler_probe: test/mockgpu/qcom/test_integration.py::TestQCOMIntegration::test_emitted_instruction_bytes_are_required_for_execution
+            targets: >-
+              test/mockgpu/qcom
+              test/testextra/test_qcom_driver.py
+              test/testextra/test_qcom_driver_folding.py
+              test/testextra/test_qcom_driver_repairs.py
+              test/backend/test_jit.py::TestJit::test_simple_jit
+          # CL stays bounded because libllvm-qcom.so is arm64 and runs under qemu on x86 runners.
           - renderer: CL
-            compiler_probe: >-
+            targets: >-
+              test/mockgpu/qcom/test_integration.py::TestQCOMIntegration::test_real_submissions_cover_odd_shapes_and_repeated_programs
+              'test/mockgpu/qcom/test_image_integration.py::test_image_matmul_preserves_nonuniform_values_and_odd_channels[False]'
+              'test/mockgpu/qcom/test_image_integration.py::test_image_matmul_preserves_nonuniform_values_and_odd_channels[True]'
+              test/backend/test_jit.py::TestJit::test_simple_jit
+              test/testextra/test_qcom_driver.py::QCOMDriverTests::test_native_callback_latches_failure_and_preserves_original_cause
+              test/testextra/test_qcom_driver.py::QCOMDriverTests::test_native_callback_forwards_real_descriptor
               test/mockgpu/qcom/test_qcomcl.py::test_generated_add_uses_every_lane_and_workgroup
               test/mockgpu/qcom/test_qcomcl.py::test_jit_refreshes_arguments_without_reusing_previous_values
     name: Linux (QCOM A630 mock ${{ matrix.renderer }})
@@ -582,18 +594,12 @@ jobs:
           deps: "testing_unit mesa"
           llvm: 'true'
           qemu: ${{ matrix.renderer == 'CL' }}
-      - name: Run representative QCOM compilation and submission regressions
+      - name: Run QCOM compilation and submission regressions
         # Image tests assert actual image instruction execution and FP16 storage.
-        # The broad execution/backend/image matrix is release/local qualification.
+        # The six-cell backend/image matrix remains release/local qualification.
         run: >-
           python -m pytest -n 2 --dist worksteal
-          test/mockgpu/qcom/test_integration.py::TestQCOMIntegration::test_real_submissions_cover_odd_shapes_and_repeated_programs
-          'test/mockgpu/qcom/test_image_integration.py::test_image_matmul_preserves_nonuniform_values_and_odd_channels[False]'
-          'test/mockgpu/qcom/test_image_integration.py::test_image_matmul_preserves_nonuniform_values_and_odd_channels[True]'
-          test/backend/test_jit.py::TestJit::test_simple_jit
-          test/testextra/test_qcom_driver.py::QCOMDriverTests::test_native_callback_latches_failure_and_preserves_original_cause
-          test/testextra/test_qcom_driver.py::QCOMDriverTests::test_native_callback_forwards_real_descriptor
-          ${{ matrix.compiler_probe }}
+          ${{ matrix.targets }}
 
   testamd:
     strategy:
