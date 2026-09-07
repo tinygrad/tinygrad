@@ -415,8 +415,6 @@ jobs:
     name: UsbGPU Benchmark
     runs-on: [self-hosted, macOS]
     timeout-minutes: 3
-    env:
-      HCQ2: 0
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -538,9 +536,7 @@ jobs:
   testcommausbgpubenchmark:
     name: UsbGPU Benchmark (comma)
     runs-on: [self-hosted, Linux, comma4]
-    timeout-minutes: 10
-    env:
-      HCQ2: 0
+    timeout-minutes: 12
     defaults:
       run:
         shell: bash -e -o pipefail {0}
