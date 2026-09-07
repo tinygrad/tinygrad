@@ -166,6 +166,8 @@ def stderr_log(msg:str): print(msg, end='', file=sys.stderr, flush=True)
 
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
+  # ContextDecorator otherwise reuses self, so recursive calls overwrite old_context.
+  def _recreate_cm(self): return Context(**self.kwargs)
   def __enter__(self):
     self.old_context:dict[str, Any] = {k: ContextVar._cache[k].value for k in self.kwargs}
     for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
