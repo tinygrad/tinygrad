@@ -1,5 +1,6 @@
 import unittest, contextlib
 from tinygrad import Device, Tensor, Context, TinyJit, dtypes
+from tinygrad.dtype import AddrSpace
 from test.helpers import is_hcq2_device
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.device import Compiled, ProfileProgramEvent
@@ -28,27 +29,45 @@ def custom_asm_cdna(A:UOp):
   import tinygrad.runtime.autogen.amd.cdna.ins as cdna
   WAVE_SIZE = 64
   insts = [
-    cdna.s_mov_b32(s[0], 1),
+    cdna.s_barrier(),
+    cdna.s_getreg_b32(s[0], cdna.HWREG.HW_REG_HW_ID.value | (4 << 6) | (1 << 11)),
 
-    # taken: SCC=1, skip v0=0x11
-    cdna.s_cmp_eq_u32(s[0], 1),
-    cdna.s_cbranch_scc1(1),
-    cdna.v_mov_b32_e32(v[0], 0x11),
-    cdna.v_mov_b32_e32(v[0], 0x22),
-
-    # not taken: SCC=0, execute v1=0x33
     cdna.s_cmp_eq_u32(s[0], 0),
-    cdna.s_cbranch_scc1(1),
-    cdna.v_mov_b32_e32(v[1], 0x33),
+    cdna.s_cbranch_scc1(16),
 
-    # unconditional: skip v2=0x44
-    cdna.s_branch(1),
-    cdna.v_mov_b32_e32(v[2], 0x44),
-    cdna.v_mov_b32_e32(v[2], 0x55),
+    cdna.s_cmp_eq_u32(s[0], 1),
+    cdna.s_cbranch_scc1(9),
 
+    cdna.s_cmp_eq_u32(s[0], 2),
+    cdna.s_cbranch_scc1(3),
+
+    # SIMD 3
+    cdna.v_mov_b32_e32(v[0], 3),
+    cdna.s_nop(3),
+    cdna.s_endpgm(),
+
+    # SIMD 2
+    cdna.v_mov_b32_e32(v[0], 2),
+    cdna.s_nop(2),
+    cdna.s_nop(2),
+    cdna.s_endpgm(),
+
+    # SIMD 1
+    cdna.v_mov_b32_e32(v[0], 1),
+    cdna.s_nop(1),
+    cdna.s_nop(1),
+    cdna.s_nop(1),
+    cdna.s_endpgm(),
+
+    # SIMD 0
+    cdna.v_mov_b32_e32(v[0], 0),
+    cdna.s_nop(0),
+    cdna.s_nop(0),
+    cdna.s_nop(0),
+    cdna.s_nop(0),
     cdna.s_endpgm(),
   ]
-  return custom_asm(A, insts, WAVE_SIZE)
+  return custom_asm(A, insts, WAVE_SIZE*4, 96*1024)
 
 def custom_asm_rdna(A:UOp):
   import tinygrad.runtime.autogen.amd.rdna3.ins as rdna3
@@ -56,8 +75,9 @@ def custom_asm_rdna(A:UOp):
   insts = [rdna3.s_nop(0), rdna3.s_mov_b32(s[0], 10)]
   return custom_asm(A, insts+[rdna3.s_endpgm()], WAVE_SIZE*2)
 
-def custom_asm(A, insts, num_threads) -> UOp:
-  return UOp(Ops.PROGRAM, src=(UOp.sink(A, UOp.special(num_threads, "lidx0"), arg=KernelInfo("asm")), \
+def custom_asm(A, insts, num_threads, lds_size=0) -> UOp:
+  lds = UOp.placeholder((lds_size,), dtypes.uint8, addrspace=AddrSpace.LOCAL) if lds_size else None
+  return UOp(Ops.PROGRAM, src=(UOp.sink(A, lds, UOp.special(num_threads, "lidx0"), arg=KernelInfo("asm")), \
       UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS,arg=(x,dtypes.void)) for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "only runs on AMD")
