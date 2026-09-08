@@ -81,7 +81,7 @@ class QCOMExecutor:
       sz = r[mesa.REG_A6XX_SP_CS_INSTR_SIZE] * 128
       bs = (r.get(mesa.REG_A6XX_SP_CS_CNTL_0, 0) & mesa.A6XX_SP_CS_CNTL_0_BRANCHSTACK__MASK) >> mesa.A6XX_SP_CS_CNTL_0_BRANCHSTACK__SHIFT
       try:
-        from test.mockgpu.qcom.emu import run_shader
+        from test.mockgpu.qcom.mine_emu_wave import run_shader
         run_shader(base, sz, self.gpu.const_addr, r, bs)
       except Exception as e: self.pending_err = e
       return True
