@@ -26,7 +26,7 @@ class MetalGraph(GraphRunner):
 
     self.var_bind_data = []
     if len(self.vars):
-      (self.var_buf, _), host = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s) in unwrap(r).signature if s == ()))
+      (self.var_buf, _), host, _ = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s) in unwrap(r).signature if s == ()))
       self.var_buf_view, var_buf_offset = unwrap(host).mv, 0
 
     all_pipelines, all_resources = [], [self.var_buf.buf] if len(self.vars) else []

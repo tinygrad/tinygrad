@@ -80,7 +80,7 @@ class CLAllocator(Allocator['CLDevice']):
     return (checked(cl.clCreateBuffer(self.dev.context, cl.CL_MEM_READ_WRITE, size, None, status := ctypes.c_int32()), status), None), None
 
   @suppress_finalizing
-  def _free(self, opaque:cl.cl_mem, options:BufferSpec): check(cl.clReleaseMemObject(opaque))
+  def _free(self, storage:tuple, options:BufferSpec): check(cl.clReleaseMemObject(storage[0][0]))
   def _copyin(self, dest:cl.cl_mem, src:memoryview):
     if mv_address(src) % 16: src = memoryview(bytearray(src))
     check(cl.clEnqueueWriteBuffer(self.dev.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))

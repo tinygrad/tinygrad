@@ -616,18 +616,17 @@ class HCQAllocator(Allocator[HCQDeviceType], Generic[HCQDeviceType]):
     self.dev.synchronize()
     with cpu_profile(f"{self.dev.device} -> TINY", f"{self.dev.device}:COPY"): ctypes.memmove(mv_address(dest), src.cpu_view().addr, dest.nbytes)
 
-  def _map(self, buf:HCQBuffer) -> tuple: # a mapping lives on the opaque, like hcq1: the lru hands the same one to many Buffers
-    if self.dev not in buf.mapped_devs:
-      if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
-      buf.mappings[self.dev] = self._do_map(buf)
-      buf.mapped_devs.append(self.dev)
-    return (mapped:=buf.mappings[self.dev]), mapped.meta
+  def _map(self, buf:Buffer) -> tuple:
+    if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
+    return (mapped:=self._do_map(buf)), mapped.meta
 
+  def _unmap(self, mapping:tuple): self._do_unmap(mapping[0])
   def _do_unmap(self, mb): getattr(self.dev, "iface").free(mb)
 
   @suppress_finalizing
-  def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):
-    if options is not None and options.external_ptr is not None: return
+  def _free(self, storage:tuple, options:BufferSpec):
+    if options.external_ptr is not None: return
+    buf = storage[0][0]
     for dev in buf.mapped_devs: dev.synchronize()
     for d, mb in buf.mappings.items(): d.allocator._do_unmap(mb)
     if hasattr(self, '_do_free'): self._do_free(buf, options)

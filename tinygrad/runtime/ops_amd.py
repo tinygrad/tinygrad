@@ -565,7 +565,7 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 
   def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
-  def _do_map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _do_map(self, buf:Buffer): return self.dev.iface.map(buf._buf)
 
   def _do_unmap(self, buf:HCQBuffer): self.dev.iface.unmap(buf)
 
@@ -806,6 +806,7 @@ class USBAllocator(AMDAllocator): # the host program reads another device's memo
   def map(self, buf:Buffer) -> tuple:
     mv = buf.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True)
     return HCQBuffer(addr:=mv_address(mv), mv.nbytes, meta=mv, view=MMIOInterface(addr, mv.nbytes, fmt='B'), owner=self.dev), mv
+  def _unmap(self, mapping:tuple): pass
 
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called

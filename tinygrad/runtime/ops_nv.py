@@ -296,7 +296,11 @@ class NVAllocator(HCQAllocator['NVDevice']):
 
   def _do_free(self, opaque:HCQBuffer, options:BufferSpec): self.dev.iface.free(opaque)
 
-  def _do_map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
+  def _do_map(self, buf:Buffer):
+    mem = buf._buf
+    if buf.device.split(":")[0] == "CPU":
+      mem = next((mb for d, (mb, _) in buf._maps.items() if d.startswith("NV")), mem)
+    return self.dev.iface.map(mem)
 
   def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, desc_buf:HCQBuffer, hist:list[HCQBuffer], shape:tuple[int,...], frame_pos:int):
     assert all(h.va_addr % 0x100 == 0 for h in hist + [bufin, bufout, desc_buf]), "all buffers must be 0x100 aligned"
@@ -505,8 +509,7 @@ class NVKIface:
 
   def map(self, mem:HCQBuffer):
     if mem.owner is not None and mem.owner._is_cpu():
-      if not any(x.device.startswith("NV") for x in mem.mapped_devs): return self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
-      mem = mem.mappings[next(x for x in mem.mapped_devs if x.device.startswith("NV"))]
+      return self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
     return self._gpu_uvm_map(mem.va_addr, mem.size, mem.meta.hMemory, create_range=False, owner=mem.owner)
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):

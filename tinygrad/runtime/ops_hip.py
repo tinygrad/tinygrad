@@ -61,7 +61,7 @@ class HIPAllocator(Allocator[HIPDevice]):
     check(hip.hipSetDevice(self.dev.device_id))
     return (init_c_var(hip.hipDeviceptr_t, lambda x: check(hip.hipMalloc(ctypes.byref(x), size))), None), None
 
-  def _free(self, opaque, options:BufferSpec): check(hip.hipFree(opaque))
+  def _free(self, storage:tuple, options:BufferSpec): check(hip.hipFree(storage[0][0]))
   def _copyin(self, dest, src: memoryview):
     check(hip.hipSetDevice(self.dev.device_id))
     check(hip.hipMemcpy(dest, mv_address(src), len(src), hip.hipMemcpyHostToDevice))

@@ -55,7 +55,7 @@ class AMDComputeQueue(HWQueue):
 
   def __del__(self):
     if self.binded_device is not None:
-      self.binded_device.allocator.free(((self.hw_page, self.hw_page.meta), self.hw_page.view), self.hw_page.size,
+      self.binded_device.allocator.free(((self.hw_page, self.hw_page.meta), self.hw_page.view, {}), self.hw_page.size,
                                        BufferSpec(cpu_access=True, nolru=True, uncached=True))
 
   def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, len(vals) - 1), *vals)

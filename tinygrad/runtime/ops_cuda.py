@@ -73,7 +73,8 @@ class CUDAAllocator(Allocator['CUDADevice']):
     return (opaque, None), MMIOInterface(opaque.value, size) if options.host else None
 
   @suppress_finalizing
-  def _free(self, opaque, options:BufferSpec):
+  def _free(self, storage:tuple, options:BufferSpec):
+    opaque = storage[0][0]
     if options.external_ptr: return
     if options.host: check(cuda.cuMemFreeHost(opaque))
     else: check(cuda.cuMemFree_v2(opaque))

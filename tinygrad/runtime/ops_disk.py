@@ -83,7 +83,7 @@ class DiskAllocator(Allocator):
     self.dev._might_open(size)
     return (opaque:=DiskBuffer(self.dev, size), None), MMIOInterface(mv_address(opaque._buf()), size)
 
-  def _free(self, opaque, options): self.dev._might_close()
+  def _free(self, storage:tuple, options): self.dev._might_close()
   def _as_buffer(self, src:DiskBuffer): return src._buf()
   def _copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def _copyout(self, dest:memoryview, src:DiskBuffer):

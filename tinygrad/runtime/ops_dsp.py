@@ -84,7 +84,8 @@ class DSPAllocator(Allocator['DSPDevice']):
     return (opaque, opaque.share_info), MMIOInterface(opaque.va_addr, size)
 
   @suppress_finalizing
-  def _free(self, opaque:DSPBuffer, options:BufferSpec):
+  def _free(self, storage:tuple, options:BufferSpec):
+    opaque = storage[0][0]
     libc.munmap(opaque.va_addr, opaque.size)
     if opaque.share_info is not None:
       os.close(opaque.share_info.fd)

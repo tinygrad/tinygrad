@@ -314,7 +314,7 @@ class HCQGraph(MultiGraphRunner):
 
     if PROFILE and self.kickoff_value >= 1: self.collect_timestamps()
 
-    for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(buf, BufferSpec(cpu_access=True))
+    for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(((buf, buf.meta), buf.view), BufferSpec(cpu_access=True))
 
   @staticmethod
   def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:

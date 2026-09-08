@@ -160,7 +160,7 @@ class WebGpuAllocator(Allocator['WebGpuDevice']):
     dest[:] = buf_to_mv(tmp_buf:=self.dev._readable_buffer(src))[:dest.nbytes]
     self.dev.free(tmp_buf)
 
-  def _free(self, opaque:webgpu.WGPUBuffer, options:BufferSpec): self.dev.free(opaque)
+  def _free(self, storage:tuple, options:BufferSpec): self.dev.free(storage[0][0])
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):

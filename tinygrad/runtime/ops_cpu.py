@@ -2,7 +2,7 @@ from __future__ import annotations
 import platform, sys, ctypes, mmap, struct, time
 from typing import cast
 from tinygrad.helpers import to_mv, from_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
-from tinygrad.device import BufferSpec, TinyELF, Program, Device
+from tinygrad.device import Buffer, BufferSpec, TinyELF, Program, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator
 from tinygrad.runtime.support.c import DLL
@@ -89,7 +89,8 @@ class CPUAllocator(HCQAllocator['CPUDevice']):
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
     dest[:] = to_mv(int(src.va_addr), dest.nbytes)[:]
-  def _do_map(self, buf:HCQBuffer):
+  def _do_map(self, src:Buffer):
+    buf = src._buf
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
     return HCQBuffer(buf.view.addr, buf.size, view=buf.view, owner=buf.owner)
   def _do_unmap(self, mb): pass  # CPU _do_map returns a view wrapper, nothing to release

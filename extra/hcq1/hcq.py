@@ -3,7 +3,7 @@ from typing import cast, Callable, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, collections, itertools
 from tinygrad.helpers import PROFILE, getenv, from_mv, cpu_profile, ProfileRangeEvent, unwrap
 from tinygrad.helpers import suppress_finalizing, TracingKey
-from tinygrad.device import BufferSpec, Compiled, Allocator, ProfileDeviceEvent, ProfileProgramEvent, Program, TinyELF
+from tinygrad.device import Buffer, BufferSpec, Compiled, Allocator, ProfileDeviceEvent, ProfileProgramEvent, Program, TinyELF
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.renderer import Renderer
@@ -282,7 +282,7 @@ class HCQProgram(Program[HCQDeviceType]):
     if PROFILE: Compiled.profile_events += [ProfileProgramEvent(dev.device, obj.name, obj.lib, base, self.prof_prg_counter, self.profile_key)]
 
   @staticmethod
-  def _fini(dev, buf, spec): dev.allocator.free(((buf, buf.meta), buf.view), buf.size, spec)
+  def _fini(dev, buf, spec): dev.allocator.free(((buf, buf.meta), buf.view, {}), buf.size, spec)
 
   def fill_kernargs(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int|None, ...]=(), kernargs:HCQBuffer|None=None) -> HCQArgsState:
     """
@@ -425,7 +425,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
 
   def _realloc(self, oldbuf:HCQBuffer|None, new_size:int, options:BufferSpec|None=None, force=False) -> tuple[HCQBuffer, bool]:
-    if oldbuf is not None: self.allocator.free(((oldbuf, oldbuf.meta), oldbuf.view), oldbuf.size, options=options)
+    if oldbuf is not None: self.allocator.free(((oldbuf, oldbuf.meta), oldbuf.view, {}), oldbuf.size, options=options)
     try: buf, realloced = self.allocator.alloc(new_size, options=options)[0][0], True
     except MemoryError:
       if force: raise
@@ -458,6 +458,8 @@ class HCQAllocatorBase(Allocator[HCQDeviceType], Generic[HCQDeviceType]):
     self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True))[0][0] for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
 
+  def map(self, buf:Buffer) -> tuple: return self._map(buf.ensure_allocated()._buf)
+
   def _map(self, buf:HCQBuffer) -> tuple:
     if self.dev not in buf.mapped_devs:
       if buf.owner is None: raise RuntimeError(f"map failed: buffer {buf.va_addr} has no owner, it's a virtual buffer")
@@ -468,7 +470,8 @@ class HCQAllocatorBase(Allocator[HCQDeviceType], Generic[HCQDeviceType]):
     return mapped, mapped.meta
 
   @suppress_finalizing
-  def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):
+  def _free(self, storage:tuple, options:BufferSpec|None=None):
+    buf = storage[0][0]
     for dev in buf.mapped_devs: dev.synchronize()
     for d, mb in buf.mappings.items(): d.allocator._do_unmap(mb)
     if hasattr(self, '_do_free'): self._do_free(buf, options)
