@@ -137,7 +137,7 @@ runs:
 
     # ******************* apt *******************
     - name: Setup apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true')
       shell: bash
       run: |
         sudo mkdir -p /var/cache/apt/archives
@@ -165,7 +165,7 @@ runs:
         echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
     - name: Compute Package List + Hash
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true')
       id: apt-pkgs
       shell: bash
       run: |
@@ -211,20 +211,20 @@ runs:
         echo "installed=$installed" >> "$GITHUB_OUTPUT"
 
     - name: Cache apt (PR)
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true') && github.event_name == 'pull_request' && steps.apt-pkgs.outputs.installed == 'false'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name == 'pull_request' && steps.apt-pkgs.outputs.installed == 'false'
       uses: actions/cache/restore@v5
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
     - name: Cache apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true') && github.event_name != 'pull_request' && steps.apt-pkgs.outputs.installed == 'false'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name != 'pull_request' && steps.apt-pkgs.outputs.installed == 'false'
       uses: actions/cache@v5
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
 
     - name: Run apt Update + Install
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true') && steps.apt-pkgs.outputs.installed == 'false'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && steps.apt-pkgs.outputs.installed == 'false'
       shell: bash
       run: |
         sudo apt -qq update || true
