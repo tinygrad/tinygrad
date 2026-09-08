@@ -49,6 +49,10 @@ inputs:
     description: "Install ninja?"
     required: false
     default: 'false'
+  autogen:
+    description: "Install autogen support packages?"
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -133,7 +137,7 @@ runs:
 
     # ******************* apt *******************
     - name: Setup apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true')
       shell: bash
       run: |
         sudo mkdir -p /var/cache/apt/archives
@@ -154,14 +158,14 @@ runs:
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
 
     - name: Add LLVM Repo (Linux)
-      if: inputs.llvm == 'true' && runner.os == 'Linux'
+      if: (inputs.llvm == 'true' || inputs.autogen == 'true') && runner.os == 'Linux'
       shell: bash
       run: |
         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
         echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
     - name: Compute Package List + Hash
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true')
       id: apt-pkgs
       shell: bash
       run: |
@@ -190,6 +194,10 @@ runs:
         if [[ "${{ inputs.ninja }}" == "true" ]]; then
           pkgs+=" ninja-build"
         fi
+        # **** autogen ****
+        if [[ "${{ inputs.autogen }}" == "true" ]]; then
+          pkgs+=" libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev libdrm-dev liburing-dev"
+        fi
 
         echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
         echo "hash=$(echo -n "$pkgs" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
@@ -203,20 +211,20 @@ runs:
         echo "installed=$installed" >> "$GITHUB_OUTPUT"
 
     - name: Cache apt (PR)
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true') && github.event_name == 'pull_request' && steps.apt-pkgs.outputs.installed == 'false'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name == 'pull_request' && steps.apt-pkgs.outputs.installed == 'false'
       uses: actions/cache/restore@v5
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
     - name: Cache apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true') && github.event_name != 'pull_request' && steps.apt-pkgs.outputs.installed == 'false'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && github.event_name != 'pull_request' && steps.apt-pkgs.outputs.installed == 'false'
       uses: actions/cache@v5
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
 
     - name: Run apt Update + Install
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true') && steps.apt-pkgs.outputs.installed == 'false'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true' || inputs.ninja == 'true' || inputs.autogen == 'true') && steps.apt-pkgs.outputs.installed == 'false'
       shell: bash
       run: |
         sudo apt -qq update || true
