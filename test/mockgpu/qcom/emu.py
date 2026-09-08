@@ -6,7 +6,7 @@
 # Buffers:
 #   0 gpr    gpr[tid*256 + reg]     full 32-bit file
 #   1 h      h[tid*256 + reg]       half 16-bit file (same Mesa _ index, not aliased)
-#   2 lds    32KiB shared
+#   2 lds    a630 cs_shared_mem_size
 #   3 pvt    pvt[tid*32768 + off]   per-fiber private
 #   4 vmem   identity map, INDEX is host VA
 #   5 caddr  const file pointer
@@ -14,20 +14,22 @@
 #   7 enc    packed DST/SRC/OFF per instruction
 from __future__ import annotations
 import ctypes, functools, hashlib, itertools, math, mmap, os, struct
+from typing import Literal
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device
-from tinygrad.helpers import Context, mv_address, to_mv
+from tinygrad.helpers import Context, mv_address, to_mv, unwrap
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 from tinygrad.runtime.autogen import mesa, libc
 
-WAVE, PARK, _JP, DONE, BAR = 64, 64, 0xffffffff, 1, 2
+# a630 fd_dev_info: threadsize_base=64, cs_shared_mem_size=32*1024 (wave_granularity/fibers_per_sp are occupancy, not emu width)
+WAVE, CS_SHARED_MEM_SIZE, PARK, _JP, DONE, BAR = 64, 32 * 1024, 64, 0xffffffff, 1, 2
 _ONES64 = (1 << 64) - 1
 
 ### HOST MAPS
 
-def _host_buf(nitems: int, fmt: str) -> tuple[int, mmap.mmap, memoryview]:
+def _host_buf(nitems: int, fmt: Literal["I", "i", "B", "Q"]) -> tuple[int, mmap.mmap, memoryview]:
   nbytes = max(nitems * {"I": 4, "i": 4, "B": 1, "Q": 8}[fmt], 8)
   m = mmap.mmap(-1, nbytes)
   addr = mv_address(m)
@@ -257,7 +259,7 @@ def _pack_one(raw: dict, name: str, k: str) -> int:
     return _s11(imm) & 0xffffffff
   if "CONST" in x:
     return int(x.get("SRC", int(x["CONST"]) * 4 + int(x.get("SWIZ", 0)))) & 0xffffffff
-  return int(x.get("SRC", x["_"])) & 0xffffffff
+  return int(unwrap(x.get("SRC", x.get("_")))) & 0xffffffff
 
 def _pack_named(raw: dict) -> dict[str, int]:
   name = _iname(raw) or ""
@@ -270,11 +272,12 @@ class _Ctx:
     self.nt = nt
     self.stores: list[UOp] = []
     self.pval: dict[str, UOp] = {}
-    self.rpt, self.raw, self.ins_name = 0, {}, ""
+    self.raw: dict = {}
+    self.rpt, self.ins_name = 0, ""
     self.tid = UOp.range(nt, 0, dtype=dtypes.int)
     self.gpr = UOp.param(0, dtypes.uint32, self.nt * 256)
     self.h = UOp.param(1, dtypes.uint32, self.nt * 256)
-    self.lds = UOp.param(2, dtypes.uint8, 32768)
+    self.lds = UOp.param(2, dtypes.uint8, CS_SHARED_MEM_SIZE)
     self.pvt = UOp.param(3, dtypes.uint8, self.nt * 32768)
     self.vmem = UOp.param(4, dtypes.uint32, 1 << 40)
     self.caddr = UOp.param(5, dtypes.uint64, 1)
@@ -341,7 +344,7 @@ class _Ctx:
       if self.rpt and self._src_rel(k): i = i + _c(self.rpt)
       x = self._ld_vmem(self.caddr.index(0).load() + i.cast(dtypes.uint64) * _c(4, dtypes.uint64), 4)
     else:
-      idx = self.ridx(k) if k in self.pval else self._as_int(d if not isinstance(d, dict) else int(d.get("SRC", d["_"])))
+      idx = self.ridx(k) if k in self.pval else self._as_int(d if not isinstance(d, dict) else int(unwrap(d.get("SRC", d.get("_")))))
       x = self.h_r(idx) if isinstance(d, dict) and d.get("HALF") else self.gpr_r(idx)
     an = int(d.get("ABSNEG", 0)) if isinstance(d, dict) else 0
     if not an: return x
@@ -577,7 +580,7 @@ class _Ctx:
     for i in range(n):
       val = self.h_r(data + _c(i, dtypes.int)) if hm else self.gpr_r(data + _c(i, dtypes.int))
       if self.ins_name == "stl":
-        self.lds = self._st_bytes(self.lds, (a0 + _c(i * ts)).cast(dtypes.int), ts, val)
+        self.lds = self._st_bytes(self.lds, (a0 + _c(i * ts)).cast(dtypes.int) & _c(CS_SHARED_MEM_SIZE - 1, dtypes.int), ts, val)
       else:
         self.pvt = self._st_bytes(self.pvt, self.tid * 32768 + (a0 + _c(i * ts)).cast(dtypes.int), ts, val)
 
@@ -585,7 +588,7 @@ class _Ctx:
     n, ts, hm = self._memsz(ins)
     a0, dst = self.gpr_r(self.ridx("SRC")) + self._off13(), self.ridx("DST")
     for i in range(n):
-      if self.ins_name == "ldl": val, _ = self._ld_bytes(self.lds, (a0 + _c(i * ts)).cast(dtypes.int), ts)
+      if self.ins_name == "ldl": val, _ = self._ld_bytes(self.lds, (a0 + _c(i * ts)).cast(dtypes.int) & _c(CS_SHARED_MEM_SIZE - 1, dtypes.int), ts)
       else: val, _ = self._ld_bytes(self.pvt, self.tid * 32768 + (a0 + _c(i * ts)).cast(dtypes.int), ts)
       self.wr_reg(hm, dst + _c(i, dtypes.int), val)
 
@@ -670,14 +673,14 @@ class _WorkGroup:
       return addr, mv
     self.gpr_addr, self.gpr_mv = hb(nt * 256, "I")
     self.h_addr, _ = hb(nt * 256, "I")
-    self.lds_addr, _ = hb(32768, "B")
+    self.lds_addr, _ = hb(CS_SHARED_MEM_SIZE, "B")
     self.pvt_addr, _ = hb(nt * 32768, "B")
     self.ca_addr, self.ca_mv = hb(1, "Q")
 
   def reset(self, lds=False, pvt=False):
     ctypes.memset(self.gpr_addr, 0, self.nt * 256 * 4)
     ctypes.memset(self.h_addr, 0, self.nt * 256 * 4)
-    if lds: ctypes.memset(self.lds_addr, 0, 32768)
+    if lds: ctypes.memset(self.lds_addr, 0, CS_SHARED_MEM_SIZE)
     if pvt: ctypes.memset(self.pvt_addr, 0, self.nt * 32768)
 
   def c_bufs(self, base: int, wst_addr: int, enc_addr: int) -> list:
@@ -704,14 +707,15 @@ _WPC, _WACT, _WPMO, _WPMA, _WPPC = 0, 8, 16, 24, 32
 _WPMK = _WPPC + PARK * 4
 _WSP, _WFLG, _WBYTES = _WPMK + PARK * 8, _WPMK + PARK * 8 + 4, _WPMK + PARK * 8 + 8
 
-def _wmv(addr: int, off: int, n: int, fmt: str):
+def _wmv(addr: int, off: int, n: int, fmt: Literal["I", "Q"]):
   return to_mv(addr + off, n * {"I": 4, "Q": 8}[fmt]).cast(fmt)
 
 class _Wave:
   __slots__ = ("base", "nlanes", "all", "keep", "addr", "c_bufs", "park_limit",
                "pc_mv", "act_mv", "pmode_mv", "pmask_mv", "ppc_mv", "pmsk_mv", "sp_mv", "flg_mv")
   def __init__(self, base: int, nlanes: int):
-    self.base, self.nlanes, self.all, self.keep, self.c_bufs = base, nlanes, (1 << nlanes) - 1, [], None
+    self.base, self.nlanes, self.all, self.keep = base, nlanes, (1 << nlanes) - 1, []
+    self.c_bufs: list|None = None
     self.park_limit = PARK
     addr, m, _ = _host_buf(_WBYTES, "B")
     self.addr = addr
@@ -869,7 +873,7 @@ def _step_wave(wave: _Wave, instrs: list[dict], wg, nins: int):
     if _is_cat0(raw, name):
       if _exec_cat0(wave, wg, raw, name) == "bar": return
     else:
-      _run_wave_op(raw, wave.nlanes, wave.c_bufs)
+      _run_wave_op(raw, wave.nlanes, unwrap(wave.c_bufs))
   raise RuntimeError("ir3 wave exceeded 1M instructions")
 
 def _run_waves(waves: list[_Wave], instrs: list[dict], wg):

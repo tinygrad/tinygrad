@@ -1,4 +1,5 @@
 import ctypes, functools, mmap
+from typing import Any
 from tinygrad.runtime.autogen import kgsl, libc
 from tinygrad.runtime.support import hcq2
 from test.mockgpu.driver import VirtDriver, VirtFile, VirtFileDesc, TextFileDesc, DirFileDesc
@@ -76,6 +77,7 @@ class QCOMDriver(VirtDriver):
 
   def kgsl_ioctl(self, req, argp):
     nr = req & 0xFF
+    st: Any
     if nr == kgsl.IOCTL_KGSL_GPUOBJ_ALLOC.args[2]:
       st = kgsl.struct_kgsl_gpuobj_alloc.from_address(argp)
       st.id = self.next_id
