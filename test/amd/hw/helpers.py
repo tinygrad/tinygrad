@@ -225,7 +225,7 @@ amdhsa.kernels:
   prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
 
   buf_sz = _out_bytes(n_lanes)
-  out_gpu = dev.allocator.alloc(buf_sz)
+  out_gpu = dev.allocator.alloc(buf_sz)[0][0]
   assert out_gpu.va_addr % 16 == 0, f"buffer not 16-byte aligned: 0x{out_gpu.va_addr:x}"
   prg(out_gpu, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
 

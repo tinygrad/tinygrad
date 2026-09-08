@@ -19,7 +19,7 @@ def _run_asm(asm_src:str) -> subprocess.CompletedProcess:
   return _run('from tinygrad.device import Device, TinyELF; from tinygrad.helpers import Target; '
               'from tinygrad.runtime.support.compiler_amd import HIPCompiler; dev = Device["AMD"]; '
               f'dev.runtime(TinyELF(HIPCompiler(dev.arch).compile("""{asm_src}"""), "test", Target("AMD", arch=dev.arch), ()))('
-              'dev.allocator.alloc(64), global_size=(1,1,1), local_size=(1,1,1), wait=True)')
+              'dev.allocator.alloc(64)[0][0], global_size=(1,1,1), local_size=(1,1,1), wait=True)')
 
 def _verify_recovery() -> subprocess.CompletedProcess:
   return _run('from tinygrad import Tensor; t = Tensor([1.0, 2.0], device="AMD").realize(); assert (t + 1).numpy().tolist() == [2.0, 3.0]')

@@ -472,7 +472,7 @@ pm_usb_lower = PatternMatcher([
 @functools.cache
 def _host_block(dev) -> Buffer: # link, staging, zeros
   b = Buffer("CPU", 0x180020, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
-  b._buf.cpu_view().view(fmt='B')[:16] = struct.pack('QQ', *[ctypes.addressof(x.contents) for x in (dev.iface.pci_dev.usb.usb.handle, USB3.ctx())])
+  b.host.view(fmt='B')[:16] = struct.pack('QQ', *[ctypes.addressof(x.contents) for x in (dev.iface.pci_dev.usb.usb.handle, USB3.ctx())])
   return b
 @functools.cache
 def _xfer(dev, tag:str) -> Buffer: # fixed fields; status, length, buffer change per chunk
@@ -482,7 +482,7 @@ def _xfer(dev, tag:str) -> Buffer: # fixed fields; status, length, buffer change
 @functools.cache
 def _words(dev) -> Buffer: # zero the read signal and scratch
   b = Buffer(dev.device, 2, dtypes.uint32, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), preallocate=True)
-  b._buf.cpu_view().view(fmt='B')[:8] = bytes(8)
+  b.host.view(fmt='B')[:8] = bytes(8)
   return b
 @functools.cache
 def _asm24(dev) -> Buffer:

@@ -120,7 +120,7 @@ class TestProfiler(unittest.TestCase):
 
     for dev in [TestProfiler.d0.device, d1.device]:
       evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and _dev_base(x.device) == dev]
-      assert len(evs) == (0 if hasattr(TestProfiler.d0.allocator, '_as_buffer') else 1), "one kernel runs are expected"
+      assert len(evs) == (0 if buf1._host_mv() is not None else 1), "one kernel runs are expected"
 
   def test_profile_multidev_transfer(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
