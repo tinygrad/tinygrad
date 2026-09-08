@@ -64,13 +64,25 @@ class TestAfterCounterexamples(unittest.TestCase):
     # Zeroing y does not change x.
     self.assertEqual(z.sum().gradient(x)[0].tolist(), [1.])
 
-  @unittest.expectedFailure
   def test_after_dependency_gradient(self):
     x = Tensor([2., 3.])
     y = x.clone()
     y[:1].assign(0)
-    # View assign creates a nested AFTER; currently raises in backward.
+    # View assign creates a nested AFTER; only the untouched element depends on x.
     self.assertEqual(y.sum().gradient(x)[0].tolist(), [0., 1.])
+
+  def test_view_assign_gradient(self):
+    for view, expected in ((lambda t: t.reshape(3, 2)[1:], [[1., 1., 0.], [0., 0., 0.]]),
+                           (lambda t: t.permute(1, 0)[1:], [[1., 0., 0.], [1., 0., 0.]]),
+                           (lambda t: t.flip((0, 1))[:1], [[1., 1., 1.], [0., 0., 0.]])):
+      with self.subTest(expected=expected):
+        x = Tensor([[1., 2., 3.], [4., 5., 6.]])
+        y = x.clone()
+        v = Tensor.full(view(y).shape, 7.)
+        view(y).assign(v)
+        gx, gv = y.sum().gradient(x, v)
+        self.assertEqual(gx.tolist(), expected)
+        self.assertEqual(gv.tolist(), Tensor.ones(v.shape).tolist())
 
   @unittest.expectedFailure
   def test_unordered_overlapping_stores_rejected(self):
