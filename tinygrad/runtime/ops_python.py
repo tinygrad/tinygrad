@@ -61,8 +61,8 @@ class PythonProgram(Program['PythonDevice']):
       i = 0
       while i < len(self.uops):
         u = self.uops[i]
-        src_values = [values[v] for v in u.src if v.dtype is not dtypes.void]
-        src_dtypes = [v.dtype for v in u.src if v.dtype is not dtypes.void]
+        srcs = [v for v in u.src if v.dtype is not dtypes.void or (u.op is Ops.CALL and v.op is Ops.CUSTOM_FUNCTION)]
+        src_values, src_dtypes = [values[v] for v in srcs], [v.dtype for v in srcs]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
         if u.op is Ops.END:
           if len(u.src) == 3:
@@ -139,9 +139,10 @@ class PythonProgram(Program['PythonDevice']):
                                for k in range(len(src_values))], j, u.dtype) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
+        elif u.op is Ops.CUSTOM_FUNCTION: values[u] = src_values[0]
         elif u.op is Ops.CALL:
-          assert u.dtype is dtypes.void
-          cfunc = ctypes.CFUNCTYPE(None, *[ctypes.c_uint64] * (len(src_values)-1))
+          ret_type = None if u.dtype is dtypes.void else {1:ctypes.c_uint8, 2:ctypes.c_uint16, 4:ctypes.c_uint32, 8:ctypes.c_uint64}[u.dtype.itemsize]
+          cfunc = ctypes.CFUNCTYPE(ret_type, *[ctypes.c_uint64] * (len(src_values)-1))
           values[u] = []
           for args,gate in zip(zip(*src_values), exec_masks[-1]):
             call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]

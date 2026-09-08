@@ -75,7 +75,9 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
 @functools.cache
 def cfunc_buf(lib:str, name:str) -> Buffer:
   fn = getattr(importlib.import_module(f"tinygrad.runtime.autogen.{lib}").dll, name)
-  (b:=Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, preallocate=True))._buf.view.view(fmt='Q')[0] = unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
+  raw = (b:=Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, preallocate=True))._buf
+  mv = raw.view.view(fmt='Q') if hasattr(raw, "view") and hasattr(raw.view, "view") else raw.cast('Q')
+  mv[0] = unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
   return b
 
 def ccall(fn:Any, *args:UOp|int) -> UOp:
@@ -450,7 +452,8 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's
   dev = cast(HCQ2Compiled, Device[to_tuple(b.device)[0]])
 
   # device owns the placeholders it names
-  if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
+  if isinstance(b.tag, tuple) and b.tag[0] == "cfunc": r = cfunc_buf(*b.tag[1:])
+  elif dev.pm_bufferize is not None and (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
   elif not ctx.use_rt:
     spec = BufferSpec(host=b.arg.volatile, uncached=b.arg.volatile, cpu_access=True)
     r = Buffer(dev.device, b.max_numel(), b.dtype, options=spec, preallocate=True)
@@ -462,17 +465,21 @@ def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
   buf, off = unwrap_view(g.src[0])
   if buf.op not in {Ops.BUFFER, Ops.MSELECT}: return None
   ctx.refs.append(buf) # add to refs
-  return UOp.const(cast(Buffer, buf.buffer).get_buf(to_tuple(g.arg)[0]).va_addr + off, dtypes.uint64)
+  raw = cast(Buffer, buf.buffer).get_buf(to_tuple(g.arg)[0])
+  return UOp.const((raw.va_addr if hasattr(raw, "va_addr") else mv_address(raw)) + off, dtypes.uint64)
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
   if getattr(b:=cast(Buffer, buf.buffer), '_hcq_written', None) is not blob.arg: # TODO: remove me
     cast(Any, b.ensure_allocated())._hcq_written = blob.arg
-    b._buf.cpu_view().view(fmt='B')[:len(blob.arg)] = blob.arg
+    raw = b._buf
+    mv = raw.cpu_view().view(fmt='B') if hasattr(raw, "cpu_view") else raw.cast('B')
+    mv[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
 def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
   base, off = unwrap_view(buf)
-  mv = cast(Buffer, base.buffer).ensure_allocated()._buf.cpu_view().view(fmt='B')
+  raw = cast(Buffer, base.buffer).ensure_allocated()._buf
+  mv = raw.cpu_view().view(fmt='B') if hasattr(raw, "cpu_view") else raw.cast('B')
   for o, w in zip(offs.src, ws.src):
     n, at = w.dtype.itemsize, off + o.val * w.dtype.itemsize
     mv[at:at + n] = (w.val & (1 << 8 * n) - 1).to_bytes(n, 'little')
