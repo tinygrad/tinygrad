@@ -7,12 +7,34 @@ from tinygrad.device import BufferStorage, Buffer, BufferSpec, Compiled, Allocat
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.renderer import Renderer
-from tinygrad.runtime.support.hcq import HCQBuffer
 
 SignalType = TypeVar('SignalType', bound='HCQSignal')
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
+
+class HCQBuffer:
+  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQBuffer|None=None, view:MMIOInterface|None=None, owner:Any=None):
+    self.va_addr, self.size, self.meta, self._base, self.view = va_addr, size, meta, _base, view
+    self._devs, self.owner = ([owner] if owner is not None else []), owner
+    self._mappings:dict[Compiled, HCQBuffer] = {} # mapping to the other devices
+
+  def offset(self, offset:int=0, size:int|None=None) -> HCQBuffer:
+    return HCQBuffer(self.va_addr+offset, size or (self.size - offset), owner=self.owner, meta=self.meta,
+      _base=self._base or self, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
+
+  def cpu_view(self) -> MMIOInterface:
+    assert self.view is not None, "buffer has no cpu_view"
+    return self.view
+
+  @property
+  def base(self) -> HCQBuffer: return self._base or self
+
+  @property
+  def mappings(self): return self._mappings if self._base is None else self._base._mappings
+
+  @property
+  def mapped_devs(self): return self._devs if self._base is None else self._base._devs
 
 class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
   """

@@ -4,7 +4,7 @@ from tinygrad.helpers import mv_address, DEBUG, DEV
 from test.helpers import slow, replace_opts
 from tinygrad.device import Buffer, BufferSpec
 from extra.hcq1.hcq import HCQCompiled
-from tinygrad.runtime.support.hcq import HCQBuffer
+from extra.hcq1.hcq import HCQBuffer
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.system import PCIIfaceBase
 from tinygrad.engine.realize import get_runtime

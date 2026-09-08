@@ -10,7 +10,7 @@ class TestBuffer(unittest.TestCase):
     host = v.host
     host.view(fmt='H')[0] = 0x1234
     self.assertEqual(b.host.view(fmt='H')[2], 0x1234)
-    self.assertEqual(v._buf.va_addr, b._buf.va_addr + 4)
+    self.assertEqual(v._buf, b._buf + 4)
     self.assertIs(v.host, host)
     self.assertIs(v.meta, b.meta)
 

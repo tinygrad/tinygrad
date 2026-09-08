@@ -170,9 +170,10 @@ def run_program_emu(instructions: list, n_lanes: int = 1) -> WaveState:
 
 def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
   """Run instructions on real AMD hardware via HIPCompiler and the AMD runtime."""
-  from tinygrad.device import Device, TinyELF
+  from tinygrad.device import Device, TinyELF, Buffer
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
-  from tinygrad.helpers import Target, flat_mv
+  from tinygrad.helpers import Target
+  from tinygrad.dtype import dtypes
 
   dev = Device["AMD"]
   compiler = HIPCompiler(dev.arch)  # type: ignore[attr-defined]
@@ -225,12 +226,11 @@ amdhsa.kernels:
   prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
 
   buf_sz = _out_bytes(n_lanes)
-  out_gpu = dev.allocator.alloc(buf_sz).buf
-  assert out_gpu.va_addr % 16 == 0, f"buffer not 16-byte aligned: 0x{out_gpu.va_addr:x}"
-  prg(out_gpu, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
+  out_gpu = Buffer(dev.device, buf_sz, dtypes.uint8, preallocate=True)
+  assert out_gpu._buf % 16 == 0, f"buffer not 16-byte aligned: 0x{out_gpu._buf:x}"
+  prg(out_gpu._buf, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
 
-  out_buf = bytearray(buf_sz)
-  dev.allocator._copyout(flat_mv(memoryview(out_buf)), out_gpu)
+  out_buf = out_gpu.as_memoryview()
 
   return parse_output(bytes(out_buf), n_lanes)
 

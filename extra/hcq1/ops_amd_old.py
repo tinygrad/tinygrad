@@ -3,8 +3,8 @@ from typing import cast
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from extra.hcq1.hcq import HCQCompiled, HCQAllocator, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, hcq_profile
-from tinygrad.runtime.support.hcq import HCQBuffer, FileIOInterface
+from extra.hcq1.hcq import HCQBuffer, HCQCompiled, HCQAllocator, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, hcq_profile
+from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferStorage, Compiled, BufferSpec, TinyELF
@@ -980,6 +980,19 @@ class PCIIface(PCIIfaceBase):
     raise RuntimeError("Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
+
+  def alloc(self, size:int, **kwargs) -> HCQBuffer:
+    storage = super().alloc(size, **kwargs)
+    return HCQBuffer(storage.buf, storage.meta.mapping.size, meta=storage.meta, view=storage.host, owner=self.dev)
+
+  def free(self, buf:HCQBuffer):
+    if buf.owner == self.dev: super().free(BufferStorage(buf.va_addr, buf.meta, buf.view))
+    else: self.dev_impl.mm.unmap_range(buf.va_addr, round_up(buf.size, 0x1000))
+
+  def map(self, buf:HCQBuffer):
+    from types import SimpleNamespace
+    super().map(SimpleNamespace(device=buf.owner.device, _buf=buf.va_addr, nbytes=buf.size, meta=buf.meta))
+    return HCQBuffer(buf.va_addr, buf.size, meta=buf.meta, owner=buf.owner)
 
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
