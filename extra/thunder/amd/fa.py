@@ -17,8 +17,10 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None
   return Tensor(Tensor.invalids(*shape, dtype=dtype, device=ref.device).uop.unshard(axis), dtype=dtype, device=ref.device)
 
 @functools.cache
-def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
-                                  device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
+def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, *args:UOp, device:str, arch:str,
+                                  B:int, N:int, H:int, H_KV:int, D:int, write_fp8:bool=False):
+  if write_fp8: q_fp8, k_fp8, xqkv, freqs_cis = args
+  else: xqkv, freqs_cis = args
   group_size = H // H_KV
   q, k, v = q.reshape(B, N, H, D), k.reshape(B, N, H_KV, D), v.reshape(B, N, H_KV, D)
   xqkv = xqkv.reshape(B, N, H_KV, group_size + 2, D)
@@ -28,6 +30,9 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
   c = freqs_cis[0, n, 0, pair, 0].cast(dtypes.float)
   s = freqs_cis[0, n, 0, pair, 1].cast(dtypes.float)
   ordered:UOp|None = None
+  # The kernel evaluates exp2, so bake sqrt(1/sqrt(D) * log2(e)) into
+  # each operand and avoid scaling every FP32 score element after MFMA.
+  fp8_attn_scale = (D ** -0.5 * 1.44269504089) ** 0.5
   for kvh in range(H_KV):
     q_out, k_out, v_out = (x.after(ordered) if ordered is not None else x for x in (q, k, v))
     x_in = xqkv.after(ordered) if ordered is not None else xqkv
@@ -36,14 +41,20 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
       a = x_in[b, n, kvh, rep, even].cast(dtypes.float)
       bb = x_in[b, n, kvh, rep, even + 1].cast(dtypes.float)
       h = kvh * group_size + rep
-      stores += [q_out[b, n, h, even].store((a * c - bb * s).cast(q.dtype)),
-                 q_out[b, n, h, even + 1].store((a * s + bb * c).cast(q.dtype))]
+      q0, q1 = a * c - bb * s, a * s + bb * c
+      stores += [q_out[b, n, h, even].store(q0.cast(q.dtype)), q_out[b, n, h, even + 1].store(q1.cast(q.dtype))]
+      if write_fp8:
+        q0s, q1s = ((x * fp8_attn_scale).maximum(-448.0).minimum(448.0) for x in (q0, q1))
+        stores += [q_fp8[b, n, h, even].store(q0s.cast(q_fp8.dtype)), q_fp8[b, n, h, even + 1].store(q1s.cast(q_fp8.dtype))]
     a = x_in[b, n, kvh, group_size, even].cast(dtypes.float)
     bb = x_in[b, n, kvh, group_size, even + 1].cast(dtypes.float)
-    stores += [k_out[b, n, kvh, even].store((a * c - bb * s).cast(k.dtype)),
-               k_out[b, n, kvh, even + 1].store((a * s + bb * c).cast(k.dtype)),
+    k0, k1 = a * c - bb * s, a * s + bb * c
+    stores += [k_out[b, n, kvh, even].store(k0.cast(k.dtype)), k_out[b, n, kvh, even + 1].store(k1.cast(k.dtype)),
                v_out[b, n, kvh, even].store(x_in[b, n, kvh, group_size + 1, even]),
                v_out[b, n, kvh, even + 1].store(x_in[b, n, kvh, group_size + 1, even + 1])]
+    if write_fp8:
+      k0s, k1s = ((x * fp8_attn_scale).maximum(-448.0).minimum(448.0) for x in (k0, k1))
+      stores += [k_fp8[b, n, kvh, even].store(k0s.cast(k_fp8.dtype)), k_fp8[b, n, kvh, even + 1].store(k1s.cast(k_fp8.dtype))]
     ordered = UOp.group(*stores)
   assert ordered is not None
   return ordered.end(pair, n, b).sink(arg=KernelInfo(name="fused_qkv_rope_forward"))
@@ -106,9 +117,11 @@ def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp, bool]|None:
     return dq_native, dk_partial, dv_partial, True
   return None
 
-def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp, *, prequantize_mxfp4:bool=False) -> tuple[None, None, None, UOp, None]:
+def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp, *, prequantize_mxfp4:bool=False,
+                         prequantize_fp8:bool=False) -> tuple:
   dq, dk, dv = Tensor(dq_u, device=dq_u.device), Tensor(dk_u, device=dk_u.device), Tensor(dv_u, device=dv_u.device)
-  xqkv_u, freqs_u = call.src[4], call.src[5]
+  input_idx = 6 if prequantize_fp8 else 4
+  xqkv_u, freqs_u = call.src[input_idx], call.src[input_idx + 1]
   xqkv, freqs_cis = Tensor(xqkv_u, device=xqkv_u.device), Tensor(freqs_u, device=freqs_u.device)
   B, N, _ = xqkv.shape
   H, H_KV, D = dq.shape[2], dk.shape[2], dq.shape[3]
@@ -136,10 +149,10 @@ def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp, *, prequantize_
     fxn = functools.partial(custom_fused_qkv_rope_backward, device=single_device, arch=arch,
                             B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, expanded_fa_grads=expanded_fa_grads)
     dxqkv = Tensor.custom_kernel(dxqkv, dq, dk, dv, freqs_cis, fxn=fxn)[0]
-  return None, None, None, dxqkv.uop, None
+  return (None, None, None, None, None, dxqkv.uop, None) if prequantize_fp8 else (None, None, None, dxqkv.uop, None)
 
 def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, head_dim:int, *,
-                   prequantize_grad_mxfp4:bool=False) -> tuple[Tensor, Tensor, Tensor]:
+                   prequantize_grad_mxfp4:bool=False, prequantize_fp8:bool=False) -> tuple[Tensor, ...]:
   B, N, packed_dim = xqkv.shape
   assert packed_dim == n_kv_heads * (n_heads // n_kv_heads + 2) * head_dim
   assert freqs_cis.dtype == dtypes.bfloat16, f"fused QKV RoPE requires bfloat16 frequencies, got {freqs_cis.dtype}"
@@ -157,16 +170,20 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
   q = _sharded_empty((B, N, n_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
   k = _sharded_empty((B, N, n_kv_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
   v = _sharded_empty((B, N, n_kv_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
+  fp8_outputs = (_sharded_empty(q.shape, xqkv, axis=axis, dtype=dtypes.fp8e4m3),
+                 _sharded_empty(k.shape, xqkv, axis=axis, dtype=dtypes.fp8e4m3)) if prequantize_fp8 else ()
   fxn = functools.partial(custom_fused_qkv_rope_forward, device=single_device, arch=arch,
-                          B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=head_dim)
-  grad_fxn = functools.partial(_fused_qkv_rope_grad, prequantize_mxfp4=prequantize_grad_mxfp4)
-  q, k, v, *_ = Tensor.custom_kernel(q, k, v, xqkv, freqs_cis, fxn=fxn, grad_fxn=grad_fxn)
-  return q, k, v
+                          B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=head_dim,
+                          write_fp8=prequantize_fp8)
+  grad_fxn = functools.partial(_fused_qkv_rope_grad, prequantize_mxfp4=prequantize_grad_mxfp4, prequantize_fp8=prequantize_fp8)
+  outputs = Tensor.custom_kernel(q, k, v, *fp8_outputs, xqkv, freqs_cis, fxn=fxn, grad_fxn=grad_fxn)
+  return tuple(outputs[:5 if prequantize_fp8 else 3])
 
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
-def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=0):
+def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink,
+                 window=0, fp8_qk=False):
   def grad(dou:UOp, ker:UOp) -> tuple:
     do = Tensor(dou, device=dou.device)
     attn = Tensor(ker.src[1].after(ker), device=ker.src[1].device)
@@ -174,6 +191,14 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     xq = Tensor(ker.src[3], device=ker.src[3].device)
     xk = Tensor(ker.src[4], device=ker.src[4].device)
     xv = Tensor(ker.src[5], device=ker.src[5].device)
+    if fp8_qk:
+      xv = Tensor(ker.src[7], device=ker.src[7].device)
+      # Q/K are explicitly kept as BF16 custom-op inputs for backward.  Using
+      # them directly avoids two dequantization passes per layer and gives the
+      # BF16 backward kernel the exact forward inputs rather than rounded FP8.
+      xq_bwd, xk_bwd = xq, xk
+    else:
+      xq_bwd, xk_bwd = xq, xk
 
     use_asm_bwd = getenv("ASM_FA", 1) and getenv("ASM_FA_BWD", 1) and window == 0 and arch == "gfx950" and not has_sink and \
       (B_local, N, H_local, H_KV_local, D) == (2, 8192, 32, 8, 128)
@@ -200,13 +225,13 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
                               B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
 
     if use_asm_bwd:
-      dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, xq, xk, xv, do, l_vec, delta_vec,
+      dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, xq_bwd, xk_bwd, xv, do, l_vec, delta_vec,
         fxn=functools.partial(custom_asm_fa_backward, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
       dq_out = _sharded_empty((B, N, H, D), xq, axis=shard_axis)
       dq = Tensor.custom_kernel(dq_out, dq,
         fxn=functools.partial(custom_asm_fa_backward_shuffle, B=B_local, N=N, H=H_local, D=D))[0]
     else:
-      dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, do, xq, xk, xv, l_vec, delta_vec,
+      dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, do, xq_bwd, xk_bwd, xv, l_vec, delta_vec,
         fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch,
                               B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, window=window))[:3]
 
@@ -225,6 +250,13 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
       dk = dk_partial.reshape(B, GROUP_SIZE // HEADS_PER_WG, N, H_KV, D).sum(1)
       dv = dv_partial.reshape(B, GROUP_SIZE // HEADS_PER_WG, N, H_KV, D).sum(1)
 
+    if fp8_qk:
+      # q/k quantization below is an identity STE, so expose physical BF16
+      # gradients directly. This also preserves the native FA gradient layout
+      # consumed by fused QKV RoPE backward.
+      # Q/K are the differentiable BF16 inputs. Packed FP8 buffers and scales are
+      # auxiliary forward inputs, so their gradients are intentionally absent.
+      return None, None, dq.uop, dk.uop, None, None, dv.uop, None, None
     if not has_sink: return None, None, dq.uop, dk.uop, dv.uop
     sinks = Tensor(ker.src[6], device=ker.src[6].device)
     p_sink = (sinks.reshape(1, H, 1, 1) - l_vec).exp()
@@ -234,7 +266,10 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
   return grad
 
 # TODO: remove write_flat once scheduler can remove reshapes between custom_kernel. TestCustomKernel.test_simple_reshape
-def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, write_flat:bool=False, sinks:Tensor|None=None, window:int=0):
+def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, write_flat:bool=False, sinks:Tensor|None=None,
+                    window:int=0, fp8_qk:bool|None=None, q_amax_state:Tensor|None=None, k_amax_state:Tensor|None=None,
+                    q_amax_out:Tensor|None=None, k_amax_out:Tensor|None=None, q_fp8:Tensor|None=None, k_fp8:Tensor|None=None,
+                    fp8_amax:float=16.0):
   assert attn_mask is None, "attn_mask not supported"
   assert is_causal, "only causal attention supported"
 
@@ -260,6 +295,37 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   attn = _sharded_empty_like(xq, axis=shard_axis)
   attn = _sharded_empty((B, N, H * D), xq, axis=shard_axis) if write_flat else _sharded_empty_like(xq, axis=shard_axis)
   l_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
+
+  if getenv("FP8_FA") if fp8_qk is None else fp8_qk:
+    assert arch == "gfx950" and D == 128, f"FP8 Flash Attention requires gfx950 and D=128, got {arch=} {D=}"
+    assert not has_sink and window == 0, "FP8 Flash Attention does not support sinks or sliding windows"
+    from extra.llama_kernels import FP8_MAX, local_abs_max
+    def quantize_qk(x:Tensor, amax_state:Tensor|None, amax_out:Tensor|None) -> tuple[Tensor, Tensor]:
+      if amax_state is not None or amax_out is not None:
+        assert amax_state is not None and amax_out is not None, "delayed FP8 scaling requires both amax state and output"
+        from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
+        return quantize_fp8_delayed(x, amax_state, amax_out)
+      amax = (local_abs_max(x) if isinstance(x.device, tuple) else x.abs().max()).detach().float()
+      descale = ((amax + 1e-8) / FP8_MAX).reshape(1).contiguous()
+      scale = descale.reciprocal()
+      # The packed buffers are auxiliary, non-differentiable inputs to FA. Its
+      # custom backward returns physical-unit gradients directly to xq/xk.
+      return (x * scale).clamp(-FP8_MAX, FP8_MAX).cast(dtypes.fp8e4m3).contiguous(), descale
+    pre_scaled_fp8 = q_fp8 is not None or k_fp8 is not None
+    if pre_scaled_fp8:
+      assert q_fp8 is not None and k_fp8 is not None, "prequantized FP8 attention requires both Q and K"
+      q_descale = Tensor.ones((1,), dtype=dtypes.float32, device=xq.device).contiguous()
+      k_descale = Tensor.ones((1,), dtype=dtypes.float32, device=xk.device).contiguous()
+    else:
+      q_fp8, q_descale = quantize_qk(xq, q_amax_state, q_amax_out)
+      k_fp8, k_descale = quantize_qk(xk, k_amax_state, k_amax_out)
+    grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t,
+                        single_device, arch, False, fp8_qk=True)
+    attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, xv, q_descale, k_descale,
+      fxn=functools.partial(custom_hk_fp8_fa_forward, device=single_device, arch=arch,
+                            B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
+                            pre_scaled=pre_scaled_fp8), grad_fxn=grad)[:2]
+    return attn, attn, l_vec
 
   grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=window)
 
@@ -363,6 +429,39 @@ def custom_hk_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=N
     struct.pack_into('<I', lib, rodata_off, 160000)
     lib = bytes(lib)
 
+  return UOp(Ops.PROGRAM,
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+
+@functools.cache
+def custom_hk_fp8_fa_forward(o:UOp, l_vec:UOp, q_saved:UOp, k_saved:UOp, q:UOp, k:UOp, v:UOp,
+                             q_descale:UOp, k_descale:UOp, *, device:str, arch:str,
+                             B:int, N:int, H:int, H_KV:int, D:int, pre_scaled:bool=False):
+  """Causal FA with native E4M3 QK MFMA, FP32 softmax/LSE, and BF16 PV/output."""
+  assert arch == "gfx950", f"FP8 Flash Attention requires gfx950, got {arch}"
+  assert q_saved.dtype == k_saved.dtype == v.dtype == o.dtype == dtypes.bfloat16
+  assert q.dtype == k.dtype == dtypes.fp8e4m3
+  assert q_descale.dtype == k_descale.dtype == dtypes.float32
+  assert math.prod(q_descale.shape) == math.prod(k_descale.shape) == 1
+  code = (pathlib.Path(__file__).parent / "fa_fwd_causal.cpp").read_text()
+  compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4",
+                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math", "-DATTN_FP8=1", "-DATTN_SINK=0", "-DWINDOW=0",
+                  f"-DATTN_FP8_PRE_SCALED={int(pre_scaled)}",
+                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}"]
+  Q_BLOCK_SIZE, NUM_THREADS = 32, 512
+  thread_idx = UOp.special(NUM_THREADS, "lidx0")
+  block_idx_x = UOp.special(H, "gidx0")
+  block_idx_y = UOp.special(math.ceil((N // Q_BLOCK_SIZE) / 8), "gidx1")
+  block_idx_z = UOp.special(B, "gidx2")
+  mem = B*N*(H*D*(q.dtype.itemsize + o.dtype.itemsize) + H_KV*D*(k.dtype.itemsize + v.dtype.itemsize)) + B*H*N*4
+  sink = UOp.sink(o.base, l_vec.base, q_saved.base, k_saved.base, q.base, k.base, v.base, q_descale.base, k_descale.base,
+                  thread_idx, block_idx_x, block_idx_y, block_idx_z,
+                  arg=KernelInfo(name="custom_fp8_qk_fa_forward", estimates=Estimates(ops=2*B*H*N*N*D, lds=mem, mem=mem)))
+  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
+  if not getenv("NO_HIPCC"):
+    lib = bytearray(lib)
+    rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
+    struct.pack_into('<I', lib, rodata_off, 160000)
+    lib = bytes(lib)
   return UOp(Ops.PROGRAM,
              src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 

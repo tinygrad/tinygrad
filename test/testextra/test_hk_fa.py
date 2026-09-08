@@ -4,7 +4,8 @@ from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.engine.jit import TinyJit
 import numpy as np
 
-from extra.thunder.amd.fa import custom_asm_fa_forward, custom_fa_forward, custom_hk_fa_forward, flash_attention
+from extra.models.llama import precompute_freqs_cis
+from extra.thunder.amd.fa import custom_asm_fa_forward, custom_fa_forward, custom_hk_fa_forward, flash_attention, fused_qkv_rope
 
 def assert_allclose(cmp:Tensor, ref:Tensor, **kwargs) -> None:
   if Device.DEFAULT == "NULL": Tensor.realize(cmp, ref)
@@ -42,6 +43,57 @@ class TestFA(unittest.TestCase):
     ref = q.scaled_dot_product_attention(k, v, is_causal=True, enable_gqa=True).float().transpose(1, 2)
 
     assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
+
+  def test_fp8_qk_fa_forward_backward_mlperf(self):
+    """E4M3 QK MFMA must preserve finite outputs and BF16-training gradients."""
+    if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("FP8 FA requires gfx950")
+    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
+    Tensor.manual_seed(11)
+    with Context(DEBUG=0):
+      base_q = (Tensor.randn(B, N, H, D) * 0.12).bfloat16().contiguous().realize()
+      base_k = (Tensor.randn(B, N, H_KV, D) * 0.12).bfloat16().contiguous().realize()
+      base_v = (Tensor.randn(B, N, H_KV, D) * 0.12).bfloat16().contiguous().realize()
+      do = (Tensor.randn(B, N, H, D) * 0.1).bfloat16().contiguous().realize()
+
+    def run(fp8_qk:bool):
+      q, k, v = (x.detach().clone().contiguous().realize() for x in (base_q, base_k, base_v))
+      out, _, lse = flash_attention(q, k, v, is_causal=True, fp8_qk=fp8_qk)
+      out.backward(do)
+      Tensor.realize(out, lse, q.grad, k.grad, v.grad)
+      return out, lse, q.grad, k.grad, v.grad
+
+    fp8, ref = run(True), run(False)
+    for x in fp8: self.assertTrue(x.float().isfinite().all().item())
+    assert_allclose(fp8[0], ref[0], atol=2e-3, rtol=2e-2)
+    assert_allclose(fp8[1], ref[1], atol=2e-3, rtol=1e-3)
+    assert_allclose(fp8[2], ref[2], atol=5e-4, rtol=5e-2)
+    assert_allclose(fp8[3], ref[3], atol=5e-4, rtol=5e-2)
+    assert_allclose(fp8[4], ref[4], atol=3e-3, rtol=2e-2)
+
+  def test_fp8_qk_fused_rope_forward_backward_mlperf(self):
+    """The fused RoPE writer must produce usable FP8 Q/K while preserving BF16 backward."""
+    if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("FP8 FA requires gfx950")
+    B, N, H, H_KV, D, GROUP = 2, 8192, 32, 8, 128, 4
+    Tensor.manual_seed(13)
+    with Context(DEBUG=0):
+      base = (Tensor.randn(B, N, H_KV * (GROUP + 2) * D) * 0.12).bfloat16().contiguous().realize()
+      freqs = precompute_freqs_cis(D, N * 2).cast(dtypes.bfloat16).clone().realize()
+      do = (Tensor.randn(B, N, H, D) * 0.1).bfloat16().contiguous().realize()
+
+    def run(prequantized:bool):
+      x = base.detach().clone().contiguous().realize()
+      q, k, v, *qk8 = fused_qkv_rope(x, freqs, H, H_KV, D, prequantize_fp8=prequantized)
+      out, _, lse = flash_attention(q, k, v, is_causal=True, fp8_qk=True,
+                                    q_fp8=qk8[0] if prequantized else None, k_fp8=qk8[1] if prequantized else None)
+      out.backward(do)
+      Tensor.realize(out, lse, x.grad)
+      return out, lse, x.grad
+
+    fused, ref = run(True), run(False)
+    for x in fused: self.assertTrue(x.float().isfinite().all().item())
+    assert_allclose(fused[0], ref[0], atol=2e-3, rtol=2e-2)
+    assert_allclose(fused[1], ref[1], atol=2e-3, rtol=1e-3)
+    assert_allclose(fused[2], ref[2], atol=1e-3, rtol=6e-2)
 
   def test_asm_fa_fwd_mlperf(self):
     if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("translated FA requires gfx950")

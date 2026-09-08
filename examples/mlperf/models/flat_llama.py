@@ -247,9 +247,11 @@ class FlatTransformer:
     saves = []
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention, fused_qkv_rope
-      xq, xk, xv = fused_qkv_rope(xqkv, freqs_cis, self.n_heads, self.n_kv_heads, self.head_dim,
-                                  prequantize_grad_mxfp4=bool(MXFP4))
-      attn, *save = flash_attention(xq, xk, xv, is_causal=True, write_flat=True)
+      fp8_fa = bool(getenv("FP8_FA"))
+      xq, xk, xv, *fp8_qk = fused_qkv_rope(xqkv, freqs_cis, self.n_heads, self.n_kv_heads, self.head_dim,
+                                           prequantize_grad_mxfp4=bool(MXFP4), prequantize_fp8=fp8_fa)
+      attn, *save = flash_attention(xq, xk, xv, is_causal=True, write_flat=True,
+                                    q_fp8=fp8_qk[0] if fp8_fa else None, k_fp8=fp8_qk[1] if fp8_fa else None)
       saves.extend([xq, xk, xv, *save])
     else:
       xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
