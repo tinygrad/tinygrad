@@ -183,7 +183,7 @@ def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
 def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink,
-                 window=0, fp8_qk=False, asm_fp8=False):
+                 window=0, fp8_qk=False, asm_fp8=False, pre_scaled_fp8=False):
   def grad(dou:UOp, ker:UOp) -> tuple:
     do = Tensor(dou, device=dou.device)
     attn = Tensor(ker.src[1].after(ker), device=ker.src[1].device)
@@ -191,17 +191,32 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     xq = Tensor(ker.src[3], device=ker.src[3].device)
     xk = Tensor(ker.src[4], device=ker.src[4].device)
     xv = Tensor(ker.src[5], device=ker.src[5].device)
-    if fp8_qk:
-      xv = Tensor(ker.src[7], device=ker.src[7].device)
-      # Q/K are explicitly kept as BF16 custom-op inputs for backward.  Using
-      # them directly avoids two dequantization passes per layer and gives the
-      # BF16 backward kernel the exact forward inputs rather than rounded FP8.
-      xq_bwd, xk_bwd = xq, xk
-    else:
-      xq_bwd, xk_bwd = xq, xk
-
     use_asm_bwd = getenv("ASM_FA", 1) and getenv("ASM_FA_BWD", 1) and window == 0 and arch == "gfx950" and not has_sink and \
       (B_local, N, H_local, H_KV_local, D) == (2, 8192, 32, 8, 128)
+    matched_fp8 = fp8_qk and pre_scaled_fp8 and use_asm_bwd
+    xq_bwd, xk_bwd = xq, xk
+    if fp8_qk:
+      def input_tensor(idx:int) -> Tensor: return Tensor(ker.src[idx], device=ker.src[idx].device)
+      q8, k8, xv = input_tensor(5), input_tensor(6), input_tensor(7)
+      # BF16 scores from the original Q/K do not share the FP8 forward normalizer.
+      # exp(score_bf16 - lse_fp8) can exceed one by arbitrarily large factors.
+      if asm_fp8: xv = (input_tensor(10).float() * input_tensor(11)).bfloat16().contiguous()
+      if matched_fp8:
+        # Widening E4M3 is exact. The assembly variant uses unit exp2 score scale
+        # and accounts for the fused RoPE operand scale in physical dQ/dK.
+        xq_bwd, xk_bwd = q8.bfloat16().contiguous(), k8.bfloat16().contiguous()
+      else:
+        # General descales and the HIP backward path need a normalizer matching
+        # their physical BF16 operands. Recompute both O and LSE for this fallback.
+        inv_scale = (D**-0.5 * math.log2(math.e))**-0.5
+        qs, ks = (inv_scale, inv_scale) if pre_scaled_fp8 else (input_tensor(8), input_tensor(9))
+        xq_bwd, xk_bwd = (q8.float()*qs).bfloat16().contiguous(), (k8.float()*ks).bfloat16().contiguous()
+        attn = _sharded_empty_like(xq, axis=shard_axis)
+        l_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
+        attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq_bwd, xk_bwd, xv,
+          fxn=functools.partial(custom_fa_forward, device=single_device, arch=arch,
+                                B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, has_sink=False))[:2]
+
     dq = _sharded_empty((B, H, N, D), xq, axis=shard_axis_t)
     GROUP_SIZE = H_local // H_KV_local
     HEADS_PER_WG = 2 if D == 128 and GROUP_SIZE % 2 == 0 else 1
@@ -226,7 +241,8 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
 
     if use_asm_bwd:
       dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, xq_bwd, xk_bwd, xv, do, l_vec, delta_vec,
-        fxn=functools.partial(custom_asm_fa_backward, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
+        fxn=functools.partial(custom_asm_fa_backward, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
+                              pre_scaled_fp8=matched_fp8))[:3]
       dq_out = _sharded_empty((B, N, H, D), xq, axis=shard_axis)
       dq = Tensor.custom_kernel(dq_out, dq,
         fxn=functools.partial(custom_asm_fa_backward_shuffle, B=B_local, N=N, H=H_local, D=D))[0]
@@ -321,7 +337,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       k_fp8, k_descale = quantize_qk(xk, k_amax_state, k_amax_out)
     asm_fp8 = bool(getenv("ASM_FP8_FA"))
     grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t,
-                        single_device, arch, False, fp8_qk=True, asm_fp8=asm_fp8)
+                        single_device, arch, False, fp8_qk=True, asm_fp8=asm_fp8, pre_scaled_fp8=pre_scaled_fp8)
     if asm_fp8:
       from extra.thunder.amd.asm_fa_fp8 import custom_asm_fp8_fa_forward
       v_fp8, v_descale = quantize_qk(xv, None, None)
@@ -377,7 +393,7 @@ def custom_asm_fa_backward_pre(o:UOp, do:UOp, delta:UOp, *, B:int, N:int, H:int,
 
 @functools.cache
 def custom_asm_fa_backward(dq_acc:UOp, dk_expanded:UOp, dv_expanded:UOp, q:UOp, k:UOp, v:UOp, do:UOp, lse:UOp, delta:UOp,
-                           *, B:int, N:int, H:int, H_KV:int, D:int):
+                           *, B:int, N:int, H:int, H_KV:int, D:int, pre_scaled_fp8:bool=False):
   from extra.thunder.amd.asm_fa_bwd import build_kernel
   assert (B, N, H, H_KV, D) == (2, 8192, 32, 8, 128)
   threads = UOp.special(256, "lidx0")
@@ -390,9 +406,9 @@ def custom_asm_fa_backward(dq_acc:UOp, dk_expanded:UOp, dv_expanded:UOp, q:UOp, 
                   v.flatten().index(zero).load(), do.flatten().index(zero).load(), lse.flatten().index(zero).load(),
                   delta.flatten().index(zero).load(),
                   lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
-                  arg=KernelInfo(name="asm_fa_bwd_main_bf16_causal_2_8192_32_8_128",
+                  arg=KernelInfo(name="asm_fa_bwd_main_" + ("fp8_matched_" if pre_scaled_fp8 else "bf16_") + "causal_2_8192_32_8_128",
                                  estimates=Estimates(ops=5*B*H*N*N*D)))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, H_KV, D)))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, H_KV, D, pre_scaled_fp8)))))
 
 @functools.cache
 def custom_asm_fa_backward_shuffle(dq:UOp, dq_acc:UOp, *, B:int, N:int, H:int, D:int):

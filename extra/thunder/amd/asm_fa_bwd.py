@@ -1,9 +1,14 @@
 # ruff: noqa: E501,F403,F405
 """gfx950 BF16 causal Flash Attention main backward translated from AMD Aiter ISA."""
+import math, struct
 from tinygrad.runtime.autogen.amd.cdna.ins import *
 
-def build_kernel(B: int, N: int, H: int, H_KV: int, D: int):
+def build_kernel(B: int, N: int, H: int, H_KV: int, D: int, pre_scaled_fp8: bool = False):
   assert (B, N, H, H_KV, D) == (2, 8192, 32, 8, 128), f'unsupported FA shape {(B, N, H, H_KV, D)}'
+  # FP8 operands already contain sqrt(temperature * log2(e)). Reconstruct scores
+  # with unit exp2 scale, and convert dQ/dK back to physical units with temperature / operand_scale.
+  grad_scale = D**-0.5 / math.sqrt(D**-0.5 * math.log2(math.e)) if pre_scaled_fp8 else D**-0.5
+  grad_scale_bits = struct.unpack("<I", struct.pack("<f", grad_scale))[0]
   return [
     s_and_b32(s[1], s[1], LIT, 65535),
     s_load_dwordx2(s[32:33], s[0:1], s[0], 0, 0, 0, 0, 1),
@@ -15,7 +20,7 @@ def build_kernel(B: int, N: int, H: int, H_KV: int, D: int):
     s_load_dwordx2(s[20:21], s[0:1], s[0], 48, 0, 0, 0, 1),
     s_load_dwordx2(s[24:25], s[0:1], s[0], 56, 0, 0, 0, 1),
     s_load_dwordx2(s[28:29], s[0:1], s[0], 64, 0, 0, 0, 1),
-    s_mov_b32(s[47], LIT, 0x3db504f3),
+    s_mov_b32(s[47], LIT, grad_scale_bits),
     s_mov_b32(s[48], LIT, 0x3fb8aa3b),
     s_mov_b32(s[78], LIT, 256),
     s_mov_b32(s[5], LIT, 8192),
@@ -221,7 +226,7 @@ def build_kernel(B: int, N: int, H: int, H_KV: int, D: int):
     v_readfirstlane_b32_e32(v[77], v[23]),
     s_nop(3),
     v_mov_b32_e32(v[20], s[47]),
-    v_mul_f32_e32(v[20], s[48], v[20]),
+    v_mov_b32_e32(v[20], 1.0) if pre_scaled_fp8 else v_mul_f32_e32(v[20], s[48], v[20]),
     s_mov_b32(s[58], s[49]),
     s_mov_b32(s[59], 0),
     v_readfirstlane_b32_e32(v[57], v[20]),
