@@ -5,6 +5,8 @@ def _s32(x:int) -> int: return x - (1 << 32) if x & (1 << 31) else x
 def _sext(x:int, bits:int) -> int: return x - (1 << bits) if x & (1 << (bits - 1)) else x
 def _f32(x:int) -> float: return struct.unpack("f", struct.pack("I", x & 0xffffffff))[0]
 def _f32bits(x:float) -> int: return struct.unpack("I", struct.pack("f", x))[0]
+def _f16(x:int) -> float: return struct.unpack("e", struct.pack("H", x & 0xffff))[0]
+def _f16bits(x:float) -> int: return struct.unpack("H", struct.pack("e", x))[0]
 def _fmod(x:float, enc:int) -> float:
   return [-x, abs(x), -abs(x)][((enc >> 14) & 3) - 1] if (enc >> 14) & 3 else x
 
@@ -46,23 +48,37 @@ class A6XXEmulator:
     if enc & 0x1000: return enc & 0xfff
     raise NotImplementedError(f"A6XX cat3 source encoding {enc:#x}")
 
-  def _run_thread(self, global_id:int):
+  def _run_thread(self, local_id:tuple[int, int, int], group_id:tuple[int, int, int]):
     gpr, hreg, pc = [0] * 256, [0] * 256, 0
-    gpr[0] = gpr[48 * 4] = global_id
-    if (localid:=((self.regs.get(0xb997, 0) >> 24) & 0xff)) < 64: gpr[localid * 4] = global_id
+    config = self.regs.get(0xb997, 0)
+    if (wgid:=config & 0xff) < 0xfc: gpr[wgid:wgid + 3] = group_id
+    if (lid:=(config >> 24) & 0xff) < 0xfc: gpr[lid:lid + 3] = local_id
+    global_id = group_id[0] * (((self.regs[0xb990] >> 2) & 0x3ff) + 1) + local_id[0]
     while pc * 8 < len(self.shader):
       ins = struct.unpack_from("Q", self.shader, pc * 8)[0]
       cat, dst = (ins >> 61) & 0x7, (ins >> 32) & 0xff
       if cat == 0:
-        if (ins >> 55) & 0xf == 6: break
+        op = (ins >> 55) & 0x3f
+        if op == 1:
+          if gpr[0xf8]:
+            pc += _s32(ins & 0xffffffff)
+            continue
+        elif op == 2:
+          pc += _s32(ins & 0xffffffff)
+          continue
+        elif op == 6: break
       elif cat == 1:
         src_type, dst_type, mode = (ins >> 50) & 0x7, (ins >> 46) & 0x7, (ins >> 53) & 0x3
         src_file = hreg if src_type in (0, 2, 4, 6) else gpr
-        src = ins & 0xffffffff if mode == 2 else self.constants[ins & 0x7ff] if mode == 1 else src_file[ins & 0xff]
-        if src_type in (2, 4): src &= 0xffff
-        if src_type == 4: src = _sext(src, 16)
-        if src_type == 5: src = _s32(src)
-        (hreg if dst_type in (0, 2, 4, 6) else gpr)[dst] = _u32(src)
+        dst_file = hreg if dst_type in (0, 2, 4, 6) else gpr
+        for rpt in range(((ins >> 40) & 0x3) + 1):
+          srcidx = (ins & 0xff) + (rpt if (ins >> 43) & 1 else 0)
+          src = ins & 0xffffffff if mode == 2 else self.constants[ins & 0x7ff] if mode == 1 else src_file[srcidx]
+          if src_type != dst_type:
+            val = [_f16(src), _f32(src), src & 0xffff, src, _sext(src & 0xffff, 16), _s32(src), src & 0xff, _sext(src & 0xff, 8)][src_type]
+            src = [_f16bits, _f32bits, lambda x:int(x) & 0xffff, lambda x:_u32(int(x)), lambda x:int(x) & 0xffff,
+                   lambda x:_u32(int(x)), lambda x:int(x) & 0xff, lambda x:int(x) & 0xff][dst_type](val)
+          dst_file[dst + rpt] = _u32(src)
       elif cat == 2:
         full, conv = bool((ins >> 52) & 1), bool((ins >> 46) & 1)
         op = (ins >> 53) & 0x3f
@@ -82,6 +98,10 @@ class A6XXEmulator:
           elif op == 0x14:
             cond = (ins >> 48) & 0x7
             out = int([a < b, a <= b, a > b, a >= b, a == b, a != b][cond])
+          elif op == 0x15:
+            cond, sa, sb = (ins >> 48) & 0x7, _s32(a), _s32(b)
+            out = int([sa < sb, sa <= sb, sa > sb, sa >= sb, sa == sb, sa != sb][cond])
+          elif op == 0x32: out = a * b
           elif op == 0x38: out = _s32(a) >> (b & 31)
           elif op == 0x37: out = a >> (b & 31)
           elif op == 0x36: out = a << (b & 31)
@@ -89,14 +109,26 @@ class A6XXEmulator:
           (hreg if full == conv and dst <= 0xf7 else gpr)[dst + rpt] = _u32(out)
       elif cat == 3:
         op = (ins >> 55) & 0xf
-        a = self._cat3_src(ins & 0x1fff, gpr)
-        b, c = gpr[(ins >> 47) & 0xff], self._cat3_src((ins >> 16) & 0x1fff, gpr)
-        if op == 0x9:
-          out = a if b else c
-          if os.getenv("QCOM_TRACE") and global_id < 2: print(f"thread {global_id} sel {a:#x} if {b:#x} else {c:#x} -> {out:#x}")
-        elif op == 0xa: out = (b >> (a & 31)) | c
-        else: raise NotImplementedError(f"A6XX cat3 opcode {op:#x} at {pc}")
-        gpr[dst] = _u32(out)
+        for rpt in range(((ins >> 40) & 0x3) + 1):
+          aenc = (ins & 0x1fff) + (rpt if (ins >> 43) & 1 else 0)
+          bidx = ((ins >> 47) & 0xff) + (rpt if (ins >> 15) & 1 else 0)
+          cenc = ((ins >> 16) & 0x1fff) + (rpt if (ins >> 29) & 1 else 0)
+          b, c = gpr[bidx], self._cat3_src(cenc, gpr)
+          if op == 0x3:
+            a = self.constants[aenc & 0xfff] if aenc & 0x1000 else gpr[aenc & 0xff]
+            out = (_sext(a & 0xffff, 16) * (b & 0xffff) >> 16) + c
+          elif op == 0x7:
+            a = self.constants[aenc & 0xfff] if aenc & 0x1000 else gpr[aenc & 0xff]
+            out = _f32bits(_f32(a) * _f32(b) + _f32(c))
+          elif op == 0x9:
+            a = self._cat3_src(aenc, gpr)
+            out = a if b else c
+            if os.getenv("QCOM_TRACE") and global_id < 2: print(f"thread {global_id} sel {a:#x} if {b:#x} else {c:#x} -> {out:#x}")
+          elif op == 0xa:
+            a = self._cat3_src(aenc, gpr)
+            out = (b >> (a & 31)) | c
+          else: raise NotImplementedError(f"A6XX cat3 opcode {op:#x} at {pc}")
+          gpr[dst + rpt] = _u32(out)
       elif cat == 4:
         full, conv, op = bool((ins >> 52) & 1), bool((ins >> 46) & 1), (ins >> 53) & 0x3f
         for rpt in range(((ins >> 40) & 0x3) + 1):
@@ -130,6 +162,9 @@ class A6XXEmulator:
   def exec_cs(self, groups:tuple[int, int, int]):
     cfg = self.regs[0xb990]
     local = (((cfg >> 2) & 0x3ff) + 1, ((cfg >> 12) & 0x3ff) + 1, ((cfg >> 22) & 0x3ff) + 1)
-    for z in range(groups[2] * local[2]):
-      for y in range(groups[1] * local[1]):
-        for x in range(groups[0] * local[0]): self._run_thread(x)
+    for gz in range(groups[2]):
+      for gy in range(groups[1]):
+        for gx in range(groups[0]):
+          for lz in range(local[2]):
+            for ly in range(local[1]):
+              for lx in range(local[0]): self._run_thread((lx, ly, lz), (gx, gy, gz))
