@@ -998,14 +998,10 @@ class TestAssignOrdering(unittest.TestCase):
 class TestAssignToUnrealizedView(unittest.TestCase):
   def test_copy(self):
     t = Tensor.zeros(2,2, dtype=dtypes.int).to("CPU:0").contiguous().realize()
-    c = t.to("CPU:1")  # unrealized COPY
-    self.assertIs(c.uop.base.op, Ops.COPY)
+    c = t.to("CPU:1")  # the pending transfer already owns its destination
+    self.assertIs(c.uop.base.op, Ops.AFTER)
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).to("CPU:1").contiguous().realize())
-    try:
-      self.assertEqual(c.tolist(), [[0,1],[0,1]])
-    except AssertionError:
-      # TODO: broken now
-      self.assertEqual(c.tolist(), [[0,0],[0,0]])
+    self.assertEqual(c.tolist(), [[0,1],[0,1]])
 
   def test_contiguous(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
@@ -1045,14 +1041,10 @@ class TestAssignToUnrealizedView(unittest.TestCase):
 
   def test_detach_copy(self):
     t = Tensor.zeros(2,2, dtype=dtypes.int).to("CPU:0").contiguous().realize()
-    d = t.to("CPU:1").detach()  # DETACH(unrealized COPY)
-    self.assertIs(d.uop.base.op, Ops.COPY)
+    d = t.to("CPU:1").detach()
+    self.assertIs(d.uop.base.op, Ops.AFTER)
     d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).to("CPU:1").contiguous().realize())
-    try:
-      self.assertEqual(d.tolist(), [[0,1],[0,1]])
-    except AssertionError:
-      # TODO: broken now
-      self.assertEqual(d.tolist(), [[0,0],[0,0]])
+    self.assertEqual(d.tolist(), [[0,1],[0,1]])
 
   def test_detach_contiguous(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()

@@ -1,7 +1,129 @@
 import unittest
-from tinygrad import Tensor, dtypes
+from unittest.mock import patch
+from tinygrad import Tensor, dtypes, function
+from tinygrad.tensor import transform_to_call
+from tinygrad.uop.ops import UOp, Ops, ParamArg
 
 class TestCallify(unittest.TestCase):
+  def test_no_buffer_creation_in_callify(self):
+    x = Tensor([1., 2.]).realize()
+    for precompile in (False, True):
+      @function(precompile=precompile)
+      def f(x): return x + 1
+      called = f(x)
+      roots = ((x + 2).uop.materialize(), called.uop, x.clone().uop)
+      with patch.object(UOp, "new_buffer", side_effect=AssertionError("callify created storage")), \
+           patch.object(UOp, "empty_like", side_effect=AssertionError("callify replaced storage")), \
+           patch.object(UOp, "bind_buffer", side_effect=AssertionError("callify bound storage")):
+        call, mapped = transform_to_call(UOp.sink(*roots))
+      self.assertIs(mapped[called.uop].storage_base, called.uop.storage_base)
+      self.assertIn(called.uop.storage_base, call.src[1:])
+
+  def test_unbound_store_binds_original_declaration(self):
+    buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), dtypes.float32, size=2, device="CPU"))
+    alias = Tensor(buf)
+    t = Tensor(buf.after(buf.store(buf.const_like(7.))))
+    t.callify().callify().realize()
+    self.assertEqual(t.uop.storage_base.arg.slot, buf.arg.slot)
+    self.assertFalse(t.uop.storage_base.is_unbound)
+    self.assertIs(alias.uop.buffer, t.uop.buffer)
+    self.assertEqual(t.tolist(), [7., 7.])
+    self.assertEqual(t.tolist(), [7., 7.])
+
+  def test_empty_declaration_binds(self):
+    buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), dtypes.float32, size=2, device="CPU"))
+    t = Tensor(buf).realize()
+    self.assertEqual(t.uop.arg.slot, buf.arg.slot)
+    self.assertFalse(t.uop.is_unbound)
+
+  def test_call_output_identity_and_cache(self):
+    for precompile in (False, True):
+      @function(precompile=precompile)
+      def f(x): return x + 1, x * 2
+      x = Tensor([1., 2.]).realize()
+      a, b = f(x)
+      decls = (a.uop.storage_base, b.uop.storage_base)
+      a.callify(b).realize(b)
+      self.assertEqual((a.uop.storage_base.arg.slot, b.uop.storage_base.arg.slot), tuple(d.arg.slot for d in decls))
+      self.assertEqual(a.tolist(), [2., 3.])
+      self.assertEqual(b.tolist(), [2., 4.])
+      c, d = f(x)
+      c.realize(d)
+      self.assertIsNot(a.uop.buffer, c.uop.buffer)
+      self.assertIsNot(b.uop.buffer, d.uop.buffer)
+      self.assertEqual(c.tolist(), [2., 3.])
+      self.assertEqual(d.tolist(), [2., 4.])
+
+  def test_call_read_materializes_declared_output(self):
+    for precompile in (False, True):
+      @function(precompile=precompile)
+      def f(x): return x + 1
+      x = Tensor([1., 2.]).realize()
+      y = f(x)
+      slot = y.uop.storage_base.arg.slot
+      self.assertEqual(y.tolist(), [2., 3.])
+      self.assertEqual(y.uop.storage_base.arg.slot, slot)
+      x.assign(0).realize()
+      self.assertEqual(y.tolist(), [2., 3.])
+
+  def test_output_aliases_share_materialization(self):
+    x = Tensor([1., 2.]).realize() + 1
+    y, z = x.contiguous_backward(), x.contiguous()
+    x.realize(y, z, x)
+    self.assertIs(x.uop.buffer, y.uop.buffer)
+    self.assertIs(x.uop.buffer, z.uop.buffer)
+    self.assertEqual(x.tolist(), [2., 3.])
+
+  def test_output_slots_survive_binding(self):
+    x = Tensor([1., 2.]).realize()
+    p = x.uop.param_like(1)
+    (out,) = UOp.call_with_outputs((p + 1,), x.uop, output_pos=(0,))
+    c = out.src[1]
+    bound = c.substitute({out.storage_base: out.storage_base.bind_buffer()})
+    self.assertTrue(bound.is_value_call)
+    self.assertFalse(bound.has_unbound_outputs)
+    self.assertEqual(bound.arg.output_pos, (0,))
+    self.assertEqual(Tensor(bound.call_outputs[0]).tolist(), [2., 3.])
+
+  def test_output_scoping_preserves_storage_targets(self):
+    x = Tensor([1., 2.]).realize()
+    y = x.clone()
+    x.assign(0)
+    y.realize(x)
+    self.assertEqual(y.tolist(), [1., 2.])
+    self.assertEqual(x.tolist(), [0., 0.])
+    self.assertIsNot(y.uop.buffer, x.uop.buffer)
+
+  def test_shared_output_order(self):
+    for reverse in (False, True):
+      x = Tensor([1., 2.]).realize()
+      a = (x + 1).sum()
+      b = a * 2
+      roots = (b, a) if reverse else (a, b)
+      Tensor.realize(*roots)
+      x.assign(0).realize()
+      self.assertEqual(a.item(), 5.)
+      self.assertEqual(b.item(), 10.)
+
+  def test_transfers_own_storage(self):
+    a = Tensor([1., 2.], device="CPU:0")
+    self.assertIs(a.uop.op, Ops.AFTER)
+    b = a.to("CPU:1")
+    self.assertIs(b.uop.op, Ops.AFTER)
+    self.assertIsNot(a.uop.storage_base, b.uop.storage_base)
+    c = Tensor.empty(2, device="CPU:1").assign(b).realize()
+    a.assign(0).realize()
+    self.assertEqual(b.tolist(), [1., 2.])
+    self.assertEqual(c.tolist(), [1., 2.])
+    b.assign(3).realize()
+    self.assertEqual(c.tolist(), [1., 2.])
+
+  def test_virtual_output_does_not_allocate(self):
+    t = Tensor(2.)
+    with patch.object(UOp, "new_buffer", side_effect=AssertionError("virtual storage")):
+      t.callify().realize()
+    self.assertEqual(t.item(), 2.)
+
   def test_basic(self):
     a = Tensor([1.,2,3])
     b = Tensor([4.,5,6])

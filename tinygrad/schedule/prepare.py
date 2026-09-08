@@ -113,7 +113,8 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
     if p.arg.size is not None:
       n, flat = flat_storage(a)
       if p.arg.size != n: raise TypeError(f"arg {i} shape mismatch: expected size {p.arg.size}, got {a.shape}")
-      dict_map[p] = flat
+      # Output PARAMs address storage, not padded values: padding a symbolic output view would put WHERE on a STORE destination.
+      dict_map[p] = a.storage_base.reshape((n,)) if p.arg.slot in (c.arg.output_pos or ()) else flat
     elif a.shape != ():
       raise TypeError(f"arg {i} shape mismatch: expected scalar, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
@@ -133,10 +134,10 @@ def expand_bitcast(bc:UOp) -> UOp|None:
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls with RETURNED inputs (inline the body)
-  (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.has_unbound_outputs else None),
+  (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.is_value_call else None),
 
   # resolve AFTER on RETURNED (call outputs)
-  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
+  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True, name="a"), resolve_returned_after),
 
   # resolve allreduce (must be bottom up)
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),

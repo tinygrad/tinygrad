@@ -32,14 +32,14 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     # grads align with the call's src positions (None for the body and for RETURNED outputs, wherever they are)
     def arg_grads(g):
       git = iter(g)
-      return (None,) + tuple(next(git) if not a.unsharded_base.is_unbound else None for a in k.src[1:])
+      return (None,) + tuple(None if i in (k.arg.output_pos or ()) else next(git) for i in range(len(args)))
     if ctx.op is Ops.SINK:
       real = [on_dev(g, i) for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
       return arg_grads(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return arg_grads(k.arg.grad_fxn(on_dev(ctx, 0), k))
   # the RETURNED inputs are the call outputs: their positions in the args get the output gradients from the AFTER rule
-  assert fxn.op is Ops.SINK and k.has_unbound_outputs, f"expected a CALL with unbound BUFFER outputs or a grad_fxn, got {fxn.op}"
-  ret_pos = [i for i, a in enumerate(args) if a.unsharded_base.is_unbound]
+  assert fxn.op is Ops.SINK and k.is_value_call, f"expected a value CALL or a grad_fxn, got {fxn.op}"
+  ret_pos = k.arg.output_pos
   # the body stores the outputs into output PARAMs: the values are the stored values in slot order
   values = UOp.sink(*[st.src[1] for st in fxn.src if st.op is Ops.STORE])
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
@@ -53,7 +53,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   grads = compute_gradient(values, root_grad, set(params.values()))
   # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(values.src)} if k.arg.precompile else {}
-  fwd_outs = k.unbound_outputs if k.arg.precompile else ()
+  fwd_outs = k.call_outputs if k.arg.precompile else ()
   # collect needed gradient bodies, compact unused params, create a single backward CALL
   grad_bodies = [(i, shaped_grad(grads[p], i)) for i in needed if (p:=params.get(i)) is not None and p in grads]
   bwd_body = UOp.sink(*[gb for _, gb in grad_bodies]).substitute(fwd_subs, walk=True)

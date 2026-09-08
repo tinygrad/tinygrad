@@ -527,7 +527,10 @@ class TestFunctionTuple(unittest.TestCase):
       return c
 
     def count_kernels(t:Tensor):
-      linear, _ = t.linear_with_vars()
+      # Inspect lowering without consuming the forward Tensor graph used by backward below.
+      from tinygrad.tensor import transform_to_call
+      from tinygrad.schedule import create_linear_with_vars
+      linear, _ = create_linear_with_vars(transform_to_call(UOp.sink(t.uop))[0])
       return sum((len(call.device) if isinstance(call.device, tuple) else 1)
                  for call in linear.src if call.src[0].op is Ops.SINK)
 

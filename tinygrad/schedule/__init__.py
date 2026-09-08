@@ -121,7 +121,7 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.src[0]
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo): return None
   # value calls (with unbound outputs) are inlined positionally during prepare: their bodies are not programs to schedule
-  if call.has_unbound_outputs: return None
+  if call.is_value_call: return None
   st = time.perf_counter()
   cache_key = function.key
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
@@ -181,8 +181,14 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
 ])
 
-@rewrite_group(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
-def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
+@rewrite_group(lambda _,ret,**kwargs: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
+def create_linear_with_vars(big_sink:UOp, buffer_bindings:dict[UOp, UOp]|None=None) -> tuple[UOp, dict[str, int]]:
+  # Only bind external declarations here. BUFFERs inside a body remain lexical schedule temporaries.
+  bindings = buffer_bindings if buffer_bindings is not None else {}
+  for arg in big_sink.src[1:]:
+    for b in arg.toposort(enter_calls=False):
+      if b.is_unbound and b not in bindings: bindings[b] = b.bind_buffer()
+  big_sink = big_sink.replace(src=(big_sink.src[0],)+tuple(a.substitute(bindings) for a in big_sink.src[1:]))
   # big_sink srcs are all the Tensors
   linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
 
