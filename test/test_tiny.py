@@ -31,6 +31,29 @@ class TestTiny(unittest.TestCase):
     out = Tensor.ones(16).contiguous() + Tensor.ones(16).contiguous()
     self.assertListEqual(out.tolist(), [2]*16)
 
+  def test_associative_scan(self):
+    def add(a, b): return a+b
+    self.assertListEqual(Tensor([1,2,3,4]).associative_scan(add).tolist(), [1,3,6,10])
+    self.assertListEqual(Tensor([[1,2,3],[4,5,6]]).associative_scan(add, axis=-1).tolist(), [[1,3,6],[4,9,15]])
+    self.assertListEqual(Tensor([1,2,3,4]).associative_scan(add, reverse=True).tolist(), [10,9,7,4])
+    self.assertEqual(Tensor(3).associative_scan(add).item(), 3)
+    self.assertListEqual(Tensor.empty(0).associative_scan(add).tolist(), [])
+
+    calls = 0
+    def counted_add(a, b):
+      nonlocal calls
+      calls += 1
+      return a+b
+    Tensor.empty(1024).associative_scan(counted_add)
+    self.assertLessEqual(calls, 20)
+
+  def test_associative_scan_noncommutative(self):
+    x = Tensor([[[1,1],[0,1]], [[1,0],[1,1]], [[2,0],[0,1]]])
+    self.assertListEqual(x.associative_scan(lambda a, b: a@b).tolist(),
+                         [[[1,1],[0,1]], [[2,1],[1,1]], [[4,1],[2,1]]])
+    self.assertListEqual(x.associative_scan(lambda a, b: a@b, reverse=True).tolist(),
+                         [[[2,2],[1,2]], [[2,0],[1,1]], [[2,0],[0,1]]])
+
   def test_cat(self):
     out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.zeros(8).contiguous())
     self.assertListEqual(out.tolist(), [1]*8+[0]*8)
