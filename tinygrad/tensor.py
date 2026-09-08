@@ -312,7 +312,7 @@ class Tensor(RandMixin):
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
-    self.uop:UOp = data if data.device is None or data.device == _device else data.copy_to_device(_device)
+    self.uop:UOp = data if data.device is None or data.device == _device else data.copy_to_device(_device).clone()
     # cast on the target device, the source may not hold the dtype (numpy has no fp8/bfloat16) or be able to compute it (DISK)
     if _dtype is not None: self.uop = self.uop.cast(_dtype)
 
