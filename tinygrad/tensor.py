@@ -21,7 +21,6 @@ from tinygrad.engine.realize import run_linear
 @dataclass
 class AllocCtx:
   buffer_map: dict[UOp, UOp] = field(default_factory=dict)
-  bases: set[UOp] = field(default_factory=set)
   stores: list[UOp] = field(default_factory=list)
   replacements: list[UOp] = field(default_factory=list)
   unbound: dict[UOp, UOp] = field(default_factory=dict)
@@ -36,33 +35,44 @@ def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_i
 def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
 def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
-def creation_copy_is_realized(u:UOp):
-  # all copies from disk/numpy are realized into a real buffer
-  if is_creation_device(u.src[0]): return tag_uop(u)
-
 # CONTIGUOUS and AFTER + parents are the only nodes that get updated
 add_tags = PatternMatcher([
-  (UPat(Ops.COPY, name="u"), creation_copy_is_realized),
   # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="x"), tag_uop),
-  (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
 
-def mint_tagged_storage(x:UOp):
-  if x.tag is None: return None          # untouched
-  # empty tag from rtag(()): a COPY already handled via buffer_map or merged into a parent AFTER.
-  # () is falsy but not None, so it isn't re-tagged like a bare (tag=None) node would be; just strip it here
-  if not x.tag: return x.rtag(None)
-  # a tagged CONTIGUOUS is consumed by the mint: the buffer stores its source directly
-  src = x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag(None)
-  # virtual values and DISK tensors don't get real buffers: keep the (single) annotation, drop the tag
-  if x.is_virtual or on_disk(x): return src.alu(Ops.CONTIGUOUS)
-  # if size is 0, remove the contig
-  if 0 in x.shape: return src
-  buf = x.empty_like()
-  return buf.after(buf.store(src)).replace(tag=x.tag)
+def clone_up_front(tensors:tuple["Tensor", ...]) -> None:
+  # every tensor that realizes gets explicit storage (a clone) in the Tensor graph: transform_to_call never creates buffers.
+  # DISK values stay virtual, and loads from creation devices are handled as copies, not cloned.
+  # process the roots in toposort order so a root's clone sees the storage of the roots it depends on
+  pos = {n: i for i, n in enumerate(UOp.sink(*[x.uop for x in tensors]).toposort(enter_calls=False))}
+  for x in sorted(tensors, key=lambda x: pos.get(x.uop.base, 0)):
+    # fold contiguous/copy of movement ops on a real buffer into a zero-copy buffer view before any storage decision
+    base = graph_rewrite(x.uop.base, pm_contig_mops_to_view, ctx=AllocCtx(), name="contig mops to view")
+    # peel no-op wrappers before storage decisions: DETACH and CONTIGUOUS_BACKWARD are graph-level, and a
+    # CONTIGUOUS of something that already has storage is a no-op (these mirror the early-transform strip rules)
+    while True:
+      if base.op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: base = base.src[0]
+      elif base.op is Ops.CONTIGUOUS and base.src[0].op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}:
+        base = UOp(Ops.CONTIGUOUS, (base.src[0].src[0],))  # keep the annotation, peel the wrapper inside it
+      elif base.op is Ops.CONTIGUOUS and base.src[0].op is Ops.AFTER and base.src[0].src[0].has_buffer_identity(): base = base.src[0]
+      else: break
+    # decide what the root becomes AFTER folding and peeling: storage-backed values are used directly,
+    # everything else gets a clone (a CONTIGUOUS is consumed by the clone: the buffer stores its source)
+    decide = base
+    if not base.is_virtual and not base.storage_base.has_buffer_identity(after_ok=True) and base.op is not Ops.AFTER and not on_disk(base) \
+        and not (base.op is Ops.COPY and is_creation_device(base.src[0])):
+      decide = (base.src[0] if base.op is Ops.CONTIGUOUS else base).clone()
+    if decide is not x.uop.base: _apply_map_to_tensors({x.uop.base: decide}, name="Clone Up Front")
+  # loads from creation devices (nested copies too) get their own storage up front, like everything else.
+  # copies TO DISK are the schedule's job, and a copy that is a STORE's source is implemented by that store
+  nodes = list(UOp.sink(*[x.uop for x in tensors]).toposort(enter_calls=False))
+  copies_in_stores = {st.src[1] for st in nodes if st.op is Ops.STORE}
+  copies = {u: u.clone() for u in nodes if u.op is Ops.COPY and u not in copies_in_stores
+            and not on_disk(u) and is_creation_device(u.src[0])}
+  if len(copies): _apply_map_to_tensors(copies, name="Clone Up Front")
 
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -86,6 +96,11 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   if unshard is not None: return view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:])
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
+
+pm_contig_mops_to_view = PatternMatcher([
+  # a contiguous/copy of movement ops on a real buffer is just a view of that buffer (zero-copy)
+  (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
+])
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
@@ -156,8 +171,6 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # contiguous of an already-materialized value is a no-op (tags carry over for held values)
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
-  # mint buffers for tagged values; an untagged CONTIGUOUS flows through to the scheduler, which bufferizes it
-  (UPat(GroupOp.All-{Ops.AFTER, Ops.STORE}, name="x"), mint_tagged_storage),
 ])
 
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
@@ -196,8 +209,8 @@ pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
-  # bases to realize. an AFTER already names the storage its store writes into
-  ctx = AllocCtx(bases={base for x in big_sink.src if needs_storage(base:=x.base) and base.op is not Ops.AFTER})
+  # buffers are all created in the Tensor graph up front (clone_up_front); transform_to_call only has to replace them
+  ctx = AllocCtx()
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
@@ -386,6 +399,7 @@ class Tensor(RandMixin):
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
   def callify(self, *lst:Tensor) -> Tensor:
+    clone_up_front((self,)+lst)
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
     big_sink, buffer_map = transform_to_call(big_sink)
     _apply_map_to_tensors({x:y.after(big_sink) for x,y in buffer_map.items()}, name="callify")
@@ -396,6 +410,7 @@ class Tensor(RandMixin):
     # weakness ends where storage begins
     if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
+    clone_up_front((self,)+lst)
     big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
