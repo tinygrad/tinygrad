@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes
 from tinygrad.helpers import DEBUG, DEV, getenv, mv_address, suppress_finalizing
-from tinygrad.device import Compiled, BufferSpec, LRUAllocator, Program, TinyELF
+from tinygrad.device import MMIOInterface, Compiled, BufferSpec, Allocator, Program, TinyELF
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
@@ -64,12 +64,14 @@ class CUDAProgram(Program['CUDADevice']):
       for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
 
-class CUDAAllocator(LRUAllocator['CUDADevice']):
-  def _alloc(self, size, options:BufferSpec):
+class CUDAAllocator(Allocator['CUDADevice']):
+  def _alloc(self, size:int, options:BufferSpec) -> tuple:
     check(cuda.cuCtxSetCurrent(self.dev.context))
-    if options.external_ptr: return cuda.CUdeviceptr_v2(options.external_ptr)
-    if options.host: return init_c_var(ctypes.c_void_p, lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
-    return init_c_var(cuda.CUdeviceptr, lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
+    if options.external_ptr: opaque = cuda.CUdeviceptr_v2(options.external_ptr)
+    elif options.host: opaque = init_c_var(ctypes.c_void_p, lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
+    else: opaque = init_c_var(cuda.CUdeviceptr, lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
+    return (opaque, None), MMIOInterface(opaque.value, size) if options.host else None
+
   @suppress_finalizing
   def _free(self, opaque, options:BufferSpec):
     if options.external_ptr: return
@@ -79,8 +81,8 @@ class CUDAAllocator(LRUAllocator['CUDADevice']):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     host_mem = self.alloc(len(src), BufferSpec(host=True))
     self.dev.pending_copyin.append((host_mem, len(src), BufferSpec(host=True)))
-    ctypes.memmove(host_mem, mv_address(src), len(src))
-    check(cuda.cuMemcpyHtoDAsync_v2(dest, host_mem, len(src), None))
+    ctypes.memmove(host_mem[0][0], mv_address(src), len(src))
+    check(cuda.cuMemcpyHtoDAsync_v2(dest, host_mem[0][0], len(src), None))
   def _copyout(self, dest:memoryview, src):
     CUDADevice.synchronize_system()
     check(cuda.cuCtxSetCurrent(self.dev.context))
@@ -114,7 +116,7 @@ class CUDADevice(Compiled):
       check(cuda.cuCtxEnablePeerAccess(dev.context, 0))
       CUDADevice.peer_access = True
 
-    self.pending_copyin: list[tuple[int, int, BufferSpec|None]] = []
+    self.pending_copyin: list[tuple[tuple, int, BufferSpec|None]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph

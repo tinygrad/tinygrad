@@ -302,8 +302,8 @@ def qcom_build_program(dev:QCOMDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[Q
   return cached
 
 class QCOMAllocator(HCQAllocator['QCOMDevice']):
-  def _alloc(self, size:int, opts:BufferSpec) -> HCQBuffer:
-    return self.dev._gpu_map(opts.external_ptr, size) if opts.external_ptr else self.dev._gpu_alloc(size)
+  def _alloc(self, size:int, options:BufferSpec) -> tuple:
+    return (opaque:=self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size), opaque.meta), opaque.view
 
   def _do_free(self, opaque, options:BufferSpec): self.dev._gpu_free(opaque)
 

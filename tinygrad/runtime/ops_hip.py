@@ -1,6 +1,6 @@
 import ctypes
 from tinygrad.helpers import mv_address, getenv, suppress_finalizing
-from tinygrad.device import Compiled, LRUAllocator, BufferSpec, Program, TinyELF
+from tinygrad.device import Compiled, Allocator, BufferSpec, Program, TinyELF
 from tinygrad.runtime.autogen import hip
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.support.c import init_c_var, init_c_struct_t
@@ -56,10 +56,11 @@ class HIPProgram(Program[HIPDevice]):
       check(hip.hipEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), self.dev.time_event_st, self.dev.time_event_en))
       return ret.value * 1e-3
 
-class HIPAllocator(LRUAllocator[HIPDevice]):
-  def _alloc(self, size:int, options:BufferSpec):
+class HIPAllocator(Allocator[HIPDevice]):
+  def _alloc(self, size:int, options:BufferSpec) -> tuple:
     check(hip.hipSetDevice(self.dev.device_id))
-    return init_c_var(hip.hipDeviceptr_t, lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
+    return (init_c_var(hip.hipDeviceptr_t, lambda x: check(hip.hipMalloc(ctypes.byref(x), size))), None), None
+
   def _free(self, opaque, options:BufferSpec): check(hip.hipFree(opaque))
   def _copyin(self, dest, src: memoryview):
     check(hip.hipSetDevice(self.dev.device_id))

@@ -291,8 +291,8 @@ def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVPro
   return cached
 
 class NVAllocator(HCQAllocator['NVDevice']):
-  def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host, zero=options.zero)
+  def _alloc(self, size:int, options:BufferSpec) -> tuple:
+    return (opaque:=self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host, zero=options.zero), opaque.meta), opaque.view
 
   def _do_free(self, opaque:HCQBuffer, options:BufferSpec): self.dev.iface.free(opaque)
 
@@ -661,9 +661,9 @@ class NVDevice(HCQ2Compiled):
     return [x.data for x in infos]
 
   def _push(self, fifo:GPFifo, cmds:list[int]): # a pushbuffer built in python: channel setup and video decode
-    (buf:=self.rt_view(len(cmds) * 4))._buf.cpu_view().view(fmt='I')[:] = array.array('I', cmds)
+    (buf:=self.rt_view(len(cmds) * 4)).host.view(fmt='I')[:] = array.array('I', cmds)
 
-    put = fifo.put_value._buf.view.view(fmt='Q')
+    put = fifo.put_value.host.view(fmt='Q')
     fifo.ring._buf.cpu_view().view(fmt='Q')[put[0] % fifo.entries] = buf._buf.va_addr | (len(cmds) << 42) | (1 << 41)
     fifo.gpput._buf.cpu_view().view(fmt='I')[0] = (put[0] + 1) % fifo.entries
 
@@ -672,7 +672,7 @@ class NVDevice(HCQ2Compiled):
     put[0] += 1
 
   def _submit_cmds(self, fifo:GPFifo, *cmds:int): # runs cmds once everything already submitted is done, then bumps the timeline
-    tl, addr = self.timeline._buf.cpu_view().view(fmt='Q'), self.timeline._buf.va_addr
+    tl, addr = self.timeline.host.view(fmt='Q'), self.timeline._buf.va_addr
     self._push(fifo, nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(addr), *data64_le(tl[1]),
                          nv_flags("NVC56F_SEM_EXECUTE", operation="acq_circ_geq", payload_size="64bit")) + list(cmds) +
                      nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(addr), *data64_le(tl[1] + 1),

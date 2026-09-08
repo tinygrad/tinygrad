@@ -30,7 +30,7 @@ class HCQGraph(MultiGraphRunner):
     for runtime in self.runtimes:
       if runtime is None: continue
       kernargs_size[runtime.dev] += round_up(runtime.kernargs_alloc_size, 16)
-    self.kernargs_bufs: dict[Compiled, HCQBuffer] = {d:d.allocator._alloc(max(sz, 1), BufferSpec(cpu_access=True)) for d,sz in kernargs_size.items()}
+    self.kernargs_bufs: dict[Compiled, HCQBuffer] = {d:d.allocator._alloc(max(sz, 1), BufferSpec(cpu_access=True))[0][0] for d,sz in kernargs_size.items()}
 
     # Fill initial arguments.
     self.ji_args: dict[int, HCQArgsState] = {}

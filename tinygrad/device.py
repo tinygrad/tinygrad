@@ -7,6 +7,7 @@ from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, G
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up
 from tinygrad.dtype import DType, _to_np_dtype
+from tinygrad.runtime.support.memory import MMIOInterface
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -101,11 +102,12 @@ class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
                initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
-    self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = Device.canonicalize(device), size, dtype, options, offset, 0
-    self._bufs: dict[str, Any] = {}
+    self.device, self.size, self.dtype, self.offset, self.allocated_views, self._base = Device.canonicalize(device), size, dtype, offset, 0, base
+    self.options = options if options is not None else BufferSpec()
+    self._storage:tuple|None = None
+    self._maps:dict[str, tuple] = {}
     if base is None:
       assert offset == 0, "base buffers can't have offset"
-      self._base = None
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
@@ -114,56 +116,76 @@ class Buffer:
     else:
       assert base._base is None, "base can't have a base"
       assert self.device == base.device, "base must have the same device"
-      self._base = base
     if preallocate: self.allocate()
+
+  @suppress_finalizing
+  def __del__(self): self._storage is None or self.deallocate()
+
+  def __repr__(self):
+    return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
+           (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options != BufferSpec() else "") + ">"
+
   @property
   def base(self) -> Buffer: return self._base if self._base is not None else self
+  @functools.cached_property
+  def allocator(self) -> Allocator: return self.base.allocator if self._base is not None else Device[self.device].allocator
   @property
-  def _buf(self) -> Any: return self._bufs[self.device]
-  # check if the underlying buffer is allocated and the current buffer/view is initialized
-  def is_initialized(self) -> bool: return self.is_allocated() and self.device in self._bufs
-  # check if the underlying buffer is allocated, possibly from the base object
-  def is_allocated(self) -> bool: return self.base.is_allocated() if self._base is not None else self.device in self._bufs
-  def get_buf(self, device: str) -> Any:
-    if device not in self._bufs and (device:=Device.canonicalize(device)) not in self._bufs:
+  def _buf(self) -> Any: return self.get_storage()[0][0]
+  @property
+  def host(self) -> MMIOInterface: return unwrap(self.get_storage()[1])
+  @property
+  def meta(self) -> Any: return self.get_storage()[0][1]
+  @property
+  def nbytes(self): return self.size * self.dtype.itemsize
+
+  def get_storage(self, device:str|None=None) -> tuple:
+    storage = unwrap(self.ensure_allocated()._storage)
+    device = Device.canonicalize(device) if device is not None else self.device
+    if device == self.device: return storage
+    if device not in self._maps:
       allocator = Device[device].allocator
-      if device == self.device: self.ensure_allocated()
-      elif self._base is not None: self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
-      else: self._bufs[device] = allocator.map(self.ensure_allocated())
-    return self._bufs[device]
-  def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_initialized() else self
+      self._maps[device] = (allocator._offset(self.base.get_buf(device), self.nbytes, self.offset), None) if self._base else allocator.map(self)
+    return self._maps[device], storage[1]
+
+  def get_buf(self, device:str) -> Any: return self.get_storage(device)[0][0]
+
+  def is_allocated(self) -> bool: return self._storage is not None and (self._base is None or self._base_storage is self.base._storage)
+  def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
-    assert not self.is_initialized(), "can't allocate already allocated buffer"
+    assert not self.is_allocated(), "can't allocate already allocated buffer"
     if DEBUG >= 7: print(f"buffer: allocate {self.nbytes} bytes on {self.device}")
-    if not self.device.startswith("NULL") and self.size > MAX_BUFFER_SIZE > 0 and (self.options is None or self.options.external_ptr is None):
+    if not self.device.startswith("NULL") and self.size > MAX_BUFFER_SIZE > 0 and self.options.external_ptr is None:
       raise RuntimeError(f"buffer of size {self.size/1e6:.2f}M is too large")
-    self.allocator:Allocator = Device[self.device].allocator
-    if external_ptr is not None:
-      self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferSpec(external_ptr=external_ptr)
+    if external_ptr is not None: self.options = replace(self.options, external_ptr=external_ptr)
     if self._base is not None:
-      self._base.ensure_allocated()
-      self._base.allocated_views += 1
-      self._bufs[self.device] = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
+      (buf, meta), host = self.base.get_storage()
+      mapping = self.allocator._offset(buf, self.nbytes, self.offset), meta
     else:
-      self._bufs[self.device] = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
-      if not self.device.startswith("DISK") and (self.options is None or self.options.external_ptr is None):
+      if opaque is not None: self.options = replace(self.options, nolru=True)
+      mapping, host = ((opaque, None), None) if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
+    storage = mapping, host.view(self.offset, self.nbytes, fmt='B') if host is not None else None
+    if self._base is None:
+      if not self.device.startswith("DISK") and self.options.external_ptr is None:
         GlobalCounters.mem_used += self.nbytes
         GlobalCounters.mem_used_per_device[self.device] += self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", self.trace_num, {"dtype":self.dtype, "sz":self.size}))
+    elif self._storage is None: self.base.allocated_views += 1
+    self._storage, self._maps, self._base_storage = storage, {}, self.base._storage if self._base else None
     return self
+
   def deallocate(self):
-    assert self.device in self._bufs, "buffer must be allocated to deallocate"
+    assert self._storage is not None, "buffer must be allocated to deallocate"
     if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None:
-      if GlobalCounters is not None and not self.device.startswith("DISK") and (self.options is None or self.options.external_ptr is None):
+      if GlobalCounters is not None and not self.device.startswith("DISK") and self.options.external_ptr is None:
         GlobalCounters.mem_used -= self.nbytes
         GlobalCounters.mem_used_per_device[self.device] -= self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", self.trace_num))
-      for dev, mb in self._bufs.items():
-        if dev != self.device: Device[dev].allocator._unmap(mb)
-      self.allocator.free(self._buf, self.nbytes, self.options)
-    elif self._base is not None: self._base.allocated_views -= 1
-    self._bufs.clear()
+      for dev, mb in self._maps.items(): Device[dev].allocator._unmap(mb[0])
+      self.allocator.free(self._storage, self.nbytes, self.options)
+    else: self.base.allocated_views -= 1
+    self._storage, self._maps, self._base_storage = None, {}, None
+
   def __reduce_ex__(self, protocol):
     buf:bytearray|pickle.PickleBuffer|None = None
     if self._base is not None:
@@ -172,37 +194,40 @@ class Buffer:
     if self.is_allocated():
       buf = pickle.PickleBuffer(self.as_memoryview()) if protocol >= 5 else bytearray(self.as_memoryview())
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
+
   @property
   def trace_num(self) -> int:
     if not hasattr(self, '_trace_num'): self._trace_num = len(Buffer.profile_events)
     return self._trace_num
-  @property
-  def nbytes(self): return self.size*self.dtype.itemsize
-  @suppress_finalizing
-  def __del__(self): (self.device not in self._bufs) or self.deallocate()
-  def __repr__(self):
-    return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
-           (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
+
+  def _host_mv(self) -> memoryview|None:
+    if self.is_allocated() and hasattr(host:=self.get_storage()[1], 'mv'): return unwrap(host).view(fmt='B').mv
+    if self.is_allocated() and hasattr(self.allocator, '_as_buffer'): return self.allocator._as_buffer(self._buf)
+    return None
+
   def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False, no_sync=False) -> memoryview:
     # zero copy with as_memoryview (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer'):
+    if (force_zero_copy or allow_zero_copy) and (mv:=self._host_mv()) is not None:
       if not no_sync: self.allocator.dev.synchronize()
-      if (mv:=self.allocator._as_buffer(self._buf)) is not None: return mv
+      return mv
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
     Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv
+
   def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
     import numpy as np
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     return np.frombuffer(self.as_memoryview(), dtype=_to_np_dtype(self.dtype))
+
   def copy_from(self, src:Buffer) -> Buffer:
     assert self.nbytes == src.nbytes, f"copy size mismatch, {self.nbytes} != {src.nbytes}"
-    assert self.is_initialized() and src.is_initialized(), "copy requires allocated buffers"
+    assert self.is_allocated() and src.is_allocated(), "copy requires allocated buffers"
     from tinygrad.engine.realize import run_linear
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self), UOp.from_buffer(src)
     run_linear(UOp(Ops.LINEAR, src=(su.param_like(1).copy_to_device(self.device).call(du, su),)), update_stats=False)
     return self
+
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
     return Buffer(self.device, size, dtype, base=self.base, offset=self.offset+offset)
@@ -211,54 +236,46 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator(Generic[DeviceType]):
+  lru = True
+
   def __init__(self, dev:DeviceType, supports_copy_from_disk:bool=True, supports_transfer:bool=True):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
+    self.cache:dict[tuple[int, BufferSpec|None], list[tuple]] = defaultdict(list)
     self.supports_copy_from_disk, self.supports_transfer = supports_copy_from_disk, supports_transfer
-  # overridden in LRUAllocator
-  def alloc(self, size:int, options:BufferSpec|None=None):
-    assert size > 0, f"alloc size must be positive, getting {size}"
-    try: return self._alloc(size, options if options is not None else self.default_buffer_spec)
-    except (RuntimeError, MemoryError) as e: raise MemoryError(f"Allocation of {size_to_str(size)} failed on {self.dev.device}. "
-                                                               f"Used: {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
-  def free(self, opaque, size:int, options:BufferSpec|None=None):
-    self._free(opaque, options if options is not None else self.default_buffer_spec)
 
-  def map(self, buf:Buffer): return self._map(buf.ensure_allocated()._buf)
+  def alloc(self, size:int, options:BufferSpec|None=None) -> tuple:
+    assert size > 0, f"alloc size must be positive, getting {size}"
+    if len(c:=self.cache[(size, options)]): return c.pop()
+    spec = options if options is not None else self.default_buffer_spec
+    try: return self._alloc(size, spec)
+    except (RuntimeError, MemoryError): self.free_cache()
+    try: return self._alloc(size, spec)
+    except (RuntimeError, MemoryError) as e: raise MemoryError(f"Allocation of {size_to_str(size)} failed on {self.dev.device}. "
+                                                            f"Used: {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
+
+  def free(self, storage:tuple, size:int, options:BufferSpec|None=None):
+    spec = options if options is not None else self.default_buffer_spec
+    if LRU and self.lru and not (spec.nolru or spec.zero) and spec.external_ptr is None: self.cache[(size, options)].append(storage)
+    else: self._free(storage[0][0], spec)
+
+  def free_cache(self):
+    for (_, options), storages in self.cache.items():
+      for storage in storages: self._free(storage[0][0], options if options is not None else self.default_buffer_spec)
+      storages.clear()
+
+  def map(self, buf:Buffer) -> tuple: return self._map(buf.ensure_allocated()._buf)
 
   # implemented by the runtime
-  def _alloc(self, size:int, options:BufferSpec): raise NotImplementedError("need alloc")
+  def _alloc(self, size:int, options:BufferSpec) -> tuple: raise NotImplementedError("need alloc")
   def _free(self, opaque, options:BufferSpec): pass  # if opaque is a Python object, you don't need a free
   def _copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def _copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
-  def _map(self, buf): raise NotImplementedError("need map")
+  def _map(self, buf) -> tuple: raise NotImplementedError("need map")
   def _unmap(self, mb): pass  # default no-op; override if _map allocates iface-side state
-  # def _as_buffer(self, src) -> memoryview:
   def _offset(self, buf, size:int, offset:int): raise NotImplementedError("need offset")
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
   def _encode_decode(self, bufout, bufin, desc, hist:list, shape:tuple[int,...], frame_pos:int): raise NotImplementedError("need encdec") # optional
-
-class LRUAllocator(Allocator, Generic[DeviceType]):
-  """
-  The LRU Allocator is responsible for caching buffers.
-  It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
-  """
-  def __init__(self, dev:DeviceType, **kwargs):
-    self.cache: dict[tuple[int, BufferSpec|None], Any] = defaultdict(list)
-    super().__init__(dev, **kwargs)
-  def alloc(self, size:int, options:BufferSpec|None=None):
-    if len(c := self.cache[(size, options)]): return c.pop()
-    try: return super().alloc(size, options)
-    except (RuntimeError, MemoryError):
-      self.free_cache()
-      return super().alloc(size, options)
-  def free_cache(self):
-    for (sz,options),opaques in self.cache.items():
-      for opaque in opaques: super().free(opaque, sz, options)
-      opaques.clear()
-  def free(self, opaque:Any, size:int, options:BufferSpec|None=None):
-    if LRU and (options is None or (not (options.nolru or options.zero) and options.external_ptr is None)): self.cache[(size, options)].append(opaque)
-    else: super().free(opaque, size, options)
 
 class DepsTracker:
   def __init__(self):

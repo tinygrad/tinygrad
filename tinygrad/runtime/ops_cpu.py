@@ -76,18 +76,19 @@ class CPUProgram(Program['CPUDevice']):
 
 class CPUAllocator(HCQAllocator['CPUDevice']):
   def __init__(self, dev:CPUDevice): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
-  def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
+  def _alloc(self, size:int, options:BufferSpec) -> tuple:
     if options.external_ptr is not None: addr, buf = options.external_ptr, None
     elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
-    return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
+    return (opaque:=HCQBuffer(addr, size, meta=buf, view=MMIOInterface(addr, size, fmt='B'), owner=self.dev), opaque.meta), opaque.view
+
   def _as_buffer(self, src) -> memoryview: return to_mv(src.va_addr, src.size)
   def _copyin(self, dest:HCQBuffer, src:memoryview):
     self.dev.synchronize()
     ctypes.memmove(int(dest.va_addr), from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
-    dest[:] = self._as_buffer(src)[:len(dest)]
+    dest[:] = to_mv(int(src.va_addr), dest.nbytes)[:]
   def _do_map(self, buf:HCQBuffer):
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
     return HCQBuffer(buf.view.addr, buf.size, view=buf.view, owner=buf.owner)
