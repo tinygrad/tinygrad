@@ -450,6 +450,7 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's
   if b.tag is None: return None # a param, not a placeholder
 
   dev = cast(HCQ2Compiled, Device[to_tuple(b.device)[0]])
+  r:Buffer|None
 
   # device owns the placeholders it names
   if isinstance(b.tag, tuple) and b.tag[0] == "cfunc": r = cfunc_buf(*b.tag[1:])

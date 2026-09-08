@@ -1,4 +1,5 @@
 import math, unittest
+from typing import cast
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import DEV
 
@@ -34,13 +35,15 @@ class TestQCOMEmulator(unittest.TestCase):
     self.assertEqual(out.realize().tolist(), [[1.] * n])
 
   def test_random_and_convolution(self):
-    self.assertTrue(all(0 <= x < 1 for x in Tensor.rand(64, device="QCOM").realize().tolist()))
+    rnd = cast(list[float], Tensor.rand(64, device="QCOM").realize().tolist())
+    self.assertTrue(all(0 <= x < 1 for x in rnd))
     out = Tensor.ones(1, 1, 8, 8, device="QCOM").conv2d(Tensor.ones(2, 1, 3, 3, device="QCOM")).realize()
     self.assertEqual(out.tolist(), [[[[9.] * 6 for _ in range(6)] for _ in range(2)]])
 
   def test_sfu_and_select(self):
     out = Tensor([[-3.0, 2.0], [3.0, 4.0]], device="QCOM").sum(axis=1).elu().realize()
-    self.assertAlmostEqual(out.tolist()[0], math.expm1(-1.0), places=5)
-    self.assertEqual(out.tolist()[1], 7.0)
+    vals = cast(list[float], out.tolist())
+    self.assertAlmostEqual(vals[0], math.expm1(-1.0), places=5)
+    self.assertEqual(vals[1], 7.0)
 
 if __name__ == "__main__": unittest.main()

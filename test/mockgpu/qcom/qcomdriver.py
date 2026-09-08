@@ -31,8 +31,9 @@ class QCOMDriver(VirtDriver):
       if os.getenv("QCOM_TRACE"): print(f"ioctl fd={fd} request={request:#x} argp={argp:#x}")
       return self.ioctl(request, argp)
     self._ioctl_cb = cb_type(_ioctl_bridge)
-    self._ioctl_cb.__name__, self._ioctl_cb.__module__ = "ioctl", "libc"
-    libc.dll.ioctl = self._ioctl_cb
+    setattr(self._ioctl_cb, "__name__", "ioctl")
+    setattr(self._ioctl_cb, "__module__", "libc")
+    setattr(libc.dll, "ioctl", self._ioctl_cb)
 
   def open(self, name, flags, mode, virtfile):
     fd, self.next_fd = self.next_fd, self.next_fd + 1
