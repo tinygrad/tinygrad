@@ -598,7 +598,6 @@ jobs:
       DEV: MOCK+QCOM:IR3
       SKIP_SLOW_TEST: 1
       HCQ2: 1
-      HCQ_RUNTIME_DEV: PYTHON
       PYTHONPATH: .
     steps:
       - name: Checkout Code
