@@ -48,7 +48,7 @@ class A6XXEmulator:
     if enc & 0x1000: return enc & 0xfff
     raise NotImplementedError(f"A6XX cat3 source encoding {enc:#x}")
 
-  def _run_thread(self, local_id:tuple[int, int, int], group_id:tuple[int, int, int]):
+  def _run_thread(self, local_id:tuple[int, int, int], group_id:tuple[int, int, int], shared:bytearray):
     gpr, hreg, pc = [0] * 256, [0] * 256, 0
     config = self.regs.get(0xb997, 0)
     if (wgid:=config & 0xff) < 0xfc: gpr[wgid:wgid + 3] = group_id
@@ -146,6 +146,11 @@ class A6XXEmulator:
           off, width = _sext((ins >> 1) & 0x1fff, 13), 2 if typ in (0, 2, 4) else 1 if typ == 6 else 4
           self.check_range(addr + off * width, size * width)
           for i in range(size): gpr[dst + i] = int.from_bytes(ctypes.string_at(addr + (off + i) * width, width), "little")
+        elif op == 1:
+          addr, size, typ = gpr[(ins >> 14) & 0xff], (ins >> 24) & 0x7, (ins >> 49) & 0x7
+          width = 2 if typ in (0, 2, 4) else 1 if typ == 6 else 4
+          if addr + size * width > len(shared): raise RuntimeError(f"out-of-bounds A6XX local load {addr:#x}+{size * width:#x}")
+          for i in range(size): gpr[dst + i] = int.from_bytes(shared[addr + i * width:addr + (i + 1) * width], "little")
         elif op == 3:
           src, addr_lo = (ins >> 1) & 0xff, (ins >> 41) & 0xff
           addr = gpr[addr_lo] | gpr[(addr_lo + 1) & 0xff] << 32
@@ -155,7 +160,15 @@ class A6XXEmulator:
           if os.getenv("QCOM_TRACE") and global_id < 2: print(f"thread {global_id} stg addr={addr:#x} src={src} value={gpr[src]:#x}")
           self.check_range(addr + off * width, size * width)
           for i in range(size): ctypes.memmove(addr + (off + i) * width, struct.pack("I", gpr[src + i])[:width], width)
+        elif op == 4:
+          src, addr = (ins >> 1) & 0xff, gpr[(ins >> 41) & 0xff]
+          size, typ = (ins >> 24) & 0x7, (ins >> 49) & 0x7
+          width = 2 if typ in (0, 2, 4) else 1 if typ == 6 else 4
+          if addr + size * width > len(shared): raise RuntimeError(f"out-of-bounds A6XX local store {addr:#x}+{size * width:#x}")
+          for i in range(size): shared[addr + i * width:addr + (i + 1) * width] = struct.pack("I", gpr[src + i])[:width]
         else: raise NotImplementedError(f"A6XX cat6 opcode {op:#x} at {pc}")
+      elif cat == 7:
+        yield
       else: raise NotImplementedError(f"A6XX category {cat} at {pc}")
       pc += 1
 
@@ -165,6 +178,14 @@ class A6XXEmulator:
     for gz in range(groups[2]):
       for gy in range(groups[1]):
         for gx in range(groups[0]):
-          for lz in range(local[2]):
-            for ly in range(local[1]):
-              for lx in range(local[0]): self._run_thread((lx, ly, lz), (gx, gy, gz))
+          shared = bytearray(128 * 1024)
+          threads = [self._run_thread((lx, ly, lz), (gx, gy, gz), shared)
+                     for lz in range(local[2]) for ly in range(local[1]) for lx in range(local[0])]
+          while threads:
+            waiting = []
+            for thread in threads:
+              try:
+                next(thread)
+                waiting.append(thread)
+              except StopIteration: pass
+            threads = waiting
