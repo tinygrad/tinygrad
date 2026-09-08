@@ -734,5 +734,6 @@ if __name__ == "__main__":
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
   evt_num = getenv("SQTT_EVENT", -1)
   for i, event in enumerate(sqtt_events):
-    print(f"\n=== event {i} {prg_names.get(event.kern, '')} ===")
-    print_packets(decode(event.blob))
+    if evt_num == -1 or i == evt_num:
+      print(f"\n=== event {i} {prg_names.get(event.kern, '')} ===")
+      print_packets(decode(event.blob))
