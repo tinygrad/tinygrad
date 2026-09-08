@@ -655,6 +655,9 @@ jobs:
         shell: bash
         if: contains(matrix.dev, 'a630')
         run: DEBUG=7 python3 test/backend/test_ops.py TestOps.test_gemm | grep isam
+      - name: Test IR3 cast rounding
+        if: contains(matrix.dev, 'IR3')
+        run: python -m pytest -n=auto test/null/test_compile_failures.py::TestDisassembly::test_float16_cast_rounding
       - name: Run test_ops
         shell: bash
         run: |
