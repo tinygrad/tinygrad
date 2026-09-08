@@ -102,11 +102,10 @@ class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
                initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
-    self.device, self.size, self.dtype, self.offset, self._base = Device.canonicalize(device), size, dtype, offset, base
+    self.device, self.size, self.dtype, self.offset, self.allocated_views, self._base = Device.canonicalize(device), size, dtype, offset, 0, base
     self.options = options if options is not None else BufferSpec()
     self._storage:tuple|None = None
     self._maps:dict[str, tuple] = {}
-    self.allocated_views = 0
     if base is None:
       assert offset == 0, "base buffers can't have offset"
       if opaque is not None: self.allocate(opaque)
@@ -162,7 +161,7 @@ class Buffer:
       (buf, meta), host = self.base.get_storage()
       mapping = self.allocator._offset(buf, self.nbytes, self.offset), meta
     else:
-      if opaque is not None or self.device.startswith("DISK"): self.options = replace(self.options, nolru=True)
+      if opaque is not None: self.options = replace(self.options, nolru=True)
       mapping, host = ((opaque, None), None) if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
     storage = mapping, host.view(self.offset, self.nbytes, fmt='B') if host is not None else None
     if self._base is None:
@@ -237,6 +236,8 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator(Generic[DeviceType]):
+  lru = True
+
   def __init__(self, dev:DeviceType, supports_copy_from_disk:bool=True, supports_transfer:bool=True):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
@@ -255,7 +256,7 @@ class Allocator(Generic[DeviceType]):
 
   def free(self, storage:tuple, size:int, options:BufferSpec|None=None):
     spec = options if options is not None else self.default_buffer_spec
-    if LRU and not (spec.nolru or spec.zero) and spec.external_ptr is None: self.cache[(size, options)].append(storage)
+    if LRU and self.lru and not (spec.nolru or spec.zero) and spec.external_ptr is None: self.cache[(size, options)].append(storage)
     else: self._free(storage[0][0], spec)
 
   def free_cache(self):

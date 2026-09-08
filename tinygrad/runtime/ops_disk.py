@@ -78,6 +78,7 @@ class DiskBuffer:
 
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
+  lru = False
   def _alloc(self, size:int, options) -> tuple:
     self.dev._might_open(size)
     return (opaque:=DiskBuffer(self.dev, size), None), MMIOInterface(mv_address(opaque.as_memoryview()), size)
