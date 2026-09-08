@@ -545,9 +545,8 @@ class Tensor(RandMixin):
     """
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
-    # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
-    if isinstance(device, str) and device.startswith("DISK"): ret = Tensor(self.uop.clone(device))
-    else: ret = Tensor(self.uop.copy_to_device(device))
+    # The transfer owns its destination from construction; COPY itself only describes the transfer.
+    ret = Tensor(self.uop.copy_to_device(device).clone())
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret.is_param_(self.is_param)
 
