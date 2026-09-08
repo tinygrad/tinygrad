@@ -1014,6 +1014,24 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(c.tolist(), [[1,1],[2,1]])
 
+  def test_contiguous_partial_assign_realize(self):
+    x = Tensor([1., 2.]).realize()
+    y = (x + 1).contiguous()  # unrealized CONTIGUOUS
+    self.assertIs(y.uop.base.op, Ops.CONTIGUOUS)
+    # a partial write survives an explicit realize: the values are right, storage is an implementation detail
+    y[:1].assign(9.)
+    y.realize()
+    self.assertEqual(y.tolist(), [9., 3.])
+    # and it stays assigned across schedules
+    y[:1].assign(7.)
+    y.realize()
+    self.assertEqual(y.tolist(), [7., 3.])
+    # setitem syntax gives the same values, contiguous or not
+    for mk in (lambda xx: xx + 1, lambda xx: (xx + 1).contiguous()):
+      z = mk(Tensor([1., 2.]).realize())
+      z[:1] = 9.
+      self.assertEqual(z.tolist(), [9., 3.])
+
   def test_contiguous_backward(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
     cb = t.contiguous_backward()  # unrealized CONTIGUOUS_BACKWARD

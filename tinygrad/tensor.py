@@ -452,8 +452,11 @@ class Tensor(RandMixin):
     ib = self.uop
     while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
     if ib is not self.uop:
+      # a partial write needs storage to land in: a pending value gets explicit storage (a clone)
+      target = ib if ib.has_buffer_identity(after_ok=True) else ib.clone()
+      if target is not ib: assign = assign.substitute({ib: target}, walk=True)
       # view assign: replace the node under the views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
-      _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign")
+      _apply_map_to_tensors({ib: target.after(assign)}, name="Embed View Assign")
     else:
       # simple assign
       self.uop = assign
