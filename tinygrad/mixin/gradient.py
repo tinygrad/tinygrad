@@ -2,7 +2,7 @@ from typing import cast
 import math, dataclasses
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes
 from tinygrad.helpers import argsort
-from tinygrad.dtype import sum_acc_dtype
+from tinygrad.dtype import dtypes, sum_acc_dtype
 from tinygrad.function import renumber_invalid_outputs
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
@@ -67,6 +67,19 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   ret_set = set(ret_pos)
   return (None,) + tuple(None if i in ret_set else (bwd_outs[gb_map[i]] if i in gb_map else None) for i in range(len(args)))
 
+def partial_after_gradient(ctx:UOp, dest:UOp, view:UOp):
+  # A write through a non-overlapping view replaces only that region of the returned state.
+  path, base = [], view
+  while base is not dest and base.op in {Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE, Ops.FLIP}:
+    path.append(base)
+    base = base.src[0]
+  if base is not dest: return None
+  grad = ctx
+  for mop in reversed(path): grad = mop.replace(src=(grad,)+mop.src[1:])
+  mask = grad.const_like(1)
+  for mop in path: mask = pm_gradient.rewrite(mop, ctx=mask)[0]
+  return mask.cast(dtypes.bool).where(0, ctx), grad
+
 # ctx is grad_output
 pm_gradient = PatternMatcher([
   (UPat(Ops.CAST, name="ret"), lambda ctx, ret: (ctx.cast(ret.src[0].dtype),)),
@@ -104,6 +117,8 @@ pm_gradient = PatternMatcher([
    lambda ctx, dest, t: (ctx, None) if t.buf_uop is not dest.buf_uop else None),
   # clone/assign gradient passes through to val
   (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="dest"), UPat())))), lambda ctx,dest: (None, ctx)),
+  (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.AFTER, src=(UPat(name="view"),
+    UPat(Ops.STORE, src=(UPat(name="view"), UPat())))))), partial_after_gradient),
   (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),

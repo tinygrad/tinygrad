@@ -3,6 +3,8 @@ from unittest.mock import patch
 from tinygrad import Tensor, dtypes, function
 from tinygrad.tensor import transform_to_call
 from tinygrad.uop.ops import UOp, Ops, ParamArg
+from tinygrad.uop.render import pyrender
+from tinygrad.uop.spec import eval_pyrender
 
 class TestCallify(unittest.TestCase):
   def test_no_buffer_creation_in_callify(self):
@@ -35,6 +37,19 @@ class TestCallify(unittest.TestCase):
     t = Tensor(buf).realize()
     self.assertEqual(t.uop.arg.slot, buf.arg.slot)
     self.assertFalse(t.uop.is_unbound)
+
+  def test_declaration_pyrender(self):
+    for size in (None, 2):
+      buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), dtypes.float32, size=size, device="CPU"))
+      self.assertIs(eval_pyrender(pyrender(buf)), buf)
+
+  def test_scalar_declaration_binds(self):
+    buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), dtypes.float32, device="CPU"))
+    t = Tensor(buf.after(buf.store(buf.const_like(7.)))).realize()
+    self.assertEqual(t.shape, ())
+    self.assertEqual(t.uop.storage_base.arg.slot, buf.arg.slot)
+    self.assertEqual(t.uop.buffer.size, 1)
+    self.assertEqual(t.item(), 7.)
 
   def test_call_output_identity_and_cache(self):
     for precompile in (False, True):

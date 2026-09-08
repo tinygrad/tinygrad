@@ -135,7 +135,7 @@ spec_tensor = PatternMatcher([
 
   # BUFFER
   (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf:
-   True if buf.is_unbound else (isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device))
+   True if buf.is_unbound else (isinstance(buf.dtype, DType) and isinstance(buf.arg.size, (int, type(None))) and is_device(buf.arg.device))
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
 
   # a Variable is a 0-d ALU BUFFER with a value range and no device
