@@ -72,7 +72,7 @@ class DiskBuffer:
   def __init__(self, device:DiskDevice, size:int, offset=0):
     self.device, self.size, self.offset = device, size, offset
   def __repr__(self): return f"<DiskBuffer size={self.size} offset={self.offset}>"
-  def as_memoryview(self) -> memoryview:
+  def _buf(self) -> memoryview:
     assert hasattr(self.device, "mem"), f"DiskBuffer wasn't opened: {self.device.device}"
     return memoryview(self.device.mem)[self.offset:self.offset+self.size]
 
@@ -81,11 +81,11 @@ class DiskAllocator(Allocator):
   lru = False
   def _alloc(self, size:int, options) -> tuple:
     self.dev._might_open(size)
-    return (opaque:=DiskBuffer(self.dev, size), None), MMIOInterface(mv_address(opaque.as_memoryview()), size)
+    return (opaque:=DiskBuffer(self.dev, size), None), MMIOInterface(mv_address(opaque._buf()), size)
 
   def _free(self, opaque, options): self.dev._might_close()
-  def _as_buffer(self, src:DiskBuffer): return src.as_memoryview()
-  def _copyin(self, dest:DiskBuffer, src:memoryview): dest.as_memoryview()[:] = src
+  def _as_buffer(self, src:DiskBuffer): return src._buf()
+  def _copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def _copyout(self, dest:memoryview, src:DiskBuffer):
     if OSX and self.dev.fd is not None:
       # OSX doesn't seem great at mmap, this is faster
@@ -94,7 +94,7 @@ class DiskAllocator(Allocator):
         bytes_read = 0
         while (n := fo.readinto(dest[bytes_read:])) is not None and n > 0: bytes_read += n
     else:
-      dest[:] = src.as_memoryview()
+      dest[:] = src._buf()
 
   def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int,
                        use_ioring:bool=True) -> Generator[tuple[int, int, int, int], None, None]:
