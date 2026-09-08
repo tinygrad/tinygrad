@@ -139,6 +139,19 @@ class TestCallify(unittest.TestCase):
       t.callify().realize()
     self.assertEqual(t.item(), 2.)
 
+  def test_contiguous_through_wrapper_keeps_copy(self):
+    for wrapper in ("detach", "contiguous_backward"):
+      with self.subTest(wrapper=wrapper):
+        x = Tensor([1., 2.]).realize()
+        y = getattr(x.flip(0), wrapper)().contiguous().realize()
+        x.assign(0).realize()
+        self.assertEqual(y.tolist(), [2., 1.])
+
+  def test_intermediate_contiguous_through_wrapper_is_view(self):
+    x = Tensor([1., 2., 3., 4.], device="CPU").realize()
+    y = x[:2].contiguous_backward().contiguous() + 1
+    self.assertEqual(len(y.schedule_linear().src), 1)
+
   def test_basic(self):
     a = Tensor([1.,2,3])
     b = Tensor([4.,5,6])

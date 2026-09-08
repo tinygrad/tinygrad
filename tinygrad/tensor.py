@@ -85,19 +85,10 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # swap every placed value for its target storage, also inside other stores' AFTER deps
   fxn = UOp.sink(*(x.substitute(placed) for x in items))
 
-  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
-  # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
-  rmap = dict(zip(ret_pos, outs))
-  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
-                                   for i, a in enumerate(c.src[1:])]), arg=replace(c.arg, output_pos=None))
-  rets = tuple(o.after(new_call) for o in outs)
-
-  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  # NOTE: must use the resolved shapes of the RETURNED placeholders (which substitute PARAMs with external args), not raw body shapes
-  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
-
-  # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
-  return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
+  # Keep the declared output views (including symbolic shapes); only value inputs need contiguous annotations.
+  new_call = c.replace(src=(fxn, *[a if i in ret_pos or a.has_buffer_identity(after_ok=True) else a.contiguous()
+                                 for i, a in enumerate(c.src[1:])]), arg=replace(c.arg, output_pos=None))
+  return UOp.sink(*(o.store(o.after(new_call)) for o in outs))
 
 def fold_unobserved_transfer(store:UOp, a:UOp, copy:UOp):
   # Assigning a temporary transfer can write directly into the assignment's destination. A held transfer (or any other
@@ -209,6 +200,14 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, ctx.buffer_map
+
+def outputs_to_call(*xs:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+  # Build output requests, not a preparation pass over the graph. Intermediate storage is already declared.
+  memo:dict[UOp, UOp] = {}
+  outputs = {x.base:x.base.materialize(memo) for x in xs}
+  big_sink, becomes_map = transform_to_call(UOp.sink(*outputs.values()))
+  becomes_map.update({x:y.substitute(becomes_map) for x,y in outputs.items() if x is not y})
+  return big_sink, becomes_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -369,11 +368,7 @@ class Tensor(RandMixin):
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
   def callify(self, *lst:Tensor) -> Tensor:
-    # Build output requests, not a preparation pass over the graph. Intermediate storage is already declared.
-    memo:dict[UOp, UOp] = {}
-    outputs = {x.uop.base:x.uop.base.materialize(memo) for x in (self,)+lst}
-    big_sink, buffer_map = transform_to_call(UOp.sink(*outputs.values()))
-    buffer_map.update({x:y.substitute(buffer_map) for x,y in outputs.items() if x is not y})
+    big_sink, buffer_map = outputs_to_call(*[x.uop for x in (self,)+lst])
     _apply_map_to_tensors({x:y.after(big_sink) for x,y in buffer_map.items()}, name="callify")
     return self
 
@@ -382,10 +377,7 @@ class Tensor(RandMixin):
     # weakness ends where storage begins
     if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
-    memo:dict[UOp, UOp] = {}
-    outputs = {x.uop.base:x.uop.base.materialize(memo) for x in (self,)+lst}
-    big_sink, becomes_map = transform_to_call(UOp.sink(*outputs.values()))
-    becomes_map.update({x:y.substitute(becomes_map) for x,y in outputs.items() if x is not y})
+    big_sink, becomes_map = outputs_to_call(*[x.uop for x in (self,)+lst])
     bindings:dict[UOp, UOp] = {}
     ret = create_linear_with_vars(big_sink, buffer_bindings=bindings)
     _apply_map_to_tensors({**bindings, **{x:y.substitute(bindings) for x,y in becomes_map.items()}}, name="buffers")
