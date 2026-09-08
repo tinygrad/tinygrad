@@ -187,7 +187,8 @@ class CStyleLanguage(Renderer):
       return prefix + self.type_map.get(dtype, dtype.name).replace(" ", "_") + str(sz) + suffix
     return prefix + self.type_map.get(dtype, dtype.name) + suffix
 
-  def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace, shape=u._shape)
+  def render_type(self, u:UOp):
+    return self._render_dtype(u.dtype, u.max_numel(), u.addrspace, shape=u._shape, override_ptr=u.op is Ops.INDEX and u.addrspace is AddrSpace.REG)
   def render_ptr(self, u:UOp):
     # the address of an access, vector-cast if the access reads/writes more lanes than the pointer's scalar type
     if u.max_numel() > 1 or u.dtype != u.src[0].dtype:

@@ -1,7 +1,8 @@
 import unittest, ctypes
 from tinygrad import Tensor, UOp
 from tinygrad.device import Device
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.codegen import to_program
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.uop.ops import KernelInfo
 
@@ -36,5 +37,11 @@ class TestCall(unittest.TestCase):
     c = Tensor.custom_kernel(f, c, fxn=call_ret_kernel)[1]
     c.realize()
     self.assertEqual(c.item(), 44)
+
+  def test_call_stack_pointer(self):
+    slot = UOp.placeholder((1,), dtypes.uint32, addrspace=AddrSpace.REG)
+    call = UOp.custom_function("callback", UOp.const(0, dtypes.uint64)).call(slot[0], ret_dtype=dtypes.void)
+    prg = to_program(call.sink(arg=KernelInfo("call_stack")), Device["CPU"].renderer)
+    self.assertIn("(unsigned int*)((buf", prg.src[2].arg)
 
 if __name__ == "__main__": unittest.main()
