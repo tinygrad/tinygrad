@@ -5,7 +5,7 @@ from typing import Any, List
 from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES, DEV
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype, truncate
 from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.renderer.nir import NIRRenderer
+from tinygrad.renderer.nir import NIRRenderer, LVPRenderer
 from tinygrad import Context, Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
 from test.helpers import rand_for_dtype, min_normal
@@ -236,6 +236,13 @@ class TestFloatDType(TestDType):
 @unittest.skipUnless(dtypes.double in supported_dtypes, f"no double on {Device.DEFAULT}")
 class TestDoubleDType(TestDType):
   DTYPE = dtypes.double
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, LVPRenderer), "LVP double-to-half lowering")
+  def test_float64_to_half_rounding(self):
+    # A float32 intermediate loses which side of the half-way boundary the float64 input was on.
+    values = np.array([sign * (1 + 2**-11 + delta) for sign in [1, -1] for delta in [-2**-40, 0, 2**-40]], dtype=np.float64)
+    actual = Tensor(values).cast(dtypes.half).bitcast(dtypes.ushort).numpy()
+    np.testing.assert_array_equal(actual, [0x3c00, 0x3c00, 0x3c01, 0xbc00, 0xbc00, 0xbc01])
+
   @unittest.skipIf((DEV.interface.startswith("MOCK") and Device.DEFAULT in {"CUDA", "NV"}) or \
    isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "conversion not supported on CI CUDA, PTX, and NIR")  # TODO: why not?
   def test_float64_increased_precision(self):
