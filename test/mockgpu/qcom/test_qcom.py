@@ -33,6 +33,11 @@ class TestQCOMEmulator(unittest.TestCase):
     out = Tensor.ones(1, n, device="QCOM").contiguous() @ Tensor.eye(n).to("QCOM").clone()
     self.assertEqual(out.realize().tolist(), [[1.] * n])
 
+  def test_random_and_convolution(self):
+    self.assertTrue(all(0 <= x < 1 for x in Tensor.rand(64, device="QCOM").realize().tolist()))
+    out = Tensor.ones(1, 1, 8, 8, device="QCOM").conv2d(Tensor.ones(2, 1, 3, 3, device="QCOM")).realize()
+    self.assertEqual(out.tolist(), [[[[9.] * 6 for _ in range(6)] for _ in range(2)]])
+
   def test_sfu_and_select(self):
     out = Tensor([[-3.0, 2.0], [3.0, 4.0]], device="QCOM").sum(axis=1).elu().realize()
     self.assertAlmostEqual(out.tolist()[0], math.expm1(-1.0), places=5)
