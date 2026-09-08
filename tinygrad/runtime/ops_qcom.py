@@ -9,7 +9,7 @@ from tinygrad.runtime.autogen import kgsl, mesa, libc
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.helpers import getenv, mv_address, round_up, ceildiv, prod, is_image_shape
-from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE
+from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE, DEV
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
@@ -306,6 +306,12 @@ class QCOMAllocator(HCQAllocator['QCOMDevice']):
     return self.dev._gpu_map(opts.external_ptr, size) if opts.external_ptr else self.dev._gpu_alloc(size)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev._gpu_free(opaque)
+
+  def _do_map(self, buf:HCQBuffer):
+    src = buf._base if buf._base is not None else buf
+    return self.dev._gpu_map(int(src.va_addr), src.size)
+
+  def _do_unmap(self, buf:HCQBuffer): self.dev._gpu_free(buf)
 
 def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, f"{nm}_MASK")
 

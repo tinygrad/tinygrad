@@ -590,6 +590,40 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
+  testqcom:
+    name: Linux (qcom ir3)
+    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    env:
+      DEV: MOCK+QCOM:IR3
+      SKIP_SLOW_TEST: 1
+      HCQ2: 1
+      HCQ_RUNTIME_DEV: PYTHON
+      PYTHONPATH: .
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: qcom-ir3-emu
+          deps: "testing_unit mesa"
+          llvm: 'true'
+      - name: Check Device.DEFAULT and print some source
+        run: |
+          python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['QCOM'], Device.DEFAULT"
+          DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
+      - name: Run pytest (qcom)
+        run: python -m pytest -n=auto test/unit/test_qcom_emu.py test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq2.py --durations=20
+      - name: Run opt tests
+        run: python -m pytest -n=auto test/opt --durations=20
+      - name: Run disk copy tests
+        run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
+      - name: Run TRANSCENDENTAL math
+        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/backend/test_ops.py::TestOps::test_sin test/backend/test_ops.py::TestOps::test_cos test/backend/test_ops.py::TestOps::test_tan test/backend/test_ops.py::TestOps::test_exp test/backend/test_ops.py::TestOps::test_log --durations=20
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
+
   testnvidia:
     strategy:
       fail-fast: false
