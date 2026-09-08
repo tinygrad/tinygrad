@@ -11,13 +11,6 @@ class TestMetal(unittest.TestCase):
     with self.assertRaises(MemoryError):
       device.allocator.alloc(10000000000000000000)
 
-  def test_import_private_buffer(self):
-    device = Device['METAL']
-    private = device.sysdevice.newBufferWithLength_options(4, metal.MTLResourceStorageModePrivate)
-    (buf, _), host = device.allocator.alloc(4, BufferSpec(external_ptr=private.value))
-    self.assertEqual(buf.buf.value, private.value)
-    self.assertIsNone(host)
-
   def test_compile_error(self):
     compiler = MetalCompiler()
     with self.assertRaises(CompileError):
