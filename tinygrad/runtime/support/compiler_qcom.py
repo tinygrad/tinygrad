@@ -43,5 +43,5 @@ class QCOMCompiler(Compiler):
     llvm_qcom.cl_compiler_free_assembly(ptr)
     return ret
 
-  def disassemble(self, lib: bytes): disas_adreno(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)], self.chip_id)
+  def disassemble(self, lib: bytes): disas_adreno(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)], int(self.arch.split(',')[0][1:]))
 
