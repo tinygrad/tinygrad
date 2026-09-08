@@ -3,7 +3,6 @@ from tinygrad.device import CompileError, Device, BufferSpec, TinyELF
 from tinygrad.helpers import Target
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler
-  from tinygrad.runtime.autogen import metal
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
   def test_alloc_oom(self):
