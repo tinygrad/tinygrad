@@ -1,5 +1,5 @@
 import math, unittest
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 from tinygrad.helpers import DEV
 
 @unittest.skipUnless(DEV.target("QCOM").interface == "MOCK", "requires DEV=MOCK+QCOM:IR3")
@@ -24,8 +24,9 @@ class TestQCOMEmulator(unittest.TestCase):
 
   def test_tiled_matrix_multiply(self):
     n = 64
-    out = Tensor.ones(n, n, device="QCOM").contiguous() @ Tensor.eye(n).to("QCOM").clone()
-    self.assertEqual(out.realize().tolist(), [[1.] * n for _ in range(n)])
+    for dtype in (dtypes.float, dtypes.half):
+      out = Tensor.ones(n, n, dtype=dtype, device="QCOM").contiguous() @ Tensor.eye(n, dtype=dtype).to("QCOM").clone()
+      self.assertEqual(out.realize().tolist(), [[1.] * n for _ in range(n)])
 
   def test_shared_memory_reduction(self):
     n = 64

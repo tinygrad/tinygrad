@@ -86,21 +86,27 @@ class A6XXEmulator:
           aenc = (ins & 0xffff) + (rpt if (ins >> 43) & 1 else 0)
           benc = ((ins >> 16) & 0xffff) + (rpt if (ins >> 51) & 1 else 0)
           a, b = self._src(aenc, gpr, hreg, self.constants, full), self._src(benc, gpr, hreg, self.constants, full)
-          fa, fb = _fmod(_f32(a), aenc), _fmod(_f32(b), benc)
-          if op == 0x00: out = _f32bits(fa + fb)
-          elif op == 0x01: out = _f32bits(min(fa, fb))
-          elif op == 0x02: out = _f32bits(max(fa, fb))
-          elif op == 0x03: out = _f32bits(fa * fb)
+          fa, fb = _fmod((_f32 if full else _f16)(a), aenc), _fmod((_f32 if full else _f16)(b), benc)
+          floatbits = _f16bits if full == conv and dst <= 0xf7 else _f32bits
+          if op == 0x00: out = floatbits(fa + fb)
+          elif op == 0x01: out = floatbits(min(fa, fb))
+          elif op == 0x02: out = floatbits(max(fa, fb))
+          elif op == 0x03: out = floatbits(fa * fb)
           elif op == 0x05:
             cond = (ins >> 48) & 0x7
             out = int([fa < fb, fa <= fb, fa > fb, fa >= fb, fa == fb, fa != fb][cond])
           elif op == 0x10: out = a + b
+          elif op in (0x12, 0x13): out = a - b
           elif op == 0x14:
             cond = (ins >> 48) & 0x7
             out = int([a < b, a <= b, a > b, a >= b, a == b, a != b][cond])
           elif op == 0x15:
             cond, sa, sb = (ins >> 48) & 0x7, _s32(a), _s32(b)
             out = int([sa < sb, sa <= sb, sa > sb, sa >= sb, sa == sb, sa != sb][cond])
+          elif op == 0x1c: out = a & b
+          elif op == 0x1d: out = a | b
+          elif op == 0x1e: out = ~a
+          elif op == 0x1f: out = a ^ b
           elif op == 0x32: out = a * b
           elif op == 0x38: out = _s32(a) >> (b & 31)
           elif op == 0x37: out = a >> (b & 31)
@@ -133,24 +139,27 @@ class A6XXEmulator:
         full, conv, op = bool((ins >> 52) & 1), bool((ins >> 46) & 1), (ins >> 53) & 0x3f
         for rpt in range(((ins >> 40) & 0x3) + 1):
           enc = (ins & 0xffff) + (rpt if (ins >> 43) & 1 else 0)
-          x = _fmod(_f32(self._src(enc, gpr, hreg, self.constants, full)), enc)
+          x = _fmod((_f32 if full else _f16)(self._src(enc, gpr, hreg, self.constants, full)), enc)
           out = [lambda:1/x, lambda:1/math.sqrt(x), lambda:math.log2(x), lambda:2**x,
                  lambda:math.sin(x), lambda:math.cos(x), lambda:math.sqrt(x)][op]()
           if os.getenv("QCOM_TRACE") and global_id < 2: print(f"thread {global_id} cat4 op={op} x={x} out={out}")
-          (hreg if full == conv and dst <= 0xf7 else gpr)[dst + rpt] = _f32bits(out)
+          (hreg if full == conv and dst <= 0xf7 else gpr)[dst + rpt] = (_f16bits if full == conv else _f32bits)(out)
       elif cat == 6:
         op = (ins >> 54) & 0x1f
         if op == 0:
           addr_lo, size, typ = (ins >> 14) & 0xff, (ins >> 24) & 0x7, (ins >> 49) & 0x7
           addr = gpr[addr_lo] | gpr[(addr_lo + 1) & 0xff] << 32
           off, width = _sext((ins >> 1) & 0x1fff, 13), 2 if typ in (0, 2, 4) else 1 if typ == 6 else 4
-          self.check_range(addr + off * width, size * width)
-          for i in range(size): gpr[dst + i] = int.from_bytes(ctypes.string_at(addr + (off + i) * width, width), "little")
+          try: self.check_range(addr + off * width, size * width)
+          except RuntimeError as e: raise RuntimeError(f"{e} at pc {pc}") from e
+          dst_file = hreg if typ in (0, 2, 4, 6) else gpr
+          for i in range(size): dst_file[dst + i] = int.from_bytes(ctypes.string_at(addr + (off + i) * width, width), "little")
         elif op == 1:
           addr, size, typ = gpr[(ins >> 14) & 0xff], (ins >> 24) & 0x7, (ins >> 49) & 0x7
           width = 2 if typ in (0, 2, 4) else 1 if typ == 6 else 4
           if addr + size * width > len(shared): raise RuntimeError(f"out-of-bounds A6XX local load {addr:#x}+{size * width:#x}")
-          for i in range(size): gpr[dst + i] = int.from_bytes(shared[addr + i * width:addr + (i + 1) * width], "little")
+          dst_file = hreg if typ in (0, 2, 4, 6) else gpr
+          for i in range(size): dst_file[dst + i] = int.from_bytes(shared[addr + i * width:addr + (i + 1) * width], "little")
         elif op == 3:
           src, addr_lo = (ins >> 1) & 0xff, (ins >> 41) & 0xff
           addr = gpr[addr_lo] | gpr[(addr_lo + 1) & 0xff] << 32
@@ -158,14 +167,17 @@ class A6XXEmulator:
           size, typ = (ins >> 24) & 0x7, (ins >> 49) & 0x7
           width = 2 if typ in (0, 2, 4) else 1 if typ == 6 else 4
           if os.getenv("QCOM_TRACE") and global_id < 2: print(f"thread {global_id} stg addr={addr:#x} src={src} value={gpr[src]:#x}")
-          self.check_range(addr + off * width, size * width)
-          for i in range(size): ctypes.memmove(addr + (off + i) * width, struct.pack("I", gpr[src + i])[:width], width)
+          try: self.check_range(addr + off * width, size * width)
+          except RuntimeError as e: raise RuntimeError(f"{e} at pc {pc}") from e
+          src_file = hreg if typ in (0, 2, 4, 6) else gpr
+          for i in range(size): ctypes.memmove(addr + (off + i) * width, struct.pack("I", src_file[src + i])[:width], width)
         elif op == 4:
           src, addr = (ins >> 1) & 0xff, gpr[(ins >> 41) & 0xff]
           size, typ = (ins >> 24) & 0x7, (ins >> 49) & 0x7
           width = 2 if typ in (0, 2, 4) else 1 if typ == 6 else 4
           if addr + size * width > len(shared): raise RuntimeError(f"out-of-bounds A6XX local store {addr:#x}+{size * width:#x}")
-          for i in range(size): shared[addr + i * width:addr + (i + 1) * width] = struct.pack("I", gpr[src + i])[:width]
+          src_file = hreg if typ in (0, 2, 4, 6) else gpr
+          for i in range(size): shared[addr + i * width:addr + (i + 1) * width] = struct.pack("I", src_file[src + i])[:width]
         else: raise NotImplementedError(f"A6XX cat6 opcode {op:#x} at {pc}")
       elif cat == 7:
         yield
