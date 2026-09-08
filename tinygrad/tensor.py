@@ -448,15 +448,18 @@ class Tensor(RandMixin):
       self.uop = (x.uop.src[0] if x.uop.op is Ops.CONTIGUOUS else x.uop).clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
-    assign = self.uop.after(self.uop.store(x.uop))
+    assign = self.uop.after(store := self.uop.store(x.uop))
     ib = self.uop
     while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
     if ib is not self.uop:
       # a partial write needs storage to land in: a pending value gets explicit storage (a clone)
       target = ib if ib.has_buffer_identity(after_ok=True) else ib.clone()
-      if target is not ib: assign = assign.substitute({ib: target}, walk=True)
-      # view assign: replace the node under the views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
-      _apply_map_to_tensors({ib: target.after(assign)}, name="Embed View Assign")
+      if target is not ib:
+        assign = assign.substitute({ib: target}, walk=True)
+        store = assign.src[1]
+      # view assign: the base reads "after the store into the view" (one AFTER level). replace the node under the
+      # views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
+      _apply_map_to_tensors({ib: target.after(store)}, name="Embed View Assign")
     else:
       # simple assign
       self.uop = assign
