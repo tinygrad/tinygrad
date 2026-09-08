@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Device, Tensor, dtypes
+from tinygrad.helpers import DEV
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.uop.ops import AxisType
 
@@ -88,6 +89,7 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM", "ir3 emu too slow")
   def test_matmul(self):
     N = 128
     Tensor.manual_seed(1552)
@@ -115,6 +117,7 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "QCOM", "ir3 emu too slow")
   def test_double_reduce(self):
     N = 128
     Tensor.manual_seed(1552)

@@ -593,7 +593,7 @@ jobs:
   testqcom:
     name: Linux (qcom ir3)
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
       DEV: MOCK+QCOM:IR3
       SKIP_SLOW_TEST: 1
@@ -615,8 +615,6 @@ jobs:
       - name: Run pytest (qcom)
         run: python -m pytest -n=auto test/unit/test_qcom_emu.py test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq2.py --durations=20
       - name: Run opt tests
-        env:
-          TEST_TIMEOUT: 600
         run: python -m pytest -n=auto test/opt --durations=20
       - name: Run disk copy tests
         run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
