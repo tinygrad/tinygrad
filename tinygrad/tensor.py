@@ -46,7 +46,7 @@ add_tags = PatternMatcher([
   # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
-  (UPat((Ops.CONTIGUOUS, Ops.AFTER), name="x"), tag_uop),
+  (UPat(Ops.AFTER, name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
 
@@ -206,10 +206,10 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # final outputs of value calls materialize with fresh storage
   srcs:list[UOp] = []
   for u in big_sink.src:
-    if u.op is Ops.AFTER and u.src[0].unsharded_base.is_unbound:
+    if u.op is Ops.AFTER and u.src[0].unsharded_base.is_unbound and u.src[1].op is Ops.CALL:
       # precompiled calls don't need this: transform_precompiled_call gives their outputs real buffers
       call = u.src[1]
-      if not (call.op is Ops.CALL and call.arg is not None and call.arg.precompile):
+      if not (call.arg is not None and call.arg.precompile):
         buf = u.empty_like()
         u = buf.after(buf.store(u.rtag(None))).replace(tag=u.tag)
     srcs.append(u)
@@ -220,8 +220,10 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
   # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
   # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
+  # AFTERs on unbound STORAGE (clones) are collected too: the clone's own buffer is the storage, no fresh copy
   for u in big_sink.toposort(enter_calls=False):
-    if (u.op is Ops.COPY and on_disk(u)) or (u.op is Ops.AFTER and not u.is_bound_var and not u.src[0].unsharded_base.is_unbound):
+    if (u.op is Ops.COPY and on_disk(u)) or (u.op is Ops.AFTER and not u.is_bound_var and
+        (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
       ctx.stores.append(u)
       if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
   ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
@@ -440,8 +442,9 @@ class Tensor(RandMixin):
       (b:=self._buffer()).copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=x._data()))
       return self
     assigned_to = self.uop.storage_base
-    # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead
-    if not assigned_to.has_buffer_identity() and assigned_to.op is not Ops.CONTIGUOUS:
+    # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead.
+    # a pending CONTIGUOUS counts only if it's the whole target: writes through views of it store into its storage
+    if not assigned_to.has_buffer_identity() and (assigned_to.op is not Ops.CONTIGUOUS or self.uop is assigned_to):
       self.uop = (x.uop.src[0] if x.uop.op is Ops.CONTIGUOUS else x.uop).clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
@@ -449,8 +452,11 @@ class Tensor(RandMixin):
     ib = self.uop
     while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
     if ib is not self.uop:
+      # a partial write needs storage to land in: a pending value gets explicit storage (a clone)
+      target = ib if ib.has_buffer_identity(after_ok=True) else ib.clone()
+      if target is not ib: assign = assign.substitute({ib: target}, walk=True)
       # view assign: replace the node under the views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
-      _apply_map_to_tensors({ib: ib.after(assign)}, name="Embed View Assign")
+      _apply_map_to_tensors({ib: target.after(assign)}, name="Embed View Assign")
     else:
       # simple assign
       self.uop = assign
