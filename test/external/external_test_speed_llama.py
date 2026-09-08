@@ -13,7 +13,7 @@ class FakeProgram:
   def __call__(self, *bufs, global_size, local_size, vals=(), wait=False, **kw): pass
 
 class FakeAllocator(Allocator[Compiled]):
-  def _alloc(self, sz, options): return None
+  def _alloc(self, sz, options): return (None, None), None
   def _copyin(self, dest, src:memoryview): pass
 
 class TestLLaMASpeed(unittest.TestCase):

@@ -97,4 +97,3 @@ if __name__ == "__main__":
   tf_output = keras_model(test_input).numpy()[0]
   print("keras:   ", tf_output, file=sys.stderr)
   np.testing.assert_allclose(tf_output, test_output, atol=1e-5, rtol=1e-5)
-

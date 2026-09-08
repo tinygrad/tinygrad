@@ -22,7 +22,8 @@ class NullProgram(Program['NullDevice']):
     with cpu_profile(self.name, self.device, profile_key=self.profile_key): return 1e-3
 
 class NullAllocator(Allocator['NullDevice']):
-  def _alloc(self, size, options): pass
+  def _alloc(self, size:int, options) -> tuple: return (None, None), None
+
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src):
     if not NULL_ALLOW_COPYOUT: raise RuntimeError("no copyout on NULL")

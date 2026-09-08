@@ -1,7 +1,7 @@
 import os, sys, mmap, io, ctypes, contextlib, pathlib
 from typing import Generator, Callable
-from tinygrad.helpers import OSX, round_up
-from tinygrad.device import Compiled, Allocator
+from tinygrad.helpers import OSX, round_up, mv_address
+from tinygrad.device import MMIOInterface, Compiled, Allocator
 with contextlib.suppress(ImportError):
   import _posixshmem
   from tinygrad.runtime.autogen import io_uring, libc
@@ -72,19 +72,19 @@ class DiskBuffer:
   def __init__(self, device:DiskDevice, size:int, offset=0):
     self.device, self.size, self.offset = device, size, offset
   def __repr__(self): return f"<DiskBuffer size={self.size} offset={self.offset}>"
-  def _buf(self) -> memoryview:
+  def as_memoryview(self) -> memoryview:
     assert hasattr(self.device, "mem"), f"DiskBuffer wasn't opened: {self.device.device}"
     return memoryview(self.device.mem)[self.offset:self.offset+self.size]
 
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
-  def __init__(self, dev:DiskDevice): super().__init__(dev)
-  def _alloc(self, size:int, options):
+  def _alloc(self, size:int, options) -> tuple:
     self.dev._might_open(size)
-    return DiskBuffer(self.dev, size)
+    return (opaque:=DiskBuffer(self.dev, size), None), MMIOInterface(mv_address(opaque.as_memoryview()), size)
+
   def _free(self, opaque, options): self.dev._might_close()
-  def _as_buffer(self, src:DiskBuffer): return src._buf()
-  def _copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
+  def _as_buffer(self, src:DiskBuffer): return src.as_memoryview()
+  def _copyin(self, dest:DiskBuffer, src:memoryview): dest.as_memoryview()[:] = src
   def _copyout(self, dest:memoryview, src:DiskBuffer):
     if OSX and self.dev.fd is not None:
       # OSX doesn't seem great at mmap, this is faster
@@ -93,7 +93,7 @@ class DiskAllocator(Allocator):
         bytes_read = 0
         while (n := fo.readinto(dest[bytes_read:])) is not None and n > 0: bytes_read += n
     else:
-      dest[:] = src._buf()
+      dest[:] = src.as_memoryview()
 
   def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int,
                        use_ioring:bool=True) -> Generator[tuple[int, int, int, int], None, None]:

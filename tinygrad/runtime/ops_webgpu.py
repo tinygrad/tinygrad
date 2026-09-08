@@ -147,10 +147,10 @@ class WebGPUProgram(Program['WebGpuDevice']):
     return None
 
 class WebGpuAllocator(Allocator['WebGpuDevice']):
-  def _alloc(self, size:int, options:BufferSpec) -> webgpu.WGPUBuffer:
+  def _alloc(self, size:int, options:BufferSpec) -> tuple:
     # WebGPU buffers have to be 4-byte aligned
-    return webgpu.wgpuDeviceCreateBuffer(self.dev.device_res, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),
-      usage=webgpu.WGPUBufferUsage_Storage | webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_CopySrc))
+    return (webgpu.wgpuDeviceCreateBuffer(self.dev.device_res, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),
+      usage=webgpu.WGPUBufferUsage_Storage | webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_CopySrc)), None), None
   def _copyin(self, dest:webgpu.WGPUBuffer, src:memoryview):
     if src.nbytes % 4:
       padded_src = bytearray(round_up(src.nbytes, 4))

@@ -85,7 +85,7 @@ amdhsa.kernels:
 """
   lib = compiler.compile(asm_src)
   prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
-  out_gpu = dev.allocator.alloc(LANES * 4)
+  out_gpu = dev.allocator.alloc(LANES * 4)[0][0]
   prg(out_gpu, global_size=(1, 1, 1), local_size=(LANES, 1, 1), wait=True)
   out = bytearray(LANES * 4)
   dev.allocator._copyout(flat_mv(memoryview(out)), out_gpu)

@@ -4,7 +4,7 @@ import functools, time, itertools, decimal, weakref, statistics, ctypes, importl
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2, cpu_profile, mv_address
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us, DEV
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, DepsTracker
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, Allocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
@@ -75,7 +75,7 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
 @functools.cache
 def cfunc_buf(lib:str, name:str) -> Buffer:
   fn = getattr(importlib.import_module(f"tinygrad.runtime.autogen.{lib}").dll, name)
-  (b:=Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, preallocate=True))._buf.view.view(fmt='Q')[0] = unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
+  (b:=Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, preallocate=True)).host.view(fmt='Q')[0] = unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
   return b
 
 def ccall(fn:Any, *args:UOp|int) -> UOp:
@@ -467,12 +467,12 @@ def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
   if getattr(b:=cast(Buffer, buf.buffer), '_hcq_written', None) is not blob.arg: # TODO: remove me
     cast(Any, b.ensure_allocated())._hcq_written = blob.arg
-    b._buf.cpu_view().view(fmt='B')[:len(blob.arg)] = blob.arg
+    b.host.view(fmt='B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
 def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
   base, off = unwrap_view(buf)
-  mv = cast(Buffer, base.buffer).ensure_allocated()._buf.cpu_view().view(fmt='B')
+  mv = cast(Buffer, base.buffer).ensure_allocated().host.view(fmt='B')
   for o, w in zip(offs.src, ws.src):
     n, at = w.dtype.itemsize, off + o.val * w.dtype.itemsize
     mv[at:at + n] = (w.val & (1 << 8 * n) - 1).to_bytes(n, 'little')
@@ -537,13 +537,13 @@ class HCQ2Compiled(Compiled):
   @functools.cached_property
   def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]
     buf = Buffer(self.device, 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
-    buf._buf.cpu_view().view(fmt='B')[:16] = bytes(16)
+    buf.host.view(fmt='B')[:16] = bytes(16)
     return buf
 
   def collect_prof(self):
     if PROFILE:
       es = list(self.prof_ents.items())
-      sigs = [buf._buf.cpu_view().view(fmt='Q')[i]/decimal.Decimal(self.timestamp_divider) for (buf, _), e in es for i in (e.st_id, e.en_id)]
+      sigs = [buf.host.view(fmt='Q')[i]/decimal.Decimal(self.timestamp_divider) for (buf, _), e in es for i in (e.st_id, e.en_id)]
       Compiled.profile_events.append(ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,(_, e) in enumerate(es)], [], sigs))
     self.prof_ents.clear()
 
@@ -556,7 +556,7 @@ class HCQ2Compiled(Compiled):
       self.prof_ents.clear()
       st = perf_counter_us()
       self.synchronize()
-      gpu = max(buf._buf.cpu_view().view(fmt='Q')[e.en_id] for (buf, _), e in ents)/decimal.Decimal(self.timestamp_divider)
+      gpu = max(buf.host.view(fmt='Q')[e.en_id] for (buf, _), e in ents)/decimal.Decimal(self.timestamp_divider)
       tdiffs.append((st+perf_counter_us())/2 - gpu)
     Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
 
@@ -581,7 +581,7 @@ class HCQ2Compiled(Compiled):
       elif self.sleep_timeout_ms is not None and elapsed > self.sleep_timeout_ms / 1000: self.on_sleep()
 
   def synchronize(self, timeout:int|None=None):
-    try: self._wait_signal(tl:=self.timeline._buf.cpu_view().view(fmt='Q'), tl[1], timeout)
+    try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
     except RuntimeError:
       self.on_device_hang()
       raise
@@ -610,21 +610,20 @@ class HCQ2Buffer:
   def offset(self, offset:int, size:int) -> HCQ2Buffer:
     return HCQ2Buffer(self.va_addr+offset, meta=self.meta, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
 
-class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
+class HCQAllocator(Allocator[HCQDeviceType], Generic[HCQDeviceType]):
   def _as_buffer(self, buf:HCQBuffer) -> memoryview|None: return buf.view.mv if buf.view is not None else None
-
   def _copyout(self, dest:memoryview, src:HCQBuffer): # TODO: remove with memcpy on cpu worker?
     self.dev.synchronize()
     with cpu_profile(f"{self.dev.device} -> TINY", f"{self.dev.device}:COPY"): ctypes.memmove(mv_address(dest), src.cpu_view().addr, dest.nbytes)
 
-  def _map(self, buf:HCQBuffer) -> HCQBuffer: # a mapping lives on the opaque, like hcq1: the lru hands the same one to many Buffers
+  def _map(self, buf:HCQBuffer) -> tuple: # a mapping lives on the opaque, like hcq1: the lru hands the same one to many Buffers
     if self.dev not in buf.mapped_devs:
       if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
       buf.mappings[self.dev] = self._do_map(buf)
       buf.mapped_devs.append(self.dev)
-    return buf.mappings[self.dev]
+    return (mapped:=buf.mappings[self.dev]), mapped.meta
 
-  def _do_unmap(self, mb): self.dev.iface.free(mb)
+  def _do_unmap(self, mb): getattr(self.dev, "iface").free(mb)
 
   @suppress_finalizing
   def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):
