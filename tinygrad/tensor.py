@@ -442,8 +442,9 @@ class Tensor(RandMixin):
       (b:=self._buffer()).copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=x._data()))
       return self
     assigned_to = self.uop.storage_base
-    # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead
-    if not assigned_to.has_buffer_identity() and assigned_to.op is not Ops.CONTIGUOUS:
+    # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead.
+    # a pending CONTIGUOUS counts only if it's the whole target: writes through views of it store into its storage
+    if not assigned_to.has_buffer_identity() and (assigned_to.op is not Ops.CONTIGUOUS or self.uop is assigned_to):
       self.uop = (x.uop.src[0] if x.uop.op is Ops.CONTIGUOUS else x.uop).clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging

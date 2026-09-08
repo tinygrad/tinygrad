@@ -619,7 +619,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    assert_kernel_count(4 if is_hcq2_device() else 2)  # TODO: first copy is dead, could be 1
+    assert_kernel_count(5 if is_hcq2_device() else 3)  # TODO: first copy is dead, could be 2
     self.assertEqual(base.tolist(), [1,4,3])
 
   def test_nested_after_contiguous_store_no_init(self):

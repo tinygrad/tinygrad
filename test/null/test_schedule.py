@@ -582,8 +582,8 @@ class TestSchedule(unittest.TestCase):
     p = P[0]
     p = p.pad(((1, 0), ))
     p = p.repeat([2])
-    # TODO: this should be 3 if fix store hazard worked correctly
-    check_schedule(p, 4)
+    # assign on a pending contiguous overwrites the whole value, no store hazard
+    check_schedule(p, 3)
 
   def test_conv2d(self, allowed=4, dtype=dtypes.float):
     self.enterContext(Context(DEFAULT_FLOAT=dtype))
@@ -614,7 +614,7 @@ class TestSchedule(unittest.TestCase):
 
       with Context(IMAGE=1):
         got = cnt()
-        if got != 6: raise KernelCountException(6, got)
+        if got != 5: raise KernelCountException(5, got)
 
   def test_image_f16_residual_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
@@ -1343,7 +1343,7 @@ class TestSchedule(unittest.TestCase):
 
       # NOOP, 3 convs, contiguous
       #check_schedule(x, 5)
-      check_schedule(x, 8)
+      check_schedule(x, 7)
 
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
