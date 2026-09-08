@@ -17,7 +17,7 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.hcq import FileIOInterface, HCQBuffer, MMIOInterface, hcq_filter_visible_devices
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
-from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
+from tinygrad.runtime.support.system import PCIIfaceBase, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import USB3, pm_usb_batch, pm_usb_lower, pm_usb_bufferize
 from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
@@ -575,7 +575,7 @@ class AMDQueueDesc:
 
 class KFDIface:
   kfd:FileIOInterface|None = None
-  event_page:HCQBuffer|None = None
+  event_page:Buffer
   gpus:list[FileIOInterface] = []
   count:int = 0
 
@@ -609,24 +609,6 @@ class KFDIface:
     self.kfd_ver = ((ver_st:=kfd.AMDKFD_IOC_GET_VERSION(KFDIface.kfd)).major_version, ver_st.minor_version)
     kfd.AMDKFD_IOC_ACQUIRE_VM(KFDIface.kfd, drm_fd=self.drm_fd.fd, gpu_id=self.gpu_id)
     if self.kfd_ver >= (1,14): kfd.AMDKFD_IOC_RUNTIME_ENABLE(KFDIface.kfd, mode_mask=0)
-
-    # Set these for our device.
-    if KFDIface.event_page is None:
-      KFDIface.event_page = self.alloc(0x8000, uncached=True)
-      kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_page_offset=KFDIface.event_page.meta.handle)
-    else: self.map(KFDIface.event_page)
-
-    # Event to wait for queues completion
-    self.dev.queue_event = kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_type=kfd.KFD_IOC_EVENT_SIGNAL, auto_reset=1)
-    self.dev.queue_event_mailbox_ptr = KFDIface.event_page.va_addr + self.dev.queue_event.event_slot_index * 8
-
-    # OS events to collect memory and hardware faults
-    self.mem_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_type=kfd.KFD_IOC_EVENT_MEMORY)
-    self.hw_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_type=kfd.KFD_IOC_EVENT_HW_EXCEPTION)
-
-    self.queue_event_arr = (kfd.struct_kfd_event_data * 3)(kfd.struct_kfd_event_data(event_id=self.dev.queue_event.event_id),
-      kfd.struct_kfd_event_data(event_id=self.mem_fault_event.event_id), kfd.struct_kfd_event_data(event_id=self.hw_fault_event.event_id))
-    self.queue_event_arr_ptr = ctypes.addressof(self.queue_event_arr)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, cpu_addr=None) -> HCQBuffer:
     flags = kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
@@ -685,6 +667,16 @@ class KFDIface:
 
   def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
                    xcc_id=0, idx=0):
+    if not hasattr(self, 'queue_event_arr'):
+      if not hasattr(KFDIface, 'event_page'):
+        KFDIface.event_page = Buffer(self.dev.device, 0x8000, dtypes.uint8, options=BufferSpec(uncached=True), preallocate=True)
+        kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_page_offset=KFDIface.event_page._buf.meta.handle)
+
+      KFDIface.event_page.get_buf(self.dev.device)
+      self.queue_event_arr = (kfd.struct_kfd_event_data * 3)(*[kfd.struct_kfd_event_data(event_id=kfd.AMDKFD_IOC_CREATE_EVENT(
+        KFDIface.kfd, event_type=t, auto_reset=int(t == kfd.KFD_IOC_EVENT_SIGNAL)).event_id)
+        for t in (kfd.KFD_IOC_EVENT_SIGNAL, kfd.KFD_IOC_EVENT_MEMORY, kfd.KFD_IOC_EVENT_HW_EXCEPTION)])
+
     queue = kfd.AMDKFD_IOC_CREATE_QUEUE(KFDIface.kfd, ring_base_address=ring._buf.va_addr, ring_size=ring._buf.size, gpu_id=self.gpu_id,
       queue_type=queue_type, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE|(xcc_id<<8), queue_priority=getenv("AMD_KFD_QUEUE_PRIORITY", 7),
       eop_buffer_address=eop_buffer._buf.va_addr if eop_buffer else 0, eop_buffer_size=eop_buffer._buf.size if eop_buffer else 0,
@@ -703,7 +695,7 @@ class KFDIface:
       write_ptr=gart.view(1, dtypes.uint64, wptr).ensure_allocated(), put_value=put_value, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer)
 
   def sleep(self, tm:int):
-    kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=3, wait_for_all=0, timeout=tm)
+    kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=ctypes.addressof(self.queue_event_arr), num_events=3, wait_for_all=0, timeout=tm)
     if self.queue_event_arr[1].memory_exception_data.gpu_id or self.queue_event_arr[2].hw_exception_data.gpu_id: self.on_device_hang()
 
   def on_device_hang(self):
@@ -821,13 +813,17 @@ class USBIface(PCIIface):
     self.dev, self.pci_dev, self.vram_bar, self.count = dev, USBPCIDevice("AM", *visible[dev_id]), 0, len(visible)
     self.dev_impl = AMDev(self.pci_dev)
     self._compute_props()
+
+  @functools.cached_property
+  def ctrl(self) -> Buffer:
     # the controller's memory the queue and the host share, one range (usb.py slices it): the sys page at 0, the cq page at 0x1000, the sram at
     # 0x5000. the host's view starts at the sys page's controller address 0xa000, which puts the sram on its scsi window 0xf000
     vaddr, pieces = self.dev_impl.mm.alloc_vaddr(size=0x85000), [(0x0, 0x820000, 0x1000), (0x1000, 0x822000, 0x1000), (0x5000, 0x200000, 0x80000)]
-    maps = [self.dev_impl.mm.map_range(vaddr + off, n, [(sys, n)], aspace=AddrSpace.SYS, uncached=True) for off, sys, n in pieces]
-    self.ctrl = HCQBuffer(vaddr, 0x85000, meta=PCIAllocationMeta(maps[0], has_cpu_mapping=False), view=self.pci_dev.dma_view(0xa000, 0x85000),
-                          owner=self.dev)
-    for off, n in ((0x800, 4), (0x5000, 0x80000)): unwrap(self.ctrl.view).view(off, n)[:] = bytes(n) # no stale fence or sentinel
+    for off, paddr, n in pieces: self.dev_impl.mm.map_range(vaddr + off, n, [(paddr, n)], aspace=AddrSpace.SYS, uncached=True)
+    view = self.pci_dev.dma_view(0xa000, 0x85000)
+    for off, n in ((0x800, 4), (0x5000, 0x80000)): view.view(off, n)[:] = bytes(n) # no stale fence or sentinel
+    return Buffer(self.dev.device, 0x85000, dtypes.uint8, options=BufferSpec(external_ptr=vaddr, nolru=True),
+                  opaque=HCQBuffer(vaddr, 0x85000, view=view, owner=self.dev))
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False, **kwargs) -> HCQBuffer:
     # everything, even host-style signals, lives in vram: gpu writes into the bridge's own memory collide with an armed 0xF2 read stream
