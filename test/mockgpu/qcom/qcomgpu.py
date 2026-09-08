@@ -61,7 +61,7 @@ class QCOMExecutor:
     if op in (mesa.CP_WAIT_FOR_IDLE, mesa.CP_WAIT_MEM_WRITES, mesa.CP_SET_MARKER):
       return True
     if op == mesa.CP_LOAD_STATE6_FRAG:
-      if ((p[0] >> 14) & 3) == mesa.ST_CONSTANTS:
+      if ((p[0] >> 14) & 3) == mesa.ST_CONSTANTS and ((p[0] >> 18) & 0xf) == mesa.SB6_CS_SHADER:
         self.gpu.const_addr = p[1] | (p[2] << 32)
       return True
     if op == mesa.CP_EVENT_WRITE:
