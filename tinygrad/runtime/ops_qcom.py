@@ -308,12 +308,11 @@ class QCOMAllocator(HCQAllocator['QCOMDevice']):
   def _do_free(self, opaque, options:BufferSpec): self.dev._gpu_free(opaque)
 
   def _do_map(self, buf:HCQBuffer):
+    if not DEV.interface.startswith("MOCK"): raise NotImplementedError("QCOM peer map")
     src = buf._base if buf._base is not None else buf
-    if DEV.interface.startswith("MOCK"): # _gpu_map flushes dcache with aarch64 dc cvac
-      return HCQBuffer(int(src.va_addr), src.size, meta=(None, False), view=src.view, owner=self.dev)
-    return self.dev._gpu_map(int(src.va_addr), src.size)
+    return HCQBuffer(int(src.va_addr), src.size, meta=(None, False), view=src.view, owner=self.dev)
 
-  def _do_unmap(self, buf:HCQBuffer): self.dev._gpu_free(buf)
+  def _do_unmap(self, buf:HCQBuffer): pass
 
 def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, f"{nm}_MASK")
 
