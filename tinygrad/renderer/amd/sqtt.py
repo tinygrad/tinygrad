@@ -670,11 +670,16 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       for wave in range(10):
         if (p.inst >> (wave * 2)) & 3 == 3:
           inst = pc_map[pc:=wave_pc[(p.simd, wave)]]
+          if getattr(inst, 'op_name', '') not in {'S_NOP', 'S_WAITCNT'}: continue
           wave_pc[(p.simd, wave)] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
     elif isinstance(p, CDNA_INST):
       inst = pc_map[pc:=wave_pc[(p.simd, p.wave)]]
-      wave_pc[(p.simd, p.wave)] += inst.size()
+      if p.op == InstOpCDNA.JUMP:
+        x = getattr(inst, 'simm16') & 0xffff
+        wave_pc[(p.simd, p.wave)] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
+      else:
+        wave_pc[(p.simd, p.wave)] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
     # map INST events on this SIMD to the program counter, we know the waves
     elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)) and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_")):
