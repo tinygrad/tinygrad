@@ -101,7 +101,8 @@ class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
                initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
-    self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = Device.canonicalize(device), size, dtype, options, offset, 0
+    self.device, self.size, self.dtype, self.offset, self.allocated_views = Device.canonicalize(device), size, dtype, offset, 0
+    self.options = options if options is not None else BufferSpec()
     self._bufs: dict[str, Any] = {}
     if base is None:
       assert offset == 0, "base buffers can't have offset"
@@ -135,18 +136,17 @@ class Buffer:
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
     assert not self.is_initialized(), "can't allocate already allocated buffer"
     if DEBUG >= 7: print(f"buffer: allocate {self.nbytes} bytes on {self.device}")
-    if not self.device.startswith("NULL") and self.size > MAX_BUFFER_SIZE > 0 and (self.options is None or self.options.external_ptr is None):
+    if not self.device.startswith("NULL") and self.size > MAX_BUFFER_SIZE > 0 and self.options.external_ptr is None:
       raise RuntimeError(f"buffer of size {self.size/1e6:.2f}M is too large")
     self.allocator:Allocator = Device[self.device].allocator
-    if external_ptr is not None:
-      self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferSpec(external_ptr=external_ptr)
+    if external_ptr is not None: self.options = replace(self.options, external_ptr=external_ptr)
     if self._base is not None:
       self._base.ensure_allocated()
       self._base.allocated_views += 1
       self._bufs[self.device] = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
     else:
       self._bufs[self.device] = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
-      if not self.device.startswith("DISK") and (self.options is None or self.options.external_ptr is None):
+      if not self.device.startswith("DISK") and self.options.external_ptr is None:
         GlobalCounters.mem_used += self.nbytes
         GlobalCounters.mem_used_per_device[self.device] += self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", self.trace_num, {"dtype":self.dtype, "sz":self.size}))
@@ -155,7 +155,7 @@ class Buffer:
     assert self.device in self._bufs, "buffer must be allocated to deallocate"
     if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None:
-      if GlobalCounters is not None and not self.device.startswith("DISK") and (self.options is None or self.options.external_ptr is None):
+      if GlobalCounters is not None and not self.device.startswith("DISK") and self.options.external_ptr is None:
         GlobalCounters.mem_used -= self.nbytes
         GlobalCounters.mem_used_per_device[self.device] -= self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", self.trace_num))
@@ -182,7 +182,7 @@ class Buffer:
   def __del__(self): (self.device not in self._bufs) or self.deallocate()
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
-           (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
+           (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options != BufferSpec() else "") + ">"
   def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False, no_sync=False) -> memoryview:
     # zero copy with as_memoryview (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer'):
