@@ -49,6 +49,10 @@ inputs:
     description: "Install ninja?"
     required: false
     default: 'false'
+  autogen:
+    description: "Install autogen support packages?"
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -154,7 +158,7 @@ runs:
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
 
     - name: Add LLVM Repo (Linux)
-      if: inputs.llvm == 'true' && runner.os == 'Linux'
+      if: (inputs.llvm == 'true' || inputs.autogen == 'true') && runner.os == 'Linux'
       shell: bash
       run: |
         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
@@ -189,6 +193,10 @@ runs:
         # **** ninja ****
         if [[ "${{ inputs.ninja }}" == "true" ]]; then
           pkgs+=" ninja-build"
+        fi
+        # **** autogen ****
+        if [[ "${{ inputs.autogen }}" == "true" ]]; then
+          pkgs+=" libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev libdrm-dev liburing-dev"
         fi
 
         echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
