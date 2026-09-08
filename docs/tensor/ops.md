@@ -30,6 +30,7 @@
 ::: tinygrad.Tensor.dot
 ::: tinygrad.Tensor.matmul
 ::: tinygrad.Tensor.einsum
+::: tinygrad.Tensor.associative_scan
 ::: tinygrad.Tensor.cumsum
 ::: tinygrad.Tensor.cumprod
 ::: tinygrad.Tensor.cummax

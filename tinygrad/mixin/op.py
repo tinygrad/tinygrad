@@ -767,6 +767,41 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     base = chunks[..., -1]._cumalu(-1, op)._pad_constant((None,)*(chunks.ndim-2) + ((1, -1),), value)
     return chunks.alu(op, base.unsqueeze(-1)).flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
 
+  def associative_scan(self, fn:Callable[[Self, Self], Self], axis:int=0, reverse:bool=False) -> Self:
+    """
+    Computes an inclusive scan along `axis` using associative binary function `fn`.
+
+    `fn` does not need to be commutative. The scan preserves the left-to-right order of the input.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4])
+    print(t.associative_scan(lambda x, y: x + y).numpy())
+    ```
+    """
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0: return self
+    if not isinstance(self.shape[axis], int): raise RuntimeError(f"associative_scan requires a static scan dimension, got {self.shape[axis]}")
+    if self.shape[axis] < 2: return self
+
+    def _slice(x:Self, start:int|None=None, stop:int|None=None, step:int|None=None) -> Self:
+      return x[(slice(None),)*axis + (slice(start, stop, step),)]
+
+    def _scan(x:Self) -> Self:
+      assert isinstance(n:=x.shape[axis], int)
+      if n < 2: return x
+
+      odd = _scan(fn(_slice(x, None, -1, 2), _slice(x, 1, None, 2)))
+      tails = _slice(x, 2, None, 2)
+      prev = _slice(odd, None, -1) if n % 2 == 0 else odd
+      even = _slice(x, None, 1)
+      if tails.shape[axis]: even = even.cat(fn(prev, tails), dim=axis)
+
+      paired = _slice(even, None, odd.shape[axis]).stack(odd, dim=axis+1).flatten(axis, axis+1)
+      return paired.cat(_slice(even, odd.shape[axis], None), dim=axis) if n % 2 else paired
+
+    ret = _scan(self.flip(axis) if reverse else self)
+    return ret.flip(axis) if reverse else ret
+
   def cumsum(self, axis:int=0) -> Self:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.

@@ -1142,6 +1142,26 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.nn.functional.mish, Tensor.mish)
     helper_test_op([()], torch.nn.functional.mish, Tensor.mish)
 
+  def test_associative_scan(self):
+    helper_test_op([(10,)], lambda x: torch.cumsum(x, dim=0), lambda x: x.associative_scan(lambda a, b: a+b))
+    helper_test_op([(3,4)], lambda x: torch.cumsum(x, dim=1), lambda x: x.associative_scan(lambda a, b: a+b, axis=-1))
+    helper_test_op([(9,)], lambda x: torch.flip(torch.cumsum(torch.flip(x, (0,)), dim=0), (0,)),
+                   lambda x: x.associative_scan(lambda a, b: a+b, reverse=True))
+    helper_test_op([(0,3)], lambda x: x, lambda x: x.associative_scan(lambda a, b: a+b), forward_only=True)
+    helper_test_op([(1,)], lambda x: x, lambda x: x.associative_scan(lambda a, b: a+b))
+    helper_test_op([()], lambda x: x, lambda x: x.associative_scan(lambda a, b: a+b))
+
+  def test_associative_scan_noncommutative(self):
+    def torch_scan(x, reverse=False):
+      if reverse: x = torch.flip(x, (0,))
+      out = [x[0]]
+      for i in range(1, x.shape[0]): out.append(out[-1] @ x[i])
+      ret = torch.stack(out)
+      return torch.flip(ret, (0,)) if reverse else ret
+    helper_test_op([(5,2,2)], torch_scan, lambda x: x.associative_scan(lambda a, b: a@b), forward_only=True, atol=1e-5, rtol=1e-5)
+    helper_test_op([(5,2,2)], lambda x: torch_scan(x, True), lambda x: x.associative_scan(lambda a, b: a@b, reverse=True),
+                   forward_only=True, atol=1e-5, rtol=1e-5)
+
   def test_small_cumsum(self):
     helper_test_op([(10)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
   @slow_test
