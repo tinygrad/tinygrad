@@ -4,6 +4,7 @@ from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up, suppress_finalizing, getenv, to_mv
 from tinygrad.runtime.autogen import webgpu
 from tinygrad.runtime.support import c
+from tinygrad.dtype import AddrSpace
 from typing import Callable
 import ctypes
 
@@ -51,7 +52,7 @@ QueueOnSubmittedWorkDone = synchronous(webgpu.enum_WGPUQueueWorkDoneStatus)(webg
 
 class WebGPUProgram(Program['WebGpuDevice']):
   def __init__(self, dev:'WebGpuDevice', obj:TinyELF):
-    self.dev, self.name = dev, to_wgpu_str(obj.name)
+    self.dev, self.name, self.signature = dev, to_wgpu_str(obj.name), obj.signature
 
     # Creating shader module
     shader = webgpu.WGPUShaderModuleWGSLDescriptor(code=to_wgpu_str(obj.lib.decode()),
@@ -74,8 +75,9 @@ class WebGPUProgram(Program['WebGpuDevice']):
     def bgl_entry(n:int, ty:str):
       return webgpu.WGPUBindGroupLayoutEntry(binding=n, visibility=webgpu.WGPUShaderStage_Compute,
                                              buffer=webgpu.WGPUBufferBindingLayout(type=getattr(webgpu, f'WGPUBufferBindingType_{ty}')))
-    bind_entries = (webgpu.WGPUBindGroupLayoutEntry * (1+len(bufs)+len(vals)))(
-      bgl_entry(0, 'Uniform'), *(bgl_entry(i+1, 'Uniform' if i >= len(bufs) else 'Storage') for i in range(len(bufs)+len(vals))))
+    ordered_args = list(TinyELF.iter_args(self.signature, bufs, vals))
+    bind_entries = (webgpu.WGPUBindGroupLayoutEntry * (1+len(ordered_args)))(bgl_entry(0, 'Uniform'),
+      *(bgl_entry(i+1, 'Storage' if sig[4] is AddrSpace.GLOBAL else 'Uniform') for i,(sig, _) in enumerate(ordered_args)))
 
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)
     bind_layout = webgpu.wgpuDeviceCreateBindGroupLayout(self.dev.device_res,
@@ -94,7 +96,8 @@ class WebGPUProgram(Program['WebGpuDevice']):
     def bg_entry(n:int, x:webgpu.WGPUBuffer|int|float):
       buf = x if isinstance(x, webgpu.WGPUBuffer) else self.dev.create_uniform(x)
       return webgpu.WGPUBindGroupEntry(binding=n, buffer=buf, offset=0, size=webgpu.wgpuBufferGetSize(buf))
-    bindings = (webgpu.WGPUBindGroupEntry * (1+len(bufs)+len(vals)))(bg_entry(0, float('inf')), *(bg_entry(i+1, x) for i,x in enumerate(bufs+vals)))
+    bindings = (webgpu.WGPUBindGroupEntry * (1+len(ordered_args)))(bg_entry(0, float('inf')),
+      *(bg_entry(i+1, arg) for i,(_, arg) in enumerate(ordered_args)))
 
     bind_group_desc = webgpu.WGPUBindGroupDescriptor(layout=bind_layout, entryCount=len(bindings), entries=bindings)
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)

@@ -1,12 +1,12 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
+from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Sequence, Self, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct
 from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up
-from tinygrad.dtype import DType, _to_np_dtype
+from tinygrad.dtype import DType, _to_np_dtype, AddrSpace
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -325,15 +325,35 @@ class TinyELF:
   lib: bytes
   name: str
   target: Target
-  # tuple of (name, slot, dtype, shape)
-  signature: tuple[tuple[str|None, int, DType, tuple], ...]
+  # tuple of (name, slot, dtype, shape, addrspace)
+  signature: tuple[tuple[str|None, int, DType, tuple, AddrSpace], ...]
   profile_key: bytes|None = None
 
   @staticmethod
-  def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
-    for _,_,dt,_ in signature:
-      yield (offset:=round_up(offset, dt.itemsize)), dt
-      offset += dt.itemsize
+  def iter_sig(
+    signature:tuple[tuple[str|None, int, DType, tuple, AddrSpace], ...], offset:int=0, pointer_size:int=8, pointer_alignment:int=8,
+  ) -> Generator[tuple[int, DType, AddrSpace], None, None]:
+    for _,_,dt,_,addr_space in signature:
+      size = pointer_size if (addr_space == AddrSpace.GLOBAL) else dt.itemsize
+      alignment = pointer_alignment if (addr_space == AddrSpace.GLOBAL) else dt.itemsize
+      offset = round_up(offset, alignment)
+      yield (offset, dt, addr_space)
+      offset += size
+
+  @staticmethod
+  def iter_args(signature:tuple[tuple[str|None, int, DType, tuple, AddrSpace], ...], bufs:Sequence[Any], vals:Sequence[Any],
+                ) -> Generator[tuple[tuple[str|None, int, DType, tuple, AddrSpace], Any], None, None]:
+    buf_idx, val_idx = 0, 0
+    for sig in signature:
+      if sig[4] is AddrSpace.GLOBAL:
+        assert buf_idx < len(bufs), "signature has more buffers than provided arguments"
+        yield sig, bufs[buf_idx]
+        buf_idx += 1
+      else:
+        assert val_idx < len(vals), "signature has more scalars than provided arguments"
+        yield sig, vals[val_idx]
+        val_idx += 1
+    assert buf_idx == len(bufs) and val_idx == len(vals), "provided arguments do not match signature"
 
 class Program(Generic[DeviceType]):
   def __init__(self, dev:DeviceType, obj:TinyELF): pass

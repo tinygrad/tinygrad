@@ -6,7 +6,7 @@ from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.runtime.autogen import mesa, libc
 from tinygrad.runtime.support.c import POINTER
-import base64, ctypes, struct, functools, inspect, itertools
+import base64, ctypes, struct, functools, inspect
 
 def g(s:str): return getattr(mesa, s)
 def nsrc(d:mesa.nir_def) -> mesa.nir_src: return mesa.nir_src(ssa=ctypes.pointer(d))
@@ -315,12 +315,11 @@ class IR3Renderer(NIRRenderer):
                                                  for u in uops if u.op is Ops.PARAM and not is_image_shape(u._shape)), 0)
 
   def postrender(self, uops:list[UOp]):
-    bufs = [u for u in uops if u.op is Ops.PARAM and u.addrspace is not AddrSpace.ALU]
-    texs, imgs = itertools.count().__next__, itertools.count().__next__
-    for b in filter(lambda b: is_image_shape(b._shape), bufs):
-      nimm_set(self.r[b], texs() if b in self.texs else imgs(), dtypes.int)
-
-    self.b.shader.contents.info.num_ubos = len([u for u in bufs if not is_image_shape(u._shape)])
-    self.b.shader.contents.info.num_images = texs() + imgs()
+    params = [u for u in uops if u.op is Ops.PARAM]
+    images = [u for u in params if is_image_shape(u._shape)]
+    # Loads and stores share image indices; IR3 records which images also need texture descriptors.
+    for i,b in enumerate(images): nimm_set(self.r[b], i, dtypes.int)
+    self.b.shader.contents.info.num_ubos = int(any(not is_image_shape(u._shape) for u in params))
+    self.b.shader.contents.info.num_images = len(images)
 
   def supported_dtypes(self): return {d for d in NIRRenderer.supported_dtypes(self) if d != dtypes.double}

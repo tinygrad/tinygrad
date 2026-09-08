@@ -14,7 +14,7 @@ from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.autogen import libc
 from tinygrad.codegen import do_to_program
-from tinygrad.engine.realize import pm_flatten_linear, get_call_arg_uops, get_call_var_uops, get_runtime
+from tinygrad.engine.realize import pm_flatten_linear, get_call_var_uops, get_runtime
 from tinygrad import UOp, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import KernelInfo, Ops, UPat, PatternMatcher, graph_rewrite
@@ -65,10 +65,17 @@ def cpu_cmd(devs:tuple[str, ...], prog, *args:UOp) -> UOp:
   return UOp(Ops.INS, src=words + (UOp.const(0, dtypes.uint64),) * (CMD_SIZE - len(words)), arg=("cmd", dtypes.void))
 
 def cpu_exec(ctx:tuple[str, ...], call:UOp, prg:UOp) -> UOp:
-  args = [get_call_arg_uops(call)[i].getaddr(ctx) for i in prg.arg.globals] + [v.cast(dtypes.uint64) for v in get_call_var_uops(call, prg)]
-  if (core:=prg.arg.runtimevars.get('core_id')) is None: return cpu_cmd(ctx, prg, *args)
+  buffer_pairs = [(slot, call.src[slot+1].getaddr(ctx)) for slot in prg.arg.globals]
+  # User scalars stay symbolic across replay; _device_num is bound separately for each device lane.
+  scalar_pairs = [(var.arg.slot, (val if var.expr == '_device_num' else var).cast(dtypes.uint64))
+                  for var,val in zip(prg.arg.vars, get_call_var_uops(call, prg))]
+  sorted_pairs = sorted(buffer_pairs + scalar_pairs, key=lambda x: x[0])
+  args = [v for _, v in sorted_pairs]
 
-  la = [cpu_cmd(ctx,prg,*args[:(cid:=(len(prg.arg.globals)+core))],UOp.const(t, dtypes.uint64),*args[cid+1:]) for t in range(prg.arg.global_size[0])]
+  if (core:=prg.arg.runtimevars.get('core_id')) is None: return cpu_cmd(ctx, prg, *args)
+  core_slot = prg.arg.vars[core].arg.slot
+  cid = next(pos for pos, (slot, _) in enumerate(sorted_pairs) if slot == core_slot)
+  la = [cpu_cmd(ctx, prg, *args[:cid], UOp.const(t, dtypes.uint64), *args[cid+1:]) for t in range(prg.arg.global_size[0])]
   return UOp(Ops.LINEAR, src=tuple(la))
 
 pm_cpu_opsel = PatternMatcher([
@@ -118,7 +125,7 @@ class CPUProgram(Program['CPUDevice']):
 
   def __init__(self, dev:CPUDevice, obj:TinyELF):
     self.dev, self.name, self.signature = dev, obj.name, obj.signature
-    self.runtimevars = {name:slot for name,slot,*_ in obj.signature if name == 'core_id'}
+    self.runtimevars = {name:pos for pos,(name,*_) in enumerate(obj.signature) if name == 'core_id'}
     self.lvp = obj.target.renderer == "LVP"
 
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
@@ -156,13 +163,25 @@ class CPUProgram(Program['CPUDevice']):
                vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
     st = time.perf_counter()
     if self.lvp:
-      lvp_args = bytearray(12 + (len(bufs) + len(vals)) * 8)
+      payload_size = 0
+      layout = tuple(TinyELF.iter_sig(self.signature))
+      if layout:
+        last_offset, last_dtype, last_addr_space = layout[-1]
+        last_size = 8 if last_addr_space is AddrSpace.GLOBAL else last_dtype.itemsize
+        payload_size = last_offset + last_size
+      lvp_args = bytearray(12 + payload_size)
       addr = mv_address(lvp_args)
-      struct.pack_into(f'<3I{len(bufs)}Q', lvp_args, 0, *data64_le(addr+12), (len(bufs)+len(vals))*2, *[b.va_addr for b in bufs])
-      for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs)*8)): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, v)
-      self.fxn(addr)
+      struct.pack_into('<3I', lvp_args, 0, *data64_le(addr+12), (payload_size+3)//4)
+      lvp_values = list(TinyELF.iter_args(self.signature, bufs, vals))
+      for tid in range(global_size[0]):
+        for (offset, dtype, addr_space), ((name, *_), value) in zip(layout, lvp_values):
+          if addr_space == AddrSpace.GLOBAL: struct.pack_into('<Q', lvp_args, 12+offset, cast(int, value.va_addr))
+          else: struct.pack_into(f'<{dtype.fmt}', lvp_args, 12+offset, tid if name == 'core_id' else cast(int, value))
+        self.fxn(addr)
     else:
-      args = [*[cast(int, b.va_addr) for b in bufs], *cast(tuple[int, ...], vals)]
+      i = j = 0
+      args = [cast(int, bufs[(i:=i+1)-1].va_addr) if addr_space == AddrSpace.GLOBAL else cast(int, vals[(j:=j+1)-1])
+              for _, _, _, _, addr_space in self.signature]
       assert len(args) <= MAX_ARGS, f"CPU programs support at most {MAX_ARGS} arguments, got {len(args)}"
       for tid in range(global_size[0]):
         if 'core_id' in self.runtimevars: args[self.runtimevars['core_id']] = tid

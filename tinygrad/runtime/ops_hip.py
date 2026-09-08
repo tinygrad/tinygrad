@@ -1,6 +1,7 @@
 import ctypes
 from tinygrad.helpers import mv_address, getenv, suppress_finalizing
 from tinygrad.device import Compiled, LRUAllocator, BufferSpec, Program, TinyELF
+from tinygrad.dtype import AddrSpace
 from tinygrad.runtime.autogen import hip
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.support.c import init_c_var, init_c_struct_t
@@ -8,6 +9,23 @@ if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint
 
 def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
+
+def encode_args(args, vals, signature) -> tuple[ctypes.Structure, ctypes.Array]:
+  fields, ordered, end = [], [], 0
+  buf_idx, val_idx = 0, 0
+  for (off, dt, addr_space), (_, arg) in zip(TinyELF.iter_sig(signature), TinyELF.iter_args(signature, args, vals), strict=True):
+    if addr_space is AddrSpace.GLOBAL:
+      fields.append((f'f{buf_idx}', hip.hipDeviceptr_t, off))
+      buf_idx, size = buf_idx + 1, 8
+    else:
+      fields.append((f'v{val_idx}', getattr(ctypes, f"c_int{dt.bitsize}"), off))
+      val_idx, size = val_idx + 1, dt.itemsize
+    ordered.append(arg)
+    end = off + size
+  c_args = init_c_struct_t(end, tuple(fields))(*ordered)
+  vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), 2,
+                                ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), 3)
+  return c_args, vargs
 
 class HIPDevice(Compiled):
   def __init__(self, device:str=""):
@@ -37,11 +55,7 @@ class HIPProgram(Program[HIPDevice]):
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     check(hip.hipSetDevice(self.dev.device_id))
     if not hasattr(self, "vargs"):
-      fields = ([(f'f{i}', hip.hipDeviceptr_t, i*8) for i in range(len(args))] +
-        [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), o) for i,(o,dt) in enumerate(TinyELF.iter_sig(self.signature[len(args):], len(args)*8))])
-      self.c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
-      self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
-                                         ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)
+      self.c_args, self.vargs = encode_args(args, vals, self.signature)
 
     for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
     for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])

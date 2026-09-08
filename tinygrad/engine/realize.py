@@ -21,7 +21,10 @@ def get_call_var_uops(call:UOp, prg:UOp) -> list[UOp]:
 
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.src[0]
-  if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
+  if ast.op is Ops.PROGRAM:
+    # outs/ins use logical PARAM slots, while dependency tracking indexes get_call_arg_uops(call).
+    buffer_pos = {slot:pos for pos,(slot, _) in enumerate((x for x in enumerate(call.src[1:]) if not x[1].is_bound_var))}
+    return tuple(buffer_pos[x] for x in ast.arg.outs), tuple(buffer_pos[x] for x in ast.arg.ins)
   if ast.op is Ops.COPY: return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
@@ -35,6 +38,9 @@ def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple[str, Estimates, byt
     return [(d, call, (name, estimates, profile_key)) for devices,name,estimates,_,profile_key in call.arg.aux.kernels for d in devices]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call, None)]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "validate": return []
+  if ast.op is Ops.PROGRAM:
+    launch_device = next((x.device for x in call.src[1:] if x.device is not None), ast.arg.target.device)
+    return [(d, call, None) for d in to_tuple(launch_device)]
   return [(d, call, None) for d in to_tuple(call.src[1].device)]
 
 def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|None=None) -> str:
@@ -72,7 +78,7 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
 
   kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
   args = resolve_params(call, ctx.input_uops) if kernels and kernels[0][2] is None else []
-  lanes = list(unwrap_multi(call, [args[g] for g in call.src[0].arg.globals] if call.src[0].op is Ops.PROGRAM else args)) if args else []
+  lanes = list(unwrap_multi(call, args)) if args else []
   for i, (device, kcall, stats) in enumerate(kernels):
     et, bufs = ets[i] if i < len(ets) else None, lanes[i][0] if i < len(lanes) else []
     display_name = get_call_name(kcall, bufs, ctx.var_vals) if stats is None else stats[0]
@@ -185,8 +191,12 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   ets:list[float|None] = []
-  resolved = resolve_params(call, ctx.input_uops)
-  for device, (bufs, device_vars) in zip(to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
+  resolved = [_resolve(call.src[slot+1], ctx.input_uops) for slot in ast.arg.globals]
+  launch_device = next((x.device for x in resolved if x.device is not None), None)
+  if launch_device is None: launch_device = next((x.device for x in call.src[1:] if x.device is not None), ast.arg.target.device)
+  devices = to_tuple(launch_device)
+
+  for device, (bufs, device_vars) in zip(devices, unwrap_multi(call, resolved)):
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [b.ensure_allocated() for b in bufs]
     rt = get_runtime(device, ast, cache=ctx.cache)
@@ -197,13 +207,17 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   import numpy as np
+  nargs = (len(call.src) - 1) // 2
+  buffer_pos = {slot:pos for pos,slot in enumerate(i for i,s in enumerate(call.src[1:nargs+1]) if not s.is_bound_var)}
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
     var_vals = {**ctx.var_vals, **device_vars}
     cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
     global_size, local_size = prg.arg.launch_dims(var_vals)
-    cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
-    for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
+    cpu_rt(*[bufs[buffer_pos[i]].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size,
+           vals=prg.arg.vals(var_vals))
+    for i in prg.arg.outs:
+      np.testing.assert_allclose(dev_bufs[buffer_pos[i]].ensure_allocated().numpy(), bufs[buffer_pos[i]].numpy(), rtol=1e-3, atol=1e-3)
   return []
 
 def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
@@ -244,7 +258,9 @@ def _validate(call:UOp, sink:UOp) -> UOp:
   params = get_call_arg_uops(call)
   shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
   copies = tuple(p.copy_to_device(s.device).call(s, p) for s, p in zip(shadows, params))
-  return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, src=(sink,), arg="validate").call(*shadows, *params)))
+  shadow_iter = iter(shadows)
+  shadow_args = tuple(s if s.is_bound_var else next(shadow_iter) for s in call.src[1:])
+  return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, src=(sink,), arg="validate").call(*shadow_args, *call.src[1:])))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
 # ctx is beam value

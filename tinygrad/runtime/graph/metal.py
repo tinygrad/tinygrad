@@ -6,6 +6,7 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.runtime.ops_metal import MetalDevice, MetalAllocator, wait_check, to_ns_str
 from tinygrad.runtime.autogen import metal
+from tinygrad.dtype import AddrSpace
 
 class MetalGraph(GraphRunner):
   def __init__(self, linear, input_uops=()):
@@ -26,23 +27,31 @@ class MetalGraph(GraphRunner):
 
     self.var_bind_data = []
     if len(self.vars):
-      self.var_buf = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s) in unwrap(r).signature if s == ()))
+      self.var_buf = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s,_) in unwrap(r).signature if s == ()))
       self.var_buf_view, var_buf_offset = cast(MetalAllocator, self.dev.allocator)._as_buffer(self.var_buf), 0
 
     all_pipelines, all_resources = [], [self.var_buf.buf] if len(self.vars) else []
+    self.buf_bind_idxs = []
     for j, ((_, ast, bufs, _), runtime, replace) in enumerate(zip(self.calls, self.runtimes, self.uop_replace)):
       assert runtime is not None
       icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
       icb_command.setComputePipelineState(runtime.pipeline_state)
       all_pipelines.append(runtime.pipeline_state)
-      for i, b in enumerate(bufs):
-        if not any(pos == i for pos, _ in replace):
-          icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
-          all_resources.append(b._buf.buf)
-      for nm,i,dt,_ in runtime.signature[len(bufs):]:
-        icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, var_buf_offset, i)
-        self.var_bind_data.append((nm, var_buf_offset, dt.fmt))
-        var_buf_offset += dt.itemsize
+      buf_idx, bind_idxs = 0, []
+      for i, (nm, _, dt, _, addr_space) in enumerate(runtime.signature):
+        if addr_space is AddrSpace.GLOBAL:
+          b = bufs[buf_idx]
+          bind_idxs.append(i)
+          if not any(pos == buf_idx for pos, _ in replace):
+            icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
+            all_resources.append(b._buf.buf)
+          buf_idx += 1
+        else:
+          icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, var_buf_offset, i)
+          self.var_bind_data.append((nm, var_buf_offset, dt.fmt))
+          var_buf_offset += dt.itemsize
+      assert buf_idx == len(bufs), "signature does not match Metal graph buffers"
+      self.buf_bind_idxs.append(tuple(bind_idxs))
       global_size, local_size = ast.arg.launch_dims({v: 0 for v in self.vars})
       icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
       icb_command.setBarrier()
@@ -63,7 +72,7 @@ class MetalGraph(GraphRunner):
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
       for pos, iidx in self.uop_replace[j]:
         buf = cast(Buffer, input_uops[iidx].buffer)
-        computeCommand.setKernelBuffer_offset_atIndex(buf._buf.buf, buf._buf.offset, pos)
+        computeCommand.setKernelBuffer_offset_atIndex(buf._buf.buf, buf._buf.offset, self.buf_bind_idxs[j][pos])
         updated_bufs.append(buf._buf.buf)
 
     all_resources = dedup(self.all_resources + updated_bufs)

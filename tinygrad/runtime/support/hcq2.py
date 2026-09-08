@@ -87,8 +87,13 @@ def make_call(name:str, body:UOp, info:HCQInfo) -> UOp: return UOp.custom_functi
 def encode_kernargs_clike(call:UOp, prg:UOp, devs:str|tuple[str, ...]) -> UOp:
   data, info = prg.arg
   buf = UOp.placeholder((data.kernargs_alloc_size // 4,), dtypes.uint32, next(UOp.unique_num), device=devs).rtag("kernargs")
-  words = [get_call_arg_uops(call)[gi].getaddr(devs) for gi in info.globals] + list(info.vars)
-  return buf.after(*make_patches(buf, list(zip(itertools.accumulate((w.dtype.itemsize for w in words), initial=0), words))))
+  params = [(slot, call.src[slot+1].getaddr(devs)) for slot in info.globals] + [(v.arg.slot, v) for v in info.vars]
+  offset, patches = 0, []
+  for _,param in sorted(params, key=lambda x: x[0]):
+    offset = round_up(offset, param.dtype.itemsize)
+    patches.append((offset, param))
+    offset += param.dtype.itemsize
+  return buf.after(*make_patches(buf, patches))
 
 def make_buf(devs, slot:int=0, tag:str="signal") -> UOp: return UOp.placeholder((1,), dtypes.uint64, slot, device=devs, volatile=True, tag=tag)
 
@@ -132,7 +137,7 @@ def stage_copy(dst:UOp, src:UOp) -> UOp|None:
 
 def _get_enqueue_devs(call:UOp) -> Any|None:
   if call.src[0].op not in (Ops.PROGRAM, Ops.COPY): return None # only these bodies can be enqueued
-  if not (bufs:=call.src[1:]) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
+  if not (bufs:=tuple(b for b in call.src[1:] if b.device is not None)) or not all(all_devices_in(b.device, HCQ_DEVS) for b in bufs): return None
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
   devs = min(bufs, key=lambda b: to_tuple(b.device)[0].startswith("CPU")).device # prio to enqueue on not CPU device
   return devs if all_devices_in(devs, HCQ_DEVS) else None
@@ -381,7 +386,7 @@ def replace_params(call:UOp) -> UOp|None:
   tops = body.toposort(gate=lambda u: u.op not in param_ops)
   args = dedup([s for u in tops for s in u.src if s.op in param_ops and s not in variables])
 
-  patched, refhold = partition(call.src[1:], lambda x: x.src[0] in args)
+  patched, refhold = partition(call.src[1:], lambda x: bool(x.src) and x.src[0] in args)
   by_root = {p.src[0]: p for p in patched}
   c_args = [by_root.get(a, a) for a in args]
 

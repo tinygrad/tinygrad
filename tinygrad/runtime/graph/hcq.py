@@ -125,7 +125,8 @@ class HCQGraph(MultiGraphRunner):
         self.rdma_deps[j] = (peer_queue, peer_sync_signals + peer_opt_deps, peer_out_signal, j + 1)
         self.last_j[peer_queue] = j
       else:
-        sync_signals, opt_deps, rdeps = self._resolve_deps(bufs, ast.arg.outs if runtime is not None else [0], enqueue_queue,
+        writes = [ast.arg.globals.index(slot) for slot in ast.arg.outs] if runtime is not None else [0]
+        sync_signals, opt_deps, rdeps = self._resolve_deps(bufs, writes, enqueue_queue,
           enqueue_dev, out_signal, j, is_copy=is_xfer)
 
       self.ji_schedule[j] = (enqueue_dev, enqueue_queue, sync_signals, opt_deps[::-1], out_signal, None if runtime is not None else (j + 1))

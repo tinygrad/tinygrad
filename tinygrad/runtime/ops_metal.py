@@ -2,6 +2,7 @@ import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platfo
 from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, Program, TinyELF, LRUAllocator, ProfileDeviceEvent
+from tinygrad.dtype import AddrSpace
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
@@ -138,9 +139,9 @@ class MetalProgram(Program[MetalDevice]):
     command_buffer = self.dev.mtl_queue.commandBuffer().retained()
     encoder = command_buffer.computeCommandEncoder().retained()
     encoder.setComputePipelineState(self.pipeline_state)
-    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
-    for a,(_,i,dt,_) in zip(vals, self.signature[len(bufs):]):
-      encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{dt.bitsize}")(a)), dt.itemsize, i)
+    for i, ((_, _, dt, _, addr_space), arg) in enumerate(TinyELF.iter_args(self.signature, bufs, vals)):
+      if addr_space is AddrSpace.GLOBAL: encoder.setBuffer_offset_atIndex(arg.buf, arg.offset, i)
+      else: encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{dt.bitsize}")(arg)), dt.itemsize, i)
     encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?

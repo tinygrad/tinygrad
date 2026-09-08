@@ -203,22 +203,24 @@ class QCOMArgsState(HCQArgsState):
     super().__init__(buf, prg, bufs, vals=vals)
     ctypes.memset(int(self.buf.va_addr), 0, prg.kernargs_alloc_size)
 
-    ubos = [bufs[slot] for _,slot,_,shape in prg.signature if slot < len(bufs) and not is_image_shape(shape)]
-    uavs = [(dt,shape,bufs[slot]) for _,slot,dt,shape in prg.signature if slot < len(bufs) and is_image_shape(shape)]
-    # NIR can reorder images to different texture slots
-    ibos, texs = uavs[:prg.ibo_cnt], [uavs[prg.ibo_cnt + (prg.tex_to_image[i] if prg.NIR else i)] for i in range(prg.tex_cnt)]
+    args = list(TinyELF.iter_args(prg.signature, bufs, vals))
+    uniforms = [(sig, value) for sig,value in args if not is_image_shape(sig[3])]
+    uavs = [(dt,shape,value) for (_,_,dt,shape,space),value in args if space is AddrSpace.GLOBAL and is_image_shape(shape)]
+    # NIR textures refer to the shared image table; the CL compiler describes each image's resource type.
+    if prg.NIR: ibos, texs = uavs, [uavs[prg.tex_to_image[i]] for i in range(prg.tex_cnt)]
+    else:
+      ibos = [arg for arg,typ in zip(uavs, prg.image_types, strict=True) if typ == BUFTYPE_IBO]
+      texs = [arg for arg,typ in zip(uavs, prg.image_types, strict=True) if typ == BUFTYPE_TEX]
     for cnst_val,cnst_off,cnst_sz in prg.consts_info:
       to_mv(cast(int, self.buf.va_addr) + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(int(self.buf.va_addr) + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     if prg.NIR:
-      self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)
-      for v,(o,dt) in zip(vals, TinyELF.iter_sig(prg.signature[len(bufs):], len(ubos)*8)):
-        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_off + o)
-    else:
-      for i, b in enumerate(ubos): self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=prg.buf_offs[i])
-      for i,(v,(_,_,dt,_)) in enumerate(zip(vals, prg.signature[len(bufs):])):
-        self.bind_sints_to_buf(v, buf=self.buf, fmt=dt.fmt, offset=prg.buf_offs[i+len(ubos)])
+      offsets = [prg.buf_off + off for off,_,_ in TinyELF.iter_sig(tuple(sig for sig,_ in uniforms))]
+    else: offsets = prg.buf_offs
+    for ((_,_,dt,_,space),value),off in zip(uniforms, offsets, strict=True):
+      self.bind_sints_to_buf(value.va_addr if space is AddrSpace.GLOBAL else value, buf=self.buf,
+                            fmt='Q' if space is AddrSpace.GLOBAL else dt.fmt, offset=off)
 
     def _tex(b, ibo=False):
       imgdt, shape, buf = b
@@ -249,7 +251,7 @@ class QCOMProgram(HCQProgram['QCOMDevice']):
 
       # see https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_shader.h#L525
       # and https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_compiler_nir.c#L5389
-      self.samp_cnt, self.tex_cnt, self.ibo_cnt = (nt:=v.image_mapping.num_tex), nt, v.num_uavs - nt
+      self.samp_cnt, self.tex_cnt, self.ibo_cnt = (nt:=v.image_mapping.num_tex), nt, v.num_uavs
       self.tex_to_image = v.image_mapping.tex_to_image[:]
       # IR3 outputs a sampler for every texture (https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_compiler_nir.c#L1714)
       self.samplers = [qreg.a6xx_tex_samp_0(wrap_s=(clamp_mode:=mesa.A6XX_TEX_CLAMP_TO_BORDER), wrap_t=clamp_mode, wrap_r=clamp_mode),
@@ -310,6 +312,7 @@ class QCOMProgram(HCQProgram['QCOMDevice']):
       binfos.append((offset_words * 4, typ))
       bdoff += length
     self.buf_offs = [off for off,typ in binfos if typ not in {BUFTYPE_TEX, BUFTYPE_IBO}]
+    self.image_types = [typ for _,typ in binfos if typ in {BUFTYPE_TEX, BUFTYPE_IBO}]
 
     # Setting correct offsets to textures/ibos.
     self.tex_cnt, self.ibo_cnt = sum(typ is BUFTYPE_TEX for _,typ in binfos), sum(typ is BUFTYPE_IBO for _,typ in binfos)

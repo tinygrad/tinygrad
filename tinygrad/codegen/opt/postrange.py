@@ -328,8 +328,11 @@ class Scheduler:
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
 
 def args_from_ast(ast:UOp, dname:str) -> tuple[list[Buffer], dict[str, int]]:
-  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM and x.arg.slot >= 0], key=lambda x: x.arg.slot)
-  return [Buffer(dname, x.max_numel(), x.dtype) for x in glbls], {k.expr:int(k.vmax+k.vmin)//2 for k in ast.variables()}
+  params = {x.arg.slot:x for x in ast.backward_slice if x.op is Ops.PARAM and x.arg.slot >= 0}
+  # Timing calls index this list by logical slot, including gaps left by unused parameters.
+  bufs = [Buffer(dname, params[i].max_numel(), params[i].dtype) if i in params else Buffer(dname, 1, dtypes.uint8)
+          for i in range(max(params, default=-1)+1)]
+  return bufs, {k.expr:int(k.vmax+k.vmin)//2 for k in ast.variables()}
 
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.tag is not None: return ast

@@ -2,6 +2,7 @@ from __future__ import annotations
 import ctypes
 from tinygrad.helpers import DEBUG, DEV, getenv, mv_address, suppress_finalizing
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator, Program, TinyELF
+from tinygrad.dtype import AddrSpace
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
@@ -16,9 +17,20 @@ def check(status):
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
 def encode_args(args, vals, signature) -> tuple[ctypes.Structure, ctypes.Array]:
-  fields = ([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
-            [(f'v{i}', getattr(ctypes, f"c_int{dt.bitsize}"), off) for i,(off,dt) in enumerate(TinyELF.iter_sig(signature[len(args):], len(args)*8))])
-  c_args = init_c_struct_t(fields[-1][2] + ctypes.sizeof(fields[-1][1]) if len(fields) else 0, tuple(fields))(*args, *vals)
+  fields, ordered, end = [], [], 0
+  buf_idx, val_idx = 0, 0
+  for off, dt, addr_space in TinyELF.iter_sig(signature):
+    if addr_space is AddrSpace.GLOBAL:
+      fields.append((f'f{buf_idx}', cuda.CUdeviceptr_v2, off))
+      ordered.append(args[buf_idx])
+      buf_idx, size = buf_idx + 1, 8
+    else:
+      fields.append((f'v{val_idx}', getattr(ctypes, f"c_int{dt.bitsize}"), off))
+      ordered.append(vals[val_idx])
+      val_idx, size = val_idx + 1, dt.itemsize
+    end = off + size
+  assert buf_idx == len(args) and val_idx == len(vals), "signature does not match CUDA arguments"
+  c_args = init_c_struct_t(end, tuple(fields))(*ordered)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
   return c_args, vargs

@@ -93,8 +93,10 @@ class GraphRunner:
     self.runtimes: list[Any|None] = []
     self.uop_replace: list[list[tuple[int, int]]] = []
     for call in self.linear.src:
-      replace = [(p, b.arg.slot) for p, b in enumerate(get_call_arg_uops(call)) if b.op is Ops.PARAM]
-      for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(call, resolve_params(call, input_uops))):
+      # A compiled kernel only takes the buffers in ProgramInfo.globals, in that compact order.
+      buffer_call = call.replace(src=(call.src[0], *(call.src[s+1] for s in call.src[0].arg.globals))) if call.src[0].op is Ops.PROGRAM else call
+      replace = [(p, b.arg.slot) for p, b in enumerate(get_call_arg_uops(buffer_call)) if b.op is Ops.PARAM]
+      for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(call, resolve_params(buffer_call, input_uops))):
         self.calls.append((dev_idx, call.src[0], [b.ensure_allocated() for b in bufs], device_vars))
         self.runtimes.append(get_runtime(bufs[0].device, call.src[0]) if call.src[0].op is Ops.PROGRAM else None)
         self.uop_replace.append(replace)

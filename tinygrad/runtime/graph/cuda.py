@@ -19,7 +19,7 @@ class CUDAGraph(MultiGraphRunner):
         assert runtime is not None
         global_size, local_size = ast.arg.launch_dims({v: 0 for v in self.vars})
 
-        c_deps, new_node = self.new_node([b.base for b in bufs], ast.arg.outs)
+        c_deps, new_node = self.new_node([b.base for b in bufs], [ast.arg.globals.index(slot) for slot in ast.arg.outs])
         c_args, vargs = encode_args([b._buf for b in bufs], [device_vars.get(x.expr, 0) for x in ast.arg.vars], runtime.signature)
         kern_params = cuda.CUDA_KERNEL_NODE_PARAMS_v1(runtime.prg, *global_size, *local_size, runtime.smem,
                                                       ctypes.cast(0, ctypes.POINTER(ctypes.c_void_p)), vargs)
