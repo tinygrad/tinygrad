@@ -484,14 +484,11 @@ def _words(dev) -> Buffer: # zero the read signal and scratch
   b = Buffer(dev.device, 2, dtypes.uint32, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), preallocate=True)
   b.host.view(fmt='B')[:8] = bytes(8)
   return b
-@functools.cache
-def _asm24(dev) -> Buffer:
-  return Buffer(dev.device, 0x85000, dtypes.uint8, options=BufferSpec(external_ptr=dev.iface.ctrl.va_addr, nolru=True)).allocate(dev.iface.ctrl)
 pm_usb_bufferize = PatternMatcher([
   (UPat(Ops.PARAM, tag="usb_host"), lambda ctx: _host_block(ctx)),
   (UPat(Ops.PARAM, tag={"usb_xfer0", "usb_xfer1"}, name="b"), lambda ctx, b: _xfer(ctx, b.tag)),
   (UPat(Ops.PARAM, tag="usb_vram"), lambda ctx: _words(ctx)),
-  (UPat(Ops.PARAM, tag="usb_asm24"), lambda ctx: _asm24(ctx)),
+  (UPat(Ops.PARAM, tag="usb_asm24"), lambda ctx: ctx.iface.ctrl),
   (UPat(Ops.PARAM, name="b"), lambda b: Buffer("CPU", b.max_numel(), b.dtype, preallocate=True) if str(b.tag).startswith("cmdbuf_copy") else None),
 ])
 
