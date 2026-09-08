@@ -8,8 +8,8 @@ from tinygrad.runtime.support.hcq import HCQBuffer, FileIOInterface, MMIOInterfa
 from tinygrad.runtime.autogen import kgsl, mesa, libc
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.helpers import getenv, mv_address, round_up, ceildiv, prod, is_image_shape
-from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE, DEV
+from tinygrad.helpers import getenv, mv_address, round_up, ceildiv, prod, is_image_shape, DEV
+from tinygrad.helpers import next_power2, flatten, PROFILE, IMAGE
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
@@ -309,6 +309,8 @@ class QCOMAllocator(HCQAllocator['QCOMDevice']):
 
   def _do_map(self, buf:HCQBuffer):
     src = buf._base if buf._base is not None else buf
+    if DEV.interface.startswith("MOCK"): # _gpu_map flushes dcache with aarch64 dc cvac
+      return HCQBuffer(int(src.va_addr), src.size, meta=(None, False), view=src.view, owner=self.dev)
     return self.dev._gpu_map(int(src.va_addr), src.size)
 
   def _do_unmap(self, buf:HCQBuffer): self.dev._gpu_free(buf)

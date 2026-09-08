@@ -13,7 +13,7 @@
 #   6 wst    wave mmap: pc, act, pmode, pmask, park stack
 #   7 enc    packed DST/SRC/OFF per instruction
 from __future__ import annotations
-import ctypes, functools, hashlib, itertools, math, mmap, os, struct, threading
+import ctypes, functools, hashlib, itertools, math, mmap, os, struct
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device
@@ -698,7 +698,7 @@ def _pred_taken(gpr_mv, tid: int, ins: dict, invk: str, compk: str) -> bool:
   t = gpr_mv[tid * 256 + 248 + int(ins.get(compk, 0))]
   return (not t) if ins.get(invk) else bool(t)
 
-### WAVE STATE 
+### WAVE STATE
 
 _WPC, _WACT, _WPMO, _WPMA, _WPPC = 0, 8, 16, 24, 32
 _WPMK = _WPPC + PARK * 4
