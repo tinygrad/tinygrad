@@ -282,11 +282,11 @@ pm_exec = PatternMatcher([
 
 from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQ_RUNTIME_DEV, HCQInfo, HCQ_DEVS # noqa: E402 # down here, hcq2 imports realize
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None) -> UOp:
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = lower_and_compile(linear)
-  linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
+  linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
   return linear
 
 def link_linear(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UOp:
@@ -294,13 +294,13 @@ def link_linear(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) ->
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   inputs = list(input_uops)
-  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs), input_uops=inputs)
+  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: track_stats(ctx, call.without_after, perf_counter_us(), pm_exec.rewrite(call.without_after, ctx))
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True), allow_cache=ctx.cache)
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True, cache=False), allow_cache=ctx.cache)
   while True:
     if clear_l2:
       if hasattr(dev:=Device[call.src[1].device], 'invalidate_caches'): dev.invalidate_caches()
