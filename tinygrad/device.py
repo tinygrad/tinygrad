@@ -217,7 +217,9 @@ class Buffer:
 
   def as_memoryview(self, allow_zero_copy=False) -> memoryview:
     if not self.nbytes: return memoryview(bytearray())
-    if (mv:=self._host_mv()) is None: return Buffer("PYTHON", self.size, self.dtype, preallocate=True).copy_from(self).as_memoryview(allow_zero_copy=True)
+    if (mv:=self._host_mv()) is None:
+      Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
+      return mv
     for device in {self.device, *self.base.get_storage().maps}: Device[device].synchronize()
     return mv if allow_zero_copy else memoryview(bytearray(mv))
 
