@@ -221,4 +221,6 @@ def prepare_rangeify(sink:UOp) -> UOp:
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
-  return tsink
+  # An effect-only body still produces buffer states. Root stores must participate in RAW/WAR scheduling
+  # just like stores already carried by AFTER; their destination and value are unchanged.
+  return tsink.replace(src=tuple(walk_mop(s.src[0]).after(s) if s.op is Ops.STORE else s for s in tsink.src))

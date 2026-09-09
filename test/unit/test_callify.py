@@ -32,6 +32,35 @@ class TestCallify(unittest.TestCase):
     self.assertEqual(t.tolist(), [7., 7.])
     self.assertEqual(t.tolist(), [7., 7.])
 
+  def test_symbolic_view_keeps_bindings(self):
+    start, size = UOp.variable("start", 0, 4).bind(2), UOp.variable("size", 1, 4).bind(3)
+    t = Tensor.arange(8).float().realize()[start:start+size].clone()
+    shape = t.shape
+    t.callify().realize()
+    self.assertEqual(t.shape, shape)
+    self.assertEqual(t[:3].tolist(), [2., 3., 4.])
+    self.assertEqual(t[:3].tolist(), [2., 3., 4.])
+
+  def test_effect_only_call_body(self):
+    # An opaque tensor-level body needs no returned AFTERs to make its root stores execute.
+    for shape in ((6,), (2, 3)):
+      with self.subTest(shape=shape):
+        x = Tensor.arange(6).float().reshape(shape).realize()
+        a, b = Tensor.zeros(shape).contiguous().realize(), Tensor.zeros(shape).contiguous().realize()
+        a_buf, b_buf = a.uop.buffer, b.uop.buffer
+        a, b = Tensor.custom_kernel(a, b, x, fxn=lambda a,b,x: UOp.sink(a.store(x+1), b.store(x*2)))[:2]
+        a.realize(b)
+        self.assertIs(a.uop.buffer, a_buf)
+        self.assertIs(b.uop.buffer, b_buf)
+        self.assertEqual(a.flatten().tolist(), [1., 2., 3., 4., 5., 6.])
+        self.assertEqual(b.flatten().tolist(), [0., 2., 4., 6., 8., 10.])
+
+  def test_effect_only_slice_store(self):
+    x = Tensor.zeros(4, 4).contiguous().realize()
+    y = Tensor.ones(2, 2).contiguous().realize()
+    out = Tensor.custom_kernel(x, y, fxn=lambda x,y: x.shrink(((1, 3), (1, 3))).store(y).sink())[0]
+    self.assertEqual(out.tolist(), [[0., 0., 0., 0.], [0., 1., 1., 0.], [0., 1., 1., 0.], [0., 0., 0., 0.]])
+
   def test_empty_declaration_binds(self):
     buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), dtypes.float32, size=2, device="CPU"))
     t = Tensor(buf).realize()

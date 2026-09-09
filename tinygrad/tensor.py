@@ -25,28 +25,12 @@ class AllocCtx:
   unbound: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
   outputs: set[UOp] = field(default_factory=set)
-  values: dict[UOp, UOp] = field(default_factory=dict)
-
-# a tag is the tuple of original pre-rewrite UOps a node provides storage for
-def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
 
 # a base needs storage of its own if it can back a buffer and doesn't already have one
 def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_identity()
 
 def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
 def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
-
-def scope_output_sources(ctx:AllocCtx, x:UOp):
-  # References to another requested output use its declared storage. Never rewrite the STORE defining that output.
-  src = tuple(a if (out:=ctx.values.get(a)) is None or (x.op is Ops.STORE and (i == 0 or out.src[0] is x.src[0])) else out
-              for i,a in enumerate(x.src))
-  return x.replace(src=src) if src != x.src else None
-
-# Only explicit effects provide persistent Tensor storage.
-add_tags = PatternMatcher([
-  (UPat(Ops.AFTER, name="x"), tag_uop),
-  (UPat(GroupOp.All, name="x"), scope_output_sources),
-])
 
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   if (view:=src.buffer_view()) is None: return None
@@ -58,53 +42,14 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.is_value_call or not c.arg.precompile: return None
   assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
-  # the RETURNED srcs are the call outputs (slots are src positions)
+  # The body already stores into the output PARAMs. Preserve it and its declared destinations.
   ret_pos = c.arg.output_pos
-  srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
-
-  # The call already declares its output storage. Lower into those same destinations.
-  outs = tuple(c.src[1+p] for p in ret_pos)
-  targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
-
-  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
-  # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
-  placed:dict[UOp, UOp] = {}
-  items:list[UOp] = []
-  for s, t in zip(srcs, targets):
-    deps:list[UOp] = []
-    while s.op is Ops.AFTER:
-      deps.extend(s.src[1:])
-      s = s.src[0]
-    if s not in placed:
-      if s.op is Ops.CONTIGUOUS: placed[s] = t.after(t.store(s.src[0]))
-      elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = t
-      if s in placed:
-        items.append(s.after(*deps))
-        continue
-    items.append(t.after(t.store(s.after(*deps))))
-  # swap every placed value for its target storage, also inside other stores' AFTER deps
-  fxn = UOp.sink(*(x.substitute(placed) for x in items))
-
-  # Keep the declared output views (including symbolic shapes); only value inputs need contiguous annotations.
-  new_call = c.replace(src=(fxn, *[a if i in ret_pos or a.has_buffer_identity(after_ok=True) else a.contiguous()
-                                 for i, a in enumerate(c.src[1:])]), arg=replace(c.arg, output_pos=None))
-  return UOp.sink(*(o.store(o.after(new_call)) for o in outs))
-
-def fold_unobserved_transfer(store:UOp, a:UOp, copy:UOp):
-  # Assigning a temporary transfer can write directly into the assignment's destination. A held transfer (or any other
-  # reader of its storage) must retain its own buffer. This elides an existing destination; it never creates storage.
-  original = graph_rewrite(store, remove_all_tags)
-  buf = a.src[0].storage_base
-  roots = UOp.sink(*[t.uop for ref in list(all_tensors) if (t:=ref()) is not None])
-  if buf in roots.toposort(gate=lambda x: x is not original, enter_calls=False): return None
-  return store.replace(src=(store.src[0], copy))
+  new_call = c.replace(src=(c.src[0], *[a if i in ret_pos or a.has_buffer_identity(after_ok=True) else a.contiguous()
+                                      for i, a in enumerate(c.src[1:])]), arg=replace(c.arg, output_pos=None))
+  return UOp.sink(*(c.src[1+p].store(c.src[1+p].after(new_call)) for p in ret_pos))
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
-  (UPat(Ops.STORE, src=(UPat(), UPat(Ops.AFTER, src=(UPat(name="b"),
-    UPat(Ops.STORE, src=(UPat(name="b"), UPat(Ops.COPY, name="copy")))), name="a")), name="store"),
-   lambda store,a,copy,b: fold_unobserved_transfer(store, a, copy)),
-
   # lower precompiled value-producing calls into opaque CALLs using their declared output storage
   (UPat(Ops.CALL, name="c"), transform_precompiled_call),
 
@@ -122,16 +67,11 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
    x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) if on_disk(x) else None),
 
-  # strip graph-only wrappers (tags carry over)
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"),
-   lambda x: x.src[0].replace(tag=(x.src[0].tag or ())+(x.tag or ())) if x.tag else x.src[0]),
-  # contiguous of an already-materialized value is a no-op (tags carry over for held values)
-  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
-   lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
+  # strip graph-only wrappers
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+  # contiguous of an already-materialized value is a no-op
+  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),)), lambda a: a if a.src[0].has_buffer_identity() else None),
 ])
-
-# a store's storage keeps the views and drops AFTERs (they only sequence stores)
-pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
@@ -163,35 +103,29 @@ pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
   (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])
 
+def is_persistent_effect(u:UOp, outputs:set[UOp]) -> bool:
+  if u.op is Ops.COPY: return on_disk(u)
+  return u.op is Ops.AFTER and not u.is_bound_var and (
+    not u.src[0].unsharded_base.is_unbound or u.src[0].storage_base in outputs or u.src[1].op is Ops.STORE or
+    (u.src[1].op is Ops.CALL and (not u.src[1].is_value_call or u.src[1].arg.precompile)))
+
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
   # Escaping declarations become parameters of the schedule, not scope-local temporaries.
   ctx = AllocCtx(outputs={x.storage_base for x in big_sink.src if not x.is_virtual})
-  for out in big_sink.src:
-    if out.op is Ops.AFTER and len(out.src) == 2 and out.src[1].op is Ops.STORE and out.src[0].has_buffer_identity():
-      val = out.src[1].src[1]
-      if not val.is_virtual and val.op not in {Ops.AFTER, Ops.COPY} and val.storage_base.op not in {Ops.BUFFER, Ops.PARAM}:
-        ctx.values[val] = out
-
-  # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
-  # this is the only one where we have to be careful to not break the tensor graph
-  big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="add tags")
-
-  # here we can break the tensor graph. tags propagate through replaces so we can still find the original UOps
+  # Tensor replacements name the original destinations, independently of how their effects are lowered.
+  for u in big_sink.toposort(enter_calls=False):
+    if u.op is Ops.AFTER and is_persistent_effect(u, ctx.outputs):
+      ctx.buffer_map[u] = u.src[0].storage_view
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
 
-  # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
-  # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
-  # AFTERs on unbound STORAGE (clones) are collected too: the clone's own buffer is the storage, no fresh copy
+  # Collect effects without entering call bodies. Escaping declarations become schedule parameters.
   for u in big_sink.toposort(enter_calls=False):
-    if (u.op is Ops.COPY and on_disk(u)) or (u.op is Ops.AFTER and not u.is_bound_var and
-        (not u.src[0].unsharded_base.is_unbound or u.src[0].storage_base in ctx.outputs or
-         u.src[1].op is Ops.STORE or (u.src[1].op is Ops.CALL and not u.src[1].is_value_call))):
+    if is_persistent_effect(u, ctx.outputs):
       ctx.stores.append(u)
       if u.op is Ops.AFTER: ctx.outputs.add(u.src[0].storage_base)
-      if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
   body = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs")
   # An empty declaration may have no effects but still needs a binding when it escapes.
   for b in ctx.outputs:
@@ -212,16 +146,12 @@ def outputs_to_call(*xs:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, views_only:bool=False) -> None:
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
     in_scope: dict[UOp, bool] = {}
     def visitor(node: UOp) -> bool: return True if node in applied_map else any(in_scope.get(s, False) for s in node.src)
-    def is_view(u:UOp) -> bool:
-      while u.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: u = u.src[0]
-      return u in applied_map
-    scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and
-                                  (is_view(t.uop) if views_only else t.uop.topovisit(visitor, in_scope))]
+    scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
 
     # get all Tensors and apply the map. always walk: replace exactly the nodes the map names, values are final
     sink = UOp.sink(*[t.uop for t in scope_tensors])
@@ -431,18 +361,14 @@ class Tensor(RandMixin):
       self.uop = (x.uop.src[0] if x.uop.op is Ops.CONTIGUOUS else x.uop).clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
-    dest = self.uop
-    while dest.op is Ops.DETACH: dest = dest.src[0]
-    assign = dest.after(dest.store(x.uop))
+    assign = self.uop.after(self.uop.store(x.uop))
     ib = self.uop
     while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
     if ib is not self.uop:
       # a partial write needs storage to land in: a pending value gets explicit storage (a clone)
       target = ib if ib.has_buffer_identity(after_ok=True) else ib.clone()
       if target is not ib: assign = assign.substitute({ib: target}, walk=True)
-      # view assign: replace the node under the views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it.
-      # A whole detached assignment updates aliases, not expressions that already read the old state.
-      _apply_map_to_tensors({ib: target.after(assign)}, name="Embed View Assign", views_only=self.uop.op is Ops.DETACH)
+      _apply_map_to_tensors({ib: target.after(assign)}, name="Embed View Assign")
     else:
       # simple assign
       self.uop = assign

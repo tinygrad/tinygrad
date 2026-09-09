@@ -770,6 +770,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     while b.op in {Ops.BITCAST, Ops.AFTER, Ops.UNSHARD}: b = b.src[0].unsharded_base
     return b
 
+  @property
+  def storage_view(self) -> UOp:
+    """The addressed view without storage-state dependencies. Shape expressions retain their bindings."""
+    if self.op is Ops.AFTER: return self.src[0].storage_view
+    if self.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH, Ops.UNSHARD, Ops.MSELECT}:
+      return self.replace(src=(self.src[0].storage_view,)+self.src[1:])
+    if self.op is Ops.MSTACK: return self.replace(src=tuple(s.storage_view for s in self.src))
+    return self
+
   # cached property here makes external_uop_gc fail, why?
   @property
   def as_shape(self) -> tuple[sint, ...]:
