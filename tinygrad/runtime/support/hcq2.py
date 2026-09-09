@@ -11,7 +11,7 @@ from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear
-from tinygrad.engine.realize import lower_and_compile
+from tinygrad.engine.realize import lower_and_compile, _resolve
 
 # *****************
 # 0. helpers
@@ -41,7 +41,6 @@ def get_enqueue_devs(call:UOp) -> Any|None:
   devs = min(bufs, key=lambda b: not all_devices_in(b.device, HCQ_DEVS)).device
   if not all_devices_in(devs, HCQ_DEVS): return None
   dev = cast(HCQ2Compiled, Device[to_tuple(devs)[0]])
-  if not all(all_devices_in(b.device, HCQ_DEVS | {"CPU", "PYTHON", "NPY"}) for b in bufs): return None
   # a device without a copy queue leaves copies to its allocator
   return devs if call.src[0].op is not Ops.COPY or dev.has_copy_queue else None
 
@@ -103,20 +102,29 @@ def replace_buffer(ctx:tuple[bool, list[UOp], dict[UOp, int]], b:UOp) -> UOp:
 pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), replace_buffer)])
 
 # *****************
-# 1.1. prep: staging copies
+# 1.1. prep: unwrap multi
+
+def unwrap_call(call:UOp) -> UOp|None:
+  if get_enqueue_devs(call) is None or (n:=max(len(to_tuple(a.device)) for a in get_call_arg_uops(call))) == 1: return None
+  dnum = UOp.variable("_device_num", 0, n - 1, dtypes.int)
+  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.src[0], *[a if a.is_bound_var else select_lane(a, i) for a in call.src[1:]], dnum.bind(i)))
+                                   for i in range(n)))
+pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
+
+# *****************
+# 1.2. prep: staging copies
 
 STAGING_SIZE, STAGING_SLOTS = (4 if DEV.interface.startswith("MOCK") else 128) << 20, 2
 
 @functools.cache
 def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
 
-def _need_staging(a, b):
-  if not all_devices_in(a.device, HCQ_DEVS): return False
-  dev = cast(HCQ2Compiled, Device[to_tuple(a.device)[0]])
-  return not all_devices_in(b.device, HCQ_DEVS | {"CPU", "PYTHON", "NPY"}) and dev.has_copy_queue
-
-def stage_copy(dst:UOp, src:UOp) -> UOp|None:
-  if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
+def stage_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
+  if (device:=get_enqueue_devs(call)) is None: return None
+  try:
+    for b in (dst, src): cast(Buffer, _resolve(b, ctx).buffer).get_buf(device)
+    return None
+  except (RuntimeError, OSError): _staging().get_buf(device)
 
   base, it, copies = UOp.from_buffer(_staging()), src.dtype.itemsize, []
   chunk = (STAGING_SIZE // STAGING_SLOTS) // it
@@ -126,18 +134,8 @@ def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   return UOp(Ops.LINEAR, src=tuple(copies))
 
 pm_insert_copy_staging = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src"))), stage_copy),
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call", allow_any_len=True), stage_copy),
 ])
-
-# *****************
-# 1.2. prep: one call per device: the args pick their lane, the DEVICE axis binds to it
-
-def unwrap_call(call:UOp) -> UOp|None:
-  if get_enqueue_devs(call) is None or (n:=max(len(to_tuple(a.device)) for a in get_call_arg_uops(call))) == 1: return None
-  dnum = UOp.variable("_device_num", 0, n - 1, dtypes.int)
-  return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.src[0], *[a if a.is_bound_var else select_lane(a, i) for a in call.src[1:]], dnum.bind(i)))
-                                   for i in range(n)))
-pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 
 # *****************
 # 2. deps
@@ -429,7 +427,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
     linear = graph_rewrite(linear, pm_replace_buffers, ctx=(use_rt, input_uops, slots), walk=True, name="replace buffers")
     if (cached:=hcq_compile_cache.get(key:=(linear, profile))) is not None: return cached
-  linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, name="prep calls")
+  linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, ctx=tuple(input_uops), name="prep calls")
   lin = graph_rewrite(sched_batches(linear, profile), pm_encode, walk=True, name="encode")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin)
   if cache and final_linear is not linear: hcq_compile_cache[key] = final_linear
