@@ -161,10 +161,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # copy to same device is a no-op
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
 
-  # a COPY in src[1] of a plain STORE can just be removed: a STORE to a buffer on a different device is a COPY
-  (UPat(Ops.STORE, src=(UPat.var("dst"), UPat(Ops.COPY, src=(UPat.var("x"),), name="cpy"))),
-   lambda dst,x,cpy: dst.store(x) if dst.device == cpy.device and dst.has_buffer_identity(after_ok=True) else None),
-
   # a bare COPY is an anonymous store: realize it as a STORE into a fresh call-local buffer on the copy device
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), copy_to_anon_store),
 
