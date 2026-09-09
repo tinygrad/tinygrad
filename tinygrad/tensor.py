@@ -221,11 +221,10 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
 
   # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
-  # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
+  # copies to disk are explicit stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
   # AFTERs on unbound STORAGE (clones) are collected too: the clone's own buffer is the storage, no fresh copy
   for u in big_sink.toposort(enter_calls=False):
-    if (u.op is Ops.COPY and on_disk(u)) or (u.op is Ops.AFTER and not u.is_bound_var and
-        (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
+    if u.op is Ops.AFTER and not u.is_bound_var and (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE):
       ctx.stores.append(u)
       if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
   ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
@@ -434,8 +433,9 @@ class Tensor(RandMixin):
     x = x._broadcast_to(self.shape)
     if x.dtype in dtypes.weaks: x = x.cast(least_upper_dtype(self.dtype, x.dtype))
     if x.dtype != self.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
+    # an assign is just a STORE: a STORE to a buffer on a different device is a COPY, send the value over first
     if not is_disk and x.uop.device is not None and self.device is not None and self.device != x.device:
-      raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
+      x = Tensor(x.uop.copy_to_device(self.device))
     if isinstance(self.device, tuple) and x.uop.device is not None and self.uop.axis != x.uop.axis:
       raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
 
@@ -472,8 +472,12 @@ class Tensor(RandMixin):
     if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
-    x = self.contiguous()
-    if self.uop.device is None or isinstance(self.device, tuple): x = x.clone("CPU")
+    # a named global buffer is needed to read the data out: clone creates one if this value doesn't already have one.
+    # multi device values are materialized per device before gathering to CPU, disk tensors read lazily on allocation
+    if isinstance(self.device, tuple): x = self.clone().clone("CPU")
+    elif self.uop.device is None: x = self.clone("CPU")
+    elif not on_disk(self.uop) and not self.uop.has_buffer_identity(after_ok=True): x = self.clone()
+    else: x = self
     return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
 
   def _data(self) -> memoryview: return self._buffer().as_memoryview()
@@ -550,9 +554,8 @@ class Tensor(RandMixin):
     """
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
-    # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
-    if isinstance(device, str) and device.startswith("DISK"): ret = Tensor(self.uop.clone(device))
-    else: ret = Tensor(self.uop.copy_to_device(device))
+    # a copy to disk is always a store (copy_to_device handles this), all other copies stay COPY until the scheduler
+    ret = Tensor(self.uop.copy_to_device(device))
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret.is_param_(self.is_param)
 

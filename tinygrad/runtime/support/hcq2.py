@@ -122,7 +122,8 @@ def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   chunk = (STAGING_SIZE // STAGING_SLOTS) // it
   for i, off in enumerate(range(0, src.max_numel(), chunk)):
     stage = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it]
-    copies += [src[off:off+n].copy_to_device("CPU").call(stage, src[off:off+n]), stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
+    copies += [UOp(Ops.COPY, src=(src[off:off+n],), arg="CPU").call(stage, src[off:off+n]),
+               UOp(Ops.COPY, src=(stage,), arg=dst.device).call(dst[off:off+n], stage)]
   return UOp(Ops.LINEAR, src=tuple(copies))
 
 pm_insert_copy_staging = PatternMatcher([

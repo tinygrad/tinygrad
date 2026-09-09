@@ -122,7 +122,7 @@ class TestHCQ2Schedule(unittest.TestCase):
           with self.subTest(host_device=host_device, direct=direct, upload=upload):
             host, gpu = UOp.new_buffer(host_device, 4, dtypes.uint8), UOp.new_buffer(dev.device, 4, dtypes.uint8)
             src, dst = (host, gpu) if upload else (gpu, host)
-            linear = UOp(Ops.LINEAR, src=(src.copy_to_device(dst.device).call(dst, src),))
+            linear = UOp(Ops.LINEAR, src=(UOp(Ops.COPY, src=(src,), arg=dst.device).call(dst, src),))
             with patch.object(dev, "host_devs", frozenset({"CPU", host_device}) if direct else frozenset({"CPU"})):
               compiled = compile_linear(linear, profile=False)
             self.assertEqual(len(compiled.src), 1 if direct or host_device == "CPU" else 2)

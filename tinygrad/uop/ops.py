@@ -732,6 +732,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   def copy_to_device(self, device:str|tuple[str, ...], arg=None):
     assert arg is None or isinstance(self.device, tuple)
+    # a copy to a DISK device is always a store: the disk buffer is the storage of the copied value
+    if isinstance(device, str) and device.startswith("DISK"): return self.clone(device)
     inp = self if arg is None else UOp(Ops.MSELECT, src=(self,), arg=arg)
     if inp.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {inp.dtype}")
     return UOp(Ops.COPY, src=(inp.pad_to(inp.max_shape),), arg=device).shrink_to(inp.shape)
@@ -837,7 +839,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def clone(self, device=None) -> UOp:
     device = device or self.device
     ret = self.empty_like(device=device)
-    src = self if self.device is None or self.device == device else self.copy_to_device(device)
+    # a clone to DISK is the store itself (no COPY inside the STORE), a cross device clone stores a COPY
+    src = self if self.device is None or self.device == device or (isinstance(device, str) and device.startswith("DISK")) \
+         else self.copy_to_device(device)
     return ret.after(ret.store(src.cast(ret.dtype)))
   @recursive_property
   def device(self) -> str|tuple[str, ...]|None:

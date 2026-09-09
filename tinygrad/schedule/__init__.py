@@ -152,8 +152,10 @@ def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
 
-def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
+def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, di:UOp|None=None, si:UOp|None=None, ends:UOp|None=None):
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
+  # both sides must be indexed by exactly the same ranges/positions (a pure elementwise copy)
+  if di is not None and si is not None and (di.src[1:] != si.src[1:] or (ends is not None and ends.src[1:] != di.src[1:])): return None
   return call.replace(src=(UOp(Ops.COPY, src=(src,), arg=dst.device),) + call.src[1:])
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
@@ -170,11 +172,11 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
 
   # replace this with a copy if it's a copy
-  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(name="di", allow_any_len=True)
+                .store(UPat(Ops.PARAM, name="src").index(name="si", allow_any_len=True)).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_copy_uop),
-  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
-                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(name="di", allow_any_len=True)
+                .store(UPat(Ops.PARAM, name="src").index(name="si", allow_any_len=True)).end(name="ends", allow_any_len=True).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_copy_uop),
 
   # if it wasn't copy, it currently can't be cross device

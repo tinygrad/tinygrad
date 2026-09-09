@@ -1255,5 +1255,48 @@ class TestMultiAssign(unittest.TestCase):
       f(out, vi.bind(i))
     self.assertListEqual(out.tolist(), [[0,1,2,3,4,0]]*4)
 
+class TestCrossDeviceAssign(unittest.TestCase):
+  # CPU:0 and CPU:1 are always available, (Device.DEFAULT, CPU) is a real cross-device pair on GPU runners
+  pairs = [("CPU:0", "CPU:1"), (Device.DEFAULT, "CPU")]
+
+  def test_cross_device_assign(self):
+    for dst_dev, src_dev in self.pairs:
+      a = Tensor.zeros(4, 4, device=dst_dev).realize()
+      a.assign(Tensor.full((4, 4), 3.0, device=src_dev).realize())
+      np.testing.assert_allclose(a.numpy(), np.full((4, 4), 3.0))
+      # the buffer did not move
+      self.assertEqual(a.uop.device, Tensor.empty(1, device=dst_dev).uop.device)
+
+  def test_cross_device_assign_is_copy(self):
+    # a cross device assign is a single COPY call
+    for dst_dev, src_dev in self.pairs:
+      a = Tensor.zeros(5, device=dst_dev).realize()
+      src = Tensor([0.,1.,2.,3.,4.], device=src_dev).realize()
+      linear = Tensor.schedule_linear(a.assign(src))
+      copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
+      sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
+      self.assertEqual(len(copies), 1)
+      self.assertEqual(len(sinks), 0)
+      copy_dst, copy_src = copies[0].src[1:]
+      self.assertEqual(copy_dst.device, a.uop.device)
+      self.assertEqual(copy_src.device, src.uop.device)
+      from tinygrad.engine.realize import run_linear
+      run_linear(linear)
+      np.testing.assert_allclose(a.numpy(), np.arange(5))
+
+  def test_cross_device_assign_unrealized(self):
+    # the source is materialized on its own device before the copy
+    for dst_dev, src_dev in self.pairs:
+      a = Tensor.zeros(8, device=dst_dev).realize()
+      a.assign(Tensor.ones(8, device=src_dev) * 2)
+      np.testing.assert_allclose(a.numpy(), np.full((8,), 2.0))
+
+  def test_cross_device_assign_view(self):
+    # a partial (view) store across devices copies to the target device first
+    for dst_dev, src_dev in self.pairs:
+      a = Tensor.zeros(8, device=dst_dev).realize()
+      a[2:6].assign(Tensor([0.,1.,2.,3.], device=src_dev).realize())
+      np.testing.assert_allclose(a.numpy(), np.array([0, 0, 0, 1, 2, 3, 0, 0], dtype=np.float32))
+
 if __name__ == "__main__":
   unittest.main()
