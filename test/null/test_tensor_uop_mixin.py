@@ -154,6 +154,7 @@ class TestTensorUOpGetitem(unittest.TestCase):
     self.assertIs(_strip_unique(_t(4,5)[[[0,1],[2,3]]].uop), _strip_unique(_t(4,5).uop[[[0,1],[2,3]]]))
 
 class TestTensorUOpCumalu(unittest.TestCase):
+  def test_associative_scan(self): _check(self, _t(3, 5, 2), lambda x: x.associative_scan(lambda a,b: a+b, -2))
   def test_cumsum_1d(self):       _check(self, _t(5), lambda x: x.cumsum())
   def test_cumsum_2d(self):       _check(self, _t(3, 4), lambda x: x.cumsum(1))
   def test_cumsum_non_last(self): _check(self, _t(3, 4), lambda x: x.cumsum(0))

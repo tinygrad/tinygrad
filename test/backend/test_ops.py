@@ -1144,6 +1144,41 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.nn.functional.mish, Tensor.mish)
     helper_test_op([()], torch.nn.functional.mish, Tensor.mish)
 
+  def test_associative_scan_add(self):
+    self.assertEqual(Tensor([1, 2, 3, 4]).associative_scan(lambda a,b: a+b).tolist(), [1, 3, 6, 10])
+    for n in (0, 1, 2, 3, 5, 7, 17):
+      data = np.arange(1, n+1, dtype=np.float32)
+      out = Tensor(data).associative_scan(lambda a,b: a+b)
+      np.testing.assert_equal(out.numpy(), np.cumsum(data))
+      self.assertEqual(out.dtype, dtypes.float32)
+
+  def test_associative_scan_mul(self):
+    self.assertEqual(Tensor([2, 3, 4]).associative_scan(lambda a,b: a*b).tolist(), [2, 6, 24])
+    for n in (1, 2, 3, 5, 7, 17):
+      data = np.linspace(0.9, 1.1, n, dtype=np.float32)
+      np.testing.assert_allclose(Tensor(data).associative_scan(lambda a,b: a*b).numpy(), np.cumprod(data), rtol=1e-5)
+
+  def test_associative_scan_axes(self):
+    data = np.arange(105, dtype=np.float32).reshape(3, 5, 7)
+    for axis in range(-3, 3):
+      np.testing.assert_equal(Tensor(data).associative_scan(lambda a,b: a+b, axis).numpy(), np.cumsum(data, axis=axis))
+    for axis in (0, -1):
+      self.assertEqual(Tensor(3).associative_scan(lambda a,b: a+b, axis).item(), 3)
+    for shape, axis in (((), 1), ((), -2), ((0,), 1), ((3, 5), -3), ((3, 5), 2)):
+      with self.assertRaises(IndexError): Tensor.empty(shape).associative_scan(lambda a,b: a+b, axis)
+    with self.assertRaises(ValueError): Tensor.ones(5).associative_scan(lambda a,b: (a+b).sum())
+
+  def test_associative_scan_affine(self):
+    def reference(x):
+      states = [x[:, 0]]
+      for i in range(1, x.shape[1]):
+        a, b = x[:, i, ..., 0], x[:, i, ..., 1]
+        states.append(torch.stack((a*states[-1][..., 0], a*states[-1][..., 1]+b), dim=-1))
+      return torch.stack(states, dim=1)
+    def combine(left, right):
+      return (right[..., 0]*left[..., 0]).stack(right[..., 0]*left[..., 1]+right[..., 1], dim=-1)
+    helper_test_op([(2, 7, 3, 2)], reference, lambda x: x.associative_scan(combine, axis=1), low=0.5, high=1.0)
+
   def test_small_cumsum(self):
     helper_test_op([(10)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
   @slow_test

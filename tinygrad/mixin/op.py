@@ -767,6 +767,33 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     base = chunks[..., -1]._cumalu(-1, op)._pad_constant((None,)*(chunks.ndim-2) + ((1, -1),), value)
     return chunks.alu(op, base.unsqueeze(-1)).flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
 
+  def associative_scan(self, fn:Callable[[Self, Self], Self], axis:int=0) -> Self:
+    """
+    Computes inclusive prefixes using the associative operation `fn(earlier, later)`.
+    `fn` must combine corresponding positions along `axis`, preserving shape, dtype and device.
+    Uses recursive pair reduction with linear combine work and logarithmic dependency depth.
+    Input dimensions must be concrete; no identity element is required.
+    """
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self
+    if not isinstance(n:=self.shape[axis], int): raise RuntimeError("associative_scan requires a concrete scan length")
+    if n == 1: return self
+    def part(x:Self, start:int, stop:int, step:int=1) -> Self:
+      return x[(slice(None),)*axis + (slice(start, stop, step),)]
+    pairs = fn(part(self, 0, n-1, 2), part(self, 1, n, 2))
+    expected = self.shape[:axis] + (n//2,) + self.shape[axis+1:]
+    if pairs.shape != expected: raise ValueError("associative_scan fn must preserve shape")
+    # Bound fusion at each level so shared prefixes are not repeatedly expanded into later kernels.
+    odd = pairs.contiguous().associative_scan(fn, axis)
+    even = part(self, 0, 1)
+    if n > 2:
+      rest = fn(part(odd, 0, (n-1)//2), part(self, 2, n, 2))
+      if rest.shape != self.shape[:axis] + ((n-1)//2,) + self.shape[axis+1:]:
+        raise ValueError("associative_scan fn must preserve shape")
+      even = even.cat(rest, dim=axis)
+    ret = part(even, 0, n//2).stack(odd, dim=axis+1).flatten(axis, axis+1)
+    return ret.cat(part(even, n//2, n//2+1), dim=axis) if n % 2 else ret
+
   def cumsum(self, axis:int=0) -> Self:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.
