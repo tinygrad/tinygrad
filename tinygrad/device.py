@@ -6,6 +6,7 @@ import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickl
 from tinygrad.helpers import WIN, mv_address, to_mv, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
+from tinygrad.helpers import cpu_profile
 from tinygrad.dtype import DType, _to_np_dtype
 from tinygrad.runtime.support.memory import MMIOInterface
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -218,7 +219,7 @@ class Buffer:
 
   def as_memoryview(self, allow_zero_copy=False) -> memoryview:
     if not self.nbytes: return memoryview(bytearray())
-    if (mv:=self._host_mv()) is None:
+    if (mv:=self._host_mv()) is None or (not allow_zero_copy and self.get_storage().host is None): # no host memory: the allocator copies out
       Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
       return mv
     for device in {self.device, *self.base.get_storage().maps}: Device[device].synchronize()
@@ -302,10 +303,10 @@ class HostAllocator(Allocator):
 
   def _copyin(self, dest:int, src:memoryview): # a slice copy takes readonly sources, memmove doesn't
     self.dev.synchronize()
-    to_mv(dest, src.nbytes)[:] = src.cast('B')
+    with cpu_profile(f"TINY -> {self.dev.device}", f"{self.dev.device}:COPY"): to_mv(dest, src.nbytes)[:] = src.cast('B')
   def _copyout(self, dest:memoryview, src:int):
     self.dev.synchronize()
-    dest[:] = to_mv(src, dest.nbytes)[:]
+    with cpu_profile(f"{self.dev.device} -> TINY", f"{self.dev.device}:COPY"): dest[:] = to_mv(src, dest.nbytes)[:]
   def _map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf.host.addr)
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
 
