@@ -99,14 +99,19 @@ class Scheduler:
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
 
+  @property
+  def reduce_axes(self) -> list[int]:
+    red = {r for u in self.ast.backward_slice if u.op is Ops.REDUCE for s in u.src[1:] for r in s.ranges}
+    return [i for i,r in enumerate(self.rngs) if r in red]
+
   def upcast_size(self): return prod(self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
 
   @property
   def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK) \
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
   @property
-  def unrollable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE) \
-                                                  if isinstance(s:=self.full_shape[i], int) and s > 1]
+  def unrollable_dims(self) -> list[int]: return [i for i in self.reduce_axes if self.axis_types[i] in (AxisType.GROUP_REDUCE, AxisType.REDUCE) \
+                                                  and isinstance(s:=self.full_shape[i], int) and s > 1]
 
   def real_axis(self, op:OptOps, axis:int|None) -> int:
     if axis is None or op is OptOps.TC: return -1
@@ -292,7 +297,8 @@ class Scheduler:
   def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.INDEX][::-1]
   @property
   def output_shape(self):
-    return [s if at not in {AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE} else 1 for s,at in zip(self.full_shape, self.axis_types)]
+    red = self.reduce_axes
+    return [1 if i in red else s for i,s in enumerate(self.full_shape)]
   @property
   def upcasted(self) -> int: return len(self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
   @property
