@@ -419,7 +419,7 @@ pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", 
 
 hcq_compile_cache:dict[tuple[UOp, bool], UOp] = {} # eager templates: a buffer-free linear (uops are hash-consed) to its compiled form
 
-@rewrite_group(lambda linear,input_uops,profile,ret,cache=False: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
+@rewrite_group(lambda linear,input_uops,profile,cache=False,ret=None: f"HCQ Compile {pluralize('Kernel', len(ret.src))}")
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False) -> UOp:
   if any(isinstance(getattr(c.without_after.arg, "aux", None), HCQInfo) for c in linear.src): return linear # compiled already
 
