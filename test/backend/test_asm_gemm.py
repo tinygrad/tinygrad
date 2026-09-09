@@ -271,6 +271,37 @@ class TestMXFP4(unittest.TestCase):
     np.testing.assert_array_equal(a_col.numpy(), expected_col.numpy())
     np.testing.assert_array_equal(scale_a_col.numpy(), expected_scale_col.numpy())
 
+  def test_correctness2(self):
+    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+
+    def dequantize(x:Tensor) -> Tensor:
+      rows, cols = x.shape
+      packed, scales, _, _ = quantize_mxfp4(x)
+      # Undo the 32-row x 8-scale packing; request unshuffled FP4 rows for the reference.
+      scales = scales.reshape(rows//32, cols//256, 4, 16, 2, 2).permute(0, 5, 3, 1, 4, 2).reshape(rows, cols//32)
+      codes = Tensor.stack(packed & 15, packed >> 4, dim=-1).reshape(rows, cols)
+      values = Tensor([0, 0.5, 1, 1.5, 2, 3, 4, 6], device=x.device)[(codes & 7).int()]
+      values = (codes < 8).where(values, -values).reshape(rows, cols//32, 32)
+      return (values * (scales.float()-127).exp2().unsqueeze(-1)).reshape(rows, cols).cast(dtypes.bfloat16).realize()
+
+    M, N, K = getenv("M", 16384), getenv("N", 4096), getenv("K", 14336)
+    Tensor.manual_seed(0)
+    a = Tensor.rand(M, K, dtype=dtypes.bfloat16)
+    b = Tensor.rand(N, K, dtype=dtypes.bfloat16)
+    with Context(DEBUG=0):
+      Tensor.realize(a, b)
+      # Compare the quantized operands to isolate GEMM errors from Hadamard/FP4 quantization error.
+      ref = dequantize(a).matmul(dequantize(b).T, dtype=dtypes.float32).realize()
+    for _ in range(getenv("CNT", 1)):
+      # Pass initialized output directly to the assembly kernel so missing writes cannot pass.
+      with Context(DEBUG=0): out = Tensor.zeros(M, N, dtype=dtypes.bfloat16).contiguous().realize()
+      out = asm_gemm(a, b.T, mxfp4=True, out=out).realize()
+      with Context(DEBUG=0):
+        print("out:", out.flatten()[:10].tolist())
+        print("ref:", ref.flatten()[:10].tolist())
+        # The assembly stores BF16, whose rounding contributes up to roughly 0.4% relative error.
+        self.assertTrue(out.allclose(ref, rtol=0.005, atol=1e-3).item(), "MXFP4 GEMM forward mismatch")
+
   def run_empty(self, M:int, N:int, K:int, expected_tile:tuple[int, int]|None=None):
     if expected_tile is not None: self.assertEqual(_select_mxfp4_tile(M, N, K), expected_tile)
     a = Tensor.empty(M, K, dtype=dtypes.bfloat16)
@@ -284,7 +315,7 @@ class TestMXFP4(unittest.TestCase):
   def test_gemm_llama4(self): self.run_empty(4096, 14336, 16384, (256, 256))
   def test_gemm_llama5(self): self.run_empty(16384, 28672, 4096, (256, 256))
   def test_gemm_llama6(self): self.run_empty(4096, 4096, 16384, (256, 256))
-  def test_gemm_llama7(self): self.run_empty(16384, 6144, 4096, (128, 512))
+  def test_gemm_llama7(self): self.run_empty(16384, 6144, 4096, (256, 256))
   def test_gemm_llama8(self): self.run_empty(16384, 4096, 4096, (256, 256))
   def test_gemm_llama9(self): self.run_empty(16384, 14336, 4096, (256, 256))
   def test_gemm_llama10(self): self.run_empty(6144, 4096, 16384, (192, 256))
