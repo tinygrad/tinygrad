@@ -831,8 +831,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       assert bdtype.fmt is not None, f"{bdtype=} has None fmt"
       ret = UOp.empty(shape:=get_shape(x), dtype=bdtype, device="PYTHON")
       data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
-    ret.buffer.allocate() if data else ret.buffer.allocate(memoryview(bytearray()))
-    ret.buffer.host[:] = data
+    if not data: ret.buffer.allocate(memoryview(bytearray()))
+    else: ret.buffer.ensure_allocated().host[:] = data
     if ret.dtype != dtype: ret = ret.cast(dtype)
     return ret if ret.device == device else ret.copy_to_device(device)
   def clone(self, device=None) -> UOp:
