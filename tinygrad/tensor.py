@@ -43,8 +43,10 @@ def creation_copy_is_realized(u:UOp):
 # CONTIGUOUS and AFTER + parents are the only nodes that get updated
 add_tags = PatternMatcher([
   (UPat(Ops.COPY, name="u"), creation_copy_is_realized),
-  # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
+  # no tag on copies that fill an AFTER's whole dest via STORE: merge COPY tag into AFTER (the copy reads that storage).
+  # a partial STORE keeps the tag: the copy mints its own storage like any bare creation copy
+  (UPat(Ops.AFTER, src=(UPat(name="dest"),
+    UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
@@ -448,15 +450,18 @@ class Tensor(RandMixin):
       self.uop = (x.uop.src[0] if x.uop.op is Ops.CONTIGUOUS else x.uop).clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
-    assign = self.uop.after(self.uop.store(x.uop))
+    assign = self.uop.after(store := self.uop.store(x.uop))
     ib = self.uop
     while ib.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH} and not (ib.has_buffer_identity() and _tensor_holds(ib)): ib = ib.src[0]
     if ib is not self.uop:
       # a partial write needs storage to land in: a pending value gets explicit storage (a clone)
       target = ib if ib.has_buffer_identity(after_ok=True) else ib.clone()
-      if target is not ib: assign = assign.substitute({ib: target}, walk=True)
-      # view assign: replace the node under the views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
-      _apply_map_to_tensors({ib: target.after(assign)}, name="Embed View Assign")
+      if target is not ib:
+        assign = assign.substitute({ib: target}, walk=True)
+        store = assign.src[1]
+      # view assign: the base reads "after the store into the view" (one AFTER level). replace the node under the
+      # views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
+      _apply_map_to_tensors({ib: target.after(store)}, name="Embed View Assign")
     else:
       # simple assign
       self.uop = assign
