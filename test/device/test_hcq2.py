@@ -1,9 +1,9 @@
-import unittest, contextlib, ctypes, gc, random, numpy as np
+import unittest, contextlib, ctypes, gc, struct, numpy as np
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import Context, DEV, dedup, partition, unwrap
+from tinygrad.helpers import Context, dedup, partition, unwrap
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.codegen import do_to_program
