@@ -218,12 +218,11 @@ class Buffer:
     return None
 
   def as_memoryview(self, allow_zero_copy=False) -> memoryview:
-    if not self.nbytes: return memoryview(bytearray())
-    if (mv:=self._host_mv()) is None or (not allow_zero_copy and self.get_storage().host is None): # no host memory: the allocator copies out
-      Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
+    if allow_zero_copy and (mv:=self._host_mv()) is not None:
+      for device in {self.device, *self.base.get_storage().maps}: Device[device].synchronize()
       return mv
-    for device in {self.device, *self.base.get_storage().maps}: Device[device].synchronize()
-    return mv if allow_zero_copy else memoryview(bytearray(mv))
+    Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
+    return mv
 
   def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
     import numpy as np
