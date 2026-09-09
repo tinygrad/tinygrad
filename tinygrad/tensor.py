@@ -36,8 +36,18 @@ def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_i
 def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
 def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
+def creation_copy_is_realized(u:UOp):
+  # all copies from disk/numpy are realized into a real buffer
+  if is_creation_device(u.src[0]): return tag_uop(u)
+
 # CONTIGUOUS and AFTER + parents are the only nodes that get updated
 add_tags = PatternMatcher([
+  (UPat(Ops.COPY, name="u"), creation_copy_is_realized),
+  # no tag on copies that fill an AFTER's whole dest via STORE: merge COPY tag into AFTER (the copy reads that storage).
+  # a partial STORE keeps the tag: the copy mints its own storage like any bare creation copy
+  (UPat(Ops.AFTER, src=(UPat(name="dest"),
+    UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
+   lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
@@ -226,16 +236,12 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, views_only:bool=False) -> None:
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
     in_scope: dict[UOp, bool] = {}
     def visitor(node: UOp) -> bool: return True if node in applied_map else any(in_scope.get(s, False) for s in node.src)
-    def is_view(u:UOp) -> bool:
-      while u.op in GroupOp.Movement|{Ops.BITCAST, Ops.DETACH}: u = u.src[0]
-      return u in applied_map
-    scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and
-                                  (is_view(t.uop) if views_only else t.uop.topovisit(visitor, in_scope))]
+    scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
 
     # get all Tensors and apply the map. always walk: replace exactly the nodes the map names, values are final
     sink = UOp.sink(*[t.uop for t in scope_tensors])
@@ -307,11 +313,8 @@ class Tensor(RandMixin):
     # by this point, it has to be a UOp
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
-    # data might be on a different device: a created value owns its destination storage at construction.
-    # multi-device data keeps the old reshape-by-ops path (UOp.clone can't empty_like a multi-axis shard)
-    if data.device is None or data.device == _device: self.uop = data
-    elif isinstance(data.device, tuple): self.uop = data.copy_to_device(_device)
-    else: self.uop = data.clone(_device)
+    # data might be on a different device
+    self.uop:UOp = data if data.device is None or data.device == _device else data.copy_to_device(_device)
     # cast on the target device, the source may not hold the dtype (numpy has no fp8/bfloat16) or be able to compute it (DISK)
     if _dtype is not None: self.uop = self.uop.cast(_dtype)
 
@@ -457,9 +460,8 @@ class Tensor(RandMixin):
         assign = assign.substitute({ib: target}, walk=True)
         store = assign.src[1]
       # view assign: the base reads "after the store into the view" (one AFTER level). replace the node under the
-      # views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it.
-      # A whole detached assignment updates aliases, not expressions that already read the old state.
-      _apply_map_to_tensors({ib: target.after(store)}, name="Embed View Assign", views_only=self.uop.op is Ops.DETACH)
+      # views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
+      _apply_map_to_tensors({ib: target.after(store)}, name="Embed View Assign")
     else:
       # simple assign
       self.uop = assign
@@ -548,8 +550,9 @@ class Tensor(RandMixin):
     """
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
-    # the transfer owns its destination from construction; COPY itself only describes the transfer
-    ret = Tensor(self.uop.copy_to_device(device).clone())
+    # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
+    if isinstance(device, str) and device.startswith("DISK"): ret = Tensor(self.uop.clone(device))
+    else: ret = Tensor(self.uop.copy_to_device(device))
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret.is_param_(self.is_param)
 

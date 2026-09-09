@@ -459,8 +459,7 @@ class TestVizIntegration(unittest.TestCase):
       for _ in range(3): Tensor.realize(*f(a, b, c))
     out = load_profile(cpu_events)
     self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0", "NULL:1", "NULL:1:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
-    # 3 per iteration: mul kernel, assign store, and the transferred value's own store (it owns its storage)
-    self.assertEqual(len(out["layout"]["NULL"]["events"]), 3*3)
+    self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
     self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
     self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 2)
     for graph in out["layout"]["NULL Graph"]["events"]:
