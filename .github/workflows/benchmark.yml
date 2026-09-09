@@ -432,7 +432,7 @@ jobs:
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
         ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
     - name: reset chestnut
-      run: python3 extra/usbgpu/debug.py -rn
+      run: python3 extra/usbgpu/debug.py -rnw
     - name: UsbGPU boot time
       run: GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU tiny tests
