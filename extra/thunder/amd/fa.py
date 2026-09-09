@@ -182,6 +182,17 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
+@functools.cache
+def custom_fp8_fa_backward_inputs(q:UOp, k:UOp, v:UOp, q8:UOp, k8:UOp, v8:UOp, v_scale:UOp,
+                                 *, B:int, N:int, H:int, H_KV:int, D:int):
+  q, k, v, q8, k8, v8 = (x.flatten() for x in (q, k, v, q8, k8, v8))
+  size = B*N*H_KV*D
+  i = UOp.range(size, 0)
+  stores = [q[i+rep*size].store(q8[i+rep*size].cast(dtypes.bfloat16)) for rep in range(H//H_KV)]
+  stores += [k[i].store(k8[i].cast(dtypes.bfloat16)),
+             v[i].store((v8[i].cast(dtypes.float)*v_scale.flatten()[0]).cast(dtypes.bfloat16))]
+  return UOp.group(*stores).end(i).sink(arg=KernelInfo(name="fp8_fa_backward_inputs"))
+
 def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink,
                  window=0, fp8_qk=False, asm_fp8=False, pre_scaled_fp8=False):
   def grad(dou:UOp, ker:UOp) -> tuple:
@@ -200,12 +211,18 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
       q8, k8, xv = input_tensor(5), input_tensor(6), input_tensor(7)
       # BF16 scores from the original Q/K do not share the FP8 forward normalizer.
       # exp(score_bf16 - lse_fp8) can exceed one by arbitrarily large factors.
-      if asm_fp8: xv = (input_tensor(10).float() * input_tensor(11)).bfloat16().contiguous()
-      if matched_fp8:
+      if matched_fp8 and asm_fp8:
+        # Widen the exact forward operands together instead of launching three
+        # separate conversion kernels. V retains its forward descale.
+        xq_bwd, xk_bwd, xv = Tensor.custom_kernel(
+          _sharded_empty_like(xq), _sharded_empty_like(xk), _sharded_empty_like(xv), q8, k8, input_tensor(10), input_tensor(11),
+          fxn=functools.partial(custom_fp8_fa_backward_inputs, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
+      elif matched_fp8:
         # Widening E4M3 is exact. The assembly variant uses unit exp2 score scale
         # and accounts for the fused RoPE operand scale in physical dQ/dK.
         xq_bwd, xk_bwd = q8.bfloat16().contiguous(), k8.bfloat16().contiguous()
       else:
+        if asm_fp8: xv = (input_tensor(10).float() * input_tensor(11)).bfloat16().contiguous()
         # General descales and the HIP backward path need a normalizer matching
         # their physical BF16 operands. Recompute both O and LSE for this fallback.
         inv_scale = (D**-0.5 * math.log2(math.e))**-0.5
@@ -285,7 +302,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
 def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, write_flat:bool=False, sinks:Tensor|None=None,
                     window:int=0, fp8_qk:bool|None=None, q_amax_state:Tensor|None=None, k_amax_state:Tensor|None=None,
                     q_amax_out:Tensor|None=None, k_amax_out:Tensor|None=None, q_fp8:Tensor|None=None, k_fp8:Tensor|None=None,
-                    fp8_amax:float=16.0):
+                    fp8_amax:float=16.0, save_fp8:bool=False):
   assert attn_mask is None, "attn_mask not supported"
   assert is_causal, "only causal attention supported"
 
@@ -344,12 +361,14 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, xv, q_descale, k_descale, v_fp8, v_descale,
         fxn=functools.partial(custom_asm_fp8_fa_forward, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
                               pre_scaled=pre_scaled_fp8, saved_bf16=True), grad_fxn=grad)[:2]
-      return attn, attn, l_vec
+      # Precompiled layers must return the rounded operands used by backward;
+      # saving only BF16 Q/K/V would recompute RoPE and quantization in backward.
+      return (attn, attn, l_vec, q_fp8, k_fp8, q_descale, k_descale, v_fp8, v_descale) if save_fp8 else (attn, attn, l_vec)
     attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, xv, q_descale, k_descale,
       fxn=functools.partial(custom_hk_fp8_fa_forward, device=single_device, arch=arch,
                             B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
                             pre_scaled=pre_scaled_fp8), grad_fxn=grad)[:2]
-    return attn, attn, l_vec
+    return (attn, attn, l_vec, q_fp8, k_fp8, q_descale, k_descale) if save_fp8 else (attn, attn, l_vec)
 
   grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=window)
 

@@ -1,12 +1,54 @@
-import math, unittest
+import functools, math, os, unittest
+from collections import Counter
 from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import getenv
+from tinygrad.function import function
+from tinygrad.uop.ops import Ops
 from extra.models.llama import precompute_freqs_cis
-from extra.thunder.amd.fa import flash_attention, fused_qkv_rope
+from extra.thunder.amd.fa import custom_fp8_fa_backward_inputs, flash_attention, fused_qkv_rope
 
 class TestASMFP8FA(unittest.TestCase):
+  def test_backward_input_conversion(self):
+    if Device[Device.DEFAULT].renderer.target.arch != 'gfx950': self.skipTest('requires gfx950')
+    Tensor.manual_seed(14)
+    B,N,H,H_KV,D = 2,32,8,2,128
+    shapes = ((B,N,H,D),(B,N,H_KV,D),(B,N,H_KV,D))
+    inputs = [(Tensor.randn(*s)*10).cast(dtypes.fp8e4m3).contiguous().realize() for s in shapes]
+    scale = Tensor([0.0137],dtype=dtypes.float32).realize()
+    outputs = Tensor.custom_kernel(*[Tensor.invalids(*s,dtype=dtypes.bfloat16) for s in shapes], *inputs, scale,
+      fxn=functools.partial(custom_fp8_fa_backward_inputs,B=B,N=N,H=H,H_KV=H_KV,D=D))[:3]
+    expected = (inputs[0].bfloat16(), inputs[1].bfloat16(), (inputs[2].float()*scale).bfloat16())
+    for actual,reference in zip(outputs,expected):
+      np.testing.assert_array_equal(actual.float().numpy(),reference.float().numpy())
+
+  @patch.dict(os.environ, {"DEVICE_IN_FUNCTION_BUG":"1", "ASM_FP8_FA":"1"})
+  def test_saved_operands_do_not_recompute_rope(self):
+    device = Device.DEFAULT
+    if Device[device].renderer.target.arch != 'gfx950': self.skipTest('requires gfx950')
+    x = Tensor.empty(2,8192,6144,device=device,dtype=dtypes.bfloat16)
+    freqs = Tensor.empty(1,16384,1,64,2,device=device,dtype=dtypes.bfloat16)
+    do = Tensor.empty(2,8192,32,128,device=device,dtype=dtypes.bfloat16)
+    @function(precompile=True, precompile_backward=True)
+    def layer(x, freqs):
+      q,k,v,q8,k8 = fused_qkv_rope(x,freqs,32,8,128,prequantize_fp8=True)
+      out,*saves = flash_attention(q,k,v,is_causal=True,fp8_qk=True,q_fp8=q8,k_fp8=k8,save_fp8=True)
+      return out+0.1,*saves
+    out,*_ = layer(x,freqs)
+    out.backward(do)
+    counts = Counter()
+    def count_calls(u):
+      if u.op is Ops.CALL: count_calls(u.src[0])
+      elif u.op is Ops.LINEAR:
+        for s in u.src: count_calls(s)
+      elif u.op is Ops.SINK: counts[u.arg.name] += 1
+      elif u.op is Ops.PROGRAM: counts[u.src[0].arg.name] += 1
+    count_calls(out.schedule_linear(x.grad))
+    self.assertEqual(counts["fused_qkv_rope_forward"],1)
+    self.assertEqual(counts["asm_fa_fwd_fp8_causal_2_8192_32_8_128"],1)
+    self.assertEqual(counts["asm_fa_bwd_main_fp8_matched_causal_2_8192_32_8_128"],1)
+
   def test_large_scores_use_forward_quantized_operands(self):
     if Device[Device.DEFAULT].renderer.target.arch != 'gfx950': self.skipTest('requires gfx950')
     B, N, H, H_KV, D = 2, 8192, 32, 8, 128
