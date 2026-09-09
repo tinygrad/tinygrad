@@ -201,7 +201,7 @@ class Buffer:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, self.base, self.offset, self.is_allocated())
     if self.device == "NPY":
       import numpy as np
-      arr = np.frombuffer(self.as_memoryview(allow_zero_copy=True), _to_np_dtype(self.dtype))
+      arr = np.frombuffer(self.meta, _to_np_dtype(self.dtype)) # over the storage itself, so an out-of-band pickle buffer keeps it alive
       return self.__class__, (self.device, self.size, self.dtype, arr, self.options, None)
     if self.is_allocated():
       buf = pickle.PickleBuffer(self.as_memoryview()) if protocol >= 5 else bytearray(self.as_memoryview())
@@ -300,7 +300,7 @@ class HostAllocator(Allocator):
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
     return BufferStorage(addr, buf, MMIOInterface(addr, size, fmt='B'))
 
-  def _copyin(self, dest:int, src:memoryview): # a slice copy takes readonly sources, memmove doesn't
+  def _copyin(self, dest:int, src:memoryview):
     self.dev.synchronize()
     with cpu_profile(f"TINY -> {self.dev.device}", f"{self.dev.device}:COPY"): to_mv(dest, src.nbytes)[:] = src.cast('B')
   def _copyout(self, dest:memoryview, src:int):
