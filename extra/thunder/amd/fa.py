@@ -211,21 +211,23 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     if fp8_qk:
       def input_tensor(idx:int) -> Tensor: return Tensor(ker.src[idx], device=ker.src[idx].device)
       q8, k8, xv = input_tensor(5), input_tensor(6), input_tensor(7)
-      if asm_fp8: xv = xv.reshape(B, N, H_KV, D)
+      if asm_fp8:
+        xv = xv.reshape(B, N, H_KV, D)
+        v8, vs = (input_tensor(8), input_tensor(9)) if pre_scaled_fp8 else (input_tensor(10), input_tensor(11))
       # BF16 scores from the original Q/K do not share the FP8 forward normalizer.
       # exp(score_bf16 - lse_fp8) can exceed one by arbitrarily large factors.
       if matched_fp8 and asm_fp8:
         # Widen the exact forward operands together instead of launching three
         # separate conversion kernels. V retains its forward descale.
         xq_bwd, xk_bwd, xv = Tensor.custom_kernel(
-          _sharded_empty_like(xq), _sharded_empty_like(xk), _sharded_empty_like(xv), q8, k8, input_tensor(10), input_tensor(11),
+          _sharded_empty_like(xq), _sharded_empty_like(xk), _sharded_empty_like(xv), q8, k8, v8, vs,
           fxn=functools.partial(custom_fp8_fa_backward_inputs, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
       elif matched_fp8:
         # Widening E4M3 is exact. The assembly variant uses unit exp2 score scale
         # and accounts for the fused RoPE operand scale in physical dQ/dK.
         xq_bwd, xk_bwd = q8.bfloat16().contiguous(), k8.bfloat16().contiguous()
       else:
-        if asm_fp8: xv = (input_tensor(10).float() * input_tensor(11)).bfloat16().contiguous()
+        if asm_fp8: xv = (v8.float() * vs).bfloat16().contiguous()
         # General descales and the HIP backward path need a normalizer matching
         # their physical BF16 operands. Recompute both O and LSE for this fallback.
         inv_scale = (D**-0.5 * math.log2(math.e))**-0.5
@@ -292,7 +294,8 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
       # consumed by fused QKV RoPE backward.
       # Q/K are the differentiable BF16 inputs. Packed FP8 buffers and scales are
       # auxiliary forward inputs, so their gradients are intentionally absent.
-      return (None, None, dq.uop, dk.uop, None, None, dv.uop.reshape(ker.src[7].shape), None, None) + ((None, None) if asm_fp8 else ())
+      return (None, None, dq.uop, dk.uop, None, None, dv.uop.reshape(ker.src[7].shape), None, None) + \
+        ((None, None) if asm_fp8 and not pre_scaled_fp8 else ())
     if not has_sink: return None, None, dq.uop, dk.uop, dv.uop
     sinks = Tensor(ker.src[6], device=ker.src[6].device)
     p_sink = (sinks.reshape(1, H, 1, 1) - l_vec).exp()
@@ -348,17 +351,18 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       # custom backward returns physical-unit gradients directly to xq/xk.
       return (x * scale).clamp(-FP8_MAX, FP8_MAX).cast(dtypes.fp8e4m3).contiguous(), descale
     pre_scaled_fp8 = q_fp8 is not None or k_fp8 is not None
+    asm_fp8 = bool(getenv("ASM_FP8_FA"))
     if pre_scaled_fp8:
       assert q_fp8 is not None and k_fp8 is not None, "prequantized FP8 attention requires both Q and K"
-      q_descale = Tensor.ones((1,), dtype=dtypes.float32, device=xq.device).contiguous()
-      k_descale = Tensor.ones((1,), dtype=dtypes.float32, device=xk.device).contiguous()
+      if not asm_fp8:
+        q_descale = Tensor.ones((1,), dtype=dtypes.float32, device=xq.device).contiguous()
+        k_descale = Tensor.ones((1,), dtype=dtypes.float32, device=xk.device).contiguous()
     else:
       q_fp8, q_descale = quantize_qk(xq, q_amax_state, q_amax_out)
       k_fp8, k_descale = quantize_qk(xk, k_amax_state, k_amax_out)
     # Pre-scaled Q/K have constant unit descales, which backward never reads.
     # Returning them as saved outputs adds scalar copy kernels to every layer.
     fp8_saves = (q_fp8, k_fp8) + (() if pre_scaled_fp8 else (q_descale, k_descale))
-    asm_fp8 = bool(getenv("ASM_FP8_FA"))
     grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t,
                         single_device, arch, False, fp8_qk=True, asm_fp8=asm_fp8, pre_scaled_fp8=pre_scaled_fp8)
     if asm_fp8:
@@ -366,7 +370,8 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       v_fp8, v_descale = quantize_qk(xv, None, None)
       # Pass V's storage directly; its shaped view is shared by the amax and quantization expressions.
       v_arg = xv.flatten() if not is_mp else xv
-      attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, v_arg, q_descale, k_descale, v_fp8, v_descale,
+      qk_scales = () if pre_scaled_fp8 else (q_descale, k_descale)
+      attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, v_arg, *qk_scales, v_fp8, v_descale,
         fxn=functools.partial(custom_asm_fp8_fa_forward, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
                               pre_scaled=pre_scaled_fp8, saved_bf16=True), grad_fxn=grad)[:2]
       # Precompiled layers must return the rounded operands used by backward;

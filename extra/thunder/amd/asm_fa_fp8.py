@@ -4,7 +4,7 @@
 Source: aiter ba59a37aa65a34ed19edb169c7b8ea59e4781af5,
 hsa/gfx950/fmha_v3_fwd/fwd_hd128_fp8_causal.co
 SHA256: ca8f416739558e92a189e733efa77af0a3db00460ed7bed83361b839e39281b3
-Only the kernarg prologue is adapted to tinygrad's buffer ABI and fixed shapes.
+Uses tinygrad's buffer ABI and fixed shapes; pre-scaled Q/K use inline unit descales.
 """
 import functools, math, struct
 from tinygrad import Tensor, dtypes
@@ -19,6 +19,8 @@ def build_kernel(B:int, N:int, H:int, H_KV:int, D:int, pre_scaled:bool=False, sa
   assert B in (1, 2) and (N, H, H_KV, D) == (8192, 32, 8, 128)
   # Native pointer order: O, Q8, K8, V8, LSE, Qscale, Kscale, Vscale.
   slots = (0, 4, 5, 9, 1, 7, 8, 10) if saved_bf16 else (0, 2, 3, 4, 1, 5, 6, 7)
+  unit_qk = pre_scaled and saved_bf16
+  if unit_qk: slots = (0, 4, 5, 7, 1, 8)
   scalar = 1 / math.log2(math.e) if pre_scaled else D ** -0.5
   k = Kernel()
   k.emit(s_and_b32(s[1], s[1], LIT, 65535))
@@ -50,9 +52,10 @@ def build_kernel(B:int, N:int, H:int, H_KV:int, D:int, pre_scaled:bool=False, sa
   k.emit(s_mov_b32(s[57], LIT, N*H*D*2))
   k.emit(s_mov_b32(s[94], LIT, H))
   k.emit(s_mov_b32(s[93], LIT, N*4))
-  k.emit(s_load_dwordx2(s[20:21], s[0:1], s[0], slots[5]*8, 0, 0, 0, 1))
-  k.emit(s_load_dwordx2(s[22:23], s[0:1], s[0], slots[6]*8, 0, 0, 0, 1))
-  k.emit(s_load_dwordx2(s[24:25], s[0:1], s[0], slots[7]*8, 0, 0, 0, 1))
+  if not unit_qk:
+    k.emit(s_load_dwordx2(s[20:21], s[0:1], s[0], slots[5]*8, 0, 0, 0, 1))
+    k.emit(s_load_dwordx2(s[22:23], s[0:1], s[0], slots[6]*8, 0, 0, 0, 1))
+  k.emit(s_load_dwordx2(s[24:25], s[0:1], s[0], slots[-1]*8, 0, 0, 0, 1))
   k.emit(v_lshrrev_b32_e32(v[1], 10))
   k.emit(v_lshrrev_b32_e32(v[2], 10, v[1]))
   k.emit(v_and_b32_e32(v[2], LIT, v[2], 1023))
@@ -121,10 +124,14 @@ def build_kernel(B:int, N:int, H:int, H_KV:int, D:int, pre_scaled:bool=False, sa
   k.emit(s_add_u32(s[72], LIT, s[67], 66560))
   k.emit(v_mov_b32_e32(v[197], LIT, 4286578688))
   k.emit(s_waitcnt(49279))
-  k.emit(s_and_b32(s[21], s[21], LIT, 65535))
-  k.emit(s_load_dword(s[33], s[20:21], s[0], 0, 0, 0, 0, 1))
-  k.emit(s_and_b32(s[23], s[23], LIT, 65535))
-  k.emit(s_load_dword(s[34], s[22:23], s[0], 0, 0, 0, 0, 1))
+  if unit_qk:
+    k.emit(s_mov_b32(s[33], 1.0))
+    k.emit(s_mov_b32(s[34], 1.0))
+  else:
+    k.emit(s_and_b32(s[21], s[21], LIT, 65535))
+    k.emit(s_load_dword(s[33], s[20:21], s[0], 0, 0, 0, 0, 1))
+    k.emit(s_and_b32(s[23], s[23], LIT, 65535))
+    k.emit(s_load_dword(s[34], s[22:23], s[0], 0, 0, 0, 0, 1))
   k.emit(s_and_b32(s[25], s[25], LIT, 65535))
   k.emit(s_load_dword(s[35], s[24:25], s[0], 0, 0, 0, 0, 1))
   k.emit(v_mov_b32_e32(v[222], s[38]))
@@ -4993,11 +5000,16 @@ def build_kernel(B:int, N:int, H:int, H_KV:int, D:int, pre_scaled:bool=False, sa
 @functools.cache
 def custom_asm_fp8_fa_forward(o:UOp, lse:UOp, *inputs:UOp,
                               B:int, N:int, H:int, H_KV:int, D:int, pre_scaled:bool=False, saved_bf16:bool=False):
-  if saved_bf16: _, _, q, k, _, qs, ks, v, vs = inputs
-  else: q, k, v, qs, ks, vs = inputs
+  if saved_bf16 and pre_scaled:
+    _, _, q, k, _, v, vs = inputs
+    scales = (vs,)
+  else:
+    if saved_bf16: _, _, q, k, _, qs, ks, v, vs = inputs
+    else: q, k, v, qs, ks, vs = inputs
+    scales = (qs, ks, vs)
   assert q.dtype == k.dtype == v.dtype == dtypes.fp8e4m3
-  assert o.dtype == dtypes.bfloat16 and lse.dtype == qs.dtype == ks.dtype == vs.dtype == dtypes.float32
-  assert all(math.prod(x.shape) == 1 for x in (qs, ks, vs))
+  assert o.dtype == dtypes.bfloat16 and lse.dtype == dtypes.float32
+  assert all(x.dtype == dtypes.float32 and math.prod(x.shape) == 1 for x in scales)
   zero = UOp.const(0)
   writes = [x.flatten().index(zero).store(x.flatten().index(zero).load()) for x in (o, lse)]
   reads = [x.flatten().index(zero).load() for x in inputs]
