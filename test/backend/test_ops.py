@@ -1497,6 +1497,12 @@ class TestOps(unittest.TestCase):
                                                                          np.arange(64,128,dtype=np.float32).reshape(8,8)])
   def test_small_gemm_eye(self):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
+  def test_gemm_int_precision(self):
+    # Preserve integer dtype and values, including integers not representable in float32.
+    vals = [np.array([[2**24+1, -2**24-1], [3, 4]], dtype=np.int32), np.eye(2, dtype=np.int32)]
+    for dtype in (None, dtypes.int32):
+      with self.subTest(dtype=dtype):
+        helper_test_op(None, lambda x,y: x@y, lambda x,y: x.dot(y, dtype=dtype), vals=vals, forward_only=True)
   @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "not precise enough when emulating")
   @unittest.skipIf(IMAGE>0, "image does math in float32")
   def test_gemm_fp16(self):
