@@ -5,7 +5,7 @@ from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, T
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct
 from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
-from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, mv_address
+from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up
 from tinygrad.dtype import DType, _to_np_dtype
 from tinygrad.runtime.support.memory import MMIOInterface
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -164,7 +164,7 @@ class Buffer:
     else:
       if opaque is not None:
         self.options = replace(self.options, nolru=True)
-        if not isinstance(opaque, tuple): opaque = ((opaque, opaque), MMIOInterface(mv_address(opaque) if self.nbytes else 0, self.nbytes))
+        if not isinstance(opaque, tuple): opaque = ((opaque, None), None)
       mapping, host = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
     storage = mapping, host.view(self.offset, self.nbytes, fmt='B') if host is not None else None
     if self._base is None:
