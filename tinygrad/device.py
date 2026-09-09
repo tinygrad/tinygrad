@@ -111,7 +111,8 @@ class Buffer:
       if opaque is not None: self.allocate(opaque)
       if initial_value is not None:
         self.allocate()
-        self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(bytearray(initial_value))))
+        if (host:=self.get_storage()[1]) is not None: host[:] = memoryview(initial_value).cast('B')
+        else: self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(bytearray(initial_value))))
         if isinstance(initial_value, pickle.PickleBuffer): initial_value.release()
     else:
       assert base._base is None, "base can't have a base"
@@ -161,8 +162,10 @@ class Buffer:
       (buf, meta), host = self.base.get_storage()
       mapping = self.allocator._offset(buf, self.nbytes, self.offset), meta
     else:
-      if opaque is not None: self.options = replace(self.options, nolru=True)
-      mapping, host = ((opaque, None), None) if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
+      if opaque is not None:
+        self.options = replace(self.options, nolru=True)
+        if not isinstance(opaque, tuple): opaque = ((opaque, None), None)
+      mapping, host = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
     storage = mapping, host.view(self.offset, self.nbytes, fmt='B') if host is not None else None
     if self._base is None:
       if not self.device.startswith("DISK") and self.options.external_ptr is None:
