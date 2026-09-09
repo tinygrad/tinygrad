@@ -10,7 +10,6 @@ import tensorflow as tf
 import tf2onnx
 from tinygrad.nn.onnx import OnnxRunner
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import to_mv
 from extra.export_model import export_model_clang, compile_net, jit_model
 
 def get_uncompiled_model2(dataset_size=32, output_size=4):
@@ -47,8 +46,8 @@ def compile_onnx_model(onnx_model):
   cprog.append("void initialize(float *weights) {")
   weights = bytes()
   for name,cl in bufs_to_save.items():
-    cprog.append(f"memcpy({name}, weights + {len(weights)//4}, {cl._buf.size});")
-    weights += bytes(to_mv(cl._buf.va_addr, cl._buf.size))
+    cprog.append(f"memcpy({name}, weights + {len(weights)//4}, {cl.nbytes});")
+    weights += cl.as_memoryview()
   cprog.append("}")
 
   # write the weights to disk

@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
-from tinygrad.helpers import Context, to_mv, prod
+from tinygrad.helpers import Context, prod
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen import to_program
 import json
@@ -69,7 +69,7 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
 
   if not wasm:
     for name,cl in bufs_to_save.items():
-      weight = ''.join(["\\x%02X"%x for x in bytes(to_mv(cl._buf.va_addr, cl._buf.size))])
+      weight = ''.join(["\\x%02X"%x for x in cl.as_memoryview()])
       cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
     cprog += [f"{dtype_map[dtype]} {name}[{len}];" if name not in bufs_to_save else f"{dtype_map[dtype]} *{name} = ({dtype_map[dtype]} *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in input_names+output_names]
     cprog += [f"void net({forward_args}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
