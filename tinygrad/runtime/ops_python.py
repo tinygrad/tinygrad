@@ -101,7 +101,7 @@ class PythonProgram(Program['PythonDevice']):
             # REGs are per thread
             values[u] = [memoryview(bytearray(u.max_numel()*u.dtype.itemsize)).cast(storage_fmt) for _ in range(warp_size)]
           else:
-            size = u.max_numel()*u.dtype.itemsize
+            size = u.max_numel() * u.dtype.itemsize
             buf = memoryview(bytearray(size)) if u.op is not Ops.PARAM else to_mv(pbufs.pop(0), size)
             values[u] = [buf.cast(storage_fmt)] * warp_size
         elif u.op is Ops.SPECIAL:

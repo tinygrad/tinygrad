@@ -102,7 +102,7 @@ def replace_buffer(ctx:tuple[bool, list[UOp], dict[UOp, int]], b:UOp) -> UOp:
 pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), replace_buffer)])
 
 # *****************
-# 1.1. prep: one call per device: the args pick their lane, the DEVICE axis binds to it
+# 1.1. prep: unwrap multi
 
 def unwrap_call(call:UOp) -> UOp|None:
   if get_enqueue_devs(call) is None or (n:=max(len(to_tuple(a.device)) for a in get_call_arg_uops(call))) == 1: return None
