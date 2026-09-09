@@ -1,9 +1,9 @@
-import unittest, contextlib, ctypes, gc, numpy as np
+import unittest, contextlib, ctypes, gc, random, numpy as np
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import Context, dedup, partition, unwrap
+from tinygrad.helpers import Context, DEV, dedup, partition, unwrap
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.codegen import do_to_program
@@ -217,11 +217,12 @@ class TestHCQ2Schedule(unittest.TestCase):
   def test_caches_hold_no_buffers(self):
     # an eager template caches without its buffers and the jit's linear compiles once uncached: freeing the tensors frees the device memory
     def step(i):
-      x = Tensor(np.full(1024, i, np.float32)).to(Device.DEFAULT).realize()
+      buf = Buffer("NPY", 1024, dtypes.float32, initial_value=struct.pack("f", i) * 1024)
+      x = Tensor(UOp.from_buffer(buf)).to(Device.DEFAULT).realize()
       @TinyJit
       def f(a): return (a * 2 + 1).contiguous().realize()
       for _ in range(3): out = f(x)
-      self.assertEqual(out.tolist(), [2.0 * i + 1] * 1024)
+      self.assertEqual(out.to("CPU").tolist(), [2.0 * i + 1] * 1024)
     step(1) # warms the programs, templates and rings
     gc.collect()
     used = GlobalCounters.mem_used
