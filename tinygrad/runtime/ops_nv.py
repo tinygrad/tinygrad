@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, itertools
 assert sys.platform != 'win32'
 from typing import Any
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HWQueue, encode_submit, patch, to_name, unwrap_view
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, BumpAllocator, hcq_filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
@@ -481,13 +481,13 @@ class NVKIface:
     return self._gpu_uvm_map(va_addr, size, mem_handle, has_cpu_mapping=cpu_access or host)
 
   def free(self, storage:BufferStorage):
-    addr, mem, host = storage.buf, storage.meta, storage.host
+    mem = storage.meta
     if mem.hMemory > NVKIface.host_object_enumerator: # not a host object, clear phys mem.
       made = nv_gpu.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.dev.nvdevice, hObjectOld=mem.hMemory)
       nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
       if made.status != 0: raise RuntimeError(f"_gpu_free returned {get_error_str(made.status)}")
-    self.uvm(nv_gpu.UVM_FREE, nv_gpu.UVM_FREE_PARAMS(base=addr, length=mem.length))
-    if host is not None: FileIOInterface.munmap(addr, mem.length)
+    self.uvm(nv_gpu.UVM_FREE, nv_gpu.UVM_FREE_PARAMS(base=storage.buf, length=mem.length))
+    if storage.host is not None: FileIOInterface.munmap(storage.buf, mem.length)
 
   def unmap(self, mapping:BufferStorage):
     mem, owns_range = mapping.meta
@@ -510,14 +510,11 @@ class NVKIface:
     return BufferStorage(va_base, uvm_map, MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None)
 
   def map(self, buf:Buffer) -> BufferStorage:
+    mem = buf.meta
     if buf.device.split(":")[0] == "CPU":
-      if (mapped:=next((m.meta for d, m in buf.get_storage().maps.items() if d.startswith("NV")), None)) is None:
-        mem = self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf)
-        return BufferStorage(mem.buf, (mem.meta, True))
-      mem = mapped[0]
-    else: mem = buf.meta
-    mapping = self._gpu_uvm_map(buf._buf, mem.length, mem.hMemory, create_range=False)
-    return BufferStorage(mapping.buf, (mapping.meta, False))
+      if (mem:=next((m.meta[0] for d, m in buf.get_storage().maps.items() if d.startswith("NV")), None)) is None:
+        return replace(mem:=self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf), meta=(mem.meta, True))
+    return replace(mapping:=self._gpu_uvm_map(buf._buf, mem.length, mem.hMemory, create_range=False), meta=(mapping.meta, False))
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     return NVKIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVKIface.uvm_vaddr_allocator.alloc(size, alignment)
@@ -607,9 +604,8 @@ class NVDevice(HCQ2Compiled):
 
   @functools.cached_property
   def fifos(self) -> dict[str, GPFifo]:
-    mem = self.iface.alloc(size:=0x300000, contiguous=True, cpu_access=True, force_devmem=True,
-                          map_flags=nv_gpu.NVOS33_FLAGS_CACHING_TYPE_WRITECOMBINED<<23)
-    self.gpfifo_buf = Buffer(self.device, size, dtypes.uint8, opaque=mem)
+    mem = self.iface.alloc(3<<20, contiguous=True, cpu_access=True, force_devmem=True, map_flags=nv_gpu.NVOS33_FLAGS_CACHING_TYPE_WRITECOMBINED<<23)
+    self.gpfifo_buf = Buffer(self.device, 3<<20, dtypes.uint8, opaque=mem)
 
     compute = self._new_gpu_fifo("COMPUTE:0", self.ctxshare, self.channel_group, offset=0, entries=0x10000, compute=True)
     copy = self._new_gpu_fifo("COPY:0", self.ctxshare, self.channel_group, offset=0x100000, entries=0x10000)

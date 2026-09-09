@@ -642,10 +642,9 @@ class KFDIface:
     return BufferStorage(mem.va_addr, mem, MMIOInterface(mem.va_addr, mem.size, fmt='B') if cpu_access or host else None)
 
   def free(self, storage:BufferStorage):
-    addr, mem = storage.buf, storage.meta
-    self._unmap_handle(mem.handle)
-    if addr: FileIOInterface.munmap(addr, mem.size)
-    kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.handle)
+    self._unmap_handle(storage.meta.handle)
+    if storage.buf: FileIOInterface.munmap(storage.buf, storage.meta.size)
+    kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=storage.meta.handle)
 
   def unmap(self, mapping:BufferStorage):
     handle, owned = mapping.meta
@@ -654,8 +653,7 @@ class KFDIface:
 
   def map(self, buf:Buffer) -> BufferStorage:
     if buf.device.split(":")[0] == "CPU":
-      mem = self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf)
-      return BufferStorage(mem.buf, (mem.meta.handle, True))
+      return replace(mem:=self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf), meta=(mem.meta.handle, True))
     self._map_handle(buf.meta.handle)
     return BufferStorage(buf._buf, (buf.meta.handle, False))
 
@@ -826,8 +824,7 @@ class USBIface(PCIIface):
     for off, paddr, n in pieces: self.dev_impl.mm.map_range(vaddr + off, n, [(paddr, n)], aspace=AddrSpace.SYS, uncached=True)
     view = self.pci_dev.dma_view(0xa000, 0x85000)
     for off, n in ((0x800, 4), (0x5000, 0x80000)): view.view(off, n)[:] = bytes(n) # no stale fence or sentinel
-    return Buffer(self.dev.device, 0x85000, dtypes.uint8, options=BufferSpec(external_ptr=vaddr),
-                  opaque=BufferStorage(vaddr, host=view))
+    return Buffer(self.dev.device, 0x85000, dtypes.uint8, options=BufferSpec(external_ptr=vaddr), opaque=BufferStorage(vaddr, host=view))
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False,
             **kwargs) -> BufferStorage:

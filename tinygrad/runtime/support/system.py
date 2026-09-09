@@ -280,9 +280,8 @@ class PCIIfaceBase:
     return BufferStorage(mapping.va_addr, PCIAllocationMeta(mapping, cpu_access, hMemory=mapping.paddrs[0][0]), barview)
 
   def free(self, storage:BufferStorage):
-    addr, meta = storage.buf, storage.meta
-    if meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(meta.mapping)
-    if meta.has_cpu_mapping: FileIOInterface.munmap(addr, meta.mapping.size)
+    if storage.meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(storage.meta.mapping)
+    if storage.meta.has_cpu_mapping: FileIOInterface.munmap(storage.buf, storage.meta.mapping.size)
 
   def unmap(self, mapping:BufferStorage): self.dev_impl.mm.unmap_range(*mapping.meta)
 
