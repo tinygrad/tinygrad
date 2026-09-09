@@ -1,9 +1,8 @@
 from __future__ import annotations
 import platform, sys, ctypes, mmap, struct, time
 from typing import cast
-from tinygrad.helpers import to_mv, from_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
-from tinygrad.device import BufferStorage, BufferSpec, TinyELF, Program, Device, Buffer, Allocator
-from tinygrad.runtime.support.memory import MMIOInterface
+from tinygrad.helpers import OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
+from tinygrad.device import TinyELF, Program, Device, HostAllocator
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -74,30 +73,11 @@ class CPUProgram(Program['CPUDevice']):
   def __del__(self):
     if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.addr), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
 
-class CPUAllocator(Allocator['CPUDevice']):
-  def __init__(self, dev:CPUDevice): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
-  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
-    if options.external_ptr is not None: addr, buf = options.external_ptr, None
-    elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
-    else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
-    return BufferStorage(addr, buf, MMIOInterface(addr, size, fmt='B'))
-
-  def _copyin(self, dest:int, src:memoryview):
-    self.dev.synchronize()
-    ctypes.memmove(dest, from_mv(src), len(src))
-  def _copyout(self, dest:memoryview, src:int):
-    self.dev.synchronize()
-    dest[:] = to_mv(src, dest.nbytes)[:]
-  def _map(self, buf:Buffer) -> BufferStorage:
-    if not isinstance(host:=buf.get_storage().host, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
-    return BufferStorage(host.addr)
-  def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
-
 class CPUDevice(HCQ2Compiled):
   wait_timeout_ms, has_copy_queue = 30000, False
 
   def __init__(self, device:str=""):
-    super().__init__(device, CPUAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], CPUProgram,
+    super().__init__(device, HostAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], CPUProgram,
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
 
   def synchronize(self, timeout:int|None=None): # a host read is safe once every device timeline caught up
