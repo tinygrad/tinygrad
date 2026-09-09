@@ -116,17 +116,15 @@ class TestHCQ2Schedule(unittest.TestCase):
   def test_host_copies(self):
     dev = Device[Device.DEFAULT]
     if not dev.has_copy_queue: self.skipTest("copy queue required")
-    for host_device in ("CPU", "NPY", "DISK"):
-      for direct in (False, True):
-        for upload in (False, True):
-          with self.subTest(host_device=host_device, direct=direct, upload=upload):
-            host, gpu = UOp.new_buffer(host_device, 4, dtypes.uint8), UOp.new_buffer(dev.device, 4, dtypes.uint8)
-            src, dst = (host, gpu) if upload else (gpu, host)
-            linear = UOp(Ops.LINEAR, src=(src.copy_to_device(dst.device).call(dst, src),))
-            with patch.object(dev, "host_devs", frozenset({"CPU", host_device}) if direct else frozenset({"CPU"})):
-              compiled = compile_linear(linear, profile=False)
-            self.assertEqual(len(compiled.src), 1 if direct or host_device == "CPU" else 2)
-            self.assertEqual(sum(call_is_hcq(call) for call in compiled.src), 1)
+    for host_device in ("CPU", "PYTHON", "NPY", "DISK"):
+      for upload in (False, True):
+        with self.subTest(host_device=host_device, upload=upload):
+          host, gpu = UOp.new_buffer(host_device, 4, dtypes.uint8), UOp.new_buffer(dev.device, 4, dtypes.uint8)
+          src, dst = (host, gpu) if upload else (gpu, host)
+          linear = UOp(Ops.LINEAR, src=(src.copy_to_device(dst.device).call(dst, src),))
+          compiled = compile_linear(linear, profile=False)
+          self.assertEqual(len(compiled.src), 2 if host_device == "DISK" else 1)
+          self.assertEqual(sum(call_is_hcq(call) for call in compiled.src), 1)
 
   def test_large_eager_not_cached(self):
     _, compiled, inputs = self.compiled(65)
@@ -186,17 +184,6 @@ class TestHCQ2Schedule(unittest.TestCase):
     src.as_memoryview(force_zero_copy=True)[:] = data
     src.get_buf(Device.DEFAULT)
     self.assertEqual(bytes(src.as_memoryview(force_zero_copy=True)), data)
-
-  def test_staged_copy_roundtrip(self):
-    # a host buffer the device cannot read copies in chunks through a small ring of staging slots: every rotation must land bit-exact
-    stage = Buffer("CPU", size:=1 << 16, dtypes.uint8, preallocate=True)
-    for npdt in (np.uint8, np.float32):
-      with self.subTest(dtype=npdt.__name__):
-        n = (size // 2 // np.dtype(npdt).itemsize) * 9 + 7 # nine rotations of a two slot ring, plus a short tail
-        data = np.arange(n, dtype=np.int64).astype(npdt)
-        with patch.object(hcq2, "STAGING_SIZE", size), patch.object(hcq2, "STAGING_SLOTS", 2), patch.object(hcq2, "_staging", lambda: stage):
-          out = Tensor(data).to(Device.DEFAULT).contiguous().realize()
-          np.testing.assert_equal(out.numpy(), data)
 
   def test_rt_patches_are_inputs_and_vars_only(self):
     x = Tensor.rand(17, 33).contiguous().realize()

@@ -156,7 +156,7 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
          and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-    elif src.device.split(":")[0] in HCQ_DEVS and dest._host_mv() is not None:
+    elif src._host_mv() is not None and dest._host_mv() is not None:
       dst_mv, src_mv = dest.as_memoryview(force_zero_copy=True), src.as_memoryview(force_zero_copy=True)
       with cpu_profile(f"{src.device} -> TINY", f"{src.device}:COPY"): dst_mv[:] = src_mv[:]
     elif dest._host_mv() is not None: src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
@@ -280,7 +280,7 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQ_RUNTIME_DEV, HCQInfo, HCQ_DEVS # noqa: E402 # down here, hcq2 imports realize
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQ_RUNTIME_DEV, HCQInfo # noqa: E402 # down here, hcq2 imports realize
 
 def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)

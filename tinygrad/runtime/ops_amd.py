@@ -651,7 +651,7 @@ class KFDIface:
     if owned: kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=handle)
 
   def map(self, buf:Buffer) -> BufferStorage:
-    if buf.device.split(":")[0] == "CPU":
+    if buf.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
       return replace(mem:=self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf), meta=(mem.meta.handle, True))
     self._map_handle(buf.meta.handle)
     return BufferStorage(buf._buf, (buf.meta.handle, False))
@@ -891,7 +891,6 @@ class AMDDevice(HCQ2Compiled):
     if self.is_usb: # the submits write the rings over the link, the copies go through the controller's sram (usb.py)
       self.pm_batch, self.pm_lower = pm_usb_batch, pm_usb_lower
       self.pm_bufferize = pm_usb_bufferize + self.pm_bufferize
-      self.host_devs = frozenset({"CPU", "NPY", "DISK"}) # the host program streams numpy and files in place
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.pmc_enabled, self.sqtt_enabled = PROFILE > 0 and PMC > 0, PROFILE > 0 and SQTT > 0

@@ -260,8 +260,8 @@ def is_numpy_ndarray(x) -> "TypeGuard[numpy.ndarray]": return str(type(x)) == "<
 
 def _fromnp(x: 'numpy.ndarray') -> UOp:
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
-  # fake realize
-  ret.buffer.allocate(x)
+  ret.buffer.allocate() if x.size else ret.buffer.allocate(memoryview(bytearray()))
+  ret.buffer.host[:] = x.tobytes()
   return ret.reshape(x.shape)
 
 class Tensor(RandMixin):

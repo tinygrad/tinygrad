@@ -41,7 +41,7 @@ def get_enqueue_devs(call:UOp) -> Any|None:
   devs = min(bufs, key=lambda b: not all_devices_in(b.device, HCQ_DEVS)).device
   if not all_devices_in(devs, HCQ_DEVS): return None
   dev = cast(HCQ2Compiled, Device[to_tuple(devs)[0]])
-  if not all(all_devices_in(b.device, HCQ_DEVS | dev.host_devs) for b in bufs): return None
+  if not all(all_devices_in(b.device, HCQ_DEVS | {"CPU", "PYTHON", "NPY"}) for b in bufs): return None
   # a device without a copy queue leaves copies to its allocator
   return devs if call.src[0].op is not Ops.COPY or dev.has_copy_queue else None
 
@@ -113,7 +113,7 @@ def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preal
 def _need_staging(a, b):
   if not all_devices_in(a.device, HCQ_DEVS): return False
   dev = cast(HCQ2Compiled, Device[to_tuple(a.device)[0]])
-  return not all_devices_in(b.device, HCQ_DEVS | dev.host_devs) and dev.has_copy_queue
+  return not all_devices_in(b.device, HCQ_DEVS | {"CPU", "PYTHON", "NPY"}) and dev.has_copy_queue
 
 def stage_copy(dst:UOp, src:UOp) -> UOp|None:
   if not (_need_staging(src, dst) or _need_staging(dst, src)): return None
@@ -513,7 +513,6 @@ class HCQ2Compiled(Compiled):
   wait_timeout_ms: float = 30000.0
   sleep_timeout_ms: int|None = None
   rt_nbytes: int = 64 << 20 # the pool every per-linear buffer is carved out of
-  host_devs: frozenset[str] = frozenset({"CPU"})
   pm_encode: PatternMatcher = PatternMatcher([]) # the backend's own encode rules, matched by its submit names
   var_vals: dict[str, int] = {}
 

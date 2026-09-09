@@ -289,7 +289,7 @@ class PCIIfaceBase:
     return [(p + self.pci_dev.bar_info(self.vram_bar)[0], sz) for p, sz in paddrs], AddrSpace.SYS
 
   def map(self, b:Buffer) -> BufferStorage:
-    if b.device.split(":")[0] == "CPU":
+    if b.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
       lo, size = b._buf & ~0xfff, round_up(b._buf + b.nbytes, 0x1000) - (b._buf & ~0xfff)
       System.lock_memory(lo, size)
       paddrs, aspace, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(lo, size)], AddrSpace.SYS, True, True
