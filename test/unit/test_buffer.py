@@ -37,8 +37,7 @@ class TestBuffer(unittest.TestCase):
     self.assertEqual(bytes(v.get_storage("PYTHON").host.mv), b"test")
 
   def test_cache_owned_storage_only(self):
-    owner = Buffer("PYTHON", 8, dtypes.uint8, preallocate=True)
-    for opaque in (None, owner.get_storage()):
+    for opaque in (None, memoryview(bytearray(8))):
       with self.subTest(imported=opaque is not None), Context(LRU=1):
         b = Buffer("PYTHON", 8, dtypes.uint8, opaque=opaque)
         buf = b._buf

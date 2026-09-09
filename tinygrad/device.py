@@ -5,7 +5,7 @@ from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, T
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, ctypes
 from tinygrad.helpers import WIN, mv_address, from_mv, to_mv, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
-from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up
+from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
 from tinygrad.dtype import DType, _to_np_dtype
 from tinygrad.runtime.support.memory import MMIOInterface
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -103,7 +103,7 @@ class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:
 class Buffer:
   profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
-               initial_value:bytes|bytearray|memoryview|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
+               initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype, self.offset, self.allocated_views, self._base = Device.canonicalize(device), size, dtype, offset, 0, base
     self.options = options if options is not None else BufferSpec()
@@ -114,7 +114,7 @@ class Buffer:
       if initial_value is not None:
         self.allocate()
         if (host:=self.get_storage().host) is not None: host[:] = memoryview(initial_value).cast('B')
-        else: self.copy_from(Buffer("PYTHON", self.size, self.dtype, initial_value=initial_value))
+        else: self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(bytearray(initial_value))))
         if isinstance(initial_value, pickle.PickleBuffer): initial_value.release()
     else:
       assert base._base is None, "base can't have a base"
@@ -165,6 +165,7 @@ class Buffer:
       storage = replace(self.base.get_storage(), buf=self.allocator._offset(self.base._buf, self.nbytes, self.offset), maps={})
     elif opaque is not None:
       self.options = replace(self.options, nolru=True)
+      if is_numpy_ndarray(opaque): opaque = memoryview(opaque if opaque.flags.c_contiguous and opaque.flags.writeable else opaque.copy(order='C'))
       if isinstance(opaque, memoryview):
         opaque = BufferStorage(addr:=mv_address(opaque) if self.nbytes else 0, opaque, MMIOInterface(addr, self.nbytes))
       storage = opaque if isinstance(opaque, BufferStorage) else BufferStorage(opaque)

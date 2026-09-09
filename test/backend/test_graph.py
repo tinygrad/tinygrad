@@ -54,7 +54,7 @@ def run_schedule(calls:list[UOp]):
   run_linear(UOp(Ops.LINEAR, src=tuple(calls)))
 
 def zero_bufs(bufs):
-  for b in bufs: b.copy_from(Buffer("PYTHON", b.size, b.dtype, initial_value=bytes(b.nbytes)))
+  for b in bufs: b.copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=memoryview(bytearray(b.nbytes))))
 
 @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
 class TestGraph(unittest.TestCase):
