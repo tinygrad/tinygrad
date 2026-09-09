@@ -894,7 +894,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
                           not (s.op is Ops.SHRINK and s.tag == ("allreduce",) and s.src[0].op is not Ops.INDEX)): s = s.src[0]
     return s
 
-  def contiguous_view(self) -> tuple[UOp, int]|None:
+  def contiguous_view(self) -> tuple[UOp, int]|None: return self._contiguous_view
+
+  @functools.cached_property
+  def _contiguous_view(self) -> tuple[UOp, int]|None:
     from tinygrad.schedule.prepare import pm_mops
     from tinygrad.uop.symbolic import symbolic
 

@@ -19,6 +19,23 @@ class TestRingAllReduce(unittest.TestCase):
     ordinary = UOp(Ops.LINEAR, src=(UOp(Ops.CALL, src=(UOp(Ops.SINK), out)),))
     self.assertFalse(is_allreduce_linear_output(ordinary, 0))
 
+  def test_classify_multiple_linear_outputs_independently(self):
+    devices = ("NULL", "NULL:1")
+    outputs = [UOp.param(slot, dtypes.float, (8,), device=devices) for slot in range(2)]
+    slices = [out.mselect(i).shrink(((4*i, 4*i+4),)).rtag(("allreduce",)) for out in outputs for i in range(2)]
+    calls = tuple(UOp(Ops.CALL, src=(UOp(Ops.SINK), x)) for x in slices)
+    linear = UOp(Ops.LINEAR, src=calls)
+    self.assertTrue(is_allreduce_linear_output(linear, 1))
+    self.assertTrue(is_allreduce_linear_output(linear, 0))
+    self.assertFalse(is_allreduce_linear_output(linear, 2))
+    # Adding an ordinary use of slot zero must not disqualify slot one, or
+    # change the cached classification for the original immutable graph.
+    reader = UOp(Ops.CALL, src=(UOp(Ops.SINK), outputs[0].mselect(0)))
+    with_reader = UOp(Ops.LINEAR, src=calls+(reader,))
+    self.assertFalse(is_allreduce_linear_output(with_reader, 0))
+    self.assertTrue(is_allreduce_linear_output(with_reader, 1))
+    self.assertTrue(is_allreduce_linear_output(linear, 0))
+
   def test_physical_view_offset_uses_base_dtype_units(self):
     base = UOp.new_buffer("NULL", 64, dtypes.uint8)
     view = base.bitcast(dtypes.float).shrink(((3, 7),)).rtag(("allreduce",))

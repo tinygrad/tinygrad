@@ -37,14 +37,22 @@ def _is_stable_custom_output(buf:UOp) -> bool:
   return len(slots) == 1
 
 @functools.cache
+def _linear_output_uses(linear:UOp) -> tuple[dict[int, list[UOp]], dict[UOp, list[UOp]]]:
+  # All argument slots share the same graph. Analyze it once rather than walking
+  # the full LINEAR (including custom programs) again for every candidate slot.
+  params:dict[int, list[UOp]] = {}
+  consumers:dict[UOp, list[UOp]] = {}
+  for x in linear.toposort():
+    if x.op is Ops.PARAM and isinstance(x.arg, ParamArg): params.setdefault(x.arg.slot, []).append(x)
+    for src in x.src: consumers.setdefault(src, []).append(x)
+  return params, consumers
+
+@functools.cache
 def is_allreduce_linear_output(linear:UOp, slot:int) -> bool:
   """Check that a LINEAR parameter is used exclusively as the output storage of an allreduce."""
-  nodes = linear.toposort()
-  params = [x for x in nodes if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot == slot]
+  param_slots, consumers = _linear_output_uses(linear)
+  params = param_slots.get(slot, [])
   if len(params) != 1: return False
-  consumers:dict[UOp, list[UOp]] = {}
-  for x in nodes:
-    for s in x.src: consumers.setdefault(s, []).append(x)
   selects = consumers.get(params[0], [])
   if not selects or any(x.op is not Ops.MSELECT for x in selects): return False
   slices:list[UOp] = []
