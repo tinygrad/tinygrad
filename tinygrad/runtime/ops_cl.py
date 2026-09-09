@@ -3,7 +3,7 @@ from typing import cast
 import ctypes, hashlib
 from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.runtime.support import c
-from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, suppress_finalizing, unwrap, round_up, is_image_shape
+from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing, unwrap, round_up, is_image_shape
 from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.device import BufferStorage, BufferSpec, Allocator, Compiled, Compiler, CompileError, TinyELF, Program
 

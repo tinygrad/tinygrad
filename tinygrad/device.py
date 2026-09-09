@@ -165,8 +165,10 @@ class Buffer:
       storage = replace(self.base.get_storage(), buf=self.allocator._offset(self.base._buf, self.nbytes, self.offset), maps={})
     elif opaque is not None:
       self.options = replace(self.options, nolru=True)
-      if is_numpy_ndarray(opaque): opaque = memoryview(opaque if opaque.flags.c_contiguous and opaque.flags.writeable else opaque.copy(order='C'))
-      if isinstance(opaque, memoryview):
+      if is_numpy_ndarray(opaque): # readonly arrays stay in place, mv_address can't take their address
+        if not opaque.flags.c_contiguous: opaque = opaque.copy(order='C')
+        opaque = BufferStorage(addr:=opaque.ctypes.data, memoryview(opaque), MMIOInterface(addr, self.nbytes))
+      elif isinstance(opaque, memoryview):
         opaque = BufferStorage(addr:=mv_address(opaque) if self.nbytes else 0, opaque, MMIOInterface(addr, self.nbytes))
       storage = opaque if isinstance(opaque, BufferStorage) else BufferStorage(opaque)
     else: storage = self.allocator.alloc(self.nbytes, self.options)
@@ -196,6 +198,9 @@ class Buffer:
     buf:bytearray|pickle.PickleBuffer|None = None
     if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, self.base, self.offset, self.is_allocated())
+    if self.device == "NPY": # the array pickles itself, no staging copy
+      import numpy as np
+      return self.__class__, (self.device, self.size, self.dtype, np.frombuffer(self.as_memoryview(allow_zero_copy=True), _to_np_dtype(self.dtype)), self.options, None)
     if self.is_allocated():
       buf = pickle.PickleBuffer(self.as_memoryview()) if protocol >= 5 else bytearray(self.as_memoryview())
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
@@ -212,7 +217,7 @@ class Buffer:
 
   def as_memoryview(self, allow_zero_copy=False) -> memoryview:
     if not self.nbytes: return memoryview(bytearray())
-    if (mv:=self._host_mv()) is None: return Buffer("PYTHON", self.size, self.dtype, preallocate=True).copy_from(self).as_memoryview()
+    if (mv:=self._host_mv()) is None: return Buffer("PYTHON", self.size, self.dtype, preallocate=True).copy_from(self).as_memoryview(allow_zero_copy=True)
     for device in {self.device, *self.base.get_storage().maps}: Device[device].synchronize()
     return mv if allow_zero_copy else memoryview(bytearray(mv))
 
