@@ -423,8 +423,7 @@ hcq_compile_cache:dict[tuple[UOp, bool], UOp] = {} # eager templates: a buffer-f
 def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False) -> UOp:
   if any(isinstance(getattr(c.without_after.arg, "aux", None), HCQInfo) for c in linear.src): return linear # compiled already
 
-  if cache:
-    if input_uops is None: input_uops = []
+  if cache and input_uops is not None:
     use_rt = len(linear.src) < HCQ_CACHE_THRESH # small schedules use runtime address patches so linked schedules can be cached without input buffers
     slots = {u:i for i,u in reversed(tuple(enumerate(input_uops)))}
     linear = graph_rewrite(linear, pm_replace_buffers, ctx=(use_rt, input_uops, slots), walk=True, name="replace buffers")
@@ -433,7 +432,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
   lin = sched_batches(lin, profile)
   lin = graph_rewrite(lin, pm_encode, walk=True, name="encode")
   with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin)
-  if cache and final_linear is not linear: hcq_compile_cache[key] = final_linear
+  if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
   return final_linear
 
 # *****************
