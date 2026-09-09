@@ -249,6 +249,32 @@ class TestKernelOpts(unittest.TestCase):
     # both reduce axes padded: the outer clause lifts out, the inner clause is the inner reduce's identity
     helper_linearizer_opt(a.max(1).sum(0), [[Opt(OptOps.PADTO, 0, 4), Opt(OptOps.PADTO, 1, 4)]], wanna_output=[[3+6]])
 
+  def test_padto_unindexed_reduce(self):
+    # TODO: broken now. a repeat/cat along the reduced axis leaves a reduce range no buffer index uses, and the padded iterations are reduced too
+    a = Tensor.arange(7*5, dtype=dtypes.float).reshape(7, 5).clone().realize()
+    with self.assertRaises(AssertionError):  # sums 32 not 16
+      helper_linearizer_opt(a.repeat((3, 16)).sum(1), [[Opt(OptOps.PADTO, 2, 32)]])
+    with self.assertRaises(AssertionError):  # sums 6 not 4
+      helper_linearizer_opt(a.repeat((1, 16)).sum(1), [[Opt(OptOps.SPLIT, 1, (4, AxisType.UNROLL)), Opt(OptOps.PADTO, 1, 3)]])
+    with self.assertRaises(AssertionError):  # sums 4 not 2
+      helper_linearizer_opt(a.cat(a, dim=1).sum(1), [[Opt(OptOps.PADTO, 1, 4)]])
+    a = Tensor.full((7, 5), 2.0).clone().realize()
+    with self.assertRaises(AssertionError):  # 2**30 not 2**20
+      helper_linearizer_opt(a.repeat((1, 4)).prod(1), [[Opt(OptOps.PADTO, 1, 3)]])
+
+  def test_padto_masked_reduce(self):
+    # TODO: broken now. a where with a defined false arm gives the padded iterations a value, and it is reduced too
+    a = Tensor.arange(7*17, dtype=dtypes.float).reshape(7, 17).clone().realize()
+    m = (Tensor.arange(7).reshape(7, 1) % 2 == 0).expand(7, 17)
+    with self.assertRaises(AssertionError):  # sums 7 extra 1.0s
+      helper_linearizer_opt(m.where(a, 1.0).sum(1), [[Opt(OptOps.PADTO, 1, 8)]])
+    with self.assertRaises(AssertionError):  # sums 15 extra 1.0s
+      helper_linearizer_opt(m.where(a, 1.0).sum(1), [[Opt(OptOps.PADTO, 1, 32)]])
+    with self.assertRaises(AssertionError):  # sums 7 extra 1.0s
+      helper_linearizer_opt((Tensor.arange(17).reshape(1, 17) < 5).expand(7, 17).where(a, 1.0).sum(1), [[Opt(OptOps.PADTO, 1, 8)]])
+    with self.assertRaises(AssertionError):  # 2**16 not 2**11
+      helper_linearizer_opt(m[:, :11].where(Tensor.ones(7, 11), 2.0).prod(1), [[Opt(OptOps.PADTO, 1, 8)]])
+
   def test_padto_unrolled_prod(self):
     a = (Tensor.arange(4*17, dtype=dtypes.float).reshape(4, 17) / 100 + 1).clone().realize()
     helper_linearizer_opt(a.prod(1), [[Opt(OptOps.PADTO, 1, 32), Opt(OptOps.SPLIT, 1, (0, AxisType.UNROLL)),
