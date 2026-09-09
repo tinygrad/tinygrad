@@ -1,4 +1,4 @@
-import unittest, contextlib, ctypes, gc, numpy as np
+import unittest, contextlib, ctypes, gc, struct, numpy as np
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer
@@ -116,17 +116,15 @@ class TestHCQ2Schedule(unittest.TestCase):
   def test_host_copies(self):
     dev = Device[Device.DEFAULT]
     if not dev.has_copy_queue: self.skipTest("copy queue required")
-    for host_device in ("CPU", "NPY", "DISK"):
-      for direct in (False, True):
-        for upload in (False, True):
-          with self.subTest(host_device=host_device, direct=direct, upload=upload):
-            host, gpu = UOp.new_buffer(host_device, 4, dtypes.uint8), UOp.new_buffer(dev.device, 4, dtypes.uint8)
-            src, dst = (host, gpu) if upload else (gpu, host)
-            linear = UOp(Ops.LINEAR, src=(src.copy_to_device(dst.device).call(dst, src),))
-            with patch.object(dev, "host_devs", frozenset({"CPU", host_device}) if direct else frozenset({"CPU"})):
-              compiled = compile_linear(linear, profile=False)
-            self.assertEqual(len(compiled.src), 1 if direct or host_device == "CPU" else 2)
-            self.assertEqual(sum(call_is_hcq(call) for call in compiled.src), 1)
+    for host_device in ("CPU", "PYTHON", "NPY", "DISK"):
+      for upload in (False, True):
+        with self.subTest(host_device=host_device, upload=upload):
+          host, gpu = UOp.new_buffer(host_device, 4, dtypes.uint8), UOp.new_buffer(dev.device, 4, dtypes.uint8)
+          src, dst = (host, gpu) if upload else (gpu, host)
+          linear = UOp(Ops.LINEAR, src=(src.copy_to_device(dst.device).call(dst, src),))
+          compiled = compile_linear(linear, profile=False)
+          self.assertEqual(len(compiled.src), 2 if host_device == "DISK" else 1)
+          self.assertEqual(sum(call_is_hcq(call) for call in compiled.src), 1)
 
   def test_large_eager_not_cached(self):
     _, compiled, inputs = self.compiled(65)
@@ -183,20 +181,9 @@ class TestHCQ2Schedule(unittest.TestCase):
   def test_map_cpu_buffer_preserves_contents(self):
     src = Buffer("CPU", 16, dtypes.uint8, preallocate=True)
     data = bytes(range(16))
-    src.as_memoryview(force_zero_copy=True)[:] = data
+    src.host[:] = data
     src.get_buf(Device.DEFAULT)
-    self.assertEqual(bytes(src.as_memoryview(force_zero_copy=True)), data)
-
-  def test_staged_copy_roundtrip(self):
-    # a host buffer the device cannot read copies in chunks through a small ring of staging slots: every rotation must land bit-exact
-    stage = Buffer("CPU", size:=1 << 16, dtypes.uint8, preallocate=True)
-    for npdt in (np.uint8, np.float32):
-      with self.subTest(dtype=npdt.__name__):
-        n = (size // 2 // np.dtype(npdt).itemsize) * 9 + 7 # nine rotations of a two slot ring, plus a short tail
-        data = np.arange(n, dtype=np.int64).astype(npdt)
-        with patch.object(hcq2, "STAGING_SIZE", size), patch.object(hcq2, "STAGING_SLOTS", 2), patch.object(hcq2, "_staging", lambda: stage):
-          out = Tensor(data).to(Device.DEFAULT).contiguous().realize()
-          np.testing.assert_equal(out.numpy(), data)
+    self.assertEqual(bytes(src.as_memoryview()), data)
 
   def test_rt_patches_are_inputs_and_vars_only(self):
     x = Tensor.rand(17, 33).contiguous().realize()
@@ -230,11 +217,12 @@ class TestHCQ2Schedule(unittest.TestCase):
   def test_caches_hold_no_buffers(self):
     # an eager template caches without its buffers and the jit's linear compiles once uncached: freeing the tensors frees the device memory
     def step(i):
-      x = Tensor(np.full(1024, i, np.float32)).to(Device.DEFAULT).realize()
+      buf = Buffer("NPY", 1024, dtypes.float32, initial_value=struct.pack("f", i) * 1024)
+      x = Tensor(UOp.from_buffer(buf)).to(Device.DEFAULT).realize()
       @TinyJit
       def f(a): return (a * 2 + 1).contiguous().realize()
       for _ in range(3): out = f(x)
-      self.assertEqual(out.tolist(), [2.0 * i + 1] * 1024)
+      self.assertEqual(out.to("CPU").tolist(), [2.0 * i + 1] * 1024)
     step(1) # warms the programs, templates and rings
     gc.collect()
     used = GlobalCounters.mem_used

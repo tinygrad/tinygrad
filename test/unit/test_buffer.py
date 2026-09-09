@@ -16,10 +16,11 @@ class TestBuffer(unittest.TestCase):
 
   def test_mapping(self):
     b = Buffer("CPU", 8, dtypes.uint8, initial_value=b"abcdefgh")
-    self.assertIs(b.get_storage("PYTHON").meta, b.get_buf("PYTHON"))
+    self.assertEqual(b.get_buf("PYTHON"), b._buf)
     v = b.view(4, dtypes.uint8, 2)
     mapped = v.get_storage("PYTHON")
-    self.assertEqual(bytes(mapped.buf), b"cdef")
+    self.assertEqual(mapped.buf, b._buf + 2)
+    self.assertEqual(bytes(mapped.host.mv), b"cdef")
     self.assertIs(mapped.host, v.host)
     self.assertIsNone(mapped.meta)
     self.assertIs(v.get_storage("PYTHON"), mapped)
@@ -33,7 +34,7 @@ class TestBuffer(unittest.TestCase):
     self.assertFalse(v.is_allocated())
     v.host[:] = b"test"
     self.assertIsNot(v.get_storage("PYTHON"), old)
-    self.assertEqual(bytes(v.get_buf("PYTHON")), b"test")
+    self.assertEqual(bytes(v.get_storage("PYTHON").host.mv), b"test")
 
   def test_cache_owned_storage_only(self):
     for opaque in (None, memoryview(bytearray(8))):

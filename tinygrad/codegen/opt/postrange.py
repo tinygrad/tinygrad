@@ -296,10 +296,6 @@ class Scheduler:
   @property
   def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.INDEX][::-1]
   @property
-  def output_shape(self):
-    red = self.reduce_axes
-    return [1 if i in red else s for i,s in enumerate(self.full_shape)]
-  @property
   def upcasted(self) -> int: return len(self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
   @property
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
