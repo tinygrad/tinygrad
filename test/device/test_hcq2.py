@@ -81,7 +81,7 @@ class TestHCQ2Schedule(unittest.TestCase):
       f(x)
       return f(x), f.captured._linear, [x.uop.base]
     out = chain(x, n)
-    return out, compile_linear(out.schedule_linear(), input_uops=inputs), inputs
+    return out, compile_linear(out.schedule_linear(), input_uops=inputs, cache=True), inputs
 
   def test_jit_has_no_rt_buffers(self):
     dev = Device[Device.DEFAULT]
@@ -143,7 +143,7 @@ class TestHCQ2Schedule(unittest.TestCase):
           before = tuple(inputs)
           with rt_views() as borrowed:
             for linear in (compiled, linked):
-              self.assertIs(compile_linear(linear, input_uops=None if jit else inputs), linear)
+              self.assertIs(compile_linear(linear, input_uops=inputs, cache=not jit), linear)
           self.assertEqual(tuple(inputs), before)
           self.assertFalse(borrowed)
           run_linear(linked, input_uops=inputs, jit=True, wait=True)
