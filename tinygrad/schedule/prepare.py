@@ -132,6 +132,8 @@ def expand_bitcast(bc:UOp) -> UOp|None:
 
 def copy_to_anon_store(x:UOp, copy:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for contiguous
+  # copies must read from a whole buffer, not a view: materialize anything lacking buffer identity (SDMA can't do offset copies)
+  if not x.has_buffer_identity(after_ok=True): x = x.contiguous()
   buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
   return buf.after(buf.store(x)).reshape(copy.shape)
 
