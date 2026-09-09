@@ -30,6 +30,8 @@ class TrackedMemoryView:
     return self
 
   @property
+  def obj(self): return self.mv.obj
+  @property
   def nbytes(self): return self.mv.nbytes
   def __len__(self): return len(self.mv)
   def __repr__(self): return repr(self.mv)

@@ -12,7 +12,6 @@ from tinygrad.uop.ops import resolve_returned_after, remove_all_tags
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
-from tinygrad.schedule.multi import multi_pm
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 
@@ -21,14 +20,11 @@ from tinygrad.engine.realize import run_linear
 @dataclass
 class AllocCtx:
   buffer_map: dict[UOp, UOp] = field(default_factory=dict)
-  bases: set[UOp] = field(default_factory=set)
   stores: list[UOp] = field(default_factory=list)
   replacements: list[UOp] = field(default_factory=list)
   unbound: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
-
-# a tag is the tuple of original pre-rewrite UOps a node provides storage for
-def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
+  outputs: set[UOp] = field(default_factory=set)
 
 # a base needs storage of its own if it can back a buffer and doesn't already have one
 def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_identity()
@@ -36,108 +32,29 @@ def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_i
 def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
 def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
-def creation_copy_is_realized(u:UOp):
-  # all copies from disk/numpy are realized into a real buffer
-  if is_creation_device(u.src[0]): return tag_uop(u)
-
-# CONTIGUOUS and AFTER + parents are the only nodes that get updated
-add_tags = PatternMatcher([
-  (UPat(Ops.COPY, name="u"), creation_copy_is_realized),
-  # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
-   lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
-  (UPat(Ops.AFTER, name="x"), tag_uop),
-  (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
-])
-
-def mint_tagged_storage(x:UOp):
-  if x.tag is None: return None          # untouched
-  # empty tag from rtag(()): a COPY already handled via buffer_map or merged into a parent AFTER.
-  # () is falsy but not None, so it isn't re-tagged like a bare (tag=None) node would be; just strip it here
-  if not x.tag: return x.rtag(None)
-  # a tagged CONTIGUOUS is consumed by the mint: the buffer stores its source directly
-  src = x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag(None)
-  # virtual values and DISK tensors don't get real buffers: keep the (single) annotation, drop the tag
-  if x.is_virtual or on_disk(x): return src.alu(Ops.CONTIGUOUS)
-  # if size is 0, remove the contig
-  if 0 in x.shape: return src
-  buf = x.empty_like()
-  return buf.after(buf.store(src)).replace(tag=x.tag)
-
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
-  """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
-  buf = src.base
-  while buf.op is Ops.BITCAST: buf = buf.src[0].base
-  # no symbolic shape
-  if buf.op not in {Ops.BUFFER, Ops.UNSHARD} or not all_int(c.shape): return None
-
-  # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then view the resolved shard
-  unshard = None
-  if buf.op is Ops.UNSHARD:
-    if isinstance(c.device, str): return None
-    if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
-    src = unshard.src[0]
-
-  # offset the base buffer by the collapsed movement ops and view it
-  if (cv := src.contiguous_view()) is None or (buf := cv[0]).op is not Ops.BUFFER: return None
-  # NB: make offset a UOp.variable here to do the offset computation in the kernels
-  view = buf[cv[1]:cv[1] + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
-  ctx.views.add(view)
-  if unshard is not None: return view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:])
-  view = view.reshape(c.shape)
+  if (view:=src.buffer_view()) is None: return None
+  buf = view
+  while buf.op in {Ops.RESHAPE, Ops.UNSHARD}: buf = buf.src[0]
+  ctx.views.add(buf)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
-  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
+  if not c.is_value_call or not c.arg.precompile: return None
   assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
-  # the RETURNED srcs are the call outputs (slots are src positions)
-  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
-  srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
-
-  # add the outputs to the call
-  outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
-  targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
-
-  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
-  # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
-  placed:dict[UOp, UOp] = {}
-  items:list[UOp] = []
-  for s, t in zip(srcs, targets):
-    deps:list[UOp] = []
-    while s.op is Ops.AFTER:
-      deps.extend(s.src[1:])
-      s = s.src[0]
-    if s not in placed:
-      if s.op is Ops.CONTIGUOUS: placed[s] = t.after(t.store(s.src[0]))
-      elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = t
-      if s in placed:
-        items.append(s.after(*deps))
-        continue
-    items.append(t.after(t.store(s.after(*deps))))
-  # swap every placed value for its target storage, also inside other stores' AFTER deps
-  fxn = UOp.sink(*(x.substitute(placed) for x in items))
-
-  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
-  # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
-  rmap = dict(zip(ret_pos, outs))
-  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
-                                   for i, a in enumerate(c.src[1:])]))
-  rets = tuple(o.after(new_call) for o in outs)
-
-  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  # NOTE: must use the resolved shapes of the RETURNED placeholders (which substitute PARAMs with external args), not raw body shapes
-  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
-
-  # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
-  return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
+  # The body already stores into the output PARAMs. Preserve it and its declared destinations.
+  ret_pos = c.arg.output_pos
+  new_call = c.replace(src=(c.src[0], *[a if i in ret_pos or a.has_buffer_identity(after_ok=True) else a.contiguous()
+                                      for i, a in enumerate(c.src[1:])]), arg=replace(c.arg, output_pos=None))
+  return UOp.sink(*(c.src[1+p].store(c.src[1+p].after(new_call)) for p in ret_pos))
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
-  # transform precompiled value-producing calls into opaque CALLs (outputs become real buffers)
+  # lower precompiled value-producing calls into opaque CALLs using their declared output storage
   (UPat(Ops.CALL, name="c"), transform_precompiled_call),
 
   # resolve AFTER on RETURNED placeholders (for precompiled calls)
-  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
+  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True, name="a"), resolve_returned_after),
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
@@ -150,18 +67,11 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
    x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) if on_disk(x) else None),
 
-  # strip DETACH/CONTIGUOUS_BACKWARD before minting (tags carry over)
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"),
-   lambda x: x.src[0].replace(tag=(x.src[0].tag or ())+(x.tag or ())) if x.tag else x.src[0]),
-  # contiguous of an already-materialized value is a no-op (tags carry over for held values)
-  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
-   lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
-  # mint buffers for tagged values; an untagged CONTIGUOUS flows through to the scheduler, which bufferizes it
-  (UPat(GroupOp.All-{Ops.AFTER, Ops.STORE}, name="x"), mint_tagged_storage),
+  # strip graph-only wrappers
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+  # contiguous of an already-materialized value is a no-op
+  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),)), lambda a: a if a.src[0].has_buffer_identity() else None),
 ])
-
-# a store's storage keeps the views and drops AFTERs (they only sequence stores)
-pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
@@ -170,6 +80,7 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
 # unbound BUFFERs get canonical scope-local id slots here so structurally identical calls hash identically for the
 # schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
 def canonicalize_unbound_buffer(ctx:AllocCtx, b:UOp):
+  if b in ctx.outputs: return None
   if b.arg.slot >= 0 and b not in ctx.unbound: ctx.unbound[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.unbound)))
   return ctx.unbound.get(b)
 
@@ -185,51 +96,52 @@ pm_canonicalize_unbound = PatternMatcher([
 pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay, and unbound BUFFERs too)
   (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
-   replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL and not b.is_unbound else None),
+   replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL and (not b.is_unbound or b in ctx.outputs) else None),
   # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
   # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
   (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])
 
+def is_persistent_effect(u:UOp, outputs:set[UOp]) -> bool:
+  if u.op is Ops.COPY: return on_disk(u)
+  return u.op is Ops.AFTER and not u.is_bound_var and (
+    not u.src[0].unsharded_base.is_unbound or u.src[0].storage_base in outputs or u.src[1].op is Ops.STORE or
+    (u.src[1].op is Ops.CALL and (not u.src[1].is_value_call or u.src[1].arg.precompile)))
+
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
-  # bases to realize. an AFTER already names the storage its store writes into
-  ctx = AllocCtx(bases={base for x in big_sink.src if needs_storage(base:=x.base) and base.op is not Ops.AFTER})
-
-  # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
-  # this is the only one where we have to be careful to not break the tensor graph
-  big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="add tags")
-
-  # final outputs of value calls materialize with fresh storage
-  srcs:list[UOp] = []
-  for u in big_sink.src:
-    if u.op is Ops.AFTER and u.src[0].unsharded_base.is_unbound and u.src[1].op is Ops.CALL:
-      # precompiled calls don't need this: transform_precompiled_call gives their outputs real buffers
-      call = u.src[1]
-      if not (call.arg is not None and call.arg.precompile):
-        buf = u.empty_like()
-        u = buf.after(buf.store(u.rtag(None))).replace(tag=u.tag)
-    srcs.append(u)
-  big_sink = big_sink.replace(src=tuple(srcs))
-
-  # here we can break the tensor graph. tags propagate through replaces so we can still find the original UOps
+  # Escaping declarations become parameters of the schedule, not scope-local temporaries.
+  ctx = AllocCtx(outputs={x.storage_base for x in big_sink.src if not x.is_virtual})
+  # Tensor replacements name the original destinations, independently of how their effects are lowered.
+  for u in big_sink.toposort(enter_calls=False):
+    if u.op is Ops.AFTER and is_persistent_effect(u, ctx.outputs):
+      ctx.buffer_map[u] = u.src[0].storage_view
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
 
-  # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
-  # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
-  # AFTERs on unbound STORAGE (clones) are collected too: the clone's own buffer is the storage, no fresh copy
+  # Collect effects without entering call bodies. Escaping declarations become schedule parameters.
   for u in big_sink.toposort(enter_calls=False):
-    if (u.op is Ops.COPY and on_disk(u)) or (u.op is Ops.AFTER and not u.is_bound_var and
-        (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
+    if is_persistent_effect(u, ctx.outputs):
       ctx.stores.append(u)
-      if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
-  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
+      if u.op is Ops.AFTER: ctx.outputs.add(u.src[0].storage_base)
+  body = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs")
+  # An empty declaration may have no effects but still needs a binding when it escapes.
+  for b in ctx.outputs:
+    if b.is_unbound and b not in ctx.replacements: ctx.replacements.append(b)
+  ret = body.call(*ctx.replacements)
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, ctx.buffer_map
+
+def outputs_to_call(*xs:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+  # Build output requests, not a preparation pass over the graph. Intermediate storage is already declared.
+  memo:dict[UOp, UOp] = {}
+  outputs = {x.base:x.base.materialize(memo) for x in xs}
+  big_sink, becomes_map = transform_to_call(UOp.sink(*outputs.values()))
+  becomes_map.update({x:y.substitute(becomes_map) for x,y in outputs.items() if x is not y})
+  return big_sink, becomes_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -312,7 +224,7 @@ class Tensor(RandMixin):
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
-    self.uop:UOp = data if data.device is None or data.device == _device else data.copy_to_device(_device)
+    self.uop:UOp = data if data.device is None or data.device == _device else data.copy_to_device(_device).clone()
     # cast on the target device, the source may not hold the dtype (numpy has no fp8/bfloat16) or be able to compute it (DISK)
     if _dtype is not None: self.uop = self.uop.cast(_dtype)
 
@@ -386,8 +298,7 @@ class Tensor(RandMixin):
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
   def callify(self, *lst:Tensor) -> Tensor:
-    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
-    big_sink, buffer_map = transform_to_call(big_sink)
+    big_sink, buffer_map = outputs_to_call(*[x.uop for x in (self,)+lst])
     _apply_map_to_tensors({x:y.after(big_sink) for x,y in buffer_map.items()}, name="callify")
     return self
 
@@ -396,9 +307,11 @@ class Tensor(RandMixin):
     # weakness ends where storage begins
     if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
-    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
-    _apply_map_to_tensors(becomes_map, name="buffers")
-    return create_linear_with_vars(big_sink)
+    big_sink, becomes_map = outputs_to_call(*[x.uop for x in (self,)+lst])
+    bindings:dict[UOp, UOp] = {}
+    ret = create_linear_with_vars(big_sink, buffer_bindings=bindings)
+    _apply_map_to_tensors({**bindings, **{x:y.substitute(bindings) for x,y in becomes_map.items()}}, name="buffers")
+    return ret
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""
@@ -455,7 +368,6 @@ class Tensor(RandMixin):
       # a partial write needs storage to land in: a pending value gets explicit storage (a clone)
       target = ib if ib.has_buffer_identity(after_ok=True) else ib.clone()
       if target is not ib: assign = assign.substitute({ib: target}, walk=True)
-      # view assign: replace the node under the views (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       _apply_map_to_tensors({ib: target.after(assign)}, name="Embed View Assign")
     else:
       # simple assign
@@ -545,9 +457,8 @@ class Tensor(RandMixin):
     """
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
-    # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
-    if isinstance(device, str) and device.startswith("DISK"): ret = Tensor(self.uop.clone(device))
-    else: ret = Tensor(self.uop.copy_to_device(device))
+    # The transfer owns its destination from construction; COPY itself only describes the transfer.
+    ret = Tensor(self.uop.copy_to_device(device).clone())
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret.is_param_(self.is_param)
 

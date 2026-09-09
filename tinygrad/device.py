@@ -201,7 +201,10 @@ class Buffer:
     return self._trace_num
 
   def _host_mv(self) -> memoryview|None:
-    if self.is_allocated() and hasattr(host:=self.get_storage()[1], 'mv'): return unwrap(host).view(fmt='B').mv
+    if self.is_allocated() and hasattr(host:=self.get_storage()[1], 'mv'):
+      mv = unwrap(host).view(fmt='B').mv
+      mv.obj._buffer = self  # raw ctypes views do not own their memory; keep the allocation alive for asynchronous copies
+      return mv
     if self.is_allocated() and hasattr(self.allocator, '_as_buffer'): return self.allocator._as_buffer(self._buf)
     return None
 

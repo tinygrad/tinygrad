@@ -1,4 +1,4 @@
-import unittest
+import gc, unittest, weakref
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import Context
@@ -13,6 +13,24 @@ class TestBuffer(unittest.TestCase):
     self.assertEqual(v._buf.va_addr, b._buf.va_addr + 4)
     self.assertIs(v.host, host)
     self.assertIs(v.meta, b.meta)
+
+  def test_memoryview_keeps_allocation_alive(self):
+    for device in ("CPU", "PYTHON", "NPY"):
+      with self.subTest(device=device), Context(LRU=0):
+        b = Buffer(device, 8, dtypes.uint8).ensure_allocated()
+        b.host[:] = b"abcdefgh"
+        v = b.view(4, dtypes.uint8, 2).ensure_allocated()
+        mv = v.as_memoryview(force_zero_copy=True)[1:]
+        b_ref, v_ref = weakref.ref(b), weakref.ref(v)
+        del b, v
+        gc.collect()
+        self.assertIsNotNone(b_ref())
+        self.assertIsNotNone(v_ref())
+        self.assertEqual(bytes(mv), b"def")
+        del mv
+        gc.collect()
+        self.assertIsNone(v_ref())
+        self.assertIsNone(b_ref())
 
   def test_mapping(self):
     b = Buffer("CPU", 8, dtypes.uint8, initial_value=b"abcdefgh")

@@ -1,6 +1,6 @@
 import math, functools, operator
 from typing import TYPE_CHECKING, Literal, Self
-from tinygrad.uop import Ops
+from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import dtypes, ConstType, DType, PyConst, least_upper_dtype, least_upper_float, weak_dtype
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.creation import CreationMixin
@@ -63,6 +63,7 @@ class ElementwiseMixin(CreationMixin):
     if self.dtype in dtypes.weaks: return self
     uop = self._uop
     if uop.op is Ops.CONTIGUOUS or self.device is None or uop.has_buffer_identity(): return self._wrap_uop(uop)
+    if uop.op in GroupOp.Movement|{Ops.BITCAST} and (view:=uop.buffer_view()) is not None: return self._wrap_uop(view)
     return self._wrap_uop(uop.alu(Ops.CONTIGUOUS))
 
   def contiguous_backward(self) -> Self:

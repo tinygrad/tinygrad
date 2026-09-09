@@ -2,7 +2,7 @@ from typing import cast
 import math, dataclasses
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes
 from tinygrad.helpers import argsort
-from tinygrad.dtype import sum_acc_dtype
+from tinygrad.dtype import dtypes, sum_acc_dtype
 from tinygrad.function import renumber_invalid_outputs
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
@@ -32,14 +32,14 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     # grads align with the call's src positions (None for the body and for RETURNED outputs, wherever they are)
     def arg_grads(g):
       git = iter(g)
-      return (None,) + tuple(next(git) if not a.unsharded_base.is_unbound else None for a in k.src[1:])
+      return (None,) + tuple(None if i in (k.arg.output_pos or ()) else next(git) for i in range(len(args)))
     if ctx.op is Ops.SINK:
       real = [on_dev(g, i) for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
       return arg_grads(k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return arg_grads(k.arg.grad_fxn(on_dev(ctx, 0), k))
   # the RETURNED inputs are the call outputs: their positions in the args get the output gradients from the AFTER rule
-  assert fxn.op is Ops.SINK and k.has_unbound_outputs, f"expected a CALL with unbound BUFFER outputs or a grad_fxn, got {fxn.op}"
-  ret_pos = [i for i, a in enumerate(args) if a.unsharded_base.is_unbound]
+  assert fxn.op is Ops.SINK and k.is_value_call, f"expected a value CALL or a grad_fxn, got {fxn.op}"
+  ret_pos = k.arg.output_pos
   # the body stores the outputs into output PARAMs: the values are the stored values in slot order
   values = UOp.sink(*[st.src[1] for st in fxn.src if st.op is Ops.STORE])
   params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
@@ -53,7 +53,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   grads = compute_gradient(values, root_grad, set(params.values()))
   # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(values.src)} if k.arg.precompile else {}
-  fwd_outs = k.unbound_outputs if k.arg.precompile else ()
+  fwd_outs = k.call_outputs if k.arg.precompile else ()
   # collect needed gradient bodies, compact unused params, create a single backward CALL
   grad_bodies = [(i, shaped_grad(grads[p], i)) for i in needed if (p:=params.get(i)) is not None and p in grads]
   bwd_body = UOp.sink(*[gb for _, gb in grad_bodies]).substitute(fwd_subs, walk=True)
@@ -66,6 +66,19 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   # align gradients with the original source positions: None at RETURNED positions, gradients elsewhere
   ret_set = set(ret_pos)
   return (None,) + tuple(None if i in ret_set else (bwd_outs[gb_map[i]] if i in gb_map else None) for i in range(len(args)))
+
+def partial_after_gradient(ctx:UOp, dest:UOp, view:UOp):
+  # A write through a non-overlapping view replaces only that region of the returned state.
+  path, base = [], view
+  while base is not dest and base.op in {Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE, Ops.FLIP}:
+    path.append(base)
+    base = base.src[0]
+  if base is not dest: return None
+  grad = ctx
+  for mop in reversed(path): grad = mop.replace(src=(grad,)+mop.src[1:])
+  mask = grad.const_like(1)
+  for mop in path: mask = pm_gradient.rewrite(mop, ctx=mask)[0]
+  return mask.cast(dtypes.bool).where(0, ctx), grad
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
@@ -104,6 +117,8 @@ pm_gradient = PatternMatcher([
    lambda ctx, dest, t: (ctx, None) if t.buf_uop is not dest.buf_uop else None),
   # clone/assign gradient passes through to val
   (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="dest"), UPat())))), lambda ctx,dest: (None, ctx)),
+  (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.AFTER, src=(UPat(name="view"),
+    UPat(Ops.STORE, src=(UPat(name="view"), UPat())))))), partial_after_gradient),
   (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
