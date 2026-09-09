@@ -143,11 +143,11 @@ class Buffer:
   def get_storage(self, device:str|None=None) -> tuple:
     storage = unwrap(self.ensure_allocated()._storage)
     device = Device.canonicalize(device) if device is not None else self.device
-    if device == self.device: return storage[:2]
+    if device == self.device: return storage
     if device not in self._maps:
       allocator = Device[device].allocator
       self._maps[device] = (allocator._offset(self.base.get_buf(device), self.nbytes, self.offset), None) if self._base else allocator.map(self)
-    return self._maps[device], storage[1]
+    return self._maps[device], storage[1], storage[2]
 
   def get_buf(self, device:str) -> Any: return self.get_storage(device)[0][0]
 
@@ -161,7 +161,7 @@ class Buffer:
     if external_ptr is not None: self.options = replace(self.options, external_ptr=external_ptr)
     maps:dict[str, tuple]
     if self._base is not None:
-      (buf, meta), host = self.base.get_storage()
+      (buf, meta), host, _ = self.base.get_storage()
       mapping, maps = (self.allocator._offset(buf, self.nbytes, self.offset), meta), {}
     else:
       if opaque is not None:
