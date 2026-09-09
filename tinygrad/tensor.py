@@ -26,8 +26,6 @@ class AllocCtx:
   replacements: list[UOp] = field(default_factory=list)
   unbound: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
-  # merged COPY tags read the storage through the STORE's target view, not the AFTER's dest (layouts can differ)
-  tag_views: dict[UOp, UOp] = field(default_factory=dict)
 
 # a tag is the tuple of original pre-rewrite UOps a node provides storage for
 def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
@@ -43,15 +41,13 @@ def creation_copy_is_realized(u:UOp):
   if is_creation_device(u.src[0]): return tag_uop(u)
 
 # CONTIGUOUS and AFTER + parents are the only nodes that get updated
-def merge_copy_tag(ctx:AllocCtx, a:UOp, c:UOp, dest:UOp):
-  # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER (the copy reads dest's written view)
-  if not (a.tag and c.tag): return None
-  for t in c.tag: ctx.tag_views[t] = dest
-  return a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag)
-
 add_tags = PatternMatcher([
   (UPat(Ops.COPY, name="u"), creation_copy_is_realized),
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"), merge_copy_tag),
+  # no tag on copies that fill an AFTER's whole dest via STORE: merge COPY tag into AFTER (the copy reads that storage).
+  # a partial STORE keeps the tag: the copy mints its own storage like any bare creation copy
+  (UPat(Ops.AFTER, src=(UPat(name="dest"),
+    UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
+   lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(a.src[0], c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
@@ -231,8 +227,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
     if (u.op is Ops.COPY and on_disk(u)) or (u.op is Ops.AFTER and not u.is_bound_var and
         (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
       ctx.stores.append(u)
-      if u.tag: ctx.buffer_map.update({t:graph_rewrite(ctx.tag_views.get(t, u.src[0]), pm_drop_after).shrink_to(t.shape)
-                                       for t in u.tag})
+      if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
   ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
