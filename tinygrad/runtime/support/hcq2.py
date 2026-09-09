@@ -4,7 +4,7 @@ import functools, time, itertools, decimal, weakref, statistics, ctypes, importl
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2, cpu_profile, mv_address
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us, DEV
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, Allocator, DepsTracker
+from tinygrad.device import BufferStorage, Device, Buffer, BufferSpec, Compiled, Allocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
@@ -616,20 +616,18 @@ class HCQAllocator(Allocator[HCQDeviceType], Generic[HCQDeviceType]):
     self.dev.synchronize()
     with cpu_profile(f"{self.dev.device} -> TINY", f"{self.dev.device}:COPY"): ctypes.memmove(mv_address(dest), src.cpu_view().addr, dest.nbytes)
 
-  def _map(self, buf:HCQBuffer) -> tuple: # a mapping lives on the opaque, like hcq1: the lru hands the same one to many Buffers
-    if self.dev not in buf.mapped_devs:
-      if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
-      buf.mappings[self.dev] = self._do_map(buf)
-      buf.mapped_devs.append(self.dev)
-    return (mapped:=buf.mappings[self.dev]), mapped.meta
+  def _map(self, buf:Buffer) -> BufferStorage:
+    if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
+    return BufferStorage(mapped:=self._do_map(buf), mapped.meta)
 
+  def _unmap(self, mapping:BufferStorage): self._do_unmap(mapping.buf)
   def _do_unmap(self, mb): getattr(self.dev, "iface").free(mb)
 
   @suppress_finalizing
-  def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):
-    if options is not None and options.external_ptr is not None: return
-    for dev in buf.mapped_devs: dev.synchronize()
-    for d, mb in buf.mappings.items(): d.allocator._do_unmap(mb)
-    if hasattr(self, '_do_free'): self._do_free(buf, options)
+  def _free(self, storage:BufferStorage, options:BufferSpec):
+    if options.external_ptr is not None: return
+    for dev in storage.buf.mapped_devs: dev.synchronize()
+    for d, mb in storage.buf.mappings.items(): d.allocator._do_unmap(mb)
+    if hasattr(self, '_do_free'): self._do_free(storage.buf, options)
 
   def _offset(self, buf, size:int, offset:int) -> HCQBuffer: return buf.offset(offset=offset, size=size)

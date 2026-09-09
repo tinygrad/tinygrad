@@ -1,5 +1,5 @@
 import inspect, math
-from tinygrad.device import Compiled, Allocator, ProfileGraphEntry, ProfileGraphEvent, Program, TinyELF
+from tinygrad.device import BufferStorage, Compiled, Allocator, ProfileGraphEntry, ProfileGraphEvent, Program, TinyELF
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -22,7 +22,7 @@ class NullProgram(Program['NullDevice']):
     with cpu_profile(self.name, self.device, profile_key=self.profile_key): return 1e-3
 
 class NullAllocator(Allocator['NullDevice']):
-  def _alloc(self, size:int, options) -> tuple: return (None, None), None
+  def _alloc(self, size:int, options) -> BufferStorage: return BufferStorage(None)
 
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src):

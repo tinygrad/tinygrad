@@ -7,7 +7,7 @@ import pickle, base64, itertools, time, sys, functools, ctypes
 from dataclasses import replace
 from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile, mv_address
-from tinygrad.device import MMIOInterface, Buffer, Compiled, Compiler, Allocator, Program, TinyELF
+from tinygrad.device import BufferStorage, MMIOInterface, Buffer, Compiled, Compiler, Allocator, Program, TinyELF
 from tinygrad.renderer import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
@@ -237,14 +237,15 @@ class PythonRenderer(Renderer):
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d != dtypes.half or sys.version_info >= (3, 12)}
 
 class PythonAllocator(Allocator['PythonDevice']):
-  def _alloc(self, size:int, options) -> tuple: return (buf:=memoryview(bytearray(size)), buf), MMIOInterface(mv_address(buf), size)
+  def _alloc(self, size:int, options) -> BufferStorage:
+    return BufferStorage(buf:=memoryview(bytearray(size)), buf, MMIOInterface(mv_address(buf), size))
 
   def _as_buffer(self, src) -> memoryview: return src
   def _copyin(self, dest, src:memoryview):
     with cpu_profile("TINY -> PYTHON", f"{self.dev.device}:COPY"): dest[:] = src
   def _copyout(self, dest:memoryview, src):
     with cpu_profile("PYTHON -> TINY", f"{self.dev.device}:COPY"): dest[:] = src
-  def map(self, buf:Buffer) -> tuple: return (mv:=buf.as_memoryview(force_zero_copy=True)), mv
+  def map(self, buf:Buffer) -> BufferStorage: return BufferStorage(mv:=buf.as_memoryview(force_zero_copy=True), mv)
   def _offset(self, buf:memoryview, size:int, offset:int): return buf[offset:offset+size]
 
 class PythonDevice(Compiled):

@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys, contextlib
 assert sys.platform != 'win32'
 from typing import Any
-from tinygrad.device import BufferSpec, Buffer, Device, TinyELF
+from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, TinyELF
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue, HCQ_RUNTIME_DEV, encode_submit, ccall, cstruct, patch, unwrap_view
 from tinygrad.runtime.support.hcq import HCQBuffer, FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa, libc
@@ -302,8 +302,8 @@ def qcom_build_program(dev:QCOMDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[Q
   return cached
 
 class QCOMAllocator(HCQAllocator['QCOMDevice']):
-  def _alloc(self, size:int, options:BufferSpec) -> tuple:
-    return (opaque:=self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size), opaque.meta), opaque.view
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
+    return BufferStorage(b:=self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size), b.meta, b.view)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev._gpu_free(opaque)
 

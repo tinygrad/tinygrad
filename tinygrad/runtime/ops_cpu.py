@@ -2,7 +2,7 @@ from __future__ import annotations
 import platform, sys, ctypes, mmap, struct, time
 from typing import cast
 from tinygrad.helpers import to_mv, from_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
-from tinygrad.device import BufferSpec, TinyELF, Program, Device
+from tinygrad.device import BufferStorage, Buffer, BufferSpec, TinyELF, Program, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator
 from tinygrad.runtime.support.c import DLL
@@ -76,11 +76,11 @@ class CPUProgram(Program['CPUDevice']):
 
 class CPUAllocator(HCQAllocator['CPUDevice']):
   def __init__(self, dev:CPUDevice): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
-  def _alloc(self, size:int, options:BufferSpec) -> tuple:
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     if options.external_ptr is not None: addr, buf = options.external_ptr, None
     elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
-    return (opaque:=HCQBuffer(addr, size, meta=buf, view=MMIOInterface(addr, size, fmt='B'), owner=self.dev), opaque.meta), opaque.view
+    return BufferStorage(opaque:=HCQBuffer(addr, size, meta=buf, view=MMIOInterface(addr, size, fmt='B'), owner=self.dev), opaque.meta, opaque.view)
 
   def _as_buffer(self, src) -> memoryview: return to_mv(src.va_addr, src.size)
   def _copyin(self, dest:HCQBuffer, src:memoryview):
@@ -89,7 +89,8 @@ class CPUAllocator(HCQAllocator['CPUDevice']):
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
     dest[:] = to_mv(int(src.va_addr), dest.nbytes)[:]
-  def _do_map(self, buf:HCQBuffer):
+  def _do_map(self, src:Buffer):
+    buf = src._buf
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
     return HCQBuffer(buf.view.addr, buf.size, view=buf.view, owner=buf.owner)
   def _do_unmap(self, mb): pass  # CPU _do_map returns a view wrapper, nothing to release

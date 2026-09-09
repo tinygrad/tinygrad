@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, os, mmap, tempfile, pathlib, array, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
-from tinygrad.device import MMIOInterface, BufferSpec, Compiled, Allocator, Compiler, Program, TinyELF
+from tinygrad.device import BufferStorage, MMIOInterface, BufferSpec, Compiled, Allocator, Compiler, Program, TinyELF
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing, Target, unwrap
@@ -75,20 +75,20 @@ class DSPBuffer:
     self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
 
 class DSPAllocator(Allocator['DSPDevice']):
-  def _alloc(self, size:int, options:BufferSpec) -> tuple:
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     if getenv("MOCKDSP"): fd, share_info, flags = -1, None, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS
     else:
       b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
       fd, flags = (share_info:=qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)).fd, mmap.MAP_SHARED
     opaque = DSPBuffer(libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, flags, fd, 0), size, share_info, offset=0)
-    return (opaque, opaque.share_info), MMIOInterface(opaque.va_addr, size)
+    return BufferStorage(opaque, opaque.share_info, MMIOInterface(opaque.va_addr, size))
 
   @suppress_finalizing
-  def _free(self, opaque:DSPBuffer, options:BufferSpec):
-    libc.munmap(opaque.va_addr, opaque.size)
-    if opaque.share_info is not None:
-      os.close(opaque.share_info.fd)
-      qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
+  def _free(self, storage:BufferStorage, options:BufferSpec):
+    libc.munmap(storage.buf.va_addr, storage.buf.size)
+    if storage.buf.share_info is not None:
+      os.close(storage.buf.share_info.fd)
+      qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=storage.buf.share_info.handle)
 
   def _as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
   def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, mv_address(src), src.nbytes)
@@ -132,7 +132,7 @@ class DSPDevice(Compiled):
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
       super().__init__(device, DSPAllocator(self), [DSPRenderer], DSPProgram)
       fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
-      self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))[0][0]
+      self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True)).buf
       ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
 
       self.init_dsp()
