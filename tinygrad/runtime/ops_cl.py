@@ -5,7 +5,7 @@ from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.runtime.support import c
 from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing, unwrap, round_up, is_image_shape
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.device import BufferSpec, Allocator, Compiled, Compiler, CompileError, TinyELF, Program
+from tinygrad.device import BufferStorage, BufferSpec, Allocator, Compiled, Compiler, CompileError, TinyELF, Program
 
 CC_CB = c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], c.POINTER[None], cl.size_t, c.POINTER[None]]]
 BP_CB = c.CFUNCTYPE[None, [cl.cl_program, c.POINTER[None]]]
@@ -76,11 +76,11 @@ class CLProgram(Program['CLDevice']):
     return None
 
 class CLAllocator(Allocator['CLDevice']):
-  def _alloc(self, size:int, options:BufferSpec) -> tuple:
-    return (checked(cl.clCreateBuffer(self.dev.context, cl.CL_MEM_READ_WRITE, size, None, status := ctypes.c_int32()), status), None), None
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
+    return BufferStorage(checked(cl.clCreateBuffer(self.dev.context, cl.CL_MEM_READ_WRITE, size, None, status := ctypes.c_int32()), status))
 
   @suppress_finalizing
-  def _free(self, storage:tuple, options:BufferSpec): check(cl.clReleaseMemObject(storage[0][0]))
+  def _free(self, storage:BufferStorage, options:BufferSpec): check(cl.clReleaseMemObject(storage.buf))
   def _copyin(self, dest:cl.cl_mem, src:memoryview):
     if mv_address(src) % 16: src = memoryview(bytearray(src))
     check(cl.clEnqueueWriteBuffer(self.dev.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))

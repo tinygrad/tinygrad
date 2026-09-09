@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue, e
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface, FileIOInterface, BumpAllocator, hcq_filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
-from tinygrad.device import Buffer, BufferSpec, Compiled, Device, TinyELF
+from tinygrad.device import BufferStorage, Buffer, BufferSpec, Compiled, Device, TinyELF
 from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, PROFILE, ContextVar, VIZ
 from tinygrad.helpers import ProfileEvent
@@ -291,15 +291,15 @@ def nv_build_program(dev:NVDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[NVPro
   return cached
 
 class NVAllocator(HCQAllocator['NVDevice']):
-  def _alloc(self, size:int, options:BufferSpec) -> tuple:
-    return (opaque:=self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host, zero=options.zero), opaque.meta), opaque.view
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
+    return BufferStorage(buf:=self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host, zero=options.zero), buf.meta, buf.view)
 
   def _do_free(self, opaque:HCQBuffer, options:BufferSpec): self.dev.iface.free(opaque)
 
   def _do_map(self, buf:Buffer):
     mem = buf._buf
     if buf.device.split(":")[0] == "CPU":
-      mem = next((mb for d, (mb, _) in buf._maps.items() if d.startswith("NV")), mem)
+      mem = next((mb.buf for d, mb in buf.get_storage().maps.items() if d.startswith("NV")), mem)
     return self.dev.iface.map(mem)
 
   def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, desc_buf:HCQBuffer, hist:list[HCQBuffer], shape:tuple[int,...], frame_pos:int):
@@ -602,7 +602,7 @@ class NVDevice(HCQ2Compiled):
   def fifos(self) -> dict[str, GPFifo]:
     mem = self.iface.alloc(size:=0x300000, contiguous=True, cpu_access=True, force_devmem=True,
                           map_flags=nv_gpu.NVOS33_FLAGS_CACHING_TYPE_WRITECOMBINED<<23)
-    self.gpfifo_buf = Buffer(self.device, size, dtypes.uint8, opaque=((mem, mem.meta), mem.view))
+    self.gpfifo_buf = Buffer(self.device, size, dtypes.uint8, opaque=BufferStorage(mem, mem.meta, mem.view))
 
     compute = self._new_gpu_fifo("COMPUTE:0", self.ctxshare, self.channel_group, offset=0, entries=0x10000, compute=True)
     copy = self._new_gpu_fifo("COPY:0", self.ctxshare, self.channel_group, offset=0x100000, entries=0x10000)
@@ -618,7 +618,7 @@ class NVDevice(HCQ2Compiled):
 
   def _new_gpu_fifo(self, name:str, ctxshare, channel_group, offset=0, entries=0x400, compute=False, video=False) -> GPFifo:
     notifier = Buffer(self.device, size:=48 << 20, dtypes.uint8,
-                      opaque=((mem:=self.iface.alloc(size, uncached=True), mem.meta), mem.view))
+                      opaque=BufferStorage(mem:=self.iface.alloc(size, uncached=True), mem.meta, mem.view))
     params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(gpFifoOffset=self.gpfifo_buf._buf.va_addr+offset, gpFifoEntries=entries,
       hObjectError=notifier.meta.hMemory, hObjectBuffer=self.virtmem if video else self.gpfifo_buf.meta.hMemory,
       hUserdMemory=(ctypes.c_uint32*8)(self.gpfifo_buf.meta.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset),
@@ -754,10 +754,10 @@ class NVDevice(HCQ2Compiled):
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES, power_params)
 
     self.pma_buf = Buffer(self.device, size:=getenv("PMA_BUFFER_SIZE", 512) << 20, dtypes.uint8,
-                          opaque=((mem:=self.iface.alloc(size, uncached=True, cpu_cached=True, cpu_access=True), mem.meta), mem.view))
+                          opaque=BufferStorage(mem:=self.iface.alloc(size, uncached=True, cpu_cached=True, cpu_access=True), mem.meta, mem.view))
     self.pma_bytes = Buffer(self.device, size:=0x1000, dtypes.uint8,
-                            opaque=((mem:=self.iface.alloc(size, uncached=True, cpu_cached=True, cpu_access=self.is_nvd(),
-                                                           read_only=True), mem.meta), mem.view))
+                            opaque=BufferStorage(mem:=self.iface.alloc(size, uncached=True, cpu_cached=True, cpu_access=self.is_nvd(),
+                                                           read_only=True), mem.meta, mem.view))
     self.pma_rptr = 0
 
     pma_stream = nv_gpu.struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS(hMemPmaBuffer=self.pma_buf.meta.hMemory,

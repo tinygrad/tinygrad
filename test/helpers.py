@@ -125,12 +125,12 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple
   allocator = dev.allocator
   bufs = []
   for buf_dt, data in inputs or []:
-    bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize)[0][0])
+    bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize).buf)
     allocator._copyin(buf, memoryview(struct.pack(str(len(data)) + (buf_dt.fmt or ""), *data)))
   g = UOp.param(0, uop.dtype, 1)
   prg = to_program(UOp.store(g.index(UOp.const(0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
   prog = dev.runtime(prg.to_elf())
-  prog(out_buf:=allocator.alloc(uop.dtype.itemsize)[0][0], *bufs, vals=vals)
+  prog(out_buf:=allocator.alloc(uop.dtype.itemsize).buf, *bufs, vals=vals)
   return out_buf.cast(uop.dtype.fmt or "").tolist()[0]
 
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:

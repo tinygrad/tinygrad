@@ -5,7 +5,7 @@ assert sys.platform != 'win32'
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HWQueue, encode_submit, to_name, patch, unwrap_view, rt_addr
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
-from tinygrad.device import BufferSpec, Buffer, Device, Compiled, ProfileProgramEvent
+from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Compiled, ProfileProgramEvent
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, prod, colored
 from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, mv_address, ContextVar, VIZ
@@ -559,9 +559,9 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
     super().__init__(dev, supports_copy_from_disk=dev.has_copy_queue, supports_transfer=dev.has_copy_queue and not dev.is_usb)
 
-  def _alloc(self, size:int, options:BufferSpec) -> tuple:
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     opaque = self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_copy_queue)
-    return (opaque, opaque.meta), opaque.view
+    return BufferStorage(opaque, opaque.meta, opaque.view)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
@@ -803,10 +803,10 @@ class PCIIface(PCIIfaceBase):
   def device_fini(self): self.dev_impl.fini()
 
 class USBAllocator(AMDAllocator): # the host program reads another device's memory in place: its bytes are the mapping
-  def map(self, buf:Buffer) -> tuple:
+  def map(self, buf:Buffer) -> BufferStorage:
     mv = buf.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True)
-    return HCQBuffer(addr:=mv_address(mv), mv.nbytes, meta=mv, view=MMIOInterface(addr, mv.nbytes, fmt='B'), owner=self.dev), mv
-  def _unmap(self, mapping:tuple): pass
+    return BufferStorage(HCQBuffer(addr:=mv_address(mv), mv.nbytes, meta=mv, view=MMIOInterface(addr, mv.nbytes, fmt='B'), owner=self.dev), mv)
+  def _unmap(self, mapping:BufferStorage): pass
 
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
@@ -825,7 +825,7 @@ class USBIface(PCIIface):
     view = self.pci_dev.dma_view(0xa000, 0x85000)
     for off, n in ((0x800, 4), (0x5000, 0x80000)): view.view(off, n)[:] = bytes(n) # no stale fence or sentinel
     return Buffer(self.dev.device, 0x85000, dtypes.uint8, options=BufferSpec(external_ptr=vaddr),
-                  opaque=((HCQBuffer(vaddr, 0x85000, view=view, owner=self.dev), None), view))
+                  opaque=BufferStorage(HCQBuffer(vaddr, 0x85000, view=view, owner=self.dev), None, view))
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False, **kwargs) -> HCQBuffer:
     # everything, even host-style signals, lives in vram: gpu writes into the bridge's own memory collide with an armed 0xF2 read stream

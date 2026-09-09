@@ -47,7 +47,7 @@ def _run_hw(instructions: list, out_reg: int = 2) -> int:
 
   dev = Device["AMD"]
   if dev.arch != "gfx950": raise unittest.SkipTest("requires gfx950 hardware")
-  out_gpu = dev.allocator.alloc(LANES * 4)[0][0]
+  out_gpu = dev.allocator.alloc(LANES * 4).buf
   code = _code(instructions, out_reg, out_gpu.va_addr)
   byte_str = ", ".join(f"0x{b:02x}" for b in code)
   asm_src = f""".text

@@ -30,8 +30,8 @@ print(f"[init] loopback connect QP 0x{qp.qp_info['qpn']:x}")
 qp.connect(qp.qp_info['qpn'], dev.mac, int.from_bytes(dev.local_gid, 'big'))
 
 # allocate src/dst via AMD GPU allocator
-buf_src = gpu.allocator.alloc(BUF_SIZE, BufferSpec(nolru=True))[0][0]
-buf_dst = gpu.allocator.alloc(BUF_SIZE, BufferSpec(nolru=True))[0][0]
+buf_src = gpu.allocator.alloc(BUF_SIZE, BufferSpec(nolru=True)).buf
+buf_dst = gpu.allocator.alloc(BUF_SIZE, BufferSpec(nolru=True)).buf
 
 bar_base = gpu.iface.pci_dev.bar_info(gpu.iface.vram_bar)[0]
 src_paddr = buf_src.meta.mapping.paddrs[0][0] + bar_base
