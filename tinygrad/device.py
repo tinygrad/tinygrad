@@ -148,7 +148,7 @@ class Buffer:
     if device not in storage.maps:
       alloc = Device[device].allocator
       storage.maps[device] = BufferStorage(alloc._offset(self.base.get_buf(device), self.nbytes, self.offset)) if self._base else alloc.map(self)
-      storage.maps[device].host = storage.host
+    storage.maps[device].host = storage.host
     return storage.maps[device]
 
   def get_buf(self, device:str) -> Any: return self.get_storage(device).buf
@@ -167,7 +167,7 @@ class Buffer:
       self.options = replace(self.options, nolru=True)
       storage = opaque if isinstance(opaque, BufferStorage) else BufferStorage(opaque)
     else: storage = self.allocator.alloc(self.nbytes, self.options)
-    if storage.host is not None: storage.host = storage.host.view(self.offset, self.nbytes, fmt='B')
+    storage = replace(storage, host=storage.host.view(self.offset, self.nbytes, fmt='B') if storage.host is not None else None)
     if self._base is None:
       if not self.device.startswith("DISK") and self.options.external_ptr is None:
         GlobalCounters.mem_used += self.nbytes
