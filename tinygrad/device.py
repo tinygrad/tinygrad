@@ -97,7 +97,7 @@ class MultiBuffer:
   def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
   def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
 
-@dataclass
+@dataclass(frozen=True)
 class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:dict[str, BufferStorage]=field(default_factory=dict) # noqa: E702
 
 class Buffer:
@@ -148,7 +148,7 @@ class Buffer:
     if device not in storage.maps:
       alloc = Device[device].allocator
       storage.maps[device] = BufferStorage(alloc._offset(self.base.get_buf(device), self.nbytes, self.offset)) if self._base else alloc.map(self)
-    storage.maps[device].host = storage.host
+    if storage.maps[device].host is not storage.host: storage.maps[device] = replace(storage.maps[device], host=storage.host)
     return storage.maps[device]
 
   def get_buf(self, device:str) -> Any: return self.get_storage(device).buf
