@@ -134,9 +134,10 @@ def copy_to_anon_store(x:UOp, copy:UOp):
   if copy.is_self_copy: return None  # self copies are contiguous, rangeify realizes them into fresh buffers
   # the buffer created here is inside the call and is not persisted, like the buffers created for contiguous
   # copies must read from a whole buffer, not a view: materialize anything lacking buffer identity (SDMA can't do offset copies)
+  x = x.pad_to(x.max_shape)
   if not x.has_buffer_identity(after_ok=True): x = x.contiguous()
   buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
-  return buf.after(buf.store(x)).reshape(copy.shape)
+  return buf.after(buf.store(x)).shrink_to(copy.shape)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls with RETURNED inputs (inline the body)
