@@ -380,7 +380,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(a.dot(b).numpy())
     ```
     """
-    if IMAGE: return self.image_dot(w, dtype)
+    if IMAGE and dtypes.is_float(self.dtype) and dtypes.is_float(w.dtype): return self.image_dot(w, dtype)
     x, dx, dw = self, self.ndim, w.ndim
     if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
     if x.shape[-1] != w.shape[axis_w:=-min(w.ndim,2)]: raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")
