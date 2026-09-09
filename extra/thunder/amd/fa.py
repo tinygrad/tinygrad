@@ -101,6 +101,8 @@ def custom_fused_qkv_rope_backward_mxfp4(dxqkv:UOp, row_fp4:UOp, row_scale:UOp, 
 
 def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp, bool]|None:
   def unwrap_partial(x:UOp) -> UOp|None:
+    # V's flat FA argument adds shape-only views when its gradient returns to RoPE.
+    while x.op is Ops.RESHAPE: x = x.src[0]
     expected = (Ops.CAST, Ops.REDUCE, Ops.PERMUTE, Ops.CAST, Ops.RESHAPE, Ops.AFTER)
     for op in expected:
       if x.op is not op: return None
@@ -209,6 +211,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     if fp8_qk:
       def input_tensor(idx:int) -> Tensor: return Tensor(ker.src[idx], device=ker.src[idx].device)
       q8, k8, xv = input_tensor(5), input_tensor(6), input_tensor(7)
+      if asm_fp8: xv = xv.reshape(B, N, H_KV, D)
       # BF16 scores from the original Q/K do not share the FP8 forward normalizer.
       # exp(score_bf16 - lse_fp8) can exceed one by arbitrarily large factors.
       if matched_fp8 and asm_fp8:
@@ -289,7 +292,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
       # consumed by fused QKV RoPE backward.
       # Q/K are the differentiable BF16 inputs. Packed FP8 buffers and scales are
       # auxiliary forward inputs, so their gradients are intentionally absent.
-      return (None, None, dq.uop, dk.uop, None, None, dv.uop, None, None) + ((None, None) if asm_fp8 else ())
+      return (None, None, dq.uop, dk.uop, None, None, dv.uop.reshape(ker.src[7].shape), None, None) + ((None, None) if asm_fp8 else ())
     if not has_sink: return None, None, dq.uop, dk.uop, dv.uop
     sinks = Tensor(ker.src[6], device=ker.src[6].device)
     p_sink = (sinks.reshape(1, H, 1, 1) - l_vec).exp()
@@ -361,7 +364,9 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     if asm_fp8:
       from extra.thunder.amd.asm_fa_fp8 import custom_asm_fp8_fa_forward
       v_fp8, v_descale = quantize_qk(xv, None, None)
-      attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, xv, q_descale, k_descale, v_fp8, v_descale,
+      # Pass V's storage directly; its shaped view is shared by the amax and quantization expressions.
+      v_arg = xv.flatten() if not is_mp else xv
+      attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, v_arg, q_descale, k_descale, v_fp8, v_descale,
         fxn=functools.partial(custom_asm_fp8_fa_forward, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
                               pre_scaled=pre_scaled_fp8, saved_bf16=True), grad_fxn=grad)[:2]
       # Precompiled layers must return the rounded operands used by backward;

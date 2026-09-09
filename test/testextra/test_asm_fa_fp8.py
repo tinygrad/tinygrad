@@ -27,9 +27,10 @@ class TestASMFP8FA(unittest.TestCase):
   def test_saved_operands_do_not_recompute_rope(self):
     device = Device.DEFAULT
     if Device[device].renderer.target.arch != 'gfx950': self.skipTest('requires gfx950')
-    x = Tensor.empty(2,8192,6144,device=device,dtype=dtypes.bfloat16)
-    freqs = Tensor.empty(1,16384,1,64,2,device=device,dtype=dtypes.bfloat16)
-    do = Tensor.empty(2,8192,32,128,device=device,dtype=dtypes.bfloat16)
+    devices = (device, f"{device.split(':')[0]}:1")
+    x = Tensor.empty(4,8192,6144,device=device,dtype=dtypes.bfloat16).shard(devices,axis=0)
+    freqs = Tensor.empty(1,16384,1,64,2,device=device,dtype=dtypes.bfloat16).shard(devices,axis=None)
+    do = Tensor.empty(4,8192,32,128,device=device,dtype=dtypes.bfloat16).shard(devices,axis=0)
     @function(precompile=True, precompile_backward=True)
     def layer(x, freqs):
       q,k,v,q8,k8 = fused_qkv_rope(x,freqs,32,8,128,prequantize_fp8=True)
@@ -38,8 +39,12 @@ class TestASMFP8FA(unittest.TestCase):
     out,*_ = layer(x,freqs)
     out.backward(do)
     counts = Counter()
+    calls = {}
     def count_calls(u):
-      if u.op is Ops.CALL: count_calls(u.src[0])
+      if u.op is Ops.CALL:
+        kernel = u.src[0].src[0] if u.src[0].op is Ops.PROGRAM else u.src[0]
+        if kernel.op is Ops.SINK: calls[kernel.arg.name] = u
+        count_calls(u.src[0])
       elif u.op is Ops.LINEAR:
         for s in u.src: count_calls(s)
       elif u.op is Ops.SINK: counts[u.arg.name] += 1
@@ -48,6 +53,9 @@ class TestASMFP8FA(unittest.TestCase):
     self.assertEqual(counts["fused_qkv_rope_forward"],1)
     self.assertEqual(counts["asm_fa_fwd_fp8_causal_2_8192_32_8_128"],1)
     self.assertEqual(counts["asm_fa_bwd_main_fp8_matched_causal_2_8192_32_8_128"],1)
+    # The BF16 autograd argument must reuse RoPE's V buffer, with no identity copy.
+    self.assertIs(calls["fused_qkv_rope_forward"].src[3].buf_uop,
+                  calls["asm_fa_fwd_fp8_causal_2_8192_32_8_128"].src[7].buf_uop)
 
   def test_large_scores_use_forward_quantized_operands(self):
     if Device[Device.DEFAULT].renderer.target.arch != 'gfx950': self.skipTest('requires gfx950')
