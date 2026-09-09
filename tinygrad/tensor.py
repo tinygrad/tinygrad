@@ -441,7 +441,7 @@ class Tensor(RandMixin):
 
     # TODO: this is a hack for writing to DISK. remove with working assign
     if is_disk:
-      (b:=self._buffer()).copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=x._data()))
+      self._buffer().copy_from(x._buffer())
       return self
     assigned_to = self.uop.storage_base
     # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead.

@@ -36,7 +36,7 @@ class TestCLError(unittest.TestCase):
     data = list(range(65))
     unaligned = memoryview(bytearray(data))[1:]
     buffer = Buffer("CL", 64, dtypes.uint8).allocate()
-    buffer.copy_from(Buffer("PYTHON", 64, dtypes.uint8, opaque=unaligned))
+    buffer.copy_from(Buffer("PYTHON", 64, dtypes.uint8, initial_value=unaligned))
     result = memoryview(bytearray(len(data) - 1))
     result[:] = buffer.as_memoryview()
     assert unaligned == result, "Unaligned data copied in must be equal to data copied out."

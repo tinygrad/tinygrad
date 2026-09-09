@@ -133,7 +133,7 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple
   prog = dev.runtime(prg.to_elf())
   out_buf = Buffer("PYTHON", 1, uop.dtype, preallocate=True)
   prog(out_buf._buf, *[b.buf for b in bufs], vals=vals)
-  return out_buf.as_memoryview(force_zero_copy=True).cast(uop.dtype.fmt or "").tolist()[0]
+  return out_buf.as_memoryview().cast(uop.dtype.fmt or "").tolist()[0]
 
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
   sink = UOp.group(*u)

@@ -103,7 +103,7 @@ class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:
 class Buffer:
   profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
-               initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
+               initial_value:bytes|bytearray|memoryview|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype, self.offset, self.allocated_views, self._base = Device.canonicalize(device), size, dtype, offset, 0, base
     self.options = options if options is not None else BufferSpec()
@@ -114,7 +114,7 @@ class Buffer:
       if initial_value is not None:
         self.allocate()
         if (host:=self.get_storage().host) is not None: host[:] = memoryview(initial_value).cast('B')
-        else: self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(bytearray(initial_value))))
+        else: self.copy_from(Buffer("PYTHON", self.size, self.dtype, initial_value=initial_value))
         if isinstance(initial_value, pickle.PickleBuffer): initial_value.release()
     else:
       assert base._base is None, "base can't have a base"
@@ -209,16 +209,11 @@ class Buffer:
     if self.is_allocated() and hasattr(self.allocator, '_as_buffer'): return self.allocator._as_buffer(self._buf)
     return None
 
-  def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False, no_sync=False) -> memoryview:
-    # zero copy with as_memoryview (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and (mv:=self._host_mv()) is not None:
-      if not no_sync:
-        for device in {self.device, *self.base.get_storage().maps}: Device[device].synchronize()
-      return mv
-    assert not force_zero_copy, "force zero copy was passed, but copy is required"
-    buf = Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
-    for device in buf.get_storage().maps: Device[device].synchronize()
-    return mv
+  def as_memoryview(self, allow_zero_copy=False) -> memoryview:
+    if not self.nbytes: return memoryview(bytearray())
+    if (mv:=self._host_mv()) is None: return Buffer("PYTHON", self.size, self.dtype, preallocate=True).copy_from(self).as_memoryview()
+    for device in {self.device, *self.base.get_storage().maps}: Device[device].synchronize()
+    return mv if allow_zero_copy else memoryview(bytearray(mv))
 
   def numpy(self) -> 'np.ndarray': # type: ignore [name-defined] # noqa: F821
     import numpy as np

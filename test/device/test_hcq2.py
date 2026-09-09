@@ -181,9 +181,9 @@ class TestHCQ2Schedule(unittest.TestCase):
   def test_map_cpu_buffer_preserves_contents(self):
     src = Buffer("CPU", 16, dtypes.uint8, preallocate=True)
     data = bytes(range(16))
-    src.as_memoryview(force_zero_copy=True)[:] = data
+    src.host[:] = data
     src.get_buf(Device.DEFAULT)
-    self.assertEqual(bytes(src.as_memoryview(force_zero_copy=True)), data)
+    self.assertEqual(bytes(src.as_memoryview()), data)
 
   def test_rt_patches_are_inputs_and_vars_only(self):
     x = Tensor.rand(17, 33).contiguous().realize()

@@ -290,7 +290,10 @@ class PCIIfaceBase:
 
   def map(self, b:Buffer) -> BufferStorage:
     if b.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
-      lo, size = b._buf & ~0xfff, round_up(b._buf + b.nbytes, 0x1000) - (b._buf & ~0xfff)
+      if b._buf % 0x1000: raise RuntimeError("Host mapping requires a page-aligned address")
+      lo, size = b._buf, round_up(b.nbytes, 0x1000)
+      if not self.dev_impl.mm.va_base <= lo < lo + size <= self.dev_impl.mm.va_base + (1 << self.dev_impl.mm.va_bits):
+        raise RuntimeError(f"Host address {lo:#x} is outside the GPU virtual address range")
       System.lock_memory(lo, size)
       paddrs, aspace, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(lo, size)], AddrSpace.SYS, True, True
     elif isinstance(ifa:=getattr(Device[b.device], "iface", None), PCIIfaceBase):

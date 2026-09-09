@@ -8,7 +8,7 @@ from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, ProfileProgramEvent
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, prod, colored
-from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, mv_address, ContextVar, VIZ
+from tinygrad.helpers import ceildiv, unwrap, pluralize, HCQ2, ContextVar, VIZ
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
@@ -652,7 +652,9 @@ class KFDIface:
 
   def map(self, buf:Buffer) -> BufferStorage:
     if buf.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
+      if buf._buf % 0x1000: raise RuntimeError("Host mapping requires a page-aligned address")
       return replace(mem:=self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf), meta=(mem.meta.handle, True))
+    if buf.device.split(":")[0] != "AMD": raise RuntimeError(f"Cannot map {buf.device} on {self.dev.device}")
     self._map_handle(buf.meta.handle)
     return BufferStorage(buf._buf, (buf.meta.handle, False))
 
@@ -800,9 +802,7 @@ class PCIIface(PCIIfaceBase):
   def device_fini(self): self.dev_impl.fini()
 
 class USBAllocator(AMDAllocator): # the host program reads another device's memory in place: its bytes are the mapping
-  def map(self, buf:Buffer) -> BufferStorage:
-    mv = buf.ensure_allocated().as_memoryview(force_zero_copy=True, no_sync=True)
-    return BufferStorage(mv_address(mv), mv)
+  def map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf.host.addr, buf.host.mv)
   def _unmap(self, mapping:BufferStorage): pass
 
 class USBIface(PCIIface):

@@ -157,9 +157,9 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
          and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
     elif src._host_mv() is not None and dest._host_mv() is not None:
-      dst_mv, src_mv = dest.as_memoryview(force_zero_copy=True), src.as_memoryview(force_zero_copy=True)
+      dst_mv, src_mv = dest.as_memoryview(allow_zero_copy=True), src.as_memoryview(allow_zero_copy=True)
       with cpu_profile(f"{src.device} -> TINY", f"{src.device}:COPY"): dst_mv[:] = src_mv[:]
-    elif dest._host_mv() is not None: src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
+    elif dest._host_mv() is not None: src.allocator._copyout(dest.as_memoryview(allow_zero_copy=True), src._buf)
     else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return []
 
