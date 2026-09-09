@@ -352,6 +352,9 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     else:
       q_fp8, q_descale = quantize_qk(xq, q_amax_state, q_amax_out)
       k_fp8, k_descale = quantize_qk(xk, k_amax_state, k_amax_out)
+    # Pre-scaled Q/K have constant unit descales, which backward never reads.
+    # Returning them as saved outputs adds scalar copy kernels to every layer.
+    fp8_saves = (q_fp8, k_fp8) + (() if pre_scaled_fp8 else (q_descale, k_descale))
     asm_fp8 = bool(getenv("ASM_FP8_FA"))
     grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t,
                         single_device, arch, False, fp8_qk=True, asm_fp8=asm_fp8, pre_scaled_fp8=pre_scaled_fp8)
@@ -363,12 +366,12 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
                               pre_scaled=pre_scaled_fp8, saved_bf16=True), grad_fxn=grad)[:2]
       # Precompiled layers must return the rounded operands used by backward;
       # saving only BF16 Q/K/V would recompute RoPE and quantization in backward.
-      return (attn, attn, l_vec, q_fp8, k_fp8, q_descale, k_descale, v_fp8, v_descale) if save_fp8 else (attn, attn, l_vec)
+      return (attn, attn, l_vec, *fp8_saves, v_fp8, v_descale) if save_fp8 else (attn, attn, l_vec)
     attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, xv, q_descale, k_descale,
       fxn=functools.partial(custom_hk_fp8_fa_forward, device=single_device, arch=arch,
                             B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
                             pre_scaled=pre_scaled_fp8), grad_fxn=grad)[:2]
-    return (attn, attn, l_vec, q_fp8, k_fp8, q_descale, k_descale) if save_fp8 else (attn, attn, l_vec)
+    return (attn, attn, l_vec, *fp8_saves) if save_fp8 else (attn, attn, l_vec)
 
   grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=window)
 
