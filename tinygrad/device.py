@@ -270,7 +270,7 @@ class Allocator(Generic[DeviceType]):
   def do_free(self, storage:BufferStorage, options:BufferSpec):
     for dev in storage.maps: Device[dev].synchronize()
     for dev, mb in storage.maps.items(): Device[dev].allocator._unmap(mb)
-    self._free(storage, options)
+    if options.external_ptr is None: self._free(storage, options)
 
   def map(self, buf:Buffer) -> BufferStorage: return self._map(buf.ensure_allocated())
 

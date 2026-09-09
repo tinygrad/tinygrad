@@ -74,7 +74,6 @@ class CUDAAllocator(Allocator['CUDADevice']):
 
   @suppress_finalizing
   def _free(self, storage:BufferStorage, options:BufferSpec):
-    if options.external_ptr: return
     if options.host: check(cuda.cuMemFreeHost(storage.buf))
     else: check(cuda.cuMemFree_v2(storage.buf))
   def _copyin(self, dest, src:memoryview):

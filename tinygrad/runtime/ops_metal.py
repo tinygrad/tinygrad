@@ -163,8 +163,7 @@ class MetalAllocator(Allocator[MetalDevice]):
     return BufferStorage(MetalBuffer(ret, size), None, MMIOInterface(addr, size) if (addr:=ret.contents()) is not None else None)
 
   @suppress_finalizing
-  def _free(self, storage:BufferStorage, options):
-    if not options.external_ptr: storage.buf.buf.release()
+  def _free(self, storage:BufferStorage, options): storage.buf.buf.release()
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = src_dev.mtl_queue.commandBuffer().retained()

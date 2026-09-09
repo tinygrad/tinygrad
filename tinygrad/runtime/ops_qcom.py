@@ -306,7 +306,6 @@ class QCOMAllocator(Allocator['QCOMDevice']):
     return self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
 
   def _free(self, storage:BufferStorage, options:BufferSpec):
-    if options.external_ptr is not None: return
     self.dev.synchronize()
     self.dev._gpu_free(storage)
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
@@ -358,9 +357,7 @@ class QCOMDevice(HCQ2Compiled):
 
   @functools.cached_property
   def border_color(self) -> Buffer: # zeros: the samplers clamp to a black border
-    (b:=Buffer(self.device, 0x1000, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)) \
-      .as_memoryview(force_zero_copy=True)[:] = bytes(0x1000)
-    return b
+    return Buffer(self.device, 0x1000, dtypes.uint8, options=BufferSpec(nolru=True), initial_value=bytes(0x1000))
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> BufferStorage:
     flags |= flag("KGSL_MEMALIGN", alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP
@@ -383,12 +380,11 @@ class QCOMDevice(HCQ2Compiled):
       raise RuntimeError("Failed to map external pointer to GPU memory") from e
 
   def _gpu_free(self, storage:BufferStorage):
-    addr, meta = storage.buf, storage.meta
-    if meta[0] is None: return # external (gpu) ptr
-    if not meta[1]: kgsl.IOCTL_KGSL_SHAREDMEM_FREE(self.fd, gpuaddr=meta[0].gpuaddr) # external (cpu) ptr
+    if storage.meta[0] is None: return # external (gpu) ptr
+    if not storage.meta[1]: kgsl.IOCTL_KGSL_SHAREDMEM_FREE(self.fd, gpuaddr=storage.meta[0].gpuaddr) # external (cpu) ptr
     else:
-      kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=meta[0].id)
-      FileIOInterface.munmap(addr, meta[0].mmapsize)
+      kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=storage.meta[0].id)
+      FileIOInterface.munmap(storage.buf, storage.meta[0].mmapsize)
 
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
     if sig[0] < value:

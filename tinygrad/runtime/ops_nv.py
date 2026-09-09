@@ -295,7 +295,6 @@ class NVAllocator(Allocator['NVDevice']):
     return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host, zero=options.zero)
 
   def _free(self, storage:BufferStorage, options:BufferSpec):
-    if options.external_ptr is not None: return
     self.dev.synchronize()
     self.dev.iface.free(storage)
   def _map(self, buf:Buffer) -> BufferStorage: return self.dev.iface.map(buf)
