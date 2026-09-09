@@ -354,9 +354,7 @@ class QCOMDevice(HCQ2Compiled):
 
   @functools.cached_property
   def border_color(self) -> Buffer: # zeros: the samplers clamp to a black border
-    (b:=Buffer(self.device, 0x1000, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)) \
-      .as_memoryview(force_zero_copy=True)[:] = bytes(0x1000)
-    return b
+    return Buffer(self.device, 0x1000, dtypes.uint8, options=BufferSpec(nolru=True), initial_value=bytes(0x1000))
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
     flags |= flag("KGSL_MEMALIGN", alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP

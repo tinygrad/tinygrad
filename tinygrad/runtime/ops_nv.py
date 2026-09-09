@@ -326,7 +326,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
 # device
 
 @dataclass
-class GPFifo: ring: Buffer; gpput: Buffer; doorbell: Buffer; put_value: Buffer; entries: int; token: int # noqa: E702
+class GPFifo: ring: Buffer; gpput: Buffer; doorbell: Buffer; put_value: Buffer; notifier: Buffer; entries: int; token: int # noqa: E702
 
 class NVKIface:
   root = None
@@ -576,9 +576,6 @@ class NVDevice(HCQ2Compiled):
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     self.channel_group = self.iface.rm_alloc(self.nvdevice, nv_gpu.KEPLER_CHANNEL_GROUP_A, channel_params)
 
-    self.gpfifo_mem = self.iface.alloc(0x300000, contiguous=True, cpu_access=True, force_devmem=True,
-      map_flags=(nv_gpu.NVOS33_FLAGS_CACHING_TYPE_WRITECOMBINED<<23))
-
     self.ctxshare = self.iface.rm_alloc(self.channel_group, nv_gpu.FERMI_CONTEXT_SHARE_A,
       nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC))
 
@@ -600,8 +597,10 @@ class NVDevice(HCQ2Compiled):
 
   @functools.cached_property
   def fifos(self) -> dict[str, GPFifo]:
-    self.gpfifo_buf = Buffer(self.device, self.gpfifo_mem.size, dtypes.uint8, options=BufferSpec(external_ptr=self.gpfifo_mem.va_addr, nolru=True)) \
-                        .allocate(opaque=self.gpfifo_mem)
+    mem = self.iface.alloc(size:=0x300000, contiguous=True, cpu_access=True, force_devmem=True,
+                          map_flags=nv_gpu.NVOS33_FLAGS_CACHING_TYPE_WRITECOMBINED<<23)
+    self.gpfifo_buf = Buffer(self.device, size, dtypes.uint8, opaque=((mem, mem.meta), mem.view))
+
     compute = self._new_gpu_fifo("COMPUTE:0", self.ctxshare, self.channel_group, offset=0, entries=0x10000, compute=True)
     copy = self._new_gpu_fifo("COPY:0", self.ctxshare, self.channel_group, offset=0x100000, entries=0x10000)
     self.iface.rm_control(self.channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
@@ -615,11 +614,12 @@ class NVDevice(HCQ2Compiled):
     return {"COMPUTE:0": compute, "COPY:0": copy}
 
   def _new_gpu_fifo(self, name:str, ctxshare, channel_group, offset=0, entries=0x400, compute=False, video=False) -> GPFifo:
-    notifier = self.iface.alloc(48 << 20, uncached=True)
-    params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(gpFifoOffset=self.gpfifo_mem.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare,
-      hObjectError=notifier.meta.hMemory, hObjectBuffer=self.virtmem if video else self.gpfifo_mem.meta.hMemory,
-      hUserdMemory=(ctypes.c_uint32*8)(self.gpfifo_mem.meta.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset),
-      engineType=19 if video else 0,
+    notifier = Buffer(self.device, size:=48 << 20, dtypes.uint8,
+                      opaque=((mem:=self.iface.alloc(size, uncached=True), mem.meta), mem.view))
+    params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(gpFifoOffset=self.gpfifo_buf._buf.va_addr+offset, gpFifoEntries=entries,
+      hObjectError=notifier.meta.hMemory, hObjectBuffer=self.virtmem if video else self.gpfifo_buf.meta.hMemory,
+      hUserdMemory=(ctypes.c_uint32*8)(self.gpfifo_buf.meta.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset),
+      engineType=19 if video else 0, hContextShare=ctxshare,
       hVASpace=self.vaspace if video and self.is_nvd() else 0) # gsp has no default vaspace, rm maps the decoder ctx into its own
     gpfifo = self.iface.rm_alloc(channel_group, self.iface.gpfifo_class, params)
 
@@ -642,7 +642,7 @@ class NVDevice(HCQ2Compiled):
     fifo = GPFifo(ring=self.gpfifo_buf.view(entries, dtypes.uint64, offset).ensure_allocated(),
       gpput=self.gpfifo_buf.view(1, dtypes.uint32, gpput_off).ensure_allocated(),
       doorbell=Buffer("CPU", 1, dtypes.uint32, options=BufferSpec(external_ptr=self.gpu_mmio.addr + 0x90), preallocate=True),
-      put_value=Buffer("CPU", 1, dtypes.uint64, preallocate=True), entries=entries, token=ws_token_params.workSubmitToken)
+      put_value=Buffer("CPU", 1, dtypes.uint64, preallocate=True), notifier=notifier, entries=entries, token=ws_token_params.workSubmitToken)
     self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, tag=to_name(n, name)), lambda ctx, b=getattr(fifo, n): b)
                                         for n in ("ring", "gpput", "doorbell", "put_value")]) + self.pm_bufferize
     return fifo
@@ -664,8 +664,8 @@ class NVDevice(HCQ2Compiled):
     (buf:=self.rt_view(len(cmds) * 4)).host.view(fmt='I')[:] = array.array('I', cmds)
 
     put = fifo.put_value.host.view(fmt='Q')
-    fifo.ring._buf.cpu_view().view(fmt='Q')[put[0] % fifo.entries] = buf._buf.va_addr | (len(cmds) << 42) | (1 << 41)
-    fifo.gpput._buf.cpu_view().view(fmt='I')[0] = (put[0] + 1) % fifo.entries
+    fifo.ring.host.view(fmt='Q')[put[0] % fifo.entries] = buf._buf.va_addr | (len(cmds) << 42) | (1 << 41)
+    fifo.gpput.host.view(fmt='I')[0] = (put[0] + 1) % fifo.entries
 
     System.memory_barrier()
     self.gpu_mmio[0x90 // 4] = fifo.token
@@ -750,13 +750,16 @@ class NVDevice(HCQ2Compiled):
       (nv_gpu.NVB0CC_CTRL_POWER_FEATURE_MASK_IDLE_SLOWDOWN_DISABLE << 8) | (nv_gpu.NVB0CC_CTRL_POWER_FEATURE_MASK_VAT_DISABLE << 10))
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES, power_params)
 
-    self.pma_buf = self.iface.alloc(getenv("PMA_BUFFER_SIZE", 512) << 20, uncached=True, cpu_cached=True, cpu_access=True)
-    self.pma_bytes = self.iface.alloc(0x1000, uncached=True, cpu_cached=True, cpu_access=self.is_nvd(), read_only=True)
+    self.pma_buf = Buffer(self.device, size:=getenv("PMA_BUFFER_SIZE", 512) << 20, dtypes.uint8,
+                          opaque=((mem:=self.iface.alloc(size, uncached=True, cpu_cached=True, cpu_access=True), mem.meta), mem.view))
+    self.pma_bytes = Buffer(self.device, size:=0x1000, dtypes.uint8,
+                            opaque=((mem:=self.iface.alloc(size, uncached=True, cpu_cached=True, cpu_access=self.is_nvd(),
+                                                           read_only=True), mem.meta), mem.view))
     self.pma_rptr = 0
 
     pma_stream = nv_gpu.struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS(hMemPmaBuffer=self.pma_buf.meta.hMemory,
-      pmaBufferSize=self.pma_buf.size, hMemPmaBytesAvailable=self.pma_bytes.meta.hMemory, pmaBufferVA=self.pma_buf.va_addr)
-    self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM, pma_stream, extra=(self.pma_buf, self.pma_bytes))
+      pmaBufferSize=self.pma_buf.nbytes, hMemPmaBytesAvailable=self.pma_bytes.meta.hMemory, pmaBufferVA=self.pma_buf._buf.va_addr)
+    self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM, pma_stream, extra=(self.pma_buf._buf, self.pma_bytes._buf))
 
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_RESERVE_HWPM_LEGACY, nv_gpu.struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS(ctxsw=0))
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_RESERVE_PM_AREA_PC_SAMPLER)
@@ -822,9 +825,9 @@ class NVDevice(HCQ2Compiled):
     if params.bOverflowStatus: raise RuntimeError("PMA profiler: buffer overflow detected")
     if params.bytesAvailable == 0: return None
 
-    start, end = self.pma_rptr, self.pma_rptr + params.bytesAvailable
-    pma_data = bytes(self.pma_buf.cpu_view()[start:min(end, self.pma_buf.size)]) + bytes(self.pma_buf.cpu_view()[:max(0, end - self.pma_buf.size)])
-    self.pma_rptr = end % self.pma_buf.size
+    start, end, view = self.pma_rptr, self.pma_rptr + params.bytesAvailable, self.pma_buf.host
+    pma_data = bytes(view[start:min(end, self.pma_buf.nbytes)]) + bytes(view[:max(0, end - self.pma_buf.nbytes)])
+    self.pma_rptr = end % self.pma_buf.nbytes
 
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_PMA_STREAM_UPDATE_GET_PUT,
       nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS(bytesConsumed=params.bytesAvailable))
