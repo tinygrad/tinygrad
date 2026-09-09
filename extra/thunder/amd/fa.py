@@ -6,7 +6,7 @@ from tinygrad.helpers import DEBUG, getenv
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 
 def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None=None) -> Tensor:
   dtype = dtype or ref.dtype
@@ -18,7 +18,7 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None
 
 @functools.cache
 def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, *args:UOp, device:str, arch:str,
-                                  B:int, N:int, H:int, H_KV:int, D:int, write_fp8:bool=False):
+                                  B:int, N:int, H:int, H_KV:int, D:int, write_fp8:bool=False, write_bf16_qk:bool=True):
   if write_fp8: q_fp8, k_fp8, xqkv, freqs_cis = args
   else: xqkv, freqs_cis = args
   group_size = H // H_KV
@@ -42,15 +42,17 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, *args:UOp, device:str, ar
       bb = x_in[b, n, kvh, rep, even + 1].cast(dtypes.float)
       h = kvh * group_size + rep
       q0, q1 = a * c - bb * s, a * s + bb * c
-      stores += [q_out[b, n, h, even].store(q0.cast(q.dtype)), q_out[b, n, h, even + 1].store(q1.cast(q.dtype))]
+      if write_bf16_qk:
+        stores += [q_out[b, n, h, even].store(q0.cast(q.dtype)), q_out[b, n, h, even + 1].store(q1.cast(q.dtype))]
       if write_fp8:
         q0s, q1s = ((x * fp8_attn_scale).maximum(-448.0).minimum(448.0) for x in (q0, q1))
         stores += [q_fp8[b, n, h, even].store(q0s.cast(q_fp8.dtype)), q_fp8[b, n, h, even + 1].store(q1s.cast(q_fp8.dtype))]
     a = x_in[b, n, kvh, group_size, even].cast(dtypes.float)
     bb = x_in[b, n, kvh, group_size, even + 1].cast(dtypes.float)
     k0, k1 = a * c - bb * s, a * s + bb * c
-    stores += [k_out[b, n, kvh, even].store(k0.cast(k.dtype)), k_out[b, n, kvh, even + 1].store(k1.cast(k.dtype)),
-               v_out[b, n, kvh, even].store(x_in[b, n, kvh, group_size + 1, even]),
+    if write_bf16_qk:
+      stores += [k_out[b, n, kvh, even].store(k0.cast(k.dtype)), k_out[b, n, kvh, even + 1].store(k1.cast(k.dtype))]
+    stores += [v_out[b, n, kvh, even].store(x_in[b, n, kvh, group_size + 1, even]),
                v_out[b, n, kvh, even + 1].store(x_in[b, n, kvh, group_size + 1, even + 1])]
     if write_fp8:
       k0s, k1s = ((x * fp8_attn_scale).maximum(-448.0).minimum(448.0) for x in (k0, k1))
@@ -120,9 +122,10 @@ def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp, bool]|None:
   return None
 
 def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp, *, prequantize_mxfp4:bool=False,
-                         prequantize_fp8:bool=False) -> tuple:
+                         prequantize_fp8:bool=False, fp8_only:bool=False) -> tuple:
+  if fp8_only: dq_u, dk_u, dv_u = dk_u, dv_u, dq_u
   dq, dk, dv = Tensor(dq_u, device=dq_u.device), Tensor(dk_u, device=dk_u.device), Tensor(dv_u, device=dv_u.device)
-  input_idx = 6 if prequantize_fp8 else 4
+  input_idx = 4 if fp8_only else 6 if prequantize_fp8 else 4
   xqkv_u, freqs_u = call.src[input_idx], call.src[input_idx + 1]
   xqkv, freqs_cis = Tensor(xqkv_u, device=xqkv_u.device), Tensor(freqs_u, device=freqs_u.device)
   B, N, _ = xqkv.shape
@@ -151,10 +154,15 @@ def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp, *, prequantize_
     fxn = functools.partial(custom_fused_qkv_rope_backward, device=single_device, arch=arch,
                             B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, expanded_fa_grads=expanded_fa_grads)
     dxqkv = Tensor.custom_kernel(dxqkv, dq, dk, dv, freqs_cis, fxn=fxn)[0]
+  if fp8_only: return (None, None, None, dxqkv.uop, None, None, None)
   return (None, None, None, None, None, dxqkv.uop, None) if prequantize_fp8 else (None, None, None, dxqkv.uop, None)
 
+def custom_fused_fp8_qkv_rope_forward(v:UOp, q8:UOp, k8:UOp, x:UOp, freqs:UOp, q:UOp, k:UOp, **kwargs):
+  return custom_fused_qkv_rope_forward(q, k, v, q8, k8, x, freqs, write_fp8=True, write_bf16_qk=False, **kwargs)
+
 def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, head_dim:int, *,
-                   prequantize_grad_mxfp4:bool=False, prequantize_fp8:bool=False) -> tuple[Tensor, ...]:
+                   prequantize_grad_mxfp4:bool=False, prequantize_fp8:bool=False, write_bf16_qk:bool=True) -> tuple[Tensor, ...]:
+  assert write_bf16_qk or prequantize_fp8
   B, N, packed_dim = xqkv.shape
   assert packed_dim == n_kv_heads * (n_heads // n_kv_heads + 2) * head_dim
   assert freqs_cis.dtype == dtypes.bfloat16, f"fused QKV RoPE requires bfloat16 frequencies, got {freqs_cis.dtype}"
@@ -176,13 +184,38 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
                  _sharded_empty(k.shape, xqkv, axis=axis, dtype=dtypes.fp8e4m3)) if prequantize_fp8 else ()
   fxn = functools.partial(custom_fused_qkv_rope_forward, device=single_device, arch=arch,
                           B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=head_dim,
-                          write_fp8=prequantize_fp8)
+                          write_fp8=prequantize_fp8, write_bf16_qk=write_bf16_qk)
   grad_fxn = functools.partial(_fused_qkv_rope_grad, prequantize_mxfp4=prequantize_grad_mxfp4, prequantize_fp8=prequantize_fp8)
+  if not write_bf16_qk:
+    # Keep runtime parameters dense for BEAM; unused BF16 autograd anchors come last.
+    fxn = functools.partial(custom_fused_fp8_qkv_rope_forward, device=single_device, arch=arch,
+                            B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=head_dim)
+    outputs = Tensor.custom_kernel(v, *fp8_outputs, xqkv, freqs_cis, q, k, fxn=fxn,
+                                    grad_fxn=functools.partial(grad_fxn, fp8_only=True))
+    return outputs[5], outputs[6], outputs[0], outputs[1], outputs[2]
   outputs = Tensor.custom_kernel(q, k, v, *fp8_outputs, xqkv, freqs_cis, fxn=fxn, grad_fxn=grad_fxn)
   return tuple(outputs[:5 if prequantize_fp8 else 3])
 
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
+
+@functools.cache
+def custom_v_amax(out:UOp, x:UOp, *, final:bool=False):
+  out, x = out.flatten(), x.flatten()
+  groups = out.numel()
+  assert x.numel() % groups == 0
+  g, r = UOp.range(groups, 0), UOp.range(x.numel()//groups, 1, AxisType.REDUCE)
+  amax = x[g*(x.numel()//groups)+r].abs().reduce(r, arg=Ops.MAX)
+  value = (amax.cast(dtypes.float)+1e-8)/448.0 if final else amax
+  return out[g].store(value).end(g).sink(arg=KernelInfo(name="fa_v_descale" if final else "fa_v_amax_partial"))
+
+def compute_v_descale(x:Tensor) -> Tensor:
+  size = math.prod(x.uop.shard_shape)
+  partials = min(8192, size)
+  partial = Tensor.invalids(partials, dtype=x.dtype, device=x.device)
+  partial = Tensor.custom_kernel(partial, x.detach(), fxn=custom_v_amax)[0]
+  scale = Tensor.invalids(1, dtype=dtypes.float32, device=x.device)
+  return Tensor.custom_kernel(scale, partial, fxn=functools.partial(custom_v_amax, final=True))[0]
 
 @functools.cache
 def custom_fp8_fa_backward_inputs(q:UOp, k:UOp, v:UOp, q8:UOp, k8:UOp, v8:UOp, v_scale:UOp,
@@ -339,13 +372,16 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     assert arch == "gfx950" and D == 128, f"FP8 Flash Attention requires gfx950 and D=128, got {arch=} {D=}"
     assert not has_sink and window == 0, "FP8 Flash Attention does not support sinks or sliding windows"
     from extra.llama_kernels import FP8_MAX, local_abs_max
-    def quantize_qk(x:Tensor, amax_state:Tensor|None, amax_out:Tensor|None) -> tuple[Tensor, Tensor]:
+    def quantize_qk(x:Tensor, amax_state:Tensor|None, amax_out:Tensor|None, *, native_v:bool=False) -> tuple[Tensor, Tensor]:
       if amax_state is not None or amax_out is not None:
         assert amax_state is not None and amax_out is not None, "delayed FP8 scaling requires both amax state and output"
         from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
         return quantize_fp8_delayed(x, amax_state, amax_out)
-      amax = (local_abs_max(x) if isinstance(x.device, tuple) else x.abs().max()).detach().float()
-      descale = ((amax + 1e-8) / FP8_MAX).reshape(1).contiguous()
+      if native_v:
+        descale = compute_v_descale(x)
+      else:
+        amax = (local_abs_max(x) if isinstance(x.device, tuple) else x.abs().max()).detach().float()
+        descale = ((amax + 1e-8) / FP8_MAX).reshape(1).contiguous()
       scale = descale.reciprocal()
       # The packed buffers are auxiliary, non-differentiable inputs to FA. Its
       # custom backward returns physical-unit gradients directly to xq/xk.
@@ -367,7 +403,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
                         single_device, arch, False, fp8_qk=True, asm_fp8=asm_fp8, pre_scaled_fp8=pre_scaled_fp8)
     if asm_fp8:
       from extra.thunder.amd.asm_fa_fp8 import custom_asm_fp8_fa_forward
-      v_fp8, v_descale = quantize_qk(xv, None, None)
+      v_fp8, v_descale = quantize_qk(xv, None, None, native_v=True)
       # Pass V's storage directly; its shaped view is shared by the amax and quantization expressions.
       v_arg = xv.flatten() if not is_mp else xv
       qk_scales = () if pre_scaled_fp8 else (q_descale, k_descale)
