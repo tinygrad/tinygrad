@@ -2,10 +2,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
 from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
-import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct
-from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
+import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap
+from tinygrad.helpers import WIN, mv_address, to_mv, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
-from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up
+from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
+from tinygrad.helpers import cpu_profile
 from tinygrad.dtype import DType, _to_np_dtype
 from tinygrad.runtime.support.memory import MMIOInterface
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -165,6 +166,11 @@ class Buffer:
       storage = replace(self.base.get_storage(), buf=self.allocator._offset(self.base._buf, self.nbytes, self.offset), maps={})
     elif opaque is not None:
       self.options = replace(self.options, nolru=True)
+      if is_numpy_ndarray(opaque):
+        if not opaque.flags.c_contiguous: opaque = opaque.copy(order='C')
+        opaque = BufferStorage(addr:=opaque.ctypes.data, memoryview(opaque), MMIOInterface(addr, self.nbytes))
+      elif isinstance(opaque, memoryview):
+        opaque = BufferStorage(addr:=mv_address(opaque) if self.nbytes else 0, opaque, MMIOInterface(addr, self.nbytes))
       storage = opaque if isinstance(opaque, BufferStorage) else BufferStorage(opaque)
     else: storage = self.allocator.alloc(self.nbytes, self.options)
     storage = replace(storage, host=storage.host.view(self.offset, self.nbytes, fmt='B') if storage.host is not None else None)
@@ -193,7 +199,10 @@ class Buffer:
     buf:bytearray|pickle.PickleBuffer|None = None
     if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None)
+    if self.device == "NPY":
+      import numpy as np
+      arr = np.frombuffer(self.meta, _to_np_dtype(self.dtype)) # over the storage itself, so an out-of-band pickle buffer keeps it alive
+      return self.__class__, (self.device, self.size, self.dtype, arr, self.options, None)
     if self.is_allocated():
       buf = pickle.PickleBuffer(self.as_memoryview()) if protocol >= 5 else bytearray(self.as_memoryview())
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
@@ -208,12 +217,10 @@ class Buffer:
     if self.is_allocated() and hasattr(self.allocator, '_as_buffer'): return self.allocator._as_buffer(self._buf)
     return None
 
-  def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False, no_sync=False) -> memoryview:
-    # zero copy with as_memoryview (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and (mv:=self._host_mv()) is not None:
-      if not no_sync: self.allocator.dev.synchronize()
+  def as_memoryview(self, allow_zero_copy=False) -> memoryview:
+    if allow_zero_copy and (mv:=self._host_mv()) is not None:
+      for device in {self.device, *self.base.get_storage().maps}: Device[device].synchronize()
       return mv
-    assert not force_zero_copy, "force zero copy was passed, but copy is required"
     Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv
 
@@ -284,6 +291,23 @@ class Allocator(Generic[DeviceType]):
   def _offset(self, buf, size:int, offset:int): raise NotImplementedError("need offset")
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
   def _encode_decode(self, bufout, bufin, desc, hist:list, shape:tuple[int,...], frame_pos:int): raise NotImplementedError("need encdec") # optional
+
+class HostAllocator(Allocator):
+  def __init__(self, dev): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
+    if options.external_ptr is not None: addr, buf = options.external_ptr, None
+    elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
+    else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
+    return BufferStorage(addr, buf, MMIOInterface(addr, size, fmt='B'))
+
+  def _copyin(self, dest:int, src:memoryview):
+    self.dev.synchronize()
+    with cpu_profile(f"TINY -> {self.dev.device}", f"{self.dev.device}:COPY"): to_mv(dest, src.nbytes)[:] = src.cast('B')
+  def _copyout(self, dest:memoryview, src:int):
+    self.dev.synchronize()
+    with cpu_profile(f"{self.dev.device} -> TINY", f"{self.dev.device}:COPY"): dest[:] = to_mv(src, dest.nbytes)[:]
+  def _map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf.host.addr)
+  def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
 
 class DepsTracker:
   def __init__(self):

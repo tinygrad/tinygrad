@@ -1,4 +1,3 @@
-import itertools
 from tinygrad.dtype import dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
@@ -131,6 +130,14 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
+def copy_to_anon_store(x:UOp, copy:UOp):
+  if copy.is_self_copy: return None  # self copies are contiguous, rangeify realizes them into fresh buffers
+  # the buffer created here is inside the call and is not persisted, like the buffers created for contiguous
+  # copies must read from a whole buffer, not a view: materialize anything lacking buffer identity (SDMA can't do offset copies)
+  if not x.has_buffer_identity(after_ok=True): x = x.contiguous()
+  buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
+  return buf.after(buf.store(x)).reshape(copy.shape)
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls with RETURNED inputs (inline the body)
   (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.has_unbound_outputs else None),
@@ -152,8 +159,13 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # ** copy rules **
 
-  # copy on reshape is reshape on copy
-  (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="shp"),), name="cpy"), lambda shp,cpy: shp.src[0].copy_to_device(cpy.device).reshape(shp.shape)),
+  # a COPY in src[1] of a plain STORE can just be removed: a STORE to a buffer on a different device is a COPY
+  # NOTE: self copies are contiguous (a materialization point), they must never be removed like this
+  (UPat(Ops.STORE, src=(UPat.var("dst"), UPat(Ops.COPY, src=(UPat.var("x"),), name="cpy"))),
+   lambda dst,x,cpy: dst.store(x) if not cpy.is_self_copy and dst.device == cpy.device and dst.has_buffer_identity(after_ok=True) else None),
+
+  # a bare COPY is an anonymous store: realize it as a STORE into a fresh call-local buffer on the copy device
+  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), copy_to_anon_store),
 
   # reshaping on STORE can be a NOOP
   (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),
@@ -190,32 +202,10 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.AFTER, name="s"), lambda s: s.replace(src=(s.src[0],)+tuple(walk_mop(u) for u in s.src[1:] if u.op is not Ops.NOOP))),
 ])
 
-def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
-  if copy.is_self_copy: return None  # self copies are contiguous, rangeify realizes them into fresh buffers
-  input_src = copy.src[0]
-  # the input must have buffer identity: materialize it with a contiguous (self COPY) first
-  if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
-  input_src = input_src.flatten()
-  if existing_buf is not None:
-    # if the existing buffer is not a full buffer, we can't use it
-    if not existing_buf.has_buffer_identity(after_ok=True): return None
-    # if there's already a buffer, we just use it
-    return existing_buf.flatten().store(input_src)
-  # create the output buffer
-  buf = UOp.new_buffer(copy.device, prod(input_src.max_shape), copy.dtype)
-  # reshape back to input
-  return buf.reshape(input_src.max_shape).after(buf.store(input_src)).reshape(copy.shape)
-
-pm_copy_to_store = PatternMatcher([
-  (UPat(name="existing_buf").store(UPat(Ops.COPY, name="copy")), convert_copy_to_store),
-  (UPat(Ops.COPY, name="copy"), convert_copy_to_store),
-])
-
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
-  tsink = graph_rewrite(tsink, pm_copy_to_store, ctx=itertools.count(0), bottom_up=True, name="convert copy to store")
   return tsink
