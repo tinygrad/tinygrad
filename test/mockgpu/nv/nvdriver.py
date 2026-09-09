@@ -268,8 +268,8 @@ class NVDriver(VirtDriver):
     elif nr == nv_gpu.UVM_REGISTER_CHANNEL: pass
     elif nr == nv_gpu.UVM_FREE:
       st = nv_gpu.UVM_FREE_PARAMS.from_address(argp)
+      if st.base not in self.host_ranges: libc.munmap(st.base, st.length) # registered host memory belongs to its allocator
       self.host_ranges.discard(st.base)
-      libc.munmap(st.base, st.length)
     else: raise RuntimeError(f"Unknown {nr} to nvidia-uvm")
     return 0
 

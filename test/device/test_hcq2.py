@@ -86,14 +86,14 @@ class TestHCQ2Schedule(unittest.TestCase):
   def test_jit_has_no_rt_buffers(self):
     dev = Device[Device.DEFAULT]
     rings = [dev.rt_buffer(True, host) for host in (False, True)]
-    ranges = [(b._buf.va_addr, b._buf.va_addr + b.nbytes) for b in rings]
+    ranges = [(b._buf, b._buf + b.nbytes) for b in rings]
     for n in (1, 65):
       with self.subTest(kernels=n):
         x, f = self.input(), TinyJit(lambda a: chain(a, n).realize())
         for _ in range(2): f(x)
         for u in f.captured.linear.toposort():
           if u.op is Ops.BUFFER and (buf:=u.buffer).device == dev.device:
-            addr = buf._buf.va_addr
+            addr = buf._buf
             self.assertFalse(any(addr < end and start < addr + buf.nbytes for start, end in ranges))
 
   def test_small_eager_cached(self):
@@ -286,7 +286,7 @@ class TestHCQ2Schedule(unittest.TestCase):
       linked = hcq2.hcq_link(UOp(Ops.LINEAR, src=(call,)), allow_cache=False).src[0]
       inner_buf, outer_buf = linked.src[1].buffer, linked.without_after.src[1].buffer
       self.assertEqual(inner_buf.host.view(fmt='I')[1], 42)
-      self.assertEqual(outer_buf.host.view(fmt='Q')[0], inner_buf._buf.va_addr + 4)
+      self.assertEqual(outer_buf.host.view(fmt='Q')[0], inner_buf._buf + 4)
 
 @unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
 class TestHCQ2FFI(unittest.TestCase):

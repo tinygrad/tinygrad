@@ -1,24 +1,21 @@
 from __future__ import annotations
-from typing import cast, TypeVar, Generic, Any, TYPE_CHECKING
+from typing import cast, Any
 import functools, time, itertools, decimal, weakref, statistics, ctypes, importlib
 from dataclasses import replace, dataclass, field
-from tinygrad.helpers import suppress_finalizing, dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2, cpu_profile, mv_address
+from tinygrad.helpers import dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2
 from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us, DEV
-from tinygrad.device import BufferStorage, Device, Buffer, BufferSpec, Compiled, Allocator, DepsTracker
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, Allocator, DepsTracker
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
-from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear
 from tinygrad.engine.realize import lower_and_compile
 
-if TYPE_CHECKING: from tinygrad.runtime.support.hcq import HCQBuffer # TODO: remove that
-
 # *****************
 # 0. helpers
 
-HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "PYTHON" if DEV.interface.startswith("MOCK") else "CPU")
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
 HCQ_DEVS = frozenset(("NV", "QCOM")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
@@ -462,7 +459,7 @@ def resolve_getaddr(ctx:LinkCtx, g:UOp) -> UOp|None:
   buf, off = unwrap_view(g.src[0])
   if buf.op not in {Ops.BUFFER, Ops.MSELECT}: return None
   ctx.refs.append(buf) # add to refs
-  return UOp.const(cast(Buffer, buf.buffer).get_buf(to_tuple(g.arg)[0]).va_addr + off, dtypes.uint64)
+  return UOp.const(cast(Buffer, buf.buffer).get_buf(to_tuple(g.arg)[0]) + off, dtypes.uint64)
 
 def fold_binary(buf:UOp, blob:UOp) -> UOp:
   if getattr(b:=cast(Buffer, buf.buffer), '_hcq_written', None) is not blob.arg: # TODO: remove me
@@ -520,7 +517,7 @@ class HCQ2Compiled(Compiled):
   pm_encode: PatternMatcher = PatternMatcher([]) # the backend's own encode rules, matched by its submit names
   var_vals: dict[str, int] = {}
 
-  def __init__(self, device:str, allocator:HCQAllocator, compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
+  def __init__(self, device:str, allocator:Allocator, compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
     self.can_recover = can_recover
 
     self.pm_bufferize = PatternMatcher([
@@ -594,40 +591,7 @@ class HCQ2Compiled(Compiled):
 
   def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
 
-  def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
-
   def finalize(self):
     try: self.synchronize() # try to finalize the device in any case
     except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
     super().finalize()
-
-@dataclass
-class HCQ2Buffer:
-  va_addr:sint
-  meta:Any=None
-  view:MMIOInterface|None=None
-
-  def offset(self, offset:int, size:int) -> HCQ2Buffer:
-    return HCQ2Buffer(self.va_addr+offset, meta=self.meta, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
-
-class HCQAllocator(Allocator[HCQDeviceType], Generic[HCQDeviceType]):
-  def _as_buffer(self, buf:HCQBuffer) -> memoryview|None: return buf.view.mv if buf.view is not None else None
-  def _copyout(self, dest:memoryview, src:HCQBuffer): # TODO: remove with memcpy on cpu worker?
-    self.dev.synchronize()
-    with cpu_profile(f"{self.dev.device} -> TINY", f"{self.dev.device}:COPY"): ctypes.memmove(mv_address(dest), src.cpu_view().addr, dest.nbytes)
-
-  def _map(self, buf:Buffer) -> BufferStorage:
-    if not hasattr(self, '_do_map'): raise NotImplementedError("map failed: no method implemented")
-    return BufferStorage(mapped:=self._do_map(buf), mapped.meta)
-
-  def _unmap(self, mapping:BufferStorage): self._do_unmap(mapping.buf)
-  def _do_unmap(self, mb): getattr(self.dev, "iface").free(mb)
-
-  @suppress_finalizing
-  def _free(self, storage:BufferStorage, options:BufferSpec):
-    if options.external_ptr is not None: return
-    for dev in storage.buf.mapped_devs: dev.synchronize()
-    for d, mb in storage.buf.mappings.items(): d.allocator._do_unmap(mb)
-    if hasattr(self, '_do_free'): self._do_free(storage.buf, options)
-
-  def _offset(self, buf, size:int, offset:int) -> HCQBuffer: return buf.offset(offset=offset, size=size)
