@@ -86,8 +86,8 @@ spec_shared = PatternMatcher([
   # GROUP of stores (or groups, or NOOPs)
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
 
-  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, RETURNED, or another AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.INDEX,
+  # AFTER on Movement Op, PARAM, BUFFER, COPY, RETURNED, or another AFTER
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.COPY, Ops.INDEX,
                                                      Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
         allow_any_len=True), lambda: True),
 
@@ -117,10 +117,10 @@ spec_shared = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
-  # STORE: the target must be storage or a CONTIGUOUS realization point (or an AFTER/BITCAST/view of one);
-  # CONTIGUOUS targets are written into the buffer the CONTIGUOUS creates. INDEX stores are checked above
+  # STORE: the target must be storage or a COPY realization point (or an AFTER/BITCAST/view of one);
+  # COPY targets are written into the buffer the COPY creates. INDEX stores are checked above
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x:
-   True if (b:=x.storage_base).op in {Ops.BUFFER, Ops.PARAM, Ops.CONTIGUOUS} else None if b.op is Ops.INDEX else False),
+   True if (b:=x.storage_base).op in {Ops.BUFFER, Ops.PARAM, Ops.COPY} else None if b.op is Ops.INDEX else False),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 5),
@@ -169,8 +169,8 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
 
-  # CONTIGUOUS ensures the source UOp realizes
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD), src=(UPat(),), arg=None), lambda: True),
+  # DETACH/CONTIGUOUS_BACKWARD are transparent to the graph
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), src=(UPat(),), arg=None), lambda: True),
 
   # TODO: this should not be here. STAGE is transformed to BUFFER later
   (UPat(Ops.STAGE, src=(UPat(),), allow_any_len=True), lambda: True),

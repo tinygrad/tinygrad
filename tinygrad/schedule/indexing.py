@@ -21,7 +21,7 @@ class IndexingContext:
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(0)
 
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.COPY, Ops.AFTER, Ops.BUFFER,
                       Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
                       Ops.LOAD, Ops.CALL}
 
@@ -45,8 +45,9 @@ def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
 pm_generate_realize_map = PatternMatcher([
   # realize the inputs of custom kernel calls
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), name="c", allow_any_len=True), realize_custom_kernel_srcs),
-  # always realize
-  (UPat({Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
+  # always realize, COPY to the same device is contiguous
+  (UPat(Ops.STORE, name="tr"), realize),
+  (UPat(Ops.COPY, name="tr"), lambda ctx,tr: realize(ctx,tr) if tr.is_self_copy else None),
   # realize srcs of these
   (UPat((Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # sometimes we need to realize the src of STORE if there's a self-access

@@ -26,8 +26,8 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
 # *** fold moved AFTERs (hack for openpilot) ***
 pm_fold_moved_after = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src")))), name="after"), found_after),
-  # contiguous is also a materialization point (it bufferizes in the scheduler)
-  (UPat(Ops.CONTIGUOUS, src=(UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src"),), name="after"), found_after),
+  # contiguous (a self COPY) is also a materialization point (it bufferizes in the scheduler)
+  (UPat(Ops.COPY, src=(UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src"),), name="after"), found_after),
   # replace ALU sources with AFTER versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
@@ -61,7 +61,7 @@ def fix_store_hazard(target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
-  for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
+  for s in src.toposort(gate=lambda s: s.op is not Ops.COPY):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
     if reaches_base[s] and s.op in unsafe and not (s is target and s.op is Ops.SHRINK): return target.store(src.contiguous())
 
@@ -152,9 +152,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # ** copy rules **
 
-  # copy to same device is a no-op
-  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
-
   # copy on reshape is reshape on copy
   (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="shp"),), name="cpy"), lambda shp,cpy: shp.src[0].copy_to_device(cpy.device).reshape(shp.shape)),
 
@@ -194,9 +191,10 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 ])
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
+  if copy.is_self_copy: return None  # self copies are contiguous, rangeify realizes them into fresh buffers
   input_src = copy.src[0]
-  # if it's a COPY, we need to give the input buffer identity
-  if not input_src.has_buffer_identity(after_ok=True) and copy.op is Ops.COPY: input_src = input_src.contiguous()
+  # the input must have buffer identity: materialize it with a contiguous (self COPY) first
+  if not input_src.has_buffer_identity(after_ok=True): input_src = input_src.contiguous()
   input_src = input_src.flatten()
   if existing_buf is not None:
     # if the existing buffer is not a full buffer, we can't use it

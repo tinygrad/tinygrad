@@ -18,7 +18,7 @@ sys.setrecursionlimit(10000)
 # *****************
 # 3.5 cleanups
 
-ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.NOOP}
+ALWAYS_RUN_OPS = {Ops.COPY, Ops.NOOP}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -274,7 +274,7 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
   (UPat(Ops.CALL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
 
   # remove invalid writes
-  (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONST, arg=Invalid),)))), lambda: UOp(Ops.NOOP)),
+  (UPat(Ops.STORE, src=(UPat(), UPat(Ops.COPY, src=(UPat(Ops.CONST, arg=Invalid),)))), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONST, arg=Invalid))), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.AFTER, name="x"), remove_noop_afters),
 ])
@@ -343,7 +343,7 @@ to_define_global = PatternMatcher([
 ])
 
 rangeify_codegen = PatternMatcher([
-  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.src[0]),
+  (UPat(Ops.COPY, name="x"), lambda x: x.src[0]),
 ])
 
 pm_add_param_range_tags = PatternMatcher([

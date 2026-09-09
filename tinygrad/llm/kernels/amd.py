@@ -65,7 +65,7 @@ class Linear(nn.Linear):
     # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
     # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
     def unwrapped(u:UOp) -> UOp:
-      while u.op in (Ops.RESHAPE, Ops.CONTIGUOUS) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)):
+      while u.op in (Ops.RESHAPE, Ops.COPY) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)):
         u = u.src[0]
       return u
     expected = ggml_data_to_tensor(Tensor(raw), self.in_features * self.out_features, ggml_type)

@@ -1009,15 +1009,15 @@ class TestAssignToUnrealizedView(unittest.TestCase):
 
   def test_contiguous(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
-    c = t.permute(1,0).contiguous()  # unrealized CONTIGUOUS
-    self.assertIs(c.uop.base.op, Ops.CONTIGUOUS)
+    c = t.permute(1,0).contiguous()  # unrealized contiguous (self-COPY)
+    self.assertIs(c.uop.base.op, Ops.COPY)
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(c.tolist(), [[1,1],[2,1]])
 
   def test_contiguous_partial_assign_realize(self):
     x = Tensor([1., 2.]).realize()
-    y = (x + 1).contiguous()  # unrealized CONTIGUOUS
-    self.assertIs(y.uop.base.op, Ops.CONTIGUOUS)
+    y = (x + 1).contiguous()  # unrealized contiguous (self-COPY)
+    self.assertIs(y.uop.base.op, Ops.COPY)
     # a partial write survives an explicit realize: the values are right, storage is an implementation detail
     y[:1].assign(9.)
     y.realize()
@@ -1056,8 +1056,8 @@ class TestAssignToUnrealizedView(unittest.TestCase):
 
   def test_detach_contiguous(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
-    d = t.permute(1,0).contiguous().detach()  # DETACH(unrealized CONTIGUOUS)
-    self.assertIs(d.uop.base.op, Ops.CONTIGUOUS)
+    d = t.permute(1,0).contiguous().detach()  # DETACH(unrealized contiguous/self-COPY)
+    self.assertIs(d.uop.base.op, Ops.COPY)
     d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(d.tolist(), [[1,1],[2,1]])
 

@@ -15,8 +15,9 @@ def add_to_ctx(ctx, x:UOp):
 pm_ctx = PatternMatcher([
   # unbound BUFFERs and their AFTER outputs are scoped inside their CALL: they are never implicit inputs
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: None if x.is_unbound else add_to_ctx(ctx,x)),
-  (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if not x.buf_uop.is_unbound and
-   not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
+  (UPat((Ops.AFTER, Ops.COPY), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if (x.op is Ops.AFTER or x.is_self_copy) and
+   not x.buf_uop.is_unbound and not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER)
+   else None),
 ])
 
 def invalid_outputs(uret:UOp) -> set[UOp]:

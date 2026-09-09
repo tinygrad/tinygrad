@@ -24,14 +24,18 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
 def lower_broadcast_copy(c:UOp, x:UOp):
   if not (isinstance(c.device, tuple) and isinstance(x.device, str)): return None
   if (sx:=x.simplify()).device is None: return UOp(Ops.MSTACK, src=(sx,)*len(c.device))
-  return UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) for d in c.device))
+  return UOp(Ops.MSTACK, src=tuple(x if x.device == d else x.copy_to_device(d) for d in c.device))
+
+def copy_to_one(c:UOp, x:UOp):
+  if not (isinstance(c.device, str) and isinstance(x.device, tuple)): return None
+  m = x.mselect(0)
+  return m if m.device == c.device else m.copy_to_device(c.device)
 
 replace_allreduce = PatternMatcher([
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
   (UPat(Ops.COPY, name="c", src=(UPat(name="x"),)), lower_broadcast_copy),
   # COPY_TO_ONE: if copying from multidevice to one, MSELECT the first (TODO: a little from each?)
-  (UPat(Ops.COPY, name="c", src=(UPat(name="x"),)), lambda c,x:
-    x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
+  (UPat(Ops.COPY, name="c", src=(UPat(name="x"),)), copy_to_one),
   # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
   # move shrink before MSTACK
@@ -289,7 +293,9 @@ multi_pm = PatternMatcher([
   (UPat(Ops.STACK, name="root", custom_early_reject=set([Ops.UNSHARD])), stack_multi),
   (UPat(Ops.INDEX, src=(UPat(Ops.UNSHARD, name="multi"),), name="root", allow_any_len=True), index_multi),
   (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD), UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="dest"), UPat(Ops.UNSHARD, name="src"))))), store_after_multi),
-  (UPat(Ops.COPY, src=(UPat(Ops.UNSHARD, name="multi"),), name="copy"), lambda multi,copy: copy_multi(multi, copy.arg)),
+  # a self COPY of a sharded value is a contiguous of every shard
+  (UPat(Ops.COPY, src=(UPat(Ops.UNSHARD, name="multi"),), name="copy"),
+   lambda multi,copy: passthrough_multi(copy, multi) if copy.is_self_copy else copy_multi(multi, copy.arg)),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.UNSHARD, name="multi"),), name="red"),
     lambda multi,red: multi.src[0].allreduce(*red.arg).unshard(multi.arg, multi.src[1:])),
 
@@ -299,7 +305,7 @@ multi_pm = PatternMatcher([
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
     UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg) if not root.has_unbound_outputs else None),
-  (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
+  (UPat((Ops.CAST, Ops.BITCAST, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), passthrough_multi),
   # STORE of a sharded value into an unsharded dest (e.g. a fragment into a full output tile)
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat(Ops.UNSHARD, name="multi"))), store_value_multi),
