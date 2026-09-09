@@ -6,7 +6,7 @@ from tinygrad.helpers import DEBUG, getenv
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None=None) -> Tensor:
   dtype = dtype or ref.dtype
@@ -200,22 +200,35 @@ def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
 @functools.cache
-def custom_v_amax(out:UOp, x:UOp, *, final:bool=False):
-  out, x = out.flatten(), x.flatten()
-  groups = out.numel()
-  assert x.numel() % groups == 0
-  g, r = UOp.range(groups, 0), UOp.range(x.numel()//groups, 1, AxisType.REDUCE)
-  amax = x[g*(x.numel()//groups)+r].abs().reduce(r, arg=Ops.MAX)
-  value = (amax.cast(dtypes.float)+1e-8)/448.0 if final else amax
-  return out[g].store(value).end(g).sink(arg=KernelInfo(name="fa_v_descale" if final else "fa_v_amax_partial"))
+def custom_fp8_v_prep(*args:UOp, arch:str, partial:bool, groups:int, tile:int):
+  size = args[-1].numel() if partial else args[2].numel()
+  threads = 256
+  assert arch == "gfx950" and size % (groups*threads*8) == 0 and size % tile == 0
+  code = (pathlib.Path(__file__).parent / "fa_v_prep.cpp").read_text()
+  options = [f"-I{pathlib.Path(__file__).parent / 'include'}", "-std=c++20", "-DKITTENS_CDNA4",
+             "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffp-contract=off", f"-DSIZE={size}", f"-DGROUPS={groups}",
+             f"-DTHREADS={threads}", f"-DTILE={tile}", f"-DPARTIAL={int(partial)}"]
+  lib = HIPCCCompiler(arch, options).compile_cached(code)
+  name = "fa_v_amax_partial" if partial else "fa_v_quantize"
+  sink = UOp.sink(*[x.base for x in args], UOp.special(threads, "lidx0"),
+                  UOp.special(groups if partial else size//tile, "gidx0"), arg=KernelInfo(name=name))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
-def compute_v_descale(x:Tensor) -> Tensor:
+def quantize_v_fp8(x:Tensor) -> tuple[Tensor, Tensor]:
+  # Integer maxima of absolute BF16 encodings are exact for finite V. The second
+  # kernel reduces these small partials in each workgroup while quantizing V.
   size = math.prod(x.uop.shard_shape)
-  partials = min(8192, size)
-  partial = Tensor.invalids(partials, dtype=x.dtype, device=x.device)
-  partial = Tensor.custom_kernel(partial, x.detach(), fxn=custom_v_amax)[0]
+  assert x.dtype == dtypes.bfloat16 and size >= 2048 and size % 2048 == 0
+  groups, tile = min(256, size//2048), min(4096, size)
+  assert size % (groups*2048) == 0
+  arch = Device[x.device[0] if isinstance(x.device, tuple) else x.device].renderer.target.arch
+  partial = Tensor.invalids(groups, dtype=dtypes.uint32, device=x.device)
+  fxn = functools.partial(custom_fp8_v_prep, arch=arch, groups=groups, tile=tile)
+  partial = Tensor.custom_kernel(partial, x.detach(), fxn=functools.partial(fxn, partial=True))[0]
+  out = _sharded_empty(x.shape, x, axis=None, dtype=dtypes.fp8e4m3)
   scale = Tensor.invalids(1, dtype=dtypes.float32, device=x.device)
-  return Tensor.custom_kernel(scale, partial, fxn=functools.partial(custom_v_amax, final=True))[0]
+  out, scale = Tensor.custom_kernel(out, scale, x.detach(), partial, fxn=functools.partial(fxn, partial=False))[:2]
+  return out, scale
 
 @functools.cache
 def custom_fp8_fa_backward_inputs(q:UOp, k:UOp, v:UOp, q8:UOp, k8:UOp, v8:UOp, v_scale:UOp,
@@ -377,11 +390,9 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         assert amax_state is not None and amax_out is not None, "delayed FP8 scaling requires both amax state and output"
         from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
         return quantize_fp8_delayed(x, amax_state, amax_out)
-      if native_v:
-        descale = compute_v_descale(x)
-      else:
-        amax = (local_abs_max(x) if isinstance(x.device, tuple) else x.abs().max()).detach().float()
-        descale = ((amax + 1e-8) / FP8_MAX).reshape(1).contiguous()
+      if native_v: return quantize_v_fp8(x)
+      amax = (local_abs_max(x) if isinstance(x.device, tuple) else x.abs().max()).detach().float()
+      descale = ((amax + 1e-8) / FP8_MAX).reshape(1).contiguous()
       scale = descale.reciprocal()
       # The packed buffers are auxiliary, non-differentiable inputs to FA. Its
       # custom backward returns physical-unit gradients directly to xq/xk.

@@ -7,7 +7,7 @@ from tinygrad.helpers import getenv
 from tinygrad.function import function
 from tinygrad.uop.ops import Ops
 from extra.models.llama import precompute_freqs_cis
-from extra.thunder.amd.fa import compute_v_descale, custom_fp8_fa_backward_inputs, flash_attention, fused_qkv_rope
+from extra.thunder.amd.fa import quantize_v_fp8, custom_fp8_fa_backward_inputs, flash_attention, fused_qkv_rope
 
 class TestASMFP8FA(unittest.TestCase):
   def test_v_descale(self):
@@ -19,13 +19,24 @@ class TestASMFP8FA(unittest.TestCase):
       data = np.zeros((2, 32768), dtype=np.float32)
       data[0, 2047], data[1, 8192] = -maxima[0], maxima[1]
       x = Tensor(data).bfloat16().shard(devices, axis=0).realize()
-      actual = compute_v_descale(x)
+      quantized, actual = quantize_v_fp8(x)
       expected = ((local_abs_max(x).float()+1e-8)/448.).reshape(1).contiguous()
       # Multiplication by sharded ones exposes each device's local scale to numpy.
       ones = Tensor.ones(2, 1).shard(devices, axis=0)
       np.testing.assert_array_equal((ones*actual).numpy(), (ones*expected).numpy())
       def quantize(scale): return (x*scale.reciprocal()).clamp(-448,448).cast(dtypes.fp8e4m3).float().numpy()
-      np.testing.assert_array_equal(quantize(actual), quantize(expected))
+      np.testing.assert_array_equal(quantized.float().numpy(), quantize(expected))
+
+  def test_v_quantization_finite_bf16_patterns(self):
+    if Device[Device.DEFAULT].renderer.target.arch != 'gfx950': self.skipTest('requires gfx950')
+    bits = np.arange(65536, dtype=np.uint16)
+    bits[(bits & 0x7f80) == 0x7f80] = 0  # all finite BF16 encodings, including signed zero and subnormals
+    x = Tensor(bits).bitcast(dtypes.bfloat16).realize()
+    actual, scale = quantize_v_fp8(x)
+    expected_scale = ((x.abs().max().float()+1e-8)/448.).reshape(1).contiguous()
+    expected = (x*expected_scale.reciprocal()).clamp(-448,448).cast(dtypes.fp8e4m3)
+    np.testing.assert_array_equal(scale.numpy(), expected_scale.numpy())
+    np.testing.assert_array_equal(actual.bitcast(dtypes.uint8).numpy(), expected.bitcast(dtypes.uint8).numpy())
 
   def test_backward_input_conversion(self):
     if Device[Device.DEFAULT].renderer.target.arch != 'gfx950': self.skipTest('requires gfx950')
@@ -99,7 +110,7 @@ class TestASMFP8FA(unittest.TestCase):
     self.assertEqual(counts["asm_fa_fwd_fp8_causal_2_8192_32_8_128"],1)
     self.assertEqual(counts["asm_fa_bwd_main_fp8_matched_causal_2_8192_32_8_128"],1)
     self.assertEqual(counts["fa_v_amax_partial"],1)
-    self.assertEqual(counts["fa_v_descale"],1)
+    self.assertEqual(counts["fa_v_quantize"],1)
     rope = calls["fused_qkv_rope_forward"].src[0]
     self.assertEqual({u.arg.slot for u in rope.toposort() if u.op is Ops.PARAM}, set(range(5)))
     # The BF16 autograd argument must reuse RoPE's V buffer, with no identity copy.
