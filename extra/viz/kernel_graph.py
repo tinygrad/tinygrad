@@ -37,6 +37,7 @@ if __name__ == "__main__":
       while ss:
         if (s:=ss.pop()) in seen: continue
         seen.add(s)
+        if str(s) not in graph: continue
         if get_node(graph, s)["label"].startswith("INDEX"):
           idx_str = get_node(graph, s)["label"].splitlines()
           src_str = ["SRC"]+get_node(graph, get_node(graph, s)["src"][0][1])["label"].splitlines()[1:]

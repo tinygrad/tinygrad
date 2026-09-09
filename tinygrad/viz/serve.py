@@ -116,7 +116,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
   excluded: set[UOp] = set()
-  for u in (toposort:=x.toposort()):
+  for u in (toposort:=x.toposort(enter_calls=False if getenv("KERNEL_GRAPH") else True)):
     # always exclude CONST
     if u.op is Ops.CONST and u is not x: excluded.add(u)
     if u.op is Ops.STACK and len(u.src) == 0: excluded.add(u)
