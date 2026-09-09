@@ -2,8 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
 from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
-import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, ctypes
-from tinygrad.helpers import WIN, mv_address, from_mv, to_mv, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
+import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap
+from tinygrad.helpers import WIN, mv_address, to_mv, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
 from tinygrad.dtype import DType, _to_np_dtype
@@ -200,7 +200,8 @@ class Buffer:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, self.base, self.offset, self.is_allocated())
     if self.device == "NPY": # the array pickles itself, no staging copy
       import numpy as np
-      return self.__class__, (self.device, self.size, self.dtype, np.frombuffer(self.as_memoryview(allow_zero_copy=True), _to_np_dtype(self.dtype)), self.options, None)
+      arr = np.frombuffer(self.as_memoryview(allow_zero_copy=True), _to_np_dtype(self.dtype))
+      return self.__class__, (self.device, self.size, self.dtype, arr, self.options, None)
     if self.is_allocated():
       buf = pickle.PickleBuffer(self.as_memoryview()) if protocol >= 5 else bytearray(self.as_memoryview())
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf)
@@ -299,9 +300,9 @@ class HostAllocator(Allocator):
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
     return BufferStorage(addr, buf, MMIOInterface(addr, size, fmt='B'))
 
-  def _copyin(self, dest:int, src:memoryview):
+  def _copyin(self, dest:int, src:memoryview): # a slice copy takes readonly sources, memmove doesn't
     self.dev.synchronize()
-    ctypes.memmove(dest, from_mv(src), len(src))
+    to_mv(dest, src.nbytes)[:] = src.cast('B')
   def _copyout(self, dest:memoryview, src:int):
     self.dev.synchronize()
     dest[:] = to_mv(src, dest.nbytes)[:]
