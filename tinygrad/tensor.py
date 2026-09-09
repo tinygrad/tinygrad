@@ -546,7 +546,7 @@ class Tensor(RandMixin):
     """
     Moves the tensor to the given device.
     """
-    if self.uop.device is None: return self
+    if self.uop.device is None: raise RuntimeError(f"can't copy from a tensor with device None to {device}. materialize it first with .clone(device)")
     if (device:=canonicalize_device(device)) == self.device: return self
     # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
     if isinstance(device, str) and device.startswith("DISK"): ret = Tensor(self.uop.clone(device))

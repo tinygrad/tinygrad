@@ -158,7 +158,7 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
       if isinstance(v.device, tuple):
         if isinstance(state_dict[k].device, tuple): v.replace(state_dict[k])
         else: v.replace(state_dict[k].shard(v.device, v.uop.axis))
-      else: v.replace(state_dict[k].to(v.device))
+      else: v.replace(state_dict[k] if v.device is None else state_dict[k].to(v.device))
       if realize: v.realize()
       if consume: del state_dict[k]
       ret.append(v)

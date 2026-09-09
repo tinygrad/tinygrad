@@ -158,7 +158,7 @@ class TestMultiScalarALU(unittest.TestCase):
   def test_multi_times_replicated_scalar(self):
     devices = ("NULL:0", "NULL:1")
     x = Tensor.ones(4).contiguous().shard(devices, axis=0)
-    s = Tensor(2.0).to(devices)
+    s = Tensor(2.0).clone(devices)
     result = x * s
     self.assertEqual(result.shape, (4,))
     self.assertEqual(result.uop.axis, 0)
@@ -166,7 +166,7 @@ class TestMultiScalarALU(unittest.TestCase):
   def test_multi_add_replicated_scalar(self):
     devices = ("NULL:0", "NULL:1")
     x = Tensor.ones(4).contiguous().shard(devices, axis=0)
-    s = Tensor(1.0).to(devices)
+    s = Tensor(1.0).clone(devices)
     result = x + s
     self.assertEqual(result.shape, (4,))
     self.assertEqual(result.uop.axis, 0)

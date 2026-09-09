@@ -180,6 +180,13 @@ class TestTensorDevice(unittest.TestCase):
   def test_create_from_single_device_tuple(self):
     (Tensor([1.0], device=(Device.DEFAULT,)) + Tensor([2.0])).realize()
 
+  def test_to_from_none_device_raises(self):
+    self.assertIsNone(Tensor.arange(10).device)
+    for f in (Tensor.arange(10).to, Tensor.arange(10).to_):
+      with self.assertRaisesRegex(RuntimeError, "can't copy from a tensor with device None"): f("CPU")
+    # materializing first with clone makes the copy work
+    np.testing.assert_equal(Tensor.arange(10).clone("CPU").to("PYTHON").numpy(), np.arange(10))
+
 class TestTensorPad(unittest.TestCase):
   # padding int tensor with float-only value (like -inf) must promote dtype to fit value
   def test_pad_int_with_neg_inf(self):
