@@ -166,7 +166,7 @@ class Buffer:
       storage = replace(self.base.get_storage(), buf=self.allocator._offset(self.base._buf, self.nbytes, self.offset), maps={})
     elif opaque is not None:
       self.options = replace(self.options, nolru=True)
-      if is_numpy_ndarray(opaque): # readonly arrays stay in place, mv_address can't take their address
+      if is_numpy_ndarray(opaque):
         if not opaque.flags.c_contiguous: opaque = opaque.copy(order='C')
         opaque = BufferStorage(addr:=opaque.ctypes.data, memoryview(opaque), MMIOInterface(addr, self.nbytes))
       elif isinstance(opaque, memoryview):
@@ -199,7 +199,7 @@ class Buffer:
     buf:bytearray|pickle.PickleBuffer|None = None
     if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY": # the array pickles itself, no staging copy
+    if self.device == "NPY":
       import numpy as np
       arr = np.frombuffer(self.as_memoryview(allow_zero_copy=True), _to_np_dtype(self.dtype))
       return self.__class__, (self.device, self.size, self.dtype, arr, self.options, None)
