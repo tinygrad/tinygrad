@@ -33,12 +33,9 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
   def test_copy_padded_const(self):
-    # Tensor.to raises on deviceless tensors, the copy of a deviceless const is built at the UOp level
-    t = Tensor(Tensor.ones(4, buffer=False, dtype=dtypes.float).pad(((1, 1),)).uop.copy_to_device("CPU:1"))
-    schedule = t.schedule_linear()
+    schedule = Tensor.ones(4, buffer=False).pad(((1, 1),)).clone("CPU:1").schedule_linear()
     assert not any(si.src[0].op is Ops.COPY for si in schedule.src), "const copy should be folded"
-    t = Tensor(Tensor.ones(4, buffer=False, dtype=dtypes.float).pad(((1, 1),)).uop.copy_to_device("CPU:1"))
-    np.testing.assert_equal(t.numpy(), [0, 1, 1, 1, 1, 0])
+    np.testing.assert_equal(Tensor.ones(4, buffer=False).pad(((1, 1),)).clone("CPU:1").numpy(), [0, 1, 1, 1, 1, 0])
 
   def test_cast_padded(self):
     # NOTE: it's always 1 kernel when calling .numpy, limitation of _check_ast_count
