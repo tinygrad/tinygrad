@@ -82,9 +82,8 @@ class CLAllocator(Allocator['CLDevice']):
   @suppress_finalizing
   def _free(self, storage:BufferStorage, options:BufferSpec): check(cl.clReleaseMemObject(storage.buf))
   def _copyin(self, dest:cl.cl_mem, src:memoryview):
-    if mv_address(src) % 16: src = memoryview(bytearray(src))
+    self.dev.pending_copyin.append(src:=memoryview(bytearray(src))) # NOTE: these can't be freed until the GPU actually executes this command
     check(cl.clEnqueueWriteBuffer(self.dev.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
-    self.dev.pending_copyin.append(src)    # NOTE: these can't be freed until the GPU actually executes this command
   def _copyout(self, dest:memoryview, src:cl.cl_mem):
     check(cl.clEnqueueReadBuffer(self.dev.queue, src, False, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))
     self.dev.synchronize()
