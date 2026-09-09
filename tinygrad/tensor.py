@@ -444,6 +444,11 @@ class Tensor(RandMixin):
     if isinstance(self.device, tuple) and x.uop.device is not None and self.uop.axis != x.uop.axis:
       raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
 
+    # a stored creation value owns its storage at construction: read the transfer's own destination, not the COPY.
+    # inside @function bodies the COPY tag merge handles this instead (a clone would be an implicit buffer)
+    from tinygrad.function import _function
+    if not is_disk and _function.depth == 0 and x.uop.op is Ops.COPY and is_creation_device(x.uop.src[0]): x.uop = x.uop.clone()
+
     # TODO: this is a hack for writing to DISK. remove with working assign
     if is_disk:
       (b:=self._buffer()).copy_from(Buffer("PYTHON", b.size, b.dtype, opaque=x._data()))
