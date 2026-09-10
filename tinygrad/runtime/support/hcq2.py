@@ -233,7 +233,9 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
     if (r:=pm.rewrite(sink)) is not None: sink = r
   return sink.call(*(ctx.slots.values() if ctx.profile else ()), aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns), estimates=estimates))
 
-def _select_queue(l:UOp) -> list[str]:
+@rewrite_group(new_ctx=False)
+def sched_batches(l:UOp, profile:bool) -> UOp:
+  devs = [() if (d:=get_enqueue_devs(c)) is None else tuple(Device.canonicalize(x) for x in to_tuple(d)) for c in l.src]
   peers = sorted({Device.canonicalize(d) for c in l.src if c.src[0].op is Ops.COPY
                   for b in get_call_arg_uops(c) for d in to_tuple(b.device) if d.split(":")[0] == "AMD"})
   num_queues = max(1, getenv("HCQ_NUM_SDMA", min(len(peers), 8) if ALL2ALL >= 1 else 1))
@@ -241,13 +243,8 @@ def _select_queue(l:UOp) -> list[str]:
   for i, c in enumerate(l.src):
     if c.src[0].op is Ops.COPY and all(b.device in peers for b in get_call_arg_uops(c)):
       queues[i] = f"COPY:{(peers.index(c.src[1].device) - peers.index(c.src[2].device) - 1) % len(peers) % num_queues}"
-  return queues
-
-@rewrite_group(new_ctx=False)
-def sched_batches(l:UOp, profile:bool) -> UOp:
-  devs = [() if (d:=get_enqueue_devs(c)) is None else tuple(Device.canonicalize(x) for x in to_tuple(d)) for c in l.src]
   srcs:list[UOp] = []
-  for hcq, grp in itertools.groupby(zip(l.src, devs, _select_queue(l)), key=lambda e: bool(e[1])):
+  for hcq, grp in itertools.groupby(zip(l.src, devs, queues), key=lambda e: bool(e[1])):
     srcs += [_finalize_batch(BatchCtx(list(grp), profile))] if hcq else [c for c, _, _ in grp]
   return l.replace(src=tuple(srcs))
 
