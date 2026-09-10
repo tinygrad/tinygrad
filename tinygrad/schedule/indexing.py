@@ -34,10 +34,6 @@ def realize_srcs(ctx:IndexingContext, rb:UOp) -> None:
 def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
   if dest.base in src.toposort(enter_calls=False): ctx.realize_map[src] = None
-  # the source of a cross device STORE is materialized on its own device first: the STORE itself is the copy
-  # NOTE: buffer identity views (shard views with max_shape != shape) must be materialized too, copies can't read them
-  if src.device is not None and dest.device != src.device:
-    ctx.realize_map[src] = ctx.non_removable[src] = None
 
 def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
   for s in c.src[1:]:

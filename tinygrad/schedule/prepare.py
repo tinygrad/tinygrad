@@ -137,16 +137,37 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
-def copy_to_anon_store(x:UOp, copy:UOp):
+def defer_materialize(ctx:dict, x:UOp, device) -> UOp:
+  # materialize x into a call-local buffer (deduped): reads of the same value share one materialization
+  # the store that materializes x is itself registered, so it is never re-rewritten into a self-referencing form
+  if x not in ctx:
+    buf = UOp.new_buffer(device, prod(x.max_shape), x.dtype).reshape(x.max_shape)
+    st = buf.store(x)
+    ctx.setdefault('created', set()).add(st)
+    ctx[x] = buf.after(st)
+  return ctx[x]
+
+def is_created_store(ctx:dict, root:UOp) -> bool: return root in ctx.get('created', ())
+
+def copy_to_anon_store(ctx:dict, x:UOp, copy:UOp):
   if copy.device is None: return None  # a COPY without a device is virtual, it can't back a store
-  # the buffer created here is inside the call and is not persisted
-  # a same-device copy materializes into it (a kernel), a cross-device STORE into it IS the copy
+  # a same-device copy of an already materialized value is a no-op; a same-device copy of a copy is the copy
+  if x.device == copy.device and (x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY): return x
+  # a same-device copy materializes (deduped), a cross-device copy stores into its own fresh buffer: the STORE itself is the copy
   if x.device != copy.device:
     # copies must read from a whole buffer, not a view: materialize anything lacking buffer identity (SDMA can't do offset copies)
     x = x.pad_to(x.max_shape)
     if not x.has_buffer_identity(after_ok=True): x = x.contiguous()
-  buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
-  return buf.after(buf.store(x)).shrink_to(copy.shape)
+    buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
+    ctx.setdefault('created', set()).add(st := buf.store(x))
+    return buf.after(st).shrink_to(copy.shape)
+  return defer_materialize(ctx, x, copy.device).shrink_to(copy.shape)
+
+def materialize_cross_device_src(ctx:dict, root:UOp, dest:UOp, src:UOp):
+  # the src of a cross device STORE is materialized on its own device first: the STORE itself is the copy
+  if is_created_store(ctx, root): return None
+  if src.device is None or dest.device == src.device or src.has_buffer_identity(after_ok=True): return None
+  return dest.store(defer_materialize(ctx, src, src.device).shrink_to(src.shape))
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls with RETURNED inputs (inline the body)
@@ -184,6 +205,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # ** store rules **
 
+  # materialize the src of a cross device STORE on its own device first: the STORE itself is the copy
+  (UPat(Ops.STORE, src=(UPat(name="dest"), UPat(name="src")), name="root"), materialize_cross_device_src),
+
   # fix store hazard (dest is in used in src) by adding contiguous: TestAssign.test_post_flipped_assignment
   (UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
 
@@ -217,5 +241,5 @@ def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
-  tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
+  tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, ctx={}, name="earliest rewrites")
   return tsink
