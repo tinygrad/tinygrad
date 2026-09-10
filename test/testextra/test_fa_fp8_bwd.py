@@ -40,6 +40,16 @@ def fp8_backward_reference(q8, k8, v8, v_descale, do, out, lse, do_descale, p_de
   return dq.transpose(1,2), reduce_gqa(dk), reduce_gqa(dv), p.abs().max(), ds.abs().max()
 
 class TestFP8BackwardReference(unittest.TestCase):
+  def test_backward_init(self):
+    from extra.thunder.amd.fa_fp8_bwd import custom_fp8_backward_init
+    rng = np.random.default_rng(28200)
+    do = Tensor(rng.standard_normal((2,64,4,128)).astype(np.float32)).bfloat16().realize()
+    for dtype in (dtypes.bfloat16,dtypes.float32):
+      dq,partial = Tensor.custom_kernel(Tensor.full(do.shape,17.,dtype=dtype).realize(),Tensor.empty(2,512),do,
+                                        fxn=custom_fp8_backward_init)[:2]
+      np.testing.assert_array_equal(dq.float().numpy(),np.zeros(do.shape))
+      np.testing.assert_array_equal(partial.numpy(),np.abs(do.float().numpy()).reshape(2,512,-1).max(-1))
+
   def test_fused_backward_prep(self):
     from extra.thunder.amd.fa_fp8_bwd import custom_fp8_backward_prep
     rng = np.random.default_rng(28200)

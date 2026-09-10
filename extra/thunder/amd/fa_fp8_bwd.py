@@ -25,6 +25,17 @@ def unpack_dq(dq:Tensor):
   return dq.reshape(B,H,N//16,8,2,4,16,2).permute(0,2,5,4,7,1,3,6).reshape(B,N,H,D)
 
 @functools.cache
+def custom_fp8_backward_init(dq:UOp, partial:UOp, do:UOp):
+  size, groups = do.numel(), partial.numel()
+  assert size % groups == 0
+  g = UOp.range(groups, 0)
+  r = UOp.range(size//groups, 1, AxisType.REDUCE)
+  idx = g*(size//groups)+r
+  do = do.after(dq.flatten()[idx].store(0.))
+  value = do.flatten()[idx].cast(dtypes.float).abs().reduce(r,arg=Ops.MAX)
+  return partial.flatten()[g].store(value).end(g).sink(arg=KernelInfo("fa_fp8_bwd_init"))
+
+@functools.cache
 def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp, *reset_amax:UOp):
   B,N,H,D = do.shape
   row = UOp.range(B*N*H, 0)
@@ -56,7 +67,12 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   H_KV = k8.shape[2]
   assert k8.shape == v8.shape == (B,N,H_KV,D) and do.shape == out.shape == q8.shape
   def alloc(shape,dtype=dtypes.float32): return alloc_like(shape,dtype,q8.device,axis)
-  do_scale = ((local_abs_max(do.float())+1e-8)/57344.).reshape(1)
+  output_dtype = dtypes.bfloat16 if native else dtypes.float32
+  dq = alloc(q8.shape,output_dtype)
+  # Reuse the compulsory dQ initialization pass to scan dO for its current scale.
+  partial = alloc((B,min(512,N*H*D)))
+  dq,partial = Tensor.custom_kernel(dq,partial,do,fxn=custom_fp8_backward_init)[:2]
+  do_scale = ((local_abs_max(partial)+1e-8)/57344.).reshape(1)
   # Before the first amax observation, bound dS from the current dO and V
   # ranges. A fixed unit amax would underflow small training gradients.
   ds_descale = (ds_descale > 0).where(ds_descale, 4*D*do_scale*v_descale*448.)
@@ -68,8 +84,6 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
                              *((next_amax,) if reset_next_amax else ()),fxn=custom_fp8_backward_prep)
   do8, delta = prep[:2]
   if reset_next_amax: next_amax = prep[5]
-  output_dtype = dtypes.bfloat16 if native else dtypes.float32
-  dq = alloc(q8.shape,output_dtype).zeros_like()
   dk,dv = [alloc(q8.shape,output_dtype) for _ in range(2)]
   amax = alloc((B,H,N//64,2))
   dev = q8.device[0] if isinstance(q8.device,tuple) else q8.device
