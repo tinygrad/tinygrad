@@ -91,7 +91,12 @@ class TestHipKittensFP8Backward(unittest.TestCase):
 
   def test_small_gradient_bootstrap(self): self.run_case(128,4,2,bootstrap=True)
 
-  def run_case(self,N,H,Hkv,jit=False,delayed=False,dp=False,bootstrap=False):
+  def test_native_bf16_accumulation(self):
+    for N in (64,128,256):
+      with self.subTest(N=N): self.run_case(N,4,2,native=True)
+    self.run_case(256,4,2,native=True,bootstrap=True)
+
+  def run_case(self,N,H,Hkv,jit=False,delayed=False,dp=False,bootstrap=False,native=False):
     if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("requires gfx950")
     from extra.thunder.amd.fa_fp8_bwd import fp8_backward
     rng = np.random.default_rng(17)
@@ -118,7 +123,7 @@ class TestHipKittensFP8Backward(unittest.TestCase):
     if dp:
       devices = (Device.DEFAULT,f"{Device.DEFAULT.split(':')[0]}:1")
       inputs = [x.shard(devices,axis=0 if i in (0,1,2,4,5,6) else None).contiguous().realize() for i,x in enumerate(inputs)]
-    actual = fp8_backward(*inputs)
+    actual = fp8_backward(*inputs,native=native)
     Tensor.realize(*actual)
     if dp:
       # Compare each shard with its single-device invocation as well as the
@@ -134,7 +139,14 @@ class TestHipKittensFP8Backward(unittest.TestCase):
     effective_dss = 4*D*dos*vs*448. if bootstrap else dss
     reference = fp8_backward_reference(q,k,v,vs,do,out,lse,dos,ps,effective_dss)
     # Stress cases (dS clipping and tiny gradients) produce sparse rounding outliers.
-    self.assert_gradients(actual[:3],reference[:3],peak_tolerance=0.02 if dp or bootstrap else 0.002)
+    if native:
+      # Packed BF16 atomics round each dQ contribution, as in the ASM BF16 backward.
+      for a,b in zip(actual[:3],reference[:3]):
+        aa,bb = a.float().numpy(),b.numpy()
+        self.assertTrue(np.isfinite(aa).all())
+        self.assertLess(np.linalg.norm(aa-bb)/np.linalg.norm(bb),0.01)
+        self.assertLess(np.max(np.abs(aa-bb))/np.max(np.abs(bb)),0.02)
+    else: self.assert_gradients(actual[:3],reference[:3],peak_tolerance=0.02 if dp or bootstrap else 0.002)
     np.testing.assert_allclose(actual[3].numpy().reshape(-1,2).max(0),[r.item() for r in reference[3:]],rtol=2e-4,atol=1e-6)
     if bootstrap:
       unquantized = fp8_backward_reference(q,k,v,vs,do,out,lse,dos,ps,effective_dss,quantize=False)

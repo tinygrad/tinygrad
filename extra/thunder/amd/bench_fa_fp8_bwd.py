@@ -7,7 +7,7 @@ from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv
 from tinygrad.engine.realize import lower_and_compile, run_linear
 from extra.thunder.amd.fa import flash_attention, custom_asm_fa_backward, custom_asm_fa_backward_shuffle
-from extra.thunder.amd.fa_fp8_bwd import custom_fp8_backward
+from extra.thunder.amd.fa_fp8_bwd import custom_fp8_backward, unpack_dq
 
 def main():
   with Context(DEBUG=0):
@@ -32,7 +32,7 @@ def main():
     delta = (out.float()*(do8.float()*dos)).sum(-1).transpose(1,2).contiguous()
     scales = Tensor.cat(vs.reshape(1),dos,Tensor([1/448]),Tensor([1e-4])).contiguous()
     # Initialize atomic output buffers before the measured backward launch.
-    fp8 = [Tensor.empty(*shape,dtype=dtypes.float32) for _ in range(3)]
+    fp8 = [Tensor.empty(*shape,dtype=dtypes.bfloat16) for _ in range(3)]
     fp8 += [Tensor.empty(B,H,N//64,2,dtype=dtypes.float32),Tensor.zeros(2,dtype=dtypes.float32),
             q8,k8,v8,do8,delta,lse.contiguous(),scales]
     # BF16 reference uses the same rounded operands, with the existing physical gradient scale.
@@ -53,6 +53,7 @@ def main():
   run_linear(fp8_schedule)
 
   with Context(DEBUG=0):
+    fp8[0] = unpack_dq(fp8[0])
     ref_q = Tensor.custom_kernel(Tensor.empty(*shape,dtype=dtypes.bfloat16),bf16[0],
       fxn=functools.partial(custom_asm_fa_backward_shuffle,B=B,N=N,H=H,D=D))[0].realize()
     for name,actual,expected in zip(("dQ","dK","dV"),fp8[:3],(ref_q,*bf16[1:3])):
