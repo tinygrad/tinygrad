@@ -73,7 +73,10 @@ class CPUProgram(Program['CPUDevice']):
     if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.addr), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
 
 class CPUDevice(Compiled):
-  wait_timeout_ms, has_copy_queue = 30000, False
+  wait_timeout_ms = 30000
+
+  @property
+  def has_copy_queue(self) -> bool: return False
 
   def __init__(self, device:str=""):
     super().__init__(device, HostAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], CPUProgram,

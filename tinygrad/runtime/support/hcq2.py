@@ -37,9 +37,8 @@ def get_enqueue_devs(call:UOp) -> Any|None:
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
   devs = min(bufs, key=lambda b: not all_devices_in(b.device, HCQ_DEVS)).device
   if not all_devices_in(devs, HCQ_DEVS): return None
-  dev = Device[to_tuple(devs)[0]]
-  # a device without a copy queue leaves copies to its allocator
-  return devs if call.src[0].op is not Ops.COPY or dev.has_copy_queue else None
+  if call.src[0].op is Ops.COPY and to_tuple(devs)[0].startswith("QCOM"): return None # QCOM is unified memory and uses host copies
+  return devs
 
 def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte offset)
   if v.op in (Ops.BITCAST, Ops.AFTER): return unwrap_view(v.src[0])
@@ -120,15 +119,19 @@ def stage_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if (device:=get_enqueue_devs(call)) is None: return None
   try:
     for b in (dst, src): cast(Buffer, _resolve(b, ctx).buffer).get_buf(device)
-    return None
-  except (RuntimeError, OSError): _staging().get_buf(device)
+  except (RuntimeError, OSError):
+    _staging().get_buf(device)
+    base, it, copies = UOp.from_buffer(_staging()), src.dtype.itemsize, []
+    chunk = (STAGING_SIZE // STAGING_SLOTS) // it
+    for i, off in enumerate(range(0, src.max_numel(), chunk)):
+      stage = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it]
+      copies += [src[off:off+n].copy_to_device("CPU").call(stage, src[off:off+n]), stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
+    return UOp(Ops.LINEAR, src=tuple(copies))
 
-  base, it, copies = UOp.from_buffer(_staging()), src.dtype.itemsize, []
-  chunk = (STAGING_SIZE // STAGING_SLOTS) // it
-  for i, off in enumerate(range(0, src.max_numel(), chunk)):
-    stage = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it]
-    copies += [src[off:off+n].copy_to_device("CPU").call(stage, src[off:off+n]), stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
-  return UOp(Ops.LINEAR, src=tuple(copies))
+  if Device[device].has_copy_queue: return None
+  out, inp = (UOp.param(i, dtypes.uint8, b.nbytes(), device=device) for i, b in enumerate((dst, src)))
+  ast = out.index(r:=UOp.range(src.nbytes(), 0)).store(inp.index(r).load()).end(r).sink(arg=KernelInfo())
+  return lower_and_compile(call.replace(src=(ast, *call.src[1:])))
 
 pm_insert_copy_staging = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call", allow_any_len=True), stage_copy),

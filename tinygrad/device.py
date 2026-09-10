@@ -220,9 +220,10 @@ class Buffer:
     return None
 
   def as_memoryview(self, allow_zero_copy=False) -> memoryview:
-    if allow_zero_copy and (mv:=self._host_mv()) is not None:
+    if (mv:=self._host_mv()) is not None:
       self.allocator.dev.synchronize()
-      return mv
+      if allow_zero_copy: return mv
+      with cpu_profile(f"{self.device} -> TINY", f"{self.device}:COPY"): return memoryview(bytearray(mv))
     Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv
 
@@ -390,7 +391,6 @@ class Compiled:
   ifaces:list[Callable] = []
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  has_copy_queue:bool = True
   timestamp_divider: float = 1000.0
   wait_timeout_ms: float = 30000.0
   sleep_timeout_ms: int|None = None
@@ -424,6 +424,9 @@ class Compiled:
     # profiling
     self.prog_bufs:dict[UOp, Buffer] = {} # cache bufferized for programs
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
+
+  @property
+  def has_copy_queue(self) -> bool: return True
 
   @property
   def renderer(self) -> Renderer: return self._select_renderer()

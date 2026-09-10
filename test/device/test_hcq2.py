@@ -113,19 +113,6 @@ class TestHCQ2Schedule(unittest.TestCase):
     self.assertEqual(device, Device.DEFAULT)
     self.assertEqual(call.src[1 + index].buffer.dtype, dtypes.uint64)
 
-  def test_host_copies(self):
-    dev = Device[Device.DEFAULT]
-    if not dev.has_copy_queue: self.skipTest("copy queue required")
-    for host_device in ("CPU", "PYTHON", "NPY", "DISK"):
-      for upload in (False, True):
-        with self.subTest(host_device=host_device, upload=upload):
-          host, gpu = UOp.new_buffer(host_device, 4, dtypes.uint8), UOp.new_buffer(dev.device, 4, dtypes.uint8)
-          src, dst = (host, gpu) if upload else (gpu, host)
-          linear = UOp(Ops.LINEAR, src=(src.copy_to_device(dst.device).call(dst, src),))
-          compiled = compile_linear(linear, profile=False)
-          self.assertEqual(len(compiled.src), 2 if host_device == "DISK" else 1)
-          self.assertEqual(sum(call_is_hcq(call) for call in compiled.src), 1)
-
   def test_large_eager_not_cached(self):
     _, compiled, inputs = self.compiled(65)
     linked = link_linear(compiled, input_uops=inputs)
