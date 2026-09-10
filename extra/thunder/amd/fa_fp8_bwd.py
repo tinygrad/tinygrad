@@ -46,7 +46,7 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   ds_descale = (ds_descale > 0).where(ds_descale, 4*D*do_scale*v_descale*448.)
   scales = Tensor.cat(v_descale.reshape(1),do_scale,p_descale.reshape(1),ds_descale.reshape(1)).contiguous()
   output_dtype = dtypes.bfloat16 if native else dtypes.float32
-  dq = alloc(q8.shape,output_dtype).zeros_like().contiguous()
+  dq = alloc(q8.shape,output_dtype).zeros_like()
   dk,dv = [alloc(q8.shape,output_dtype) for _ in range(2)]
   amax = alloc((B,H,N//64,2))
   if next_amax is None: next_amax = Tensor.zeros(2,device=q8.device,dtype=dtypes.float32).contiguous()
