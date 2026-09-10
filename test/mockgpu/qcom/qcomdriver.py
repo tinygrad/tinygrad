@@ -60,9 +60,9 @@ class KGSLFileDesc(VirtFileDesc):
 class QCOMDriver(VirtDriver):
   def __init__(self):
     super().__init__()
-    # MockQCOM's generated HCQ submit calls libc.ioctl through the bridge above.
-    # Keep that path on the CPU runtime by default rather than requiring generic
-    # Python CALL/FFI extensions.  An explicit HCQ_RUNTIME_DEV still wins.
+    # The generated QCOM HCQ submit calls libc.ioctl directly, which the Python
+    # HCQ runtime cannot service (it hangs on the QCOM synchronization op), so
+    # MockQCOM must run on the CPU HCQ runtime.  An explicit env var still wins.
     if "HCQ_RUNTIME_DEV" not in os.environ: hcq2.HCQ_RUNTIME_DEV.value = "CPU"
     self.tracked_files = [
       VirtFile('/dev/kgsl-3d0', functools.partial(KGSLFileDesc, driver=self)),
@@ -77,8 +77,8 @@ class QCOMDriver(VirtDriver):
     self.gpu = QCOMGPU(0)
     self.last_callback_error:BaseException|None = None
 
-    _qcom_drivers.append(self)
-    hcq2.cfunc_buf = _cfunc_buf
+    if self not in _qcom_drivers: _qcom_drivers.append(self)
+    if hcq2.cfunc_buf is not _cfunc_buf: hcq2.cfunc_buf = _cfunc_buf
 
   def _alloc_fd(self):
     fd, self.next_fd = self.next_fd, self.next_fd + 1

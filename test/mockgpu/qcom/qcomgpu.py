@@ -6,6 +6,14 @@ from test.mockgpu.gpu import VirtGPU
 
 _FLOAT_IMMS = (0.0, .5, 1.0, 2.0, math.e, math.pi, 1/math.pi, 1/math.log2(math.e), math.log2(math.e), 1/math.log2(10), math.log2(10), 4.0)
 
+def _float_imm(idx:int) -> float:
+  # The special-immediate source field is 10 bits wide, but only the low
+  # indices are defined.  An index past the table is an unrecognized encoding,
+  # not a value, so report it like the other unsupported encodings instead of
+  # raising a bare IndexError.
+  if idx >= len(_FLOAT_IMMS): raise NotImplementedError(f"A630 float immediate index {idx:#x}")
+  return _FLOAT_IMMS[idx]
+
 def _u32(x:int) -> int: return x & 0xffffffff
 def _s32(x:int) -> int: return (x & 0xffffffff) - (1 << 32) if x & (1 << 31) else x & 0xffffffff
 def _sext(x:int, bits:int) -> int: return x - (1 << bits) if x & (1 << (bits - 1)) else x
@@ -214,7 +222,7 @@ class QCOMGPU(VirtGPU):
       # CONST sources as full 32-bit entries.
       return val
     if kind == 4: return _sext(enc & 0x7ff, 11)
-    if kind == 5: return _f32bits(_FLOAT_IMMS[enc & 0x3ff])
+    if kind == 5: return _f32bits(_float_imm(enc & 0x3ff))
     raise NotImplementedError(f"A630 multisrc encoding {enc:#x}")
 
   @staticmethod
@@ -223,7 +231,7 @@ class QCOMGPU(VirtGPU):
     # Special float immediates denote a value, not a raw 32-bit register word.
     # In half instructions Mesa prints these as h(...); interpreting the low
     # 16 bits of their fp32 representation as fp16 corrupts the value.
-    if kind == 5: return _FLOAT_IMMS[enc & 0x3ff]
+    if kind == 5: return _float_imm(enc & 0x3ff)
     val = QCOMGPU._src(enc, gpr, hreg, consts, full)
     # Freedreno keeps half constant-register values as 32-bit floats for
     # floating-point opcodes.  Half GPR/immediate sources remain fp16.
@@ -247,6 +255,15 @@ class QCOMGPU(VirtGPU):
     # As with CAT2 floating half operands, constant-file values are 32-bit
     # floats while half GPR values contain fp16 bits.
     return _f32(raw) if enc & 0x1000 else _f16(raw)
+
+  @staticmethod
+  def _cat1_src(ins:int, mode:int, sf:list[int], consts:list[int], si:int) -> int:
+    # CAT1 source selection: mode 2 = inline 32-bit immediate, mode 1 = 11-bit
+    # constant-file index (out-of-range reads default to 0, matching IR3's
+    # constant file behavior), otherwise a register from the selected file.
+    if mode == 2: return ins & 0xffffffff
+    if mode == 1: return consts[ins & 0x7ff] if (ins & 0x7ff) < len(consts) else 0
+    return sf[si]
 
   def _run_thread(self, local_id:tuple[int,int,int], group_id:tuple[int,int,int], shared:bytearray, shader:bytes, consts:list[int]):
     gpr, hreg, pc = [0]*256, [0]*256, 0
@@ -297,9 +314,7 @@ class QCOMGPU(VirtGPU):
           continue
         for rpt in range(((ins >> 40) & 3) + 1):
           si = (ins & 0xff) + (rpt if (ins >> 43) & 1 else 0)
-          if mode == 2: src = ins & 0xffffffff
-          elif mode == 1: src = consts[ins & 0x7ff] if (ins & 0x7ff) < len(consts) else 0
-          else: src = sf[si]
+          src = self._cat1_src(ins, mode, sf, consts, si)
           if src_type != dst_type:
             val = _cov_src(src, src_type, dst_type)
             cvt = (_f16bits, _f32bits, lambda x:int(x)&0xffff, lambda x:_u32(int(x)), lambda x:int(x)&0xffff,

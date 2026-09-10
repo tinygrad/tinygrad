@@ -1,4 +1,4 @@
-import math, struct, unittest
+import math, unittest
 
 from tinygrad.runtime.autogen import mesa
 from test.mockgpu.qcom.qcomgpu import (
@@ -164,14 +164,25 @@ class TestQCOMGPUDecode(unittest.TestCase):
     self.assertEqual(QCOMGPU._cat3_f16_src(3, hreg, consts), 1.0)
     self.assertEqual(QCOMGPU._cat3_f16_src(0x1010, hreg, consts), 2.0)
 
-  def test_cat1_constant_out_of_range_defaults_to_zero(self):
-    # CAT1 immediate-constant mode (mode=1) referencing a constant index far
-    # beyond the loaded constant buffer must default to 0 like every other
-    # const read in the emulator instead of raising IndexError.
-    gpu = QCOMGPU(0)
-    ins = (1 << 61) | (1 << 53) | (mesa.TYPE_S32 << 50) | (mesa.TYPE_S32 << 46) | 0x500
-    shader = struct.pack('<Q', ins)
-    list(gpu._run_thread((0, 0, 0), (0, 0, 0), bytearray(32 * 1024), shader, []))
+  def test_cat1_constant_source_bounds(self):
+    # CAT1 immediate-constant mode (mode=1) must default to 0 for an index past
+    # the loaded constant buffer, like every other const read, instead of
+    # raising IndexError.  In-range reads return the constant word.
+    sf = [0] * 256
+    consts = [0] * 64
+    consts[16] = 0xdeadbeef
+    self.assertEqual(QCOMGPU._cat1_src(0x1010, 1, sf, consts, 0), 0xdeadbeef)  # idx 16
+    self.assertEqual(QCOMGPU._cat1_src(0x1010, 1, sf, [], 0), 0)               # idx 16, empty consts
+    self.assertEqual(QCOMGPU._cat1_src(0x0042, 2, sf, [], 0), 0x42)            # inline immediate
+    sf[7] = 0x1234
+    self.assertEqual(QCOMGPU._cat1_src(0x0007, 0, sf, [], 7), 0x1234)          # register
+
+  def test_float_immediate_out_of_range(self):
+    # A 10-bit special-immediate field with an index outside the defined table
+    # is an unrecognized encoding: report it clearly, don't IndexError.
+    gpr, hreg = [0] * 256, [0] * 256
+    with self.assertRaises(NotImplementedError):
+      QCOMGPU._float_src((5 << 11) | 20, gpr, hreg, [], full=False)
 
   def test_address_range_lifecycle(self):
     gpu = QCOMGPU(0)
