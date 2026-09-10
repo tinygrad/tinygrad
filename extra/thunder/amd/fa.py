@@ -265,7 +265,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
         from extra.thunder.amd.fa_fp8_bwd import fp8_backward
         state, nxt = input_tensor(10), input_tensor(11)
         dq, dk, dv, _ = fp8_backward(q8,k8,v8,vs,do.reshape(B,N,H,D),attn.reshape(B,N,H,D),l_vec,
-                                    (state[0]+1e-8)/448.,state[1]/57344.,nxt,native=True)
+                                    (state[0]+1e-8)/448.,state[1]/57344.,nxt,native=True,reset_next_amax=True)
         return None,None,dq.uop,dk.uop,None,None,dv.uop.reshape(ker.src[7].shape),None,None,None,None
       # BF16 scores from the original Q/K do not share the FP8 forward normalizer.
       # exp(score_bf16 - lse_fp8) can exceed one by arbitrarily large factors.

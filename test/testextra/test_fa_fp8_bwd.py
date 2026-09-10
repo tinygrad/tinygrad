@@ -51,10 +51,13 @@ class TestFP8BackwardReference(unittest.TestCase):
       scales = Tensor.cat(Tensor([1.]),scale,Tensor([1.,1.])).contiguous().realize()
       expected_do8 = (do.float()/scale).clamp(-57344,57344).cast(dtypes.fp8e5m2).contiguous().realize()
       expected_delta = (out.float()*(expected_do8.float()*scale)).sum(-1).transpose(1,2).contiguous().realize()
-      actual_do8,actual_delta = Tensor.custom_kernel(Tensor.empty(*shape,dtype=dtypes.fp8e5m2),
-        Tensor.empty(shape[0],shape[2],shape[1]),do,out,scales,fxn=custom_fp8_backward_prep)[:2]
+      next_amax = Tensor([17.,29.]).realize()
+      prepared = Tensor.custom_kernel(Tensor.empty(*shape,dtype=dtypes.fp8e5m2),
+        Tensor.empty(shape[0],shape[2],shape[1]),do,out,scales,next_amax,fxn=custom_fp8_backward_prep)
+      actual_do8,actual_delta = prepared[:2]
       np.testing.assert_array_equal(actual_do8.float().numpy(),expected_do8.float().numpy())
       np.testing.assert_allclose(actual_delta.numpy(),expected_delta.numpy(),rtol=2e-5,atol=max(magnitude*1e-5,1e-15))
+      np.testing.assert_array_equal(prepared[5].numpy(),[0.,0.])
 
   def test_prescaled_derivative_and_gqa(self):
     rng = np.random.default_rng(3)

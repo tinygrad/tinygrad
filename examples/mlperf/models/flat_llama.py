@@ -434,7 +434,8 @@ class FlatTransformer:
 
   def reset_amax(self):
     for st in (self._fp8_next_amax, self._fp8_next_grad_amax):
-      for ts in st.values():
+      for name, ts in st.items():
+        if name == "fa": continue  # FP8 backward prep resets this state before its atomic amax updates.
         for t in ts: t.assign(0)
 
   def update_amax(self):

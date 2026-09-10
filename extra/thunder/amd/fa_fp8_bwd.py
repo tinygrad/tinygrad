@@ -25,7 +25,7 @@ def unpack_dq(dq:Tensor):
   return dq.reshape(B,H,N//16,8,2,4,16,2).permute(0,2,5,4,7,1,3,6).reshape(B,N,H,D)
 
 @functools.cache
-def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp):
+def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp, *reset_amax:UOp):
   B,N,H,D = do.shape
   row = UOp.range(B*N*H, 0)
   d = UOp.range(D, 1, AxisType.REDUCE)
@@ -37,10 +37,13 @@ def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp):
   # E5M2 is the high byte of IEEE half; decoding its bits also preserves rounding on emulated-FP8 backends.
   decoded = (rounded.bitcast(dtypes.uint8).cast(dtypes.uint16)<<8).bitcast(dtypes.half).cast(dtypes.float)
   value = (out[b,n,h,d].cast(dtypes.float)*(decoded*scale)).reduce(d, arg=Ops.ADD)
-  return delta[b,h,n].store(value).end(row).sink(arg=KernelInfo("fa_fp8_bwd_prep"))
+  stores = [delta[b,h,n].store(value)]
+  if reset_amax:
+    stores.extend(reset_amax[0][UOp.const(i).valid(row.eq(0))].store(0.) for i in range(2))
+  return UOp.group(*stores).end(row).sink(arg=KernelInfo("fa_fp8_bwd_prep"))
 
 def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, out:Tensor, lse:Tensor,
-                 p_descale:Tensor, ds_descale:Tensor, next_amax:Tensor|None=None, *, native:bool=False):
+                 p_descale:Tensor, ds_descale:Tensor, next_amax:Tensor|None=None, *, native:bool=False, reset_next_amax:bool=False):
   """FP8 backward with explicit delayed scales; accumulates next amax locally.
 
   Native outputs preserve the expanded BF16 layout consumed by fused RoPE.
@@ -58,13 +61,17 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   # ranges. A fixed unit amax would underflow small training gradients.
   ds_descale = (ds_descale > 0).where(ds_descale, 4*D*do_scale*v_descale*448.)
   scales = Tensor.cat(v_descale.reshape(1),do_scale,p_descale.reshape(1),ds_descale.reshape(1)).contiguous()
-  do8, delta = Tensor.custom_kernel(alloc(q8.shape,dtypes.fp8e5m2),alloc((B,H,N)),do,out,scales,
-                                    fxn=custom_fp8_backward_prep)[:2]
+  if next_amax is None:
+    next_amax = Tensor.empty(2,device=q8.device,dtype=dtypes.float32)
+    reset_next_amax = True
+  prep = Tensor.custom_kernel(alloc(q8.shape,dtypes.fp8e5m2),alloc((B,H,N)),do,out,scales,
+                             *((next_amax,) if reset_next_amax else ()),fxn=custom_fp8_backward_prep)
+  do8, delta = prep[:2]
+  if reset_next_amax: next_amax = prep[5]
   output_dtype = dtypes.bfloat16 if native else dtypes.float32
   dq = alloc(q8.shape,output_dtype).zeros_like()
   dk,dv = [alloc(q8.shape,output_dtype) for _ in range(2)]
   amax = alloc((B,H,N//64,2))
-  if next_amax is None: next_amax = Tensor.zeros(2,device=q8.device,dtype=dtypes.float32).contiguous()
   dev = q8.device[0] if isinstance(q8.device,tuple) else q8.device
   local_b = B//len(q8.device) if axis == 0 else B
   # Native forward already writes LSE in the backward kernel's contiguous B,H,N layout.
