@@ -126,14 +126,14 @@ class TestSQTTProfiler(unittest.TestCase):
       hw_id, wave_size, add = isa.HWREG.HW_REG_WAVE_HW_ID1.value, 32, isa.s_add_co_u32
       barrier = [isa.s_barrier_signal(ssrc0=-1), isa.s_barrier_wait(simm16=-1)]
     else: self.skipTest("tested on CDNA4 and RDNA4")
-    def setprio_kernel(A, high_priority=0):
+    def setprio_kernel(A, priority=0):
       insts = [
-        isa.s_getreg_b32(s[0], hw_id),  # bit 0 of the hardware wave slot
+        isa.s_getreg_b32(s[0], hw_id),
         isa.s_mov_b32(s[1], 0),
         isa.s_setprio(0),
         isa.s_cmp_eq_u32(s[0], 0),
         isa.s_cbranch_scc1(1),
-        isa.s_setprio(high_priority),
+        isa.s_setprio(priority),
         *barrier,
       ]
       # eight waves contend for scalar issue slots
@@ -142,8 +142,8 @@ class TestSQTTProfiler(unittest.TestCase):
       return custom_asm(A, insts, wave_size*8, (96 if self.arch == "gfx950" else 64)*1024)
 
     with Context(SQTT_LIMIT_SE=1), save_sqtt():
-      Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, high_priority=3))[0].realize()
-      Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, high_priority=0))[0].realize()
+      Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, priority=3))[0].realize()
+      Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, priority=0))[0].realize()
 
   def test_multiple_runs(self):
     t = Tensor.empty(1) + 1
