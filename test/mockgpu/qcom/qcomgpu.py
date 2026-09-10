@@ -297,7 +297,9 @@ class QCOMGPU(VirtGPU):
           continue
         for rpt in range(((ins >> 40) & 3) + 1):
           si = (ins & 0xff) + (rpt if (ins >> 43) & 1 else 0)
-          src = (ins & 0xffffffff) if mode == 2 else (consts[ins & 0x7ff] if mode == 1 else sf[si])
+          if mode == 2: src = ins & 0xffffffff
+          elif mode == 1: src = consts[ins & 0x7ff] if (ins & 0x7ff) < len(consts) else 0
+          else: src = sf[si]
           if src_type != dst_type:
             val = _cov_src(src, src_type, dst_type)
             conv = (_f16bits, _f32bits, lambda x:int(x)&0xffff, lambda x:_u32(int(x)), lambda x:int(x)&0xffff,

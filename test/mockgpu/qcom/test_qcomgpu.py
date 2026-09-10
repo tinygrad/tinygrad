@@ -1,4 +1,4 @@
-import math, unittest
+import math, struct, unittest
 
 from tinygrad.runtime.autogen import mesa
 from test.mockgpu.qcom.qcomgpu import (
@@ -163,6 +163,15 @@ class TestQCOMGPUDecode(unittest.TestCase):
     consts[16] = 0x40000000  # 2.0f
     self.assertEqual(QCOMGPU._cat3_f16_src(3, hreg, consts), 1.0)
     self.assertEqual(QCOMGPU._cat3_f16_src(0x1010, hreg, consts), 2.0)
+
+  def test_cat1_constant_out_of_range_defaults_to_zero(self):
+    # CAT1 immediate-constant mode (mode=1) referencing a constant index far
+    # beyond the loaded constant buffer must default to 0 like every other
+    # const read in the emulator instead of raising IndexError.
+    gpu = QCOMGPU(0)
+    ins = (1 << 61) | (1 << 53) | (mesa.TYPE_S32 << 50) | (mesa.TYPE_S32 << 46) | 0x500
+    shader = struct.pack('<Q', ins)
+    list(gpu._run_thread((0, 0, 0), (0, 0, 0), bytearray(32 * 1024), shader, []))
 
   def test_address_range_lifecycle(self):
     gpu = QCOMGPU(0)
