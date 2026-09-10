@@ -434,6 +434,56 @@ class Compiled:
 
   def runtime(self, obj:TinyELF) -> Program[Self]: return unwrap(self.runtime_t)(self, obj)
 
+  @functools.cache
+  def rt_allocator(self, uncached:bool=True, host:bool=False) -> BumpAllocator: return BumpAllocator(self.rtalloc_size)
+
+  @functools.cache
+  def rt_buffer(self, uncached:bool=True, host:bool=False) -> Buffer:
+    spec = BufferSpec(host=host, uncached=uncached, cpu_access=True)
+    return Buffer(self.device, self.rt_allocator(uncached, host).size, dtypes.uint8, options=spec, preallocate=True)
+
+  @functools.cached_property
+  def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]
+    return Buffer(self.device, 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), initial_value=bytes(16))
+
+  def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
+    timeout = timeout if timeout is not None and self.can_recover else None
+    st, done = time.perf_counter(), sig[0]
+    while done < value:
+      if done != (done:=sig[0]): st = time.perf_counter()
+      elif (elapsed:=time.perf_counter() - st) > (timeout or self.wait_timeout_ms) / 1000: raise RuntimeError(f"{self.device} signal wait timed out")
+      elif self.sleep_timeout_ms is not None and elapsed > self.sleep_timeout_ms / 1000: self.on_sleep()
+
+  def synchronize(self, timeout:int|None=None):
+    try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
+    except RuntimeError:
+      self.on_device_hang()
+      raise
+    if self.prof_ents: self.collect_prof()
+
+  def count(self) -> int:
+    """
+    Returns the number of physical accelerators available to the runtime.
+    """
+    return self.iface.count if hasattr(self, 'iface') else 1
+
+  def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
+
+  def on_sleep(self):
+    if (iface:=getattr(self, "iface", None)) is not None and hasattr(iface, "sleep"): iface.sleep(self.sleep_timeout_ms)
+
+  def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
+
+  def finalize(self):
+    """
+    Called at the end of process lifetime to allow the device to finalize.
+    """
+    try: self.synchronize() # try to finalize the device in any case
+    except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
+    if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
+
+  # helpers
+
   def _renderer_name(self, r:type[Renderer]) -> str:
     return r.__name__.upper().removesuffix("RENDERER").removeprefix(devname:=self.device.split(':')[0].upper()) or devname
 
@@ -454,15 +504,7 @@ class Compiled:
     return select_first_inited([functools.partial(iface, self, self.device_id) for iface in filtered],
                                f"No interface for {dev}:{self.device_id} is available")
 
-  def count(self) -> int:
-    """
-    Returns the number of physical accelerators available to the runtime.
-    """
-    return self.iface.count if hasattr(self, 'iface') else 1
-
-  @functools.cached_property
-  def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]
-    return Buffer(self.device, 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), initial_value=bytes(16))
+  # profiling
 
   def collect_prof(self):
     if PROFILE:
@@ -471,8 +513,8 @@ class Compiled:
       Compiled.profile_events.append(ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,(_, e) in enumerate(es)], [], sigs))
     self.prof_ents.clear()
 
-  def _at_profile_finalize(self): # the device clock against the host's: the median offset over a few tiny kernels
-    if "timeline" not in vars(self): return
+  def _at_profile_finalize(self):
+    if self.pm_encode is None: return
     from tinygrad.tensor import Tensor
     tdiffs = []
     for _ in range(5):
@@ -484,45 +526,6 @@ class Compiled:
       gpu = max(buf.host.view(fmt='Q')[e.en_id] for (buf, _), e in ents)/decimal.Decimal(self.timestamp_divider)
       tdiffs.append((st+perf_counter_us())/2 - gpu)
     Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
-
-  @functools.cache
-  def rt_allocator(self, uncached:bool=True, host:bool=False) -> BumpAllocator: return BumpAllocator(self.rtalloc_size)
-
-  @functools.cache
-  def rt_buffer(self, uncached:bool=True, host:bool=False) -> Buffer:
-    spec = BufferSpec(host=host, uncached=uncached, cpu_access=True)
-    return Buffer(self.device, self.rt_allocator(uncached, host).size, dtypes.uint8, options=spec, preallocate=True)
-
-  def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
-    timeout = timeout if timeout is not None and self.can_recover else None
-    st, done = time.perf_counter(), sig[0]
-    while done < value:
-      if done != (done:=sig[0]): st = time.perf_counter()
-      elif (elapsed:=time.perf_counter() - st) > (timeout or self.wait_timeout_ms) / 1000: raise RuntimeError(f"{self.device} signal wait timed out")
-      elif self.sleep_timeout_ms is not None and elapsed > self.sleep_timeout_ms / 1000: self.on_sleep()
-
-  def synchronize(self, timeout:int|None=None):
-    if "timeline" not in vars(self): return
-    try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
-    except RuntimeError:
-      self.on_device_hang()
-      raise
-    if self.prof_ents: self.collect_prof()
-
-  def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
-
-  def on_sleep(self):
-    if (iface:=getattr(self, "iface", None)) is not None and hasattr(iface, "sleep"): iface.sleep(self.sleep_timeout_ms)
-
-  def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
-
-  def finalize(self):
-    """
-    Called at the end of process lifetime to allow the device to finalize.
-    """
-    try: self.synchronize() # try to finalize the device in any case
-    except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
-    if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
 
 if PROFILE:
   @atexit.register
