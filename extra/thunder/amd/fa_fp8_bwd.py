@@ -52,7 +52,8 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   if next_amax is None: next_amax = Tensor.zeros(2,device=q8.device,dtype=dtypes.float32).contiguous()
   dev = q8.device[0] if isinstance(q8.device,tuple) else q8.device
   local_b = B//len(q8.device) if axis == 0 else B
-  ret = Tensor.custom_kernel(dq,dk,dv,amax,next_amax,q8,k8,v8,do8,delta,lse.contiguous(),scales,
+  # Native forward already writes LSE in the backward kernel's contiguous B,H,N layout.
+  ret = Tensor.custom_kernel(dq,dk,dv,amax,next_amax,q8,k8,v8,do8,delta,lse if native else lse.contiguous(),scales,
     fxn=functools.partial(custom_fp8_backward,B=local_b,N=N,H=H,H_KV=H_KV,arch=Device[dev].renderer.target.arch))
   dq,dk,dv = ret[:3]
   dq = unpack_dq(dq)
