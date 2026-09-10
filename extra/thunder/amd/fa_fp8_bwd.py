@@ -2,7 +2,7 @@ import functools, pathlib
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.renderer import Estimates
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.helpers import getenv
 
 @functools.cache
@@ -24,6 +24,21 @@ def unpack_dq(dq:Tensor):
   B,N,H,D = dq.shape
   return dq.reshape(B,H,N//16,8,2,4,16,2).permute(0,2,5,4,7,1,3,6).reshape(B,N,H,D)
 
+@functools.cache
+def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp):
+  B,N,H,D = do.shape
+  row = UOp.range(B*N*H, 0)
+  d = UOp.range(D, 1, AxisType.REDUCE)
+  b,n,h = row//(N*H), row//H%N, row%H
+  scale = scales[1]
+  rounded = (do[b,n,h,d].cast(dtypes.float)/scale).maximum(-57344).minimum(57344).cast(dtypes.fp8e5m2)
+  out = out.after(do8[b,n,h,d].store(rounded))
+  # Delta must use rounded FP8 dO, with descale applied before multiplication by O.
+  # E5M2 is the high byte of IEEE half; decoding its bits also preserves rounding on emulated-FP8 backends.
+  decoded = (rounded.bitcast(dtypes.uint8).cast(dtypes.uint16)<<8).bitcast(dtypes.half).cast(dtypes.float)
+  value = (out[b,n,h,d].cast(dtypes.float)*(decoded*scale)).reduce(d, arg=Ops.ADD)
+  return delta[b,h,n].store(value).end(row).sink(arg=KernelInfo("fa_fp8_bwd_prep"))
+
 def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, out:Tensor, lse:Tensor,
                  p_descale:Tensor, ds_descale:Tensor, next_amax:Tensor|None=None, *, native:bool=False):
   """FP8 backward with explicit delayed scales; accumulates next amax locally.
@@ -43,9 +58,8 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   # ranges. A fixed unit amax would underflow small training gradients.
   ds_descale = (ds_descale > 0).where(ds_descale, 4*D*do_scale*v_descale*448.)
   scales = Tensor.cat(v_descale.reshape(1),do_scale,p_descale.reshape(1),ds_descale.reshape(1)).contiguous()
-  do_scale = scales[1:2]
-  do8 = (do.float()/do_scale).clamp(-57344,57344).cast(dtypes.fp8e5m2).contiguous()
-  delta = (out.float()*(do8.float()*do_scale)).sum(-1).transpose(1,2).contiguous()
+  do8, delta = Tensor.custom_kernel(alloc(q8.shape,dtypes.fp8e5m2),alloc((B,H,N)),do,out,scales,
+                                    fxn=custom_fp8_backward_prep)[:2]
   output_dtype = dtypes.bfloat16 if native else dtypes.float32
   dq = alloc(q8.shape,output_dtype).zeros_like()
   dk,dv = [alloc(q8.shape,output_dtype) for _ in range(2)]
