@@ -1,7 +1,7 @@
 import unittest, contextlib, ctypes, gc, struct, numpy as np
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
-from tinygrad.device import Buffer, Compiled
+from tinygrad.device import Allocator, Buffer, Compiled
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, dedup, partition, unwrap
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
@@ -132,6 +132,13 @@ class TestHCQ2Schedule(unittest.TestCase):
       f = TinyJit(lambda a: (a.to(dev.device)+1).to("CPU").realize())
       for i in range(5): self.assertEqual(f(Tensor([i, i+1], device="CPU")).tolist(), [i+1, i+2])
       self.assertEqual({c.kwargs["queue"] for c in submit.call_args_list}, {"COMPUTE:0"})
+
+  def test_copies_without_mapping(self):
+    dev = Device[Device.DEFAULT]
+    gpu = Buffer(dev.device, 4, dtypes.uint8, options=BufferSpec(cpu_access=True), preallocate=True)
+    with patch.object(dev, "has_copy_queue", False), patch.object(type(dev.allocator), "_map", Allocator._map):
+      gpu.copy_from(Buffer("CPU", 4, dtypes.uint8, initial_value=b"abcd"))
+      self.assertEqual(bytes(gpu.as_memoryview()), b"abcd")
 
   def test_large_eager_not_cached(self):
     _, compiled, inputs = self.compiled(65)
