@@ -4,7 +4,7 @@ from tinygrad.helpers import GlobalCounters
 from tinygrad.engine.realize import compile_linear, estimate_uop
 from tinygrad.codegen import to_program
 from tinygrad.renderer import Estimates
-from tinygrad.uop.ops import Ops, UOp, AxisType
+from tinygrad.uop.ops import Ops, UOp, AxisType, KernelInfo
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
