@@ -235,10 +235,6 @@ class Buffer:
   def copy_from(self, src:Buffer) -> Buffer:
     assert self.nbytes == src.nbytes, f"copy size mismatch, {self.nbytes} != {src.nbytes}"
     assert self.is_allocated() and src.is_allocated(), "copy requires allocated buffers"
-    if self.get_storage().host is not None and src.get_storage().host is not None:
-      dst_mv, src_mv = self.as_memoryview(allow_zero_copy=True), src.as_memoryview(allow_zero_copy=True)
-      with cpu_profile(f"{src.device} -> TINY", f"{src.device}:COPY"): dst_mv[:] = src_mv[:]
-      return self
     from tinygrad.engine.realize import run_linear
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self), UOp.from_buffer(src)
