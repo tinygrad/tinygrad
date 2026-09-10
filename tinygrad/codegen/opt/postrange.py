@@ -219,9 +219,6 @@ class Scheduler:
 
           if any(a.arg[-1] is AxisType.REDUCE for a in axes[:2]): raise KernelOptError("tensor core X/Y axes can't be REDUCE")
 
-          # tag the reduceop
-          self.ast = self.ast.substitute({reduceop: reduceop.replace(tag="TC")})
-
           # do optimizations and save the ranges
           try:
             for i,a in enumerate(axes):
@@ -251,7 +248,7 @@ class Scheduler:
 
           if use_tensor_cores != 2:
             # fix the srcs
-            reduceop = get_single_element([x for x in self.ast.toposort() if x.op is Ops.REDUCE and x.tag == "TC"])
+            reduceop = get_single_element([x for x in self.reduceops if axes[2] in UOp.sink(*x.src[1:]).ranges])
             tne = [x.replace(tag=1) for x in ne]
             ret = reduceop.substitute(dict(zip(ne, tne)))
             srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
@@ -291,9 +288,7 @@ class Scheduler:
   @property
   def reduceops(self) -> list[UOp]: return [x for x in self.ast.backward_slice if x.op is Ops.REDUCE]
   @property
-  def reduceop(self) -> UOp|None:
-    if not (red := self.reduceops): return None
-    return UOp(Ops.REDUCE, src=red[0].src, arg=red[0].arg)
+  def reduceop(self) -> UOp|None: return red[0] if (red:=self.reduceops) else None
   @property
   def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.INDEX][::-1]
   @property
