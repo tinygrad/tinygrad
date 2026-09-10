@@ -222,7 +222,8 @@ class Buffer:
   def as_memoryview(self, allow_zero_copy=False) -> memoryview:
     if (mv:=self._host_mv()) is not None:
       self.allocator.dev.synchronize()
-      return mv if allow_zero_copy else memoryview(bytearray(mv))
+      if allow_zero_copy: return mv
+      with cpu_profile(f"{self.device} -> TINY", f"{self.device}:COPY"): return memoryview(bytearray(mv))
     Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv
 
