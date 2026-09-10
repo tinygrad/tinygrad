@@ -55,12 +55,19 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
+# a COPY or an AFTER whose value is materialized by its own store deps (into a fresh buffer) is a materialization boundary:
+# reads past it are already ordered, so store hazards can only exist in the same materialization scope
+def store_hazard_boundary(s:UOp):
+  if s.op is Ops.COPY: return False
+  if s.op is Ops.AFTER: return not any(d.op is Ops.STORE and d.src[0].base is s.src[0].base for d in s.src[1:])
+  return True
+
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.toposort(enter_calls=False): return None
+  if (base:=target.base) not in src.toposort(gate=store_hazard_boundary, enter_calls=False): return None
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
-  for s in src.toposort(gate=lambda s: s.op is not Ops.COPY):
+  for s in src.toposort(gate=store_hazard_boundary):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
     if reaches_base[s] and s.op in unsafe and not (s is target and s.op is Ops.SHRINK): return target.store(src.contiguous())
 
@@ -131,11 +138,13 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
 def copy_to_anon_store(x:UOp, copy:UOp):
-  if copy.is_self_copy: return None  # self copies are contiguous, rangeify realizes them into fresh buffers
-  # the buffer created here is inside the call and is not persisted, like the buffers created for contiguous
-  # copies must read from a whole buffer, not a view: materialize anything lacking buffer identity (SDMA can't do offset copies)
-  x = x.pad_to(x.max_shape)
-  if not x.has_buffer_identity(after_ok=True): x = x.contiguous()
+  if copy.device is None: return None  # a COPY without a device is virtual, it can't back a store
+  # the buffer created here is inside the call and is not persisted
+  # a same-device copy materializes into it (a kernel), a cross-device STORE into it IS the copy
+  if x.device != copy.device:
+    # copies must read from a whole buffer, not a view: materialize anything lacking buffer identity (SDMA can't do offset copies)
+    x = x.pad_to(x.max_shape)
+    if not x.has_buffer_identity(after_ok=True): x = x.contiguous()
   buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
