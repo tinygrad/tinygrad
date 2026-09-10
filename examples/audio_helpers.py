@@ -4,10 +4,10 @@ from tinygrad.dtype import DTypeLike, dtypes
 import math
 
 # rewritten from numpy
-def rfftfreq(n: int, d: float = 1.0, device=None) -> Tensor:
+def rfftfreq(n: int, d: float = 1.0) -> Tensor:
   val = 1.0 / (n * d)
   N = n // 2 + 1
-  results = Tensor.arange(N, device=device)
+  results = Tensor.arange(N)
   return results * val
 
 # just like in librosa

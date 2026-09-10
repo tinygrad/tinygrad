@@ -83,9 +83,5 @@ NV backend supports several interfaces for communicating with devices:
 ## CPU Arch
 The CPU renderers may be additionally configured using the arch component of [the `DEV` environment variable](env_vars.md#dev-variable).
 CPU arch should be specified as a comma-separated list of parameters, and must contain at least two values: the architecture family (ie. x86_64, arm64, or riscv64) and the cpu type (as accepted by `clang`'s `-march`).
-If native is specified as the cpu type, tinygrad (or delegate compiler) will query the host cpu type. Additional comma-separated values may be specified as follows:
-
-* `AMX`: emit Apple silicon AMX instructions
-
-All other additional values are interpreted as cpu feature flags. When a value is preceded by a `-` character, the corresponding feature flag will be disabled, otherwise the flag will be enabled.
+If native is specified as the cpu type, tinygrad (or delegate compiler) will query the host cpu type. Additional comma-separated values are interpreted as cpu feature flags. When a value is preceded by a `-` character, the corresponding feature flag will be disabled, otherwise the flag will be enabled.
 Note that enabled feature flags should not be preceded by a `+`.

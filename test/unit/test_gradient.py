@@ -1,8 +1,8 @@
-import unittest
+import unittest, math
 import numpy as np
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, KernelInfo
+from tinygrad.uop.ops import UOp, KernelInfo, Ops
 
 class TestTensorGradient(unittest.TestCase):
   def test_example(self):
@@ -51,6 +51,10 @@ class TestTensorGradient(unittest.TestCase):
     with self.assertRaises(RuntimeError): x.sum().gradient(x)
     with self.assertRaises(RuntimeError): x.float().sum().gradient(x)
 
+  def test_const_target_raise(self):
+    t = Tensor(2.0)
+    with self.assertRaises(RuntimeError): (t * 2.0).gradient(t)
+
   def test_copy_to_device_gradient(self):
     t = Tensor([1.0, 2, 3]).realize()
     t.to("CPU:1").square().sum().backward()
@@ -98,11 +102,42 @@ class TestTensorGradient(unittest.TestCase):
     x = Tensor.randn(4, 4)
     np.testing.assert_allclose(x.pad(((1,0),(0,0))).gradient(x, gradient=g2)[0].numpy(), np.zeros((4, 4)))
 
+  def test_implicit_broadcast_where_gradient(self):
+    # WHERE with a bare ()-shape branch: the scalar's gradient counts the positions where it is selected
+    cond, x, w = Tensor([True, False, True]), Tensor([1.0, 2.0, 3.0]), Tensor(4.0, dtype=dtypes.float32)
+    dw = Tensor(cond.uop.alu(Ops.WHERE, x.uop, w.uop)).sum().gradient(w)[0]
+    self.assertEqual(dw.shape, ())
+    self.assertEqual(dw.item(), 1.0)
+    dw = Tensor(cond.uop.alu(Ops.WHERE, w.uop, x.uop)).sum().gradient(w)[0]
+    self.assertEqual(dw.item(), 2.0)
+
+  def test_implicit_broadcast_alu_gradient(self):
+    # MUL with a bare ()-shape src, no EXPAND in the graph
+    x, w = Tensor([1.0, 2.0, 3.0]), Tensor(2.0, dtype=dtypes.float32)
+    m = x.uop.alu(Ops.MUL, w.uop)
+    self.assertIs(m.src[1], w.uop)
+    dw = Tensor(m).sum().gradient(w)[0]
+    self.assertEqual(dw.shape, ())
+    self.assertEqual(dw.item(), 6.0)
+
+  def test_implicit_broadcast_intermediate_accumulation(self):
+    # s is used directly and through an implicit broadcast edge, each edge's gradient reduces to s's shape before they sum
+    x, p = Tensor([1.0, 2.0, 3.0]), Tensor(0.5, dtype=dtypes.float32)
+    s = p.sin()
+    z = Tensor(x.uop.alu(Ops.MUL, s.uop)).sum() + s
+    dp = z.gradient(p)[0]
+    self.assertEqual(dp.shape, ())
+    self.assertAlmostEqual(dp.item(), 7*math.cos(0.5), places=5)
+
   def test_bare_const_skipped_by_backward(self):
     Tensor.manual_seed(0)
     w = Tensor(1.0)
     (Tensor.rand(()) + w).backward()
     self.assertIsNone(w.grad)
+
+  def test_max_backward_many_ties(self):
+    t = Tensor.ones(70000, dtype=dtypes.half).contiguous()
+    np.testing.assert_allclose(t.max().gradient(t)[0].sum().numpy(), 1.0, atol=1e-3)
 
 class TestMultiOutputGradient(unittest.TestCase):
   @staticmethod
@@ -130,6 +165,20 @@ class TestMultiOutputGradient(unittest.TestCase):
     (c.sum() + d.sum()).backward()
     np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), rtol=1e-5)
     np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), rtol=1e-5)
+
+  def test_custom_kernel_aliased_output_views_backward(self):
+    def kernel(c:UOp, d:UOp, a:UOp) -> UOp:
+      c, d, a = c.flatten(), d.flatten(), a.flatten()
+      i = UOp.range(2, 0)
+      return UOp.group(c[i].store(a[i] * 2), d[i].store(a[i] * 3)).end(i).sink(arg=KernelInfo(name="aliased_outputs"))
+    def backward(grad_c:UOp, call:UOp): return (None, None, grad_c)
+
+    a = Tensor([1., 2.]).contiguous().realize()
+    a.requires_grad = True
+    out = Tensor.empty(4).contiguous().realize()
+    c, _, _ = Tensor.custom_kernel(out[:2], out[2:], a, fxn=kernel, grad_fxn=backward)
+    c.sum().backward()
+    np.testing.assert_equal(a.grad.numpy(), [1., 1.])
 
   def test_custom_kernel_multi_output_backward_interacting(self):
     a_np, b_np = np.random.randn(4, 4).astype(np.float32), np.random.randn(4, 4).astype(np.float32)

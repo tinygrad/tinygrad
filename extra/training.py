@@ -1,6 +1,6 @@
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import trange
+from tinygrad.helpers import trange, Context
 from tinygrad.engine.jit import TinyJit
 
 
@@ -22,7 +22,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=lambda out,y: ou
 
   if allow_jit: train_step = TinyJit(train_step)
 
-  with Tensor.train():
+  with Context(TRAINING=1):
     losses, accuracies = [], []
     for i in (t := trange(steps, disable=None)):
       samp = np.random.randint(0, X_train.shape[0], size=(BS))
@@ -40,7 +40,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=lambda out,y: ou
 
 def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=False, transform=lambda x: x,
              target_transform=lambda y: y):
-  Tensor.training = False
+  @Context(TRAINING=0)
   def numpy_eval(Y_test, num_classes):
     Y_test_preds_out = np.zeros(list(Y_test.shape)+[num_classes])
     for i in trange((len(Y_test)-1)//BS+1, disable=None):
@@ -55,4 +55,3 @@ def evaluate(model, X_test, Y_test, num_classes=None, BS=128, return_predict=Fal
   acc, Y_test_pred = numpy_eval(Y_test, num_classes)
   print("test set accuracy is %f" % acc)
   return (acc, Y_test_pred) if return_predict else acc
-

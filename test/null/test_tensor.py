@@ -12,15 +12,6 @@ x_init = np.random.randn(1,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
-class TestTrainMode(unittest.TestCase):
-  def test_train_mode(self):
-    assert not Tensor.training
-    @Tensor.train()
-    def f():
-      assert Tensor.training
-    f()
-    assert not Tensor.training
-
 class TestInferenceMode(unittest.TestCase):
   def test_inference(self):
     x = Tensor(x_init)
@@ -66,7 +57,7 @@ class TestIdxUpcast(unittest.TestCase):
       if ast.op is Ops.SINK:
         renderer = Device[si.src[1].buffer.device].renderer
         prg = to_program(ast, renderer)
-        return tuple(prg.src[2].src)
+        return tuple(prg.src[1].src)
 
   def _assert(self, dtype: DType, a: Tensor):
     uops = self._schedule_render(a)
@@ -78,7 +69,7 @@ class TestIdxUpcast(unittest.TestCase):
     if not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)):
       assert idx.op is Ops.INDEX
       idx_val = idx.src[1]
-      self.assertIs(idx_val.dtype, dtype)
+      self.assertFalse(idx_val.overflows(idx_val.dtype))
 
   # use expand to generate kernel that uses large idx
   def do_op_then_assert(self, dtype: DType, dim1, dim2, dim3):
@@ -102,7 +93,7 @@ class TestIdxUpcast(unittest.TestCase):
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "PTX and NIR always converts Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
-    a = Tensor.arange(65535)
+    a = Tensor.arange(65535).clone()
     uops = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in uops)
 
@@ -171,12 +162,19 @@ class TestTensorConstLike(unittest.TestCase):
     t = Tensor.ones(8, 4).shard(devs, axis=0)
     c = t.const_like(5)
     self.assertEqual(c.shape, (8, 4))
-    self.assertEqual(c.device, t.device)
-    self.assertEqual(c.uop.axis, 0)
+    self.assertIsNone(c.device)
+    out = t+c
+    self.assertEqual(out.device, t.device)
+    self.assertEqual(out.uop.axis, 0)
 
   def test_full_like_device_on_multi_raises(self):
     t = Tensor.ones(8, 4).shard(("NULL:0", "NULL:1"), axis=0)
     with self.assertRaises(RuntimeError): t.full_like(5, device="NULL")
+
+class TestTensorShape(unittest.TestCase):
+  def test_float_shape_raises(self):
+    for dim in (2.0, 2.5):
+      with self.subTest(dim=dim), self.assertRaisesRegex(RuntimeError, "shape must be int"): Tensor.ones(dim)
 
 class TestTensorDevice(unittest.TestCase):
   def test_create_from_single_device_tuple(self):
@@ -188,7 +186,7 @@ class TestTensorPad(unittest.TestCase):
     t = Tensor.arange(9).reshape(1, 1, 3, 3)
     self.assertEqual(t.dtype, dtypes.int)
     r = t.pad((1, 2, 0, -1), value=-float('inf'))
-    self.assertEqual(r.dtype, dtypes.float)
+    self.assertEqual(r.dtype, dtypes.weakfloat)
     self.assertEqual(r.shape, (1, 1, 2, 6))
 
 class TestTensorDeviceMismatch(unittest.TestCase):

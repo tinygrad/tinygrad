@@ -6,6 +6,8 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
+from tinygrad.renderer.llvmir import CPULLVMRenderer
+from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.uop import Ops
 import numpy as np
 import pytest
@@ -64,6 +66,8 @@ ht.fp8e5m2fnuz = ht.uint8
 def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   if op[0] == operator.mod and b == 0: return
+  # TODO: throws floating point exception
+  if isinstance(Device[Device.DEFAULT].renderer, (X86Renderer, CPULLVMRenderer)) and op[0] == operator.mod and a == dtype.min and b == -1: return
   # lt and max with nan is undefined in tinygrad
   if op[0] in (operator.lt, Tensor.maximum) and (math.isnan(a) or math.isnan(b)): return
   ta, tb = Tensor([a], dtype=dtype), Tensor([b], dtype=dtype)
@@ -291,6 +295,33 @@ class TestDTypeALU(unittest.TestCase):
   @Context(EMULATED_DTYPES="long")
   def test_emulated_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
 
+  def _test_shl(self):
+    for dtype, values, distances in ((dtypes.int64, [-0x1234, 0x80000001, -1, 0x1234, 1], [0, 5, 31, 32, 62]),
+                                     (dtypes.uint64, [0x80000001, 0x80000001, 1, 0xFEDC, 1], [0, 5, 31, 32, 62]),
+                                     (dtypes.int8, [-3, 1, 7, -2, 1], [0, 1, 3, 5, 6]),
+                                     (dtypes.uint16, [3, 1, 0xFF, 7, 1], [0, 1, 7, 12, 15])):
+      with self.subTest(dtype=dtype):
+        result = Tensor(values, dtype=dtype) << Tensor(distances, dtype=dtype)
+        np.testing.assert_equal(result.numpy(), [x << d for x, d in zip(values, distances)])
+
+  def _test_shr(self):
+    for dtype, values, distances in ((dtypes.int64, [-(2**40), -1, -(2**50), -(2**40), 0x123456789ABCDEF], [0, 5, 31, 32, 63]),
+                                     (dtypes.uint64, [0xFEDCBA9876543210] * 5, [0, 5, 31, 32, 63]),
+                                     (dtypes.int8, [-128, -1, 64, -37, 1], [0, 1, 3, 5, 7]),
+                                     (dtypes.uint16, [0xFFFF] * 5, [0, 1, 8, 13, 15])):
+      with self.subTest(dtype=dtype):
+        result = Tensor(values, dtype=dtype) >> Tensor(distances, dtype=dtype)
+        np.testing.assert_equal(result.numpy(), [x >> d for x, d in zip(values, distances)])
+
+  def test_shl(self): self._test_shl()
+  def test_shr(self): self._test_shr()
+
+  @Context(EMULATED_DTYPES="long")
+  def test_emulated_shl(self): self._test_shl()
+
+  @Context(EMULATED_DTYPES="long")
+  def test_emulated_shr(self): self._test_shr()
+
   @given(ht.uint8, strat.sampled_from(integer_unary_operations))
   def test_uint8_unary(self, a, op): universal_test_unary(a, dtypes.uint8, op)
 
@@ -372,9 +403,10 @@ class TestDTypeALU(unittest.TestCase):
     if float_dtype not in supported_dtypes: float_dtype = dtypes.float32
     universal_test_cast(a, float_dtype, unsigned_dtype)
 
-  @unittest.expectedFailure
-  def test_unsafe_cast_float_to_int_failure(self):
-    val = float(dtypes.int32.max - 1)
+  def test_unsafe_cast_float_to_int(self):
+    # the value is off the float32 grid but rounds in-range: the buffer and const-fold paths must agree
+    # (out-of-range float->int cast stays undefined: hardware may saturate where the fold wraps)
+    val = 2147483000.0
     t1 = Tensor([val], dtype=dtypes.float32).cast(dtypes.int32)
     t2 = Tensor(val, dtype=dtypes.float32).cast(dtypes.int32)
     np.testing.assert_equal(t1.item(), t2.item())

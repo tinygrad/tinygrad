@@ -2,7 +2,7 @@ import math
 from typing import Union
 
 from tinygrad import Tensor, nn, dtypes
-from tinygrad.helpers import prod, argfix, Context
+from tinygrad.helpers import prod, argfix, Context, TRAINING
 from tinygrad.nn.state import get_parameters
 from extra.models.unet import UNetModel
 
@@ -57,7 +57,7 @@ class EmbeddingBert(nn.Embedding):
   def __call__(self, idx:Tensor) -> Tensor:
     if idx.numel() == 0: return Tensor.empty(idx.shape+(self.embed_sz,), dtype=self.weight.dtype, device=self.weight.device)
     arange_shp, weight_shp, big_shp = (1, 1, self.vocab_sz, 1), (1, 1, self.vocab_sz, self.embed_sz), idx.shape+(self.vocab_sz, self.embed_sz,)
-    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, device=self.weight.device).reshape(arange_shp)
+    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz).reshape(arange_shp)
     arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1,)).expand(big_shp), self.weight.cast(dtypes.default_float).reshape(weight_shp).expand(big_shp)
     return (arange == idx).where(vals, 0).sum(2, dtype=vals.dtype)
 
@@ -85,7 +85,7 @@ class FrozenBatchNorm2dRetinaNet(nn.BatchNorm2d):
 
   def __call__(self, x:Tensor) -> Tensor:
     batch_mean, batch_var = super().calc_stats(x.cast(dtypes.float32))
-    if self.track_running_stats and Tensor.training:
+    if self.track_running_stats and TRAINING:
       self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach().cast(self.running_mean.dtype))
       self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * x.numel()/(x.numel()-x.shape[1]) * batch_var.detach().cast(self.running_var.dtype))
       self.num_batches_tracked += 1

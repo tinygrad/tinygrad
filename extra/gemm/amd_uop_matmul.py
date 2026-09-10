@@ -28,10 +28,10 @@ REG_TILES_PER_WAVE_M = BLOCK_M // (WAVES_PER_BLOCK_M * LANES_PER_WAVE_M * TM)
 assert WAVES_PER_BLOCK_M*REG_TILES_PER_WAVE_M*LANES_PER_WAVE_M*TM == BLOCK_M, "M reshape is wrong"
 assert WAVES_PER_BLOCK_N*REG_TILES_PER_WAVE_N*LANES_PER_WAVE_N*TN == BLOCK_N, "N reshape is wrong"
 
-def rngs_for_shape(shape:tuple[sint, ...], rng:int, axis_type=AxisType.LOOP): return [UOp.range(s, rng+i, axis_type) for i,s in enumerate(shape)]
+def rngs_for_shape(shape:tuple[sint, ...], rng:int, axis_type=AxisType.WEAK): return [UOp.range(s, rng+i, axis_type) for i,s in enumerate(shape)]
 def copy(dest:UOp, src:UOp, rng:int, upcast=False):
   assert dest.shape == src.shape
-  rngs = rngs_for_shape(src.shape, rng, AxisType.UPCAST if upcast else AxisType.LOOP)
+  rngs = rngs_for_shape(src.shape, rng, AxisType.UPCAST if upcast else AxisType.WEAK)
   return dest[*rngs].store(src[*rngs]).end(*rngs)
 
 def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
@@ -66,9 +66,8 @@ def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
   B_local = UOp.placeholder((BLOCK_K, BLOCK_N), dtypes.float, slot=1, addrspace=AddrSpace.LOCAL)
   B_local_store = copy(B_local.reshape(-1, THREADS_PER_BLOCK)[:, tid], b.reshape(-1, THREADS_PER_BLOCK)[:, tid], rng=200)
 
-  # TODO: can we automate barrier?
-  barrier = UOp.barrier(A_local_store, B_local_store)
-  A_local, B_local = A_local.after(barrier), B_local.after(barrier)
+  # NOTE: no explicit barrier needed, the AFTER on the LOCAL buffers implies it in late codegen
+  A_local, B_local = A_local.after(A_local_store, B_local_store), B_local.after(A_local_store, B_local_store)
 
   # open inner k range
   k = UOp.range(BLOCK_K, 3, AxisType.REDUCE)
@@ -102,7 +101,7 @@ def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
   sink = c_regs[*rngs].store(c_regs.after(k)[*rngs] + A_col[iter_m, t_m] * B_row[iter_n, t_n]).end(iter_m, iter_n, t_m, t_n)
 
   # Close k, sync, and close K tiles
-  sink = sink.end(k).barrier().end(k_tile_range)
+  sink = sink.end(k).end(k_tile_range)
 
   # ---------------------------
   # REG -> GLOBAL (epilogue)

@@ -1,4 +1,5 @@
-import functools, itertools, time
+import functools, time
+from dataclasses import replace
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
@@ -6,21 +7,28 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
 
 def add_to_ctx(ctx, x:UOp):
+  if x.buf_uop in ctx[1]: return None
   ret = x.param_like(len(ctx[0]))
   ctx[0].append(x)
   return ret
 
-pm_transform_unique_const = PatternMatcher([
-  # transform unique consts to LUNIQUE
-  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="x"),
-   lambda ctx,x: x.replace(src=(UOp(Ops.LUNIQUE, arg=next(ctx[1])), x.src[1]))),
+pm_ctx = PatternMatcher([
+  # unbound BUFFERs and their AFTER outputs are scoped inside their CALL: they are never implicit inputs
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: None if x.is_unbound else add_to_ctx(ctx,x)),
+  (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if not x.buf_uop.is_unbound and
+   not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
 ])
 
-pm_ctx = PatternMatcher([
-  (UPat((Ops.BUFFER, Ops.BIND), name="x"), add_to_ctx),
-  (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"),
-   lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
-])+pm_transform_unique_const
+def invalid_outputs(uret:UOp) -> set[UOp]:
+  # invalids() returns fresh write-only scratch: a clone storing CONST(Invalid)
+  # don't capture it as an input; only skip fresh buffers, not realized ones
+  return {u.src[0].buf_uop for u in uret.backward_slice_with_self
+          if u.op is Ops.STORE and u.src[1].base.is_invalid and not u.src[0].buf_uop.is_realized}
+
+def renumber_invalid_outputs(uret:UOp) -> UOp:
+  invalid = invalid_outputs(uret)
+  return uret.substitute({b:b.replace(arg=replace(b.arg, slot=i))
+                          for i,b in enumerate(x for x in uret.toposort(enter_calls=False) if x in invalid)})
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
@@ -40,57 +48,48 @@ class _function(Generic[ReturnType]):
     params = get_state_dict((args, kwargs), tensor_type=(Tensor, UOp)).values()
 
     # deduplicate input_uops, keeping the first occurrence index for each unique uop
-    call_uops: list[UOp] = dedup([u for t in params if not ((u:=(t.uop if isinstance(t, Tensor) else t)).base.op is Ops.CONST and u.device is None)])
+    call_uops: list[UOp] = dedup([u for t in params if (u:=t._uop).device is not None])
 
     # disable realize/schedule while this is running
     # run it and do surgery later
     with Context(ALLOW_DEVICE_USAGE=getenv("DEVICE_IN_FUNCTION_BUG", 0)):
       _function.depth += 1
-      ret = self.fxn(*args, **kwargs)
-      _function.depth -= 1
+      try:
+        ret = self.fxn(*args, **kwargs)
+      finally:
+        _function.depth -= 1
     if isinstance(ret, Tensor):
       uret = ret.uop
     elif isinstance(ret, tuple) and all(isinstance(x, Tensor) for x in ret):
-      uret = UOp.maketuple(*[x.uop for x in ret])
+      uret = UOp.sink(*[x.uop for x in ret])
     else:
       raise RuntimeError(f"function return type {type(ret)} not supported")
 
     # replace the known inputs with params (using deduplicated slots)
-    subs = {}
-    for i,x in enumerate(call_uops): subs[x] = x.param_like(i)
+    subs = {x:x.param_like(i) for i,x in enumerate(call_uops)}
     uret = uret.substitute(subs)
-
-    # add contiguous to call_uops
-    #call_uops = [x.contiguous() for x in call_uops]
 
     # the BUFFERs that are left are the implicit inputs
     num_explicit = len(call_uops)
-    uret = graph_rewrite(uret, pm_ctx, (call_uops, itertools.count(0)), bottom_up=True, name="get_implicit_inputs")
+    uret = graph_rewrite(uret, pm_ctx, (call_uops, invalid_outputs(uret)), bottom_up=True, name="get_implicit_inputs")
+    uret = renumber_invalid_outputs(uret)
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
     if not self.allow_implicit:
       implicit_buffers = [x for x in call_uops[num_explicit:] if x.op is Ops.BUFFER]
       if implicit_buffers:
-        buf_strs = '\n  '.join(f"{i}: dtype={b.dtype}, size={b.arg}, device={b.device}" for i,b in enumerate(implicit_buffers))
+        buf_strs = '\n  '.join(f"{i}: dtype={b.dtype}, size={b.max_numel()}, device={b.device}" for i,b in enumerate(implicit_buffers))
         raise RuntimeError(f"function {name} has {len(implicit_buffers)} implicit buffer(s), but allow_implicit=False\n  {buf_strs}")
 
-    # assign output
-    #pbuffer = uret.param_like(len(call_uops))
-    #assigned = pbuffer.assign(uret).sink()
-    #buffer = UOp.new_buffer(pbuffer.device, pbuffer.size, pbuffer.dtype).reshape(uret.shape)
-    #call = assigned.call(*call_uops, buffer, name=name)
-    #ret = buffer.after(call)
-
-    fret = uret.call(*call_uops, grad_fxn=self.grad_fxn, name=name, precompile=self.precompile,
-                     precompile_backward=self.precompile_backward)
+    outs = UOp.call_with_outputs(uret.src if isinstance(ret, tuple) else (uret,), *call_uops, grad_fxn=self.grad_fxn, name=name,
+                                 precompile=self.precompile, precompile_backward=self.precompile_backward)
 
     if DEBUG >= 2:
-      #signature = [(x._shape, x.dtype, x.device) for x in call_uops]
-      print("  "*_function.depth+f"function {uret.key.hex()[:8]} in {(time.perf_counter()-st)*1000:8.2f} ms: {name}") # with sig {signature}")
+      print("  "*_function.depth+f"function {uret.key.hex()[:8]} in {(time.perf_counter()-st)*1000:8.2f} ms: {name}")
 
     if isinstance(ret, tuple):
-      return cast(ReturnType, tuple(Tensor(fret.gettuple(i)) for i in range(len(ret))))
+      return cast(ReturnType, tuple(Tensor(o) for o in outs))
     else:
-      return cast(ReturnType, Tensor(fret.gettuple(0)))
+      return cast(ReturnType, Tensor(outs[0]))
 
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload

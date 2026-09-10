@@ -31,8 +31,6 @@ if __name__ == "__main__":
   assert all(os.path.exists(os.path.join(INIT_CKPT_DIR, f)) for f in required_files), \
     f"Missing checkpoint files in INIT_CKPT_DIR: {required_files}"
 
-  Tensor.training = False
-
   model = get_mlperf_bert_model(INIT_CKPT_DIR)
 
   for _, x in get_state_dict(model).items():

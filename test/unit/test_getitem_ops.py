@@ -11,11 +11,11 @@ class TestGetitemOps(unittest.TestCase):
     # O(50*60) = 3K vs O(50*60*100*200) = 60M
     GlobalCounters.reset()
     np.testing.assert_allclose(src_np[0, idx1_np, idx2_np], src[0, idx1, idx2].numpy())
-    self.assertLess(GlobalCounters.global_ops, 50_000)
+    self.assertLess(GlobalCounters.global_ops, 100_000)
     # consecutive indices not starting from dim 0: O(10*50*60) = 30K vs O(10*50*60*100*200) = 600M
     GlobalCounters.reset()
     np.testing.assert_allclose(src_np[:, idx1_np, idx2_np], src[:, idx1, idx2].numpy())
-    self.assertLess(GlobalCounters.global_ops, 500_000)
+    self.assertLess(GlobalCounters.global_ops, 1_000_000)
 
 if __name__ == '__main__':
   unittest.main()

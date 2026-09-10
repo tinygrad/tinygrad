@@ -1,8 +1,9 @@
 # ruff: noqa: E501
 import numpy as np
-import unittest
+import tempfile, unittest
 from tinygrad import Tensor, Context, Device, dtypes, UOp
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, AxisType
+from tinygrad.dtype import AddrSpace
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
@@ -42,10 +43,10 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   call = linear.src[-1]
   prg = to_program(replace_opts(call.src[0], opts), renderer=Device[Device.DEFAULT].renderer)
   if replace_src is not None:
-    old_name = prg.src[3].arg.split("__attribute__((noinline)) void ")[1].split("(")[0]
-    new_src = replace_src + "/* DSP boilerplate */" + prg.src[3].arg.split("/* DSP boilerplate */")[1].replace(old_name, "fxn")
+    old_name = prg.src[2].arg.split("__attribute__((noinline)) void ")[1].split("(")[0]
+    new_src = replace_src + "/* DSP boilerplate */" + prg.src[2].arg.split("/* DSP boilerplate */")[1].replace(old_name, "fxn")
     # drop BINARY and replace SOURCE so run_linear recompiles
-    prg = prg.replace(src=prg.src[:3] + (UOp(Ops.SOURCE, arg=new_src),))
+    prg = prg.replace(src=prg.src[:2] + (UOp(Ops.SOURCE, arg=new_src),))
   linear = linear.replace(src=linear.src[:-1] + (call.replace(src=(prg, *call.src[1:])),))
   for _ in range(run_count): run_linear(linear)
 
@@ -57,8 +58,9 @@ def get_quantized_model(sz):
       self.cnt += 1
       if self.cnt == 100: return None
       return {"input": np.random.uniform(size=(sz, sz)).astype(np.float32)}
-  out_file = "/tmp/test_out.onnx"
-  quantize_static(create_gemm_model("/tmp/test_in.onnx", sz, sz, sz), out_file,
+  tmpdir = tempfile.mkdtemp()
+  out_file = f"{tmpdir}/test_out.onnx"
+  quantize_static(create_gemm_model(f"{tmpdir}/test_in.onnx", sz, sz, sz), out_file,
                   FakeDataReader(), quant_format=QuantFormat.QDQ, per_channel=False, reduce_range=False,
                   activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8,
                   extra_options={"ActivationSymmetric": False})
@@ -79,8 +81,8 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
     with Context(QUANTIZE=1):
       linear = run_onnx({"input":inp})["output"].schedule_linear()
       prg = to_program(linear.src[-2].src[0], renderer=Device[Device.DEFAULT].renderer)
-      daccs = [u for u in tuple(prg.src[2].src) if u.op is Ops.DEFINE_REG]
-      assert all(u.dtype.scalar() is dtypes.int for u in daccs)
+      daccs = [u for u in tuple(prg.src[1].src) if u.op is Ops.BUFFER and u.addrspace is AddrSpace.REG]
+      assert all(u.dtype is dtypes.int for u in daccs)
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
 class TestQuantizeOnnx(unittest.TestCase):
@@ -96,7 +98,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     X = Tensor(np.random.uniform(0, 255, size=(1, 32, 128, 128)).astype(np.uint8))
     W = Tensor(np.random.uniform(0, 255, size=(64, 32, 1, 1)).astype(np.uint8))
     out = X.conv2d(W, dtype=X.dtype)
-    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+    opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UNROLL))]
     sexec(out, opts)
 
   def test_prequant_gemm(self):
@@ -104,7 +106,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
     W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8))
     out = X.matmul(W, dtype=X.dtype)
-    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+    opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UNROLL))]
     sexec(out, opts)
 
   # TODO: this has to work
@@ -114,7 +116,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(wi))
     # this divide is interesting and forces the accumulator to actually be an int
     out = (X.cast("int").matmul(W.cast("int"))//1000).cast("int8")
-    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+    opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UNROLL))]
     sexec(out, opts)
 
   def test_prequant_gemm_handcode(self):
@@ -198,9 +200,11 @@ class TestQuantizeOnnx(unittest.TestCase):
     self.test_prequant_gemm_intacc(np.uint8, np.int8, src)
 
   def test_prequant_gemm_intacc_32(self):
-    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UNROLL, axis=0, arg=0)]
+    opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(0, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST)),
+            Opt(op=OptOps.SPLIT, axis=3, arg=(0, AxisType.UNROLL))]
     self.test_prequant_gemm_intacc(np.uint8, np.int8, N=32, opts=opts)
-  def test_prequant_gemm_intacc_128(self): self.test_prequant_gemm_intacc(np.uint8, np.int8, N=128)
+  def test_prequant_gemm_intacc_128(self): self.test_prequant_gemm_intacc(np.uint8, np.int8, N=128,
+    opts=[Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=2, arg=(4, AxisType.UNROLL))])
   def test_prequant_gemm_intacc_256(self): self.test_prequant_gemm_intacc(np.uint8, np.int8, N=256)
   def test_prequant_gemm_intacc(self, xi=np.uint8, wi=np.uint8, replace_src=None, N=512, clip=True, opts=None):
     X = Tensor(m1:=(np.random.uniform(0, 255, size=(N,N)).astype(xi))).realize()
@@ -209,7 +213,8 @@ class TestQuantizeOnnx(unittest.TestCase):
     out = (X.int().matmul(W.int())//1000)
     if clip: out = out.clip(tg_dtype.min, tg_dtype.max)
     out = out.cast(tg_dtype)
-    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)] if opts is None else opts
+    opts = [Opt(op=OptOps.SPLIT, axis=1, arg=(128, AxisType.UPCAST)),
+            Opt(op=OptOps.SPLIT, axis=3, arg=(4, AxisType.UNROLL))] if opts is None else opts
     sexec(out, opts, replace_src, run_count=1)
     tout = out.numpy()
     mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) // 1000)
@@ -230,7 +235,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     #out = X.cast(dtypes.int) @ W.cast(dtypes.int)
     #out = X @ W
     out = X.matmul(W, dtype=X.dtype)
-    opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+    opts = [Opt(op=OptOps.SPLIT, axis=0, arg=(128, AxisType.UPCAST)), Opt(op=OptOps.SPLIT, axis=2, arg=(4, AxisType.UNROLL))]
     sexec(out, opts)
 
 if __name__ == "__main__":

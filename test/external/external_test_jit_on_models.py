@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes
 from tinygrad.engine.jit import TinyJit
+from tinygrad.helpers import Context
 from test.helpers import derandomize_model
 
 from examples.llama import Transformer
@@ -14,8 +15,7 @@ def helper_test_jitted_correctness(gen, train, train_jit):
 
 class TestJittedModels(unittest.TestCase):
   def test_jitted_tiny_llama(self):
-    old_float = dtypes.default_float
-    dtypes.default_float = dtypes.float16
+    self.enterContext(Context(DEFAULT_FLOAT=dtypes.float16))
 
     args_tiny = {"dim": 1024, "hidden_dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
@@ -25,7 +25,6 @@ class TestJittedModels(unittest.TestCase):
     @TinyJit
     def test_jit(t): return model(t, 0).realize()
     helper_test_jitted_correctness(lambda: (Tensor([[1,]]),), test, test_jit)
-    dtypes.default_float = old_float
 
   def test_jitted_stable_diffusion(self):
     from examples.stable_diffusion import UNetModel, unet_params

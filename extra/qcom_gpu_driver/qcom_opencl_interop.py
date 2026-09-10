@@ -78,9 +78,7 @@ hexdump(to_mv(cl_buf_desc_ptr, 0x100))
 rawbuf_ptr = to_mv(cl_buf_desc_ptr, 0x100).cast('Q')[20] # offset 0xA0 is a raw gpu pointer.
 
 # create QCOM tensor with the externally managed buffer
-# dtypes.imageh = cl.cl_image_format(cl.CL_RGBA, cl.CL_HALF_FLOAT)
-# dtypes.imagef = cl.cl_image_format(cl.CL_RGBA, cl.CL_FLOAT)
-x = Tensor.from_blob(rawbuf_ptr, (h*w*4,), dtype=dtypes.imagef((h,w)), device='QCOM')
+x = Tensor.from_blob(rawbuf_ptr, (h,w,4), dtype=dtypes.float, device='QCOM')
 y = (x + 1).tolist()
 print(y[:10])
 

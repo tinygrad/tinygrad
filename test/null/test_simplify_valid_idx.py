@@ -1,8 +1,9 @@
 import unittest, itertools
 
-from tinygrad.codegen.late.devectorizer import load_store_indexing
+from tinygrad.codegen.late.coalesce import indexing_simplify
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
+from tinygrad.uop.weak import pm_commit_weak
 from tinygrad.uop.symbolic import simplify_valid, sym, pm_move_where_on_load
 from tinygrad.helpers import Context
 from test.helpers import full_rewrite
@@ -11,45 +12,17 @@ from test.null.test_uop_symbolic import check_uop_against_string
 # symbolic-only idx + valid simplification (no late lowering of FLOORDIV/FLOORMOD)
 def simplify_valid_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load, name="simplify_valid_idx")
 # image-aware idx + valid simplification: adds the codegen-layer matcher that drops provably in-bounds gates
-def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+load_store_indexing, name="simplify_image_idx")
+def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+indexing_simplify, name="simplify_image_idx")
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
-  return UOp(Ops.LOAD, dtypes.float, (
-    UOp.param(0, dtypes.float.ptr()).index(idx.valid(valid), ptr=True),
-    UOp.const(dtypes.float, 0.0)
-  ))
+  return UOp.param(0, dtypes.float, 1024).index(idx.valid(valid)).load()
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
-  return UOp(Ops.LOAD, dtypes.float.vec(4), (
-    UOp.param(0, dtypes.imagef(image_shape)).index(idx[1].valid(valid), idx[0].valid(valid), ptr=True),
-    UOp(Ops.STACK, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
-  ))
+  return UOp.param(0, dtypes.float, image_shape).index(idx[1].valid(valid), idx[0].valid(valid)).load()
 
-def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.weakint, (UOp.const(dtypes.weakint, nmax),), expr)
-def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
+def Special(expr, nmax): return UOp.special(nmax, expr)
+def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax, param=True)
 def Range(n, nmax): return UOp.range(nmax, n)
-
-class TestHelpers(unittest.TestCase):
-  def test_is_increasing(self):
-    idx1 = Special("idx1", 32)
-    idx2 = Special("idx2", 64)
-    ridx0 = Variable("ridx0", 0, 5)
-    ridx1 = Variable("ridx1", 0, 2)
-    ridx2 = Variable("ridx2", 0, 2)
-    # (ridx0+(idx1*48)+(ridx2*6)+(-6)),((idx2*2)+ridx1+(-1)))
-    f0 = ((idx1*24)+(ridx2*3)+ridx0+765)%768
-    f1 = ridx0+(idx1*48)+(ridx2*6)+(-6)
-    f2 = (idx2*2)+ridx1+((idx1+((ridx2+7)//8)+31)//32)+(-2)
-    f3 = (idx2*2)+ridx1+(-1)
-
-    self.assertFalse(f0.is_increasing())
-    self.assertTrue(f1.is_increasing())
-    self.assertTrue(f2.is_increasing())
-    self.assertTrue(f3.is_increasing())
-
-    rng = UOp.range(5, 2)
-    self.assertTrue(rng.is_increasing())
-    self.assertTrue((rng+2).is_increasing())
 
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid, extra=()):
@@ -86,6 +59,10 @@ class TestValidIdxSimplification(unittest.TestCase):
     alu0 = gidx0+ridx0
     valid = (alu0 < 57) & (alu0 >= 1)
     self.assertIsNone(simplify_valid(valid))
+
+  def test_bitwise_and_is_not_a_valid(self):
+    ridx0 = Range(0, 16)
+    self.assertEqual(simplify_valid_idx(UOp.sink((ridx0 & UOp.const(12, dtypes.int)) & ridx0)).src[0].render(), "((int)(r0)&12&(int)(r0))")
 
   def test_valid_order_matters1(self):
     ridx0 = Range(0, 2)
@@ -231,7 +208,7 @@ class TestImageSimplification(unittest.TestCase):
     if svalid is not None:
       check_uop_against_string(self, off.src[1].get_valid(), svalid)
     else:
-      self.assertEqual(off.src[1].get_valid(), UOp.const(dtypes.bool, True), "svalid is None but valid is not True")
+      self.assertEqual(off.src[1].get_valid(), UOp.const(True), "svalid is None but valid is not True")
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
@@ -292,8 +269,7 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, (gidx0<8) & (gidx0<8).ne(True), idx)
     with Context(NOOPT=1, SPEC=0):
       load = full_rewrite(load.sink()).src[0]
-    self.assertEqual(load.op, Ops.STACK)
-    self.assertEqual(load.dtype.count, 4)
+    self.assertFalse(load.op_in_backward_slice_with_self(Ops.LOAD))
 
   def test_openpilot_conv1(self):
     # first conv in openpilot
@@ -357,7 +333,7 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, valid, idx)
 
     self.check(load,
-               "((((idx2*2)+r0)<11)&((((idx1*8)+r1)<3)!=True))",
+               "(((idx2*2)+r0)<11)",
                "(idx0+(idx1*512+r1*64)+-192)",
                "((((idx2*2)+r0)+(((idx1+((r1+5)//8))+1)//2))+-4)")
 
@@ -434,7 +410,7 @@ class TestImageSimplification(unittest.TestCase):
     alu1 = ((idx2*1536)+(ridx4*768)+ridx3+(idx1*24)+(ridx5*3)+-771)//768
     valid = (((idx2+ridx4)<1)!=1)&(((idx1+ridx5)<1)!=1)
     load = get_load_image_uop((128, 768, 4), valid, (alu0, alu1))
-    self.check(load, None, "((((idx1*24)+r3)+(r5*3))+-3)", "(((idx2*2)+r4)+-1)")
+    self.check(load, None, "((((idx1*24)+(r5*3))+r3)+-3)", "(((idx2*2)+r4)+-1)")
 
   def test_simplify7(self):
     # DEBUG=2 ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1397 ALLOWED_GATED_READ_IMAGE=94 FLOAT16=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916 # noqa: E501
@@ -480,12 +456,12 @@ class TestImageSimplification(unittest.TestCase):
     A1 = lidx0*32 + r0*32 + lidx1*4 - 99
     valid = ((lidx1 < 1).ne(True)) & ((lidx0 + r0) < 3).ne(True) & ((lidx0 + r0) < 19)
     alu0 = gidx0 + (A1 % 32)*32 + (A1 // 32 % 16)*1024
-    load = get_load_image_uop((1, 16384, 4), valid, (alu0, UOp.const(dtypes.weakint, 0)))
+    load = get_load_image_uop((1, 16384, 4), valid, (alu0, UOp.const(0)))
     try:
       self.check(load, None, "(gidx0+lidx0*1024+r0*1024+lidx1*128+-3168)", "0")
     except AssertionError:
       # TODO: fold valid
-      self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<19))",
+      self.check(load, "(((lidx1<1)!=True)&((lidx0+r0)<19))",
                        "(gidx0+lidx1*128+(lidx0*1024+r0*1024)+-3168)", "0")
 
   def test_simplify10(self):
@@ -499,26 +475,46 @@ class TestImageSimplification(unittest.TestCase):
     A1 = lidx0*16 + r0*16 + lidx1*4 - 51
     valid = ((lidx1 < 1).ne(True)) & ((lidx0 + r0) < 3).ne(True) & ((lidx0 + r0) < 11)
     alu0 = lidx2 + gidx0*4 + (A1 % 16)*64 + (A1 // 16 % 8)*1024
-    load = get_load_image_uop((1, 8192, 4), valid, (alu0, UOp.const(dtypes.weakint, 0)))
+    load = get_load_image_uop((1, 8192, 4), valid, (alu0, UOp.const(0)))
     try:
       self.check(load, None, "(lidx2+gidx0*4+lidx0*1024+r0*1024+lidx1*256+-3264)", "0")
     except AssertionError:
       # TODO: fold valid
-      self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<11))",
+      self.check(load, "(((lidx1<1)!=True)&((lidx0+r0)<11))",
                        "(lidx2+gidx0*4+lidx1*256+(lidx0*1024+r0*1024)+-3264)", "0")
+
+  def test_drop_non_monotonic_window(self):
+    # two-sided window valid (645 <= gidx0 < 653) on a non-monotonic index (lane split via %4 and //4):
+    # gidx0 outside the window pushes idx_x out of the (1, 48) image, so the gate is dropped
+    gidx0 = Special("gidx0", 1064)
+    r12 = Range(12, 3)
+    valid = ((gidx0 < 645).ne(True)) & (gidx0 < 653)
+    idx = (r12*4 + (gidx0+3)%4 + (gidx0+3)//4*24 - 3888, UOp.const(0))
+    load = get_load_image_uop((1, 48, 4), valid, idx)
+    self.check(load, None, "(r12*4+(gidx0+3)%4+(gidx0+3)//4*24+-3888)", "0")
+
+  def test_drop_gate_committed_in_the_index_pass(self):
+    # the fused index pass runs without symbolic, so committing a weak src must not leave a CAST that
+    # symbolic later folds inside the index only: the gate's copy of the expression has to stay the same node
+    f = UOp.variable("f", 0.0, 9.0, dtypes.float)
+    idx_y = (f + UOp.const(1.0)).cast(dtypes.int)
+    load = get_load_image_uop((10, 10, 4), (UOp.const(-1) < idx_y) & (idx_y < UOp.const(10)),
+                              (Special("gidx0", 10), idx_y))
+    off = graph_rewrite(load.sink(), pm_commit_weak+indexing_simplify).src[0].src[0]
+    self.assertEqual(off.src[1].get_valid(), UOp.const(True))
 
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):
     # test that INDEX with a constant True valid gets simplified to drop the valid
-    from tinygrad.codegen.late.devectorizer import load_store_indexing
+    from tinygrad.codegen.late.coalesce import indexing_simplify
     from tinygrad.uop.ops import graph_rewrite
     from tinygrad.uop.symbolic import sym
-    buf = UOp.param(0, dtypes.int.ptr())
-    idx = UOp.const(dtypes.weakint, 0)
-    true_gate = UOp.const(dtypes.bool, True)
-    index_with_gate = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx.valid(true_gate)))
+    buf = UOp.param(0, dtypes.int, 1)
+    idx = UOp.const(0)
+    true_gate = UOp.const(True)
+    index_with_gate = buf.index(idx.valid(true_gate))
     # apply the optimization
-    result = graph_rewrite(index_with_gate, sym+load_store_indexing)
+    result = graph_rewrite(index_with_gate, sym+indexing_simplify)
     # the True valid should be dropped (INDEX should only have 2 sources)
     self.assertEqual(len(result.src), 2, "True valid should be dropped from INDEX")
 
@@ -528,53 +524,53 @@ class TestRangeShrink(unittest.TestCase):
       result = full_rewrite(sink)
     return [u for u in result.toposort() if u.op is Ops.RANGE]
 
+  def assert_range_end(self, ranges:list[UOp], end:int):
+    self.assertEqual(len(ranges), 1)
+    with Context(NOOPT=1, SPEC=0): expected = full_rewrite(UOp.const(end, dtypes.int).sink()).src[0]
+    self.assertIs(ranges[0].src[0], expected)
+
   def test_range_shrink_single_guard(self):
     # range 0..203 guarded by r < 4 everywhere -> shrink to 0..3
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(dtypes.weakint, 4), r)
+    load = get_gated_load_uop(r < UOp.const(4), r)
     ranges = self.get_ranges(load.sink())
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 4)
+    self.assert_range_end(ranges, 4)
 
   def test_range_shrink_picks_max_guard(self):
     # two loads guard the same range with r < 4 and r < 8 -> shrink to max(4, 8) = 8
     r = Range(0, 204)
-    load1 = get_gated_load_uop(r < UOp.const(dtypes.weakint, 4), r)
-    load2 = get_gated_load_uop(r < UOp.const(dtypes.weakint, 8), r)
+    load1 = get_gated_load_uop(r < UOp.const(4), r)
+    load2 = get_gated_load_uop(r < UOp.const(8), r)
     ranges = self.get_ranges(UOp.sink(load1, load2))
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 8)
+    self.assert_range_end(ranges, 8)
 
   def test_range_no_shrink_guard_ge_max(self):
     # guard r < 300 with range max 204 -> no shrink (guard doesn't constrain)
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(dtypes.weakint, 300), r)
+    load = get_gated_load_uop(r < UOp.const(300), r)
     ranges = self.get_ranges(load.sink())
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 204)
+    self.assert_range_end(ranges, 204)
 
   def test_range_no_shrink_when_unguarded_elsewhere(self):
     # one load guards r < 4, but another load uses r without a gate -> no shrink
     r = Range(0, 204)
-    load1 = get_gated_load_uop(r < UOp.const(dtypes.weakint, 4), r)
-    load2 = UOp(Ops.LOAD, dtypes.float, (UOp.param(1, dtypes.float.ptr()).index(r, ptr=True),))
+    load1 = get_gated_load_uop(r < UOp.const(4), r)
+    load2 = UOp.param(1, dtypes.float, 204).index(r).load()
     ranges = self.get_ranges(UOp.sink(load1, load2))
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 204)
+    self.assert_range_end(ranges, 204)
 
   def test_range_no_shrink_when_used_in_reduce(self):
     # range used in both a gated load AND directly in the reduce expression -> no shrink
     r = Range(0, 204)
-    gated_load = get_gated_load_uop(r < UOp.const(dtypes.weakint, 4), r)
+    gated_load = get_gated_load_uop(r < UOp.const(4), r)
     red = (r.cast(dtypes.float) + gated_load).reduce(r, arg=Ops.ADD)
     ranges = self.get_ranges(red.sink())
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 204)
+    self.assert_range_end(ranges, 204)
 
   def test_range_shrink_to_single_iteration(self):
     # guard r < 1 shrinks range to 1 -> single iteration, range eliminated entirely
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(dtypes.weakint, 1), r)
+    load = get_gated_load_uop(r < UOp.const(1), r)
     ranges = self.get_ranges(load.sink())
     self.assertEqual(len(ranges), 0)
 
@@ -582,19 +578,17 @@ class TestRangeShrink(unittest.TestCase):
     # emulates mask.where(x.pad_to(mask.shape), Invalid): range should shrink accordingly
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
-    x = (r < 4).where(UOp.const(dtypes.float, 1), Invalid)
-    ranges = self.get_ranges(UOp.param(0, dtypes.float.ptr()).index(r).store((r < 4).where(x, 0)).sink())
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 4)
+    x = (r < 4).where(UOp.const(1.0), Invalid)
+    ranges = self.get_ranges(UOp.param(0, dtypes.float, 204).index(r).store((r < 4).where(x, Invalid)).sink())
+    self.assert_range_end(ranges, 4)
 
   def test_range_shrink_store_where_invalid_flipped(self):
     # above, but flipped
     from tinygrad.dtype import Invalid
     r = Range(0, 204)
-    x = (r < 4).where(UOp.const(dtypes.float, 1), Invalid)
-    ranges = self.get_ranges(UOp.param(0, dtypes.float.ptr()).index(r).store((r < 4).where(0, x)).sink())
-    self.assertEqual(len(ranges), 1)
-    self.assertEqual(ranges[0].src[0].arg, 4)
+    x = (r < 4).where(UOp.const(1.0), Invalid)
+    ranges = self.get_ranges(UOp.param(0, dtypes.float, 204).index(r).store((r >= 4).where(Invalid, x)).sink())
+    self.assert_range_end(ranges, 4)
 
 if __name__ == '__main__':
   unittest.main()

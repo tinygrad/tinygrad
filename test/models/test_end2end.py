@@ -5,10 +5,11 @@ import numpy as np
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.nn import optim, Linear, Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import Context
 from extra.datasets import fetch_mnist
 
 def compare_tiny_torch(model, model_torch, X, Y):
-  with Tensor.train():
+  with Context(TRAINING=1):
     model_torch.train()
     model_state_dict = get_state_dict(model)
     for k,v in model_torch.named_parameters():

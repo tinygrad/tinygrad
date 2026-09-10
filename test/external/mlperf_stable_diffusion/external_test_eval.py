@@ -51,7 +51,7 @@ class TestEval(unittest.TestCase):
       vae = AutoencoderKL()
       for p in get_parameters(vae): p.to_(GPUS).realize()
       x = Tensor.zeros(48,4,64,64).contiguous().to(GPUS).realize()
-      x.uop = x.uop.multi(0)
+      x.uop = x.uop.unshard(0)
       for _ in range(2): vae_decode(x, vae)
 
 if __name__=="__main__":

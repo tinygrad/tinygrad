@@ -1,7 +1,7 @@
 import unittest, math
 
 from tinygrad import dtypes, Tensor, Device
-from tinygrad.helpers import getenv, DEV
+from tinygrad.helpers import getenv, DEV, Context
 from tinygrad.codegen import to_program
 
 from tinygrad.uop.ops import Ops
@@ -77,7 +77,7 @@ class TestRandomness(unittest.TestCase):
       ast = call.src[0]
       if ast.op is Ops.SINK:
         prg = to_program(ast, renderer=Device[Device.DEFAULT].renderer)
-        for u in tuple(prg.src[2].src):
+        for u in tuple(prg.src[1].src):
           self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {prg.arg.name}")
 
   def test_threefry_against_reference_full(self):
@@ -232,16 +232,14 @@ class TestRandomness(unittest.TestCase):
   @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
   def test_randn_finite(self, default_float):
     if default_float not in Device[Device.DEFAULT].renderer.supported_dtypes(): return
-    old_default_float = dtypes.default_float
     # low precision can result in inf from randn
-    dtypes.default_float = default_float
+    self.enterContext(Context(DEFAULT_FLOAT=default_float))
     t = Tensor.randn(64, 64)
     mx = t.max().numpy().item()
     mn = t.min().numpy().item()
     print(f"testing with {default_float=}")
     assert math.isfinite(mx), mx
     assert math.isfinite(mn), mn
-    dtypes.default_float = old_default_float
 
   def test_random_counter_overflow(self):
     device = Device.DEFAULT

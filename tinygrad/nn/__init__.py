@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, functools
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS
+from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS, TRAINING
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -40,7 +40,7 @@ class BatchNorm:
 
   def calc_stats(self, x:Tensor) -> tuple[Tensor, Tensor]:
     shape_mask: list[int] = [1, -1, *([1]*(x.ndim-2))]
-    if self.track_running_stats and not Tensor.training: return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
+    if self.track_running_stats and not TRAINING: return self.running_mean, self.running_var.reshape(shape=shape_mask)
     # This requires two full memory accesses to x
     # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
     # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
@@ -52,7 +52,7 @@ class BatchNorm:
   def __call__(self, x:Tensor) -> Tensor:
     batch_mean, batch_var = self.calc_stats(x)
     # NOTE: wow, this is done all throughout training in most PyTorch models
-    if self.track_running_stats and Tensor.training:
+    if self.track_running_stats and TRAINING:
       self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
       self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * x.numel()/(x.numel()-x.shape[1]) * batch_var.detach())
       self.num_batches_tracked += 1
@@ -99,7 +99,7 @@ class Conv2d:
     if isinstance(padding, str):
       if padding.lower() != 'same': raise ValueError(f"Invalid padding string {padding!r}, only 'same' is supported")
       if stride != 1: raise ValueError("padding='same' is not supported for strided convolutions")
-      pad = [(d*(k-1)//2, d*(k-1) - d*(k-1)//2) for d,k in zip(make_tuple(dilation, len(self.kernel_size)), self.kernel_size[::-1])]
+      pad = [(d*(k-1)//2, d*(k-1) - d*(k-1)//2) for d,k in zip(make_tuple(dilation, len(self.kernel_size))[::-1], self.kernel_size[::-1])]
       padding = tuple(flatten(pad))
     self.stride, self.dilation, self.groups, self.padding = stride, dilation, groups, padding
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
@@ -305,7 +305,7 @@ class RMSNorm:
 
 from tinygrad.uop.ops import UOp, KernelInfo, Ops, AxisType
 def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
-  weight, idx = call.src[1:]
+  weight, idx = (a for a in call.src[1:] if not a.unsharded_base.is_unbound)
   is_vocab_sharded = isinstance(weight.device, tuple) and weight.axis == 0
   # for multi-device: replicate grad_emb and idx on all devices
   if isinstance(weight.device, tuple):
@@ -315,7 +315,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   if is_vocab_sharded:
     ndev = len(weight.device)
     local_vocab_size = weight.shape[0] // ndev
-    grad_weight_uop = Tensor.empty(local_vocab_size, weight.shape[1], dtype=dtypes.float, device=weight.device).uop.multi(axis=0)
+    grad_weight_uop = Tensor.empty(local_vocab_size, weight.shape[1], dtype=dtypes.float, device=weight.device).uop.unshard(axis=0)
   else:
     # weight is replicated (or single device), grad_weight should match
     grad_weight_uop = Tensor.empty(weight.shape, dtype=dtypes.float, device=weight.device).uop
@@ -335,30 +335,31 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
 
     embed_size = grad_weight.shape[-1]
     BLOCK_J = min(256, embed_size)
-    assert embed_size % BLOCK_J == 0, f"embed_size {embed_size} must be divisible by {BLOCK_J}"
-
-    n_j_blocks = embed_size // BLOCK_J
+    n_j_blocks = (embed_size + BLOCK_J - 1) // BLOCK_J
     i = UOp.range(grad_emb_flat.shape[0], 0)         # batch_size * sequence_length -> GLOBAL
-    j_inner = UOp.range(BLOCK_J, 2, AxisType.LOOP if device in ("CPU", "NULL") else AxisType.LOCAL)  # BLOCK_J threads per workgroup
+    j_inner = UOp.range(BLOCK_J, 2, AxisType.WEAK if device in ("CPU", "NULL") else AxisType.LOCAL)  # BLOCK_J threads per workgroup
     j_outer = UOp.range(n_j_blocks, 1)
     j = j_outer * BLOCK_J + j_inner
+    # mask padded embed
+    j_ok = j < embed_size
+    j_idx = j.clip(0, embed_size-1)
 
     if is_vocab_sharded:
       # each device owns [offset, offset+local_vocab_size) of the global vocabulary
-      dnum = UOp.variable("_device_num", 0, ndev-1)
+      dnum = UOp.range(ndev, -1, AxisType.DEVICE)
       offset = dnum * local_vocab_size
       global_token_id = idx_flat[i].cast(dtypes.weakint)
       local_token_id = (global_token_id - offset).clip(0, grad_weight.shape[0]-1)
-      in_range = (global_token_id >= offset) & (global_token_id < (offset + local_vocab_size))
-      grad_val = in_range.where(grad_emb_flat[i, j].cast(dtypes.float), 0.0)
+      in_range = (global_token_id >= offset) & (global_token_id < (offset + local_vocab_size)) & j_ok
+      grad_val = in_range.where(grad_emb_flat[i, j_idx].load().cast(dtypes.float), 0.0)
     else:
       local_token_id = idx_flat[i].clip(0, grad_weight.shape[0]-1).cast(dtypes.weakint)
-      grad_val = grad_emb_flat[i, j].cast(dtypes.float)
+      grad_val = j_ok.where(grad_emb_flat[i, j_idx].load().cast(dtypes.float), 0.0)
     # atomic scatter-add: grad_weight[token_id, j] += grad_emb_flat[i, j]
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
     elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
     else: raise NotImplementedError(f"no atomics for device {device}")
-    atomic = UOp(Ops.CUSTOM, dtypes.void, (grad_weight.index(local_token_id, j, ptr=True), grad_val), arg = atomic_arg)
+    atomic = UOp(Ops.CUSTOM, src=(grad_weight.index(local_token_id, j_idx), grad_val), arg=(atomic_arg, dtypes.void))
     return atomic.end(i, j_outer, j_inner).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
   grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]
@@ -366,7 +367,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   return (grad_weight_uop.cast(weight.dtype), None)
 
 def _embedding_fwd(weight:Tensor, idx:Tensor) -> Tensor:
-  arange = Tensor.arange(weight.shape[0], device=weight.device)
+  arange = Tensor.arange(weight.shape[0])
   return (arange == idx.unsqueeze(-1)).unsqueeze(-1).where(weight, 0).sum(-2, dtype=weight.dtype)
 
 @functools.cache
@@ -411,7 +412,7 @@ class LSTMCell:
     self.bias_hh: Tensor|None = Tensor.zeros(hidden_size*4) if bias else None
 
   def __call__(self, x:Tensor, hc:tuple[Tensor, Tensor]|None=None) -> tuple[Tensor, Tensor]:
-    if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, device=x.device, buffer=False),)*2
+    if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, buffer=False),)*2
     gates = x.linear(self.weight_ih.T, self.bias_ih) + hc[0].linear(self.weight_hh.T, self.bias_hh)
     i, f, g, o = gates.chunk(4, dim=1)
     i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()

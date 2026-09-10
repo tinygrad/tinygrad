@@ -1,7 +1,8 @@
 import unittest, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DTYPES_DICT
-from tinygrad.uop.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp, GroupOp
+from tinygrad.codegen.decomp.op import threefry2x32
 import numpy as np
 from test.helpers import not_support_multi_device
 
@@ -15,8 +16,8 @@ def _check_ast_count(desired_count:int, t:Tensor):
 
 class TestMovedConstFolding(unittest.TestCase):
   def test_contiguous_deviceless_const(self):
-    t = Tensor(UOp.const(dtypes.float, 2.0)).contiguous()
-    self.assertIs(t.uop.op, Ops.CONST)
+    t = Tensor(UOp.const(2.0, dtypes.float)).contiguous()
+    self.assertIs(t.uop, UOp.const(2.0, dtypes.float))
     self.assertIsNone(t.uop.device)
 
   def test_add_shrunk_zero(self):
@@ -32,9 +33,9 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
   def test_copy_padded_const(self):
-    schedule = Tensor.ones(4, device="CPU:0", buffer=False).pad(((1, 1),)).to("CPU:1").schedule_linear()
+    schedule = Tensor.ones(4, buffer=False).pad(((1, 1),)).to("CPU:1").schedule_linear()
     assert not any(si.src[0].op is Ops.COPY for si in schedule.src), "const copy should be folded"
-    np.testing.assert_equal(Tensor.ones(4, device="CPU:0", buffer=False).pad(((1, 1),)).to("CPU:1").numpy(), [0, 1, 1, 1, 1, 0])
+    np.testing.assert_equal(Tensor.ones(4, buffer=False).pad(((1, 1),)).to("CPU:1").numpy(), [0, 1, 1, 1, 1, 0])
 
   def test_cast_padded(self):
     # NOTE: it's always 1 kernel when calling .numpy, limitation of _check_ast_count
@@ -83,10 +84,10 @@ class TestReduceOpsConstFolding(unittest.TestCase):
       np.testing.assert_equal(reduceop((Tensor.randn(shape:=(0, 1))+1).realize()).numpy(), reduceop(np.empty(shape)))
 
   def test_zero_size_realize_folded(self):
-    # non contiguous folded output doesn't realize
+    # folded output doesn't realize on its own
     _check_ast_count(0, Tensor.empty(1, 0).sum())
-    # contiguous folded const can still schedule
-    a = Tensor.empty(1, 0).sum().contiguous()
+    # explicit storage of the folded const still schedules, and the value is usable
+    a = Tensor.empty(1, 0).sum().clone()
     _check_ast_count(2, a+2)
     self.assertIs(a.uop.base.op, Ops.BUFFER)
     np.testing.assert_equal((Tensor.empty(1, 0).sum().contiguous()+2).numpy(), 2)
@@ -167,8 +168,9 @@ class TestMultiConstFolding(unittest.TestCase):
 
 class TestThreefryConstFolding(unittest.TestCase):
   def test_threefry(self):
-    x = UOp.const(dtypes.uint64, 5, Device.DEFAULT, ()).threefry(UOp.const(dtypes.uint64, 10, Device.DEFAULT, ()))
-    self.assertIs(x.simplify().op, Ops.CONST)
+    # THREEFRY(const,const) folds to a const once decomposed
+    x = threefry2x32(UOp.const(5, dtypes.uint64), UOp.const(10, dtypes.uint64)).simplify()
+    self.assertEqual([u.op for u in x.toposort() if u.op in GroupOp.ALU], [])
 
 class TestTautologicalCompare(unittest.TestCase):
   # without const folding, these would have triggered -Wtautological-compare in clang
@@ -186,7 +188,6 @@ class TestTautologicalCompare(unittest.TestCase):
     np.testing.assert_equal((Tensor(True) < Tensor(False)).numpy(), False)
     np.testing.assert_equal((Tensor(True) < Tensor(True)).numpy(), False)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support NaN comparison correctly")
   def test_a_eq_a(self):
     # self eq is always true for int or bool
     a = Tensor([1, 2, 3])

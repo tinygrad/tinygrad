@@ -2,7 +2,8 @@ import unittest, struct, contextlib, statistics, gc
 from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
-from tinygrad.runtime.support.hcq import HCQCompiled
+from extra.hcq1.hcq import HCQCompiled
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 
@@ -34,7 +35,18 @@ def helper_profile_filter_device(profile, device:str):
   assert len(dev_events) == 1, "only one device registration event is expected"
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT], (HCQCompiled, HCQ2Compiled)) or Device.DEFAULT == "METAL", "Dev not supported")
+class TestSimpleProfiler(unittest.TestCase):
+  @unittest.skipIf(Device.DEFAULT == "CPU", "fails in CPU")
+  def test_profiler(self):
+    start = len(Compiled.profile_events)
+    with Context(PROFILE=1):
+      Tensor.empty(32).add(1).realize()
+      Device[Device.DEFAULT].synchronize()
+    self.assertTrue(any(isinstance(e, (ProfileRangeEvent, ProfileGraphEvent)) for e in Compiled.profile_events[start:]))
+
 # TODO: support in HCQCompiled
+# TODO: support these tests in HCQ2
 is_cpu_hcq = Device.DEFAULT in {"CPU"}
 
 @unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in {"METAL"}, "Dev not supported")
@@ -70,9 +82,9 @@ class TestProfiler(unittest.TestCase):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0) as profile:
-      buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
+      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
 
-    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith(TestProfiler.d0.device)]
+    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith((TestProfiler.d0.device, "PYTHON"))]
     assert len(kernel_runs) == 1, "one kernel run is expected"
 
   def test_profile_multiops(self):
@@ -80,12 +92,12 @@ class TestProfiler(unittest.TestCase):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0) as profile:
-      buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
+      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
       gs, ls = TestProfiler.prg.arg.launch_dims({})
       TestProfiler.runtime(buf1._buf, TestProfiler.a.uop.buffer._buf, global_size=gs, local_size=ls)
-      buf1.copyout(memoryview(bytearray(buf1.nbytes)))
+      buf1.as_memoryview()
 
-    evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith(TestProfiler.d0.device)]
+    evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith((TestProfiler.d0.device, "PYTHON"))]
 
     assert len(evs) == 3, "3 kernel runs are expected"
     # NOTE: order of events does not matter, the tool is responsible for sorting them
@@ -103,12 +115,12 @@ class TestProfiler(unittest.TestCase):
     buf2 = Buffer(f"{Device.DEFAULT}:1", 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
-      buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
-      buf2.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
+      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
+      buf2.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
 
     for dev in [TestProfiler.d0.device, d1.device]:
       evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and _dev_base(x.device) == dev]
-      assert len(evs) == 1, "one kernel runs are expected"
+      assert len(evs) == (0 if buf1._host_mv() is not None else 1), "one kernel runs are expected"
 
   def test_profile_multidev_transfer(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]

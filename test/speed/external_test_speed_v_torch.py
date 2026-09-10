@@ -174,7 +174,7 @@ class TestSpeed(unittest.TestCase):
   def test_permute(self):
     for N in [1024, 4096]:
       # this is a 64MB tensor, M1 L1 cache is 128kB
-      # to fit easily in L1, rotations should be 128x128 chunks. 128x128 is also the AMX size
+      # to fit easily in L1, rotations should be 128x128 chunks.
       def f(a, b): return a.permute(1,0).contiguous()
       helper_test_generic_square('permute', N, f, f, onearg=True)
 

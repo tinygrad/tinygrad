@@ -89,7 +89,8 @@ class TestBeamSearch(unittest.TestCase):
     s.apply_opt(Opt(OptOps.TC, 0, (-1, 0, 1)))
     up = prod([x for x, t in zip(s.full_shape, s.axis_types) if t in (AxisType.UPCAST, AxisType.UNROLL)])
     actions = get_kernel_actions(s, include_0=False, max_up=int(up))
-    upcasted = [s for s in actions.values() if any(opt.op in (OptOps.UPCAST, OptOps.UNROLL) for opt in s.applied_opts)]
+    upcasted = [s for s in actions.values() if any(o.op is OptOps.SPLIT and o.arg[1] in (AxisType.UPCAST, AxisType.UNROLL)
+                                                  for o in s.applied_opts)]
     assert len(upcasted) > 0, f"expected upcast/unroll actions after TC with max_up={up}, but got none"
 
   def test_max_up(self):
@@ -98,8 +99,8 @@ class TestBeamSearch(unittest.TestCase):
     s = Scheduler(ast, Device[Device.DEFAULT].renderer)
     for max_up in (2, 4):
       actions = get_kernel_actions(s, include_0=False, max_up=max_up)
-      for up_opts in [s.applied_opts for s in actions.values() if any(opt.op in (OptOps.UPCAST, OptOps.UNROLL) for opt in s.applied_opts)]:
-        assert len([opt for opt in up_opts if opt.arg > max_up]) == 0 and len([op for op in up_opts if op.arg <= max_up]) > 0
+      up_opts = [o for s in actions.values() for o in s.applied_opts if o.op is OptOps.SPLIT and o.arg[1] in (AxisType.UPCAST, AxisType.UNROLL)]
+      assert len([opt for opt in up_opts if opt.arg[0] > max_up]) == 0 and len([op for op in up_opts if op.arg[0] <= max_up]) > 0
 
 if __name__ == '__main__':
   unittest.main()

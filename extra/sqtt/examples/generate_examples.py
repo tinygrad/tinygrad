@@ -1,4 +1,4 @@
-import os, subprocess, sys, shlex
+import os, subprocess, sys, shlex, pickle
 from pathlib import Path
 from tinygrad.helpers import temp, getenv
 
@@ -9,8 +9,8 @@ EXAMPLES = {
   "empty":"test/backend/test_custom_kernel.py TestCustomKernel.test_empty",
   "plus":"test/test_tiny.py TestTiny.test_plus",
   "gemm":"-c \"from tinygrad import Tensor; (Tensor.empty(N:=32, N)@Tensor.empty(N, N)).realize()\"",
-  "sync":"test/amd/test_custom_kernel.py TestCustomKernel.test_lds_sync",
-  "handwritten":"test/amd/test_custom_kernel.py TestCustomKernel.test_handwritten",
+  "sync":"test/amd/test_asm_kernel.py TestAsmKernel.test_lds_sync",
+  "handwritten":"test/amd/test_asm_kernel.py TestAsmKernel.test_handwritten",
 }
 
 if __name__ == "__main__":
@@ -23,5 +23,8 @@ if __name__ == "__main__":
       # AM_RESET=1 gets a clear trace, does not work on mi300 machines
       subprocess.run([sys.executable, *shlex.split(test)], cwd=EXAMPLES_DIR.parent.parent.parent,
                      env={**os.environ, "DEV":"AMD", "AM_RESET":"1" if not arch.startswith("gfx9") else "0", "VIZ":"-2", "PYTHONPATH":"."})
+      with open(PROFILE_PATH, "rb") as f: events = pickle.load(f)
+      with open(PROFILE_PATH, "wb") as f:
+        pickle.dump([e for e in events if type(e).__name__ in {"ProfilePMCEvent", "ProfileSQTTEvent", "ProfileProgramEvent"}], f)
       PROFILE_PATH.rename(dest:=EXAMPLES_DIR/arch/f"profile_{name}_run_{i}.pkl")
       print(f"saved SQTT trace to {dest}")

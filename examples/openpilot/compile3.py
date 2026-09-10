@@ -1,4 +1,4 @@
-import os, sys, pickle, time, re
+import os, sys, pickle, time, re, tempfile, struct, shutil, io
 import numpy as np
 if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 
@@ -9,6 +9,39 @@ from tinygrad.nn.onnx import OnnxRunner
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
 OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
+PICKLE_OOB = getenv("PICKLE_OOB")
+
+def dump_pickle(obj, f):
+  if PICKLE_OOB:
+    # allows pickling when buffers don't fit in (CPU) RAM
+    # from openpilot/selfdrive/modeld/helpers.py
+    with tempfile.TemporaryFile(dir=".") as tmp:
+      def buffer_callback(pb: pickle.PickleBuffer):
+        m = pb.raw()
+        tmp.write(struct.pack('<q', m.nbytes))
+        tmp.write(m)
+        pb.release() # keep peak ram at ~1 buffer
+      stream = io.BytesIO()
+      pickle.Pickler(stream, protocol=5, buffer_callback=buffer_callback).dump(obj)
+      opcodes = stream.getvalue()
+      f.write(struct.pack('<q', len(opcodes)))
+      f.write(opcodes)
+      tmp.seek(0)
+      shutil.copyfileobj(tmp, f)
+  else: pickle.dump(obj, f)
+
+def load_pickle(f):
+  if PICKLE_OOB:
+    # allows unpickling when buffers don't fit in (CPU) RAM
+    # from openpilot/selfdrive/modeld/helpers.py
+    opcodes = f.read(struct.unpack('<q', f.read(8))[0])
+    def buffers():
+      while (h := f.read(8)):
+        pb = pickle.PickleBuffer(bytearray(struct.unpack('<q', h)[0]))
+        f.readinto(pb)
+        yield pb
+    return pickle.load(io.BytesIO(opcodes), buffers=buffers())
+  else: return pickle.load(f)
 
 def compile(onnx_file):
   run_onnx = OnnxRunner(onnx_file)
@@ -28,8 +61,8 @@ def compile(onnx_file):
     inputs = {k:Tensor(v.numpy(), device=Device.DEFAULT).realize() if 'img' in k else v for k,v in inputs.items()}
   print("created tensors")
 
-  run_onnx_jit = TinyJit(lambda **kwargs:
-                         next(iter(run_onnx({k:v.to(Device.DEFAULT) for k,v in kwargs.items()}).values())).cast('float32'), prune=True)
+  @TinyJit(prune=True)
+  def run_onnx_jit(**kwargs): return next(iter(run_onnx({k:v.to(Device.DEFAULT) for k,v in kwargs.items()}).values())).cast('float32')
   for i in range(3):
     GlobalCounters.reset()
     print(f"run {i}")
@@ -42,7 +75,7 @@ def compile(onnx_file):
   kernel_calls = [u for u in run_onnx_jit.captured.linear.toposort(gate=lambda x: x.op not in kernel_asts)
                   if u.op is Ops.CALL and u.src[0].op in kernel_asts]
   print(f"captured {len(kernel_calls)} kernels")
-  np.testing.assert_equal(test_val, ret, "JIT run failed")
+  if getenv("TEST", 1): np.testing.assert_equal(test_val, ret, "JIT run failed")
   print("jit run validated")
 
   # check gated read_image usage
@@ -50,7 +83,7 @@ def compile(onnx_file):
   read_image_count = 0
   gated_read_image_count = 0
   for call in kernel_calls:
-    _, _, _, source, _ = call.src[0].src
+    _, _, source, _ = call.src[0].src
     src = source.arg
     kernel_count += 1
     read_image_count += src.count("read_image")
@@ -65,8 +98,7 @@ def compile(onnx_file):
   if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", -1)) != -1:
     assert gated_read_image_count == allowed_gated_read_image, f"different gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
 
-  with open(OUTPUT, "wb") as f:
-    pickle.dump(run_onnx_jit, f)
+  with open(OUTPUT, "wb") as f: dump_pickle(run_onnx_jit, f)
   mdl_sz = os.path.getsize(onnx_file)
   pkl_sz = os.path.getsize(OUTPUT)
   print(f"mdl size is {mdl_sz/1e6:.2f}M")
@@ -75,14 +107,21 @@ def compile(onnx_file):
   return inputs, test_val
 
 def test_vs_compile(run, inputs, test_val=None):
+  if (log:=bool(getenv("BENCHMARK_LOG", ""))): from extra.bench_log import WallTimeEvent, BenchEvent
 
   # run 20 times
   step_times = []
   for _ in range(20):
     st = time.perf_counter()
-    out = run(**inputs)
-    mt = time.perf_counter()
-    val = out.numpy()
+    if log:
+      with WallTimeEvent(BenchEvent.STEP):
+        out = run(**inputs)
+        mt = time.perf_counter()
+        val = out.numpy()
+    else:
+      out = run(**inputs)
+      mt = time.perf_counter()
+      val = out.numpy()
     et = time.perf_counter()
     step_times.append((et-st)*1e3)
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {step_times[-1]:6.2f} ms")
@@ -128,15 +167,9 @@ def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
   print("test vs onnx passed")
   return timings
 
-def bench(run, inputs):
-  from extra.bench_log import WallTimeEvent, BenchEvent
-  for _ in range(10):
-    with WallTimeEvent(BenchEvent.STEP):
-      run(**inputs).numpy()
-
 if __name__ == "__main__":
   if getenv("RUN_PICKLE"):
-    with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
+    with open(OUTPUT, "rb") as f: pickle_loaded = load_pickle(f)
     inputs = {name: Tensor(Tensor.randn(*view.shape, dtype=dtype).numpy(), device=device)
               for name, (view, _vars, dtype, device) in zip(pickle_loaded.captured.expected_names, pickle_loaded.captured.expected_input_info)}
     test_vs_compile(pickle_loaded, inputs)
@@ -144,11 +177,8 @@ if __name__ == "__main__":
     onnx_file = fetch(OPENPILOT_MODEL)
     inputs, outputs = compile(onnx_file)
 
-    with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
+    with open(OUTPUT, "rb") as f: pickle_loaded = load_pickle(f)
 
     test_vs_compile(pickle_loaded, inputs, outputs)
     if getenv("SELFTEST"):
       test_vs_onnx(inputs, outputs, onnx_file, 1e-4)
-
-  if getenv("BENCHMARK_LOG", ""):
-    bench(pickle_loaded, inputs)

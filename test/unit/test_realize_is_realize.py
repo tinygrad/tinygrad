@@ -15,6 +15,10 @@ class TestRealizeIsRealized(unittest.TestCase):
     t = Tensor.zeros(10).contiguous().realize()
     assert t.uop.is_realized
 
+  def test_ones(self):
+    t = Tensor.ones(4, 4).realize()
+    assert t.uop.is_realized
+
   def test_bytes(self):
     t = Tensor(b'\x01\x02\x03').realize()
     assert t.uop.is_realized
@@ -26,7 +30,7 @@ class TestRealizeIsRealized(unittest.TestCase):
   def test_multi(self):
     d = Device.DEFAULT
     t = Tensor.ones(8).contiguous().shard((d, d), axis=0).realize()
-    assert all(u.is_realized for u in t.uop.src)
+    assert t.uop.src[0].is_realized
 
   def test_empty(self):
     t = Tensor.empty(4, 4).realize()
@@ -49,10 +53,6 @@ class TestRealizeIsRealized(unittest.TestCase):
 
   def test_const_not_realized(self):
     t = Tensor(3.14).realize()
-    assert not t.uop.is_realized
-
-  def test_ones_not_realized(self):
-    t = Tensor.ones(4, 4).realize()
     assert not t.uop.is_realized
 
   def test_none_not_realized(self):

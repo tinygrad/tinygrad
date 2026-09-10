@@ -1,6 +1,6 @@
 import unittest, os
 from tempfile import TemporaryDirectory
-from tinygrad import Tensor
+from tinygrad import Context
 from tinygrad.helpers import getenv
 from examples.mlperf.model_train import train_stable_diffusion
 
@@ -14,7 +14,7 @@ class TestTrain(unittest.TestCase):
     if not getenv("CKPTDIR", ""): os.environ["CKPTDIR"] = "/raid/weights/stable_diffusion"
     with TemporaryDirectory(prefix="test-train") as tmp:
       os.environ["UNET_CKPTDIR"] = tmp
-      with Tensor.train():
+      with Context(TRAINING=1):
         saved_ckpts = train_stable_diffusion()
       expected_ckpt = f"{tmp}/{num_steps}.safetensors"
       assert len(saved_ckpts) == 1 and saved_ckpts[0] == expected_ckpt

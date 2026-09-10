@@ -31,7 +31,7 @@ const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
       width = Math.max(width, ctx.measureText(tokens.map((t) => t.st).join("")).width);
       height += lineHeight;
     }
-    g.setNode(lead, { ...rectDims(width, height), label, labelX:0, id:lead, color:"#1a1b26" });
+    g.setNode(lead, { ...rectDims(width, height), label, labelX:0, id:lead, color:"#1a1b26", addrspace:null });
   }
   // paths become edges between basic blocks
   const pathColors = {0:"#3f7564", 1:"#7a4540", 2:"#3b5f7e"};
@@ -45,23 +45,26 @@ const layoutUOp = (g, { graph, change }, opts) => {
   const lineHeight = 14;
   g.setGraph({ rankdir: "LR", font:"sans-serif", lh:lineHeight });
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
-  if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
+  if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, labelX:0, className:"overlay"});
   let callCount = 0;
-  for (const [k, {label, src, ref, color, tag, exclude }] of Object.entries(graph)) {
+  for (const [k, {label, src, ref, color, tag, exclude, addrspace}] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
     for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
       width = Math.max(width, ctx.measureText(line).width);
       height += lineHeight;
     }
-    const callNode = label.startsWith("CALL\n") || label.startsWith("FUNCTION\n");
+    const op = label.split("\n", 1)[0];
+    const callNode = op === "CALL", programNode = op === "PROGRAM";
+    const collapsePorts = callNode ? [0] : programNode ? [0, 1] : null;
     if (callNode) callCount++;
-    g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, tag, callNode, exclude});
+    g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, tag, callNode, collapsePorts, exclude, addrspace,
+      className:label.startsWith("REWRITE_ERROR") ? "err" : null});
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
     for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port},
-      ...(callNode && port === 0 && {color:"#a0a1b8"})});
+      ...(collapsePorts?.includes(port) && {color:"#a0a1b8"})});
     if (change?.includes(parseInt(k))) g.setParent(k, "overlay");
   }
   // optionally hide nodes from the layout
@@ -86,11 +89,11 @@ const layoutUOp = (g, { graph, change }, opts) => {
       const consumer = g.node(consumerId);
       // add +- toggle if this consumer has collapsible sources
       const edge = g.edge(n, consumerId);
-      const collapsible = consumer.callNode ? edge?.label?.text === 0 : node.exclude;
+      const collapsible = consumer.collapsePorts != null ? consumer.collapsePorts.includes(edge?.label?.text) : node.exclude;
       if (!collapsible) continue;
       consumer.collapsible = true;
-      // increase width of call/function nodes to make space for a toggle
-      if (consumer.callNode) { consumer.width = consumer.labelWidth+NODE_PADDING*2+CALL_TAG_WIDTH; consumer.labelX = CALL_TAG_WIDTH/2; }
+      // increase width of call/function/program nodes to make space for a toggle
+      if (consumer.collapsePorts != null) { consumer.width = consumer.labelWidth+NODE_PADDING*2+CALL_TAG_WIDTH; consumer.labelX = CALL_TAG_WIDTH/2; }
       // make sources invisible if UI has toggled it off
       const collapsed = consumer.callNode ? opts.showCallSrc === opts.callSrcMask.has(consumerId) : !opts.expandedNodes.has(consumerId);
       if (!collapsed) continue;

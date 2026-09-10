@@ -2,11 +2,15 @@ import unittest
 from tinygrad.helpers import getenv
 import torch
 import tinygrad.nn.torch
-torch.set_default_device("tiny")
 import numpy as np
 
 @unittest.skipIf(getenv("GPUS",1)<=1, "only single GPU")
 class TestTorchBackendMultiGPU(unittest.TestCase):
+  def setUp(self):
+    self._prev_device = torch.get_default_device()
+    torch.set_default_device("tiny")
+  def tearDown(self): torch.set_default_device(self._prev_device)
+
   def test_transfer(self):
     a = torch.Tensor([[1,2],[3,4]]).to("tiny:0")
     b = torch.Tensor([[3,2],[1,0]]).to("tiny:1")

@@ -1,8 +1,9 @@
-import unittest, pickle, types
+import unittest, pickle, types, tracemalloc
 import numpy as np
-from tinygrad import Tensor, TinyJit, Variable, dtypes
-from tinygrad.helpers import GlobalCounters, ContextVar, Context
-from tinygrad.uop.ops import PatternMatcher, UPat, UOp
+from tinygrad import Tensor, Device, TinyJit, Variable, dtypes
+from tinygrad.helpers import GlobalCounters, ContextVar, Context, DEV
+from tinygrad.uop.ops import PatternMatcher, UPat, UOp, deconstruct_function
+from test.helpers import KernelCountException
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
@@ -11,9 +12,14 @@ class TestPickle(unittest.TestCase):
     fxn = types.FunctionType(pickle.loads(code_str), globals())
     self.assertEqual(fxn(2), 4)
 
+  def test_deconstruct_function_nested_comprehension(self):
+    # pre PEP 709, each comprehension is its own code object, so dtypes here is referenced two code objects deep
+    def fxn(): return [[dtypes.int for _ in range(2)] for _ in range(2)]
+    self.assertEqual(types.FunctionType(*deconstruct_function(fxn))(), fxn())
+
   def test_pickle_pattern_matcher(self):
     pm = PatternMatcher([(UPat.cvar('x'), lambda x: x*2)])
-    sink = UOp.const(dtypes.int, 2)
+    sink = UOp.const(2)
     tt = pm.rewrite(sink)
     pm_str = pickle.dumps(pm)
     pm2 = pickle.loads(pm_str)
@@ -36,7 +42,7 @@ class TestPickle(unittest.TestCase):
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t_values, t2.numpy())
     # expect at most one COPY kernel
-    self.assertLessEqual(GlobalCounters.kernel_count, 1)
+    if GlobalCounters.kernel_count > 1: raise KernelCountException(1, GlobalCounters.kernel_count)
 
   def test_pickle_realized_tensor_alt(self):
     print("** init")
@@ -78,6 +84,22 @@ class TestPickle(unittest.TestCase):
     a2:UOp = pickle.loads(s)
     self.assertListEqual(a2.base.realized.as_memoryview().cast("I").tolist(), [0, 1, 2, 3])
 
+  @unittest.skipIf(DEV.interface.startswith("MOCK"), "mock device buffers live in host RAM, not VRAM")
+  def test_pickle_oob_ram(self):
+    N, M = 8, 10**6
+    ts = [Tensor.rand(M, dtype='float32').realize() for _ in range(N)]
+    tracemalloc.start()
+    st = pickle.dumps(ts, protocol=5, buffer_callback=lambda pb: pb.release())
+    self.assertLess(tracemalloc.get_traced_memory()[1], N*M*4)
+    tracemalloc.reset_peak()
+    def make_fake_buffers():
+      for _ in range(N):
+        Device[Device.DEFAULT].synchronize()
+        yield pickle.PickleBuffer(bytearray(M*4))
+    pickle.loads(st, buffers=make_fake_buffers())
+    self.assertLess(tracemalloc.get_traced_memory()[1], N*M*4)
+    tracemalloc.stop()
+
   def test_pickle_unrealized_tensor(self):
     t = Tensor.ones(10, 10)
     st = pickle.dumps(t)
@@ -110,6 +132,26 @@ class TestPickle(unittest.TestCase):
     st = pickle.dumps(t)
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t.numpy(), t2.numpy())
+
+  def test_pickle_no_storage_aliasing(self):
+    # loading the same pickle twice gives fully independent storage: the buffers (and their BUFFER uops) are never shared
+    t = Tensor([1,2,3,4]).realize()
+    st = pickle.dumps(t)
+    t1, t2 = pickle.loads(st), pickle.loads(st)
+    self.assertIsNot(t1.uop, t2.uop)
+    self.assertIsNot(t1.uop.base.buffer, t2.uop.base.buffer)
+    t1.assign(Tensor([9,9,9,9])).realize()
+    self.assertListEqual(t1.tolist(), [9,9,9,9])
+    self.assertListEqual(t2.tolist(), [1,2,3,4])
+
+  def test_pickle_view_is_self_contained(self):
+    # a pickled graph carries its own buffer: data from earlier loads of related graphs must not leak into it
+    t = Tensor([1,2,3,4]).realize()
+    t1 = pickle.loads(pickle.dumps(t))
+    t1.assign(Tensor([9,9,9,9])).realize()
+    # loading a view of the original tensor must give the pickled values ([2,3]), not the mutated values from the other load
+    v2 = pickle.loads(pickle.dumps(t[1:3]))
+    self.assertListEqual(v2.realize().tolist(), [2,3])
 
   def test_pickle_jit(self):
     @TinyJit

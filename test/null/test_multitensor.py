@@ -1,5 +1,5 @@
 import gc, unittest
-from tinygrad import Tensor, GlobalCounters, dtypes
+from tinygrad import Tensor, UOp, GlobalCounters, dtypes
 from tinygrad.engine.jit import TinyJit
 from tinygrad.helpers import Context
 
@@ -58,14 +58,14 @@ class TestMultiRamUsage(unittest.TestCase):
     X = Tensor.ones(256, buffer=False).realize()
     self.assertUsed(0)
     X.shard_(devices_4).realize()
-    self.assertUsed(256 * 4 * 4)  # TODO: can be zero
+    self.assertUsed(0)
 
   def test_sharded_memory_axis_const(self):
     devices_4 = tuple(f"NULL:{i+1}" for i in range(4))
     X = Tensor.ones(256, buffer=False).realize()
     self.assertUsed(0)
     X.shard_(devices_4, axis=0).realize()
-    self.assertUsed(256 * 4)  # TODO: can be zero
+    self.assertUsed(0)
 
   def test_zeros_per_device(self):
     _ = Tensor.zeros(self.N, self.N, device="NULL").contiguous().realize()
@@ -181,11 +181,11 @@ class TestMultiScalarALU(unittest.TestCase):
     @functools.cache
     def _fxn(x_p, device):
       t = Tensor(x_p, device=device)
-      inner = Tensor(t.uop.src[0]) if t.uop.op is Ops.MULTI else t
+      inner = Tensor(t.uop.src[0]) if t.uop.op is Ops.UNSHARD else t
       return (inner.sum(),)
     param = x.as_param(0)
     fxn = _fxn(param.uop, x.device)
-    per_dev_scalar = Tensor(fxn[0].uop.call(x.uop).gettuple(0))
+    per_dev_scalar = Tensor(fxn[0].uop.call_with_output(x.uop))
     result = x * per_dev_scalar
     self.assertEqual(result.shape, (4, 4))
     self.assertEqual(result.uop.axis, 0)
@@ -204,6 +204,12 @@ class TestMultiAxis(unittest.TestCase):
     self.assertEqual(t.reshape(2, 16).uop.axis, 0)
     self.assertEqual(t.reshape(2, 2, 8).uop.axis, 0)
 
+  def test_uop_shard_axis_none(self):
+    devices = ("NULL:0", "NULL:1")
+    u = Tensor.ones(8).contiguous().realize().uop
+    self.assertIsNone(u.shard(devices).axis)
+    self.assertEqual(u.shard(devices, 0).axis, 0)
+
   def test_empty_like_sharded(self):
     t = Tensor.ones(4, 8).shard(("NULL:0", "NULL:1"), axis=0)
     e = t.empty_like()
@@ -211,6 +217,11 @@ class TestMultiAxis(unittest.TestCase):
     self.assertEqual(e.device, t.device)
     self.assertEqual(e.uop.axis, 0)
     self.assertTrue(e.uop.has_buffer_identity())
+
+  def test_symbolic_reshape_shard_axis(self):
+    rows = UOp.variable("rows", 1, 4).bind(3)
+    x = Tensor.empty(4, 2).shard(("NULL:1", "NULL:2"), axis=1)[:rows]
+    self.assertEqual(x.reshape(rows, 1, 2).uop.axis, 2)
 
 if __name__ == '__main__':
   unittest.main()

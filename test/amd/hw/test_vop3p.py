@@ -457,6 +457,21 @@ class TestWMMAF16(unittest.TestCase):
         self.assertAlmostEqual(lo, 16.0, places=1, msg=f"v[{reg}] lane {lane}: expected 16.0, got {lo}")
         self.assertEqual(result >> 16, 0, msg=f"v[{reg}] lane {lane}: hi bits should be 0")
 
+  def test_v_wmma_f16_16x16x16_f16_inline_zero_accumulator(self):
+    """V_WMMA_F16_16X16X16_F16 with the inline constant 0 as C: D = A @ B, whatever v[128:135] holds."""
+    instructions: list[Inst] = []
+    instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
+    for i in range(16, 32):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    instructions.append(s_mov_b32(s[1], 0x57b057b0))  # packed f16 123.0, poison where a VGPR read of "128" would land
+    for i in range(128, 136):
+      instructions.append(v_mov_b32_e32(v[i], s[1]))
+    instructions.append(v_wmma_f16_16x16x16_f16(v[0:7], v[16:23], v[24:31], 0))
+    st = run_program(instructions, n_lanes=32)
+    for lane in range(32):
+      for reg in range(8):
+        self.assertEqual(st.vgpr[lane][reg], 0x4c00, msg=f"v[{reg}] lane {lane}")
+
   def test_v_wmma_f16_16x16x16_f16_with_accumulator(self):
     """V_WMMA_F16_16X16X16_F16 with non-zero accumulator."""
     instructions: list[Inst] = []

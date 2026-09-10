@@ -2,6 +2,7 @@ import heapq
 from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
+from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
@@ -23,9 +24,7 @@ def linearize(sink:UOp) -> list[UOp]:
     match u.op:
       # the order and placement of these defines is important
       case Ops.PARAM: priority, extra = -20, u.arg.slot
-      case Ops.DEFINE_VAR: priority, extra = -19, u.arg
-      case Ops.DEFINE_REG: priority = -18
-      case Ops.DEFINE_LOCAL: priority = -17
+      case Ops.BUFFER: priority = -17 if u.addrspace == AddrSpace.LOCAL else -18
       case Ops.LOAD: priority = -1    # place loads early
       case Ops.STORE: priority = 1    # place stores late
       case Ops.RANGE: priority = 5    # placing RANGE is good
@@ -86,9 +85,9 @@ pm_add_control_flow = PatternMatcher([
 ])
 
 def do_split_ends(e:UOp):
-  ret = e.src[0]
-  for r in sorted(UOp.sink(*e.src[1:]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
-  return ret
+  ret, backedge = e.src[0], tuple(x for x in e.src[1:] if x.dtype in (dtypes.void, dtypes.bool))
+  for r in sorted(UOp.sink(*[x for x in e.src[1:] if x not in backedge]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
+  return ret.end(*backedge) if len(backedge) else ret
 
 pm_split_ends = PatternMatcher([
   # split the ends

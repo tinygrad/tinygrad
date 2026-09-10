@@ -84,22 +84,22 @@ class TestUSBMMIOInterface(unittest.TestCase):
     self.mmio[2] = 0xFE
     self.assertEqual(full_view[2], 0xFE)
 
-  def test_pcimem_byte(self):
+  def test_pcimem_dword(self):
     usb2 = MockUSB(bytearray(self.size))
-    mmio_pci = USBMMIOInterface(usb2, 0, self.size, fmt='B', pcimem=True)
-    mmio_pci[3] = 0x11
-    self.assertEqual(mmio_pci[3], 0x11)
-    self.assertEqual(usb2.mem[3], 0x11)
+    mmio_pci = USBMMIOInterface(usb2, 0, self.size, fmt='I', pcimem=True)
+    mmio_pci[3] = 0x11223344
+    self.assertEqual(mmio_pci[3], 0x11223344)
+    self.assertEqual(usb2.mem[12:16], b'\x44\x33\x22\x11')
 
   def test_pcimem_slice(self):
     usb3 = MockUSB(bytearray(self.size))
     mmio_pci = USBMMIOInterface(usb3, 0, self.size, fmt='B', pcimem=True)
-    values = [2, 3, 4]
-    mmio_pci[4:7] = values
-    raw = mmio_pci[4:7]
+    values = [2, 3, 4, 5]
+    mmio_pci[4:8] = values
+    raw = mmio_pci[4:8]
     self.assertIsInstance(raw, bytes)
     self.assertEqual(list(raw), values)
-    self.assertEqual([mmio_pci[i] for i in range(4, 7)], values)
+    self.assertEqual(list(usb3.mem[4:8]), values)
 
 if __name__ == "__main__":
   unittest.main()

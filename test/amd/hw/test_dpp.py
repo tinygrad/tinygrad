@@ -6,7 +6,7 @@ when USE_HW=1.
 """
 import ctypes, unittest
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
-from tinygrad.helpers import flat_mv
+from tinygrad.helpers import Target
 from test.amd.hw.helpers import USE_HW, assemble
 from test.mockgpu.amd.emu import run_asm
 
@@ -37,8 +37,8 @@ def _run_wave64_emu(instructions: list, out_reg: int = 1) -> list[int]:
   return list(out_buf)
 
 def _run_wave64_hw(instructions: list, out_reg: int = 1) -> list[int]:
-  from tinygrad.device import Device
-  from tinygrad.runtime.ops_amd import AMDProgram
+  from tinygrad.device import Device, TinyELF, Buffer
+  from tinygrad.dtype import dtypes
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
   dev = Device["AMD"]
@@ -84,11 +84,10 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
   lib = compiler.compile(asm_src)
-  prg = AMDProgram(dev, "test", lib)  # type: ignore[arg-type]
-  out_gpu = dev.allocator.alloc(WAVE64 * 4)
-  prg(out_gpu, global_size=(1, 1, 1), local_size=(WAVE64, 1, 1), wait=True)
-  out = bytearray(WAVE64 * 4)
-  dev.allocator._copyout(flat_mv(memoryview(out)), out_gpu)
+  prg = dev.runtime(TinyELF(lib, "test", Target("AMD", arch=dev.arch), ()))
+  out_gpu = Buffer(dev.device, WAVE64 * 4, dtypes.uint8, preallocate=True)
+  prg(out_gpu._buf, global_size=(1, 1, 1), local_size=(WAVE64, 1, 1), wait=True)
+  out = out_gpu.as_memoryview()
   return [int.from_bytes(out[i*4:(i+1)*4], 'little') for i in range(WAVE64)]
 
 def run_wave64(instructions: list, out_reg: int = 1) -> list[int]:

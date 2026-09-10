@@ -1,6 +1,7 @@
 import unittest, sys
 from tinygrad import Tensor, GlobalCounters, dtypes, Context
 from tinygrad.helpers import WINO
+from test.helpers import check_schedule
 
 @unittest.skipIf(sys.platform.startswith("win"), "flaky on Windows")
 class TestWinograd(unittest.TestCase):
@@ -13,35 +14,36 @@ class TestWinograd(unittest.TestCase):
   def test_forward_kernels(self):
     x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
     out = Tensor.conv2d(x,w)
-    self.assertEqual(len(out.schedule_linear().src), 2)
+    check_schedule(out, 4)
 
-  def test_backward_kernels(self):
-    x,w = Tensor.empty(1,4,9,9).realize(), Tensor.empty(4,4,3,3).realize()
-    out = Tensor.conv2d(x,w, padding=1)
-    out.mean().backward()
-    backward_schedule = x.grad.schedule_linear(w.grad)
-    self.assertEqual(len(backward_schedule.src), 4)
+  def test_backward_counters(self):
+    # contiguous_backward on the pooled input keeps the input-transform adjoint out of the overlap accumulation, so
+    # winograd backward runs in a fraction of the direct-conv flops; NOOPT=1 keeps the raw flop ratio from drifting with the optimizer
+    IC, OC, H = 64, 64, 28
+    x,w = Tensor.empty(1,IC,H,H,device="NULL").realize(), Tensor.empty(OC,IC,3,3,device="NULL").realize()
+    x.requires_grad = w.requires_grad = True
+    def backward_ops(wino):
+      x.grad = w.grad = None
+      GlobalCounters.reset()
+      with Context(NOOPT=1, WINO=wino):
+        Tensor.conv2d(x,w,padding=1).mean().backward()
+        Tensor.realize(x.grad, w.grad)
+      return GlobalCounters.global_ops
+    ops_wino, ops_normal = backward_ops(1), backward_ops(0)
+    print(f"backward ops: normal {ops_normal} wino {ops_wino} ratio {ops_wino/ops_normal:.2f}")
+    self.assertLess(ops_wino/ops_normal, 0.35)
 
-  @unittest.skip("this requires optimizations")
   def test_counters(self):
-    IC, OC, X, Y = 4,4,9,9
-    x,w = Tensor.rand(1,IC,Y,X).realize(), Tensor.rand(OC,IC,3,3).realize()
+    IC, OC, H = 64, 64, 28
+    x,w = Tensor.empty(1,IC,H,H,device="NULL").realize(), Tensor.empty(OC,IC,3,3,device="NULL").realize()
     GlobalCounters.reset()
-    with Context(WINO=1):
-      Tensor.conv2d(x,w).realize()
-    ops_wino, mem_wino = GlobalCounters.global_ops, GlobalCounters.global_mem
+    with Context(NOOPT=0, WINO=1): Tensor.conv2d(x,w).realize()
+    ops_wino = GlobalCounters.global_ops
     GlobalCounters.reset()
-    with Context(WINO=0):
-      Tensor.conv2d(x,w).realize()
-    ops_normal, mem_normal = GlobalCounters.global_ops, GlobalCounters.global_mem
-
-    ops_ratio, mem_ratio = ops_wino/ops_normal, mem_wino/mem_normal
-    print(f"ops: normal {ops_normal:9d} wino {ops_wino:9d} ratio {ops_ratio:.2f}")
-    print(f"mem: normal {mem_normal:9d} wino {mem_wino:9d} ratio {mem_ratio:.2f}")
-
-    # TODO: what's optimal on this?
-    self.assertLess(ops_ratio, 4.3)
-    self.assertLess(mem_ratio, 4)
+    with Context(NOOPT=0, WINO=0): Tensor.conv2d(x,w).realize()
+    ops_normal = GlobalCounters.global_ops
+    print(f"ops: normal {ops_normal} wino {ops_wino} ratio {ops_wino/ops_normal:.2f}")
+    self.assertLess(ops_wino/ops_normal, 0.6)
 
   def test_dtype(self):
     IC, OC, X, Y = 4,4,9,9

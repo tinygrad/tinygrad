@@ -4,6 +4,7 @@ from tinygrad import Tensor, GlobalCounters, Context, Device
 from tinygrad.dtype import DTypeLike, dtypes
 from tinygrad.engine.realize import run_linear
 from tinygrad.helpers import DEBUG, get_single_element
+from test.helpers import check_schedule
 
 def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
   # only support axis =-1
@@ -68,7 +69,7 @@ class TestFuse(unittest.TestCase):
     self._test_fuse(lambda a: a.softmax(axis=-1, dtype='half'), a, atol=3e-4)
 
   def test_fuse_arange_eye(self):
-    self._test_fuse(lambda: Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10))
+    self._test_fuse(lambda: (Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10)).clone())
 
   @unittest.skip("needs RANGEIFY>1")
   def test_double_gemm(self):
@@ -103,8 +104,7 @@ class TestFuse(unittest.TestCase):
     k = (x @ wk).contiguous()
     v = (x @ wv).contiguous()
     attn = q.scaled_dot_product_attention(k, v)
-    s = attn.schedule_linear()
-    self.assertEqual(len(s.src), 4) # 3 matmul and 1 attention
+    check_schedule(attn, 4) # 3 matmul and 1 attention
 
   @unittest.skip("needs RANGEIFY>1")
   def test_flash_attention(self):

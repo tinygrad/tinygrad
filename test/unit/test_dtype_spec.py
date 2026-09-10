@@ -1,8 +1,8 @@
 import unittest, math, subprocess
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes, DType, DTYPES_DICT
+from tinygrad.dtype import dtypes, DType, DTYPES_DICT, strong_dtype
 from tinygrad.device import Device
-from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES
+from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES, Context
 from test.helpers import slow
 from hypothesis import given, settings, strategies as strat
 import numpy as np
@@ -25,6 +25,8 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float
   if DEBUG >= 2: print(tensor.numpy())
   try:
     assert tensor.dtype == target_dtype
+    # weak values read back at their default.
+    target_dtype = strong_dtype(target_dtype)
     # denormals are zero
     if target_dtype in dtypes.floats and (target_dtype not in supported_dtypes or target_dtype in EMULATED_DTYPES.tolist(dtypes)):
       fe, fm = dtypes.finfo(target_dtype)
@@ -37,10 +39,13 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
 class TestTypeSpec(unittest.TestCase):
-  def setUp(self):
-    self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
-  def tearDown(self):
-    dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
+  def test_default_dtype_context(self):
+    default_float, default_int = dtypes.default_float, dtypes.default_int
+    with Context(DEFAULT_FLOAT=dtypes.half, DEFAULT_INT=dtypes.int16):
+      assert dtypes.default_float is dtypes.half
+      assert dtypes.default_int is dtypes.int16
+    assert dtypes.default_float is default_float
+    assert dtypes.default_int is default_int
 
   @unittest.skip("this test is slow and spawning whole pythons")
   def test_env_set_default_float(self):
@@ -79,13 +84,15 @@ class TestTypeSpec(unittest.TestCase):
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_creation(self, default_int, default_float):
-    dtypes.default_int, dtypes.default_float = default_int, default_float
+    self.enterContext(Context(DEFAULT_INT=default_int, DEFAULT_FLOAT=default_float))
     _assert_eq(Tensor(True), dtypes.bool, True)
-    _assert_eq(Tensor(None), dtypes.default_float, [])
-    _assert_eq(Tensor(2), dtypes.default_int, 2)
-    _assert_eq(Tensor(2.34), dtypes.default_float, 2.34)
+    _assert_eq(Tensor(None), dtypes.weakfloat, [])
+    _assert_eq(Tensor(2), dtypes.weakint, 2)
+    _assert_eq(Tensor(2.34), dtypes.weakfloat, 2.34)
     _assert_eq(Tensor([]), dtypes.default_float, [])
     _assert_eq(Tensor([1]), dtypes.default_int, [1])
+    # list elements are python scalars; a numpy scalar in a list has no inferred dtype (use np.array or state a dtype)
+    with self.assertRaises(RuntimeError): Tensor([np.int32(1)])
     _assert_eq(Tensor([1.1]), dtypes.default_float, [1.1])
 
     _assert_eq(Tensor.eye(0), dtypes.default_float, np.eye(0))
@@ -96,7 +103,7 @@ class TestTypeSpec(unittest.TestCase):
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_full(self, default_int, default_float):
-    dtypes.default_int, dtypes.default_float = default_int, default_float
+    self.enterContext(Context(DEFAULT_INT=default_int, DEFAULT_FLOAT=default_float))
 
     _assert_eq(Tensor.zeros((2, 3)), dtypes.default_float, np.zeros((2, 3)))
     _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.int64), dtypes.int64, np.zeros((2, 3)))
@@ -119,7 +126,7 @@ class TestTypeSpec(unittest.TestCase):
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_reduce_0d_default(self, default_int, default_float):
-    dtypes.default_int, dtypes.default_float = default_int, default_float
+    self.enterContext(Context(DEFAULT_INT=default_int, DEFAULT_FLOAT=default_float))
     _assert_eq(Tensor.ones((2,3,0)).sum(2), dtypes.default_float, np.zeros((2, 3)))
     # TODO: what should this one be?
     # _assert_eq(Tensor.ones((2,3,0), dtype=dtypes.default_int).sum(2), dtypes.default_int, np.zeros((2, 3)))
@@ -127,7 +134,7 @@ class TestTypeSpec(unittest.TestCase):
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
   def test_arange(self, default_int, default_float):
-    dtypes.default_int, dtypes.default_float = default_int, default_float
+    self.enterContext(Context(DEFAULT_INT=default_int, DEFAULT_FLOAT=default_float))
 
     _assert_eq(Tensor.arange(5), dtypes.default_int, np.arange(5))
     _assert_eq(Tensor.arange(120), dtypes.default_int, np.arange(120))
@@ -144,10 +151,8 @@ class TestTypeSpec(unittest.TestCase):
     _assert_eq(Tensor.arange(5.0, 3.0), dtypes.default_float, np.arange(5.0, 3.0))
 
 class TestAutoCastType(unittest.TestCase):
-  def setUp(self):
-    self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
-  def tearDown(self):
-    dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
+  def test_int_sqrt(self):
+    _assert_eq(Tensor([1, 4, 9, 16]).sqrt(), dtypes.default_float, [1, 2, 3, 4])
 
   @given(strat.sampled_from([d for d in core_dtypes if dtypes.is_int(d) and d in supported_dtypes]))
   def test_int_to_float_unary_func(self, dtype):
@@ -185,22 +190,18 @@ class TestAutoCastType(unittest.TestCase):
     np.testing.assert_allclose(t.prod(dtype=dtypes.float32).numpy(), 20000)
 
   def test_gradient_dtype(self):
-    old_default_float = dtypes.default_float
-
     for default_dtype in dtypes.floats:
       if default_dtype not in supported_dtypes: continue
-      dtypes.default_float = default_dtype
-      for dtype in dtypes.floats:
-        if dtype not in supported_dtypes: continue
-        if DEBUG >= 2:
-          print(f"testing {default_dtype=}, {dtype=}")
-        a = Tensor([1, 2, 3], dtype=dtype)
-        b = (a * 5).sum()
-        b.backward()  # if there is dtype mismatch, lazy should assert
-        assert a.grad.dtype == a.dtype
-        np.testing.assert_allclose(a.grad.numpy(), [5, 5, 5])
-
-    dtypes.default_float = old_default_float
+      with Context(DEFAULT_FLOAT=default_dtype):
+        for dtype in dtypes.floats:
+          if dtype not in supported_dtypes: continue
+          if DEBUG >= 2:
+            print(f"testing {default_dtype=}, {dtype=}")
+          a = Tensor([1, 2, 3], dtype=dtype)
+          b = (a * 5).sum()
+          b.backward()  # if there is dtype mismatch, lazy should assert
+          assert a.grad.dtype == a.dtype
+          np.testing.assert_allclose(a.grad.numpy(), [5, 5, 5])
 
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "very slow")
   @slow
@@ -220,6 +221,12 @@ class TestAutoCastType(unittest.TestCase):
     np.testing.assert_allclose(t.mean().numpy(), 60000)
     t.square().mean().backward()
     np.testing.assert_allclose(t.grad.numpy().flatten(), [60000 * 2 / (N*N)] * N*N)
+
+  @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
+  def test_var_half_precision_large_n(self):
+    # the element count (70000) exceeds half max (65504): the denominator must not be materialized in half
+    t = Tensor([[0.0, 1.0]], dtype=dtypes.half).expand(35000, 2).contiguous()
+    np.testing.assert_allclose(t.var().numpy(), 0.25, rtol=1e-3)
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Precision error")
   @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")

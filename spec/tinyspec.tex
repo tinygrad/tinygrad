@@ -23,12 +23,12 @@
 \definecolor{axblue}{HTML}{1565C0}       % GLOBAL
 \definecolor{axcyan}{HTML}{00838F}       % LOCAL
 \definecolor{axbrcyan}{HTML}{00ACC1}     % WARP
-\definecolor{axbrblue}{HTML}{42A5F5}     % THREAD
 \definecolor{axwhite}{HTML}{616161}      % LOOP (gray on white paper)
 \definecolor{axred}{HTML}{C62828}        % REDUCE
 \definecolor{axbrred}{HTML}{E53935}      % GROUP_REDUCE
 \definecolor{axyellow}{HTML}{F9A825}     % UPCAST
 \definecolor{axmagenta}{HTML}{7B1FA2}    % UNROLL
+\definecolor{axgreen}{HTML}{2E7D32}      % DEVICE
 
 \title{tinygrad: a single dialect from Tensor programs to Command Buffers}
 \author{tinygrad, Corp. \\ \texttt{research@tinygrad.org}}
@@ -40,7 +40,7 @@
 
 \section*{UOps}
 
-All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op},\;\mathrm{src},\;\mathrm{arg},\;\mathrm{tag})$ where $\mathrm{op}$ is from the set below, $\mathrm{src}$ is a tuple of input UOps, $\mathrm{arg}$ is op-dependent, and $\mathrm{tag}$ is for temporary processing. The full program is a DAG of UOps. Each UOp has five derived properties --- \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{min\_max}, and \textbf{axis} --- determined by the rules at the end of this document.
+All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op},\;\mathrm{src},\;\mathrm{arg},\;\mathrm{tag})$ where $\mathrm{op}$ is from the set below, $\mathrm{src}$ is a tuple of input UOps, $\mathrm{arg}$ is op-dependent, and $\mathrm{tag}$ is for temporary processing. The full program is a DAG of UOps. Each UOp has five derived properties --- \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspace}, and \textbf{min\_max} --- determined by the rules at the end of this document.
 
 %% ============================================================
 \subsection*{Source Ops \normalfont\small--- leaf nodes}
@@ -49,10 +49,10 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Param} & $(\mathbf{s})$ & slot, dtype, device?, addrspace? &
-  Placeholder with shape $\mathbf{s}$. Substituted in \op{Function}. \\[4pt]
-\op{Buffer} & () & size, dtype, device, addrspace &
-  Shape $(n \cdot \textit{size},)$ if device is $n$-tuple, else $(\textit{size},)$. \\
+\op{Param} & () & \texttt{ParamArg} &
+  Placeholder with flat storage of $\mathrm{size}$ elements. Substituted in \op{Call}. \\[4pt]
+\op{Buffer} & () & \texttt{ParamArg} &
+  Flat storage of $\mathrm{size}$ elements. \textbf{Unbound} if not allocated yet. \\
 \op{Const} & () & value, dtype &
   A scalar constant with shape $(\ )$. \\
   & & & Form vector consts with \op{Stack} \\
@@ -61,7 +61,21 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 \smallskip
-A \op{Buffer}'s \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}.
+\texttt{ParamArg} contains slot, dtype, concrete size (or \textsc{null} for a scalar), value bounds, alignment, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for unbound \op{Buffer}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}.
+
+%% ============================================================
+\subsection*{{\color{callblue}Call Ops} \normalfont\small--- function abstraction, like the lambda calculus}
+
+\begin{tabular}{@{}l l l l@{}}
+\toprule
+\textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
+\midrule
+\op{Call} & (body, $a_0$, $a_1$, \ldots) & --- & Substitute each \op{Param} $k$ in body with $a_k$. \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound positionally to the call's unbound \op{Buffer} arguments; output $a_k$ is \op{After}$(a_k, \op{Call})$. Unbound \op{Buffer}s are scoped to their \op{Call}: they are never implicit inputs of the enclosing graph.
 
 %% ============================================================
 \subsection*{{\color{movgreen}Movement Ops} \normalfont\small--- no arithmetic; view, indexing, and reinterpretation only}
@@ -73,51 +87,36 @@ A \op{Buffer}'s \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \textt
 \op{Permute} & $(T,)$ & axis order $\pi$ & Reorder axes. $\pi = (1,0)$ is transpose. \\
 \op{Flip} & $(T,)$ & bools $\mathbf{f}$ & Reverse along flagged axes. \\
 \op{Reshape} & $(T, \mathbf{s'})$ & --- & Reinterpret in row-major order. $\prod s_k = \prod s'_k$. \\
-\op{Expand} & $(T, \mathbf{s'})$ & --- & Broadcast size-1 axes. $s_k \in \{1, s'_k\}$. \\
-\op{Pad} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Place $T$ at offset $o_k$ in a zero-filled output of shape $s'_k$. \\
+\op{Expand} & $(T, \mathbf{n})$ & --- & Prepend axes $\mathbf{n}$ on the left. Output shape is $\mathbf{n} + T.\mathrm{shape}$. \\
+\op{Pad} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Place $T$ at offset $o_k$ in an invalid-filled output of shape $s'_k$. \\
 \op{Shrink} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Keep $s'_k$ elements starting at offset $o_k$ per axis. Inverse of \op{Pad}. \\
 \op{Index} & $(T, i_0, i_1, \ldots)$ & --- & Index from left. $()$-shaped $i$ removes dim; $(k,)$-shaped makes it $k$. \\
 \op{Stack} & $(T_0, T_1, \ldots)$ & --- & Join along a newly created leading axis. All shapes must match. \\
-\op{Replicated} & $(T,)$ & axes & Mark $T$ as replicated along axes. Collapse axes to $1$. \\
-\op{Slice} & $(T, \mathrm{offset})$ & size, dtype & Zero-copy \textit{size} elems of dtype; offset is elems of $T$ dtype. \\
 \op{Bitcast} & $(T,)$ & dtype & Reinterpret storage as target dtype; preserve total bytes. \\
+\op{Unshard} & $(T, R_0, R_1, \ldots)$ & axes $(a_0, a_1, \ldots)$ & Concatenate shards of \op{Range} $R_k$ along axis $a_k$; $R_k$ is outer. \\
 \bottomrule
 \end{tabular}
 
 %% ============================================================
-\subsection*{{\color{reducered}Reduce Ops} \normalfont\small--- collapse axes to size $1$}
+\subsection*{{\color{reducered}Reduce Ops} \normalfont\small--- remove axes}
 
 \begin{tabular}{@{}l l l l@{}}
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Reduce} & ($T$, $r_0$, $r_1$, \ldots) & op, axes & Reduce $T$ along axes or ranges. Op is \op{Add}, \op{Max}, or \op{Mul}. \\
+\op{Reduce} & ($T$, $r_0$, $r_1$, \ldots) & op, $n$ & Reduce the first $n$ axes of $T$. Op is \op{Add}, \op{Max}, or \op{Mul}. \\
 \bottomrule
 \end{tabular}
 
 %% ============================================================
-\subsection*{{\color{callblue}Call Ops} \normalfont\small--- function abstraction, like the lambda calculus}
+\subsection*{{\color{loadred}Load Ops} \normalfont\small--- can change device or addrspace, anonymous store}
 
 \begin{tabular}{@{}l l l l@{}}
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Function} & (body, $a_0$, $a_1$, \ldots) & --- & Substitute each \op{Param} $k$ in \op{Tuple} body with $a_k$. Gradient-able. \\
-\op{Call} & (body, $a_0$, $a_1$, \ldots) & --- & Opaque invocation of a compiled kernel or custom function. \\
-\op{Tuple} & $(v_0, v_1, \ldots)$ & --- & Pack values; required as \op{Function} body to return a value. \\
-\op{GetTuple} & $(T,)$ & idx & Extract element at idx from a \op{Tuple}. \\
-\bottomrule
-\end{tabular}
-
-%% ============================================================
-\subsection*{{\color{loadred}Load Ops} \normalfont\small--- can change device or addrspace}
-
-\begin{tabular}{@{}l l l l@{}}
-\toprule
-\textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
-\midrule
-\op{Load} & (buf, alt?, gate?) & device, addrspace & Read (pull) from buffer into a new anonymous buffer. \\
-  & & & Note: this replaces \op{Copy} and \op{Contiguous}. \\
+\op{Load} & (buf, alt?, gate?) & --- & Read from buffer into AddrSpace.ALU. \\
+\op{Copy} & (buf,) & device & Copy buf to device arg. \\
 \bottomrule
 \end{tabular}
 
@@ -229,6 +228,7 @@ Ternary & $(P, A, B)$
 \midrule
 \op{Barrier} & (deps\ldots) & --- & Synchronize threads within a workgroup. \\
 \op{Ins} & \ldots & \ldots & A single machine instruction (e.g.\ AMD ISA). \\
+\op{GetAddr} & (buf,) & dev & Lower buf to its address on device dev. \\
 \op{Special} & (bound,) & name & GPU thread/workgroup index (e.g.\ \texttt{gidx0}, \texttt{lidx1}). \\
 \op{If} & (gate,) & --- & Begin conditional execution block. \\
 \op{Endif} & (if,) & --- & End conditional execution block. \\
@@ -248,18 +248,19 @@ These ops are not part of the core specification and are subject to change.
 %% ============================================================
 \subsection*{Derived Properties}
 
-Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{min\_max}, and \textbf{axis}, derived from its op, src, and arg:
+Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspace}, and \textbf{min\_max}, derived from its op, src, and arg:
 
 \medskip
 \begin{tabular}{@{}l l l l l@{}}
 \toprule
 \textbf{Op} & \textbf{dtype} & \textbf{shape} & \textbf{device} & \textbf{min\_max} \\
 \midrule
-\op{Buffer} & from arg & $(\text{size},)$ from arg & from arg & dtype range \\
+\op{Buffer} & from arg & from arg ($\mathrm{size}$) & from arg & dtype range \\
 \op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\
-\op{Param} & from arg & from $\mathrm{src}[0]$ & from arg & from src or dtype range \\[3pt]
+\op{Param} & from arg & from arg ($\mathrm{size}$) & from arg & from src or dtype range \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
-\op{Reduce} & $\mathrm{src}[0].\mathrm{dtype}$ & collapse axes to $1$ & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\[3pt]
+\op{Unshard} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0]$, each $a_k \times n_k$ & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
+\op{Reduce} & $\mathrm{src}[0].\mathrm{dtype}$ & remove first $n$ axes & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\[3pt]
 \op{Cast} & from arg & $\mathrm{src}[0].\mathrm{shape}$ & $\mathrm{src}[0].\mathrm{device}$ & clamped to dtype \\
 \op{Bitcast} & from arg & $\mathrm{src}[0].\mathrm{shape}$ & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
 \op{Copy} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0].\mathrm{shape}$ & from arg & $\mathrm{src}[0]$ \\
@@ -270,7 +271,7 @@ ALU unary & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0].\mathrm{shape}$ 
 Other binary & $\mathrm{src}[0].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
 \op{CmpLt}, \op{CmpNe} & bool & broadcast & $\mathrm{src}[0].\mathrm{device}$ & from intervals \\
 \op{Where} & $\mathrm{src}[1].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & $[\min(b,c),\, \max(B,C)]$ \\[3pt]
-\op{Function}, \op{Call} & $\mathrm{src}[0].\mathrm{dtype}$ & substitute \op{Param} shapes & $\mathrm{src}[1].\mathrm{device}$ & dtype range \\
+\op{Call} & void & --- & first non-null src device & --- \\
 \op{Range} & index & $()$ & \textsc{null} & $[0,\, n{-}1]$ \\
 \op{Index} & $\mathrm{src}[0].\mathrm{dtype}$ & remaining dims & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Store} & void & $()$ & $\mathrm{src}[0].\mathrm{device}$ & --- \\
@@ -284,9 +285,9 @@ $[a,A]$, $[b,B]$, $[c,C]$ denote min\_max of $\mathrm{src}[0]$, $\mathrm{src}[1]
 Default \emph{dtype range}: $[\mathrm{dtype\_min},\, \mathrm{dtype\_max}]$.
 
 \medskip
-\textbf{axis} tracks the multi-device sharding dimension. \op{Buffer} with $n$-tuple device: axis $= 0$ (device dim).
-\op{Reshape} remaps axis to preserve the shard boundary. \op{Permute} follows the permutation.
-\op{Reduce} on the shard axis $\to$ \textsc{null}. \op{Replicated} on the shard axis $\to$ \textsc{null}. \op{Copy} $\to$ \textsc{null}. ALU ops inherit from sources. Default: \textsc{null}.
+\textbf{sharding} tracks multi-device sharding as a set of (axis, \op{Range}) pairs. \op{Unshard} defines it: arg is the tuple of sharded axes, one \op{Range} in src per axis (positional: the $k$-th \op{Range} shards the $k$-th axis). \op{Buffer} with $n$-tuple device: sharded on axis $0$ (device dim). The single-axis convenience \textbf{axis} is \textsc{null} unless exactly one axis is sharded.
+\op{Reshape} remaps each sharded axis to preserve its shard boundary. \op{Permute} follows the permutation. \op{Expand} shifts all sharded axes right by $|\mathbf{n}|$.
+\op{Reduce} on a sharded axis drops it. \op{Replicated} on the shard axis $\to$ \textsc{null}. \op{Copy} $\to$ \textsc{null}. ALU ops inherit from sources. Default: \textsc{null}.
 
 %% ============================================================
 \subsection*{Kernel Optimizations (OptOps) \normalfont\small--- schedule-level transforms on kernel ranges}
@@ -298,10 +299,10 @@ Each kernel's iteration space is a set of \op{Range} axes. Every range has an \t
 \toprule
 \textbf{AxisType} & \textbf{Letter} & \textbf{Split from} & \textbf{Direction} & \textbf{Semantics} \\
 \midrule
+{\color{axgreen}\texttt{DEVICE}} & \texttt{d} & --- & --- & Multi-device sharding dimension. \\
 {\color{axblue}\texttt{GLOBAL}} & \texttt{g} & --- & --- & GPU global workgroup dimension. \\
 {\color{axcyan}\texttt{LOCAL}} & \texttt{l} & g, L & inner & Workgroup local dimension (shared memory). \\
 {\color{axbrcyan}\texttt{WARP}} & \texttt{w} & \multicolumn{2}{l}{(created by \op{TC})} & Warp-level lanes for tensor cores. \\
-{\color{axbrblue}\texttt{THREAD}} & \texttt{t} & g & outer & CPU thread parallelism. \\
 {\color{axwhite}\texttt{LOOP}} & \texttt{L} & --- & --- & Generic sequential loop (initial state). \\
 {\color{axred}\texttt{REDUCE}} & \texttt{R} & --- & --- & Reduction axis. \\
 {\color{axbrred}\texttt{GROUP\_REDUCE}} & \texttt{G} & R & inner/outer & Shared-memory group reduction. \\
@@ -324,8 +325,6 @@ An optimization is a triple $(\mathrm{op},\;\mathrm{axis},\;\mathrm{arg})$:
   Pad axis to next multiple of $m$ with validity masks. \\[4pt]
 \op{Swap} & axis$_i$ & axis$_j$ &
   Swap two axes $i \leftrightarrow j$. \\
-\op{Nolocals} & --- & --- &
-  Disable local memory; no workgroup dims emitted. \\
 \op{TC} & reduce idx & (tc, opt, mode) &
   Apply tensor core \op{Wmma}: split reduce/output axes into \texttt{WARP}, \texttt{UPCAST}, and \texttt{UNROLL} dims. \\
 \bottomrule
@@ -379,6 +378,8 @@ def scatter_add(T, idx, val):
 Let $D = (d_0, \ldots, d_{n-1})$ be an $n$-tuple device.
 \op{Copy} to an $n$-tuple device reshards with axis $= 0$. \op{Copy} never changes shape.
 
+\textbf{Sharding} splits a tensor along an axis across $n$ devices. It opens a \op{Range} of type \texttt{DEVICE} (a symbolic per-device index $d$), shrinks each device's view to its piece, then closes the range with \op{Unshard}$(T, R, a)$. The result is a logical tensor whose shape along axis $a$ is the full size; each device holds $1/n$ of it. \op{Unshard} is the inverse of sharding --- it marks the boundary between per-device computation and the logical multi-device tensor. The range need not be \texttt{DEVICE}; e.g.\ a \texttt{WARP} range closes the same way, concatenating per-lane shards along $a$ with the range as the outer factor. A tensor may be sharded along several axes at once: \op{Unshard}$(T, R_0, R_1, \ldots;\; a_0, a_1, \ldots)$ carries one \op{Range} per sharded axis, and every movement op maps each sharded axis independently.
+
 \begin{lstlisting}
 # T has shape (s,) on a single device.
 
@@ -416,7 +417,7 @@ def allreduce(T):
 %% ============================================================
 \subsection*{{\color{callblue}The \texttt{@function} Decorator} \normalfont\small--- graph capture via tracing}
 
-The \texttt{@function} decorator transforms a Python function on Tensors into a single \op{Function} node.
+The \texttt{@function} decorator transforms a Python function on Tensors into a single \op{Call} node.
 
 \begin{lstlisting}
 @function
@@ -428,14 +429,15 @@ When \texttt{f(x, y)} is called, the decorator:
 
 \begin{enumerate}[leftmargin=1.5em, itemsep=2pt]
   \item \textbf{Extracts inputs}: walks all arguments to find every Tensor, deduplicates by identity.
-  \item \textbf{Runs the function} lazily (no device execution), building a UOp graph from the result.
-  \item \textbf{Parameterizes}: replaces each input UOp with a \op{Param}$(k)$ placeholder.
-  \item \textbf{Wraps the body} in a \op{Tuple} (even for single returns) and creates\\
-        \op{Function}(\op{Tuple}(body), $x$, $y$).
-  \item \textbf{Returns} the result via \op{GetTuple}$(0)$, or one \op{GetTuple} per element for tuple returns.
+  \item \textbf{Runs the function} lazily (no device execution), building a UOp graph from each returned value.
+  \item \textbf{Parameterizes inputs}: replaces each input UOp with a positional \op{Param}$(k)$ placeholder.
+  \item \textbf{Parameterizes outputs}: for each returned value $v_i$, creates an output \op{Param}$(m+i)$ and a matching unbound \op{Buffer} $b_i$ (unique identity), where $m$ is the number of inputs.
+  \item \textbf{Builds the call}: stores every $v_i$ into its output parameter and creates\\
+        \op{Call}(\op{Sink}(\op{Store}(\op{Param}$(m)$, $v_0$), \ldots), $x$, $y$, $b_0$, \ldots).
+  \item \textbf{Returns values}: exposes each result as \op{After}($b_i$, \op{Call}).
 \end{enumerate}
 
-The result is a reusable graph fragment: the body contains only \op{Param} references, not concrete buffers. At schedule time, the \op{Function} is resolved by substituting each \op{Param}$(k)$ back with its corresponding argument $a_k$, or lowered into an opaque \op{Call} if it is to be compiled as a reusable kernel.
+The result is a reusable graph fragment: the body contains only \op{Param} references, not concrete buffers, and a single call can return any number of values. At schedule time, an ordinary value-producing \op{Call} is inlined by positional \op{Param} substitution and each output \op{After} resolves to the value stored in the body. A precompiled call instead materializes real output buffers in place of the unbound \op{Buffer}s and lowers the body to an opaque call that writes them.
 
 %% ============================================================
 \subsection*{Lowering Pipeline \normalfont\small--- from Tensor graph to machine code}

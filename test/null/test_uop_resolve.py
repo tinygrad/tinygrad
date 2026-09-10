@@ -4,44 +4,48 @@ from tinygrad.uop.ops import UOp, resolve
 
 class TestUOpResolve(unittest.TestCase):
   def test_simple_int(self):
-    u = UOp.const(dtypes.int, 4)
+    u = UOp.const(4, dtypes.int)
     self.assertEqual(int(u), 4)
 
+  def test_weak_const(self):
+    self.assertEqual(int(UOp.const(5)), 5)
+    self.assertEqual(float(UOp.const(1.5)), 1.5)
+
   def test_int_add(self):
-    u = UOp.const(dtypes.int, 4) + 7
+    u = UOp.const(4, dtypes.int) + 7
     self.assertEqual(int(u), 11)
 
   def test_lt(self):
-    u = UOp.const(dtypes.int, 4) < 7
+    u = UOp.const(4) < 7
     self.assertTrue(u)
 
   def test_rfloordiv(self):
-    u = 8 // UOp.const(dtypes.int, 4)
+    u = 8 // UOp.const(4, dtypes.int)
     self.assertEqual(int(u), 2)
 
   def test_rtruediv(self):
-    u = 9 / UOp.const(dtypes.float, 4)
+    u = 9 / UOp.const(4, dtypes.float)
     self.assertEqual(float(u), 2.25)
 
   def test_leq(self):
-    u = UOp.const(dtypes.int, 4) <= 4
+    u = UOp.const(4) <= 4
     self.assertTrue(u)
 
   def test_ne(self):
-    u = UOp.const(dtypes.int, 4) != 7
+    u = UOp.const(4) != 7
     self.assertTrue(u)
 
   def test_ne_f(self):
-    u = UOp.const(dtypes.int, 4) != 4
+    u = UOp.const(4) != 4
     self.assertFalse(u)
 
   def test_ngt(self):
-    u = UOp.const(dtypes.int, 4) > 7
+    u = UOp.const(4) > 7
     self.assertFalse(u)
 
   def test_ssimplify(self):
-    self.assertEqual((8 % UOp.const(dtypes.int, 4)).ssimplify(), 0)
-    self.assertEqual((8 * UOp.const(dtypes.int, 4)).ssimplify(), 32)
+    self.assertEqual((8 % UOp.const(4)).ssimplify(), 0)
+    self.assertEqual((8 * UOp.const(4)).ssimplify(), 32)
 
   def test_ambiguous_less_than(self):
     u = UOp.variable("i", 1, 10)
@@ -52,7 +56,7 @@ class TestUOpResolve(unittest.TestCase):
     self.assertFalse(resolve(u < -1, True))
 
   def test_float_direct(self):
-    u = UOp.const(dtypes.float, 4.5) + 7
+    u = UOp.const(4.5, dtypes.float) + 7
     self.assertEqual(float(u), 11.5)
 
   def test_var_cmp_t(self):

@@ -1,11 +1,20 @@
 import unittest
-from tinygrad import Tensor, Variable, GlobalCounters
+from tinygrad import Tensor, Variable, GlobalCounters, Context
 from tinygrad.uop.ops import sym_infer
 from tinygrad.dtype import dtypes
 from examples.gpt2 import Attention
 import numpy as np
 
 class TestSymbolicOps(unittest.TestCase):
+  def test_negative_slice(self):
+    a = Tensor.rand(3, 10, 4)
+    for i in range(3, 10):
+      vi = Variable("i", 1, 10).bind(i)
+      # negative int bounds against a symbolic dim must resolve against the size, like slice.indices
+      np.testing.assert_allclose(a[:, :vi][:, -3:-1].numpy(), a[:, :i][:, -3:-1].numpy(), atol=1e-6, rtol=1e-6)
+      np.testing.assert_allclose(a[:, :vi][:, -1:].numpy(), a[:, :i][:, -1:].numpy(), atol=1e-6, rtol=1e-6)
+      np.testing.assert_allclose(a[:, :vi][:, -1].numpy(), a[:, :i][:, -1].numpy(), atol=1e-6, rtol=1e-6)
+
   def test_plus1(self):
     def f(a): return (a+1).realize()
     a = Tensor.rand(3, 10)
@@ -63,7 +72,7 @@ class TestSymbolicOps(unittest.TestCase):
     self.test_attention(imin=4, imax=5, use_symbolic=True)
 
   def test_attention_training(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       self.test_attention(dropout_p=0.0)
       with self.assertRaises(ValueError):
         # symbolic shape dropout is not supported

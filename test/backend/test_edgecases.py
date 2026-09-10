@@ -25,7 +25,7 @@
 import unittest
 import numpy as np
 import torch
-from tinygrad import Tensor, dtypes, nn
+from tinygrad import Tensor, dtypes, nn, Context
 from tinygrad.device import Device
 from tinygrad.helpers import DEV
 from tinygrad.renderer.nir import NIRRenderer
@@ -101,7 +101,7 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
   # we don't need more of these
 
   def test_dropout_rate_one(self):
-    with Tensor.train():
+    with Context(TRAINING=1):
       out = Tensor.ones(100).dropout(1.0)
       np.testing.assert_allclose(out.numpy(), np.zeros(100))
 
@@ -109,7 +109,7 @@ class TestDropoutProbabilityEdgeCases(unittest.TestCase):
     with self.assertRaises(ValueError):
       torch.nn.functional.dropout(torch.ones(10), -0.1, True)
     with self.assertRaises(ValueError):
-      with Tensor.train():
+      with Context(TRAINING=1):
         Tensor.ones(10).dropout(-0.1)
 
 class TestInputValidation(unittest.TestCase):
@@ -219,7 +219,6 @@ class TestUOpValidationIssue(unittest.TestCase):
 class TestEdgeCases(unittest.TestCase):
   # add tests exposing new and diverse kinds of bugs that might impact real users here
 
-  @unittest.expectedFailure
   def test_circular_pad_negative(self):
     # negative pads with circular mode should wrap like PyTorch
     arr = np.arange(9).reshape(1, 1, 3, 3).astype(np.float32)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 import functools, pathlib
-from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import Ops
+from tinygrad import Tensor
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 
 FP8_MAX = 448.0
@@ -11,18 +10,13 @@ NUM_WG, THREADS_PER_WG = 1024, 256
 @functools.cache
 def _local_abs_max_fxn(x_p, device):
   x = Tensor(x_p, device=device)
-  inner = Tensor(x.uop.src[0]) if x.uop.op is Ops.MULTI else x
+  inner = Tensor(x.uop.src[0]) if x.uop.axis is not None else x  # the per-shard view of the flat param
   return (inner.abs().max(),)
 
 def local_abs_max(x:Tensor) -> Tensor:
   param = x.as_param(0)
   fxn = _local_abs_max_fxn(param.uop, x.device)
-  return Tensor(fxn[0].uop.call(x.uop).gettuple(0))
-
-def scalar_amax(amax_buf:Tensor) -> Tensor:
-  if isinstance(amax_buf.device, tuple):
-    return local_abs_max(amax_buf).detach()
-  return amax_buf.max().detach()
+  return Tensor(fxn[0].uop.call_with_output(x.uop))
 
 def shard_shape(shape:tuple, axis:int, ndev:int) -> list:
   s = list(shape)
@@ -35,12 +29,12 @@ def dname_of(device) -> str:
 
 def alloc_like(shape, dtype, device, axis=None) -> Tensor:
   if isinstance(device, tuple) and axis is not None:
-    return Tensor(Tensor.invalids(*shard_shape(shape, axis, len(device)), dtype=dtype, device=device).uop.multi(axis), device=device)
+    return Tensor(Tensor.invalids(*shard_shape(shape, axis, len(device)), dtype=dtype, device=device).uop.unshard(axis), device=device)
   return Tensor.invalids(*shape, dtype=dtype, device=device)
 
 def alloc_local(shape, dtype, device, axis=None) -> Tensor:
   if isinstance(device, tuple) and axis is not None:
-    return Tensor(Tensor.invalids(*shape, dtype=dtype, device=device).uop.multi(0), device=device)
+    return Tensor(Tensor.invalids(*shape, dtype=dtype, device=device).uop.unshard(0), device=device)
   return Tensor.invalids(*shape, dtype=dtype, device=device)
 
 def compile_hip(src:str, defines:list[str]):

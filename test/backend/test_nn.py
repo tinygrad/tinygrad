@@ -3,18 +3,18 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit, dtypes
-from tinygrad.uop.ops import Ops
 from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
+from test.helpers import check_schedule
 from tinygrad.engine.realize import run_linear
 from test.helpers import not_support_multi_device, needs_second_gpu, slow
 
 @slow
 class TestNN(unittest.TestCase):
   def test_batchnorm2d(self, training=False, threed=False, track_running_stats=True):
-    with Tensor.train(training):
+    with Context(TRAINING=training):
       szs = [4, 8, 16, 32]
       for sz in szs:
         # create in tinygrad
@@ -135,7 +135,7 @@ class TestNN(unittest.TestCase):
   def test_conv2d_same_padding_large_kernel(self):
     self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=16, DIMS=[28, 33], C2=32, K=9, S=1, P='same')
   def test_conv2d_same_padding_with_dilation(self):
-    self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=3, DIMS=[28, 28], C2=32, K=3, S=1, P='same', D=3)
+    self._test_conv(Conv2d, torch.nn.Conv2d, BS=16, C1=3, DIMS=[28, 31], C2=32, K=(3,5), S=1, P='same', D=(2,3))
 
   def test_conv2d_same_padding_invalid_stride(self):
     self.assertRaises(ValueError, Conv2d, in_channels=16, out_channels=32, kernel_size=2, stride=2, padding='same')
@@ -428,18 +428,14 @@ class TestNN(unittest.TestCase):
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
     result = layer(a)
-    linear, var_vals = result.linear_with_vars()
-    self.assertEqual(len([call for call in linear.src if call.src[0].op is Ops.SINK]), kcount,
-                     "first run realizes weight and embedding")
+    linear, var_vals = check_schedule(result, kcount)
     run_linear(linear, var_vals)
 
     b = Tensor([[1, 2, 3],
                 [4, 5, 6],
                 [7, 8, 9]])
     result = layer(b)
-    linear, var_vals = result.linear_with_vars()
-    self.assertEqual(1, len([call for call in linear.src if call.src[0].op is Ops.SINK]),
-                     "second run realizes embedding only")
+    linear, var_vals = check_schedule(result, 1)
     run_linear(linear, var_vals)
     print(f"Embedding used {GlobalCounters.global_ops} ops")
     self.assertLessEqual(GlobalCounters.global_ops, ops)

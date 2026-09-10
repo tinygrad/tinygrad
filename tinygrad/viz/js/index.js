@@ -23,6 +23,7 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
                        .style("color", d => d.color).text(d => d.st)).node();
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
+const viewBounds = () => [rect(".ctx-list-parent").right, rect(".metadata-parent").left];
 
 // dims of shapes on the canvas aren't tracked by the browser, we compute it
 const canvasRect = (s, pixelScale) => {
@@ -57,9 +58,9 @@ function intersectRect(r1, r2) {
 }
 
 function addTags(root, path) {
-  root.selectAll("circle").data(d => d.rect ? [] : [d]).join("circle").attr("r", 5).style("fill", d => d.fill ?? null);
+  root.selectAll("circle").data(d => d.rect ? [] : [d]).join("circle").attr("r", 5).style("fill", d => d.fill ?? null).style("stroke", d => d.stroke ?? null);
   root.selectAll("rect").data(d => d.rect ? [d] : []).join("rect").attr("x", d => -d.width/2).attr("y", d => -d.height/2)
-    .attr("width", d => d.width).attr("height", d => d.height).style("fill", d => d.fill ?? null);
+    .attr("width", d => d.width).attr("height", d => d.height).style("fill", d => d.fill ?? null).style("stroke", d => d.stroke ?? null);
   if (path != null) root.selectAll("path").data(d => [d]).join("path").attr("d", path);
   else root.selectAll("text").data(d => [d]).join("text").text(d => d.text).attr("dy", "0.35em");
 }
@@ -115,11 +116,13 @@ const drawGraph = (data) => {
   });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => ({ text:e.tag })));
+  addTags(nodes.selectAll("g.addrspace").data(d => d.addrspace != null ? [d] : []).join("g").attr("class", "tag addrspace")
+    .attr("transform", d => `translate(${d.width/2-8}, ${-d.height/2+8})`).datum(e => ({ rect:true, width:10, height:10, fill:e.addrspace, stroke:"none" })));
   const CALL_TAG_WIDTH = 14;
   addTags(nodes.selectAll("g.type").data(d => d.collapsible ? [d] : []).join("g").attr("class", d => `tag clickable ${d.collapsed ? 'collapsed' : 'expanded'}`)
-    .attr("transform", d => d.callNode ? `translate(${CALL_TAG_WIDTH/2-d.width/2}, ${0})` : `translate(${-d.width/2}, ${0})`)
-    .datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.callNode ? null : d.color,
-      ...(d.callNode && { rect:true, width:CALL_TAG_WIDTH }) })).on("click", (e,d) => {
+    .attr("transform", d => d.collapsePorts != null ? `translate(${CALL_TAG_WIDTH/2-d.width/2}, ${0})` : `translate(${-d.width/2}, ${0})`)
+    .datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.collapsePorts != null ? null : d.color,
+      ...(d.collapsePorts != null && { rect:true, width:CALL_TAG_WIDTH }) })).on("click", (e,d) => {
       e.stopPropagation();
       const t = d3.zoomTransform(document.getElementById("graph-svg"));
       const [x, y] = t.apply([d.x, d.y]);
@@ -185,7 +188,7 @@ function renderDag(layoutSpec, { recenter }) {
     }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => ({ text:e.value.label.text })));
     if (anchor != null) {
       const n = g.node(anchor.id);
-      d3.select("#graph-svg").call(svgZoom.transform, d3.zoomIdentity.translate(anchor.x-n.x*anchor.k, anchor.y-n.y*anchor.k).scale(anchor.k));
+      if (n != null) d3.select("#graph-svg").call(svgZoom.transform, d3.zoomIdentity.translate(anchor.x-n.x*anchor.k, anchor.y-n.y*anchor.k).scale(anchor.k));
     } else if (recenter) document.getElementById("zoom-to-fit-btn").click();
     anchor = null;
   };
@@ -227,7 +230,7 @@ const waveColor = (op) => {
 };
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["precompile","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"],
   GPC:new Map([["NONE","#1a7a2e"],["MEMORY_DEPENDENCY","#8b1a00"],["EXEC_DEPENDENCY","#006b6b"],["INST_FETCH","#7a7a00"],["SYNC","#6b006b"],
     ["PIPE_BUSY","#7a4a00"],["MEMORY_THROTTLE","#5c0000"],["CONSTANT_MEMORY","#1a3d7a"],["NOT_SELECTED","#2e2e3a"],["OTHER","#4a4a55"],
     ["SLEEPING","#1a1a2a"],["DEFAULT","#3a3a45"]]), WAVE:waveColor, VMEMEXEC:waveColor, ALUEXEC:waveColor}
@@ -269,6 +272,8 @@ const canvasDims = () => {
   return [Math.round(document.querySelector("#profiler").clientWidth-sideRect.width), Math.round(sideRect.height)];
 }
 
+new ResizeObserver(([e]) => e.contentRect.width > 0 && e.target.dispatchEvent(new Event("resize"))).observe(document.getElementById("profiler"));
+
 function selectShape(key) {
   if (key == null) return {};
   const [t, idx] = key.split("-");
@@ -299,12 +304,13 @@ function timeAtCycle(clk) {
 }
 
 function getZoomIdentity() {
+  const xscale = timelineScale(), deviceRight = rect("#device-list").right, [viewLeft, sidebarLeft] = viewBounds();
+  const viewRight = sidebarLeft || rect(".main-container").right;
+  const x0 = Math.max(0, viewLeft-deviceRight), x1 = Math.min(canvasDims()[0], viewRight-deviceRight);
   // for packets, set zoom to the full range of instruction events
-  if (data.instSt != null) {
-    const k = (data.dur - data.first) / (data.instEt - data.instSt), xscale = timelineScale();
-    return d3.zoomIdentity.translate(-xscale(data.instSt) * k, 0).scale(k);
-  }
-  return d3.zoomIdentity;
+  const [st, et] = data.instSt != null ? [data.instSt, data.instEt] : [data.first, data.dur];
+  const k = (x1-x0)/(xscale(et)-xscale(st));
+  return d3.zoomIdentity.translate(x0-xscale(st)*k, 0).scale(k);
 }
 
 const Modes = {0:'read', 1:'write', 2:'write+read'};
@@ -332,7 +338,7 @@ function setFocus(key) {
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)]];
-    if (data.instSt != null) {
+    if (data.tracks.get("Shader Clock") != null) {
       const p = d3.create("p");
       p.append("span").text(timeAtCycle(e.x));
       p.append("span").style("margin-left", "8px").style("color", "#f0f0f566").text(formatTime(e.x));
@@ -419,7 +425,7 @@ async function renderProfiler(path, opts) {
   for (const [k,v] of Object.entries(extData)) data[k] = v;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
-  const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
+  const secondaryTick = data.tracks.get("Shader Clock") != null ? timeAtCycle : null;
   const axisHeight = secondaryTick != null ? tickSize*2+(padding*2) : tickSize;
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", axisHeight+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
@@ -482,13 +488,6 @@ async function renderProfiler(path, opts) {
           const steps = ctxs[ref.ctx+1].steps;
           for (let si=start; si<steps.length; si++) {
             if (steps[si].name == e.name) { ref.step = si; shapeRef = ref; break; }
-          }
-        } else {
-          const steps = ctxs[state.currentCtx].steps;
-          for (let i=state.currentStep+1; i<steps.length; i++) {
-            const loc = steps[i].loc;
-            if (loc == null) break;
-            if (loc === e.name) { shapeRef = {ctx:state.currentCtx-1, step:i}; break; }
           }
         }
         // tiny device events go straight to the rewrite rule
@@ -593,7 +592,7 @@ async function renderProfiler(path, opts) {
   if (data.pcMap != null) setFocus(focusedShape);
   // secondary axis mapping
   let instRange = null;
-  for (const [k, { shapes }] of data.tracks) if (!k.includes("Clock") && path.includes("sqtt")) {
+  for (const [k, { shapes }] of data.tracks) if (k !== "Shader Clock" && path.includes("sqtt")) {
     const first = shapes[0].x, last = shapes.at(-1).x+shapes.at(-1).width;
     instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])];
   }
@@ -731,23 +730,30 @@ async function renderProfiler(path, opts) {
     }
   }
 
+  let lastCanvasRect = null;
   function resize() {
     const [width, height] = canvasDims();
-    if (canvas.width === width*dpr && canvas.height === height*dpr) return;
-    canvas.width = width*dpr;
-    canvas.height = height*dpr;
+    const pixelWidth = Math.trunc(width*dpr), pixelHeight = Math.trunc(height*dpr);
+    if (canvas.width === pixelWidth && canvas.height === pixelHeight) return;
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
+    const newRect = rect(canvas);
+    if (lastCanvasRect != null && lastCanvasRect.width > 0) {
+      zoomLevel = d3.zoomIdentity.translate(zoomLevel.x+lastCanvasRect.left-newRect.left, 0).scale(zoomLevel.k*lastCanvasRect.width/width);
+    }
+    lastCanvasRect = { left:newRect.left, width };
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
   zoomLevel = getZoomIdentity();
   canvasZoom = d3.zoom().filter(vizZoomFilter).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
-  document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
+  profiler.on("contextmenu", e => e.ctrlKey && e.preventDefault());
 
-  new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
+  profiler.on("resize", (e) => resize()); resize();
   profiler.on("scroll", () => render(zoomLevel));
 
   function findRectAtPosition(x, y) {
@@ -803,8 +809,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const svg = d3.select("#graph-svg");
   svg.call(svgZoom.transform, d3.zoomIdentity);
   const mainRect = rect(".main-container");
-  const x0 = rect(".ctx-list-parent").right;
-  const x1 = rect(".metadata-parent").left;
+  const [x0, x1] = viewBounds();
   const pad = 16;
   const R = { x: x0+pad, y: mainRect.top+pad, width: (x1>0 ? x1-x0 : mainRect.width)-2*pad, height: mainRect.height-2*pad };
   const r = rect("#render");
@@ -877,7 +882,7 @@ const evtSources = [];
 // context: collection of steps
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set(), expandedNodes:new Set()};
 function setState(ns) {
-  saveToHistory(state);
+  if (["currentCtx", "currentStep", "currentRewrite"].some(k => k in ns && state[k] !== ns[k])) saveToHistory(state);
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
   const prevRewrite = state.currentRewrite;
   Object.assign(state, ns);
@@ -990,20 +995,8 @@ async function main() {
   }
   if (!ckey.startsWith("/graph")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
-    if (ret.steps?.length > 0) {
-      const el = select(state.currentCtx, state.currentStep);
-      if (el.step.querySelectorAll("ul").length === ret.steps.length) return;
-      // re render the list with new items
-      ctx.steps.push(...ret.steps);
-      while (el.ctx.children.length > 1) el.ctx.children[1].remove();
-      appendSteps(el.ctx, state.currentCtx, ctx.steps);
-      return setState({ currentStep:state.currentStep+1, expandSteps:true });
-    }
     // timeline with cycles on the x axis
-    if (ret instanceof ArrayBuffer) {
-      const pkts = step.query.includes("sqtt");
-      return renderProfiler(ckey, {unit:"clk", heightScale:0.5, hideLabels:true, colorByName:pkts});
-    }
+    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, {heightScale:0.5, hideLabels:true, colorByName:true});
     metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
       return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)]));
     })));
@@ -1041,23 +1034,19 @@ async function main() {
       }
       return table;
     }
-    if (ret.ref != null) {
-      const disasmIdx = ctxs[ret.ref+1].steps.findIndex(s => s.name === "View Disassembly")
-      metadata.appendChild(d3.create("a").text("View Disassembly").on("click", () => switchCtx(ret.ref, disasmIdx)).node());
-    }
     if (ret.cols != null) renderTable(root, ret);
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
     return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** Graph view
   // if we don't have a complete cache yet we start streaming graphs in this step
-  if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
+  if (!(ckey in cache) || (!cache[ckey].done && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
     const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
-      if (e.data === "[DONE]") return eventSource.close();
+      if (e.data === "[DONE]") { ret.done = true; eventSource.close(); return; }
       const chunk = JSON.parse(e.data);
       ret.push(chunk);
       // if it's the first one render this new rgaph

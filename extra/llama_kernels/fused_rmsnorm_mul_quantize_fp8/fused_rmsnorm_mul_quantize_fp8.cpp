@@ -7,7 +7,7 @@
 //   fp8 = fp8_sat(y * (FP8_MAX / amax_state))
 // Also writes:
 //   rrms[row]        — saved for the rmsnorm backward
-//   amax_buf[wg]     — per-WG |y| partials, reduced later to update amax_state
+//   amax_out         — scalar |y| via global atomic max
 //
 // Layout: one WG per row, ROWS_PER_WG rows per WG via grid-stride (ROWS = N_ELEMS / HIDDEN).
 // Each thread handles HIDDEN / THREADS_PER_WG elements per row.
@@ -48,7 +48,7 @@ fused_add_rmsnorm_mul_quantize_fp8(
     __hip_bfloat16*       __restrict__ h_out,           // bf16, ROWS*HIDDEN — x + residual (saved for downstream)
     __hip_bfloat16*       __restrict__ x_normed_out,    // bf16, ROWS*HIDDEN
     float*                __restrict__ rrms_out,        // fp32, ROWS
-    float*                __restrict__ amax_buf,        // fp32, NUM_WG
+    float*                __restrict__ amax_out,        // fp32 scalar, initialized to 0 before launch
     const __hip_bfloat16* __restrict__ x,               // bf16, ROWS*HIDDEN
     const __hip_bfloat16* __restrict__ residual,        // bf16, ROWS*HIDDEN — added into x before rmsnorm
     const __hip_bfloat16* __restrict__ weight,          // bf16, HIDDEN
@@ -60,7 +60,7 @@ fused_rmsnorm_mul_quantize_fp8(
     __hip_fp8_storage_t*  __restrict__ fp8_out,         // fp8, ROWS*HIDDEN
     __hip_bfloat16*       __restrict__ x_normed_out,    // bf16, ROWS*HIDDEN (saved for rmsnorm bwd)
     float*                __restrict__ rrms_out,        // fp32, ROWS (fp32 to match rmsnorm_bwd.cpp expectation)
-    float*                __restrict__ amax_buf,        // fp32, NUM_WG per-WG partials
+    float*                __restrict__ amax_out,        // fp32 scalar, initialized to 0 before launch
     const __hip_bfloat16* __restrict__ x,               // bf16, ROWS*HIDDEN
     const __hip_bfloat16* __restrict__ weight,          // bf16, HIDDEN (per-hidden scale)
     const float*          __restrict__ amax_state)      // fp32 scalar
@@ -144,12 +144,12 @@ fused_rmsnorm_mul_quantize_fp8(
     __syncthreads();  // before next row's sum_sq reduce reuses sdata
   }
 
-  // Final per-WG amax reduce.
+  // Final per-WG amax reduce, then global atomic into the scalar.
   sdata[tid] = local_max;
   __syncthreads();
   for (int s = THREADS_PER_WG / 2; s > 0; s >>= 1) {
     if (tid < s) sdata[tid] = fmaxf(sdata[tid], sdata[tid + s]);
     __syncthreads();
   }
-  if (tid == 0) amax_buf[wg] = sdata[0];
+  if (tid == 0 && sdata[0] > *amax_out) atomicMax(reinterpret_cast<int32_t*>(amax_out), __float_as_int(sdata[0]));
 }

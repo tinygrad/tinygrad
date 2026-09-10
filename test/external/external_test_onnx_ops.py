@@ -54,6 +54,12 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["squeezed"]
     self.helper_test_single_op("Squeeze", inputs, attributes, outputs)
 
+  def test_mean_variance_normalization_axes(self):
+    inputs = {"x": np.random.randn(2, 3, 4, 5).astype(np.float32)}
+    attributes = {"axes": [2, 3]}
+    outputs = ["out"]
+    self.helper_test_single_op("MeanVarianceNormalization", inputs, attributes, outputs)
+
   def test_conv(self):
     # test VALID auto_pad
     inputs = {
@@ -235,6 +241,15 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["y"]
     self.helper_test_single_op("MaxUnpool", inputs, attributes, outputs)
 
+  def test_maxunpool_pads(self):
+    # per-axis pads shrink the output: spatial dim is (i-1)*stride + kernel - pad_begin - pad_end -> (2, 4), and indices index into that output
+    # NOTE: indices must be in bounds of that output; ORT aborts the process on out-of-bounds indices
+    xT = np.array([[[[5, 6], [7, 8]]]], dtype=np.float32)
+    xI = np.array([[[[0, 3], [4, 7]]]], dtype=np.int64)
+    inputs = {"x": xT, "indices": xI}
+    attributes = {"kernel_shape": [2, 2], "strides": [2, 2], "pads": [1, 0, 1, 0]}
+    self.helper_test_single_op("MaxUnpool", inputs, attributes, ["y"])
+
   def test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-13
     inputs = {"x": np.random.randn(1, 1, 32, 32, 32).astype(np.float32)}
@@ -285,7 +300,7 @@ class TestMainOnnxOps(TestOnnxOps):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
       for b in (np.ones([32], dtype=np.int32), np.zeros([32], dtype=np.int32)):
         for channel_shape in [(), (32,)]:
-          with self.subTest(dtype=dtype, zero_point=zero_point, channel_shape=channel_shape):
+          with self.subTest(dtype=dtype.__name__, zero_point=zero_point, channel_shape=channel_shape):
             dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
             inputs = {
               "x": np.random.randint(dtype_min, dtype_max + 1, [1, 3, 224, 224], dtype=dtype),
@@ -304,7 +319,7 @@ class TestMainOnnxOps(TestOnnxOps):
 
   def test_qlinear_matmul(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
-      with self.subTest(dtype=dtype, zero_point=zero_point):
+      with self.subTest(dtype=dtype.__name__, zero_point=zero_point):
         dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
         inputs = {
           "A": np.random.randint(dtype_min, dtype_max + 1, [10, 10], dtype=dtype),
@@ -371,8 +386,8 @@ class TestMainOnnxOps(TestOnnxOps):
     Shape = onnx_ops["Shape"]
     Compress = onnx_ops["Compress"]
     with Context(DEV="CPU"):
-      x = Tensor.arange(4, device="PYTHON").reshape(2,2)
-      self.assertEqual(EyeLike(x).device, x.device)
+      x = Tensor.arange(4).clone("PYTHON").reshape(2,2)
+      self.assertIsNone(EyeLike(x).device)
       self.assertEqual(Shape(x).device, x.device)
       out = Compress(x, [True, False, True, False])
       self.assertEqual(out.device, x.device)
@@ -512,7 +527,7 @@ class TestContribOnnxOps(TestOnnxOps):
 
   def test_qlinear_add(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
-      with self.subTest(dtype=dtype, zero_point=zero_point):
+      with self.subTest(dtype=dtype.__name__, zero_point=zero_point):
         dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
         inputs = {
           "A": np.random.randint(dtype_min, dtype_max + 1, [10, 10], dtype=dtype),
@@ -546,7 +561,7 @@ class TestContribOnnxOps(TestOnnxOps):
 
   def test_qlinear_mul(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
-      with self.subTest(dtype=dtype, zero_point=zero_point):
+      with self.subTest(dtype=dtype.__name__, zero_point=zero_point):
         dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
         inputs = {
           "A": np.random.randint(dtype_min, dtype_max + 1, [10, 10], dtype=dtype),
@@ -580,7 +595,7 @@ class TestContribOnnxOps(TestOnnxOps):
   def test_qlinear_global_average_pool(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
       for channels_last in [0, 1]:
-        with self.subTest(dtype=dtype, zero_point=zero_point, channels_last=channels_last):
+        with self.subTest(dtype=dtype.__name__, zero_point=zero_point, channels_last=channels_last):
           dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
           # NCHW for channels_last=0, NHWC for channels_last=1
           shape = [1, 3, 32, 32] if channels_last == 0 else [1, 32, 32, 3]

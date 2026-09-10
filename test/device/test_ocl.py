@@ -1,18 +1,20 @@
 import unittest
 from unittest.mock import patch
 from tinygrad import Device
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, TinyELF
 from tinygrad.dtype import dtypes
-from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler, CLProgram
+from tinygrad.helpers import Target
+from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler
 
 @unittest.skipUnless(Device.DEFAULT == "CL", "Runs only on OpenCL")
 class TestCLCompileCache(unittest.TestCase):
   def test_compile_cached(self):
     device = Device[Device.DEFAULT]
     src = "__kernel void cached_test(__global int* a) { a[0] = 1; }"
-    CLProgram(device, name="cached_test", lib=src.encode())
+    obj = TinyELF(src.encode(), "cached_test", Target("CL"), ())
+    device.runtime(obj)
     with patch.object(CLCompiler, 'compile', side_effect=RuntimeError("compile should not be called on cache hit")):
-      CLProgram(device, name="cached_test", lib=src.encode())
+      device.runtime(obj)
 
 @unittest.skipUnless(Device.DEFAULT == "CL", "Runs only on OpenCL")
 class TestCLError(unittest.TestCase):
@@ -27,14 +29,14 @@ class TestCLError(unittest.TestCase):
   def test_invalid_kernel_name(self):
     device = Device[Device.DEFAULT]
     with self.assertRaises(RuntimeError) as err:
-      CLProgram(device, name="", lib="__kernel void test(__global int* a) { a[0] = 1; }".encode())
+      device.runtime(TinyELF(b"__kernel void test(__global int* a) { a[0] = 1; }", "", Target("CL"), ()))
     assert str(err.exception) == "OpenCL Error -46: CL_INVALID_KERNEL_NAME"
 
   def test_unaligned_copy(self):
     data = list(range(65))
     unaligned = memoryview(bytearray(data))[1:]
     buffer = Buffer("CL", 64, dtypes.uint8).allocate()
-    buffer.copyin(unaligned)
+    buffer.copy_from(Buffer("PYTHON", 64, dtypes.uint8, opaque=unaligned))
     result = memoryview(bytearray(len(data) - 1))
-    buffer.copyout(result)
+    result[:] = buffer.as_memoryview()
     assert unaligned == result, "Unaligned data copied in must be equal to data copied out."

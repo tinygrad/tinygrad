@@ -16,7 +16,7 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None) -> Tensor:
   if not isinstance(ref.device, tuple): return Tensor.empty(*shape, dtype=ref.dtype, device=ref.device)
   shape = tuple(s // len(ref.device) if i == ref.uop.axis else s for i, s in enumerate(shape))
   axis = ref.uop.axis if axis is None else axis
-  return Tensor(Tensor.empty(*shape, dtype=ref.dtype, device=ref.device).uop.multi(axis), dtype=ref.dtype, device=ref.device)
+  return Tensor(Tensor.empty(*shape, dtype=ref.dtype, device=ref.device).uop.unshard(axis), dtype=ref.dtype, device=ref.device)
 
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)

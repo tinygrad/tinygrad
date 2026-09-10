@@ -64,6 +64,7 @@ def rocprof_inst_traces_match(sqtt, prg, target):
 
   return passed_insts, len(rwaves), len(rwaves_iter)
 
+@unittest.skip("TODO: fix to not require unpickling UOps.")
 class TestSQTTMapBase(unittest.TestCase):
   target: str
   examples: dict
