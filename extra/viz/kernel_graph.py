@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Usage: DEBUG=5 python -m tinygrad.viz.cli --json | ./extra/viz/kernel_graph.py > /tmp/kernel_graph.txt
+# Usage: KERNEL_GRAPH=1 python -m tinygrad.viz.cli --json | ./extra/viz/kernel_graph.py > /tmp/kernel_graph.txt
 import argparse, json, sys, itertools
 from tinygrad.helpers import ansistrip
 from tinygrad.viz.cli import fmt_all
