@@ -38,13 +38,14 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   H_KV = k8.shape[2]
   assert k8.shape == v8.shape == (B,N,H_KV,D) and do.shape == out.shape == q8.shape
   def alloc(shape,dtype=dtypes.float32): return alloc_like(shape,dtype,q8.device,axis)
-  do_scale = ((local_abs_max(do.float())+1e-8)/57344.).reshape(1).contiguous()
-  do8 = (do.float()/do_scale).clamp(-57344,57344).cast(dtypes.fp8e5m2).contiguous()
-  delta = (out.float()*(do8.float()*do_scale)).sum(-1).transpose(1,2).contiguous()
+  do_scale = ((local_abs_max(do.float())+1e-8)/57344.).reshape(1)
   # Before the first amax observation, bound dS from the current dO and V
   # ranges. A fixed unit amax would underflow small training gradients.
   ds_descale = (ds_descale > 0).where(ds_descale, 4*D*do_scale*v_descale*448.)
   scales = Tensor.cat(v_descale.reshape(1),do_scale,p_descale.reshape(1),ds_descale.reshape(1)).contiguous()
+  do_scale = scales[1:2]
+  do8 = (do.float()/do_scale).clamp(-57344,57344).cast(dtypes.fp8e5m2).contiguous()
+  delta = (out.float()*(do8.float()*do_scale)).sum(-1).transpose(1,2).contiguous()
   output_dtype = dtypes.bfloat16 if native else dtypes.float32
   dq = alloc(q8.shape,output_dtype).zeros_like()
   dk,dv = [alloc(q8.shape,output_dtype) for _ in range(2)]
