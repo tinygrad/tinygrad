@@ -220,10 +220,9 @@ class Buffer:
     return None
 
   def as_memoryview(self, allow_zero_copy=False) -> memoryview:
-    if (mv:=self._host_mv()) is not None:
+    if allow_zero_copy and (mv:=self._host_mv()) is not None:
       self.allocator.dev.synchronize()
-      if allow_zero_copy: return mv
-      with cpu_profile(f"{self.device} -> TINY", f"{self.device}:COPY"): return memoryview(bytearray(mv))
+      return mv
     Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv
 
@@ -235,6 +234,10 @@ class Buffer:
   def copy_from(self, src:Buffer) -> Buffer:
     assert self.nbytes == src.nbytes, f"copy size mismatch, {self.nbytes} != {src.nbytes}"
     assert self.is_allocated() and src.is_allocated(), "copy requires allocated buffers"
+    if self.get_storage().host is not None and src.get_storage().host is not None:
+      dst_mv, src_mv = self.as_memoryview(allow_zero_copy=True), src.as_memoryview(allow_zero_copy=True)
+      with cpu_profile(f"{src.device} -> TINY", f"{src.device}:COPY"): dst_mv[:] = src_mv[:]
+      return self
     from tinygrad.engine.realize import run_linear
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self), UOp.from_buffer(src)
