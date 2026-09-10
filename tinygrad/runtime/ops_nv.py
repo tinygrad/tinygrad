@@ -515,7 +515,7 @@ class NVKIface:
     mem = buf.meta
     if buf.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
       if buf._buf % 0x1000: raise RuntimeError("Host mapping requires a page-aligned address")
-      if (mem:=next((m.meta[0] for d, m in buf.get_storage().maps.items() if d.startswith("NV")), None)) is None:
+      if (mem:=next((m.meta[0] for d, m in buf.get_storage().maps.items() if d.device.startswith("NV")), None)) is None:
         return replace(mem:=self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf), meta=(mem.meta, True))
     elif buf.device.split(":")[0] != "NV": raise RuntimeError(f"Cannot map {buf.device} on {self.dev.device}")
     return replace(mapping:=self._gpu_uvm_map(buf._buf, mem.length, mem.hMemory, create_range=False), meta=(mapping.meta, False))
