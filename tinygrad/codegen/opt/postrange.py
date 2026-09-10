@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, itertools
 from typing import cast
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, remove_all_tags
-from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
+from tinygrad.uop.ops import axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, Invalid
 from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
@@ -31,16 +31,6 @@ class Scheduler:
   def full_shape(self): return [ssimplify(x.src[0]) for x in self.rngs]
   @property
   def axis_types(self) -> list[AxisType]: return [x.arg[-1] for x in self.rngs]
-
-  # strings like ['g0', 'g1', 'l0', 'l1', 'l2', 'l3', 'l4', 'l5', 'R0', 'r0', 'r1', 'r2', 'u0', 'u1', 'u2']
-  def shape_str(self) -> list[str]:
-    ret: list[str] = []
-    cnt: dict[AxisType, int] = {}
-    for x in self.axis_types:
-      cnt[x] = (cnt[x] + 1) if x in cnt else 0
-      ret.append(f"{axis_letters[x]}{cnt[x]}")
-    return ret
-  def shape_str_to_axis(self, nms:list[str]) -> tuple[int, ...]: return tuple([self.shape_str().index(x) for x in nms])
 
   def copy(self) -> Scheduler:
     ret = Scheduler(self.ast, self.ren)
@@ -252,16 +242,13 @@ class Scheduler:
             tne = [x.replace(tag=1) for x in ne]
             ret = reduceop.substitute(dict(zip(ne, tne)))
             srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-            srcs = [x.substitute(dict(zip(tne, [ne[i] for i in argsort(p)]))) for x,p in zip(srcs, tc.permutes_for_shape_str(tc.base_shape_str()))]
+            bss = tc.base_shape_str()
+            srcs = [x.substitute(dict(zip(tne, [ne[i] for i in argsort(p)]))) for x,p in zip(srcs, tc.permutes_for_shape_str(bss))]
 
             # get reduce/upcast axes for the tensor cores
-            tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
-            base_upcast_axes = tuple([(s,2) for s in self.shape_str_to_axis(tc.base_upcast_axes())])
+            tc_reduce_axes = tuple([ne[bss.index(f"r{i}")].arg[0] for i in range(len(tc.get_reduce_axes()))])
+            base_upcast_axes = tuple([(ne[bss.index(s)].arg[0], 2) for s in tc.base_upcast_axes()])
             tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
-
-            # axes to range number (was done in lowerer)
-            tc_upcast_axes = tuple([tuple([(self.rngs[a].arg[0], sz) for a,sz in v]) for v in tc_upcast_axes])
-            tc_reduce_axes = tuple([self.rngs[a].arg[0] for a in tc_reduce_axes])
             def with_missing_tc_axes(arg):
               ret = list(arg)
               for rn,_ in tc_upcast_axes[0]+tc_upcast_axes[1]:
