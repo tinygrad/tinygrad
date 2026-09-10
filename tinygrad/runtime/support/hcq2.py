@@ -8,7 +8,7 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear
-from tinygrad.engine.realize import lower_and_compile, _resolve, resolve_params, unwrap_multi
+from tinygrad.engine.realize import lower_and_compile, _resolve
 
 # *****************
 # 0. helpers
@@ -34,12 +34,12 @@ def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for
 
 def get_enqueue_devs(call:UOp, inputs:tuple[UOp, ...]) -> Any|None:
   if call.src[0].op not in (Ops.PROGRAM, Ops.COPY): return None # only these bodies can be enqueued
-  if not (bufs:=get_call_arg_uops(call)): return None
+  if not (bufs:=list(get_call_arg_uops(call))): return None
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
-  devs = min(bufs, key=lambda b: not all_devices_in(b.device, HCQ_DEVS)).device
+  bufs.sort(key=lambda b: not all_devices_in(b.device, HCQ_DEVS))
+  devs = bufs[0].device
   if not all_devices_in(devs, HCQ_DEVS): return None
-  if call.src[0].op is Ops.COPY and all(b.get_storage().host is not None
-                                      for bufs, _ in unwrap_multi(call, resolve_params(call, inputs)) for b in bufs): return None
+  if call.src[0].op is Ops.COPY and all(cast(Buffer, _resolve(b, inputs).buffer).get_storage().host is not None for b in bufs): return None
   return devs
 
 def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte offset)
@@ -102,8 +102,9 @@ pm_replace_buffers = PatternMatcher([(UPat(Ops.BUFFER, name="b"), replace_buffer
 # *****************
 # 1.1. prep: unwrap multi
 
-def unwrap_call(ctx:tuple[UOp, ...], call:UOp) -> UOp|None:
-  if get_enqueue_devs(call, ctx) is None or (n:=max(len(to_tuple(a.device)) for a in get_call_arg_uops(call))) == 1: return None
+def unwrap_call(call:UOp) -> UOp|None:
+  if call.src[0].op not in (Ops.PROGRAM, Ops.COPY) or not (bufs:=get_call_arg_uops(call)): return None
+  if (n:=max(len(to_tuple(a.device)) for a in bufs)) == 1 or not any(all_devices_in(a.device, HCQ_DEVS) for a in bufs): return None
   dnum = UOp.variable("_device_num", 0, n - 1, dtypes.int)
   return UOp(Ops.LINEAR, src=tuple(call.replace(src=(call.src[0], *[a if a.is_bound_var else select_lane(a, i) for a in call.src[1:]], dnum.bind(i)))
                                    for i in range(n)))
@@ -117,30 +118,26 @@ STAGING_SIZE, STAGING_SLOTS = (4 if DEV.interface.startswith("MOCK") else 128) <
 @functools.cache
 def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
 
-def stage_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
+def prepare_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if (device:=get_enqueue_devs(call, ctx)) is None: return None
   try:
     for b in (dst, src): cast(Buffer, _resolve(b, ctx).buffer).get_buf(device)
-    return None
-  except (RuntimeError, OSError): _staging().get_buf(device)
+  except (RuntimeError, OSError):
+    _staging().get_buf(device)
+    base, it, copies = UOp.from_buffer(_staging()), src.dtype.itemsize, []
+    chunk = (STAGING_SIZE // STAGING_SLOTS) // it
+    for i, off in enumerate(range(0, src.max_numel(), chunk)):
+      stage = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it]
+      copies += [src[off:off+n].copy_to_device("CPU").call(stage, src[off:off+n]), stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
+    return UOp(Ops.LINEAR, src=tuple(copies))
 
-  base, it, copies = UOp.from_buffer(_staging()), src.dtype.itemsize, []
-  chunk = (STAGING_SIZE // STAGING_SLOTS) // it
-  for i, off in enumerate(range(0, src.max_numel(), chunk)):
-    stage = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it]
-    copies += [src[off:off+n].copy_to_device("CPU").call(stage, src[off:off+n]), stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
-  return UOp(Ops.LINEAR, src=tuple(copies))
-
-def copy_to_kernel(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
-  if (device:=get_enqueue_devs(call, ctx)) is None or Device[device].has_copy_queue: return None
-  device = dst.device if all_devices_in(dst.device, HCQ_DEVS) else src.device
+  if Device[device].has_copy_queue: return None
   out, inp = (UOp.param(i, dtypes.uint8, b.nbytes(), device=device) for i, b in enumerate((dst, src)))
   ast = out.index(r:=UOp.range(src.nbytes(), 0)).store(inp.index(r).load()).end(r).sink(arg=KernelInfo())
-  return lower_and_compile(UOp(Ops.LINEAR, src=(call.replace(src=(ast, *call.src[1:])),)))
+  return lower_and_compile(call.replace(src=(ast, *call.src[1:])))
 
 pm_prepare_copy = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call", allow_any_len=True), stage_copy),
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call", allow_any_len=True), copy_to_kernel),
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call", allow_any_len=True), prepare_copy),
 ])
 
 # *****************
