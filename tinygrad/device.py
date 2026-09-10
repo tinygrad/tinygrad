@@ -101,7 +101,7 @@ class MultiBuffer:
   def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
 
 @dataclass(frozen=True)
-class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:dict[str, BufferStorage]=field(default_factory=dict) # noqa: E702
+class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:dict[Compiled, BufferStorage]=field(default_factory=dict) # noqa: E702
 
 class Buffer:
   profile_events:list[ProfileEvent] = []
@@ -148,11 +148,11 @@ class Buffer:
     storage = unwrap(self.ensure_allocated()._storage)
     device = Device.canonicalize(device) if device is not None else self.device
     if device == self.device: return storage
-    if device not in storage.maps:
-      alloc = Device[device].allocator
-      storage.maps[device] = BufferStorage(alloc._offset(self.base.get_buf(device), self.nbytes, self.offset)) if self._base else alloc.map(self)
-    if storage.maps[device].host is not storage.host: storage.maps[device] = replace(storage.maps[device], host=storage.host)
-    return storage.maps[device]
+    if (dev:=Device[device]) not in storage.maps:
+      alloc = dev.allocator
+      storage.maps[dev] = BufferStorage(alloc._offset(self.base.get_buf(device), self.nbytes, self.offset)) if self._base else alloc.map(self)
+    if storage.maps[dev].host is not storage.host: storage.maps[dev] = replace(storage.maps[dev], host=storage.host)
+    return storage.maps[dev]
 
   def get_buf(self, device:str) -> Any: return self.get_storage(device).buf
 
@@ -278,8 +278,8 @@ class Allocator(Generic[DeviceType]):
       storages.clear()
 
   def do_free(self, storage:BufferStorage, options:BufferSpec):
-    for dev in storage.maps: Device[dev].synchronize()
-    for dev, mb in storage.maps.items(): Device[dev].allocator._unmap(mb)
+    for dev in storage.maps: dev.synchronize()
+    for dev, mb in storage.maps.items(): dev.allocator._unmap(mb)
     if options.external_ptr is None: self._free(storage, options)
 
   def map(self, buf:Buffer) -> BufferStorage: return self._map(buf.ensure_allocated())
@@ -411,7 +411,7 @@ class Compiled:
     self.device, self.allocator, self.runtime_t, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
     self.cached_renderer:dict[Any, Renderer] = {}
-    self.pending:dict[str, int] = {} # timeline values of the devices that touched our memory
+    self.pending:dict[Compiled, int] = {} # timeline values of the devices that touched our memory
 
     # hcq2
     self.pm_bufferize = PatternMatcher([
@@ -461,7 +461,7 @@ class Compiled:
   def synchronize(self, timeout:int|None=None):
     try:
       self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
-      for d, v in self.pending.items(): Device[d]._wait_signal(Device[d].timeline.host.view(fmt='Q'), v, timeout)
+      for d, v in self.pending.items(): d._wait_signal(d.timeline.host.view(fmt='Q'), v, timeout)
     except RuntimeError:
       self.on_device_hang()
       raise
