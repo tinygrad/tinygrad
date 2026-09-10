@@ -6,7 +6,7 @@ from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, T
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC
+from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC, canonicalize_strides, strides_for_shape
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
 from tinygrad.uop.ops import resolve_returned_after, remove_all_tags
 from tinygrad.uop.spec import type_verify, spec_tensor
@@ -89,6 +89,13 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
+def copy_destination_to_view(ctx:AllocCtx, c:UOp, dst:UOp):
+  # Restrict this optimization to dense single-device storage with static shapes.
+  if not isinstance(dst.device, str) or not dst.src[0].has_buffer_identity(after_ok=True) or not all_int(dst.shape+dst.src[0].shape): return None
+  # SHRINK preserves its parent's strides; dimensions of length one do not constrain contiguity.
+  if strides_for_shape(dst.shape) != canonicalize_strides(dst.shape, strides_for_shape(dst.src[0].shape)): return None
+  return contiguous_mops_to_view(ctx, c, dst)
+
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
   assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
@@ -144,6 +151,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.CONTIGUOUS), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
+  # Bind a contiguous copy destination as a view, reusing the existing full-buffer COPY path.
+  (UPat(Ops.STORE, src=(UPat(Ops.SHRINK, name="dst"), UPat(Ops.COPY)), name="c"), copy_destination_to_view),
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, name="copy"), lambda x,copy:
