@@ -672,16 +672,20 @@ class NVDevice(HCQ2Compiled):
       nv_gpu.NV2080_CTRL_GR_GET_INFO_PARAMS(grInfoListSize=len(infos), grInfoList=ctypes.addressof(infos)))
     return [x.data for x in infos]
 
-  def _submit_cmds(self, queue:str, *cmds:int): # channel setup and video decode use the same runtime submit as kernels
+  def _submit_cmds(self, queue:str, *cmds:int): run_linear(self._compile_cmds(queue, *cmds), jit=True, update_stats=False)
+
+  @functools.cache
+  def _compile_cmds(self, queue:str, *cmds:int) -> UOp: # channel setup and video decode use the same runtime submit as kernels
     tl = timeline(devs:=(self.device,))
     value = tl.index(1).load()
     submit = make_submit(
       UOp(Ops.INS, arg=("wait", dtypes.void), src=(tl, value)),
       UOp(Ops.INS, arg=("nv", dtypes.void), src=(UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes()),)),
       UOp(Ops.INS, arg=("store", dtypes.void), src=(tl, value + 1)), devs=devs, queue=queue).replace(arg="submit_nv_raw")
-    call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_submit")).call(aux=HCQInfo(devs))
+    fence = UOp.custom_function("hcq_fence", UOp.placeholder((2,), dtypes.uint64, device=devs, volatile=True, tag="slots"))
+    call = UOp.sink(submit.after(fence), arg=KernelInfo("nv_submit")).call(aux=HCQInfo(devs))
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
-    run_linear(hcq_link(linear, use_rt=True), jit=True, update_stats=False)
+    return hcq_link(linear, allow_cache=True)
 
   def _ensure_has_local_memory(self, required):
     if self.slm_per_thread >= required: return
