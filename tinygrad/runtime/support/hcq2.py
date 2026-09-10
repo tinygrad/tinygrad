@@ -1,17 +1,13 @@
 from __future__ import annotations
 from typing import cast, Any
-import functools, time, itertools, decimal, weakref, statistics, ctypes, importlib
+import functools, itertools, weakref, ctypes, importlib
 from dataclasses import replace, dataclass, field
-from tinygrad.helpers import dedup, pluralize, unwrap, PROFILE, VIZ, HCQ2
-from tinygrad.helpers import to_tuple, ContextVar, Context, panic, partition, perf_counter_us, DEV
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, Allocator, DepsTracker
-from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent, ProfileDeviceEvent
+from tinygrad.helpers import dedup, pluralize, unwrap, VIZ, HCQ2, to_tuple, ContextVar, Context, panic, partition, DEV
+from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
-from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
-from tinygrad.renderer import Renderer, Estimates
-from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear
-from tinygrad.engine.realize import lower_and_compile, _resolve
+from tinygrad.renderer import Estimates
+from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear, lower_and_compile, _resolve
 
 # *****************
 # 0. helpers
@@ -40,7 +36,7 @@ def get_enqueue_devs(call:UOp) -> Any|None:
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
   devs = min(bufs, key=lambda b: not all_devices_in(b.device, HCQ_DEVS)).device
   if not all_devices_in(devs, HCQ_DEVS): return None
-  dev = cast(HCQ2Compiled, Device[to_tuple(devs)[0]])
+  dev = Device[to_tuple(devs)[0]]
   # a device without a copy queue leaves copies to its allocator
   return devs if call.src[0].op is not Ops.COPY or dev.has_copy_queue else None
 
@@ -389,7 +385,8 @@ def lower_call(call:UOp) -> UOp|None:
   # encode bodies
   ctx = EncodeCtx(call.arg.aux.device)
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in ctx.devs])]
-  body = graph_rewrite(call.src[0], sum([d.pm_encode for d in devs], PatternMatcher([])) + pm_hcq_encode, ctx=ctx, bpm=pm_patches, name="encode")
+  body = graph_rewrite(call.src[0], sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
+                       ctx=ctx, bpm=pm_patches, name="encode")
   body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])), ctx=ctx, bpm=pm_patches, name="lower")
 
   # resize table
@@ -441,14 +438,16 @@ class LinkCtx: inputs:dict[UOp, UOp]; use_rt:bool; refs:list[UOp] = field(defaul
 def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's) owns the linear's buffers, a one-shot borrows ring slots
   if b.tag is None: return None # a param, not a placeholder
 
-  dev = cast(HCQ2Compiled, Device[to_tuple(b.device)[0]])
+  dev = Device[to_tuple(b.device)[0]]
 
   # device owns the placeholders it names
   if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
   elif not ctx.use_rt:
     spec = BufferSpec(host=b.arg.volatile, uncached=b.arg.volatile, cpu_access=True)
     r = Buffer(dev.device, b.max_numel(), b.dtype, options=spec, preallocate=True)
-  else: r = dev.rt_view(b.max_numel() * b.dtype.itemsize, b.dtype, host=b.arg.volatile)
+  else:
+    off = dev.rt_allocator(True, b.arg.volatile).alloc(max(b.max_numel() * b.dtype.itemsize, 1), alignment=256)
+    r = dev.rt_buffer(True, b.arg.volatile).view(b.max_numel(), b.dtype, off).ensure_allocated()
 
   return UOp.from_buffer(r, HCQ_RUNTIME_DEV.value)
 
@@ -501,93 +500,3 @@ def hcq_link(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UO
   if ctx.refs: linked = linked.replace(src=(linked.src[0].after(*dedup(ctx.refs)), *linked.src[1:])) # attach refs to linear
   if cache and linked is not linear: link_linear_cache[linear] = linked
   return linked
-
-# *****************
-# Device classes
-
-class HCQ2Compiled(Compiled):
-  timestamp_divider: float = 1000.0
-  wait_timeout_ms: float = 30000.0
-  sleep_timeout_ms: int|None = None
-  rt_nbytes: int = 64 << 20 # the pool every per-linear buffer is carved out of
-  pm_encode: PatternMatcher = PatternMatcher([]) # the backend's own encode rules, matched by its submit names
-  var_vals: dict[str, int] = {}
-
-  def __init__(self, device:str, allocator:Allocator, compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
-    self.can_recover = can_recover
-
-    self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag="timeline"), lambda ctx: ctx.timeline),
-      (UPat(Ops.PARAM, tag="program", name="b"),
-       lambda ctx, b: ctx.prog_bufs.setdefault(b, Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)))),
-      (UPat(Ops.PARAM, name="b"), lambda b: cfunc_buf(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == "cfunc" else None),
-    ])
-    super().__init__(device, allocator, compilers, runtime, None, arch=arch)
-
-    self.prog_bufs:dict[UOp, Buffer] = {}
-    self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
-
-  @functools.cached_property
-  def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]
-    buf = Buffer(self.device, 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
-    buf.host.view(fmt='B')[:16] = bytes(16)
-    return buf
-
-  def collect_prof(self):
-    if PROFILE:
-      es = list(self.prof_ents.items())
-      sigs = [buf.host.view(fmt='Q')[i]/decimal.Decimal(self.timestamp_divider) for (buf, _), e in es for i in (e.st_id, e.en_id)]
-      Compiled.profile_events.append(ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,(_, e) in enumerate(es)], [], sigs))
-    self.prof_ents.clear()
-
-  def _at_profile_finalize(self): # the device clock against the host's: the median offset over a few tiny kernels
-    from tinygrad.tensor import Tensor
-    tdiffs = []
-    for _ in range(5):
-      with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
-      if not (ents:=list(self.prof_ents.items())): return
-      self.prof_ents.clear()
-      st = perf_counter_us()
-      self.synchronize()
-      gpu = max(buf.host.view(fmt='Q')[e.en_id] for (buf, _), e in ents)/decimal.Decimal(self.timestamp_divider)
-      tdiffs.append((st+perf_counter_us())/2 - gpu)
-    Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
-
-  @functools.cache
-  def rt_allocator(self, uncached:bool=True, host:bool=False) -> BumpAllocator: return BumpAllocator(self.rt_nbytes)
-
-  @functools.cache
-  def rt_buffer(self, uncached:bool=True, host:bool=False) -> Buffer:
-    spec = BufferSpec(host=host, uncached=uncached, cpu_access=True)
-    return Buffer(self.device, self.rt_allocator(uncached, host).size, dtypes.uint8, options=spec, preallocate=True)
-
-  def rt_view(self, nbytes:int, dtype:DType=dtypes.uint8, uncached:bool=True, host:bool=False) -> Buffer: # a slot of the ring, wraps silently
-    off = self.rt_allocator(uncached, host).alloc(max(nbytes, 1), alignment=256)
-    return self.rt_buffer(uncached, host).view(nbytes // dtype.itemsize, dtype, off).ensure_allocated()
-
-  def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
-    timeout = timeout if timeout is not None and self.can_recover else None
-    st, done = time.perf_counter(), sig[0]
-    while done < value:
-      if done != (done:=sig[0]): st = time.perf_counter()
-      elif (elapsed:=time.perf_counter() - st) > (timeout or self.wait_timeout_ms) / 1000: raise RuntimeError(f"{self.device} signal wait timed out")
-      elif self.sleep_timeout_ms is not None and elapsed > self.sleep_timeout_ms / 1000: self.on_sleep()
-
-  def synchronize(self, timeout:int|None=None):
-    try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
-    except RuntimeError:
-      self.on_device_hang()
-      raise
-    if self.prof_ents: self.collect_prof()
-
-  def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
-
-  def on_sleep(self):
-    if (iface:=getattr(self, "iface", None)) is not None and hasattr(iface, "sleep"): iface.sleep(self.sleep_timeout_ms)
-
-  def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
-
-  def finalize(self):
-    try: self.synchronize() # try to finalize the device in any case
-    except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
-    super().finalize()

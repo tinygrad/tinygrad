@@ -3,7 +3,7 @@ from typing import cast, Any
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, hashlib, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass, replace
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HWQueue, encode_submit, to_name, patch, unwrap_view, rt_addr
+from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, to_name, patch, unwrap_view, rt_addr
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, ProfileProgramEvent
 from tinygrad.dtype import dtypes
@@ -832,7 +832,7 @@ class USBIface(PCIIface):
 
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
-class AMDDevice(HCQ2Compiled):
+class AMDDevice(Compiled):
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
   sleep_timeout_ms = 200
   max_scratch_psize = 0
@@ -850,7 +850,7 @@ class AMDDevice(HCQ2Compiled):
   def __init__(self, device:str=""):
     self.iface = self._select_iface(device)
     self.is_usb = isinstance(self.iface, USBIface)
-    if self.is_usb: self.rt_nbytes = 4 << 20
+    self.can_recover, self.rtalloc_size = self.is_am(), (4 if self.is_usb else 64)<<20
 
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
@@ -879,7 +879,7 @@ class AMDDevice(HCQ2Compiled):
     self.has_copy_queue = not getenv("AMD_DISABLE_SDMA")
 
     allocator = USBAllocator(self) if self.is_usb else AMDAllocator(self)
-    super().__init__(device, allocator, [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, can_recover=self.is_am(), arch=self.arch)
+    super().__init__(device, allocator, [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, arch=self.arch)
 
     # Scratch setup
     self.max_private_segment_size = 0

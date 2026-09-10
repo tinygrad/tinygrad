@@ -50,7 +50,7 @@ class MetalDevice(Compiled):
                      MetalGraph if 'virtual' not in from_ns_str(self.sysdevice.name()).lower() else None,
                      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
 
-  def synchronize(self):
+  def synchronize(self, timeout:int|None=None):
     for cbuf in self.mtl_buffers_in_flight:
       wait_check(cbuf)
       st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000

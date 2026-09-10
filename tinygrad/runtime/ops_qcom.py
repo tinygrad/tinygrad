@@ -2,8 +2,8 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys, contextlib
 assert sys.platform != 'win32'
 from typing import Any
-from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, TinyELF
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HWQueue, HCQ_RUNTIME_DEV, encode_submit, ccall, cstruct, patch, unwrap_view
+from tinygrad.device import Compiled, BufferStorage, BufferSpec, Buffer, Device, Allocator, TinyELF
+from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, encode_submit, ccall, cstruct, patch, unwrap_view
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa, libc
 from tinygrad.renderer.cstyle import QCOMCLRenderer
@@ -312,7 +312,7 @@ class QCOMAllocator(Allocator['QCOMDevice']):
 
 def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, f"{nm}_MASK")
 
-class QCOMDevice(HCQ2Compiled):
+class QCOMDevice(Compiled):
   timestamp_divider = 19.2
   has_copy_queue = False
   pm_encode = PatternMatcher([

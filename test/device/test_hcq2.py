@@ -1,7 +1,7 @@
 import unittest, contextlib, ctypes, gc, struct, numpy as np
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, Compiled
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, dedup, partition, unwrap
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
@@ -11,16 +11,16 @@ from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
-from tinygrad.runtime.support.hcq2 import HCQ_DEVS, HCQ2Compiled, all_devices_in, hcq_compile_cache, link_linear_cache
+from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in, hcq_compile_cache, link_linear_cache
 from test.helpers import call_is_hcq
 
 @contextlib.contextmanager
-def rt_views():
-  calls, orig = [], HCQ2Compiled.rt_view
+def rt_buffers():
+  calls, orig = [], Compiled.rt_buffer
   def track(dev, *args, **kwargs):
     calls.append(dev)
     return orig(dev, *args, **kwargs)
-  with patch.object(HCQ2Compiled, "rt_view", track): yield calls
+  with patch.object(Compiled, "rt_buffer", track): yield calls
 
 def chain(x:Tensor, n:int) -> Tensor:
   for _ in range(n): x = (x + 1).contiguous()
@@ -139,7 +139,7 @@ class TestHCQ2Schedule(unittest.TestCase):
           out, compiled, inputs = self.compiled(n, jit=jit)
           linked = link_linear(compiled, input_uops=inputs, allow_cache=not jit)
           before = tuple(inputs)
-          with rt_views() as borrowed:
+          with rt_buffers() as borrowed:
             for linear in (compiled, linked):
               self.assertIs(compile_linear(linear, input_uops=inputs, cache=not jit), linear)
           self.assertEqual(tuple(inputs), before)
@@ -153,7 +153,7 @@ class TestHCQ2Schedule(unittest.TestCase):
         with self.subTest(kernels=n, jit=jit):
           out, compiled, inputs = self.compiled(n, jit=jit)
           linked = link_linear(compiled, input_uops=inputs, allow_cache=not jit)
-          with rt_views() as borrowed:
+          with rt_buffers() as borrowed:
             again = link_linear(linked, input_uops=inputs, allow_cache=not jit)
           self.assertIs(again, linked)
           self.assertFalse(borrowed)

@@ -3,8 +3,7 @@ import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, itertool
 assert sys.platform != 'win32'
 from typing import Any
 from dataclasses import dataclass, replace
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HWQueue, encode_submit, patch, to_name, unwrap_view
-from tinygrad.runtime.support.hcq2 import make_submit, timeline, HCQInfo, lower_call, hcq_link
+from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, BumpAllocator, hcq_filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops, lower_and_compile, run_linear
@@ -555,7 +554,7 @@ class PCIIface(PCIIfaceBase):
 
 class MOCKIface(NVKIface): count = 1
 
-class NVDevice(HCQ2Compiled):
+class NVDevice(Compiled):
   ifaces = [NVKIface, PCIIface, MOCKIface]
   sleep_timeout_ms = 200
   pm_encode = PatternMatcher([

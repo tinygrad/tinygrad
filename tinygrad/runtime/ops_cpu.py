@@ -2,8 +2,7 @@ from __future__ import annotations
 import platform, sys, ctypes, mmap, struct, time
 from typing import cast
 from tinygrad.helpers import OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
-from tinygrad.device import TinyELF, Program, Device, HostAllocator
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled
+from tinygrad.device import Compiled, TinyELF, Program, Device, HostAllocator
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
@@ -73,7 +72,7 @@ class CPUProgram(Program['CPUDevice']):
   def __del__(self):
     if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.addr), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
 
-class CPUDevice(HCQ2Compiled):
+class CPUDevice(Compiled):
   wait_timeout_ms, has_copy_queue = 30000, False
 
   def __init__(self, device:str=""):
@@ -82,4 +81,4 @@ class CPUDevice(HCQ2Compiled):
 
   def synchronize(self, timeout:int|None=None): # a host read is safe once every device timeline caught up
     for dev in [Device[d] for d in Device._opened_devices if not d.startswith("CPU")]:
-      if isinstance(dev, HCQ2Compiled): dev.synchronize(timeout)
+      if "timeline" in vars(dev): dev.synchronize(timeout)
