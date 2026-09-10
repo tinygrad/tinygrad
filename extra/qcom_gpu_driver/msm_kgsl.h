@@ -129,7 +129,6 @@
 #define KGSL_CACHEMODE_WRITEBACK 3
 
 #define KGSL_MEMFLAGS_USE_CPU_MAP 0x10000000ULL
-#define KGSL_MEMFLAGS_IOCOHERENT 0x80000000ULL
 
 /* Memory types for which allocations are made */
 #define KGSL_MEMTYPE_MASK		0x0000FF00

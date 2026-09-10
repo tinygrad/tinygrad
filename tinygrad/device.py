@@ -220,9 +220,9 @@ class Buffer:
     return None
 
   def as_memoryview(self, allow_zero_copy=False) -> memoryview:
-    if allow_zero_copy and (mv:=self._host_mv()) is not None:
+    if (mv:=self._host_mv()) is not None:
       self.allocator.dev.synchronize()
-      return mv
+      return mv if allow_zero_copy else memoryview(bytearray(mv))
     Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv
 

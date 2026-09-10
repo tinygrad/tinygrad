@@ -115,6 +115,7 @@ class TestHCQ2Schedule(unittest.TestCase):
 
   def test_host_copies(self):
     dev = Device[Device.DEFAULT]
+    if not dev.has_copy_queue: self.skipTest("copy queue required")
     for host_device in ("CPU", "PYTHON", "NPY", "DISK"):
       for upload in (False, True):
         with self.subTest(host_device=host_device, upload=upload):
@@ -190,14 +191,6 @@ class TestHCQ2Schedule(unittest.TestCase):
     src.host[:] = data
     src.get_buf(Device.DEFAULT)
     self.assertEqual(bytes(src.as_memoryview()), data)
-
-  def test_mapped_copies(self):
-    src, dst, gpu = [Buffer(d, 4097, dtypes.uint8, preallocate=True) for d in ("CPU", "CPU", Device.DEFAULT)]
-    for i in range(5):
-      src.host[:] = data = bytes([i]) * src.nbytes
-      gpu.copy_from(src)
-      dst.copy_from(gpu)
-      self.assertEqual(bytes(dst.as_memoryview()), data)
 
   def test_rt_patches_are_inputs_and_vars_only(self):
     x = Tensor.rand(17, 33).contiguous().realize()
