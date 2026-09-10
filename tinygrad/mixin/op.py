@@ -422,7 +422,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     xs, formula = list(argfix(*operands)), formula.replace(" ", "")
     # expand ellipsis to letters, determine output
     if "..." in formula:
-      ell, lhs = "".join(c for c in string.ascii_letters if c not in formula), (formula.split("->") + [""])[0]
+      ell, lhs = "".join(c for c in string.ascii_letters if c not in formula), (formula.split("->"))[0]
       ell_n = [max(0, x.ndim - len(s) + 3) if "..." in s else 0 for s, x in zip(lhs.split(","), xs)]
       for i, (s, x) in enumerate(zip(inputs := lhs.split(","), xs)): inputs[i] = s.replace("...", ell[max(ell_n)-ell_n[i]:max(ell_n)])
       lhs, auto = ",".join(inputs), "".join(sorted(c for c in lhs if lhs.count(c) == 1 and c.isalpha() and c not in ell))
