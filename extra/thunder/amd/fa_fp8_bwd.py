@@ -10,7 +10,8 @@ def custom_fp8_backward(*args:UOp, B:int, N:int, H:int, H_KV:int, arch:str):
   source = (pathlib.Path(__file__).parent / "fa_fp8_bwd.cpp").read_text()
   output_bf16 = args[0].dtype == dtypes.bfloat16
   options = [f"-I{pathlib.Path(__file__).parent / 'include'}", "-std=c++20", "-DKITTENS_CDNA4",
-             "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffp-contract=off", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}"]
+             "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffp-contract=off", "-Wno-duplicate-decl-specifier", "-Wno-unused-command-line-argument",
+             f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}"]
   lib = HIPCCCompiler(arch, options+[f"-DOUTPUT_BF16={int(output_bf16)}"]).compile_cached(source)
   owned_rows = min(N, 128)
   sink = UOp.sink(*(a.base for a in args), UOp.special(owned_rows*4,"lidx0"), UOp.special(N//owned_rows,"gidx0"),

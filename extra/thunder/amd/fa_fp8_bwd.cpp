@@ -7,7 +7,7 @@ struct alignas(1024) ST {
   unsigned char data[128*128];
   __device__ static unsigned swizzle(int2 rc) {return (rc.x*128+rc.y)^(((rc.x>>1)&7)<<4)^((rc.x&16)<<2);}
 };
-using SMALL=st_fp8e4m3<128,128,st_16x128_s>;
+using SMALL=ST;
 using RT=rt_fp8e4m3<16,128>;
 using CT=rt<fp8e4m3,16,128,col_l,rt_16x128_s>;
 using ACC=rt_fl<16,128,col_l,rt_16x16_s>;
@@ -36,7 +36,6 @@ __device__ void cols(CT& x,const ST& s,int col) {
   asm volatile("ds_read_b64_tr_b8 %0, %2\nds_read_b64_tr_b8 %1, %2 offset:8192"
     : "=&v"(*(float2*)&x.tiles[0][0].data[2]),"=&v"(*(float2*)&x.tiles[0][0].data[6]) : "v"(a) : "memory");
 }
-__device__ void cols(CT& x,const SMALL& s,int col) {load(x,s,col);}
 template<int R,typename S> __device__ void stage(S& s,const unsigned char* p,int pos,int head,int batch,int heads) {
   if constexpr(ATTN_N<128) {
     using V=unsigned __attribute__((ext_vector_type(4)));
