@@ -10,6 +10,7 @@ from tinygrad.codegen import to_program
 from tinygrad.viz.serve import load_amd_counters, VizData
 from tinygrad.renderer.amd.sqtt import decode, print_packets
 from tinygrad.renderer.amd.dsl import s, v
+from tinygrad.helpers import getenv
 
 @contextlib.contextmanager
 def save_sqtt():
@@ -20,6 +21,19 @@ def save_sqtt():
   Device[Device.DEFAULT].synchronize()
   Device[Device.DEFAULT]._at_profile_finalize()
   data[:] = [e for e in Compiled.profile_events[:profile_start] if isinstance(e, ProfileProgramEvent)]+Compiled.profile_events[profile_start:]
+  if getenv("PRINT_PKTS"):
+    sqtt_kernels = set()
+    for event in data:
+      if not isinstance(event, ProfileSQTTEvent) or not event.itrace: continue
+      print(f"\n=== SE {event.se} ===")
+      print_packets(decode(event.blob))
+      sqtt_kernels.add(event.kern)
+    for event in data:
+      if not isinstance(event, ProfileProgramEvent) or event.tag not in sqtt_kernels: continue
+      from test.null.test_viz import write_files, run_cli
+      with write_files(profile=data) as files:
+        out = run_cli(*files, "-s", f"{event.name} SQTT SE:0 PKTS", json_fmt=False)[0]["out"]
+      print(out)
 
 def map_sqtt(profile:list) -> list[dict]:
   load_amd_counters(data:=VizData(), profile)
@@ -101,14 +115,6 @@ class TestSQTTProfiler(unittest.TestCase):
     t = Tensor.empty(1)
     with save_sqtt() as data:
       t.custom_kernel(fxn=custom_asm_cdna if self.arch == "gfx950" else custom_asm_rdna)[0].realize()
-    for event in data:
-      if not isinstance(event, ProfileSQTTEvent) or not event.itrace: continue
-      print(f"\n=== SE {event.se} ===")
-      print_packets(decode(event.blob))
-    from test.null.test_viz import write_files, run_cli
-    with write_files(profile=data) as files:
-      out = run_cli(*files, "-s", "asm SQTT SE:0 PKTS", json_fmt=False)[0]["out"]
-    print(out)
 
   def test_multiple_runs(self):
     t = Tensor.empty(1) + 1
