@@ -7,10 +7,7 @@ devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(GPUS))
 bufs = tuple(Tensor.empty(SZ, dtype=dtypes.uint8, device=dev).contiguous().realize() for _ in range(DEPTH) for dev in devs)
 
 @TinyJit
-def all_to_all(*srcs:Tensor):
-  outputs = tuple(src.to(dst) for i,src in enumerate(srcs) for j,dst in enumerate(devs) if i % GPUS != j)
-  Tensor.realize(*outputs)
-  return outputs
+def all_to_all(*srcs:Tensor): return Tensor.realize(*(src.to(dst) for i,src in enumerate(srcs) for j,dst in enumerate(devs) if i % GPUS != j))
 
 if __name__ == "__main__":
   with Context(ALL2ALL=1, JIT_BATCH_SIZE=0):
