@@ -141,14 +141,32 @@ class TestSetitemInto(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT != "CPU", "source must be on another device")
   def test_setitem_slice_assign_from_other_device(self):
-    # NOTE: this is 2 kernels, the cross-device copy should fuse with the assign into one
     a = Tensor.ones(20, device="CPU")
     b = Tensor.arange(20).float().clone()
     Tensor.realize(a, b)
     GlobalCounters.reset()
     a[10:12].assign(b[13:15].to(a.device)).realize()
-    assert_kernel_count(2)
+    assert_kernel_count(1)  # the cross-device copy lands in the dest slice
+    self.assertEqual(GlobalCounters.global_mem, 2*4)
     self.assertListEqual(a.tolist(), [1.0]*10 + [13.0, 14.0] + [1.0]*8)
+
+  def test_setitem_slice_assign_to_other_device(self):
+    a = Tensor.zeros(8).contiguous()
+    b = Tensor.arange(8, dtype=dtypes.float32).clone("CPU:1")
+    Tensor.realize(a, b)
+    GlobalCounters.reset()
+    a[2:4].assign(b[5:7].to(a.device)).realize()
+    assert_kernel_count(1)
+    self.assertEqual(GlobalCounters.global_mem, 2*4)
+    self.assertListEqual(a.tolist(), [0.0, 0.0, 5.0, 6.0, 0.0, 0.0, 0.0, 0.0])
+
+  def test_setitem_slice_assign_from_other_device_noncontiguous(self):
+    # a 2D inner slice is not a contiguous view, this must still be correct
+    a = Tensor.zeros(4, 4).contiguous()
+    b = Tensor.arange(16, dtype=dtypes.float32).reshape(4, 4).clone("CPU:1")
+    Tensor.realize(a, b)
+    a[1:3, 1:3].assign(b[0:2, 0:2].to(a.device)).realize()
+    self.assertListEqual(a.tolist(), [[0.0]*4, [0.0, 0.0, 1.0, 0.0], [0.0, 4.0, 5.0, 0.0], [0.0]*4])
 
 if __name__ == '__main__':
   unittest.main()
