@@ -9,9 +9,10 @@ def custom_fp8_backward(*args:UOp, B:int, N:int, H:int, H_KV:int, arch:str):
   assert arch == "gfx950" and N % 64 == 0 and H % H_KV == 0
   source = (pathlib.Path(__file__).parent / "fa_fp8_bwd.cpp").read_text()
   options = [f"-I{pathlib.Path(__file__).parent / 'include'}", "-std=c++20", "-DKITTENS_CDNA4",
-             "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffp-contract=off", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}"]
+             "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffp-contract=off", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}"]
   lib = HIPCCCompiler(arch, options).compile_cached(source)
-  sink = UOp.sink(*(a.base for a in args), UOp.special(64,"lidx0"), UOp.special(N//64,"gidx0"),
+  owned_rows = min(N, 128)
+  sink = UOp.sink(*(a.base for a in args), UOp.special(owned_rows*4,"lidx0"), UOp.special(2*(N//owned_rows),"gidx0"),
                   UOp.special(H,"gidx1"), UOp.special(B,"gidx2"),arg=KernelInfo(name="hk_fa_fp8_backward", estimates=Estimates(ops=5*B*H*N*N*128)))
   return UOp(Ops.PROGRAM,src=(sink,UOp(Ops.LINEAR,src=(*sink.src,sink)),UOp(Ops.SOURCE,arg=source),UOp(Ops.BINARY,arg=lib)))
 
