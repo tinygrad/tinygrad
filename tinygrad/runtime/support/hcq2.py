@@ -27,7 +27,7 @@ class HCQInfo:
   table:int = -1
   inputs:tuple[tuple[UOp, str, int], ...] = ()
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
-  host_devs:tuple[str, ...] = () # devices whose mapped memory the batch touches: their synchronize waits on ours
+  host_deps:tuple[tuple[str, str], ...] = () # (memory owner, accessing device)
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -232,9 +232,10 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
   sink = UOp.sink(*merged, arg=KernelInfo("hcq_submit"), tag=1)
   for pm in [Device[d].pm_batch for d in ctx.queues if Device[d].pm_batch is not None]: # a device adds its own work to the batch
     if (r:=pm.rewrite(sink)) is not None: sink = r
-  host_devs = dedup([d for call, _, _ in ctx.batch for a in get_call_arg_uops(call) for d in to_tuple(a.device) if d not in ctx.queues])
+  host_deps = tuple(dedup((host, devs[0]) for call, devs, _ in ctx.batch for buf in get_call_arg_uops(call)
+                         for host in to_tuple(buf.device) if host not in ctx.queues))
   return sink.call(*(ctx.slots.values() if ctx.profile else ()),
-                   aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns), estimates=estimates, host_devs=tuple(host_devs)))
+                   aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns), estimates=estimates, host_deps=host_deps))
 
 @rewrite_group(new_ctx=False)
 def sched_batches(l:UOp, profile:bool) -> UOp:
