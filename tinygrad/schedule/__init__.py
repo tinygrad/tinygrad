@@ -152,9 +152,15 @@ def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
 
-def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
+def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None, dst_s:UOp|None=None, src_s:UOp|None=None):
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
-  return call.replace(src=(UOp(Ops.COPY, src=(src,), arg=dst.device),) + call.src[1:])
+  new_srcs = list(call.src[1:])
+  sz = r.numel() if r is not None else 1
+  if dst_s is not None and dst_s.op is Ops.CONST:
+    new_srcs[0] = new_srcs[0].shrink(((int(dst_s.val), int(dst_s.val)+sz),))
+  if src_s is not None and src_s.op is Ops.CONST and new_srcs[1].op is not Ops.SHRINK:
+    new_srcs[1] = new_srcs[1].shrink(((int(src_s.val), int(src_s.val)+sz),))
+  return call.replace(src=(UOp(Ops.COPY, src=(src,), arg=dst.device),) + tuple(new_srcs))
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
@@ -175,6 +181,19 @@ pm_copy_from_store = PatternMatcher([
                 name="call", allow_any_len=True), copy_kernel_to_copy_uop),
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
+                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r")+UPat.cvar("dst_s"))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r")+UPat.cvar("src_s")))
+                .end(UPat(Ops.RANGE, name="r")).sink(),),
+                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r")+UPat.cvar("dst_s"))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r")))
+                .end(UPat(Ops.RANGE, name="r")).sink(),),
+                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
+                .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r")+UPat.cvar("src_s")))
+                .end(UPat(Ops.RANGE, name="r")).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_copy_uop),
 
   # if it wasn't copy, it currently can't be cross device
