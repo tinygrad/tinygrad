@@ -154,7 +154,23 @@ def assert_all_same_devices(ast:UOp):
 
 def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
+  size = 1 if r is None else r.src[0].ssimplify()
+  if dst.arg.size != size or src.arg.size != size: return None
   return call.replace(src=(UOp(Ops.COPY, src=(src,), arg=dst.device),) + call.src[1:])
+
+def copy_kernel_with_offset(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
+  if dst.device == src.device: return None
+  size = 1 if r is None else r.src[0].ssimplify()
+  if not isinstance(size, int) or size <= 0: return None
+  views = []
+  for x in (dst, src):
+    if not isinstance(off:=(x.src[1] - (r if r is not None else 0)).ssimplify(), int): return None
+    buf = call.src[1+x.src[0].arg.slot]
+    if off < 0 or off+size > buf.max_numel(): return None
+    view = buf[off:off+size]
+    if view.contiguous_view() is None: return None
+    views.append(view)
+  return call.replace(src=(UOp(Ops.COPY, src=(src.src[0],), arg=dst.device),) + tuple(views))
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
@@ -176,6 +192,14 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
                 name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+
+  # contiguous subranges copy directly through buffer views, preserving the surrounding destination elements
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM).index(UPat(), name="dst")
+                .store(UPat(Ops.PARAM).index(UPat(), name="src")).end(UPat(Ops.RANGE, name="r")).sink(),),
+                name="call", allow_any_len=True), copy_kernel_with_offset),
+  (UPat(Ops.CALL, src=(UPat(Ops.PARAM).index(UPat(), name="dst")
+                .store(UPat(Ops.PARAM).index(UPat(), name="src")).sink(),),
+                name="call", allow_any_len=True), copy_kernel_with_offset),
 
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
@@ -209,5 +233,5 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
     capturing[0].add_linear(linear, var_vals)
     return UOp(Ops.LINEAR, src=()), var_vals
 
-  held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
+  held_bufs = ({b for a in linear_call.src[1:] for b in a.toposort() if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
   return memory_plan_rewrite(linear, held_bufs), var_vals

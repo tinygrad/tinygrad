@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, rewrite_group, broadcast_axes
 from tinygrad.uop.ops import gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, colored, Context, SPEC
+from tinygrad.helpers import argsort, all_same, all_int, cpu_profile, colored, Context, SPEC
 
 @dataclass
 class IndexingContext:
@@ -31,12 +31,17 @@ def realize_srcs(ctx:IndexingContext, rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx.realize_map[s] = None
 
+def is_copy_view(x:UOp) -> bool:
+  if not all_int(x.shape) or (cv:=x.contiguous_view()) is None: return False
+  return cv[0].dtype == x.dtype and cv[0].has_buffer_identity(after_ok=True)
+
 def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
   if dest.base in src.toposort(enter_calls=False): ctx.realize_map[src] = None
-  # the source of a cross device STORE is materialized on its own device first: the STORE itself is the copy
+  # materialize cross-device values unless they already name the whole source buffer: the STORE itself is the copy
   # NOTE: buffer identity views (shard views with max_shape != shape) must be materialized too, copies can't read them
-  if src.device is not None and dest.device != src.device:
+  if src.device is not None and dest.device != src.device and not ((src.has_buffer_identity(after_ok=True) and src.shape == src.max_shape)
+                                                                 or is_copy_view(src)):
     ctx.realize_map[src] = ctx.non_removable[src] = None
 
 def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:

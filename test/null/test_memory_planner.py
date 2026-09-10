@@ -232,6 +232,31 @@ class TestMemoryPlanner(unittest.TestCase):
     ]
     check_assign(bs, copies=[(b(1), b(0)), (b(2), b(0))])
 
+  def test_sliced_copy_keeps_backing_buffer_live(self):
+    a, other = [UOp.new_buffer("NULL", 256, dtypes.uint8) for _ in range(2)]
+    dst = UOp.new_buffer("NULL:1", 256, dtypes.uint8)
+    linear = UOp(Ops.LINEAR, src=(
+      a.copy_to_device(dst.device).call(dst, a),
+      UOp.sink().call(dst),
+      other.copy_to_device(dst.device).call(dst, other),
+      a[16:32].copy_to_device(dst.device).call(dst[:16], a[16:32]),
+    ))
+    result = memory_plan_rewrite(linear, {dst})
+    a_view, other_view = result.src[0].src[2].contiguous_view(), result.src[2].src[2].contiguous_view()
+    assert a_view is not None and other_view is not None
+    self.assertIs(a_view[0], other_view[0])
+    self.assertGreaterEqual(abs(a_view[1] - other_view[1]), a.nbytes())
+
+  def test_sliced_copy_uses_copy_lane(self):
+    a, compute = [UOp.new_buffer("NULL", 64, dtypes.float32) for _ in range(2)]
+    dst = UOp.new_buffer("NULL:1", 32, dtypes.uint8)
+    view = a[4:12].bitcast(dtypes.uint8)
+    linear = UOp(Ops.LINEAR, src=(UOp.sink().call(a, compute), view.copy_to_device(dst.device).call(dst, view)))
+    result = memory_plan_rewrite(linear, {dst})
+    copy_view, compute_view = result.src[0].src[1].contiguous_view(), result.src[0].src[2].contiguous_view()
+    assert copy_view is not None and compute_view is not None
+    self.assertIsNot(copy_view[0], compute_view[0])
+
   def test_copy_bufs_pinned_mixed(self):
     bs = [
       [b(0, pin=True), b(1), b(2)],

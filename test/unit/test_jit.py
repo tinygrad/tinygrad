@@ -1,7 +1,7 @@
 import unittest, numpy as np
 from test.helpers import assert_jit_cache_len
 from tinygrad import Tensor, TinyJit, Context, UOp, dtypes
-from tinygrad.engine.jit import JitError
+from tinygrad.engine.jit import JitError, MultiGraphRunner
 
 def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):
@@ -422,6 +422,22 @@ class TestJitInsideJit(unittest.TestCase):
     g(Tensor([1])).realize()
     with self.assertRaisesRegex(RuntimeError, "having TinyJit inside another TinyJit is not supported"):
       g(Tensor([1])).realize()
+
+class TestMultiGraphRunner(unittest.TestCase):
+  def test_copy_input_views(self):
+    dst = UOp.new_buffer("NULL", 20, dtypes.float32)
+    src = UOp.new_buffer("NULL:1", 20, dtypes.float32)
+    dst_param = UOp.param(0, dtypes.float32, 20, "NULL")
+    src_param = UOp.param(1, dtypes.float32, 20, "NULL:1")
+    for name, dest, source, supported in [
+      ("buffers", dst[10:12], src[13:15], True),
+      ("direct inputs", dst_param, src_param, True),
+      ("source view", dst[10:12], src_param[13:15], False),
+      ("destination view", dst_param[10:12], src[13:15], False),
+      ("bitcast source view", dst[10:12].bitcast(dtypes.uint8), src_param[13:15].bitcast(dtypes.uint8), False),
+    ]:
+      with self.subTest(name=name):
+        self.assertEqual(MultiGraphRunner.supports_uop([], source.copy_to_device(dest.device).call(dest, source)), supported)
 
 class TestJitRandom(unittest.TestCase):
   def test_jit_rangeify(self):

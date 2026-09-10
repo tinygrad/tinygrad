@@ -3,7 +3,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
-from tinygrad.schedule.indexing import apply_movement_op
+from tinygrad.schedule.indexing import apply_movement_op, is_copy_view
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
@@ -132,7 +132,7 @@ def expand_bitcast(bc:UOp) -> UOp|None:
 
 def copy_to_anon_store(x:UOp, copy:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for contiguous
-  # copies must read from a whole buffer, not a view: materialize anything lacking buffer identity (SDMA can't do offset copies)
+  # materialize sources without buffer identity; input buffer views already have their own PARAM
   if not x.has_buffer_identity(after_ok=True): x = x.contiguous()
   buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
   return buf.after(buf.store(x)).reshape(copy.shape)
@@ -161,9 +161,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # copy to same device is a no-op
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
 
-  # a COPY in src[1] of a plain STORE can just be removed: a STORE to a buffer on a different device is a COPY
+  # a COPY feeding a contiguous STORE can target the destination buffer directly
   (UPat(Ops.STORE, src=(UPat.var("dst"), UPat(Ops.COPY, src=(UPat.var("x"),), name="cpy"))),
-   lambda dst,x,cpy: dst.store(x) if dst.device == cpy.device and dst.has_buffer_identity(after_ok=True) else None),
+   lambda dst,x,cpy: dst.store(x) if dst.device == cpy.device and (dst.has_buffer_identity(after_ok=True) or is_copy_view(dst)) else None),
 
   # a bare COPY is an anonymous store: realize it as a STORE into a fresh call-local buffer on the copy device
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), copy_to_anon_store),

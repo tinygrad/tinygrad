@@ -154,6 +154,9 @@ class GraphRunner:
 class MultiGraphRunner(GraphRunner):
   @staticmethod
   def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
+    # Graph replay updates direct PARAM arguments only; views of inputs must use the ordinary copy runner.
+    if new_call.src[0].op is Ops.COPY and any(b.op is not Ops.PARAM and b.op_in_backward_slice_with_self(Ops.PARAM)
+                                            for b in get_call_arg_uops(new_call)): return False
     # Devices must be the same type
     return new_call.src[0].op in (Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
