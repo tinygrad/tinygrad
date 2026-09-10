@@ -258,6 +258,14 @@ class TestKernelOpts(unittest.TestCase):
     a = Tensor.full((7, 5), 2.0).clone().realize()
     helper_linearizer_opt(a.repeat((1, 4)).prod(1), [[Opt(OptOps.PADTO, 1, 3)]])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_padto_half_group_reduce(self):
+    # AMD:LLVM with LLVM 21 folds the gated half loads into partial register loads and loses a write on the first run of the kernel
+    q, k, v = (Tensor.rand(1, 2, 16, 16).cast(dtypes.half) for _ in range(3))
+    helper_linearizer_opt(q.scaled_dot_product_attention(k, v),
+      [[Opt(OptOps.SPLIT, 3, (4, AxisType.GROUP_REDUCE)), Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.PADTO, 4, 4)]], atol=1e-2, rtol=1e-2)
+
   def test_padto_reduce_identity(self):
     a = Tensor.arange(7*5, dtype=dtypes.float).reshape(7, 5).clone().realize()
     helper_linearizer_opt(a.sum(1), [[Opt(OptOps.PADTO, 1, 8), Opt(OptOps.PADTO, 1, 16)]])
