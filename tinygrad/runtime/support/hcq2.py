@@ -3,7 +3,7 @@ from typing import cast, Any
 import functools, itertools, weakref, ctypes, importlib
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import dedup, pluralize, unwrap, VIZ, HCQ2, to_tuple, ContextVar, Context, panic, partition, DEV, ALL2ALL, getenv
-from tinygrad.device import Device, Buffer, BufferSpec, Allocator, DepsTracker
+from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
@@ -37,8 +37,6 @@ def get_enqueue_devs(call:UOp) -> Any|None:
   if call.src[0].op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
   devs = min(bufs, key=lambda b: not all_devices_in(b.device, HCQ_DEVS)).device
   if not all_devices_in(devs, HCQ_DEVS): return None
-  dev = Device[to_tuple(devs)[0]]
-  if call.src[0].op is Ops.COPY and not dev.has_copy_queue and type(dev.allocator)._map is Allocator._map: return None
   return devs
 
 def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte offset)

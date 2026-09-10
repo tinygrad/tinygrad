@@ -1,7 +1,7 @@
 import unittest, contextlib, ctypes, gc, struct, numpy as np
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
-from tinygrad.device import Allocator, Buffer, Compiled
+from tinygrad.device import Buffer, Compiled
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, dedup, partition, unwrap
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
@@ -115,7 +115,6 @@ class TestHCQ2Schedule(unittest.TestCase):
 
   def test_host_copies(self):
     dev = Device[Device.DEFAULT]
-    if not dev.has_copy_queue: self.skipTest("copy queue required")
     for host_device in ("CPU", "PYTHON", "NPY", "DISK"):
       for upload in (False, True):
         with self.subTest(host_device=host_device, upload=upload):
@@ -132,13 +131,6 @@ class TestHCQ2Schedule(unittest.TestCase):
       f = TinyJit(lambda a: (a.to(dev.device)+1).to("CPU").realize())
       for i in range(5): self.assertEqual(f(Tensor([i, i+1], device="CPU")).tolist(), [i+1, i+2])
       self.assertEqual({c.kwargs["queue"] for c in submit.call_args_list}, {"COMPUTE:0"})
-
-  def test_copies_without_mapping(self):
-    dev = Device[Device.DEFAULT]
-    gpu = Buffer(dev.device, 4, dtypes.uint8, options=BufferSpec(cpu_access=True), preallocate=True)
-    with patch.object(dev, "has_copy_queue", False), patch.object(type(dev.allocator), "_map", Allocator._map):
-      gpu.copy_from(Buffer("CPU", 4, dtypes.uint8, initial_value=b"abcd"))
-      self.assertEqual(bytes(gpu.as_memoryview()), b"abcd")
 
   def test_large_eager_not_cached(self):
     _, compiled, inputs = self.compiled(65)
@@ -198,6 +190,14 @@ class TestHCQ2Schedule(unittest.TestCase):
     src.host[:] = data
     src.get_buf(Device.DEFAULT)
     self.assertEqual(bytes(src.as_memoryview()), data)
+
+  def test_mapped_copies(self):
+    src, dst, gpu = [Buffer(d, 4097, dtypes.uint8, preallocate=True) for d in ("CPU", "CPU", Device.DEFAULT)]
+    for i in range(5):
+      src.host[:] = data = bytes([i]) * src.nbytes
+      gpu.copy_from(src)
+      dst.copy_from(gpu)
+      self.assertEqual(bytes(dst.as_memoryview()), data)
 
   def test_rt_patches_are_inputs_and_vars_only(self):
     x = Tensor.rand(17, 33).contiguous().realize()
