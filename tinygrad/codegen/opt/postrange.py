@@ -1,10 +1,10 @@
 from __future__ import annotations
 import math, itertools
 from typing import cast
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element
 from tinygrad.uop.ops import axis_colors, axis_to_pos
 from tinygrad.device import Buffer
-from tinygrad.dtype import dtypes, Invalid
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
@@ -156,11 +156,11 @@ class Scheduler:
       replaced_rng = UOp.range(new_sz, *rng.arg, dtype=rng.dtype)
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
-      store_targets = {s.src[0] for s in self.ast.backward_slice_with_self if s.op is Ops.STORE}
       for b in self.bufs:
-        if rng in (i:=b.src[1].get_idx()).backward_slice_with_self:
-          nb = b.replace(src=(b.src[0], i.valid(valid&b.src[1].get_valid())))
-          replaces[b] = nb if b in store_targets else valid.where(nb, UOp.const(Invalid))
+        if rng in (i:=b.src[1]).ranges: replaces[b] = b.replace(src=(b.src[0], i.get_idx().valid(valid&i.get_valid())))
+      for r in self.reduceops:
+        if any(rng in y.ranges for y in r.src[1:]):
+          replaces[r] = r.replace(src=(valid.where(r.src[0], UOp.const(identity_element(r.arg[0], r.dtype), r.dtype)),)+r.src[1:])
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
       try:
@@ -236,11 +236,12 @@ class Scheduler:
             ne.append(new_range)
 
           if use_tensor_cores != 2:
-            # fix the srcs
             reduceop = get_single_element([x for x in self.reduceops if axes[2] in UOp.sink(*x.src[1:]).ranges])
-            mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
+            gate, mul = (r0.src[0], r0.src[1]) if (r0:=reduceop.src[0]).op is Ops.WHERE else (None, r0)
+            if mul.op is Ops.CAST: mul = mul.src[0]
+            ins = mul.src if gate is None else tuple(gate.where(x, UOp.const(0, x.dtype)) for x in mul.src)
             bss = tc.base_shape_str()
-            srcs = [x.substitute(dict(zip(ne, [ne[i] for i in argsort(p)])), walk=True) for x,p in zip(mul.src, tc.permutes_for_shape_str(bss))]
+            srcs = [x.substitute(dict(zip(ne, [ne[i] for i in argsort(p)])), walk=True) for x,p in zip(ins, tc.permutes_for_shape_str(bss))]
 
             # get upcast axes for the tensor cores
             base_upcast_axes = [ne[bss.index(s)].arg[0] for s in tc.base_upcast_axes()]
