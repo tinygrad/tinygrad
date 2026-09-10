@@ -98,6 +98,7 @@ __device__ void body(Output* dq,Output* dk,Output* dv,float* amax,float* next_am
   float vs=uniform(scales[0]),dos=uniform(scales[1]),p_scale=uniform(scales[2]),s_scale=uniform(scales[3]);
   float pi=uniform(1.f/p_scale),si=uniform(1.f/s_scale);
   constexpr float grad_scale=0.08838834764831845f/0.3570958286295132f;
+  float qk_scale=uniform(s_scale*grad_scale),v_scale=uniform(p_scale*dos);
   RT ar,dr;
   global_rows(ar,k,base+wr,kh,batch,HK);
   global_rows(dr,v,base+wr,kh,batch,HK);
@@ -156,14 +157,13 @@ __device__ void body(Output* dq,Output* dk,Output* dv,float* amax,float* next_am
             pv[u]=pos!=base || ki<=qi?pv[u]:0.f;
             if constexpr(N<128) if(qi>=N || ki>=N) pv[u]=0.f;
           }
-          F2 sv=pv*__builtin_elementwise_fma(*(F2*)((float*)dp+t),F2{vs*dos*si,vs*dos*si},F2{-d*si,-d*si});
-          pv*=F2{pi,pi};
+          F2 sv=pv*__builtin_elementwise_fma(*(F2*)((float*)dp+t),F2{vs*dos,vs*dos},F2{-d,-d});
           #pragma unroll
           for(int u=0;u<2;u++) {
             pmax_lane[t+u]=fmaxf(pmax_lane[t+u],pv[u]);smax_lane[t+u]=fmaxf(smax_lane[t+u],fabsf(sv[u]));
           }
-          *(F2*)(svalues+t)=sv;
-          *(F2*)(pvalues+t)=pv;
+          *(F2*)(svalues+t)=sv*F2{si,si};
+          *(F2*)(pvalues+t)=pv*F2{pi,pi};
         }
         int r=wr+(laneid()/16)*4,c=j*16+laneid()%16;
         *(unsigned*)((unsigned char*)ds.data+ds.swizzle({c,r}))=encode4<true>(svalues);
@@ -204,7 +204,9 @@ __device__ void body(Output* dq,Output* dk,Output* dv,float* amax,float* next_am
         if(dim<7) cols(operandv,db,(dim+1)*16);
         #pragma unroll
         for(int pair=0;pair<2;pair++) {
-          float x=((float*)grad)[pair*2]*s_scale*grad_scale,y=((float*)grad)[pair*2+1]*s_scale*grad_scale;
+          F2 xy;
+          asm("v_pk_mul_f32 %0, %1, %2" : "=v"(xy) : "v"(*(F2*)((float*)grad+pair*2)),"s"(F2{qk_scale,qk_scale}));
+          float x=xy[0],y=xy[1];
           unsigned idx=((batch*H+h)*(N/16)+(pos+wr)/16)*2048+laneid()*2;
           if constexpr(OUTPUT_BF16) {
             unsigned packed;
@@ -222,13 +224,12 @@ __device__ void body(Output* dq,Output* dk,Output* dv,float* amax,float* next_am
   #pragma unroll
   for(int t=0;t<4;t++) {
     int r=(laneid()/16)*4+t,c=j*16+laneid()%16,idx=((batch*N+base+wr+r)*H+h)*128+c;
-    dk[idx]=((float*)g0.tiles[0][j].data)[t]*s_scale*grad_scale;
-    dv[idx]=((float*)g1.tiles[0][j].data)[t]*p_scale*dos;
+    dk[idx]=((float*)g0.tiles[0][j].data)[t]*qk_scale;
+    dv[idx]=((float*)g1.tiles[0][j].data)[t]*v_scale;
   }
   {
     float pm=fmaxf(fmaxf(pmax_lane[0],pmax_lane[1]),fmaxf(pmax_lane[2],pmax_lane[3]));
     float sm=fmaxf(fmaxf(smax_lane[0],smax_lane[1]),fmaxf(smax_lane[2],smax_lane[3]));
-    pm*=p_scale;sm*=s_scale;
     for(int off=32;off;off/=2) {pm=fmaxf(pm,__shfl_xor(pm,off));sm=fmaxf(sm,__shfl_xor(sm,off));}
     if(laneid()==0) {
       maxima[wave_id()*2]=pm;
