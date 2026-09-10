@@ -248,6 +248,14 @@ class TestDiskTensor(TempDirTestCase):
     out = t[1].to(Device.DEFAULT).tolist()
     assert out == list(range(16, 32))
 
+  def test_copy_slice_and_read_source(self):
+    source = Tensor(list(range(20)), device="CPU").to(f"DISK:{self.tmp('source')}").realize()
+    copied = source[2:10].to(f"DISK:{self.tmp('copy')}")
+    read = source[3:7].to("CPU")
+    Tensor.realize(copied, read)
+    self.assertEqual(copied.to("CPU").tolist(), list(range(2, 10)))
+    self.assertEqual(read.tolist(), [3, 4, 5, 6])
+
   def test_simple_read_bitcast(self):
     fn = pathlib.Path(self.tmp("dt_simple_read_bitcast"))
     fn.write_bytes(bytes(range(256))*2)

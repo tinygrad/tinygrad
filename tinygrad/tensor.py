@@ -229,7 +229,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
       ctx.stores.append(u)
       if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
   # views of written buffers must share their base PARAM so the scheduler can order reads before writes
-  written = {s.buf_uop for s in ctx.stores}
+  written = {s.buf_uop for s in ctx.stores if s.op is Ops.AFTER}
   ctx.views = {v for v in ctx.views if v.buf_uop not in written}
   ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
