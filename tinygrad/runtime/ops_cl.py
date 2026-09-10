@@ -125,6 +125,6 @@ class CLDevice(Compiled):
 
   def count(self) -> int: return len(unwrap(self.device_ids))
 
-  def synchronize(self):
+  def synchronize(self, timeout:int|None=None):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()

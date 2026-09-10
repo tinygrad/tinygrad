@@ -2,14 +2,16 @@ from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
 from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
-import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap
+import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, time, statistics
 from tinygrad.helpers import WIN, mv_address, to_mv, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile
-from tinygrad.dtype import DType, _to_np_dtype
-from tinygrad.runtime.support.memory import MMIOInterface
-if TYPE_CHECKING: from tinygrad.renderer import Renderer
+from tinygrad.helpers import cpu_profile, perf_counter_us
+from tinygrad.dtype import dtypes, DType, _to_np_dtype
+from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
+if TYPE_CHECKING:
+  from tinygrad.renderer import Renderer
+  from tinygrad.uop.ops import UOp
 
 # **************** Device ****************
 
@@ -389,17 +391,38 @@ class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
   has_copy_queue:bool = True
+  timestamp_divider: float = 1000.0
+  wait_timeout_ms: float = 30000.0
+  sleep_timeout_ms: int|None = None
+  var_vals: dict[str, int] = {}
 
+  # hcq2
   pm_batch:Any = None
-  pm_encode:Any = None
   pm_lower:Any = None
-  pm_bufferize:Any = None
 
-  def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, graph=None, arch=None):
+  def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None,
+               graph=None, arch=None, can_recover:bool=False, rtalloc_size:int=64<<20):
     from tinygrad.renderer import Renderer
+    from tinygrad.uop.ops import Ops, UPat, PatternMatcher
+    from tinygrad.runtime.support.hcq2 import cfunc_buf
+
     self.device, self.allocator, self.runtime_t, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
-    self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
+    self.device_id, self.arch, self.can_recover = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch, can_recover
     self.cached_renderer:dict[Any, Renderer] = {}
+
+    # hcq2
+    self.rtalloc_size = rtalloc_size
+    self.pm_bufferize = PatternMatcher([
+      (UPat(Ops.PARAM, tag="timeline"), lambda ctx: ctx.timeline),
+      (UPat(Ops.PARAM, tag="program", name="b"),
+       lambda ctx, b: ctx.prog_bufs.setdefault(b, Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)))),
+      (UPat(Ops.PARAM, name="b"), lambda b, cfunc_buf=cfunc_buf: cfunc_buf(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == "cfunc" else None),
+    ])
+    self.pm_encode = PatternMatcher([])
+
+    # profiling
+    self.prog_bufs:dict[UOp, Buffer] = {} # cache bufferized for programs
+    self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
 
   @property
   def renderer(self) -> Renderer: return self._select_renderer()
@@ -437,22 +460,68 @@ class Compiled:
     """
     return self.iface.count if hasattr(self, 'iface') else 1
 
-  def synchronize(self):
-    """
-    Synchronize all pending operations on the device.
+  @functools.cached_property
+  def timeline(self) -> Buffer: # [the signal, the value the last submitted batch signals]
+    return Buffer(self.device, 2, dtypes.uint64, options=BufferSpec(host=True, uncached=True, cpu_access=True), initial_value=bytes(16))
 
-    This method ensures that all previously queued operations on the device have been completed before proceeding.
-    """
-    # override this in your device implementation
-  def _at_profile_finalize(self):
-    """
-    Called at the end of profiling to allow the device to finalize any profiling.
-    """
-    # override this in your device implementation
+  def collect_prof(self):
+    if PROFILE:
+      es = list(self.prof_ents.items())
+      sigs = [buf.host.view(fmt='Q')[i]/decimal.Decimal(self.timestamp_divider) for (buf, _), e in es for i in (e.st_id, e.en_id)]
+      Compiled.profile_events.append(ProfileGraphEvent([replace(e, st_id=2*i, en_id=2*i+1) for i,(_, e) in enumerate(es)], [], sigs))
+    self.prof_ents.clear()
+
+  def _at_profile_finalize(self): # the device clock against the host's: the median offset over a few tiny kernels
+    if "timeline" not in vars(self): return
+    from tinygrad.tensor import Tensor
+    tdiffs = []
+    for _ in range(5):
+      with Context(DEBUG=0, BEAM=0, TRACK_MATCH_STATS=0): Tensor.ones(1, device=self.device).contiguous().realize()
+      if not (ents:=list(self.prof_ents.items())): return
+      self.prof_ents.clear()
+      st = perf_counter_us()
+      self.synchronize()
+      gpu = max(buf.host.view(fmt='Q')[e.en_id] for (buf, _), e in ents)/decimal.Decimal(self.timestamp_divider)
+      tdiffs.append((st+perf_counter_us())/2 - gpu)
+    Compiled.profile_events.append(ProfileDeviceEvent(self.device, statistics.median(tdiffs), self.device_props()))
+
+  @functools.cache
+  def rt_allocator(self, uncached:bool=True, host:bool=False) -> BumpAllocator: return BumpAllocator(self.rtalloc_size)
+
+  @functools.cache
+  def rt_buffer(self, uncached:bool=True, host:bool=False) -> Buffer:
+    spec = BufferSpec(host=host, uncached=uncached, cpu_access=True)
+    return Buffer(self.device, self.rt_allocator(uncached, host).size, dtypes.uint8, options=spec, preallocate=True)
+
+  def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
+    timeout = timeout if timeout is not None and self.can_recover else None
+    st, done = time.perf_counter(), sig[0]
+    while done < value:
+      if done != (done:=sig[0]): st = time.perf_counter()
+      elif (elapsed:=time.perf_counter() - st) > (timeout or self.wait_timeout_ms) / 1000: raise RuntimeError(f"{self.device} signal wait timed out")
+      elif self.sleep_timeout_ms is not None and elapsed > self.sleep_timeout_ms / 1000: self.on_sleep()
+
+  def synchronize(self, timeout:int|None=None):
+    if "timeline" not in vars(self): return
+    try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
+    except RuntimeError:
+      self.on_device_hang()
+      raise
+    if self.prof_ents: self.collect_prof()
+
+  def on_device_hang(self): raise RuntimeError(f"{self.device} hang detected")
+
+  def on_sleep(self):
+    if (iface:=getattr(self, "iface", None)) is not None and hasattr(iface, "sleep"): iface.sleep(self.sleep_timeout_ms)
+
+  def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
+
   def finalize(self):
     """
     Called at the end of process lifetime to allow the device to finalize.
     """
+    try: self.synchronize() # try to finalize the device in any case
+    except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
     if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
 
 if PROFILE:
