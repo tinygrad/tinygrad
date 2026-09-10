@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math, itertools
 from typing import cast
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, remove_all_tags
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify
 from tinygrad.uop.ops import axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, Invalid
@@ -168,10 +168,9 @@ class Scheduler:
       except IndexError:
         raise KernelOptError
       check(rng.arg[-1] == AxisType.GLOBAL and altrng.arg[-1] == AxisType.GLOBAL, "swap only for globals")
-      self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1]), tag=1),
-                                      altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]), tag=1)},
-                                      name=f"swap {rng.arg[:-1]} {altrng.arg[:-1]}")
-      self.ast = graph_rewrite(self.ast, remove_all_tags, name="swap remove tags")
+      self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1])),
+                                      altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]))},
+                                      name=f"swap {rng.arg[:-1]} {altrng.arg[:-1]}", walk=True)
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
 
@@ -239,22 +238,16 @@ class Scheduler:
           if use_tensor_cores != 2:
             # fix the srcs
             reduceop = get_single_element([x for x in self.reduceops if axes[2] in UOp.sink(*x.src[1:]).ranges])
-            tne = [x.replace(tag=1) for x in ne]
-            ret = reduceop.substitute(dict(zip(ne, tne)))
-            srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
+            mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
             bss = tc.base_shape_str()
-            srcs = [x.substitute(dict(zip(tne, [ne[i] for i in argsort(p)]))) for x,p in zip(srcs, tc.permutes_for_shape_str(bss))]
+            srcs = [x.substitute(dict(zip(ne, [ne[i] for i in argsort(p)])), walk=True) for x,p in zip(mul.src, tc.permutes_for_shape_str(bss))]
 
-            # get reduce/upcast axes for the tensor cores
-            tc_reduce_axes = tuple([ne[bss.index(f"r{i}")].arg[0] for i in range(len(tc.get_reduce_axes()))])
-            base_upcast_axes = tuple([(ne[bss.index(s)].arg[0], 2) for s in tc.base_upcast_axes()])
-            tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
-            def with_missing_tc_axes(arg):
-              ret = list(arg)
-              for rn,_ in tc_upcast_axes[0]+tc_upcast_axes[1]:
-                if rn not in [x[0] for x in ret]: ret.append((rn, 1))
-              return tuple(ret)
-            tc_upcast_axes = tuple(with_missing_tc_axes(v) for v in tc_upcast_axes)
+            # get upcast axes for the tensor cores
+            base_upcast_axes = [ne[bss.index(s)].arg[0] for s in tc.base_upcast_axes()]
+            upcast_cnt = [int(math.log2(tc.elements_per_thread[i])) for i in range(3)]
+            # each operand upcasts its first upcast_cnt axes, the axes only A or B upcast are size 1 so the operands broadcast
+            tc_upcast_axes = tuple([tuple([(a, 2 if j < cnt else 1) for j,a in enumerate(base_upcast_axes[:max(cnt, *upcast_cnt[:2])])])
+                                    for cnt in upcast_cnt])
 
             # construct the op
             # TODO: remove tc_upcast_axes from the arg
@@ -264,7 +257,7 @@ class Scheduler:
                               tc.dims, self.ren.target.device, tc.threads, tc_upcast_axes=tc_upcast_axes)
 
             # preserve extra reduces
-            reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
+            reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x not in ne[len(tc.opts):]]
             if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, src=(tc_uop,)+tuple(reduce_ranges), arg=(Ops.ADD, 0))
             self.ast = self.ast.substitute({reduceop: tc_uop})
           self.tensor_core = tc
