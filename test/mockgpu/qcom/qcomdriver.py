@@ -89,51 +89,51 @@ class QCOMDriver(VirtDriver):
   def ioctl(self, request:int, argp:int):
     nr = request & 0xff
     if nr == _ioctl_nr(kgsl.IOCTL_KGSL_DRAWCTXT_CREATE):
-      st = kgsl.struct_kgsl_drawctxt_create.from_address(argp)
-      st.drawctxt_id, self.next_ctx = self.next_ctx, self.next_ctx + 1
+      st_ctx = kgsl.struct_kgsl_drawctxt_create.from_address(argp)
+      st_ctx.drawctxt_id, self.next_ctx = self.next_ctx, self.next_ctx + 1
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_DRAWCTXT_DESTROY): pass
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_SETPROPERTY): pass
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY):
-      st = kgsl.struct_kgsl_device_getproperty.from_address(argp)
-      if st.type != kgsl.KGSL_PROP_DEVICE_INFO: raise NotImplementedError(f"unsupported KGSL property {st.type}")
-      info = kgsl.struct_kgsl_devinfo.from_address(st.value)
+      st_prop = kgsl.struct_kgsl_device_getproperty.from_address(argp)
+      if st_prop.type != kgsl.KGSL_PROP_DEVICE_INFO: raise NotImplementedError(f"unsupported KGSL property {st_prop.type}")
+      info = kgsl.struct_kgsl_devinfo.from_address(int(st_prop.value))
       info.device_id, info.chip_id, info.mmu_enabled = 0, A630_CHIP_ID, 1
       info.gpu_id, info.gmem_sizebytes = 630, 1024 * 1024
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_GPUOBJ_ALLOC):
-      st = kgsl.struct_kgsl_gpuobj_alloc.from_address(argp)
-      st.id, self.next_obj = self.next_obj, self.next_obj + 1
-      st.mmapsize = max(st.mmapsize, st.size)
-      self.objects[st.id] = {"size": int(st.mmapsize), "flags": int(st.flags), "addr": 0}
+      st_alloc = kgsl.struct_kgsl_gpuobj_alloc.from_address(argp)
+      st_alloc.id, self.next_obj = self.next_obj, self.next_obj + 1
+      st_alloc.mmapsize = max(st_alloc.mmapsize, st_alloc.size)
+      self.objects[st_alloc.id] = {"size": int(st_alloc.mmapsize), "flags": int(st_alloc.flags), "addr": 0}
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_GPUOBJ_FREE):
-      obj = self.objects.pop(kgsl.struct_kgsl_gpuobj_free.from_address(argp).id, None)
-      if obj is not None and obj["addr"]: self.gpu.unmap_range(obj["addr"], obj["size"])
+      freed = self.objects.pop(kgsl.struct_kgsl_gpuobj_free.from_address(argp).id, None)
+      if freed is not None and freed["addr"]: self.gpu.unmap_range(freed["addr"], freed["size"])
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_MAP_USER_MEM):
-      st = kgsl.struct_kgsl_map_user_mem.from_address(argp)
-      st.gpuaddr = st.hostptr
-      self.gpu.map_range(int(st.hostptr), int(st.len))
-      self.user_maps.setdefault(int(st.gpuaddr), []).append(int(st.len))
+      st_map = kgsl.struct_kgsl_map_user_mem.from_address(argp)
+      st_map.gpuaddr = st_map.hostptr
+      self.gpu.map_range(int(st_map.hostptr), int(st_map.len))
+      self.user_maps.setdefault(int(st_map.gpuaddr), []).append(int(st_map.len))
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_SHAREDMEM_FREE):
-      st = kgsl.struct_kgsl_sharedmem_free.from_address(argp)
-      if sizes:=self.user_maps.get(addr:=int(st.gpuaddr)):
+      st_free = kgsl.struct_kgsl_sharedmem_free.from_address(argp)
+      if sizes:=self.user_maps.get(addr:=int(st_free.gpuaddr)):
         self.gpu.unmap_range(addr, sizes.pop())
         if not sizes: self.user_maps.pop(addr)
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_GPU_COMMAND):
-      st = kgsl.struct_kgsl_gpu_command.from_address(argp)
+      st_cmd = kgsl.struct_kgsl_gpu_command.from_address(argp)
       if os.getenv("QCOM_TRACE"):
-        print(f"KGSL_GPU_COMMAND cmdlist={int(st.cmdlist):#x} cmdsize={st.cmdsize} numcmds={st.numcmds} "
-              f"context={st.context_id} objlist={int(st.objlist):#x} numobjs={st.numobjs}", flush=True)
+        print(f"KGSL_GPU_COMMAND cmdlist={int(st_cmd.cmdlist):#x} cmdsize={st_cmd.cmdsize} numcmds={st_cmd.numcmds} "
+              f"context={st_cmd.context_id} objlist={int(st_cmd.objlist):#x} numobjs={st_cmd.numobjs}", flush=True)
       if os.getenv("QCOM_MOCK_NOEXEC"): return 0
-      for i in range(st.numcmds):
-        obj = kgsl.struct_kgsl_command_object.from_address(st.cmdlist + i * st.cmdsize)
+      for i in range(st_cmd.numcmds):
+        cmd = kgsl.struct_kgsl_command_object.from_address(st_cmd.cmdlist + i * st_cmd.cmdsize)
         if os.getenv("QCOM_TRACE"):
-          print(f"  command[{i}] gpuaddr={int(obj.gpuaddr):#x} offset={int(obj.offset):#x} size={int(obj.size):#x} flags={obj.flags:#x}", flush=True)
-        self.gpu.submit_ib(int(obj.gpuaddr + obj.offset), int(obj.size))
+          print(f"  command[{i}] gpuaddr={int(cmd.gpuaddr):#x} offset={int(cmd.offset):#x} size={int(cmd.size):#x} flags={cmd.flags:#x}", flush=True)
+        self.gpu.submit_ib(int(cmd.gpuaddr + cmd.offset), int(cmd.size))
       self.gpu.execute()
       self.timestamp += 1
-      st.timestamp = self.timestamp
+      st_cmd.timestamp = self.timestamp
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID):
-      st = kgsl.struct_kgsl_cmdstream_readtimestamp_ctxtid.from_address(argp)
-      st.timestamp = self.timestamp
+      st_ts = kgsl.struct_kgsl_cmdstream_readtimestamp_ctxtid.from_address(argp)
+      st_ts.timestamp = self.timestamp
     elif nr == _ioctl_nr(kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID): pass
     else: raise NotImplementedError(f"unsupported KGSL ioctl {nr:#x}")
     return 0

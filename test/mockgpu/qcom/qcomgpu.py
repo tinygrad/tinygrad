@@ -302,9 +302,9 @@ class QCOMGPU(VirtGPU):
           else: src = sf[si]
           if src_type != dst_type:
             val = _cov_src(src, src_type, dst_type)
-            conv = (_f16bits, _f32bits, lambda x:int(x)&0xffff, lambda x:_u32(int(x)), lambda x:int(x)&0xffff,
-                    lambda x:_u32(int(x)), lambda x:int(x)&0xff, lambda x:int(x)&0xff)[dst_type]
-            src = conv(val)
+            cvt = (_f16bits, _f32bits, lambda x:int(x)&0xffff, lambda x:_u32(int(x)), lambda x:int(x)&0xffff,
+                   lambda x:_u32(int(x)), lambda x:int(x)&0xff, lambda x:int(x)&0xff)[dst_type]
+            src = cvt(val)
           df[dst+rpt] = _u32(src)
       elif cat == 2:
         full, conv, op = bool((ins >> 52) & 1), bool((ins >> 46) & 1), (ins >> 53) & 0x3f
@@ -387,18 +387,18 @@ class QCOMGPU(VirtGPU):
             # This is used heavily by tinygrad's 64-bit multiply decomposition.
             out = _madsh_m16(a, b, c)
           elif op == 0x6:
-            a = self._cat3_f16_src(ae, hreg, consts)
+            af = self._cat3_f16_src(ae, hreg, consts)
             bf = _f16(hreg[bi])
             cf = self._cat3_f16_src(ce, hreg, consts)
             neg = ((ins >> 14) & 1) | (((ins >> 30) & 1) << 1) | (((ins >> 31) & 1) << 2)
-            hreg[dst+rpt] = _f16bits(_mad_f16(a, bf, cf, neg, bool((ins >> 42) & 1)))
+            hreg[dst+rpt] = _f16bits(_mad_f16(af, bf, cf, neg, bool((ins >> 42) & 1)))
             continue
           elif op == 0x7:
-            a = _f32(self._cat3_src(ae, gpr, consts))
+            af = _f32(self._cat3_src(ae, gpr, consts))
             bf = _f32(gpr[bi])
             cf = _f32(self._cat3_src(ce, gpr, consts))
             neg = ((ins >> 14) & 1) | (((ins >> 30) & 1) << 1) | (((ins >> 31) & 1) << 2)
-            val = _mad_f16(a, bf, cf, neg, bool((ins >> 42) & 1))
+            val = _mad_f16(af, bf, cf, neg, bool((ins >> 42) & 1))
             # Normal CAT3 mad.f32 can convert its float32 result to a half-file
             # destination.  Mesa exposes raw bit 46 as DST_HALF for this opcode.
             if (ins >> 46) & 1: hreg[dst+rpt] = _f16bits(val)
@@ -436,8 +436,8 @@ class QCOMGPU(VirtGPU):
           try: self._check(addr+off, size*width)
           except RuntimeError as e:
             raise RuntimeError(f"{e}; pc={pc} cat6=ldg ar={ar} lo={gpr[ar]:#x} hi={gpr[(ar+1)&0xff]:#x} off={off} typ={typ} size={size}") from e
-          out = hreg if typ in (0,2,4,6) else gpr
-          for i in range(size): out[dst+i] = int.from_bytes(ctypes.string_at(addr+off+i*width, width), 'little')
+          out_regs = hreg if typ in (0,2,4,6) else gpr
+          for i in range(size): out_regs[dst+i] = int.from_bytes(ctypes.string_at(addr+off+i*width, width), 'little')
         elif op == 3:
           src, ar = (ins >> 1)&0xff, (ins >> 41)&0xff
           addr = gpr[ar] | (gpr[(ar+1)&0xff] << 32)
@@ -452,8 +452,8 @@ class QCOMGPU(VirtGPU):
           ar = (ins >> 14)&0xff
           addr = gpr[ar]
           if addr + size*width > len(shared): raise RuntimeError(f"A630 local load OOB {addr:#x}+{size*width:#x}")
-          out = hreg if typ in (0,2,4,6) else gpr
-          for i in range(size): out[dst+i] = int.from_bytes(shared[addr+i*width:addr+(i+1)*width], 'little')
+          out_regs = hreg if typ in (0,2,4,6) else gpr
+          for i in range(size): out_regs[dst+i] = int.from_bytes(shared[addr+i*width:addr+(i+1)*width], 'little')
         elif op == 2:
           # ldp offsets are byte offsets (Mesa disassembles these as p[rN+off]),
           # unlike global ldg offsets which are scaled by the element width.
@@ -461,8 +461,8 @@ class QCOMGPU(VirtGPU):
           off = _cat6_private_offset(ins, store=False)
           addr = gpr[ar] + off
           if addr < 0 or addr + size*width > len(private): raise RuntimeError(f"A630 private load OOB {addr:#x}+{size*width:#x}")
-          out = hreg if typ in (0,2,4,6) else gpr
-          for i in range(size): out[dst+i] = int.from_bytes(private[addr+i*width:addr+(i+1)*width], 'little')
+          out_regs = hreg if typ in (0,2,4,6) else gpr
+          for i in range(size): out_regs[dst+i] = int.from_bytes(private[addr+i*width:addr+(i+1)*width], 'little')
         elif op == 4:
           src, ar = (ins >> 1)&0xff, (ins >> 41)&0xff
           addr = gpr[ar]

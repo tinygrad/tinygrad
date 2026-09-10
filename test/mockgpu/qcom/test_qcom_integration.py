@@ -1,4 +1,5 @@
 import math, unittest
+from typing import cast
 
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import DEV
@@ -29,14 +30,14 @@ class TestQCOMA630Integration(unittest.TestCase):
     self.assertEqual((lhs @ rhs).realize().tolist(), [[1.] * n])
 
   def test_random_convolution_and_sfu_select(self):
-    rnd = Tensor.rand(64, device="QCOM").realize().tolist()
+    rnd = cast(list[float], Tensor.rand(64, device="QCOM").realize().tolist())
     self.assertEqual(len(rnd), 64)
     self.assertTrue(all(0.0 <= x < 1.0 for x in rnd))
 
     conv = Tensor.ones(1, 1, 8, 8, device="QCOM").conv2d(Tensor.ones(2, 1, 3, 3, device="QCOM")).realize()
     self.assertEqual(conv.tolist(), [[[[9.] * 6 for _ in range(6)] for _ in range(2)]])
 
-    vals = Tensor([[-3.0, 2.0], [3.0, 4.0]], device="QCOM").sum(axis=1).elu().realize().tolist()
+    vals = cast(list[float], Tensor([[-3.0, 2.0], [3.0, 4.0]], device="QCOM").sum(axis=1).elu().realize().tolist())
     self.assertAlmostEqual(vals[0], math.expm1(-1.0), places=5)
     self.assertEqual(vals[1], 7.0)
 
