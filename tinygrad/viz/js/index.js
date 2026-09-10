@@ -733,7 +733,7 @@ async function renderProfiler(path, opts) {
   let lastCanvasRect = null;
   function resize() {
     const [width, height] = canvasDims();
-    const pixelWidth = Math.round(width*dpr), pixelHeight = Math.round(height*dpr);
+    const pixelWidth = Math.trunc(width*dpr), pixelHeight = Math.trunc(height*dpr);
     if (canvas.width === pixelWidth && canvas.height === pixelHeight) return;
     canvas.width = pixelWidth;
     canvas.height = pixelHeight;
