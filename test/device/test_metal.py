@@ -1,8 +1,8 @@
 import unittest
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from tinygrad.uop.ops import Ops
-from tinygrad.device import CompileError, Device, BufferSpec
+from tinygrad.device import CompileError, Device, Buffer, BufferSpec
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
@@ -20,6 +20,13 @@ class TestMetal(unittest.TestCase):
     self.assertFalse(any(u.op is Ops.PARAM and u.tag == icbs[0].tag for u in linked.toposort()))
     run_linear(linked, jit=True, wait=True)
     self.assertEqual(out.tolist(), [5] * 4)
+
+  def test_host_copy_views(self):
+    src = Buffer("CPU", 64, dtypes.uint8, initial_value=bytes(range(64)))
+    dst = Buffer("METAL", 64, dtypes.uint8, initial_value=bytes(64))
+    dst.view(16, dtypes.uint8, 8).ensure_allocated().copy_from(src.view(16, dtypes.uint8, 24).ensure_allocated())
+    out = Buffer("CPU", 64, dtypes.uint8, preallocate=True).copy_from(dst)
+    self.assertEqual(bytes(out.as_memoryview()), bytes(8) + bytes(range(24, 40)) + bytes(40))
 
   def test_alloc_oom(self):
     device = MetalDevice("metal")

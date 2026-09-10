@@ -1,13 +1,13 @@
 from __future__ import annotations
-import subprocess, pathlib, struct, ctypes, tempfile, functools, platform, weakref, threading, mmap
-from tinygrad.helpers import to_mv, round_up, cache_dir, unwrap, prod, to_tuple
+import subprocess, pathlib, struct, ctypes, tempfile, functools, platform, weakref, threading
+from tinygrad.helpers import to_mv, round_up, cache_dir, unwrap, prod
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, Compiler, CompileError, MMIOInterface
 from tinygrad.dtype import dtypes
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
-from tinygrad.runtime.support.hcq2 import HWQueue, EncodeCtx, encode_submit, ccall, patch, unwrap_view, timeline_value, host_buf
+from tinygrad.runtime.support.hcq2 import HWQueue, EncodeCtx, encode_submit, ccall, patch, unwrap_view, HCQ_RUNTIME_DEV
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
 
@@ -84,10 +84,12 @@ class MetalCompiler(Compiler):
 # *****************
 # queue: the body is a chain of objc calls, the kernels run from an indirect command buffer
 
-HANDLES = ("queue", "event", "timeline_event", "fence")
-SELECTORS = ("commandBuffer", "computeCommandEncoder", "executeCommandsInBuffer:withRange:", "updateFence:", "endEncoding", "commit",
-  "setKernelBuffer:offset:atIndex:", "concurrentDispatchThreadgroups:threadsPerThreadgroup:", "encodeWaitForEvent:value:", "encodeSignalEvent:value:",
-  "blitCommandEncoder", "waitForFence:", "copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:")
+HANDLES = ("queue",)
+SELECTORS = ("commandBuffer", "computeCommandEncoder", "executeCommandsInBuffer:withRange:", "endEncoding", "commit", "waitUntilCompleted",
+  "setKernelBuffer:offset:atIndex:", "concurrentDispatchThreadgroups:threadsPerThreadgroup:")
+def host_buf(*vals:int) -> Buffer:
+  return Buffer(HCQ_RUNTIME_DEV.value, len(vals), dtypes.uint64, initial_value=struct.pack(f"{len(vals)}Q", *vals))
+
 def mtl_const(name:str, devs:tuple[str, ...]) -> UOp: # a device's handles and the selectors: one host buffer the body loads from
   i = (HANDLES + SELECTORS).index(name)
   return UOp.placeholder((len(HANDLES) + len(SELECTORS),), dtypes.uint64, 0, device=devs, tag="mtl")[i:i + 1]
@@ -108,8 +110,8 @@ class MetalQueue(HWQueue):
     handles = UOp.placeholder((2,), dtypes.uint64, device=self.devs, volatile=True, tag="mtl_handles") # [command buffer, open encoder]
     self.cb, self.enc, self.root = handles[:1], handles[1:2], handles.after(self.blob_buf)
     self.tail, self.setups = self.root, list[UOp]() # the command buffer is encoded in order, the icb is written wide before the commit
-    self.count, self.done = 0, 0 # kernels queued, kernels handed to an encoder
-    self.words(0) # word 0: the blob's own mtlbuffer, patched at submit
+    self.count, self.signals = 0, list[tuple[UOp, UOp]]()
+    self.words(0) # word 0: the blob's MTLBuffer for scalar bindings
     self.msg(mtl_const("queue", self.devs), "commandBuffer", result=self.cb)
 
   @staticmethod
@@ -119,9 +121,6 @@ class MetalQueue(HWQueue):
   def ptr(self, off:int) -> UOp: return self.blob_buf.after(self.root).bitcast(dtypes.uint64).index(off // 8) # into the blob, after its patches
   def binding(self, buf:UOp) -> tuple[int, int]: # a buffer binds as its base's mtlbuffer: (the blob word holding it, the view's offset)
     base, off = unwrap_view(buf)
-    if base.op is Ops.MSELECT: # a lane of a multi view
-      lane, lane_off = unwrap_view(base.src[0])
-      base, off = lane.mselect(base.arg), off + lane_off
     return self.words(base.getaddr(self.devs)), off
 
   def call(self, after:UOp, target:UOp, sel:str, *args:UOp|int, result:UOp|None=None) -> UOp: # one objc_msgSend, its return stored into result
@@ -133,13 +132,7 @@ class MetalQueue(HWQueue):
     self.tail = self.tail.after(self.call(self.tail, target, sel, *args, result=result))
   def setup(self, cmd:UOp, sel:str, *args:UOp|int): self.setups.append(self.call(self.root, cmd, sel, *args))
 
-  def event(self, dst:UOp, val:UOp) -> tuple[UOp, UOp]: # a timeline signals its device's timeline event, a slot the other one with a per-run value
-    devs = to_tuple((base:=unwrap_view(dst)[0]).device)
-    event = mtl_const("timeline_event" if base.tag == "timeline" else "event", devs).index(0).load()
-    return event, val.ccast(dtypes.uint64) if base.tag == "timeline" else (timeline_value(devs) << 32) | val.ccast(dtypes.uint64)
-
   def exec(self, call:UOp, prg:UOp):
-    if self.count == self.done: self.msg(self.cb, "computeCommandEncoder", result=self.enc)
     cmd, bufs, vals = self.icb[1 + self.count:2 + self.count], get_call_arg_uops(call), get_call_var_uops(call, prg)
     binds = [self.binding(bufs[i]) for i in prg.arg.globals] + [(0, self.words(v)) for v in vals] # a variable binds the blob at its word
     for i, (word, off) in enumerate(binds): self.setup(cmd, "setKernelBuffer:offset:atIndex:", self.ptr(word).load(), off, i)
@@ -147,35 +140,19 @@ class MetalQueue(HWQueue):
       self.setup(cmd, "concurrentDispatchThreadgroups:threadsPerThreadgroup:", self.ptr(sizes:=self.words(*self.dims(prg))), self.ptr(sizes + 24))
     self.count += 1
 
-  def flush(self): # the open encoder runs the kernels queued since the last one as one range of the icb
-    if self.count > self.done:
-      self.msg(self.enc, "executeCommandsInBuffer:withRange:", self.icb.index(0).load(), self.done, self.count - self.done)
-      self.msg(self.enc, "updateFence:", mtl_const("fence", self.devs).index(0).load())
-      self.msg(self.enc, "endEncoding")
-      self.done = self.count
-
-  def wait(self, dst:UOp, val:UOp):
-    self.flush()
-    self.msg(self.cb, "encodeWaitForEvent:value:", *self.event(dst, val))
-
+  def wait(self, dst:UOp, val:UOp): pass # submissions complete on the host before the next batch
   def timestamp(self, dst:UOp): pass # TODO: counter sample buffers
-
-  def signal(self, dst:UOp, val:UOp):
-    self.flush()
-    base, off = unwrap_view(dst)
-    if base.tag == "timeline": # the host polls the timeline: a blit behind the fence writes the value once the kernels are done
-      src = self.words(val, base.getaddr(self.devs))
-      self.msg(self.cb, "blitCommandEncoder", result=self.enc)
-      self.msg(self.enc, "waitForFence:", mtl_const("fence", self.devs).index(0).load())
-      self.msg(self.enc, "copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:", self.ptr(0).load(), src, self.ptr(src + 8).load(), off, 8)
-      self.msg(self.enc, "endEncoding")
-    self.msg(self.cb, "encodeSignalEvent:value:", *self.event(dst, val))
+  def signal(self, dst:UOp, val:UOp): self.signals.append((dst, val))
 
   def submit(self, cmdbuf:UOp) -> UOp:
-    self.flush()
+    self.msg(self.cb, "computeCommandEncoder", result=self.enc)
+    self.msg(self.enc, "executeCommandsInBuffer:withRange:", self.icb.index(0).load(), 0, self.count)
+    self.msg(self.enc, "endEncoding")
     self.tail = self.tail.after(*self.setups)
     self.msg(self.cb, "commit")
-    buf = unwrap_view(cmdbuf)[0] # word 0: the blob's own mtlbuffer, a link patch on the bare placeholder
+    self.msg(self.cb, "waitUntilCompleted")
+    for dst, val in self.signals: self.tail = self.tail.after(dst.after(self.tail).index(0).store(val))
+    buf = unwrap_view(cmdbuf)[0]
     return self.tail.substitute({self.blob_buf: cmdbuf.after(patch(buf, [(0, buf.getaddr(self.devs))]))})
 
 # *****************
@@ -199,15 +176,6 @@ class MetalAllocator(Allocator['MetalDevice']):
     storage.meta.retain = False
     storage.meta.release()
 
-  def _map(self, buf:Buffer) -> BufferStorage:
-    if isinstance(buf.allocator, MetalAllocator): mtl = buf.meta # every metal device is the same gpu: a mapping only adds to this device's residency
-    else: # page aligned host memory (a CPU buffer) wraps into a buffer of its own
-      wrap = objc.msg("newBufferWithBytesNoCopy:length:options:deallocator:", metal.MTLBuffer, [ctypes.c_void_p]*4, retain=True)
-      mtl = wrap(self.dev.sysdevice, buf.host.addr, round_up(buf.nbytes, mmap.PAGESIZE), metal.MTLResourceStorageModeShared, None)
-      if mtl.value is None: raise RuntimeError(f"metal can't map {buf.device} memory at {buf.host.addr:#x}: it must be page aligned")
-    self.dev.resident(mtl)
-    return BufferStorage(mtl.value, mtl)
-  def _unmap(self, mapping:BufferStorage): self.dev.resident(mapping.meta, False)
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf # a view binds its base's mtlbuffer, the offset rides with the Buffer
 
 class MetalDevice(Compiled):
@@ -225,7 +193,6 @@ class MetalDevice(Compiled):
     # the buffers of an indirect command buffer must be resident: everything the device allocates is
     self.residency = checked(self.sysdevice.newResidencySetWithDescriptor_error, metal.MTLResidencySetDescriptor.new())
     self.queue.addResidencySet(self.residency)
-    self.event, self.timeline_event, self.fence = self.sysdevice.newSharedEvent(), self.sysdevice.newSharedEvent(), self.sysdevice.newFence()
     self.icbs:weakref.WeakKeyDictionary[Buffer, tuple] = weakref.WeakKeyDictionary() # an icb and its commands live as long as their words
 
     # https://developer.apple.com/documentation/metal/mtlgpufamily

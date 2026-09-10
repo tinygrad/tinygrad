@@ -162,6 +162,7 @@ class TestHCQ2Schedule(unittest.TestCase):
       vi = Variable("i", 1, 10).bind(i)
       np.testing.assert_allclose(f(a[:, :vi]).item(), (a[:, :i] + 1).sum().item(), atol=1e-5, rtol=1e-5)
 
+  @unittest.skipIf(Device.DEFAULT == "METAL", "Metal copies through the host")
   def test_map_cpu_buffer_preserves_contents(self):
     src = Buffer("CPU", 16, dtypes.uint8, preallocate=True)
     data = bytes(range(16))
@@ -218,7 +219,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
     dev = Device[Device.DEFAULT]
     names = {"AMD": () if getattr(dev, "is_aql", False) else ("scratch",), # the aql descriptor holds the scratch, nothing addresses it
-             "NV": ("timeline",), "QCOM": ("_stack", "dummy"), "METAL": ("timeline",)}[Device.DEFAULT.split(":")[0]]
+             "NV": ("timeline",), "QCOM": ("_stack", "dummy"), "METAL": ()}[Device.DEFAULT.split(":")[0]]
     @TinyJit
     def f(a): return (a * 2 + 1).contiguous().realize()
     x = Tensor.ones(16).contiguous().realize()
