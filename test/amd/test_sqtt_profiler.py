@@ -1,4 +1,4 @@
-import unittest, contextlib
+import unittest, contextlib, functools
 from tinygrad import Device, Tensor, Context, TinyJit, dtypes
 from tinygrad.dtype import AddrSpace
 from test.helpers import is_hcq2_device
@@ -113,27 +113,35 @@ class TestSQTTProfiler(unittest.TestCase):
 
   def test_asm(self):
     t = Tensor.empty(1)
-    with save_sqtt() as data:
+    with save_sqtt():
       t.custom_kernel(fxn=custom_asm_cdna if self.arch == "gfx950" else custom_asm_rdna)[0].realize()
 
-  def test_set_prio(self):
+  def test_setprio(self):
+    if self.arch == "gfx950":
+      from tinygrad.runtime.autogen.amd.cdna import ins as isa
+      hw_id, wave_size, add = isa.HWREG.HW_REG_HW_ID.value, 64, isa.s_add_u32
+      barrier = [isa.s_barrier()]
+    elif self.arch.startswith("gfx12"):
+      from tinygrad.runtime.autogen.amd.rdna4 import ins as isa
+      hw_id, wave_size, add = isa.HWREG.HW_REG_WAVE_HW_ID1.value, 32, isa.s_add_co_u32
+      barrier = [isa.s_barrier_signal(ssrc0=-1), isa.s_barrier_wait(simm16=-1)]
+    else: self.skipTest("tested on CDNA4 and RDNA4")
     def setprio_kernel(A, high_priority=0):
       insts = [
-        cdna.s_getreg_b32(s[0], cdna.HWREG.HW_REG_HW_ID.value | (3 << 11)),
-        cdna.s_and_b32(s[0], s[0], 1),
-        cdna.s_mov_b32(s[1], 0),
-        cdna.s_setprio(0),
-        cdna.s_cmp_eq_u32(s[0], 0),
-        cdna.s_cbranch_scc1(1),
-        cdna.s_setprio(high_priority),
-        cdna.s_barrier(),
+        isa.s_getreg_b32(s[0], hw_id),  # bit 0 of the hardware wave slot
+        isa.s_mov_b32(s[1], 0),
+        isa.s_setprio(0),
+        isa.s_cmp_eq_u32(s[0], 0),
+        isa.s_cbranch_scc1(1),
+        isa.s_setprio(high_priority),
+        *barrier,
       ]
-      # contend for the CU's scalar issue resources
-      insts += [cdna.s_add_u32(s[1], s[1], 1) for _ in range(64)]
-      insts += [cdna.s_setprio(0), cdna.s_barrier(), cdna.s_endpgm()]
-      return custom_asm(A, insts, CDNA_WAVE_SIZE*8, 96*1024)
+      # eight waves contend for scalar issue slots
+      insts += [add(s[1], s[1], 1) for _ in range(64)]
+      insts += [isa.s_setprio(0), *barrier, isa.s_endpgm()]
+      return custom_asm(A, insts, wave_size*8, (96 if self.arch == "gfx950" else 64)*1024)
 
-    with save_sqtt() as data:
+    with Context(SQTT_LIMIT_SE=1), save_sqtt():
       Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, high_priority=3))[0].realize()
       Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, high_priority=0))[0].realize()
 

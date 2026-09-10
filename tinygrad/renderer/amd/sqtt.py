@@ -653,7 +653,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
     pending = cdna_imm_queue[key]
     while pending and (p:=pending[0]) is not None:
       pending.pop(0)
-      if (inst:=pc_map[pc:=wave_pc[key]]).op_name not in {'S_NOP', 'S_WAITCNT'}: continue
+      if (inst:=pc_map[pc:=wave_pc[key]]).op_name not in {'S_NOP', 'S_WAITCNT', 'S_SETPRIO'}: continue
       wave_pc[key] += inst.size()
       yield (p, InstructionInfo(pc, key[1], inst))
   # RDNA selects one SIMD for instruction tracing, CDNA traces multiple SIMDs
