@@ -36,12 +36,20 @@ def custom_fp8_backward_init(dq:UOp, partial:UOp, do:UOp):
   return partial.flatten()[g].store(value).end(g).sink(arg=KernelInfo("fa_fp8_bwd_init"))
 
 @functools.cache
-def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp, *reset_amax:UOp):
+def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp, *inputs:UOp, finalize:bool=False):
   B,N,H,D = do.shape
   row = UOp.range(B*N*H, 0)
   d = UOp.range(D, 1, AxisType.REDUCE)
   b,n,h = row//(N*H), row//H%N, row%H
-  scale = scales[1]
+  reset_amax = inputs[:1]
+  if finalize:
+    partial,state,vs = inputs[1:]
+    r = UOp.range(partial.numel(),2,AxisType.REDUCE)
+    scale = (partial.flatten()[r].reduce(r,arg=Ops.MAX)+1e-8)/57344.
+    pd,sd = (state[0]+1e-8)/448.,state[1]/57344.
+    sd = (sd>0).where(sd,4*D*scale*vs[0]*448.)
+    scale_values = (vs[0],scale,pd,sd)
+  else: scale = scales[1]
   rounded = (do[b,n,h,d].cast(dtypes.float)/scale).maximum(-57344).minimum(57344).cast(dtypes.fp8e5m2)
   out = out.after(do8[b,n,h,d].store(rounded))
   # Delta must use rounded FP8 dO, with descale applied before multiplication by O.
@@ -49,12 +57,14 @@ def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp, *r
   decoded = (rounded.bitcast(dtypes.uint8).cast(dtypes.uint16)<<8).bitcast(dtypes.half).cast(dtypes.float)
   value = (out[b,n,h,d].cast(dtypes.float)*(decoded*scale)).reduce(d, arg=Ops.ADD)
   stores = [delta[b,h,n].store(value)]
+  if finalize: stores.extend(scales[UOp.const(i).valid(row.eq(0))].store(v) for i,v in enumerate(scale_values))
   if reset_amax:
     stores.extend(reset_amax[0][UOp.const(i).valid(row.eq(0))].store(0.) for i in range(2))
   return UOp.group(*stores).end(row).sink(arg=KernelInfo("fa_fp8_bwd_prep"))
 
 def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, out:Tensor, lse:Tensor,
-                 p_descale:Tensor, ds_descale:Tensor, next_amax:Tensor|None=None, *, native:bool=False, reset_next_amax:bool=False):
+                 p_descale:Tensor, ds_descale:Tensor, next_amax:Tensor|None=None, *, native:bool=False, reset_next_amax:bool=False,
+                 delayed_state:Tensor|None=None):
   """FP8 backward with explicit delayed scales; accumulates next amax locally.
 
   Native outputs preserve the expanded BF16 layout consumed by fused RoPE.
@@ -72,17 +82,22 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   # Reuse the compulsory dQ initialization pass to scan dO for its current scale.
   partial = alloc((B,min(512,N*H*D)))
   dq,partial = Tensor.custom_kernel(dq,partial,do,fxn=custom_fp8_backward_init)[:2]
-  do_scale = ((local_abs_max(partial)+1e-8)/57344.).reshape(1)
-  # Before the first amax observation, bound dS from the current dO and V
-  # ranges. A fixed unit amax would underflow small training gradients.
-  ds_descale = (ds_descale > 0).where(ds_descale, 4*D*do_scale*v_descale*448.)
-  scales = Tensor.cat(v_descale.reshape(1),do_scale,p_descale.reshape(1),ds_descale.reshape(1)).contiguous()
   if next_amax is None:
     next_amax = Tensor.empty(2,device=q8.device,dtype=dtypes.float32)
     reset_next_amax = True
+  if delayed_state is not None:
+    assert reset_next_amax
+    scales = Tensor.empty(4,device=q8.device,dtype=dtypes.float32)
+  else:
+    do_scale = ((local_abs_max(partial)+1e-8)/57344.).reshape(1)
+    # Before the first amax observation, bound dS from the current dO and V ranges.
+    ds_descale = (ds_descale > 0).where(ds_descale, 4*D*do_scale*v_descale*448.)
+    scales = Tensor.cat(v_descale.reshape(1),do_scale,p_descale.reshape(1),ds_descale.reshape(1)).contiguous()
   prep = Tensor.custom_kernel(alloc(q8.shape,dtypes.fp8e5m2),alloc((B,H,N)),do,out,scales,
-                             *((next_amax,) if reset_next_amax else ()),fxn=custom_fp8_backward_prep)
+    *((next_amax,) if reset_next_amax else ()),*((partial,delayed_state,v_descale.reshape(1)) if delayed_state is not None else ()),
+    fxn=functools.partial(custom_fp8_backward_prep,finalize=delayed_state is not None))
   do8, delta = prep[:2]
+  if delayed_state is not None: scales = prep[4]
   if reset_next_amax: next_amax = prep[5]
   dk,dv = [alloc(q8.shape,output_dtype) for _ in range(2)]
   amax = alloc((B,H,N//64,2))
