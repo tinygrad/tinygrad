@@ -398,6 +398,7 @@ class Compiled:
 
   # hcq2
   pm_batch:Any = None
+  pm_encode:Any = None
   pm_lower:Any = None
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None,
@@ -418,7 +419,6 @@ class Compiled:
        lambda ctx, b: ctx.prog_bufs.setdefault(b, Buffer(ctx.device, b.max_numel(), b.dtype, options=BufferSpec(cpu_access=True, nolru=True)))),
       (UPat(Ops.PARAM, name="b"), lambda b, cfunc_buf=cfunc_buf: cfunc_buf(*b.tag[1:]) if isinstance(b.tag, tuple) and b.tag[0] == "cfunc" else None),
     ])
-    self.pm_encode = PatternMatcher([])
 
     # profiling
     self.prog_bufs:dict[UOp, Buffer] = {} # cache bufferized for programs

@@ -385,7 +385,8 @@ def lower_call(call:UOp) -> UOp|None:
   # encode bodies
   ctx = EncodeCtx(call.arg.aux.device)
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in ctx.devs])]
-  body = graph_rewrite(call.src[0], sum([d.pm_encode for d in devs], PatternMatcher([])) + pm_hcq_encode, ctx=ctx, bpm=pm_patches, name="encode")
+  body = graph_rewrite(call.src[0], sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
+                       ctx=ctx, bpm=pm_patches, name="encode")
   body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])), ctx=ctx, bpm=pm_patches, name="lower")
 
   # resize table

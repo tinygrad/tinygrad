@@ -557,6 +557,11 @@ class MOCKIface(NVKIface): count = 1
 class NVDevice(Compiled):
   ifaces = [NVKIface, PCIIface, MOCKIface]
   sleep_timeout_ms = 200
+  pm_encode = PatternMatcher([
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute", name="submit"), lambda ctx, submit: encode_submit(NVComputeQueue(ctx, submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy", name="submit"), lambda ctx, submit: encode_submit(NVCopyQueue(ctx, submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_raw", name="submit"), lambda ctx, submit: encode_submit(NVQueue(ctx, submit))),
+  ])
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
 
@@ -599,11 +604,6 @@ class NVDevice(Compiled):
     self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
 
     super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], None, arch=self.arch)
-    self.pm_encode = PatternMatcher([
-      (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute", name="submit"), lambda ctx, submit: encode_submit(NVComputeQueue(ctx, submit))),
-      (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy", name="submit"), lambda ctx, submit: encode_submit(NVCopyQueue(ctx, submit))),
-      (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_raw", name="submit"), lambda ctx, submit: encode_submit(NVQueue(ctx, submit))),
-    ])
 
     self.pma_enabled, self.pma_exec_counter = PMA.value > 0 and PROFILE >= 1, itertools.count(0)
 

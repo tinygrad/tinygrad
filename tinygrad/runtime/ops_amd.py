@@ -836,6 +836,10 @@ class AMDDevice(Compiled):
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
   sleep_timeout_ms = 200
   max_scratch_psize = 0
+  pm_encode = PatternMatcher([
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute", name="submit"), lambda ctx, submit: encode_submit(amd_compute_queue(ctx, submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy", name="submit"), lambda ctx, submit: encode_submit(AMDSDMAQueue(ctx, submit))),
+  ])
 
   ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]
 
@@ -876,10 +880,6 @@ class AMDDevice(Compiled):
     allocator = USBAllocator(self) if self.is_usb else AMDAllocator(self)
     super().__init__(device, allocator, [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, can_recover=self.is_am(), arch=self.arch,
                      rtalloc_size=(4 if self.is_usb else 64)<<20)
-    self.pm_encode = PatternMatcher([
-      (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_compute", name="submit"), lambda ctx, submit: encode_submit(amd_compute_queue(ctx, submit))),
-      (UPat(Ops.CUSTOM_FUNCTION, arg="submit_amd_copy", name="submit"), lambda ctx, submit: encode_submit(AMDSDMAQueue(ctx, submit))),
-    ])
 
     # Scratch setup
     self.max_private_segment_size = 0
