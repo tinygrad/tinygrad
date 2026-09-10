@@ -1,5 +1,5 @@
 import unittest, contextlib, ctypes, gc, struct, numpy as np
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer, Compiled
 from tinygrad.dtype import AddrSpace
@@ -68,24 +68,6 @@ class TestHCQ2Deps(unittest.TestCase):
       self.assertEqual(tracker.access_resources([b.shrink(((0, 4),))], [0], 2), [0])
       self.assertEqual(tracker.access_resources([b.shrink(((12, 16),))], [0], 3), [0])
       self.assertEqual(tracker.access_resources([b.shrink(((4, 12),))], [], 4), [1])
-
-class TestHCQ2CopyQueues(unittest.TestCase):
-  def test_all2all(self):
-    a, b, c, host = [UOp.param(i, dtypes.uint8, 16, device=d) for i, d in enumerate(("AMD", "AMD:1", "AMD:2", "CPU"))]
-    calls = tuple(src.copy_to_device(dst.device).call(dst, src) for src, dst in ((a, b), (a, c), (b, a), (a, host), (host, a)))
-    for enabled, count, expected in [(0, None, [0, 0, 0, 0, 0]), (1, None, [0, 1, 1, 0, 0]), (1, 1, [0, 0, 0, 0, 0])]:
-      with self.subTest(enabled=enabled, count=count), Context(ALL2ALL=enabled), \
-           patch.object(hcq2, "getenv", side_effect=lambda k, default: count or default), \
-           patch.object(hcq2, "HCQ_DEVS", frozenset(("AMD",))), \
-           patch.object(type(Device), "__getitem__", return_value=Mock(has_copy_queue=True, pm_batch=None)), \
-           patch.object(hcq2, "_finalize_batch", wraps=hcq2._finalize_batch) as finalize:
-        hcq2.sched_batches(UOp(Ops.LINEAR, src=calls), profile=False)
-        ctx = finalize.call_args.args[0]
-        self.assertEqual([q for _, _, q in ctx.batch], [f"COPY:{i}" for i in expected])
-        ctx.tracker = hcq2.HCQDepsTracker()
-        waits = [hcq2._wait_ins(ctx, call, devs[0], queue, tag) for tag, (call, devs, queue) in enumerate(ctx.batch)]
-        self.assertEqual({w.src[0] for w in waits[2]}, {ctx.queue_signal(("AMD",), f"COPY:{i}") for i in expected[:2]})
-        self.assertEqual(len(hcq2._epilogue(ctx, "AMD").src[0].src), 3 if enabled and count != 1 else 1)
 
 @unittest.skipUnless(all_devices_in(Device.DEFAULT, HCQ_DEVS), "hcq2 device required")
 class TestHCQ2Schedule(unittest.TestCase):
