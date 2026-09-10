@@ -116,6 +116,27 @@ class TestSQTTProfiler(unittest.TestCase):
     with save_sqtt() as data:
       t.custom_kernel(fxn=custom_asm_cdna if self.arch == "gfx950" else custom_asm_rdna)[0].realize()
 
+  def test_set_prio(self):
+    def setprio_kernel(A, high_priority=0):
+      insts = [
+        cdna.s_getreg_b32(s[0], cdna.HWREG.HW_REG_HW_ID.value | (3 << 11)),
+        cdna.s_and_b32(s[0], s[0], 1),
+        cdna.s_mov_b32(s[1], 0),
+        cdna.s_setprio(0),
+        cdna.s_cmp_eq_u32(s[0], 0),
+        cdna.s_cbranch_scc1(1),
+        cdna.s_setprio(high_priority),
+        cdna.s_barrier(),
+      ]
+      # contend for the CU's scalar issue resources
+      insts += [cdna.s_add_u32(s[1], s[1], 1) for _ in range(64)]
+      insts += [cdna.s_setprio(0), cdna.s_barrier(), cdna.s_endpgm()]
+      return custom_asm(A, insts, CDNA_WAVE_SIZE*8, 96*1024)
+
+    with save_sqtt() as data:
+      Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, high_priority=3))[0].realize()
+      Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, high_priority=0))[0].realize()
+
   def test_multiple_runs(self):
     t = Tensor.empty(1) + 1
     with save_sqtt() as data:
