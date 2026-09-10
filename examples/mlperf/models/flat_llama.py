@@ -13,7 +13,7 @@ if __name__ == "__main__":
       os.environ["ASM_GEMM"] = "1"
 from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
 from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker, round_up
-from tinygrad.uop.ops import Ops, UOp
+from tinygrad.uop.ops import Ops, UOp, KernelInfo
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.llama_kernels import FP8_MAX, local_abs_max
@@ -28,6 +28,12 @@ MXFP8 = getenv("MXFP8", 0)
 MXFP4 = getenv("MXFP4", 0)
 
 FP8_DTYPE = dtypes.fp8e4m3
+
+def _update_fa_amax_and_reset_loss(loss:UOp, *states:UOp):
+  count = len(states)//2
+  stores = [loss.flatten()[0].store(0.)]
+  stores.extend(states[i][j].store(states[count+i][j]) for i in range(count) for j in range(2))
+  return UOp.group(*stores).sink(arg=KernelInfo("update_fa_amax_and_reset_loss"))
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
 
 def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
@@ -438,10 +444,17 @@ class FlatTransformer:
         if name == "fa": continue  # FP8 backward prep resets this state before its atomic amax updates.
         for t in ts: t.assign(0)
 
-  def update_amax(self):
+  def update_amax(self, reset:Tensor|None=None):
     for cur, nxt in ((self._fp8_amax, self._fp8_next_amax), (self._fp8_grad_amax, self._fp8_next_grad_amax)):
       for name in cur:
+        if name == "fa" and reset is not None:
+          ret = Tensor.custom_kernel(reset,*cur[name],*nxt[name],fxn=_update_fa_amax_and_reset_loss)
+          for c, updated in zip(cur[name],ret[1:]): c.replace(updated)
+          reset.replace(ret[0])
+          continue
         for c, n in zip(cur[name], nxt[name]): c.assign(n)
+    if reset is not None:
+      return reset if "fa" in self._fp8_grad_amax else reset.assign(0)
 
   def __call__(self, tokens:Tensor, save:bool=True,
                mxfp4_weights:dict[str, list[tuple[Tensor, Tensor, Tensor, Tensor]]]|None=None):

@@ -40,6 +40,27 @@ def fp8_backward_reference(q8, k8, v8, v_descale, do, out, lse, do_descale, p_de
   return dq.transpose(1,2), reduce_gqa(dk), reduce_gqa(dv), p.abs().max(), ds.abs().max()
 
 class TestFP8BackwardReference(unittest.TestCase):
+  def test_fused_state_update(self):
+    from examples.mlperf.models.flat_llama import FlatTransformer
+    model = FlatTransformer.__new__(FlatTransformer)
+    model._fp8_amax,model._fp8_next_amax = {},{}
+    model._fp8_grad_amax = {"fa":[Tensor([1.,0.]).realize() for _ in range(2)]}
+    model._fp8_next_grad_amax = {"fa":[Tensor([3.,4.]).realize(),Tensor([5.,6.]).realize()]}
+    loss = Tensor([17.]).realize()
+    @TinyJit
+    def step():
+      snapshot = loss.clone()
+      reset = model.update_amax(reset=loss)
+      Tensor.realize(snapshot,reset,*model._fp8_grad_amax["fa"])
+      return snapshot
+    for i in range(3):
+      loss.assign(17.+i).realize()
+      model._fp8_next_grad_amax["fa"][0].assign(Tensor([3.+i,4.+i])).realize()
+      np.testing.assert_array_equal(step().numpy(),[17.+i])
+      np.testing.assert_array_equal(loss.numpy(),[0.])
+      np.testing.assert_array_equal(model._fp8_grad_amax["fa"][0].numpy(),[3.+i,4.+i])
+      np.testing.assert_array_equal(model._fp8_grad_amax["fa"][1].numpy(),[5.,6.])
+
   def test_backward_scale_finalization(self):
     from extra.thunder.amd.fa_fp8_bwd import custom_fp8_backward_init, custom_fp8_backward_prep
     rng = np.random.default_rng(17)
