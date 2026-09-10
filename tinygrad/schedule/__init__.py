@@ -1,4 +1,5 @@
 import time, inspect, functools
+from typing import cast
 from dataclasses import replace
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo, CallInfo
@@ -188,8 +189,8 @@ def canonicalize_call_for_schedule_cache(call:UOp) -> UOp|None:
   if any(slot+1 >= len(call.src) for slot in param_slots): return None
   bufs = [x for x in nodes if x.op is Ops.BUFFER and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
   buf_slots = list(dict.fromkeys(x.arg.slot for x in bufs))
-  pmap, bmap = ({slot:i for i,slot in enumerate(param_slots)},
-                {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)})
+  pmap:dict[int, int] = {slot:i for i,slot in enumerate(param_slots)}
+  bmap:dict[int, int|ParamArg] = {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)}
   body = remap_paramarg_slots(body, pmap, bmap, clear_buffer=True)
   arg = replace(call.arg, grad_fxn=None) if isinstance(call.arg, CallInfo) and call.arg.grad_fxn is not None else call.arg
   return call.replace(src=(body,)+tuple(call.src[1+slot] for slot in param_slots), arg=arg)
@@ -212,10 +213,11 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   params = [x for x in nodes if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
   bufs = [x for x in nodes if x.op is Ops.BUFFER and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
   param_slots, buf_slots = (list(dict.fromkeys(x.arg.slot for x in xs)) for xs in (params, bufs))
-  pmap, bmap = ({slot:i for i,slot in enumerate(param_slots)}, {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)})
+  pmap:dict[int, int] = {slot:i for i,slot in enumerate(param_slots)}
+  bmap:dict[int, int|ParamArg] = {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)}
   canonical = remap_paramarg_slots(canonical, pmap, bmap, clear_buffer=True)
   param_map = {pmap[x.arg.slot]:x.arg.slot for x in params}
-  buffer_map = {bmap[x.arg.slot]:x.arg for x in bufs}
+  buffer_map = {cast(int, bmap[x.arg.slot]):x.arg for x in bufs}
   cache_key = canonical.key
   sc_ret = None
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
