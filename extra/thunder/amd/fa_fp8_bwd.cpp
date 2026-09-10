@@ -15,6 +15,8 @@ using I8=int __attribute__((ext_vector_type(8)));
 using F4=float __attribute__((ext_vector_type(4)));
 using F2=float __attribute__((ext_vector_type(2)));
 using Output=std::conditional_t<OUTPUT_BF16,bf16,float>;
+__device__ int wave_id() {return __builtin_amdgcn_readfirstlane(warpid());}
+__device__ float uniform(float x) {return __uint_as_float(__builtin_amdgcn_readfirstlane(__float_as_uint(x)));}
 
 template<int A,int B,typename X,typename Y> __device__ void dot(float2* out,const X& x,const Y& y) {
   *(F4*)out=__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(*(const I8*)x.tiles[0][0].data,
@@ -51,7 +53,7 @@ template<int R,typename S> __device__ void stage(S& s,const unsigned char* p,int
     for(int i=0;i<128*128/(WARPS*64*16);i++) {
       int off=threadIdx.x*16+i*WARPS*64*16,r=off/128,c=off%128;
       unsigned global_off=r*heads*128+(s.swizzle({r,c})%128);
-      auto ptr=(as3_uint32_ptr)((uintptr_t)s.data+warpid()*1024+i*WARPS*1024);
+      auto ptr=(as3_uint32_ptr)((uintptr_t)s.data+wave_id()*1024+i*WARPS*1024);
       llvm_amdgcn_raw_buffer_load_lds(resource,ptr,16,global_off,0,0,static_cast<int>(coherency::cache_all));
     }
   }
@@ -62,6 +64,18 @@ __device__ void global_rows(RT& out,const unsigned char* ptr,int pos,int head,in
   for(int i=0;i<2;i++) {
     int r=pos+laneid()%16,c=laneid()/16*16+i*64;
     *(V*)&out.tiles[0][0].data[i*4]=*(const V*)(ptr+((batch*ATTN_N+r)*heads+head)*128+c);
+  }
+}
+__device__ void stage_stats(float* shared,const float* lse,const float* delta,int pos,int h,int batch) {
+  if(wave_id()<4) {
+    int row=threadIdx.x%128;
+    const float* p=(wave_id()<2?lse:delta)+(batch*ATTN_H+h)*ATTN_N+pos;
+    if constexpr(ATTN_N<128) shared[threadIdx.x]=p[row<ATTN_N?row:ATTN_N-1];
+    else {
+      auto resource=make_srsrc(p,128*sizeof(float));
+      auto ptr=(as3_uint32_ptr)((uintptr_t)shared+wave_id()*256);
+      llvm_amdgcn_raw_buffer_load_lds(resource,ptr,4,row*4,0,0,static_cast<int>(coherency::cache_all));
+    }
   }
 }
 template<bool E5> __device__ unsigned encode4(float (&x)[4]) {
@@ -78,10 +92,11 @@ template<bool E5> __device__ unsigned encode4(float (&x)[4]) {
 }
 __device__ void body(Output* dq,Output* dk,Output* dv,float* amax,float* next_amax,
  const unsigned char* q,const unsigned char* k,const unsigned char* v,const unsigned char* dout,
- const float* delta,const float* lse,const float* scales,ST (&bs)[2],ST (&dbs)[2],SMALL& ps,SMALL& ds,ST& ks,float* maxima,int bx,int bh,int bb) {
+ const float* delta,const float* lse,const float* scales,ST (&bs)[2],ST (&dbs)[2],SMALL& ps,SMALL& ds,ST& ks,float (&stats)[2][256],float* maxima,int bx,int bh,int bb) {
   constexpr int N=ATTN_N,H=ATTN_H,HK=ATTN_H_KV;
-  int group=bx%(N/OWN),base=group*OWN,wr=warpid()*16,h=bh,batch=bb,kh=h/(H/HK);
-  float vs=scales[0],dos=scales[1],p_scale=scales[2],s_scale=scales[3],pi=1.f/p_scale,si=1.f/s_scale;
+  int group=bx%(N/OWN),base=group*OWN,wr=wave_id()*16,h=bh,batch=bb,kh=h/(H/HK);
+  float vs=uniform(scales[0]),dos=uniform(scales[1]),p_scale=uniform(scales[2]),s_scale=uniform(scales[3]);
+  float pi=uniform(1.f/p_scale),si=uniform(1.f/s_scale);
   constexpr float grad_scale=0.08838834764831845f/0.3570958286295132f;
   RT ar,dr;
   global_rows(ar,k,base+wr,kh,batch,HK);
@@ -94,6 +109,7 @@ __device__ void body(Output* dq,Output* dk,Output* dv,float* amax,float* next_am
   int first=base,end=N;
   stage<128>(bs[0],q,first,h,batch,H);
   stage<128>(dbs[0],dout,first,h,batch,H);
+  stage_stats(stats[0],lse,delta,first,h,batch);
   ACC g0,g1;zero(g0);zero(g1);
   float pmax_lane[4]={},smax_lane[4]={};
   for(int pos=first,tic=0;pos<end;pos+=128,tic^=1) {
@@ -103,6 +119,7 @@ __device__ void body(Output* dq,Output* dk,Output* dv,float* amax,float* next_am
     if(pos+128<end) {
       stage<128>(bs[tic^1],q,pos+128,h,batch,H);
       stage<128>(dbs[tic^1],dout,pos+128,h,batch,H);
+      stage_stats(stats[tic^1],lse,delta,pos+128,h,batch);
     }
     {
       constexpr int CLUSTER=4;
@@ -126,9 +143,8 @@ __device__ void body(Output* dq,Output* dk,Output* dv,float* amax,float* next_am
           auto& p=pvreg[z];auto& dp=dpreg[z];
         float svalues[4],pvalues[4];
         int qi=pos+j*16+laneid()%16;
-        int safe_qi=N<128 && qi>=N?N-1:qi;
-        float lv=lse[(batch*H+h)*N+safe_qi]*1.4426950408889634f;
-        float d=delta[(batch*H+h)*N+safe_qi];
+        float lv=stats[tic][j*16+laneid()%16]*1.4426950408889634f;
+        float d=stats[tic][128+j*16+laneid()%16];
         #pragma unroll
         for(int t=0;t<4;t+=2) {
           F2 score=*(F2*)((float*)p+t)-F2{lv,lv};
@@ -140,13 +156,14 @@ __device__ void body(Output* dq,Output* dk,Output* dv,float* amax,float* next_am
             pv[u]=pos!=base || ki<=qi?pv[u]:0.f;
             if constexpr(N<128) if(qi>=N || ki>=N) pv[u]=0.f;
           }
-          F2 sv=pv*__builtin_elementwise_fma(*(F2*)((float*)dp+t),F2{vs*dos,vs*dos},F2{-d,-d});
+          F2 sv=pv*__builtin_elementwise_fma(*(F2*)((float*)dp+t),F2{vs*dos*si,vs*dos*si},F2{-d*si,-d*si});
+          pv*=F2{pi,pi};
           #pragma unroll
           for(int u=0;u<2;u++) {
             pmax_lane[t+u]=fmaxf(pmax_lane[t+u],pv[u]);smax_lane[t+u]=fmaxf(smax_lane[t+u],fabsf(sv[u]));
           }
-          *(F2*)(svalues+t)=sv*F2{si,si};
-          *(F2*)(pvalues+t)=pv*F2{pi,pi};
+          *(F2*)(svalues+t)=sv;
+          *(F2*)(pvalues+t)=pv;
         }
         int r=wr+(laneid()/16)*4,c=j*16+laneid()%16;
         *(unsigned*)((unsigned char*)ds.data+ds.swizzle({c,r}))=encode4<true>(svalues);
@@ -161,13 +178,30 @@ __device__ void body(Output* dq,Output* dk,Output* dv,float* amax,float* next_am
       CT sr,pr;cols(sr,ds,wr);cols(pr,ps,wr);
       RT sq;rows(sq,ds,wr);
       __builtin_amdgcn_sched_barrier(0);asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory");__builtin_amdgcn_sched_barrier(0);
+      CT kr,operand,operandv;
+      cols(kr,ks,0);cols(operand,b,0);cols(operandv,db,0);
       #pragma unroll
       for(int dim=0;dim<8;dim++) {
-        CT kr,operand,operandv;cols(kr,ks,dim*16);cols(operand,b,dim*16);cols(operandv,db,dim*16);
-        __builtin_amdgcn_sched_barrier(0);asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory");__builtin_amdgcn_sched_barrier(0);
+        __builtin_amdgcn_sched_barrier(0);
+        asm volatile("s_waitcnt lgkmcnt(8)" ::: "memory");
+        __builtin_amdgcn_sched_barrier(0);
         float2 grad[2]={};dot<1,0>(grad,sq,kr);
+        __builtin_amdgcn_sched_barrier(0);
+        if(dim<7) cols(kr,ks,(dim+1)*16);
+        __builtin_amdgcn_sched_barrier(0);
+        if(dim<7) asm volatile("s_waitcnt lgkmcnt(8)" ::: "memory");
+        else asm volatile("s_waitcnt lgkmcnt(4)" ::: "memory");
+        __builtin_amdgcn_sched_barrier(0);
         dot<1,0>(g0.tiles[0][dim].data,sr,operand);
+        __builtin_amdgcn_sched_barrier(0);
+        if(dim<7) cols(operand,b,(dim+1)*16);
+        __builtin_amdgcn_sched_barrier(0);
+        if(dim<7) asm volatile("s_waitcnt lgkmcnt(8)" ::: "memory");
+        else asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory");
+        __builtin_amdgcn_sched_barrier(0);
         dot<0,1>(g1.tiles[0][dim].data,pr,operandv);
+        __builtin_amdgcn_sched_barrier(0);
+        if(dim<7) cols(operandv,db,(dim+1)*16);
         #pragma unroll
         for(int pair=0;pair<2;pair++) {
           float x=((float*)grad)[pair*2]*s_scale*grad_scale,y=((float*)grad)[pair*2+1]*s_scale*grad_scale;
@@ -194,10 +228,11 @@ __device__ void body(Output* dq,Output* dk,Output* dv,float* amax,float* next_am
   {
     float pm=fmaxf(fmaxf(pmax_lane[0],pmax_lane[1]),fmaxf(pmax_lane[2],pmax_lane[3]));
     float sm=fmaxf(fmaxf(smax_lane[0],smax_lane[1]),fmaxf(smax_lane[2],smax_lane[3]));
+    pm*=p_scale;sm*=s_scale;
     for(int off=32;off;off/=2) {pm=fmaxf(pm,__shfl_xor(pm,off));sm=fmaxf(sm,__shfl_xor(sm,off));}
     if(laneid()==0) {
-      maxima[warpid()*2]=pm;
-      maxima[warpid()*2+1]=sm;
+      maxima[wave_id()*2]=pm;
+      maxima[wave_id()*2+1]=sm;
     }
     __syncthreads();
     if(threadIdx.x<OWN/64) {
@@ -219,11 +254,12 @@ extern "C" __global__ __launch_bounds__(WARPS*64) __attribute__((amdgpu_waves_pe
  const float* delta,const float* lse,const float* scales) {
   __shared__ SMALL ps,ds;
   __shared__ ST bs[2],dbs[2],ks;
+  __shared__ float stats[2][256];
   __shared__ float maxima[WARPS*2];
   constexpr int GX=ATTN_N/OWN,TOTAL=GX*ATTN_H*ATTN_B;
   constexpr int HEAD_GROUP=ATTN_H%4==0?4:ATTN_H%2==0?2:1;
   int gid=(blockIdx.z*ATTN_H+blockIdx.y)*GX+blockIdx.x;
   if constexpr(TOTAL%8==0) gid=(gid%8)*(TOTAL/8)+gid/8;
   int bx=(gid/HEAD_GROUP)%GX,bh=((gid/(GX*HEAD_GROUP))*HEAD_GROUP+gid%HEAD_GROUP)%ATTN_H,bb=gid/(GX*ATTN_H);
-  body(dq,dk,dv,amax,next_amax,q,k,v,dout,delta,lse,scales,bs,dbs,ps,ds,ks,maxima,bx,bh,bb);
+  body(dq,dk,dv,amax,next_amax,q,k,v,dout,delta,lse,scales,bs,dbs,ps,ds,ks,stats,maxima,bx,bh,bb);
 }
