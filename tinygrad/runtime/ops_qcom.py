@@ -310,8 +310,8 @@ class QCOMAllocator(Allocator['QCOMDevice']):
     self.dev._gpu_free(storage)
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
   def _map(self, buf:Buffer) -> BufferStorage:
-    if (host:=buf.get_storage().host) is None: raise RuntimeError(f"Cannot map {buf.device} buffer without host memory")
-    return self.dev._gpu_map(host.addr, buf.nbytes)
+    if buf.device.split(":")[0] not in {"CPU", "PYTHON", "NPY"}: raise RuntimeError(f"Cannot map {buf.device} on {self.dev.device}")
+    return self.dev._gpu_map(buf._buf, buf.nbytes)
   def _unmap(self, mapping:BufferStorage): self.dev._gpu_free(mapping)
 
 def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, f"{nm}_MASK")
