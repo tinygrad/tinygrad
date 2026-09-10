@@ -2,7 +2,7 @@ from __future__ import annotations
 import platform, sys, ctypes, mmap, struct, time
 from typing import cast
 from tinygrad.helpers import OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
-from tinygrad.device import Compiled, TinyELF, Program, Device, HostAllocator
+from tinygrad.device import Compiled, TinyELF, Program, HostAllocator
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
@@ -78,7 +78,3 @@ class CPUDevice(Compiled):
   def __init__(self, device:str=""):
     super().__init__(device, HostAllocator(self), [ClangRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer], CPUProgram,
       arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
-
-  def synchronize(self, timeout:int|None=None): # a host read is safe once every device timeline caught up
-    for dev in [Device[d] for d in Device._opened_devices if not d.startswith("CPU")]:
-      if "timeline" in vars(dev): dev.synchronize(timeout)

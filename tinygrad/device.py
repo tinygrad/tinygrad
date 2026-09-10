@@ -221,7 +221,7 @@ class Buffer:
 
   def as_memoryview(self, allow_zero_copy=False) -> memoryview:
     if allow_zero_copy and (mv:=self._host_mv()) is not None:
-      for device in {self.device, *self.base.get_storage().maps}: Device[device].synchronize()
+      self.allocator.dev.synchronize()
       return mv
     Buffer("PYTHON", self.size, self.dtype, opaque=(mv:=memoryview(bytearray(self.nbytes)))).copy_from(self)
     return mv
@@ -411,6 +411,7 @@ class Compiled:
     self.device, self.allocator, self.runtime_t, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
     self.cached_renderer:dict[Any, Renderer] = {}
+    self.pending:dict[str, int] = {} # timeline values of the devices that touched our memory
 
     # hcq2
     self.pm_bufferize = PatternMatcher([
@@ -455,7 +456,9 @@ class Compiled:
       elif self.sleep_timeout_ms is not None and elapsed > self.sleep_timeout_ms / 1000: self.on_sleep()
 
   def synchronize(self, timeout:int|None=None):
-    try: self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
+    try:
+      self._wait_signal(tl:=self.timeline.host.view(fmt='Q'), tl[1], timeout)
+      for d, v in self.pending.items(): Device[d]._wait_signal(Device[d].timeline.host.view(fmt='Q'), v, timeout)
     except RuntimeError:
       self.on_device_hang()
       raise
