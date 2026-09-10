@@ -13,7 +13,7 @@ def fp8_backward_reference(q8, k8, v8, v_descale, do, out, lse, do_descale, p_de
   Return new amaxes separately so capture/replay cannot overwrite scales needed by an earlier microbatch.
   """
   B, N, H, D = q8.shape
-  assert N <= 256, "quadratic reference is only for unit tests"
+  assert N <= 512, "quadratic reference is only for unit tests"
   Hkv = k8.shape[2]
   def heads(x): return x.transpose(1, 2).float()
   def expand(x): return heads(x).reshape(B,Hkv,1,N,D).expand(B,Hkv,H//Hkv,N,D).reshape(B,H,N,D)
@@ -95,6 +95,10 @@ class TestHipKittensFP8Backward(unittest.TestCase):
     for N in (64,128,256):
       with self.subTest(N=N): self.run_case(N,4,2,native=True)
     self.run_case(256,4,2,native=True,bootstrap=True)
+
+  def test_multiple_kv_tiles(self):
+    self.run_case(512,4,2)
+    self.run_case(512,4,2,native=True)
 
   def run_case(self,N,H,Hkv,jit=False,delayed=False,dp=False,bootstrap=False,native=False):
     if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("requires gfx950")
