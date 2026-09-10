@@ -199,6 +199,9 @@ class FlatTransformer:
     grad_names += ["xw1", "xw3"] if SPLIT_W13 else ["xw13"]
     self._fp8_grad_amax = {name: [_amax() for _ in range(n_amax)] for name in grad_names}
     self._fp8_next_grad_amax = {name: [_amax() for _ in range(n_amax)] for name in grad_names}
+    if getenv("FP8_FA_BWD"):
+      for state in (self._fp8_grad_amax, self._fp8_next_grad_amax):
+        state["fa"] = [Tensor([1.,0.], dtype=dtypes.float32).contiguous().is_param_(False) for _ in range(n_layers)]
     w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
     w_scales += [("w1", s_1), ("w3", s_3)] if SPLIT_W13 else [("w13", s_13)]
     self._fp8_inv_scale = {name: (s if MXFP8 else s.float()).contiguous().is_param_(False) for name, s in w_scales}
@@ -226,7 +229,7 @@ class FlatTransformer:
                 next_amax_xqkv:Tensor|None, next_amax_xo:Tensor|None,
                 grad_amax_xqkv:Tensor|None, grad_amax_xo:Tensor|None,
                 next_grad_amax_xqkv:Tensor|None, next_grad_amax_xo:Tensor|None,
-                mxfp4_wqkv=None, mxfp4_wo=None):
+                mxfp4_wqkv=None, mxfp4_wo=None, fa_bwd_amax=None, next_fa_bwd_amax=None):
     bsz, seqlen, _ = x.shape
     saves = []
 
@@ -237,12 +240,14 @@ class FlatTransformer:
     saves.extend([x_normed, rrms, *s, xqkv])
     out, out_saves = self.attention_from_qkv(xqkv, freqs_cis, wo=wo, amax_xo=amax_xo, s_o=s_o,
                                               next_amax_xo=next_amax_xo, grad_amax_xo=grad_amax_xo,
-                                              next_grad_amax_xo=next_grad_amax_xo, mxfp4_wo=mxfp4_wo)
+                                              next_grad_amax_xo=next_grad_amax_xo, mxfp4_wo=mxfp4_wo,
+                                              fa_bwd_amax=fa_bwd_amax, next_fa_bwd_amax=next_fa_bwd_amax)
     saves.extend(out_saves)
     return out, saves
 
   def attention_from_qkv(self, xqkv:Tensor, freqs_cis:Tensor, *, wo:Tensor, amax_xo:Tensor|None, s_o:Tensor,
-                         next_amax_xo:Tensor|None, grad_amax_xo:Tensor|None, next_grad_amax_xo:Tensor|None, mxfp4_wo=None):
+                         next_amax_xo:Tensor|None, grad_amax_xo:Tensor|None, next_grad_amax_xo:Tensor|None, mxfp4_wo=None,
+                         fa_bwd_amax=None, next_fa_bwd_amax=None):
     bsz, seqlen, _ = xqkv.shape
     saves = []
     if getenv("HK_FLASH_ATTENTION"):
@@ -252,7 +257,8 @@ class FlatTransformer:
                                            prequantize_grad_mxfp4=bool(MXFP4), prequantize_fp8=fp8_fa,
                                            write_bf16_qk=not (fp8_fa and getenv("ASM_FP8_FA")))
       attn, *save = flash_attention(xq, xk, xv, is_causal=True, write_flat=True, save_fp8=True,
-                                    q_fp8=fp8_qk[0] if fp8_fa else None, k_fp8=fp8_qk[1] if fp8_fa else None)
+                                    q_fp8=fp8_qk[0] if fp8_fa else None, k_fp8=fp8_qk[1] if fp8_fa else None,
+                                    fa_bwd_amax=fa_bwd_amax, next_fa_bwd_amax=next_fa_bwd_amax)
       # FP8 backward consumes the saved rounded operands, not the original Q/K.
       # Native FP8 also uses rounded V; HIP still needs the original BF16 V.
       if not fp8_fa: saves.extend([xq, xk, xv])
@@ -450,6 +456,8 @@ class FlatTransformer:
     for i in range(self.n_layers):
       attn_kwargs = dict(attention_norm=self.attention_norm[i], wqkv=self.wqkv[i], wo=self.wo[i], s_qkv=s["wqkv"][i], s_o=s["wo"][i],
                          **amax_kwargs(i, ("xqkv", "xo"), ("xqkv", "xo")))
+      if getenv("FP8_FA_BWD"):
+        attn_kwargs.update(fa_bwd_amax=ga["fa"][i], next_fa_bwd_amax=nga["fa"][i])
       ffn_kwargs = dict(ffn_norm=self.ffn_norm[i], w2=self.w2[i], s_2=s["w2"][i], **amax_kwargs(i, ("x2",), ("xout",)))
       if mxfp4_weights is not None:
         attn_kwargs.update(mxfp4_wqkv=mxfp4_weights["wqkv"][i], mxfp4_wo=mxfp4_weights["wo"][i])
@@ -461,6 +469,8 @@ class FlatTransformer:
         ffn_kwargs.update(w13=self.w13[i], s_13=s["w13"][i], **amax_kwargs(i, ("x13",), ("xw13",)))
         if mxfp4_weights is not None: ffn_kwargs.update(mxfp4_w13=mxfp4_weights["w13"][i])
       attn_out_kwargs = {k:attn_kwargs[k] for k in ("wo", "amax_xo", "s_o", "next_amax_xo", "grad_amax_xo", "next_grad_amax_xo")}
+      if getenv("FP8_FA_BWD"):
+        attn_out_kwargs.update(fa_bwd_amax=ga["fa"][i], next_fa_bwd_amax=nga["fa"][i])
       if "mxfp4_wo" in attn_kwargs: attn_out_kwargs["mxfp4_wo"] = attn_kwargs["mxfp4_wo"]
       layer_kwargs.append((attn_kwargs, attn_out_kwargs, ffn_kwargs))
 

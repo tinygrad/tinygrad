@@ -260,6 +260,13 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
       if asm_fp8:
         xv = xv.reshape(B, N, H_KV, D)
         v8, vs = (input_tensor(8), input_tensor(9)) if pre_scaled_fp8 else (input_tensor(10), input_tensor(11))
+      if getenv("FP8_FA_BWD"):
+        assert asm_fp8 and pre_scaled_fp8
+        from extra.thunder.amd.fa_fp8_bwd import fp8_backward
+        state, nxt = input_tensor(10), input_tensor(11)
+        dq, dk, dv, _ = fp8_backward(q8,k8,v8,vs,do.reshape(B,N,H,D),attn.reshape(B,N,H,D),l_vec,
+                                    (state[0]+1e-8)/448.,state[1]/57344.,nxt,native=True)
+        return None,None,dq.uop,dk.uop,None,None,dv.uop.reshape(ker.src[7].shape),None,None,None,None
       # BF16 scores from the original Q/K do not share the FP8 forward normalizer.
       # exp(score_bf16 - lse_fp8) can exceed one by arbitrarily large factors.
       if matched_fp8 and asm_fp8:
@@ -354,7 +361,7 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
 def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, write_flat:bool=False, sinks:Tensor|None=None,
                     window:int=0, fp8_qk:bool|None=None, q_amax_state:Tensor|None=None, k_amax_state:Tensor|None=None,
                     q_amax_out:Tensor|None=None, k_amax_out:Tensor|None=None, q_fp8:Tensor|None=None, k_fp8:Tensor|None=None,
-                    fp8_amax:float=16.0, save_fp8:bool=False):
+                    fp8_amax:float=16.0, save_fp8:bool=False, fa_bwd_amax:Tensor|None=None, next_fa_bwd_amax:Tensor|None=None):
   assert attn_mask is None, "attn_mask not supported"
   assert is_causal, "only causal attention supported"
 
@@ -417,10 +424,14 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       v_fp8, v_descale = quantize_qk(xv, None, None, native_v=True)
       # Pass V's storage directly; its shaped view is shared by the amax and quantization expressions.
       v_arg = xv.flatten() if not is_mp else xv
+      bwd_inputs = ()
+      if getenv("FP8_FA_BWD"):
+        assert pre_scaled_fp8 and fa_bwd_amax is not None and next_fa_bwd_amax is not None
+        bwd_inputs = (fa_bwd_amax, next_fa_bwd_amax)
       qk_scales = () if pre_scaled_fp8 else (q_descale, k_descale)
-      attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, v_arg, *qk_scales, v_fp8, v_descale,
+      attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, v_arg, *qk_scales, v_fp8, v_descale, *bwd_inputs,
         fxn=functools.partial(custom_asm_fp8_fa_forward, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
-                              pre_scaled=pre_scaled_fp8, saved_bf16=True), grad_fxn=grad)[:2]
+                              pre_scaled=pre_scaled_fp8, saved_bf16=True, fp8_backward=bool(bwd_inputs)), grad_fxn=grad)[:2]
       # Precompiled layers must return the rounded operands used by backward;
       # saving only BF16 Q/K/V would recompute RoPE and quantization in backward.
       return (attn, attn, l_vec, *fp8_saves, v_fp8, v_descale) if save_fp8 else (attn, attn, l_vec)
@@ -485,7 +496,7 @@ def custom_asm_fa_backward(dq_acc:UOp, dk_expanded:UOp, dv_expanded:UOp, q:UOp, 
                   v.flatten().index(zero).load(), do.flatten().index(zero).load(), lse.flatten().index(zero).load(),
                   delta.flatten().index(zero).load(),
                   lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
-                  arg=KernelInfo(name="asm_fa_bwd_main_" + ("fp8_matched_" if pre_scaled_fp8 else "bf16_") + "causal_2_8192_32_8_128",
+                  arg=KernelInfo(name="asm_fa_bwd_" + ("fp8_matched" if pre_scaled_fp8 else "bf16"),
                                  estimates=Estimates(ops=5*B*H*N*N*D)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, H_KV, D, pre_scaled_fp8)))))
 

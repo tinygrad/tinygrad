@@ -4999,7 +4999,11 @@ def build_kernel(B:int, N:int, H:int, H_KV:int, D:int, pre_scaled:bool=False, sa
 
 @functools.cache
 def custom_asm_fp8_fa_forward(o:UOp, lse:UOp, *inputs:UOp,
-                              B:int, N:int, H:int, H_KV:int, D:int, pre_scaled:bool=False, saved_bf16:bool=False):
+                              B:int, N:int, H:int, H_KV:int, D:int, pre_scaled:bool=False, saved_bf16:bool=False, fp8_backward:bool=False):
+  all_inputs = inputs
+  if fp8_backward:
+    assert saved_bf16 and pre_scaled
+    inputs = inputs[:-2]
   if saved_bf16 and pre_scaled:
     _, _, q, k, _, v, vs = inputs
     scales = (vs,)
@@ -5012,7 +5016,7 @@ def custom_asm_fp8_fa_forward(o:UOp, lse:UOp, *inputs:UOp,
   assert all(x.dtype == dtypes.float32 and math.prod(x.shape) == 1 for x in scales)
   zero = UOp.const(0)
   writes = [x.flatten().index(zero).store(x.flatten().index(zero).load()) for x in (o, lse)]
-  reads = [x.flatten().index(zero).load() for x in inputs]
+  reads = [x.flatten().index(zero).load() for x in all_inputs]
   mem = B*N*(H*D*3+H_KV*D*2)+B*H*N*4
   sink = UOp.sink(*writes, *reads, UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL),
                   UOp.special(512, 'lidx0'), UOp.special(N//512, 'gidx0'), UOp.special(H, 'gidx1'), UOp.special(B, 'gidx2'),
