@@ -391,7 +391,6 @@ class Compiled:
   ifaces:list[Callable] = []
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  has_copy_queue:bool = True
   timestamp_divider: float = 1000.0
   wait_timeout_ms: float = 30000.0
   sleep_timeout_ms: int|None = None
@@ -425,6 +424,9 @@ class Compiled:
     # profiling
     self.prog_bufs:dict[UOp, Buffer] = {} # cache bufferized for programs
     self.prof_ents:dict[tuple[Buffer, int], ProfileGraphEntry] = {} # (a batch's timestamps, start slot) -> entry, read at synchronize
+
+  @property
+  def has_copy_queue(self) -> bool: return True
 
   @property
   def renderer(self) -> Renderer: return self._select_renderer()

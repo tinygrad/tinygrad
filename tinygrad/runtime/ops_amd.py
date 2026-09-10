@@ -556,9 +556,6 @@ def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
   return data, bytes(image).ljust(round_up(len(image), 4), b"\x00") # the program is uploaded as whole dwords
 
 class AMDAllocator(Allocator['AMDDevice']):
-  def __init__(self, dev:AMDDevice):
-    super().__init__(dev, supports_copy_from_disk=dev.has_copy_queue, supports_transfer=dev.has_copy_queue and not dev.is_usb)
-
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_copy_queue)
 
@@ -876,7 +873,6 @@ class AMDDevice(Compiled):
     self.is_aql = getenv("AMD_AQL", int(self.xccs > 1))
     self.max_copy_size = 0x40000000 if (4, 4, 2) <= (v:=self.iface.ip_versions[am.SDMA0_HWIP]) < (5, 0, 0) or v >= (5, 2, 0) else 0x400000
     self.sdma_queues:dict = {}
-    self.has_copy_queue = not getenv("AMD_DISABLE_SDMA")
 
     allocator = USBAllocator(self) if self.is_usb else AMDAllocator(self)
     super().__init__(device, allocator, [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, arch=self.arch)
@@ -949,6 +945,11 @@ class AMDDevice(Compiled):
       (1 << 20) if self.is_usb else (16 << 20), eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size,
       debug_memory_size=round_up(self.wave_cnt * 32, 64))
+
+  @functools.cached_property
+  def has_copy_queue(self) -> bool:
+    self.has_copy_queue = False # queue setup can allocate buffers that check this property
+    return self.sdma_queue(0) is not None
 
   def sdma_queue(self, idx:int):
     if getenv("AMD_DISABLE_SDMA"): return None

@@ -314,10 +314,12 @@ def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, 
 
 class QCOMDevice(Compiled):
   timestamp_divider = 19.2
-  has_copy_queue = False
   pm_encode = PatternMatcher([
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_qcom_compute", name="submit"), lambda ctx, submit: encode_submit(QCOMComputeQueue(ctx, submit))),
   ])
+
+  @property
+  def has_copy_queue(self) -> bool: return False
 
   def __init__(self, device:str=""):
     self.fd = FileIOInterface('/dev/kgsl-3d0', os.O_RDWR)
