@@ -394,6 +394,8 @@ class Compiled:
   timestamp_divider: float = 1000.0
   wait_timeout_ms: float = 30000.0
   sleep_timeout_ms: int|None = None
+  can_recover:bool = False
+  rtalloc_size:int = 64<<20 # the pool every per-linear buffer is carved out of
   var_vals: dict[str, int] = {}
 
   # hcq2
@@ -401,18 +403,16 @@ class Compiled:
   pm_encode:Any = None
   pm_lower:Any = None
 
-  def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None,
-               graph=None, arch=None, can_recover:bool=False, rtalloc_size:int=64<<20):
+  def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, graph=None, arch=None):
     from tinygrad.renderer import Renderer
     from tinygrad.uop.ops import Ops, UPat, PatternMatcher
     from tinygrad.runtime.support.hcq2 import cfunc_buf
 
     self.device, self.allocator, self.runtime_t, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
-    self.device_id, self.arch, self.can_recover = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch, can_recover
+    self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
     self.cached_renderer:dict[Any, Renderer] = {}
 
     # hcq2
-    self.rtalloc_size = rtalloc_size
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.PARAM, tag="timeline"), lambda ctx: ctx.timeline),
       (UPat(Ops.PARAM, tag="program", name="b"),
