@@ -196,6 +196,18 @@ class VGPRField(SrcField):
         raise ValueError(f"VGPRField: v[{encoded}].h not encodable in 8-bit field (v[0:127] only for .h)")
       encoded |= 0x80
     return encoded
+
+  def __get__(self, obj, objtype=None):
+    if obj is None: return self
+    raw = (obj._raw >> self.lo) & self.mask
+    # NOTE:: better way to check arch?
+    is_rdna3 = "rdna3" in str(obj.__module__)
+    if is_rdna3 and (getattr(obj, "opsel", 0) == 8 or (self.lo == 17 and raw & 0x80)):
+      reg = self.decode(raw & 0x7F)
+      return Reg(reg.offset, obj.op_regs[self.name], hi=True)
+    else:
+      return super().__get__(obj, objtype)
+
 class SGPRField(SrcField): _valid_range = (0, 127)
 class SSrcField(SrcField): _valid_range = (0, 255)
 
