@@ -367,6 +367,11 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(op=OptOps.SPLIT, axis=0, arg=(8, AxisType.LOCAL)), Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))],
     ])
 
+  def test_group_non_reduce_axis(self):
+    # GROUP_REDUCE splits only a reduce axis
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_opt(Tensor.rand(64, 64).sum(1), [[Opt(OptOps.SPLIT, 0, (16, AxisType.GROUP_REDUCE, True))]])
+
   def test_double_sum_group(self):
     a = Tensor.rand(4, 4, 4)
     r = a.sum((1, 2)).sum()
