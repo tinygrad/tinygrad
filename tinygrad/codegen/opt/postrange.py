@@ -194,7 +194,7 @@ class Scheduler:
           # tensor cores have three ranges. X, Y, and REDUCE
           in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0], reverse=True)
           in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg[0], reverse=True)
-          red_ranges = sorted(reduceop.src[1:], key=lambda x: x.arg[0], reverse=True)
+          red_ranges = sorted(UOp.sink(*reduceop.src[1:]).ranges, key=lambda x: x.arg[0], reverse=True)
           if DEBUG >= 3:
             print(f"TC({axis}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]}",
                               f"{[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")
@@ -209,6 +209,7 @@ class Scheduler:
           if any(a.arg[-1] is AxisType.REDUCE for a in axes[:2]): raise KernelOptError("tensor core X/Y axes can't be REDUCE")
 
           # do optimizations and save the ranges
+          ast, warp, ne = self.ast, UOp.range(tc.threads, -1, AxisType.WARP), []
           try:
             for i,a in enumerate(axes):
               idx = self.rngs.index(a)
@@ -217,23 +218,22 @@ class Scheduler:
                 # apply_opt should return the updated range?
                 self.apply_opt(Opt(OptOps.PADTO, idx, tc.dims[i]), append_opt=False) # PADTO might fail
                 axes[i] = self.rngs[idx]
-          except KernelOptError: continue
+            # we create the warp as a whole thing, in case some of these ranges are moved/removed later
+            for opt in tc.opts:
+              if opt[0] == "l":
+                axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.LOCAL, input_new_rng=warp%2)
+                warp //= 2
+              elif opt[0] == "u":
+                axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.UPCAST)
+              else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")
+              ne.append(new_range)
 
-          # we create the warp as a whole thing, in case some of these ranges are moved/removed later
-          warp = UOp.range(tc.threads, -1, AxisType.WARP)
-          ne: list[UOp] = []
-          for opt in tc.opts:
-            if opt[0] == "l":
-              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.LOCAL, input_new_rng=warp%2)
-              warp //= 2
-            elif opt[0] == "u":
-              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.UPCAST)
-            else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")
-            ne.append(new_range)
-
-          for _, amt in tc.get_reduce_axes():
-            axes[2], new_range = self.shift_to(axes[2], amt, AxisType.UNROLL)
-            ne.append(new_range)
+            for _, amt in tc.get_reduce_axes():
+              axes[2], new_range = self.shift_to(axes[2], amt, AxisType.UNROLL)
+              ne.append(new_range)
+          except KernelOptError:
+            self.ast = ast
+            continue
 
           if use_tensor_cores != 2:
             reduceop = get_single_element([x for x in self.reduceops if axes[2] in UOp.sink(*x.src[1:]).ranges])
