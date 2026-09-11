@@ -83,6 +83,13 @@ def mint_tagged_storage(x:UOp):
   buf = x.empty_like()
   return buf.after(buf.store(src)).replace(tag=x.tag)
 
+def mint_function_materialization(x:UOp) -> UOp|None:
+  return mint_tagged_storage(x.replace(tag=(x,)))
+
+pm_mint_function_materializations = PatternMatcher([
+  (UPat(Ops.CONTIGUOUS, src=(UPat((Ops.COPY, Ops.AFTER, Ops.CAST)),), name="x"), mint_function_materialization),
+])
+
 # Allocation provenance is local to Callify, while physical allreduce annotations are consumed later by the scheduler.
 pm_remove_allocation_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x:
   x.replace(tag=None) if x.tag is not None and x.tag not in {("allreduce",), ("allreduce_accumulate",)} else None)])
@@ -277,6 +284,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
   # here we can break the tensor graph. tags propagate through replaces so we can still find the original UOps
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
+  big_sink = graph_rewrite(big_sink, pm_mint_function_materializations, name="mint function materializations")
 
   # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
   # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
