@@ -1,9 +1,10 @@
-import os, sys, pickle, time, re, tempfile, struct, shutil, io
+import os, sys, time, re
 import numpy as np
 if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 
-from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device, dtypes
-from tinygrad.helpers import DEBUG, getenv
+from tinygrad import fetch, Tensor, Context, Device, dtypes
+from tinygrad.nn.compile import compile_jit, dump_pickle as _dump_pickle, load_pickle as _load_pickle
+from tinygrad.helpers import getenv
 from tinygrad.uop.ops import Ops
 from tinygrad.nn.onnx import OnnxRunner
 
@@ -11,37 +12,8 @@ OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/comm
 OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
 PICKLE_OOB = getenv("PICKLE_OOB")
 
-def dump_pickle(obj, f):
-  if PICKLE_OOB:
-    # allows pickling when buffers don't fit in (CPU) RAM
-    # from openpilot/selfdrive/modeld/helpers.py
-    with tempfile.TemporaryFile(dir=".") as tmp:
-      def buffer_callback(pb: pickle.PickleBuffer):
-        m = pb.raw()
-        tmp.write(struct.pack('<q', m.nbytes))
-        tmp.write(m)
-        pb.release() # keep peak ram at ~1 buffer
-      stream = io.BytesIO()
-      pickle.Pickler(stream, protocol=5, buffer_callback=buffer_callback).dump(obj)
-      opcodes = stream.getvalue()
-      f.write(struct.pack('<q', len(opcodes)))
-      f.write(opcodes)
-      tmp.seek(0)
-      shutil.copyfileobj(tmp, f)
-  else: pickle.dump(obj, f)
-
-def load_pickle(f):
-  if PICKLE_OOB:
-    # allows unpickling when buffers don't fit in (CPU) RAM
-    # from openpilot/selfdrive/modeld/helpers.py
-    opcodes = f.read(struct.unpack('<q', f.read(8))[0])
-    def buffers():
-      while (h := f.read(8)):
-        pb = pickle.PickleBuffer(bytearray(struct.unpack('<q', h)[0]))
-        f.readinto(pb)
-        yield pb
-    return pickle.load(io.BytesIO(opcodes), buffers=buffers())
-  else: return pickle.load(f)
+def dump_pickle(obj, f): return _dump_pickle(obj, f, out_of_band=bool(PICKLE_OOB))
+def load_pickle(f): return _load_pickle(f, out_of_band=bool(PICKLE_OOB))
 
 def compile(onnx_file):
   run_onnx = OnnxRunner(onnx_file)
@@ -61,21 +33,17 @@ def compile(onnx_file):
     inputs = {k:Tensor(v.numpy(), device=Device.DEFAULT).realize() if 'img' in k else v for k,v in inputs.items()}
   print("created tensors")
 
-  @TinyJit(prune=True)
-  def run_onnx_jit(**kwargs): return next(iter(run_onnx({k:v.to(Device.DEFAULT) for k,v in kwargs.items()}).values())).cast('float32')
-  for i in range(3):
-    GlobalCounters.reset()
-    print(f"run {i}")
-    with Context(DEBUG=max(DEBUG.value, 2 if i == 2 else 1), OPENPILOT_HACKS=1):
-      ret = run_onnx_jit(**inputs).numpy()
-    # copy i == 1 so use of JITBEAM is okay
-    if i == 1: test_val = np.copy(ret)
+  def run_model(**kwargs): return next(iter(run_onnx({k:v.to(Device.DEFAULT) for k,v in kwargs.items()}).values())).cast('float32')
+  def make_inputs(seed):
+    return (), {k: Tensor(v.numpy() * (1 if seed == 42 else 2), device=v.device).realize() for k, v in inputs.items()}
+  with Context(OPENPILOT_HACKS=1):
+    run_onnx_jit = compile_jit(run_model, make_inputs, benchmark_runs=1, out_of_band=bool(PICKLE_OOB))
+    test_val = run_onnx_jit(**inputs).numpy().copy()
   # iterate kernel CALLs in the captured LINEAR UOp; toposort descends into batched graph CUSTOM_FUNCTIONs
   kernel_asts = {Ops.PROGRAM}
   kernel_calls = [u for u in run_onnx_jit.captured.linear.toposort(gate=lambda x: x.op not in kernel_asts)
                   if u.op is Ops.CALL and u.src[0].op in kernel_asts]
   print(f"captured {len(kernel_calls)} kernels")
-  if getenv("TEST", 1): np.testing.assert_equal(test_val, ret, "JIT run failed")
   print("jit run validated")
 
   # check gated read_image usage
