@@ -89,6 +89,9 @@ def fclip_grads(grads:list[Tensor], clip_norm) -> Tensor:
   scale = (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
   return [(g * scale).cast(g.dtype) for g in grads], total_norm
 
+def _copy_to_stable_storage(x:Tensor) -> Tensor:
+  return Tensor.empty(x.shape, dtype=x.dtype, device=x.device).realize().assign(x)
+
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
     super().__init__(params, lr, device, fused)
@@ -99,7 +102,7 @@ class GradAccClipAdamW(Optimizer):
     self.v = [self._zero_shard(x) for x in self._new_optim_param()]
     self.grad_acc, self.clip_norm = grad_acc, clip_norm
     if MASTER_WEIGHTS and self.params[0].dtype != dtypes.float32:
-      self.master_params:list[Tensor]|None = [self._zero_shard(p.to(self.device).float().contiguous()) for p in self.params]
+      self.master_params:list[Tensor]|None = [self._zero_shard(_copy_to_stable_storage(p.to(self.device).float())) for p in self.params]
     else:
       self.master_params = None
     self.param_shards = [self._zero_shard(p) for p in self.params] if self.zero else self.params
