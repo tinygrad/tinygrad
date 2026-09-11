@@ -88,7 +88,7 @@ ICB_COUNT = 16
 HANDLES = ("queue", "event", "fence")
 SELECTORS = ("commandBuffer", "computeCommandEncoder", "executeCommandsInBuffer:withRange:", "endEncoding", "commit", "waitUntilCompleted",
   "setKernelBuffer:offset:atIndex:", "concurrentDispatchThreadgroups:threadsPerThreadgroup:", "GPUStartTime", "GPUEndTime",
-  "encodeSignalEvent:value:", "signaledValue", "setSignaledValue:", "waitForFence:", "updateFence:")
+  "encodeSignalEvent:value:", "signaledValue", "setSignaledValue:", "waitForFence:", "updateFence:", "useResource:usage:")
 def host_buf(*vals:int) -> Buffer:
   return Buffer(HCQ_RUNTIME_DEV.value, len(vals), dtypes.uint64, initial_value=struct.pack(f"{len(vals)}Q", *vals))
 
@@ -116,6 +116,7 @@ class MetalQueue(HWQueue):
     self.root = self.root.after(done.end(loop, done < self.pool_ref(0).load())) # only wait when reusing an in-flight icb
     self.tail, self.setups = self.root, list[UOp]() # the command buffer is encoded in order, the icb is written wide before the commit
     self.count, self.done, self.signals = 0, 0, list[tuple[UOp, UOp]]()
+    self.resources:list[UOp] = []
     self.start:UOp|None = None
     self.words(0) # empty kernels still need a nonempty host scratch buffer
 
@@ -151,6 +152,7 @@ class MetalQueue(HWQueue):
       self.setups.append(ccall(libc.memcpy, self.pool_ref(3).load() + off, self.ptr(off), 8 * len(vals)))
       binds += [(self.pool_ref(2).load(), off + 8 * i) for i in range(len(vals))]
     for i, (buf, off) in enumerate(binds): self.setup(cmd, "setKernelBuffer:offset:atIndex:", buf, off, i)
+    self.resources.extend(buf for buf, _ in binds)
     if any(isinstance(d, UOp) for d in self.dims(prg)): # arm64 passes MTLSize by reference
       self.setup(cmd, "concurrentDispatchThreadgroups:threadsPerThreadgroup:", self.ptr(sizes:=self.words(*self.dims(prg))), self.ptr(sizes + 24))
     self.count += 1
@@ -172,13 +174,15 @@ class MetalQueue(HWQueue):
     self.msg(mtl_const("queue", self.devs), "commandBuffer", result=self.cb)
     self.msg(self.cb, "computeCommandEncoder", result=self.enc)
     self.msg(self.enc, "waitForFence:", mtl_const("fence", self.devs).index(0).load())
+    # declare indirect bindings here: paravirtualized Metal supports ICBs but cannot create residency sets
+    for buf in dict.fromkeys(self.resources): self.msg(self.enc, "useResource:usage:", buf, metal.MTLResourceUsageRead | metal.MTLResourceUsageWrite)
     self.msg(self.enc, "executeCommandsInBuffer:withRange:", self.pool_ref(1).load(), self.done, self.count - self.done)
     self.msg(self.enc, "updateFence:", mtl_const("fence", self.devs).index(0).load())
     self.msg(self.enc, "endEncoding")
     self.tail = self.tail.after(*self.setups)
     if signal is not None: self.msg(self.cb, "encodeSignalEvent:value:", mtl_const("event", self.devs).index(0).load(), signal)
     self.msg(self.cb, "commit")
-    self.done, self.setups = self.count, []
+    self.done, self.setups, self.resources = self.count, [], []
 
   def submit(self, cmdbuf:UOp) -> UOp:
     value = self.signals[-1][1]
@@ -200,13 +204,11 @@ class MetalAllocator(Allocator['MetalDevice']):
     mtl = metal.MTLBuffer(options.external_ptr) if options.external_ptr else \
           self.dev.sysdevice.newBufferWithLength_options(size, metal.MTLResourceStorageModeShared)
     if mtl.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
-    self.dev.resident(mtl)
     return BufferStorage(mtl.value, mtl, MMIOInterface(c, size) if (c:=mtl.contents()) else None) # an external buffer may have no host side
 
   def do_free(self, storage:BufferStorage, options:BufferSpec): # the icb doesn't retain what it binds: the gpu must be done with a buffer first
     self.dev.synchronize()
-    self.dev.resident(storage.meta, False)
-    super().do_free(storage, options) # an external buffer only leaves the residency set
+    super().do_free(storage, options)
   def _free(self, storage:BufferStorage, options:BufferSpec): # released now, not when the storage is collected
     storage.meta.retain = False
     storage.meta.release()
@@ -220,17 +222,12 @@ class MetalDevice(Compiled):
   ])
 
   def __init__(self, device:str=""):
-    if int(platform.mac_ver()[0].split('.')[0]) < 15: raise RuntimeError("METAL needs macOS 15 for residency sets")
     self.sysdevice = metal.MTLCreateSystemDefaultDevice()
     self.queue = self.sysdevice.newCommandQueueWithMaxCommandBufferCount(1024)
     self.event = self.sysdevice.newSharedEvent()
     self.fence = self.sysdevice.newFence()
     if self.queue.value is None: raise RuntimeError("Cannot allocate a new command queue")
 
-    # the buffers of an indirect command buffer must be resident: everything the device allocates is
-    self.residency = checked(self.sysdevice.newResidencySetWithDescriptor_error, metal.MTLResidencySetDescriptor.new())
-    if self.residency.value is None: raise RuntimeError("METAL HCQ2 requires residency sets, but Metal failed to create one")
-    self.queue.addResidencySet(self.residency)
     self.icbs:weakref.WeakKeyDictionary[Buffer, tuple] = weakref.WeakKeyDictionary() # an icb and its commands live as long as their words
 
     # https://developer.apple.com/documentation/metal/mtlgpufamily
@@ -276,16 +273,12 @@ class MetalDevice(Compiled):
     self.icbs[buf:=host_buf(*words)] = tuple(refs)
     return buf
 
-  def resident(self, mtl:metal.MTLBuffer, add:bool=True):
-    (self.residency.addAllocation if add else self.residency.removeAllocation)(ctypes.cast(mtl, metal.MTLAllocation))
-    self.residency.commit()
-
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
     if not self.event.waitUntilSignaledValue_timeoutMS(value, timeout or int(self.wait_timeout_ms)):
       raise RuntimeError(f"{self.device} signal wait timed out")
 
   def synchronize(self, timeout:int|None=None):
-    if not self.timeline.is_allocated(): return
+    if "timeline" not in self.__dict__: return
     super().synchronize(timeout)
     # the gpu is done with every command buffer: drain them. a nested synchronize (a free during collection) finds no pool to pop
     if (pool:=getattr(pools, "pool", None)) is not None: objc.lib.objc_autoreleasePoolPop(pool)

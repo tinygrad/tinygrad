@@ -8,17 +8,6 @@ if Device.DEFAULT=="METAL":
   from tinygrad.runtime.autogen import metal
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
-  def test_residency_set_unavailable(self):
-    code = """
-from unittest.mock import patch
-from tinygrad.runtime.ops_metal import MetalDevice, metal
-with patch.object(metal.MTLDevice, 'newResidencySetWithDescriptor_error', return_value=metal.MTLResidencySet()):
-  MetalDevice('METAL')
-"""
-    ret = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=60)
-    self.assertEqual(ret.returncode, 1, ret.stderr.decode()) # Python exception, not SIGABRT from addResidencySet(nil)
-    self.assertIn("RuntimeError: METAL HCQ2 requires residency sets", ret.stderr.decode())
-
   def test_profile_kernel_timestamps(self):
     x = Tensor.ones(256).contiguous().realize()
     with helper_collect_profile(Device["METAL"]) as profile:

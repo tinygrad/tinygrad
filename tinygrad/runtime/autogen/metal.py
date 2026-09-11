@@ -1728,8 +1728,3 @@ MTLSharedEvent._methods_ = [
   ('setSignaledValue:', None, [uint64_t]),
   ('waitUntilSignaledValue:timeoutMS:', BOOL, [uint64_t, uint64_t]),
 ]
-MTLSharedEvent._methods_ = [
-  ('signaledValue', uint64_t, []),
-  ('setSignaledValue:', None, [uint64_t]),
-  ('waitUntilSignaledValue:timeoutMS:', BOOL, [uint64_t, uint64_t]),
-]
