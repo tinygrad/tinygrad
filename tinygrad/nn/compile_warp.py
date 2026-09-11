@@ -92,17 +92,24 @@ def make_frame_prepare(nv12: NV12Frame, model_w, model_h):
   return frame_prepare_tinygrad
 
 
-def make_luma_warp(nv12:NV12Frame, width, height):
+def make_luma_warp(nv12:NV12Frame, width, height, border_fill=None):
   def warp(input_frame, M_inv):
     M_inv = M_inv.to(Device.DEFAULT).realize()
     return warp_perspective_tinygrad(input_frame[:nv12.height*nv12.stride], M_inv,
                                     (width, height), (nv12.height, nv12.width), nv12.stride-nv12.width,
-                                    border_fill_val=16).reshape(-1, height*width)
+                                    border_fill_val=border_fill).reshape(-1, height*width)
   return warp
 
 
-def compile_warp(frame:NV12Frame, output_size, *, layout='luma', benchmark_runs=20):
-  function = make_luma_warp(frame, *output_size) if layout == 'luma' else make_frame_prepare(frame, *output_size)
+def make_warp(frame, output_size, layout='luma', border_fill=None):
+  width, height = output_size
+  if layout == 'luma': return make_luma_warp(NV12Frame(*frame), width, height, border_fill)
+  if layout == 'yuv420': return make_frame_prepare(NV12Frame(*frame), width, height)
+  raise ValueError(f'Unknown warp layout: {layout}')
+
+
+def compile_warp(frame:NV12Frame, output_size, *, layout='luma', border_fill=None, benchmark_runs=20):
+  function = make_warp(frame, output_size, layout, border_fill)
   def make_inputs(seed):
     rng = np.random.default_rng(seed)
     data = Tensor(rng.integers(0, 256, frame.size, dtype=np.uint8), device=Device.DEFAULT).realize()
@@ -116,8 +123,9 @@ if __name__ == '__main__':
   parser.add_argument('--frame', type=parse_frame, required=True, help='width,height,stride,y_height,uv_height,buffer_size')
   parser.add_argument('--warp-to', type=parse_size, required=True)
   parser.add_argument('--layout', choices=['luma', 'yuv420'], default='luma')
+  parser.add_argument('--border-fill', type=int, help='luma outside the frame; omit to clamp coordinates')
   parser.add_argument('--output', required=True)
   parser.add_argument('--benchmark-runs', type=int, default=20)
   args = parser.parse_args()
-  jit = compile_warp(args.frame, args.warp_to, layout=args.layout, benchmark_runs=args.benchmark_runs)
+  jit = compile_warp(args.frame, args.warp_to, layout=args.layout, border_fill=args.border_fill, benchmark_runs=args.benchmark_runs)
   with open(args.output, 'wb') as f: dump_pickle(jit, f)
