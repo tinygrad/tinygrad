@@ -261,7 +261,7 @@ class TestTimingEvidence(unittest.TestCase):
   def test_missing_reference_never_silently_skips(self):
     with tempfile.TemporaryDirectory() as directory:
       environment = {"DEV": "MOCK+AMD", "SQTT_TIMING_CAPTURE_DIR": "", "SQTT_TIMING_REFERENCE_DIR": directory}
-      with patch.dict(os.environ, environment):
+      with patch.dict(os.environ, environment), patch("test.amd.test_sqtt_timing.getenv", return_value="cached device selection"):
         os.environ.pop("PYTEST_XDIST_WORKER", None)
         with self.assertRaisesRegex(AssertionError, "no captures"): TestTimingHardware().test_capture_or_compare()
 
@@ -285,7 +285,7 @@ class TestTimingHardware(unittest.TestCase):
     if capture and reference: self.fail("capture and reference modes are mutually exclusive")
     self.assertNotIn("PYTEST_XDIST_WORKER", os.environ, "hardware evidence requires -n0")
     if reference:
-      self.assertTrue(getenv("DEV", "").startswith("MOCK+AMD"), "reference comparison requires DEV=MOCK+AMD")
+      self.assertTrue(os.getenv("DEV", "").startswith("MOCK+AMD"), "reference comparison requires DEV=MOCK+AMD")
       paths = sorted(Path(reference).glob("*.json"))
       self.assertTrue(paths, "reference directory contains no captures")
       cases = {c.name: c for c in corpus()}
@@ -307,7 +307,7 @@ class TestTimingHardware(unittest.TestCase):
       print(json.dumps(reports, sort_keys=True))
       self.assertTrue(all(r["status"] == "match" for r in reports), "observed SQTT instructions/ticks differ; see report")
       return
-    self.assertEqual(getenv("DEV", ""), "AMD", "hardware capture requires explicit DEV=AMD")
+    self.assertEqual(os.getenv("DEV", ""), "AMD", "hardware capture requires explicit DEV=AMD")
     self.assertTrue(getenv("PROFILE") and getenv("SQTT"), "hardware capture requires PROFILE=1 SQTT=1")
     from tinygrad import Device, Tensor
     from tinygrad.device import ProfileProgramEvent
