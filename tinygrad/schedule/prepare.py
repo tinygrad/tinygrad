@@ -26,7 +26,8 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
 pm_fold_moved_after = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src")))), name="after"), found_after),
   # contiguous is also a materialization point (it bufferizes in the scheduler)
-  (UPat(Ops.COPY, src=(UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src"),), name="after"), found_after),
+  (UPat(Ops.COPY, src=(UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src"),), name="after"),
+   lambda ctx,after,src: found_after(ctx, after, src) if after.is_self_copy else None),
   # replace ALU sources with AFTER versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
@@ -137,7 +138,6 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
 def copy_to_anon_store(x:UOp, copy:UOp):
-  if copy.device is None: return None
   if copy.is_self_copy and (x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY): return x
   if not copy.is_self_copy: x = x.pad_to(x.max_shape)
   buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
