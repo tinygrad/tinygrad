@@ -148,14 +148,13 @@ class OnnxPBParser:
 
   def _parse_ModelProto(self) -> dict:
     """Entry point for parsing the ONNX model."""
-    obj: dict[str, Any] = {"opset_import": [], "metadata_props": []}
+    obj: dict[str, Any] = {"opset_import": []}
     for fid, wire_type in self._parse_message(self.reader.len):
       match fid:
         case 4: obj["domain"] = self.reader.read_string()
         case 5: obj["model_version"] = self.reader.read_int64()
         case 7: obj["graph"] = self._parse_GraphProto()
         case 8: obj["opset_import"].append(self._parse_OperatorSetIdProto())
-        case 14: obj["metadata_props"].append(self._parse_StringStringEntryProto())
         case _: self.reader.skip_field(wire_type)
 
     # update opset version
@@ -377,16 +376,13 @@ class OnnxRunner:
   def __init__(self, model_path: Tensor | str | pathlib.Path):
     model = OnnxPBParser(model_path, load_external_data=True).parse()
     self._init_from_graph(model["graph"])
-    self.metadata = {p["key"]: p["value"] for p in model["metadata_props"]}
 
   def _init_from_graph(self, graph: dict, is_subgraph: bool = False):
-    self.metadata = {}
     self.is_training = any(n['parsed_node'].opset_id.domain in {Domain.AI_ONNX_TRAINING, Domain.AI_ONNX_PREVIEW_TRAINING} for n in graph["node"])
     self.graph_name = graph["name"] if is_subgraph else ""
     self.graph_values = {"": None, **{i["name"]: i["parsed_tensor"] for i in graph["initializer"]}}
     self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
     self.graph_outputs = tuple(o["name"] for o in graph["output"])
-    self.output_shapes = {o["name"]: o["parsed_type"].shape if o["parsed_type"] is not None else () for o in graph["output"]}
     self.graph_nodes = tuple(n["parsed_node"] for n in graph["node"])
     # track names from initializers and Constant nodes for fast path optimizations
     self.const_names: set[str] = set(self.graph_values.keys()) | {o for n in self.graph_nodes if n.op == "Constant" for o in n.outputs}

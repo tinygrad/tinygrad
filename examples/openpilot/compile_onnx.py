@@ -7,7 +7,25 @@ from tinygrad.dtype import DType, _to_np_dtype
 from tinygrad.helpers import fetch
 from .helpers import allocate_inputs, compile_jit, dump_pickle
 from .compile_warp import NV12Frame, make_warp
-from tinygrad.nn.onnx import OnnxRunner
+from tinygrad.nn.onnx import OnnxPBParser, OnnxRunner
+
+
+def onnx_metadata(path):
+  parser = OnnxPBParser(path, load_external_data=False)
+  metadata, output_shapes = {}, {}
+  for field, wire_type in parser._parse_message(parser.reader.len):
+    if field == 14:
+      entry = parser._parse_StringStringEntryProto()
+      metadata[entry['key']] = entry['value']
+    elif field == 7:
+      # Read output declarations without parsing graph nodes or weight tensors.
+      for field, wire_type in parser._parse_message(parser._decode_end_pos()):
+        if field == 12:
+          value = parser._parse_ValueInfoProto()
+          output_shapes[value['name']] = value['parsed_type'].shape if value['parsed_type'] is not None else ()
+        else: parser.reader.skip_field(wire_type)
+    else: parser.reader.skip_field(wire_type)
+  return metadata, output_shapes
 
 
 def sample_history(buffer, value, shape, *, axis, size=1, stride=1, reduce='sample', delay=0):
@@ -44,9 +62,10 @@ def prepare_inputs(runner, config, device_inputs, float32):
 
 def compile_onnx(path, *, device_inputs=(), float32=False, output_name=None, benchmark_runs=20, out_of_band=False, configs=None):
   runner = OnnxRunner(path)
-  metadata = {'metadata': runner.metadata} | {
+  properties, output_shapes = onnx_metadata(path)
+  metadata = {'metadata': properties} | {
     f'{kind}_shapes': {name: tuple(d if isinstance(d, int) else 0 for d in shape) for name, shape in shapes.items()}
-    for kind, shapes in [('input', {name: spec.shape for name, spec in runner.graph_inputs.items()}), ('output', runner.output_shapes)]}
+    for kind, shapes in [('input', {name: spec.shape for name, spec in runner.graph_inputs.items()}), ('output', output_shapes)]}
   if unknown := set(device_inputs) - runner.graph_inputs.keys(): raise ValueError(f"Unknown inputs: {unknown}")
   if output_name is not None and output_name not in runner.graph_outputs: raise ValueError(f"Unknown output: {output_name}")
 
