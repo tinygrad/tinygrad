@@ -42,7 +42,7 @@ class TestSimpleProfiler(unittest.TestCase):
     with helper_collect_profile(Device[Device.DEFAULT]) as profile:
       Tensor.empty(32).add(1).realize()
       Device[Device.DEFAULT].synchronize()
-    self.assertTrue(any(isinstance(e, (ProfileRangeEvent, ProfileGraphEvent)) and e.device == Device.DEFAULT for e in profile))
+    self.assertTrue(any(isinstance(e, ProfileRangeEvent) and e.device == Device.DEFAULT for e in profile))
 
 # TODO: support in HCQCompiled
 # TODO: none of these tests run on HCQ2
