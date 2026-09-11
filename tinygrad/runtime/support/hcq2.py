@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import cast, Any
+from typing import cast, Any, Sequence
 import functools, itertools, weakref, ctypes, importlib
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import dedup, pluralize, unwrap, VIZ, HCQ2, to_tuple, ContextVar, Context, panic, partition, DEV, ALL2ALL, getenv
-from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker
+from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker, TinyELF
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
@@ -65,6 +65,18 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   return UOp.custom_function(fn, UOp(Ops.LINEAR, src=tuple(cmds), arg=(devs, queue)))
 
 # C FFI
+
+def layout_args(args:Sequence[UOp|int], offset:int=0) -> list[tuple[int, UOp]]:
+  words = [a if isinstance(a, UOp) else UOp.const(a, dtypes.uint32) for a in args]
+  return [(offset + o, w) for (o, _), w in zip(TinyELF.iter_sig(tuple((None, i, w.dtype, ()) for i, w in enumerate(words))), words)]
+
+def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
+  words, end = [], 0
+  for offset, arg in sorted(args, key=lambda x: x[0]):
+    if offset != end: words.append(UOp(Ops.BINARY, arg=bytes(offset - end)))
+    words.append(arg)
+    end = offset + arg.dtype.itemsize
+  return words + [UOp(Ops.BINARY, arg=bytes(size - end))]
 
 @functools.cache
 def cfunc_buf(lib:str, name:str) -> Buffer:
