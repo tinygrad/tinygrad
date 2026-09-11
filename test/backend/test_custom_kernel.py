@@ -428,6 +428,22 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
 
+  @unittest.skipIf(Device.DEFAULT == "CPU", "test needs to copy from CPU to another device")
+  def test_custom_kernel_source_copy(self):
+    from tinygrad.codegen import do_to_program
+    def custom_source(out:UOp, inp:UOp) -> UOp:
+      # generate a SOURCE for this device, runtime only sees a SOURCE and BINARY
+      src = do_to_program(custom_add_one_kernel(out, inp), Device[out.device].renderer).src[2].arg
+      binary = Device[out.device].renderer.compiler.compile(src)
+      sink = UOp.sink(out.base, inp.base, arg=KernelInfo("add_one_1"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+    out = Tensor([-1]).realize()
+    cpu_src = Tensor([2], device="CPU").realize()
+    out = Tensor.custom_kernel(out, cpu_src.to(out.device), fxn=custom_source)[0]
+    cp = out.to("CPU").realize()
+    self.assertEqual(out.tolist(), [3])
+    self.assertEqual(cp.tolist(), [3])
+
   def test_sliced_buffer_function(self):
     x = Tensor.arange(32).reshape(8, 4).clone().realize()
     from tinygrad import function
