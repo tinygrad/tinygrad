@@ -49,7 +49,7 @@ jobs:
         source /tmp/tinygrad_pytest_ci/bin/activate
         pytest -nauto --durations=20
     - name: openpilot compile 0.10.1 driving_vision
-      run: OPENPILOT_HACKS=1 JIT_BATCH_SIZE=0 FLOAT16=1 DEV=CL IMAGE=1 python3.11 -m tinygrad.nn.compile https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx /tmp/openpilot.pkl --float32 --device-input img --device-input big_img
+      run: OPENPILOT_HACKS=1 JIT_BATCH_SIZE=0 FLOAT16=1 DEV=CL IMAGE=1 python3.11 -m tinygrad.nn.compile_onnx https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx /tmp/openpilot.pkl --float32 --device-input img --device-input big_img
 
   # TODO: reenable when not flaky
   #testframeworkpytest:
@@ -505,7 +505,7 @@ jobs:
       run: test/external/process_replay/reset.py
     - name: compile
       run: |
-        FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 -m tinygrad.nn.compile ${{ matrix.url }} openpilot.pkl --float32 ${{ (matrix.model == 'vision' || matrix.model == 'supercombo') && '--device-input img --device-input big_img' || matrix.model == 'dmonitoring' && '--device-input input_img' || '' }}
+        FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 -m tinygrad.nn.compile_onnx ${{ matrix.url }} openpilot.pkl --float32 ${{ (matrix.model == 'vision' || matrix.model == 'supercombo') && '--device-input img --device-input big_img' || matrix.model == 'dmonitoring' && '--device-input input_img' || '' }}
         taskset -c 4-7 python3 extra/benchmark_pickle.py openpilot.pkl
     - name: run pickle
       run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" taskset -c 4-7 python3 extra/benchmark_pickle.py openpilot.pkl
@@ -562,7 +562,7 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: openpilot compile big_driving_supercombo
       run: |
-        TC_OPT=2 GMMU=0 DEV=USB+AMD:LLVM python3 -m tinygrad.nn.compile https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/10926f2c0911821ca0e72439c1c3bf3ec11f0a08789aa14b7ee8f25379b2afa4 openpilot.pkl --out-of-band --float32 --device-input img --device-input big_img
+        TC_OPT=2 GMMU=0 DEV=USB+AMD:LLVM python3 -m tinygrad.nn.compile_onnx https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/10926f2c0911821ca0e72439c1c3bf3ec11f0a08789aa14b7ee8f25379b2afa4 openpilot.pkl --out-of-band --float32 --device-input img --device-input big_img
         BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=50 python3 extra/benchmark_pickle.py openpilot.pkl --out-of-band
     - name: openpilot load_pickle big_driving_supercombo
       run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=25 python3 examples/openpilot/load_pickle.py openpilot.pkl
