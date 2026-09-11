@@ -8,21 +8,30 @@ from tinygrad.helpers import getenv
 @functools.cache
 def custom_fp8_backward(*args:UOp, B:int, N:int, H:int, H_KV:int, arch:str):
   assert arch == "gfx950" and N % 64 == 0 and H % H_KV == 0
-  m32 = getenv("FA_BWD_M32", 1) and N % 256 == 0
-  source = (pathlib.Path(__file__).parent / ("fa_fp8_bwd32.cpp" if m32 else "fa_fp8_bwd.cpp")).read_text()
+  converged = getenv("FA_BWD_CONVERGED", 1)
+  m32 = not converged and getenv("FA_BWD_M32", 1) and N % 256 == 0
+  source = (pathlib.Path(__file__).parent / ("fa_fp8_bwd_converged.cpp" if converged else
+                                          "fa_fp8_bwd32.cpp" if m32 else "fa_fp8_bwd.cpp")).read_text()
   output_bf16 = args[0].dtype == dtypes.bfloat16
   options = [f"-I{pathlib.Path(__file__).parent / 'include'}", "-std=c++20", "-DKITTENS_CDNA4",
              "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffp-contract=off", "-Wno-duplicate-decl-specifier", "-Wno-unused-command-line-argument",
              f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}"]
   lib = HIPCCCompiler(arch, options+[f"-DOUTPUT_BF16={int(output_bf16)}"]).compile_cached(source)
   owned_rows = 256 if m32 else min(N, 128)
-  sink = UOp.sink(*(a.base for a in args), UOp.special(owned_rows*(2 if m32 else 4),"lidx0"), UOp.special(N//owned_rows,"gidx0"),
+  sink = UOp.sink(*(a.base for a in args), UOp.special(owned_rows*(2 if m32 else 4),"lidx0"),
+                  UOp.special((2 if converged else 1)*(N//owned_rows),"gidx0"),
                   UOp.special(H,"gidx1"), UOp.special(B,"gidx2"),arg=KernelInfo(name="hk_fa_fp8_backward", estimates=Estimates(ops=5*B*H*N*N*128)))
   return UOp(Ops.PROGRAM,src=(sink,UOp(Ops.LINEAR,src=(*sink.src,sink)),UOp(Ops.SOURCE,arg=source),UOp(Ops.BINARY,arg=lib)))
 
 def unpack_dq(dq:Tensor):
   B,N,H,D = dq.shape
   return dq.reshape(B,H,N//16,8,2,4,16,2).permute(0,2,5,4,7,1,3,6).reshape(B,N,H,D)
+
+@functools.cache
+def cast_gradients(*args:UOp):
+  idx = UOp.range(args[0].numel(),0)
+  stores = [args[i].flatten()[idx].store(args[i+3].flatten()[idx].cast(dtypes.bfloat16)) for i in range(3)]
+  return UOp.group(*stores).end(idx).sink(arg=KernelInfo("fp8_fa_backward_cast"))
 
 @functools.cache
 def custom_fp8_backward_init(dq:UOp, partial:UOp, do:UOp):
@@ -77,7 +86,8 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   H_KV = k8.shape[2]
   assert k8.shape == v8.shape == (B,N,H_KV,D) and do.shape == out.shape == q8.shape
   def alloc(shape,dtype=dtypes.float32): return alloc_like(shape,dtype,q8.device,axis)
-  output_dtype = dtypes.bfloat16 if native else dtypes.float32
+  converged = getenv("FA_BWD_CONVERGED", 1)
+  output_dtype = dtypes.bfloat16 if native and not converged else dtypes.float32
   dq = alloc(q8.shape,output_dtype)
   # Reuse the compulsory dQ initialization pass to scan dO for its current scale.
   partial = alloc((B,min(512,N*H*D)))
@@ -107,7 +117,10 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   ret = Tensor.custom_kernel(dq,dk,dv,amax,next_amax,q8,k8,v8,do8,delta,lse if native else lse.contiguous(),scales,
     fxn=functools.partial(custom_fp8_backward,B=local_b,N=N,H=H,H_KV=H_KV,arch=Device[dev].renderer.target.arch))
   dq,dk,dv = ret[:3]
-  dq = unpack_dq(dq)
+  if converged:
+    if native:
+      dq,dk,dv = Tensor.custom_kernel(*(alloc(q8.shape,dtypes.bfloat16) for _ in range(3)),dq,dk,dv,fxn=cast_gradients)[:3]
+  else: dq = unpack_dq(dq)
   dk = dk.reshape(B,N,H_KV,H//H_KV,D).sum(3)
   dv = dv.reshape(B,N,H_KV,H//H_KV,D).sum(3)
   return dq,dk,dv,ret[3]
