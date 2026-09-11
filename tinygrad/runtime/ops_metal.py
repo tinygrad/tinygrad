@@ -121,6 +121,9 @@ class MetalQueue(HWQueue):
   def ptr(self, off:int) -> UOp: return self.blob_buf.after(self.root).bitcast(dtypes.uint64).index(off // 8) # into the blob, after its patches
   def binding(self, buf:UOp) -> tuple[int, int]: # a buffer binds as its base's mtlbuffer: (the blob word holding it, the view's offset)
     base, off = unwrap_view(buf)
+    if base.op is Ops.MSELECT:
+      lane, lane_off = unwrap_view(base.src[0])
+      base, off = lane.mselect(base.arg), off + lane_off
     return self.words(base.getaddr(self.devs)), off
 
   def call(self, after:UOp, target:UOp, sel:str, *args:UOp|int, result:UOp|None=None) -> UOp: # one objc_msgSend, its return stored into result
