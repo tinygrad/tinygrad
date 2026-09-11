@@ -27,7 +27,9 @@ def onnx_metadata(path):
 
 
 def sample_history(buffer, value, shape, *, axis, size=1, stride=1, reduce='sample', delay=0):
+  """Append a frame, then sample or pool history ending delay frames before it."""
   buffer.assign(buffer[1:].cat(value.unsqueeze(0), dim=0).contiguous())
+  if delay: buffer = buffer[:-delay]
   samples = shape[axis] // size
   sampled = buffer.reshape(samples, stride, *value.shape).max(1) if reduce == 'max' else buffer[:samples*stride:stride]
   return sampled.permute(*range(1, axis+1), 0, *range(axis+1, sampled.ndim)).contiguous().reshape(shape)
@@ -45,7 +47,7 @@ def prepare_inputs(runner, config, device_inputs, float32):
       axis, size, stride = history['axis'], history.get('size', 1), history.get('stride', 1)
       samples = shape[axis] // size
       shape = shape[:axis] + (size,) + shape[axis+1:]
-      length = samples*stride if history.get('reduce') == 'max' else (samples-1)*stride + 1 + history.get('delay', 0)
+      length = (samples*stride if history.get('reduce') == 'max' else (samples-1)*stride + 1) + history.get('delay', 0)
       histories[name] = ((length, *shape), dtypes.uint8 if 'warp' in cfg else dtype)
     if warp := cfg.get('warp'):
       frame = NV12Frame(*warp['frame'])

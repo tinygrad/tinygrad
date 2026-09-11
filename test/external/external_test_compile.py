@@ -1,9 +1,9 @@
-import re, tempfile, unittest
+import itertools, re, tempfile, unittest
 from pathlib import Path
 import numpy as np
 from extra.benchmark_pickle import make_inputs
 from tinygrad.helpers import fetch, getenv
-from tinygrad.nn.compile import load_pickle
+from tinygrad.nn.compile import dump_pickle, load_pickle
 from tinygrad.nn.state import get_parameters
 from tinygrad.uop.ops import Ops
 
@@ -36,18 +36,23 @@ class TestConfiguredCompile(unittest.TestCase):
     with tempfile.TemporaryDirectory() as directory:
       path = Path(directory) / 'history.onnx'
       onnx.save(onnx.helper.make_model(graph), path)
-      for reduce in ['sample', 'max']:
-        with self.subTest(reduce=reduce):
-          config = {'inputs': {'sequence': {'source': 'current', 'history': {'axis': 1, 'stride': 2, 'delay': 1, 'reduce': reduce}}},
+      for reduce, stride, delay in itertools.product(['sample', 'max'], [1, 2, 4], [0, 1, 3, 5]):
+        with self.subTest(reduce=reduce, stride=stride, delay=delay):
+          config = {'inputs': {'sequence': {'source': 'current', 'history': {'axis': 1, 'stride': stride, 'delay': delay, 'reduce': reduce}}},
                     'pack': ['current']}
-          variant = compile_onnx(path, configs={'test': config}, float32=True, benchmark_runs=1)['variants']['test']
+          with tempfile.TemporaryFile() as f:
+            dump_pickle(compile_onnx(path, configs={'test': config}, float32=True, benchmark_runs=1), f)
+            f.seek(0)
+            variant = load_pickle(f)['variants']['test']
           arrays = {name: np.zeros(shape, dtype=dtype) for name, (shape, dtype, _) in variant['input_specs'].items()}
           inputs = {name: Tensor(arrays[name], device=device).realize() for name, (_, _, device) in variant['input_specs'].items()}
-          history = np.zeros((6, 2), dtype=np.float32)
-          for value in range(1, 9):
+          frames = np.random.default_rng(0).integers(-8, 9, (20, 2)).astype(np.float32)
+          for t, value in enumerate(frames):
             arrays['packed_inputs'].view(np.float32)[:] = value
-            history = np.concatenate([history[1:], np.full((1, 2), value, dtype=np.float32)])
-            expected = history[::2] if reduce == 'sample' else history.reshape(3, 2, 2).max(1)
+            # Each output sample ends at t-delay-offset; max pools the preceding stride frames.
+            expected = np.array([np.max([frames[index] if (index := t-delay-offset-j) >= 0 else np.zeros(2)
+                                         for j in range(stride if reduce == 'max' else 1)], axis=0)
+                                 for offset in (2*stride, stride, 0)])
             np.testing.assert_array_equal(variant['run'](**inputs).numpy(), expected[None] * 2)
 
 
