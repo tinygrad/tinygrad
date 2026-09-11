@@ -26,8 +26,10 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   return (), ()
 
 def get_call_written_bufs(call:UOp) -> list[UOp]:
+  if isinstance(call.arg.aux, HCQInfo): return list(call.arg.aux.written_bufs)
   arg_uops, (outs, ins) = get_call_arg_uops(call), get_call_outs_ins(call)
-  return dedup([b for k in outs if k not in ins and (b:=u if (cv:=(u:=arg_uops[k]).contiguous_view()) is None else cv[0]).op is Ops.BUFFER])
+  bufs = [b.src[0].storage_base if (b:=arg_uops[k].storage_base).op is Ops.MSELECT else b for k in outs if k not in ins]
+  return dedup([b for b in bufs if b.op is Ops.BUFFER])
 
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]]:
   if isinstance(call.arg.aux, HCQInfo): # the submitter itself, then every kernel it enqueues
