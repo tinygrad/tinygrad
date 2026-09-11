@@ -256,7 +256,18 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
   @recursive_property
   def key(self) -> bytes:
-    return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
+    # Program metadata can contain symbolic UOps. Hash those structurally: repr would recursively render their full
+    # graphs, which is both quadratic and deep enough to overflow on large HCQ submission programs.
+    def skey(x): return x.key if isinstance(x, UOp) else x
+    if isinstance(self.arg, ProgramInfo):
+      arg = (self.arg.name, tuple(map(skey, self.arg.global_size)), tuple(map(skey, self.arg.local_size)),
+             tuple(x.key for x in self.arg.vars), self.arg.globals, self.arg.outs, self.arg.ins, self.arg.target)
+    elif isinstance(self.arg, KernelInfo):
+      est = None if self.arg.estimates is None else tuple(skey(x) for x in
+        (self.arg.estimates.ops, self.arg.estimates.lds, self.arg.estimates.mem))
+      arg = (self.arg.name, self.arg.applied_opts, self.arg.opts_to_apply, est, self.arg.beam)
+    else: arg = self.arg
+    return hashlib.sha256(str((self.op, self.dtype, arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self):
     from tinygrad.uop.render import pretty_print
     return pretty_print(self)
