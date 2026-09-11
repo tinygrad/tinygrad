@@ -407,6 +407,18 @@ def split_store(x:UOp) -> UOp|None:
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
+  # Cross-device identity stores are physical copies. Source realization has already happened, so canonicalizing
+  # their equal source/destination indices to one flat range cannot introduce staging storage or lose a view.
+  stores = [u for u in ret.toposort() if u.op is Ops.STORE]
+  if len(stores) == 1:
+    store, value = stores[0], stores[0].src[1]
+    if value.op is Ops.COPY: value = value.src[0]
+    if store.src[0].op is Ops.INDEX and value.op is Ops.INDEX and store.src[0].src[1:] == value.src[1:]:
+      out, inp = store.src[0].src[0], value.src[0]
+      if out.device != inp.device and out.numel() == inp.numel() and out.numel() > 1:
+        r = UOp.range(out.numel(), 0)
+        ret = out.index(r).store(inp.index(r)).end(r)
+
   # create the Kernel. NOTE: buffers can be on different devices here now, they are compiled to SDMA copies later by schedule
   return ret.sink(arg=KernelInfo()).call(*lctx.map.values())
 
