@@ -29,7 +29,7 @@ class HCQInfo:
   inputs:tuple[tuple[UOp, str, int], ...] = ()
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
   host_deps:tuple[tuple[str, str], ...] = () # (memory owner, accessing device)
-  written_bufs:tuple[UOp, ...] = () # write-only kernel outputs, retained for JIT input/output alias protection
+  written_bufs:tuple[UOp, ...] = () # write args
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
