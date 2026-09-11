@@ -11,7 +11,7 @@ from tinygrad.uop.ops import Ops
 class TestConfiguredCompile(unittest.TestCase):
   def test_metadata(self):
     import onnx
-    from tinygrad.nn.onnx import OnnxRunner
+    from examples.openpilot.compile_onnx import compile_onnx
     graph = onnx.helper.make_graph([onnx.helper.make_node('Identity', ['input'], ['output'])], 'metadata',
       [onnx.helper.make_tensor_value_info('input', onnx.TensorProto.FLOAT, ['batch', 3])],
       [onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, ['batch', 3])])
@@ -21,10 +21,8 @@ class TestConfiguredCompile(unittest.TestCase):
       for metadata in ({}, {'model_checkpoint': 'v1.0', 'output_slices': 'dGVzdA=='}):
         onnx.helper.set_model_props(model, metadata)
         onnx.save(model, path)
-        runner = OnnxRunner(path)
-        self.assertEqual(runner.metadata, metadata)
-        self.assertEqual(runner.graph_inputs['input'].shape, ('batch', 3))
-        self.assertEqual(runner.output_shapes, {'output': ('batch', 3)})
+        artifact = compile_onnx(path, benchmark_runs=1)
+        self.assertEqual(artifact['metadata'], {'metadata': metadata, 'input_shapes': {'input': (0, 3)}, 'output_shapes': {'output': (0, 3)}})
 
   def test_warp_layouts(self):
     from tinygrad import Tensor
