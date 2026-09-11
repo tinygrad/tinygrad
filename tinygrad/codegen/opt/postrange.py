@@ -9,7 +9,7 @@ from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, argsort, round_up, p
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, TensorCore
 
 split_targets = {AxisType.UPCAST: (AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK), AxisType.UNROLL: (AxisType.REDUCE, AxisType.GROUP_REDUCE),
                  AxisType.LOCAL: (AxisType.GLOBAL, AxisType.WEAK), AxisType.GROUP_REDUCE: (AxisType.REDUCE,)}
@@ -18,6 +18,7 @@ class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
     self.ast, self.ren = ast, ren
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
+    self.tensor_core:TensorCore|None = None
     self.opt_range = count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
 
   @property
@@ -35,7 +36,7 @@ class Scheduler:
   def copy(self) -> Scheduler:
     ret = Scheduler(self.ast, self.ren)
     ret.applied_opts = self.applied_opts[:]
-    if hasattr(self, 'tensor_core'): ret.tensor_core = self.tensor_core
+    ret.tensor_core = self.tensor_core
     return ret
 
   def get_optimized_ast(self, name_override:str|None=None) -> UOp:
