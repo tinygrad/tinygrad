@@ -3,7 +3,7 @@
 from __future__ import annotations
 from tinygrad.renderer.amd.dsl import Inst
 from tinygrad.renderer.amd.sqtt import (_build_decode_tables, PACKET_TYPES_RDNA3, PacketType, InstOp,
-                                        LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST)
+                                        LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, TS_DELTA_OR_MARK)
 
 _NIB_COUNTS = {cls: nc for _, (cls, nc, *_) in _build_decode_tables(PACKET_TYPES_RDNA3)[0].items()}
 
@@ -65,30 +65,51 @@ def make_encoder():
 
   nibbles: list[int] = []
   started: set[int] = set()
+  time = 0
   _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
 
-  def emit(wave_id: int, inst: Inst, branch_taken: bool|None):
-    """Emit an SQTT packet for one executed instruction."""
+  def packet(cls: type[PacketType], timestamp: int|None, **kwargs):
+    nonlocal time
+    target = time + 1 if timestamp is None else timestamp
+    if type(target) is not int or target < time: raise ValueError("SQTT timestamps must be nondecreasing integers")
+    delta = target - time
+    # Long gaps need a timestamp packet: instruction packets have only 2-3 delta bits.
+    if delta > cls.__dict__['delta'].mask:
+      if delta > TS_DELTA_OR_MARK.delta.mask: raise ValueError("SQTT timestamp gap exceeds the 36-bit packet range")
+      _emit_nibbles(nibbles, TS_DELTA_OR_MARK, delta=delta)
+      delta = 0
+    _emit_nibbles(nibbles, cls, delta=delta, **kwargs)
+    time = target
+
+  def emit(wave_id: int, inst: Inst, branch_taken: bool|None, timestamp: int|None = None):
+    """Emit an instruction at an optional absolute trace tick; omitted ticks preserve legacy ordering."""
+    if timestamp is not None and (type(timestamp) is not int or timestamp < time):
+      raise ValueError("SQTT timestamps must be nondecreasing integers")
     w = wave_id & 0x1F
     if wave_id not in started:
-      _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, wgp=0, wave=w, id7=wave_id)
+      packet(WAVESTART, timestamp, simd=0, wgp=0, wave=w, id7=wave_id)
       started.add(wave_id)
     inst_type, inst_op, op_name = type(inst), inst.op.value if hasattr(inst, 'op') else 0, inst.op.name if hasattr(inst, 'op') else ""
     if issubclass(inst_type, _SOPP):
-      if inst_op in _SOPP_SKIP: return
-      if inst_op in _SOPP_IMMEDIATE: _emit_nibbles(nibbles, IMMEDIATE, delta=1, wave=w)
-      elif inst_op in _SOPP_BARRIER: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.BARRIER)
-      elif inst_op in _SOPP_BRANCH: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.JUMP if branch_taken else InstOp.JUMP_NO)
-      else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SALU)
+      if inst_op in _SOPP_SKIP:
+        # A skipped instruction can still advance modeled time, without an instruction packet.
+        if timestamp is not None and timestamp > time: packet(TS_DELTA_OR_MARK, timestamp)
+        return
+      if inst_op in _SOPP_IMMEDIATE: packet(IMMEDIATE, timestamp, wave=w)
+      elif inst_op in _SOPP_BARRIER: packet(INST, timestamp, wave=w, op=InstOp.BARRIER)
+      elif inst_op in _SOPP_BRANCH: packet(INST, timestamp, wave=w, op=InstOp.JUMP if branch_taken else InstOp.JUMP_NO)
+      else: packet(INST, timestamp, wave=w, op=InstOp.SALU)
     elif issubclass(inst_type, _VALU):
-      if (op := _valu_op(op_name)) is None: _emit_nibbles(nibbles, VALUINST, delta=1, wave=w)
-      else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=op)
-    elif issubclass(inst_type, _SMEM): _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SMEM_RD)
-    else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=_mem_op(inst_type, op_name))
+      if (op := _valu_op(op_name)) is None: packet(VALUINST, timestamp, wave=w)
+      else: packet(INST, timestamp, wave=w, op=op)
+    elif issubclass(inst_type, _SMEM): packet(INST, timestamp, wave=w, op=InstOp.SMEM_RD)
+    else: packet(INST, timestamp, wave=w, op=_mem_op(inst_type, op_name))
 
-  def finish(wave_id: int):
+  def finish(wave_id: int, timestamp: int|None = None):
     """Emit WAVEEND for a completed wave."""
-    if wave_id in started: _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, wgp=0, wave=wave_id & 0x1F)
+    if wave_id in started:
+      packet(WAVEEND, timestamp, simd=0, wgp=0, wave=wave_id & 0x1F)
+      started.remove(wave_id)
 
   def finalize() -> bytes:
     """Pad and return the encoded SQTT blob."""

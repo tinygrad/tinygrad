@@ -5,7 +5,8 @@ Run with: DEV=MOCK+AMD python -m pytest test/amd/test_sqtt_encoder.py -v
 """
 import ctypes, unittest
 from tinygrad.helpers import Context
-from tinygrad.renderer.amd.sqtt import decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, InstOp
+from tinygrad.renderer.amd.sqtt import decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, InstOp, TS_DELTA_OR_MARK
+from test.mockgpu.amd.sqtt_enc import make_encoder
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 
 def _run_kernel(instructions: list, lx=1, ly=1, lz=1, gx=1, gy=1, gz=1, args_ptr=0) -> bytes:
@@ -103,6 +104,101 @@ class TestSQTTEncoder(unittest.TestCase):
     with Context(PROFILE=0):
       run_asm(ctypes.addressof(buf), len(code), 1, 1, 1, 1, 1, 1, 0)
     self.assertEqual(len(sqtt_traces), 0)
+
+class TestSQTTEncoderTiming(unittest.TestCase):
+  def test_explicit_ticks(self):
+    emit, finish, finalize = make_encoder()
+    emit(0, s_mov_b32(s[0], 1), None, 0)
+    emit(0, v_mov_b32_e32(v[0], 2), None, 19)
+    emit(0, s_nop(0), None, 19)
+    finish(0, 200)
+    packets = list(decode(finalize()))
+    events = [p for p in packets if isinstance(p, (WAVESTART, INST, VALUINST, IMMEDIATE, WAVEEND))]
+    self.assertEqual([p._time for p in events], [0, 0, 19, 19, 200])
+    self.assertEqual(sum(isinstance(p, TS_DELTA_OR_MARK) for p in packets), 2)
+
+  def test_delta_boundaries(self):
+    for gap in (0, 1, 3, 4, 7, 8, 15, 16, 65535, 1 << 32, (1 << 36) - 1):
+      with self.subTest(gap=gap):
+        emit, finish, finalize = make_encoder()
+        emit(0, s_mov_b32(s[0], 1), None, 0)
+        emit(0, s_mov_b32(s[1], 2), None, gap)
+        finish(0, gap)
+        packets = list(decode(finalize()))
+        self.assertEqual([p._time for p in packets if isinstance(p, INST)], [0, gap])
+        self.assertEqual([p._time for p in packets if isinstance(p, WAVEEND)], [gap])
+
+  def test_interleaved_waves_share_one_clock(self):
+    emit, finish, finalize = make_encoder()
+    for wave, tick in ((0, 4), (1, 4), (0, 10), (1, 12)):
+      emit(wave, s_mov_b32(s[0], 1), None, tick)
+    finish(1, 13)
+    finish(0, 20)
+    packets = list(decode(finalize()))
+    self.assertEqual([(p.wave, p._time) for p in packets if isinstance(p, INST)], [(0, 4), (1, 4), (0, 10), (1, 12)])
+    self.assertEqual([(p.wave, p._time) for p in packets if isinstance(p, WAVEEND)], [(1, 13), (0, 20)])
+
+  def test_bad_timestamp_does_not_advance_clock(self):
+    for bad in (-1, 0, 9, 1.5, True, "12", 10 + (1 << 36)):
+      with self.subTest(timestamp=bad):
+        emit, finish, finalize = make_encoder()
+        emit(0, s_mov_b32(s[0], 1), None, 10)
+        with self.assertRaises(ValueError): emit(0, s_mov_b32(s[1], 2), None, bad)
+        emit(0, s_mov_b32(s[1], 2), None, 11)
+        finish(0, 11)
+        self.assertEqual([p._time for p in decode(finalize()) if isinstance(p, INST)], [10, 11])
+
+  def test_untimed_packet_order_unchanged(self):
+    emit, finish, finalize = make_encoder()
+    emit(0, s_mov_b32(s[0], 1), None)
+    emit(0, s_nop(0), None)
+    finish(0)
+    packets = [p for p in decode(finalize()) if isinstance(p, (WAVESTART, INST, IMMEDIATE, WAVEEND))]
+    self.assertEqual([p._time for p in packets], [1, 2, 3, 4])
+
+  def test_skipped_instruction_advances_explicit_time(self):
+    for inst in (s_delay_alu(0), s_endpgm()):
+      with self.subTest(instruction=inst):
+        emit, finish, finalize = make_encoder()
+        emit(0, s_mov_b32(s[0], 1), None, 0)
+        emit(0, inst, None, 10)
+        with self.assertRaises(ValueError): emit(0, s_mov_b32(s[1], 2), None, 5)
+        emit(0, s_mov_b32(s[1], 2), None)
+        finish(0, 12)
+        packets = list(decode(finalize()))
+        self.assertEqual([p._time for p in packets if isinstance(p, INST)], [0, 11])
+        self.assertEqual([p._time for p in packets if isinstance(p, WAVEEND)], [12])
+
+  def test_reused_wave_slot(self):
+    emit, finish, finalize = make_encoder()
+    for tick in (0, 10):
+      emit(0, s_mov_b32(s[0], 1), None, tick)
+      finish(0, tick+1)
+    packets = list(decode(finalize()))
+    self.assertEqual([p._time for p in packets if isinstance(p, WAVESTART)], [0, 10])
+    self.assertEqual([p._time for p in packets if isinstance(p, WAVEEND)], [1, 11])
+
+  def test_hardware_fixture_instruction_ticks_round_trip(self):
+    from test.amd.test_sqtt_timing import upstream_traces
+    from tinygrad.renderer.amd.sqtt import map_insts
+    count = 0
+    for name, trace, program in upstream_traces():
+      with self.subTest(fixture=name, se=trace.se):
+        packets = list(decode(trace.blob))
+        simd = packets[0].simd
+        original = [(p, i) for p, i in map_insts(trace.blob, program.lib, "gfx1100") if i is not None and
+                    (not isinstance(p, WAVEEND) or p.simd == simd)]
+        if not original: continue  # Some recorded SEs contain no instruction observations.
+        emit, finish, finalize = make_encoder()
+        for packet, info in original:
+          taken = packet.op == InstOp.JUMP if isinstance(packet, INST) and packet.op in (InstOp.JUMP, InstOp.JUMP_NO) else None
+          emit(info.wave, info.inst, taken, packet._time)
+          if isinstance(packet, WAVEEND): finish(info.wave, packet._time)
+        def identity(packet, info): return info.wave, info.pc, info.inst.to_bytes(), packet._time
+        actual = [identity(p, i) for p, i in map_insts(finalize(), program.lib, "gfx1100") if i is not None]
+        self.assertEqual(actual, [identity(p, i) for p, i in original])
+        count += len(actual)
+    self.assertGreater(count, 1000)
 
 if __name__ == "__main__":
   unittest.main()
