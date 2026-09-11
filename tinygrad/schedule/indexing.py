@@ -45,9 +45,8 @@ def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
 pm_generate_realize_map = PatternMatcher([
   # realize the inputs of custom kernel calls
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), name="c", allow_any_len=True), realize_custom_kernel_srcs),
-  # always realize: STOREs write buffers, and a COPY that reaches the kernel graph is a materialization barrier
-  (UPat(Ops.STORE, name="tr"), realize),
-  (UPat(Ops.COPY, name="tr"), realize),
+  # always realize
+  (UPat({Ops.COPY, Ops.STORE}, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # sometimes we need to realize the src of STORE if there's a self-access, or if it's a cross device store

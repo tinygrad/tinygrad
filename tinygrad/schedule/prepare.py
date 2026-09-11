@@ -25,7 +25,7 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
 # *** fold moved AFTERs (hack for openpilot) ***
 pm_fold_moved_after = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src")))), name="after"), found_after),
-  # contiguous (a self COPY) is also a materialization point (it bufferizes in the scheduler)
+  # contiguous is also a materialization point (it bufferizes in the scheduler)
   (UPat(Ops.COPY, src=(UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src"),), name="after"), found_after),
   # replace ALU sources with AFTER versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
@@ -55,15 +55,14 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
-# a COPY or an AFTER whose value is materialized by its own store deps (into a fresh buffer) is a materialization boundary:
-# reads past it are already ordered, so store hazards can only exist in the same materialization scope
+# stop at materialization boundaries, including COPYs already lowered to AFTER+STORE
 def store_hazard_boundary(s:UOp):
   if s.op is Ops.COPY: return False
   if s.op is Ops.AFTER: return not any(d.op is Ops.STORE and d.src[0].base is s.src[0].base for d in s.src[1:])
   return True
 
 def fix_store_hazard(target:UOp, src:UOp):
-  if (base:=target.base) not in src.toposort(gate=store_hazard_boundary, enter_calls=False): return None
+  if (base:=target.base) not in src.toposort(enter_calls=False): return None
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
@@ -137,37 +136,17 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
-def defer_materialize(ctx:dict, x:UOp, device) -> UOp:
-  # materialize x into a call-local buffer (deduped): reads of the same value share one materialization
-  # the store that materializes x is itself registered, so it is never re-rewritten into a self-referencing form
-  if x not in ctx:
-    buf = UOp.new_buffer(device, prod(x.max_shape), x.dtype).reshape(x.max_shape)
-    st = buf.store(x)
-    ctx.setdefault('created', set()).add(st)
-    ctx[x] = buf.after(st)
-  return ctx[x]
+def copy_to_anon_store(x:UOp, copy:UOp):
+  if copy.device is None: return None
+  if copy.is_self_copy and (x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY): return x
+  if not copy.is_self_copy: x = x.pad_to(x.max_shape)
+  buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
+  return buf.after(buf.store(x)).shrink_to(copy.shape)
 
-def is_created_store(ctx:dict, root:UOp) -> bool: return root in ctx.get('created', ())
-
-def copy_to_anon_store(ctx:dict, x:UOp, copy:UOp):
-  if copy.device is None: return None  # a COPY without a device is virtual, it can't back a store
-  # a same-device copy of an already materialized value is a no-op; a same-device copy of a copy is the copy
-  if x.device == copy.device and (x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY): return x
-  # a same-device copy materializes (deduped), a cross-device copy stores into its own fresh buffer: the STORE itself is the copy
-  if x.device != copy.device:
-    # copies must read from a whole buffer, not a view: materialize anything lacking buffer identity (SDMA can't do offset copies)
-    x = x.pad_to(x.max_shape)
-    if not x.has_buffer_identity(after_ok=True): x = x.contiguous()
-    buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
-    ctx.setdefault('created', set()).add(st := buf.store(x))
-    return buf.after(st).shrink_to(copy.shape)
-  return defer_materialize(ctx, x, copy.device).shrink_to(copy.shape)
-
-def materialize_cross_device_src(ctx:dict, root:UOp, dest:UOp, src:UOp):
-  # the src of a cross device STORE is materialized on its own device first: the STORE itself is the copy
-  if is_created_store(ctx, root): return None
+def materialize_cross_device_src(dest:UOp, src:UOp):
+  # cross-device copies must read a whole buffer (SDMA can't do offset copies)
   if src.device is None or dest.device == src.device or src.has_buffer_identity(after_ok=True): return None
-  return dest.store(defer_materialize(ctx, src, src.device).shrink_to(src.shape))
+  return dest.store(src.contiguous())
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls with RETURNED inputs (inline the body)
@@ -191,7 +170,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # ** copy rules **
 
   # a COPY in src[1] of a plain STORE can just be removed: a STORE to a buffer on a different device is a COPY
-  # NOTE: self copies are contiguous (a materialization point), they must never be removed like this
   (UPat(Ops.STORE, src=(UPat.var("dst"), UPat(Ops.COPY, src=(UPat.var("x"),), name="cpy"))),
    lambda dst,x,cpy: dst.store(x) if not cpy.is_self_copy and dst.device == cpy.device and dst.has_buffer_identity(after_ok=True) else None),
 
@@ -206,7 +184,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # ** store rules **
 
   # materialize the src of a cross device STORE on its own device first: the STORE itself is the copy
-  (UPat(Ops.STORE, src=(UPat(name="dest"), UPat(name="src")), name="root"), materialize_cross_device_src),
+  (UPat(Ops.STORE, src=(UPat(name="dest"), UPat(name="src"))), materialize_cross_device_src),
 
   # fix store hazard (dest is in used in src) by adding contiguous: TestAssign.test_post_flipped_assignment
   (UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
@@ -241,5 +219,5 @@ def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
-  tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, ctx={}, name="earliest rewrites")
+  tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink
