@@ -1,4 +1,4 @@
-"""Capture TinyJit artifacts using the backend selected by DEV."""
+"""Shared compilation and input allocation for model and warp artifacts."""
 import io, pickle, shutil, struct, tempfile, time
 from collections.abc import Callable
 import numpy as np

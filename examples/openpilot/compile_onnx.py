@@ -5,8 +5,8 @@ import numpy as np
 from tinygrad import Device, dtypes
 from tinygrad.dtype import DType, _to_np_dtype
 from tinygrad.helpers import fetch
-from tinygrad.nn.compile import allocate_inputs, compile_jit, dump_pickle
-from tinygrad.nn.compile_warp import NV12Frame, make_warp
+from .helpers import allocate_inputs, compile_jit, dump_pickle
+from .compile_warp import NV12Frame, make_warp
 from tinygrad.nn.onnx import OnnxRunner
 
 
