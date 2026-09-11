@@ -31,11 +31,10 @@ def get_call_written_bufs(call:UOp) -> list[UOp]:
   bufs = [b.src[0].storage_base if (b:=arg_uops[k].storage_base).op is Ops.MSELECT else b for k in outs if k not in ins]
   return dedup([b for b in bufs if b.op is Ops.BUFFER])
 
-def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple[str, Estimates, bytes, int]|None]]:
+def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]]:
   if isinstance(call.arg.aux, HCQInfo): # the submitter itself, then every kernel it enqueues
-    kernels:list[tuple[str, UOp, tuple[str, Estimates, bytes, int]|None]] = [(HCQ_RUNTIME_DEV.value, call, None)]
-    return kernels + [(d, call, (name, estimates, profile_key, nargs))
-                      for devices,name,estimates,_,profile_key,nargs in call.arg.aux.kernels for d in devices]
+    kernels:list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]] = [(HCQ_RUNTIME_DEV.value, call, None)]
+    return kernels + [(d, call, (name, estimates, profile_key)) for devices,name,estimates,_,profile_key in call.arg.aux.kernels for d in devices]
   ast = call.src[0]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call, None)]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "validate": return []
@@ -100,7 +99,7 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
     mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
       colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
-      f" {ansipad(display_name, 46)} arg {len(bufs) if stats is None else stats[3]:2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
+      f" {ansipad(display_name, 46)} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
       ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})"))
     first_run_cache.add(key)
 
@@ -208,14 +207,14 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   if not (ctx.wait or PROFILE): return ets
 
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
-  for devs, name, _, prof, pkey, _ in info.kernels:
+  for devs, name, _, prof, pkey in info.kernels:
     for d in (devs if prof else ()): cast(Any, Device[d]).prof_ents[(slots[d], prof[0])] = ProfileGraphEntry(d, name, prof[0], prof[1], pkey)
   if ctx.wait:
     for device in info.device: cast(Any, Device[device]).synchronize(timeout=ctx.timeout)
   def _prof_tm(device:str, prof:tuple[int, ...]) -> float:
     st, en = (slots[device].host.view(fmt='Q')[x] for x in prof)
     return float(en-st) / cast(Any, Device[device]).timestamp_divider / 1e6
-  return ets + [_prof_tm(device, prof) if ctx.wait else None for devices, _, _, prof, _, _ in info.kernels if prof for device in devices]
+  return ets + [_prof_tm(device, prof) if ctx.wait else None for devices, _, _, prof, _ in info.kernels if prof for device in devices]
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([

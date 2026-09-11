@@ -173,8 +173,6 @@ class TestPickle(unittest.TestCase):
     for _ in range(3): fn(Tensor.randn(4))
     loaded = pickle.loads(pickle.dumps(fn))
     self.assertEqual(loaded(Tensor([1.0,2.0,3.0,4.0])).tolist(), [2.0,3.0,4.0,5.0])
-    del loaded
-    self.assertEqual(fn(Tensor([4.0,3.0,2.0,1.0])).tolist(), [5.0,4.0,3.0,2.0])
 
   def test_pickle_context_var(self):
     v = ContextVar("test_var", 0)

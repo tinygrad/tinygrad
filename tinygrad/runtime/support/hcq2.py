@@ -21,8 +21,7 @@ HCQ_DEVS = frozenset(("NV", "QCOM", "METAL")) | (frozenset(("AMD",)) if HCQ2 els
 class HCQInfo:
   device:tuple[str, ...]
 
-  # (devices, name, estimates, timestamp slots, profile key, buffer argument count)
-  kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes, int], ...] = ()
+  kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = () # (devices, name, estimates, timestamp slots, profile key)
   estimates:Estimates = Estimates()
 
   nargs:int = 0
@@ -208,8 +207,7 @@ def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], 
 
     # and make hcq call
     name, est = get_call_name(call, get_call_arg_uops(call)), estimate_uop(call)
-    nargs = len(call.src[0].arg.globals) if call.src[0].op is Ops.PROGRAM else len(get_call_arg_uops(call))
-    kerns.append((devices, name, est, tuple(2 * s + 1 for s in ctx.stamps(devices, tag)), getattr(call.src[0].arg, "profile_key", None), nargs))
+    kerns.append((devices, name, est, tuple(2 * s + 1 for s in ctx.stamps(devices, tag)), getattr(call.src[0].arg, "profile_key", None)))
 
     ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slot(devices, i),)) for i in ctx.stamps(devices, tag)]
     q += ts_ins[:1] + [call] + ts_ins[1:]
