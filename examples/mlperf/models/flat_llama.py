@@ -459,7 +459,7 @@ class FlatTransformer:
   def __call__(self, tokens:Tensor, save:bool=True,
                mxfp4_weights:dict[str, list[tuple[Tensor, Tensor, Tensor, Tensor]]]|None=None):
     h = self.tok_embeddings(tokens)
-    freqs_cis = self.freqs_cis.cast(h.dtype)
+    freqs_cis = self.freqs_cis.cast(h.dtype).clone()
     if not getenv("HK_FLASH_ATTENTION"): freqs_cis = freqs_cis[:, :tokens.shape[1], :, :, :]
     a, na, ga, nga, s = self._fp8_amax, self._fp8_next_amax, self._fp8_grad_amax, self._fp8_next_grad_amax, self._fp8_inv_scale
     def amax_kwargs(i:int, act_names:tuple[str, ...], grad_names:tuple[str, ...]) -> dict[str, Tensor|None]:
