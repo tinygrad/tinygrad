@@ -418,16 +418,10 @@ class FlatTransformer:
 
   def create_mxfp4_weight_cache(self) -> dict[str, list[tuple[Tensor, Tensor, Tensor, Tensor]]]:
     assert MXFP4
-    from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs, quantize_mxfp4
+    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
     from examples.mlperf.optim import register_mxfp4_weight_cache
     names = ("wqkv", "wo", "w1", "w3", "w2") if SPLIT_W13 else ("wqkv", "wo", "w13", "w2")
-    def initialize(w:Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-      # Cache refresh writes into persistent outputs. Use that same path for initialization so Callify never has to
-      # turn the custom kernel's unbound output placeholders into long-lived model state.
-      outputs = alloc_mxfp4_outputs(w)
-      Tensor.realize(*outputs)
-      return quantize_mxfp4(w, shuffle_row=True, shuffle_col=True, out=outputs)
-    cache = {name:[initialize(w) for w in getattr(self, name)] for name in names}
+    cache = {name:[quantize_mxfp4(w, shuffle_row=True, shuffle_col=True) for w in getattr(self, name)] for name in names}
     if not SPLIT_W13: register_mxfp4_weight_cache(self.w13, cache["w13"])
     register_mxfp4_weight_cache(self.w2, cache["w2"])
     register_mxfp4_weight_cache(self.wqkv, cache["wqkv"])

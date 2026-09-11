@@ -1471,12 +1471,6 @@ def train_llama3():
   clip_coeff_buf = Tensor.empty(1, dtype=dtypes.float32, device=device).realize()
   Tensor.realize(loss_acc, *optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
   mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
-  if mxfp4_weights is not None:
-    Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
-    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
-    initialized_mxfp4 = [x for name, layers in mxfp4_weights.items() for weight, outputs in zip(getattr(model, name), layers)
-                         for x in quantize_mxfp4(weight, shuffle_row=True, shuffle_col=True, out=outputs)]
-    Tensor.realize(*initialized_mxfp4)
 
   def minibatch_impl(tokens:Tensor, accumulate:bool):
     model.reset_amax()
