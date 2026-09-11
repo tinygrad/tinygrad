@@ -1583,6 +1583,17 @@ def train_llama3():
       minibatches(batch_tokens)
       dev_time += time.perf_counter() - mst
 
+      if i == 0:
+        from tinygrad.uop.ops import UOp, AxisType
+        dnum = UOp.range(len(device), -1, AxisType.DEVICE)
+        avg_grads = [(g / grad_acc).cast(g.dtype) for g in grads]
+        local_sq = [Tensor(g.uop._shard(0, dnum)).float().square().sum() if g.ndim and g.shape[0] % len(device) == 0 else
+                    g.float().square().sum() / len(device) for g in avg_grads]
+        local_norm = Tensor.stack(*local_sq).sum()
+        local_norm_cpu = [Tensor(local_norm.uop.mselect(j)).to("CPU") for j in range(len(device))]
+        Tensor.realize(*local_norm_cpu)
+        print(f"local norm-squared diagnostic: {[x.item() for x in local_norm_cpu]}")
+
       gt = time.perf_counter()
       ret = optim_step()
       lr, grad_norm, loss = ret[0].item(), ret[1].item(), ret[2].item() / grad_acc
