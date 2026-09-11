@@ -106,7 +106,7 @@ class MetalQueue(HWQueue):
             for prg in [u.src[0] for u in self.lin.src if u.op is Ops.CALL]] # a serializable recipe, never an owned pipeline pointer
     stride = 4 + len(cmds) # each entry: completion value, icb, scalar buffer, scalar host address, commands
     self.pool = UOp.placeholder((1 + ICB_COUNT * stride,), dtypes.uint64, device=self.devs, volatile=True, tag=("icb", tuple(cmds)))
-    self.slot = self.pool.index(0).load()
+    self.slot = self.pool.index(0).load() % ICB_COUNT
     self.offset = 1 + self.slot * stride
     self.blob_buf = UOp.placeholder((8,), dtypes.uint8, device=self.devs) # stands in for the blob's buffer until submit
     handles = UOp.placeholder((2,), dtypes.uint64, device=self.devs, volatile=True, tag="mtl_handles") # [command buffer, open encoder]
