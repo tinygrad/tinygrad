@@ -8,7 +8,7 @@ from tinygrad.helpers import getenv
 @functools.cache
 def custom_fp8_backward(*args:UOp, B:int, N:int, H:int, H_KV:int, arch:str):
   assert arch == "gfx950" and N % 64 == 0 and H % H_KV == 0
-  converged = getenv("FA_BWD_CONVERGED", 1)
+  converged = getenv("FA_BWD_CONVERGED", 0)
   m32 = not converged and getenv("FA_BWD_M32", 1) and N % 256 == 0
   source = (pathlib.Path(__file__).parent / ("fa_fp8_bwd_converged.cpp" if converged else
                                           "fa_fp8_bwd32.cpp" if m32 else "fa_fp8_bwd.cpp")).read_text()
@@ -86,7 +86,7 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   H_KV = k8.shape[2]
   assert k8.shape == v8.shape == (B,N,H_KV,D) and do.shape == out.shape == q8.shape
   def alloc(shape,dtype=dtypes.float32): return alloc_like(shape,dtype,q8.device,axis)
-  converged = getenv("FA_BWD_CONVERGED", 1)
+  converged = getenv("FA_BWD_CONVERGED", 0)
   output_dtype = dtypes.bfloat16 if native and not converged else dtypes.float32
   dq = alloc(q8.shape,output_dtype)
   # Reuse the compulsory dQ initialization pass to scan dO for its current scale.

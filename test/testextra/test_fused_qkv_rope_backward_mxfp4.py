@@ -4,7 +4,7 @@ import functools
 from tinygrad import Device, Tensor, dtypes
 
 from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs, quantize_mxfp4
-from extra.thunder.amd.fa import custom_fused_qkv_rope_backward_mxfp4
+from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, custom_fused_qkv_rope_backward_mxfp4
 
 
 B, N, H, H_KV, D = 2, 8192, 32, 8, 128
@@ -60,6 +60,30 @@ def main() -> None:
   for name, actual, expected in zip(("row_fp4", "row_scale", "col_fp4", "col_scale"),
                                     (row_fp4, row_scale, col_fp4, col_scale), quant_ref):
     check(name, actual, expected, 0.0)
+
+  # Exercise the packed dQ layout written by the fast FP8 kernel, including the
+  # native-gradient routing which previously discarded its unpacking view.
+  from extra.thunder.amd.fa import _fa_native_grads
+  from extra.thunder.amd.fa_fp8_bwd import unpack_dq, cast_gradients
+  packed = dq.reshape(B,N//16,4,2,2,H,8,16).permute(0,5,1,6,3,2,7,4).contiguous().reshape(B,N,H,D)
+  raw = Tensor.custom_kernel(*(Tensor.empty_like(x) for x in (dq,dk,dv)),packed,dk,dv,fxn=cast_gradients)[:3]
+  logical_dq = unpack_dq(raw[0])
+  logical_dk,logical_dv = [x.reshape(B,N,H_KV,GROUP,D).sum(3) for x in raw[1:]]
+  native = _fa_native_grads(logical_dq.uop,logical_dk.uop,logical_dv.uop)
+  assert native is not None and native[3:] == (True,True)
+  contiguous = _fa_native_grads(raw[0].uop,logical_dk.uop,logical_dv.uop)
+  assert contiguous is not None and contiguous[3:] == (True,False)
+  output = Tensor.empty(B,N,PACKED_N,dtype=dtypes.bfloat16)
+  packed_quant = alloc_mxfp4_outputs(output,flatten_row=True)
+  ret = Tensor.custom_kernel(output,*packed_quant,*(Tensor(x) for x in native[:3]),freqs_cis,
+    fxn=functools.partial(custom_fused_qkv_rope_backward_mxfp4,device=Device.DEFAULT,arch=arch,
+                          B=B,N=N,H=H,H_KV=H_KV,D=D,expanded_fa_grads=native[3],packed_fp8_dq=native[4]))
+  for name,actual,expected in zip(("row_fp4","row_scale","col_fp4","col_scale"),ret[1:5],quant_ref):
+    check(f"packed dQ {name}",actual,expected,0.0)
+  plain = Tensor.custom_kernel(Tensor.empty_like(output),*(Tensor(x) for x in native[:3]),freqs_cis,
+    fxn=functools.partial(custom_fused_qkv_rope_backward,device=Device.DEFAULT,arch=arch,
+                          B=B,N=N,H=H,H_KV=H_KV,D=D,expanded_fa_grads=native[3],packed_fp8_dq=native[4]))[0]
+  check("packed dQ BF16 RoPE",plain,dxqkv_ref,0.0)
 
 
 if __name__ == "__main__":

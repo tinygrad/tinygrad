@@ -33,6 +33,27 @@ constexpr int TILE_N = 16;
 
 template<typename T> using grad_tile = rt<T, TILE_N, ATTN_D, row_l, rt_16x32_s>;
 
+// FP8 backward pairs neighboring query rows for BF16 atomics. Load that layout
+// into the ordinary row tile before applying RoPE; dK/dV remain contiguous.
+template<ducks::rt::row_layout RT>
+__device__ __forceinline__ void load_fp8_dq(RT &tile, const bf16 *src, int b, int h, int n_base) {
+  const int lane = kittens::laneid();
+  #pragma unroll
+  for (int i = 0; i < tile.height; i++) {
+    const int row = n_base + tile.base_tile_rows * i + lane % tile.base_tile_rows;
+    #pragma unroll
+    for (int j = 0; j < tile.width; j++) {
+      #pragma unroll
+      for (int k = 0; k < tile.packed_per_base_tile; k++) {
+        const int col = tile.base_tile_cols * j + tile.base_tile_stride * (lane / tile.base_tile_rows) + 2 * k;
+        const int idx = ((b * ATTN_H + h) * (ATTN_N / 16) + row / 16) * 2048 +
+                        (col / 16) * 256 + (row % 4 / 2) * 128 + (row % 16 / 4) * 32 + (col % 16) * 2 + row % 2;
+        tile.tiles[i][j].data[k] = bf16_2{src[idx], src[idx + 2]};
+      }
+    }
+  }
+}
+
 template<int axis, ducks::rt::row_layout RT, ducks::gl::all GL, ducks::coord::tile COORD=coord<RT>>
 __device__ __forceinline__ void load_fa_shuffled(RT &dst, const GL &src, const COORD &idx) {
   using U = typename GL::dtype;
@@ -193,7 +214,11 @@ fused_qkv_rope_backward(
     const int out_head = (field / GROUP_SIZE) * (GROUP_SIZE + 2) + field % GROUP_SIZE;
 #endif
 #ifdef EXPANDED_FA_GRADS
+#ifdef PACKED_FP8_DQ
+    load_fp8_dq(tile, dq, b, field, n_base);
+#else
     load<1>(tile, dqg, {b, n_tile, field, 0});
+#endif
     inverse_rope(tile, reinterpret_cast<const bf16_2*>(freqs_cis), n_base);
 #ifndef WRITE_MXFP4
     store<1>(out, tile, {b, n_tile, out_head, 0});
