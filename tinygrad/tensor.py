@@ -49,6 +49,8 @@ add_tags = PatternMatcher([
     UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="x"), tag_uop),
+  # materializations synthesized at function boundaries still need storage outside the nested call
+  (UPat(Ops.CONTIGUOUS, src=(UPat((Ops.COPY, Ops.AFTER, Ops.CAST)),), name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
 
