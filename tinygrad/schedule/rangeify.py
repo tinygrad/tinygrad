@@ -173,8 +173,8 @@ pm_no_indexing_calls = PatternMatcher([
 
 # the kernel graph is what gets executed: no shape views left in it, the storage of a value is just the storage
 pm_no_views = PatternMatcher([
-  (UPat((Ops.RESHAPE, Ops.SHRINK), name="v", src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER)),), allow_any_len=True), lambda v:
-   None if v.op is Ops.SHRINK and v.tag == ("allreduce",) and v.src[0].op is Ops.PARAM else v.src[0]),
+  (UPat((Ops.RESHAPE, Ops.SHRINK), name="v", src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.MSELECT, Ops.BUFFER)),), allow_any_len=True),
+   lambda v: None if v.op is Ops.SHRINK and v.tag == ("allreduce",) else v.src[0]),
 ])
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8, "CPU": 31} # TODO: get from device?
