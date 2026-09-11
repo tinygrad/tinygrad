@@ -198,7 +198,6 @@ class MockUSB3:
       self.state.driver._emulate_execute()  # landed data may un-stall a ring polling on it (e.g. copyin sentinels)
     elif op == "pcie_write": self.state._pcie_write(address, data)
     else: raise RuntimeError(f"cannot bulk write for {op}")
-
     self._bulk_write_op = (op, address + len(data), size - len(data)) if len(data) < size else None
 
   def bulk_write_async(self, payload:memoryview, timeout:int=10000) -> int:  # the mock completes transfers synchronously
