@@ -265,6 +265,16 @@ def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
+  # Preserve the canonical flat form for a full identity copy. Movement views can leave an equivalent
+  # multidimensional index here, but the flat form is what the COPY recognizer and runtimes consume.
+  stores = [x for x in ast.toposort() if x.op is Ops.STORE]
+  if len(stores) == 1:
+    store, value = stores[0], stores[0].src[1]
+    if value.op is Ops.COPY: value = value.src[0]
+    if (store.src[0].op is Ops.INDEX and value.op is Ops.INDEX and store.src[0].src[1:] == value.src[1:]
+        and store.src[0].src[0].numel() == value.src[0].numel() == dst.numel() == src.numel()):
+      out, inp, r = store.src[0].src[0], value.src[0], UOp.range(dst.numel(), 0)
+      ast = out.index(r).store(inp.index(r)).end(r).sink()
   from tinygrad.codegen.simplify import pm_flatten_range, pm_simplify_ranges
   from tinygrad.schedule.prepare import pm_mops
   from tinygrad.uop.symbolic import sym
