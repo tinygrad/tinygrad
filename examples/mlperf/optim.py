@@ -27,7 +27,7 @@ def stochastic_round_bf16(x:Tensor) -> Tensor:
   noise = (noise * 0xFFFF).cast(dtypes.uint32)
   return ((bits + noise) & 0xFFFF0000).bitcast(dtypes.float32).cast(dtypes.bfloat16)
 
-def clip_grads(grads:list[Tensor], grad_acc, clip_norm) -> tuple[Tensor, Tensor]:
+def clip_grads(grads:list[Tensor], grad_acc, clip_norm, clip_coeff_out:Tensor|None=None) -> tuple[Tensor, Tensor]:
   # Match the BF16 rounding of the former in-place divide while leaving gradients untouched for the optimizer.
   avg_grads = [(g / grad_acc).cast(g.dtype) for g in grads]
   device = avg_grads[0].device
@@ -41,7 +41,8 @@ def clip_grads(grads:list[Tensor], grad_acc, clip_norm) -> tuple[Tensor, Tensor]
     total_norm = Tensor(local_norm.uop.allreduce(Ops.ADD, device)).sqrt().contiguous()
   else:
     total_norm = Tensor.stack(*[g.float().square().sum() for g in avg_grads]).sum().sqrt().contiguous()
-  return total_norm, (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0).contiguous()
+  clip_coeff = (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
+  return total_norm, clip_coeff.contiguous() if clip_coeff_out is None else clip_coeff_out.assign(clip_coeff)
 
 @functools.cache
 def _adamw_master_kernel(m:UOp, v:UOp, master:UOp, param:UOp, grad:UOp, lr:UOp, b1_t:UOp, b2_t:UOp, clip_coeff:UOp,
