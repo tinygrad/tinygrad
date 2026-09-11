@@ -141,6 +141,20 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
+def is_physical_allreduce_copy(copy:UOp) -> bool:
+  x = copy.src[0]
+  return (copy.tag == ("allreduce",) or (x.op is Ops.SHRINK and x.tag == ("allreduce",)) or
+          (x.op is Ops.AFTER and x.src[0].op is Ops.SHRINK and x.src[0].tag == ("allreduce",)))
+
+def copy_to_anon_store(x:UOp, copy:UOp):
+  # Physical allreduce slices retain their runtime views for split_copy_slice below.
+  if is_physical_allreduce_copy(copy): return None
+  # the buffer created here is inside the call and is not persisted, like the buffers created for contiguous
+  # copies must read from a whole buffer, not a view: materialize anything lacking buffer identity (SDMA can't do offset copies)
+  if not x.has_buffer_identity(after_ok=True): x = x.contiguous()
+  buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
+  return buf.after(buf.store(x)).reshape(copy.shape)
+
 def forward_assembled_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
   """Retarget a complete set of disjoint slice writes to an already allocated output buffer."""
   while target.op is Ops.RESHAPE: target = target.src[0]
@@ -392,6 +406,14 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # copy to same device is a no-op
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
 
+  # a COPY in src[1] of a plain STORE can just be removed: a STORE to a buffer on a different device is a COPY
+  (UPat(Ops.STORE, src=(UPat.var("dst"), UPat(Ops.COPY, src=(UPat.var("x"),), name="cpy"))),
+   lambda dst,x,cpy: dst.store(x) if not is_physical_allreduce_copy(cpy) and dst.device == cpy.device and
+   dst.has_buffer_identity(after_ok=True) else None),
+
+  # a bare COPY is an anonymous store: realize it as a STORE into a fresh call-local buffer on the copy device
+  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), copy_to_anon_store),
+
   # copy on reshape is reshape on copy
   (UPat(Ops.COPY, src=(UPat(Ops.RESHAPE, name="shp"),), name="cpy"), lambda shp,cpy: shp.src[0].copy_to_device(cpy.device).reshape(shp.shape)),
 
@@ -431,6 +453,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 ])
 
 def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
+  if not is_physical_allreduce_copy(copy): return None
   # Tagged copies are the payload of the physical-view STORE synthesized below. Leave them intact for
   # split_copy_slice instead of recursively materializing another destination.
   if copy.tag == ("allreduce",): return None
