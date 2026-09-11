@@ -8,7 +8,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
-from tinygrad.uop.ops import resolve_returned_after, remove_all_tags
+from tinygrad.uop.ops import resolve_returned_after
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
@@ -80,6 +80,10 @@ def mint_tagged_storage(x:UOp):
   if 0 in x.shape: return src
   buf = x.empty_like()
   return buf.after(buf.store(src)).replace(tag=x.tag)
+
+# Allocation provenance is local to Callify, while physical allreduce annotations are consumed later by the scheduler.
+pm_remove_allocation_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x:
+  x.replace(tag=None) if x.tag is not None and x.tag not in {("allreduce",), ("allreduce_accumulate",)} else None)])
 
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -211,6 +215,11 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
   return b.param_like(len(ctx.replacements)-1)
 
+def replace_realized_allreduce_view(ctx:AllocCtx, b:UOp):
+  # The call body receives an ordinary PARAM, but the runtime argument must retain the physical-view tag: its SHRINK
+  # operands are (offset, size), not the ordinary (start, end). Dropping the tag corrupts every nonzero packed offset.
+  return replace_input_buffer(ctx, b)
+
 # unbound BUFFERs get canonical scope-local id slots here so structurally identical calls hash identically for the
 # schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
 def canonicalize_unbound_buffer(ctx:AllocCtx, b:UOp):
@@ -230,10 +239,15 @@ pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay, and unbound BUFFERs too)
   (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL and not b.is_unbound else None),
-  # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
+  # replace buffer views created in this Callify
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
   # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
   (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
+])
+
+pm_replace_realized_allreduce_views = PatternMatcher([
+  (UPat(Ops.SHRINK, tag={("allreduce",)}, name="b"), lambda ctx,b:
+   replace_realized_allreduce_view(ctx, b) if b._base_buffer_is_realized() else None),
 ])
 
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
@@ -270,7 +284,10 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
         (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
       ctx.stores.append(u)
       if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
-  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
+  stores = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_realized_allreduce_views, ctx=ctx,
+                         walk=True, name="replace realized allreduce views")
+  ret = graph_rewrite(stores, pm_replace_buf+pm_remove_allocation_tags, ctx=ctx,
+                      bottom_up=True, name="replace bufs").call(*ctx.replacements)
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, ctx.buffer_map

@@ -2,9 +2,11 @@ import unittest
 from tinygrad import Tensor, UOp, dtypes
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, KernelInfo
-from tinygrad.schedule.allreduce import create_allreduce_function, handle_allreduce, _is_stable_custom_output, is_allreduce_linear_output
+from tinygrad.schedule.allreduce import create_allreduce_function, handle_allreduce, _allreduce_view, _is_stable_custom_output
+from tinygrad.schedule.allreduce import is_allreduce_linear_output
 from tinygrad.schedule.prepare import prepare_rangeify, _accumulate_linear_allreduce, _accumulate_linear_replicated, walk_mop
 from tinygrad.schedule.rangeify import no_indexing_calls
+from tinygrad.tensor import transform_to_call
 from test.helpers import KernelCountException
 from tinygrad.engine.realize import run_linear
 
@@ -53,6 +55,20 @@ class TestRingAllReduce(unittest.TestCase):
     src = UOp.param(1, dtypes.float, (64,), device="NULL")
     view = src.shrink(((8, 24),)).rtag(("allreduce",))
     self.assertIs(walk_mop(view), view)
+
+  def test_callify_keeps_physical_view_tag(self):
+    buf = UOp.new_buffer("CPU", 16, dtypes.float)
+    view = _allreduce_view(buf, 4, 8)
+    call, _ = transform_to_call(UOp.sink(view.after(view.store(view.const_like(1)))))
+    views = [x for x in call.toposort() if x.op is Ops.SHRINK]
+    self.assertEqual([(x.shape, x.tag) for x in views], [((4,), ("allreduce",))])
+
+  def test_callify_parameterizes_realized_physical_view(self):
+    buf = Tensor.zeros(16).realize().uop
+    view = _allreduce_view(buf, 4, 8)
+    call, _ = transform_to_call(UOp.sink(view + 1))
+    self.assertTrue(any(x.op is Ops.PARAM and x.shape == (4,) for x in call.toposort()))
+    self.assertIn(view, call.src[1:])
 
   def test_classify_linear_allreduce_output_with_direct_write(self):
     devices = ("NULL", "NULL:1")
