@@ -111,7 +111,7 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5, 6), outs=(0,), ins=(1, 2, 3, 4, 5, 6)))
+             arg=replace(info:=ProgramInfo.from_sink(sink), outs=(0,), ins=info.globals[1:]))
 
 # ** MXFP4 GEMM custom kernel
 

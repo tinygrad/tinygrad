@@ -25,7 +25,7 @@ def _custom_fwd(fp8_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_out:UOp,
   src = _src()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5, 6), outs=(0, 1, 2, 3), ins=(4, 5, 6)))
+             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5, 6), outs=(0, 1, 2, 3), ins=(3, 4, 5, 6)))
 
 @functools.cache
 def _custom_fwd_add(fp8_out:UOp, h_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax_out:UOp,
@@ -43,7 +43,7 @@ def _custom_fwd_add(fp8_out:UOp, h_out:UOp, x_normed_out:UOp, rrms_out:UOp, amax
   src = _src()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5, 6, 7, 8), outs=(0, 1, 2, 3, 4), ins=(5, 6, 7, 8)))
+             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5, 6, 7, 8), outs=(0, 1, 2, 3, 4), ins=(4, 5, 6, 7, 8)))
 
 @functools.cache
 def _custom_bwd(grad_x:UOp, grad_weight_partial:UOp,

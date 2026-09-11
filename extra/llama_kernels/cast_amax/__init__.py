@@ -24,7 +24,7 @@ def _custom_fused_bwd_w13(grad_xw13_fp8:UOp, grad_amax_next:UOp, grad_amax:UOp,
   src, lib = compile_cpp(pathlib.Path(__file__).parent, "cast_amax_bwd_w13.cpp", n_elems, hidden)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5, 6), outs=(0, 1, 2), ins=(3, 4, 5, 6)))
+             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5, 6), outs=(0, 1, 2), ins=(1, 3, 4, 5, 6)))
 
 @functools.cache
 def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_out:UOp, xw13:UOp, amax_state:UOp, grad_amax_state:UOp,
@@ -39,7 +39,7 @@ def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_out:UOp, xw13:UOp, amax_state:
   src, lib = compile_cpp(pathlib.Path(__file__).parent, "cast_amax_fwd_w13.cpp", n_elems, hidden)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3), outs=(0, 1), ins=(2, 3)))
+             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3), outs=(0, 1), ins=(1, 2, 3)))
 
 def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   _, _, xw13, amax_state, grad_amax_state, next_grad_amax_state = kernel.src[1:]

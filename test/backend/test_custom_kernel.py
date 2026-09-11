@@ -470,7 +470,7 @@ class TestCustomKernel(unittest.TestCase):
     def custom_src_kernel(A:UOp, B:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-                 arg=replace(ProgramInfo.from_sink(sink), globals=(0,), outs=(0,), ins=()))
+                 arg=replace(ProgramInfo.from_sink(sink), globals=(0,), outs=(0,), ins=(0,)))
     a = Tensor.custom_kernel(a.reshape(2, 2).clone(), a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
     self.assertEqual(a.tolist(), [[1, 1], [2, 3]])
 

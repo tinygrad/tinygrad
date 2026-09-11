@@ -20,7 +20,7 @@ def make_matmul_kernel(name:str, src:str, local_size:int):
     lib = Device[Device.DEFAULT].compiler.compile_cached(src)
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                  UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
-               arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2), outs=(2,), ins=(0, 1)))
+               arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2), outs=(2,), ins=(0, 1, 2)))
   return fxn
 
 if __name__ == "__main__":
