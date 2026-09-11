@@ -220,13 +220,6 @@ def replace_realized_allreduce_view(ctx:AllocCtx, b:UOp):
   # operands are (offset, size), not the ordinary (start, end). Dropping the tag corrupts every nonzero packed offset.
   return replace_input_buffer(ctx, b)
 
-def parameterize_minted_storage(ctx:AllocCtx, a:UOp):
-  # Minting gives held values explicit storage. Keep that storage as a call argument so subsequent captures see the
-  # same buffer identity instead of treating it as schedule-local scratch.
-  b = a.src[0].unsharded_base
-  if b.op is not Ops.BUFFER or not b.is_unbound or a.tag is None or not all(isinstance(t, UOp) for t in a.tag): return None
-  return a.substitute({b:replace_input_buffer(ctx, b)}, walk=True)
-
 # unbound BUFFERs get canonical scope-local id slots here so structurally identical calls hash identically for the
 # schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
 def canonicalize_unbound_buffer(ctx:AllocCtx, b:UOp):
@@ -255,10 +248,6 @@ pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
 pm_replace_realized_allreduce_views = PatternMatcher([
   (UPat(Ops.SHRINK, tag={("allreduce",)}, name="b"), lambda ctx,b:
    replace_realized_allreduce_view(ctx, b) if b._base_buffer_is_realized() else None),
-])
-
-pm_parameterize_minted_storage = PatternMatcher([
-  (UPat(Ops.AFTER, name="a"), parameterize_minted_storage),
 ])
 
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
@@ -295,8 +284,8 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
         (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
       ctx.stores.append(u)
       if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
-  stores = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_realized_allreduce_views+pm_parameterize_minted_storage, ctx=ctx,
-                         walk=True, name="parameterize realized storage")
+  stores = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_realized_allreduce_views, ctx=ctx,
+                         walk=True, name="replace realized allreduce views")
   ret = graph_rewrite(stores, pm_replace_buf+pm_remove_allocation_tags, ctx=ctx,
                       bottom_up=True, name="replace bufs").call(*ctx.replacements)
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
