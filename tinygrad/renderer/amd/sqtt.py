@@ -648,6 +648,14 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   from tinygrad.viz.serve import amd_decode
   pc_map = amd_decode(lib, target)
   wave_pc:dict[tuple[int, int], int] = {}
+  cdna_imm_queue:dict[tuple[int, int], list[CDNA_ISSUE|None]] = {}
+  def cdna_imm_dequeue(key:tuple[int, int]) -> Iterator[tuple[PacketType, InstructionInfo]]:
+    pending = cdna_imm_queue[key]
+    while pending and (p:=pending[0]) is not None:
+      pending.pop(0)
+      if (inst:=pc_map[pc:=wave_pc[key]]).op_name not in {'S_NOP', 'S_WAITCNT', 'S_SETPRIO'}: continue
+      wave_pc[key] += inst.size()
+      yield (p, InstructionInfo(pc, key[1], inst))
   # RDNA selects one SIMD for instruction tracing, CDNA traces multiple SIMDs
   simd:int = 0
   for p in decode(data):
@@ -668,12 +676,11 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
           yield (p, InstructionInfo(pc, wave, inst))
     elif isinstance(p, CDNA_ISSUE):
       for wave in range(10):
-        if (p.inst >> (wave * 2)) & 3 == 3:
-          inst = pc_map[pc:=wave_pc[(p.simd, wave)]]
-          if getattr(inst, 'op_name', '') not in {'S_NOP', 'S_WAITCNT'}: continue
-          wave_pc[(p.simd, wave)] += inst.size()
-          yield (p, InstructionInfo(pc, wave, inst))
+        if (status:=(p.inst >> (wave * 2)) & 3) in {2, 3}:
+          cdna_imm_queue.setdefault(key:=(p.simd, wave), []).append(p if status == 3 else None)
+          yield from cdna_imm_dequeue(key)
     elif isinstance(p, CDNA_INST):
+      cdna_imm_queue[(p.simd, p.wave)].pop(0)
       inst = pc_map[pc:=wave_pc[(p.simd, p.wave)]]
       if p.op == InstOpCDNA.JUMP:
         x = getattr(inst, 'simm16') & 0xffff
@@ -681,6 +688,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       else:
         wave_pc[(p.simd, p.wave)] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
+      yield from cdna_imm_dequeue((p.simd, p.wave))
     # map INST events on this SIMD to the program counter, we know the waves
     elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)) and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_")):
       inst = pc_map[pc:=wave_pc[(simd, p.wave)]]

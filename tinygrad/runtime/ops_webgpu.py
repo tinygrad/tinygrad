@@ -189,7 +189,7 @@ class WebGpuDevice(Compiled):
     super().__init__(device, WebGpuAllocator(self), [WGSLRenderer], WebGPUProgram,
                      arch="shader-f16" * (webgpu.WGPUFeatureName_ShaderF16 in self.features))
 
-  def synchronize(self): QueueOnSubmittedWorkDone(self.queue)
+  def synchronize(self, timeout:int|None=None): QueueOnSubmittedWorkDone(self.queue)
 
   @suppress_finalizing
   def free(self, buf:webgpu.WGPUBuffer):

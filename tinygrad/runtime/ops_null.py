@@ -51,6 +51,8 @@ class NullGraph(MultiGraphRunner):
     return 1e-1
 
 class NullDevice(Compiled):
+  def synchronize(self, timeout:int|None=None): pass
+
   def __init__(self, device:str):
     assert (emu:=getenv("EMULATE", "")) == "", \
       "EMULATE is deprecated, use DEV=NULL:HIP:"+{"AMD":"gfx1100", "AMD_RDNA4":"gfx1201", "AMD_CDNA4":"gfx950"}.get(emu, "<arch>")

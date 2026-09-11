@@ -3,7 +3,7 @@ from typing import cast, Any
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, hashlib, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass, replace
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HWQueue, encode_submit, to_name, patch, unwrap_view, rt_addr
+from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, to_name, patch, unwrap_view, rt_addr
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, ProfileProgramEvent
 from tinygrad.dtype import dtypes
@@ -476,7 +476,7 @@ class AMDSDMAQueue(HWQueue):
     sz = call.src[2].max_numel() * call.src[2].dtype.itemsize
     hdr = self.sdma.SDMA_OP_COPY | self.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_COPY_LINEAR)
     for off in range(0, sz, self.max_copy_size):
-      self.q(hdr, self.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(sz-off, self.max_copy_size)-1), 0,
+      self.q(hdr, min(sz-off, self.max_copy_size)-1, 0,
              *(a + UOp.const(off, dtypes.uint64) if off else a for a in (call.src[2].getaddr(self.devs), call.src[1].getaddr(self.devs))))
 
   def wait(self, signal:UOp, value:UOp, eq:bool=False):
@@ -556,9 +556,6 @@ def _amd_program_image(dev, lib:bytes) -> tuple[AMDProgramData, bytes]:
   return data, bytes(image).ljust(round_up(len(image), 4), b"\x00") # the program is uploaded as whole dwords
 
 class AMDAllocator(Allocator['AMDDevice']):
-  def __init__(self, dev:AMDDevice):
-    super().__init__(dev, supports_copy_from_disk=dev.has_copy_queue, supports_transfer=dev.has_copy_queue and not dev.is_usb)
-
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_copy_queue)
 
@@ -832,7 +829,7 @@ class USBIface(PCIIface):
 
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
-class AMDDevice(HCQ2Compiled):
+class AMDDevice(Compiled):
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
   sleep_timeout_ms = 200
   max_scratch_psize = 0
@@ -850,7 +847,7 @@ class AMDDevice(HCQ2Compiled):
   def __init__(self, device:str=""):
     self.iface = self._select_iface(device)
     self.is_usb = isinstance(self.iface, USBIface)
-    if self.is_usb: self.rt_nbytes = 4 << 20
+    self.can_recover, self.rtalloc_size = self.is_am(), (4 if self.is_usb else 64)<<20
 
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
@@ -874,12 +871,11 @@ class AMDDevice(HCQ2Compiled):
                       bases={i: tuple(getattr(self.ip_off, f'NBIO_BASE__INST{i}_SEG{s}', 0) for s in range(9)) for i in range(6)})
 
     self.is_aql = getenv("AMD_AQL", int(self.xccs > 1))
-    self.max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
+    self.max_copy_size = 0x40000000 if (4, 4, 2) <= (v:=self.iface.ip_versions[am.SDMA0_HWIP]) < (5, 0, 0) or v >= (5, 2, 0) else 0x400000
     self.sdma_queues:dict = {}
-    self.has_copy_queue = not getenv("AMD_DISABLE_SDMA")
 
     allocator = USBAllocator(self) if self.is_usb else AMDAllocator(self)
-    super().__init__(device, allocator, [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, can_recover=self.is_am(), arch=self.arch)
+    super().__init__(device, allocator, [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, arch=self.arch)
 
     # Scratch setup
     self.max_private_segment_size = 0
@@ -949,6 +945,11 @@ class AMDDevice(HCQ2Compiled):
       (1 << 20) if self.is_usb else (16 << 20), eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size,
       debug_memory_size=round_up(self.wave_cnt * 32, 64))
+
+  @functools.cached_property
+  def has_copy_queue(self) -> bool:
+    self.has_copy_queue = False # queue setup can allocate buffers that check this property
+    return self.sdma_queue(0) is not None
 
   def sdma_queue(self, idx:int):
     if getenv("AMD_DISABLE_SDMA"): return None

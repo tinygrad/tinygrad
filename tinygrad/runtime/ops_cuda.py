@@ -124,7 +124,7 @@ class CUDADevice(Compiled):
 
   def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(cuda.cuDeviceGetCount(ctypes.byref(x)))).value
 
-  def synchronize(self):
+  def synchronize(self, timeout:int|None=None):
     check(cuda.cuCtxSetCurrent(self.context))
     check(cuda.cuCtxSynchronize())
     for opaque,sz,options in self.pending_copyin: self.allocator.free(opaque, sz, options)

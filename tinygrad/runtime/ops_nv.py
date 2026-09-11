@@ -3,20 +3,20 @@ import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, itertool
 assert sys.platform != 'win32'
 from typing import Any
 from dataclasses import dataclass, replace
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HWQueue, encode_submit, patch, to_name, unwrap_view
+from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, BumpAllocator, hcq_filter_visible_devices
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
-from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
+from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops, lower_and_compile, run_linear
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, TinyELF
 from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, PROFILE, ContextVar, VIZ
-from tinygrad.helpers import ProfileEvent
+from tinygrad.helpers import ProfileEvent, unwrap
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.runtime.autogen import nv_570, nv_580, nv_610, mesa
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
-from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
+from tinygrad.runtime.support.system import PCIIfaceBase, MAP_FIXED
 from tinygrad.renderer.nir import NAKRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
@@ -95,6 +95,9 @@ class QMD:
 
 class NVQueue(HWQueue):
   dev:NVDevice
+  q_rewrite = HWQueue.q_rewrite + PatternMatcher([
+    (UPat(Ops.INS, arg=("nv", dtypes.void), name="u"), lambda ctx, u: ctx.q(*u.src)),
+  ])
 
   def nvm(self, subc:int, mthd:int, *vals, typ=2): self.q(*nvm(subc, mthd, *vals, typ=typ))
 
@@ -323,7 +326,7 @@ class NVAllocator(Allocator['NVDevice']):
     cmds += nvm(4, nv_gpu.NVC9B0_SET_INTRA_TOP_BUF_OFFSET, (filter_addr + dev.intra_top_off) >> 8)
     if dev.intra_unk_off is not None: cmds += nvm(4, 0x4dc, (filter_addr + dev.intra_unk_off) >> 8)
     cmds += nvm(4, nv_gpu.NVC9B0_EXECUTE, 0)
-    dev._submit_cmds(dev.fifos["NVDEC:0"], *cmds)
+    dev._submit_cmds("NVDEC:0", *cmds)
 
 # *****************
 # device
@@ -512,7 +515,7 @@ class NVKIface:
     mem = buf.meta
     if buf.device.split(":")[0] in {"CPU", "PYTHON", "NPY"}:
       if buf._buf % 0x1000: raise RuntimeError("Host mapping requires a page-aligned address")
-      if (mem:=next((m.meta[0] for d, m in buf.get_storage().maps.items() if d.startswith("NV")), None)) is None:
+      if (mem:=next((m.meta[0] for d, m in buf.get_storage().maps.items() if d.device.startswith("NV")), None)) is None:
         return replace(mem:=self.alloc(buf.nbytes, host=True, cpu_addr=buf._buf), meta=(mem.meta, True))
     elif buf.device.split(":")[0] != "NV": raise RuntimeError(f"Cannot map {buf.device} on {self.dev.device}")
     return replace(mapping:=self._gpu_uvm_map(buf._buf, mem.length, mem.hMemory, create_range=False), meta=(mapping.meta, False))
@@ -551,12 +554,13 @@ class PCIIface(PCIIfaceBase):
 
 class MOCKIface(NVKIface): count = 1
 
-class NVDevice(HCQ2Compiled):
+class NVDevice(Compiled):
   ifaces = [NVKIface, PCIIface, MOCKIface]
   sleep_timeout_ms = 200
   pm_encode = PatternMatcher([
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_compute", name="submit"), lambda ctx, submit: encode_submit(NVComputeQueue(ctx, submit))),
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_copy", name="submit"), lambda ctx, submit: encode_submit(NVCopyQueue(ctx, submit))),
+    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_nv_raw", name="submit"), lambda ctx, submit: encode_submit(NVQueue(ctx, submit))),
   ])
 
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
@@ -611,14 +615,15 @@ class NVDevice(HCQ2Compiled):
     compute = self._new_gpu_fifo("COMPUTE:0", self.ctxshare, self.channel_group, offset=0, entries=0x10000, compute=True)
     copy = self._new_gpu_fifo("COPY:0", self.ctxshare, self.channel_group, offset=0x100000, entries=0x10000)
     self.iface.rm_control(self.channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
+    self.fifos = {"COMPUTE:0": compute, "COPY:0": copy}
 
-    self._submit_cmds(compute, *nvm(1, nv_gpu.NVC6C0_SET_OBJECT, self.iface.compute_class),
+    self._submit_cmds("COMPUTE:0", *nvm(1, nv_gpu.NVC6C0_SET_OBJECT, self.iface.compute_class),
                        *nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, *data64(self.local_mem_window)),
                        *nvm(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, *data64(self.shared_mem_window)))
-    self._submit_cmds(copy, *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, self.iface.dma_class))
+    self._submit_cmds("COPY:0", *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, self.iface.dma_class))
 
     if self.pma_enabled: self._prof_init() # the sampler binds to the channel group, so it only comes up once the channels do
-    return {"COMPUTE:0": compute, "COPY:0": copy}
+    return self.fifos
 
   def _new_gpu_fifo(self, name:str, ctxshare, channel_group, offset=0, entries=0x400, compute=False, video=False) -> GPFifo:
     notifier = Buffer(self.device, size:=48 << 20, dtypes.uint8, opaque=self.iface.alloc(size, uncached=True))
@@ -666,24 +671,16 @@ class NVDevice(HCQ2Compiled):
       nv_gpu.NV2080_CTRL_GR_GET_INFO_PARAMS(grInfoListSize=len(infos), grInfoList=ctypes.addressof(infos)))
     return [x.data for x in infos]
 
-  def _push(self, fifo:GPFifo, cmds:list[int]): # a pushbuffer built in python: channel setup and video decode
-    (buf:=self.rt_view(len(cmds) * 4)).host.view(fmt='I')[:] = array.array('I', cmds)
-
-    put = fifo.put_value.host.view(fmt='Q')
-    fifo.ring.host.view(fmt='Q')[put[0] % fifo.entries] = buf._buf | (len(cmds) << 42) | (1 << 41)
-    fifo.gpput.host.view(fmt='I')[0] = (put[0] + 1) % fifo.entries
-
-    System.memory_barrier()
-    self.gpu_mmio[0x90 // 4] = fifo.token
-    put[0] += 1
-
-  def _submit_cmds(self, fifo:GPFifo, *cmds:int): # runs cmds once everything already submitted is done, then bumps the timeline
-    tl, addr = self.timeline.host.view(fmt='Q'), self.timeline._buf
-    self._push(fifo, nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(addr), *data64_le(tl[1]),
-                         nv_flags("NVC56F_SEM_EXECUTE", operation="acq_circ_geq", payload_size="64bit")) + list(cmds) +
-                     nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(addr), *data64_le(tl[1] + 1),
-                         nv_flags("NVC56F_SEM_EXECUTE", operation="release", release_wfi="en", payload_size="64bit")))
-    tl[1] += 1
+  def _submit_cmds(self, queue:str, *cmds:int): # channel setup and video decode use the same runtime submit as kernels
+    tl = timeline(devs:=(self.device,))
+    value = tl.index(1).load()
+    submit = make_submit(
+      UOp(Ops.INS, arg=("wait", dtypes.void), src=(tl, value)),
+      UOp(Ops.INS, arg=("nv", dtypes.void), src=(UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes()),)),
+      UOp(Ops.INS, arg=("store", dtypes.void), src=(tl, value + 1)), devs=devs, queue=queue).replace(arg="submit_nv_raw")
+    call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_submit")).call(aux=HCQInfo(devs))
+    linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
+    run_linear(hcq_link(linear, allow_cache=True), jit=True, update_stats=False, wait=True)
 
   def _ensure_has_local_memory(self, required):
     if self.slm_per_thread >= required: return
@@ -693,7 +690,7 @@ class NVDevice(HCQ2Compiled):
     self.shader_local_mem = Buffer(self.device, round_up(bytes_per_tpc*self.num_tpc_per_gpc*self.num_gpcs, 0x20000), dtypes.uint8,
                                    options=BufferSpec(nolru=True), preallocate=True)
 
-    self._submit_cmds(self.fifos["COMPUTE:0"], *nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, *data64(self.shader_local_mem._buf)),
+    self._submit_cmds("COMPUTE:0", *nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, *data64(self.shader_local_mem._buf)),
                        *nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, *data64(bytes_per_tpc), 0xff))
 
   def _ensure_has_vid_hw(self, w, h):
@@ -709,7 +706,7 @@ class NVDevice(HCQ2Compiled):
     if "NVDEC:0" not in self.fifos:
       self.fifos["NVDEC:0"] = self._new_gpu_fifo("NVDEC:0", 0, self.nvdevice, offset=0x200000, entries=2048, video=True)
       self.vid_coloc_buf, self.vid_filter_buf, self.vid_stat_buf = _vid_buf(coloc_sz), _vid_buf(filter_sz), _vid_buf(0x1000)
-      self._submit_cmds(self.fifos["NVDEC:0"], *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, self.iface.viddec_class))
+      self._submit_cmds("NVDEC:0", *nvm(4, nv_gpu.NVC6C0_SET_OBJECT, self.iface.viddec_class))
     else:
       if coloc_sz > self.vid_coloc_buf.nbytes: self.vid_coloc_buf = _vid_buf(coloc_sz)
       if filter_sz > self.vid_filter_buf.nbytes: self.vid_filter_buf = _vid_buf(filter_sz)
