@@ -191,14 +191,15 @@ class MockUSB3:
   def bulk_write(self, data:bytes, timeout:int=1000):
     assert self._bulk_write_op is not None
     op, address, size = self._bulk_write_op
-    assert len(data) == size
+    assert len(data) <= size
     if op == "sram_write":
       ctrl, (host_addr, region_size) = next((ca, r) for ca, r in self.state._dma_regions.items() if ca <= address < ca + r[1])
       ctypes.memmove(host_addr + (address - ctrl), data, min(len(data), region_size - (address - ctrl)))
       self.state.driver._emulate_execute()  # landed data may un-stall a ring polling on it (e.g. copyin sentinels)
     elif op == "pcie_write": self.state._pcie_write(address, data)
     else: raise RuntimeError(f"cannot bulk write for {op}")
-    self._bulk_write_op = None
+
+    self._bulk_write_op = (op, address + len(data), size - len(data)) if len(data) < size else None
 
   def bulk_write_async(self, payload:memoryview, timeout:int=10000) -> int:  # the mock completes transfers synchronously
     self.bulk_write(bytes(payload), timeout)
