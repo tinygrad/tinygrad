@@ -229,6 +229,7 @@ class MetalDevice(Compiled):
 
     # the buffers of an indirect command buffer must be resident: everything the device allocates is
     self.residency = checked(self.sysdevice.newResidencySetWithDescriptor_error, metal.MTLResidencySetDescriptor.new())
+    if self.residency.value is None: raise RuntimeError("METAL HCQ2 requires residency sets, but Metal failed to create one")
     self.queue.addResidencySet(self.residency)
     self.icbs:weakref.WeakKeyDictionary[Buffer, tuple] = weakref.WeakKeyDictionary() # an icb and its commands live as long as their words
 
