@@ -7,7 +7,8 @@ from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
-from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, estimate_uop, pm_flatten_linear, lower_and_compile, _resolve
+from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, get_call_written_bufs
+from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_compile, _resolve
 
 # *****************
 # 0. helpers
@@ -28,6 +29,7 @@ class HCQInfo:
   inputs:tuple[tuple[UOp, str, int], ...] = ()
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
   host_deps:tuple[tuple[str, str], ...] = () # (memory owner, accessing device)
+  written_bufs:tuple[UOp, ...] = () # write-only kernel outputs, retained for JIT input/output alias protection
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -231,14 +233,13 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
                               *[ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs])
   merged:list[UOp] = [] # the submits in order, after the fence
   for m in _merge_queues(submits): merged.append(m.after(fence, *merged[-1:]))
-  estimates = sum((estimate_uop(call) for call, _, _ in ctx.batch), start=Estimates()).simplify()
   sink = UOp.sink(*merged, arg=KernelInfo("hcq_submit"), tag=1)
   for pm in [Device[d].pm_batch for d in ctx.queues if Device[d].pm_batch is not None]: # a device adds its own work to the batch
     if (r:=pm.rewrite(sink)) is not None: sink = r
-  host_deps = tuple(dedup((host, devs[0]) for call, devs, _ in ctx.batch for buf in get_call_arg_uops(call)
-                         for host in to_tuple(buf.device) if host not in ctx.queues))
-  return sink.call(*(ctx.slots.values() if ctx.profile else ()),
-                   aux=HCQInfo(tuple(ctx.queues), kernels=tuple(kerns), estimates=estimates, host_deps=host_deps))
+  info = HCQInfo(tuple(ctx.queues), kernels=tuple(kerns), written_bufs=tuple(dedup(b for c, _, _ in ctx.batch for b in get_call_written_bufs(c))),
+    estimates=sum((estimate_uop(call) for call, _, _ in ctx.batch), start=Estimates()).simplify(),
+    host_deps=tuple(dedup((h, d[0]) for c, d, _ in ctx.batch for b in get_call_arg_uops(c) for h in to_tuple(b.device) if h not in ctx.queues)))
+  return sink.call(*(ctx.slots.values() if ctx.profile else ()), aux=info)
 
 @rewrite_group(new_ctx=False)
 def sched_batches(l:UOp, profile:bool) -> UOp:
