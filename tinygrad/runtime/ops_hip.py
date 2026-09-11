@@ -1,6 +1,6 @@
 import ctypes
 from tinygrad.helpers import mv_address, getenv, suppress_finalizing
-from tinygrad.device import Compiled, Allocator, BufferSpec, Program, TinyELF
+from tinygrad.device import BufferStorage, Compiled, Allocator, BufferSpec, Program, TinyELF
 from tinygrad.runtime.autogen import hip
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.support.c import init_c_var, init_c_struct_t
@@ -19,7 +19,7 @@ class HIPDevice(Compiled):
 
   def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(hip.hipGetDeviceCount(x))).value
 
-  def synchronize(self):
+  def synchronize(self, timeout:int|None=None):
     check(hip.hipSetDevice(self.device_id))
     check(hip.hipDeviceSynchronize())
 
@@ -57,11 +57,11 @@ class HIPProgram(Program[HIPDevice]):
       return ret.value * 1e-3
 
 class HIPAllocator(Allocator[HIPDevice]):
-  def _alloc(self, size:int, options:BufferSpec) -> tuple:
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     check(hip.hipSetDevice(self.dev.device_id))
-    return (init_c_var(hip.hipDeviceptr_t, lambda x: check(hip.hipMalloc(ctypes.byref(x), size))), None), None
+    return BufferStorage(init_c_var(hip.hipDeviceptr_t, lambda x: check(hip.hipMalloc(ctypes.byref(x), size))))
 
-  def _free(self, opaque, options:BufferSpec): check(hip.hipFree(opaque))
+  def _free(self, storage:BufferStorage, options:BufferSpec): check(hip.hipFree(storage.buf))
   def _copyin(self, dest, src: memoryview):
     check(hip.hipSetDevice(self.dev.device_id))
     check(hip.hipMemcpy(dest, mv_address(src), len(src), hip.hipMemcpyHostToDevice))

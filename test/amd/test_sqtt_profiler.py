@@ -1,4 +1,4 @@
-import unittest, contextlib
+import unittest, contextlib, functools
 from tinygrad import Device, Tensor, Context, TinyJit, dtypes
 from tinygrad.dtype import AddrSpace
 from test.helpers import is_hcq2_device
@@ -10,6 +10,7 @@ from tinygrad.codegen import to_program
 from tinygrad.viz.serve import load_amd_counters, VizData
 from tinygrad.renderer.amd.sqtt import decode, print_packets
 from tinygrad.renderer.amd.dsl import s, v
+from tinygrad.helpers import getenv
 
 @contextlib.contextmanager
 def save_sqtt():
@@ -20,6 +21,19 @@ def save_sqtt():
   Device[Device.DEFAULT].synchronize()
   Device[Device.DEFAULT]._at_profile_finalize()
   data[:] = [e for e in Compiled.profile_events[:profile_start] if isinstance(e, ProfileProgramEvent)]+Compiled.profile_events[profile_start:]
+  if getenv("PRINT_PKTS"):
+    sqtt_kernels = set()
+    for event in data:
+      if not isinstance(event, ProfileSQTTEvent) or not event.itrace: continue
+      print(f"\n=== SE {event.se} ===")
+      print_packets(decode(event.blob))
+      sqtt_kernels.add(event.kern)
+    for event in data:
+      if not isinstance(event, ProfileProgramEvent) or event.tag not in sqtt_kernels: continue
+      from test.null.test_viz import write_files, run_cli
+      with write_files(profile=data) as files:
+        out = run_cli(*files, "-s", f"{event.name} SQTT SE:0 PKTS", json_fmt=False)[0]["out"]
+      print(out)
 
 def map_sqtt(profile:list) -> list[dict]:
   load_amd_counters(data:=VizData(), profile)
@@ -99,16 +113,37 @@ class TestSQTTProfiler(unittest.TestCase):
 
   def test_asm(self):
     t = Tensor.empty(1)
-    with save_sqtt() as data:
+    with save_sqtt():
       t.custom_kernel(fxn=custom_asm_cdna if self.arch == "gfx950" else custom_asm_rdna)[0].realize()
-    for event in data:
-      if not isinstance(event, ProfileSQTTEvent) or not event.itrace: continue
-      print(f"\n=== SE {event.se} ===")
-      print_packets(decode(event.blob))
-    from test.null.test_viz import write_files, run_cli
-    with write_files(profile=data) as files:
-      out = run_cli(*files, "-s", "asm SQTT SE:0 PKTS", json_fmt=False)[0]["out"]
-    print(out)
+
+  def test_setprio(self):
+    if self.arch == "gfx950":
+      from tinygrad.runtime.autogen.amd.cdna import ins as isa
+      hw_id, wave_size, add = isa.HWREG.HW_REG_HW_ID.value, 64, isa.s_add_u32
+      barrier = [isa.s_barrier()]
+    elif self.arch.startswith("gfx12"):
+      from tinygrad.runtime.autogen.amd.rdna4 import ins as isa
+      hw_id, wave_size, add = isa.HWREG.HW_REG_WAVE_HW_ID1.value, 32, isa.s_add_co_u32
+      barrier = [isa.s_barrier_signal(ssrc0=-1), isa.s_barrier_wait(simm16=-1)]
+    else: self.skipTest("tested on CDNA4 and RDNA4")
+    def setprio_kernel(A, priority=0):
+      insts = [
+        isa.s_getreg_b32(s[0], hw_id),
+        isa.s_mov_b32(s[1], 0),
+        isa.s_setprio(0),
+        isa.s_cmp_eq_u32(s[0], 0),
+        isa.s_cbranch_scc1(1),
+        isa.s_setprio(priority),
+        *barrier,
+      ]
+      # eight waves contend for scalar issue slots
+      insts += [add(s[1], s[1], 1) for _ in range(64)]
+      insts += [isa.s_setprio(0), *barrier, isa.s_endpgm()]
+      return custom_asm(A, insts, wave_size*8, (96 if self.arch == "gfx950" else 64)*1024)
+
+    with Context(SQTT_LIMIT_SE=1), save_sqtt():
+      Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, priority=3))[0].realize()
+      Tensor.empty(1).custom_kernel(fxn=functools.partial(setprio_kernel, priority=0))[0].realize()
 
   def test_multiple_runs(self):
     t = Tensor.empty(1) + 1

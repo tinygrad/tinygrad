@@ -10,6 +10,7 @@ ZERO_OPTIM = getenv("ZERO_OPTIM", 0)
 FP8_AMAX_MARGIN = getenv("FP8_AMAX_MARGIN", 1.1)
 IMMEDIATE_SCALE = getenv("IMMEDIATE_SCALE", 0)
 MXFP8 = getenv("MXFP8", 0)
+PRESTORE_WT = getenv("PRESTORE_WT", 0)
 
 def stochastic_round_bf16(x:Tensor) -> Tensor:
   bits = x.bitcast(dtypes.uint32)
@@ -104,6 +105,12 @@ class GradAccClipAdamW(Optimizer):
         new_e8 = w_e8.reshape(t._inv_scale.shape)
         t._inv_scale.assign(new_e8.shard_like(t._inv_scale) if offloaded else new_e8)
         ret = w_q.reshape(t.shape)
+        if PRESTORE_WT and hasattr(t, '_wT_q'):
+          from extra.gemm.cdna_asm_gemm import _mx_block_scale_3d
+          w_phys = ret.cast(dtypes.bfloat16) * _mx_block_scale_3d(new_e8).cast(dtypes.bfloat16)
+          wT_q, wT_e8, _ = quantize_mxfp8(w_phys.transpose(1, 2))
+          t._wT_q.assign(wT_q.shard_like(t._wT_q) if offloaded else wT_q)
+          t._wT_e8.assign(wT_e8.shard_like(t._wT_e8) if offloaded else wT_e8)
         return ret.shard_like(t) if offloaded else ret
       from examples.mlperf.models.flat_llama import FP8_MAX
       if IMMEDIATE_SCALE:

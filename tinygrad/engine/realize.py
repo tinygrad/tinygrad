@@ -3,7 +3,7 @@ from typing import cast, Iterator, Any, Sequence
 import weakref, decimal, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.renderer import Estimates, Renderer
@@ -156,7 +156,10 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
          and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-    elif dest._host_mv() is not None: src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
+    elif dest.get_storage().host is not None and src.get_storage().host is not None:
+      for b in (dest, src): b.allocator.dev.synchronize()
+      with cpu_profile(f"{src.device} -> {dest.device}", f"{src.device}:COPY"): dest.host[:] = src.host[:]
+    elif dest._host_mv() is not None: src.allocator._copyout(dest.as_memoryview(allow_zero_copy=True), src._buf)
     else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return []
 
@@ -194,10 +197,11 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   if (info:=call.arg.aux).inputs:
-    addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(dev).va_addr + off for u, dev, off in info.inputs]
+    addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(dev) + off for u, dev, off in info.inputs]
     cast(Buffer, call.src[1 + info.table].buffer).host.view(fmt='Q')[:] = array.array('Q', addrs)
   ctx = replace(ctx, var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
   ets = exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,))
+  for host, dev in info.host_deps: Device[host].pending[Device[dev]] = Device[dev].timeline.host.view(fmt='Q')[1]
   if not (ctx.wait or PROFILE): return ets
 
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
@@ -279,11 +283,11 @@ pm_exec = PatternMatcher([
 
 from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQ_RUNTIME_DEV, HCQInfo # noqa: E402 # down here, hcq2 imports realize
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None) -> UOp:
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = lower_and_compile(linear)
-  linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
+  linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
   return linear
 
 def link_linear(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UOp:
@@ -291,13 +295,13 @@ def link_linear(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) ->
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   inputs = list(input_uops)
-  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs), input_uops=inputs)
+  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: track_stats(ctx, call.without_after, perf_counter_us(), pm_exec.rewrite(call.without_after, ctx))
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True), allow_cache=ctx.cache)
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True, cache=False), allow_cache=ctx.cache)
   while True:
     if clear_l2:
       if hasattr(dev:=Device[call.src[1].device], 'invalidate_caches'): dev.invalidate_caches()

@@ -1,10 +1,10 @@
 from __future__ import annotations
 import math, itertools
 from typing import cast
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, remove_all_tags
-from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element
+from tinygrad.uop.ops import axis_colors, axis_to_pos
 from tinygrad.device import Buffer
-from tinygrad.dtype import dtypes, Invalid
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
@@ -31,16 +31,6 @@ class Scheduler:
   def full_shape(self): return [ssimplify(x.src[0]) for x in self.rngs]
   @property
   def axis_types(self) -> list[AxisType]: return [x.arg[-1] for x in self.rngs]
-
-  # strings like ['g0', 'g1', 'l0', 'l1', 'l2', 'l3', 'l4', 'l5', 'R0', 'r0', 'r1', 'r2', 'u0', 'u1', 'u2']
-  def shape_str(self) -> list[str]:
-    ret: list[str] = []
-    cnt: dict[AxisType, int] = {}
-    for x in self.axis_types:
-      cnt[x] = (cnt[x] + 1) if x in cnt else 0
-      ret.append(f"{axis_letters[x]}{cnt[x]}")
-    return ret
-  def shape_str_to_axis(self, nms:list[str]) -> tuple[int, ...]: return tuple([self.shape_str().index(x) for x in nms])
 
   def copy(self) -> Scheduler:
     ret = Scheduler(self.ast, self.ren)
@@ -88,6 +78,7 @@ class Scheduler:
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
 
   def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False, input_new_rng:UOp|None=None):
+    check(rng.arg[-1] in split_targets[new_type], f"{new_type} is from {split_targets[new_type]}, not {rng.arg[-1]}")
     if (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
     new_rng = UOp.range(amount, next(self.opt_range), new_type, dtype=rng.dtype) if input_new_rng is None else input_new_rng
@@ -99,14 +90,19 @@ class Scheduler:
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
 
+  @property
+  def reduce_axes(self) -> list[int]:
+    red = {r for u in self.ast.backward_slice if u.op is Ops.REDUCE for s in u.src[1:] for r in s.ranges}
+    return [i for i,r in enumerate(self.rngs) if r in red]
+
   def upcast_size(self): return prod(self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
 
   @property
   def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK) \
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
   @property
-  def unrollable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE) \
-                                                  if isinstance(s:=self.full_shape[i], int) and s > 1]
+  def unrollable_dims(self) -> list[int]: return [i for i in self.reduce_axes if self.axis_types[i] in (AxisType.GROUP_REDUCE, AxisType.REDUCE) \
+                                                  and isinstance(s:=self.full_shape[i], int) and s > 1]
 
   def real_axis(self, op:OptOps, axis:int|None) -> int:
     if axis is None or op is OptOps.TC: return -1
@@ -160,11 +156,11 @@ class Scheduler:
       replaced_rng = UOp.range(new_sz, *rng.arg, dtype=rng.dtype)
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
-      store_targets = {s.src[0] for s in self.ast.backward_slice_with_self if s.op is Ops.STORE}
       for b in self.bufs:
-        if rng in (i:=b.src[1].get_idx()).backward_slice_with_self:
-          nb = b.replace(src=(b.src[0], i.valid(valid&b.src[1].get_valid())))
-          replaces[b] = nb if b in store_targets else valid.where(nb, UOp.const(Invalid))
+        if rng in (i:=b.src[1]).ranges: replaces[b] = b.replace(src=(b.src[0], i.get_idx().valid(valid&i.get_valid())))
+      for r in self.reduceops:
+        if any(rng in y.ranges for y in r.src[1:]):
+          replaces[r] = r.replace(src=(valid.where(r.src[0], UOp.const(identity_element(r.arg[0], r.dtype), r.dtype)),)+r.src[1:])
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
       try:
@@ -172,10 +168,9 @@ class Scheduler:
       except IndexError:
         raise KernelOptError
       check(rng.arg[-1] == AxisType.GLOBAL and altrng.arg[-1] == AxisType.GLOBAL, "swap only for globals")
-      self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1]), tag=1),
-                                      altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]), tag=1)},
-                                      name=f"swap {rng.arg[:-1]} {altrng.arg[:-1]}")
-      self.ast = graph_rewrite(self.ast, remove_all_tags, name="swap remove tags")
+      self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1])),
+                                      altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]))},
+                                      name=f"swap {rng.arg[:-1]} {altrng.arg[:-1]}", walk=True)
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
 
@@ -213,9 +208,6 @@ class Scheduler:
 
           if any(a.arg[-1] is AxisType.REDUCE for a in axes[:2]): raise KernelOptError("tensor core X/Y axes can't be REDUCE")
 
-          # tag the reduceop
-          self.ast = self.ast.substitute({reduceop: reduceop.replace(tag="TC")})
-
           # do optimizations and save the ranges
           try:
             for i,a in enumerate(axes):
@@ -244,27 +236,19 @@ class Scheduler:
             ne.append(new_range)
 
           if use_tensor_cores != 2:
-            # fix the srcs
-            reduceop = get_single_element([x for x in self.ast.toposort() if x.op is Ops.REDUCE and x.tag == "TC"])
-            tne = [x.replace(tag=1) for x in ne]
-            ret = reduceop.substitute(dict(zip(ne, tne)))
-            srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-            srcs = [x.substitute(dict(zip(tne, [ne[i] for i in argsort(p)]))) for x,p in zip(srcs, tc.permutes_for_shape_str(tc.base_shape_str()))]
+            reduceop = get_single_element([x for x in self.reduceops if axes[2] in UOp.sink(*x.src[1:]).ranges])
+            gate, mul = (r0.src[0], r0.src[1]) if (r0:=reduceop.src[0]).op is Ops.WHERE else (None, r0)
+            if mul.op is Ops.CAST: mul = mul.src[0]
+            ins = mul.src if gate is None else tuple(gate.where(x, UOp.const(0, x.dtype)) for x in mul.src)
+            bss = tc.base_shape_str()
+            srcs = [x.substitute(dict(zip(ne, [ne[i] for i in argsort(p)])), walk=True) for x,p in zip(ins, tc.permutes_for_shape_str(bss))]
 
-            # get reduce/upcast axes for the tensor cores
-            tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
-            base_upcast_axes = tuple([(s,2) for s in self.shape_str_to_axis(tc.base_upcast_axes())])
-            tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
-
-            # axes to range number (was done in lowerer)
-            tc_upcast_axes = tuple([tuple([(self.rngs[a].arg[0], sz) for a,sz in v]) for v in tc_upcast_axes])
-            tc_reduce_axes = tuple([self.rngs[a].arg[0] for a in tc_reduce_axes])
-            def with_missing_tc_axes(arg):
-              ret = list(arg)
-              for rn,_ in tc_upcast_axes[0]+tc_upcast_axes[1]:
-                if rn not in [x[0] for x in ret]: ret.append((rn, 1))
-              return tuple(ret)
-            tc_upcast_axes = tuple(with_missing_tc_axes(v) for v in tc_upcast_axes)
+            # get upcast axes for the tensor cores
+            base_upcast_axes = [ne[bss.index(s)].arg[0] for s in tc.base_upcast_axes()]
+            upcast_cnt = [int(math.log2(tc.elements_per_thread[i])) for i in range(3)]
+            # each operand upcasts its first upcast_cnt axes, the axes only A or B upcast are size 1 so the operands broadcast
+            tc_upcast_axes = tuple([tuple([(a, 2 if j < cnt else 1) for j,a in enumerate(base_upcast_axes[:max(cnt, *upcast_cnt[:2])])])
+                                    for cnt in upcast_cnt])
 
             # construct the op
             # TODO: remove tc_upcast_axes from the arg
@@ -274,7 +258,7 @@ class Scheduler:
                               tc.dims, self.ren.target.device, tc.threads, tc_upcast_axes=tc_upcast_axes)
 
             # preserve extra reduces
-            reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
+            reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x not in ne[len(tc.opts):]]
             if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, src=(tc_uop,)+tuple(reduce_ranges), arg=(Ops.ADD, 0))
             self.ast = self.ast.substitute({reduceop: tc_uop})
           self.tensor_core = tc
@@ -285,14 +269,9 @@ class Scheduler:
   @property
   def reduceops(self) -> list[UOp]: return [x for x in self.ast.backward_slice if x.op is Ops.REDUCE]
   @property
-  def reduceop(self) -> UOp|None:
-    if not (red := self.reduceops): return None
-    return UOp(Ops.REDUCE, src=red[0].src, arg=red[0].arg)
+  def reduceop(self) -> UOp|None: return red[0] if (red:=self.reduceops) else None
   @property
   def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.INDEX][::-1]
-  @property
-  def output_shape(self):
-    return [s if at not in {AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE} else 1 for s,at in zip(self.full_shape, self.axis_types)]
   @property
   def upcasted(self) -> int: return len(self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
   @property

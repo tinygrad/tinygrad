@@ -222,9 +222,7 @@ class TestTensorCores(unittest.TestCase):
     one = Tensor(1, dtype=tc.dtype_in)
     ma = (Tensor.rand(a.shape[0], 1) > 0.5).expand(a.shape).where(a, one)
     mb = (Tensor.rand(1, b.shape[1]) > 0.5).expand(b.shape).where(b, one)
-    # TODO: broken now, the padded K lanes multiply 1.0*1.0
-    with self.assertRaises(AssertionError):
-      helper_linearizer_opt(ma.matmul(mb, dtype=tc.dtype_out), [[tc_opt]], check_default_opt=False, atol=3e-2, rtol=1e-3)
+    helper_linearizer_opt(ma.matmul(mb, dtype=tc.dtype_out), [[tc_opt]], check_default_opt=False, atol=3e-2, rtol=1e-3)
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "not generated on EMULATED device")

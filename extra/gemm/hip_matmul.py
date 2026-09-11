@@ -34,9 +34,9 @@ num_threads = prod(local_size)
 # Can AMDAllocator initialized as device=0 by default?
 device = AMDDevice()
 hipallocator = AMDAllocator(device)
-a = hipallocator.alloc(N*N*4)[0][0]
-b = hipallocator.alloc(N*N*2)[0][0]
-c = hipallocator.alloc(N*N*2)[0][0]
+a = hipallocator.alloc(N*N*4).buf
+b = hipallocator.alloc(N*N*2).buf
+c = hipallocator.alloc(N*N*2).buf
 na = np.empty(N*N, np.float32)
 nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astype(np.float16)
 nc = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astype(np.float16)

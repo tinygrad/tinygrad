@@ -9,7 +9,7 @@ if __name__ == "__main__":
   dev: List[AMDDevice] = [Device[f"KFD:{i}"] for i in range(6)]
   print(f"got {len(dev)} devices")
 
-  buffers = [(rd:=random.choice(dev), rd.allocator.alloc(random.randint(1, 10000))[0][0]) for i in range(100)]
+  buffers = [(rd:=random.choice(dev), rd.allocator.alloc(random.randint(1, 10000)).buf) for i in range(100)]
 
   for _ in trange(100000):
     d1, b1 = random.choice(buffers)

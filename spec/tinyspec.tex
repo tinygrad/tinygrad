@@ -109,14 +109,14 @@ A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound
 \end{tabular}
 
 %% ============================================================
-\subsection*{{\color{loadred}Load Ops} \normalfont\small--- can change device or addrspace}
+\subsection*{{\color{loadred}Load Ops} \normalfont\small--- can change device or addrspace, anonymous store}
 
 \begin{tabular}{@{}l l l l@{}}
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Load} & (buf, alt?, gate?) & device, addrspace & Read (pull) from buffer into a new anonymous buffer. \\
-  & & & Note: this replaces \op{Copy} and \op{Contiguous}. \\
+\op{Load} & (buf, alt?, gate?) & --- & Read from buffer into AddrSpace.ALU. \\
+\op{Copy} & (buf,) & device & Copy buf to device arg. \\
 \bottomrule
 \end{tabular}
 

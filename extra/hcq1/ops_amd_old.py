@@ -3,11 +3,11 @@ from typing import cast
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from extra.hcq1.hcq import HCQCompiled, HCQAllocator, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, hcq_profile
-from tinygrad.runtime.support.hcq import HCQBuffer, FileIOInterface
+from extra.hcq1.hcq import HCQBuffer, HCQCompiled, HCQAllocator, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, hcq_profile
+from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
-from tinygrad.device import Compiled, BufferSpec, TinyELF
+from tinygrad.device import BufferStorage, Compiled, BufferSpec, TinyELF
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, TracingKey
 from tinygrad.helpers import ceildiv, unwrap, pluralize
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
@@ -55,7 +55,7 @@ class AMDComputeQueue(HWQueue):
 
   def __del__(self):
     if self.binded_device is not None:
-      self.binded_device.allocator.free(((self.hw_page, self.hw_page.meta), self.hw_page.view), self.hw_page.size,
+      self.binded_device.allocator.free(BufferStorage(self.hw_page, self.hw_page.meta, self.hw_page.view), self.hw_page.size,
                                        BufferSpec(cpu_access=True, nolru=True, uncached=True))
 
   def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, len(vals) - 1), *vals)
@@ -396,7 +396,7 @@ class AMDComputeQueue(HWQueue):
 
   def bind(self, dev:AMDDevice):
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))[0][0]
+    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True)).buf
     hw_view = self.hw_page.cpu_view().view(fmt='I')
     for i, value in enumerate(self._q): hw_view[i] = value
 
@@ -447,7 +447,7 @@ class AMDComputeAQLQueue(AMDComputeQueue):
 
   def bind(self, dev:AMDDevice):
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))[0][0]
+    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True)).buf
     self._cmds = self._prep_aql(self._q, self.hw_page)
     self._q = self.hw_page.cpu_view().view(fmt='I')
     return self
@@ -512,7 +512,7 @@ class AMDCopyQueue(HWQueue):
     if not getenv("AMD_SDMA_BIND", 0) or not dev.is_am(): return
 
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))[0][0]
+    self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True)).buf
     hw_view = self.hw_page.cpu_view().view(fmt='I')
     for i in range(qsz): hw_view[i] = self._q[i] if i < len(self._q) else 0
 
@@ -572,7 +572,7 @@ class AMDProgram(HCQProgram['AMDDevice']):
       if typ == 5: image[apply_image_offset:apply_image_offset+8] = struct.pack('<q', rel_sym_offset - apply_image_offset + addent) # R_AMDGPU_REL64
       else: raise RuntimeError(f"unknown AMD reloc {typ}")
 
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(nolru=True))[0][0]
+    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(nolru=True)).buf
     self.dev.allocator._copyin(self.lib_gpu, image)
     self.dev.synchronize()
 
@@ -643,9 +643,9 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
     super().__init__(dev, copy_bufs=getattr(dev.iface, 'copy_bufs', None),
                      supports_copy_from_disk=dev.has_sdma_queue, supports_transfer=dev.has_sdma_queue and not dev.is_usb())
 
-  def _alloc(self, size:int, options:BufferSpec) -> tuple:
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
     opaque = self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_sdma_queue)
-    return (opaque, opaque.meta), opaque.view
+    return BufferStorage(opaque, opaque.meta, opaque.view)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
@@ -981,6 +981,19 @@ class PCIIface(PCIIfaceBase):
 
   def device_fini(self): self.dev_impl.fini()
 
+  def alloc(self, size:int, **kwargs) -> HCQBuffer:
+    storage = super().alloc(size, **kwargs)
+    return HCQBuffer(storage.buf, storage.meta.mapping.size, meta=storage.meta, view=storage.host, owner=self.dev)
+
+  def free(self, buf:HCQBuffer):
+    if buf.owner == self.dev: super().free(BufferStorage(buf.va_addr, buf.meta, buf.view))
+    else: self.dev_impl.mm.unmap_range(buf.va_addr, round_up(buf.size, 0x1000))
+
+  def map(self, buf:HCQBuffer):
+    from types import SimpleNamespace
+    super().map(SimpleNamespace(device=buf.owner.device, _buf=buf.va_addr, nbytes=buf.size, meta=buf.meta))
+    return HCQBuffer(buf.va_addr, buf.size, meta=buf.meta, owner=buf.owner)
+
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
     if dev_id >= len(visible:=hcq_filter_visible_devices(USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001), "AMD")):
@@ -1086,7 +1099,7 @@ class AMDDevice(HCQCompiled):
 
       with (q:=cast(AMDComputeQueue, unwrap(self.hw_compute_queue_t)())).pred_exec((1 << self.xccs) - 1):
         q.pmc_start([(k, *self.pmc_counters[k]) for k in PMC_COUNTERS]).submit(self)
-      self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(nolru=True, uncached=True))[0][0]
+      self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(nolru=True, uncached=True)).buf
       self.allocator._copyin(self.pmc_buffer, memoryview(bytearray(self.pmc_buffer.size))) # zero pmc buffers, some counters have only lo part.
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
@@ -1095,8 +1108,8 @@ class AMDDevice(HCQCompiled):
       self.iface.require_profile_mode()
 
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
-      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE<<20, BufferSpec(nolru=True, uncached=True))[0][0] for _ in range(self.se_cnt * self.xccs)]
-      self.sqtt_wptrs = self.allocator.alloc(round_up(self.se_cnt * self.xccs * 4, 0x1000), BufferSpec(cpu_access=True, nolru=True))[0][0]
+      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE<<20, BufferSpec(nolru=True, uncached=True)).buf for _ in range(self.se_cnt * self.xccs)]
+      self.sqtt_wptrs = self.allocator.alloc(round_up(self.se_cnt * self.xccs * 4, 0x1000), BufferSpec(cpu_access=True, nolru=True)).buf
       self.sqtt_next_cmd_id = itertools.count(0)
 
     if self.is_am():

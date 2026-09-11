@@ -3,16 +3,38 @@ from typing import cast, Callable, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, collections, itertools
 from tinygrad.helpers import PROFILE, getenv, from_mv, cpu_profile, ProfileRangeEvent, unwrap
 from tinygrad.helpers import suppress_finalizing, TracingKey
-from tinygrad.device import BufferSpec, Compiled, Allocator, ProfileDeviceEvent, ProfileProgramEvent, Program, TinyELF
+from tinygrad.device import BufferStorage, Buffer, BufferSpec, Compiled, Allocator, ProfileDeviceEvent, ProfileProgramEvent, Program, TinyELF
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.renderer import Renderer
-from tinygrad.runtime.support.hcq import HCQBuffer
 
 SignalType = TypeVar('SignalType', bound='HCQSignal')
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
+
+class HCQBuffer:
+  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQBuffer|None=None, view:MMIOInterface|None=None, owner:Any=None):
+    self.va_addr, self.size, self.meta, self._base, self.view = va_addr, size, meta, _base, view
+    self._devs, self.owner = ([owner] if owner is not None else []), owner
+    self._mappings:dict[Compiled, HCQBuffer] = {} # mapping to the other devices
+
+  def offset(self, offset:int=0, size:int|None=None) -> HCQBuffer:
+    return HCQBuffer(self.va_addr+offset, size or (self.size - offset), owner=self.owner, meta=self.meta,
+      _base=self._base or self, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
+
+  def cpu_view(self) -> MMIOInterface:
+    assert self.view is not None, "buffer has no cpu_view"
+    return self.view
+
+  @property
+  def base(self) -> HCQBuffer: return self._base or self
+
+  @property
+  def mappings(self): return self._mappings if self._base is None else self._base._mappings
+
+  @property
+  def mapped_devs(self): return self._devs if self._base is None else self._base._devs
 
 class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
   """
@@ -282,7 +304,7 @@ class HCQProgram(Program[HCQDeviceType]):
     if PROFILE: Compiled.profile_events += [ProfileProgramEvent(dev.device, obj.name, obj.lib, base, self.prof_prg_counter, self.profile_key)]
 
   @staticmethod
-  def _fini(dev, buf, spec): dev.allocator.free(((buf, buf.meta), buf.view), buf.size, spec)
+  def _fini(dev, buf, spec): dev.allocator.free(BufferStorage(buf, buf.meta, buf.view), buf.size, spec)
 
   def fill_kernargs(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int|None, ...]=(), kernargs:HCQBuffer|None=None) -> HCQArgsState:
     """
@@ -359,7 +381,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       self.timeline_signal, self._shadow_timeline_signal = self.new_signal(value=0, is_timeline=True), self.new_signal(value=0, is_timeline=True)
 
     if comp_queue_t is not None:
-      self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))[0][0]
+      self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True)).buf
       self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
 
     self.can_recover = can_recover # Whether the device can recover from faults or timeouts
@@ -393,7 +415,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   def new_signal(self, **kwargs) -> SignalType:
     assert self.signal_t is not None, "Device does not support signals"
     if not HCQCompiled.signal_pool[pg:=self.peer_group]:
-      HCQCompiled.signal_pages[pg].append(alc:=self.allocator.alloc(self.sigalloc_size, BufferSpec(host=True, uncached=True, cpu_access=True))[0][0])
+      HCQCompiled.signal_pages[pg].append(alc:=self.allocator.alloc(self.sigalloc_size, BufferSpec(host=True, uncached=True, cpu_access=True)).buf)
       HCQCompiled.signal_pool[pg] += [alc.offset(offset=off, size=16) for off in range(0, alc.size, 16)]
       for dev in HCQCompiled.peer_groups[pg]: cast(HCQAllocator, dev.allocator)._map(alc)
     return self.signal_t(base_buf=HCQCompiled.signal_pool[pg].pop(), owner=self, **kwargs)
@@ -425,11 +447,11 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
 
   def _realloc(self, oldbuf:HCQBuffer|None, new_size:int, options:BufferSpec|None=None, force=False) -> tuple[HCQBuffer, bool]:
-    if oldbuf is not None: self.allocator.free(((oldbuf, oldbuf.meta), oldbuf.view), oldbuf.size, options=options)
-    try: buf, realloced = self.allocator.alloc(new_size, options=options)[0][0], True
+    if oldbuf is not None: self.allocator.free(BufferStorage(oldbuf, oldbuf.meta, oldbuf.view), oldbuf.size, options=options)
+    try: buf, realloced = self.allocator.alloc(new_size, options=options).buf, True
     except MemoryError:
       if force: raise
-      buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options)[0][0], False
+      buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options).buf, False
     return buf, realloced
 
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
@@ -455,8 +477,10 @@ class HCQAllocatorBase(Allocator[HCQDeviceType], Generic[HCQDeviceType]):
 
   def __init__(self, dev:HCQDeviceType, batch_size:int=(2 << 20), batch_cnt:int=32, copy_bufs=None, **kwargs):
     super().__init__(dev, **kwargs)
-    self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True))[0][0] for _ in range(batch_cnt)]
+    self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True)).buf for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
+
+  def map(self, buf:Buffer) -> BufferStorage: return BufferStorage(*self._map(buf.ensure_allocated()._buf))
 
   def _map(self, buf:HCQBuffer) -> tuple:
     if self.dev not in buf.mapped_devs:
@@ -468,10 +492,10 @@ class HCQAllocatorBase(Allocator[HCQDeviceType], Generic[HCQDeviceType]):
     return mapped, mapped.meta
 
   @suppress_finalizing
-  def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):
-    for dev in buf.mapped_devs: dev.synchronize()
-    for d, mb in buf.mappings.items(): d.allocator._do_unmap(mb)
-    if hasattr(self, '_do_free'): self._do_free(buf, options)
+  def _free(self, storage:BufferStorage, options:BufferSpec|None=None):
+    for dev in storage.buf.mapped_devs: dev.synchronize()
+    for d, mb in storage.buf.mappings.items(): d.allocator._do_unmap(mb)
+    if hasattr(self, '_do_free'): self._do_free(storage.buf, options)
 
   def _do_unmap(self, mb): self.dev.iface.free(mb)
 

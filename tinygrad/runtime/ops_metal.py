@@ -1,7 +1,7 @@
 import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platform
 from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
-from tinygrad.device import MMIOInterface, Compiled, Compiler, CompileError, Program, TinyELF, Allocator, ProfileDeviceEvent
+from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Compiler, CompileError, Program, TinyELF, Allocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
@@ -50,7 +50,7 @@ class MetalDevice(Compiled):
                      MetalGraph if 'virtual' not in from_ns_str(self.sysdevice.name()).lower() else None,
                      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
 
-  def synchronize(self):
+  def synchronize(self, timeout:int|None=None):
     for cbuf in self.mtl_buffers_in_flight:
       wait_check(cbuf)
       st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000
@@ -155,16 +155,15 @@ class MetalBuffer:
   def __init__(self, buf:metal.MTLBuffer, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
 
 class MetalAllocator(Allocator[MetalDevice]):
-  def _alloc(self, size:int, options) -> tuple:
+  def _alloc(self, size:int, options) -> BufferStorage:
     ret = metal.MTLBuffer(options.external_ptr) if options.external_ptr else \
       self.dev.sysdevice.newBufferWithLength_options(size, metal.MTLResourceStorageModeShared)
     setattr(ret, "retain", False) # Buffer is explicitly released in _free()
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
-    return (MetalBuffer(ret, size), None), MMIOInterface(addr, size) if (addr:=ret.contents()) is not None else None
+    return BufferStorage(MetalBuffer(ret, size), None, MMIOInterface(addr, size) if (addr:=ret.contents()) is not None else None)
 
   @suppress_finalizing
-  def _free(self, opaque:MetalBuffer, options):
-    if not options.external_ptr: opaque.buf.release()
+  def _free(self, storage:BufferStorage, options): storage.buf.buf.release()
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = src_dev.mtl_queue.commandBuffer().retained()

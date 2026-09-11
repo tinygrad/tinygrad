@@ -1,13 +1,15 @@
 import os, sys, mmap, io, ctypes, contextlib, pathlib
 from typing import Generator, Callable
 from tinygrad.helpers import OSX, round_up, mv_address
-from tinygrad.device import MMIOInterface, Compiled, Allocator
+from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Allocator
 with contextlib.suppress(ImportError):
   import _posixshmem
   from tinygrad.runtime.autogen import io_uring, libc
 
 class DiskDevice(Compiled):
   _tried_io_uring_init = False
+
+  def synchronize(self, timeout:int|None=None): pass
 
   def __init__(self, device:str):
     if not DiskDevice._tried_io_uring_init: self._iouring_setup()
@@ -79,11 +81,11 @@ class DiskBuffer:
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
   lru = False
-  def _alloc(self, size:int, options) -> tuple:
+  def _alloc(self, size:int, options) -> BufferStorage:
     self.dev._might_open(size)
-    return (opaque:=DiskBuffer(self.dev, size), None), MMIOInterface(mv_address(opaque._buf()), size)
+    return BufferStorage(opaque:=DiskBuffer(self.dev, size), None, MMIOInterface(mv_address(opaque._buf()), size))
 
-  def _free(self, opaque, options): self.dev._might_close()
+  def _free(self, storage:BufferStorage, options): self.dev._might_close()
   def _as_buffer(self, src:DiskBuffer): return src._buf()
   def _copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def _copyout(self, dest:memoryview, src:DiskBuffer):

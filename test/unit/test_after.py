@@ -42,19 +42,17 @@ class TestAfterCounterexamples(unittest.TestCase):
     # y = x**4, so dy/dx = 4*x**3. Currently raises "cycle detected while indexing".
     self.assertEqual(y.sum().gradient(x)[0].tolist(), [32.])
 
-  @unittest.expectedFailure
   def test_partial_store_gradient(self):
     x = Tensor([2., 3.]).realize()
     y = Tensor(x.uop.after(x[:1].uop.store(4)))
-    # y = [4, x[1]]. Currently returns [0., 0.].
+    # y = [4, x[1]]; only the untouched element depends on x.
     self.assertEqual(y.sum().gradient(x)[0].tolist(), [0., 1.])
 
-  @unittest.expectedFailure
   def test_partial_store_source_gradient(self):
     x = Tensor([4.])
     y = Tensor([2., 3.]).realize()
     z = Tensor(y.uop.after(y[:1].uop.store(x.uop)))
-    # x contributes once, not twice. Currently returns [2.].
+    # x contributes once, not twice.
     self.assertEqual(z.sum().gradient(x)[0].tolist(), [1.])
 
   def test_unrelated_store_gradient(self):
@@ -64,13 +62,25 @@ class TestAfterCounterexamples(unittest.TestCase):
     # Zeroing y does not change x.
     self.assertEqual(z.sum().gradient(x)[0].tolist(), [1.])
 
-  @unittest.expectedFailure
   def test_after_dependency_gradient(self):
     x = Tensor([2., 3.])
     y = x.clone()
     y[:1].assign(0)
-    # View assign creates a nested AFTER; currently raises in backward.
+    # View assign is an AFTER on a partial STORE; only the untouched element depends on x.
     self.assertEqual(y.sum().gradient(x)[0].tolist(), [0., 1.])
+
+  def test_view_assign_gradient(self):
+    for view, expected in ((lambda t: t.reshape(3, 2)[1:], [[1., 1., 0.], [0., 0., 0.]]),
+                           (lambda t: t.permute(1, 0)[1:], [[1., 0., 0.], [1., 0., 0.]]),
+                           (lambda t: t.flip((0, 1))[:1], [[1., 1., 1.], [0., 0., 0.]])):
+      with self.subTest(expected=expected):
+        x = Tensor([[1., 2., 3.], [4., 5., 6.]])
+        y = x.clone()
+        v = Tensor.full(view(y).shape, 7.)
+        view(y).assign(v)
+        gx, gv = y.sum().gradient(x, v)
+        self.assertEqual(gx.tolist(), expected)
+        self.assertEqual(gv.tolist(), Tensor.ones(v.shape).tolist())
 
   @unittest.expectedFailure
   def test_unordered_overlapping_stores_rejected(self):

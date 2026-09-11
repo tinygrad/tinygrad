@@ -10,30 +10,31 @@ class TestBuffer(unittest.TestCase):
     host = v.host
     host.view(fmt='H')[0] = 0x1234
     self.assertEqual(b.host.view(fmt='H')[2], 0x1234)
-    self.assertEqual(v._buf.va_addr, b._buf.va_addr + 4)
+    self.assertEqual(v._buf, b._buf + 4)
     self.assertIs(v.host, host)
     self.assertIs(v.meta, b.meta)
 
   def test_mapping(self):
     b = Buffer("CPU", 8, dtypes.uint8, initial_value=b"abcdefgh")
-    self.assertIs(b.get_storage("PYTHON")[0][1], b.get_buf("PYTHON"))
+    self.assertEqual(b.get_buf("PYTHON"), b._buf)
     v = b.view(4, dtypes.uint8, 2)
     mapped = v.get_storage("PYTHON")
-    self.assertEqual(bytes(mapped[0][0]), b"cdef")
-    self.assertIs(mapped[1], v.host)
-    self.assertIsNone(mapped[0][1])
-    self.assertIs(v.get_storage("PYTHON")[0], mapped[0])
+    self.assertEqual(mapped.buf, b._buf + 2)
+    self.assertEqual(bytes(mapped.host.mv), b"cdef")
+    self.assertIs(mapped.host, v.host)
+    self.assertIsNone(mapped.meta)
+    self.assertIs(v.get_storage("PYTHON"), mapped)
 
   def test_view_reallocation(self):
     b = Buffer("CPU", 8, dtypes.uint8)
     v = b.view(4, dtypes.uint8, 2)
-    old = v.get_storage("PYTHON")[0]
+    old = v.get_storage("PYTHON")
     b.deallocate()
     b.allocate()
     self.assertFalse(v.is_allocated())
     v.host[:] = b"test"
-    self.assertIsNot(v.get_storage("PYTHON")[0], old)
-    self.assertEqual(bytes(v.get_buf("PYTHON")), b"test")
+    self.assertIsNot(v.get_storage("PYTHON"), old)
+    self.assertEqual(bytes(v.get_storage("PYTHON").host.mv), b"test")
 
   def test_cache_owned_storage_only(self):
     for opaque in (None, memoryview(bytearray(8))):

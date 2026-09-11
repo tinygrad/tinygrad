@@ -5,7 +5,7 @@ gfx950 hardware when USE_HW=1.
 """
 import ctypes, struct, unittest
 import tinygrad.runtime.autogen.amd.cdna.ins as cdna
-from tinygrad.helpers import Target, flat_mv
+from tinygrad.helpers import Target
 from tinygrad.renderer.amd.dsl import NULL
 from test.amd.hw.helpers import USE_HW, assemble
 from test.mockgpu.amd.emu import run_asm
@@ -42,13 +42,14 @@ def _run_emu(instructions: list, out_reg: int = 2) -> int:
   return out_buf[0]
 
 def _run_hw(instructions: list, out_reg: int = 2) -> int:
-  from tinygrad.device import Device, TinyELF
+  from tinygrad.device import Device, TinyELF, Buffer
+  from tinygrad.dtype import dtypes
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
   dev = Device["AMD"]
   if dev.arch != "gfx950": raise unittest.SkipTest("requires gfx950 hardware")
-  out_gpu = dev.allocator.alloc(LANES * 4)[0][0]
-  code = _code(instructions, out_reg, out_gpu.va_addr)
+  out_gpu = Buffer(dev.device, LANES * 4, dtypes.uint8, preallocate=True)
+  code = _code(instructions, out_reg, out_gpu._buf)
   byte_str = ", ".join(f"0x{b:02x}" for b in code)
   asm_src = f""".text
 .globl test
@@ -87,8 +88,7 @@ amdhsa.kernels:
 """
   prg = dev.runtime(TinyELF(HIPCompiler(dev.arch).compile(asm_src), "test", Target("AMD", arch=dev.arch), ()))
   prg(global_size=(1, 1, 1), local_size=(LANES, 1, 1), wait=True)
-  out = bytearray(LANES * 4)
-  dev.allocator._copyout(flat_mv(memoryview(out)), out_gpu)
+  out = out_gpu.as_memoryview()
   return struct.unpack("<I", out)[0]
 
 def run_cdna(instructions: list, out_reg: int = 2) -> int:

@@ -21,7 +21,7 @@ FP8_DTYPE = dtypes.fp8e4m3
 FP8_MAX = 448.0
 INIT_STD = 0.02
 ASM_GEMM = getenv("ASM_GEMM", 0)
-
+PRESTORE_WT = getenv("PRESTORE_WT", 0)
 
 def _quant_dequant_fwd(x:Tensor) -> Tensor:
   # x (2d bf16) -> bf16 value after an mxfp8 round-trip (1x32 block scaling on the last axis)
@@ -149,6 +149,9 @@ class GPTOSS:
     self.w_gate_up_bias = Tensor.zeros(n_layers, n_experts, intermediate_size * 2, dtype=dtypes.bfloat16).contiguous()
     self.w_down, self.w_down_scale = self._quant_weight(n_layers, n_experts, dim, intermediate_size, std=scaled_std, moe=True)
     self.w_down_bias = Tensor.zeros(n_layers, n_experts, dim, dtype=dtypes.bfloat16).contiguous()
+    if PRESTORE_WT:
+      self.w_gate_up_wT, self.w_gate_up_wT_scale = self._make_wT(self.w_gate_up, self.w_gate_up_scale)
+      self.w_down_wT, self.w_down_wT_scale = self._make_wT(self.w_down, self.w_down_scale)
 
     # output
     self.norm = nn.RMSNorm(dim, norm_eps)
@@ -170,6 +173,15 @@ class GPTOSS:
       for q in qs: q[0]._zero2 = True  # grad arrives sharded on the expert axis under ZeRO-2 (moe_gemm)
       return [q[0] for q in qs], [q[1] for q in qs]
     return _one(*shape)
+
+  def _make_wT(self, weights:list[Tensor], scales:list[Tensor]):
+    wtq, wte = [], []
+    for w_q, w_e8 in zip(weights, scales):
+      wq, we, _ = quantize_mxfp8((w_q.cast(dtypes.bfloat16) * _mx_block_scale_3d(w_e8).cast(dtypes.bfloat16)).transpose(1, 2))
+      wq, we = wq.is_param_(False), we.is_param_(False)
+      wq._prestore_wT = we._prestore_wT = True
+      wtq.append(wq); wte.append(we)
+    return wtq, wte
 
   def _attn_mask(self, seqlen:int, dtype) -> Tensor:
     i, j = Tensor.arange(seqlen).reshape(seqlen, 1), Tensor.arange(seqlen).reshape(1, seqlen)
