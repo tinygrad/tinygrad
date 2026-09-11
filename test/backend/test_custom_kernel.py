@@ -8,6 +8,7 @@ from tinygrad.renderer import Target
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.codegen import to_program
+from tinygrad.engine.realize import run_linear
 from test.helpers import assert_kernel_count, KernelCountException
 
 # **** kernels ****
@@ -31,6 +32,12 @@ def custom_elementwise_add_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
   C,A,B = C.flatten(), A.flatten(), B.flatten()
   i = UOp.range(C.numel(), 0)
   return C[i].store(A[i]+B[i]).end(i).sink(arg=KernelInfo(name=f"custom_add_kernel_{C.numel()}")).simplify()
+
+def custom_scale_last_kernel(C:UOp, X:UOp, Y:UOp, A:UOp) -> UOp:
+  # X and Y are unused, n is left for codegen to number
+  n = UOp.param(-1, dtypes.int, vmin_vmax=(1, 10), name="n", addrspace=AddrSpace.ALU)
+  i = UOp.range(C.numel(), 0)
+  return C[i].store(A[i] * n.cast(A.dtype)).end(i).sink(arg=KernelInfo(name=f"custom_scale_last_{C.numel()}"))
 
 def custom_elementwise_addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:
   C,D,A,B = C.flatten(), D.flatten(), A.flatten(), B.flatten()
@@ -130,6 +137,13 @@ class TestCustomKernel(unittest.TestCase):
     # webgpu silently errors when a kernel has duplicate buffer args, so the list stays the same.
     # https://gpuweb.github.io/gpuweb/#abstract-opdef-encoder-bind-groups-alias-a-writable-resource
     self.assertEqual(x.tolist(), [1, 2, 3, 4] if Device.DEFAULT != "WEBGPU" else [0, 1, 2, 3])
+
+  def test_unused_args_with_variable(self):
+    # the kernel only reads slots 0 and 3, the variable has to be numbered past both
+    a = Tensor([1., 2., 3., 4.]).contiguous().realize()
+    c = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(4), Tensor.empty(4), a, fxn=custom_scale_last_kernel)[0]
+    run_linear(c.schedule_linear(), var_vals={"n": 3})
+    self.assertEqual(c.tolist(), [3., 6., 9., 12.])
 
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")
