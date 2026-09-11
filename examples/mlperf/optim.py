@@ -99,7 +99,7 @@ class GradAccClipAdamW(Optimizer):
     self.v = [self._zero_shard(x) for x in self._new_optim_param()]
     self.grad_acc, self.clip_norm = grad_acc, clip_norm
     if MASTER_WEIGHTS and self.params[0].dtype != dtypes.float32:
-      self.master_params:list[Tensor]|None = [self._zero_shard(p.to(self.device).float().clone()) for p in self.params]
+      self.master_params:list[Tensor]|None = [self._zero_shard(p.to(self.device).float().contiguous()) for p in self.params]
     else:
       self.master_params = None
     self.param_shards = [self._zero_shard(p) for p in self.params] if self.zero else self.params
