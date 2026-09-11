@@ -884,7 +884,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     while len(s.src) and s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK}: s = s.src[0]
     return s
 
-  def contiguous_view(self) -> tuple[UOp, int]|None:
+  def contiguous_view(self) -> tuple[UOp, int]|None: return self._contiguous_view
+
+  @functools.cached_property
+  def _contiguous_view(self) -> tuple[UOp, int]|None:
     from tinygrad.schedule.prepare import pm_mops
     from tinygrad.uop.symbolic import symbolic
 
