@@ -966,7 +966,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret.bufs = [cast(Buffer, x.buffer) for x in self.src]
       assert all_same([(x.size, x.dtype) for x in ret.bufs]), "multibuffers mismatch buffers"
       return ret
-    assert self.op is Ops.BUFFER and self.arg.buffer is not None, f"must be a realized BUFFER {self}"
+    assert self.op is Ops.BUFFER and self.arg.buffer is not None, f"must be a realized BUFFER, got {self.op}"
     return self.arg.buffer
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
