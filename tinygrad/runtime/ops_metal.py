@@ -94,7 +94,7 @@ def host_buf(*vals:int) -> Buffer:
 
 def mtl_const(name:str, devs:tuple[str, ...]) -> UOp: # a device's handles and the selectors: one host buffer the body loads from
   i = (HANDLES + SELECTORS).index(name)
-  return UOp.placeholder((len(HANDLES) + len(SELECTORS),), dtypes.uint64, 0, device=devs, tag="mtl").index(i)
+  return UOp.placeholder((len(HANDLES) + len(SELECTORS),), dtypes.uint64, 0, device=devs, tag="mtl")[i:i + 1]
 
 class MetalQueue(HWQueue):
   dev:MetalDevice
@@ -104,55 +104,53 @@ class MetalQueue(HWQueue):
     # a command per call: its pipeline and static sizes are set when the icb is made, the body binds the buffers before every run
     cmds = [(prg.src[3].arg, prg.arg.function_name, tuple(1 if isinstance(d, UOp) else int(d) for d in self.dims(prg)))
             for prg in [u.src[0] for u in self.lin.src if u.op is Ops.CALL]] # a serializable recipe, never an owned pipeline pointer
-    self.stride = 4 + len(cmds) # each entry: completion value, icb, scalar buffer, scalar host address, commands
-    self.pool = UOp.placeholder((1 + ICB_COUNT * self.stride,), dtypes.uint64, device=self.devs, volatile=True, tag=("icb", tuple(cmds)))
+    stride = 4 + len(cmds) # each entry: completion value, icb, scalar buffer, scalar host address, commands
+    self.pool = UOp.placeholder((1 + ICB_COUNT * stride,), dtypes.uint64, device=self.devs, volatile=True, tag=("icb", tuple(cmds)))
     self.slot = self.pool.index(0).load()
-    self.icb = self.pool_ref(1)
+    self.offset = 1 + self.slot * stride
     self.blob_buf = UOp.placeholder((8,), dtypes.uint8, device=self.devs) # stands in for the blob's buffer until submit
     handles = UOp.placeholder((2,), dtypes.uint64, device=self.devs, volatile=True, tag="mtl_handles") # [command buffer, open encoder]
-    self.cb, self.enc, self.root = handles.index(0), handles.index(1), handles.after(self.blob_buf, self.slot)
+    self.cb, self.enc, self.root = handles[:1], handles[1:2], handles.after(self.blob_buf, self.slot)
     loop = UOp.loop(len(ctx.devs) + ctx.devs.index(self.devs[0])) # hcq_fence uses the first len(ctx.devs) loop IDs
     done = self.call(self.root.after(loop), mtl_const("event", self.devs), "signaledValue", restype=ctypes.c_void_p) # uint64 return ABI
     self.root = self.root.after(done.end(loop, done < self.pool_ref(0).load())) # only wait when reusing an in-flight icb
     self.tail, self.setups = self.root, list[UOp]() # the command buffer is encoded in order, the icb is written wide before the commit
     self.count, self.done, self.signals = 0, 0, list[tuple[UOp, UOp]]()
     self.start:UOp|None = None
-    self.scalar_count = 0
     self.words(0) # empty kernels still need a nonempty host scratch buffer
 
-  def pool_ref(self, i:int) -> UOp: return self.pool.index(1 + self.slot * self.stride + i)
+  def pool_ref(self, i:int, *after:UOp) -> UOp: return self.pool.after(*after).index(self.offset + i)
 
   @staticmethod
   def dims(prg:UOp) -> tuple: return (*prg.arg.global_size, *prg.arg.local_size)
   def words(self, *ws:UOp|int) -> int: # append 64-bit words to the blob, returns the offset of the first
     return self.q(*[w.ccast(dtypes.uint64) if isinstance(w, UOp) else UOp.const(w, dtypes.uint64) for w in ws]) - 8 * len(ws)
   def ptr(self, off:int) -> UOp: return self.blob_buf.after(self.root).bitcast(dtypes.uint64).index(off // 8) # into the blob, after its patches
-  def binding(self, buf:UOp) -> tuple[int, int]: # a buffer binds as its base's mtlbuffer: (the blob word holding it, the view's offset)
+  def binding(self, buf:UOp) -> tuple[UOp, int]: # a buffer binds as (its base's mtlbuffer, the view's offset)
     base, off = unwrap_view(buf)
     if base.op is Ops.MSELECT:
       lane, lane_off = unwrap_view(base.src[0])
       base, off = lane.mselect(base.arg), off + lane_off
-    return self.words(base.getaddr(self.devs)), off
+    return self.ptr(self.words(base.getaddr(self.devs))).load(), off
 
   def call(self, after:UOp, target:UOp, sel:str, *args:UOp|int, result:UOp|None=None, restype=None) -> UOp:
     fn = metal.dll.bind(restype or (ctypes.c_void_p if result is not None else None))(metal.dll.objc_msgSend)
     cargs = [UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args]
-    ret = ccall(fn, target.src[0].after(after).index(target.src[1]).load(), mtl_const(sel, self.devs).load(), *cargs)
-    return result.src[0].after(after).index(result.src[1]).store(ret) if result is not None else ret
+    target, idx = (target.src[0], target.src[1]) if target.op is Ops.INDEX else (target, 0)
+    ret = ccall(fn, target.after(after).index(idx).load(), mtl_const(sel, self.devs).index(0).load(), *cargs)
+    return result.after(after).index(0).store(ret) if result is not None else ret
   def msg(self, target:UOp, sel:str, *args:UOp|int, result:UOp|None=None):
     self.tail = self.tail.after(self.call(self.tail, target, sel, *args, result=result))
   def setup(self, cmd:UOp, sel:str, *args:UOp|int): self.setups.append(self.call(self.root, cmd, sel, *args))
 
   def exec(self, call:UOp, prg:UOp):
     cmd, bufs, vals = self.pool_ref(4 + self.count), get_call_arg_uops(call), get_call_var_uops(call, prg)
-    for i, arg in enumerate(prg.arg.globals):
-      word, off = self.binding(bufs[arg])
-      self.setup(cmd, "setKernelBuffer:offset:atIndex:", self.ptr(word).load(), off, i)
-    for i, v in enumerate(vals):
-      scalars = self.pool.after(self.root).index(1 + self.slot * self.stride + 3).load()
-      self.setups.append(ccall(libc.memcpy, scalars + self.scalar_count * 8, self.ptr(self.words(v)), 8))
-      self.setup(cmd, "setKernelBuffer:offset:atIndex:", self.pool_ref(2).load(), self.scalar_count * 8, len(prg.arg.globals) + i)
-      self.scalar_count += 1
+    binds = [self.binding(bufs[i]) for i in prg.arg.globals]
+    if vals:
+      off = self.words(*vals)
+      self.setups.append(ccall(libc.memcpy, self.pool_ref(3).load() + off, self.ptr(off), 8 * len(vals)))
+      binds += [(self.pool_ref(2).load(), off + 8 * i) for i in range(len(vals))]
+    for i, (buf, off) in enumerate(binds): self.setup(cmd, "setKernelBuffer:offset:atIndex:", buf, off, i)
     if any(isinstance(d, UOp) for d in self.dims(prg)): # arm64 passes MTLSize by reference
       self.setup(cmd, "concurrentDispatchThreadgroups:threadsPerThreadgroup:", self.ptr(sizes:=self.words(*self.dims(prg))), self.ptr(sizes + 24))
     self.count += 1
@@ -173,12 +171,12 @@ class MetalQueue(HWQueue):
     if self.count == self.done: return
     self.msg(mtl_const("queue", self.devs), "commandBuffer", result=self.cb)
     self.msg(self.cb, "computeCommandEncoder", result=self.enc)
-    self.msg(self.enc, "waitForFence:", mtl_const("fence", self.devs).load())
-    self.msg(self.enc, "executeCommandsInBuffer:withRange:", self.icb.load(), self.done, self.count - self.done)
-    self.msg(self.enc, "updateFence:", mtl_const("fence", self.devs).load())
+    self.msg(self.enc, "waitForFence:", mtl_const("fence", self.devs).index(0).load())
+    self.msg(self.enc, "executeCommandsInBuffer:withRange:", self.pool_ref(1).load(), self.done, self.count - self.done)
+    self.msg(self.enc, "updateFence:", mtl_const("fence", self.devs).index(0).load())
     self.msg(self.enc, "endEncoding")
     self.tail = self.tail.after(*self.setups)
-    if signal is not None: self.msg(self.cb, "encodeSignalEvent:value:", mtl_const("event", self.devs).load(), signal)
+    if signal is not None: self.msg(self.cb, "encodeSignalEvent:value:", mtl_const("event", self.devs).index(0).load(), signal)
     self.msg(self.cb, "commit")
     self.done, self.setups = self.count, []
 
@@ -186,11 +184,11 @@ class MetalQueue(HWQueue):
     value = self.signals[-1][1]
     if self.count == self.done: self.msg(mtl_const("event", self.devs), "setSignaledValue:", value) # profiled kernels already completed
     else: self.finish(value)
-    self.tail = self.tail.after(self.pool.after(self.tail).index(1 + self.slot * self.stride).store(value))
+    self.tail = self.tail.after(self.pool_ref(0, self.tail).store(value))
     self.tail = self.tail.after(self.pool.after(self.tail).index(0).store((self.slot + 1) % ICB_COUNT))
     # HCQ's scratch is reusable after encoding. Host accesses wait on the GPU event in _wait_signal.
     for dst, val in self.signals: self.tail = self.tail.after(dst.after(self.tail).index(0).store(val))
-    return self.tail.substitute({self.blob_buf: cmdbuf, self.pool: self.pool.replace(tag=(*self.pool.tag, self.scalar_count))})
+    return self.tail.substitute({self.blob_buf: cmdbuf, self.pool: self.pool.replace(tag=(*self.pool.tag, len(self.blob)))})
 
 # *****************
 # device
@@ -255,22 +253,23 @@ class MetalDevice(Compiled):
     descriptor.setSupportIndirectCommandBuffers(True)
     return checked(self.sysdevice.newComputePipelineStateWithDescriptor_options_reflection_error, descriptor, metal.MTLPipelineOptionNone, None)
 
-  def new_icb(self, cmds:tuple[tuple[bytes, str, tuple[int, ...]], ...], scalar_count:int) -> Buffer:
+  def new_icb(self, cmds:tuple[tuple[bytes, str, tuple[int, ...]], ...], blob_size:int) -> Buffer:
     descriptor = metal.MTLIndirectCommandBufferDescriptor.new()
     descriptor.setCommandTypes(metal.MTLIndirectCommandTypeConcurrentDispatch)
     descriptor.setMaxKernelBufferBindCount(31)
+    states = [(self.pipeline(lib, name), dims) for lib, name, dims in cmds]
+    for state, dims in states:
+      if prod(dims[3:]) > (mx:=state.maxTotalThreadsPerThreadgroup()): raise RuntimeError(f"local size {dims[3:]} bigger than {mx}")
     words, refs = [0], []
     for _ in range(ICB_COUNT):
       icb = self.sysdevice.newIndirectCommandBufferWithDescriptor_maxCommandCount_options(descriptor, max(len(cmds), 1), 0)
       if icb.value is None: raise RuntimeError("create indirect command buffer failed, does your system support this?")
       objs = [icb.indirectComputeCommandAtIndex(i).own() for i in range(len(cmds))]
-      for cmd, (lib, name, dims) in zip(objs, cmds):
-        state = self.pipeline(lib, name)
-        if prod(dims[3:]) > (mx:=state.maxTotalThreadsPerThreadgroup()): raise RuntimeError(f"local size {dims[3:]} bigger than {mx}")
+      for cmd, (state, dims) in zip(objs, states):
         cmd.setComputePipelineState(state)
         cmd.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*dims[:3]), metal.MTLSize(*dims[3:]))
         cmd.setBarrier() # the kernels of a batch run in order
-      scalars = Buffer(self.device, max(scalar_count, 1), dtypes.uint64, options=BufferSpec(nolru=True), preallocate=True)
+      scalars = Buffer(self.device, blob_size, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
       words += [0, icb.value, scalars._buf, scalars.host.addr, *[c.value for c in objs]]
       refs.append((icb, objs, scalars))
     self.icbs[buf:=host_buf(*words)] = tuple(refs)
