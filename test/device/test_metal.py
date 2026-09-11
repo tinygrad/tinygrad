@@ -1,5 +1,5 @@
-import unittest
-from tinygrad import Tensor, dtypes
+import unittest, pickle, subprocess, sys
+from tinygrad import Tensor, TinyJit, dtypes
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from tinygrad.uop.ops import Ops
 from tinygrad.device import CompileError, Device, Buffer, BufferSpec
@@ -7,6 +7,15 @@ if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
+  def test_pickle_jit_fresh_process(self):
+    @TinyJit
+    def f(x): return x + 1
+    for _ in range(3): f(Tensor([1, 2, 3, 4]))
+    code = "import pickle, sys; from tinygrad import Tensor; f = pickle.load(sys.stdin.buffer); " \
+           "assert f(Tensor([4, 3, 2, 1])).tolist() == [5, 4, 3, 2]"
+    ret = subprocess.run([sys.executable, "-c", code], input=pickle.dumps(f), capture_output=True, timeout=60)
+    self.assertEqual(ret.returncode, 0, ret.stderr.decode())
+
   def test_icb_per_batch(self):
     x = Tensor.full((4,), 2).contiguous().realize()
     out = x

@@ -100,11 +100,8 @@ class MetalQueue(HWQueue):
   def __init__(self, ctx:EncodeCtx, submit:UOp):
     super().__init__(ctx, submit)
     # a command per call: its pipeline and static sizes are set when the icb is made, the body binds the buffers before every run
-    cmds = []
-    for prg in [u.src[0] for u in self.lin.src if u.op is Ops.CALL]:
-      state, dims = self.dev.pipeline(prg.src[3].arg, prg.arg.function_name), tuple(1 if isinstance(d, UOp) else int(d) for d in self.dims(prg))
-      if prod(dims[3:]) > (mx:=state.maxTotalThreadsPerThreadgroup()): raise RuntimeError(f"local size {dims[3:]} bigger than {mx}")
-      cmds.append((state, dims))
+    cmds = [(prg.src[3].arg, prg.arg.function_name, tuple(1 if isinstance(d, UOp) else int(d) for d in self.dims(prg)))
+            for prg in [u.src[0] for u in self.lin.src if u.op is Ops.CALL]] # a serializable recipe, never an owned pipeline pointer
     self.icb = UOp.placeholder((1 + len(cmds),), dtypes.uint64, device=self.devs, tag=("icb", tuple(cmds))) # [the icb, its commands]
     self.blob_buf = UOp.placeholder((8,), dtypes.uint8, device=self.devs) # stands in for the blob's buffer until submit
     handles = UOp.placeholder((2,), dtypes.uint64, device=self.devs, volatile=True, tag="mtl_handles") # [command buffer, open encoder]
@@ -221,14 +218,16 @@ class MetalDevice(Compiled):
     descriptor.setSupportIndirectCommandBuffers(True)
     return checked(self.sysdevice.newComputePipelineStateWithDescriptor_options_reflection_error, descriptor, metal.MTLPipelineOptionNone, None)
 
-  def new_icb(self, cmds:tuple[tuple[metal.MTLComputePipelineState, tuple[int, ...]], ...]) -> Buffer:
+  def new_icb(self, cmds:tuple[tuple[bytes, str, tuple[int, ...]], ...]) -> Buffer:
     descriptor = metal.MTLIndirectCommandBufferDescriptor.new()
     descriptor.setCommandTypes(metal.MTLIndirectCommandTypeConcurrentDispatch)
     descriptor.setMaxKernelBufferBindCount(31)
     icb = self.sysdevice.newIndirectCommandBufferWithDescriptor_maxCommandCount_options(descriptor, max(len(cmds), 1), 0)
     if icb.value is None: raise RuntimeError("create indirect command buffer failed, does your system support this?")
     objs = [icb.indirectComputeCommandAtIndex(i).own() for i in range(len(cmds))]
-    for cmd, (state, dims) in zip(objs, cmds):
+    for cmd, (lib, name, dims) in zip(objs, cmds):
+      state = self.pipeline(lib, name)
+      if prod(dims[3:]) > (mx:=state.maxTotalThreadsPerThreadgroup()): raise RuntimeError(f"local size {dims[3:]} bigger than {mx}")
       cmd.setComputePipelineState(state)
       cmd.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*dims[:3]), metal.MTLSize(*dims[3:]))
       cmd.setBarrier() # the kernels of a batch run in order
