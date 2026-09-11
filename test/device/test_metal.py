@@ -2,11 +2,25 @@ import unittest, pickle, subprocess, sys
 from tinygrad import Tensor, TinyJit, dtypes
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from tinygrad.uop.ops import Ops
-from tinygrad.device import CompileError, Device, Buffer, BufferSpec
+from tinygrad.device import CompileError, Device, Buffer, BufferSpec, ProfileGraphEvent
+from test.backend.test_profiler import helper_collect_profile
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
+  def test_profile_kernel_timestamps(self):
+    x = Tensor.ones(256).contiguous().realize()
+    with helper_collect_profile(Device["METAL"]) as profile:
+      out = ((x + 1).contiguous() * 2).contiguous().realize()
+    times = [(event.sigs[e.st_id], event.sigs[e.en_id]) for event in profile if isinstance(event, ProfileGraphEvent)
+             for e in event.ents if e.device == "METAL"]
+    self.assertEqual(len(times), 2)
+    for start, end in times:
+      self.assertGreater(start, 0)
+      self.assertGreater(end, start)
+    self.assertGreaterEqual(times[1][0], times[0][1])
+    self.assertEqual(out.tolist(), [4] * 256)
+
   def test_pickle_jit_fresh_process(self):
     @TinyJit
     def f(x): return x + 1

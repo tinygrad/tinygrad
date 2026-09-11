@@ -86,7 +86,7 @@ class MetalCompiler(Compiler):
 
 HANDLES = ("queue",)
 SELECTORS = ("commandBuffer", "computeCommandEncoder", "executeCommandsInBuffer:withRange:", "endEncoding", "commit", "waitUntilCompleted",
-  "setKernelBuffer:offset:atIndex:", "concurrentDispatchThreadgroups:threadsPerThreadgroup:")
+  "setKernelBuffer:offset:atIndex:", "concurrentDispatchThreadgroups:threadsPerThreadgroup:", "GPUStartTime", "GPUEndTime")
 def host_buf(*vals:int) -> Buffer:
   return Buffer(HCQ_RUNTIME_DEV.value, len(vals), dtypes.uint64, initial_value=struct.pack(f"{len(vals)}Q", *vals))
 
@@ -107,9 +107,9 @@ class MetalQueue(HWQueue):
     handles = UOp.placeholder((2,), dtypes.uint64, device=self.devs, volatile=True, tag="mtl_handles") # [command buffer, open encoder]
     self.cb, self.enc, self.root = handles[:1], handles[1:2], handles.after(self.blob_buf)
     self.tail, self.setups = self.root, list[UOp]() # the command buffer is encoded in order, the icb is written wide before the commit
-    self.count, self.signals = 0, list[tuple[UOp, UOp]]()
+    self.count, self.done, self.signals = 0, 0, list[tuple[UOp, UOp]]()
+    self.start:UOp|None = None
     self.words(0) # word 0: the blob's MTLBuffer for scalar bindings
-    self.msg(mtl_const("queue", self.devs), "commandBuffer", result=self.cb)
 
   @staticmethod
   def dims(prg:UOp) -> tuple: return (*prg.arg.global_size, *prg.arg.local_size)
@@ -123,8 +123,8 @@ class MetalQueue(HWQueue):
       base, off = lane.mselect(base.arg), off + lane_off
     return self.words(base.getaddr(self.devs)), off
 
-  def call(self, after:UOp, target:UOp, sel:str, *args:UOp|int, result:UOp|None=None) -> UOp: # one objc_msgSend, its return stored into result
-    fn = metal.dll.bind(ctypes.c_void_p if result is not None else None)(metal.dll.objc_msgSend)
+  def call(self, after:UOp, target:UOp, sel:str, *args:UOp|int, result:UOp|None=None, restype=None) -> UOp:
+    fn = metal.dll.bind(restype or (ctypes.c_void_p if result is not None else None))(metal.dll.objc_msgSend)
     cargs = [UOp.const(a, dtypes.uint64) if isinstance(a, int) else a for a in args]
     ret = ccall(fn, target.after(after).index(0).load(), mtl_const(sel, self.devs).index(0).load(), *cargs)
     return result.after(after).index(0).store(ret) if result is not None else ret
@@ -141,16 +141,29 @@ class MetalQueue(HWQueue):
     self.count += 1
 
   def wait(self, dst:UOp, val:UOp): pass # submissions complete on the host before the next batch
-  def timestamp(self, dst:UOp): pass # TODO: counter sample buffers
+  def timestamp(self, dst:UOp): # profiling isolates each kernel so command-buffer times measure that kernel
+    if self.start is None: self.start = dst
+    else:
+      self.finish()
+      for slot, sel in ((self.start, "GPUStartTime"), (dst, "GPUEndTime")):
+        tm = self.call(self.tail, self.cb, sel, restype=ctypes.c_double)
+        self.tail = self.tail.after(slot.after(self.tail).index(1).store((tm * 1e9).cast(dtypes.uint64)))
+      self.start = None
   def signal(self, dst:UOp, val:UOp): self.signals.append((dst, val))
 
-  def submit(self, cmdbuf:UOp) -> UOp:
+  def finish(self):
+    if self.count == self.done: return
+    self.msg(mtl_const("queue", self.devs), "commandBuffer", result=self.cb)
     self.msg(self.cb, "computeCommandEncoder", result=self.enc)
-    self.msg(self.enc, "executeCommandsInBuffer:withRange:", self.icb.index(0).load(), 0, self.count)
+    self.msg(self.enc, "executeCommandsInBuffer:withRange:", self.icb.index(0).load(), self.done, self.count - self.done)
     self.msg(self.enc, "endEncoding")
     self.tail = self.tail.after(*self.setups)
     self.msg(self.cb, "commit")
     self.msg(self.cb, "waitUntilCompleted")
+    self.done, self.setups = self.count, []
+
+  def submit(self, cmdbuf:UOp) -> UOp:
+    self.finish()
     for dst, val in self.signals: self.tail = self.tail.after(dst.after(self.tail).index(0).store(val))
     buf = unwrap_view(cmdbuf)[0]
     return self.tail.substitute({self.blob_buf: cmdbuf.after(patch(buf, [(0, buf.getaddr(self.devs))]))})
