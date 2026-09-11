@@ -1426,7 +1426,7 @@ def train_llama3():
   for p in optim.params:
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
     # apply_grad updates packed slices by manipulating the UOp directly, so give the long-lived accumulator explicit storage.
-    p.grad = p.zeros_like(dtype=grad_dtype).clone()
+    p.grad = p.zeros_like(dtype=grad_dtype).clone().realize()
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
