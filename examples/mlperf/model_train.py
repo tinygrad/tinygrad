@@ -1459,9 +1459,9 @@ def train_llama3():
       if MXFP8:
         from extra.gemm.cdna_asm_gemm import _mx_block_scale
         bs = _mx_block_scale(inv.reshape(-1, inv.shape[-1])).reshape(w.shape)
-        master.assign((master * bs).contiguous())
+        master.assign(Tensor.empty_like(master).assign(master * bs))
       else:
-        master.assign((master * inv.reshape(*inv.shape, *([1]*(w.ndim-inv.ndim)))).contiguous())
+        master.assign(Tensor.empty_like(master).assign(master * inv.reshape(*inv.shape, *([1]*(w.ndim-inv.ndim)))))
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
