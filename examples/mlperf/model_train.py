@@ -1508,10 +1508,11 @@ def train_llama3():
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_reset, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax,
+    clip_coeff_cpu = clip_coeff.float().to("CPU")
+    Tensor.realize(lr_cpu, grad_norm_cpu, clip_coeff_cpu, loss_cpu, loss_reset, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax,
                    *refreshed_mxfp4)
 
-    return lr_cpu, grad_norm_cpu, loss_cpu
+    return lr_cpu, grad_norm_cpu, loss_cpu, clip_coeff_cpu
 
   @TinyJit
   @Context(TRAINING=0)
@@ -1585,6 +1586,7 @@ def train_llama3():
       gt = time.perf_counter()
       ret = optim_step()
       lr, grad_norm, loss = ret[0].item(), ret[1].item(), ret[2].item() / grad_acc
+      if i == 0: print(f"clip_coeff diagnostic: {ret[3].item():.9f}")
       et = time.perf_counter()
 
       optim_time = et - gt
