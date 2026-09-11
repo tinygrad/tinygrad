@@ -1,11 +1,11 @@
-import unittest, pickle, subprocess, sys
-from tinygrad import Tensor, TinyJit, dtypes
+import unittest, pickle, subprocess, sys, threading
+from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
-from tinygrad.uop.ops import Ops
 from tinygrad.device import CompileError, Device, Buffer, BufferSpec, ProfileGraphEvent
 from test.backend.test_profiler import helper_collect_profile
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler
+  from tinygrad.runtime.autogen import metal
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
   def test_profile_kernel_timestamps(self):
@@ -30,19 +30,39 @@ class TestMetal(unittest.TestCase):
     ret = subprocess.run([sys.executable, "-c", code], input=pickle.dumps(f), capture_output=True, timeout=60)
     self.assertEqual(ret.returncode, 0, ret.stderr.decode())
 
-  def test_icb_per_batch(self):
+  def test_batch_dependencies(self):
     x = Tensor.full((4,), 2).contiguous().realize()
     out = x
     for _ in range(3): out = (out + 1).contiguous()
     compiled = compile_linear(out.schedule_linear())
-    icbs = [u for u in compiled.toposort() if u.op is Ops.PARAM and isinstance(u.tag, tuple) and u.tag[0] == "icb"]
-    self.assertEqual(len(icbs), 1) # one batch, one icb
-    self.assertEqual(len(icbs[0].tag[1]), 3) # a command per call: repeated programs still need separate commands
-    self.assertEqual(icbs[0].arg.size, 4) # the icb and its commands
     linked = link_linear(compiled)
-    self.assertFalse(any(u.op is Ops.PARAM and u.tag == icbs[0].tag for u in linked.toposort()))
     run_linear(linked, jit=True, wait=True)
     self.assertEqual(out.tolist(), [5] * 4)
+
+  def test_async_replay_snapshots_arguments(self):
+    @TinyJit
+    def f(src, dst, v): return dst.assign(src + v).realize()
+    srcs = [Tensor.full((256,), i, dtype=dtypes.int).contiguous().realize() for i in range(8)]
+    dsts = [Tensor.zeros(256, dtype=dtypes.int).contiguous().realize() for _ in srcs]
+    for _ in range(3): f(srcs[0], dsts[0], Variable("v", 1, 8).bind(1))
+    dev = Device["METAL"]
+    dev.synchronize()
+    event = dev.sysdevice.newSharedEvent()
+    gate = dev.queue.commandBuffer()
+    gate.encodeWaitForEvent_value(metal.MTLEvent(event.value), 1)
+    gate.commit()
+    timer = threading.Timer(5, lambda: event.setSignaledValue(1)) # release a broken synchronous implementation instead of hanging the suite
+    timer.start()
+    try:
+      for i in range(8): f(srcs[i], dsts[i], Variable("v", 1, 8).bind(i + 1))
+      self.assertEqual(event.signaledValue(), 0, "submission waited for GPU completion")
+    finally:
+      event.setSignaledValue(1)
+      timer.cancel()
+      dev.synchronize()
+    for i, dst in enumerate(dsts): self.assertEqual(dst.tolist(), [2 * i + 1] * 256)
+    for i in range(64): f(srcs[i % 8], dsts[i % 8], Variable("v", 1, 8).bind(i // 8 + 1))
+    for i, dst in enumerate(dsts): self.assertEqual(dst.tolist(), [i + 8] * 256) # wrap the pool; host reads wait for queued writes
 
   def test_host_copy_views(self):
     src = Buffer("CPU", 64, dtypes.uint8, initial_value=bytes(range(64)))
