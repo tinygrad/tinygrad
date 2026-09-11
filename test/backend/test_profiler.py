@@ -37,16 +37,14 @@ def helper_profile_filter_device(profile, device:str):
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT], HCQCompiled) or Device.DEFAULT in HCQ_DEVS | {"CPU", "METAL"}, "Dev not supported")
 class TestSimpleProfiler(unittest.TestCase):
-  @unittest.skipIf(Device.DEFAULT == "CPU", "fails in CPU")
   def test_profiler(self):
-    start = len(Compiled.profile_events)
-    with Context(PROFILE=1):
+    with helper_collect_profile(Device[Device.DEFAULT]) as profile:
       Tensor.empty(32).add(1).realize()
       Device[Device.DEFAULT].synchronize()
-    self.assertTrue(any(isinstance(e, (ProfileRangeEvent, ProfileGraphEvent)) for e in Compiled.profile_events[start:]))
+    self.assertTrue(any(isinstance(e, (ProfileRangeEvent, ProfileGraphEvent)) and e.device == Device.DEFAULT for e in profile))
 
 # TODO: support in HCQCompiled
-# TODO: support these tests in HCQ2
+# TODO: none of these tests run on HCQ2
 is_cpu_hcq = Device.DEFAULT in {"CPU"}
 
 @unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in {"METAL"}, "Dev not supported")
