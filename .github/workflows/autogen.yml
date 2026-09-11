@@ -73,7 +73,7 @@ jobs:
 
   autogen-mac:
     name: In-tree Autogen (macos)
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 15
     steps:
     - name: Checkout Code
