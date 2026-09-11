@@ -259,7 +259,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self):
     from tinygrad.uop.render import pretty_print
-    return pretty_print(self)
+    try: return pretty_print(self)
+    except RecursionError:
+      import traceback
+      traceback.print_stack(limit=20)
+      return f"UOp({self.op}, <graph too deep to render>)"
   def argstr(self):
     if self.op is Ops.REDUCE: return f'({", ".join(map(str, self.arg))})'
     return repr(self.arg)
