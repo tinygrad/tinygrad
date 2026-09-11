@@ -150,6 +150,15 @@ class TestSchedule(unittest.TestCase):
     run_linear(*check_schedule(out, 3))
     np.testing.assert_equal(out.numpy(), [4.])
 
+  def test_shrink_copy(self):
+    a = Tensor.arange(4).clone("CPU:1").realize()
+    b = a.to("CPU:2").shrink(((1, 3),)).to("CPU:3")
+    GlobalCounters.reset()
+    run_linear(*check_schedule(b, 2, filter_sink=False))
+    # copy the source slice directly from its buffer offset
+    self.assertEqual(GlobalCounters.global_mem, 4*4 + 2*4)
+    self.assertListEqual(b.tolist(), [1, 2])
+
 class TestLimitBufs(unittest.TestCase):
   @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in ocelot")
   def test_limit_bufs_with_var(self):
@@ -377,15 +386,6 @@ class TestCopyFolding(unittest.TestCase):
   def test_clone(self):
     a = Tensor.empty(4)
     check_schedule(a.clone(), 1, filter_sink=False)
-
-  def test_shrink_copy(self):
-    a = Tensor.arange(4).clone("CPU:1").realize()
-    b = a.to("CPU:2").shrink(((1, 3),)).to("CPU:3")
-    GlobalCounters.reset()
-    run_linear(*check_schedule(b, 3, filter_sink=False))
-    # extra E kernel, copy exactly 4 bytes
-    self.assertEqual(GlobalCounters.global_mem, 4*4 + 2*4*2 + 2*4)
-    self.assertListEqual(b.tolist(), [1, 2])
 
   def test_expanded_copy(self):
     a = Tensor.arange(4).clone("CPU:1").realize()

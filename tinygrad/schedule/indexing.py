@@ -32,6 +32,7 @@ def realize_srcs(ctx:IndexingContext, rb:UOp) -> None:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx.realize_map[s] = None
 
 def is_copy_view(x:UOp) -> bool:
+  if not x.storage_base.has_buffer_identity(after_ok=True): return False
   if not all_int(x.shape) or (cv:=x.contiguous_view()) is None: return False
   return cv[0].dtype == x.dtype and cv[0].has_buffer_identity(after_ok=True)
 
