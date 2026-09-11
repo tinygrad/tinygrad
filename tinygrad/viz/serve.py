@@ -620,7 +620,7 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
     if (sink:=get_sink_at(("do_linearize",), viz_data, i, data)) is None: return {"src":"No linear found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[1].src)))}
   if fmt == "code":
-    if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1)) is None: return {"src":"No source found"}
+    if (sink:=get_sink_at(("do_render","do_assemble","do_compile"), viz_data, i, data, depth=1)) is None: return {"src":"No source found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}

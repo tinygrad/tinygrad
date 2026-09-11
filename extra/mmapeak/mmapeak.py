@@ -1,11 +1,12 @@
 import os
+from dataclasses import replace
 
 # TODO: there is a timing bug without this
 os.environ["AMD_AQL"] = "1"
 
 from tinygrad import Tensor, Device, GlobalCounters, Context, dtypes
 from tinygrad.helpers import getenv, DEV
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 from tinygrad.renderer import Estimates
 from tinygrad.renderer.amd.dsl import Reg, Inst, s, v
 from tinygrad.engine.realize import run_linear
@@ -37,7 +38,8 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
     gidx = UOp.special(NUM_WORKGROUPS, "gidx0")
     FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
     sink = UOp.sink(A.base, threads, gidx, arg=KernelInfo(inst.op.name.lower(), estimates=Estimates(ops=FLOPs, mem=0)))
-    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))),
+               arg=replace(ProgramInfo.from_sink(sink), globals=(0,), outs=(0,), ins=()))
   dummy = Tensor.zeros(1).contiguous().realize()
   out = Tensor.custom_kernel(dummy, fxn=fxn)[0]
   linear = out.schedule_linear()

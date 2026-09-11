@@ -1,7 +1,8 @@
 from __future__ import annotations
 import functools, pathlib
+from dataclasses import replace
 from tinygrad import Tensor, dtypes, nn
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, sint
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo, sint
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import alloc_like, compile_hip
 
@@ -16,7 +17,8 @@ def _custom_embedding_fwd(out:UOp, idx:UOp, weight:UOp) -> UOp:
                   arg=KernelInfo(f"gptoss_embedding_fwd_{tokens}_{VOCAB}_{EMBED}_v16_t{FWD_THREADS}_nt",
                                  estimates=Estimates(mem=tokens*4 + tokens*EMBED*4)))
   src = (pathlib.Path(__file__).parent/"embedding_fwd.cpp").read_text()
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, []))))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, []))),
+             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2), outs=(0,), ins=(1, 2)))
 
 def gptoss_embedding_fwd(weight:Tensor, idx:Tensor) -> Tensor:
   out_shape = idx.shape + (EMBED,)
@@ -35,7 +37,8 @@ def _custom_init_heads(head:UOp) -> UOp:
   src = (pathlib.Path(__file__).parent/"embedding_bwd.cpp").read_text()
   defines = [f"-DVOCAB={vocab}", f"-DTHREADS={THREADS}", "-DINIT_HEADS=1"]
   return UOp(Ops.PROGRAM,
-             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))),
+             arg=replace(ProgramInfo.from_sink(sink), globals=(0,), outs=(0,), ins=()))
 
 @functools.cache
 def _custom_build_links(next_idx:UOp, head:UOp, idx:UOp) -> UOp:
@@ -46,7 +49,8 @@ def _custom_build_links(next_idx:UOp, head:UOp, idx:UOp) -> UOp:
   src = (pathlib.Path(__file__).parent/"embedding_bwd.cpp").read_text()
   defines = [f"-DTOKENS={tokens}", f"-DVOCAB={vocab}", f"-DTHREADS={THREADS}", "-DBUILD_LINKS=1"]
   return UOp(Ops.PROGRAM,
-             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))),
+             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2), outs=(0, 1), ins=(1, 2)))
 
 @functools.cache
 def _custom_reduce(out:UOp, grad_emb:UOp, head:UOp, next_idx:UOp) -> UOp:
@@ -60,7 +64,8 @@ def _custom_reduce(out:UOp, grad_emb:UOp, head:UOp, next_idx:UOp) -> UOp:
   src = (pathlib.Path(__file__).parent/"embedding_bwd.cpp").read_text()
   defines = [f"-DTOKENS={tokens}", f"-DVOCAB={vocab}", f"-DEMBED={embed}", f"-DTHREADS={THREADS}"]
   return UOp(Ops.PROGRAM,
-             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))),
+             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3), outs=(0,), ins=(1, 2, 3)))
 
 def embedding_bwd_owner(grad_emb:Tensor, idx:Tensor, vocab:sint) -> Tensor:
   grad_emb = grad_emb.reshape(idx.numel(), grad_emb.shape[-1])

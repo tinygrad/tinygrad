@@ -1,7 +1,8 @@
 from __future__ import annotations
 import functools, math, pathlib
+from dataclasses import replace
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 from tinygrad.renderer import Estimates
 from extra.gemm.cdna_asm_gemm import FP8_DTYPE
 from extra.llama_kernels import NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, compile_hip, dname_of
@@ -44,7 +45,8 @@ def _custom_rmsnorm_mul_quantize_mxfp8_fwd(q:UOp, e8:UOp, rrms:UOp, x:UOp, weigh
   defines = [f"-DN_ELEMS={rows*hidden}", f"-DHIDDEN={hidden}", f"-DPADDED={padded}",
              f"-DNUM_WG={num_wg}", f"-DTHREADS_PER_WG={THREADS_PER_WG}", f"-DEPS_LITERAL={eps}f"]
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=compile_hip(src, defines))))
+                               UOp(Ops.BINARY, arg=compile_hip(src, defines))),
+             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4), outs=(0, 1, 2), ins=(3, 4)))
 
 @functools.cache
 def _custom_rmsnorm_mul_quantize_mxfp8_bwd(grad_x:UOp, grad_weight_partial:UOp, grad_q:UOp, x:UOp, weight:UOp, e8:UOp, rrms:UOp,
@@ -60,7 +62,8 @@ def _custom_rmsnorm_mul_quantize_mxfp8_bwd(grad_x:UOp, grad_weight_partial:UOp, 
   src = (pathlib.Path(__file__).parent/"rmsnorm_mul_quantize_mxfp8_bwd.cpp").read_text()
   defines = [f"-DN_ELEMS={rows*hidden}", f"-DHIDDEN={hidden}", f"-DPADDED={padded}", f"-DNUM_WG={num_wg}", f"-DTHREADS_PER_WG={THREADS_PER_WG}"]
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=compile_hip(src, defines))))
+                               UOp(Ops.BINARY, arg=compile_hip(src, defines))),
+             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5, 6), outs=(0, 1), ins=(2, 3, 4, 5, 6)))
 
 def _rmsnorm_mul_quantize_mxfp8_backward(gradient:UOp, kernel:UOp) -> tuple:
   _, e8_u, rrms_u, x_u, weight_u = kernel.src[1:]

@@ -1,8 +1,9 @@
 import unittest, contextlib, functools
+from dataclasses import replace
 from tinygrad import Device, Tensor, Context, TinyJit, dtypes
 from tinygrad.dtype import AddrSpace
 from test.helpers import is_hcq2_device
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 from tinygrad.device import Compiled, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.engine.realize import run_linear
@@ -91,8 +92,9 @@ def custom_asm_rdna(A:UOp):
 
 def custom_asm(A, insts, num_threads, lds_size=0) -> UOp:
   lds = UOp.placeholder((lds_size,), dtypes.uint8, addrspace=AddrSpace.LOCAL) if lds_size else None
-  return UOp(Ops.PROGRAM, src=(UOp.sink(A, lds, UOp.special(num_threads, "lidx0"), arg=KernelInfo("asm")), \
-      UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS,arg=(x,dtypes.void)) for x in insts]))))
+  sink = UOp.sink(A, lds, UOp.special(num_threads, "lidx0"), arg=KernelInfo("asm"))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS,arg=(x,dtypes.void)) for x in insts]))),
+             arg=replace(ProgramInfo.from_sink(sink), globals=(0,), outs=(0,), ins=()))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "only runs on AMD")
 class TestSQTTProfiler(unittest.TestCase):

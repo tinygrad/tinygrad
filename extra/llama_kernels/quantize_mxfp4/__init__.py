@@ -1,6 +1,7 @@
 import functools, math, pathlib
+from dataclasses import replace
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import alloc_like, compile_hip
 
@@ -19,7 +20,8 @@ def _custom_quantize_mxfp4(row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UO
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
     UOp(Ops.BINARY, arg=compile_hip(src, [f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}",
                                              f"-DSHUFFLE_ROWWISE_FP4_VALUE={int(shuffle_row)}",
-                                             f"-DSHUFFLE_COLWISE_FP4_VALUE={int(shuffle_col)}"]))))
+                                             f"-DSHUFFLE_COLWISE_FP4_VALUE={int(shuffle_col)}"]))),
+    arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4), outs=(0, 1, 2, 3), ins=(4,)))
 
 def quantize_mxfp4(x:Tensor, *, shuffle_row:bool=False, shuffle_col:bool=False, flatten_row:bool=False) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   assert x.dtype == dtypes.bfloat16 and x.ndim >= 2, f"expected BF16 matrix, got {x.dtype} {x.shape}"
