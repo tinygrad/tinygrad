@@ -259,11 +259,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self):
     from tinygrad.uop.render import pretty_print
-    try: return pretty_print(self)
-    except RecursionError:
-      import traceback
-      traceback.print_stack(limit=20)
-      return f"UOp({self.op}, <graph too deep to render>)"
+    return pretty_print(self)
   def argstr(self):
     if self.op is Ops.REDUCE: return f'({", ".join(map(str, self.arg))})'
     return repr(self.arg)
@@ -970,7 +966,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret.bufs = [cast(Buffer, x.buffer) for x in self.src]
       assert all_same([(x.size, x.dtype) for x in ret.bufs]), "multibuffers mismatch buffers"
       return ret
-    assert self.op is Ops.BUFFER and self.arg.buffer is not None, f"must be a realized BUFFER, got {self.op}"
+    assert self.op is Ops.BUFFER and self.arg.buffer is not None, f"must be a realized BUFFER {self}"
     return self.arg.buffer
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
@@ -1222,7 +1218,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     creates unbound buffers: use call_with_outputs for calls that produce values"""
     assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
-    assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), f"ranges {self.ranges} are leaking out of the call"
+    assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), \
+      f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     # the (possibly void) return dtype lives in the CallInfo; an external C call is a CALL on a CUSTOM_FUNCTION
     # body holding the callee (a function pointer), rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux,
