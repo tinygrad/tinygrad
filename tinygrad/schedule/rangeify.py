@@ -109,9 +109,16 @@ def remove_noop_bufferize(idx,b2):
 def normalize_allreduce_view_source(x:UOp) -> UOp|None:
   # Rangeify can wrap a physical view's buffer in INDEX. Keep the view attached to the buffer itself so
   # scheduling and runtime argument resolution retain the physical offset.
-  if (x.tag != ("allreduce",) or x.src[0].op is not Ops.INDEX or
-      x.src[1].op is not Ops.CONST or x.src[2].op is not Ops.CONST): return None
-  return _allreduce_view(x.src[0].src[0], x.src[1].val, x.src[1].val+x.src[2].val)
+  if x.tag != ("allreduce",) or x.src[1].op is not Ops.CONST or x.src[2].op is not Ops.CONST: return None
+  if x.src[0].op is Ops.INDEX: return _allreduce_view(x.src[0].src[0], x.src[1].val, x.src[1].val+x.src[2].val)
+  # Packed persistent outputs arrive as a physical slice relative to MSELECT(SHRINK(buffer)). pm_no_views later
+  # removes the ordinary SHRINK, so fold its offset into the physical slice before that information is lost.
+  parent, rank = (x.src[0].src[0], x.src[0].arg) if x.src[0].op is Ops.MSELECT else (x.src[0], None)
+  if (view:=parent.contiguous_view()) is None or view[0] is parent or view[1] == 0: return None
+  base, offset = view
+  if rank is not None: base = base.mselect(rank)
+  start = offset + x.src[1].val
+  return _allreduce_view(base, start, start+x.src[2].val)
 
 def after_all_invalid(after:UOp):
   buf = after.src[0].buf_uop
