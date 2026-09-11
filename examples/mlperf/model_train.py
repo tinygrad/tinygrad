@@ -1467,6 +1467,9 @@ def train_llama3():
   if optim.master_params: Tensor.realize(*optim.master_params)
   Tensor.realize(*[x for o in optim.optimizers for x in o.m + o.v + o.param_shards])
   loss_acc = Tensor.zeros(1, dtype=dtypes.float32, device=device)
+  # Keep the optimizer's shared clip scale in stable storage across TinyJit captures. Upstream now mints storage for
+  # pending contiguous values, so leaving this as a temporary makes it an internal BUFFER instead of a call PARAM.
+  clip_coeff_buf = Tensor.empty(1, dtype=dtypes.float32, device=device).realize()
   Tensor.realize(loss_acc, *optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
   mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
   if mxfp4_weights is not None:
@@ -1496,7 +1499,7 @@ def train_llama3():
 
   @TinyJit
   def optim_step():
-    grad_norm, clip_coeff = clip_grads(grads, grad_acc, 1.0)
+    grad_norm, clip_coeff = clip_grads(grads, grad_acc, 1.0, clip_coeff_buf)
     optim.fstep(grads, grad_norm, clip_coeff)
     scheduler.step()
 
