@@ -486,7 +486,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   """
   if ast.op is Ops.PROGRAM:
     prg = ast
-    assert isinstance(prg.arg, ProgramInfo), "require ProgramInfo on arg to PROGRAM"
+    assert isinstance(prg.arg, ProgramInfo) and (prg.src[0].arg, KenrelInfo), "requires ProgramInfo on arg to to_program"
     prg = prg.replace(arg=replace(ProgramInfo.from_sink(prg.src[0], renderer.target), globals=prg.arg.globals, outs=prg.arg.outs, ins=prg.arg.ins))
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
