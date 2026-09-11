@@ -319,7 +319,7 @@ class TestWeakMaterializationEntries(unittest.TestCase):
       self.assertTrue(t.uop.is_virtual)
       # realize is a no-op, so a weak input can never become the real buffer TinyJit needs
       with self.assertRaises(JitError): TinyJit(lambda x: (x+1).realize())(t)
-    # callify must not silently commit a weak contiguous to storage
+    # callify must not silently commit a weak CONTIGUOUS to storage
     c = devful.contiguous()
     c.callify()
     self.assertIs(c.dtype, dtypes.weakfloat)
