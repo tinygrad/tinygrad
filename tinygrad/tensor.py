@@ -260,7 +260,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # bases to realize. an AFTER already names the storage its store writes into
   calls = [x for x in big_sink.toposort() if x.op is Ops.CALL]
   ctx = AllocCtx(bases={base for x in big_sink.src if needs_storage(base:=x.base) and base.op is not Ops.AFTER},
-                 call_inputs={s for c in calls for s in c.src[1:] if s.op is Ops.CONTIGUOUS})
+                 call_inputs={x for c in calls for s in c.src[1:] for x in s.toposort() if x.op is Ops.CONTIGUOUS})
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
