@@ -18,13 +18,13 @@ class TestConfiguredCompile(unittest.TestCase):
     data[8:, 0:8:2], data[8:, 1:8:2] = 100, 200
     image = Tensor(data.reshape(-1)).realize()
     transform = np.eye(3, dtype=np.float32)
-    luma = compile_warp(frame, (4, 4), layout='luma', border_fill=16, benchmark_runs=1)
-    np.testing.assert_array_equal(luma(image, Tensor(transform, device='NPY')).numpy(), data[:4, :4].reshape(1, 16))
+    luma = compile_warp(frame, (4, 4), layout='luma', border_fill=16, benchmark_runs=1)['variants']['default']['run']
+    np.testing.assert_array_equal(luma(input_frame=image, M_inv=Tensor(transform, device='NPY')).numpy(), data[:4, :4].reshape(1, 16))
     transform[0, 2] = 1000
-    np.testing.assert_array_equal(luma(image, Tensor(transform, device='NPY')).numpy(), np.full((1, 16), 16, dtype=np.uint8))
-    yuv = compile_warp(frame, (4, 4), layout='yuv420', benchmark_runs=1)
+    np.testing.assert_array_equal(luma(input_frame=image, M_inv=Tensor(transform, device='NPY')).numpy(), np.full((1, 16), 16, dtype=np.uint8))
+    yuv = compile_warp(frame, (4, 4), layout='yuv420', benchmark_runs=1)['variants']['default']['run']
     expected = [[[0, 2], [16, 18]], [[8, 10], [24, 26]], [[1, 3], [17, 19]], [[9, 11], [25, 27]], [[100]*2]*2, [[200]*2]*2]
-    np.testing.assert_array_equal(yuv(image, Tensor(np.eye(3, dtype=np.float32), device='NPY')).numpy(), expected)
+    np.testing.assert_array_equal(yuv(input_frame=image, M_inv=Tensor(np.eye(3, dtype=np.float32), device='NPY')).numpy(), expected)
 
   def test_packed_history(self):
     import onnx
@@ -54,10 +54,11 @@ class TestConfiguredCompile(unittest.TestCase):
 @unittest.skipUnless(getenv("MODEL_PKL", ""), "requires an artifact from python -m tinygrad.nn.compile_onnx")
 class TestCompiledModel(unittest.TestCase):
   def setUp(self):
-    with open(getenv("MODEL_PKL", ""), 'rb') as f: self.model = load_pickle(f, out_of_band=bool(getenv("PICKLE_OOB")))
+    with open(getenv("MODEL_PKL", ""), 'rb') as f: self.variant = load_pickle(f, out_of_band=bool(getenv("PICKLE_OOB")))['variants']['default']
+    self.model = self.variant['run']
 
   def test_inputs(self):
-    def run(seed): return [t.numpy().copy() for t in get_parameters(self.model(**make_inputs(self.model, seed)))]
+    def run(seed): return [t.numpy().copy() for t in get_parameters(self.model(**make_inputs(self.variant, seed)))]
     original, changed, repeated = run(100), run(101), run(100)
     for before, after, again in zip(original, changed, repeated, strict=True):
       self.assertTrue(np.isfinite(before).all() and np.isfinite(after).all())
@@ -70,7 +71,7 @@ class TestCompiledModel(unittest.TestCase):
     session = ort.InferenceSession(str(fetch(getenv("MODEL_ONNX", ""))), providers=['CPUExecutionProvider'])
     input_types = {v.name: v.type.removeprefix('tensor(').removesuffix(')') for v in session.get_inputs()}
     for seed in (100, 101):
-      inputs = make_inputs(self.model, seed)
+      inputs = make_inputs(self.variant, seed)
       reference = session.run(None, {k: v.numpy().astype({'float': 'float32', 'double': 'float64'}.get(input_types[k], input_types[k]))
                                     for k, v in inputs.items()})
       for expected, actual in zip(reference, get_parameters(self.model(**inputs)), strict=True):

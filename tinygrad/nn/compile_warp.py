@@ -114,8 +114,10 @@ def compile_warp(frame:NV12Frame, output_size, *, layout='luma', border_fill=Non
     rng = np.random.default_rng(seed)
     data = Tensor(rng.integers(0, 256, frame.size, dtype=np.uint8), device=Device.DEFAULT).realize()
     transform = Tensor((rng.standard_normal((3, 3))*8).astype(np.float32), device='NPY').realize()
-    return (data, transform), {}
-  return compile_jit(function, make_inputs, benchmark_runs)
+    return (), {'input_frame': data, 'M_inv': transform}
+  jit = compile_jit(function, make_inputs, benchmark_runs)
+  specs = {'input_frame': ((frame.size,), np.dtype(np.uint8).str, Device.DEFAULT), 'M_inv': ((3, 3), np.dtype(np.float32).str, 'NPY')}
+  return {'metadata': {}, 'variants': {'default': {'run': jit, 'input_specs': specs, 'packed_specs': {}}}}
 
 
 if __name__ == '__main__':
@@ -127,5 +129,5 @@ if __name__ == '__main__':
   parser.add_argument('--output', required=True)
   parser.add_argument('--benchmark-runs', type=int, default=20)
   args = parser.parse_args()
-  jit = compile_warp(args.frame, args.warp_to, layout=args.layout, border_fill=args.border_fill, benchmark_runs=args.benchmark_runs)
-  with open(args.output, 'wb') as f: dump_pickle(jit, f)
+  artifact = compile_warp(args.frame, args.warp_to, layout=args.layout, border_fill=args.border_fill, benchmark_runs=args.benchmark_runs)
+  with open(args.output, 'wb') as f: dump_pickle(artifact, f)
