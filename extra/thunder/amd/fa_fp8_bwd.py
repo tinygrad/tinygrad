@@ -8,6 +8,14 @@ from tinygrad.helpers import getenv
 @functools.cache
 def custom_fp8_backward(*args:UOp, B:int, N:int, H:int, H_KV:int, arch:str):
   assert arch == "gfx950" and N % 64 == 0 and H % H_KV == 0
+  if getenv("FA_BWD_ASM", 0) and (B,N,H,H_KV) == (2,8192,32,8) and args[0].dtype == dtypes.bfloat16:
+    from extra.thunder.amd.asm_fa_fp8_bwd import build_kernel
+    from tinygrad.dtype import AddrSpace
+    lds = UOp.placeholder((132160,), dtypes.uint8, 0, addrspace=AddrSpace.LOCAL)
+    sink = UOp.sink(*(a.base for a in args), lds, UOp.special(512,"lidx0"), UOp.special(N//256,"gidx0"),
+                    UOp.special(H,"gidx1"), UOp.special(B,"gidx2"),
+                    arg=KernelInfo(name="hk_fa_fp8_backward", estimates=Estimates(ops=5*B*H*N*N*128)))
+    return UOp(Ops.PROGRAM,src=(sink,UOp(Ops.LINEAR,src=tuple(UOp(Ops.INS,arg=(inst,dtypes.void)) for inst in build_kernel(B,N,H,H_KV)))))
   converged = getenv("FA_BWD_CONVERGED", 0)
   m32 = not converged and getenv("FA_BWD_M32", 1) and N % 256 == 0
   source = (pathlib.Path(__file__).parent / ("fa_fp8_bwd_converged.cpp" if converged else

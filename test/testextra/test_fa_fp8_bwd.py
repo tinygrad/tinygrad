@@ -169,14 +169,18 @@ class TestHipKittensFP8Backward(unittest.TestCase):
     self.run_case(512,4,2)
     self.run_case(512,4,2,native=True)
 
-  def run_case(self,N,H,Hkv,jit=False,delayed=False,dp=False,bootstrap=False,native=False):
+  def test_saturating_conversions(self):
+    self.run_case(256,4,2,clipping=True)
+    self.run_case(256,4,2,clipping=True,native=True)
+
+  def run_case(self,N,H,Hkv,jit=False,delayed=False,dp=False,bootstrap=False,native=False,clipping=False):
     if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("requires gfx950")
     from extra.thunder.amd.fa_fp8_bwd import fp8_backward
     rng = np.random.default_rng(17)
     B,D = (2 if dp else 1),128
     q,k,v = [Tensor(rng.standard_normal(s).astype(np.float32)*0.3).cast(dtypes.fp8e4m3).contiguous().realize()
              for s in [(B,N,H,D),(B,N,Hkv,D),(B,N,Hkv,D)]]
-    vs,ps,dss = [Tensor([x]).realize() for x in [0.37,1/448,1e-5]]
+    vs,ps,dss = [Tensor([x]).realize() for x in ([0.37,1e-5,1e-9] if clipping else [0.37,1/448,1e-5])]
     do = Tensor(rng.standard_normal((B,N,H,D)).astype(np.float32)*0.2).bfloat16().realize()
     if bootstrap:
       do = (do.float()*1e-8).bfloat16().realize()
@@ -219,7 +223,7 @@ class TestHipKittensFP8Backward(unittest.TestCase):
         self.assertTrue(np.isfinite(aa).all())
         self.assertLess(np.linalg.norm(aa-bb)/np.linalg.norm(bb),0.01)
         self.assertLess(np.max(np.abs(aa-bb))/np.max(np.abs(bb)),0.02)
-    else: self.assert_gradients(actual[:3],reference[:3],peak_tolerance=0.02 if dp or bootstrap else 0.002)
+    else: self.assert_gradients(actual[:3],reference[:3],peak_tolerance=0.02 if dp or bootstrap or clipping else 0.002)
     np.testing.assert_allclose(actual[3].numpy().reshape(-1,2).max(0),[r.item() for r in reference[3:]],rtol=2e-4,atol=1e-6)
     if bootstrap:
       unquantized = fp8_backward_reference(q,k,v,vs,do,out,lse,dos,ps,effective_dss,quantize=False)

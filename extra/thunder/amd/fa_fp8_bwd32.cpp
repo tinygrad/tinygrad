@@ -10,7 +10,7 @@ template<int R,int C> struct alignas(1024) Tile {
   unsigned char data[R*C];
   __device__ static unsigned swizzle(unsigned r,unsigned c) {
     // 128-column panels let the 32x32 MFMA transpose loads share one base.
-    return (c/128*(R*128)+r*128+c%128)^((r&7)<<4)^((r&16)<<2);
+    return (c/128*(R*128)+r*128+c%128)^((r&6)<<3)^((r&16)<<2);
   }
 };
 __device__ int wave() {return __builtin_amdgcn_readfirstlane(warpid());}
@@ -58,8 +58,6 @@ __device__ void wait_lds() {
   __builtin_amdgcn_sched_barrier(0);
 }
 template<bool E5> __device__ unsigned encode4(float (&x)[4]) {
-  #pragma unroll
-  for(int i=0;i<4;i++) x[i]=__builtin_amdgcn_fmed3f(x[i],E5?-57344.f:-448.f,E5?57344.f:448.f);
   if constexpr(E5) {
     unsigned a=__builtin_amdgcn_cvt_pk_bf8_f32(x[0],x[1],0,false);
     return __builtin_amdgcn_cvt_pk_bf8_f32(x[2],x[3],a,true);
@@ -71,6 +69,8 @@ template<bool E5> __device__ unsigned encode4(float (&x)[4]) {
 extern "C" __global__ __launch_bounds__(512) __attribute__((amdgpu_waves_per_eu(2,2))) void fa_fp8_backward(
  Output* dq,Output* dk,Output* dv,float* amax,float* next_amax,const unsigned char* q,const unsigned char* k,
  const unsigned char* v,const unsigned char* dout,const float* delta,const float* lse,const float* scales) {
+  // FP16_OVFL also saturates FP8/BF8 conversions, avoiding a clamp for every P/dS value.
+  asm volatile("s_setreg_imm32_b32 hwreg(HW_REG_MODE, 23, 1), 1" ::: "memory");
   constexpr int N=ATTN_N,H=ATTN_H,HK=ATTN_H_KV,GX=N/256,TOTAL=GX*H*ATTN_B;
   constexpr int HEAD_GROUP=H%4==0?4:H%2==0?2:1;
   int gid=(blockIdx.z*H+blockIdx.y)*GX+blockIdx.x;
