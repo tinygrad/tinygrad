@@ -72,7 +72,8 @@ class TestAfterCounterexamples(unittest.TestCase):
   def test_view_assign_gradient(self):
     for view, expected in ((lambda t: t.reshape(3, 2)[1:], [[1., 1., 0.], [0., 0., 0.]]),
                            (lambda t: t.permute(1, 0)[1:], [[1., 0., 0.], [1., 0., 0.]]),
-                           (lambda t: t.flip((0, 1))[:1], [[1., 1., 1.], [0., 0., 0.]])):
+                           (lambda t: t.flip((0, 1))[:1], [[1., 1., 1.], [0., 0., 0.]]),
+                           (lambda t: t[:, ::2], [[0., 1., 0.], [0., 1., 0.]])):
       with self.subTest(expected=expected):
         x = Tensor([[1., 2., 3.], [4., 5., 6.]])
         y = x.clone()
