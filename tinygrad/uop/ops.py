@@ -1218,8 +1218,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     creates unbound buffers: use call_with_outputs for calls that produce values"""
     assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
-    assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), \
-      f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
+    assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), f"ranges {self.ranges} are leaking out of the call"
     # the (possibly void) return dtype lives in the CallInfo; an external C call is a CALL on a CUSTOM_FUNCTION
     # body holding the callee (a function pointer), rendered as an indirect call
     return UOp(Ops.CALL, src=(self,)+srcs, arg=CallInfo(grad_fxn, name, precompile, precompile_backward, aux,
