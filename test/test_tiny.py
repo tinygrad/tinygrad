@@ -35,6 +35,18 @@ class TestTiny(unittest.TestCase):
     out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.zeros(8).contiguous())
     self.assertListEqual(out.tolist(), [1]*8+[0]*8)
 
+  def test_cat_empty(self):
+    with self.assertRaisesRegex(ValueError, "cannot concatenate an empty sequence"):
+      Tensor.cat([])
+    with self.assertRaisesRegex(ValueError, "cannot concatenate an empty sequence"):
+      Tensor.cat(())
+
+  def test_stack_empty(self):
+    with self.assertRaisesRegex(ValueError, "cannot stack an empty sequence"):
+      Tensor.stack([])
+    with self.assertRaisesRegex(ValueError, "cannot stack an empty sequence"):
+      Tensor.stack(())
+
   def test_sum(self, N=getenv("SUM_N", 256)):
     out = Tensor.ones(N).contiguous().sum()
     self.assertEqual(out.item(), N)

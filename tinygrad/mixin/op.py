@@ -732,6 +732,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     Concatenates self with other tensors in `args` along an axis specified by `dim`.
     All tensors must have the same shape except in the concatenating dimension.
+    Raises a ValueError if the input sequence is empty.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
@@ -741,6 +742,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t0.cat(t1, t2, dim=1).numpy())
     ```
     """
+    tensors = argfix(self, *args)
+    if not tensors: raise ValueError("cannot concatenate an empty sequence")
+    self, *args = tensors
     dim = self._resolve_dim(dim)
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
     tensors = [self, *args]

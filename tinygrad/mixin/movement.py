@@ -257,6 +257,7 @@ class MovementMixin:
   def stack(self, *args: Self, dim: int = 0) -> Self:
     """
     Concatenates self with other tensors in `args` along a new dimension specified by `dim`.
+    Raises a ValueError if the input sequence is empty.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t0, t1, t2 = Tensor([1, 2]), Tensor([3, 4]), Tensor([5, 6])
@@ -267,6 +268,7 @@ class MovementMixin:
     ```
     """
     tensors = argfix(self, *args)
+    if not tensors: raise ValueError("cannot stack an empty sequence")
     dim = tensors[0]._resolve_dim(dim, extra=True)
     assert all(t.shape == tensors[0].shape for t in tensors), f"all shapes must match for stack, got {[t.shape for t in tensors]}"
     ret = tensors[0]._mop(Ops.STACK, arg=tuple(t._uop for t in tensors[1:]))
