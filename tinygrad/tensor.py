@@ -84,7 +84,7 @@ def mint_tagged_storage(x:UOp):
   return buf.after(buf.store(src)).replace(tag=x.tag)
 
 def mint_function_materialization(x:UOp) -> UOp|None:
-  return mint_tagged_storage(x.replace(tag=(x,)))
+  return mint_tagged_storage(x if x.tag is not None else x.replace(tag=(x,)))
 
 pm_mint_function_materializations = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, src=(UPat((Ops.COPY, Ops.AFTER, Ops.CAST)),), name="x"), mint_function_materialization),
