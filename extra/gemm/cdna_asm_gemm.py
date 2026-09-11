@@ -573,7 +573,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
         flags = Tensor.zeros(1 << 20, dtype=dtypes.uint8, device=a.device)
         # The imported ABI has distinct D and C pointers. C is still used to form/load buffer descriptors even with beta=0,
         # so alias the complete output allocation as the replay harness does; a one-element dummy can fault on JIT replay.
-        out = Tensor.custom_kernel(out, out, b.T.clone(), a, workspace, flags,
+        out = Tensor.custom_kernel(out, out, b.T, a, workspace, flags,
                                    fxn=custom_asm_bf16_mlperf_gemm1, grad_fxn=custom_asm_bf16_mlperf_gemm1_bw)[0]
       else:
         out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
