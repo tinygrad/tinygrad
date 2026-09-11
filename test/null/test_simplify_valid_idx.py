@@ -409,7 +409,6 @@ class TestImageSimplification(unittest.TestCase):
     self.check(load, None, "((((idx1*24)+(r5*3))+r3)+-3)", "(((idx2*2)+r4)+-1)")
 
   def test_simplify7(self):
-    # DEBUG=2 ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1397 ALLOWED_GATED_READ_IMAGE=94 FLOAT16=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916 # noqa: E501
     # kernel 143
     gidx0 = Special("gidx0", 32)
     lidx0 = Special("lidx0", 16)
@@ -431,7 +430,7 @@ class TestImageSimplification(unittest.TestCase):
     self.check(load, None, "(lidx1*128+gidx0//2+144)", "(lidx0*2+r0+-3)")
 
   def test_simplify8(self):
-    # from openpilot compile3, kernel r_4_16_8_16_4_4_3_3n1
+    # from the openpilot vision model, kernel r_4_16_8_16_4_4_3_3n1
     # valid guarantees A >= 0, so divmod simplifies and gate is removed
     gidx0 = Special("gidx0", 16)
     gidx1 = Special("gidx1", 4)
@@ -443,7 +442,7 @@ class TestImageSimplification(unittest.TestCase):
     self.check(load, None, "(gidx0+lidx1*64+-16)", "(lidx0+gidx1*8+-1)")
 
   def test_simplify9(self):
-    # from openpilot compile3, kernel r_32_16_8_4_4_7_7 (image 1x16384)
+    # from the openpilot vision model, kernel r_32_16_8_4_4_7_7 (image 1x16384)
     # valid guarantees A1 >= 0 and A1 < 512, gate should be removable
     gidx0 = Special("gidx0", 32)
     lidx0 = Special("lidx0", 16)
@@ -461,7 +460,7 @@ class TestImageSimplification(unittest.TestCase):
                        "(gidx0+lidx1*128+(lidx0*1024+r0*1024)+-3168)", "0")
 
   def test_simplify10(self):
-    # from openpilot compile3, kernel r_16_8_4_4_4_4_7_7 (image 1x8192)
+    # from the openpilot vision model, kernel r_16_8_4_4_4_4_7_7 (image 1x8192)
     # valid guarantees A1 >= 0 and A1 < 128, gate should be removable
     gidx0 = Special("gidx0", 16)
     lidx0 = Special("lidx0", 8)

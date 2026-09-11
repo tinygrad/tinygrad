@@ -1,6 +1,6 @@
 import sys
 from extra.bench_log import WallTimeEvent, BenchEvent
-from examples.openpilot.compile3 import load_pickle
+from tinygrad.nn.compile import load_pickle
 from tinygrad.helpers import getenv
 
 PKL = sys.argv[1] if len(sys.argv) > 1 else "/tmp/openpilot.pkl"
@@ -8,7 +8,7 @@ PKL = sys.argv[1] if len(sys.argv) > 1 else "/tmp/openpilot.pkl"
 load_times = []
 
 for _ in range(10):
-  with WallTimeEvent(BenchEvent.STEP) as wte: load_pickle(open(PKL, 'rb'))
+  with WallTimeEvent(BenchEvent.STEP) as wte, open(PKL, 'rb') as f: load_pickle(f, out_of_band=bool(getenv("PICKLE_OOB")))
   load_times.append(wte.time)
   print(f"pickle load: {wte.time:6.2f} s")
 
