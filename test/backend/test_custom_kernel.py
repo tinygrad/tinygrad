@@ -437,8 +437,9 @@ class TestCustomKernel(unittest.TestCase):
       src = do_to_program(custom_add_one_kernel(out, inp), Device[out.device].renderer).src[2].arg
       binary = Device[out.device].renderer.compiler.compile(src)
       sink = UOp.sink(out.base, inp.base, arg=KernelInfo("add_one_1"))
+      # NOTE: Ops.PROGRAM kernels cannot infer inputs and outputs from the UOp, the user must provide these
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-                 arg=ProgramInfo(name="add_one_1", globals=(0, 1), outs=(0,), ins=(1,), target=Device[out.device].renderer.target))
+                 arg=ProgramInfo(globals=(0, 1), outs=(0,), ins=(1,)))
     out = Tensor([-1]).realize()
     cpu_src = Tensor([2], device="CPU").realize()
     out = Tensor.custom_kernel(out, cpu_src.to(out.device), fxn=custom_source)[0]
