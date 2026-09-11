@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 from extra.benchmark_pickle import make_inputs
 from tinygrad.helpers import fetch, getenv
-from tinygrad.nn.compile import dump_pickle, load_pickle
+from tinygrad.nn.compile import allocate_inputs, dump_pickle, load_pickle
 from tinygrad.nn.state import get_parameters
 from tinygrad.uop.ops import Ops
 
@@ -28,7 +28,6 @@ class TestConfiguredCompile(unittest.TestCase):
 
   def test_packed_history(self):
     import onnx
-    from tinygrad import Tensor
     from tinygrad.nn.compile_onnx import compile_onnx
     graph = onnx.helper.make_graph([onnx.helper.make_node('Add', ['sequence', 'sequence'], ['output'])], 'history',
       [onnx.helper.make_tensor_value_info('sequence', onnx.TensorProto.FLOAT16, [1, 3, 2])],
@@ -44,11 +43,10 @@ class TestConfiguredCompile(unittest.TestCase):
             dump_pickle(compile_onnx(path, configs={'test': config}, float32=True, benchmark_runs=1), f)
             f.seek(0)
             variant = load_pickle(f)['variants']['test']
-          arrays = {name: np.zeros(shape, dtype=dtype) for name, (shape, dtype, _) in variant['input_specs'].items()}
-          inputs = {name: Tensor(arrays[name], device=device).realize() for name, (_, _, device) in variant['input_specs'].items()}
+          inputs, views = allocate_inputs(variant['input_specs'], variant['packed_specs'])
           frames = np.random.default_rng(0).integers(-8, 9, (20, 2)).astype(np.float32)
           for t, value in enumerate(frames):
-            arrays['packed_inputs'].view(np.float32)[:] = value
+            views['current'][...] = value
             # Each output sample ends at t-delay-offset; max pools the preceding stride frames.
             expected = np.array([np.max([frames[index] if (index := t-delay-offset-j) >= 0 else np.zeros(2)
                                          for j in range(stride if reduce == 'max' else 1)], axis=0)

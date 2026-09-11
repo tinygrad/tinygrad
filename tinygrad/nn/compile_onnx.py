@@ -1,29 +1,13 @@
 """Compile ONNX with optional input warps, temporal sampling and packed host transfers."""
 import argparse, json, math
 from pathlib import Path
-from typing import Any
 import numpy as np
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Device, dtypes
 from tinygrad.dtype import DType, _to_np_dtype
 from tinygrad.helpers import fetch
-from tinygrad.nn.compile import compile_jit, dump_pickle
+from tinygrad.nn.compile import allocate_inputs, compile_jit, dump_pickle
 from tinygrad.nn.compile_warp import NV12Frame, make_warp
-from tinygrad.nn.onnx import OnnxRunner, OnnxPBParser
-
-
-def onnx_metadata(path):
-  class MetadataParser(OnnxPBParser):
-    def _parse_ModelProto(self) -> dict:
-      obj:dict[str, Any] = {"graph": {"input": [], "output": []}, "metadata_props": []}
-      for fid, wire_type in self._parse_message(self.reader.len):
-        if fid == 7: obj["graph"] = self._parse_GraphProto()
-        elif fid == 14: obj["metadata_props"].append(self._parse_StringStringEntryProto())
-        else: self.reader.skip_field(wire_type)
-      return obj
-  model = MetadataParser(path).parse()
-  return {"metadata": {p["key"]: p["value"] for p in model["metadata_props"]}} | {
-    f"{kind}_shapes": {v["name"]: tuple(d if isinstance(d, int) else 0 for d in v["parsed_type"].shape) for v in model["graph"][kind]}
-    for kind in ("input", "output")}
+from tinygrad.nn.onnx import OnnxRunner
 
 
 def sample_history(buffer, value, shape, *, axis, size=1, stride=1, reduce='sample', delay=0):
@@ -60,6 +44,9 @@ def prepare_inputs(runner, config, device_inputs, float32):
 
 def compile_onnx(path, *, device_inputs=(), float32=False, output_name=None, benchmark_runs=20, out_of_band=False, configs=None):
   runner = OnnxRunner(path)
+  metadata = {'metadata': runner.metadata} | {
+    f'{kind}_shapes': {name: tuple(d if isinstance(d, int) else 0 for d in shape) for name, shape in shapes.items()}
+    for kind, shapes in [('input', {name: spec.shape for name, spec in runner.graph_inputs.items()}), ('output', runner.output_shapes)]}
   if unknown := set(device_inputs) - runner.graph_inputs.keys(): raise ValueError(f"Unknown inputs: {unknown}")
   if output_name is not None and output_name not in runner.graph_outputs: raise ValueError(f"Unknown output: {output_name}")
 
@@ -72,21 +59,20 @@ def compile_onnx(path, *, device_inputs=(), float32=False, output_name=None, ben
       packed_specs[name] = (offset, shape, np.dtype(_to_np_dtype(dtype)).str)
       offset += math.prod(shape)*dtype.itemsize
 
+    specs = {name: (shape, np.dtype(_to_np_dtype(dtype)).str, device)
+             for name, (shape, dtype, device) in sources.items() if name not in packed_specs}
+    if packed_specs: specs['packed_inputs'] = ((offset,), np.dtype(np.uint8).str, 'NPY')
+    specs.update({name+'_history': (shape, np.dtype(_to_np_dtype(dtype)).str, Device.DEFAULT) for name, (shape, dtype) in histories.items()})
+
     def make_inputs(seed):
       rng = np.random.default_rng(seed)
-      inputs = {}
-      packed = np.zeros(offset, dtype=np.uint8)
-      for name in list(packed_specs) + [k for k in sources if k not in packed_specs]:
-        shape, dtype, device = sources[name]
-        data = (rng.standard_normal(shape) if dtypes.is_float(dtype) else
-                rng.integers(0, 256, shape, dtype=np.uint8) if dtype == dtypes.uint8 else rng.integers(0, 2 if dtype == dtypes.bool else 16, shape))
-        if name in packed_specs:
-          start, _, npdtype = packed_specs[name]
-          packed[start:start+math.prod(shape)*dtype.itemsize].view(npdtype).reshape(shape)[:] = data
-        else: inputs[name] = Tensor(data, dtype=dtype, device=device).contiguous().realize()
-      if packed_specs: inputs['packed_inputs'] = Tensor(packed, device='NPY').realize()
-      for name, (shape, dtype) in histories.items(): inputs[name+'_history'] = Tensor.zeros(*shape, dtype=dtype).contiguous().realize()
-      return (), inputs
+      def initialize(views):
+        for name in list(packed_specs) + [k for k in sources if k not in packed_specs]:
+          shape, dtype, _ = sources[name]
+          views[name][...] = (rng.standard_normal(shape) if dtypes.is_float(dtype) else
+                             rng.integers(0, 256, shape, dtype=np.uint8) if dtype == dtypes.uint8 else
+                             rng.integers(0, 2 if dtype == dtypes.bool else 16, shape))
+      return (), allocate_inputs(specs, packed_specs, initialize)[0]
 
     def run(**inputs):
       values = {name: inputs[name].to(Device.DEFAULT) for name in sources if name not in packed_specs}
@@ -109,13 +95,9 @@ def compile_onnx(path, *, device_inputs=(), float32=False, output_name=None, ben
       return next(iter(outputs.values())) if len(outputs) == 1 else outputs
 
     jit = compile_jit(run, make_inputs, benchmark_runs, out_of_band=out_of_band)
-    specs = {name: (shape, np.dtype(_to_np_dtype(dtype)).str, device)
-             for name, (shape, dtype, device) in sources.items() if name not in packed_specs}
-    if packed_specs: specs['packed_inputs'] = ((offset,), np.dtype(np.uint8).str, 'NPY')
-    specs.update({name+'_history': (shape, np.dtype(_to_np_dtype(dtype)).str, Device.DEFAULT) for name, (shape, dtype) in histories.items()})
     return {'run': jit, 'input_specs': specs, 'packed_specs': packed_specs}
 
-  return {'metadata': onnx_metadata(path), 'variants': {name: compile_config(config) for name, config in (configs or {'default': {}}).items()}}
+  return {'metadata': metadata, 'variants': {name: compile_config(config) for name, config in (configs or {'default': {}}).items()}}
 
 
 if __name__ == '__main__':

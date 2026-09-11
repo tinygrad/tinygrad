@@ -2,8 +2,20 @@
 import io, pickle, shutil, struct, tempfile, time
 from collections.abc import Callable
 import numpy as np
-from tinygrad import TinyJit, Device
+from tinygrad import Tensor, TinyJit, Device
 from tinygrad.nn.state import get_parameters
+
+
+def allocate_inputs(input_specs, packed_specs, initialize=None):
+  """Allocate inputs and NumPy views, initializing before copying to devices."""
+  arrays = {name: np.zeros(shape, dtype=dtype) for name, (shape, dtype, _) in input_specs.items()}
+  views = arrays.copy()
+  if packed_specs:
+    packed = views.pop('packed_inputs')
+    views.update({name: packed[start:start+int(np.prod(shape))*np.dtype(dtype).itemsize].view(dtype).reshape(shape)
+                  for name, (start, shape, dtype) in packed_specs.items()})
+  if initialize is not None: initialize(views)
+  return {name: Tensor(arrays[name], device=device).realize() for name, (_, _, device) in input_specs.items()}, views
 
 
 def dump_pickle(obj, f, *, out_of_band=False):

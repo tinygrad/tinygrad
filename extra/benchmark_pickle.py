@@ -1,24 +1,18 @@
 import argparse, time
 from contextlib import nullcontext
 import numpy as np
-from tinygrad import Tensor
 from tinygrad.helpers import getenv
-from tinygrad.nn.compile import load_pickle
+from tinygrad.nn.compile import allocate_inputs, load_pickle
 from tinygrad.nn.state import get_parameters
 
 
 def make_inputs(variant, seed=100):
   rng = np.random.default_rng(seed)
-  arrays = {name: np.zeros(shape, dtype=dtype) for name, (shape, dtype, _) in variant['input_specs'].items()}
-  views = arrays.copy()
-  if variant['packed_specs']:
-    packed = views.pop('packed_inputs')
-    views.update({name: packed[start:start+int(np.prod(shape))*np.dtype(dtype).itemsize].view(dtype).reshape(shape)
-                  for name, (start, shape, dtype) in variant['packed_specs'].items()})
-  for value in views.values():
-    value[...] = (rng.standard_normal(value.shape) * 8 if np.issubdtype(value.dtype, np.floating) else
-                  rng.integers(0, 2 if value.dtype == np.bool_ else 16, value.shape))
-  return {name: Tensor(arrays[name], device=device).realize() for name, (_, _, device) in variant['input_specs'].items()}
+  def initialize(views):
+    for value in views.values():
+      value[...] = (rng.standard_normal(value.shape) * 8 if np.issubdtype(value.dtype, np.floating) else
+                    rng.integers(0, 2 if value.dtype == np.bool_ else 16, value.shape))
+  return allocate_inputs(variant['input_specs'], variant['packed_specs'], initialize)[0]
 
 
 if __name__ == '__main__':
