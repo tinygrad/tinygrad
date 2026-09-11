@@ -5,10 +5,9 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
-from tinygrad.helpers import all_int, prod, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray
+from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC
-from tinygrad.uop.ops import UOp, Ops, ParamArg, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
-from tinygrad.uop.ops import to_max_shape
+from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
 from tinygrad.uop.ops import resolve_returned_after
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
@@ -85,13 +84,10 @@ def mint_tagged_storage(x:UOp):
   return buf.after(buf.store(src)).replace(tag=x.tag)
 
 def mint_function_materialization(x:UOp) -> UOp|None:
-  # Function-boundary materializations are outputs of the enclosing Callify, not pre-existing caller inputs.
-  # Declare their storage unbound so call resolution owns it; ordinary mint_tagged_storage intentionally creates
-  # bound storage for held tensors under the current Buffer model.
-  axis = x.axis if isinstance(x.device, tuple) else None
-  shape = x.shard_shape if axis is not None else x.shape
-  buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), x.dtype, prod(to_max_shape(shape)), device=x.device)).view_as(shape, axis)
-  return buf.after(buf.store(x.src[0])).replace(tag=x.tag if x.tag is not None else (x,))
+  # These CONTIGUOUS nodes are synthesized after provenance tagging. Give them caller-owned storage without inventing
+  # a tensor mapping: they are internal function materializations, not additional Callify outputs.
+  buf = x.empty_like()
+  return buf.after(buf.store(x.src[0])).replace(tag=x.tag)
 
 pm_mint_function_materializations = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, src=(UPat((Ops.COPY, Ops.AFTER, Ops.CAST)),), name="x"), mint_function_materialization),
