@@ -163,6 +163,7 @@ class Scheduler:
         if any(rng in y.ranges for y in r.src[1:]):
           replaces[r] = r.replace(src=(valid.where(r.src[0], UOp.const(identity_element(r.arg[0], r.dtype), r.dtype)),)+r.src[1:])
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
+      ret = replaced_rng
     elif opt.op is OptOps.SWAP:
       try:
         altrng:UOp = self.rngs[opt.arg]
@@ -213,12 +214,9 @@ class Scheduler:
           ast, warp, ne = self.ast, UOp.range(tc.threads, -1, AxisType.WARP), []
           try:
             for i,a in enumerate(axes):
-              idx = self.rngs.index(a)
               if (a.vmax+1) % tc.dims[i] != 0:
                 if opt_level < 2: raise KernelOptError("tc padding requires opt_level >= 2")
-                # apply_opt should return the updated range?
-                self.apply_opt(Opt(OptOps.PADTO, idx, tc.dims[i]), append_opt=False) # PADTO might fail
-                axes[i] = self.rngs[idx]
+                axes[i] = self.apply_opt(Opt(OptOps.PADTO, self.rngs.index(a), tc.dims[i]), append_opt=False) # PADTO might fail
             # we create the warp as a whole thing, in case some of these ranges are moved/removed later
             for opt in tc.opts:
               if opt[0] == "l":
