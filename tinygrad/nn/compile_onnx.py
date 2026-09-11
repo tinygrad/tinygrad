@@ -1,5 +1,5 @@
 """Compile ONNX with optional input warps, temporal sampling and packed host transfers."""
-import argparse, json, math, pickle
+import argparse, json, math
 from pathlib import Path
 from typing import Any
 import numpy as np
@@ -113,8 +113,7 @@ def compile_onnx(path, *, device_inputs=(), float32=False, output_name=None, ben
     specs.update({name+'_history': (shape, np.dtype(_to_np_dtype(dtype)).str, Device.DEFAULT) for name, (shape, dtype) in histories.items()})
     return {'run': jit, 'input_specs': specs, 'packed_specs': packed_specs}
 
-  if configs is None: return compile_config({})['run']
-  return {'metadata': onnx_metadata(path), 'variants': {name: compile_config(config) for name, config in configs.items()}}
+  return {'metadata': onnx_metadata(path), 'variants': {name: compile_config(config) for name, config in (configs or {'default': {}}).items()}}
 
 
 if __name__ == '__main__':
@@ -126,13 +125,10 @@ if __name__ == '__main__':
   parser.add_argument('--output-name', help='select one model output')
   parser.add_argument('--benchmark-runs', type=int, default=20)
   parser.add_argument('--out-of-band', action='store_true', help='stream protocol-5 buffers for large models')
-  parser.add_argument('--metadata-output')
   parser.add_argument('--config', action='append', help='NAME=JSON: per-input source, warp and history settings, plus host input packing order')
   args = parser.parse_args()
   path = fetch(args.onnx) if '://' in args.onnx else Path(args.onnx)
   configs = dict((name, json.loads(config)) for name, config in (value.split('=', 1) for value in args.config)) if args.config else None
-  jit = compile_onnx(path, device_inputs=args.device_input, float32=args.float32, output_name=args.output_name,
-                     benchmark_runs=args.benchmark_runs, out_of_band=args.out_of_band, configs=configs)
-  with open(args.output, 'wb') as f: dump_pickle(jit, f, out_of_band=args.out_of_band)
-  if args.metadata_output:
-    with open(args.metadata_output, 'wb') as f: pickle.dump(onnx_metadata(path), f)
+  artifact = compile_onnx(path, device_inputs=args.device_input, float32=args.float32, output_name=args.output_name,
+                          benchmark_runs=args.benchmark_runs, out_of_band=args.out_of_band, configs=configs)
+  with open(args.output, 'wb') as f: dump_pickle(artifact, f, out_of_band=args.out_of_band)
