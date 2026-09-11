@@ -49,6 +49,8 @@ add_tags = PatternMatcher([
     UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="x"), tag_uop),
+  # materializations synthesized at function boundaries still need storage outside the nested call
+  (UPat(Ops.CONTIGUOUS, src=(UPat((Ops.COPY, Ops.AFTER, Ops.CAST)),), name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
 
@@ -80,6 +82,13 @@ def mint_tagged_storage(x:UOp):
   if 0 in x.shape: return src
   buf = x.empty_like()
   return buf.after(buf.store(src)).replace(tag=x.tag)
+
+def mint_function_materialization(x:UOp) -> UOp|None:
+  return mint_tagged_storage(x if x.tag is not None else x.replace(tag=(x,)))
+
+pm_mint_function_materializations = PatternMatcher([
+  (UPat(Ops.CONTIGUOUS, src=(UPat((Ops.COPY, Ops.AFTER, Ops.CAST)),), name="x"), mint_function_materialization),
+])
 
 # Allocation provenance is local to Callify, while physical allreduce annotations are consumed later by the scheduler.
 pm_remove_allocation_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x:
@@ -168,7 +177,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
   # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
   rmap = dict(zip(ret_pos, outs))
-  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous().replace(tag=(a,)))
+  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
                                    for i, a in enumerate(c.src[1:])]))
   rets = tuple(o.after(new_call) for o in outs)
 
@@ -275,6 +284,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
   # here we can break the tensor graph. tags propagate through replaces so we can still find the original UOps
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
+  big_sink = graph_rewrite(big_sink, pm_mint_function_materializations, name="mint function materializations")
 
   # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
   # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
