@@ -1425,7 +1425,7 @@ def train_llama3():
 
   for p in optim.params:
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
-    p.grad = p.zeros_like(dtype=grad_dtype).contiguous()
+    p.grad = p.zeros_like(dtype=grad_dtype).contiguous().realize()
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
