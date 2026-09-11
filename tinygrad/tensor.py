@@ -78,8 +78,6 @@ def mint_tagged_storage(x:UOp):
   if x.is_virtual or on_disk(x): return src.alu(Ops.CONTIGUOUS)
   # if size is 0, remove the contig
   if 0 in x.shape: return src
-  if x.numel() in (1, 2097152, 67108864):
-    print("MINT_TRACE", x.op, x.shape, x.dtype, x.device, [(t.op, t.shape) for t in x.tag])
   buf = x.empty_like()
   return buf.after(buf.store(src)).replace(tag=x.tag)
 
