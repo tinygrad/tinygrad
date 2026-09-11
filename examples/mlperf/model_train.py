@@ -1504,12 +1504,19 @@ def train_llama3():
     loss_reset = model.update_amax(reset=loss_acc)
     refreshed_mxfp4 = model.refresh_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
 
+    # Diagnose whether the fused optimizer leaves the persistent weight cache identical to an independent refresh.
+    if mxfp4_weights is not None:
+      from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+      fresh = quantize_mxfp4(model.wqkv[0], shuffle_row=True, shuffle_col=True)
+      cache_diff = Tensor.stack(*[(cached != expected).float().sum() for cached, expected in zip(mxfp4_weights["wqkv"][0], fresh)]).sum().to("CPU")
+    else: cache_diff = Tensor.zeros(1)
+
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_reset, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax,
+    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_reset, cache_diff, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax,
                    *refreshed_mxfp4)
 
-    return lr_cpu, grad_norm_cpu, loss_cpu
+    return lr_cpu, grad_norm_cpu, loss_cpu, cache_diff
 
   @TinyJit
   @Context(TRAINING=0)
@@ -1583,6 +1590,7 @@ def train_llama3():
       gt = time.perf_counter()
       ret = optim_step()
       lr, grad_norm, loss = ret[0].item(), ret[1].item(), ret[2].item() / grad_acc
+      print(f"MXFP4 cache mismatch elements: {ret[3].item():.0f}")
       et = time.perf_counter()
 
       optim_time = et - gt
