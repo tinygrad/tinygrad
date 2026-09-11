@@ -220,10 +220,11 @@ def replace_realized_allreduce_view(ctx:AllocCtx, b:UOp):
   # operands are (offset, size), not the ordinary (start, end). Dropping the tag corrupts every nonzero packed offset.
   return replace_input_buffer(ctx, b)
 
-def parameterize_minted_storage(ctx:AllocCtx, a:UOp, b:UOp):
+def parameterize_minted_storage(ctx:AllocCtx, a:UOp):
   # Minting gives held values explicit storage. Keep that storage as a call argument so subsequent captures see the
   # same buffer identity instead of treating it as schedule-local scratch.
-  if not b.is_unbound or a.tag is None or not all(isinstance(t, UOp) for t in a.tag): return None
+  b = a.src[0].unsharded_base
+  if b.op is not Ops.BUFFER or not b.is_unbound or a.tag is None or not all(isinstance(t, UOp) for t in a.tag): return None
   return a.substitute({b:replace_input_buffer(ctx, b)}, walk=True)
 
 # unbound BUFFERs get canonical scope-local id slots here so structurally identical calls hash identically for the
@@ -257,7 +258,7 @@ pm_replace_realized_allreduce_views = PatternMatcher([
 ])
 
 pm_parameterize_minted_storage = PatternMatcher([
-  (UPat(Ops.AFTER, src=(UPat(Ops.BUFFER, name="b"), UPat(Ops.STORE)), name="a"), parameterize_minted_storage),
+  (UPat(Ops.AFTER, name="a"), parameterize_minted_storage),
 ])
 
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
