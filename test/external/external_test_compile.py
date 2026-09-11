@@ -1,17 +1,34 @@
 import itertools, re, tempfile, unittest
 from pathlib import Path
 import numpy as np
-from extra.benchmark_pickle import make_inputs
+from examples.openpilot.load_pickle import make_inputs
 from tinygrad.helpers import fetch, getenv
-from tinygrad.nn.compile import allocate_inputs, dump_pickle, load_pickle
+from examples.openpilot.helpers import allocate_inputs, dump_pickle, load_pickle
 from tinygrad.nn.state import get_parameters
 from tinygrad.uop.ops import Ops
 
 
 class TestConfiguredCompile(unittest.TestCase):
+  def test_metadata(self):
+    import onnx
+    from tinygrad.nn.onnx import OnnxRunner
+    graph = onnx.helper.make_graph([onnx.helper.make_node('Identity', ['input'], ['output'])], 'metadata',
+      [onnx.helper.make_tensor_value_info('input', onnx.TensorProto.FLOAT, ['batch', 3])],
+      [onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, ['batch', 3])])
+    model = onnx.helper.make_model(graph)
+    with tempfile.TemporaryDirectory() as directory:
+      path = Path(directory) / 'metadata.onnx'
+      for metadata in ({}, {'model_checkpoint': 'v1.0', 'output_slices': 'dGVzdA=='}):
+        onnx.helper.set_model_props(model, metadata)
+        onnx.save(model, path)
+        runner = OnnxRunner(path)
+        self.assertEqual(runner.metadata, metadata)
+        self.assertEqual(runner.graph_inputs['input'].shape, ('batch', 3))
+        self.assertEqual(runner.output_shapes, {'output': ('batch', 3)})
+
   def test_warp_layouts(self):
     from tinygrad import Tensor
-    from tinygrad.nn.compile_warp import NV12Frame, compile_warp
+    from examples.openpilot.compile_warp import NV12Frame, compile_warp
     frame = NV12Frame(8, 6, 12, 8, 4, 144)
     data = np.zeros((12, 12), dtype=np.uint8)
     data[:6, :8] = np.arange(48, dtype=np.uint8).reshape(6, 8)
@@ -28,7 +45,7 @@ class TestConfiguredCompile(unittest.TestCase):
 
   def test_packed_history(self):
     import onnx
-    from tinygrad.nn.compile_onnx import compile_onnx
+    from examples.openpilot.compile_onnx import compile_onnx
     graph = onnx.helper.make_graph([onnx.helper.make_node('Add', ['sequence', 'sequence'], ['output'])], 'history',
       [onnx.helper.make_tensor_value_info('sequence', onnx.TensorProto.FLOAT16, [1, 3, 2])],
       [onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT16, [1, 3, 2])])
@@ -54,7 +71,7 @@ class TestConfiguredCompile(unittest.TestCase):
             np.testing.assert_array_equal(variant['run'](**inputs).numpy(), expected[None] * 2)
 
 
-@unittest.skipUnless(getenv("MODEL_PKL", ""), "requires an artifact from python -m tinygrad.nn.compile_onnx")
+@unittest.skipUnless(getenv("MODEL_PKL", ""), "requires an artifact from python -m examples.openpilot.compile_onnx")
 class TestCompiledModel(unittest.TestCase):
   def setUp(self):
     with open(getenv("MODEL_PKL", ""), 'rb') as f: self.variant = load_pickle(f, out_of_band=bool(getenv("PICKLE_OOB")))['variants']['default']

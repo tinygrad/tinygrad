@@ -3,7 +3,7 @@ import argparse
 from typing import NamedTuple
 import numpy as np
 from tinygrad import Tensor, Device, Context
-from tinygrad.nn.compile import allocate_inputs, compile_jit, dump_pickle
+from .helpers import allocate_inputs, compile_jit, dump_pickle
 
 
 class NV12Frame(NamedTuple):

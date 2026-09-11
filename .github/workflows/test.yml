@@ -315,7 +315,7 @@ jobs:
           IMAGE: "1"
           FLOAT16: "1"
         run: |
-          python -m tinygrad.nn.compile_onnx https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916 "$MODEL_PKL" --float32 --device-input img --device-input big_img
+          python -m examples.openpilot.compile_onnx https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916 "$MODEL_PKL" --float32 --device-input img --device-input big_img
           ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1361 ALLOWED_GATED_READ_IMAGE=38 python -m pytest -n12 test/external/external_test_compile.py
       - name: Test openpilot CL compile fp32 (test correctness)
         env:
@@ -323,7 +323,7 @@ jobs:
           IMAGE: "1"
           MODEL_ONNX: https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
         run: |
-          python -m tinygrad.nn.compile_onnx "$MODEL_ONNX" "$MODEL_PKL" --float32 --device-input img --device-input big_img
+          python -m examples.openpilot.compile_onnx "$MODEL_ONNX" "$MODEL_PKL" --float32 --device-input img --device-input big_img
           python -m pytest -n12 test/external/external_test_compile.py
       - name: Test openpilot LLVM compile fp16
         env:
@@ -331,7 +331,7 @@ jobs:
           IMAGE: "1"
           FLOAT16: "1"
         run: |
-          python -m tinygrad.nn.compile_onnx https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916 "$MODEL_PKL" --float32 --device-input img --device-input big_img
+          python -m examples.openpilot.compile_onnx https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916 "$MODEL_PKL" --float32 --device-input img --device-input big_img
           python -m pytest -n12 test/external/external_test_compile.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
