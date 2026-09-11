@@ -258,7 +258,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
   # bases to realize. an AFTER already names the storage its store writes into
-  calls = [x for x in big_sink.toposort(enter_calls=False) if x.op is Ops.CALL]
+  calls = [x for x in big_sink.toposort() if x.op is Ops.CALL]
   ctx = AllocCtx(bases={base for x in big_sink.src if needs_storage(base:=x.base) and base.op is not Ops.AFTER},
                  call_inputs={s for c in calls for s in c.src[1:] if s.op is Ops.CONTIGUOUS})
 
