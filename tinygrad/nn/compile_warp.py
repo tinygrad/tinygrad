@@ -3,7 +3,7 @@ import argparse
 from typing import NamedTuple
 import numpy as np
 from tinygrad import Tensor, Device, Context
-from tinygrad.nn.compile import compile_jit, dump_pickle
+from tinygrad.nn.compile import allocate_inputs, compile_jit, dump_pickle
 
 
 class NV12Frame(NamedTuple):
@@ -110,13 +110,14 @@ def make_warp(frame, output_size, layout='luma', border_fill=None):
 
 def compile_warp(frame:NV12Frame, output_size, *, layout='luma', border_fill=None, benchmark_runs=20):
   function = make_warp(frame, output_size, layout, border_fill)
+  specs = {'input_frame': ((frame.size,), np.dtype(np.uint8).str, Device.DEFAULT), 'M_inv': ((3, 3), np.dtype(np.float32).str, 'NPY')}
   def make_inputs(seed):
     rng = np.random.default_rng(seed)
-    data = Tensor(rng.integers(0, 256, frame.size, dtype=np.uint8), device=Device.DEFAULT).realize()
-    transform = Tensor((rng.standard_normal((3, 3))*8).astype(np.float32), device='NPY').realize()
-    return (), {'input_frame': data, 'M_inv': transform}
+    def initialize(views):
+      views['input_frame'][:] = rng.integers(0, 256, frame.size, dtype=np.uint8)
+      views['M_inv'][:] = rng.standard_normal((3, 3))*8
+    return (), allocate_inputs(specs, {}, initialize)[0]
   jit = compile_jit(function, make_inputs, benchmark_runs)
-  specs = {'input_frame': ((frame.size,), np.dtype(np.uint8).str, Device.DEFAULT), 'M_inv': ((3, 3), np.dtype(np.float32).str, 'NPY')}
   return {'metadata': {}, 'variants': {'default': {'run': jit, 'input_specs': specs, 'packed_specs': {}}}}
 
 
