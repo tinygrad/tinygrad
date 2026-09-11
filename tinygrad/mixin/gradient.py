@@ -2,7 +2,7 @@ from typing import cast
 import math, dataclasses
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, broadcast_axes
 from tinygrad.helpers import argsort
-from tinygrad.dtype import sum_acc_dtype
+from tinygrad.dtype import dtypes, sum_acc_dtype
 from tinygrad.function import renumber_invalid_outputs
 
 # Gradient producers can attach auxiliary representations that are valid only for that exact gradient value (for
@@ -36,7 +36,10 @@ def forward_unshard_auxiliaries(ctx:UOp, ret:UOp, physical:UOp) -> UOp:
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   if op == Ops.ADD: return (ctx._broadcast_to(ret.src[0].shape),)
-  if op == Ops.MAX: return (((mask:=ret.src[0].eq(ret).cast(ctx.dtype))/mask._rop(Ops.ADD, tuple(range(ret.arg[1])))) * ctx,)
+  if op == Ops.MAX:
+    # count the ties in the acc dtype, the count can overflow the gradient dtype
+    mask = ret.src[0].eq(ret).cast(sum_acc_dtype(ctx.dtype))
+    return ((mask/mask._rop(Ops.ADD, tuple(range(ret.arg[1])))).cast(ctx.dtype) * ctx,)
   if op == Ops.MUL:
     # d(prod x)/dx_j = prod_{i!=j} x_i: ret/x_j whenever x_j != 0 (any zero makes ret 0), else the product of the others
     safe_x, axes = (is_zero:=(x:=ret.src[0]).eq(0)).where(1, x), tuple(range(ret.arg[1]))
@@ -131,6 +134,19 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   ret_set = set(ret_pos)
   return (None,) + tuple(None if i in ret_set else (bwd_outs[gb_map[i]] if i in gb_map else None) for i in range(len(args)))
 
+def partial_store_gradient(ctx:UOp, dest:UOp, view:UOp):
+  # A write through a non-overlapping view replaces only that region of the returned state.
+  path, base = [], view
+  while base is not dest and base.op in {Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE, Ops.FLIP}:
+    path.append(base)
+    base = base.src[0]
+  if base is not dest: return None
+  grad = ctx
+  for mop in reversed(path): grad = mop.replace(src=(grad,)+mop.src[1:])
+  mask = grad.const_like(1)
+  for mop in path: mask = pm_gradient.rewrite(mop, ctx=mask)[0]
+  return mask.cast(dtypes.bool).where(0, ctx), grad
+
 # ctx is grad_output
 pm_gradient = PatternMatcher([
   (UPat(Ops.CAST, name="ret"), lambda ctx, ret: (ctx.cast(ret.src[0].dtype),)),
@@ -163,8 +179,12 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.SINK), lambda ctx: ctx.src),
   (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
     (ctx, UOp.sink(*([ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1)])))),
+  # ordering-only AFTER: store target is a different buffer, gradient flows straight through to dest
+  (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="t"), UPat())))),
+   lambda ctx, dest, t: (ctx, None) if t.buf_uop is not dest.buf_uop else None),
   # clone/assign gradient passes through to val
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE))), lambda ctx: (None, ctx)),
+  (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="dest"), UPat())))), lambda ctx,dest: (None, ctx)),
+  (UPat(Ops.AFTER, src=(UPat(name="dest"), UPat(Ops.STORE, src=(UPat(name="view"), UPat())))), partial_store_gradient),
   (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),

@@ -1883,14 +1883,14 @@ class WaveState:
     # CDNA (wave64) has separate ACCVGPR file; RDNA shares with VGPR
     if wave_size == 64:
       self.accvgpr_buf = Buffer('CPU', vgpr_size, dtypes.uint32).ensure_allocated()
-      ctypes.memset(self.accvgpr_buf._buf.va_addr, 0, vgpr_size * 4)
+      ctypes.memset(self.accvgpr_buf._buf, 0, vgpr_size * 4)
     else:
       self.accvgpr_buf = self.vgpr_buf
-    self._vgpr_mv = self.vgpr_buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('I')
-    self._sgpr_mv = self.sgpr_buf.as_memoryview(force_zero_copy=True, no_sync=True).cast('I')
+    self._vgpr_mv = self.vgpr_buf.host.view(fmt='I').mv
+    self._sgpr_mv = self.sgpr_buf.host.view(fmt='I').mv
     # Zero memory using ctypes memset (much faster than Python loops)
-    ctypes.memset(self.vgpr_buf._buf.va_addr, 0, vgpr_size * 4)
-    ctypes.memset(self.sgpr_buf._buf.va_addr, 0, SGPR_COUNT * 4)
+    ctypes.memset(self.vgpr_buf._buf, 0, vgpr_size * 4)
+    ctypes.memset(self.sgpr_buf._buf, 0, SGPR_COUNT * 4)
     # Pre-populate inline constants at indices 128-255
     for i in range(65): self._write_sgpr(128 + i, i)  # 128-192: integers 0-64
     for i in range(16): self._write_sgpr(193 + i, (-(i + 1)) & MASK32)  # 193-208: -1 to -16
@@ -1992,11 +1992,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     waves: list[tuple[WaveState, list]] = []
     for wave_start in range(0, total_threads, wave_size):
       st = _init_wave(lib, wave_start, total_threads, lx, ly, lz, args_ptr, rsrc2, scratch_size, arch, gidx, gidy, gidz, user_data, wave_size)
-      scratch_base = scratch_buf._buf.va_addr + (wave_start // wave_size) * scratch_size * wave_size if scratch_buf else 0
-      waves.append((st, [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
-                         ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
-                         ctypes.c_uint64(scratch_base if scratch_buf else 0),
-                         ctypes.c_uint64(st.accvgpr_buf._buf.va_addr)]))
+      scratch_base = scratch_buf._buf + (wave_start // wave_size) * scratch_size * wave_size if scratch_buf else 0
+      waves.append((st, [ctypes.c_uint64(st.sgpr_buf._buf), ctypes.c_uint64(st.vgpr_buf._buf),
+                         ctypes.c_uint64(vmem_buf._buf), ctypes.c_uint64(lds_buf._buf),
+                         ctypes.c_uint64(scratch_base if scratch_buf else 0), ctypes.c_uint64(st.accvgpr_buf._buf)]))
     done = [False] * len(waves)
     for _ in range(10_000_000):
       if all(done): return
@@ -2027,7 +2026,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     for gidz, gidy, gidx in itertools.product(range(gz), range(gy), range(gx)):
       _run_workgroup(gidx, gidy, gidz, tracing)
       tracing = False  # only trace the first workgroup
-      if lds_size > 0: ctypes.memset(lds_buf._buf.va_addr, 0, max(lds_size, 4))  # reset LDS for next workgroup
+      if lds_size > 0: ctypes.memset(lds_buf._buf, 0, max(lds_size, 4))  # reset LDS for next workgroup
 
   if PROFILE: sqtt_traces.append(sqtt_finalize())
   return 0

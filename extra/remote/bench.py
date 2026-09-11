@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os, sys, time
-from extra.remote.hcq1_remote import RemotePCIDevice
+from extra.hcq1.remote import RemotePCIDevice
 
 LAT_N_RUNS = 500
 THROUGHPUT_N_RUNS = 8
@@ -18,7 +18,7 @@ if __name__ == "__main__":
   print(f"connected to {os.environ['REMOTE']}, device: {name}\n")
 
   # ping (minimal server round-trip, no device I/O)
-  from extra.remote.hcq1_remote import RemoteCmd
+  from extra.hcq1.remote import RemoteCmd
   sock = pci.sock
   for _ in range(10): RemotePCIDevice._rpc(sock, 0, RemoteCmd.PING)
   st = time.perf_counter()

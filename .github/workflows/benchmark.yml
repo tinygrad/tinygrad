@@ -431,6 +431,8 @@ jobs:
       run: |
         ./extra/hcq/hcq_smi.py amd kill_pids --sudoless
         ./extra/hcq/hcq_smi.py nv kill_pids --sudoless
+    - name: reset chestnut
+      run: python3 extra/usbgpu/debug.py -rnw
     - name: UsbGPU boot time
       run: GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU tiny tests
@@ -536,7 +538,7 @@ jobs:
   testcommausbgpubenchmark:
     name: UsbGPU Benchmark (comma)
     runs-on: [self-hosted, Linux, comma4]
-    timeout-minutes: 10
+    timeout-minutes: 14
     defaults:
       run:
         shell: bash -e -o pipefail {0}

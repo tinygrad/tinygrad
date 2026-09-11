@@ -3,6 +3,7 @@ from dataclasses import replace
 from typing import Any, Callable
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
+from tinygrad.device import Buffer
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
@@ -67,7 +68,7 @@ def assert_kernel_count(expected:int):
 
 def is_hcq2_device() -> bool: # an hcq2 device stages every copy from the host through a pinned buffer: such a copy is two calls, not one
   from tinygrad.runtime.support.hcq2 import HCQ_DEVS
-  return Device.DEFAULT.split(":")[0] in HCQ_DEVS - {"CPU"}
+  return Device.DEFAULT.split(":")[0] in HCQ_DEVS
 
 def call_is_graph(call:UOp) -> bool:
   ast = call.src[0]
@@ -126,12 +127,13 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple
   bufs = []
   for buf_dt, data in inputs or []:
     bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize))
-    allocator._copyin(buf, memoryview(struct.pack(str(len(data)) + (buf_dt.fmt or ""), *data)))
+    allocator._copyin(buf.buf, memoryview(struct.pack(str(len(data)) + (buf_dt.fmt or ""), *data)))
   g = UOp.param(0, uop.dtype, 1)
   prg = to_program(UOp.store(g.index(UOp.const(0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
   prog = dev.runtime(prg.to_elf())
-  prog(out_buf:=allocator.alloc(uop.dtype.itemsize), *bufs, vals=vals)
-  return out_buf.cast(uop.dtype.fmt or "").tolist()[0]
+  out_buf = Buffer("PYTHON", 1, uop.dtype, preallocate=True)
+  prog(out_buf._buf, *[b.buf for b in bufs], vals=vals)
+  return out_buf.as_memoryview().cast(uop.dtype.fmt or "").tolist()[0]
 
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
   sink = UOp.group(*u)

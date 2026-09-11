@@ -56,14 +56,14 @@ class ElementwiseMixin(CreationMixin):
     """
     return self.cast(dtypes.bool).ne(True)
 
-  def contiguous(self, **kwargs) -> Self:
+  def contiguous(self) -> Self:
     """
     Returns a contiguous tensor.
     """
     if self.dtype in dtypes.weaks: return self
     uop = self._uop
     if uop.op is Ops.CONTIGUOUS or self.device is None or uop.has_buffer_identity(): return self._wrap_uop(uop)
-    return self._wrap_uop(uop.alu(Ops.CONTIGUOUS, **kwargs))
+    return self._wrap_uop(uop.alu(Ops.CONTIGUOUS))
 
   def contiguous_backward(self) -> Self:
     """
@@ -705,7 +705,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-9., -6., -3., 0., 3., 6., 9.]).relu6().numpy())
     ```
     """
-    return self.relu() - (self-6).relu()
+    return ((r:=self.relu()) < 6).where(r, 6)
 
   def hardswish(self) -> Self:
     """
@@ -730,7 +730,7 @@ class ElementwiseMixin(CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardsigmoid().numpy())
     ```
     """
-    return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
+    return ((y:=(alpha * self + beta).relu()) < 1).where(y, 1)
 
   def hardtanh(self, min_val=-1, max_val=1) -> Self:
     """

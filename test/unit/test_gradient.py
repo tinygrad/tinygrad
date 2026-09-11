@@ -135,6 +135,10 @@ class TestTensorGradient(unittest.TestCase):
     (Tensor.rand(()) + w).backward()
     self.assertIsNone(w.grad)
 
+  def test_max_backward_many_ties(self):
+    t = Tensor.ones(70000, dtype=dtypes.half).contiguous()
+    np.testing.assert_allclose(t.max().gradient(t)[0].sum().numpy(), 1.0, atol=1e-3)
+
 class TestMultiOutputGradient(unittest.TestCase):
   @staticmethod
   def addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:

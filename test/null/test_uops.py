@@ -269,7 +269,6 @@ class TestGatedStoreRewrite(unittest.TestCase):
     for x in gated_uops: self.assertIs(x.op, Ops.STORE)
     for x in gated_uops: self.assertEqual(len(x.src), 2)
 
-@unittest.skipIf(Device.DEFAULT == "METAL", "compiler bug")
 @unittest.skipUnless(Ops.SHR in Device[Device.DEFAULT].renderer.code_for_op, "fast_idiv requires SHR")
 class TestFastIdiv(unittest.TestCase):
   def test_division_power_of_two(self):
@@ -310,7 +309,7 @@ class TestFastIdiv(unittest.TestCase):
       self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
 
   @Context(DISABLE_FAST_IDIV=0)
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
+  @unittest.skipUnless(dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "fast_idiv widens uint32 to uint64")
   def test_fast_idiv_and_mod(self):
     g = UOp.param(0, dtypes.uint32, 4)
     c = UOp.const(3)
@@ -330,6 +329,25 @@ class TestFastIdiv(unittest.TestCase):
     self.assertNotIn(Ops.CMOD, ops)
 
   @Context(DISABLE_FAST_IDIV=0)
+  def test_fast_idiv_nonpositive_divisor(self):
+    ridx = UOp.range(20, 0)
+    for d in (-3, 0):
+      for op in (Ops.CDIV, Ops.CMOD):
+        ops = [x.op for x in to_uops_list([ridx.alu(op, UOp.const(d))], ren=Device[Device.DEFAULT].renderer)]
+        self.assertNotIn(Ops.SHR, ops, f"fast_idiv fired on {op} by {d}")
+
+  @Context(DISABLE_FAST_IDIV=0)
+  @unittest.skipUnless(dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "needs a uint64 buffer")
+  def test_fast_idiv_cmod_kept_when_idiv_declines(self):
+    ren = Device[Device.DEFAULT].renderer
+    d = UOp.param(0, dtypes.int32, 4).index(UOp.const(0))
+    ops = [x.op for x in to_uops_list([UOp.range(30, 0).alu(Ops.CMOD, d)], ren=ren)]
+    self.assertIn(Ops.CMOD, ops, "CMOD by a non-const divisor should be left alone")
+    big = UOp.param(1, dtypes.uint64, 4).index(UOp.const(0))
+    ops = [x.op for x in to_uops_list([big.alu(Ops.CMOD, UOp.const(3, dtypes.uint64))], ren=ren)]
+    self.assertIn(Ops.CMOD, ops, "CMOD should be left alone when fast_idiv declines")
+
+  @Context(DISABLE_FAST_IDIV=0)
   def test_fast_idiv_bounded_numerator_zero(self):
     x = UOp.variable("x", 0, 1, dtype=dtypes.int32)
     for val in range(2):
@@ -342,6 +360,7 @@ class TestFastIdiv(unittest.TestCase):
     # this requires shifting out the powers of two before doing fast_idiv
     # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
     self.assertNotIn(dtypes.long, [x.dtype for x in uops])
+    self.assertNotIn(Ops.CDIV, [x.op for x in uops])
 
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):

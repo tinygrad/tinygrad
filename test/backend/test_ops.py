@@ -712,6 +712,9 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]])
     helper_test_op(None, lambda x: 0.7**x, vals=[[-2.,-1,0,1,2,3]])
     helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]])
+    # 2**52+2 - 0.5 rounds back to itself
+    helper_test_op(None, lambda x: x**(2.0**52), vals=[[0.5, 1., 2.]], forward_only=True)
+    helper_test_op(None, lambda x: x**(2.0**52+2), vals=[[0.5, 1., 2.]], forward_only=True)
     # float to power of int
     helper_test_op(None, lambda x: 0.7**x, lambda x: (0.7**x).clone(), vals=[[-2,-1,0,1,2,3]], forward_only=True)
 
@@ -1086,6 +1089,8 @@ class TestOps(unittest.TestCase):
   def test_hardsigmoid_extreme(self):
     helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, low=300, high=400)
     helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, low=-400, high=-300)
+    helper_test_op(None, torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, vals=[[1e7, 1e8, 2.68e8, 1e9]])
+    helper_test_op(None, torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, vals=[[-3.1, -3., -2.9, 2.9, 3., 3.1]])
   def test_softplus(self):
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
     helper_test_op([(45,65)], lambda t: torch.nn.functional.softplus(t, beta=3), lambda t: Tensor.softplus(t, beta=3), grad_atol=1e-6)
@@ -1129,9 +1134,12 @@ class TestOps(unittest.TestCase):
   def test_relu6(self):
     helper_test_op([(45,65)], torch.nn.functional.relu6, Tensor.relu6)
     helper_test_op([()], torch.nn.functional.relu6, Tensor.relu6)
+    helper_test_op(None, torch.nn.functional.relu6, Tensor.relu6, vals=[[6.71089e7, 2.68435e8, 1e9]])
+    helper_test_op(None, torch.nn.functional.relu6, Tensor.relu6, vals=[[0., 6.]])
   def test_hardswish(self):
     helper_test_op([(45,65)], torch.nn.functional.hardswish, Tensor.hardswish, grad_atol=1e-6)
     helper_test_op([()], torch.nn.functional.hardswish, Tensor.hardswish, grad_atol=1e-6)
+    helper_test_op(None, torch.nn.functional.hardswish, Tensor.hardswish, vals=[[-3., 3.]], grad_atol=1e-6)
   def test_mish(self):
     helper_test_op([(45,65)], torch.nn.functional.mish, Tensor.mish)
     helper_test_op([()], torch.nn.functional.mish, Tensor.mish)

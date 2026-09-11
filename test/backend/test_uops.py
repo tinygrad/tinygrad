@@ -359,8 +359,7 @@ class TestUOpPrograms(unittest.TestCase):
     prog = C.end(i, j, k)
 
     # run program
-    # TODO: make this work with opts_to_apply
-    self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), a, b, c)
+    self._run(prog.sink(arg=KernelInfo()), a, b, c)
 
     with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)
 

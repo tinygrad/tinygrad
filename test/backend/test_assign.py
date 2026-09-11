@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad import Device, dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import temp, DEV, Context
-from test.helpers import assert_kernel_count, needs_second_gpu, is_hcq2_device
+from test.helpers import assert_kernel_count, needs_second_gpu
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -43,7 +43,7 @@ class TestAssign(unittest.TestCase):
     # it should copy into the empty buffer
     GlobalCounters.reset()
     c.realize()
-    assert_kernel_count(2 if is_hcq2_device() else 1)
+    assert_kernel_count(1)
 
   def test_assign_slice(self):
     X = Tensor([1,2,3,4]).realize()
@@ -619,7 +619,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    assert_kernel_count(4 if is_hcq2_device() else 2)  # TODO: first copy is dead, could be 1
+    assert_kernel_count(3)  # TODO: first copy is dead, could be 2
     self.assertEqual(base.tolist(), [1,4,3])
 
   def test_nested_after_contiguous_store_no_init(self):
@@ -629,7 +629,7 @@ class TestAssign(unittest.TestCase):
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
     GlobalCounters.reset()
     base.assign(contig).realize()
-    assert_kernel_count(2 if is_hcq2_device() else 1)
+    assert_kernel_count(1)
     self.assertEqual(base.tolist(), [1,4,3])
 
   def test_assign_temporary_copy_reshape(self):
@@ -637,7 +637,7 @@ class TestAssign(unittest.TestCase):
     c = Tensor.empty(2, 2).assign(a.to(None))
     GlobalCounters.reset()
     c.realize()
-    assert_kernel_count(2 if is_hcq2_device() else 1)
+    assert_kernel_count(1)
     self.assertEqual(c.tolist(), [[1., 2], [3, 4]])
 
 class TestAssignOrdering(unittest.TestCase):
@@ -875,12 +875,8 @@ class TestAssignOrdering(unittest.TestCase):
     a.assign(b + 1)                                    # a == 11
     v1 = a * 3                                         # reads 11 -> 33
     a.assign(b + 100)                                  # a == 110
-    out = (a + v1).numpy()
-    try:
-      np.testing.assert_allclose(out, 143)
-    except AssertionError:
-      # TODO: broken now, v1 reads a after the second assign
-      np.testing.assert_allclose(out, 440)
+    with self.assertRaisesRegex(RuntimeError, "cycle"):  # TODO: broken now, ideally v1 is realized between the assigns
+      np.testing.assert_allclose((a + v1).numpy(), 143)
 
   def test_two_reads_between_three_assigns(self):
     a = Tensor.zeros(4).realize()
@@ -995,12 +991,9 @@ class TestAssignOrdering(unittest.TestCase):
       x.assign(x+1)
       return y+x
     a = Tensor([1.]).realize()
-    out = outer(a).item()
-    try:
+    with self.assertRaisesRegex(RuntimeError, "cycle"):  # TODO: broken now, ideally y is realized between the assigns
+      out = outer(a).item()
       self.assertEqual([out, a.item()], [7., 3.])
-    except AssertionError:
-      # TODO: broken now, the inner assign is run twice
-      self.assertEqual([out, a.item()], [6., 4.])
 
 class TestAssignToUnrealizedView(unittest.TestCase):
   def test_copy(self):
@@ -1020,6 +1013,24 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     self.assertIs(c.uop.base.op, Ops.CONTIGUOUS)
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(c.tolist(), [[1,1],[2,1]])
+
+  def test_contiguous_partial_assign_realize(self):
+    x = Tensor([1., 2.]).realize()
+    y = (x + 1).contiguous()  # unrealized CONTIGUOUS
+    self.assertIs(y.uop.base.op, Ops.CONTIGUOUS)
+    # a partial write survives an explicit realize: the values are right, storage is an implementation detail
+    y[:1].assign(9.)
+    y.realize()
+    self.assertEqual(y.tolist(), [9., 3.])
+    # and it stays assigned across schedules
+    y[:1].assign(7.)
+    y.realize()
+    self.assertEqual(y.tolist(), [7., 3.])
+    # setitem syntax gives the same values, contiguous or not
+    for mk in (lambda xx: xx + 1, lambda xx: (xx + 1).contiguous()):
+      z = mk(Tensor([1., 2.]).realize())
+      z[:1] = 9.
+      self.assertEqual(z.tolist(), [9., 3.])
 
   def test_contiguous_backward(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()

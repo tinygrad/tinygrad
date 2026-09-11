@@ -478,6 +478,7 @@ jobs:
     timeout-minutes: 20
     env:
       DEV: MOCKKFD+AMD
+      HCQ_RUNTIME_DEV: PYTHON
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -504,7 +505,7 @@ jobs:
       - name: Run AMD renderer tests (AMD:LLVM)
         run: DEV=MOCKKFD+AMD:LLVM python -m pytest -n=auto test/amd/ --durations 20
       - name: Run SQTT profiling tests
-        run: VIZ=-2 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
+        run: SQTT_BUFFER_SIZE=16 VIZ=-2 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
       - name: Run AMD emulated tests on NULL backend
         env:
           AMD: 0
@@ -577,7 +578,7 @@ jobs:
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run MXFP4 Llama training on NULL backend
         if: ${{ matrix.backend == 'amd' && matrix.arch == 'gfx950' }}
-        run: HCQ2=0 PYTHONPATH=. DEV=NULL:HIP:gfx950 MXFP4=1 LLAMA_LAYERS=2 BENCHMARK=3 NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 ROCM_PATH=/opt/rocm JITBEAM=0 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
+        run: PYTHONPATH=. DEV=NULL:HIP:gfx950 MXFP4=1 LLAMA_LAYERS=2 BENCHMARK=3 NULL_ALLOW_COPYOUT=1 NO_HIPCC=1 ROCM_PATH=/opt/rocm JITBEAM=0 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama31_8b/implementations/tinybox_8xMI350X/profile.sh
       - name: Run pytest (amd)
         run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq2.py test/external/external_test_am.py test/backend/test_asm_gemm.py::TestAsmGEMM --durations=20
       - name: Run opt tests
@@ -620,7 +621,7 @@ jobs:
         # skip multitensor because it's slow
         run: python -m pytest -n=auto test/backend --ignore test/backend/test_multitensor.py --durations=20
       - name: Run TestOps.test_add with PMA
-        run: VIZ=-1 PMA=1 DEBUG=5 python3 test/backend/test_ops.py TestOps.test_add
+        run: VIZ=-1 PMA=1 PMA_BUFFER_SIZE=8 DEBUG=5 python3 test/backend/test_ops.py TestOps.test_add
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 

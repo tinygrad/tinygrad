@@ -209,6 +209,22 @@ class TestTensorCores(unittest.TestCase):
                           check_default_opt=False, atol=3e-2, rtol=1e-3)
 
   @Context(ALLOW_TF32=1)
+  @unittest.skipUnless(any(tc.dtype_in in (dtypes.half, dtypes.float) for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                       "test requires half or float tensor cores")
+  def test_tensor_cores_padto_masked_operand(self):
+    # tc_opt=2 pads K. an ALU between the load and the multiply is fine, a where with a defined false arm is not
+    tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in in (dtypes.half, dtypes.float))
+    Tensor.manual_seed(3)
+    a = Tensor.rand(tc.dims[1]*2+1, tc.dims[2]*3-1, dtype=tc.dtype_in).realize()
+    b = Tensor.rand(tc.dims[2]*3-1, tc.dims[0]*2+1, dtype=tc.dtype_in).realize()
+    tc_opt = Opt(OptOps.TC, 0, (-1, 2, 1))
+    helper_linearizer_opt((a+1).matmul(b+1, dtype=tc.dtype_out), [[tc_opt]], check_default_opt=False, atol=3e-2, rtol=1e-3)
+    one = Tensor(1, dtype=tc.dtype_in)
+    ma = (Tensor.rand(a.shape[0], 1) > 0.5).expand(a.shape).where(a, one)
+    mb = (Tensor.rand(1, b.shape[1]) > 0.5).expand(b.shape).where(b, one)
+    helper_linearizer_opt(ma.matmul(mb, dtype=tc.dtype_out), [[tc_opt]], check_default_opt=False, atol=3e-2, rtol=1e-3)
+
+  @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "not generated on EMULATED device")
   @slow
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
