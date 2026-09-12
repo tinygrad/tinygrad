@@ -545,6 +545,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # the trace must not retain the device Buffer: store a placeholder instead (the real one would pin memory and fail pickling),
     # keeping bound and unbound buffers distinguishable in viz
     arg = replace(self.arg, buffer=cast("Buffer", object())) if isinstance(self.arg, ParamArg) and self.arg.buffer is not None else self.arg
+    # hcq2 calls have BUFFER UOps in the arg, tracing must store them as trace_nums
+    if isinstance(arg, CallInfo) and hasattr(aux:=arg.aux, "written_bufs"):
+      arg = replace(arg, aux=replace(aux, written_bufs=tuple(b.trace_num for b in aux.written_bufs),
+                                     inputs=tuple((u.trace_num, d, i) for u, d, i in aux.inputs)))
     uop_fields[num] = (self.op, tuple(s.trace_num for s in self.src), arg, tag)+((self.metadata,) if TRACEMETA>=2 else ())
     return num
 
