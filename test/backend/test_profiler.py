@@ -16,9 +16,7 @@ def _dev_base(d):
 @contextlib.contextmanager
 def helper_collect_profile(*devs):
   for dev in devs: dev.synchronize()
-  saved = [x for x in Compiled.profile_events if isinstance(x, ProfileDeviceEvent) and x.device.startswith("METAL")]
   Compiled.profile_events.clear()
-  for x in saved: Compiled.profile_events.append(x)
 
   cpu_events.clear()
 
@@ -86,7 +84,7 @@ class TestProfiler(unittest.TestCase):
 
     profile = filter_ranges(profile)
     kernel_runs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, "PYTHON"))]
-    self.assertEqual(len(kernel_runs), 2 if Device.DEFAULT in HCQ_DEVS else 1)
+    self.assertEqual(len(kernel_runs), 2 if Device.DEFAULT in HCQ_DEVS - {"METAL"} else 1)
 
   def test_profile_multiops(self):
     runner_name = ansistrip(TestProfiler.prg.arg.name)
@@ -100,7 +98,7 @@ class TestProfiler(unittest.TestCase):
     profile = filter_ranges(profile)
     evs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, "PYTHON"))]
 
-    assert len(evs) == (4 if Device.DEFAULT in HCQ_DEVS else 3), "unexpected number of kernel and copy events"
+    assert len(evs) == (4 if Device.DEFAULT in HCQ_DEVS - {"METAL"} else 3), "unexpected number of kernel and copy events"
     # NOTE: order of events does not matter, the tool is responsible for sorting them
     prg_events = [e for e in evs if e.device == TestProfiler.d0.device]
     assert any(ansistrip(e.name) == runner_name for e in prg_events), "kernel name is not correct"
