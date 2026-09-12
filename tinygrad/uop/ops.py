@@ -51,7 +51,7 @@ axis_colors = {AxisType.DEVICE: "green", AxisType.GLOBAL: "blue", AxisType.LOCAL
 axis_to_pos = {AxisType.DEVICE: -2, AxisType.WEAK: -1, AxisType.LOOP: -1, AxisType.GLOBAL: 0, AxisType.WARP: 1,
                AxisType.LOCAL: 2, AxisType.UPCAST: 3, AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
-range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.LINEAR: 0}
+range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.END: 1, Ops.CALL: 1, Ops.LINEAR: 0}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op])
@@ -141,7 +141,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       if (b:=src[0]).op is Ops.PARAM and is_image_shape(b.shape): return dtypes.float
       return b.dtype
     case Ops.LOAD | Ops.UNSHARD | Ops.REDUCE | Ops.AFTER | Ops.RANGE | \
-         Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
+         Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.STAGE | Ops.DETACH | \
          Ops.MSTACK | Ops.MSELECT | Ops.ALLREDUCE | Ops.SPECIAL:
       # pass through first
       return src[0].dtype
@@ -387,7 +387,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
         return wmma_b + (self.src[2].shape[-1],)
 
       # passthrough ops
-      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
+      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
            Ops.COPY | Ops.ALLREDUCE | Ops.STORE | Ops.END:
         return self.src[0]._shape
 
@@ -702,8 +702,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def axis(self) -> int|None:
-    # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
-    if self.op is Ops.COPY: return None
+    # COPY removes axis, except a self COPY (contiguous) which keeps the sharding of its source
+    if self.op is Ops.COPY: return self.src[0].axis if self.is_self_copy else None
     if self.op is Ops.UNSHARD:
       if len(self.arg) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {self.arg}, use .sharding")
       return self.arg[0]
@@ -753,7 +753,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     assert arg is None or isinstance(self.device, tuple)
     inp = self if arg is None else UOp(Ops.MSELECT, src=(self,), arg=arg)
     if inp.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {inp.dtype}")
-    return UOp(Ops.COPY, src=(inp.pad_to(inp.max_shape),), arg=device).shrink_to(inp.shape)
+    return UOp(Ops.COPY, src=(inp,), arg=device)
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, src=(self,), arg=arg)
   def mstack(self, *srcs: UOp) -> UOp: return UOp(Ops.MSTACK, src=(self,)+srcs) if len(srcs) else self
   @property
@@ -875,6 +875,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if x.device is not None: return x.device
     return None
   @property
+  def is_self_copy(self) -> bool: return self.op is Ops.COPY and self.device == self.src[0].device
+  @property
   def is_virtual(self) -> bool:
     # NOTE: no device means no place to store, weak means no width to store. neither can back a buffer as-is
     # TODO: unify with has_buffer_identity
@@ -954,7 +956,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:
-    if self.op in {Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
+    if self.op in {Ops.COPY, Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops.
     # NOTE: the view Buffer returned here is transient (short-lived), it only wraps an offset into the base BUFFER's storag
     # TODO: caching buffer views halves the python time in llama
@@ -1125,7 +1127,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.STACK: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     if self.op is Ops.CONST and self.val is not Invalid: return self.val, self.val
     if self.op is Ops.PAD: return min(self.src[0].vmin, 0), max(self.src[0].vmax, 0)  # PAD adds zeros
-    if self.op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.AFTER, Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD}: return self.src[0]._min_max
+    if self.op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.AFTER, Ops.DETACH, Ops.COPY, Ops.CONTIGUOUS_BACKWARD}: return self.src[0]._min_max
     if self.op is Ops.CAST:
       # rounding is monotone (truncation toward zero into an int, to-nearest onto the value grid into a float)
       smin, smax = self.src[0]._min_max

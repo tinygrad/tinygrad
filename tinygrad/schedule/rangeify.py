@@ -19,7 +19,7 @@ sys.setrecursionlimit(10000)
 # *****************
 # 3.5 cleanups
 
-ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.NOOP}
+ALWAYS_RUN_OPS = {Ops.NOOP}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -291,7 +291,6 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+PatternMatcher([
   (UPat(Ops.CALL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
 
   # remove invalid writes
-  (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONST, arg=Invalid),)))), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONST, arg=Invalid))), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.AFTER, name="x"), remove_noop_afters),
 ])
@@ -367,10 +366,6 @@ to_define_global = PatternMatcher([
   (UPat(Ops.RANGE, name="r"), renumber_range),
 ])
 
-rangeify_codegen = PatternMatcher([
-  (UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.src[0]),
-])
-
 pm_add_param_range_tags = PatternMatcher([
   (UPat((Ops.PARAM, Ops.RANGE), name="x"), lambda x: x.rtag(())),
 ])
@@ -412,7 +407,7 @@ def split_store(x:UOp) -> UOp|None:
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
-  ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
+  ret = graph_rewrite(x, to_define_global+pm_flatten_range, ctx=lctx, name="kernel split", bottom_up=True)
 
   # Cross-device identity stores are physical copies. Source realization has already happened, so canonicalizing
   # their equal source/destination indices to one flat range cannot introduce staging storage or lose a view.

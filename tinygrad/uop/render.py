@@ -100,7 +100,7 @@ def render_marg(ctx,x:UOp):
   return f"({','.join(pieces)})" if len(pieces) != 1 else f"({pieces[0]},)"
 
 sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,
-         Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER, Ops.DETACH}
+         Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.BARRIER, Ops.DETACH}
 pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val})"),
   (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})" if x.dtype != x.src[0].dtype else None),
@@ -127,11 +127,6 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(set(syms.keys())-{Ops.SUB, Ops.CDIV, Ops.CMOD}, name="x"), lambda ctx,x:
     strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})")
     if x.src[0]._broadcasted(x.src[1]) == x.src else f"{ctx[x.src[0]]}.alu({x.op}, {ctx[x.src[1]]})"),
-  # `.contiguous` is a no-op for weak dtypes, CONTIGUOUS, deviceless or buffer-backed inputs:
-  # the sugar would change the graph for those, so render them via .alu() instead
-  (UPat(Ops.CONTIGUOUS, name="x"), lambda ctx,x:
-   f"{ctx[x.src[0]]}.alu(Ops.CONTIGUOUS)" if x.src[0].dtype in dtypes.weaks or x.src[0].op is Ops.CONTIGUOUS
-   or x.src[0].device is None or x.src[0].has_buffer_identity() else None),
   (UPat(sugar, src=(), name="x"), lambda x: f"UOp.{x.op.name.lower()}("+', '.join(([f'arg={repr(x.arg)}'] if x.arg is not None else []))+")"),
   (UPat(sugar, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}("+', '.join([ctx[y] for y in x.src[1:]] + \
     ([f'arg={repr(x.arg)}'] if x.arg is not None else []))+")"),
@@ -165,7 +160,7 @@ def pyrender(ast:UOp) -> str:
 
   cmap = consumer_map_from_toposort(lst)
   not_rendered = {Ops.CONST}
-  always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.STACK,
+  always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.STACK,
                      Ops.BUFFER, Ops.COPY, Ops.CALL, Ops.WHERE, Ops.END}
 
   to_render: set[UOp] = {ast}

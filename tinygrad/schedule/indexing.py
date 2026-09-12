@@ -22,7 +22,7 @@ class IndexingContext:
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(0)
 
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.AFTER, Ops.BUFFER,
                       Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
                       Ops.LOAD, Ops.CALL}
 
@@ -42,13 +42,13 @@ def _pointwise_self_store(ctx:IndexingContext, dest:UOp, src:UOp) -> bool:
     reduced = next((s for s in src.src if s is not dest), None)
     if old is not None and reduced is not None and base not in reduced.toposort(enter_calls=False):
       owner_store = dest.store(src)
-      readers = [x for x in ctx.store_srcs if dest in x.toposort(gate=lambda y: y.op is not Ops.CONTIGUOUS, enter_calls=False)]
+      readers = [x for x in ctx.store_srcs if dest in x.toposort(gate=lambda y: not y.is_self_copy, enter_calls=False)]
       if src in readers and all(x is src or (x.op is Ops.COPY and any(y.op is Ops.AFTER and y.src[0] is dest and owner_store in y.src[1:]
                                                     for y in x.toposort(enter_calls=False))) for x in readers): return True
   reaches_base: dict[UOp, bool] = {}
   unsafe = {Ops.REDUCE, Ops.ALLREDUCE, Ops.COPY, Ops.PERMUTE, Ops.FLIP, Ops.EXPAND, Ops.PAD, Ops.SHRINK,
             Ops.MSTACK, Ops.MSELECT, Ops.CALL, Ops.BITCAST}
-  nodes = src.toposort(gate=lambda x: x.op is not Ops.CONTIGUOUS, enter_calls=False)
+  nodes = src.toposort(gate=lambda x: not x.is_self_copy, enter_calls=False)
   # Device transfers must materialize before an assignment even when their source does not flow from the destination.
   if any(x.op is Ops.COPY for x in nodes): return False
   for x in nodes:
@@ -56,7 +56,7 @@ def _pointwise_self_store(ctx:IndexingContext, dest:UOp, src:UOp) -> bool:
     if reaches_base[x] and x.op in unsafe: return False
   # Another assignment reading this pre-store value creates a cross-assignment WAR hazard. Each RHS must materialize
   # before either destination is overwritten (TestAssign.test_assign_double_diamond_reduce).
-  return sum(base in x.toposort(gate=lambda x: x.op is not Ops.CONTIGUOUS, enter_calls=False) for x in ctx.store_srcs) == 1
+  return sum(base in x.toposort(gate=lambda x: not x.is_self_copy, enter_calls=False) for x in ctx.store_srcs) == 1
 
 def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
@@ -84,7 +84,7 @@ pm_generate_realize_map = PatternMatcher([
   # realize the inputs of custom kernel calls
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), name="c", allow_any_len=True), realize_custom_kernel_srcs),
   # always realize
-  (UPat({Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
+  (UPat(Ops.STORE, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # sometimes we need to realize the src of STORE if there's a self-access, or if it's a cross device store

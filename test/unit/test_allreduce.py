@@ -177,7 +177,7 @@ class TestRingAllReduce(unittest.TestCase):
     buf = UOp.new_buffer(devices, 4096, dtypes.float) + 1
     ret = create_allreduce_function(buf, buf.allreduce(Ops.ADD, devices))
     assert ret is not None
-    contiguous = [x for x in ret.toposort() if x.op is Ops.CONTIGUOUS]
+    contiguous = [x for x in ret.toposort() if x.is_self_copy]
     self.assertEqual(len(contiguous), 1)
     call = next(x for x in ret.toposort() if x.op is Ops.CALL)
     self.assertIs(call.src[-1], contiguous[0])

@@ -4,7 +4,10 @@ import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
+from tinygrad.renderer import Target
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.llvmir import AMDLLVMRenderer
+from tinygrad.codegen import to_program
 from test.helpers import assert_kernel_count, KernelCountException
 
 # **** kernels ****
@@ -220,17 +223,16 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_loop_acc_gemm_tc_refused(self):
     # ACC[j] += A[t,:] @ B[:,j] over t: the recurrence on ACC makes t a serial LOOP, so no tensor core may split it
-    tcs = Device[Device.DEFAULT].renderer.tensor_cores
-    if (i:=next((i for i,tc in enumerate(tcs) if tc.dtype_in is dtypes.half and tc.dtype_out is dtypes.float), None)) is None:
-      self.skipTest("needs a half->float tensor core")
+    ren = AMDLLVMRenderer(Target("AMD", arch="gfx1100"))
+    i, tc = next((i, tc) for i, tc in enumerate(ren.tensor_cores) if tc.dtype_in is dtypes.half and tc.dtype_out is dtypes.float)
     def kernel(ACC:UOp, A:UOp, B:UOp) -> UOp:
       t, j, k = UOp.range(A.shape[0], 0, AxisType.LOOP), UOp.range(B.shape[1], 1), UOp.range(A.shape[1], 2, AxisType.REDUCE)
       mm = (A[t, k] * B[k, j]).cast(dtypes.float).reduce(k, arg=Ops.ADD)
       return ACC[j].set(ACC.after(t)[j] + mm, end=t).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (i, 0, 1)),)))
-    N, M, K = tcs[i].dims
+    N, M, K = tc.dims
     a, b, acc = Tensor.empty(M, K, dtype=dtypes.half), Tensor.empty(K, N, dtype=dtypes.half), Tensor.empty(N, dtype=dtypes.float)
-    with self.assertRaisesRegex(KernelOptError, "not AxisType.LOOP"):
-      Tensor.custom_kernel(acc, a, b, fxn=kernel)[0].realize()
+    ast = Tensor.custom_kernel(acc, a, b, fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    with self.assertRaises(KernelOptError): to_program(ast, ren)
 
   def test_gemm_multi(self):
     devs = ("CPU:0", "CPU:1")

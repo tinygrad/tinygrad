@@ -165,7 +165,6 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.MUL, name="ret"), lambda ctx, ret: (ret.src[1]*ctx, ret.src[0]*ctx)),
   (UPat(Ops.WHERE, name="ret"), lambda ctx, ret: (None, ret.src[0].where(ctx, ctx.const_like(0)), ret.src[0].where(ctx.const_like(0), ctx))),
   (UPat(Ops.REDUCE, name="ret"), lambda ctx, ret: reduce_gradient(ctx, ret, ret.arg[0])),
-  (UPat(Ops.CONTIGUOUS), lambda ctx: (ctx,)),
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),
   (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape), None)),
   (UPat(Ops.EXPAND), lambda ctx: (ctx, None)),
@@ -174,7 +173,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.marg)),)),
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip([i for i,x in enumerate(ret.marg) if x]),)),
   (UPat(Ops.STACK, name="ret"), lambda ctx, ret: tuple(ctx[i] for i in range(len(ret.src)))),
-  (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device),)),
+  (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx,) if ret.is_self_copy else (ctx.copy_to_device(ret.src[0].device),)),
   (UPat(Ops.UNSHARD, name="ret"), unshard_gradient),
   (UPat(Ops.SINK), lambda ctx: ctx.src),
   (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:

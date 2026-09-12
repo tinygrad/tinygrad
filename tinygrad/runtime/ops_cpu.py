@@ -1,7 +1,7 @@
 from __future__ import annotations
-import platform, sys, ctypes, mmap, struct, time
+import platform, sys, ctypes, mmap, struct
 from typing import cast
-from tinygrad.helpers import OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
+from tinygrad.helpers import OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le, cpu_profile
 from tinygrad.device import Compiled, TinyELF, Program, HostAllocator
 from tinygrad.runtime.support.c import DLL
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -20,7 +20,7 @@ class CPUProgram(Program['CPUDevice']):
   def _load(self, lib, base=0): return lib if lib[:4] != libc.ELFMAG.encode() else jit_loader(lib, base=base, link_libs=[self.libm, self.rt_lib])
 
   def __init__(self, dev:CPUDevice, obj:TinyELF):
-    self.dev, self.name, self.signature = dev, obj.name, obj.signature
+    self.dev, self.name, self.signature, self.profile_key = dev, obj.name, obj.signature, obj.profile_key
     self.lvp = obj.target.renderer == "LVP"
 
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
@@ -56,17 +56,17 @@ class CPUProgram(Program['CPUDevice']):
 
   def __call__(self, *bufs:int, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
-    st = time.perf_counter()
-    if self.lvp:
-      lvp_args = bytearray(12 + (len(bufs) + len(vals)) * 8)
-      addr = mv_address(lvp_args)
-      struct.pack_into(f'<3I{len(bufs)}Q', lvp_args, 0, *data64_le(addr+12), (len(bufs)+len(vals))*2, *bufs)
-      for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs)*8)): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, v)
-      self.fxn(addr)
-    else:
-      args = [*bufs, *cast(tuple[int, ...], vals)]
-      self.fxn(*[ctypes.c_uint64(x) for x in args])
-    return time.perf_counter() - st if wait else None
+    with cpu_profile(self.name, self.dev.device, profile_key=self.profile_key) as prof:
+      if self.lvp:
+        lvp_args = bytearray(12 + (len(bufs) + len(vals)) * 8)
+        addr = mv_address(lvp_args)
+        struct.pack_into(f'<3I{len(bufs)}Q', lvp_args, 0, *data64_le(addr+12), (len(bufs)+len(vals))*2, *bufs)
+        for v,(off,dt) in zip(vals, TinyELF.iter_sig(self.signature[-len(vals):], len(bufs)*8)): struct.pack_into(f'<{dt.fmt}', lvp_args, 12+off, v)
+        self.fxn(addr)
+      else:
+        args = [*bufs, *cast(tuple[int, ...], vals)]
+        self.fxn(*[ctypes.c_uint64(x) for x in args])
+    return float(unwrap(prof.en) - prof.st) * 1e-6 if wait else None
 
   @suppress_finalizing
   def __del__(self):

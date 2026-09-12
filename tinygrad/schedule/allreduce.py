@@ -23,7 +23,7 @@ def _allreduce_chunk(buf:UOp, start:int, end:int, input_staged:bool) -> UOp:
 def _is_stable_custom_output(buf:UOp) -> bool:
   """A write-only custom output already has stable call-argument storage and an explicit producer dependency."""
   state = buf
-  while state.op in {Ops.RESHAPE, Ops.PERMUTE, Ops.EXPAND, Ops.PAD, Ops.SHRINK, Ops.FLIP, Ops.CAST, Ops.CONTIGUOUS}:
+  while state.op in {Ops.RESHAPE, Ops.PERMUTE, Ops.EXPAND, Ops.PAD, Ops.SHRINK, Ops.FLIP, Ops.CAST} or state.is_self_copy:
     state = state.src[0]
   if state.op is not Ops.AFTER: return False
   base = state.src[0].buf_uop
