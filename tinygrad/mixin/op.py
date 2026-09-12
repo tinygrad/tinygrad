@@ -767,6 +767,25 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     base = chunks[..., -1]._cumalu(-1, op)._pad_constant((None,)*(chunks.ndim-2) + ((1, -1),), value)
     return chunks.alu(op, base.unsqueeze(-1)).flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
 
+  def associative_scan(self, fn:Callable[[Self, Self], Self], axis:int=0) -> Self:
+    """Computes an inclusive scan along `axis` for an associative binary function `fn`."""
+    axis = self._resolve_dim(axis)
+    if self.shape[axis] == 0 or self.shape[axis] == 1: return self
+    x = self.transpose(axis, 0) if axis != 0 else self
+
+    def rec(a:Self) -> Self:
+      n = int(a.shape[0])
+      if n <= 1: return a
+      odd = rec(fn(a[0:n-1:2], a[1:n:2]))
+      if n == 2: return a[:1].cat(odd, dim=0)
+      even_tail = fn(odd[:-1], a[2:n:2]) if n % 2 == 0 else fn(odd, a[2:n:2])
+      even = a[:1].cat(even_tail, dim=0)
+      paired = even[:odd.shape[0]].stack(odd, dim=1).flatten(0, 1)
+      return paired.cat(even[-1:], dim=0) if n % 2 else paired
+
+    out = rec(x)
+    return out.transpose(0, axis) if axis != 0 else out
+
   def cumsum(self, axis:int=0) -> Self:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.
