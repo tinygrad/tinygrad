@@ -64,7 +64,7 @@ class TestProfiler(unittest.TestCase):
     run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(TestProfiler.b.uop, TestProfiler.a.uop),)))
 
   def test_profile_kernel_run(self, wait=False):
-    runner_name = TestProfiler.prg.arg.name
+    runner_name = ansistrip(TestProfiler.prg.arg.name)
     with helper_collect_profile(TestProfiler.d0) as profile:
       run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(TestProfiler.b.uop, TestProfiler.a.uop),)), wait=wait)
 
@@ -72,7 +72,7 @@ class TestProfiler(unittest.TestCase):
     profile = filter_ranges(profile)
     kernel_runs = [x for x in profile if x.device == TestProfiler.d0.device]
     assert len(kernel_runs) == 1, "one kernel run is expected"
-    assert kernel_runs[0].name == runner_name, "kernel name is not correct"
+    assert ansistrip(kernel_runs[0].name) == runner_name, "kernel name is not correct"
     assert _dev_base(kernel_runs[0].device) == kernel_runs[0].device, "kernel should not be on a sub-device"
 
   def test_profile_kernel_run_wait(self):
@@ -89,7 +89,7 @@ class TestProfiler(unittest.TestCase):
     self.assertEqual(len(kernel_runs), 2 if Device.DEFAULT in HCQ_DEVS else 1)
 
   def test_profile_multiops(self):
-    runner_name = TestProfiler.prg.arg.name
+    runner_name = ansistrip(TestProfiler.prg.arg.name)
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0) as profile:
@@ -103,7 +103,7 @@ class TestProfiler(unittest.TestCase):
     assert len(evs) == (4 if Device.DEFAULT in HCQ_DEVS else 3), "unexpected number of kernel and copy events"
     # NOTE: order of events does not matter, the tool is responsible for sorting them
     prg_events = [e for e in evs if e.device == TestProfiler.d0.device]
-    assert any(e.name == runner_name for e in prg_events), "kernel name is not correct"
+    assert any(ansistrip(e.name) == runner_name for e in prg_events), "kernel name is not correct"
 
     #for i in range(1, 3):
     #  assert evs[i].st > evs[i-1].en, "timestamp not aranged"
