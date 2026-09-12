@@ -51,6 +51,16 @@ def lower_hcq(body:UOp) -> UOp:
   return unwrap(hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test")).call(aux=hcq2.HCQInfo(("CPU",)))))
 
 class TestHCQ2Deps(unittest.TestCase):
+  def test_copy_only_batch_with_multiple_queues(self):
+    from types import SimpleNamespace
+    bufs = [UOp.param(i, dtypes.uint8, 16, device="AMD") for i in range(4)]
+    calls = [(src.copy_to_device("AMD").call(dst, src), ("AMD",), f"COPY:{i}") for i, (dst, src) in enumerate(zip(bufs[:2], bufs[2:]))]
+    with patch.object(type(Device), "__getitem__", return_value=SimpleNamespace(pm_batch=None)):
+      batch = hcq2._finalize_batch(hcq2.BatchCtx(calls, False))
+    streams = [s.without_after.src[0] for s in batch.src[0].src]
+    self.assertEqual([s.arg[1] for s in streams], ["COPY:0", "COPY:1", "COMPUTE:0"])
+    self.assertEqual([u.arg[0] for u in streams[-1].src], ["wait", "wait", "store"])
+
   def test_disjoint_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="CPU")
     for write in ([], [0]):

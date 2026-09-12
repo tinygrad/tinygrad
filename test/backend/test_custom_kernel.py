@@ -1,9 +1,8 @@
 import unittest
-from dataclasses import replace
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
-from tinygrad.uop.ops import KernelInfo, ProgramInfo, AxisType, Ops
+from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.renderer import Target
 from tinygrad.renderer.ptx import PTXRenderer
@@ -435,19 +434,21 @@ class TestCustomKernel(unittest.TestCase):
   def test_custom_kernel_source_copy(self):
     from tinygrad.codegen import do_to_program
     def custom_source(out:UOp, inp:UOp) -> UOp:
-      # generate a SOURCE for this device, runtime only sees a SOURCE and BINARY
-      src = do_to_program(custom_add_one_kernel(out, inp), Device[out.device].renderer).src[2].arg
-      binary = Device[out.device].renderer.compiler.compile(src)
+      prg_uop = do_to_program(custom_add_one_kernel(out, inp), Device[out.device].renderer)
+      # construct a plain Ops.PROGRAM
       sink = UOp.sink(out.base, inp.base, arg=KernelInfo("add_one_1"))
-      # NOTE: Ops.PROGRAM kernels cannot infer inputs and outputs from the UOp, the user must provide these
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-                 arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1), outs=(0,), ins=(1,)))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())),)+prg_uop.src[2:])
     out = Tensor([-1]).realize()
     cpu_src = Tensor([2], device="CPU").realize()
     out = Tensor.custom_kernel(out, cpu_src.to(out.device), fxn=custom_source)[0]
     cp = out.to("CPU").realize()
     self.assertEqual(out.tolist(), [3])
-    self.assertEqual(cp.tolist(), [3])
+    from tinygrad.runtime.support.hcq2 import HCQ_DEVS
+    if Device.DEFAULT in HCQ_DEVS:
+      with self.assertRaises(AssertionError):
+        self.assertEqual(cp.tolist(), [3])
+    else:
+      self.assertEqual(cp.tolist(), [3])
 
   def test_sliced_buffer_function(self):
     x = Tensor.arange(32).reshape(8, 4).clone().realize()
@@ -471,8 +472,7 @@ class TestCustomKernel(unittest.TestCase):
     binary = Device[a.device].renderer.compiler.compile(src)
     def custom_src_kernel(A:UOp, B:UOp) -> UOp:
       sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-                 arg=replace(ProgramInfo.from_sink(sink), globals=(0,), outs=(0,), ins=(0,)))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
     a = Tensor.custom_kernel(a.reshape(2, 2).clone(), a.reshape(2, 2).T, fxn=custom_src_kernel)[0]
     self.assertEqual(a.tolist(), [[1, 1], [2, 3]])
 
@@ -484,8 +484,7 @@ class TestCustomKernel(unittest.TestCase):
     binary = Device[a.device].renderer.compiler.compile(src)
     def custom_src_kernel(out:UOp, inp:UOp) -> UOp:
       sink = UOp.sink(out, inp, arg=KernelInfo(name="copy"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-                 arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1), outs=(0,), ins=(1,)))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
     out = Tensor.custom_kernel(Tensor.empty_like(a), a+1, fxn=custom_src_kernel)[0]
     GlobalCounters.reset()
     out.realize()

@@ -3,7 +3,7 @@ import os, ctypes, functools, mmap, struct, array, math, sys, contextlib
 assert sys.platform != 'win32'
 from typing import Any
 from tinygrad.device import Compiled, BufferStorage, BufferSpec, Buffer, Device, Allocator, TinyELF
-from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, encode_submit, ccall, cstruct, patch, unwrap_view
+from tinygrad.runtime.support.hcq2 import HWQueue, HCQ_RUNTIME_DEV, encode_submit, ccall, cstruct, patch, unwrap_view, layout_args, pack_args
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa, libc
 from tinygrad.renderer.cstyle import QCOMCLRenderer
@@ -92,16 +92,13 @@ class QCOMComputeQueue(HWQueue):
     # NIR can reorder images to different texture slots
     ibos, texs = uavs[:data.ibo_cnt], [uavs[data.ibo_cnt + (data.tex_to_image[i] if data.NIR else i)] for i in range(data.tex_cnt)]
 
-    # the words of the kernargs, as runs at their byte offsets
-    runs:list[tuple[int, list]] = [(off, [UOp.const(val, dtypes.uint32 if sz == 4 else dtypes.uint16)]) for val,off,sz in data.consts_info]
-    runs.append((data.samp_off, data.samplers))
+    args = [(off, UOp.const(val, dtypes.uint32 if sz == 4 else dtypes.uint16)) for val,off,sz in data.consts_info]
+    args += layout_args(data.samplers, data.samp_off)
+    vals = [v.ccast(dt) for v,(_,_,dt,_) in zip(vals, data.signature[len(bufs):])]
     if data.NIR:
-      runs.append((data.buf_off, [b.getaddr(self.devs) for b in ubos]))
-      runs += [(data.buf_off + o, [v.ccast(dt)]) for v,(o,dt) in zip(vals, TinyELF.iter_sig(data.signature[len(bufs):], len(ubos)*8))]
-      if data.wgsz != 0xfc: runs.append((data.wgsz * 4, list(prg.arg.local_size)))
-    else:
-      runs += [(data.buf_offs[i], [b.getaddr(self.devs)]) for i, b in enumerate(ubos)]
-      runs += [(data.buf_offs[i+len(ubos)], [v.ccast(dt)]) for i,(v,(_,_,dt,_)) in enumerate(zip(vals, data.signature[len(bufs):]))]
+      args += layout_args([b.getaddr(self.devs) for b in ubos] + vals, data.buf_off)
+      if data.wgsz != 0xfc: args += layout_args(list(prg.arg.local_size), data.wgsz * 4)
+    else: args += list(zip(data.buf_offs, [b.getaddr(self.devs) for b in ubos] + vals))
 
     def _tex(b, ibo=False):
       imgdt, shape, buf = b
@@ -111,16 +108,8 @@ class QCOMComputeQueue(HWQueue):
               qreg.a6xx_tex_const_1(width=shape[1], height=shape[0]),
               qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=pitch, pitchalign=ctz(pitch)-6), 0, buf.getaddr(self.devs),
               qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13), 0, 0, 0, 0, 0, 0, 0, 0]
-    runs += [(data.tex_off, flatten(map(_tex, texs))), (data.ibo_off, flatten(map(functools.partial(_tex, ibo=True), ibos)))]
-
-    # laid out as a linear in the cmdbuf tail, like amd's kernargs: the runs in order, zero bytes between them and after the last
-    out, end = [], 0
-    for off, run in sorted([r for r in runs if r[1]], key=lambda r: r[0]) + [(data.kernargs_alloc_size, [])]:
-      assert off >= end, f"kernargs run at {off} overlaps the one ending at {end}"
-      if off > end: out.append(UOp(Ops.BINARY, arg=bytes(off - end)))
-      out += (run:=[w if isinstance(w, UOp) else UOp.const(w, dtypes.uint32) for w in run])
-      end = off + sum(w.dtype.itemsize for w in run)
-    return UOp(Ops.LINEAR, src=tuple(out))
+    args += layout_args(flatten(map(_tex, texs)), data.tex_off) + layout_args(flatten(map(functools.partial(_tex, ibo=True), ibos)), data.ibo_off)
+    return UOp(Ops.LINEAR, src=tuple(pack_args(args, data.kernargs_alloc_size)))
 
   def exec(self, call:UOp, prg:UOp):
     data, lib = qcom_build_program(self.dev, prg, self.devs)

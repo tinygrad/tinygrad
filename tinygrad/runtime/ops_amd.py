@@ -3,7 +3,7 @@ from typing import cast, Any
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, hashlib, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass, replace
-from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, to_name, patch, unwrap_view, rt_addr
+from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, to_name, patch, unwrap_view, rt_addr, layout_args, pack_args
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, ProfileProgramEvent
 from tinygrad.dtype import dtypes
@@ -356,11 +356,9 @@ class AMDComputeQueue(HWQueue):
   ### exec
 
   def kernargs(self, call:UOp, prg:UOp, data:AMDProgramData) -> list[UOp]:
-    words = [get_call_arg_uops(call)[gi].getaddr(self.devs) for gi in prg.arg.globals] + \
+    args = [get_call_arg_uops(call)[gi].getaddr(self.devs) for gi in prg.arg.globals] + \
             [b.ccast(v.dtype) for v, b in zip(prg.arg.vars, get_call_var_uops(call, prg))] # a bound value is a bare const, the var has the width
-    pad = data.kernargs_segment_size - sum(w.dtype.itemsize for w in words)
-    assert pad >= 0 and pad % 4 == 0, f"bad kernargs padding {pad}"
-    return words + [UOp.const(0, dtypes.uint32)] * (pad // 4) + (dispatch_packet(data, prg.arg) if data.enable_dispatch_ptr else [])
+    return pack_args(layout_args(args), data.kernargs_segment_size) + (dispatch_packet(data, prg.arg) if data.enable_dispatch_ptr else [])
 
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(self.dev, prg, self.devs)
@@ -908,7 +906,7 @@ class AMDDevice(Compiled):
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, idx=0):
     ring = Buffer(self.device, ring_size // 4, dtypes.uint32, options=BufferSpec(uncached=True, cpu_access=True), preallocate=True)
-    gart = Buffer(self.device, 0x100, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True), preallocate=True)
+    gart = Buffer(self.device, 0x100, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True), initial_value=bytes(0x100))
 
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL:
       self.aql_gart = gart

@@ -485,9 +485,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
     The Ops.PROGRAM with SINK/LINEAR/SOURCE/BINARY.
   """
   if ast.op is Ops.PROGRAM:
+    assert isinstance(ast.arg, ProgramInfo), "requires ProgramInfo on arg for PROGRAM ast"
     prg = ast
-    assert isinstance(prg.arg, ProgramInfo) and isinstance(prg.src[0].arg, KernelInfo), "requires ProgramInfo and KernelInfo on arg for PROGRAM ast"
-    prg = prg.replace(arg=replace(ProgramInfo.from_sink(prg.src[0], renderer.target), globals=prg.arg.globals, outs=prg.arg.outs, ins=prg.arg.ins))
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
