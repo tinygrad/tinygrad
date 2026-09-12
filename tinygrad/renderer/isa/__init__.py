@@ -3,6 +3,7 @@ import itertools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops
+from tinygrad.dtype import AddrSpace
 from typing import Any
 
 @dataclass(frozen=True)
@@ -18,7 +19,7 @@ class Register:
 class IselContext:
   def __init__(self, sink:UOp):
     self.reg_n = itertools.count()
-    def arg_key(u:UOp): return (1, u.arg) if u.op is Ops.SPECIAL else (0, u.arg.slot)
+    def arg_key(u:UOp): return (1, u.arg) if u.op is Ops.SPECIAL else (0, 0 if u.addrspace != AddrSpace.ALU else 1, u.arg.slot)
     self.func_args = sorted([u for u in sink.toposort() if u.op in {Ops.PARAM, Ops.SPECIAL}], key=arg_key)
 
   def vreg(self, cons:tuple[Register, ...]|Register):

@@ -7,7 +7,7 @@ from tinygrad.helpers import WIN, mv_address, to_mv, LRU, getenv, diskcache_get,
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
 from tinygrad.helpers import cpu_profile, perf_counter_us
-from tinygrad.dtype import dtypes, DType, _to_np_dtype
+from tinygrad.dtype import dtypes, DType, AddrSpace, _to_np_dtype
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 if TYPE_CHECKING:
   from tinygrad.renderer import Renderer
@@ -372,13 +372,13 @@ class TinyELF:
   lib: bytes
   name: str
   target: Target
-  # tuple of (name, slot, dtype, shape)
-  signature: tuple[tuple[str|None, int, DType, tuple], ...]
+  # tuple of (name, slot, dtype, shape, addrspace)
+  signature: tuple[tuple[str|None, int, DType, tuple, AddrSpace], ...]
   profile_key: bytes|None = None
 
   @staticmethod
   def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
-    for _,_,dt,_ in signature:
+    for _,_,dt,*_ in signature:
       yield (offset:=round_up(offset, dt.itemsize)), dt
       offset += dt.itemsize
 
@@ -393,9 +393,9 @@ class Program(Generic[DeviceType]):
     if (call:=cls.__dict__.get('__call__')) is not None:
       def _call(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
                 wait=False, **kw) -> float|None:
-        if not vals and hasattr(self, 'signature') and any(s == () for _,_,_,s in self.signature):
-          bufs = [a for a, (_,_,_,s) in zip(args, self.signature) if s != ()]
-          vals = tuple(a for a, (_,_,_,s) in zip(args, self.signature) if s == ())
+        if not vals and hasattr(self, 'signature') and any(ads == AddrSpace.ALU for *_,ads in self.signature):
+          bufs = [a for a, (*_,ads) in zip(args, self.signature) if ads != AddrSpace.ALU]
+          vals = tuple(a for a, (*_,ads) in zip(args, self.signature) if ads == AddrSpace.ALU)
           return call(self, *bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait, **kw)
         return call(self, *args, global_size=global_size, local_size=local_size, vals=vals, wait=wait, **kw)
       setattr(cls, '__call__', _call)

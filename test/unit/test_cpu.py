@@ -22,5 +22,22 @@ class TestCPU(unittest.TestCase):
           with redirect_stdout(out): r.compiler.disassemble(lib)
           self.assertEqual("vmov" in out.getvalue(), expect_vmov, out.getvalue())
 
+  def test_x86_abi_interleaved_ordering(self):
+    from tinygrad.renderer.isa import IselContext
+    from tinygrad.dtype import AddrSpace, dtypes
+    from tinygrad.uop.ops import UOp
+
+    s0 = UOp.variable("s0", 1, 10)
+    p0 = s0.param_like(0)  # ALU scalar in slot 0
+    p1 = UOp.param(1, dtypes.float, (4,), AddrSpace.GLOBAL)  # Buffer in slot 1
+    s2 = UOp.variable("s2", 1, 10)
+    p2 = s2.param_like(2)  # ALU scalar in slot 2
+    p3 = UOp.param(3, dtypes.float, (4,), AddrSpace.GLOBAL)  # Buffer in slot 3
+
+    sink = UOp.sink(p1, p3, p0, p2)
+    ctx = IselContext(sink)
+    # CPUProgram passes [*bufs, *vals]. Buffers (non-ALU) must precede scalars (ALU)
+    self.assertEqual(ctx.func_args, [p1, p3, p0, p2])
+
 if __name__ == '__main__':
   unittest.main()

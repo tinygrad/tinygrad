@@ -418,6 +418,30 @@ class TestArgOrder(unittest.TestCase):
     out = Tensor(outs[0])
     np.testing.assert_equal(out.numpy(), [6.0, 7.0, 8.0, 9.0])
 
+  def test_program_positional_adapter(self):
+    from tinygrad.device import Program, TinyELF
+    from tinygrad.helpers import Target
+    from tinygrad.dtype import AddrSpace
+    received: dict[str, tuple] = {}
+    class DummyProgram(Program):
+      def __init__(self, dev, obj): pass
+      def __call__(self, *bufs, global_size=(1,1,1), local_size=(1,1,1), vals=(), wait=False):
+        received['bufs'] = bufs
+        received['vals'] = vals
+        return 0.0
+
+    sig = (
+      ("s0", 0, dtypes.int, (), AddrSpace.ALU),
+      ("b0", 1, dtypes.float, (), AddrSpace.GLOBAL),
+      ("s1", 2, dtypes.int, (), AddrSpace.ALU),
+      ("b1", 3, dtypes.float, (3,), AddrSpace.GLOBAL),
+    )
+    obj = TinyELF(b"", "dummy", Target("CPU"), sig)
+    prg = DummyProgram(None, obj)
+    prg(10, "buf_0d", 20, "buf_1d")
+    self.assertEqual(received['bufs'], ("buf_0d", "buf_1d"))
+    self.assertEqual(received['vals'], (10, 20))
+
 class TestCallMultiSharded(unittest.TestCase):
   # TODO: multi-output + sharded needs per-device CALL execution, which requires reworking how MULTI propagates through TUPLE bodies
   def test_tuple_sharded(self):

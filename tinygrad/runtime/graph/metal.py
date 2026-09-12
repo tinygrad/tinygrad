@@ -5,6 +5,7 @@ from tinygrad.device import Buffer, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.runtime.ops_metal import MetalDevice, wait_check, to_ns_str
+from tinygrad.dtype import AddrSpace
 from tinygrad.runtime.autogen import metal
 
 class MetalGraph(GraphRunner):
@@ -26,7 +27,7 @@ class MetalGraph(GraphRunner):
 
     self.var_bind_data = []
     if len(self.vars):
-      storage = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s) in unwrap(r).signature if s == ()))
+      storage = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,_,ads) in unwrap(r).signature if ads == AddrSpace.ALU))
       self.var_buf, self.var_buf_view, var_buf_offset = storage.buf, unwrap(storage.host).mv, 0
 
     all_pipelines, all_resources = [], [self.var_buf.buf] if len(self.vars) else []
@@ -39,7 +40,7 @@ class MetalGraph(GraphRunner):
         if not any(pos == i for pos, _ in replace):
           icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
-      for nm,i,dt,_ in runtime.signature[len(bufs):]:
+      for nm,i,dt,*_ in runtime.signature[len(bufs):]:
         icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, var_buf_offset, i)
         self.var_bind_data.append((nm, var_buf_offset, dt.fmt))
         var_buf_offset += dt.itemsize
