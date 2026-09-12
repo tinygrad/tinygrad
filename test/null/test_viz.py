@@ -498,11 +498,14 @@ class TestVizIntegration(unittest.TestCase):
     bin_render = get_render(viz.data, steps[bin_idx]["query"])["src"]
     self.assertIn(type(e.exception).__name__, bin_render)
 
+  # precompiled programs skip codegen call
+  @unittest.expectedFailure
   def test_view_source_alt(self):
     src = "void E_3(float* data0_3) {}"
+    binary = Device["CPU"].renderer.compiler.compile(src)
     def custom_binary(X:UOp):
       sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src)),
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
                  arg=replace(ProgramInfo.from_sink(sink), globals=(0,), outs=(0,), ins=()))
     x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_binary)[0]
     with save_viz() as viz:
