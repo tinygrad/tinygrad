@@ -61,10 +61,6 @@ def _pointwise_self_store(ctx:IndexingContext, dest:UOp, src:UOp) -> bool:
 def realize_store_after_src(ctx:IndexingContext, dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
   if dest.base in src.toposort(enter_calls=False) and not _pointwise_self_store(ctx, dest, src): ctx.realize_map[src] = None
-  # the source of a cross device STORE is materialized on its own device first: the STORE itself is the copy
-  # NOTE: buffer identity views (shard views with max_shape != shape) must be materialized too, copies can't read them
-  if src.device is not None and dest.device != src.device:
-    ctx.realize_map[src] = ctx.non_removable[src] = None
 
 def realize_custom_kernel_srcs(ctx:IndexingContext, c:UOp) -> None:
   # A write-only custom output can be forwarded into the buffer that ultimately stores it. Readable arguments still
