@@ -95,6 +95,10 @@ class HCQGraph(MultiGraphRunner):
         for b in bufs[::-1]:
           if (enqueue_dev:=cast(HCQCompiled, Device[b.device])).hw_copy_queue_t is not None: break
 
+      if runtime is not None and runtime.name == "fa_fp8_bwd_prep":
+        print("FA_PREP_BUFS", j, enqueue_dev.device,
+              [(b.size, b.offset, b.base.size, hex(int(b.get_buf(enqueue_dev.device)))) for b in bufs])
+
       # set any fixedvars on the device
       self.device_vars[enqueue_dev] = merge_dicts([self.device_vars.get(enqueue_dev, {}), device_vars])
 
