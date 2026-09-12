@@ -2,6 +2,7 @@ import functools, time
 from dataclasses import replace
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv, DEBUG
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
@@ -74,6 +75,10 @@ class _function(Generic[ReturnType]):
     uret = graph_rewrite(uret, pm_ctx, (call_uops, invalid_outputs(uret)), bottom_up=True, name="get_implicit_inputs")
     uret = renumber_invalid_outputs(uret)
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
+    if name in {"FlatTransformer.run_layer", "FlatTransformer.run_last_layer"}:
+      for i, u in enumerate(call_uops):
+        if u.dtype == dtypes.float32 and u.numel() == 2:
+          print(f"{name} {'explicit' if i < num_explicit else 'implicit'}[{i}] {u!r}")
     if not self.allow_implicit:
       implicit_buffers = [x for x in call_uops[num_explicit:] if x.op is Ops.BUFFER]
       if implicit_buffers:
