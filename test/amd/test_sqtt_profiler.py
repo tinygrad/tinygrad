@@ -108,7 +108,7 @@ class TestSQTTProfiler(unittest.TestCase):
     with save_sqtt() as data:
       linear = t.schedule_linear()
       run_linear(linear)
-    fn_name = to_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).arg.function_name
+    fn_name = to_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).src[0].arg.function_name
     sqtt = map_sqtt(data)
     self.assertEqual(len(sqtt), 1)
     self.assertEqual(sqtt[0]["name"], f"SQTT {fn_name}")
@@ -152,7 +152,7 @@ class TestSQTTProfiler(unittest.TestCase):
     with save_sqtt() as data:
       linear = t.schedule_linear()
       for _ in range(N:=3): run_linear(linear)
-    fn_name = to_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).arg.function_name
+    fn_name = to_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).src[0].arg.function_name
     sqtt = map_sqtt(data)
     self.assertEqual(len(sqtt), N)
     for i in range(1, N):
@@ -166,7 +166,7 @@ class TestSQTTProfiler(unittest.TestCase):
     sqtt = map_sqtt(data)
     self.assertEqual(len(sqtt), len(linear.src))
     for i,call in enumerate(linear.src):
-      fn_name = to_program(call.src[0], renderer=Device[Device.DEFAULT].renderer).arg.function_name
+      fn_name = to_program(call.src[0], renderer=Device[Device.DEFAULT].renderer).src[0].arg.function_name
       self.assertEqual(sqtt[i]["name"], f"SQTT {fn_name}")
 
   def test_multiple_kernels_lower(self):
@@ -177,7 +177,7 @@ class TestSQTTProfiler(unittest.TestCase):
     sqtt = map_sqtt(data)
     self.assertEqual(len(sqtt), len(linear.src))
     for i,call in enumerate(linear.src):
-      fn_name = to_program(call.src[0], renderer=Device[Device.DEFAULT].renderer).arg.function_name
+      fn_name = to_program(call.src[0], renderer=Device[Device.DEFAULT].renderer).src[0].arg.function_name
       self.assertEqual(sqtt[i]["name"], f"SQTT {fn_name}")
 
   def test_jit(self):
