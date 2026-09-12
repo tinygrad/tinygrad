@@ -4,6 +4,7 @@ assert sys.platform != 'win32'
 from typing import Any
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
+from tinygrad.runtime.support.hcq2 import layout_args
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, BumpAllocator, hcq_filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops, lower_and_compile, run_linear
@@ -172,7 +173,7 @@ class NVComputeQueue(NVQueue):
       qmd.set_constant_buf_addr(j, qmd_addr + UOp.const(self.qmd_sz, dtypes.uint64) if j == 0 else lib.getaddr(self.devs) + off)
     bufs, vals = [get_call_arg_uops(call)[j] for j in prg.arg.globals], get_call_var_uops(call, prg)
     qmd.mv[self.qmd_sz:(at:=self.qmd_sz + len(data.cbuf_0) * 4)] = array.array('I', data.cbuf_0).tobytes() # constant buffer 0: the driver params
-    qmd.patches |= {at + j * 8: b.getaddr(self.devs) for j, b in enumerate(bufs)} | {at + o: v.ccast(dt) for v, (o, dt) in zip(vals, data.vars)}
+    qmd.patches |= dict(layout_args([b.getaddr(self.devs) for b in bufs] + [v.ccast(dt) for v, dt in zip(vals, data.vars)], at))
 
     if self.prev_qmd is None:
       if self.dev.pma_enabled: self.nvm(1, nv_gpu.NVC6C0_PM_TRIGGER, 0)
@@ -243,9 +244,8 @@ class NVProgramData:
 
     # the arguments follow the driver params in constant buffer 0: the buffers as 64 bit addresses, then the vars packed by their width
     nbufs = sum(name is None for name, *_ in signature)
-    self.vars = list(TinyELF.iter_sig(signature[nbufs:], nbufs * 8))
-    if mock: # mockgpu reads the arg counts out of cbuf0 and wants every var 64 bit
-      self.cbuf_0[80:82], self.vars = [nbufs, len(self.vars)], [(nbufs * 8 + i * 8, dtypes.uint64) for i in range(len(self.vars))]
+    self.vars = [dtypes.uint64 if mock else dt for _,_,dt,_ in signature[nbufs:]] # mockgpu wants every var 64 bit
+    if mock: self.cbuf_0[80:82] = [nbufs, len(self.vars)] # mockgpu reads the arg counts out of cbuf0
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.image = image.ljust(round_up(len(image), 0x1000) + 0x1000, b'\x00')
