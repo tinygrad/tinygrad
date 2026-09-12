@@ -68,7 +68,7 @@ class TestDTypeFromUOp(unittest.TestCase):
 class TestMemoryCoalescing(unittest.TestCase):
   def test_volatile_view_not_coalesced(self):
     buf = UOp.param(0, dtypes.uint32, 4, volatile=True).bitcast(dtypes.int32)
-    sink = memory_coalescing(UOp.sink(*(buf.index(i).load() for i in range(4))), Renderer(Target("CPU")))
+    sink = memory_coalescing(UOp.sink(*(buf.index(i).load() for i in range(4))), Renderer(Target()))
     self.assertEqual(sum(u.op is Ops.LOAD for u in sink.toposort()), 4)
 
 class TestLowerIndexDtype(unittest.TestCase):
