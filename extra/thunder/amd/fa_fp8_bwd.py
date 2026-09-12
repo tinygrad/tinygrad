@@ -8,7 +8,7 @@ from tinygrad.helpers import getenv
 @functools.cache
 def custom_fp8_backward(*args:UOp, B:int, N:int, H:int, H_KV:int, arch:str):
   assert arch == "gfx950" and N % 64 == 0 and H % H_KV == 0
-  if getenv("FA_BWD_ASM", 0) and (B,N,H,H_KV) == (2,8192,32,8) and args[0].dtype == dtypes.bfloat16:
+  if getenv("FA_BWD_ASM", 1) and (B,N,H,H_KV) == (2,8192,32,8) and args[0].dtype == dtypes.bfloat16:
     from extra.thunder.amd.asm_fa_fp8_bwd import build_kernel
     from tinygrad.dtype import AddrSpace
     lds = UOp.placeholder((132160,), dtypes.uint8, 0, addrspace=AddrSpace.LOCAL)
