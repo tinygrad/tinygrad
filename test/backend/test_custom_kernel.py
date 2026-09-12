@@ -351,7 +351,7 @@ class TestCustomKernel(unittest.TestCase):
     for call in compiled.src:
       prg = call.src[0]
       if prg.op is not Ops.PROGRAM: continue
-      self.assertTrue(len(prg.arg.globals) > 0, f"empty kernel compiled (no globals): name={prg.arg.name}")
+      self.assertTrue(len(prg.arg.globals) > 0, f"empty kernel compiled (no globals): name={prg.src[0].arg.name}")
 
   def test_multi_invalids_custom_kernel_no_copy(self):
     devs = ("CPU:0", "CPU:1")
