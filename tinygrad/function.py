@@ -46,7 +46,13 @@ class _function(Generic[ReturnType]):
   def __call__(self, *args, **kwargs) -> ReturnType:
     st = time.perf_counter()
 
-    params = get_state_dict((args, kwargs), tensor_type=(Tensor, UOp)).values()
+    param_state = get_state_dict((args, kwargs), tensor_type=(Tensor, UOp))
+    name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
+    if name in {"FlatTransformer.run_layer", "FlatTransformer.run_last_layer"}:
+      for key, t in param_state.items():
+        if t.dtype == dtypes.float32 and t.numel() == 2:
+          print(f"{name} state[{key}] {t._uop!r}")
+    params = param_state.values()
 
     # deduplicate input_uops, keeping the first occurrence index for each unique uop
     call_uops: list[UOp] = dedup([u for t in params if (u:=t._uop).device is not None])
@@ -74,7 +80,6 @@ class _function(Generic[ReturnType]):
     num_explicit = len(call_uops)
     uret = graph_rewrite(uret, pm_ctx, (call_uops, invalid_outputs(uret)), bottom_up=True, name="get_implicit_inputs")
     uret = renumber_invalid_outputs(uret)
-    name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
     if name in {"FlatTransformer.run_layer", "FlatTransformer.run_last_layer"}:
       for i, u in enumerate(call_uops):
         if u.dtype == dtypes.float32 and u.numel() == 2:
