@@ -510,19 +510,20 @@ def _get_pads(uop:UOp) -> list[UOp]:
 
 def apply_grad(grad_buf:Tensor, new_grad:UOp, accumulate:bool=True):
   pads = _get_pads(new_grad)
-  if not accumulate:
-    slices = [tuple((m[0], m[0]+s) for s,m in zip(p.src[0].shape, p.marg)) for p in pads if p.op is Ops.PAD]
-    covered = sum(math.prod(p.src[0].shape) for p in pads if p.op is Ops.PAD)
-    disjoint = all(any(a1 <= b0 or b1 <= a0 for (a0, a1), (b0, b1) in zip(a, b)) for i,a in enumerate(slices) for b in slices[i+1:])
-    print(f"packed gradient: shape={grad_buf.shape} terms={len(pads)} pads={len(slices)} "
-          f"covered={covered}/{grad_buf.numel()} disjoint={disjoint} slices={slices}")
-    new_grad = new_grad.cast(grad_buf.dtype)
-    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(new_grad))
-    return
   if len(pads) <= 1:
     new_grad = new_grad.cast(grad_buf.dtype)
     grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad if accumulate else new_grad))
     return
+  if not accumulate:
+    # Slice-wise overwrite is only valid when the PADs are a complete, disjoint partition of the packed gradient.
+    # Fall back to defining the whole buffer for gradients that don't have that structure.
+    slices = [tuple((m[0], m[0]+s) for s,m in zip(p.src[0].shape, p.marg)) for p in pads if p.op == Ops.PAD]
+    disjoint = all(any(a1 <= b0 or b1 <= a0 for (a0, a1), (b0, b1) in zip(a, b)) for i,a in enumerate(slices) for b in slices[i+1:])
+    complete = len(slices) == len(pads) and sum(math.prod(p.src[0].shape) for p in pads) == grad_buf.numel()
+    if not (disjoint and complete):
+      new_grad = new_grad.cast(grad_buf.dtype)
+      grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(new_grad))
+      return
   cur = grad_buf.uop
   for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
     if pad.op == Ops.PAD:
