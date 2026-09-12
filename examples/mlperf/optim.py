@@ -90,7 +90,7 @@ def fclip_grads(grads:list[Tensor], clip_norm) -> Tensor:
   return [(g * scale).cast(g.dtype) for g in grads], total_norm
 
 def _copy_to_stable_storage(x:Tensor) -> Tensor:
-  return Tensor.empty(x.shape, dtype=x.dtype, device=x.device).realize().assign(x.contiguous())
+  return x.clone()
 
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
