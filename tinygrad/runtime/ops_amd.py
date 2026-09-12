@@ -906,7 +906,7 @@ class AMDDevice(Compiled):
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, idx=0):
     ring = Buffer(self.device, ring_size // 4, dtypes.uint32, options=BufferSpec(uncached=True, cpu_access=True), preallocate=True)
-    gart = Buffer(self.device, 0x100, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True), preallocate=True)
+    gart = Buffer(self.device, 0x100, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True), initial_value=bytes(0x100))
 
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL:
       self.aql_gart = gart
