@@ -69,6 +69,7 @@ lift_full_buffer_after_views = PatternMatcher([
 ])
 
 def mint_tagged_storage(x:UOp):
+  if x.tag == ("replicate",): return x
   if x.tag is None: return None          # untouched
   # Scheduler annotations are not allocation provenance tags.
   if not all(isinstance(t, UOp) for t in x.tag): return None
@@ -97,7 +98,7 @@ pm_mint_function_materializations = PatternMatcher([
 
 # Allocation provenance is local to Callify, while physical allreduce annotations are consumed later by the scheduler.
 pm_remove_allocation_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x:
-  x.replace(tag=None) if x.tag is not None and x.tag not in {("allreduce",), ("allreduce_accumulate",)} else None)])
+  x.replace(tag=None) if x.tag is not None and x.tag not in {("allreduce",), ("allreduce_accumulate",), ("replicate",)} else None)])
 
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -217,7 +218,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
    lambda x: x.src[0].replace(tag=(x.src[0].tag or ())+(x.tag or ())) if x.tag else x.src[0]),
   # contiguous of an already-materialized value is a no-op (tags carry over for held values)
   (UPat(Ops.COPY, src=(UPat(Ops.AFTER, name="a"),), name="c"),
-   lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if c.is_self_copy and a.src[0].has_buffer_identity() else None),
+   lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ()))
+   if c.is_self_copy and c.tag != ("replicate",) and a.src[0].has_buffer_identity() else None),
   # mint buffers for tagged values; an untagged CONTIGUOUS flows through to the scheduler, which bufferizes it
   (UPat(GroupOp.All-{Ops.AFTER, Ops.STORE}, name="x"), mint_tagged_storage),
 ])

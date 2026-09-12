@@ -703,7 +703,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def axis(self) -> int|None:
     # COPY removes axis, except a self COPY (contiguous) which keeps the sharding of its source
-    if self.op is Ops.COPY: return self.src[0].axis if self.is_self_copy else None
+    if self.op is Ops.COPY: return self.src[0].axis if self.is_self_copy and self.tag != ("replicate",) else None
     if self.op is Ops.UNSHARD:
       if len(self.arg) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {self.arg}, use .sharding")
       return self.arg[0]
