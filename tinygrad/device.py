@@ -383,7 +383,23 @@ class TinyELF:
       offset += dt.itemsize
 
 class Program(Generic[DeviceType]):
-  def __init__(self, dev:DeviceType, obj:TinyELF): pass
+  def __init_subclass__(cls, **kwargs):
+    super().__init_subclass__(**kwargs)
+    if (init:=cls.__dict__.get('__init__')) is not None:
+      def _init(self, dev:DeviceType, obj:TinyELF, *a, **kw):
+        init(self, dev, obj, *a, **kw)
+        if not hasattr(self, 'signature'): self.signature = obj.signature
+      cls.__init__ = _init
+    if (call:=cls.__dict__.get('__call__')) is not None:
+      def _call(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
+                wait=False, **kw) -> float|None:
+        if not vals and hasattr(self, 'signature') and any(s == () for _,_,_,s in self.signature):
+          bufs = [a for a, (_,_,_,s) in zip(args, self.signature) if s != ()]
+          vals = tuple(a for a, (_,_,_,s) in zip(args, self.signature) if s == ())
+          return call(self, *bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait, **kw)
+        return call(self, *args, global_size=global_size, local_size=local_size, vals=vals, wait=wait, **kw)
+      cls.__call__ = _call
+  def __init__(self, dev:DeviceType, obj:TinyELF): self.signature = obj.signature
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
                wait=False) -> float|None: pass
 
