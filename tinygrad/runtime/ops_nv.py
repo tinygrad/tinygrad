@@ -244,7 +244,7 @@ class NVProgramData:
 
     # the arguments follow the driver params in constant buffer 0: the buffers as 64 bit addresses, then the vars packed by their width
     nbufs = sum(name is None for name, *_ in signature)
-    self.vars = [dtypes.uint64 if mock else dt for _,_,dt,_ in signature[nbufs:]] # mockgpu wants every var 64 bit
+    self.vars = [dtypes.uint64 if mock else dt for _,_,dt,*_ in signature[nbufs:]] # mockgpu wants every var 64 bit
     if mock: self.cbuf_0[80:82] = [nbufs, len(self.vars)] # mockgpu reads the arg counts out of cbuf0
 
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.

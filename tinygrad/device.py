@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace, field
 from collections import defaultdict
-from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
+from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING, Sequence
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, time, statistics
 from tinygrad.helpers import WIN, mv_address, to_mv, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
@@ -377,7 +377,7 @@ class TinyELF:
   profile_key: bytes|None = None
 
   @staticmethod
-  def iter_sig(signature:tuple[tuple[str|None, int, DType, tuple], ...], offset:int=0) -> Generator[tuple[int, DType], None, None]:
+  def iter_sig(signature:Sequence[tuple[Any, ...]], offset:int=0) -> Generator[tuple[int, DType], None, None]:
     for _,_,dt,*_ in signature:
       yield (offset:=round_up(offset, dt.itemsize)), dt
       offset += dt.itemsize
