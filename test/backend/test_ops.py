@@ -1670,6 +1670,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.var())
     helper_test_op([(15, 25, 35)], lambda x: x.var(correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.var(correction=5))
+    helper_test_op(None, lambda x: x.float().var(), lambda x: x.var(), vals=[[1, 2, 3, 4]], forward_only=True)
     # TODO: fix this
     # helper_test_op([(10, 2)], lambda x: x.var(correction=50))
   @slow_test

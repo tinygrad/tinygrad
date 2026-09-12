@@ -2,10 +2,13 @@ from __future__ import annotations
 import functools, math, pathlib
 from dataclasses import replace
 from tinygrad import Tensor, dtypes
+from tinygrad.helpers import getenv
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
 from tinygrad.renderer import Estimates
 from extra.gemm.cdna_asm_gemm import FP8_DTYPE
 from extra.llama_kernels import NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, compile_hip, dname_of
+
+COOP_EPILOGUE = getenv("RMSNORM_MX_EP8")
 
 def rmsnorm_mul_fwd(x_in:Tensor, weight:Tensor, eps:float) -> tuple[Tensor, Tensor]:
   x = x_in.float()
@@ -43,7 +46,7 @@ def _custom_rmsnorm_mul_quantize_mxfp8_fwd(q:UOp, e8:UOp, rrms:UOp, x:UOp, weigh
                                  estimates=Estimates(ops=8*rows*hidden, mem=rows*(hidden*2+padded+padded//32+4)+hidden*2)))
   src = (pathlib.Path(__file__).parent/"rmsnorm_mul_quantize_mxfp8.cpp").read_text()
   defines = [f"-DN_ELEMS={rows*hidden}", f"-DHIDDEN={hidden}", f"-DPADDED={padded}",
-             f"-DNUM_WG={num_wg}", f"-DTHREADS_PER_WG={THREADS_PER_WG}", f"-DEPS_LITERAL={eps}f"]
+             f"-DNUM_WG={num_wg}", f"-DTHREADS_PER_WG={THREADS_PER_WG}", f"-DEPS_LITERAL={eps}f", f"-DCOOP_EPILOGUE={COOP_EPILOGUE}"]
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=compile_hip(src, defines))),
              arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4), outs=(0, 1, 2), ins=(3, 4)))

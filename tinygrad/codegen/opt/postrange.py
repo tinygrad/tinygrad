@@ -9,7 +9,7 @@ from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, argsort, round_up, p
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, TensorCore
 
 split_targets = {AxisType.UPCAST: (AxisType.GLOBAL, AxisType.LOCAL, AxisType.WEAK), AxisType.UNROLL: (AxisType.REDUCE, AxisType.GROUP_REDUCE),
                  AxisType.LOCAL: (AxisType.GLOBAL, AxisType.WEAK), AxisType.GROUP_REDUCE: (AxisType.REDUCE,)}
@@ -18,6 +18,7 @@ class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
     self.ast, self.ren = ast, ren
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
+    self.tensor_core:TensorCore|None = None
     self.opt_range = count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
 
   @property
@@ -35,7 +36,7 @@ class Scheduler:
   def copy(self) -> Scheduler:
     ret = Scheduler(self.ast, self.ren)
     ret.applied_opts = self.applied_opts[:]
-    if hasattr(self, 'tensor_core'): ret.tensor_core = self.tensor_core
+    ret.tensor_core = self.tensor_core
     return ret
 
   def get_optimized_ast(self, name_override:str|None=None) -> UOp:
@@ -162,6 +163,7 @@ class Scheduler:
         if any(rng in y.ranges for y in r.src[1:]):
           replaces[r] = r.replace(src=(valid.where(r.src[0], UOp.const(identity_element(r.arg[0], r.dtype), r.dtype)),)+r.src[1:])
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
+      ret = replaced_rng
     elif opt.op is OptOps.SWAP:
       try:
         altrng:UOp = self.rngs[opt.arg]
@@ -180,21 +182,17 @@ class Scheduler:
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> None|list[UOp]:
     if not (reduceops := self.reduceops): raise KernelOptError("no reduce ops for TensorCore")
     reduceop = reduceops[0]
-    if use_tensor_cores and reduceop.arg[0] is Ops.ADD:
+    if reduceop.arg[0] is Ops.ADD:
       mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
       if mul.op is not Ops.MUL: return None
       in0, in1 = mul.src
-      try:
-        tensor_cores = self.ren.tensor_cores if tc_select == -1 else [self.ren.tensor_cores[tc_select]]
-      except IndexError:
-        raise KernelOptError(f"invalid tensor core choice {tc_select}")
-      for tc in tensor_cores:
+      for tc in self.ren.tensor_cores if tc_select == -1 else [self.ren.tensor_cores[tc_select]]:
         if self.ren.target.device in ("CUDA", "NV") and tc.dtype_in == dtypes.float and not ALLOW_TF32: continue
         if tc.dtype_in == in0.dtype and tc.dtype_in == in1.dtype and tc.dtype_out == reduceop.dtype:
           # tensor cores have three ranges. X, Y, and REDUCE
           in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0], reverse=True)
           in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg[0], reverse=True)
-          red_ranges = sorted(reduceop.src[1:], key=lambda x: x.arg[0], reverse=True)
+          red_ranges = sorted(UOp.sink(*reduceop.src[1:]).ranges, key=lambda x: x.arg[0], reverse=True)
           if DEBUG >= 3:
             print(f"TC({axis}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]}",
                               f"{[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")
@@ -209,31 +207,28 @@ class Scheduler:
           if any(a.arg[-1] is AxisType.REDUCE for a in axes[:2]): raise KernelOptError("tensor core X/Y axes can't be REDUCE")
 
           # do optimizations and save the ranges
+          ast, warp, ne = self.ast, UOp.range(tc.threads, -1, AxisType.WARP), []
           try:
             for i,a in enumerate(axes):
-              idx = self.rngs.index(a)
               if (a.vmax+1) % tc.dims[i] != 0:
                 if opt_level < 2: raise KernelOptError("tc padding requires opt_level >= 2")
-                # apply_opt should return the updated range?
-                self.apply_opt(Opt(OptOps.PADTO, idx, tc.dims[i]), append_opt=False) # PADTO might fail
-                axes[i] = self.rngs[idx]
-          except KernelOptError: continue
+                axes[i] = self.apply_opt(Opt(OptOps.PADTO, self.rngs.index(a), tc.dims[i]), append_opt=False) # PADTO might fail
+            # we create the warp as a whole thing, in case some of these ranges are moved/removed later
+            for opt in tc.opts:
+              if opt[0] == "l":
+                axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.LOCAL, input_new_rng=warp%2)
+                warp //= 2
+              elif opt[0] == "u":
+                axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.UPCAST)
+              else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")
+              ne.append(new_range)
 
-          # we create the warp as a whole thing, in case some of these ranges are moved/removed later
-          warp = UOp.range(tc.threads, -1, AxisType.WARP)
-          ne: list[UOp] = []
-          for opt in tc.opts:
-            if opt[0] == "l":
-              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.LOCAL, input_new_rng=warp%2)
-              warp //= 2
-            elif opt[0] == "u":
-              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.UPCAST)
-            else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")
-            ne.append(new_range)
-
-          for _, amt in tc.get_reduce_axes():
-            axes[2], new_range = self.shift_to(axes[2], amt, AxisType.UNROLL)
-            ne.append(new_range)
+            for _, amt in tc.get_reduce_axes():
+              axes[2], new_range = self.shift_to(axes[2], amt, AxisType.UNROLL)
+              ne.append(new_range)
+          except KernelOptError:
+            self.ast = ast
+            continue
 
           if use_tensor_cores != 2:
             reduceop = get_single_element([x for x in self.reduceops if axes[2] in UOp.sink(*x.src[1:]).ranges])
