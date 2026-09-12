@@ -1473,6 +1473,7 @@ def train_llama3():
   mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
   if mxfp4_weights is not None:
     Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
+    for dev in device: Device[dev].synchronize()
 
   def minibatch_impl(tokens:Tensor, accumulate:bool):
     model.reset_amax()
@@ -1585,6 +1586,7 @@ def train_llama3():
       gt = time.perf_counter()
       ret = optim_step()
       lr, grad_norm, loss = ret[0].item(), ret[1].item(), ret[2].item() / grad_acc
+      for dev in device: Device[dev].synchronize()
       et = time.perf_counter()
 
       optim_time = et - gt
