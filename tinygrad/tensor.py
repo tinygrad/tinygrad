@@ -92,7 +92,7 @@ def mint_function_materialization(x:UOp) -> UOp|None:
 
 pm_mint_function_materializations = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat((Ops.COPY, Ops.AFTER, Ops.CAST)),), name="x"),
-   lambda ctx,x: mint_function_materialization(ctx, x) if x.is_self_copy else None),
+   lambda x: mint_function_materialization(x) if x.is_self_copy else None),
 ])
 
 # Allocation provenance is local to Callify, while physical allreduce annotations are consumed later by the scheduler.
