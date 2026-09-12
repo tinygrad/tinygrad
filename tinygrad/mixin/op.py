@@ -768,6 +768,15 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return chunks.alu(op, base.unsqueeze(-1)).flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
 
   def associative_scan(self, fn:Callable[[Self, Self], Self], axis:int=0, reverse:bool=False) -> Self:
+    """
+    Computes the inclusive parallel associative prefix scan along the specified `axis` using `fn`.
+    `fn(a, b)` combines the accumulated prefix `a` with incoming element `b` (or `fn(b, a)` when `reverse=True`).
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1.0, 2.0, 3.0, 4.0])
+    print(t.associative_scan(lambda a, b: a + b).numpy())
+    ```
+    """
     axis = self._resolve_dim(axis)
     x = self.flip(axis) if reverse else self
     n, offset = x.shape[axis], 1
@@ -775,7 +784,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       p = tuple((offset, 0) if d == axis else (0, 0) for d in range(x.ndim))
       s = tuple((0, sz) if d == axis else (0, sz) for d, sz in enumerate(x.shape))
       shifted = x.pad(p).shrink(s)
-      comb = fn(shifted, x)
+      comb = fn(x, shifted) if reverse else fn(shifted, x)
       m = type(self).arange(n).reshape(*[n if d == axis else 1 for d in range(x.ndim)]) >= offset
       x = m.where(comb, x)
       offset <<= 1

@@ -1175,6 +1175,25 @@ class TestOps(unittest.TestCase):
     np.testing.assert_allclose(r2.numpy(), [1.0, 2.0, 6.0, 24.0])
     np.testing.assert_allclose(r3.numpy(), [10.0, 9.0, 7.0, 4.0])
 
+    # 2D non-default axis
+    x2d = Tensor([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])
+    r2d_fwd = x2d.associative_scan(lambda a, b: a + b, axis=1)
+    r2d_rev = x2d.associative_scan(lambda a, b: a + b, axis=1, reverse=True)
+    Tensor.realize(r2d_fwd, r2d_rev)
+    np.testing.assert_allclose(r2d_fwd.numpy(), [[1.0, 3.0, 6.0, 10.0], [5.0, 11.0, 18.0, 26.0]])
+    np.testing.assert_allclose(r2d_rev.numpy(), [[10.0, 9.0, 7.0, 4.0], [26.0, 21.0, 15.0, 8.0]])
+
+    # non-commutative associative operation (matrix multiplication)
+    m0 = np.array([[1.0, 2.0], [0.0, 1.0]], dtype=np.float32)
+    m1 = np.array([[2.0, 0.0], [1.0, 1.0]], dtype=np.float32)
+    m2 = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.float32)
+    mats = Tensor(np.stack([m0, m1, m2]))
+    rfwd = mats.associative_scan(lambda a, b: a @ b, axis=0)
+    rrev = mats.associative_scan(lambda a, b: a @ b, axis=0, reverse=True)
+    Tensor.realize(rfwd, rrev)
+    np.testing.assert_allclose(rfwd.numpy(), [m0, m0 @ m1, m0 @ m1 @ m2])
+    np.testing.assert_allclose(rrev.numpy(), [m0 @ m1 @ m2, m1 @ m2, m2])
+
   def test_small_cumprod(self):
     helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
   @slow_test
