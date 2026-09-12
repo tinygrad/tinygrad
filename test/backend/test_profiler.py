@@ -37,7 +37,6 @@ def helper_profile_filter_device(profile, device:str):
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT], HCQCompiled) or Device.DEFAULT in HCQ_DEVS | {"CPU", "METAL"}, "Dev not supported")
 class TestSimpleProfiler(unittest.TestCase):
-  @unittest.skipIf(Device.DEFAULT == "CPU", "fails in CPU")
   def test_profiler(self):
     with helper_collect_profile(Device[Device.DEFAULT]) as profile:
       Tensor.empty(32).add(1).realize()
