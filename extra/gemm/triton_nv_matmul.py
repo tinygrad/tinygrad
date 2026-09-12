@@ -90,8 +90,7 @@ if __name__ == "__main__":
   # remove debug sections
   src = src.split("\t.file")[0]
   assert '.extern .shared' not in src
-  info = ProgramInfo(name="matmul_kernel",
-                     global_size=(M//BLOCK_SIZE_M, N//BLOCK_SIZE_N, 1), local_size=(32*compiled.metadata.num_warps, 1, 1))
+  info = ProgramInfo(global_size=(M//BLOCK_SIZE_M, N//BLOCK_SIZE_N, 1), local_size=(32*compiled.metadata.num_warps, 1, 1))
   sink = UOp.sink(arg=KernelInfo(name="matmul_kernel"))
   prg_uop = to_program(UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=src)), arg=info),
                        Device.default.renderer)
