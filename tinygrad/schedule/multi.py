@@ -37,7 +37,9 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
 def lower_broadcast_copy(c:UOp, x:UOp):
   if not (isinstance(c.device, tuple) and isinstance(x.device, str)): return None
   if (sx:=x.simplify()).device is None: return UOp(Ops.MSTACK, src=(sx,)*len(c.device))
-  return UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) for d in c.device))
+  # Keep a computed value on its source device. Cross-device COPYs materialize their own SDMA source in prepare.
+  buffered = x.has_buffer_identity(after_ok=True)
+  return UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) if buffered or d != x.device else x for d in c.device))
 
 def lower_copy_to_one(c:UOp, x:UOp):
   if not (isinstance(c.device, str) and isinstance(x.device, tuple)): return None

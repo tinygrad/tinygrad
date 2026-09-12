@@ -733,7 +733,7 @@ class Tensor(RandMixin):
     counter = Tensor._device_rng_counters[device]
     new_low = counter[0:1] + (num & 0xffffffff)
     new_high = counter[1:2] + (num >> 32) + (new_low < counter[0])
-    counter.assign(new_low.cat(new_high))
+    counter.assign(new_low.cat(new_high).contiguous())
     low = counter[0:1] - (num & 0xffffffff)
     high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
     return Tensor._device_seeds[device], low.cat(high)
