@@ -36,7 +36,7 @@ class TestAssociativeScan(unittest.TestCase):
     out = associative_scan(lambda a, b: a.matmul(b), Tensor(arr), reverse=True).numpy()
     expected = np.empty_like(arr)
     expected[-1] = arr[-1]
-    for i in range(len(arr)-2, -1, -1): expected[i] = expected[i+1] if False else arr[i] @ expected[i+1]
+    for i in range(len(arr)-2, -1, -1): expected[i] = arr[i] @ expected[i+1]
     np.testing.assert_allclose(out, expected, rtol=1e-5, atol=1e-6)
 
 
