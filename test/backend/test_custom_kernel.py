@@ -435,8 +435,9 @@ class TestCustomKernel(unittest.TestCase):
     from tinygrad.codegen import do_to_program
     def custom_source(out:UOp, inp:UOp) -> UOp:
       prg_uop = do_to_program(custom_add_one_kernel(out, inp), Device[out.device].renderer)
+      # construct a plain Ops.PROGRAM
       sink = UOp.sink(out.base, inp.base, arg=KernelInfo("add_one_1"))
-      return prg_uop.replace(src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())),)+prg_uop.src[2:], arg=None)
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())),)+prg_uop.src[2:])
     out = Tensor([-1]).realize()
     cpu_src = Tensor([2], device="CPU").realize()
     out = Tensor.custom_kernel(out, cpu_src.to(out.device), fxn=custom_source)[0]
