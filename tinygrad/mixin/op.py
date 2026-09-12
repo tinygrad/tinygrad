@@ -767,6 +767,20 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     base = chunks[..., -1]._cumalu(-1, op)._pad_constant((None,)*(chunks.ndim-2) + ((1, -1),), value)
     return chunks.alu(op, base.unsqueeze(-1)).flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
 
+  def associative_scan(self, fn:Callable[[Self, Self], Self], axis:int=0, reverse:bool=False) -> Self:
+    axis = self._resolve_dim(axis)
+    x = self.flip(axis) if reverse else self
+    n, offset = x.shape[axis], 1
+    while offset < n:
+      p = tuple((offset, 0) if d == axis else (0, 0) for d in range(x.ndim))
+      s = tuple((0, sz) if d == axis else (0, sz) for d, sz in enumerate(x.shape))
+      shifted = x.pad(p).shrink(s)
+      comb = fn(shifted, x)
+      m = type(self).arange(n).reshape(*[n if d == axis else 1 for d in range(x.ndim)]) >= offset
+      x = m.where(comb, x)
+      offset <<= 1
+    return x.flip(axis) if reverse else x
+
   def cumsum(self, axis:int=0) -> Self:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.

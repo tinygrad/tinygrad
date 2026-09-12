@@ -1166,6 +1166,15 @@ class TestOps(unittest.TestCase):
     helper_test_op([(0,3)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(2,3,0)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2))
 
+  def test_associative_scan(self):
+    x = Tensor([1.0, 2.0, 3.0, 4.0])
+    r1, r2, r3 = x.associative_scan(lambda a, b: a + b), x.associative_scan(lambda a, b: a * b), x.associative_scan(lambda a, b: a + b, reverse=True)
+    Tensor.realize(r1, r2, r3)
+    if COMPILE_ONLY: return
+    np.testing.assert_allclose(r1.numpy(), [1.0, 3.0, 6.0, 10.0])
+    np.testing.assert_allclose(r2.numpy(), [1.0, 2.0, 6.0, 24.0])
+    np.testing.assert_allclose(r3.numpy(), [10.0, 9.0, 7.0, 4.0])
+
   def test_small_cumprod(self):
     helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
   @slow_test
