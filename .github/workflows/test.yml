@@ -168,6 +168,26 @@ jobs:
     - name: Run TYPED=1
       run: CHECK_OOB=0 DEV=CPU TYPED=1 python test/test_tiny.py
 
+  qcommock:
+    name: QCOM A630 MockGPU
+    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: qcom-mock
+        python-version: '3.12'
+        deps: mesa
+        pydeps: pytest pytest-xdist
+    - name: Run A630 MockGPU tests
+      env:
+        DEV: MOCK+QCOM:IR3
+        DERANDOMIZE_CI: 1
+      run: python3 -m pytest -n=auto test/mockgpu/qcom/ --durations=20
+
   nulltest:
     name: Null Tests
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
