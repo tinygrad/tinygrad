@@ -10,7 +10,6 @@ from typing import Iterator
 from enum import Enum
 from tinygrad.helpers import getenv, colored
 from tinygrad.renderer.amd.dsl import BitField, FixedBitField, Inst, bits
-from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm # same encoding as RDNA4
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIELD ENUMS
@@ -665,8 +664,8 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       if (key:=(p.simd, p.wave)) in wave_pc: raise AssertionError("only one inflight wave per unit")
       wave_pc[key] = next(iter(pc_map))
     elif isinstance(p, (WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)):
-      pc = wave_pc.pop((p.simd, p.wave))
-      yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
+      wave_pc.pop((p.simd, p.wave))
+      yield (p, None)
     elif isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
