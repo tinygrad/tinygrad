@@ -40,7 +40,7 @@ def creation_copy_is_realized(u:UOp):
   # all copies from disk/numpy are realized into a real buffer
   if is_creation_device(u.src[0]): return tag_uop(u)
 
-# CONTIGUOUS and AFTER + parents are the only nodes that get updated
+# tag creation copies, AFTERs, and bases that need storage
 add_tags = PatternMatcher([
   (UPat(Ops.COPY, name="u"), creation_copy_is_realized),
   # no tag on copies that fill an AFTER's whole dest via STORE: merge COPY tag into AFTER (the copy reads that storage).
@@ -57,7 +57,7 @@ def mint_tagged_storage(x:UOp):
   # empty tag from rtag(()): a COPY already handled via buffer_map or merged into a parent AFTER.
   # () is falsy but not None, so it isn't re-tagged like a bare (tag=None) node would be; just strip it here
   if not x.tag: return x.rtag(None)
-  # a tagged CONTIGUOUS is consumed by the mint: the buffer stores its source directly
+  # a tagged self-copy is consumed by the mint: the buffer stores its source directly
   src = x.src[0] if x.is_self_copy else x.rtag(None)
   # virtual values and DISK tensors don't get real buffers: keep the (single) annotation, drop the tag
   if x.is_virtual or on_disk(x): return src.alu(Ops.COPY, arg=src.device) if src.device is not None else src
@@ -100,7 +100,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
   targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
 
-  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
+  # how each stored value lands in its output PARAM target: a self-copy materializes straight into the target and
   # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
   placed:dict[UOp, UOp] = {}
   items:list[UOp] = []
@@ -147,10 +147,10 @@ pm_early_transform_tensor_graph = PatternMatcher([
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="cont").f(Ops.COPY, name="copy"), lambda x,cont,copy:
-   copy.replace(src=(x,), tag=None) if cont.is_self_copy and on_disk(x) else None),
-  # push copy past movement ops to disk
+   copy.replace(src=(x,)) if cont.is_self_copy and on_disk(x) else None),
+  # push copy past movement ops from disk, keeping the output's storage tag on the moved view
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
-   x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) if on_disk(x) else None),
+   x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:], tag=copy.tag) if on_disk(x) else None),
 
   # strip DETACH/CONTIGUOUS_BACKWARD before minting (tags carry over)
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"),
@@ -158,7 +158,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # contiguous of an already-materialized value is a no-op (tags carry over for held values)
   (UPat(Ops.COPY, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if c.is_self_copy and a.src[0].has_buffer_identity() else None),
-  # mint buffers for tagged values; an untagged CONTIGUOUS flows through to the scheduler, which bufferizes it
+  # mint buffers for tagged values; an untagged COPY flows through to the scheduler, which lowers it to AFTER+STORE
   (UPat(GroupOp.All-{Ops.AFTER, Ops.STORE}, name="x"), mint_tagged_storage),
 ])
 
@@ -443,7 +443,7 @@ class Tensor(RandMixin):
       return self
     assigned_to = self.uop.storage_base
     # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead.
-    # a pending CONTIGUOUS counts only if it's the whole target: writes through views of it store into its storage
+    # a pending self-copy counts only if it's the whole target: writes through views of it store into its storage
     if not assigned_to.has_buffer_identity() and (not assigned_to.is_self_copy or self.uop is assigned_to):
       self.uop = (x.uop.src[0] if x.uop.is_self_copy else x.uop).clone()
       return self

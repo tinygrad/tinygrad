@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, dtypes, Variable
 from tinygrad.helpers import Context, GlobalCounters, getenv, DEBUG
-from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops, UOp
+from tinygrad.uop.ops import UOp
 
 class TestDoubleMatmul(unittest.TestCase):
   def test_double_matmul(self):
@@ -77,59 +77,6 @@ def fa():
   with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
   GlobalCounters.reset()
   return q.scaled_dot_product_attention(k, v)
-
-# contiguous + reduce can support ranges?
-
-@unittest.skip("pm_rangeify no longer exists. test this in a different way")
-class TestRangeifyPM(unittest.TestCase):
-  def setUp(self): self.base = Tensor.empty(10*10).reshape(10, 10).contiguous()
-  def assert_same(self, a, b):
-    def run_pm_rangeify(t:Tensor):
-      from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext
-      sink = t.uop.sink()
-      pm_realize = PatternMatcher([(UPat(Ops.COPY, name="x"), lambda x: x.replace(op=Ops.REALIZE))])
-      sink = graph_rewrite(sink, pm_realize)
-      return graph_rewrite(sink, pm_rangeify, ctx=RangeifyContext())
-    self.assertIs(run_pm_rangeify(a.contiguous()), run_pm_rangeify(b.contiguous()))
-
-  def test_nothing_match(self):
-    a = self.base.pad(((0,0),(0,1)))
-    b = self.base.pad(((0,0),(0,1)))
-    self.assert_same(a, b)
-
-  def test_reshape_match(self):
-    a = self.base
-    b = self.base.reshape(100).reshape(10, 10)
-    self.assert_same(a, b)
-
-  def test_permute_reshape_match(self):
-    a = self.base
-    b = self.base.permute(1,0).reshape(100).reshape(10, 10).permute(1,0)
-    self.assert_same(a, b)
-
-  def test_padded_permute_match(self):
-    a = self.base.pad(((0,0),(0,1)))
-    b = self.base.permute(1,0).pad(((0,1),(0,0))).permute(1,0)
-    self.assert_same(a, b)
-
-  @unittest.expectedFailure
-  def test_padded_reshape_match(self):
-    a = self.base.pad(((0,0),(0,1)))
-    b = self.base.reshape(100).reshape(10, 10).pad(((0,0),(0,1)))
-    self.assert_same(a, b)
-
-  @unittest.expectedFailure
-  def test_padded_permute_reshape_match(self):
-    a = self.base.pad(((0,0),(0,1)))
-    b = self.base.permute(1,0).reshape(100).reshape(10, 10).pad(((0,1),(0,0))).permute(1,0)
-    self.assert_same(a, b)
-
-  # why is this failing?
-  @unittest.expectedFailure
-  def test_cross_pad_match(self):
-    a = self.base.pad(((0,0),(0,1))).pad(((0,1),(0,0)))
-    b = self.base.pad(((0,1),(0,0))).pad(((0,0),(0,1)))
-    self.assert_same(a, b)
 
 if __name__ == '__main__':
   unittest.main()

@@ -61,6 +61,14 @@ class TestTensorGradient(unittest.TestCase):
     self.assertEqual(t.grad.device, t.device)
     self.assertListEqual(t.grad.tolist(), [2.0, 4.0, 6.0])
 
+  def test_contiguous_copy_gradient(self):
+    t = Tensor([[1.0, 2.0], [3.0, 4.0]], device="CPU").realize()
+    copied = t.transpose().to("CPU:1").contiguous()
+    grad = copied.square().sum().gradient(t)[0]
+    self.assertEqual(grad.device, t.device)
+    self.assertListEqual(copied.tolist(), [[1.0, 3.0], [2.0, 4.0]])
+    self.assertListEqual(grad.tolist(), [[2.0, 4.0], [6.0, 8.0]])
+
   def test_multiple_backward(self):
     x = Tensor([3.])
     (x*2)[0].backward()

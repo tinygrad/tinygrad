@@ -62,7 +62,7 @@ class ElementwiseMixin(CreationMixin):
     """
     if self.dtype in dtypes.weaks: return self
     uop = self._uop
-    if uop.is_self_copy or self.device is None or uop.has_buffer_identity(): return self._wrap_uop(uop)
+    if uop.op is Ops.COPY or self.device is None or uop.has_buffer_identity(): return self._wrap_uop(uop)
     return self._wrap_uop(uop.copy_to_device(uop.device))
 
   def contiguous_backward(self) -> Self:

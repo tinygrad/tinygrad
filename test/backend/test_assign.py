@@ -590,8 +590,8 @@ class TestAssign(unittest.TestCase):
     for i in range(N):
       shared = (x @ W[i]).contiguous()  # .contiguous() UOp is shared between assign (k) and next layer (q)
       k, q = shared[:, :D], shared[:, D:]
-      caches[i][0:1].assign(k)          # assign references the CONTIGUOUS
-      x = q + caches[i][:1]             # next layer also references the same CONTIGUOUS through q
+      caches[i][0:1].assign(k)          # assign references the self-copy
+      x = q + caches[i][:1]             # next layer also references the same self-copy through q
     GlobalCounters.reset()
     caches[-1][:1].contiguous().realize()
     # N matmuls + N assigns + 1 final read = 2*N+1 (AFTER embedding allows full graph scheduling with shared contiguous reuse)
@@ -1009,14 +1009,14 @@ class TestAssignToUnrealizedView(unittest.TestCase):
 
   def test_contiguous(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
-    c = t.permute(1,0).contiguous()  # unrealized CONTIGUOUS
+    c = t.permute(1,0).contiguous()  # unrealized self-copy
     self.assertIs(c.uop.base.op, Ops.COPY)
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(c.tolist(), [[1,1],[2,1]])
 
   def test_contiguous_partial_assign_realize(self):
     x = Tensor([1., 2.]).realize()
-    y = (x + 1).contiguous()  # unrealized CONTIGUOUS
+    y = (x + 1).contiguous()  # unrealized self-copy
     self.assertIs(y.uop.base.op, Ops.COPY)
     # a partial write survives an explicit realize: the values are right, storage is an implementation detail
     y[:1].assign(9.)
@@ -1056,7 +1056,7 @@ class TestAssignToUnrealizedView(unittest.TestCase):
 
   def test_detach_contiguous(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
-    d = t.permute(1,0).contiguous().detach()  # DETACH(unrealized CONTIGUOUS)
+    d = t.permute(1,0).contiguous().detach()  # DETACH(unrealized self-copy)
     self.assertIs(d.uop.base.op, Ops.COPY)
     d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(d.tolist(), [[1,1],[2,1]])

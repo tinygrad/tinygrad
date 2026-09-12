@@ -49,7 +49,7 @@ pm_generate_realize_map = PatternMatcher([
   (UPat(Ops.STORE, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
-  # sometimes we need to realize the src of STORE if there's a self-access, or if it's a cross device store
+  # sometimes we need to realize the src of STORE if there's a self-access
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
 ])
 
