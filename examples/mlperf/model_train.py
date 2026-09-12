@@ -1576,12 +1576,6 @@ def train_llama3():
         data_time += mst - ist
         batch_tokens.append(tokens)
       if stopped: break
-      if mxfp4_weights is not None:
-        from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
-        fresh = quantize_mxfp4(model.wqkv[0], shuffle_row=True, shuffle_col=True)
-        cache_diff = Tensor.stack(*[(cached != expected).float().sum()
-                                    for cached, expected in zip(mxfp4_weights["wqkv"][0], fresh)]).sum()
-        print(f"MXFP4 cache mismatch before step: {cache_diff.item():.0f}")
       mst = time.perf_counter()
       minibatches(batch_tokens)
       dev_time += time.perf_counter() - mst
