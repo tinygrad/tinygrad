@@ -443,12 +443,7 @@ class TestCustomKernel(unittest.TestCase):
     out = Tensor.custom_kernel(out, cpu_src.to(out.device), fxn=custom_source)[0]
     cp = out.to("CPU").realize()
     self.assertEqual(out.tolist(), [3])
-    from tinygrad.runtime.support.hcq2 import HCQ_DEVS
-    if Device.DEFAULT in HCQ_DEVS:
-      with self.assertRaises(AssertionError):
-        self.assertEqual(cp.tolist(), [3])
-    else:
-      self.assertEqual(cp.tolist(), [3])
+    self.assertEqual(cp.tolist(), [3])
 
   def test_sliced_buffer_function(self):
     x = Tensor.arange(32).reshape(8, 4).clone().realize()
