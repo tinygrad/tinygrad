@@ -96,15 +96,12 @@ class TestHCQ2Schedule(unittest.TestCase):
   def test_jit_has_no_rt_buffers(self):
     dev = Device[Device.DEFAULT]
     rings = [dev.rt_buffer(True, host) for host in (False, True)]
-    ranges = [(b._buf, b._buf + b.nbytes) for b in rings]
     for n in (1, 65):
       with self.subTest(kernels=n):
         x, f = self.input(), TinyJit(lambda a: chain(a, n).realize())
         for _ in range(2): f(x)
         for u in f.captured.linear.toposort():
-          if u.op is Ops.BUFFER and (buf:=u.buffer).device == dev.device:
-            addr = buf._buf
-            self.assertFalse(any(addr < end and start < addr + buf.nbytes for start, end in ranges))
+          if u.op is Ops.BUFFER and (buf:=u.buffer).device == dev.device: self.assertFalse(any(buf.base is r for r in rings))
 
   def test_small_eager_cached(self):
     _, compiled, inputs = self.compiled(1)
@@ -175,6 +172,7 @@ class TestHCQ2Schedule(unittest.TestCase):
       vi = Variable("i", 1, 10).bind(i)
       np.testing.assert_allclose(f(a[:, :vi]).item(), (a[:, :i] + 1).sum().item(), atol=1e-5, rtol=1e-5)
 
+  @unittest.skipIf(Device.DEFAULT == "METAL", "Metal copies through the host")
   def test_map_cpu_buffer_preserves_contents(self):
     src = Buffer("CPU", 16, dtypes.uint8, preallocate=True)
     data = bytes(range(16))
@@ -231,7 +229,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
     dev = Device[Device.DEFAULT]
     names = {"AMD": () if getattr(dev, "is_aql", False) else ("scratch",), # the aql descriptor holds the scratch, nothing addresses it
-             "NV": ("timeline",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
+             "NV": ("timeline",), "QCOM": ("_stack", "dummy"), "METAL": ()}[Device.DEFAULT.split(":")[0]]
     @TinyJit
     def f(a): return (a * 2 + 1).contiguous().realize()
     x = Tensor.ones(16).contiguous().realize()

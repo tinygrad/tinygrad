@@ -1723,3 +1723,8 @@ MTLResourceStorageModeShift = 4
 MTLResourceStorageModeMask = (0xf << MTLResourceStorageModeShift)
 MTLResourceHazardTrackingModeShift = 8
 MTLResourceHazardTrackingModeMask = (0x3 << MTLResourceHazardTrackingModeShift)
+MTLSharedEvent._methods_ = [
+  ('signaledValue', uint64_t, []),
+  ('setSignaledValue:', None, [uint64_t]),
+  ('waitUntilSignaledValue:timeoutMS:', BOOL, [uint64_t, uint64_t]),
+]
