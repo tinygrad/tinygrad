@@ -154,8 +154,9 @@ def is_physical_allreduce_copy(copy:UOp) -> bool:
           (x.op is Ops.AFTER and x.src[0].op is Ops.SHRINK and x.src[0].tag == ("allreduce",)))
 
 def copy_to_anon_store(x:UOp, copy:UOp):
-  # Physical allreduce slices retain their runtime views for split_copy_slice below.
-  if is_physical_allreduce_copy(copy): return None
+  # A local physical slice is already readable in place. Cross-device physical slices retain their runtime views for
+  # split_copy_slice below; materializing either case would create an unnecessary per-chunk staging buffer.
+  if is_physical_allreduce_copy(copy): return x if copy.is_self_copy else None
   if copy.is_self_copy and (x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY): return x
   if not copy.is_self_copy: x = x.pad_to(x.max_shape)
   buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
