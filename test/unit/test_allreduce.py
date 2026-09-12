@@ -79,6 +79,12 @@ class TestRingAllReduce(unittest.TestCase):
     self.assertEqual(call.src[1:3], tuple(outputs))
     self.assertIs(call.src[-1], view)
 
+  def test_eager_physical_view_store_keeps_caller_storage(self):
+    buf = Tensor.zeros(16, device="CPU").realize()
+    view = Tensor(_allreduce_view(buf.uop.buf_uop, 4, 8))
+    view.assign(Tensor.full((4,), 3, dtype=dtypes.float, device="CPU")).realize()
+    self.assertEqual(buf.numpy().tolist(), [0]*4 + [3]*4 + [0]*8)
+
   def test_classify_linear_allreduce_output_with_direct_write(self):
     devices = ("NULL", "NULL:1")
     out = UOp.param(5, dtypes.float, (8,), device=devices)

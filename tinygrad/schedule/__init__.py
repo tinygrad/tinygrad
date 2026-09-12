@@ -114,7 +114,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
     if any(in_degree.values()): raise RuntimeError("cycle detected in assign graph")
   return UOp(Ops.LINEAR, src=tuple(linearized))
 
-from tinygrad.schedule.memory import memory_plan_rewrite
+from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.engine.realize import capturing, pm_flatten_linear
 from tinygrad.schedule.prepare import prepare_rangeify
 from tinygrad.schedule.rangeify import get_kernel_graph
@@ -328,5 +328,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
     capturing[0].add_linear(linear, var_vals)
     return UOp(Ops.LINEAR, src=()), var_vals
 
-  held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
+  # Caller arguments own their storage even when passed through a physical view. Planning only direct BUFFER arguments
+  # redirects eager writes through SHRINK(BUFFER) into a temporary arena; JIT happened to mask this by holding live tensors.
+  held_bufs = ({b for x in linear_call.src[1:] for b in _collect_bufs(x)} if linear_call.op is Ops.CALL else set())
   return memory_plan_rewrite(linear, held_bufs), var_vals
