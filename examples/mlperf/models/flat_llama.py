@@ -511,6 +511,10 @@ def _get_pads(uop:UOp) -> list[UOp]:
 def apply_grad(grad_buf:Tensor, new_grad:UOp, accumulate:bool=True):
   pads = _get_pads(new_grad)
   if not accumulate:
+    covered = sum(math.prod(p.src[0].shape) for p in pads if p.op is Ops.PAD)
+    if any(p.op is Ops.PAD for p in pads) and (covered != grad_buf.numel() or any(p.op is not Ops.PAD for p in pads)):
+      print(f"incomplete packed gradient: shape={grad_buf.shape} terms={len(pads)} covered={covered}/{grad_buf.numel()} "
+            f"ops={[p.op for p in pads]}")
     new_grad = new_grad.cast(grad_buf.dtype)
     grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(new_grad))
     return
