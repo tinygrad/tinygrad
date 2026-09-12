@@ -155,16 +155,15 @@ class BatchCtx:
   profile:bool
   tracker:HCQDepsTracker = field(default_factory=HCQDepsTracker)
   queues:dict[str, list[str]] = field(init=False)
-  first:dict[tuple[str, str], int] = field(init=False); last:dict[tuple[str, str], int] = field(init=False) # noqa: E702
+  last:dict[tuple[str, str], int] = field(init=False)
   prev:list[int|None] = field(init=False)
   signal_tags:set[int] = field(init=False)
   slots:dict[str, UOp] = field(init=False)
 
   def __post_init__(self):
-    self.queues, self.first, self.last, self.prev = {}, {}, {}, []
+    self.queues, self.last, self.prev = {}, {}, []
     for tag, (_, devs, q) in enumerate(self.batch):
       if q not in self.queues.setdefault(devs[0], []): self.queues[devs[0]].append(q)
-      self.first.setdefault((devs[0], q), tag)
       self.prev.append(self.last.get((devs[0], q)))
       self.last[(devs[0], q)] = tag
     self.signal_tags = {tag for (dev, q), tag in self.last.items() if q != self.epilogue_queue(dev)}
@@ -191,54 +190,59 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   ctx.signal_tags |= set(latest.values())
   return [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64))) for (d, q), t in latest.items()]
 
-def _merge_queues(submits:list[UOp]) -> list[UOp]:
-  # grouped by queues. can be sent in any order, sync convers that
-  return [make_submit(*[c for s in submits if s.src[0].arg == k for c in s.src[0].src], devs=k[0], queue=k[1])
-          for k in dedup([s.src[0].arg for s in submits])]
+def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
+  # find all waits first to mark calls that must signal
+  call_waits = [_wait_ins(ctx, c, d[0], q, tag) for tag, (c, d, q) in enumerate(ctx.batch)]
+  queues:dict[tuple[tuple[str, ...], str], list[UOp]] = {}
+  for tag, ((call, devices, queue), waits) in enumerate(zip(ctx.batch, call_waits)):
+    # first use of a queue: wait for prior device work
+    if not (q:=queues.setdefault((devices, queue), [])):
+      q += [UOp(Ops.INS, arg=("barrier", dtypes.void), src=()),
+            UOp(Ops.INS, arg=("wait", dtypes.void), src=(timeline(devices), timeline_value(devices)))]
 
-def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], list[tuple]]:
-  # one submit per call: timeline sync on first queue use, timestamps, the call, and a signal if someone waits on it
-  src, kerns = [], []
-  for tag, ((call, devices, queue), q) in enumerate(zip(ctx.batch, call_waits)):
-    # first queue use, sync prior device work with the device timeline
-    if ctx.first[(devices[0], queue)] == tag:
-      q = [UOp(Ops.INS, arg=("barrier", dtypes.void), src=()),
-           UOp(Ops.INS, arg=("wait", dtypes.void), src=(timeline(devices), timeline_value(devices)))] + q
-
-    # and make hcq call
-    name, est = get_call_name(call, get_call_arg_uops(call)), estimate_uop(call)
-    kerns.append((devices, name, est, tuple(2 * s + 1 for s in ctx.stamps(devices, tag)), getattr(call.src[0].arg, "profile_key", None)))
-
+    # dependency waits, then the call between its timestamps
     ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slot(devices, i),)) for i in ctx.stamps(devices, tag)]
-    q += ts_ins[:1] + [call] + ts_ins[1:]
+    q += waits + ts_ins[:1] + [call] + ts_ins[1:]
 
     # signal the queue if someone waits for us
     if tag in ctx.signal_tags:
       q += [UOp(Ops.INS, arg=("store", dtypes.void), src=(ctx.queue_signal(devices, queue), UOp.const(tag + 1, dtypes.uint64)))]
-    src.append(make_submit(*q, devs=devices, queue=queue))
-  return src, kerns
 
-def _epilogue(ctx:BatchCtx, dev:str) -> UOp:
-  # one queue signals the timeline once the last call of every other queue signaled
-  waits = [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((dev,), q), UOp.const(ctx.last[(dev, q)] + 1, dtypes.uint64)))
-           for q in ctx.queues[dev] if q != ctx.epilogue_queue(dev)]
-  bump = UOp(Ops.INS, arg=("store", dtypes.void), src=(timeline((dev,)), timeline_value((dev,)) + UOp.const(1, dtypes.uint64)))
-  return make_submit(*waits, bump, devs=dev, queue=ctx.epilogue_queue(dev))
+  # one queue advances the device timeline after all other queues finish
+  for dev in ctx.queues:
+    queue = ctx.epilogue_queue(dev)
+    waits = [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((dev,), q), UOp.const(ctx.last[(dev, q)] + 1, dtypes.uint64)))
+             for q in ctx.queues[dev] if q != queue]
+    bump = UOp(Ops.INS, arg=("store", dtypes.void), src=(timeline((dev,)), timeline_value((dev,)) + UOp.const(1, dtypes.uint64)))
+
+    # multiple copy queues may need a new compute stream
+    queues.setdefault(((dev,), queue), []).extend([*waits, bump])
+  return queues
 
 def _finalize_batch(ctx:BatchCtx) -> UOp:
-  call_waits = [_wait_ins(ctx, c, d[0], q, tag) for tag, (c, d, q) in enumerate(ctx.batch)]
-  submits, kerns = _emit_submits(ctx, call_waits)
-  submits += [_epilogue(ctx, dev) for dev in ctx.queues]
-  fence = UOp.custom_function("hcq_fence", *[ctx.sched_timeline((dev,)) for dev in ctx.queues],
-                              *[ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs])
-  merged:list[UOp] = [] # the submits in order, after the fence
-  for m in _merge_queues(submits): merged.append(m.after(fence, *merged[-1:]))
-  sink = UOp.sink(*merged, arg=KernelInfo("hcq_submit"), tag=1)
+  queues = _build_queues(ctx)
+
+  # re-arm the batch signals before submitting queues in first-use order
+  submits:list[UOp] = []
+  timelines = [ctx.sched_timeline((dev,)) for dev in ctx.queues]
+  signals = [ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs]
+  fence = UOp.custom_function("hcq_fence", *timelines, *signals)
+  for (devs, queue), cmds in queues.items(): submits.append(make_submit(*cmds, devs=devs, queue=queue).after(fence, *submits[-1:]))
+  sink = UOp.sink(*submits, arg=KernelInfo("hcq_submit"), tag=1)
   for pm in [Device[d].pm_batch for d in ctx.queues if Device[d].pm_batch is not None]: # a device adds its own work to the batch
     if (r:=pm.rewrite(sink)) is not None: sink = r
-  info = HCQInfo(tuple(ctx.queues), kernels=tuple(kerns), written_bufs=tuple(dedup(b for c, _, _ in ctx.batch for b in get_call_written_bufs(c))),
-    estimates=sum((estimate_uop(call) for call, _, _ in ctx.batch), start=Estimates()).simplify(),
-    host_deps=tuple(dedup((h, d[0]) for c, d, _ in ctx.batch for b in get_call_arg_uops(c) for h in to_tuple(b.device) if h not in ctx.queues)))
+
+  # per call metadata
+  names = [get_call_name(c, get_call_arg_uops(c)) for c, _, _ in ctx.batch]
+  estimates = [estimate_uop(c) for c, _, _ in ctx.batch]
+  stamps = [tuple(2 * s + 1 for s in ctx.stamps(d, tag)) for tag, (_, d, _) in enumerate(ctx.batch)]
+  profile_keys = [getattr(c.src[0].arg, "profile_key", None) for c, _, _ in ctx.batch]
+  kerns:tuple[tuple, ...] = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys))
+  written_bufs = tuple(dedup(b for c, _, _ in ctx.batch for b in get_call_written_bufs(c)))
+  host_deps = tuple(dedup((host, devs[0]) for call, devs, _ in ctx.batch for buf in get_call_arg_uops(call)
+                         for host in to_tuple(buf.device) if host not in ctx.queues))
+  info = HCQInfo(tuple(ctx.queues), kernels=kerns, written_bufs=written_bufs,
+                 estimates=sum(estimates, start=Estimates()).simplify(), host_deps=host_deps)
   return sink.call(*(ctx.slots.values() if ctx.profile else ()), aux=info)
 
 @rewrite_group(new_ctx=False)
