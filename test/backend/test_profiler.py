@@ -1,6 +1,6 @@
-import unittest, struct, contextlib, statistics, gc
+import unittest, struct, contextlib, statistics
 from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup, flatten, ansistrip
+from tinygrad.helpers import DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, flatten, ansistrip
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from extra.hcq1.hcq import HCQCompiled
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS
@@ -211,37 +211,6 @@ class TestProfiler(unittest.TestCase):
 
     range_events = [p for p in profile if isinstance(p, ProfileRangeEvent) and p.device == dev]
     self.assertEqual(len(range_events), 2)
-
-  @unittest.skip("this test is flaky")
-  @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
-  def test_graph(self):
-    from test.backend.test_graph import helper_alloc_rawbuffer, helper_exec_op, helper_test_graphs
-    device = TestProfiler.d0.device
-    bufs = [helper_alloc_rawbuffer(device, fill=True) for _ in range(5)]
-    graphs = [[helper_exec_op(device, bufs[0], [bufs[1], bufs[2]]), helper_exec_op(device, bufs[0], [bufs[3], bufs[4]]),]]
-    with helper_collect_profile(dev:=TestProfiler.d0) as profile:
-      helper_test_graphs(dev.graph, graphs, runs:=2)
-      # NOTE: explicitly trigger deletion of all graphs
-      graphs.clear()
-      gc.collect()
-    graphs = [e for e in profile if isinstance(e, ProfileGraphEvent)]
-    self.assertEqual(len(graphs), runs)
-    for ge in graphs:
-      self.assertEqual(len(ge.ents), len(graphs))
-
-  @unittest.skip("this test is flaky")
-  def test_trace_metadata(self):
-    with Context(TRACEMETA=1):
-      a = Tensor.empty(1)+2
-      b = Tensor.empty(1)+2
-      with helper_collect_profile(TestProfiler.d0) as profile:
-        Tensor.realize(a, b)
-    profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
-    exec_points = [e for e in profile if isinstance(e, ProfilePointEvent) and e.name == "exec"]
-    range_events = [e for e in profile if isinstance(e, ProfileRangeEvent) and _dev_base(e.device) == e.device]
-    self.assertEqual(len(exec_points), len(range_events), 2)
-    self.assertEqual(len(dedup(e.arg['name'] for e in exec_points)), 1)
-    self.assertEqual(len(dedup(e.arg['metadata'] for e in exec_points)), 1)
 
 if __name__ == "__main__":
   unittest.main()
