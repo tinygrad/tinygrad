@@ -73,8 +73,7 @@ def layout_args(args:Sequence[UOp|int], offset:int=0) -> list[tuple[int, UOp]]:
 def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
   words, end = [], 0
   for offset, arg in sorted(args, key=lambda x: x[0]):
-    if offset != end: words.append(UOp(Ops.BINARY, arg=bytes(offset - end)))
-    words.append(arg)
+    words += [UOp(Ops.BINARY, arg=bytes(offset - end)), arg] if offset != end else [arg]
     end = offset + arg.dtype.itemsize
   return words + [UOp(Ops.BINARY, arg=bytes(size - end))]
 

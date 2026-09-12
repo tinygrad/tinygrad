@@ -98,8 +98,7 @@ class QCOMComputeQueue(HWQueue):
     if data.NIR:
       args += layout_args([b.getaddr(self.devs) for b in ubos] + vals, data.buf_off)
       if data.wgsz != 0xfc: args += layout_args(list(prg.arg.local_size), data.wgsz * 4)
-    else:
-      args += list(zip(data.buf_offs, [b.getaddr(self.devs) for b in ubos] + vals))
+    else: args += list(zip(data.buf_offs, [b.getaddr(self.devs) for b in ubos] + vals))
 
     def _tex(b, ibo=False):
       imgdt, shape, buf = b
