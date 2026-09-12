@@ -653,7 +653,7 @@ class NVDevice(Compiled):
     fifo = GPFifo(ring=self.gpfifo_buf.view(entries, dtypes.uint64, offset).ensure_allocated(),
       gpput=self.gpfifo_buf.view(1, dtypes.uint32, gpput_off).ensure_allocated(),
       doorbell=Buffer("CPU", 1, dtypes.uint32, options=BufferSpec(external_ptr=self.gpu_mmio.addr + 0x90), preallocate=True),
-      put_value=Buffer("CPU", 1, dtypes.uint64, preallocate=True), notifier=notifier, entries=entries, token=ws_token_params.workSubmitToken)
+      put_value=Buffer("CPU", 1, dtypes.uint64, initial_value=bytes(8)), notifier=notifier, entries=entries, token=ws_token_params.workSubmitToken)
     self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, tag=to_name(n, name)), lambda ctx, b=getattr(fifo, n): b)
                                         for n in ("ring", "gpput", "doorbell", "put_value")]) + self.pm_bufferize
     return fifo
