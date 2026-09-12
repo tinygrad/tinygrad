@@ -1194,6 +1194,12 @@ class TestOps(unittest.TestCase):
     np.testing.assert_allclose(rfwd.numpy(), [m0, m0 @ m1, m0 @ m1 @ m2])
     np.testing.assert_allclose(rrev.numpy(), [m0 @ m1 @ m2, m1 @ m2, m2])
 
+    # edge cases (0-D scalar, empty tensor, single element, negative axis)
+    assert Tensor(5.0).associative_scan(lambda a, b: a + b).item() == 5.0
+    assert Tensor([]).associative_scan(lambda a, b: a + b).shape == (0,)
+    assert Tensor([42.0]).associative_scan(lambda a, b: a + b).numpy().tolist() == [42.0]
+    np.testing.assert_allclose(x2d.associative_scan(lambda a, b: a + b, axis=-1).numpy(), [[1.0, 3.0, 6.0, 10.0], [5.0, 11.0, 18.0, 26.0]])
+
   def test_small_cumprod(self):
     helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
   @slow_test

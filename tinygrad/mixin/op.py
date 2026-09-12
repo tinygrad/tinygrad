@@ -777,16 +777,17 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.associative_scan(lambda a, b: a + b).numpy())
     ```
     """
+    if self.ndim == 0 or 0 in self.shape: return self
     axis = self._resolve_dim(axis)
     x = self.flip(axis) if reverse else self
     n, offset = x.shape[axis], 1
+    idx = type(self).arange(n).reshape(*[n if d == axis else 1 for d in range(x.ndim)])
     while offset < n:
       p = tuple((offset, 0) if d == axis else (0, 0) for d in range(x.ndim))
       s = tuple((0, sz) if d == axis else (0, sz) for d, sz in enumerate(x.shape))
       shifted = x.pad(p).shrink(s)
       comb = fn(x, shifted) if reverse else fn(shifted, x)
-      m = type(self).arange(n).reshape(*[n if d == axis else 1 for d in range(x.ndim)]) >= offset
-      x = m.where(comb, x)
+      x = (idx >= offset).where(comb, x)
       offset <<= 1
     return x.flip(axis) if reverse else x
 
