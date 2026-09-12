@@ -1473,9 +1473,6 @@ def train_llama3():
   mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
   if mxfp4_weights is not None:
     Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
-  if "fa" in model._fp8_grad_amax:
-    for state_name, state in (("fa", model._fp8_grad_amax["fa"]), ("next_fa", model._fp8_next_grad_amax["fa"])):
-      for i, tensor in enumerate(state): print(f"{state_name}[{i}] {tensor.uop!r}")
 
   def minibatch_impl(tokens:Tensor, accumulate:bool):
     model.reset_amax()
