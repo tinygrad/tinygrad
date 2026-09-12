@@ -2,10 +2,9 @@
 # This is for RDNA3, but if you don't have one you can run with the emulator
 # PYTHONPATH="." DEV=MOCKPCI+AMD
 
-from dataclasses import replace
 from tinygrad import Tensor, Context, GlobalCounters, UOp, Device
 from tinygrad.helpers import DEV, DEBUG, getenv
-from tinygrad.uop.ops import AxisType, KernelInfo, ProgramInfo, Ops
+from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 
@@ -68,8 +67,7 @@ def example_2_hip(a:Tensor, correct):
     # the sink specifies the GLOBAL and LOCAL sizes, along with the input buffers and name
     sink = UOp.sink(UOp.special(GLOBALS, 'gidx0'), UOp.special(THREADS, 'lidx0'), out, buf,
                     arg=KernelInfo(name="hip_reduce_sum_kernel"))
-    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-               arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1), outs=(0,), ins=(1,)))
+    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
   eval_harness("HIP kernel", a, lambda x: Tensor.empty(GLOBALS).custom_kernel(x, fxn=hip_reduce_sum)[0].sum(), check=correct)
 
 def example_3_custom_uop(a:Tensor, correct):
@@ -124,8 +122,7 @@ def example_5_custom_assembly(a:Tensor, correct):
         offset_dwords = (self.labels[inst._target] - inst._pos - inst.size()) // 4
         if not -32768 <= offset_dwords <= 32767: raise ValueError(f"branch to '{inst._target}' offset {offset_dwords} exceeds simm16 range")
         inst.simm16 = offset_dwords
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in self.instructions]))),
-                 arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1), outs=(0,), ins=(0, 1)))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in self.instructions]))))
 
   CU_COUNT = 32
   LANES = 64

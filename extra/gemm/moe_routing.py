@@ -1,8 +1,7 @@
 import functools, math, pathlib
-from dataclasses import replace
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 
@@ -21,8 +20,7 @@ def _router_mfma_fwd(out:UOp, x:UOp, weight:UOp, bias:UOp, *, dname:str) -> UOp:
   src = (amd/"moe_router_mfma.cpp").read_text()
   lib = HIPCCCompiler("gfx950", [f"-I{(amd/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS",
                                  f"-DROUTER_M={M}", f"-DROUTER_K={K}", f"-DROUTER_E={E}"]).compile_cached(src)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3), outs=(0,), ins=(1, 2, 3)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def _router_mfma_bwd(gradient:UOp, kernel:UOp) -> tuple:
   _, x_u, weight_u, bias_u = kernel.src[1:5]

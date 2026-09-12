@@ -1,10 +1,9 @@
 # kernel8_batched_gmem.s from https://seb-v.github.io/optimization/update/2025/01/20/Fast-GPU-Matrix-multiplication.html
 # sudo PATH=/opt/homebrew/Cellar/llvm/20.1.6/bin:$PATH AMD_LLVM=0 AMD=1 DEBUG=2 python3 extra/gemm/amd_matmul.py
 import pathlib
-from dataclasses import replace
 from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.helpers import getenv
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import run_linear
 
@@ -19,8 +18,7 @@ def make_matmul_kernel(name:str, src:str, local_size:int):
     sink = UOp.sink(a.base, b.base, c.base, threads, wg_x, wg_y, arg=KernelInfo(name, estimates=Estimates(ops=2*N**3, mem=3*N*N*4)))
     lib = Device[Device.DEFAULT].compiler.compile_cached(src)
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                                 UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
-               arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2), outs=(2,), ins=(0, 1, 2)))
+                                 UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
   return fxn
 
 if __name__ == "__main__":

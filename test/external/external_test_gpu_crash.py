@@ -5,10 +5,9 @@ These tests intentionally cause GPU faults to verify error handling.
 Run with: DEV=AMD python -m pytest test/external/external_test_gpu_crash.py -v
 """
 import unittest, re, importlib
-from dataclasses import replace
 from tinygrad import Device, UOp, dtypes
 from tinygrad.engine.realize import run_linear
-from tinygrad.uop.ops import Ops, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import Ops, KernelInfo
 from tinygrad.renderer.amd.dsl import s, v, Inst, NULL
 
 RDNA3_CDNA3_MAP = {"v_mov_b32_e32": "v_mov_b32_e32", "s_mov_b32": "s_mov_b32", "s_waitcnt": "s_waitcnt", "s_endpgm": "s_endpgm",
@@ -38,8 +37,7 @@ class TestGPUCrash(unittest.TestCase):
   def _run_insts(self, insts: list[Inst]):
     buf = UOp.new_buffer("AMD", 64, dtypes.uint8)
     sink = UOp.sink(UOp.param(0, dtypes.uint8, 64, device="AMD"), UOp.special(1, "lidx0"), arg=KernelInfo("test"))
-    prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(i, dtypes.void)) for i in insts))),
-              arg=replace(ProgramInfo.from_sink(sink), globals=(0,), outs=(0,), ins=()))
+    prg = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(i, dtypes.void)) for i in insts))))
     run_linear(UOp(Ops.LINEAR, src=(prg.call(buf),)), wait=True)
 
   def _assert_gpu_fault(self, func):

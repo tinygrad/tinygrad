@@ -1,8 +1,7 @@
 # RDNA4 128x128 GEMM using WMMA — optimized DS scheduling
 import numpy as np
-from dataclasses import replace
 from tinygrad import Tensor, Device, Context, GlobalCounters
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv, colored
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.engine.realize import Estimates, run_linear
@@ -224,8 +223,7 @@ def test_matmul():
     lds = UOp.placeholder((lds_size,), dtypes.uint8, 0, AddrSpace.LOCAL)
     sink = UOp.sink(A.base, B.base, C.base, lds, *gidxs, *lidxs,
                     arg=KernelInfo(name=colored("kernel","cyan"), estimates=Estimates(ops=N*N*N*2, mem=N*N*2*3)))
-    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))),
-               arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2), outs=(2,), ins=(0, 1)))
+    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
 
   c = Tensor.custom_kernel(a, b, c, fxn=asm_kernel)[2]
   linear = c.schedule_linear()

@@ -1,8 +1,7 @@
 from __future__ import annotations
 import functools, pathlib
-from dataclasses import replace
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import THREADS_PER_WG, alloc_like, dname_of, compile_hip
 
@@ -20,8 +19,7 @@ def _custom_transpose_quantize_mxfp8(q:UOp, e8:UOp, g:UOp, dname:str) -> UOp:
   src = (pathlib.Path(__file__).parent/"transpose_quantize_mxfp8.cpp").read_text()
   defines = [f"-DM_DIM={M}", f"-DN_DIM={N}", f"-DTHREADS_PER_WG={THREADS_PER_WG}"]
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2), outs=(0, 1), ins=(2,)))
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
 
 def transpose_quantize_mxfp8(g:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   # fused g.T quantize: returns (q, e8, si) == quantize_mxfp8(g.T) — q (N,M) fp8, e8 (N, M/32), si packed (M/128, N)

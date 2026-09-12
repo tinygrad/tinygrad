@@ -1,6 +1,6 @@
 import unittest
 import decimal, sys, json, contextlib, tempfile, pickle, io, math, pathlib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Generator
 
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, rewrite_group
@@ -498,15 +498,13 @@ class TestVizIntegration(unittest.TestCase):
     bin_render = get_render(viz.data, steps[bin_idx]["query"])["src"]
     self.assertIn(type(e.exception).__name__, bin_render)
 
-  # precompiled programs skip codegen call
-  @unittest.expectedFailure
   def test_view_source_alt(self):
     src = "void E_3(float* data0_3) {}"
     binary = Device["CPU"].renderer.compiler.compile(src)
     def custom_binary(X:UOp):
       sink = UOp.sink(X, arg=KernelInfo("custom_binary"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)),
-                 arg=replace(ProgramInfo.from_sink(sink), globals=(0,), outs=(0,), ins=()))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=sink.src+(sink,)), UOp(Ops.SOURCE, arg=src),
+                                   UOp(Ops.BINARY, arg=binary)))
     x = Tensor.custom_kernel(Tensor.empty(1, device="CPU"), fxn=custom_binary)[0]
     with save_viz() as viz:
       x.realize()
@@ -830,7 +828,7 @@ class TestVizMemoryLayout(unittest.TestCase):
     users = profile["layout"][f"{a.device} Memory"]["events"].pop()["arg"]["users"]
     self.assertEqual(len(programs), len(set(users)), n)
 
-from tinygrad.uop.ops import KernelInfo, ProgramInfo
+from tinygrad.uop.ops import KernelInfo
 from tinygrad.renderer.amd.dsl import s
 from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbranch_execz, s_cbranch_scc0, s_cbranch_scc1, s_cmp_eq_i32,
                                                     s_cmp_eq_u64, s_code_end, s_endpgm, s_mov_b32, s_nop)
@@ -844,8 +842,7 @@ class TestCfg(unittest.TestCase):
       lidx = UOp.special(1, "lidx0")
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))),
-                 arg=replace(ProgramInfo.from_sink(sink), globals=(0,), outs=(0,), ins=()))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
     with save_viz() as viz:
       with Context(DEV="NULL::gfx1100"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]

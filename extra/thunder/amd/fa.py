@@ -1,5 +1,4 @@
 import math, pathlib, functools, struct
-from dataclasses import replace
 
 from tinygrad import Device, Tensor
 from tinygrad.dtype import DTypeLike, dtypes
@@ -7,7 +6,7 @@ from tinygrad.helpers import DEBUG, getenv
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None=None) -> Tensor:
   dtype = dtype or ref.dtype
@@ -62,8 +61,7 @@ def custom_fused_qkv_rope_backward(dxqkv:UOp, dq:UOp, dk:UOp, dv:UOp, freqs_cis:
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
                   f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DTHREADS_PER_BLOCK={threads}"]
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4), outs=(0,), ins=(1, 2, 3, 4)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
 def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp]|None:
   def unwrap_partial(x:UOp) -> UOp|None:
@@ -222,7 +220,6 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None
   sink = UOp.sink(*buf_inputs,
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="custom_fa_forward", estimates=estimates))
-  prog_info = replace(ProgramInfo.from_sink(sink), globals=tuple(range(len(buf_inputs))), outs=(0, 1), ins=tuple(range(2, len(buf_inputs))))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
   if not getenv("NO_HIPCC"):
@@ -232,8 +229,7 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None
     lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
-             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-             arg=prog_info)
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
 def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
@@ -255,7 +251,6 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
   sink = UOp.sink(delta_vec.base, dq.base, o.base, do.base,
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="custom_fa_backward_pre", estimates=estimates))
-  prog_info = replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3), outs=(0, 1), ins=(2, 3))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
   if not getenv("NO_HIPCC"):
@@ -265,8 +260,7 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
     lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
-             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-             arg=prog_info)
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
 def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_vec:UOp, delta_vec:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int, window:int=0):
@@ -290,7 +284,6 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
   sink = UOp.sink(dq.base, dk.base, dv.base, do.base, q.base, k.base, v.base, l_vec.base, delta_vec.base,
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="custom_fa_backward", estimates=estimates))
-  prog_info = replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5, 6, 7, 8), outs=(0, 1, 2), ins=(0, 3, 4, 5, 6, 7, 8))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
   if not getenv("NO_HIPCC"):
@@ -300,8 +293,7 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
     lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
-             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-             arg=prog_info)
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
 def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
@@ -323,7 +315,6 @@ def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str, B:int, 
   sink = UOp.sink(dq_out.base, dq_in.base,
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="custom_fa_backward_post", estimates=estimates))
-  prog_info = replace(ProgramInfo.from_sink(sink), globals=(0, 1), outs=(0,), ins=(1,))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
   if not getenv("NO_HIPCC"):
@@ -333,5 +324,4 @@ def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str, B:int, 
     lib = bytes(lib)
 
   return UOp(Ops.PROGRAM,
-             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)),
-             arg=prog_info)
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))

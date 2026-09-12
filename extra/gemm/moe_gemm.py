@@ -1,7 +1,6 @@
 import functools, pathlib
-from dataclasses import replace
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.helpers import getenv
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
@@ -46,8 +45,7 @@ def custom_hk_grouped_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, 
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
                                  f"-DGEMM_E={E}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5, 6, 7), outs=(0,), ins=(1, 2, 3, 4, 5, 6, 7)))
+                               UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
 def custom_hk_grouped_mxfp8_wgrad(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, expert_off:UOp, *, dname:str, n_experts:int) -> UOp:
@@ -66,8 +64,7 @@ def custom_hk_grouped_mxfp8_wgrad(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp,
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DWGRAD_M={M}", f"-DWGRAD_N={N}", f"-DWGRAD_K={K}",
                                  f"-DWGRAD_E={E}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5), outs=(0,), ins=(1, 2, 3, 4, 5)))
+                               UOp(Ops.BINARY, arg=lib)))
 
 def grouped_mx_wgrad(g:Tensor, xg:Tensor, expert_off:Tensor, n_experts:int) -> Tensor:
   from extra.llama_kernels.transpose_quantize_mxfp8 import transpose_quantize_mxfp8

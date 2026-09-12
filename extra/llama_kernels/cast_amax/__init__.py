@@ -1,8 +1,7 @@
 from __future__ import annotations
 import functools, pathlib
-from dataclasses import replace
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import NUM_WG, THREADS_PER_WG, compile_cpp, alloc_like, dname_of
 
@@ -23,8 +22,7 @@ def _custom_fused_bwd_w13(grad_xw13_fp8:UOp, grad_amax_next:UOp, grad_amax:UOp,
                   arg=KernelInfo(f"fused_silu_mul_bwd_w13_{n_elems}", estimates=Estimates(ops=10*n_elems, mem=mem)))
   src, lib = compile_cpp(pathlib.Path(__file__).parent, "cast_amax_bwd_w13.cpp", n_elems, hidden)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3, 4, 5, 6), outs=(0, 1, 2), ins=(1, 3, 4, 5, 6)))
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
 def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_out:UOp, xw13:UOp, amax_state:UOp, grad_amax_state:UOp,
@@ -38,8 +36,7 @@ def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_out:UOp, xw13:UOp, amax_state:
                   arg=KernelInfo(f"fused_silu_mul_cast_amax_w13_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=mem)))
   src, lib = compile_cpp(pathlib.Path(__file__).parent, "cast_amax_fwd_w13.cpp", n_elems, hidden)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)),
-             arg=replace(ProgramInfo.from_sink(sink), globals=(0, 1, 2, 3), outs=(0, 1), ins=(1, 2, 3)))
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   _, _, xw13, amax_state, grad_amax_state, next_grad_amax_state = kernel.src[1:]
