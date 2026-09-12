@@ -70,6 +70,15 @@ class TestRingAllReduce(unittest.TestCase):
     self.assertTrue(any(x.op is Ops.PARAM and x.shape == (4,) for x in call.toposort()))
     self.assertIn(view, call.src[1:])
 
+  def test_callify_physical_view_keeps_graph_argument_order(self):
+    outputs = [Tensor.zeros(8).realize().uop for _ in range(2)]
+    buf = Tensor.zeros(16).realize().uop
+    view = _allreduce_view(buf, 4, 8)
+    sink = UOp.sink(*(x.after(x.store(x.const_like(i))) for i,x in enumerate(outputs)), view + 1)
+    call, _ = transform_to_call(sink)
+    self.assertEqual(call.src[1:3], tuple(outputs))
+    self.assertIs(call.src[-1], view)
+
   def test_classify_linear_allreduce_output_with_direct_write(self):
     devices = ("NULL", "NULL:1")
     out = UOp.param(5, dtypes.float, (8,), device=devices)

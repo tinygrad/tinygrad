@@ -26,6 +26,7 @@ class AllocCtx:
   replacements: list[UOp] = field(default_factory=list)
   unbound: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
+  physical_views: dict[UOp, UOp] = field(default_factory=dict)
 
 # a tag is the tuple of original pre-rewrite UOps a node provides storage for
 def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
@@ -228,9 +229,11 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
   return b.param_like(len(ctx.replacements)-1)
 
 def replace_realized_allreduce_view(ctx:AllocCtx, b:UOp):
-  # The call body receives an ordinary PARAM, but the runtime argument must retain the physical-view tag: its SHRINK
-  # operands are (offset, size), not the ordinary (start, end). Dropping the tag corrupts every nonzero packed offset.
-  return replace_input_buffer(ctx, b)
+  # Shield the physical view from the bottom-up buffer replacement. The placeholder is numbered in ordinary graph
+  # order below, while the runtime argument retains the tagged SHRINK (whose operands are physical offset and size).
+  placeholder = b.param_like(-1_000_000-len(ctx.physical_views))
+  ctx.physical_views[placeholder] = b
+  return placeholder
 
 # unbound BUFFERs get canonical scope-local id slots here so structurally identical calls hash identically for the
 # schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
@@ -248,6 +251,8 @@ pm_canonicalize_unbound = PatternMatcher([
 ])
 
 pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
+  # Number shielded physical views alongside ordinary buffers so CALL arguments retain graph order.
+  (UPat(Ops.PARAM, name="p"), lambda ctx,p: replace_input_buffer(ctx, ctx.physical_views[p]) if p in ctx.physical_views else None),
   # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay, and unbound BUFFERs too)
   (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
    replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL and not b.is_unbound else None),
