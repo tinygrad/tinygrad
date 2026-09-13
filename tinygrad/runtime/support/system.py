@@ -87,8 +87,7 @@ class _System:
 
   @functools.cache
   def list_devices(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
-    if getenv("REMOTE", ""):
-      return [(functools.partial(RemotePCIDevice, sock=s), x) for s, x in RemotePCIDevice.remote_list(vendor, devices, base_class)]
+    if getenv("REMOTE", ""): return [(functools.partial(RemotePCIDevice, sock=s), x) for s, x in RemotePCIDevice.scan(vendor, devices, base_class)]
     return [(PCIDevice, x) for x in System.pci_scan_bus(vendor, devices, base_class)]
 
   def pci_probe_device(self, device:str, dev_id:int, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
@@ -355,7 +354,7 @@ class RemotePCIDevice(PCIDevice):
     return sock
 
   @staticmethod
-  def remote_list(vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None) -> list[tuple[socket.socket, str]]:
+  def scan(vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None) -> list[tuple[socket.socket, str]]:
     payload, ret = array.array('I', itertools.chain.from_iterable((m, d) for m, ds in devices for d in ds)).tobytes(), []
     for r in [r.strip() for r in getenv("REMOTE", "").split(",") if r.strip()]:
       host, port = r.split(":")[0], int(r.split(":")[1]) if ":" in r else 6667
