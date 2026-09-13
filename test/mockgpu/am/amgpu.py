@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 from __future__ import annotations
 import ctypes, struct, functools, os, mmap
-from tinygrad.runtime.autogen.am import am
+from tinygrad.runtime.autogen.am import am, smu_14_0_2
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.amd import AMDReg, import_asic_regs
 from test.mockgpu.amd.amdgpu import AMDGPU
@@ -144,7 +144,10 @@ class MockSMU(MockIPBlock):
 
   def write(self, reg:int, val:int):
     super().write(reg, val)
-    if reg == self._c2pmsg_66 or reg == self._c2pmsg_75: self._msg_pending = True
+    if reg == self._c2pmsg_66 or reg == self._c2pmsg_75:
+      self._msg_pending = True
+      if val == smu_14_0_2.PPSMC_MSG_GetDpmFreqByIndex:
+        self.mmio.regs[self._c2pmsg_82] = 2 if self.mmio.regs.get(self._c2pmsg_82, 0) & 0xffff == 0xff else 1000
     if (reg == self._c2pmsg_90 or reg == self._c2pmsg_54) and val == 0: self._msg_pending = False
 
 class MockSDMA(MockIPBlock):

@@ -98,9 +98,9 @@ class TestProfiler(unittest.TestCase):
       buf1.as_memoryview()
 
     profile = filter_ranges(profile)
-    evs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, "PYTHON"))]
+    evs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, "PYTHON", "CPU:COPY"))]
 
-    assert len(evs) == (4 if Device.DEFAULT in HCQ_DEVS else 3), "unexpected number of kernel and copy events"
+    assert len(evs) == (5 if Device.DEFAULT in HCQ_DEVS else 3), "unexpected number of kernel and copy events"
     # NOTE: order of events does not matter, the tool is responsible for sorting them
     prg_events = [e for e in evs if e.device == TestProfiler.d0.device]
     assert any(ansistrip(e.name) == runner_name for e in prg_events), "kernel name is not correct"
