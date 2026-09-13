@@ -4,6 +4,18 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import alloc_like, compile_hip
 
+def alloc_mxfp4_outputs(x:Tensor, *, flatten_row:bool=False) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+  M, N = math.prod(x.shape[:-1]), x.shape[-1]
+  axis = x.uop.axis if isinstance(x.device, tuple) else None
+  row_axis = 0 if flatten_row and axis is not None else axis
+  col_axis = None if axis is None else (0 if axis == x.ndim-1 else 1)
+  row_shape = (M, N//2) if flatten_row else (*x.shape[:-1], N//2)
+  scale_shape = (M, N//32) if flatten_row else (*x.shape[:-1], N//32)
+  return (alloc_like(row_shape, dtypes.uint8, x.device, row_axis),
+          alloc_like(scale_shape, dtypes.uint8, x.device, row_axis),
+          alloc_like((N, M//2), dtypes.uint8, x.device, col_axis),
+          alloc_like((N, M//32), dtypes.uint8, x.device, col_axis))
+
 @functools.cache
 def _custom_quantize_mxfp4(row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UOp, x:UOp, *, shuffle_row:bool, shuffle_col:bool) -> UOp:
   M, N = math.prod(x.shape[:-1]), x.shape[-1]
@@ -26,12 +38,6 @@ def quantize_mxfp4(x:Tensor, *, shuffle_row:bool=False, shuffle_col:bool=False, 
   assert x.dtype == dtypes.bfloat16 and x.ndim >= 2, f"expected BF16 matrix, got {x.dtype} {x.shape}"
   M, N = math.prod(x.shape[:-1]), x.shape[-1]
   assert M % 256 == 0 and N % 256 == 0, f"MXFP4 quantization requires multiples of 256, got {x.shape}"
-  axis = x.uop.axis if isinstance(x.device, tuple) else None
-  row_axis = 0 if flatten_row and axis is not None else axis
-  col_axis = None if axis is None else (0 if axis == x.ndim-1 else 1)
-  outputs = (alloc_like((M, N//2) if flatten_row else (*x.shape[:-1], N//2), dtypes.uint8, x.device, row_axis),
-             alloc_like((M, N//32) if flatten_row else (*x.shape[:-1], N//32), dtypes.uint8, x.device, row_axis),
-             alloc_like((N, M//2), dtypes.uint8, x.device, col_axis),
-             alloc_like((N, M//32), dtypes.uint8, x.device, col_axis)) if out is None else out
+  outputs = alloc_mxfp4_outputs(x, flatten_row=flatten_row) if out is None else out
   fxn = functools.partial(_custom_quantize_mxfp4, shuffle_row=shuffle_row, shuffle_col=shuffle_col)
   return tuple(Tensor.custom_kernel(*outputs, x, fxn=fxn)[:4])

@@ -5,7 +5,7 @@ from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
 from extra.llama_kernels import local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
-from extra.llama_kernels.swiglu import swiglu
+from extra.llama_kernels.swiglu import swiglu, swiglu_mxfp4
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.thunder.amd.fa import custom_fused_qkv_rope_backward, fused_qkv_rope
 from test.helpers import needs_second_gpu, assert_kernel_count
@@ -186,6 +186,32 @@ class TestSwiGLU(unittest.TestCase):
     if Device.DEFAULT != "AMD" or not Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950"):
       self.skipTest("only run on real machine for speed")
     run_swiglu(self, (2, 8192, 28672))
+
+  def test_mxfp4(self):
+    if Device.DEFAULT != "AMD" or not Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950"):
+      self.skipTest("MXFP4 SwiGLU requires gfx950")
+    from extra.gemm.cdna_asm_gemm import asm_gemm
+    from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
+    Tensor.manual_seed(0)
+    x_fused = (Tensor.randn(1, 256, 1024) * 2).cast(dtypes.bfloat16).realize()
+    x_ref = x_fused.detach().contiguous().realize()
+    w_fused = Tensor.randn(512, 512).cast(dtypes.bfloat16).realize()
+    w_ref = w_fused.detach().contiguous().realize()
+    x_fused.requires_grad = x_ref.requires_grad = w_fused.requires_grad = w_ref.requires_grad = True
+    proxy, x_mxfp4 = swiglu_mxfp4(x_fused)
+    w_mxfp4 = quantize_mxfp4(w_fused, shuffle_row=True, shuffle_col=True)
+    out = asm_gemm(proxy, w_fused.T, mxfp4=True, mxfp4_x=x_mxfp4, mxfp4_w=w_mxfp4)
+    ref = asm_gemm(swiglu(x_ref), w_ref.T, mxfp4=True)
+    Tensor.realize(out, ref)
+    with Context(DEBUG=0): self.assertTrue(out.allclose(ref, atol=2.5e-1, rtol=3e-2).item(), "SwiGLU MXFP4 GEMM mismatch")
+
+    grad = (Tensor.randn(*out.shape) * 2).cast(dtypes.bfloat16).realize()
+    grad_x, grad_w = out.gradient(x_fused, w_fused, gradient=grad)
+    grad_x_ref, grad_w_ref = ref.gradient(x_ref, w_ref, gradient=grad)
+    Tensor.realize(grad_x, grad_w, grad_x_ref, grad_w_ref)
+    with Context(DEBUG=0):
+      self.assertTrue(grad_x.allclose(grad_x_ref, atol=2.5e-1, rtol=3e-2).item(), "SwiGLU MXFP4 input gradient mismatch")
+      self.assertTrue(grad_w.allclose(grad_w_ref, atol=2.5e-1, rtol=3e-2).item(), "SwiGLU MXFP4 weight gradient mismatch")
 
 if __name__ == '__main__':
   unittest.main()
