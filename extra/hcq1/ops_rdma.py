@@ -6,7 +6,7 @@ from extra.hcq1.hcq import HCQCompiled, HCQAllocatorBase, HCQAllocator, HWQueue,
 from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace
-from tinygrad.runtime.support.mlx.mlxdev import MLXDev, MLXQP
+from extra.mlx_driver.mlxdev import MLXDev, MLXQP
 from tinygrad.helpers import unwrap, to_be32, to_be64
 
 class RDMACopyQueue(HWQueue):
