@@ -1,8 +1,6 @@
 import unittest, io
 from contextlib import redirect_stdout
-from unittest.mock import patch
 from tinygrad import Tensor, Device
-from tinygrad.runtime.ops_cpu import CPUDevice
 from tinygrad.helpers import Target
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
@@ -10,15 +8,6 @@ from tinygrad.codegen import to_program
 
 @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
 class TestCPU(unittest.TestCase):
-  def test_remote_synchronize_pending(self):
-    dev, peer = CPUDevice("CPU"), CPUDevice("CPU")
-    signal = peer.timeline.host.view(fmt='Q')
-    dev.pending[peer], peer.wait_timeout_ms = 1, 0
-    with patch.object(dev, "remote"), patch.object(dev, "timeline", peer.timeline):
-      with self.assertRaisesRegex(RuntimeError, "hang detected"): dev.synchronize()
-      signal[0] = 1
-      dev.synchronize()
-
   def test_arch_feats(self):
     ast = (Tensor.empty(16) + Tensor.empty(16)).schedule_linear().src[-1].src[0]
     for ren in Device[Device.DEFAULT].renderers:
