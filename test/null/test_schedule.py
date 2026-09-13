@@ -1897,6 +1897,15 @@ class TestUOpBecome(unittest.TestCase):
     assert b.uop.base is a.uop.base
 
 class TestFusionOp(unittest.TestCase):
+  def test_conv_backward_gradient_norm_fusion(self):
+    weights = [Tensor.empty(c, ic, 4, 4) for ic, c in ((1, 16), (16, 32), (32, 64))]
+    for weight in weights: weight.requires_grad = True
+    hidden = Tensor.empty(256, 1, 13, 13)
+    for weight in weights: hidden = hidden.conv2d(weight, stride=2, padding=1).relu()
+    hidden.sum().backward()
+    gradient_norm = sum((weight.grad * weight.grad).sum() for weight in weights).sqrt()
+    check_schedule(gradient_norm, 10)
+
   def test_recursive_add(self):
     st = time.perf_counter()
     a = Tensor([1,2,3,4])
