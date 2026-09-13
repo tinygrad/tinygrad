@@ -64,7 +64,7 @@ class TestProfiler(unittest.TestCase):
     run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(TestProfiler.b.uop, TestProfiler.a.uop),)))
 
   def test_profile_kernel_run(self, wait=False):
-    runner_name = ansistrip(TestProfiler.prg.arg.name)
+    runner_name = ansistrip(TestProfiler.prg.src[0].arg.name)
     with helper_collect_profile(TestProfiler.d0) as profile:
       run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(TestProfiler.b.uop, TestProfiler.a.uop),)), wait=wait)
 
@@ -89,7 +89,7 @@ class TestProfiler(unittest.TestCase):
     self.assertEqual(len(kernel_runs), 2 if Device.DEFAULT in HCQ_DEVS else 1)
 
   def test_profile_multiops(self):
-    runner_name = ansistrip(TestProfiler.prg.arg.name)
+    runner_name = ansistrip(TestProfiler.prg.src[0].arg.name)
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0) as profile:

@@ -320,7 +320,10 @@ class GPTOSS:
                         w_down=self.w_down[i], w_down_scale=self.w_down_scale[i], w_down_bias=self.w_down_bias[i])
       h, *_ = self.run_layer(h, freqs_cis, mask_full, i % 2 == 0, attn_kwargs, ffn_kwargs, save=save)
 
-    h_normed = self.norm(h)
+    if getenv("FAST_FINAL_RMSNORM", 0):
+      from extra.gptoss_kernels.rmsnorm import gptoss_final_rmsnorm
+      h_normed = gptoss_final_rmsnorm(h, self.norm.weight, self.norm_eps)
+    else: h_normed = self.norm(h)
 
     if getenv("FP8_LMHEAD", 0) and ASM_GEMM:
       pad = (-self.dim) % 256
