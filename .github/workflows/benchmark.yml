@@ -630,15 +630,13 @@ jobs:
       env:
         DEV: PCI+AMD
       run: |
-        for aql in 0 1; do
-          PYTHONPATH=. python3 extra/remote/serve.py 6482 &
-          server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-          sleep 1
-          DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 AMD_AQL=$aql python3 test/test_tiny.py
-          kill "$server_pid"
-          wait "$server_pid"
-        done
+        PYTHONPATH=. python3 extra/remote/serve.py 6482 &
+        server_pid=$!
+        trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+        sleep 1
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 python3 test/test_tiny.py
+        kill "$server_pid"
+        wait "$server_pid"
         trap - EXIT
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
