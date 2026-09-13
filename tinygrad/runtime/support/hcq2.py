@@ -271,11 +271,9 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
 
   srcs:list[UOp] = []
   for hcq, grp in itertools.groupby(zip(l.src, devs, queues), key=lambda e: bool(e[1])):
-    if not hcq: srcs += [c for c, _, _ in grp]
-    else: # each node runs its own submission program
-      nodes:dict[str, list] = {}
-      for e in grp: nodes.setdefault(Device[e[1][0]].peer_group, []).append(e)
-      srcs += [_finalize_batch(BatchCtx(batch, profile)) for batch in nodes.values()]
+    nodes:dict[str, list] = {}
+    for e in grp: nodes.setdefault(Device[e[1][0]].peer_group if hcq else "", []).append(e)
+    for batch in nodes.values(): srcs += [_finalize_batch(BatchCtx(batch, profile))] if hcq else [c for c, _, _ in batch]
   return l.replace(src=tuple(srcs))
 
 # *****************
