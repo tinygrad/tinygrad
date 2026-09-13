@@ -209,6 +209,7 @@ class UOpMetaClass(type):
 
 # some uops map to other stuff
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
+buffer_views:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary()
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 class recursive_property(property):
@@ -255,7 +256,18 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def is_invalid(self) -> bool: return self.op is Ops.CONST and self.val is Invalid
   @recursive_property
   def key(self) -> bytes:
-    return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
+    # Program metadata can contain symbolic UOps. Hash those structurally: repr would recursively render their full
+    # graphs, which is both quadratic and deep enough to overflow on large HCQ submission programs.
+    def skey(x): return x.key if isinstance(x, UOp) else x
+    if isinstance(self.arg, ProgramInfo):
+      arg = (self.arg.name, tuple(map(skey, self.arg.global_size)), tuple(map(skey, self.arg.local_size)),
+             tuple(x.key for x in self.arg.vars), self.arg.globals, self.arg.outs, self.arg.ins, self.arg.target)
+    elif isinstance(self.arg, KernelInfo):
+      est = None if self.arg.estimates is None else tuple(skey(x) for x in
+        (self.arg.estimates.ops, self.arg.estimates.lds, self.arg.estimates.mem))
+      arg = (self.arg.name, self.arg.applied_opts, self.arg.opts_to_apply, est, self.arg.beam)
+    else: arg = self.arg
+    return hashlib.sha256(str((self.op, self.dtype, arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self):
     from tinygrad.uop.render import pretty_print
     return pretty_print(self)
@@ -413,6 +425,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
           return tuple(ssimplify(sz) for _,sz in self.marg)
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
+          # All-reduce views address the underlying allocation as a flat physical buffer. This preserves the
+          # semantics of the former SLICE op when a FUNCTION parameter is rebound to a differently shaped view.
+          if self.tag == ("allreduce",) and len(self.marg) == 1:
+            o,sz = self.marg[0]
+            if not (resolve(0<=o) and resolve(sz>=0) and resolve(o+sz<=prod(ps))):
+              raise ValueError(f"invalid allreduce shrink {self.marg} for {ps}")
+            return (ssimplify(sz),)
           if len(ps) != len(self.marg) or not all(resolve(0<=o) and resolve(sz>=0) and resolve(o+sz<=s) for s,(o,sz) in zip(ps, self.marg)):
             raise ValueError(f"invalid shrink {self.marg} for {ps}")
           return tuple(ssimplify(sz) for _,sz in self.marg)
@@ -688,7 +707,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def axis(self) -> int|None:
     # COPY removes axis, except a self COPY (contiguous) which keeps the sharding of its source
-    if self.op is Ops.COPY: return self.src[0].axis if self.is_self_copy else None
+    if self.op is Ops.COPY: return self.src[0].axis if self.is_self_copy and self.tag != ("replicate",) else None
     if self.op is Ops.UNSHARD:
       if len(self.arg) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {self.arg}, use .sharding")
       return self.arg[0]
@@ -885,12 +904,18 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, src=tuple(x.buf_uop for x in self.src))
+    # A hardware buffer view is part of the call argument: dropping it here loses its byte offset.
+    if self.op is Ops.SHRINK and self.tag == ("allreduce",) and self.src[0].op is not Ops.INDEX: return self
     if self.base.op is Ops.AFTER: return self.base.src[0].buf_uop.base
     s = self
-    while len(s.src) and s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK}: s = s.src[0]
+    while len(s.src) and (s.op not in {Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.MSTACK} and
+                          not (s.op is Ops.SHRINK and s.tag == ("allreduce",) and s.src[0].op is not Ops.INDEX)): s = s.src[0]
     return s
 
-  def contiguous_view(self) -> tuple[UOp, int]|None:
+  def contiguous_view(self) -> tuple[UOp, int]|None: return self._contiguous_view
+
+  @functools.cached_property
+  def _contiguous_view(self) -> tuple[UOp, int]|None:
     from tinygrad.schedule.prepare import pm_mops
     from tinygrad.uop.symbolic import symbolic
 
@@ -900,6 +925,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # reasonable values for CL_DEVICE_MEM_BASE_ADDR_ALIGN. cl_ext_buffer_device_address could potentially help, but this extension is not provided
     # by relevant CL runtimes at time of writing.
     if (dev:=self.device) is not None and any(d.startswith(("WEBGPU", "CL")) for d in ((dev,) if isinstance(dev, str) else dev)): return None
+
+    # An all-reduce SHRINK is a flat physical allocation view, so its offset composes directly with its parent's
+    # contiguous view even when the parent's logical rank differs after FUNCTION argument substitution.
+    if self.op is Ops.SHRINK and self.tag == ("allreduce",) and self.src[1].op is Ops.CONST and self.src[2].op is Ops.CONST:
+      if (parent:=self.src[0].contiguous_view()) is None: return None
+      byte_offset = self.src[1].val * self.src[0].dtype.itemsize
+      assert byte_offset % parent[0].dtype.itemsize == 0, "all-reduce view offset must align to the base dtype"
+      return parent[0], parent[1] + byte_offset // parent[0].dtype.itemsize
 
     idx = self.flatten().index(UOp.range(self.numel(), 0))
     out = graph_rewrite(idx, pm_mops+symbolic+pm_contiguous_view_offset, ctx=self, name="contiguous_view_offset")
@@ -913,7 +946,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
-    return self.op in {Ops.BUFFER, Ops.PARAM} and not self.is_unbound
+    return (self.op in {Ops.BUFFER, Ops.PARAM} and not self.is_unbound) or (self.op is Ops.SHRINK and self.tag == ("allreduce",))
   @property
   def is_unbound(self) -> bool:
     # an unbound GLOBAL BUFFER has no storage bound yet: it's a declaration of storage (call output, scheduler temp)
@@ -929,15 +962,18 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def buffer(self) -> Buffer|MultiBuffer:
     if self.op in {Ops.COPY, Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops.
-    # NOTE: the view Buffer returned here is transient (short-lived), it only wraps an offset into the base BUFFER's storage
+    # NOTE: the view Buffer returned here is transient (short-lived), it only wraps an offset into the base BUFFER's storag
+    # TODO: caching buffer views halves the python time in llama
     if self is not self.base or self.op is Ops.BITCAST:
+      if (ret:=buffer_views.get(self)) is not None: return ret
       if (cv := self.contiguous_view()) is None: raise RuntimeError(f"non-contiguous view is not supported for {self.device} buffer")
       buf, offset = (b:=cv[0]).base.buffer, cv[1]
       if isinstance(buf, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
         mbuf.bufs = [x.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize) for x in buf.bufs]
-        return mbuf
-      return buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
+        buffer_views[self] = mbuf
+      else: buffer_views[self] = buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
+      return buffer_views[self]
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)

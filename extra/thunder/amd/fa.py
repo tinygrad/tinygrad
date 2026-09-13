@@ -1,7 +1,7 @@
 import math, pathlib, functools, struct
 
 from tinygrad import Device, Tensor
-from tinygrad.dtype import DTypeLike, dtypes
+from tinygrad.dtype import AddrSpace, DTypeLike, dtypes
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
@@ -17,8 +17,10 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None
   return Tensor(Tensor.invalids(*shape, dtype=dtype, device=ref.device).uop.unshard(axis), dtype=dtype, device=ref.device)
 
 @functools.cache
-def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
-                                  device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
+def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, *args:UOp, device:str, arch:str,
+                                  B:int, N:int, H:int, H_KV:int, D:int, write_fp8:bool=False, write_bf16_qk:bool=True):
+  if write_fp8: q_fp8, k_fp8, xqkv, freqs_cis = args
+  else: xqkv, freqs_cis = args
   group_size = H // H_KV
   q, k, v = q.reshape(B, N, H, D), k.reshape(B, N, H_KV, D), v.reshape(B, N, H_KV, D)
   xqkv = xqkv.reshape(B, N, H_KV, group_size + 2, D)
@@ -28,6 +30,9 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
   c = freqs_cis[0, n, 0, pair, 0].cast(dtypes.float)
   s = freqs_cis[0, n, 0, pair, 1].cast(dtypes.float)
   ordered:UOp|None = None
+  # The kernel evaluates exp2, so bake sqrt(1/sqrt(D) * log2(e)) into
+  # each operand and avoid scaling every FP32 score element after MFMA.
+  fp8_attn_scale = (D ** -0.5 * 1.44269504089) ** 0.5
   for kvh in range(H_KV):
     q_out, k_out, v_out = (x.after(ordered) if ordered is not None else x for x in (q, k, v))
     x_in = xqkv.after(ordered) if ordered is not None else xqkv
@@ -36,20 +41,30 @@ def custom_fused_qkv_rope_forward(q:UOp, k:UOp, v:UOp, xqkv:UOp, freqs_cis:UOp,
       a = x_in[b, n, kvh, rep, even].cast(dtypes.float)
       bb = x_in[b, n, kvh, rep, even + 1].cast(dtypes.float)
       h = kvh * group_size + rep
-      stores += [q_out[b, n, h, even].store((a * c - bb * s).cast(q.dtype)), q_out[b, n, h, even + 1].store((a * s + bb * c).cast(q.dtype))]
+      q0, q1 = a * c - bb * s, a * s + bb * c
+      if write_bf16_qk:
+        stores += [q_out[b, n, h, even].store(q0.cast(q.dtype)), q_out[b, n, h, even + 1].store(q1.cast(q.dtype))]
+      if write_fp8:
+        q0s, q1s = ((x * fp8_attn_scale).maximum(-448.0).minimum(448.0) for x in (q0, q1))
+        stores += [q_fp8[b, n, h, even].store(q0s.cast(q_fp8.dtype)), q_fp8[b, n, h, even + 1].store(q1s.cast(q_fp8.dtype))]
     a = x_in[b, n, kvh, group_size, even].cast(dtypes.float)
     bb = x_in[b, n, kvh, group_size, even + 1].cast(dtypes.float)
-    stores += [k_out[b, n, kvh, even].store((a * c - bb * s).cast(k.dtype)),
-               k_out[b, n, kvh, even + 1].store((a * s + bb * c).cast(k.dtype)),
-               v_out[b, n, kvh, even].store(x_in[b, n, kvh, group_size + 1, even]),
+    k0, k1 = a * c - bb * s, a * s + bb * c
+    if write_bf16_qk:
+      stores += [k_out[b, n, kvh, even].store(k0.cast(k.dtype)), k_out[b, n, kvh, even + 1].store(k1.cast(k.dtype))]
+    stores += [v_out[b, n, kvh, even].store(x_in[b, n, kvh, group_size + 1, even]),
                v_out[b, n, kvh, even + 1].store(x_in[b, n, kvh, group_size + 1, even + 1])]
+    if write_fp8:
+      k0s, k1s = ((x * fp8_attn_scale).maximum(-448.0).minimum(448.0) for x in (k0, k1))
+      stores += [k_fp8[b, n, kvh, even].store(k0s.cast(k_fp8.dtype)), k_fp8[b, n, kvh, even + 1].store(k1s.cast(k_fp8.dtype))]
     ordered = UOp.group(*stores)
   assert ordered is not None
   return ordered.end(pair, n, b).sink(arg=KernelInfo(name="fused_qkv_rope_forward"))
 
 @functools.cache
 def custom_fused_qkv_rope_backward(dxqkv:UOp, dq:UOp, dk:UOp, dv:UOp, freqs_cis:UOp,
-                                   device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
+                                   device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int,
+                                   expanded_fa_grads:bool=False, packed_fp8_dq:bool=False):
   assert (B, N, H, H_KV, D) == (2, 8192, 32, 8, 128)
   code = (pathlib.Path(__file__).parent / "fused_qkv_rope_bwd.cpp").read_text()
   threads = 256
@@ -58,13 +73,42 @@ def custom_fused_qkv_rope_backward(dxqkv:UOp, dq:UOp, dk:UOp, dv:UOp, freqs_cis:
   block_idx_x, block_idx_y, block_idx_z = (UOp.special(x, f"gidx{i}") for i, x in enumerate(gsz))
   sink = UOp.sink(dxqkv.base, dq.base, dk.base, dv.base, freqs_cis.base, thread_idx, block_idx_x, block_idx_y, block_idx_z,
                   arg=KernelInfo(name="fused_qkv_rope_backward"))
-  compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math", f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
+  compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4",
+                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math"] + (["-DEXPANDED_FA_GRADS"] if expanded_fa_grads else []) + [
+                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
                   f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DTHREADS_PER_BLOCK={threads}"]
+  if packed_fp8_dq: compile_args.append("-DPACKED_FP8_DQ")
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
 
-def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp]|None:
+@functools.cache
+def custom_fused_qkv_rope_backward_mxfp4(dxqkv:UOp, row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UOp,
+                                         dq:UOp, dk:UOp, dv:UOp, freqs_cis:UOp,
+                                         device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int,
+                                         expanded_fa_grads:bool=False, packed_fp8_dq:bool=False):
+  assert (B, N, H, H_KV, D) == (2, 8192, 32, 8, 128)
+  code = (pathlib.Path(__file__).parent / "fused_qkv_rope_bwd.cpp").read_text()
+  threads = 256
+  thread_idx = UOp.special(threads, "lidx0")
+  gsz = (B, N // 64, H + 2 * H_KV)
+  block_idx_x, block_idx_y, block_idx_z = (UOp.special(x, f"gidx{i}") for i, x in enumerate(gsz))
+  sink = UOp.sink(dxqkv.base, row_fp4.base, row_scale.base, col_fp4.base, col_scale.base,
+                  dq.base, dk.base, dv.base, freqs_cis.base, thread_idx, block_idx_x, block_idx_y, block_idx_z,
+                  arg=KernelInfo(name="fused_qkv_rope_backward_mxfp4"))
+  include = pathlib.Path(__file__).parent / "include"
+  quant_include = pathlib.Path(__file__).parents[2] / "llama_kernels" / "quantize_mxfp4"
+  compile_args = [f"-I{include}", f"-I{quant_include}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS",
+                  "-DWRITE_MXFP4", "-ffast-math"] + (["-DEXPANDED_FA_GRADS"] if expanded_fa_grads else []) + [
+                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}",
+                  f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DTHREADS_PER_BLOCK={threads}"]
+  if packed_fp8_dq: compile_args.append("-DPACKED_FP8_DQ")
+  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+
+def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp, bool, bool]|None:
   def unwrap_partial(x:UOp) -> UOp|None:
+    # V's flat FA argument adds shape-only views when its gradient returns to RoPE.
+    while x.op is Ops.RESHAPE: x = x.src[0]
     expected = (Ops.CAST, Ops.REDUCE, Ops.PERMUTE, Ops.CAST, Ops.RESHAPE, Ops.AFTER)
     for op in expected:
       if x.op is not op: return None
@@ -75,12 +119,22 @@ def _fa_native_grads(dq:UOp, dk:UOp, dv:UOp) -> tuple[UOp, UOp, UOp]|None:
   B, N, H, D, H_KV = dq.shape[0], dq.shape[1], dq.shape[2], dq.shape[3], dk.shape[2]
   heads_per_wg = 2 if D == 128 and (H // H_KV) % 2 == 0 else 1
   partials = (H // H_KV) // heads_per_wg
-  if dq_native.shape != (B, H, N, D) or dk_partial.shape != (B * partials, N, H_KV, D) or dv_partial.shape != dk_partial.shape: return None
-  return dq_native, dk_partial, dv_partial
+  if dq_native.shape == (B, H, N, D) and dk_partial.shape == (B * partials, N, H_KV, D) and dv_partial.shape == dk_partial.shape:
+    return dq_native, dk_partial, dv_partial, False, False
+  if dq_native.shape == (B, N, H, D) and dk_partial.shape == (B, N, H, D) and dv_partial.shape == dk_partial.shape:
+    from extra.thunder.amd.fa_fp8_bwd import unpack_dq
+    # Taking .base discards fast FP8 dQ's unpacking view; preserve its layout in the fused consumer.
+    packed = dq is unpack_dq(Tensor(dq_native)).uop
+    if not packed and dq is not dq_native: return None
+    return dq_native, dk_partial, dv_partial, True, packed
+  return None
 
-def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp) -> tuple[None, None, None, UOp, None]:
+def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp, *, prequantize_mxfp4:bool=False,
+                         prequantize_fp8:bool=False, fp8_only:bool=False) -> tuple:
+  if fp8_only: dq_u, dk_u, dv_u = dk_u, dv_u, dq_u
   dq, dk, dv = Tensor(dq_u, device=dq_u.device), Tensor(dk_u, device=dk_u.device), Tensor(dv_u, device=dv_u.device)
-  xqkv_u, freqs_u = call.src[4], call.src[5]
+  input_idx = 4 if fp8_only else 6 if prequantize_fp8 else 4
+  xqkv_u, freqs_u = call.src[input_idx], call.src[input_idx + 1]
   xqkv, freqs_cis = Tensor(xqkv_u, device=xqkv_u.device), Tensor(freqs_u, device=freqs_u.device)
   B, N, _ = xqkv.shape
   H, H_KV, D = dq.shape[2], dk.shape[2], dq.shape[3]
@@ -93,14 +147,32 @@ def _fused_qkv_rope_grad(dq_u:UOp, dk_u:UOp, dv_u:UOp, call:UOp) -> tuple[None, 
   arch = Device[single_device].renderer.target.arch
   fa_native = _fa_native_grads(dq_u, dk_u, dv_u)
   assert fa_native is not None, "fused QKV RoPE backward requires native Flash Attention gradients"
-  dq, dk, dv = (Tensor(x, device=x.device) for x in fa_native)
+  dq, dk, dv = (Tensor(x, device=x.device) for x in fa_native[:3])
+  expanded_fa_grads = fa_native[3]
   dxqkv = _sharded_empty_like(xqkv, axis=xqkv.uop.axis if isinstance(xqkv.device, tuple) else None)
-  fxn = functools.partial(custom_fused_qkv_rope_backward, device=single_device, arch=arch,
-                          B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D)
-  dxqkv = Tensor.custom_kernel(dxqkv, dq, dk, dv, freqs_cis, fxn=fxn)[0]
-  return None, None, None, dxqkv.uop, None
+  if prequantize_mxfp4:
+    from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs, _grad_mxfp4_mailbox
+    quant = alloc_mxfp4_outputs(dxqkv, flatten_row=True)
+    fxn = functools.partial(custom_fused_qkv_rope_backward_mxfp4, device=single_device, arch=arch,
+                            B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
+                            expanded_fa_grads=expanded_fa_grads, packed_fp8_dq=fa_native[4])
+    ret = Tensor.custom_kernel(dxqkv, *quant, dq, dk, dv, freqs_cis, fxn=fxn)
+    dxqkv, quant = ret[0], list(ret[1:5])
+    _grad_mxfp4_mailbox[dxqkv.uop] = tuple(x.uop for x in quant)
+  else:
+    fxn = functools.partial(custom_fused_qkv_rope_backward, device=single_device, arch=arch,
+                            B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
+                            expanded_fa_grads=expanded_fa_grads, packed_fp8_dq=fa_native[4])
+    dxqkv = Tensor.custom_kernel(dxqkv, dq, dk, dv, freqs_cis, fxn=fxn)[0]
+  if fp8_only: return (None, None, None, dxqkv.uop, None, None, None)
+  return (None, None, None, None, None, dxqkv.uop, None) if prequantize_fp8 else (None, None, None, dxqkv.uop, None)
 
-def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, head_dim:int) -> tuple[Tensor, Tensor, Tensor]:
+def custom_fused_fp8_qkv_rope_forward(v:UOp, q8:UOp, k8:UOp, x:UOp, freqs:UOp, q:UOp, k:UOp, **kwargs):
+  return custom_fused_qkv_rope_forward(q, k, v, q8, k8, x, freqs, write_fp8=True, write_bf16_qk=False, **kwargs)
+
+def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, head_dim:int, *,
+                   prequantize_grad_mxfp4:bool=False, prequantize_fp8:bool=False, write_bf16_qk:bool=True) -> tuple[Tensor, ...]:
+  assert write_bf16_qk or prequantize_fp8
   B, N, packed_dim = xqkv.shape
   assert packed_dim == n_kv_heads * (n_heads // n_kv_heads + 2) * head_dim
   assert freqs_cis.dtype == dtypes.bfloat16, f"fused QKV RoPE requires bfloat16 frequencies, got {freqs_cis.dtype}"
@@ -118,15 +190,69 @@ def fused_qkv_rope(xqkv:Tensor, freqs_cis:Tensor, n_heads:int, n_kv_heads:int, h
   q = _sharded_empty((B, N, n_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
   k = _sharded_empty((B, N, n_kv_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
   v = _sharded_empty((B, N, n_kv_heads, head_dim), xqkv, axis=axis, dtype=dtypes.bfloat16)
+  fp8_outputs = (_sharded_empty(q.shape, xqkv, axis=axis, dtype=dtypes.fp8e4m3),
+                 _sharded_empty(k.shape, xqkv, axis=axis, dtype=dtypes.fp8e4m3)) if prequantize_fp8 else ()
   fxn = functools.partial(custom_fused_qkv_rope_forward, device=single_device, arch=arch,
-                          B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=head_dim)
-  q, k, v, *_ = Tensor.custom_kernel(q, k, v, xqkv, freqs_cis, fxn=fxn, grad_fxn=_fused_qkv_rope_grad)
-  return q, k, v
+                          B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=head_dim,
+                          write_fp8=prequantize_fp8, write_bf16_qk=write_bf16_qk)
+  grad_fxn = functools.partial(_fused_qkv_rope_grad, prequantize_mxfp4=prequantize_grad_mxfp4, prequantize_fp8=prequantize_fp8)
+  if not write_bf16_qk:
+    # Keep runtime parameters dense for BEAM; unused BF16 autograd anchors come last.
+    fxn = functools.partial(custom_fused_fp8_qkv_rope_forward, device=single_device, arch=arch,
+                            B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=head_dim)
+    outputs = Tensor.custom_kernel(v, *fp8_outputs, xqkv, freqs_cis, q, k, fxn=fxn,
+                                    grad_fxn=functools.partial(grad_fxn, fp8_only=True))
+    return outputs[5], outputs[6], outputs[0], outputs[1], outputs[2]
+  outputs = Tensor.custom_kernel(q, k, v, *fp8_outputs, xqkv, freqs_cis, fxn=fxn, grad_fxn=grad_fxn)
+  return tuple(outputs[:5 if prequantize_fp8 else 3])
 
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
-def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=0):
+@functools.cache
+def custom_fp8_v_prep(*args:UOp, arch:str, partial:bool, groups:int, tile:int):
+  size = args[-1].numel() if partial else args[2].numel()
+  threads = 256
+  assert arch == "gfx950" and size % (groups*threads*8) == 0 and size % tile == 0
+  code = (pathlib.Path(__file__).parent / "fa_v_prep.cpp").read_text()
+  options = [f"-I{pathlib.Path(__file__).parent / 'include'}", "-std=c++20", "-DKITTENS_CDNA4",
+             "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffp-contract=off", f"-DSIZE={size}", f"-DGROUPS={groups}",
+             f"-DTHREADS={threads}", f"-DTILE={tile}", f"-DPARTIAL={int(partial)}"]
+  lib = HIPCCCompiler(arch, options).compile_cached(code)
+  name = "fa_v_amax_partial" if partial else "fa_v_quantize"
+  sink = UOp.sink(*[x.base for x in args], UOp.special(threads, "lidx0"),
+                  UOp.special(groups if partial else size//tile, "gidx0"), arg=KernelInfo(name=name))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+
+def quantize_v_fp8(x:Tensor) -> tuple[Tensor, Tensor]:
+  # Integer maxima of absolute BF16 encodings are exact for finite V. The second
+  # kernel reduces these small partials in each workgroup while quantizing V.
+  size = math.prod(x.uop.shard_shape)
+  assert x.dtype == dtypes.bfloat16 and size >= 2048 and size % 2048 == 0
+  groups, tile = min(256, size//2048), min(4096, size)
+  assert size % (groups*2048) == 0
+  arch = Device[x.device[0] if isinstance(x.device, tuple) else x.device].renderer.target.arch
+  partial = Tensor.invalids(groups, dtype=dtypes.uint32, device=x.device)
+  fxn = functools.partial(custom_fp8_v_prep, arch=arch, groups=groups, tile=tile)
+  partial = Tensor.custom_kernel(partial, x.detach(), fxn=functools.partial(fxn, partial=True))[0]
+  out = _sharded_empty(x.shape, x, axis=None, dtype=dtypes.fp8e4m3)
+  scale = Tensor.invalids(1, dtype=dtypes.float32, device=x.device)
+  out, scale = Tensor.custom_kernel(out, scale, x.detach(), partial, fxn=functools.partial(fxn, partial=False))[:2]
+  return out, scale
+
+@functools.cache
+def custom_fp8_fa_backward_inputs(q:UOp, k:UOp, v:UOp, q8:UOp, k8:UOp, v8:UOp, v_scale:UOp,
+                                 *, B:int, N:int, H:int, H_KV:int, D:int):
+  q, k, v, q8, k8, v8 = (x.flatten() for x in (q, k, v, q8, k8, v8))
+  size = B*N*H_KV*D
+  i = UOp.range(size, 0)
+  stores = [q[i+rep*size].store(q8[i+rep*size].cast(dtypes.bfloat16)) for rep in range(H//H_KV)]
+  stores += [k[i].store(k8[i].cast(dtypes.bfloat16)),
+             v[i].store((v8[i].cast(dtypes.float)*v_scale.flatten()[0]).cast(dtypes.bfloat16))]
+  return UOp.group(*stores).end(i).sink(arg=KernelInfo(name="fp8_fa_backward_inputs"))
+
+def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink,
+                 window=0, fp8_qk=False, asm_fp8=False, pre_scaled_fp8=False):
   def grad(dou:UOp, ker:UOp) -> tuple:
     do = Tensor(dou, device=dou.device)
     attn = Tensor(ker.src[1].after(ker), device=ker.src[1].device)
@@ -134,28 +260,105 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
     xq = Tensor(ker.src[3], device=ker.src[3].device)
     xk = Tensor(ker.src[4], device=ker.src[4].device)
     xv = Tensor(ker.src[5], device=ker.src[5].device)
+    use_asm_bwd = getenv("ASM_FA", 1) and getenv("ASM_FA_BWD", 1) and window == 0 and arch == "gfx950" and not has_sink and \
+      (B_local, N, H_local, H_KV_local, D) == (2, 8192, 32, 8, 128)
+    matched_fp8 = fp8_qk and pre_scaled_fp8 and use_asm_bwd
+    xq_bwd, xk_bwd = xq, xk
+    if fp8_qk:
+      def input_tensor(idx:int) -> Tensor: return Tensor(ker.src[idx], device=ker.src[idx].device)
+      q8, k8, xv = input_tensor(5), input_tensor(6), input_tensor(7)
+      if asm_fp8:
+        xv = xv.reshape(B, N, H_KV, D)
+        v8, vs = (input_tensor(8), input_tensor(9)) if pre_scaled_fp8 else (input_tensor(10), input_tensor(11))
+      if getenv("FP8_FA_BWD"):
+        assert asm_fp8 and pre_scaled_fp8
+        from extra.thunder.amd.fa_fp8_bwd import fp8_backward
+        state, nxt = input_tensor(10), input_tensor(11)
+        dq, dk, dv, _ = fp8_backward(q8,k8,v8,vs,do.reshape(B,N,H,D),attn.reshape(B,N,H,D),l_vec,
+                                    (state[0]+1e-8)/448.,state[1]/57344.,nxt,native=True,reset_next_amax=True,delayed_state=state)
+        return None,None,dq.uop,dk.uop,None,None,dv.uop.reshape(ker.src[7].shape),None,None,None,None
+      # BF16 scores from the original Q/K do not share the FP8 forward normalizer.
+      # exp(score_bf16 - lse_fp8) can exceed one by arbitrarily large factors.
+      if matched_fp8 and asm_fp8:
+        # Widen the exact forward operands together instead of launching three
+        # separate conversion kernels. V retains its forward descale.
+        xq_bwd, xk_bwd, xv = Tensor.custom_kernel(
+          _sharded_empty_like(xq), _sharded_empty_like(xk), _sharded_empty_like(xv), q8, k8, v8, vs,
+          fxn=functools.partial(custom_fp8_fa_backward_inputs, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
+      elif matched_fp8:
+        # Widening E4M3 is exact. The assembly variant uses unit exp2 score scale
+        # and accounts for the fused RoPE operand scale in physical dQ/dK.
+        xq_bwd, xk_bwd = q8.bfloat16().contiguous(), k8.bfloat16().contiguous()
+      else:
+        if asm_fp8: xv = (v8.float() * vs).bfloat16().contiguous()
+        # General descales and the HIP backward path need a normalizer matching
+        # their physical BF16 operands. Recompute both O and LSE for this fallback.
+        inv_scale = (D**-0.5 * math.log2(math.e))**-0.5
+        qs, ks = (inv_scale, inv_scale) if pre_scaled_fp8 else (input_tensor(8), input_tensor(9))
+        xq_bwd, xk_bwd = (q8.float()*qs).bfloat16().contiguous(), (k8.float()*ks).bfloat16().contiguous()
+        attn = _sharded_empty_like(xq, axis=shard_axis)
+        l_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
+        attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq_bwd, xk_bwd, xv,
+          fxn=functools.partial(custom_fa_forward, device=single_device, arch=arch,
+                                B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, has_sink=False))[:2]
 
     dq = _sharded_empty((B, H, N, D), xq, axis=shard_axis_t)
     GROUP_SIZE = H_local // H_KV_local
     HEADS_PER_WG = 2 if D == 128 and GROUP_SIZE % 2 == 0 else 1
-    dk_partial = _sharded_empty((B * GROUP_SIZE // HEADS_PER_WG, N, H_KV, D), xk, axis=shard_axis)
-    dv_partial = _sharded_empty((B * GROUP_SIZE // HEADS_PER_WG, N, H_KV, D), xv, axis=shard_axis)
+    if use_asm_bwd:
+      dk_partial = _sharded_empty((B, N, H, D), xk, axis=shard_axis)
+      dv_partial = _sharded_empty((B, N, H, D), xv, axis=shard_axis)
+    else:
+      dk_partial = _sharded_empty((B * GROUP_SIZE // HEADS_PER_WG, N, H_KV, D), xk, axis=shard_axis)
+      dv_partial = _sharded_empty((B * GROUP_SIZE // HEADS_PER_WG, N, H_KV, D), xv, axis=shard_axis)
 
     # delta_vec = (do * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
     delta_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
-    delta_vec, dq = Tensor.custom_kernel(delta_vec, dq, attn, do, fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
+    if use_asm_bwd and getenv("ASM_FA_BWD_PRE", 1):
+      # AITER's main kernel atomically accumulates dQ, so its workspace must be zero before launch.
+      dq = dq.zeros_like()
+      delta_vec = Tensor.custom_kernel(attn, do, delta_vec,
+        fxn=functools.partial(custom_asm_fa_backward_pre, B=B_local, N=N, H=H_local, D=D))[2]
+    else:
+      delta_vec, dq = Tensor.custom_kernel(delta_vec, dq, attn, do,
+        fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch,
+                              B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
 
-    dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, do, xq, xk, xv, l_vec, delta_vec, fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, window=window))[:3]
+    if use_asm_bwd:
+      dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, xq_bwd, xk_bwd, xv, do, l_vec, delta_vec,
+        fxn=functools.partial(custom_asm_fa_backward, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
+                              pre_scaled_fp8=matched_fp8))[:3]
+      dq_out = _sharded_empty((B, N, H, D), xq, axis=shard_axis)
+      dq = Tensor.custom_kernel(dq_out, dq,
+        fxn=functools.partial(custom_asm_fa_backward_shuffle, B=B_local, N=N, H=H_local, D=D))[0]
+    else:
+      dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, do, xq_bwd, xk_bwd, xv, l_vec, delta_vec,
+        fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch,
+                              B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D, window=window))[:3]
 
-    if D == 64:
+    if use_asm_bwd:
+      pass
+    elif D == 64:
       dq = dq.reshape(B, H, N//16, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2).permute(0, 1, 2, 8, 9, 10, 11, 3, 4, 6, 7, 5, 12).reshape(B, H, N, D).transpose(1, 2)
     else:
       dq = dq.reshape(B, H, N//16, 4, 2, 2, D//32, 4, 4, 2).permute(0, 1, 2, 7, 8, 3, 4, 6, 5, 9).reshape(B, H, N, D).transpose(1, 2)
 
     # reduce partial dK/dV across GROUP_SIZE query heads
-    dk = dk_partial.reshape(B, GROUP_SIZE // HEADS_PER_WG, N, H_KV, D).sum(1)
-    dv = dv_partial.reshape(B, GROUP_SIZE // HEADS_PER_WG, N, H_KV, D).sum(1)
+    if use_asm_bwd:
+      dk = dk_partial.reshape(B, N, H_KV, GROUP_SIZE, D).sum(3)
+      dv = dv_partial.reshape(B, N, H_KV, GROUP_SIZE, D).sum(3)
+    else:
+      dk = dk_partial.reshape(B, GROUP_SIZE // HEADS_PER_WG, N, H_KV, D).sum(1)
+      dv = dv_partial.reshape(B, GROUP_SIZE // HEADS_PER_WG, N, H_KV, D).sum(1)
 
+    if fp8_qk:
+      # q/k quantization below is an identity STE, so expose physical BF16
+      # gradients directly. This also preserves the native FA gradient layout
+      # consumed by fused QKV RoPE backward.
+      # Q/K are the differentiable BF16 inputs. Packed FP8 buffers and scales are
+      # auxiliary forward inputs, so their gradients are intentionally absent.
+      return (None, None, dq.uop, dk.uop, None, None, dv.uop.reshape(ker.src[7].shape), None, None) + \
+        ((None, None) if asm_fp8 and not pre_scaled_fp8 else ())
     if not has_sink: return None, None, dq.uop, dk.uop, dv.uop
     sinks = Tensor(ker.src[6], device=ker.src[6].device)
     p_sink = (sinks.reshape(1, H, 1, 1) - l_vec).exp()
@@ -165,7 +368,10 @@ def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, sha
   return grad
 
 # TODO: remove write_flat once scheduler can remove reshapes between custom_kernel. TestCustomKernel.test_simple_reshape
-def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, write_flat:bool=False, sinks:Tensor|None=None, window:int=0):
+def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False, write_flat:bool=False, sinks:Tensor|None=None,
+                    window:int=0, fp8_qk:bool|None=None, q_amax_state:Tensor|None=None, k_amax_state:Tensor|None=None,
+                    q_amax_out:Tensor|None=None, k_amax_out:Tensor|None=None, q_fp8:Tensor|None=None, k_fp8:Tensor|None=None,
+                    fp8_amax:float=16.0, save_fp8:bool=False, fa_bwd_amax:Tensor|None=None, next_fa_bwd_amax:Tensor|None=None):
   assert attn_mask is None, "attn_mask not supported"
   assert is_causal, "only causal attention supported"
 
@@ -192,6 +398,59 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   attn = _sharded_empty((B, N, H * D), xq, axis=shard_axis) if write_flat else _sharded_empty_like(xq, axis=shard_axis)
   l_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
 
+  if getenv("FP8_FA") if fp8_qk is None else fp8_qk:
+    assert arch == "gfx950" and D == 128, f"FP8 Flash Attention requires gfx950 and D=128, got {arch=} {D=}"
+    assert not has_sink and window == 0, "FP8 Flash Attention does not support sinks or sliding windows"
+    from extra.llama_kernels import FP8_MAX, local_abs_max
+    def quantize_qk(x:Tensor, amax_state:Tensor|None, amax_out:Tensor|None, *, native_v:bool=False) -> tuple[Tensor, Tensor]:
+      if amax_state is not None or amax_out is not None:
+        assert amax_state is not None and amax_out is not None, "delayed FP8 scaling requires both amax state and output"
+        from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
+        return quantize_fp8_delayed(x, amax_state, amax_out)
+      if native_v: return quantize_v_fp8(x)
+      amax = (local_abs_max(x) if isinstance(x.device, tuple) else x.abs().max()).detach().float()
+      descale = ((amax + 1e-8) / FP8_MAX).reshape(1).contiguous()
+      scale = descale.reciprocal()
+      # The packed buffers are auxiliary, non-differentiable inputs to FA. Its
+      # custom backward returns physical-unit gradients directly to xq/xk.
+      return (x * scale).clamp(-FP8_MAX, FP8_MAX).cast(dtypes.fp8e4m3).contiguous(), descale
+    pre_scaled_fp8 = q_fp8 is not None or k_fp8 is not None
+    asm_fp8 = bool(getenv("ASM_FP8_FA"))
+    if pre_scaled_fp8:
+      assert q_fp8 is not None and k_fp8 is not None, "prequantized FP8 attention requires both Q and K"
+      if not asm_fp8:
+        q_descale = Tensor.ones((1,), dtype=dtypes.float32, device=xq.device).contiguous()
+        k_descale = Tensor.ones((1,), dtype=dtypes.float32, device=xk.device).contiguous()
+    else:
+      q_fp8, q_descale = quantize_qk(xq, q_amax_state, q_amax_out)
+      k_fp8, k_descale = quantize_qk(xk, k_amax_state, k_amax_out)
+    # Pre-scaled Q/K have constant unit descales, which backward never reads.
+    # Returning them as saved outputs adds scalar copy kernels to every layer.
+    fp8_saves = (q_fp8, k_fp8) + (() if pre_scaled_fp8 else (q_descale, k_descale))
+    grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t,
+                        single_device, arch, False, fp8_qk=True, asm_fp8=asm_fp8, pre_scaled_fp8=pre_scaled_fp8)
+    if asm_fp8:
+      from extra.thunder.amd.asm_fa_fp8 import custom_asm_fp8_fa_forward
+      v_fp8, v_descale = quantize_qk(xv, None, None, native_v=True)
+      # Pass V's storage directly; its shaped view is shared by the amax and quantization expressions.
+      v_arg = xv.flatten() if not is_mp else xv
+      bwd_inputs = ()
+      if getenv("FP8_FA_BWD"):
+        assert pre_scaled_fp8 and fa_bwd_amax is not None and next_fa_bwd_amax is not None
+        bwd_inputs = (fa_bwd_amax, next_fa_bwd_amax)
+      qk_scales = () if pre_scaled_fp8 else (q_descale, k_descale)
+      attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, v_arg, *qk_scales, v_fp8, v_descale, *bwd_inputs,
+        fxn=functools.partial(custom_asm_fp8_fa_forward, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
+                              pre_scaled=pre_scaled_fp8, saved_bf16=True, fp8_backward=bool(bwd_inputs)), grad_fxn=grad)[:2]
+      # Precompiled layers must return the rounded operands used by backward;
+      # saving only BF16 Q/K/V would recompute RoPE and quantization in backward.
+      return (attn, attn, l_vec, *fp8_saves, v_fp8, v_descale) if save_fp8 else (attn, attn, l_vec)
+    attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, q_fp8, k_fp8, xv, q_descale, k_descale,
+      fxn=functools.partial(custom_hk_fp8_fa_forward, device=single_device, arch=arch,
+                            B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D,
+                            pre_scaled=pre_scaled_fp8), grad_fxn=grad)[:2]
+    return (attn, attn, l_vec, *fp8_saves) if save_fp8 else (attn, attn, l_vec)
+
   grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch, has_sink, window=window)
 
   fwd_inputs = (attn, l_vec, xq, xk, xv) + ((sinks,) if has_sink else ())
@@ -200,7 +459,73 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   return attn, attn, l_vec
 
 @functools.cache
-def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None, *, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int, has_sink:bool=True, window:int=0):
+def custom_asm_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, *, B:int, N:int, H:int, H_KV:int, D:int):
+  from extra.thunder.amd.asm_fa_fwd import build_kernel
+  assert B in (1, 2) and (N, H, H_KV, D) == (8192, 32, 8, 128)
+  threads = UOp.special(512, "lidx0")
+  # AMD's MLPerf trace launches 16 query-tile workgroups (8192 total X threads / 512 threads per workgroup).
+  blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(16, "gidx0"), UOp.special(32, "gidx1"), UOp.special(B, "gidx2")
+  lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  zero = UOp.const(0)
+  # Metadata-only accesses keep every opaque ISA buffer live and describe its read/write dependencies to the scheduler.
+  o_write = o.flatten().index(zero).store(o.flatten().index(zero).load())
+  lse_write = l_vec.flatten().index(zero).store(l_vec.flatten().index(zero).load())
+  sink = UOp.sink(o_write, lse_write, q.flatten().index(zero).load(), k.flatten().index(zero).load(), v.flatten().index(zero).load(),
+                  lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
+                  arg=KernelInfo(name=f"asm_fa_fwd_bf16_causal_{B}_8192_32_8_128",
+                                 estimates=Estimates(ops=2*B*H*N*N*D, mem=(2*B*N*H*D+2*B*N*H_KV*D)*2+B*H*N*4)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, H_KV, D)))))
+
+@functools.cache
+def custom_asm_fa_backward_pre(o:UOp, do:UOp, delta:UOp, *, B:int, N:int, H:int, D:int):
+  from extra.thunder.amd.asm_fa_bwd_pre import build_kernel
+  assert (B, N, H, D) == (2, 8192, 32, 128)
+  threads = UOp.special(256, "lidx0")
+  blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(N // 128, "gidx0"), UOp.special(H, "gidx1"), UOp.special(B, "gidx2")
+  lds = UOp.placeholder((40960,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  zero = UOp.const(0)
+  delta_write = delta.flatten().index(zero).store(delta.flatten().index(zero).load())
+  sink = UOp.sink(o.flatten().index(zero).load(), do.flatten().index(zero).load(), delta_write,
+                  lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
+                  arg=KernelInfo(name="asm_fa_bwd_odo_bf16_2_8192_32_128",
+                                 estimates=Estimates(ops=2*B*H*N*D, mem=(2*B*N*H*D)*2+B*H*N*4)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, D)))))
+
+@functools.cache
+def custom_asm_fa_backward(dq_acc:UOp, dk_expanded:UOp, dv_expanded:UOp, q:UOp, k:UOp, v:UOp, do:UOp, lse:UOp, delta:UOp,
+                           *, B:int, N:int, H:int, H_KV:int, D:int, pre_scaled_fp8:bool=False):
+  from extra.thunder.amd.asm_fa_bwd import build_kernel
+  assert (B, N, H, H_KV, D) == (2, 8192, 32, 8, 128)
+  threads = UOp.special(256, "lidx0")
+  # ts_kv=256 and causal traversal halves the 32 K tiles to 16 workgroups, matching AMD's MLPerf trace.
+  blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(16, "gidx0"), UOp.special(H, "gidx1"), UOp.special(B, "gidx2")
+  lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  zero = UOp.const(0)
+  def rw(x:UOp): return x.flatten().index(zero).store(x.flatten().index(zero).load())
+  sink = UOp.sink(rw(dq_acc), rw(dk_expanded), rw(dv_expanded), q.flatten().index(zero).load(), k.flatten().index(zero).load(),
+                  v.flatten().index(zero).load(), do.flatten().index(zero).load(), lse.flatten().index(zero).load(),
+                  delta.flatten().index(zero).load(),
+                  lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
+                  arg=KernelInfo(name="asm_fa_bwd_" + ("fp8_matched" if pre_scaled_fp8 else "bf16"),
+                                 estimates=Estimates(ops=5*B*H*N*N*D)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, H_KV, D, pre_scaled_fp8)))))
+
+@functools.cache
+def custom_asm_fa_backward_shuffle(dq:UOp, dq_acc:UOp, *, B:int, N:int, H:int, D:int):
+  from extra.thunder.amd.asm_fa_bwd_shuffle import build_kernel
+  assert (B, N, H, D) == (2, 8192, 32, 128)
+  threads = UOp.special(256, "lidx0")
+  blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(N // 64, "gidx0"), UOp.special(H, "gidx1"), UOp.special(B, "gidx2")
+  lds = UOp.placeholder((40960,), dtypes.uint8, 0, AddrSpace.LOCAL)
+  zero = UOp.const(0)
+  dq_write = dq.flatten().index(zero).store(dq.flatten().index(zero).load())
+  sink = UOp.sink(dq_write, dq_acc.flatten().index(zero).load(), lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
+                  arg=KernelInfo(name="asm_fa_bwd_dq_shuffle_bf16_2_8192_32_128"))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, D)))))
+
+@functools.cache
+def custom_hk_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None, *, device:str, arch:str,
+                         B:int, N:int, H:int, H_KV:int, D:int, has_sink:bool=True, window:int=0):
   code = (pathlib.Path(__file__).parent / "fa_fwd_causal.cpp").read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
                   f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}", f"-DATTN_SINK={int(has_sink)}", f"-DWINDOW={window}"]
@@ -230,6 +555,47 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None
 
   return UOp(Ops.PROGRAM,
              src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+
+@functools.cache
+def custom_hk_fp8_fa_forward(o:UOp, l_vec:UOp, q_saved:UOp, k_saved:UOp, q:UOp, k:UOp, v:UOp,
+                             q_descale:UOp, k_descale:UOp, *, device:str, arch:str,
+                             B:int, N:int, H:int, H_KV:int, D:int, pre_scaled:bool=False):
+  """Causal FA with native E4M3 QK MFMA, FP32 softmax/LSE, and BF16 PV/output."""
+  assert arch == "gfx950", f"FP8 Flash Attention requires gfx950, got {arch}"
+  assert q_saved.dtype == k_saved.dtype == v.dtype == o.dtype == dtypes.bfloat16
+  assert q.dtype == k.dtype == dtypes.fp8e4m3
+  assert q_descale.dtype == k_descale.dtype == dtypes.float32
+  assert math.prod(q_descale.shape) == math.prod(k_descale.shape) == 1
+  code = (pathlib.Path(__file__).parent / "fa_fwd_causal.cpp").read_text()
+  compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4",
+                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math", "-DATTN_FP8=1", "-DATTN_SINK=0", "-DWINDOW=0",
+                  f"-DATTN_FP8_PRE_SCALED={int(pre_scaled)}",
+                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}", f"-DATTN_D={D}"]
+  Q_BLOCK_SIZE, NUM_THREADS = 32, 512
+  thread_idx = UOp.special(NUM_THREADS, "lidx0")
+  block_idx_x = UOp.special(H, "gidx0")
+  block_idx_y = UOp.special(math.ceil((N // Q_BLOCK_SIZE) / 8), "gidx1")
+  block_idx_z = UOp.special(B, "gidx2")
+  mem = B*N*(H*D*(q.dtype.itemsize + o.dtype.itemsize) + H_KV*D*(k.dtype.itemsize + v.dtype.itemsize)) + B*H*N*4
+  sink = UOp.sink(o.base, l_vec.base, q_saved.base, k_saved.base, q.base, k.base, v.base, q_descale.base, k_descale.base,
+                  thread_idx, block_idx_x, block_idx_y, block_idx_z,
+                  arg=KernelInfo(name="custom_fp8_qk_fa_forward", estimates=Estimates(ops=2*B*H*N*N*D, lds=mem, mem=mem)))
+  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
+  if not getenv("NO_HIPCC"):
+    lib = bytearray(lib)
+    rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
+    struct.pack_into('<I', lib, rodata_off, 160000)
+    lib = bytes(lib)
+  return UOp(Ops.PROGRAM,
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+
+@functools.cache
+def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, sinks:UOp|None=None, *, device:str, arch:str,
+                      B:int, N:int, H:int, H_KV:int, D:int, has_sink:bool=True, window:int=0):
+  if getenv("ASM_FA", 1) and window == 0 and arch == "gfx950" and not has_sink and B in (1, 2) and (N, H, H_KV, D) == (8192, 32, 8, 128):
+    return custom_asm_fa_forward(o, l_vec, q, k, v, B=B, N=N, H=H, H_KV=H_KV, D=D)
+  return custom_hk_fa_forward(o, l_vec, q, k, v, sinks, device=device, arch=arch,
+                              B=B, N=N, H=H, H_KV=H_KV, D=D, has_sink=has_sink, window=window)
 
 @functools.cache
 def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):

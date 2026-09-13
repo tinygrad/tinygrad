@@ -24,12 +24,30 @@ constexpr int ATTN_D = 128; // dimension
 #ifndef ATTN_SINK
 #define ATTN_SINK 0
 #endif
+#ifndef ATTN_FP8
+#define ATTN_FP8 0
+#endif
+#ifndef ATTN_FP8_PRE_SCALED
+#define ATTN_FP8_PRE_SCALED 0
+#endif
 #if ATTN_D == 64
-#define FA_VM2 "1"
-#define FA_VM4 "2"
+#define FA_VM_K_THEN_V "1"
+#define FA_VM_PIPELINE "2"
+#define FA_VM_EPILOGUE_K "1"
 #else
-#define FA_VM2 "2"
-#define FA_VM4 "4"
+#if ATTN_FP8
+#define FA_VM_K_THEN_V "2"
+// A D=128 FP8 K tile is one b128 load per thread, while a BF16 V tile is two.
+// In the steady-state pipeline two V loads remain from the prior stage before
+// K+V enqueue three more requests.  Waiting to 3 (rather than BF16's 4) makes
+// the complete prior V tile visible before its LDS buffer is consumed.
+#define FA_VM_PIPELINE "3"
+#define FA_VM_EPILOGUE_K "1"
+#else
+#define FA_VM_K_THEN_V "2"
+#define FA_VM_PIPELINE "4"
+#define FA_VM_EPILOGUE_K "2"
+#endif
 #endif
 constexpr int Q_BLOCK_SIZE = 32; // q block size
 constexpr int KV_BLOCK_SIZE = 64; // kv block size
@@ -48,6 +66,9 @@ constexpr bool causal = true;
 
 using namespace kittens;
 using _gl_QKVO = gl<bf16, -1, -1, -1, -1>;
+#if ATTN_FP8
+using _gl_QK = gl<fp8e4m3, -1, -1, -1, -1>;
+#endif
 
 using G = kittens::group<NUM_WARPS>;
 
@@ -181,7 +202,12 @@ __device__ inline void mask_kv_tile(RT &dst, int q_abs, int k_abs, uint32_t neg_
 /**********************************************************/
 
 template<int D> struct attn_globals {
+#if ATTN_FP8
+    _gl_QK Qg, Kg;
+    _gl_QKVO Vg, Og;
+#else
     _gl_QKVO Qg, Kg, Vg, Og;
+#endif
     gl<float, -1, -1, -1, -1> L_vec;
     dim3 grid() { return dim3(ATTN_H, ((ATTN_N / Q_BLOCK_SIZE + NUM_WARPS - 1) / NUM_WARPS), ATTN_B); }
     dim3 block() { return dim3(NUM_THREADS); }
@@ -189,21 +215,36 @@ template<int D> struct attn_globals {
 };
 
 template<int D> __launch_bounds__(NUM_THREADS, 2)
-__global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr
+__global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr,
+#if ATTN_FP8
+    bf16 *Q_saved_ptr, bf16 *K_saved_ptr, fp8e4m3 *Q_ptr, fp8e4m3 *K_ptr,
+    bf16 *V_ptr, float *Q_descale_ptr, float *K_descale_ptr
+#else
+    bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr
+#endif
 #if ATTN_SINK
     , float *Sinks_ptr
 #endif
     ) {
     _gl_QKVO Og{O_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
+#if ATTN_FP8
+    _gl_QK Qg{Q_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
+    _gl_QK Kg{K_ptr, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D};
+#else
     _gl_QKVO Qg{Q_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
     _gl_QKVO Kg{K_ptr, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D};
+#endif
     _gl_QKVO Vg{V_ptr, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D};
     gl<float, -1, -1, -1, -1> L_vec{L_vec_ptr, ATTN_B, ATTN_H, 1, ATTN_N};
     attn_globals<D> g{Qg, Kg, Vg, Og, L_vec};
 
     extern __shared__ alignment_dummy __shm[];
     shared_allocator al((int*)&__shm[0]);
+#if ATTN_FP8
+    st_fp8e4m3<KV_BLOCK_SIZE, ATTN_D, st_16x64_s> (&k_smem)[2] = al.allocate<st_fp8e4m3<KV_BLOCK_SIZE, ATTN_D, st_16x64_s>, 2>();
+#else
     st_bf<KV_BLOCK_SIZE, ATTN_D, st_32x32_s> (&k_smem)[2] = al.allocate<st_bf<KV_BLOCK_SIZE, ATTN_D, st_32x32_s>, 2>();
+#endif
     st_bf<KV_BLOCK_SIZE, ATTN_D, st_8x32_s> (&v_smem)[2] = al.allocate<st_bf<KV_BLOCK_SIZE, ATTN_D, st_8x32_s>, 2>();
 
     const int head_idx = (blockIdx.x % ATTN_H_KV) * GROUP_SIZE + (blockIdx.x / ATTN_H_KV);
@@ -232,14 +273,25 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     constexpr int min_tile = 0;
 #endif
 
-    constexpr float TEMPERATURE_SCALE = (D == 128) ? 0.08838834764f*1.44269504089f : 0.125f*1.44269504089f;
+    const float TEMPERATURE_SCALE = ((D == 128) ? 0.08838834764f*1.44269504089f : 0.125f*1.44269504089f)
+#if ATTN_FP8
+                                  * *Q_descale_ptr * *K_descale_ptr
+#endif
+                                  ;
     uint32_t neg_inf_v = 0xff800000;
 
     // Initialize all of the register tiles.
+#if ATTN_FP8
+    qo_tile<D, fp8e4m3, row_l, rt_32x64_s> q_reg;
+    qo_tile_transposed<D, fp8e4m3, col_l, rt_64x32_s> q_reg_transposed;
+    kv_tile<D, fp8e4m3, row_l, rt_32x64_s> k_reg;
+    kv_tile_transposed<D, fp8e4m3, col_l, rt_64x32_s> k_reg_transposed;
+#else
     qo_tile<D, bf16> q_reg; // Q and K are both row layout, as we use mma_ABt.
     qo_tile_transposed<D, bf16> q_reg_transposed;
     kv_tile<D, bf16> k_reg;
     kv_tile_transposed<D, bf16> k_reg_transposed;
+#endif
 
     kv_tile<D, bf16, col_l, rt_16x32_4_s> v_reg;
     qo_tile_transposed<D, float, col_l, rt_32x32_s> o_reg; // Output tile.
@@ -252,13 +304,22 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     zero(norm_vec);
     zero(scale_vec);
 
+#if ATTN_FP8
+    using T = typename st_fp8e4m3<KV_BLOCK_SIZE, ATTN_D, st_16x64_s>::dtype;
+    constexpr int bytes_per_thread = st_16x64_s::template bytes_per_thread<T>();
+    constexpr int k_memcpy_per_tile = KV_BLOCK_SIZE * ATTN_D * sizeof(T) / (bytes_per_thread * NUM_THREADS);
+    using V_T = typename st_bf<KV_BLOCK_SIZE, ATTN_D, st_8x32_s>::dtype;
+    constexpr int v_memcpy_per_tile = KV_BLOCK_SIZE * ATTN_D * sizeof(V_T) /
+                                      (st_8x32_s::template bytes_per_thread<V_T>() * NUM_THREADS);
+#else
     using T = typename st_bf<KV_BLOCK_SIZE, ATTN_D, st_32x32_s>::dtype;
     constexpr int bytes_per_thread = st_32x32_s::template bytes_per_thread<T>();
-    constexpr int bytes_per_memcpy = bytes_per_thread * NUM_THREADS;
-    constexpr int memcpy_per_tile = KV_BLOCK_SIZE * ATTN_D * sizeof(T) / bytes_per_memcpy;
+    constexpr int k_memcpy_per_tile = KV_BLOCK_SIZE * ATTN_D * sizeof(T) / (bytes_per_thread * NUM_THREADS);
+    constexpr int v_memcpy_per_tile = k_memcpy_per_tile;
+#endif
 
-    uint32_t swizzled_offsets_V[memcpy_per_tile];
-    uint32_t swizzled_offsets_K[memcpy_per_tile];
+    uint32_t swizzled_offsets_V[v_memcpy_per_tile];
+    uint32_t swizzled_offsets_K[k_memcpy_per_tile];
     G::prefill_swizzled_offsets<1, false>(k_smem[0], g.Kg, swizzled_offsets_K);
     G::prefill_swizzled_offsets<1, false>(v_smem[0], g.Vg, swizzled_offsets_V);
 
@@ -267,12 +328,16 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
 
+#if ATTN_FP8
+    load<1, decltype(q_reg), _gl_QK>(q_reg, g.Qg, {batch_idx, tile_idx, head_idx, 0});
+#else
     qo_tile<D, float> q_reg_fl;
     load<1, qo_tile<D, float>, _gl_QKVO>(q_reg_fl, g.Qg, {batch_idx, tile_idx, head_idx, 0});
     #if !WINDOW
     mul(q_reg_fl, q_reg_fl, TEMPERATURE_SCALE);  // Use sqrtf for clarity
     #endif
     copy(q_reg, q_reg_fl);
+#endif
     transpose(q_reg_transposed, q_reg);
 
     // All warps then collaboratively load in the first slice of V (V0) and the second slice of K (K1) into shared memory
@@ -282,7 +347,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     load(k_reg, k_smem[0]);
     __builtin_amdgcn_sched_barrier(0);
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(" FA_VM2 ")");
+    asm volatile("s_waitcnt vmcnt(" FA_VM_K_THEN_V ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
 
@@ -290,7 +355,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     zero(att_block[0]);
     transpose(k_reg_transposed, k_reg);
     mma_AtB(att_block[0], k_reg_transposed, q_reg_transposed, att_block[0]);
-    #if WINDOW
+    #if WINDOW || (ATTN_FP8 && !ATTN_FP8_PRE_SCALED)
     mul(att_block[0], att_block[0], TEMPERATURE_SCALE);
     #endif
     __builtin_amdgcn_sched_barrier(0);
@@ -331,7 +396,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     // All warps then collaboratively load in the second slice of V (V1) into shared memory
     G::load<1, false>(v_smem[1], g.Vg, {batch_idx, min_tile + 1, head_idx_kv, 0}, swizzled_offsets_V);
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
+    asm volatile("s_waitcnt vmcnt(" FA_VM_PIPELINE ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
 
@@ -342,7 +407,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         zero(att_block[1]);
         transpose(k_reg_transposed, k_reg);
         mma_AtB(att_block[1], k_reg_transposed, q_reg_transposed, att_block[1]);
-        #if WINDOW
+        #if WINDOW || (ATTN_FP8 && !ATTN_FP8_PRE_SCALED)
         mul(att_block[1], att_block[1], TEMPERATURE_SCALE);
         #endif
 #if WINDOW
@@ -354,7 +419,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         mul(norm_vec, norm_vec, scale_vec);
         col_sum(norm_vec, att_block[0], norm_vec);
         copy(att_block_bf16, att_block[0]);
-        att_block_bf16_in = *reinterpret_cast<attn_tile< bf16, col_l, rt_16x32_4_s>*>(&att_block_bf16);
+        att_block_bf16_in = *reinterpret_cast<attn_tile<bf16, col_l, rt_16x32_4_s>*>(&att_block_bf16);
         sched_barrier_exp_pairs<6, 3, 1>();
         sched_barrier_pairs<10, 5, 1>();
         __builtin_amdgcn_sched_barrier(0);
@@ -367,7 +432,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         //      Load V0 into registers
         load(v_reg, v_smem[0]);
         asm volatile("s_waitcnt lgkmcnt(0)");
-        asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
+        asm volatile("s_waitcnt vmcnt(" FA_VM_PIPELINE ")");
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -398,7 +463,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         //      Load K2 into registers
         load(k_reg, k_smem[0]);
         asm volatile("s_waitcnt lgkmcnt(0)");
-        asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
+        asm volatile("s_waitcnt vmcnt(" FA_VM_PIPELINE ")");
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -409,7 +474,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         zero(att_block[0]);
         transpose(k_reg_transposed, k_reg);
         mma_AtB(att_block[0], k_reg_transposed, q_reg_transposed, att_block[0]);
-        #if WINDOW
+        #if WINDOW || (ATTN_FP8 && !ATTN_FP8_PRE_SCALED)
         mul(att_block[0], att_block[0], TEMPERATURE_SCALE);
         #endif
         //      Finish softmax for QK1
@@ -437,7 +502,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
             }
         }
         asm volatile("s_waitcnt lgkmcnt(0)");
-        asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
+        asm volatile("s_waitcnt vmcnt(" FA_VM_PIPELINE ")");
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -468,7 +533,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         //      Load K3 into registers
         load(k_reg, k_smem[1]);
         asm volatile("s_waitcnt lgkmcnt(0)");
-        asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
+        asm volatile("s_waitcnt vmcnt(" FA_VM_PIPELINE ")");
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_barrier();
         __builtin_amdgcn_sched_barrier(0);
@@ -480,7 +545,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     zero(att_block[1]);
     transpose(k_reg_transposed, k_reg);
     mma_AtB(att_block[1], k_reg_transposed, q_reg_transposed, att_block[1]);
-    #if WINDOW
+    #if WINDOW || (ATTN_FP8 && !ATTN_FP8_PRE_SCALED)
     mul(att_block[1], att_block[1], TEMPERATURE_SCALE);
     #endif
     //      Finish softmax for QK2
@@ -508,7 +573,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         }
     }
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
+    asm volatile("s_waitcnt vmcnt(" FA_VM_PIPELINE ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_sched_barrier(0);
@@ -539,7 +604,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     //      Load K4 into registers
     load(k_reg, k_smem[0]);
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(" FA_VM4 ")");
+    asm volatile("s_waitcnt vmcnt(" FA_VM_PIPELINE ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_sched_barrier(0);
@@ -549,7 +614,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     zero(att_block[0]);
     transpose(k_reg_transposed, k_reg);
     mma_AtB(att_block[0], k_reg_transposed, q_reg_transposed, att_block[0]);
-    #if WINDOW
+    #if WINDOW || (ATTN_FP8 && !ATTN_FP8_PRE_SCALED)
     mul(att_block[0], att_block[0], TEMPERATURE_SCALE);
     #endif
     //      Finish softmax for QK3
@@ -574,7 +639,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
         }
     }
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(" FA_VM2 ")");
+    asm volatile("s_waitcnt vmcnt(" FA_VM_EPILOGUE_K ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_sched_barrier(0);
@@ -604,7 +669,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     //      Load K5 into registers
     load(k_reg, k_smem[1]);
     asm volatile("s_waitcnt lgkmcnt(0)");
-    asm volatile("s_waitcnt vmcnt(" FA_VM2 ")");
+    asm volatile("s_waitcnt vmcnt(" FA_VM_K_THEN_V ")");
     __builtin_amdgcn_sched_barrier(0);
     __builtin_amdgcn_s_barrier();
     __builtin_amdgcn_sched_barrier(0);
@@ -614,7 +679,7 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     zero(att_block[1]);
     transpose(k_reg_transposed, k_reg);
     mma_AtB(att_block[1], k_reg_transposed, q_reg_transposed, att_block[1]);
-    #if WINDOW
+    #if WINDOW || (ATTN_FP8 && !ATTN_FP8_PRE_SCALED)
     mul(att_block[1], att_block[1], TEMPERATURE_SCALE);
     #endif
     //      Finish softmax for QK4
@@ -713,7 +778,12 @@ __global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_p
     store(g.L_vec, norm_vec, {batch_idx, head_idx, 0, tile_idx});
 }
 
-template __global__ void attend_ker<ATTN_D>(bf16*, float*, bf16*, bf16*, bf16*
+template __global__ void attend_ker<ATTN_D>(bf16*, float*,
+#if ATTN_FP8
+    bf16*, bf16*, fp8e4m3*, fp8e4m3*, bf16*, float*, float*
+#else
+    bf16*, bf16*, bf16*
+#endif
 #if ATTN_SINK
     , float*
 #endif

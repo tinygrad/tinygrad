@@ -4,6 +4,8 @@ from tinygrad import Tensor, function, Device
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.tensor import transform_to_call
+from tinygrad.schedule import resolve_linear_call
+from tinygrad.schedule.allreduce import _allreduce_view
 
 def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop))[0].src[0].key
 
@@ -144,6 +146,19 @@ class TestCallShape(unittest.TestCase):
     self.assertEqual(shape[0], sz.bind(5))
 
 class TestCallSchedule(unittest.TestCase):
+  def test_nested_linear_preserves_after(self):
+    p = UOp.param(0, dtypes.float, 4, device="CPU")
+    inner = UOp.custom_function("inner").call(p)
+    linear = UOp(Ops.LINEAR, src=(inner,))
+    buf, dep = UOp.new_buffer("CPU", 4, dtypes.float), UOp.custom_function("dep").call()
+
+    resolved = resolve_linear_call(linear.call(buf.after(dep)))
+    self.assertEqual(resolved.src[0].src[1].op, Ops.AFTER)
+
+    # Physical all-reduce views are the exception: runtime calls take the SHRINK itself to retain its byte offset.
+    resolved_view = resolve_linear_call(linear.call(_allreduce_view(buf, 1, 3).after(dep)))
+    self.assertEqual((resolved_view.src[0].src[1].op, resolved_view.src[0].src[1].tag), (Ops.SHRINK, ("allreduce",)))
+
   def test_precompile_slice_assign(self):
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x * 2 + 1

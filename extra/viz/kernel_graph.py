@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Usage: DEBUG=5 python -m tinygrad.viz.cli --json | ./extra/viz/kernel_graph.py > /tmp/kernel_graph.txt
+# Usage: KERNEL_GRAPH=1 python -m tinygrad.viz.cli --json | ./extra/viz/kernel_graph.py > /tmp/kernel_graph.txt
 import argparse, json, sys, itertools
 from tinygrad.helpers import ansistrip
 from tinygrad.viz.cli import fmt_all
@@ -37,6 +37,7 @@ if __name__ == "__main__":
       while ss:
         if (s:=ss.pop()) in seen: continue
         seen.add(s)
+        if str(s) not in graph: continue
         if get_node(graph, s)["label"].startswith("INDEX"):
           idx_str = get_node(graph, s)["label"].splitlines()
           src_str = ["SRC"]+get_node(graph, get_node(graph, s)["src"][0][1])["label"].splitlines()[1:]

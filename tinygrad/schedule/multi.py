@@ -1,20 +1,33 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
-from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, graph_rewrite, broadcast_axes, _broadcast_shape, sint_to_uop
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, AxisType, graph_rewrite, broadcast_axes, _broadcast_shape, sint_to_uop, resolve
 from tinygrad.uop.ops import sint, ssimplify
 from tinygrad.dtype import dtypes
 from tinygrad.schedule.allreduce import handle_allreduce
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
-def _apply_shrink(marg, s:UOp, i:int) -> UOp:
-  new_arg = [tuple([x.substitute({drng[0]:drng[0].const_like(i)}) if isinstance(x, UOp) and
-                    (drng:=[r for r in x.ranges if r.arg[-1] is AxisType.DEVICE]) else x for x in ss]) for ss in marg]
-  return s._mop(Ops.SHRINK, tuple(new_arg))
+def _resolve_shrink_marg(marg, i:int):
+  return tuple(tuple(x.substitute({drng[0]:drng[0].const_like(i)}) if isinstance(x, UOp) and
+                           (drng:=[r for r in x.ranges if r.arg[-1] is AxisType.DEVICE]) else x for x in ss) for ss in marg)
+
+def _apply_shrink(marg, s:UOp, i:int) -> UOp: return s._mop(Ops.SHRINK, _resolve_shrink_marg(marg, i))
+
+def _shrink_self_copy(x:UOp, marg, i:int) -> UOp:
+  resolved = _resolve_shrink_marg(marg, i)
+  has_device_range = tuple(any(isinstance(v, UOp) and any(r.arg[-1] is AxisType.DEVICE for r in v.ranges) for v in ss) for ss in marg)
+  inner = tuple(r if is_device else (0, s) for r,s,is_device in zip(resolved, x.src[0].shape, has_device_range))
+  outer = tuple((0, r[1]) if is_device else r for r,is_device in zip(resolved, has_device_range))
+  materialized = UOp(Ops.COPY, src=(x.src[0]._mop(Ops.SHRINK, inner),), arg=x.device, tag=("force_contiguous",))
+  return materialized._mop(Ops.SHRINK, outer)
 
 def mstack_early_shrink(ms:UOp, shrink:UOp):
   ret:list[UOp] = []
   for i, x in enumerate(ms.src):
-    if x.op is Ops.COPY:
+    if x.is_self_copy:
+      # Before COPY/CONTIGUOUS unification, shrink stayed outside a contiguous materialization. Preserve that
+      # ordering, while resolving the device-axis slice first so each shard materializes only its physical local view.
+      ret.append(_shrink_self_copy(x, shrink.marg, i))
+    elif x.op is Ops.COPY:
       src = _apply_shrink(shrink.marg, x.src[0], i)
       ret.append(src.contiguous() if src.device == x.device else src.copy_to_device(x.device))
     else:
@@ -24,15 +37,20 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
 def lower_broadcast_copy(c:UOp, x:UOp):
   if not (isinstance(c.device, tuple) and isinstance(x.device, str)): return None
   if (sx:=x.simplify()).device is None: return UOp(Ops.MSTACK, src=(sx,)*len(c.device))
-  return UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) for d in c.device))
+  # Keep a computed value on its source device. Cross-device COPYs materialize their own SDMA source in prepare.
+  buffered = x.has_buffer_identity(after_ok=True)
+  return UOp(Ops.MSTACK, src=tuple(x.copy_to_device(d) if buffered or d != x.device else x for d in c.device))
+
+def lower_copy_to_one(c:UOp, x:UOp):
+  if not (isinstance(c.device, str) and isinstance(x.device, tuple)): return None
+  m = x.mselect(0)
+  return m if m.device == c.device else m.copy_to_device(c.device)
 
 replace_allreduce = PatternMatcher([
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
   (UPat(Ops.COPY, name="c", src=(UPat(name="x"),)), lower_broadcast_copy),
   # COPY_TO_ONE: if copying from multidevice to one, MSELECT the first (TODO: a little from each?)
-  (UPat(Ops.COPY, name="c", src=(UPat(name="x"),)), lambda c,x:
-    (m if (m:=x.mselect(0)).device == c.device else m.copy_to_device(c.device))
-    if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
+  (UPat(Ops.COPY, name="c", src=(UPat(name="x"),)), lower_copy_to_one),
   # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
   # move shrink before MSTACK
@@ -115,7 +133,11 @@ def reduce_multi(root:UOp, multi:UOp):
     # all sharded axes are reduced: full allreduce
     if ALLREDUCE_CAST and multi.src[0].op is Ops.CAST and multi.src[0].src[0].dtype in (dtypes.bfloat16, dtypes.half):
       orig_dtype = multi.src[0].src[0].dtype
-      return local.cast(orig_dtype).allreduce(op, multi.device).cast(local.dtype)
+      # A local reduction over only singleton axes is an identity. Reduce the original low-precision storage
+      # directly instead of materializing a cast/reduce/cast kernel before the cross-device reduction.
+      local_to_reduce = multi.src[0].src[0].reshape(local.shape) if all(resolve(s == 1) for s in multi.src[0].shape[:num_axes]) \
+                        else local.cast(orig_dtype)
+      return local_to_reduce.allreduce(op, multi.device).cast(local.dtype)
     return local.allreduce(op, multi.device)
   # no sharded axes reduced: piecewise, keep all remaining sharding
   new_axes = tuple(ax - num_axes for ax, _ in remaining)
@@ -292,7 +314,8 @@ multi_pm = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD), UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="dest"), UPat(Ops.UNSHARD, name="src"))))), store_after_multi),
   # a self COPY of a sharded value is a contiguous of every shard
   (UPat(Ops.COPY, src=(UPat(Ops.UNSHARD, name="multi"),), name="copy"),
-   lambda multi,copy: passthrough_multi(copy, multi) if copy.is_self_copy else copy_multi(multi, copy.arg)),
+   lambda multi,copy: copy_multi(multi, copy.arg) if copy.tag == ("replicate",) else
+                      passthrough_multi(copy, multi) if copy.is_self_copy else copy_multi(multi, copy.arg)),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.UNSHARD, name="multi"),), name="red"),
     lambda multi,red: multi.src[0].allreduce(*red.arg).unshard(multi.arg, multi.src[1:])),
 

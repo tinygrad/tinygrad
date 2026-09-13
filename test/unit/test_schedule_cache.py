@@ -13,6 +13,9 @@ def custom_add_backward(grad_output:UOp, _) -> tuple[None, UOp]:
   return None, grad.uop
 
 class TestScheduleCache(unittest.TestCase):
+  def setUp(self):
+    schedule_cache.clear()
+
   def test_bound_variable_reuses_cache(self):
     schedule_cache.clear()
     v = Variable('v', 1, 100)
@@ -36,7 +39,6 @@ class TestScheduleCache(unittest.TestCase):
       self.assertEqual(a.item(), i+1)
 
   def test_same_custom_function_reuses_cache(self):
-    schedule_cache.clear()
     fxn = functools.partial(custom_add_kernel, num=10)
 
     # first run
@@ -52,6 +54,16 @@ class TestScheduleCache(unittest.TestCase):
     b.realize()
     self.assertEqual(b.item(), 11)
     self.assertEqual(len(schedule_cache), cache_size_after_first)
+
+  def test_fresh_gradient_callback_reuses_cache(self):
+    cache_size_after_first = None
+    for _ in range(2):
+      a, x = Tensor.empty(1), Tensor.ones(1)
+      a = Tensor.custom_kernel(a, x, fxn=functools.partial(custom_add_kernel, num=10), grad_fxn=lambda grad,call: (grad, None))[0]
+      a.realize()
+      self.assertEqual(a.item(), 11)
+      if cache_size_after_first is None: cache_size_after_first = len(schedule_cache)
+      else: self.assertEqual(len(schedule_cache), cache_size_after_first)
 
   def test_simple(self):
     a = Tensor.ones(10).contiguous()
