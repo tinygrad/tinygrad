@@ -454,9 +454,9 @@ pm_clean_up_group_sink = PatternMatcher([
 
 sym = symbolic+pm_simplify_valid+PatternMatcher([
   # ** where **
-  # push cast to branches
-  (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"),
-   lambda s,a,b,cast: s.where(a.ccast(cast.dtype), b.ccast(cast.dtype))),
+  # f(s.where(c0, c1)) -> s.where(f(c0), f(c1)) for const c0, c1
+  *[(UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(UPat.var("s").where(c, c).named("w"),), name="f"),
+     lambda s,w,f: s.where(f.replace(src=(w.src[1],)), f.replace(src=(w.src[2],)))) for c in (bare_const, casted_const)],
   # ** pow **
   ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
   # ** load/store folding **
