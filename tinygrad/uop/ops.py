@@ -35,6 +35,9 @@ class ParamArg:
   image: tuple[int, int]|None = None
   # the device Buffer for a realized BUFFER. the UOp is the owner of the Buffer: they live and die together (1:1)
   buffer: Buffer|MultiBuffer|None = None
+  # the order params take in a kernel signature: buffers first, then scalars, each by slot (launchers pass bufs then vals)
+  @property
+  def order_key(self) -> tuple[bool, int]: return (self.addrspace is AddrSpace.ALU, self.slot)
   def __repr__(self):
     fields = (("vmin_vmax", None), ("multiple_of", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
               ("volatile", False), ("image", None))
