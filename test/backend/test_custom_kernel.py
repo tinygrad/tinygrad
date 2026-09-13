@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
+from tinygrad import Tensor, UOp, GlobalCounters, Context, Device, TinyJit
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
@@ -31,6 +31,10 @@ def custom_elementwise_add_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
   C,A,B = C.flatten(), A.flatten(), B.flatten()
   i = UOp.range(C.numel(), 0)
   return C[i].store(A[i]+B[i]).end(i).sink(arg=KernelInfo(name=f"custom_add_kernel_{C.numel()}")).simplify()
+
+def custom_scale_kernel(C:UOp, S:UOp, A:UOp) -> UOp:
+  i = UOp.range(C.numel(), 0)
+  return C[i].store(A[i] * S.cast(A.dtype)).end(i).sink(arg=KernelInfo(name=f"custom_scale_{C.numel()}"))
 
 def custom_elementwise_addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:
   C,D,A,B = C.flatten(), D.flatten(), A.flatten(), B.flatten()
@@ -130,6 +134,25 @@ class TestCustomKernel(unittest.TestCase):
     # webgpu silently errors when a kernel has duplicate buffer args, so the list stays the same.
     # https://gpuweb.github.io/gpuweb/#abstract-opdef-encoder-bind-groups-alias-a-writable-resource
     self.assertEqual(x.tolist(), [1, 2, 3, 4] if Device.DEFAULT != "WEBGPU" else [0, 1, 2, 3])
+
+  def test_scalar_arg_any_position(self):
+    for order in ((1, 0, 2), (0, 1, 2), (0, 2, 1)):  # scalar first, middle, last
+      srcs = (Tensor.empty(4), Tensor(UOp.variable("s", 1, 10, dtypes.int).bind(3)), Tensor([1., 2., 3., 4.]))
+      outs = Tensor.custom_kernel(*[srcs[i] for i in order], fxn=lambda *p, order=order: custom_scale_kernel(*[p[order.index(i)] for i in range(3)]))
+      self.assertEqual(outs[order.index(0)].tolist(), [3., 6., 9., 12.])
+
+  def test_scalar_arg_jit(self):
+    @TinyJit
+    def f(a:Tensor, s:UOp) -> Tensor: return Tensor.custom_kernel(Tensor.empty(4), Tensor(s), a, fxn=custom_scale_kernel)[0].realize()
+    a = Tensor([1., 2., 3., 4.]).realize()
+    for n in (1, 2, 3, 7): self.assertEqual(f(a, UOp.variable("s", 1, 10, dtypes.int).bind(n)).tolist(), [1.*n, 2.*n, 3.*n, 4.*n])
+
+  def test_scalar_arg_backward(self):
+    # scalars are not call args, so grad_fxn gets the buffers
+    a, s = Tensor([1., 2., 3., 4.]), Tensor(UOp.variable("s", 1, 10, dtypes.int).bind(3))
+    out = Tensor.custom_kernel(Tensor.empty(4), s, a, fxn=custom_scale_kernel, grad_fxn=lambda g,k: (None, (Tensor(g)*3).uop))[0]
+    out.sum().backward()
+    self.assertEqual(a.grad.tolist(), [3., 3., 3., 3.])
 
   def test_simple_sharded(self):
     devs = ("CPU:0", "CPU:1")

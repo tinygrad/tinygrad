@@ -1253,9 +1253,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # one-line convenience for the single-output case: self is the value
   def call_with_output(self, *srcs:UOp, **kwargs) -> UOp: return UOp.call_with_outputs((self,), *srcs, **kwargs)[0]
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
-    kernel = fxn(*placeholders).call(*srcs, grad_fxn=grad_fxn)
-    return [s.after(kernel) for s in srcs]
+    # scalars are body params bound by name and never call args, only buffers take slots (like kernel_var in llm/kernels/amd.py)
+    nbuf, scalar = itertools.count(), [s.is_bound_var or s.is_variable for s in srcs]
+    placeholders = [(s.src[0] if s.op is Ops.AFTER else s).replace(op=Ops.PARAM) if sc else UOp.placeholder_like(s, slot=next(nbuf))
+                    for s, sc in zip(srcs, scalar)]
+    bufs = [s for s, sc in zip(srcs, scalar) if not sc]
+    # the bound values ride on the first buffer so they still reach var_vals
+    if bufs and (bound := [s for s in srcs if s.is_bound_var]): bufs[0] = bufs[0].after(*bound)
+    kernel = fxn(*placeholders).call(*bufs, grad_fxn=grad_fxn)
+    it = iter(bufs)
+    return [s if sc else next(it).after(kernel) for s, sc in zip(srcs, scalar)]
 
   def to_elf(self) -> TinyELF:
     assert self.op is Ops.PROGRAM and isinstance(self.arg, ProgramInfo), "to_elf should only be called on a PROGRAM ast"
