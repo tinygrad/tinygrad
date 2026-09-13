@@ -36,7 +36,7 @@ class TestAssociativeScan(unittest.TestCase):
     expected = np.empty_like(arr)
     expected[-1] = arr[-1]
     for i in range(len(arr)-2, -1, -1):
-        expected[i] = arr[i] @ expected[i+1]
+      expected[i] = arr[i] @ expected[i+1]
     np.testing.assert_allclose(out, expected, rtol=1e-5, atol=1e-6)
 
   def test_single_element(self):
