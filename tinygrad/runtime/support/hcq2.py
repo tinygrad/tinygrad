@@ -136,9 +136,9 @@ def stage_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
     base, it, copies = UOp.from_buffer(staging), src.dtype.itemsize, []
     chunk = (STAGING_SIZE // STAGING_SLOTS) // it
     for i, off in enumerate(range(0, src.max_numel(), chunk)):
-      stage = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it]
-      copies += [src[off:off+n].copy_to_device(staging.device).call(stage, src[off:off+n]),
-                 stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
+      n = min(chunk, src.max_numel() - off)
+      stage, part = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + n * it], src[off:off+n]
+      copies += [part.copy_to_device(staging.device).call(stage, part), stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
     return UOp(Ops.LINEAR, src=tuple(copies))
 
   if Device[device].has_copy_queue: return None

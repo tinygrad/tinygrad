@@ -330,8 +330,8 @@ class RemoteMMIOInterface(MMIOInterface):
   def __getitem__(self, k):
     sl, el = k if isinstance(k, slice) else slice(k, k + 1), struct.calcsize(self.fmt)
     st, en = (sl.start or 0) * el, (len(self) if sl.stop is None else sl.stop) * el
-    cmd = RemoteCmd.SYSMEM_READ if self.sysmem else RemoteCmd.MMIO_READ
-    data = self.dev.rpc(cmd, (self.addr if self.sysmem else self.off) + st, en - st, bar=self.residx, readout_size=en - st)[2]
+    cmd, addr = (RemoteCmd.SYSMEM_READ, self.addr) if self.sysmem else (RemoteCmd.MMIO_READ, self.off)
+    data = self.dev.rpc(cmd, addr + st, en - st, bar=self.residx, readout_size=en - st)[2]
     res = data if self.fmt == 'B' else list(struct.unpack(f'<{(en - st) // el}{self.fmt}', data))
     return res if isinstance(k, slice) else res[0]
   def __setitem__(self, k, v):
