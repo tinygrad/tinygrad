@@ -1479,6 +1479,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return cx.image_conv2d(cw, groups=groups, dtype=dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
   def image_conv2d(self, weight:Self, bias:Self|None=None, groups=1, stride=1, dilation=1, padding=0, dtype=None) -> Self:
+    assert dtype is None or to_dtype(dtype) == dtypes.float32, "image math is done in float32"
     dtsz = 2 if FLOAT16 else 4
 
     (bs,_,_,_), (cout,cin,H,W) = self.shape, weight.shape
@@ -1551,7 +1552,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
     # the conv!
-    ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
+    ret = (x*w).sum((-4, -3, -2, -1))
 
     ret = ret.reshape(bs, oy, ox, groups, rcout)
     # undo hack for non multiples of 4 on C.rcout
