@@ -262,7 +262,7 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
   signals = [ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs]
   fence = UOp.custom_function("hcq_fence", *timelines, *signals)
   for (devs, queue), cmds in queues.items(): submits.append(make_submit(*cmds, devs=devs, queue=queue).after(fence, *submits[-1:]))
-  sink = UOp.sink(*submits, arg=KernelInfo("hcq_submit"), tag=1)
+  sink = UOp.sink(*submits, arg=KernelInfo("hcq_submit", estimates=Estimates()), tag=1)
   for pm in [Device[d].pm_batch for d in ctx.queues if Device[d].pm_batch is not None]: # a device adds its own work to the batch
     if (r:=pm.rewrite(sink)) is not None: sink = r
 
