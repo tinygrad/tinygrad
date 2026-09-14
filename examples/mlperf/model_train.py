@@ -1504,12 +1504,12 @@ def train_llama3():
 
     loss_cpu = loss_acc.to("CPU")
     loss_reset = model.update_amax(reset=loss_acc)
-    refreshed_mxfp4 = model.refresh_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
+    updated_mxfp4 = model.update_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
     Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_reset, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax,
-                   *refreshed_mxfp4)
+                   *updated_mxfp4)
 
     return lr_cpu, grad_norm_cpu, loss_cpu
 

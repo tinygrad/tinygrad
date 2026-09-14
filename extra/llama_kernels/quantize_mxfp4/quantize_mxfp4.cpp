@@ -1,8 +1,6 @@
 // Copyright (c) 2025-2026, Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-#include <hip/hip_runtime.h>
-#include <cstdint>
 #include "quantize_mxfp4_device.h"
 
 #if !defined(KERNEL_NAME) || !defined(M_DIM) || !defined(N_DIM) || !defined(WRITE_ROWWISE_VALUE) || \
@@ -11,8 +9,6 @@
 #endif
 
 namespace {
-
-using namespace mxfp4;
 
 constexpr int BLOCK = 32;
 constexpr int TILE_M = 128;
@@ -46,14 +42,14 @@ __device__ __forceinline__ void quantize_row(uint16_t* tile, uint8_t* fp4_output
                                              int tile_m, int tile_n, int local_row, int lane) {
   const int row = tile_m + local_row;
   const int col = lane * VALUES_PER_THREAD;
-  const Quantized4 result = quantize(load_bf16x4(tile + local_row * SMEM_STRIDE + col), lane);
-  store_fp4<SHUFFLE_ROWWISE_FP4>(fp4_output, row, (tile_n + col) / 2, N_PACKED, result.fp4);
-  if (lane == 0) store_scale(scale_output, row, tile_n / BLOCK, N_SCALES, result.scale);
+  const mxfp4::Quantized4 result = mxfp4::quantize(mxfp4::load_bf16x4(tile + local_row * SMEM_STRIDE + col), lane);
+  mxfp4::store_fp4<SHUFFLE_ROWWISE_FP4>(fp4_output, row, (tile_n + col) / 2, N_PACKED, result.fp4);
+  if (lane == 0) mxfp4::store_scale(scale_output, row, tile_n / BLOCK, N_SCALES, result.scale);
 }
 
-__device__ __forceinline__ Quantized4 quantize_col(uint16_t* tile, int col, int lane) {
+__device__ __forceinline__ mxfp4::Quantized4 quantize_col(uint16_t* tile, int col, int lane) {
   const int row = lane * VALUES_PER_THREAD;
-  return quantize(make_float4(
+  return mxfp4::quantize(make_float4(
     __uint_as_float(static_cast<uint32_t>(tile[(row + 0) * SMEM_STRIDE + col]) << 16),
     __uint_as_float(static_cast<uint32_t>(tile[(row + 1) * SMEM_STRIDE + col]) << 16),
     __uint_as_float(static_cast<uint32_t>(tile[(row + 2) * SMEM_STRIDE + col]) << 16),
@@ -86,7 +82,7 @@ void KERNEL_NAME(uint8_t* __restrict__ rowwise_fp4, uint8_t* __restrict__ rowwis
 
         if constexpr (WRITE_ROWWISE) quantize_row(tile, rowwise_fp4, rowwise_scale, tile_m, tile_n, line, lane);
         if constexpr (WRITE_COLWISE) {
-          const Quantized4 result = quantize_col(tile, line, lane);
+          const mxfp4::Quantized4 result = quantize_col(tile, line, lane);
           col_fp4[chunk_n][chunk_m] = result.fp4;
           col_scale[chunk_n][chunk_m] = result.scale;
         }
@@ -109,7 +105,7 @@ void KERNEL_NAME(uint8_t* __restrict__ rowwise_fp4, uint8_t* __restrict__ rowwis
       if (lane == 0) {
         const int col = block_n + chunk_n * BLOCK + line;
         for (int chunk_m = 0; chunk_m < TILE_M / BLOCK; chunk_m++)
-          store_scale(colwise_scale, col, block_m / BLOCK + chunk_m, M_SCALES, col_scale[chunk_n][chunk_m]);
+          mxfp4::store_scale(colwise_scale, col, block_m / BLOCK + chunk_m, M_SCALES, col_scale[chunk_n][chunk_m]);
       }
       __syncthreads();
     }
@@ -125,9 +121,9 @@ void KERNEL_NAME(uint8_t* __restrict__ rowwise_fp4, uint8_t* __restrict__ rowwis
         if constexpr (WRITE_COLWISE) {
           const int row = lane * VALUES_PER_THREAD;
           const int col = tile_n + line;
-          const Quantized4 result = quantize_col(tile, line, lane);
-          store_fp4<true>(colwise_fp4, col, (tile_m + row) / 2, M_PACKED, result.fp4);
-          if (lane == 0) store_scale(colwise_scale, col, tile_m / BLOCK, M_SCALES, result.scale);
+          const mxfp4::Quantized4 result = quantize_col(tile, line, lane);
+          mxfp4::store_fp4<true>(colwise_fp4, col, (tile_m + row) / 2, M_PACKED, result.fp4);
+          if (lane == 0) mxfp4::store_scale(colwise_scale, col, tile_m / BLOCK, M_SCALES, result.scale);
         }
         __syncthreads();
       }

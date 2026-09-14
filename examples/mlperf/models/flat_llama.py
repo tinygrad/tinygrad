@@ -427,16 +427,16 @@ class FlatTransformer:
     register_mxfp4_weight_cache(self.wqkv, cache["wqkv"])
     return cache
 
-  def refresh_mxfp4_weight_cache(self, cache:dict[str, list[tuple[Tensor, Tensor, Tensor, Tensor]]]) -> list[Tensor]:
+  def update_mxfp4_weight_cache(self, cache:dict[str, list[tuple[Tensor, Tensor, Tensor, Tensor]]]) -> list[Tensor]:
     from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
-    refreshed = []
+    updated = []
     for name, layers in cache.items():
       if name in ("w13", "w2", "wqkv"):
-        refreshed.extend(x for outputs in layers for x in outputs)
+        updated.extend(x for outputs in layers for x in outputs)
         continue
       for weight, outputs in zip(getattr(self, name), layers):
-        refreshed.extend(quantize_mxfp4(weight, shuffle_row=True, shuffle_col=True, out=outputs))
-    return refreshed
+        updated.extend(quantize_mxfp4(weight, shuffle_row=True, shuffle_col=True, out=outputs))
+    return updated
 
   def reset_amax(self):
     for st in (self._fp8_next_amax, self._fp8_next_grad_amax):
