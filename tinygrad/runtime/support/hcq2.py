@@ -198,7 +198,7 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   if latest and device.split(":")[0] == "NV" and queue.startswith("COMPUTE") and (p:=ctx.prev[tag]) is not None: latest[(device, queue)] = p
 
   ctx.signal_tags |= set(latest.values())
-  return [UOp(Ops.NOOP).ins("wait", src=(ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64))) for (d, q), t in latest.items()]
+  return [UOp(Ops.NOOP).ins("wait", ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64)) for (d, q), t in latest.items()]
 
 def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
   # find all waits first to mark calls that must signal
@@ -211,7 +211,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
             UOp(Ops.NOOP).ins("wait", timeline(devices), timeline_value(devices))]
 
     # dependency waits, then the call between its timestamps
-    ts_ins = [UOp(Ops.NOOP).src("timestamp", ctx.slot(devices, i)) for i in ctx.stamps(devices, tag)]
+    ts_ins = [UOp(Ops.NOOP).ins("timestamp", ctx.slot(devices, i)) for i in ctx.stamps(devices, tag)]
     q += waits + ts_ins[:1] + [call] + ts_ins[1:]
 
     # signal the queue if someone waits for us
@@ -291,10 +291,10 @@ class HWQueue:
     (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), lambda ctx, call, prg: ctx.exec(call, prg)),
     (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), lambda ctx, call: ctx.copy(call)),
     (UPat(Ops.CALL, arg=InstInfo("barrier", dtypes.void)), lambda ctx: ctx.memory_barrier()),
-    (UPat(Ops.CALL, arg=InstInfo("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
-    (UPat(Ops.CALL, arg=InstInfo("wait_eq", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
-    (UPat(Ops.CALL, arg=InstInfo("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
-    (UPat(Ops.CALL, arg=InstInfo("store", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
+    (UPat(Ops.CALL, arg=InstInfo("wait", dtypes.void), src=(UPat(), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
+    (UPat(Ops.CALL, arg=InstInfo("wait_eq", dtypes.void), src=(UPat(), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
+    (UPat(Ops.CALL, arg=InstInfo("timestamp", dtypes.void), src=(UPat(), UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
+    (UPat(Ops.CALL, arg=InstInfo("store", dtypes.void), src=(UPat(), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
   ])
 
   def __init__(self, ctx:EncodeCtx, submit:UOp):
