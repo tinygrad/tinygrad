@@ -588,9 +588,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def ins(self, opc:Any, *src:UOp, **kwargs):
     graph = set(self.toposort())
     # only value (register) producing operands are bound to the graph. isel rewrites a node before its srcs, so this can't use the tags
-    bound = tuple(s for s in src if s in graph and s.dtype is not dtypes.void)
-    ps = {o:o.param_like(i) for i,o in enumerate(bound)}
-    sink = self.substitute(ps)
+    bound = {s:i for i,s in enumerate(src) if s in graph and s.dtype is not dtypes.void}
+    sink = self.substitute({o:o.param_like(i) for o,i in bound.items()})
     ret = UOp(Ops.CALL, (sink,) + src, InstInfo(opc, kwargs.pop("dtype", self.dtype)), kwargs.pop("tag", self.tag))
     assert not kwargs, f"unknown kwargs to ins: {list(kwargs)}"
     return ret
