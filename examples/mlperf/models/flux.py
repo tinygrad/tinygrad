@@ -6,8 +6,6 @@ import math
 from typing import List, Optional, Union, Tuple, Callable
 from dataclasses import dataclass
 
-def tensor_identity(x:Tensor) -> Tensor: return x
-
 class AutoEncoder:
   def __init__(self, scale_factor:float, shift_factor:float):
     self.decoder = FirstStage.Decoder(128, 3, 3, 16, [1, 2, 4, 4], 2, 256)
@@ -294,7 +292,6 @@ class Flux:
 
   def __init__(
       self,
-      guidance_embed:bool,
       in_channels:int = 64,
       vec_in_dim:int = 768,
       context_in_dim:int = 4096,
@@ -309,7 +306,6 @@ class Flux:
       ):
 
     axes_dim = axes_dim or [16, 56, 56]
-    self.guidance_embed = guidance_embed
     self.in_channels = in_channels
     self.out_channels = self.in_channels
     if hidden_size % num_heads != 0:
@@ -323,23 +319,18 @@ class Flux:
     self.img_in = nn.Linear(self.in_channels, self.hidden_size, bias=True)
     self.time_in = MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size)
     self.vector_in = MLPEmbedder(vec_in_dim, self.hidden_size)
-    self.guidance_in:Callable[[Tensor], Tensor] = MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size) if guidance_embed else tensor_identity
     self.txt_in = nn.Linear(context_in_dim, self.hidden_size)
 
     self.double_blocks = [DoubleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias) for _ in range(depth)]
     self.single_blocks = [SingleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=mlp_ratio) for _ in range(depth_single_blocks)]
     self.final_layer = LastLayer(self.hidden_size, 1, self.out_channels)
 
-  def __call__(self, img:Tensor, img_ids:Tensor, txt:Tensor, txt_ids:Tensor, timesteps:Tensor, y:Tensor, guidance:Optional[Tensor] = None) -> Tensor:
+  def __call__(self, img:Tensor, img_ids:Tensor, txt:Tensor, txt_ids:Tensor, timesteps:Tensor, y:Tensor) -> Tensor:
     if img.ndim != 3 or txt.ndim != 3:
       raise ValueError("Input img and txt tensors must have 3 dimensions.")
     # running on sequences img
     img = self.img_in(img)
     vec = self.time_in(timestep_embedding(timesteps, 256))
-    if self.guidance_embed:
-      if guidance is None:
-        raise ValueError("Didn't get guidance strength for guidance distilled model.")
-      vec = vec + self.guidance_in(timestep_embedding(guidance, 256))
     vec = vec + self.vector_in(y)
     txt = self.txt_in(txt)
     ids = Tensor.cat(txt_ids, img_ids, dim=1)
@@ -374,9 +365,6 @@ class Flux:
     self.vector_in.in_layer.bias.shard_(devices, axis=None).realize()
     self.vector_in.out_layer.weight.shard_(devices, axis=0).realize()
     self.vector_in.out_layer.bias.shard_(devices, axis=0).realize()
-
-    if isinstance(self.guidance_in, MLPEmbedder):
-      for p in nn.state.get_parameters(self.guidance_in): p.shard_(devices, axis=None).realize()
 
     self.final_layer.adaLN_modulation[-1].weight.shard_(devices, axis=1).realize()
     self.final_layer.adaLN_modulation[-1].bias.shard_(devices, axis=None).realize()
