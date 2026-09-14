@@ -137,11 +137,11 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
                                   ((n % RING_ENTRIES) << 48) | (((p + ceildiv(size, MTU)) & 0xffffff) << 24) | (p & 0xffffff))]
 
       # rings the doorbell: the slot after the wqe and the epoch of its pass
-      ops += [ins("store", db, ((n + 1) % RING_ENTRIES | ((n + 1) // RING_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | ring_db)]
+      ops += [ins("write", db, ((n + 1) % RING_ENTRIES | ((n + 1) // RING_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | ring_db)]
 
       # waits for the cqe, acks the cq
       ops += [ins("wait_eq", cq_addr + (n % CQ_ENTRIES) * 32 + 24, (n // CQ_ENTRIES & 1 ^ 1 | (2 if is_recv else 0)).cast(dtypes.uint16)),
-              ins("store", db, ((n + 1) % CQ_ENTRIES | ((n + 1) // CQ_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | cq_db)]
+              ins("write", db, ((n + 1) % CQ_ENTRIES | ((n + 1) // CQ_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | cq_db)]
       n, p = n + 1, p + ceildiv(size, MTU)
 
     # and invalidate the gpu caches on recv

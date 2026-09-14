@@ -492,7 +492,6 @@ class AMDSDMAQueue(HWQueue):
            _dw(words) - 1, *words)
 
   def signal(self, signal:UOp, value:UOp):
-    if signal.dtype.itemsize == 8: return self.write(signal, value)
     op = self.sdma.SDMA_OP_FENCE | (self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.target[0] != 9 else 0)
     self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), self.sdma.SDMA_OP_TRAP, 0)
 
