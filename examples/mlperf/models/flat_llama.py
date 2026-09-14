@@ -39,7 +39,8 @@ def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
 
 def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_scale:Tensor|None=None,
            x_fp8:Tensor|None=None, grad_amax_state:Tensor|None=None, next_grad_amax_state:Tensor|None=None, x_prequant_mx:tuple|None=None,
-           next_amax_x:Tensor|None=None, mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None) -> tuple[Tensor,...]:
+           next_amax_x:Tensor|None=None, mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
+           x_prequant_mxfp4:tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]|None=None) -> tuple[Tensor,...]:
   if not fp8:
     if ASM_GEMM:
       from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
@@ -48,7 +49,7 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
   if MXFP4:
     assert x is not None, "MXFP4 matmul requires an unquantized input"
     from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm
-    if can_use_asm_gemm(x, w.T): return (asm_gemm(x, w.T, mxfp4=True, mxfp4_w=mxfp4_w),)
+    if can_use_asm_gemm(x, w.T): return (asm_gemm(x, w.T, mxfp4=True, mxfp4_w=mxfp4_w, mxfp4_x=x_prequant_mxfp4),)
     return (x @ w.T,)
   assert w_inv_scale is not None, "fp8 matmul requires w_inv_scale (weights must be stored in fp8 with per-tensor scale)"
   if MXFP8:
@@ -115,9 +116,11 @@ def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, s_2:Tensor,
                              grad_amax_xw13:Tensor|None, next_grad_amax_xw13:Tensor|None,
                              grad_amax_xout:Tensor|None, next_grad_amax_xout:Tensor|None, mxfp4_w=None):
   if FUSED_SILU_W13 and MXFP4:
-    from extra.llama_kernels.swiglu import swiglu
-    out, *ret = matmul(swiglu(x_w13), w2, amax_x=amax_x2, w_inv_scale=s_2, grad_amax_state=grad_amax_xout,
-                       next_grad_amax_state=next_grad_amax_xout, next_amax_x=next_amax_x2, mxfp4_w=mxfp4_w)
+    from extra.llama_kernels.swiglu import swiglu_mxfp4
+    x2, x2_mxfp4 = swiglu_mxfp4(x_w13)
+    out, *ret = matmul(x2, w2, amax_x=amax_x2, w_inv_scale=s_2, grad_amax_state=grad_amax_xout,
+                       next_grad_amax_state=next_grad_amax_xout, next_amax_x=next_amax_x2, mxfp4_w=mxfp4_w,
+                       x_prequant_mxfp4=x2_mxfp4)
     return out, ret
   if FUSED_SILU_W13 and not MXFP4:
     from extra.llama_kernels.cast_amax import fused_quantize_fp8_w13
