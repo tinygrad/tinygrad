@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import socket, struct, sys, signal
 from tinygrad.runtime.support.system import PCIDevice, RemoteCmd, System, REMOTE_REQ, REMOTE_RESP
-from tinygrad.runtime.support.am.amdev import AMMemoryManager
+from tinygrad.runtime.support.memory import MemoryManager
 from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.device import Device, TinyELF
 from tinygrad.helpers import DEBUG, Target, to_mv
@@ -9,7 +9,7 @@ from tinygrad.helpers import DEBUG, Target, to_mv
 def resp(resp0=0, resp1=0, status=0): return struct.pack(REMOTE_RESP, status, resp0, resp1)
 def resp_err(msg): return resp(len(err:=msg.encode()), status=1) + err
 
-discovered_devices: list[tuple[type, str]] = []
+discovered_devices: list[str] = []
 opened_devices: dict[int, PCIDevice] = {}
 mapped_bars: dict[tuple[int, int], object] = {}
 programs: list = []
@@ -25,18 +25,17 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
       mask, dev = struct.unpack('<II', payload[i:i+8])
       filter_devices.setdefault(mask, []).append(dev)
     base_class = None if arg0 == 0 else int(arg0)
-    devs = System.list_devices(arg2, tuple([(x, tuple(y)) for x,y in filter_devices.items()]), base_class)
+    devs = System.pci_scan_bus(arg2, tuple([(x, tuple(y)) for x,y in filter_devices.items()]), base_class)
     for p in devs:
       if p not in discovered_devices: discovered_devices.append(p)
-    data = "\n".join(f"{p[1]}:{discovered_devices.index(p)}" for p in devs).encode()
+    data = "\n".join(f"{p}:{discovered_devices.index(p)}" for p in devs).encode()
     return conn.sendall(resp(len(data), len(devs)) + data)
 
   # only PCI commands need an open GPU
   if cmd not in {RemoteCmd.MAP_SYSMEM, RemoteCmd.SYSMEM_READ, RemoteCmd.SYSMEM_WRITE, RemoteCmd.UNMAP_SYSMEM, RemoteCmd.LOAD_PROG, RemoteCmd.EXEC_PROG}:
     if dev_id not in opened_devices:
       if dev_id >= len(discovered_devices): raise RuntimeError(f"device {dev_id} not probed")
-      cl, pcibus = discovered_devices[dev_id]
-      opened_devices[dev_id] = cl("SV", pcibus)
+      opened_devices[dev_id] = PCIDevice("SV", discovered_devices[dev_id])
     pci_dev = opened_devices[dev_id]
 
   if cmd == RemoteCmd.MAP_BAR:
@@ -101,7 +100,7 @@ def serve(conn:socket.socket):
 
 if __name__ == "__main__":
   signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-  System.reserve_va(AMMemoryManager.va_allocator.base, AMMemoryManager.va_allocator.size)
+  System.reserve_va(MemoryManager.va_allocator.base, MemoryManager.va_allocator.size)
   port = int(sys.argv[1]) if len(sys.argv) > 1 else 6667
   server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

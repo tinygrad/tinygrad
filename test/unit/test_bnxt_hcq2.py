@@ -7,10 +7,10 @@ from tinygrad.runtime.ops_rdma import BNXTAllocator
 from tinygrad.runtime.support import hcq2
 from tinygrad.runtime.autogen import bnxt
 from tinygrad.runtime.support.rdma.bnxtdev import send_wqe, recv_wqe, msn_entry, db_value, RING_ENTRIES, CQ_ENTRIES
-from tinygrad.runtime.ops_rdma import RDMADevice
+from tinygrad.runtime import ops_rdma
 from tinygrad.engine import realize
 from tinygrad.runtime.support.memory import AddrSpace, VirtMapping
-from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta
+from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System
 from tinygrad.uop.ops import UOp, Ops, ProgramInfo, KernelInfo, graph_rewrite
 
 class TestBNXTAllocator(unittest.TestCase):
@@ -62,78 +62,104 @@ class TestRDMASchedule(unittest.TestCase):
   def setUp(self):
     self.enterContext(patch.object(hcq2, "getenv", return_value=1))
     self.devs = {d: SimpleNamespace(device=d, peer_group=g, host="CPU", has_copy_queue=True, pm_batch=None)
-                 for d, g in (("AMD:1", "a"), ("AMD:2", "b"), ("AMD:3", "a"))}
+                 for d, g in (("AMD:1", "a"), ("AMD:2", "b"), ("AMD:3", "a"), ("RDMA:0", "a"), ("RDMA:1", "b"))}
     get_device = type(Device).__getitem__
     self.enterContext(patch.object(type(Device), "__getitem__", lambda obj, d: self.devs[d] if d in self.devs else get_device(obj, d)))
+    self.enterContext(patch.object(System, "nic_for", lambda dev: self.devs["RDMA:0" if dev.peer_group == "a" else "RDMA:1"]))
 
   def prepare(self, calls): return graph_rewrite(UOp(Ops.LINEAR, src=tuple(calls)), hcq2.pm_insert_copy_staging+realize.pm_flatten_linear)
 
-  def test_split(self):
+  def test_split(self): # a copy between nodes: a send to the source's nic and a receive from the destination's, each on its gpu's queue
     src, dst = buf(0, "AMD:1"), buf(1, "AMD:2")
     send, recv = self.prepare([copy(src, dst)]).src
-    self.assertEqual((send.src[0].arg, recv.src[0].arg), ("send", "recv"))
+    self.assertTrue(hcq2.is_rdma(send) and hcq2.is_rdma(recv))
+    self.assertEqual([hcq2.rdma_wire(c).device for c in (send, recv)], ["RDMA:0", "RDMA:1"])
+    self.assertEqual([ops_rdma.side(c)[1:] for c in (send, recv)], [(src, False), (dst, True)])
     self.assertEqual((hcq2.get_enqueue_devs(send), hcq2.get_enqueue_devs(recv)), ("AMD:1", "AMD:2"))
-    self.assertIsNone(hcq2.stage_copy((), send, dst, src))
-    # The ordinary-copy path is tested with real buffers elsewhere; this checks that these calls are not split.
-    with patch.object(hcq2, "get_enqueue_devs", return_value=None):
-      self.assertIsNone(hcq2.stage_copy((), copy(src, same:=buf(2, "AMD:3")), same, src))
-      with patch.object(hcq2, "getenv", return_value=0): self.assertIsNone(hcq2.stage_copy((), copy(src, dst), dst, src))
+    self.assertIsNone(hcq2.stage_copy((), send, *send.src[1:]))
+    self.assertIsNone(hcq2.split_rdma(c:=copy(buf(2, "AMD:1"), buf(3, "AMD:3")), *c.src[1:])) # inside a node: not split
+    with patch.object(hcq2, "getenv", return_value=0): self.assertIsNone(hcq2.split_rdma(c:=copy(buf(4, "AMD:1"), buf(5, "AMD:2")), *c.src[1:]))
 
-  def test_dependencies_stay_on_each_node(self):
+  def test_each_node_has_its_side(self):
     src, dst = buf(0, "AMD:1"), buf(1, "AMD:2")
-    send, recv = self.prepare([copy(src, dst)]).src
-    calls = [(kernel(src), ("AMD:1",), "COPY:0"), (kernel(dst, False), ("AMD:2",), "COPY:0"),
-             (send, ("AMD:1",), "COMPUTE:0"), (recv, ("AMD:2",), "COMPUTE:0"),
-             (kernel(src), ("AMD:1",), "COPY:0"), (kernel(dst, False), ("AMD:2",), "COPY:0")]
-    ctx = hcq2.BatchCtx(calls, False)
-    waits = [hcq2._wait_ins(ctx, c, ds[0], q, i) for i, (c, ds, q) in enumerate(calls)]
-    self.assertEqual([[w.src[1].val for w in ws] for ws in waits], [[], [], [1], [2], [3], [4]])
     batches = hcq2.sched_batches(self.prepare([copy(src, dst), copy(buf(2, "AMD:3"), dst)]), False).src
     self.assertEqual([(b.arg.aux.device, b.arg.aux.rdma) for b in batches], [(("AMD:1", "AMD:3"), True), (("AMD:2",), True)])
 
 class TestBNXTCopy(unittest.TestCase):
-  def test_words_replay(self): # the words of a send and a receive, linked and run: rings and cqs wrap, counters advance
-    for recv in (False, True):
-      rings = {n: Buffer("CPU", 8192, dtypes.uint8, preallocate=True) for n in ("sq", "rq", "scq", "rcq", "db")} # addressed, never written here
-      counters = ("sq_seq", "rq_seq", "psn")
-      args = {n: UOp.from_buffer(b) for n, b in rings.items()}
-      args |= {n: UOp.placeholder((1,), dtypes.uint64, 0, device="CPU", volatile=True, tag=n) for n in counters}
-      nic = SimpleNamespace(device="CPU", iface=SimpleNamespace(dev_impl=SimpleNamespace(db_off=0)), arg=lambda pair, n: args[n],
-                            qp=lambda a, b: SimpleNamespace(qpn=5, scq_id=6, rcq_id=7))
-      nic.wait = types.MethodType(RDMADevice.wait, nic)
-      recorded:list = []
-      hq = SimpleNamespace(dev=SimpleNamespace(device="CPU"), devs=("CPU",), ctx=SimpleNamespace(host="CPU"), counts={}, words={},
-                           memory_barrier=lambda: None, write=lambda dst, *w: recorded.extend([dst, *w]),
-                           signal=lambda dst, v: recorded.extend([dst, v]), wait=lambda a, v, eq: recorded.extend([a, v]))
-      hq.rt, hq.bump = (types.MethodType(f, hq) for f in (hcq2.HWQueue.rt, hcq2.HWQueue.bump))
-      src, dst = [Buffer("CPU", 4096, dtypes.uint8, preallocate=True) for _ in range(2)]
-      call = UOp.from_buffer(src).copy_to_device("CPU").replace(arg="recv" if recv else "send").call(UOp.from_buffer(dst), UOp.from_buffer(src))
-      RDMADevice.copy(nic, hq, call)
-      # every recorded word at its own width, read back as u64
-      checks = UOp.placeholder((8 * len(recorded),), dtypes.uint8, device="CPU", tag="checks")
-      words = [w if isinstance(w, UOp) else UOp.const(w, dtypes.uint32) for w in recorded]
+  def test_words_replay(self): # a send and a receive as ops of the gpu queue, linked and run: rings and cqs wrap, one completion per signal
+    for recv, chunk in ((False, 4096), (True, 4096), (False, 1024), (True, 1024)): # a wqe per chunk
+      self.enterContext(patch.object(ops_rdma, "RDMA_CHUNK", chunk))
+      k = 4096 // chunk
+      rings = {n: Buffer("CPU", RING_ENTRIES * 128 + RING_ENTRIES * 8, dtypes.uint8, preallocate=True) for n in ("sq", "rq", "scq", "rcq", "db")}
+      args = {n: UOp.from_buffer(b) for n, b in rings.items()} # addressed, never written here
+      nic = SimpleNamespace(device="CPU", host="CPU", iface=SimpleNamespace(dev_impl=SimpleNamespace(db_off=0)), words={},
+                            arg=lambda pair, n: args[n], qp=lambda pair, peer: SimpleNamespace(qpn=5, scq_id=6, rcq_id=7))
+      nic.word = types.MethodType(ops_rdma.RDMADevice.word, nic)
+      src, dst = Buffer("CPU:1", 4096, dtypes.uint8, preallocate=True), Buffer("CPU", 4096, dtypes.uint8, preallocate=True) # "nodes" CPU:1 and CPU
+      wire = UOp.placeholder((4096,), dtypes.uint8, 0, device="RDMA:0", tag=("rdma", ("CPU", "CPU:1")))
+      call = (UOp.from_buffer(src).copy_to_device("CPU").call(UOp.from_buffer(dst), wire) if recv else
+              UOp.from_buffer(src).copy_to_device("RDMA:0").call(wire, UOp.from_buffer(src)))
+      signal = UOp(Ops.INS, arg=("store", dtypes.void), src=(args["db"], UOp.const(1, dtypes.uint64)))
+      submit = hcq2.make_submit(call, signal, devs=("CPU",) if recv else ("CPU:1",), queue="COPY:0")
+      get_device = type(Device).__getitem__
+      with patch.object(type(Device), "__getitem__", lambda obj, d: nic if d == "RDMA:0" else get_device(obj, d)):
+        ops = list(ops_rdma.rdma_submit(hcq2.EncodeCtx(("CPU",)), submit, submit.src[0]).src[0].src)
+      self.assertIs(ops.pop(), signal) # the copy, then what completes it, then the signal
+      words = [w for u in ops for w in u.src] # every word of the queue's writes, doorbells and waits, at its own width, read back as u64
+      checks = UOp.placeholder((8 * len(words),), dtypes.uint8, device="CPU", tag="checks")
       out = hcq2.patch(checks, [(8 * i, w) for i, w in enumerate(words)], bytes(8 * len(words)))
-      out = out.after(*[b.after(out).index(0).store(base + n) for b, (base, n) in hq.counts.items()])
       lowered = hcq2.lower_call(UOp.sink(out.index(0).load(), arg=KernelInfo("bnxt_copy_test"), tag=1).call(aux=hcq2.HCQInfo(("CPU",))))
       linked = hcq2.hcq_link(realize.lower_and_compile(UOp(Ops.LINEAR, src=(lowered,))), allow_cache=False)
       bufs = {p.tag: b.buffer for p, b in zip(lowered.without_after.src[1:], linked.src[0].without_after.src[1:])}
-      ring, seq, cq = ("rq", "rq_seq", "rcq") if recv else ("sq", "sq_seq", "scq")
-      data = dst if recv else src
-      for i in range(130):
+      ring, cq, data = ("rq", "rcq", dst) if recv else ("sq", "scq", src)
+      seq = bufs[hcq2.to_name("seq", "CPU", "CPU:1", ring)].host.view(fmt="Q")
+      base, psn0 = seq[0], 0 if recv else bufs[hcq2.to_name("psn", "CPU", "CPU:1", ring)].host.view(fmt="Q")[0] # the counters persist across links
+      for it in range(130 // k):
         realize.run_linear(linked, jit=True)
-        words = bufs["checks"].host.view(fmt="Q")[:]
-        wqe, rest = words[:12], words[12:] # the slot address, 8 header dwords, va, key, size
-        self.assertEqual(wqe[0], rings[ring]._buf + i % RING_ENTRIES * 128)
-        self.assertEqual(struct.pack("<8I", *wqe[1:9]) + struct.pack("<QII", *wqe[9:12]),
-                         (recv_wqe if recv else send_wqe)(data._buf, data._buf & 0xffffffff, 4096))
-        if not recv:
-          self.assertEqual(rest[:2], [rings[ring]._buf + 0x1000 + i % RING_ENTRIES * 8, msn_entry(i, i, 4096)[0]])
-          rest = rest[2:]
-        doorbell = db_value(5, bnxt.DBC_DBC_TYPE_RQ if recv else bnxt.DBC_DBC_TYPE_SQ, (i + 1) % RING_ENTRIES, (i + 1) // RING_ENTRIES & 1)
-        cq_doorbell = db_value(7 if recv else 6, bnxt.DBC_DBC_TYPE_CQ, (i + 1) % CQ_ENTRIES, (i + 1) // CQ_ENTRIES & 1)
-        toggle = (i // CQ_ENTRIES & 1) ^ 1 | (2 if recv else 0)
-        self.assertEqual((rest[1], rest[3], rest[5]), (doorbell, toggle, cq_doorbell)) # full width doorbell words
-        self.assertEqual(rest[2], rings[cq]._buf + i % CQ_ENTRIES * 32 + 24)
-        self.assertEqual(bufs[seq].host.view(fmt="Q")[0], i + 1)
+        self.assertEqual(seq[0], base + (it + 1) * k)
+        w = bufs["checks"].host.view(fmt="Q")[:]
+        for j in range(k): # every wqe of the copy: the slot address, 8 header dwords, va, key, size; a send's msn entry; the doorbell
+          i = base + it * k + j
+          self.assertEqual(w[0], rings[ring]._buf + i % RING_ENTRIES * 128)
+          expect = (recv_wqe if recv else send_wqe)(data._buf + j * chunk, data._buf & 0xffffffff, chunk)
+          self.assertEqual(struct.pack("<8I", *w[1:9]) + struct.pack("<QII", *w[9:12]), expect)
+          w = w[12:]
+          if not recv:
+            self.assertEqual(w[:2], [rings[ring]._buf + RING_ENTRIES * 128 + i % RING_ENTRIES * 8, msn_entry(i, psn0 + i - base, chunk)[0]])
+            w = w[2:]
+          typ = bnxt.DBC_DBC_TYPE_RQ if recv else bnxt.DBC_DBC_TYPE_SQ
+          self.assertEqual(w[1], db_value(5, typ, (i + 1) % RING_ENTRIES, (i + 1) // RING_ENTRIES & 1))
+          w = w[2:]
+        last = base + (it + 1) * k - 1 # then one completion: the cqe of the last wqe and the cq doorbell
+        self.assertEqual((w[0], w[1]), (rings[cq]._buf + last % CQ_ENTRIES * 32 + 24, (last // CQ_ENTRIES & 1) ^ 1 | (2 if recv else 0)))
+        self.assertEqual(w[3], db_value(7 if recv else 6, bnxt.DBC_DBC_TYPE_CQ, (last + 1) % CQ_ENTRIES, (last + 1) // CQ_ENTRIES & 1))
+
+  def test_two_sizes_one_pair(self): # sends of different sizes share the pair's slots: consecutive wqes, one completion before the signal
+    rings = {n: Buffer("CPU", RING_ENTRIES * 128 + RING_ENTRIES * 8, dtypes.uint8, preallocate=True) for n in ("sq", "scq", "db")}
+    args = {n: UOp.from_buffer(b) for n, b in rings.items()}
+    nic = SimpleNamespace(device="CPU", host="CPU", iface=SimpleNamespace(dev_impl=SimpleNamespace(db_off=0)), words={},
+                          arg=lambda pair, n: args[n], qp=lambda pair, peer: SimpleNamespace(qpn=5, scq_id=6, rcq_id=7))
+    nic.word = types.MethodType(ops_rdma.RDMADevice.word, nic)
+    srcs = [Buffer("CPU:1", n, dtypes.uint8, preallocate=True) for n in (4096, 2048)]
+    wires = [UOp.placeholder((b.size,), dtypes.uint8, 0, device="RDMA:0", tag=("rdma", ("CPU", "CPU:1"))) for b in srcs]
+    calls = [UOp.from_buffer(b).copy_to_device("RDMA:0").call(w, UOp.from_buffer(b)) for b, w in zip(srcs, wires)]
+    signal = UOp(Ops.INS, arg=("store", dtypes.void), src=(args["db"], UOp.const(1, dtypes.uint64)))
+    submit = hcq2.make_submit(*calls, signal, devs=("CPU:1",), queue="COPY:0")
+    get_device = type(Device).__getitem__
+    with patch.object(type(Device), "__getitem__", lambda obj, d: nic if d == "RDMA:0" else get_device(obj, d)):
+      ops = list(ops_rdma.rdma_submit(hcq2.EncodeCtx(("CPU",)), submit, submit.src[0]).src[0].src)
+    self.assertEqual([u.arg[0] for u in ops], ["write", "write", "store"] * 2 + ["wait_eq", "store", "store"]) # two posts, one completion, the signal
+    words = [w for u in ops[:-1] for w in u.src]
+    checks = UOp.placeholder((8 * len(words),), dtypes.uint8, device="CPU", tag="checks")
+    out = hcq2.patch(checks, [(8 * i, w) for i, w in enumerate(words)], bytes(8 * len(words)))
+    lowered = hcq2.lower_call(UOp.sink(out.index(0).load(), arg=KernelInfo("bnxt_two_sizes"), tag=1).call(aux=hcq2.HCQInfo(("CPU",))))
+    linked = hcq2.hcq_link(realize.lower_and_compile(UOp(Ops.LINEAR, src=(lowered,))), allow_cache=False)
+    bufs = {p.tag: b.buffer for p, b in zip(lowered.without_after.src[1:], linked.src[0].without_after.src[1:])}
+    base = bufs[hcq2.to_name("seq", "CPU", "CPU:1", "sq")].host.view(fmt="Q")[0]
+    realize.run_linear(linked, jit=True)
+    w = bufs["checks"].host.view(fmt="Q")[:]
+    self.assertEqual((w[0], w[16]), (rings["sq"]._buf + base % RING_ENTRIES * 128, rings["sq"]._buf + (base + 1) % RING_ENTRIES * 128))
+    self.assertEqual(bufs[hcq2.to_name("seq", "CPU", "CPU:1", "sq")].host.view(fmt="Q")[0], base + 2)
+    self.assertEqual(w[32], rings["scq"]._buf + (base + 1) % CQ_ENTRIES * 32 + 24) # the completion waits for the last wqe
 
 if __name__ == "__main__": unittest.main()

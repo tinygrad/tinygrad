@@ -1,16 +1,22 @@
 from __future__ import annotations
+from typing import Any
 import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, struct, socket, enum, itertools
 from tinygrad.device import BufferStorage, Buffer, Device
 from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize
 from tinygrad.runtime.autogen import libc, pci, vfio
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, hcq_filter_visible_devices
-from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator
+from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator, MemoryManager
 from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, USBMMIOInterface
 
 MAP_FIXED, MAP_FIXED_NOREPLACE = 0x10, 0x100000
 MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
 
 def ipv4_to_gid(ip:str) -> bytes: return bytes(10) + b'\xff\xff' + socket.inet_aton(ip)
+
+# the pci devices of a machine: vendor, (mask, device ids) pairs, base class
+PCI_DEVICES = {"AMD": (0x1002, ((0xffff, (0x74a1,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0)),), None),
+               "NV": (0x10de, ((0xff00, (0x2200,0x2400,0x2500,0x2600,0x2700,0x2800,0x2b00,0x2c00,0x2d00,0x2f00)),), 0x03),
+               "RDMA": (0x14e4, ((0xffff, (0x1760,)),), 0x02)}
 
 class _System:
   def write_sysfs(self, path:str, value:str, msg:str, expected:str|None=None):
@@ -86,12 +92,17 @@ class _System:
     return sorted([val for vndr, device, val in all_devs if vndr == vendor and any((device & mask) in devlist for mask, devlist in devices)])
 
   @functools.cache
-  def list_devices(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
-    if getenv("REMOTE", ""): return [(functools.partial(RemotePCIDevice, sock=s), x) for s, x in RemotePCIDevice.scan(vendor, devices, base_class)]
-    return [(PCIDevice, x) for x in System.pci_scan_bus(vendor, devices, base_class)]
+  def list_devices(self, device:str) -> list[tuple[Any, str]]: # the visible devices of a kind, on every node
+    remote = [(functools.partial(RemotePCIDevice, sock=s), x) for s, x in RemotePCIDevice.scan(*PCI_DEVICES[device])]
+    local = [(PCIDevice, x) for x in System.pci_scan_bus(*PCI_DEVICES[device])] if not getenv("REMOTE", "") else []
+    return hcq_filter_visible_devices(remote + local, device)
 
-  def pci_probe_device(self, device:str, dev_id:int, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
-    try: cl, pcibus = (ds:=hcq_filter_visible_devices(self.list_devices(vendor, devices, base_class), device))[dev_id]
+  def nic_for(self, dev) -> Any: # the rdma device on the node of dev
+    nics = [Device[f"RDMA:{i}"] for i in range(len(self.list_devices("RDMA")))]
+    return next(n for n in nics if n.peer_group == dev.peer_group)
+
+  def pci_probe_device(self, device:str, dev_id:int):
+    try: cl, pcibus = (ds:=self.list_devices(device))[dev_id]
     except IndexError: raise RuntimeError(f"{device}:{dev_id} does not exist ({pluralize('device', len(ds))} available)")
     return cl(device[:2], pcibus)
 
@@ -259,13 +270,12 @@ class PCIIfaceBase:
   def remote(self) -> RemotePCIDevice|None: return self.pci_dev if isinstance(self.pci_dev, RemotePCIDevice) else None
   def is_bar_small(self) -> bool: return self.pci_dev.bar_info(self.vram_bar)[1] == (256 << 20)
 
-  def __init__(self, dev, dev_id, vendor, devices:tuple[tuple[int, tuple[int, ...]], ...], vram_bar, va_start, va_size,
-               dev_impl_t, base_class:int|None=None):
-    self.pci_dev = System.pci_probe_device(dn:=dev.__class__.__name__[:-6], dev_id, vendor, devices, base_class=base_class)
-    if self.remote is None: System.reserve_va(va_start, va_size)
+  def __init__(self, dev, dev_id, vram_bar, dev_impl_t, va=MemoryManager.va_allocator):
+    self.pci_dev = System.pci_probe_device(dn:=dev.__class__.__name__[:-6], dev_id)
+    if self.remote is None: System.reserve_va(va.base, va.size)
     with contextlib.suppress(Exception): self.pci_dev.resize_bar(vram_bar)
     self.dev_impl = dev_impl_t(self.pci_dev)
-    self.dev, self.vram_bar, self.count = dev, vram_bar, len(hcq_filter_visible_devices(System.list_devices(vendor, devices, base_class), dn))
+    self.dev, self.vram_bar, self.count = dev, vram_bar, len(System.list_devices(dn))
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False,
             **kwargs) -> BufferStorage:
