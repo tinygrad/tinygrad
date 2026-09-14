@@ -2,6 +2,7 @@ import functools
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.renderer import Estimates
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.codegen.opt import Opt, OptOps
 
 @functools.cache
 def custom_fp8_backward(*args:UOp, B:int, N:int, H:int, H_KV:int, arch:str):
@@ -30,20 +31,27 @@ def custom_fp8_backward_init(dq:UOp, partial:UOp, do:UOp):
   return partial.flatten()[g].store(value).end(g).sink(arg=KernelInfo("fa_fp8_bwd_init"))
 
 @functools.cache
-def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp, *inputs:UOp, finalize:bool=False):
+def custom_fp8_backward_scales(scales:UOp, next_amax:UOp, partial:UOp, state:UOp, vs:UOp, *, D:int):
+  assert scales.numel() == 5
+  # Finalize once, rather than repeating the partial-amax reduction for every attention row in prep.
+  r = UOp.range(partial.numel(),0,AxisType.REDUCE)
+  numerator = partial.flatten()[r].reduce(r,arg=Ops.MAX)+1e-8
+  scale = numerator/57344.
+  pd,sd = (state[0]+1e-8)/448.,state[1]/57344.
+  sd = (sd>0).where(sd,4*D*scale*vs[0]*448.)
+  stores = [scales[i].store(v) for i,v in enumerate((vs[0],scale,pd,sd))]
+  # Preserve the original prep's floating-point operation order before the division by 57344.
+  stores.append(scales[4].store(numerator))
+  stores.extend(next_amax[i].store(0.) for i in range(2))
+  return UOp.group(*stores).sink(arg=KernelInfo("fa_fp8_bwd_scales"))
+
+@functools.cache
+def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp, *reset_amax:UOp):
   B,N,H,D = do.shape
   row = UOp.range(B*N*H, 0)
   d = UOp.range(D, 1, AxisType.REDUCE)
   b,n,h = row//(N*H), row//H%N, row%H
-  reset_amax = inputs[:1]
-  if finalize:
-    partial,state,vs = inputs[1:]
-    r = UOp.range(partial.numel(),2,AxisType.REDUCE)
-    scale = (partial.flatten()[r].reduce(r,arg=Ops.MAX)+1e-8)/57344.
-    pd,sd = (state[0]+1e-8)/448.,state[1]/57344.
-    sd = (sd>0).where(sd,4*D*scale*vs[0]*448.)
-    scale_values = (vs[0],scale,pd,sd)
-  else: scale = scales[1]
+  scale = scales[4]/57344. if scales.numel() == 5 else scales[1]
   rounded = (do[b,n,h,d].cast(dtypes.float)/scale).maximum(-57344).minimum(57344).cast(dtypes.fp8e5m2)
   out = out.after(do8[b,n,h,d].store(rounded))
   # Delta must use rounded FP8 dO, with descale applied before multiplication by O.
@@ -51,10 +59,15 @@ def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp, *i
   decoded = (rounded.bitcast(dtypes.uint8).cast(dtypes.uint16)<<8).bitcast(dtypes.half).cast(dtypes.float)
   value = (out[b,n,h,d].cast(dtypes.float)*(decoded*scale)).reduce(d, arg=Ops.ADD)
   stores = [delta[b,h,n].store(value)]
-  if finalize: stores.extend(scales[UOp.const(i).valid(row.eq(0))].store(v) for i,v in enumerate(scale_values))
   if reset_amax:
     stores.extend(reset_amax[0][UOp.const(i).valid(row.eq(0))].store(0.) for i in range(2))
-  return UOp.group(*stores).end(row).sink(arg=KernelInfo("fa_fp8_bwd_prep"))
+  opts = None
+  dev = do.device[0] if isinstance(do.device,tuple) else do.device
+  if (B,N,H,D) == (2,8192,32,128) and scales.numel() == 5 and Device[dev].renderer.target.arch == "gfx950":
+    # Preserve the original eight-way strided sum, with four rows per workgroup and partial unrolling.
+    opts = (Opt(OptOps.SPLIT,2,(4,AxisType.LOCAL)),Opt(OptOps.SPLIT,4,(8,AxisType.GROUP_REDUCE)),
+            Opt(OptOps.SPLIT,5,(4,AxisType.UNROLL)))
+  return UOp.group(*stores).end(row).sink(arg=KernelInfo("fa_fp8_bwd_prep",opts_to_apply=opts))
 
 def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, out:Tensor, lse:Tensor,
                  p_descale:Tensor, ds_descale:Tensor, next_amax:Tensor|None=None, *, reset_next_amax:bool=False,
@@ -77,18 +90,18 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
     reset_next_amax = True
   if delayed_state is not None:
     assert reset_next_amax
-    scales = Tensor.empty(4,device=q8.device,dtype=dtypes.float32)
+    # The assembly consumes the first four entries; prep also needs the unnormalized dO scale in entry four.
+    scales,next_amax = Tensor.custom_kernel(Tensor.empty(5,device=q8.device,dtype=dtypes.float32),next_amax,
+      partial,delayed_state,v_descale.reshape(1),fxn=functools.partial(custom_fp8_backward_scales,D=D))[:2]
   else:
     do_scale = ((local_abs_max(partial)+1e-8)/57344.).reshape(1)
     # Before the first amax observation, bound dS from the current dO and V ranges.
     ds_descale = (ds_descale > 0).where(ds_descale, 4*D*do_scale*v_descale*448.)
     scales = Tensor.cat(v_descale.reshape(1),do_scale,p_descale.reshape(1),ds_descale.reshape(1)).contiguous()
   prep = Tensor.custom_kernel(alloc(q8.shape,dtypes.fp8e5m2),alloc((B,H,N)),do,out,scales,
-    *((next_amax,) if reset_next_amax else ()),*((partial,delayed_state,v_descale.reshape(1)) if delayed_state is not None else ()),
-    fxn=functools.partial(custom_fp8_backward_prep,finalize=delayed_state is not None))
+    *((next_amax,) if reset_next_amax and delayed_state is None else ()),fxn=custom_fp8_backward_prep)
   do8, delta = prep[:2]
-  if delayed_state is not None: scales = prep[4]
-  if reset_next_amax: next_amax = prep[5]
+  if reset_next_amax and delayed_state is None: next_amax = prep[5]
   dk,dv = [alloc(q8.shape,dtypes.bfloat16) for _ in range(2)]
   amax = alloc((B,H,N//64,2))
   dev = q8.device[0] if isinstance(q8.device,tuple) else q8.device

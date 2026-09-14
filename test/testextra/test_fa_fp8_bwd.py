@@ -62,23 +62,41 @@ class TestFP8BackwardReference(unittest.TestCase):
       np.testing.assert_array_equal(model._fp8_grad_amax["fa"][1].numpy(),[5.,6.])
 
   def test_backward_scale_finalization(self):
-    from extra.thunder.amd.fa_fp8_bwd import custom_fp8_backward_init, custom_fp8_backward_prep
+    from extra.thunder.amd.fa_fp8_bwd import custom_fp8_backward_init, custom_fp8_backward_prep, custom_fp8_backward_scales
     rng = np.random.default_rng(17)
     shape = (2,64,4,128)
     do,out = [Tensor(rng.standard_normal(shape).astype(np.float32)*0.2).bfloat16().realize() for _ in range(2)]
     _,partial = Tensor.custom_kernel(Tensor.empty_like(do),Tensor.empty(2,512),do,fxn=custom_fp8_backward_init)[:2]
     for ds in (0.,0.3):
       state,vs = Tensor([1.,ds]).realize(),Tensor([0.37]).realize()
+      scales,next_amax = Tensor.custom_kernel(Tensor.empty(5),Tensor([17.,29.]).realize(),partial,state,vs,
+        fxn=functools.partial(custom_fp8_backward_scales,D=128))[:2]
       ret = Tensor.custom_kernel(Tensor.empty_like(do,dtype=dtypes.fp8e5m2),Tensor.empty(2,4,64),do,out,
-        Tensor.empty(4),Tensor([17.,29.]).realize(),partial,state,vs,fxn=functools.partial(custom_fp8_backward_prep,finalize=True))
+        scales,fxn=custom_fp8_backward_prep)+[next_amax]
       scale = (do.float().abs().max()+1e-8)/57344.
       rounded = (do.float()/scale).clamp(-57344,57344).cast(dtypes.fp8e5m2).contiguous().realize()
       expected = (out.float()*(rounded.float()*scale)).sum(-1).transpose(1,2).contiguous().realize()
       np.testing.assert_array_equal(ret[0].float().numpy(),rounded.float().numpy())
       np.testing.assert_allclose(ret[1].numpy(),expected.numpy(),rtol=2e-5,atol=2e-6)
       effective_ds = ds/57344. if ds else 4*128*scale.item()*0.37*448.
-      np.testing.assert_allclose(ret[4].numpy(),[0.37,scale.item(),(1.+1e-8)/448.,effective_ds],rtol=2e-6)
+      np.testing.assert_allclose(ret[4][:4].numpy(),[0.37,scale.item(),(1.+1e-8)/448.,effective_ds],rtol=2e-6)
       np.testing.assert_array_equal(ret[5].numpy(),[0.,0.])
+
+  def test_backward_scales_replay(self):
+    from extra.thunder.amd.fa_fp8_bwd import custom_fp8_backward_scales
+    @TinyJit
+    def step(partial,state,vs,next_amax):
+      ret = Tensor.custom_kernel(Tensor.empty(5),next_amax,partial,state,vs,
+        fxn=functools.partial(custom_fp8_backward_scales,D=128))
+      Tensor.realize(*ret[:2])
+      return ret[:2]
+    for i,ds in enumerate((0.,0.3,0.,0.6,0.)):
+      partial = Tensor.full((2,512),float(i+1)).contiguous().realize()
+      scales,next_amax = step(partial,Tensor([1.,ds]).realize(),Tensor([0.37]).realize(),Tensor([17.,29.]).realize())
+      scale = (i+1+1e-8)/57344.
+      effective_ds = ds/57344. if ds else 4*128*scale*0.37*448.
+      np.testing.assert_allclose(scales[:4].numpy(),[0.37,scale,(1.+1e-8)/448.,effective_ds],rtol=2e-6)
+      np.testing.assert_array_equal(next_amax.numpy(),[0.,0.])
 
   def test_backward_init(self):
     from extra.thunder.amd.fa_fp8_bwd import custom_fp8_backward_init
