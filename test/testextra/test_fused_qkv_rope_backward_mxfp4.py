@@ -64,9 +64,9 @@ def main() -> None:
   # Exercise the packed dQ layout written by the fast FP8 kernel, including the
   # native-gradient routing which previously discarded its unpacking view.
   from extra.thunder.amd.fa import _fa_native_grads
-  from extra.thunder.amd.fa_fp8_bwd import unpack_dq, cast_gradients
+  from extra.thunder.amd.fa_fp8_bwd import unpack_dq
   packed = dq.reshape(B,N//16,4,2,2,H,8,16).permute(0,5,1,6,3,2,7,4).contiguous().reshape(B,N,H,D)
-  raw = Tensor.custom_kernel(*(Tensor.empty_like(x) for x in (dq,dk,dv)),packed,dk,dv,fxn=cast_gradients)[:3]
+  raw = tuple(x.bfloat16().contiguous() for x in (packed,dk,dv))
   logical_dq = unpack_dq(raw[0])
   logical_dk,logical_dv = [x.reshape(B,N,H_KV,GROUP,D).sum(3) for x in raw[1:]]
   native = _fa_native_grads(logical_dq.uop,logical_dk.uop,logical_dv.uop)

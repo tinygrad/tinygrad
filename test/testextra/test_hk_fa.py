@@ -1,4 +1,4 @@
-import functools, unittest, time
+import functools, math, unittest, time
 
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.engine.jit import TinyJit
@@ -45,9 +45,9 @@ class TestFA(unittest.TestCase):
     assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
 
   def test_fp8_qk_fa_forward_backward_mlperf(self):
-    """E4M3 QK MFMA must preserve finite outputs and BF16-training gradients."""
+    """E4M3 QK MFMA must preserve finite outputs and training gradients."""
     if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("FP8 FA requires gfx950")
-    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
+    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
     Tensor.manual_seed(11)
     with Context(DEBUG=0):
       base_q = (Tensor.randn(B, N, H, D) * 0.12).bfloat16().contiguous().realize()
@@ -57,7 +57,12 @@ class TestFA(unittest.TestCase):
 
     def run(fp8_qk:bool):
       q, k, v = (x.detach().clone().contiguous().realize() for x in (base_q, base_k, base_v))
-      out, _, lse = flash_attention(q, k, v, is_causal=True, fp8_qk=fp8_qk)
+      scale = math.sqrt(D**-0.5 * math.log2(math.e))
+      q8 = (q.float()*scale).cast(dtypes.fp8e4m3).contiguous() if fp8_qk else None
+      k8 = (k.float()*scale).cast(dtypes.fp8e4m3).contiguous() if fp8_qk else None
+      state,nxt = (Tensor([1.,0.]).realize(),Tensor.zeros(2).contiguous().realize()) if fp8_qk else (None,None)
+      out, _, lse = flash_attention(q, k, v, is_causal=True, fp8_qk=fp8_qk, q_fp8=q8, k_fp8=k8,
+                                    fa_bwd_amax=state, next_fa_bwd_amax=nxt)
       out.backward(do)
       Tensor.realize(out, lse, q.grad, k.grad, v.grad)
       return out, lse, q.grad, k.grad, v.grad
@@ -71,7 +76,7 @@ class TestFA(unittest.TestCase):
     assert_allclose(fp8[4], ref[4], atol=3e-3, rtol=2e-2)
 
   def test_fp8_qk_fused_rope_forward_backward_mlperf(self):
-    """The fused RoPE writer must produce usable FP8 Q/K while preserving BF16 backward."""
+    """The fused RoPE writer must produce usable FP8 Q/K for the assembly backward."""
     if Device[Device.DEFAULT].renderer.target.arch != "gfx950": self.skipTest("FP8 FA requires gfx950")
     B, N, H, H_KV, D, GROUP = 2, 8192, 32, 8, 128, 4
     Tensor.manual_seed(13)
@@ -82,9 +87,11 @@ class TestFA(unittest.TestCase):
 
     def run(prequantized:bool):
       x = base.detach().clone().contiguous().realize()
-      q, k, v, *qk8 = fused_qkv_rope(x, freqs, H, H_KV, D, prequantize_fp8=prequantized)
-      out, _, lse = flash_attention(q, k, v, is_causal=True, fp8_qk=True,
-                                    q_fp8=qk8[0] if prequantized else None, k_fp8=qk8[1] if prequantized else None)
+      q, k, v, *qk8 = fused_qkv_rope(x, freqs, H, H_KV, D, prequantize_fp8=prequantized, write_bf16_qk=not prequantized)
+      state,nxt = (Tensor([1.,0.]).realize(),Tensor.zeros(2).contiguous().realize()) if prequantized else (None,None)
+      out, _, lse = flash_attention(q, k, v, is_causal=True, fp8_qk=prequantized,
+                                    q_fp8=qk8[0] if prequantized else None, k_fp8=qk8[1] if prequantized else None,
+                                    fa_bwd_amax=state, next_fa_bwd_amax=nxt)
       out.backward(do)
       Tensor.realize(out, lse, x.grad)
       return out, lse, x.grad

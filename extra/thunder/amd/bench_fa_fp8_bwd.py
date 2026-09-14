@@ -5,20 +5,18 @@ DEV=AMD DEBUG=2 PYTHONPATH=. ROCM_PATH=/opt/rocm-7.1.1 python extra/thunder/amd/
 Set WARMUP=2 REPEAT=10 for alternating paired measurements. Leave both unset for SQTT captures.
 Output buffers are reset outside each measured launch, including atomic accumulators.
 """
-import functools, math, os
+import functools, math
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv
 from tinygrad.engine.realize import lower_and_compile, run_linear
 from extra.thunder.amd.fa import flash_attention, custom_asm_fa_backward, custom_asm_fa_backward_shuffle
 from extra.thunder.amd.fa_fp8_bwd import custom_fp8_backward, unpack_dq
 
+@Context(FP8_FA=1)
 def main():
   warmup, repeat = getenv("WARMUP", 0), getenv("REPEAT", 1)
   assert warmup >= 0 and repeat > 0
   with Context(DEBUG=0):
-    # Select FP8 forward only for input preparation; backward is launched explicitly below.
-    os.environ.update(FP8_FA="1", ASM_FP8_FA="1", FP8_FA_BWD="0")
-    getenv.cache_clear()
     dev = Device[Device.DEFAULT]
     assert dev.renderer.target.arch == "gfx950", "requires DEV=AMD on gfx950"
     B,N,H,HK,D = 2,8192,32,8,128
@@ -28,7 +26,9 @@ def main():
     do = (Tensor.randn(*shape)*0.1).bfloat16().contiguous().realize()
     c = math.sqrt(D**-0.5*math.log2(math.e))
     q8,k8 = [(x.float()*c).cast(dtypes.fp8e4m3).detach().contiguous().realize() for x in (q,k)]
-    out,_,lse,*saved = flash_attention(q,k,v,is_causal=True,fp8_qk=True,q_fp8=q8,k_fp8=k8,save_fp8=True)
+    state,nxt = Tensor([1.,0.]).realize(),Tensor.zeros(2).contiguous().realize()
+    out,_,lse,*saved = flash_attention(q,k,v,is_causal=True,fp8_qk=True,q_fp8=q8,k_fp8=k8,save_fp8=True,
+                                       fa_bwd_amax=state,next_fa_bwd_amax=nxt)
     v8,vs = saved[-2:]
     Tensor.realize(out,lse,v8,vs)
     out = out.reshape(shape)

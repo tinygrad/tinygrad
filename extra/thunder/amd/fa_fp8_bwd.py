@@ -1,45 +1,22 @@
-import functools, pathlib
+import functools
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.renderer import Estimates
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
-from tinygrad.helpers import getenv
 
 @functools.cache
 def custom_fp8_backward(*args:UOp, B:int, N:int, H:int, H_KV:int, arch:str):
-  assert arch == "gfx950" and N % 64 == 0 and H % H_KV == 0
-  if getenv("FA_BWD_ASM", 1) and (B,N,H,H_KV) == (2,8192,32,8) and args[0].dtype == dtypes.bfloat16:
-    from extra.thunder.amd.asm_fa_fp8_bwd import build_kernel
-    from tinygrad.dtype import AddrSpace
-    lds = UOp.placeholder((132160,), dtypes.uint8, 0, addrspace=AddrSpace.LOCAL)
-    sink = UOp.sink(*(a.base for a in args), lds, UOp.special(512,"lidx0"), UOp.special(N//256,"gidx0"),
-                    UOp.special(H,"gidx1"), UOp.special(B,"gidx2"),
-                    arg=KernelInfo(name="hk_fa_fp8_backward", estimates=Estimates(ops=5*B*H*N*N*128)))
-    return UOp(Ops.PROGRAM,src=(sink,UOp(Ops.LINEAR,src=tuple(UOp(Ops.INS,arg=(inst,dtypes.void)) for inst in build_kernel(B,N,H,H_KV)))))
-  converged = getenv("FA_BWD_CONVERGED", 0)
-  m32 = not converged and getenv("FA_BWD_M32", 1) and N % 256 == 0
-  source = (pathlib.Path(__file__).parent / ("fa_fp8_bwd_converged.cpp" if converged else
-                                          "fa_fp8_bwd32.cpp" if m32 else "fa_fp8_bwd.cpp")).read_text()
-  output_bf16 = args[0].dtype == dtypes.bfloat16
-  options = [f"-I{pathlib.Path(__file__).parent / 'include'}", "-std=c++20", "-DKITTENS_CDNA4",
-             "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffp-contract=off", "-Wno-duplicate-decl-specifier", "-Wno-unused-command-line-argument",
-             f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}"]
-  lib = HIPCCCompiler(arch, options+[f"-DOUTPUT_BF16={int(output_bf16)}"]).compile_cached(source)
-  owned_rows = 256 if m32 else min(N, 128)
-  sink = UOp.sink(*(a.base for a in args), UOp.special(owned_rows*(2 if m32 else 4),"lidx0"),
-                  UOp.special((2 if converged else 1)*(N//owned_rows),"gidx0"),
-                  UOp.special(H,"gidx1"), UOp.special(B,"gidx2"),arg=KernelInfo(name="hk_fa_fp8_backward", estimates=Estimates(ops=5*B*H*N*N*128)))
-  return UOp(Ops.PROGRAM,src=(sink,UOp(Ops.LINEAR,src=(*sink.src,sink)),UOp(Ops.SOURCE,arg=source),UOp(Ops.BINARY,arg=lib)))
+  assert arch == "gfx950" and (B,N,H,H_KV) == (2,8192,32,8) and args[0].dtype == dtypes.bfloat16
+  from extra.thunder.amd.asm_fa_fp8_bwd import build_kernel
+  from tinygrad.dtype import AddrSpace
+  lds = UOp.placeholder((132160,), dtypes.uint8, 0, addrspace=AddrSpace.LOCAL)
+  sink = UOp.sink(*(a.base for a in args), lds, UOp.special(512,"lidx0"), UOp.special(N//256,"gidx0"),
+                  UOp.special(H,"gidx1"), UOp.special(B,"gidx2"),
+                  arg=KernelInfo(name="hk_fa_fp8_backward", estimates=Estimates(ops=5*B*H*N*N*128)))
+  return UOp(Ops.PROGRAM,src=(sink,UOp(Ops.LINEAR,src=tuple(UOp(Ops.INS,arg=(inst,dtypes.void)) for inst in build_kernel(B,N,H,H_KV)))))
 
 def unpack_dq(dq:Tensor):
   B,N,H,D = dq.shape
   return dq.reshape(B,H,N//16,8,2,4,16,2).permute(0,2,5,4,7,1,3,6).reshape(B,N,H,D)
-
-@functools.cache
-def cast_gradients(*args:UOp):
-  idx = UOp.range(args[0].numel(),0)
-  stores = [args[i].flatten()[idx].store(args[i+3].flatten()[idx].cast(dtypes.bfloat16)) for i in range(3)]
-  return UOp.group(*stores).end(idx).sink(arg=KernelInfo("fp8_fa_backward_cast"))
 
 @functools.cache
 def custom_fp8_backward_init(dq:UOp, partial:UOp, do:UOp):
@@ -80,23 +57,18 @@ def custom_fp8_backward_prep(do8:UOp, delta:UOp, do:UOp, out:UOp, scales:UOp, *i
   return UOp.group(*stores).end(row).sink(arg=KernelInfo("fa_fp8_bwd_prep"))
 
 def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, out:Tensor, lse:Tensor,
-                 p_descale:Tensor, ds_descale:Tensor, next_amax:Tensor|None=None, *, native:bool=False, reset_next_amax:bool=False,
+                 p_descale:Tensor, ds_descale:Tensor, next_amax:Tensor|None=None, *, reset_next_amax:bool=False,
                  delayed_state:Tensor|None=None):
-  """FP8 backward with explicit delayed scales; accumulates next amax locally.
-
-  Native outputs preserve the expanded BF16 layout consumed by fused RoPE.
-  """
+  """FP8 backward with explicit delayed scales; accumulates next amax locally."""
   from extra.llama_kernels import alloc_like, local_abs_max
   B,N,H,D = q8.shape
-  assert D == 128 and q8.dtype == k8.dtype == v8.dtype == dtypes.fp8e4m3
+  assert (N,H,D) == (8192,32,128) and q8.dtype == k8.dtype == v8.dtype == dtypes.fp8e4m3
   axis = q8.uop.axis if isinstance(q8.device,tuple) else None
   assert axis in (None,0), "FP8 backward currently supports data parallelism only"
   H_KV = k8.shape[2]
   assert k8.shape == v8.shape == (B,N,H_KV,D) and do.shape == out.shape == q8.shape
   def alloc(shape,dtype=dtypes.float32): return alloc_like(shape,dtype,q8.device,axis)
-  converged = getenv("FA_BWD_CONVERGED", 0)
-  output_dtype = dtypes.bfloat16 if native and not converged else dtypes.float32
-  dq = alloc(q8.shape,output_dtype)
+  dq = alloc(q8.shape,dtypes.bfloat16)
   # Reuse the compulsory dQ initialization pass to scan dO for its current scale.
   partial = alloc((B,min(512,N*H*D)))
   dq,partial = Tensor.custom_kernel(dq,partial,do,fxn=custom_fp8_backward_init)[:2]
@@ -117,18 +89,15 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   do8, delta = prep[:2]
   if delayed_state is not None: scales = prep[4]
   if reset_next_amax: next_amax = prep[5]
-  dk,dv = [alloc(q8.shape,output_dtype) for _ in range(2)]
+  dk,dv = [alloc(q8.shape,dtypes.bfloat16) for _ in range(2)]
   amax = alloc((B,H,N//64,2))
   dev = q8.device[0] if isinstance(q8.device,tuple) else q8.device
   local_b = B//len(q8.device) if axis == 0 else B
-  # Native forward already writes LSE in the backward kernel's contiguous B,H,N layout.
-  ret = Tensor.custom_kernel(dq,dk,dv,amax,next_amax,q8,k8,v8,do8,delta,lse if native else lse.contiguous(),scales,
+  # The assembly forward writes LSE in the backward kernel's contiguous B,H,N layout.
+  ret = Tensor.custom_kernel(dq,dk,dv,amax,next_amax,q8,k8,v8,do8,delta,lse,scales,
     fxn=functools.partial(custom_fp8_backward,B=local_b,N=N,H=H,H_KV=H_KV,arch=Device[dev].renderer.target.arch))
   dq,dk,dv = ret[:3]
-  if converged:
-    if native:
-      dq,dk,dv = Tensor.custom_kernel(*(alloc(q8.shape,dtypes.bfloat16) for _ in range(3)),dq,dk,dv,fxn=cast_gradients)[:3]
-  else: dq = unpack_dq(dq)
+  dq = unpack_dq(dq)
   dk = dk.reshape(B,N,H_KV,H//H_KV,D).sum(3)
   dv = dv.reshape(B,N,H_KV,H//H_KV,D).sum(3)
   return dq,dk,dv,ret[3]

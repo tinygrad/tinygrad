@@ -17,6 +17,7 @@ from tinygrad.uop.ops import Ops, UOp, KernelInfo
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.llama_kernels import FP8_MAX, local_abs_max
+from extra.thunder.amd.fa import FP8_FA
 
 ASM_GEMM = getenv("ASM_GEMM", 0)
 FUSED_INPUT_QUANTIZE = getenv("FUSED_INPUT_QUANTIZE", 0)
@@ -205,7 +206,7 @@ class FlatTransformer:
     grad_names += ["xw1", "xw3"] if SPLIT_W13 else ["xw13"]
     self._fp8_grad_amax = {name: [_amax() for _ in range(n_amax)] for name in grad_names}
     self._fp8_next_grad_amax = {name: [_amax() for _ in range(n_amax)] for name in grad_names}
-    if getenv("FP8_FA_BWD"):
+    if FP8_FA:
       for state in (self._fp8_grad_amax, self._fp8_next_grad_amax):
         state["fa"] = [Tensor([1.,0.], dtype=dtypes.float32).contiguous().is_param_(False) for _ in range(n_layers)]
     w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
@@ -258,17 +259,16 @@ class FlatTransformer:
     saves = []
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention, fused_qkv_rope
-      fp8_fa = bool(getenv("FP8_FA"))
+      fp8_fa = bool(FP8_FA)
       xq, xk, xv, *fp8_qk = fused_qkv_rope(xqkv, freqs_cis, self.n_heads, self.n_kv_heads, self.head_dim,
                                            prequantize_grad_mxfp4=bool(MXFP4), prequantize_fp8=fp8_fa,
-                                           write_bf16_qk=not (fp8_fa and getenv("ASM_FP8_FA")))
+                                           write_bf16_qk=not fp8_fa)
       attn, *save = flash_attention(xq, xk, xv, is_causal=True, write_flat=True, save_fp8=True,
                                     q_fp8=fp8_qk[0] if fp8_fa else None, k_fp8=fp8_qk[1] if fp8_fa else None,
                                     fa_bwd_amax=fa_bwd_amax, next_fa_bwd_amax=next_fa_bwd_amax)
       # FP8 backward consumes the saved rounded operands, not the original Q/K.
-      # Native FP8 also uses rounded V; HIP still needs the original BF16 V.
+      # Native FP8 uses the rounded V operand.
       if not fp8_fa: saves.extend([xq, xk, xv])
-      elif not getenv("ASM_FP8_FA"): saves.append(xv)
       saves.extend(save)
     else:
       xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
@@ -470,7 +470,7 @@ class FlatTransformer:
     for i in range(self.n_layers):
       attn_kwargs = dict(attention_norm=self.attention_norm[i], wqkv=self.wqkv[i], wo=self.wo[i], s_qkv=s["wqkv"][i], s_o=s["wo"][i],
                          **amax_kwargs(i, ("xqkv", "xo"), ("xqkv", "xo")))
-      if getenv("FP8_FA_BWD"):
+      if FP8_FA:
         attn_kwargs.update(fa_bwd_amax=ga["fa"][i], next_fa_bwd_amax=nga["fa"][i])
       ffn_kwargs = dict(ffn_norm=self.ffn_norm[i], w2=self.w2[i], s_2=s["w2"][i], **amax_kwargs(i, ("x2",), ("xout",)))
       if mxfp4_weights is not None:
@@ -483,7 +483,7 @@ class FlatTransformer:
         ffn_kwargs.update(w13=self.w13[i], s_13=s["w13"][i], **amax_kwargs(i, ("x13",), ("xw13",)))
         if mxfp4_weights is not None: ffn_kwargs.update(mxfp4_w13=mxfp4_weights["w13"][i])
       attn_out_kwargs = {k:attn_kwargs[k] for k in ("wo", "amax_xo", "s_o", "next_amax_xo", "grad_amax_xo", "next_grad_amax_xo")}
-      if getenv("FP8_FA_BWD"):
+      if FP8_FA:
         attn_out_kwargs.update(fa_bwd_amax=ga["fa"][i], next_fa_bwd_amax=nga["fa"][i])
       if "mxfp4_wo" in attn_kwargs: attn_out_kwargs["mxfp4_wo"] = attn_kwargs["mxfp4_wo"]
       layer_kwargs.append((attn_kwargs, attn_out_kwargs, ffn_kwargs))
