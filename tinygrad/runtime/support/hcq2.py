@@ -19,7 +19,6 @@ HCQ_DEVS = frozenset(("NV", "QCOM")) | (frozenset(("AMD",)) if HCQ2 else frozens
 @dataclass(frozen=True)
 class HCQInfo:
   device:tuple[str, ...]
-  skip_wait:bool = False
 
   kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = () # (devices, name, estimates, timestamp slots, profile key)
   estimates:Estimates = Estimates()
@@ -30,6 +29,8 @@ class HCQInfo:
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
   host_deps:tuple[tuple[str, str], ...] = () # (memory owner, accessing device)
   written_bufs:tuple[UOp, ...] = () # write args
+
+  skip_wait:bool = False # TODO: remove. an rdma copy between nodes is two batches, so waiting on the first alone deadlocks
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
@@ -55,7 +56,7 @@ def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.placeholder((2,), dtypes.uint64, 0, device=devs, volatile=True, tag="timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
 
-def rt_addr(b:UOp, dev="CPU", *deps:UOp) -> UOp: # the address as dev sees it, read at runtime after deps
+def rt_addr(b:UOp, dev="CPU", *deps:UOp) -> UOp:
   base, off = unwrap_view(b)
   word = UOp.placeholder((1,), dtypes.uint64, device=Device[to_tuple(dev)[0]].host, tag="addr")
   return patch(word, [(0, base.bitcast(dtypes.uint8)[off:off + b.nbytes()].getaddr(dev))]).after(*deps).index(0).load()
@@ -132,16 +133,17 @@ def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
   if Device[devs[0]].peer_group == Device[devs[1]].peer_group: return None
 
-  from tinygrad.runtime.support.system import System
-  if None in (nics:=[System.nic_for(Device[d]) for d in devs]): return None
+  from tinygrad.runtime.ops_rdma import rdma_nic_for
+  if None in (nics:=[rdma_nic_for(Device[d]) for d in devs]): return None
 
-  # the wires: a placeholder on each node's nic in place of the far gpu, named by it, never a buffer
-  wires = [UOp.placeholder(src.max_shape, src.dtype, 0, device=nic.device, tag=peer) for nic, peer in zip(nics, devs[::-1])]
+  # wires: a placeholder per nic in place of the far gpu, tagged by it
+  wires = [UOp.placeholder(src.max_shape, src.dtype, 0, device=unwrap(nic).device, tag=peer) for nic, peer in zip(nics, devs[::-1])]
   send = call.replace(src=(call.src[0].replace(arg=wires[1].device), wires[1], src))
   return UOp(Ops.LINEAR, src=(send, call.replace(src=(call.src[0], dst, wires[0]))))
 
 def stage_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
-  if any(to_tuple(b.device)[0].startswith("RDMA") for b in (dst, src)): return None # over the nic: the gpu's queue encodes it
+  if any(to_tuple(b.device)[0].startswith("RDMA") for b in (dst, src)): return None # over the nic
+
   if (device:=get_enqueue_devs(call)) is None: return None
   try:
     for b in (dst, src): cast(Buffer, _resolve(b, ctx).buffer).get_buf(device)
@@ -433,10 +435,11 @@ pm_renumber = PatternMatcher([
 def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.nargs: return None # not an hcq call, or lowered already
 
-  # encode bodies
+  # encode bodies: copies between nodes become queue ops first (ops_rdma.py), then each device encodes its submits
+  from tinygrad.runtime.ops_rdma import pm_rdma_encode
   ctx = EncodeCtx(call.arg.aux.device)
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in ctx.devs])]
-  body = graph_rewrite(call.src[0], sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
+  body = graph_rewrite(call.src[0], pm_rdma_encode + sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
                        ctx=ctx, bpm=pm_patches, name="encode")
   body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])), ctx=ctx, bpm=pm_patches, name="lower")
 

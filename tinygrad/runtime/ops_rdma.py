@@ -10,12 +10,17 @@ from tinygrad.runtime.support.rdma.bnxtdev import BNXTDev, BNXTQP, db_value, sen
 from tinygrad.runtime.support.hcq2 import unwrap_view, rt_addr, to_name
 from tinygrad.runtime.support.memory import AddrSpace, MMIOInterface, VirtMapping, MemoryManager
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System
+from tinygrad.runtime.support.hcq import hcq_filter_visible_devices
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat
 
 RDMA_CHUNK = 1 << 30 # a wqe length is 32 bits
 
+BNXT_IDS = (0x14e4, ((0xffff, (0x1760,)),), 0x02) # vendor, (mask, device ids), base class
+
 class BNXTIface(PCIIfaceBase):
-  def __init__(self, dev:RDMADevice, index:int): super().__init__(dev, index, vram_bar=2, dev_impl_t=BNXTDev)
+  def __init__(self, dev:RDMADevice, index:int):
+    super().__init__(dev, index, *BNXT_IDS[:2], vram_bar=2, va_start=MemoryManager.va_allocator.base, va_size=MemoryManager.va_allocator.size,
+                     dev_impl_t=BNXTDev, base_class=BNXT_IDS[2])
   def device_fini(self): self.dev_impl.fini()
 
   def storage(self, mem:MMIOInterface, paddrs:list[int], snooped:bool=True) -> BufferStorage: # nic memory any gpu of the node maps
@@ -47,30 +52,30 @@ class BNXTAllocator(Allocator):
   def _offset(self, buf, size:int, offset:int): return buf
   def _unmap(self, storage:BufferStorage): self.dev.iface.dev_impl.unregister_mem(storage.meta)
 
+def rdma_nic_for(dev) -> RDMADevice|None: # the nic on the node of dev, if it has one
+  nics = [Device[f"RDMA:{i}"] for i in range(len(hcq_filter_visible_devices(System.list_devices(*BNXT_IDS), "RDMA")))]
+  return next((cast(RDMADevice, n) for n in nics if n.peer_group == dev.peer_group), None)
+
 class RDMADevice(Compiled):
   ifaces = [BNXTIface]
 
   def __init__(self, device:str):
     self.iface = self._select_iface(device)
-
-    # all bufs per qp
-    self.bufs:dict[str, Buffer] = {}
-
     super().__init__(device, BNXTAllocator(self), [], None)
-
-    self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.bufs.get(b.tag))]) + self.pm_bufferize
 
 # *****************
 # UOps implementation
 
 @functools.cache
-def rdma_qp(pair:tuple[str, str]) -> dict[str, BNXTQP]: # one queue pair per gpu pair: on both nics, connected, with the rings and counters
-  nics = [cast(RDMADevice, System.nic_for(Device[d])) for d in pair]
+def rdma_qp(pair:tuple[str, str]) -> dict[str, BNXTQP]:
+  # one qp per gpu pair
+  nics = [unwrap(rdma_nic_for(Device[d])) for d in pair]
   qps = {nic.device: BNXTQP(nic.iface.dev_impl) for nic in nics}
   for nic, q in zip(nics, qps.values()):
-    for name in ("sq", "rq", "scq", "rcq"): nic.bufs[to_name("rdma", *pair, name)] = nic.iface.buffer(getattr(q, name).ring, getattr(q, name).paddrs)
-    for name in ("sq_seq", "rq_seq", "psn"): nic.bufs[to_name("rdma", *pair, name)] = Buffer(nic.device, 1, dtypes.uint64, initial_value=bytes(8))
-    nic.bufs[to_name("rdma", *pair, "db")] = nic.iface.doorbell
+    bufs = {name: nic.iface.buffer(getattr(q, name).ring, getattr(q, name).paddrs) for name in ("sq", "rq", "scq", "rcq")}
+    bufs |= {name: Buffer(nic.device, 1, dtypes.uint64, initial_value=bytes(8)) for name in ("sq_seq", "rq_seq", "psn")} | {"db": nic.iface.doorbell}
+    rules = [(UPat(Ops.PARAM, tag=to_name("rdma", *pair, n)), lambda ctx, b=b: b) for n, b in bufs.items()]
+    nic.pm_bufferize = PatternMatcher(rules) + nic.pm_bufferize
   for a, b in (nics, nics[::-1]): qps[a.device].connect(qps[b.device].qpn, b.iface.dev_impl.local_gid, b.iface.dev_impl.mac)
   return qps
 
