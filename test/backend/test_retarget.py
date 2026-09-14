@@ -1,21 +1,20 @@
-import unittest, itertools
+import unittest, itertools, torch
 from tinygrad import Tensor, Device
 from tinygrad.helpers import VIZ
 from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.uop.ops import CallInfo, graph_rewrite, PatternMatcher, UPat, UOp, Ops, ProgramInfo
 from tinygrad.codegen import full_rewrite_to_sink, pm_to_program, to_program_key
-from tinygrad.engine.realize import ExecContext, pm_exec
+from tinygrad.engine.realize import ExecContext, pm_exec, _get_call_to_compile
 
 def _cross_exec(graph:Tensor):
   device = Device[Device.DEFAULT]
-  # how to construct an identical device object with a new renderer
-  isa_ren, final_ren = device.renderer, next(r for r in device.renderers if not isinstance(r, ISARenderer))
+  isa_ren, final_ren = device.renderer, next(r for r in device.renderers if not issubclass(r, ISARenderer))
   final_ren = final_ren(isa_ren.target)
 
   def transmute(ast:UOp) -> UOp:
     sink = full_rewrite_to_sink(ast, isa_ren)
     # perform instruction selection
-    sink = graph_rewrite(sink, isa_ren.pre_isel_matcher, ctx=itertools.count(-1,1), name="pre instruction selection", bottom_up=True)
+    sink = graph_rewrite(sink, isa_ren.pre_isel_matcher, ctx=itertools.count(-1,-1), name="pre instruction selection", bottom_up=True)
     sink = graph_rewrite(sink, isa_ren.isel_matcher, ctx=IselContext(sink), name="instruction selection", bottom_up=True)
     sink = graph_rewrite(sink, PatternMatcher([]), name="view machine code")
 
@@ -35,7 +34,7 @@ def _cross_exec(graph:Tensor):
 
   # compile kernels and swap calls
   linear = graph.schedule_linear()
-  calls = {c: (c.src[0], final_ren) for c in linear.toposort() if c.op is Ops.CALL and isinstance(c.arg, CallInfo)}
+  calls = {c: (c.src[0], final_ren) for c in linear.toposort() if c.op is Ops.CALL and _get_call_to_compile(c) is not None}
   prgs = {c: transmute(a[0]) for c,a in calls.items()}
   linear = linear.substitute({c: c.replace(src=(c.src[0].substitute({a[0]: prgs[c]}), *c.src[1:])) for c,a in calls.items()})
 
@@ -46,6 +45,6 @@ def _cross_exec(graph:Tensor):
 class TestRetarget(unittest.TestCase):
   def test_transfer_gemm(self):
     x, w = Tensor.ones(32,32).contiguous(), Tensor.eye(32).clone()
-    truth = (out := x@w).tolist()
-    _cross_exec(out)
+    truth = [[1.0] * 32 for _ in range(32)]
+    _cross_exec((out := x@w))
     self.assertListEqual(out.tolist(), truth)
