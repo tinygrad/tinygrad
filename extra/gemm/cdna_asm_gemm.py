@@ -158,7 +158,7 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
 def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor) -> Tensor:
   M, half_k = a_q.shape
   N, half_k_b = b_q.shape
-  assert half_k == half_k_b
+  assert half_k == half_k_b, f"MXFP4 K mismatch: A {a_q.shape}, B {b_q.shape}"
   is_multi = isinstance(a_q.device, tuple)
   reduce_out = is_multi and (a_q.uop.axis == 1 or b_q.uop.axis == 1)
   if not is_multi: out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a_q.device)
@@ -445,7 +445,7 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=F
 # ** mxfp4 gemm backward
 
 def _producer_mxfp4_outputs(gradient:UOp, expected_half_k:int) -> tuple[UOp, UOp, UOp, UOp]|None:
-  """Recover quantized sibling outputs from a fused gradient producer without relying on a mutable mailbox."""
+  """Recover quantized sibling outputs from a fused gradient producer without mutable mailboxes or core gradient changes."""
   for call in reversed(gradient.toposort()):
     if call.op is not Ops.CALL or call.src[0].op is not Ops.PROGRAM or not call.src[0].src: continue
     info = call.src[0].src[0].arg

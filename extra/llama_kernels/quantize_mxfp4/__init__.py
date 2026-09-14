@@ -39,9 +39,9 @@ def _custom_quantize_mxfp4(row_fp4:UOp, row_scale:UOp, col_fp4:UOp, col_scale:UO
                   *(UOp(Ops.CUSTOM, src=(o.base.index(0),), arg=("", dtypes.void)) for o in outputs),
                   UOp.special(256, "lidx0"), UOp.special(M//128, "gidx0"), UOp.special(N//64, "gidx1"),
                   arg=KernelInfo(name, estimates=Estimates(ops=12*M*N, mem=mem)))
-  src = (pathlib.Path(__file__).parent/"quantize_mxfp4.cpp").read_text()
+  src = ((cpp_dir:=pathlib.Path(__file__).parent)/"quantize_mxfp4.cpp").read_text()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-    UOp(Ops.BINARY, arg=compile_hip(src, [f"-I{pathlib.Path(__file__).parent}", f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}",
+    UOp(Ops.BINARY, arg=compile_hip(src, [f"-I{cpp_dir}", f"-DKERNEL_NAME={name}", f"-DM_DIM={M}", f"-DN_DIM={N}",
                                              f"-DWRITE_ROWWISE_VALUE={int(write_row)}", f"-DWRITE_COLWISE_VALUE={int(write_col)}",
                                              f"-DSHUFFLE_ROWWISE_FP4_VALUE={int(shuffle_row)}",
                                              f"-DSHUFFLE_COLWISE_FP4_VALUE={int(shuffle_col)}"]))))
@@ -75,5 +75,4 @@ def quantize_mxfp4(x:Tensor, *, shuffle_row:bool=False, shuffle_col:bool=False, 
                alloc_like((N, M//2), dtypes.uint8, x.device, col_axis) if col else alloc_like((1,), dtypes.uint8, x.device, None),
                alloc_like((N, M//32), dtypes.uint8, x.device, col_axis) if col else alloc_like((1,), dtypes.uint8, x.device, None))
   fxn = functools.partial(_custom_quantize_mxfp4, shuffle_row=shuffle_row, shuffle_col=shuffle_col, write_row=row, write_col=col)
-  ret = Tensor.custom_kernel(*outputs, x, fxn=fxn)
-  return ret[0], ret[1], ret[2], ret[3]
+  return tuple(Tensor.custom_kernel(*outputs, x, fxn=fxn)[:4])
