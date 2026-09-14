@@ -10,6 +10,23 @@ RMS_MUL_FWD_GROUPS, RMS_MUL_BWD_GROUPS, RMS_MUL_THREADS = 2048, 1024, 128
 def _source(name:str) -> str: return (pathlib.Path(__file__).parent/name).read_text()
 
 @functools.cache
+def _rmsnorm_fwd_mxfp4_dual(*args:UOp, eps:float, add_residual:bool) -> UOp:
+  x = args[3 if add_residual else 2]
+  rows, hidden = x.numel() // x.shape[-1], x.shape[-1]
+  assert hidden == 4096 and rows % 32 == 0
+  name = f"rmsnorm_{'add_' if add_residual else ''}mul_fwd_mxfp4_dual_{rows}_{hidden}"
+  mem = (8 if add_residual else 4)*x.numel() + x.numel() + x.numel()//16 + 4*rows
+  sink = UOp.sink(*(a.base for a in args), UOp.special(512,"lidx0"), UOp.special(rows//32,"gidx0"),
+                  arg=KernelInfo(name, estimates=Estimates(ops=(31 if add_residual else 30)*x.numel(), mem=mem)))
+  source = _source("rmsnorm_mxfp4_dual.hip")
+  inc = pathlib.Path(__file__).parent.parent/"quantize_mxfp4"
+  source = source.replace('#include "quantize_mxfp4_8.h"',(inc/"quantize_mxfp4_8.h").read_text().replace("#pragma once\n",""))
+  defines = [f"-DKERNEL_NAME={name}", f"-DROWS={rows}", f"-DHIDDEN={hidden}", f"-DEPS={eps}f",
+             f"-DADD_RESIDUAL={int(add_residual)}", f"-I{inc}"]
+  return UOp(Ops.PROGRAM, src=(sink,UOp(Ops.LINEAR,src=(*sink.src,sink)),UOp(Ops.SOURCE,arg=source),
+                              UOp(Ops.BINARY,arg=compile_hip(source,defines))))
+
+@functools.cache
 def _rmsnorm_mul_fwd(out:UOp, rrms:UOp, x:UOp, weight:UOp, eps:float) -> UOp:
   rows, hidden = x.numel() // x.shape[-1], x.shape[-1]
   threads, groups = UOp.special(RMS_MUL_THREADS, "lidx0"), UOp.special(RMS_MUL_FWD_GROUPS, "gidx0")
@@ -105,10 +122,11 @@ def _rmsnorm_add_mul_bwd_mxfp4_row(dh:UOp, dweight_partial:UOp, row_fp4:UOp, row
   sink = UOp.sink(dh.base, dweight_partial.base, row_fp4.base, row_scale.base, dout.base, dh_direct.base,
                   h.base, rrms.base, weight.base, threads, groups,
                   arg=KernelInfo(f"rmsnorm_add_mul_bwd_mxfp4_row_{rows}_{hidden}", estimates=Estimates(ops=23*h.numel(), mem=mem)))
-  source = _source("rmsnorm_add_mul_bwd.hip")
+  source = _source("rmsnorm_add_mul_bwd_mxfp4.hip")
   inc = pathlib.Path(__file__).parent.parent/"quantize_mxfp4"
+  source = source.replace('#include "quantize_mxfp4_8.h"',(inc/"quantize_mxfp4_8.h").read_text().replace("#pragma once\n",""))
   defines = [f"-DROWS={rows}", f"-DHIDDEN={hidden}", f"-DNUM_WG={RMS_MUL_BWD_GROUPS}", f"-DTHREADS={RMS_MUL_THREADS}",
-             "-DWRITE_MXFP4_ROW=1", f"-I{inc}"]
+             "-DKERNEL_NAME=rmsnorm_add_mul_bwd", f"-I{inc}"]
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=source),
                                UOp(Ops.BINARY, arg=compile_hip(source, defines))))
 
@@ -145,12 +163,19 @@ def rmsnorm_mul(x:Tensor, weight:Tensor, eps:float) -> tuple[Tensor, Tensor]:
                                         fxn=functools.partial(_rmsnorm_mul_fwd, eps=eps), grad_fxn=_rmsnorm_mul_gradient)
   return out, rrms
 
-def rmsnorm_mul_mxfp4(x:Tensor, weight:Tensor, eps:float) -> tuple[Tensor, Tensor, tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]]:
+def rmsnorm_mul_mxfp4(x:Tensor, weight:Tensor, eps:float, *, quantized_only:bool=False) -> \
+    tuple[Tensor, Tensor, tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]]:
   assert x.dtype == weight.dtype == dtypes.bfloat16 and x.shape[-1] == weight.shape[-1] == 4096
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   out = alloc_like(x.shape, dtypes.bfloat16, x.device, axis)
   rrms_axis = axis if axis is None or axis < x.ndim-1 else None
   rrms = alloc_like(x.shape[:-1], dtypes.float32, x.device, rrms_axis)
+  if quantized_only:
+    from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs
+    outputs = alloc_mxfp4_outputs(out)
+    ret = Tensor.custom_kernel(out,rrms,x,weight,*outputs,
+      fxn=functools.partial(_rmsnorm_fwd_mxfp4_dual,eps=eps,add_residual=False),grad_fxn=_rmsnorm_mul_gradient)
+    return ret[0],ret[1],tuple(ret[4:8])
   from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_row_outputs
   row_fp4, row_scale = alloc_mxfp4_row_outputs(out)
   ret = Tensor.custom_kernel(out, rrms, x, weight, row_fp4, row_scale,
@@ -168,7 +193,7 @@ def rmsnorm_add_mul(x:Tensor, residual:Tensor, weight:Tensor, eps:float) -> tupl
                                            fxn=functools.partial(_rmsnorm_add_mul_fwd, eps=eps), grad_fxn=_rmsnorm_add_mul_gradient)
   return out, h, rrms
 
-def rmsnorm_add_mul_mxfp4(x:Tensor, residual:Tensor, weight:Tensor, eps:float) -> \
+def rmsnorm_add_mul_mxfp4(x:Tensor, residual:Tensor, weight:Tensor, eps:float, *, quantized_only:bool=False) -> \
     tuple[Tensor, Tensor, Tensor, tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]]:
   assert x.dtype == residual.dtype == weight.dtype == dtypes.bfloat16 and x.shape == residual.shape and x.shape[-1] == weight.shape[-1] == 4096
   axis = x.uop.axis if isinstance(x.device, tuple) else None
@@ -176,6 +201,12 @@ def rmsnorm_add_mul_mxfp4(x:Tensor, residual:Tensor, weight:Tensor, eps:float) -
   h = alloc_like(x.shape, dtypes.bfloat16, x.device, axis)
   rrms_axis = axis if axis is None or axis < x.ndim-1 else None
   rrms = alloc_like(x.shape[:-1], dtypes.float32, x.device, rrms_axis)
+  if quantized_only:
+    from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs
+    outputs = alloc_mxfp4_outputs(out)
+    ret = Tensor.custom_kernel(out,h,rrms,x,residual,weight,*outputs,
+      fxn=functools.partial(_rmsnorm_fwd_mxfp4_dual,eps=eps,add_residual=True),grad_fxn=_rmsnorm_add_mul_gradient)
+    return ret[0],ret[1],ret[2],tuple(ret[6:10])
   from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_row_outputs
   row_fp4, row_scale = alloc_mxfp4_row_outputs(out)
   ret = Tensor.custom_kernel(out, h, rrms, x, residual, weight, row_fp4, row_scale,

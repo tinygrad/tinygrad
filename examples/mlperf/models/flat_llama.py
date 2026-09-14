@@ -105,10 +105,10 @@ def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, ep
     return out, x_normed, rrms, ret
   if MXFP4:
     from extra.llama_kernels.rmsnorm import rmsnorm_mul_mxfp4
-    normed, rrms, normed_mxfp4 = rmsnorm_mul_mxfp4(x, norm, eps)
+    normed, rrms, normed_mxfp4 = rmsnorm_mul_mxfp4(x, norm, eps, quantized_only=True)
     out, *ret = matmul(normed, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
                        next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w,
-                       x_prequant_mxfp4=normed_mxfp4, save_original_input=True)
+                       x_prequant_mxfp4=normed_mxfp4, save_mxfp4_input=True)
     return out, normed, rrms, ret
   x_normed, rrms = rmsnorm(x, eps)
   out, *ret = matmul(x_normed * norm, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
@@ -125,10 +125,10 @@ def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w
     return out, h, x_normed, rrms, ret
   if MXFP4:
     from extra.llama_kernels.rmsnorm import rmsnorm_add_mul_mxfp4
-    normed, h, rrms, normed_mxfp4 = rmsnorm_add_mul_mxfp4(x, residual, norm, eps)
+    normed, h, rrms, normed_mxfp4 = rmsnorm_add_mul_mxfp4(x, residual, norm, eps, quantized_only=True)
     out, *ret = matmul(normed, w, amax_x=amax_x, w_inv_scale=w_inv_scale, grad_amax_state=grad_amax_state,
                        next_grad_amax_state=next_grad_amax_state, next_amax_x=next_amax_x, mxfp4_w=mxfp4_w,
-                       x_prequant_mxfp4=normed_mxfp4, save_original_input=True)
+                       x_prequant_mxfp4=normed_mxfp4, save_mxfp4_input=True)
     return out, h, normed, rrms, ret
   h = x + residual
   x_normed, rrms = rmsnorm(h, eps)
@@ -244,7 +244,7 @@ class FlatTransformer:
                                                                   amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv,
                                                                   next_grad_amax_state=next_grad_amax_xqkv, next_amax_x=next_amax_xqkv,
                                                                   mxfp4_w=mxfp4_wqkv)
-    saves.extend([x_normed, rrms, *s, xqkv])
+    saves.extend([*(() if MXFP4 else (x_normed,)), rrms, *s, xqkv])
     out, out_saves = self.attention_from_qkv(xqkv, freqs_cis, wo=wo, amax_xo=amax_xo, s_o=s_o,
                                               next_amax_xo=next_amax_xo, grad_amax_xo=grad_amax_xo,
                                               next_grad_amax_xo=next_grad_amax_xo, mxfp4_wo=mxfp4_wo,
@@ -283,7 +283,7 @@ class FlatTransformer:
 
     out, *s = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo,
                                next_grad_amax_state=next_grad_amax_xo, next_amax_x=next_amax_xo, mxfp4_w=mxfp4_wo,
-                               save_original_input=bool(MXFP4))
+                               save_mxfp4_input=bool(MXFP4))
     saves.extend([*s, out])
     return out, saves
 
@@ -294,7 +294,7 @@ class FlatTransformer:
                                                            grad_amax_state=attn_kwargs["grad_amax_xqkv"],
                                                            next_grad_amax_state=attn_kwargs["next_grad_amax_xqkv"],
                                                            mxfp4_w=attn_kwargs.get("mxfp4_wqkv"))
-    return x, xqkv, [x, x_normed, rrms, *s, xqkv]
+    return x, xqkv, [x, *(() if MXFP4 else (x_normed,)), rrms, *s, xqkv]
 
   def feed_forward(self, x:Tensor, residual:Tensor, **kwargs):
     saves = []
@@ -331,7 +331,7 @@ class FlatTransformer:
                                                                           grad_amax_state=kwargs["grad_amax_xw13"],
                                                                           next_grad_amax_state=kwargs["next_grad_amax_xw13"],
                                                                           mxfp4_w=kwargs.get("mxfp4_w13"))
-      saves.extend([h, x_normed, rrms, *s, x_w13])
+      saves.extend([h, *(() if MXFP4 else (x_normed,)), rrms, *s, x_w13])
       out, s = silu_w13_quantize_matmul(x_w13, kwargs["w2"], kwargs["s_2"], amax_x2=kwargs["amax_x2"],
                                                      next_amax_x2=kwargs["next_amax_x2"],
                                                      grad_amax_xw13=kwargs["grad_amax_xw13"],
@@ -425,13 +425,14 @@ class FlatTransformer:
     if not SPLIT_W13: register_mxfp4_weight_cache(self.w13, cache["w13"])
     register_mxfp4_weight_cache(self.w2, cache["w2"])
     register_mxfp4_weight_cache(self.wqkv, cache["wqkv"])
+    register_mxfp4_weight_cache(self.wo, cache["wo"])
     return cache
 
   def update_mxfp4_weight_cache(self, cache:dict[str, list[tuple[Tensor, Tensor, Tensor, Tensor]]]) -> list[Tensor]:
     from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
     updated = []
     for name, layers in cache.items():
-      if name in ("w13", "w2", "wqkv"):
+      if name in ("w13", "w2", "wqkv", "wo"):
         updated.extend(x for outputs in layers for x in outputs)
         continue
       for weight, outputs in zip(getattr(self, name), layers):
