@@ -74,7 +74,7 @@ def block_128x128_gemm(lane:UOp, wave_m:UOp, wave_n:UOp, c:UOp, a:UOp, b:UOp) ->
     return inner_reduce()
 
   # run the matmul
-  acc = acc.after(tile_reduce(acc, a, b))
+  acc = acc.after(tile_reduce())
 
   # store accumulator to output (unified)
   c = c.reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M,
