@@ -427,7 +427,7 @@ def custom_asm_fa_backward(dq_acc:UOp, dk_expanded:UOp, dv_expanded:UOp, q:UOp, 
                   v.flatten().index(zero).load(), do.flatten().index(zero).load(), lse.flatten().index(zero).load(),
                   delta.flatten().index(zero).load(),
                   lds, threads, blockIdx_x, blockIdx_y, blockIdx_z,
-                  arg=KernelInfo(name="asm_fa_bwd_" + ("fp8_matched" if pre_scaled_fp8 else "bf16"),
+                  arg=KernelInfo(name="asm_fa_bwd_bf16",
                                  estimates=Estimates(ops=5*B*H*N*N*D)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in build_kernel(B, N, H, H_KV, D, pre_scaled_fp8)))))
 
