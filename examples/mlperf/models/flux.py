@@ -1,5 +1,5 @@
 from examples.sdxl import FirstStage
-from tinygrad import Tensor, nn, dtypes, function
+from tinygrad import Tensor, nn, dtypes
 from extra.models.clip import FrozenClosedClipEmbedder
 
 import math
@@ -345,17 +345,11 @@ class Flux:
     ids = Tensor.cat(txt_ids, img_ids, dim=1)
     pe = self.pe_embedder(ids)
     for block in self.double_blocks:
-      @function(precompile=True, precompile_backward=True, allow_implicit=True)
-      def run_double(img:Tensor, txt:Tensor, vec:Tensor, pe:Tensor, _block=block) -> tuple[Tensor, Tensor]:
-        img, txt = _block(img=img, txt=txt, vec=vec, pe=pe)
-        return img.contiguous(), txt.contiguous()
-      img, txt = run_double(img, txt, vec, pe)
+      img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
+      img, txt = img.contiguous(), txt.contiguous()
     img = Tensor.cat(txt, img, dim=1)
     for block in self.single_blocks:
-      @function(precompile=True, precompile_backward=True, allow_implicit=True)
-      def run_single(img:Tensor, vec:Tensor, pe:Tensor, _block=block) -> Tensor:
-        return _block(img, vec=vec, pe=pe).contiguous()
-      img = run_single(img, vec, pe)
+      img = block(img, vec, pe)
 
     img = img[:, txt.shape[1] :, ...]
 
@@ -370,11 +364,24 @@ class Flux:
 
     for p in nn.state.get_parameters(self.img_in): p.shard_(devices, axis=None).realize()
     for p in nn.state.get_parameters(self.txt_in): p.shard_(devices, axis=None).realize()
-    for p in nn.state.get_parameters(self.time_in): p.shard_(devices, axis=None).realize()
-    for p in nn.state.get_parameters(self.vector_in): p.shard_(devices, axis=None).realize()
+
+    self.time_in.in_layer.weight.shard_(devices, axis=None).realize()
+    self.time_in.in_layer.bias.shard_(devices, axis=None).realize()
+    self.time_in.out_layer.weight.shard_(devices, axis=0).realize()
+    self.time_in.out_layer.bias.shard_(devices, axis=0).realize()
+
+    self.vector_in.in_layer.weight.shard_(devices, axis=None).realize()
+    self.vector_in.in_layer.bias.shard_(devices, axis=None).realize()
+    self.vector_in.out_layer.weight.shard_(devices, axis=0).realize()
+    self.vector_in.out_layer.bias.shard_(devices, axis=0).realize()
+
     if isinstance(self.guidance_in, MLPEmbedder):
       for p in nn.state.get_parameters(self.guidance_in): p.shard_(devices, axis=None).realize()
-    for p in nn.state.get_parameters(self.final_layer): p.shard_(devices, axis=None).realize()
+
+    self.final_layer.adaLN_modulation[-1].weight.shard_(devices, axis=1).realize()
+    self.final_layer.adaLN_modulation[-1].bias.shard_(devices, axis=None).realize()
+    self.final_layer.linear.weight.shard_(devices, axis=None).realize()
+    self.final_layer.linear.bias.shard_(devices, axis=None).realize()
 
     for block in self.double_blocks:
       for attn in [block.img_attn, block.txt_attn]:

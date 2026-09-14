@@ -2135,8 +2135,6 @@ def train_flux():
     loss = (pred - tgt).square().mean()
 
     for p, g in zip(optim.params, loss.gradient(*optim.params)):
-      if isinstance(p.device, tuple) and g.uop.axis != p.uop.axis:
-        g = g.to(p.device[0]).shard(p.device, p.uop.axis)
       p.grad.assign(g)
 
     return loss.float().to("CPU").realize(*grads)
