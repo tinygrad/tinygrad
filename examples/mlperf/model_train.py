@@ -2119,7 +2119,6 @@ def train_flux():
 
   # model
   model = Flux(
-    guidance_embed=False,
     in_channels=64,
     vec_in_dim=768,
     context_in_dim=4096,
