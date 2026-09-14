@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
 from tinygrad.runtime.support.hcq2 import layout_args
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, BumpAllocator, hcq_filter_visible_devices
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, InstInfo
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops, lower_and_compile, run_linear
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, TinyELF
 from tinygrad.dtype import dtypes, DType
@@ -97,7 +97,7 @@ class QMD:
 class NVQueue(HWQueue):
   dev:NVDevice
   q_rewrite = HWQueue.q_rewrite + PatternMatcher([
-    (UPat(Ops.INS, arg=("nv", dtypes.void), name="u"), lambda ctx, u: ctx.q(*u.src)),
+    (UPat(Ops.CALL, arg=InstInfo("nv"), name="u"), lambda ctx, u: ctx.q(*u.src[1:])),
   ])
 
   def nvm(self, subc:int, mthd:int, *vals, typ=2): self.q(*nvm(subc, mthd, *vals, typ=typ))
@@ -675,9 +675,9 @@ class NVDevice(Compiled):
     tl = timeline(devs:=(self.device,))
     value = tl.index(1).load()
     submit = make_submit(
-      UOp(Ops.INS, arg=("wait", dtypes.void), src=(tl, value)),
-      UOp(Ops.INS, arg=("nv", dtypes.void), src=(UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes()),)),
-      UOp(Ops.INS, arg=("store", dtypes.void), src=(tl, value + 1)), devs=devs, queue=queue).replace(arg="submit_nv_raw")
+      UOp(Ops.NOOP).ins("wait", tl, value),
+      UOp(Ops.NOOP).ins("nv", UOp(Ops.BINARY, arg=array.array('I', cmds).tobytes())),
+      UOp(Ops.NOOP).ins("store", tl, value + 1), devs=devs, queue=queue).replace(arg="submit_nv_raw")
     call = UOp.sink(tl.after(submit).index(1).store(value + 1), arg=KernelInfo("nv_submit")).call(aux=HCQInfo(devs))
     linear = lower_and_compile(UOp(Ops.LINEAR, src=(unwrap(lower_call(call)),)))
     run_linear(hcq_link(linear, allow_cache=True), jit=True, update_stats=False, wait=True)

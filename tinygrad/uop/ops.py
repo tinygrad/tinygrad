@@ -127,13 +127,9 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       return dtypes.void
     case Ops.CALL:
       # a call states its (possibly void) dtype in the CallInfo
-      return arg.dtype if isinstance(arg, CallInfo) else dtypes.void
+      return arg.dtype if isinstance(arg, (CallInfo, InstInfo)) else dtypes.void
     case Ops.CUSTOM | Ops.CUSTOMI:
       assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"CUSTOM/CUSTOMI arg must be (str, DType), got {arg}"
-      return arg[1]
-    case Ops.INS:
-      # arg is (instruction, dtype), a queue command or an asm line is void
-      assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"INS arg must be (instruction, DType), got {arg}"
       return arg[1]
     case Ops.INDEX:
       # an image access is always float, no matter the storage dtype
@@ -327,11 +323,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.CALL:
         return None if self.dtype is dtypes.void else ()
 
-      # INS shape is always scalar, vector width is in the instruction encoding
-      case Ops.INS:
-        if self.dtype is dtypes.void: return None
-        return ()
-
       # special (terrible) case for RESHAPE on NOOP
       case Ops.RESHAPE:
         if self.src[0].op is Ops.NOOP: return self.marg
@@ -459,6 +450,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def ended_ranges(self) -> tuple[UOp, ...]:
     if self.op is Ops.CALL and self.src[0].op is Ops.CUSTOM_FUNCTION and self.src[0].src: return ()
+    # ranges flow through machine code op?
+    if self.op is Ops.CALL and isinstance(self.arg, InstInfo): return (self.src[0],)
     if self.op is Ops.END: return tuple(r for r in self.src[1:] if r.op is Ops.RANGE)
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
@@ -592,7 +585,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def without_after(self) -> UOp: return self.src[0] if self.op is Ops.AFTER else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
-  def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("src", self.src), (arg, kwargs.pop("dtype", self.dtype)), kwargs.pop("tag", self.tag))
+  def ins(self, opc:Any, *src:UOp, **kwargs):
+    graph = set(self.toposort())
+    # only value (register) producing operands are bound to the graph. isel rewrites a node before its srcs, so this can't use the tags
+    bound = tuple(s for s in src if s in graph and s.dtype is not dtypes.void)
+    ps = {o:o.param_like(i) for i,o in enumerate(bound)}
+    sink = self.substitute(ps)
+    ret = UOp(Ops.CALL, (sink,) + src, InstInfo(opc, kwargs.pop("dtype", self.dtype)), kwargs.pop("tag", self.tag))
+    assert not kwargs, f"unknown kwargs to ins: {list(kwargs)}"
+    return ret
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
@@ -1334,6 +1335,11 @@ class CallInfo:
     return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward})" + \
       (f", {self.dtype}" if self.dtype is not dtypes.void else "")
 
+@dataclass(frozen=True)
+class InstInfo:
+  opcode: Any
+  dtype: DType = dtypes.void
+
 # ******** ops in python ********
 
 def safe_exp2(x):
@@ -1722,7 +1728,7 @@ class RewriteContext:
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
         # CALL bodies are never rewritten separately, rewrites that need them pass enter_calls=True
-        if n.op is Ops.CALL and not self.enter_calls: self.replace[n.src[0]] = n.src[0]
+        if n.op is Ops.CALL and isinstance(n.arg, CallInfo) and not self.enter_calls: self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
           if x not in self.replace: stack.append((x, False))
       else:
@@ -1761,14 +1767,18 @@ class RewriteContext:
         stack.append((n, 1, new_n))
         # NOTE: CALLs are handled as a special case: their bodies are not included in the graph_rewrite,
         # rewrites that need them pass enter_calls=True
-        if new_n.op is Ops.CALL and not self.enter_calls: self.replace[new_n.src[0]] = new_n.src[0]
+        # NOTE: machine instruction src[0] is to call
+        if new_n.op is Ops.CALL and new_n.src[0] not in on_stack and not self.enter_calls: self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
           on_stack.add(x)
       elif stage == 1:
-        tmp = []
-        for x in new_n.src:
+        # NOTE: machine code CALLs get placed as the sink of their own rewrite
+        # must be excluded from normal waitlist handling to avoid cycle
+        circular = new_n.op is Ops.CALL and not self.enter_calls
+        tmp = [new_n.src[0]] if circular else []
+        for x in (new_n.src[1:] if circular else new_n.src):
           if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
             # source not ready: register in waitlist instead of spinning
             waitlist.setdefault(x, []).append((n, 1, new_n))

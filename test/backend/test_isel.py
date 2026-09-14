@@ -20,7 +20,7 @@ class TestIselX86(unittest.TestCase):
       with self.subTest(dtype=dt):
         v = [UOp.variable(str(i), 0, 0, dt) for i in range(nargs)]
         n = self.isel_rewrite(expr(*v))
-        self.assertIs(n.arg[0], op)
+        self.assertIs(n.arg.opcode, op)
 
   def test_cmove(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
@@ -29,9 +29,9 @@ class TestIselX86(unittest.TestCase):
     d = (a != b).where(a, b)
     f = c + d
     n = self.isel_rewrite(f)
-    self.assertTrue(n.src[0].arg[0] is X86Ops.CMOVL and n.src[1].arg[0] is X86Ops.CMOVNE)
+    self.assertTrue(n.src[1].arg.opcode is X86Ops.CMOVL and n.src[2].arg.opcode is X86Ops.CMOVNE)
     # both comparisons become the same instruction
-    self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].arg[0] is X86Ops.CMP)
+    self.assertTrue(n.src[1].src[3] == n.src[2].src[3] and n.src[1].src[3].arg.opcode is X86Ops.CMP)
 
   def test_vinsertps(self):
     a = UOp.variable("a", 0, 0, dtypes.float32)
@@ -41,7 +41,7 @@ class TestIselX86(unittest.TestCase):
 
     valid = [UOp.stack(lane(a, 0), lane(b, 1), lane(a, 2), lane(b, 3)),
              UOp.stack(lane(a, 3), lane(b, 2), lane(c, 1), d)]
-    for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg[0], X86Ops.VINSERTPS)
+    for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg.opcode, X86Ops.VINSERTPS)
 
   # complex address is [base + index*scale + displacement]
   def test_complex_address(self):
@@ -49,7 +49,7 @@ class TestIselX86(unittest.TestCase):
     load = UOp.param(0, dtypes.int32, 16).index(a + UOp.cconst(1, dtypes.int32)).load()
     n = self.isel_rewrite(load)
     # displacement is the constant in "a" scaled to the buffer element size, dtype is int8 when the value fits otherwise int32
-    self.assertTrue(n.src[2].dtype is dtypes.int8 and n.src[2].src[0].op is Ops.CONST and n.src[2].src[0].val == 4)
+    self.assertTrue(n.src[3].dtype is dtypes.int8 and n.src[3].src[0].op is Ops.CONST and n.src[3].src[0].val == 4)
 
 if __name__ == "__main__":
   unittest.main()
