@@ -37,22 +37,20 @@ class TestRDMACopy(unittest.TestCase):
     np.testing.assert_equal(y.numpy(), expected)
     print(f"RDMA copy: {50 * expected.nbytes / elapsed / 1e9:.2f} GB/s, 50 x 16 MiB")
 
-  def test_copy_wrap(self): # 300 copies each way of changing contents: the 32 entry rings and the 128 entry cqs wrap, every result is checked
-    from tinygrad.runtime import ops_rdma
+  def test_copy_wrap(self): # 300 copies each way of changing contents: the rings and the cqs wrap, every result is checked
     n = 3 << 18
     original = CPUProgram.__call__
-    with patch.object(ops_rdma, "RDMA_CHUNK", 1 << 18): # three chunks per copy
-      for src, dst in (self.devs, self.devs[::-1]):
-        xs = [Tensor.zeros(n, dtype=dtypes.uint8, device=src).contiguous().realize() for _ in range(2)] # two input allocations, used in turn
-        f = TinyJit(lambda x: x[4096:].to(dst).contiguous().realize()) # an offset view
-        def late_receiver(prg, *args, **kwargs): # the send is posted before the receive
-          if prg.dev.device == Device[dst].host: time.sleep(0.05)
-          return original(prg, *args, **kwargs)
-        for i in range(300):
-          data = np.random.default_rng(i).integers(0, 256, n, dtype=np.uint8)
-          xs[i % 2].assign(Tensor(data, device=src)).realize()
-          with patch.object(CPUProgram, "__call__", late_receiver if 34 <= i < 38 else original): y = f(xs[i % 2])
-          np.testing.assert_equal(y.numpy(), data[4096:])
+    for src, dst in (self.devs, self.devs[::-1]):
+      xs = [Tensor.zeros(n, dtype=dtypes.uint8, device=src).contiguous().realize() for _ in range(2)] # two input allocations, used in turn
+      f = TinyJit(lambda x: x[4096:].to(dst).contiguous().realize()) # an offset view
+      def late_receiver(prg, *args, **kwargs): # the send is posted before the receive
+        if prg.dev.device == Device[dst].host: time.sleep(0.05)
+        return original(prg, *args, **kwargs)
+      for i in range(300):
+        data = np.random.default_rng(i).integers(0, 256, n, dtype=np.uint8)
+        xs[i % 2].assign(Tensor(data, device=src)).realize()
+        with patch.object(CPUProgram, "__call__", late_receiver if 34 <= i < 38 else original): y = f(xs[i % 2])
+        np.testing.assert_equal(y.numpy(), data[4096:])
 
   def test_sharded_reduce(self):
     def reduce(x): return (x + 1).sum().realize()

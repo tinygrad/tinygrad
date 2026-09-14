@@ -19,7 +19,7 @@ HCQ_DEVS = frozenset(("NV", "QCOM")) | (frozenset(("AMD",)) if HCQ2 else frozens
 @dataclass(frozen=True)
 class HCQInfo:
   device:tuple[str, ...]
-  rdma:bool = False
+  skip_wait:bool = False
 
   kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = () # (devices, name, estimates, timestamp slots, profile key)
   estimates:Estimates = Estimates()
@@ -32,11 +32,6 @@ class HCQInfo:
   written_bufs:tuple[UOp, ...] = () # write args
 
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
-
-def rdma_wire(call:UOp) -> UOp|None: # the wire of a side of a copy between nodes: a placeholder on the node's nic
-  if call.op is not Ops.CALL or call.src[0].op is not Ops.COPY: return None
-  return next((b for b in get_call_arg_uops(call) if to_tuple(b.device)[0].startswith("RDMA")), None)
-def is_rdma(call:UOp) -> bool: return rdma_wire(call) is not None
 
 def get_enqueue_devs(call:UOp) -> Any|None:
   if call.src[0].op not in (Ops.PROGRAM, Ops.COPY): return None # only these bodies can be enqueued
@@ -133,18 +128,20 @@ STAGING_SIZE, STAGING_SLOTS = (4 if DEV.interface.startswith("MOCK") else 128) <
 @functools.cache
 def _staging(device:str) -> Buffer: return Buffer(device, STAGING_SIZE, dtypes.uint8, preallocate=True)
 
-def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None: # a copy between nodes: a send to the source's nic and a receive from the destination's
+def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
-  if not getenv("RDMA") or any(d.split(":")[0] != "AMD" for d in devs): return None
   if Device[devs[0]].peer_group == Device[devs[1]].peer_group: return None
+
   from tinygrad.runtime.support.system import System
-  # the wire: a placeholder on the node's nic tagged with the gpu pair, never a buffer, the queues read its tag
-  wires = [UOp.placeholder(src.max_shape, src.dtype, 0, device=System.nic_for(Device[d]).device, tag=("rdma", (min(devs), max(devs)))) for d in devs]
+  if None in (nics:=[System.nic_for(Device[d]) for d in devs]): return None
+
+  # the wires: a placeholder on each node's nic in place of the far gpu, named by it, never a buffer
+  wires = [UOp.placeholder(src.max_shape, src.dtype, 0, device=nic.device, tag=peer) for nic, peer in zip(nics, devs[::-1])]
   send = call.replace(src=(call.src[0].replace(arg=wires[1].device), wires[1], src))
   return UOp(Ops.LINEAR, src=(send, call.replace(src=(call.src[0], dst, wires[0]))))
 
 def stage_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
-  if is_rdma(call): return None
+  if any(to_tuple(b.device)[0].startswith("RDMA") for b in (dst, src)): return None # over the nic: the gpu's queue encodes it
   if (device:=get_enqueue_devs(call)) is None: return None
   try:
     for b in (dst, src): cast(Buffer, _resolve(b, ctx).buffer).get_buf(device)
@@ -247,7 +244,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
     queues.setdefault(((dev,), queue), []).extend([*waits, bump])
   return queues
 
-def _finalize_batch(ctx:BatchCtx) -> UOp:
+def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   queues = _build_queues(ctx)
 
   # re-arm the batch signals before submitting queues in first-use order
@@ -269,7 +266,7 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
   written_bufs = tuple(dedup(b for c, _, _ in ctx.batch for b in get_call_written_bufs(c)))
   host_deps = tuple(dedup((host, devs[0]) for call, devs, _ in ctx.batch for buf in get_call_arg_uops(call)
                          for host in to_tuple(buf.device) if host not in ctx.queues))
-  info = HCQInfo(tuple(ctx.queues), rdma=any(is_rdma(c) for c, _, _ in ctx.batch), kernels=kerns, written_bufs=written_bufs,
+  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, written_bufs=written_bufs,
                  estimates=sum(estimates, start=Estimates()).simplify(), host_deps=host_deps)
   return sink.call(*(ctx.slots.values() if ctx.profile else ()), aux=info)
 
@@ -290,7 +287,8 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
   for hcq, grp in itertools.groupby(zip(l.src, devs, queues), key=lambda e: bool(e[1])):
     nodes:dict[str, list] = {}
     for e in grp: nodes.setdefault(Device[e[1][0]].peer_group if hcq else "", []).append(e)
-    for batch in nodes.values(): srcs += [_finalize_batch(BatchCtx(batch, profile))] if hcq else [c for c, _, _ in batch]
+    batches = list(nodes.values())
+    for batch in batches: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1])] if hcq else [c for c, _, _ in batch]
   return l.replace(src=tuple(srcs))
 
 # *****************

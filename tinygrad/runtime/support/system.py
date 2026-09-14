@@ -97,9 +97,9 @@ class _System:
     local = [(PCIDevice, x) for x in System.pci_scan_bus(*PCI_DEVICES[device])] if not getenv("REMOTE", "") else []
     return hcq_filter_visible_devices(remote + local, device)
 
-  def nic_for(self, dev) -> Any: # the rdma device on the node of dev
+  def nic_for(self, dev) -> Any: # the rdma device on the node of dev, if it has one
     nics = [Device[f"RDMA:{i}"] for i in range(len(self.list_devices("RDMA")))]
-    return next(n for n in nics if n.peer_group == dev.peer_group)
+    return next((n for n in nics if n.peer_group == dev.peer_group), None)
 
   def pci_probe_device(self, device:str, dev_id:int):
     try: cl, pcibus = (ds:=self.list_devices(device))[dev_id]
