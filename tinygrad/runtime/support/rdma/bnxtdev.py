@@ -9,7 +9,7 @@ BNXT_DEBUG = getenv("BNXT_DEBUG", 0)
 BNXT_ACCESS, BNXT_INIT_MASK, BNXT_RTR_MASK, BNXT_RTS_MASK = 3, 0xd, 0x41515ad, 0xae005
 BNXT_CHIMP_COMM, BNXT_CHIMP_COMM_TRIGGER = 0x0, 0x100
 BNXT_BACKING_STORE = ((0, 64), (1, 0), (2, 128), (3, 0), (4, 2), (5, 0), (6, 0), (14, 1024), (15, 0))
-WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU = 128, 1024, 1024, 4096 # a ring holds a batch of wqes, a cq its completions
+WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU = 128, 1024, 1024, 4096
 def db_value(xid, typ, index, epoch):
   return (xid & bnxt.DBC_DBC_XID_MASK | bnxt.DBC_DBC_PATH_ROCE | typ | bnxt.BNXT_QPLIB_DBR_VALID) << 32 | \
          index & bnxt.DBC_DBC_INDEX_MASK | epoch << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT
@@ -24,7 +24,7 @@ def msn_entry(wqe_idx:int, psn:int, size:int) -> tuple[int, int]: # the entry an
   return (wqe_idx % RING_ENTRIES) << bnxt.SQ_MSN_SEARCH_START_IDX_SFT | nxt << bnxt.SQ_MSN_SEARCH_NEXT_PSN_SFT | psn, nxt
 def cqe_ready(cqe:bytes, cons:int) -> bool: return (cqe[24] & bnxt.CQ_BASE_TOGGLE) != (cons // CQ_ENTRIES & 1)
 
-def build_pbl(dev, paddrs, queue=False):
+def build_pbl(dev, paddrs, queue=False) -> tuple[int, int]:
   if len(paddrs) == 1: return 0, paddrs[0]
   values = [p | bnxt.PTU_PTE_VALID for p in paddrs]
   if queue: values[-1], values[-2] = values[-1] | bnxt.PTU_PTE_LAST, values[-2] | bnxt.PTU_PTE_NEXT_TO_LAST
@@ -46,10 +46,8 @@ class BNXTQueue:
 
 def alloc_queue(dev, stride:int=16, aux=False, entries:int=0) -> BNXTQueue: # a page of entries by default
   entries = entries or 0x1000 // stride
-  size = entries * stride
-  mem, paddrs = dev.pci_dev.alloc_sysmem(size + aux * entries * 8)
-  lvl, addr = build_pbl(dev, paddrs, queue=True)
-  return BNXTQueue(mem, paddrs, stride, lvl, addr, size)
+  mem, paddrs = dev.pci_dev.alloc_sysmem((size:=entries * stride) + aux * entries * 8)
+  return BNXTQueue(mem, paddrs, stride, *build_pbl(dev, paddrs, queue=True), size=size)
 
 class BNXTDev:
   def __init__(self, pci_dev:PCIDevice):
@@ -70,7 +68,7 @@ class BNXTDev:
     self.setup_backing_store()
     self._open_rcfw()
     self._open_l2()
-    self.local_gid = bytes(10) + b'\xff\xff\x0a' + self.mac.to_bytes(6, 'big')[3:] # an ipv4-mapped gid from the mac: unique, nothing to configure
+    self.local_gid = bytes(10) + b'\xff\xff\x0a' + self.mac.to_bytes(6, 'big')[3:]
     self.gid_id = self.rcfw("add_gid", gid=struct.unpack(">4I", self.local_gid)[::-1], src_mac=struct.unpack(">3H", self.mac.to_bytes(6, 'big'))).xid
 
     if DEBUG >= 2: print(f"bnxt {self.devfmt}: booted mac={self.mac.to_bytes(6, 'big').hex(':')} gid={self.local_gid.hex()}")
