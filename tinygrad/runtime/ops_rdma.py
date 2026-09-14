@@ -7,7 +7,7 @@ from tinygrad.helpers import round_up, ceildiv, unwrap, to_tuple, flatten
 from tinygrad.engine.realize import get_call_arg_uops
 from tinygrad.runtime.autogen import bnxt
 from tinygrad.runtime.support.rdma.bnxtdev import BNXTDev, BNXTQP, db_value, send_wqe, recv_wqe, WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU
-from tinygrad.runtime.support.hcq2 import unwrap_view, rt_addr
+from tinygrad.runtime.support.hcq2 import unwrap_view, rt_addr, to_name
 from tinygrad.runtime.support.memory import AddrSpace, MMIOInterface, VirtMapping, MemoryManager
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat
@@ -52,29 +52,30 @@ class RDMADevice(Compiled):
 
   def __init__(self, device:str):
     self.iface = self._select_iface(device)
-    self.qps:dict[tuple[str, str], BNXTQP] = {}
-    self.bufs:dict[tuple[tuple[str, str], str], Buffer] = {} # a gpu pair's rings, cqs, counters and the doorbell
-    super().__init__(device, BNXTAllocator(self), [], None)
-    self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="b"),
-      lambda ctx, b: ctx.bufs[b.tag[1:]] if isinstance(b.tag, tuple) and b.tag[0] == "rdma" else None)]) + self.pm_bufferize
 
-  def qp(self, pair:tuple[str, str], peer) -> BNXTQP: # one queue pair per gpu pair, on this nic and the peer's, with its rings and counters
-    if pair not in self.qps:
-      other = cast(RDMADevice, System.nic_for(peer))
-      for nic in (self, other):
-        nic.qps[pair] = q = BNXTQP(nic.iface.dev_impl)
-        for name in ("sq", "rq", "scq", "rcq"): nic.bufs[pair, name] = nic.iface.buffer(getattr(q, name).ring, getattr(q, name).paddrs)
-        for name in ("sq_seq", "rq_seq", "psn"): nic.bufs[pair, name] = Buffer(nic.device, 1, dtypes.uint64, initial_value=bytes(8))
-        nic.bufs[pair, "db"] = nic.iface.doorbell
-      for a, b in ((self, other), (other, self)): a.qps[pair].connect(b.qps[pair].qpn, b.iface.dev_impl.local_gid, b.iface.dev_impl.mac)
-    return self.qps[pair]
+    # all bufs per qp
+    self.bufs:dict[str, Buffer] = {}
+
+    super().__init__(device, BNXTAllocator(self), [], None)
+
+    self.pm_bufferize = PatternMatcher([(UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.bufs.get(b.tag))]) + self.pm_bufferize
 
 # *****************
 # UOps implementation
 
-# a gpu pair's memory on its nic, bound at link: the rings (a send ring has its msn table), the cqs, the next slot and psn, the doorbell page
+@functools.cache
+def rdma_qp(pair:tuple[str, str]) -> dict[str, BNXTQP]: # one queue pair per gpu pair: on both nics, connected, with the rings and counters
+  nics = [cast(RDMADevice, System.nic_for(Device[d])) for d in pair]
+  qps = {nic.device: BNXTQP(nic.iface.dev_impl) for nic in nics}
+  for nic, q in zip(nics, qps.values()):
+    for name in ("sq", "rq", "scq", "rcq"): nic.bufs[to_name("rdma", *pair, name)] = nic.iface.buffer(getattr(q, name).ring, getattr(q, name).paddrs)
+    for name in ("sq_seq", "rq_seq", "psn"): nic.bufs[to_name("rdma", *pair, name)] = Buffer(nic.device, 1, dtypes.uint64, initial_value=bytes(8))
+    nic.bufs[to_name("rdma", *pair, "db")] = nic.iface.doorbell
+  for a, b in (nics, nics[::-1]): qps[a.device].connect(qps[b.device].qpn, b.iface.dev_impl.local_gid, b.iface.dev_impl.mac)
+  return qps
+
 def rdma_mem(nic:str, pair:tuple[str, str], name:str, size:int, dtype:DType=dtypes.uint8) -> UOp:
-  return UOp.placeholder((size,), dtype, 0, device=nic, volatile=True, tag=("rdma", pair, name))
+  return UOp.placeholder((size,), dtype, 0, device=nic, volatile=True, tag=to_name("rdma", *pair, name))
 def rdma_ring(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp:
   return rdma_mem(nic, pair, "rq" if is_recv else "sq", RING_ENTRIES * (WQE_SIZE if is_recv else WQE_SIZE + 8))
 def rdma_cq(nic:str, pair:tuple[str, str], is_recv:bool) -> UOp: return rdma_mem(nic, pair, "rcq" if is_recv else "scq", CQ_ENTRIES * 32)
@@ -97,7 +98,7 @@ def ins(name:str, *src:UOp|int) -> UOp:
 
 def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the ops of each copy of a submit on one queue
   (pair, is_recv), nic = queue_of(calls[0]), cast(RDMADevice, Device[unwrap(rdma_wire(calls[0])).device])
-  qp = nic.qp(pair, Device[next(p for p in pair if p != devs[0])])
+  qp = rdma_qp(pair)[nic.device]
   ring, cq = rdma_ring(nic.device, pair, is_recv), rdma_cq(nic.device, pair, is_recv)
   seq, psn = rdma_seq(nic.device, pair, is_recv), rdma_psn(nic.device, pair)
   bufs = [get_call_arg_uops(c)[0 if is_recv else 1] for c in calls]
@@ -136,13 +137,15 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
       ops += [ins("wait_eq", cq_addr + (n % CQ_ENTRIES) * 32 + 24, (n // CQ_ENTRIES & 1 ^ 1 | (2 if is_recv else 0)).cast(dtypes.uint16)),
               ins("store", db, ((n + 1) % CQ_ENTRIES | ((n + 1) // CQ_ENTRIES & 1) << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT) | cq_db)]
       n, p = n + 1, p + ceildiv(size, MTU)
-    copies.append(ops + ([ins("barrier")] if is_recv else [])) # a receive invalidates the gpu caches
+
+    # and invalidate the gpu caches on recv
+    copies.append(ops + ([ins("barrier")] if is_recv else []))
   return copies
 
 # *****************
 # encode rewrite
 
-def rdma_submit(ctx, submit:UOp, lin:UOp) -> UOp|None: # the copies between nodes of a submit become its ops
+def rdma_submit(ctx, submit:UOp, lin:UOp) -> UOp|None:
   if not (queues:={i: queue_of(u) for i, u in enumerate(lin.src) if is_rdma(u)}): return None
 
   ops = [[u] for u in lin.src]

@@ -92,8 +92,8 @@ class TestBNXTCopy(unittest.TestCase):
       rings = {n: Buffer("CPU", RING_ENTRIES * 128 + RING_ENTRIES * 8, dtypes.uint8, preallocate=True) for n in ("sq", "rq", "scq", "rcq", "db")}
       args = {n: UOp.from_buffer(b) for n, b in rings.items()} # addressed, never written here
       args |= {n: UOp.placeholder((1,), dtypes.uint64, 0, device="CPU", volatile=True, tag=n) for n in ("sq_seq", "rq_seq", "psn")}
-      nic = SimpleNamespace(device="CPU", iface=SimpleNamespace(dev_impl=SimpleNamespace(db_off=0)),
-                            qp=lambda pair, peer: SimpleNamespace(qpn=5, scq_id=6, rcq_id=7))
+      nic = SimpleNamespace(device="CPU", iface=SimpleNamespace(dev_impl=SimpleNamespace(db_off=0)))
+      self.enterContext(patch.object(ops_rdma, "rdma_qp", lambda pair: {"CPU": SimpleNamespace(qpn=5, scq_id=6, rcq_id=7)}))
       self.enterContext(patch.object(ops_rdma, "rdma_mem", lambda nic, pair, name, *_: args[name]))
       src, dst = Buffer("CPU:1", 4096, dtypes.uint8, preallocate=True), Buffer("CPU", 4096, dtypes.uint8, preallocate=True) # "nodes" CPU:1 and CPU
       wire = UOp.placeholder((4096,), dtypes.uint8, 0, device="RDMA:0", tag="CPU:1" if recv else "CPU") # the far gpu
@@ -136,8 +136,8 @@ class TestBNXTCopy(unittest.TestCase):
     rings = {n: Buffer("CPU", RING_ENTRIES * 128 + RING_ENTRIES * 8, dtypes.uint8, preallocate=True) for n in ("sq", "scq", "db")}
     args = {n: UOp.from_buffer(b) for n, b in rings.items()}
     args |= {n: UOp.placeholder((1,), dtypes.uint64, 0, device="CPU", volatile=True, tag=n) for n in ("sq_seq", "psn")}
-    nic = SimpleNamespace(device="CPU", iface=SimpleNamespace(dev_impl=SimpleNamespace(db_off=0)),
-                          qp=lambda pair, peer: SimpleNamespace(qpn=5, scq_id=6, rcq_id=7))
+    nic = SimpleNamespace(device="CPU", iface=SimpleNamespace(dev_impl=SimpleNamespace(db_off=0)))
+    self.enterContext(patch.object(ops_rdma, "rdma_qp", lambda pair: {"CPU": SimpleNamespace(qpn=5, scq_id=6, rcq_id=7)}))
     self.enterContext(patch.object(ops_rdma, "rdma_mem", lambda nic, pair, name, *_: args[name]))
     srcs = [Buffer("CPU:1", n, dtypes.uint8, preallocate=True) for n in (4096, 2048)]
     wires = [UOp.placeholder((b.size,), dtypes.uint8, 0, device="RDMA:0", tag="CPU") for b in srcs] # the far gpu
