@@ -67,12 +67,10 @@ def _swiglu_bwd(gradient:UOp, kernel:UOp, *, prequantize_mxfp4:bool=False):
   M, N = math.prod(x_w13.shape[:-1]), x_w13.shape[-1]
   if prequantize_mxfp4:
     assert M % 256 == 0 and N % 256 == 0, f"MXFP4 SwiGLU gradient requires multiples of 256, got {(M, N)}"
-    from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs, _grad_mxfp4_mailbox
+    from extra.llama_kernels.quantize_mxfp4 import alloc_mxfp4_outputs
     quant = alloc_mxfp4_outputs(grad_out, flatten_row=True)
-    ret = Tensor.custom_kernel(grad_out, *quant, Tensor(x_w13, device=x_w13.device),
-                               Tensor(gradient, device=x_w13.device), fxn=_custom_swiglu_bwd_mxfp4)
-    grad_out, quant = ret[0], list(ret[1:5])
-    _grad_mxfp4_mailbox[grad_out.uop] = tuple(x.uop for x in quant)
+    grad_out, *_ = Tensor.custom_kernel(grad_out, *quant, Tensor(x_w13, device=x_w13.device),
+                                        Tensor(gradient, device=x_w13.device), fxn=_custom_swiglu_bwd_mxfp4)
   else:
     grad_out, *_ = Tensor.custom_kernel(grad_out, Tensor(x_w13, device=x_w13.device), Tensor(gradient, device=x_w13.device),
                                         fxn=_custom_swiglu_bwd)

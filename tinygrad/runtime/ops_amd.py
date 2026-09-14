@@ -3,7 +3,7 @@ from typing import cast, Any
 import os, ctypes, struct, functools, importlib, mmap, errno, contextlib, sys, hashlib, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass, replace
-from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, to_name, patch, unwrap_view, rt_addr
+from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, to_name, patch, unwrap_view, rt_addr, layout_args, pack_args
 from tinygrad.uop.ops import sint, UOp, ProgramInfo
 from tinygrad.device import BufferStorage, BufferSpec, Buffer, Device, Allocator, Compiled, ProfileProgramEvent
 from tinygrad.dtype import dtypes
@@ -356,11 +356,9 @@ class AMDComputeQueue(HWQueue):
   ### exec
 
   def kernargs(self, call:UOp, prg:UOp, data:AMDProgramData) -> list[UOp]:
-    words = [get_call_arg_uops(call)[gi].getaddr(self.devs) for gi in prg.arg.globals] + \
+    args = [get_call_arg_uops(call)[gi].getaddr(self.devs) for gi in prg.arg.globals] + \
             [b.ccast(v.dtype) for v, b in zip(prg.arg.vars, get_call_var_uops(call, prg))] # a bound value is a bare const, the var has the width
-    pad = data.kernargs_segment_size - sum(w.dtype.itemsize for w in words)
-    assert pad >= 0 and pad % 4 == 0, f"bad kernargs padding {pad}"
-    return words + [UOp.const(0, dtypes.uint32)] * (pad // 4) + (dispatch_packet(data, prg.arg) if data.enable_dispatch_ptr else [])
+    return pack_args(layout_args(args), data.kernargs_segment_size) + (dispatch_packet(data, prg.arg) if data.enable_dispatch_ptr else [])
 
   def exec(self, call:UOp, prg:UOp):
     data, lib = amd_build_program(self.dev, prg, self.devs)
@@ -413,8 +411,8 @@ class AMDComputeQueue(HWQueue):
   def submit(self, cmdbuf:UOp) -> UOp: # the ring gets an indirect buffer packet: 4 dwords, put stays aligned so it never wraps mid packet
     base, off = unwrap_view(cmdbuf)
     blob = struct.pack("IIII", self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), 0, 0, cmdbuf.max_numel() // 4 | self.pm4.INDIRECT_BUFFER_VALID)
-    ib = patch(UOp.placeholder((16,), dtypes.uint8, device="CPU", tag=to_name("ib", self.queue)), [(4, base.getaddr(self.devs) + off)], blob)
-    return self.push(self.prof_bump(cmdbuf), ib, self.dev.compute_queue)
+    ib = UOp.placeholder((16,), dtypes.uint8, device=self.dev.host, tag=to_name("ib", self.queue))
+    return self.push(self.prof_bump(cmdbuf), patch(ib, [(4, base.getaddr(self.devs) + off)], blob), self.dev.compute_queue)
 
   def push(self, cmdbuf:UOp, words:UOp, q, unit:int=4, doorbell_lag:int=0) -> UOp:
     ring, wptr, doorbell, put = _queue_args(self, q)
@@ -459,7 +457,7 @@ class AMDComputeAQLQueue(AMDComputeQueue): # the ring holds 64 byte aql packets:
     base, off = unwrap_view(cmdbuf)
     self.blob, self.patches = bytearray(), [] # q again, for the aql stream
     self.q(*UOp.sink(*self.pkts).substitute({self.cmd_addr: base.getaddr(self.devs) + off}).src)
-    aql = UOp.placeholder((len(self.blob),), dtypes.uint8, device="CPU", tag=to_name("aql", self.queue))
+    aql = UOp.placeholder((len(self.blob),), dtypes.uint8, device=self.dev.host, tag=to_name("aql", self.queue))
     return self.push(self.prof_bump(cmdbuf), patch(aql, self.patches, bytes(self.blob)), self.dev.compute_queue, unit=64, doorbell_lag=1)
 
 # *****************
@@ -499,7 +497,7 @@ class AMDSDMAQueue(HWQueue):
 
     ring, wptr, doorbell, put = _queue_args(self, q)
     base = unwrap_view(cmdbuf)[0] # in host memory: streamed into the ring, the device never reads it
-    cmdbuf = cmdbuf.substitute({base: base.replace(arg=replace(base.arg, device="CPU"))})
+    cmdbuf = cmdbuf.substitute({base: base.replace(arg=replace(base.arg, device=self.dev.host))})
 
     rs, size_dw = q.ring.size, cmdbuf.max_numel() // 4
     put_b = put.index(0).load()
@@ -531,7 +529,7 @@ def amd_build_program(dev, prg:UOp, devs:tuple[str, ...]) -> tuple[AMDProgramDat
     data, image = _amd_program_image(dev, lib)
     buf = UOp.placeholder((len(image),), dtypes.uint8, next(UOp.unique_num), device=devs).rtag("program")
     cached = _amd_program_cache[key] = (data, buf.after(buf.store(UOp(Ops.BINARY, src=(), arg=image).bitcast(buf.dtype))))
-    if PROFILE: _amd_program_prof[buf] = (prg.arg.function_name, lib, prg.key)
+    if PROFILE: _amd_program_prof[buf] = (prg.src[0].arg.function_name, lib, prg.key)
   return cached
 
 @functools.cache
@@ -769,8 +767,8 @@ class PCIIface(PCIIfaceBase):
       doorbell_index = self.dev_impl.gfx.setup_ring(*(rcvr_params:=(ring._buf, ring.nbytes, gart._buf+rptr,
         gart._buf+wptr, eop_buffer._buf, eop_buffer.nbytes, is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
 
-    (put_value := Buffer("CPU", 1, dtypes.uint64, preallocate=True)).host.view(fmt='Q')[0] = 0
-    doorbell = Buffer("CPU", 1, dtypes.uint64, options=BufferSpec(external_ptr=self.dev_impl.doorbell64.addr + doorbell_index*8), preallocate=True)
+    put_value = Buffer(host:=self.dev.host, 1, dtypes.uint64, initial_value=bytes(8))
+    doorbell = Buffer(host, 1, dtypes.uint64, options=BufferSpec(external_ptr=self.dev_impl.doorbell64.addr + doorbell_index*8), preallocate=True)
     return AMDQueueDesc(ring=ring, doorbell=doorbell, read_ptr=gart.view(1, dtypes.uint64, rptr).ensure_allocated(),
       write_ptr=gart.view(1, dtypes.uint64, wptr).ensure_allocated(), put_value=put_value, eop_buffer=eop_buffer, params=rcvr_params)
 
@@ -908,7 +906,7 @@ class AMDDevice(Compiled):
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, idx=0):
     ring = Buffer(self.device, ring_size // 4, dtypes.uint32, options=BufferSpec(uncached=True, cpu_access=True), preallocate=True)
-    gart = Buffer(self.device, 0x100, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True), preallocate=True)
+    gart = Buffer(self.device, 0x100, dtypes.uint8, options=BufferSpec(uncached=True, cpu_access=True), initial_value=bytes(0x100))
 
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL:
       self.aql_gart = gart

@@ -284,7 +284,7 @@ class TestMXFP4(unittest.TestCase):
   def test_gemm_llama4(self): self.run_empty(4096, 14336, 16384, (256, 256))
   def test_gemm_llama5(self): self.run_empty(16384, 28672, 4096, (256, 256))
   def test_gemm_llama6(self): self.run_empty(4096, 4096, 16384, (256, 256))
-  def test_gemm_llama7(self): self.run_empty(16384, 6144, 4096, (128, 512))
+  def test_gemm_llama7(self): self.run_empty(16384, 6144, 4096, (256, 256))
   def test_gemm_llama8(self): self.run_empty(16384, 4096, 4096, (256, 256))
   def test_gemm_llama9(self): self.run_empty(16384, 14336, 4096, (256, 256))
   def test_gemm_llama10(self): self.run_empty(6144, 4096, 16384, (192, 256))

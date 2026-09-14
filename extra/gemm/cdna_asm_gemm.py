@@ -444,6 +444,17 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=F
 
 # ** mxfp4 gemm backward
 
+def _producer_mxfp4_outputs(gradient:UOp, expected_half_k:int) -> tuple[UOp, UOp, UOp, UOp]|None:
+  """Recover quantized sibling outputs from a fused gradient producer without relying on a mutable mailbox."""
+  for call in reversed(gradient.toposort()):
+    if call.op is not Ops.CALL or call.src[0].op is not Ops.PROGRAM or not call.src[0].src: continue
+    info = call.src[0].src[0].arg
+    if (isinstance(info, KernelInfo) and info.name.startswith("swiglu_bwd_mxfp4_")
+        and call.src[2].shape[-1] == expected_half_k):
+      assert len(call.src) >= 6
+      return tuple(call.src[i].after(call) for i in range(2, 6))  # type: ignore[return-value]
+  return None
+
 def custom_mxfp4_gemm_bw(gradient:UOp, kernel:UOp, save_original_input:bool=False):
   inputs = kernel.src[1:]  # out, row operands/scales, BF16 operands, then saved column operands/scales
   assert len(inputs) == (9 if save_original_input else 11)
@@ -455,9 +466,11 @@ def custom_mxfp4_gemm_bw(gradient:UOp, kernel:UOp, save_original_input:bool=Fals
     a_col, scale_a_col = Tensor(inputs[7], device=a.device), Tensor(inputs[8], device=a.device)
     w_col, scale_w_col = Tensor(inputs[9], device=a.device), Tensor(inputs[10], device=a.device)
   g = Tensor(gradient, device=a.device)[:a.shape[0]].cast(dtypes.bfloat16)
-  from extra.llama_kernels.quantize_mxfp4 import _grad_mxfp4_mailbox
-  gbase = gradient.base if hasattr(gradient, "base") else gradient
-  prequant = _grad_mxfp4_mailbox.pop(gbase, None) or _grad_mxfp4_mailbox.pop(gradient, None)
+  prequant = _producer_mxfp4_outputs(gradient, w.shape[0]//2)
+  if prequant is None:
+    from extra.llama_kernels.quantize_mxfp4 import _grad_mxfp4_mailbox
+    gbase = gradient.base if hasattr(gradient, "base") else gradient
+    prequant = _grad_mxfp4_mailbox.pop(gbase, None) or _grad_mxfp4_mailbox.pop(gradient, None)
   if prequant is None: g_row, scale_g_row, g_col, scale_g_col = quantize_mxfp4(g, flatten_row=True)
   else:
     assert prequant[0] is not None and prequant[1] is not None

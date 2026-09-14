@@ -2,7 +2,7 @@ import ctypes, unittest
 from unittest.mock import patch
 
 from tinygrad.runtime.autogen import bnxt
-from extra.bnxt_driver.bnxtdev import BNXT_CHIMP_COMM, BNXT_CHIMP_COMM_TRIGGER, BNXTDev
+from tinygrad.runtime.support.rdma.bnxtdev import BNXT_CHIMP_COMM, BNXT_CHIMP_COMM_TRIGGER, BNXTDev
 
 class Mailbox:
   def __init__(self, trigger): self.words, self.trigger = {}, trigger
@@ -25,7 +25,7 @@ def reply(dev, out_type):
 
 class TestHWRM(unittest.TestCase):
   def setUp(self):
-    self.barrier = patch("extra.bnxt_driver.bnxtdev.System.memory_barrier").start()
+    self.barrier = patch("tinygrad.runtime.support.rdma.bnxtdev.System.memory_barrier").start()
     self.addCleanup(patch.stopall)
 
   def test_request(self):

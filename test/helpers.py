@@ -82,7 +82,8 @@ def jit_cache_count(linear:UOp) -> int:
   n = 0
   for call in linear.src:
     ast = call.src[0]
-    if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": n += jit_cache_count(ast.src[0])
+    if call_is_hcq(call): n += len(call.without_after.arg.aux.kernels)
+    elif ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": n += jit_cache_count(ast.src[0])
     else: n += 1
   return n
 

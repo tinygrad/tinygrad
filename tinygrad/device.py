@@ -3,10 +3,10 @@ from dataclasses import dataclass, replace, field
 from collections import defaultdict
 from typing import Any, Callable, Generic, TypeVar, Iterator, Generator, Self, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal, subprocess, struct, mmap, time, statistics
-from tinygrad.helpers import WIN, mv_address, to_mv, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
+from tinygrad.helpers import mv_address, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize, Target, unwrap, round_up, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, perf_counter_us
+from tinygrad.helpers import cpu_profile, perf_counter_us, ContextVar
 from tinygrad.dtype import dtypes, DType, _to_np_dtype
 from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 if TYPE_CHECKING:
@@ -14,6 +14,8 @@ if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp
 
 # **************** Device ****************
+
+HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "PYTHON" if DEV.interface.startswith("MOCK") else "CPU")
 
 ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
 class _Device:
@@ -298,18 +300,28 @@ class Allocator(Generic[DeviceType]):
 class HostAllocator(Allocator):
   def __init__(self, dev): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
   def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
-    if options.external_ptr is not None: addr, buf = options.external_ptr, None
-    elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
-    else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
-    return BufferStorage(addr, buf, MMIOInterface(addr, size, fmt='B'))
+    if options.external_ptr is not None: view, meta = self._view(options.external_ptr, size), None
+    elif (remote:=getattr(self.dev, "remote", None)) is not None: view, meta = remote.alloc_sysmem(round_up(size, mmap.PAGESIZE))
+    else: view = self._view(mv_address(meta:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE)), size)
+    return BufferStorage(view.addr, meta, view)
+
+  def _free(self, storage:BufferStorage, options:BufferSpec):
+    if (remote:=getattr(self.dev, "remote", None)) is not None:
+      self.dev.synchronize()
+      remote.free_sysmem(storage.host)
+
+  def _view(self, addr:int, size:int) -> MMIOInterface:
+    return remote.cpu_view(addr, size) if (remote:=getattr(self.dev, "remote", None)) is not None else MMIOInterface(addr, size, fmt='B')
 
   def _copyin(self, dest:int, src:memoryview):
     self.dev.synchronize()
-    with cpu_profile(f"TINY -> {self.dev.device}", f"{self.dev.device}:COPY"): to_mv(dest, src.nbytes)[:] = src.cast('B')
+    with cpu_profile(f"TINY -> {self.dev.device}", f"{self.dev.device}:COPY"): self._view(dest, src.nbytes)[:] = src.cast('B')
   def _copyout(self, dest:memoryview, src:int):
     self.dev.synchronize()
-    with cpu_profile(f"{self.dev.device} -> TINY", f"{self.dev.device}:COPY"): dest[:] = to_mv(src, dest.nbytes)[:]
-  def _map(self, buf:Buffer) -> BufferStorage: return BufferStorage(buf.host.addr)
+    with cpu_profile(f"{self.dev.device} -> TINY", f"{self.dev.device}:COPY"): dest[:] = self._view(src, dest.nbytes)[:]
+  def _map(self, buf:Buffer) -> BufferStorage:
+    if Device[buf.device].host != self.dev.host: raise RuntimeError(f"host memory is not on the node of {self.dev.device}")
+    return BufferStorage(buf.host.addr)
   def _offset(self, buf:int, size:int, offset:int) -> int: return buf + offset
 
 class DepsTracker:
@@ -410,6 +422,7 @@ class Compiled:
 
     self.device, self.allocator, self.runtime_t, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
+    self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
     self.cached_renderer:dict[Any, Renderer] = {}
     self.pending:dict[Compiled, int] = {} # timeline values of the devices that touched our memory
 
@@ -427,6 +440,9 @@ class Compiled:
 
   @property
   def has_copy_queue(self) -> bool: return True
+
+  @property
+  def host(self) -> str: return f"CPU:{self.peer_group[7:]}" if self.peer_group.startswith("remote:") else HCQ_RUNTIME_DEV.value
 
   @property
   def renderer(self) -> Renderer: return self._select_renderer()

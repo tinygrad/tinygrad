@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import cast, Any
+from typing import cast, Any, Sequence
 import functools, itertools, weakref, ctypes, importlib
 from dataclasses import replace, dataclass, field
 from tinygrad.helpers import dedup, pluralize, unwrap, VIZ, HCQ2, to_tuple, ContextVar, Context, panic, partition, DEV, ALL2ALL, getenv
-from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker
+from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker, TinyELF, HCQ_RUNTIME_DEV
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
@@ -13,7 +13,6 @@ from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_c
 # *****************
 # 0. helpers
 
-HCQ_RUNTIME_DEV = ContextVar("HCQ_RUNTIME_DEV", "PYTHON" if DEV.interface.startswith("MOCK") else "CPU")
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
 HCQ_DEVS = frozenset(("NV", "QCOM")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
 
@@ -66,6 +65,17 @@ def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
 
 # C FFI
 
+def layout_args(args:Sequence[UOp|int], offset:int=0) -> list[tuple[int, UOp]]:
+  words = [a if isinstance(a, UOp) else UOp.const(a, dtypes.uint32) for a in args]
+  return [(offset + o, w) for (o, _), w in zip(TinyELF.iter_sig(tuple((None, i, w.dtype, ()) for i, w in enumerate(words))), words)]
+
+def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
+  words, end = [], 0
+  for offset, arg in sorted(args, key=lambda x: x[0]):
+    words += [UOp(Ops.BINARY, arg=bytes(offset - end)), arg] if offset != end else [arg]
+    end = offset + arg.dtype.itemsize
+  return words + [UOp(Ops.BINARY, arg=bytes(size - end))]
+
 @functools.cache
 def cfunc_buf(lib:str, name:str) -> Buffer:
   fn = getattr(importlib.import_module(f"tinygrad.runtime.autogen.{lib}").dll, name)
@@ -115,19 +125,19 @@ pm_unwrap_multi = PatternMatcher([(UPat(Ops.CALL, name="call"), unwrap_call)])
 STAGING_SIZE, STAGING_SLOTS = (4 if DEV.interface.startswith("MOCK") else 128) << 20, 2
 
 @functools.cache
-def _staging() -> Buffer: return Buffer("CPU", STAGING_SIZE, dtypes.uint8, preallocate=True)
+def _staging(device:str) -> Buffer: return Buffer(device, STAGING_SIZE, dtypes.uint8, preallocate=True)
 
 def stage_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if (device:=get_enqueue_devs(call)) is None: return None
   try:
     for b in (dst, src): cast(Buffer, _resolve(b, ctx).buffer).get_buf(device)
   except (RuntimeError, OSError):
-    _staging().get_buf(device)
-    base, it, copies = UOp.from_buffer(_staging()), src.dtype.itemsize, []
+    (staging:=_staging(Device[device].host)).get_buf(device)
+    base, it, copies = UOp.from_buffer(staging), src.dtype.itemsize, []
     chunk = (STAGING_SIZE // STAGING_SLOTS) // it
     for i, off in enumerate(range(0, src.max_numel(), chunk)):
-      stage = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it]
-      copies += [src[off:off+n].copy_to_device("CPU").call(stage, src[off:off+n]), stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
+      stage, part = base[(so:=(i % STAGING_SLOTS) * chunk * it):so + (n:=min(chunk, src.max_numel() - off)) * it], src[off:off+n]
+      copies += [part.copy_to_device(staging.device).call(stage, part), stage.copy_to_device(dst.device).call(dst[off:off+n], stage)]
     return UOp(Ops.LINEAR, src=tuple(copies))
 
   if Device[device].has_copy_queue: return None
@@ -155,16 +165,15 @@ class BatchCtx:
   profile:bool
   tracker:HCQDepsTracker = field(default_factory=HCQDepsTracker)
   queues:dict[str, list[str]] = field(init=False)
-  first:dict[tuple[str, str], int] = field(init=False); last:dict[tuple[str, str], int] = field(init=False) # noqa: E702
+  last:dict[tuple[str, str], int] = field(init=False)
   prev:list[int|None] = field(init=False)
   signal_tags:set[int] = field(init=False)
   slots:dict[str, UOp] = field(init=False)
 
   def __post_init__(self):
-    self.queues, self.first, self.last, self.prev = {}, {}, {}, []
+    self.queues, self.last, self.prev = {}, {}, []
     for tag, (_, devs, q) in enumerate(self.batch):
       if q not in self.queues.setdefault(devs[0], []): self.queues[devs[0]].append(q)
-      self.first.setdefault((devs[0], q), tag)
       self.prev.append(self.last.get((devs[0], q)))
       self.last[(devs[0], q)] = tag
     self.signal_tags = {tag for (dev, q), tag in self.last.items() if q != self.epilogue_queue(dev)}
@@ -191,54 +200,59 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   ctx.signal_tags |= set(latest.values())
   return [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64))) for (d, q), t in latest.items()]
 
-def _merge_queues(submits:list[UOp]) -> list[UOp]:
-  # grouped by queues. can be sent in any order, sync convers that
-  return [make_submit(*[c for s in submits if s.src[0].arg == k for c in s.src[0].src], devs=k[0], queue=k[1])
-          for k in dedup([s.src[0].arg for s in submits])]
+def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
+  # find all waits first to mark calls that must signal
+  call_waits = [_wait_ins(ctx, c, d[0], q, tag) for tag, (c, d, q) in enumerate(ctx.batch)]
+  queues:dict[tuple[tuple[str, ...], str], list[UOp]] = {}
+  for tag, ((call, devices, queue), waits) in enumerate(zip(ctx.batch, call_waits)):
+    # first use of a queue: wait for prior device work
+    if not (q:=queues.setdefault((devices, queue), [])):
+      q += [UOp(Ops.INS, arg=("barrier", dtypes.void), src=()),
+            UOp(Ops.INS, arg=("wait", dtypes.void), src=(timeline(devices), timeline_value(devices)))]
 
-def _emit_submits(ctx:BatchCtx, call_waits:list[list[UOp]]) -> tuple[list[UOp], list[tuple]]:
-  # one submit per call: timeline sync on first queue use, timestamps, the call, and a signal if someone waits on it
-  src, kerns = [], []
-  for tag, ((call, devices, queue), q) in enumerate(zip(ctx.batch, call_waits)):
-    # first queue use, sync prior device work with the device timeline
-    if ctx.first[(devices[0], queue)] == tag:
-      q = [UOp(Ops.INS, arg=("barrier", dtypes.void), src=()),
-           UOp(Ops.INS, arg=("wait", dtypes.void), src=(timeline(devices), timeline_value(devices)))] + q
-
-    # and make hcq call
-    name, est = get_call_name(call, get_call_arg_uops(call)), estimate_uop(call)
-    kerns.append((devices, name, est, tuple(2 * s + 1 for s in ctx.stamps(devices, tag)), getattr(call.src[0].arg, "profile_key", None)))
-
+    # dependency waits, then the call between its timestamps
     ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slot(devices, i),)) for i in ctx.stamps(devices, tag)]
-    q += ts_ins[:1] + [call] + ts_ins[1:]
+    q += waits + ts_ins[:1] + [call] + ts_ins[1:]
 
     # signal the queue if someone waits for us
     if tag in ctx.signal_tags:
       q += [UOp(Ops.INS, arg=("store", dtypes.void), src=(ctx.queue_signal(devices, queue), UOp.const(tag + 1, dtypes.uint64)))]
-    src.append(make_submit(*q, devs=devices, queue=queue))
-  return src, kerns
 
-def _epilogue(ctx:BatchCtx, dev:str) -> UOp:
-  # one queue signals the timeline once the last call of every other queue signaled
-  waits = [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((dev,), q), UOp.const(ctx.last[(dev, q)] + 1, dtypes.uint64)))
-           for q in ctx.queues[dev] if q != ctx.epilogue_queue(dev)]
-  bump = UOp(Ops.INS, arg=("store", dtypes.void), src=(timeline((dev,)), timeline_value((dev,)) + UOp.const(1, dtypes.uint64)))
-  return make_submit(*waits, bump, devs=dev, queue=ctx.epilogue_queue(dev))
+  # one queue advances the device timeline after all other queues finish
+  for dev in ctx.queues:
+    queue = ctx.epilogue_queue(dev)
+    waits = [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((dev,), q), UOp.const(ctx.last[(dev, q)] + 1, dtypes.uint64)))
+             for q in ctx.queues[dev] if q != queue]
+    bump = UOp(Ops.INS, arg=("store", dtypes.void), src=(timeline((dev,)), timeline_value((dev,)) + UOp.const(1, dtypes.uint64)))
+
+    # multiple copy queues may need a new compute stream
+    queues.setdefault(((dev,), queue), []).extend([*waits, bump])
+  return queues
 
 def _finalize_batch(ctx:BatchCtx) -> UOp:
-  call_waits = [_wait_ins(ctx, c, d[0], q, tag) for tag, (c, d, q) in enumerate(ctx.batch)]
-  submits, kerns = _emit_submits(ctx, call_waits)
-  submits += [_epilogue(ctx, dev) for dev in ctx.queues]
-  fence = UOp.custom_function("hcq_fence", *[ctx.sched_timeline((dev,)) for dev in ctx.queues],
-                              *[ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs])
-  merged:list[UOp] = [] # the submits in order, after the fence
-  for m in _merge_queues(submits): merged.append(m.after(fence, *merged[-1:]))
-  sink = UOp.sink(*merged, arg=KernelInfo("hcq_submit"), tag=1)
+  queues = _build_queues(ctx)
+
+  # re-arm the batch signals before submitting queues in first-use order
+  submits:list[UOp] = []
+  timelines = [ctx.sched_timeline((dev,)) for dev in ctx.queues]
+  signals = [ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs]
+  fence = UOp.custom_function("hcq_fence", *timelines, *signals)
+  for (devs, queue), cmds in queues.items(): submits.append(make_submit(*cmds, devs=devs, queue=queue).after(fence, *submits[-1:]))
+  sink = UOp.sink(*submits, arg=KernelInfo("hcq_submit"), tag=1)
   for pm in [Device[d].pm_batch for d in ctx.queues if Device[d].pm_batch is not None]: # a device adds its own work to the batch
     if (r:=pm.rewrite(sink)) is not None: sink = r
-  info = HCQInfo(tuple(ctx.queues), kernels=tuple(kerns), written_bufs=tuple(dedup(b for c, _, _ in ctx.batch for b in get_call_written_bufs(c))),
-    estimates=sum((estimate_uop(call) for call, _, _ in ctx.batch), start=Estimates()).simplify(),
-    host_deps=tuple(dedup((h, d[0]) for c, d, _ in ctx.batch for b in get_call_arg_uops(c) for h in to_tuple(b.device) if h not in ctx.queues)))
+
+  # per call metadata
+  names = [get_call_name(c, get_call_arg_uops(c)) for c, _, _ in ctx.batch]
+  estimates = [estimate_uop(c) for c, _, _ in ctx.batch]
+  stamps = [tuple(2 * s + 1 for s in ctx.stamps(d, tag)) for tag, (_, d, _) in enumerate(ctx.batch)]
+  profile_keys = [getattr(c.src[0].arg, "profile_key", None) for c, _, _ in ctx.batch]
+  kerns:tuple[tuple, ...] = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys))
+  written_bufs = tuple(dedup(b for c, _, _ in ctx.batch for b in get_call_written_bufs(c)))
+  host_deps = tuple(dedup((host, devs[0]) for call, devs, _ in ctx.batch for buf in get_call_arg_uops(call)
+                         for host in to_tuple(buf.device) if host not in ctx.queues))
+  info = HCQInfo(tuple(ctx.queues), kernels=kerns, written_bufs=written_bufs,
+                 estimates=sum(estimates, start=Estimates()).simplify(), host_deps=host_deps)
   return sink.call(*(ctx.slots.values() if ctx.profile else ()), aux=info)
 
 @rewrite_group(new_ctx=False)
@@ -256,7 +270,9 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
 
   srcs:list[UOp] = []
   for hcq, grp in itertools.groupby(zip(l.src, devs, queues), key=lambda e: bool(e[1])):
-    srcs += [_finalize_batch(BatchCtx(list(grp), profile))] if hcq else [c for c, _, _ in grp]
+    nodes:dict[str, list] = {}
+    for e in grp: nodes.setdefault(Device[e[1][0]].peer_group if hcq else "", []).append(e)
+    for batch in nodes.values(): srcs += [_finalize_batch(BatchCtx(batch, profile))] if hcq else [c for c, _, _ in batch]
   return l.replace(src=tuple(srcs))
 
 # *****************
@@ -266,8 +282,9 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
 class EncodeCtx:
   devs:tuple[str, ...]
   inputs:dict[tuple[UOp, str, int], int] = field(default_factory=dict)
-  table:UOp = field(default_factory=lambda: UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="inputs"))
   lt_patches:list[UOp] = field(default_factory=list)
+
+  def __post_init__(self): self.table = UOp.placeholder((1,), dtypes.uint64, device=Device[self.devs[0]].host, tag="inputs")
 
 class HWQueue:
   q_rewrite = PatternMatcher([ # the ops of a queue: a queue defines the methods it supports
@@ -407,7 +424,7 @@ def lower_call(call:UOp) -> UOp|None:
   body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])), ctx=ctx, bpm=pm_patches, name="lower")
 
   # resize table
-  body = body.substitute({ctx.table: (table:=UOp.placeholder((len(ctx.inputs),), dtypes.uint64, device="CPU", tag="inputs"))})
+  body = body.substitute({ctx.table: (table:=ctx.table.replace(arg=replace(ctx.table.arg, size=len(ctx.inputs))))})
 
   # the placeholders become the body's params in visit order, variables bind by name after them, the ranges renumber
   bufs, alus = partition([u for u in body.toposort() if u.op is Ops.PARAM], lambda u: u.tag is not None)

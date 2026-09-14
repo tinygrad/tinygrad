@@ -95,3 +95,62 @@ def rmsnorm_mul_quantize_mxfp8(x:Tensor, weight:Tensor, eps:float, padded:int|No
                                          fxn=functools.partial(_custom_rmsnorm_mul_quantize_mxfp8_fwd, dname=dname_of(x.device), eps=eps),
                                          grad_fxn=_rmsnorm_mul_quantize_mxfp8_backward)
   return q, e8, rrms
+
+@functools.cache
+def _custom_fast_final_denom(denom:UOp, rrms:UOp, x:UOp, *, dname:str, eps:float) -> UOp:
+  local_x_shape, local_denom_shape, local_rrms_shape = x.shard_shape, denom.shard_shape, rrms.shard_shape
+  rows, hidden = math.prod(local_x_shape[:-1]), local_x_shape[-1]
+  threads = 64
+  sink = UOp.sink(denom.base, rrms.base, x.base,
+                  UOp.special(threads, "lidx0"), UOp.special(rows // threads, "gidx0"),
+                  arg=KernelInfo(f"fast_final_rmsnorm_denom_rrms_{rows}_{hidden}",
+                                 estimates=Estimates(ops=2*rows*hidden, mem=2*rows*hidden+8*rows)))
+  src = (pathlib.Path(__file__).parent/"fast_final_denom.cpp").read_text()
+  defines = [f"-DROWS={rows}", f"-DHIDDEN={hidden}", f"-DTHREADS={threads}", f"-DEPS_LITERAL={eps}f", "-fno-finite-math-only"]
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                               UOp(Ops.BINARY, arg=compile_hip(src, defines))))
+
+def _fast_final_rmsnorm_fwd(x:Tensor, weight:Tensor, eps:float) -> tuple[Tensor, Tensor, Tensor]:
+  axis = x.uop.axis if isinstance(x.device, tuple) else None
+  local_shape = x.uop.shard_shape if axis is not None else x.shape
+  assert axis in (None, 0) and math.prod(local_shape[:-1]) == 16384 and local_shape[-1] == 2880, \
+    f"unsupported GPT-OSS final RMS tensor ABI {x.shape}/{x.uop.shard_shape} axis={axis}"
+  denom = alloc_like(x.shape[:-1], dtypes.float32, x.device, axis).clone()
+  rrms = alloc_like(x.shape[:-1], dtypes.float32, x.device, axis).clone()
+  denom, rrms, *_ = Tensor.custom_kernel(denom, rrms, x, fxn=functools.partial(
+    _custom_fast_final_denom, dname=dname_of(x.device), eps=eps))
+  x_normed = (x.float() / denom.unsqueeze(-1)).cast(x.dtype)
+  return x_normed * weight, denom, rrms
+
+@functools.cache
+def _fast_final_rmsnorm_fwd_fxn(x_p, weight_p, eps, device):
+  return _fast_final_rmsnorm_fwd(Tensor(x_p, device=device), Tensor(weight_p, device=device), eps)
+
+def _fast_final_rmsnorm_bwd(gradient:UOp, call:UOp, *, eps:float) -> tuple:
+  x, weight = Tensor(call.src[1]), Tensor(call.src[2])
+  denom = Tensor(call.unbound_outputs[1])
+  rrms = Tensor(call.unbound_outputs[2])
+  grad = Tensor(gradient, device=x.device)
+  xf = x.float()
+  rrms_ref = (xf.square().mean(-1, keepdim=True) + eps).rsqrt()
+  y_ref = (xf * rrms_ref).cast(x.dtype) * weight
+  d_x, d_weight = y_ref.gradient(x, weight, gradient=grad)
+  denom_saved = denom.unsqueeze(-1)
+  rrms_from_denom = 1.0 / denom_saved
+  rrms_saved = rrms.unsqueeze(-1)
+  replace_dx = {rrms_ref.uop:rrms_from_denom.uop, rrms_ref.uop.src[0]:denom_saved.uop}
+  replace_dw = {rrms_ref.uop:rrms_saved.uop}
+  return d_x.uop.substitute(replace_dx, walk=True), d_weight.uop.substitute(replace_dw, walk=True)
+
+def fast_final_rmsnorm(x:Tensor, weight:Tensor, eps:float) -> Tensor:
+  """GPT-OSS final RMSNorm, with a specialized denominator pass for the training shape."""
+  assert x.dtype == weight.dtype == dtypes.bfloat16 and x.shape[-1] == weight.shape[0] == 2880
+  axis = x.uop.axis if isinstance(x.device, tuple) else None
+  local_shape = x.uop.shard_shape if axis is not None else x.shape
+  if axis not in (None, 0) or math.prod(local_shape[:-1]) != 16384:
+    xf = x.float()
+    return (xf * (xf.square().mean(-1, keepdim=True) + eps).rsqrt()).cast(x.dtype) * weight
+  fxn = _fast_final_rmsnorm_fwd_fxn(x.as_param(0).uop, weight.as_param(1).uop, eps, x.device)
+  outputs = UOp.call_with_outputs((fxn[0].uop, fxn[1].uop, fxn[2].uop),
+    x.uop, weight.uop, grad_fxn=functools.partial(_fast_final_rmsnorm_bwd, eps=eps))
+  return Tensor(outputs[0])
