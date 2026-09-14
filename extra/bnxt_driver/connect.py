@@ -17,8 +17,8 @@ def write_json(stream, obj):
   stream.write(json.dumps(obj) + "\n")
   stream.flush()
 
-def endpoint(ip):
-  dev = BNXTDev(PCIDevice("bnxt", getenv("BNXT_PCI", "0000:41:00.0")), ip=ip)
+def endpoint():
+  dev = BNXTDev(PCIDevice("bnxt", getenv("BNXT_PCI", "0000:41:00.0")))
   atexit.register(dev.fini)
   mem, pages = dev.pci_dev.alloc_sysmem(SIZE)
   return dev, BNXTQP(dev), mem, pages[0], dev.register_mem(pages, SIZE)
@@ -27,7 +27,7 @@ def info(dev, qp): return {"qpn":qp.qpn, "gid":dev.local_gid.hex(), "mac":dev.ma
 def connect(qp, peer): qp.connect(peer["qpn"], bytes.fromhex(peer["gid"]), peer["mac"])
 
 def server():
-  dev, qp, mem, addr, key = endpoint(getenv("BNXT_IP", "10.0.200.6"))
+  dev, qp, mem, addr, key = endpoint()
   write_json(sys.stdout, info(dev, qp))
   connect(qp, read_json(sys.stdin))
   for i in range(ITERS):
@@ -40,14 +40,13 @@ def server():
 if __name__ == "__main__":
   if "--server" in sys.argv: server()
   else:
-    env = {"PYTHONPATH":".", "BNXT_PCI":getenv("REMOTE_PCI", "0000:41:00.0"), "BNXT_IP":getenv("REMOTE_IP", "10.0.200.6"),
-           "SIZE":str(SIZE), "ITERS":str(ITERS)}
+    env = {"PYTHONPATH":".", "BNXT_PCI":getenv("REMOTE_PCI", "0000:41:00.0"), "SIZE":str(SIZE), "ITERS":str(ITERS)}
     command = f"cd {shlex.quote(getenv('REMOTE_DIR', 'tinygrad'))} && " + shlex.join([
       "env", *(f"{k}={v}" for k, v in env.items()), "python3", "-u", "extra/bnxt_driver/connect.py", "--server"])
     with subprocess.Popen(["ssh", "-o", "BatchMode=yes", getenv("REMOTE_HOST", "192.168.52.213"), command],
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as remote:
       peer = read_json(remote.stdout)
-      dev, qp, mem, addr, key = endpoint(getenv("BNXT_IP", "10.0.200.5"))
+      dev, qp, mem, addr, key = endpoint()
       write_json(remote.stdin, info(dev, qp))
       connect(qp, peer)
       start = time.perf_counter()
