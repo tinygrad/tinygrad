@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CPU-driven SEND/RECV through PHY loopback. Run with PYTHONPATH=. BNXT_IP=10.0.200.5."""
+"""CPU-driven SEND/RECV through PHY loopback. Run with PYTHONPATH=."""
 import atexit, time
 from tinygrad.helpers import getenv
 from tinygrad.runtime.autogen import bnxt

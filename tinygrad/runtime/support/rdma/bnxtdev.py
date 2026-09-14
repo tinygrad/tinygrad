@@ -3,13 +3,13 @@ from dataclasses import dataclass
 from tinygrad.helpers import ceildiv, getenv, wait_cond, DEBUG
 from tinygrad.runtime.autogen import bnxt, pci
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.support.system import PCIDevice, System, ipv4_to_gid
+from tinygrad.runtime.support.system import PCIDevice, System
 
 BNXT_DEBUG = getenv("BNXT_DEBUG", 0)
 BNXT_ACCESS, BNXT_INIT_MASK, BNXT_RTR_MASK, BNXT_RTS_MASK = 3, 0xd, 0x41515ad, 0xae005
 BNXT_CHIMP_COMM, BNXT_CHIMP_COMM_TRIGGER = 0x0, 0x100
 BNXT_BACKING_STORE = ((0, 64), (1, 0), (2, 128), (3, 0), (4, 2), (5, 0), (6, 0), (14, 1024), (15, 0))
-WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU = 128, 32, 128, 4096
+WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU = 128, 1024, 1024, 4096 # a ring holds a batch of wqes, a cq its completions
 def db_value(xid, typ, index, epoch):
   return (xid & bnxt.DBC_DBC_XID_MASK | bnxt.DBC_DBC_PATH_ROCE | typ | bnxt.BNXT_QPLIB_DBR_VALID) << 32 | \
          index & bnxt.DBC_DBC_INDEX_MASK | epoch << bnxt.BNXT_QPLIB_DBR_EPOCH_SHIFT
@@ -38,18 +38,21 @@ def build_pbl(dev, paddrs, queue=False):
 
 @dataclass
 class BNXTQueue:
-  ring:MMIOInterface; paddrs:list[int]; stride:int; pbl_level:int; pbl_addr:int; write_idx:int=0; read_idx:int=0 # noqa: E702
-  def read(self, i:int) -> bytes: return bytes(self.ring[(off:=i % (0x1000 // self.stride) * self.stride):off + self.stride])
-  def write(self, i:int, data:bytes, aux=False):
-    off = 0x1000 + i % RING_ENTRIES * 8 if aux else i % (0x1000 // self.stride) * self.stride
+  ring:MMIOInterface; paddrs:list[int]; stride:int; pbl_level:int; pbl_addr:int; size:int=0x1000; write_idx:int=0; read_idx:int=0 # noqa: E702
+  def read(self, i:int) -> bytes: return bytes(self.ring[(off:=i % (self.size // self.stride) * self.stride):off + self.stride])
+  def write(self, i:int, data:bytes, aux=False): # aux: the msn table after the ring
+    off = self.size + i % (self.size // self.stride) * 8 if aux else i % (self.size // self.stride) * self.stride
     self.ring[off:off + len(data)] = data
 
-def alloc_queue(dev, stride:int=16, aux=False) -> BNXTQueue:
-  mem, paddrs = dev.pci_dev.alloc_sysmem(0x1000 + aux * 0x1000)
-  return BNXTQueue(mem, paddrs, stride, *build_pbl(dev, paddrs, queue=True))
+def alloc_queue(dev, stride:int=16, aux=False, entries:int=0) -> BNXTQueue: # a page of entries by default
+  entries = entries or 0x1000 // stride
+  size = entries * stride
+  mem, paddrs = dev.pci_dev.alloc_sysmem(size + aux * entries * 8)
+  lvl, addr = build_pbl(dev, paddrs, queue=True)
+  return BNXTQueue(mem, paddrs, stride, lvl, addr, size)
 
 class BNXTDev:
-  def __init__(self, pci_dev:PCIDevice, ip:str=getenv("BNXT_IP", "10.0.0.1")):
+  def __init__(self, pci_dev:PCIDevice):
     self.pci_dev, self.devfmt, self.seq = pci_dev, pci_dev.pcibus, 0
     pci_dev.reset()
     pci_dev.write_config(pci.PCI_COMMAND, pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
@@ -67,7 +70,7 @@ class BNXTDev:
     self.setup_backing_store()
     self._open_rcfw()
     self._open_l2()
-    self.local_gid = ipv4_to_gid(ip)
+    self.local_gid = bytes(10) + b'\xff\xff\x0a' + self.mac.to_bytes(6, 'big')[3:] # an ipv4-mapped gid from the mac: unique, nothing to configure
     self.gid_id = self.rcfw("add_gid", gid=struct.unpack(">4I", self.local_gid)[::-1], src_mac=struct.unpack(">3H", self.mac.to_bytes(6, 'big'))).xid
 
     if DEBUG >= 2: print(f"bnxt {self.devfmt}: booted mac={self.mac.to_bytes(6, 'big').hex(':')} gid={self.local_gid.hex()}")
@@ -188,10 +191,10 @@ class BNXTDev:
 class BNXTQP:
   def __init__(self, dev:BNXTDev):
     self.dev, self.sq_psn = dev, 0
-    self.scq, self.rcq = alloc_queue(dev, ctypes.sizeof(bnxt.struct_cq_base)), alloc_queue(dev, ctypes.sizeof(bnxt.struct_cq_base))
+    self.scq, self.rcq = (alloc_queue(dev, ctypes.sizeof(bnxt.struct_cq_base), entries=CQ_ENTRIES) for _ in range(2))
     self.scq_id, self.rcq_id = (dev.rcfw("create_cq", cq_size=CQ_ENTRIES, pbl=q.pbl_addr, pg_size_lvl=q.pbl_level, cq_fco_cnq_id=dev.nq_id).xid
                                 for q in (self.scq, self.rcq))
-    self.sq, self.rq = alloc_queue(dev, WQE_SIZE, aux=True), alloc_queue(dev, WQE_SIZE)
+    self.sq, self.rq = alloc_queue(dev, WQE_SIZE, aux=True, entries=RING_ENTRIES), alloc_queue(dev, WQE_SIZE, entries=RING_ENTRIES)
     self.qpn = dev.rcfw("create_qp", type=bnxt.CMDQ_CREATE_QP_TYPE_RC, scq_cid=self.scq_id, rcq_cid=self.rcq_id,
       sq_size=RING_ENTRIES, sq_fwo_sq_sge=6, sq_pbl=self.sq.pbl_addr, sq_pg_size_sq_lvl=self.sq.pbl_level,
       rq_size=RING_ENTRIES, rq_fwo_rq_sge=6, rq_pbl=self.rq.pbl_addr, rq_pg_size_rq_lvl=self.rq.pbl_level).xid
