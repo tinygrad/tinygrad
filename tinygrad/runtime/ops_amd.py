@@ -491,7 +491,7 @@ class AMDSDMAQueue(HWQueue):
     self.q(self.sdma.SDMA_OP_WRITE | self.sdma.SDMA_PKT_WRITE_UNTILED_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_WRITE_LINEAR), dst.getaddr(self.devs),
            _dw(words) - 1, *words)
 
-  def signal(self, signal:UOp, value:UOp): # a fence packet then a trap; a 64-bit destination (a nic doorbell) is written whole
+  def signal(self, signal:UOp, value:UOp):
     if signal.dtype.itemsize == 8: return self.write(signal, value)
     op = self.sdma.SDMA_OP_FENCE | (self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.target[0] != 9 else 0)
     self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), self.sdma.SDMA_OP_TRAP, 0)

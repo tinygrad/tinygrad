@@ -131,7 +131,7 @@ def _staging(device:str) -> Buffer: return Buffer(device, STAGING_SIZE, dtypes.u
 
 def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
-  if Device[devs[0]].peer_group == Device[devs[1]].peer_group: return None
+  if not all(hasattr(Device[d], "iface") for d in devs) or Device[devs[0]].peer_group == Device[devs[1]].peer_group: return None # not 2 nodes
 
   from tinygrad.runtime.ops_rdma import rdma_nic_for
   if None in (nics:=[rdma_nic_for(Device[d]) for d in devs]): return None
@@ -435,7 +435,7 @@ pm_renumber = PatternMatcher([
 def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.nargs: return None # not an hcq call, or lowered already
 
-  # encode bodies: copies between nodes become queue ops first (ops_rdma.py), then each device encodes its submits
+  # encode bodies
   from tinygrad.runtime.ops_rdma import pm_rdma_encode
   ctx = EncodeCtx(call.arg.aux.device)
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in ctx.devs])]

@@ -53,8 +53,9 @@ class BNXTAllocator(Allocator):
   def _unmap(self, storage:BufferStorage): self.dev.iface.dev_impl.unregister_mem(storage.meta)
 
 def rdma_nic_for(dev) -> RDMADevice|None: # the nic on the node of dev, if it has one
-  nics = [Device[f"RDMA:{i}"] for i in range(len(hcq_filter_visible_devices(System.list_devices(*BNXT_IDS), "RDMA")))]
-  return next((cast(RDMADevice, n) for n in nics if n.peer_group == dev.peer_group), None)
+  try: count = len(hcq_filter_visible_devices(System.list_devices(*BNXT_IDS), "RDMA"))
+  except RuntimeError: return None # no pcie on this machine
+  return next((cast(RDMADevice, n) for i in range(count) if (n:=Device[f"RDMA:{i}"]).peer_group == dev.peer_group), None)
 
 class RDMADevice(Compiled):
   ifaces = [BNXTIface]
