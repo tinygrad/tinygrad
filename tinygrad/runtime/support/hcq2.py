@@ -60,9 +60,9 @@ def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.placeholder((2,), dtypes.uint64, 0, device=devs, volatile=True, tag="timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
 
-def rt_addr(b:UOp, dev="CPU", host="CPU") -> UOp:
+def rt_addr(b:UOp, dev="CPU") -> UOp:
   base, off = unwrap_view(b)
-  word = UOp.placeholder((1,), dtypes.uint64, device=host, volatile=host != "CPU", tag="addr")
+  word = UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="addr")
   return patch(word, [(0, base.bitcast(dtypes.uint8)[off:off + b.nbytes()].getaddr(dev))]).index(0).load()
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
@@ -133,15 +133,15 @@ STAGING_SIZE, STAGING_SLOTS = (4 if DEV.interface.startswith("MOCK") else 128) <
 @functools.cache
 def _staging(device:str) -> Buffer: return Buffer(device, STAGING_SIZE, dtypes.uint8, preallocate=True)
 
-def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None: # a copy between nodes: a send to the source's nic, a receive from the destination's nic
+def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None: # a copy between nodes: a send to the source's nic and a receive from the destination's
   devs = [to_tuple(b.device)[0] for b in (dst, src)]
   if not getenv("RDMA") or any(d.split(":")[0] != "AMD" for d in devs): return None
   if Device[devs[0]].peer_group == Device[devs[1]].peer_group: return None
   from tinygrad.runtime.support.system import System
-  def wire(d:str) -> UOp: # a placeholder on the nic standing for the transfer of the pair, never a buffer: the queues read its tag
-    return UOp.placeholder(src.max_shape, src.dtype, 0, device=System.nic_for(Device[d]).device, tag=("rdma", (min(devs), max(devs))))
-  send = call.replace(src=(call.src[0].replace(arg=wire(devs[1]).device), wire(devs[1]), src))
-  return UOp(Ops.LINEAR, src=(send, call.replace(src=(call.src[0], dst, wire(devs[0])))))
+  # the wire: a placeholder on the node's nic tagged with the gpu pair, never a buffer, the queues read its tag
+  wires = [UOp.placeholder(src.max_shape, src.dtype, 0, device=System.nic_for(Device[d]).device, tag=("rdma", (min(devs), max(devs)))) for d in devs]
+  send = call.replace(src=(call.src[0].replace(arg=wires[1].device), wires[1], src))
+  return UOp(Ops.LINEAR, src=(send, call.replace(src=(call.src[0], dst, wires[0]))))
 
 def stage_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if is_rdma(call): return None

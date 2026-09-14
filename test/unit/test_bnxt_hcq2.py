@@ -92,6 +92,7 @@ class TestBNXTCopy(unittest.TestCase):
       k = 4096 // chunk
       rings = {n: Buffer("CPU", RING_ENTRIES * 128 + RING_ENTRIES * 8, dtypes.uint8, preallocate=True) for n in ("sq", "rq", "scq", "rcq", "db")}
       args = {n: UOp.from_buffer(b) for n, b in rings.items()} # addressed, never written here
+      args |= {n: UOp.placeholder((1,), dtypes.uint64, 0, device="CPU", volatile=True, tag=n) for n in ("sq_seq", "rq_seq", "psn")}
       nic = SimpleNamespace(device="CPU", host="CPU", iface=SimpleNamespace(dev_impl=SimpleNamespace(db_off=0)), words={},
                             arg=lambda pair, n: args[n], qp=lambda pair, peer: SimpleNamespace(qpn=5, scq_id=6, rcq_id=7))
       nic.word = types.MethodType(ops_rdma.RDMADevice.word, nic)
@@ -112,8 +113,8 @@ class TestBNXTCopy(unittest.TestCase):
       linked = hcq2.hcq_link(realize.lower_and_compile(UOp(Ops.LINEAR, src=(lowered,))), allow_cache=False)
       bufs = {p.tag: b.buffer for p, b in zip(lowered.without_after.src[1:], linked.src[0].without_after.src[1:])}
       ring, cq, data = ("rq", "rcq", dst) if recv else ("sq", "scq", src)
-      seq = bufs[hcq2.to_name("seq", "CPU", "CPU:1", ring)].host.view(fmt="Q")
-      base, psn0 = seq[0], 0 if recv else bufs[hcq2.to_name("psn", "CPU", "CPU:1", ring)].host.view(fmt="Q")[0] # the counters persist across links
+      seq = bufs[f"{ring}_seq"].host.view(fmt="Q")
+      base, psn0 = seq[0], 0 if recv else bufs["psn"].host.view(fmt="Q")[0] # the counters persist across links
       for it in range(130 // k):
         realize.run_linear(linked, jit=True)
         self.assertEqual(seq[0], base + (it + 1) * k)
@@ -137,6 +138,7 @@ class TestBNXTCopy(unittest.TestCase):
   def test_two_sizes_one_pair(self): # sends of different sizes share the pair's slots: consecutive wqes, one completion before the signal
     rings = {n: Buffer("CPU", RING_ENTRIES * 128 + RING_ENTRIES * 8, dtypes.uint8, preallocate=True) for n in ("sq", "scq", "db")}
     args = {n: UOp.from_buffer(b) for n, b in rings.items()}
+    args |= {n: UOp.placeholder((1,), dtypes.uint64, 0, device="CPU", volatile=True, tag=n) for n in ("sq_seq", "psn")}
     nic = SimpleNamespace(device="CPU", host="CPU", iface=SimpleNamespace(dev_impl=SimpleNamespace(db_off=0)), words={},
                           arg=lambda pair, n: args[n], qp=lambda pair, peer: SimpleNamespace(qpn=5, scq_id=6, rcq_id=7))
     nic.word = types.MethodType(ops_rdma.RDMADevice.word, nic)
@@ -155,11 +157,11 @@ class TestBNXTCopy(unittest.TestCase):
     lowered = hcq2.lower_call(UOp.sink(out.index(0).load(), arg=KernelInfo("bnxt_two_sizes"), tag=1).call(aux=hcq2.HCQInfo(("CPU",))))
     linked = hcq2.hcq_link(realize.lower_and_compile(UOp(Ops.LINEAR, src=(lowered,))), allow_cache=False)
     bufs = {p.tag: b.buffer for p, b in zip(lowered.without_after.src[1:], linked.src[0].without_after.src[1:])}
-    base = bufs[hcq2.to_name("seq", "CPU", "CPU:1", "sq")].host.view(fmt="Q")[0]
+    base = bufs["sq_seq"].host.view(fmt="Q")[0]
     realize.run_linear(linked, jit=True)
     w = bufs["checks"].host.view(fmt="Q")[:]
     self.assertEqual((w[0], w[16]), (rings["sq"]._buf + base % RING_ENTRIES * 128, rings["sq"]._buf + (base + 1) % RING_ENTRIES * 128))
-    self.assertEqual(bufs[hcq2.to_name("seq", "CPU", "CPU:1", "sq")].host.view(fmt="Q")[0], base + 2)
+    self.assertEqual(bufs["sq_seq"].host.view(fmt="Q")[0], base + 2)
     self.assertEqual(w[32], rings["scq"]._buf + (base + 1) % CQ_ENTRIES * 32 + 24) # the completion waits for the last wqe
 
 if __name__ == "__main__": unittest.main()
