@@ -272,6 +272,8 @@ const canvasDims = () => {
   return [Math.round(document.querySelector("#profiler").clientWidth-sideRect.width), Math.round(sideRect.height)];
 }
 
+new ResizeObserver(([e]) => e.contentRect.width > 0 && e.target.dispatchEvent(new Event("resize"))).observe(document.getElementById("profiler"));
+
 function selectShape(key) {
   if (key == null) return {};
   const [t, idx] = key.split("-");
@@ -731,9 +733,10 @@ async function renderProfiler(path, opts) {
   let lastCanvasRect = null;
   function resize() {
     const [width, height] = canvasDims();
-    if (canvas.width === width*dpr && canvas.height === height*dpr) return;
-    canvas.width = width*dpr;
-    canvas.height = height*dpr;
+    const pixelWidth = Math.trunc(width*dpr), pixelHeight = Math.trunc(height*dpr);
+    if (canvas.width === pixelWidth && canvas.height === pixelHeight) return;
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
@@ -748,9 +751,9 @@ async function renderProfiler(path, opts) {
   zoomLevel = getZoomIdentity();
   canvasZoom = d3.zoom().filter(vizZoomFilter).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
-  document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
+  profiler.on("contextmenu", e => e.ctrlKey && e.preventDefault());
 
-  new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
+  profiler.on("resize", (e) => resize()); resize();
   profiler.on("scroll", () => render(zoomLevel));
 
   function findRectAtPosition(x, y) {

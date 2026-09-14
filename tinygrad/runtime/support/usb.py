@@ -472,7 +472,7 @@ pm_usb_lower = PatternMatcher([
 @functools.cache
 def _host_block(dev) -> Buffer: # link, staging, zeros
   b = Buffer("CPU", 0x180020, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
-  b._buf.cpu_view().view(fmt='B')[:16] = struct.pack('QQ', *[ctypes.addressof(x.contents) for x in (dev.iface.pci_dev.usb.usb.handle, USB3.ctx())])
+  b.host.view(fmt='B')[:16] = struct.pack('QQ', *[ctypes.addressof(x.contents) for x in (dev.iface.pci_dev.usb.usb.handle, USB3.ctx())])
   return b
 @functools.cache
 def _xfer(dev, tag:str) -> Buffer: # fixed fields; status, length, buffer change per chunk
@@ -482,16 +482,13 @@ def _xfer(dev, tag:str) -> Buffer: # fixed fields; status, length, buffer change
 @functools.cache
 def _words(dev) -> Buffer: # zero the read signal and scratch
   b = Buffer(dev.device, 2, dtypes.uint32, options=BufferSpec(uncached=True, cpu_access=True, nolru=True), preallocate=True)
-  b._buf.cpu_view().view(fmt='B')[:8] = bytes(8)
+  b.host.view(fmt='B')[:8] = bytes(8)
   return b
-@functools.cache
-def _asm24(dev) -> Buffer:
-  return Buffer(dev.device, 0x85000, dtypes.uint8, options=BufferSpec(external_ptr=dev.iface.ctrl.va_addr, nolru=True)).allocate(dev.iface.ctrl)
 pm_usb_bufferize = PatternMatcher([
   (UPat(Ops.PARAM, tag="usb_host"), lambda ctx: _host_block(ctx)),
   (UPat(Ops.PARAM, tag={"usb_xfer0", "usb_xfer1"}, name="b"), lambda ctx, b: _xfer(ctx, b.tag)),
   (UPat(Ops.PARAM, tag="usb_vram"), lambda ctx: _words(ctx)),
-  (UPat(Ops.PARAM, tag="usb_asm24"), lambda ctx: _asm24(ctx)),
+  (UPat(Ops.PARAM, tag="usb_asm24"), lambda ctx: ctx.iface.ctrl),
   (UPat(Ops.PARAM, name="b"), lambda b: Buffer("CPU", b.max_numel(), b.dtype, preallocate=True) if str(b.tag).startswith("cmdbuf_copy") else None),
 ])
 

@@ -1089,6 +1089,8 @@ class TestOps(unittest.TestCase):
   def test_hardsigmoid_extreme(self):
     helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, low=300, high=400)
     helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, low=-400, high=-300)
+    helper_test_op(None, torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, vals=[[1e7, 1e8, 2.68e8, 1e9]])
+    helper_test_op(None, torch.nn.functional.hardsigmoid, Tensor.hardsigmoid, vals=[[-3.1, -3., -2.9, 2.9, 3., 3.1]])
   def test_softplus(self):
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
     helper_test_op([(45,65)], lambda t: torch.nn.functional.softplus(t, beta=3), lambda t: Tensor.softplus(t, beta=3), grad_atol=1e-6)
@@ -1668,6 +1670,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.var())
     helper_test_op([(15, 25, 35)], lambda x: x.var(correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.var(correction=5))
+    helper_test_op(None, lambda x: x.float().var(), lambda x: x.var(), vals=[[1, 2, 3, 4]], forward_only=True)
     # TODO: fix this
     # helper_test_op([(10, 2)], lambda x: x.var(correction=50))
   @slow_test

@@ -181,7 +181,7 @@ class TransformerBlock(FFNBlock):
     k = apply_rope(k[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., self.config.rope_dim:], dim=-1)
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
-    store = self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).cast(dtypes.half).uop)
+    store = self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).cast(self.cache_kv.dtype).uop)
     assigned_kv = Tensor(self.cache_kv.uop.after(store))
     # on RDNA3, hybrid models use custom flash attention kernels on the KV cache
     if amd_custom_kernels_supported(x.device) and self.config.ssm is not None:

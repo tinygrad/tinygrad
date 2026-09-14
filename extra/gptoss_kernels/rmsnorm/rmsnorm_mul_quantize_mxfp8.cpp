@@ -20,6 +20,9 @@
 #ifndef EPS_LITERAL
 #define EPS_LITERAL 1e-5f
 #endif
+#ifndef COOP_EPILOGUE
+#define COOP_EPILOGUE 0
+#endif
 
 constexpr int ROWS = N_ELEMS / HIDDEN;
 constexpr int BLOCK = 32;
@@ -60,6 +63,53 @@ extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void rmsnorm_mul_quantiz
     const float rrms = rsqrtf(reduce[0] * (1.0f / (float)HIDDEN) + EPS_LITERAL);
     if (tid == 0) rrms_out[row] = rrms;
 
+#if COOP_EPILOGUE
+    // Exact GPT-OSS shape: eight lanes share each 32-value block.  This keeps
+    // all four waves active and emits aligned dwords instead of serializing
+    // the full block in one lane (GPU1/7 ABBA64: 242.40 -> 138.89/137.99 us).
+    constexpr int BLOCKS_PER_PASS = THREADS_PER_WG / 8;
+    const int lane = tid & 7;
+    const int group = tid >> 3;
+    #pragma unroll
+    for (int pass = 0; pass < (SCALE_BLOCKS + BLOCKS_PER_PASS - 1) / BLOCKS_PER_PASS; pass++) {
+      const int block = pass * BLOCKS_PER_PASS + group;
+      if (block < SCALE_BLOCKS) {
+        const int col_base = block * BLOCK + lane * 4;
+        float vals[4];
+        float amax = 0.0f;
+        #pragma unroll
+        for (int i = 0; i < 4; i++) {
+          const int col = col_base + i;
+          float v = 0.0f;
+          if (col < HIDDEN) {
+            float xn = (float)x_row[col] * rrms;
+            __hip_bfloat16 yb = (__hip_bfloat16)(xn * (float)weight[col]);
+            v = (float)yb;
+          }
+          vals[i] = v;
+          amax = fmaxf(amax, fabsf(v));
+        }
+        #pragma unroll
+        for (int s = 4; s > 0; s >>= 1) amax = fmaxf(amax, __shfl_down(amax, s, 8));
+        float qscale = 0.0f;
+        if (lane == 0) {
+          int e8 = (int)floorf(log2f(fmaxf(amax, 1e-38f))) + 127;
+          e8 = max(0, min(254, e8));
+          qscale = exp2f((float)(127 - e8));
+          e8_out[(long long)row * SCALE_BLOCKS + block] = (uint8_t)e8;
+        }
+        qscale = __shfl(qscale, 0, 8);
+        __hip_fp8_storage_t packed[4];
+        #pragma unroll
+        for (int i = 0; i < 4; i++) {
+          float v = fmaxf(-FP8_MAX, fminf(FP8_MAX, vals[i] * qscale));
+          packed[i] = __hip_cvt_float_to_fp8(v, __HIP_SATFINITE, __HIP_E4M3);
+        }
+        const long long qbase = (long long)row * PADDED + block * BLOCK + lane * 4;
+        *reinterpret_cast<uint32_t *>(&q_out[qbase]) = *reinterpret_cast<uint32_t *>(&packed[0]);
+      }
+    }
+#else
     if (tid < SCALE_BLOCKS) {
       const int col_base = tid * BLOCK;
       float vals[BLOCK];
@@ -90,6 +140,7 @@ extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void rmsnorm_mul_quantiz
       *reinterpret_cast<uint4 *>(&q_out[qbase + 16]) = *reinterpret_cast<uint4 *>(&packed[16]);
       e8_out[(long long)row * SCALE_BLOCKS + tid] = (uint8_t)e8;
     }
+#endif
     __syncthreads();
   }
 }

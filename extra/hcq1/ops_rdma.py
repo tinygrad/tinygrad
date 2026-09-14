@@ -2,11 +2,11 @@ from __future__ import annotations
 import mmap, struct, functools, atexit
 from typing import cast
 from tinygrad.uop.ops import sint
-from extra.hcq1.hcq import HCQCompiled, HCQAllocatorBase, HCQAllocator, HWQueue
-from tinygrad.runtime.support.hcq import HCQBuffer, FileIOInterface
+from extra.hcq1.hcq import HCQCompiled, HCQAllocatorBase, HCQAllocator, HWQueue, HCQBuffer
+from tinygrad.runtime.support.hcq import FileIOInterface
 from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace
-from tinygrad.runtime.support.mlx.mlxdev import MLXDev, MLXQP
+from extra.mlx_driver.mlxdev import MLXDev, MLXQP
 from tinygrad.helpers import unwrap, to_be32, to_be64
 
 class RDMACopyQueue(HWQueue):
@@ -82,7 +82,7 @@ class RDMAAllocator(HCQAllocatorBase):
                      meta=self.dev.iface.mlx_dev.register_mem(pages, len(pages) * page_sz, page_sz.bit_length() - 1))
 
   def _do_free(self, buf:HCQBuffer, options): self.dev.iface.mlx_dev.unregister_mem(buf.meta)
-  def _unmap(self, mb): self.dev.iface.mlx_dev.unregister_mem(mb.meta)
+  def _do_unmap(self, mb): self.dev.iface.mlx_dev.unregister_mem(mb.meta)
 
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:HCQCompiled, dest_dev:HCQCompiled):
     # sync device

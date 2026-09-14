@@ -141,7 +141,7 @@ class TestWaitLoop(unittest.TestCase):
 class TestVolatileLoops(unittest.TestCase):
   def test_async_wait_ext(self):
     sig_buf = Buffer(Device.DEFAULT, 1, dtypes.int, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
-    try: sig_view = sig_buf.as_memoryview(force_zero_copy=True).cast('i')
+    try: sig_view = sig_buf.host.view(fmt='i')
     except (AssertionError, NotImplementedError): self.skipTest(f"{Device.DEFAULT} does not support host-visible buffers")
     sig_view[0] = 0
 

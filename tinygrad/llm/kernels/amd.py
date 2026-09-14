@@ -65,7 +65,7 @@ class Linear(nn.Linear):
     # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
     # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
     def unwrapped(u:UOp) -> UOp:
-      while u.op in (Ops.RESHAPE, Ops.CONTIGUOUS) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)):
+      while u.op in (Ops.RESHAPE, Ops.COPY) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)):
         u = u.src[0]
       return u
     expected = ggml_data_to_tensor(Tensor(raw), self.in_features * self.out_features, ggml_type)
@@ -81,7 +81,7 @@ class Linear(nn.Linear):
       nbytes, nblocks = raw.max_numel(), raw.max_numel() // Q6_BYTES
       byte_view = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer).view(nbytes, dtypes.uint8, raw_offset)))
       padded = byte_view.reshape((nblocks, Q6_BYTES)).pad_to((nblocks, Q6_PADDED)).bitcast(dtypes.uint32)
-      self.weight = padded.contiguous().reshape(nblocks * Q6_WORDS)
+      self.weight = padded.clone().reshape(nblocks * Q6_WORDS)
     else:
       self.weight = Tensor(UOp.from_buffer(cast(Buffer, raw.buf_uop.buffer)
         .view(raw.max_numel() * raw.dtype.itemsize // dtypes.uint32.itemsize, dtypes.uint32, raw_offset)))

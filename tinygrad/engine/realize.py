@@ -3,7 +3,7 @@ from typing import cast, Iterator, Any, Sequence
 import weakref, decimal, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup
-from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, AxisType, sym_infer, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
 from tinygrad.renderer import Estimates, Renderer
@@ -26,12 +26,14 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   return (), ()
 
 def get_call_written_bufs(call:UOp) -> list[UOp]:
+  if isinstance(call.arg.aux, HCQInfo): return list(call.arg.aux.written_bufs)
   arg_uops, (outs, ins) = get_call_arg_uops(call), get_call_outs_ins(call)
-  return dedup([b for k in outs if k not in ins and (b:=u if (cv:=(u:=arg_uops[k]).contiguous_view()) is None else cv[0]).op is Ops.BUFFER])
+  bufs = [b.src[0].storage_base if (b:=arg_uops[k].storage_base).op is Ops.MSELECT else b for k in outs if k not in ins]
+  return dedup([b for b in bufs if b.op is Ops.BUFFER])
 
 def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]]:
   if isinstance(call.arg.aux, HCQInfo): # the submitter itself, then every kernel it enqueues
-    kernels:list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]] = [(HCQ_RUNTIME_DEV.value, call, None)]
+    kernels:list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]] = [(Device[call.arg.aux.device[0]].host, call, None)]
     return kernels + [(d, call, (name, estimates, profile_key)) for devices,name,estimates,_,profile_key in call.arg.aux.kernels for d in devices]
   ast = call.src[0]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call, None)]
@@ -43,7 +45,7 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
   def _dev_str(buf:Buffer|UOp) -> str: return ', '.join(d[:7] for d in to_tuple(buf.device))
 
   ast, arg_uops = call.src[0], get_call_arg_uops(call)
-  if ast.op is Ops.PROGRAM: return ast.arg.name
+  if ast.op is Ops.PROGRAM: return ast.src[0].arg.name
   if ast.op is Ops.COPY: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {_dev_str(bufs[0]):>7s} <- {_dev_str(bufs[1]):7s}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return colored(f"batched {len(ast.src[0].src)}", "cyan")
@@ -82,7 +84,7 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
       cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": ctx.var_vals,
         "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}, ts=st))
     if DEBUG < 2 or not ctx.update_stats: continue
-    if et is None:
+    if et is None and not getattr(call.arg.aux, "skip_wait", False):
       Device[device].synchronize()
       et, st = float(perf_counter_us() - st)*1e-6, perf_counter_us()
       GlobalCounters.time_sum_s += et
@@ -156,7 +158,10 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
          and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-    elif hasattr(dest.allocator, '_as_buffer'): src.allocator._copyout(dest.as_memoryview(force_zero_copy=True), src._buf)
+    elif dest.get_storage().host is not None and src.get_storage().host is not None:
+      for b in (dest, src): b.allocator.dev.synchronize()
+      with cpu_profile(f"{src.device} -> {dest.device}", f"{src.device}:COPY"): dest.host[:] = src.host[:]
+    elif dest._host_mv() is not None: src.allocator._copyout(dest.as_memoryview(allow_zero_copy=True), src._buf)
     else: dest.allocator._copyin(dest._buf, src.as_memoryview(allow_zero_copy=True))
   return []
 
@@ -194,10 +199,12 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   if (info:=call.arg.aux).inputs:
-    addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(dev).va_addr + off for u, dev, off in info.inputs]
-    cast(Buffer, call.src[1 + info.table].buffer)._buf.cpu_view().view(fmt='Q')[:] = array.array('Q', addrs)
-  ctx = replace(ctx, var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
-  ets = exec_kernel(ctx, call, ast, devices=(HCQ_RUNTIME_DEV.value,))
+    addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(dev) + off for u, dev, off in info.inputs]
+    cast(Buffer, call.src[1 + info.table].buffer).host.view(fmt='Q')[:] = array.array('Q', addrs)
+  ctx = replace(ctx, wait=ctx.wait and not info.skip_wait,
+                var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
+  ets = exec_kernel(ctx, call, ast, devices=(Device[info.device[0]].host,))
+  for host, dev in info.host_deps: Device[host].pending[Device[dev]] = Device[dev].timeline.host.view(fmt='Q')[1]
   if not (ctx.wait or PROFILE): return ets
 
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
@@ -206,7 +213,7 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   if ctx.wait:
     for device in info.device: cast(Any, Device[device]).synchronize(timeout=ctx.timeout)
   def _prof_tm(device:str, prof:tuple[int, ...]) -> float:
-    st, en = (slots[device]._buf.cpu_view().view(fmt='Q')[x] for x in prof)
+    st, en = (slots[device].host.view(fmt='Q')[x] for x in prof)
     return float(en-st) / cast(Any, Device[device]).timestamp_divider / 1e6
   return ets + [_prof_tm(device, prof) if ctx.wait else None for devices, _, _, prof, _ in info.kernels if prof for device in devices]
 
@@ -277,13 +284,13 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQ_RUNTIME_DEV, HCQInfo # noqa: E402 # down here, hcq2 imports realize
+from tinygrad.runtime.support.hcq2 import hcq_compile, hcq_link, HCQInfo # noqa: E402 # down here, hcq2 imports realize
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None) -> UOp:
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, input_uops:list[UOp]|None=None, profile:bool|None=None, cache=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = lower_and_compile(linear)
-  linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile)
+  linear = hcq_compile(linear, input_uops, bool(PROFILE or DEBUG >= 2) if profile is None else profile, cache=cache)
   return linear
 
 def link_linear(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) -> UOp:
@@ -291,13 +298,13 @@ def link_linear(linear:UOp, input_uops:list[UOp]|None=None, allow_cache=True) ->
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:Sequence[UOp]=(), update_stats=True, jit=False, wait=False):
   inputs = list(input_uops)
-  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs), input_uops=inputs)
+  if not jit: linear = link_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU, input_uops=inputs, cache=True), input_uops=inputs)
   ctx = ExecContext(var_vals or {}, tuple(inputs), update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: track_stats(ctx, call.without_after, perf_counter_us(), pm_exec.rewrite(call.without_after, ctx))
 
 def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None, clear_l2:bool=False) -> Iterator[float]:
   ctx = ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)
-  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True), allow_cache=ctx.cache)
+  linear = link_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0, profile=True, cache=False), allow_cache=ctx.cache)
   while True:
     if clear_l2:
       if hasattr(dev:=Device[call.src[1].device], 'invalidate_caches'): dev.invalidate_caches()

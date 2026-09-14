@@ -69,41 +69,27 @@ class TestSubBuffer(unittest.TestCase):
     buf = self.buf_unalloc
     sub_buf = buf.view(3, dtypes.uint8, offset=4)
     self.assertFalse(buf.is_allocated())
-    self.assertFalse(buf.is_initialized())
     self.assertFalse(sub_buf.is_allocated())
-    self.assertFalse(sub_buf.is_initialized())
 
     # base buffer alloc
     buf.allocate()
     self.assertTrue(buf.is_allocated())
-    self.assertTrue(buf.is_initialized())
+    self.assertFalse(sub_buf.is_allocated())
+    sub_buf.ensure_allocated()
     self.assertTrue(sub_buf.is_allocated())
-    self.assertFalse(sub_buf.is_initialized())
-
-    # sub buffer alloc
-    sub_buf.allocate()
-    self.assertTrue(sub_buf.is_initialized())
-
-    # sub buffer dealloc
     sub_buf.deallocate()
     self.assertTrue(buf.is_allocated())
-    self.assertTrue(buf.is_initialized())
-    self.assertTrue(sub_buf.is_allocated())
-    self.assertFalse(sub_buf.is_initialized())
+    self.assertFalse(sub_buf.is_allocated())
 
     # base buffer dealloc
     buf.deallocate()
     self.assertFalse(buf.is_allocated())
-    self.assertFalse(buf.is_initialized())
     self.assertFalse(sub_buf.is_allocated())
-    self.assertFalse(sub_buf.is_initialized())
 
-    # sub buffer alloc
+    # sub buffer alloc allocates the base
     sub_buf.ensure_allocated()
     self.assertTrue(buf.is_allocated())
-    self.assertTrue(buf.is_initialized())
     self.assertTrue(sub_buf.is_allocated())
-    self.assertTrue(sub_buf.is_initialized())
 
   def test_subbuffer_copy_in_out(self):
     sub_buf = self.buf.view(3, dtypes.uint8, offset=3).ensure_allocated() # [3:6]

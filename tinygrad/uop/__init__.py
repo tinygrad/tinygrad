@@ -84,7 +84,7 @@ class Ops(FastEnum):
   # ** 6 -- ops that don't exist in programs **
 
   # ops that adjust the behavior of the scheduler
-  CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
+  CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
   # buffer ops
   STAGE = auto(); COPY = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()

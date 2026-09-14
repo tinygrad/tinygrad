@@ -115,7 +115,7 @@ class TestSchedule(unittest.TestCase):
     idx = Tensor([1,2,5,6], dtype=dtypes.int32)
     flat_base[idx] = Tensor([99,99,99,99])
     base.assign(flat_base.reshape(4, 4))
-    sched = check_schedule(base, 4)
+    sched = check_schedule(base, 3)
     run_linear(*sched)
     expected = list(range(16))
     for i, v in zip([1,2,5,6], [99,99,99,99]): expected[i] = v

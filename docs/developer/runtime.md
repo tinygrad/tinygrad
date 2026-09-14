@@ -22,14 +22,9 @@ The `Compiled` class is responsible for initializing and managing a device.
 
 ### Allocator
 
-The `Allocator` class is responsible for managing memory on the device. There is also a version called the `LRUAllocator`, which caches allocated buffers to optimize performance.
+The `Allocator` class manages memory on the device and caches allocated buffers for reuse.
 
 ::: tinygrad.device.Allocator
-    options:
-        members: true
-        show_source: false
-
-::: tinygrad.device.LRUAllocator
     options:
         members: true
         show_source: false

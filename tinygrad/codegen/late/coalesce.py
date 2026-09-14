@@ -98,7 +98,6 @@ pm_simplify_add_image = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
   # image load/store is always float
   (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), lambda x,d: x.store(d.cast(dtypes.float))),
-  (UPat.var("x", dtype=dtypes.float).cast(dtypes.half).cast(dtypes.float), lambda x: x),
 ])
 
 def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
@@ -113,7 +112,7 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
-      if buf.op is Ops.PARAM and buf.arg.volatile: continue # volatile accesses never merge
+      if buf.buf_uop.op is Ops.PARAM and buf.buf_uop.arg.volatile: continue # volatile accesses never merge
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
       root_src: UOp|str
       if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].val

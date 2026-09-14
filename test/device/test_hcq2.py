@@ -1,7 +1,7 @@
-import unittest, contextlib, ctypes, gc, numpy as np
+import unittest, contextlib, ctypes, gc, struct, numpy as np
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, Compiled
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, dedup, partition, unwrap
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
@@ -11,16 +11,16 @@ from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
-from tinygrad.runtime.support.hcq2 import HCQ_DEVS, HCQ2Compiled, all_devices_in, hcq_compile_cache, link_linear_cache
+from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in, hcq_compile_cache, link_linear_cache
 from test.helpers import call_is_hcq
 
 @contextlib.contextmanager
-def rt_views():
-  calls, orig = [], HCQ2Compiled.rt_view
+def rt_buffers():
+  calls, orig = [], Compiled.rt_buffer
   def track(dev, *args, **kwargs):
     calls.append(dev)
     return orig(dev, *args, **kwargs)
-  with patch.object(HCQ2Compiled, "rt_view", track): yield calls
+  with patch.object(Compiled, "rt_buffer", track): yield calls
 
 def chain(x:Tensor, n:int) -> Tensor:
   for _ in range(n): x = (x + 1).contiguous()
@@ -51,6 +51,16 @@ def lower_hcq(body:UOp) -> UOp:
   return unwrap(hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test")).call(aux=hcq2.HCQInfo(("CPU",)))))
 
 class TestHCQ2Deps(unittest.TestCase):
+  def test_copy_only_batch_with_multiple_queues(self):
+    from types import SimpleNamespace
+    bufs = [UOp.param(i, dtypes.uint8, 16, device="AMD") for i in range(4)]
+    calls = [(src.copy_to_device("AMD").call(dst, src), ("AMD",), f"COPY:{i}") for i, (dst, src) in enumerate(zip(bufs[:2], bufs[2:]))]
+    with patch.object(type(Device), "__getitem__", return_value=SimpleNamespace(pm_batch=None)):
+      batch = hcq2._finalize_batch(hcq2.BatchCtx(calls, False))
+    streams = [s.without_after.src[0] for s in batch.src[0].src]
+    self.assertEqual([s.arg[1] for s in streams], ["COPY:0", "COPY:1", "COMPUTE:0"])
+    self.assertEqual([u.arg[0] for u in streams[-1].src], ["wait", "wait", "store"])
+
   def test_disjoint_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="CPU")
     for write in ([], [0]):
@@ -81,19 +91,19 @@ class TestHCQ2Schedule(unittest.TestCase):
       f(x)
       return f(x), f.captured._linear, [x.uop.base]
     out = chain(x, n)
-    return out, compile_linear(out.schedule_linear(), input_uops=inputs), inputs
+    return out, compile_linear(out.schedule_linear(), input_uops=inputs, cache=True), inputs
 
   def test_jit_has_no_rt_buffers(self):
     dev = Device[Device.DEFAULT]
     rings = [dev.rt_buffer(True, host) for host in (False, True)]
-    ranges = [(b._buf.va_addr, b._buf.va_addr + b.nbytes) for b in rings]
+    ranges = [(b._buf, b._buf + b.nbytes) for b in rings]
     for n in (1, 65):
       with self.subTest(kernels=n):
         x, f = self.input(), TinyJit(lambda a: chain(a, n).realize())
         for _ in range(2): f(x)
         for u in f.captured.linear.toposort():
           if u.op is Ops.BUFFER and (buf:=u.buffer).device == dev.device:
-            addr = buf._buf.va_addr
+            addr = buf._buf
             self.assertFalse(any(addr < end and start < addr + buf.nbytes for start, end in ranges))
 
   def test_small_eager_cached(self):
@@ -113,21 +123,6 @@ class TestHCQ2Schedule(unittest.TestCase):
     self.assertEqual(device, Device.DEFAULT)
     self.assertEqual(call.src[1 + index].buffer.dtype, dtypes.uint64)
 
-  def test_host_copies(self):
-    dev = Device[Device.DEFAULT]
-    if not dev.has_copy_queue: self.skipTest("copy queue required")
-    for host_device in ("CPU", "NPY", "DISK"):
-      for direct in (False, True):
-        for upload in (False, True):
-          with self.subTest(host_device=host_device, direct=direct, upload=upload):
-            host, gpu = UOp.new_buffer(host_device, 4, dtypes.uint8), UOp.new_buffer(dev.device, 4, dtypes.uint8)
-            src, dst = (host, gpu) if upload else (gpu, host)
-            linear = UOp(Ops.LINEAR, src=(src.copy_to_device(dst.device).call(dst, src),))
-            with patch.object(dev, "host_devs", frozenset({"CPU", host_device}) if direct else frozenset({"CPU"})):
-              compiled = compile_linear(linear, profile=False)
-            self.assertEqual(len(compiled.src), 1 if direct or host_device == "CPU" else 2)
-            self.assertEqual(sum(call_is_hcq(call) for call in compiled.src), 1)
-
   def test_large_eager_not_cached(self):
     _, compiled, inputs = self.compiled(65)
     linked = link_linear(compiled, input_uops=inputs)
@@ -141,9 +136,9 @@ class TestHCQ2Schedule(unittest.TestCase):
           out, compiled, inputs = self.compiled(n, jit=jit)
           linked = link_linear(compiled, input_uops=inputs, allow_cache=not jit)
           before = tuple(inputs)
-          with rt_views() as borrowed:
+          with rt_buffers() as borrowed:
             for linear in (compiled, linked):
-              self.assertIs(compile_linear(linear, input_uops=None if jit else inputs), linear)
+              self.assertIs(compile_linear(linear, input_uops=inputs, cache=not jit), linear)
           self.assertEqual(tuple(inputs), before)
           self.assertFalse(borrowed)
           run_linear(linked, input_uops=inputs, jit=True, wait=True)
@@ -155,7 +150,7 @@ class TestHCQ2Schedule(unittest.TestCase):
         with self.subTest(kernels=n, jit=jit):
           out, compiled, inputs = self.compiled(n, jit=jit)
           linked = link_linear(compiled, input_uops=inputs, allow_cache=not jit)
-          with rt_views() as borrowed:
+          with rt_buffers() as borrowed:
             again = link_linear(linked, input_uops=inputs, allow_cache=not jit)
           self.assertIs(again, linked)
           self.assertFalse(borrowed)
@@ -183,20 +178,9 @@ class TestHCQ2Schedule(unittest.TestCase):
   def test_map_cpu_buffer_preserves_contents(self):
     src = Buffer("CPU", 16, dtypes.uint8, preallocate=True)
     data = bytes(range(16))
-    src.as_memoryview(force_zero_copy=True)[:] = data
+    src.host[:] = data
     src.get_buf(Device.DEFAULT)
-    self.assertEqual(bytes(src.as_memoryview(force_zero_copy=True)), data)
-
-  def test_staged_copy_roundtrip(self):
-    # a host buffer the device cannot read copies in chunks through a small ring of staging slots: every rotation must land bit-exact
-    stage = Buffer("CPU", size:=1 << 16, dtypes.uint8, preallocate=True)
-    for npdt in (np.uint8, np.float32):
-      with self.subTest(dtype=npdt.__name__):
-        n = (size // 2 // np.dtype(npdt).itemsize) * 9 + 7 # nine rotations of a two slot ring, plus a short tail
-        data = np.arange(n, dtype=np.int64).astype(npdt)
-        with patch.object(hcq2, "STAGING_SIZE", size), patch.object(hcq2, "STAGING_SLOTS", 2), patch.object(hcq2, "_staging", lambda: stage):
-          out = Tensor(data).to(Device.DEFAULT).contiguous().realize()
-          np.testing.assert_equal(out.numpy(), data)
+    self.assertEqual(bytes(src.as_memoryview()), data)
 
   def test_rt_patches_are_inputs_and_vars_only(self):
     x = Tensor.rand(17, 33).contiguous().realize()
@@ -230,11 +214,12 @@ class TestHCQ2Schedule(unittest.TestCase):
   def test_caches_hold_no_buffers(self):
     # an eager template caches without its buffers and the jit's linear compiles once uncached: freeing the tensors frees the device memory
     def step(i):
-      x = Tensor(np.full(1024, i, np.float32)).to(Device.DEFAULT).realize()
+      buf = Buffer("NPY", 1024, dtypes.float32, initial_value=struct.pack("f", i) * 1024)
+      x = Tensor(UOp.from_buffer(buf)).to(Device.DEFAULT).realize()
       @TinyJit
       def f(a): return (a * 2 + 1).contiguous().realize()
       for _ in range(3): out = f(x)
-      self.assertEqual(out.tolist(), [2.0 * i + 1] * 1024)
+      self.assertEqual(out.to("CPU").tolist(), [2.0 * i + 1] * 1024)
     step(1) # warms the programs, templates and rings
     gc.collect()
     used = GlobalCounters.mem_used
@@ -271,7 +256,7 @@ class TestHCQ2Schedule(unittest.TestCase):
           self.assertIs(programs[-1], programs[0])
           linear = hcq2.hcq_link(compiled, allow_cache=False)
           run_linear(linear, jit=True)
-          self.assertEqual(linear.src[0].without_after.src[1].buffer._buf.cpu_view().view(fmt='I')[0], 35)
+          self.assertEqual(linear.src[0].without_after.src[1].buffer.host.view(fmt='I')[0], 35)
       self.assertLessEqual(build.call_count, 1)
 
   def test_patched_view(self):
@@ -285,8 +270,8 @@ class TestHCQ2Schedule(unittest.TestCase):
       self.assertTrue(all(s.op is Ops.STORE for s in call.src[1:]))
       linked = hcq2.hcq_link(UOp(Ops.LINEAR, src=(call,)), allow_cache=False).src[0]
       inner_buf, outer_buf = linked.src[1].buffer, linked.without_after.src[1].buffer
-      self.assertEqual(inner_buf._buf.cpu_view().view(fmt='I')[1], 42)
-      self.assertEqual(outer_buf._buf.cpu_view().view(fmt='Q')[0], inner_buf._buf.va_addr + 4)
+      self.assertEqual(inner_buf.host.view(fmt='I')[1], 42)
+      self.assertEqual(outer_buf.host.view(fmt='Q')[0], inner_buf._buf + 4)
 
 @unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
 class TestHCQ2FFI(unittest.TestCase):
@@ -300,7 +285,7 @@ class TestHCQ2FFI(unittest.TestCase):
     with Context(HCQ_RUNTIME_DEV="CPU"):
       out = cpu_buf(dtype=dtypes.int32, slot=1, volatile=True, tag="ffi_result")
       bufs = self._run(out.index(0).store(hcq2.ccall(libc.dll.ffs, 0x10)))
-    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.int)._buf.cpu_view().view(fmt='i')[0], 5)
+    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.int).host.view(fmt='i')[0], 5)
 
   def test_ffi_cstruct(self):
     struct_t = init_c_struct_t(16, (("u8", ctypes.c_uint8, 0), ("u16", ctypes.c_uint16, 2),
@@ -309,7 +294,7 @@ class TestHCQ2FFI(unittest.TestCase):
     with Context(HCQ_RUNTIME_DEV="CPU"):
       s = hcq2.cstruct(struct_t, u8=0x12, u16=UOp.const(0x3456, dtypes.uint16), u32=0x789ABCDE, u64=0xFEDCBA9876543210)
       bufs = self._run(s.index(0).load())
-    got = struct_t.from_buffer_copy(bytes(next(b for b in bufs if b.nbytes == ctypes.sizeof(struct_t))._buf.cpu_view()))
+    got = struct_t.from_buffer_copy(bytes(next(b for b in bufs if b.nbytes == ctypes.sizeof(struct_t)).host.view(fmt='B')))
     self.assertEqual((got.u8, got.u16, got.u32, got.u64), (0x12, 0x3456, 0x789ABCDE, 0xFEDCBA9876543210))
 
   def test_nested_cstruct_patches(self):
@@ -319,7 +304,7 @@ class TestHCQ2FFI(unittest.TestCase):
       out = cpu_buf(dtype=dtypes.uint32, tag="result")
       copied = hcq2.ccall(libc.memcpy, out.index(0), outer.bitcast(dtypes.uint64).index(0).load(), 4)
       bufs = self._run(out.after(copied).index(0).load())
-    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.uint32)._buf.cpu_view().view(fmt='I')[0], 42)
+    self.assertEqual(next(b for b in bufs if b.dtype is dtypes.uint32).host.view(fmt='I')[0], 42)
 
 if __name__ == "__main__":
   unittest.main()

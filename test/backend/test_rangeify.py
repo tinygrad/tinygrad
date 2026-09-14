@@ -87,7 +87,7 @@ class TestRangeifyPM(unittest.TestCase):
     def run_pm_rangeify(t:Tensor):
       from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext
       sink = t.uop.sink()
-      pm_realize = PatternMatcher([(UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.replace(op=Ops.REALIZE))])
+      pm_realize = PatternMatcher([(UPat(Ops.COPY, name="x"), lambda x: x.replace(op=Ops.REALIZE))])
       sink = graph_rewrite(sink, pm_realize)
       return graph_rewrite(sink, pm_rangeify, ctx=RangeifyContext())
     self.assertIs(run_pm_rangeify(a.contiguous()), run_pm_rangeify(b.contiguous()))

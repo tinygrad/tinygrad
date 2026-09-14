@@ -5,7 +5,8 @@ import os, functools, re, contextlib, operator, hashlib, pickle, sqlite3, tempfi
 from collections import defaultdict
 import shutil, math, types, copyreg, inspect, importlib, decimal, itertools, difflib
 from dataclasses import dataclass, field, replace
-from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
+from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload, TYPE_CHECKING
+if TYPE_CHECKING: import numpy
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -35,6 +36,7 @@ def get_shape(x) -> tuple[int, ...]:
   return (len(subs),) + (subs[0] if subs else ())
 def is_image_shape(shape): return shape is not None and len(shape) == 3 and shape[-1] == 4
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
+def is_numpy_ndarray(x) -> TypeGuard[numpy.ndarray]: return str(type(x)) == "<class 'numpy.ndarray'>"
 def colored(st, color:str|None, background=False): # replace the termcolor library
   if NO_COLOR: return st
   colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']

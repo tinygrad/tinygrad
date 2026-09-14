@@ -78,8 +78,6 @@ def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
   patterns = PatternMatcher([
     # a weak CONST states no width and cannot be restated: commit it at the emulated dtype a sibling src states
     (UPat(GroupOp.ALU, name="x"), lambda x, dts=dts: commit_weak_consts(x, next((s.dtype for s in x.src if s.dtype in dts), None))),
-    (UPat(Ops.WHERE, dtype=dts, src=(UPat.var("b"), UPat.var("x"), UPat.var("y")), name="w"),
-     lambda w,b,x,y: b.where(x.cast(dtypes.float), y.cast(dtypes.float)).cast(w.dtype)),
     (UPat(GroupOp.ALU-{Ops.WHERE}, dtype=dts, name="x"),
      lambda x: UOp(x.op, src=tuple(vv.cast(dtypes.float) for vv in x.src), arg=x.arg).cast(x.dtype)),
     (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dts), UPat.var("y", dtype=dts))),
@@ -111,11 +109,9 @@ def _wmma_name(u:UOp) -> str:
   # sanitize spaces in DType.name (int8 = "signed char")
   return f"WMMA_{'_'.join(map(str, u.arg[0]))}_{u.arg[1].name}_{u.dtype.name}".replace(" ", "_")
 
-# (name, dims, dtype_in, dtype_out, device, threads, upcast_sizes)
+# (name, dims, dtype_in, dtype_out, upcast_sizes)
 def wmma_args(uops:list[UOp]):
-  return dedup((_wmma_name(uop), uop.arg[0], uop.arg[1], uop.dtype, *(uop.arg[2:4]),
-               tuple(uop.src[i].shape[-1] for i in range(3)))
-              for uop in uops if uop.op is Ops.WMMA)
+  return dedup((_wmma_name(uop), uop.arg[0], uop.arg[1], uop.dtype, tuple(x.shape[-1] for x in uop.src)) for uop in uops if uop.op is Ops.WMMA)
 
 class CStyleLanguage(Renderer):
   abi: str = ""
@@ -187,7 +183,8 @@ class CStyleLanguage(Renderer):
       return prefix + self.type_map.get(dtype, dtype.name).replace(" ", "_") + str(sz) + suffix
     return prefix + self.type_map.get(dtype, dtype.name) + suffix
 
-  def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace, shape=u._shape)
+  def render_type(self, u:UOp):
+    return self._render_dtype(u.dtype, u.max_numel(), u.addrspace, shape=u._shape, override_ptr=u.op is Ops.INDEX and u.addrspace is AddrSpace.REG)
   def render_ptr(self, u:UOp):
     # the address of an access, vector-cast if the access reads/writes more lanes than the pointer's scalar type
     if u.max_numel() > 1 or u.dtype != u.src[0].dtype:
@@ -381,7 +378,7 @@ class MetalRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix = ["#include <metal_stdlib>","using namespace metal;"]
-    deduped_wmma_args = dedup([(name, dtype_in, dtype_out) for name, _, dtype_in, dtype_out, _, _, _ in wmma_args(uops)])
+    deduped_wmma_args = dedup([(name, dtype_in, dtype_out) for name, _, dtype_in, dtype_out, _ in wmma_args(uops)])
     for name, dtype_in, dtype_out in deduped_wmma_args:
       dstr_out, dstr_in = self._render_dtype(dtype_out, 2, AddrSpace.REG), self._render_dtype(dtype_in, 2, AddrSpace.REG)
       prefix.append(
@@ -453,7 +450,7 @@ class CUDARenderer(CStyleLanguage):
       or (count in (2,4,8,16) and dt in dtypes.fp8s)]
     dt_map_in = { dtypes.float: "tf32", dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.fp8e4m3: "e4m3", dtypes.fp8e5m2: "e5m2" }
     dt_map_out = { dtypes.float: "f32", dtypes.half: "f16" }
-    for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_sizes in wmma_args(uops):
+    for name, (N, M, K), dtype_in, dtype_out, upcast_sizes in wmma_args(uops):
       wmma_dtypes = [self._render_dtype(dtype, size, AddrSpace.REG) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
       n_operands = [size*dtype.itemsize//4 for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)] # 4 => CUDA reg size in bytes
       operands = [f"%{i}" for i in range(sum(n_operands))]
@@ -565,7 +562,7 @@ class HIPRenderer(CStyleLanguage):
     prefix += [f'extern "C" __attribute__((device{f", {atr}" if atr else ""})) {dto} {meth}({dti});' for meth,dti,dto,atr in ockl+ocml]
     prefix += [self.render_vector_prefix(dt, count) for dt, count in used_dtypes if count > 1]
 
-    for name, (N, M, K), dtype_in, dtype_out, _, _, _ in wmma_args(uops): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
+    for name, (N, M, K), dtype_in, dtype_out, _ in wmma_args(uops): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
       if self.is_cdna(self.target.arch):
         if (N, M, K) == (16, 16, 16): type_map[dtypes.bfloat16] = 'bf16_1k'
         elif (N, M, K) == (16, 16, 32): type_map = {**type_map, dtypes.bfloat16: "_bf16", dtypes.half: "_f16"}

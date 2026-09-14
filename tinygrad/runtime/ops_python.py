@@ -6,8 +6,8 @@ from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools, ctypes
 from dataclasses import replace
 from tinygrad.dtype import bitcast, DType, dtypes, AddrSpace, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, cpu_profile, mv_address
-from tinygrad.device import Buffer, Compiled, Compiler, Allocator, Program, TinyELF
+from tinygrad.helpers import all_same, getenv, flatten, Target, IMAGE, is_image_shape, to_mv, mv_address
+from tinygrad.device import HostAllocator, Compiled, Compiler, Program, TinyELF
 from tinygrad.renderer import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
@@ -55,7 +55,7 @@ class PythonProgram(Program['PythonDevice']):
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
       values: dict[UOp, Any] = {}
-      pbufs: list[memoryview] = list(bufs)
+      pbufs: list[int] = list(bufs)
       pvals: list[int] = list(vals)
       exec_masks = [[True] * warp_size]
       i = 0
@@ -101,7 +101,8 @@ class PythonProgram(Program['PythonDevice']):
             # REGs are per thread
             values[u] = [memoryview(bytearray(u.max_numel()*u.dtype.itemsize)).cast(storage_fmt) for _ in range(warp_size)]
           else:
-            buf = memoryview(bytearray(u.max_numel()*u.dtype.itemsize)) if u.op is not Ops.PARAM else pbufs.pop(0)
+            size = u.max_numel() * u.dtype.itemsize
+            buf = memoryview(bytearray(size)) if u.op is not Ops.PARAM else to_mv(pbufs.pop(0), size)
             values[u] = [buf.cast(storage_fmt)] * warp_size
         elif u.op is Ops.SPECIAL:
           if u.arg[0] == 'g': values[u] = [idxs[2-int(u.arg[-1])]] * warp_size
@@ -236,16 +237,6 @@ class PythonRenderer(Renderer):
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d != dtypes.half or sys.version_info >= (3, 12)}
 
-class PythonAllocator(Allocator['PythonDevice']):
-  def _alloc(self, size, options): return memoryview(bytearray(size))
-  def _as_buffer(self, src) -> memoryview: return src
-  def _copyin(self, dest, src:memoryview):
-    with cpu_profile("TINY -> PYTHON", f"{self.dev.device}:COPY"): dest[:] = src
-  def _copyout(self, dest:memoryview, src):
-    with cpu_profile("PYTHON -> TINY", f"{self.dev.device}:COPY"): dest[:] = src
-  def map(self, buf:Buffer): return buf.as_memoryview(force_zero_copy=True)
-  def _offset(self, buf:memoryview, size:int, offset:int): return buf[offset:offset+size]
-
 class PythonDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(device, PythonAllocator(self), [PythonRenderer], PythonProgram)
+    super().__init__(device, HostAllocator(self), [PythonRenderer], PythonProgram)

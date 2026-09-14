@@ -21,7 +21,7 @@ class IndexingContext:
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(0)
 
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.BUFFER,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.AFTER, Ops.BUFFER,
                       Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
                       Ops.LOAD, Ops.CALL}
 
@@ -46,10 +46,10 @@ pm_generate_realize_map = PatternMatcher([
   # realize the inputs of custom kernel calls
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM)),), name="c", allow_any_len=True), realize_custom_kernel_srcs),
   # always realize
-  (UPat({Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
+  (UPat(Ops.STORE, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
-  # sometimes we need to realize the src of STORE if there's a self-access
+  # sometimes we need to realize the src of STORE if there's a self-access, or if it's a cross device store
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
 ])
 

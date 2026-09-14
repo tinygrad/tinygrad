@@ -178,7 +178,7 @@ class TestStatsOptimized(unittest.TestCase):
 
   def check_gemm(self, p:UOp, extra_flops=0, half=False):
     est = p.src[0].arg.estimates
-    print(p.arg.name, est.ops, est.mem, est.lds)
+    print(p.src[0].arg.name, est.ops, est.mem, est.lds)
     self.assertEqual(est.ops, 2*N*N*N + extra_flops)  # N**3 mulaccs
     self.assertEqual(est.mem, 3*N*N*(2 if half else 4)) # 3 NxN mats with floats
 
@@ -243,7 +243,7 @@ class TestStatsOptimized(unittest.TestCase):
   def test_reduce(self):
     p = to_program(replace_opts(self.ast_reduce, []), renderer=Device[Device.DEFAULT].renderer)
     est = p.src[0].arg.estimates
-    print(p.arg.name, est.ops, est.mem, est.lds)
+    print(p.src[0].arg.name, est.ops, est.mem, est.lds)
     self.assertEqual(est.ops, N*N)
     self.assertEqual(est.mem, N*N*4 + 4)
 

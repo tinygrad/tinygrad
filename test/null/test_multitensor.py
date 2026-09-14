@@ -5,6 +5,7 @@ from tinygrad.helpers import Context
 
 class TestMultiRamUsage(unittest.TestCase):
   def setUp(self):
+    self.enterContext(Context(DEV="NULL"))
     gc.collect()
     self.baseline = GlobalCounters.mem_used
     self.baseline_per_device = dict(GlobalCounters.mem_used_per_device)

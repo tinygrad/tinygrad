@@ -2,6 +2,7 @@
 import unittest
 import torch
 from tinygrad.helpers import getenv, GlobalCounters
+from test.helpers import assert_kernel_count
 if getenv("TINY_BACKEND2"):
   import extra.torch_backend.backend2
   device = "cpu"
@@ -17,7 +18,7 @@ class TestKernelFusionRegression(unittest.TestCase):
     torch.manual_seed(42)
     GlobalCounters.reset()
     fn().detach().cpu().numpy()
-    self.assertEqual(GlobalCounters.kernel_count, expected_kernels)
+    assert_kernel_count(expected_kernels)
 
   def test_elementwise_fusion(self):
     def fn():
@@ -54,7 +55,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       x = torch.randn(32, 32, device=device)
       w = torch.randn(32, 32, device=device)
       return torch.nn.functional.relu(x @ w + 1.0)
-    self._check_kernel_count(fn, 8)
+    self._check_kernel_count(fn, 7)
 
   def test_pooling_fusion(self):
     def fn():
@@ -68,7 +69,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       identity = torch.randn(1, 8, 16, 16, device=device)
       out = x + identity
       return torch.nn.functional.relu(out)
-    self._check_kernel_count(fn, 8)
+    self._check_kernel_count(fn, 7)
 
   def test_inplace_add_relu_fusion(self):
     def fn():
@@ -76,7 +77,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       y = torch.randn(1, 16, 32, 32, device=device)
       x += y
       return torch.nn.functional.relu(x)
-    self._check_kernel_count(fn, 8)
+    self._check_kernel_count(fn, 7)
 
   def test_conv_bn_add_relu_fusion(self):
     def fn():
@@ -89,7 +90,7 @@ class TestKernelFusionRegression(unittest.TestCase):
         out = bn(conv(x))
         out += identity
         return torch.nn.functional.relu(out)
-    self._check_kernel_count(fn, 13)
+    self._check_kernel_count(fn, 12)
 
   def test_multiple_inplace_ops_fusion(self):
     def fn():
@@ -135,7 +136,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       loss.backward()
       optimizer.step()
       return loss
-    self._check_kernel_count(fn, 25)
+    self._check_kernel_count(fn, 24)
 
 if __name__ == "__main__":
   unittest.main()

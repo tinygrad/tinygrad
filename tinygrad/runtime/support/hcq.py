@@ -1,11 +1,8 @@
 from __future__ import annotations
-from typing import Any
 import ctypes, os
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import DEV, getenv, pluralize
-from tinygrad.device import Compiled
-from tinygrad.uop.ops import sint
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.memory import MMIOInterface as MMIOInterface, BumpAllocator as BumpAllocator
 
@@ -55,26 +52,3 @@ def hcq_filter_visible_devices(devs, device):
   else: ids = [int(x) for x in idstr.split(',') if x.strip()]
   assert all(x < len(devs) for x in ids), f"invalid visibility filter: {ids} ({pluralize('device', len(devs))} available)"
   return [devs[x] for x in ids] if ids else devs
-
-class HCQBuffer:
-  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQBuffer|None=None, view:MMIOInterface|None=None, owner:Any=None):
-    self.va_addr, self.size, self.meta, self._base, self.view = va_addr, size, meta, _base, view
-    self._devs, self.owner = ([owner] if owner is not None else []), owner
-    self._mappings:dict[Compiled, HCQBuffer] = {} # mapping to the other devices
-
-  def offset(self, offset:int=0, size:int|None=None) -> HCQBuffer:
-    return HCQBuffer(self.va_addr+offset, size or (self.size - offset), owner=self.owner, meta=self.meta,
-      _base=self._base or self, view=(self.view.view(offset=offset, size=size) if self.view is not None else None))
-
-  def cpu_view(self) -> MMIOInterface:
-    assert self.view is not None, "buffer has no cpu_view"
-    return self.view
-
-  @property
-  def base(self) -> HCQBuffer: return self._base or self
-
-  @property
-  def mappings(self): return self._mappings if self._base is None else self._base._mappings
-
-  @property
-  def mapped_devs(self): return self._devs if self._base is None else self._base._devs

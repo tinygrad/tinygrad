@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
-from tinygrad.helpers import Context, to_mv, prod
+from tinygrad.helpers import Context, prod
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen import to_program
 import json
@@ -38,9 +38,9 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     arg_uops = [b for b in call.src[1:] if not b.is_bound_var]
     prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
     info = prg.arg
-    functions[info.function_name] = prg.src[2].arg
+    functions[prg.src[0].arg.function_name] = prg.src[2].arg
     cargs = [name_of(bu, i == 0) for i, bu in enumerate(arg_uops)] + list(info.vars)
-    statements.append((info.function_name, cargs, info.global_size, info.local_size))
+    statements.append((prg.src[0].arg.function_name, cargs, info.global_size, info.local_size))
 
   return functions, statements, {name:(size, dtype, key) for name, size, dtype, key in bufs.values()}, bufs_to_save
 
@@ -69,7 +69,7 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
 
   if not wasm:
     for name,cl in bufs_to_save.items():
-      weight = ''.join(["\\x%02X"%x for x in bytes(to_mv(cl._buf.va_addr, cl._buf.size))])
+      weight = ''.join(["\\x%02X"%x for x in cl.as_memoryview()])
       cprog.append(f"unsigned char {name}_data[] = \"{weight}\";")
     cprog += [f"{dtype_map[dtype]} {name}[{len}];" if name not in bufs_to_save else f"{dtype_map[dtype]} *{name} = ({dtype_map[dtype]} *){name}_data;" for name,(len,dtype,_key) in bufs.items() if name not in input_names+output_names]
     cprog += [f"void net({forward_args}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]

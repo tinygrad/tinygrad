@@ -1460,6 +1460,8 @@ def train_llama3():
   if optim.master_params: Tensor.realize(*optim.master_params)
   loss_acc = Tensor.zeros(1, dtype=dtypes.float32, device=device)
   Tensor.realize(loss_acc, *optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
+  mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
+  if mxfp4_weights is not None: Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
 
   @TinyJit
   def minibatch(tokens:Tensor):
@@ -1467,7 +1469,7 @@ def train_llama3():
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
-    logits:Tensor = model(tokens[:, :-1], save=bool(SMALL))
+    logits:Tensor = model(tokens[:, :-1], save=bool(SMALL), mxfp4_weights=mxfp4_weights)
     if getenv("FAST_CE", 0):
       from extra.llama_kernels.fused_ce import fused_ce_loss
       loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)
@@ -1488,11 +1490,13 @@ def train_llama3():
 
     for g in grads: g.assign(0)
     model.update_amax()
+    new_mxfp4_w = model.update_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
     loss_cpu = loss_acc.to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_acc.assign(0), *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
+    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_acc.assign(0), *grads, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax,
+                   *new_mxfp4_w)
 
     return lr_cpu, grad_norm_cpu, loss_cpu
 
@@ -1502,7 +1506,7 @@ def train_llama3():
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
-    logits:Tensor = model(tokens[:, :-1])
+    logits:Tensor = model(tokens[:, :-1], mxfp4_weights=mxfp4_weights)
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float().to("CPU")
 
@@ -1750,7 +1754,7 @@ def train_gptoss():
   def _scale_key(n):
     if "." in n and (c:=f"{(b:=n.rsplit('.',1))[0]}_scale.{b[1]}") in model_state: return c
     return f"{n}_scale"
-  fp8_scale_names = {n: _scale_key(n) for n, t in model_state.items() if t.dtype == FP8_DTYPE}
+  fp8_scale_names = {n: _scale_key(n) for n, t in model_state.items() if t.dtype == FP8_DTYPE and not getattr(t, '_prestore_wT', False)}
   fp8_inv_scales = [model_state[sname] for sname in fp8_scale_names.values()]
   for wname, sname in fp8_scale_names.items():
     w, scale = model_state[wname], model_state[sname]
@@ -1761,11 +1765,23 @@ def train_gptoss():
       bs = _mx_block_scale(inv.reshape(-1, inv.shape[-1])).reshape(w.shape)
       master.assign((master * bs).contiguous())
 
+  fp8_wT_tensors = []
+  if getenv("PRESTORE_WT", 0):
+    def _wt_key(n, suffix):
+      if "." in n and (c:=f"{(b:=n.rsplit('.',1))[0]}_{suffix}.{b[1]}") in model_state: return c
+      return f"{n}_{suffix}"
+    for wname in fp8_scale_names:
+      wtq_name, wte_name = _wt_key(wname, "wT"), _wt_key(wname, "wT_scale")
+      if wtq_name in model_state and wte_name in model_state:
+        w = model_state[wname]
+        w._wT_q, w._wT_e8 = model_state[wtq_name], model_state[wte_name]
+        fp8_wT_tensors += [w._wT_q, w._wT_e8]
+
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
   if optim.master_params:
     for m in optim.master_params: m.realize()
-  Tensor.realize(*optim.params, *fp8_inv_scales)
+  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_wT_tensors)
 
   @TinyJit
   @Context(TRAINING=1)

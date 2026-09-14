@@ -4,7 +4,7 @@ from tinygrad.helpers import dedup, getenv, unwrap, PROFILE
 from tinygrad.device import Buffer, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.jit import GraphRunner, GraphException
-from tinygrad.runtime.ops_metal import MetalDevice, MetalAllocator, wait_check, to_ns_str
+from tinygrad.runtime.ops_metal import MetalDevice, wait_check, to_ns_str
 from tinygrad.runtime.autogen import metal
 
 class MetalGraph(GraphRunner):
@@ -26,8 +26,8 @@ class MetalGraph(GraphRunner):
 
     self.var_bind_data = []
     if len(self.vars):
-      self.var_buf = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s) in unwrap(r).signature if s == ()))
-      self.var_buf_view, var_buf_offset = cast(MetalAllocator, self.dev.allocator)._as_buffer(self.var_buf), 0
+      storage = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s) in unwrap(r).signature if s == ()))
+      self.var_buf, self.var_buf_view, var_buf_offset = storage.buf, unwrap(storage.host).mv, 0
 
     all_pipelines, all_resources = [], [self.var_buf.buf] if len(self.vars) else []
     for j, ((_, ast, bufs, _), runtime, replace) in enumerate(zip(self.calls, self.runtimes, self.uop_replace)):

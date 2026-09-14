@@ -3,7 +3,11 @@ from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
+from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
+from tinygrad.renderer import Target
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.llvmir import AMDLLVMRenderer
+from tinygrad.codegen import to_program
 from test.helpers import assert_kernel_count, KernelCountException
 
 # **** kernels ****
@@ -217,6 +221,19 @@ class TestCustomKernel(unittest.TestCase):
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
     self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
+  def test_loop_acc_gemm_tc_refused(self):
+    # ACC[j] += A[t,:] @ B[:,j] over t: the recurrence on ACC makes t a serial LOOP, so no tensor core may split it
+    ren = AMDLLVMRenderer(Target("AMD", arch="gfx1100"))
+    i, tc = next((i, tc) for i, tc in enumerate(ren.tensor_cores) if tc.dtype_in is dtypes.half and tc.dtype_out is dtypes.float)
+    def kernel(ACC:UOp, A:UOp, B:UOp) -> UOp:
+      t, j, k = UOp.range(A.shape[0], 0, AxisType.LOOP), UOp.range(B.shape[1], 1), UOp.range(A.shape[1], 2, AxisType.REDUCE)
+      mm = (A[t, k] * B[k, j]).cast(dtypes.float).reduce(k, arg=Ops.ADD)
+      return ACC[j].set(ACC.after(t)[j] + mm, end=t).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (i, 0, 1)),)))
+    N, M, K = tc.dims
+    a, b, acc = Tensor.empty(M, K, dtype=dtypes.half), Tensor.empty(K, N, dtype=dtypes.half), Tensor.empty(N, dtype=dtypes.float)
+    ast = Tensor.custom_kernel(acc, a, b, fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    with self.assertRaises(KernelOptError): to_program(ast, ren)
+
   def test_gemm_multi(self):
     devs = ("CPU:0", "CPU:1")
     N = 16
@@ -334,7 +351,7 @@ class TestCustomKernel(unittest.TestCase):
     for call in compiled.src:
       prg = call.src[0]
       if prg.op is not Ops.PROGRAM: continue
-      self.assertTrue(len(prg.arg.globals) > 0, f"empty kernel compiled (no globals): name={prg.arg.name}")
+      self.assertTrue(len(prg.arg.globals) > 0, f"empty kernel compiled (no globals): name={prg.src[0].arg.name}")
 
   def test_multi_invalids_custom_kernel_no_copy(self):
     devs = ("CPU:0", "CPU:1")
@@ -412,6 +429,21 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(z.tolist(), x.add(2).tolist())
 
   def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
+
+  @unittest.skipIf(Device.DEFAULT == "CPU", "test needs to copy from CPU to another device")
+  def test_custom_kernel_source_copy(self):
+    from tinygrad.codegen import do_to_program
+    def custom_source(out:UOp, inp:UOp) -> UOp:
+      prg_uop = do_to_program(custom_add_one_kernel(out, inp), Device[out.device].renderer)
+      # construct a plain Ops.PROGRAM
+      sink = UOp.sink(out.base, inp.base, arg=KernelInfo("add_one_1"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(sink.toposort())),)+prg_uop.src[2:])
+    out = Tensor([-1]).realize()
+    cpu_src = Tensor([2], device="CPU").realize()
+    out = Tensor.custom_kernel(out, cpu_src.to(out.device), fxn=custom_source)[0]
+    cp = out.to("CPU").realize()
+    self.assertEqual(out.tolist(), [3])
+    self.assertEqual(cp.tolist(), [3])
 
   def test_sliced_buffer_function(self):
     x = Tensor.arange(32).reshape(8, 4).clone().realize()

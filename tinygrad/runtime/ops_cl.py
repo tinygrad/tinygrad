@@ -3,9 +3,9 @@ from typing import cast
 import ctypes, hashlib
 from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.runtime.support import c
-from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing, unwrap, round_up, is_image_shape
+from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, suppress_finalizing, unwrap, round_up, is_image_shape
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, CompileError, TinyELF, Program
+from tinygrad.device import BufferStorage, BufferSpec, Allocator, Compiled, Compiler, CompileError, TinyELF, Program
 
 CC_CB = c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], c.POINTER[None], cl.size_t, c.POINTER[None]]]
 BP_CB = c.CFUNCTYPE[None, [cl.cl_program, c.POINTER[None]]]
@@ -75,15 +75,15 @@ class CLProgram(Program['CLDevice']):
       return float(end.value-start.value) * OSX_TIMING_RATIO * 1e-9
     return None
 
-class CLAllocator(LRUAllocator['CLDevice']):
-  def _alloc(self, size:int, options:BufferSpec) -> cl.cl_mem:
-    return checked(cl.clCreateBuffer(self.dev.context, cl.CL_MEM_READ_WRITE, size, None, status := ctypes.c_int32()), status)
+class CLAllocator(Allocator['CLDevice']):
+  def _alloc(self, size:int, options:BufferSpec) -> BufferStorage:
+    return BufferStorage(checked(cl.clCreateBuffer(self.dev.context, cl.CL_MEM_READ_WRITE, size, None, status := ctypes.c_int32()), status))
+
   @suppress_finalizing
-  def _free(self, opaque:cl.cl_mem, options:BufferSpec): check(cl.clReleaseMemObject(opaque))
+  def _free(self, storage:BufferStorage, options:BufferSpec): check(cl.clReleaseMemObject(storage.buf))
   def _copyin(self, dest:cl.cl_mem, src:memoryview):
-    if mv_address(src) % 16: src = memoryview(bytearray(src))
+    self.dev.pending_copyin.append(src:=memoryview(bytearray(src))) # NOTE: these can't be freed until the GPU actually executes this command
     check(cl.clEnqueueWriteBuffer(self.dev.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
-    self.dev.pending_copyin.append(src)    # NOTE: these can't be freed until the GPU actually executes this command
   def _copyout(self, dest:memoryview, src:cl.cl_mem):
     check(cl.clEnqueueReadBuffer(self.dev.queue, src, False, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))
     self.dev.synchronize()
@@ -125,6 +125,6 @@ class CLDevice(Compiled):
 
   def count(self) -> int: return len(unwrap(self.device_ids))
 
-  def synchronize(self):
+  def synchronize(self, timeout:int|None=None):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()

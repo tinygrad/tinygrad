@@ -545,7 +545,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
-    numerator = squares.cast(sum_acc_dtype(self.commit_dtype())).sum(axis=axis, keepdim=keepdim)
+    numerator = squares.cast(sum_acc_dtype(squares.dtype)).sum(axis=axis, keepdim=keepdim)
     return numerator.div(smax(n - correction, 0)).cast(output_dtype)
 
   def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
@@ -1479,6 +1479,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return cx.image_conv2d(cw, groups=groups, dtype=dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
   def image_conv2d(self, weight:Self, bias:Self|None=None, groups=1, stride=1, dilation=1, padding=0, dtype=None) -> Self:
+    assert dtype is None or to_dtype(dtype) == dtypes.float32, "image math is done in float32"
     dtsz = 2 if FLOAT16 else 4
 
     (bs,_,_,_), (cout,cin,H,W) = self.shape, weight.shape
@@ -1551,7 +1552,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
     # the conv!
-    ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
+    ret = (x*w).sum((-4, -3, -2, -1))
 
     ret = ret.reshape(bs, oy, ox, groups, rcout)
     # undo hack for non multiples of 4 on C.rcout

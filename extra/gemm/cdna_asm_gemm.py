@@ -111,6 +111,15 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *extra:U
 
 # ** MXFP4 GEMM custom kernel
 
+MXFP4_TILES = ((256, 256), (192, 256), (128, 512))
+MXFP4_TILE_MAP = {(6144, 4096, 16384):(192, 256), (16384, 4096, 6144):(128, 512), (16384, 6144, 4096):(128, 512)}
+
+def select_mxfp4_tile(a_q:Tensor, b_q:Tensor) -> tuple[int, int]:
+  a_shape, b_shape = a_q.uop.shard_shape, b_q.uop.shard_shape
+  M, N, K = math.prod(a_shape[:-1]), math.prod(b_shape[:-1]), a_shape[-1]*2
+  if (tile:=MXFP4_TILE_MAP.get((M, N, K))) is not None: return tile
+  return next((tile_m, tile_n) for tile_m, tile_n in MXFP4_TILES if M % tile_m == N % tile_n == 0)
+
 @functools.cache
 def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp, tile_m:int, tile_n:int) -> UOp:
   from extra.gemm.gemm_mxfp4 import build_kernel
@@ -122,7 +131,7 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
   groups_x, groups_y = UOp.special(ceildiv(N, tile_n), "gidx0"), UOp.special(ceildiv(M, tile_m), "gidx1")
   lds = UOp.placeholder((163840,), dtypes.uint8, 0, AddrSpace.LOCAL)
   sink = UOp.sink(C.base, A.base, B.base, scale_a.base, scale_b.base, *(x.base for x in extra), lds, threads, groups_x, groups_y,
-                  arg=KernelInfo(f"mxfp4_gemm_{M}_{N}_{K}",
+                  arg=KernelInfo(f"mxfp4_gemm_{M}_{N}_{K}_{tile_m}x{tile_n}",
                                  estimates=Estimates(ops=2*M*N*K, mem=(M*half_k+N*half_k)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
   insts = build_kernel(M, N, K, tile_m, tile_n)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple(UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts))))
@@ -130,7 +139,7 @@ def custom_mxfp4_gemm(C:UOp, A:UOp, B:UOp, scale_a:UOp, scale_b:UOp, *extra:UOp,
 def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor) -> Tensor:
   M, half_k = a_q.shape
   N, half_k_b = b_q.shape
-  assert half_k == half_k_b
+  assert half_k == half_k_b, f"MXFP4 K mismatch: A {a_q.shape}, B {b_q.shape}"
   is_multi = isinstance(a_q.device, tuple)
   reduce_out = is_multi and (a_q.uop.axis == 1 or b_q.uop.axis == 1)
   if not is_multi: out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a_q.device)
@@ -140,7 +149,7 @@ def _mxfp4_gemm_quantized(a_q:Tensor, b_q:Tensor, scale_a:Tensor, scale_b:Tensor
   elif b_q.uop.axis == 0:
     out = Tensor(Tensor.invalids(1, M, N//len(a_q.device), dtype=dtypes.bfloat16, device=a_q.device).uop.unshard(2), device=a_q.device)
   else: out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a_q.device)
-  tile_m, tile_n = next((tm, tn) for tm, tn in ((256, 256), (192, 256), (128, 512)) if M % tm == N % tn == 0)
+  tile_m, tile_n = select_mxfp4_tile(a_q, b_q)
   out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b,
                              fxn=functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n))[0]
   if reduce_out: out = out.sum(0)
@@ -381,6 +390,17 @@ def custom_mx_gemm_bw(gradient:UOp, kernel:UOp, has_w_post:bool, w_stored:bool=F
 
 # ** mxfp4 gemm backward
 
+def _producer_mxfp4_outputs(gradient:UOp, expected_half_k:int) -> tuple[UOp, UOp, UOp, UOp]|None:
+  """Recover quantized sibling outputs from a fused gradient producer without mutable mailboxes or core gradient changes."""
+  for call in reversed(gradient.toposort()):
+    if call.op is not Ops.CALL or call.src[0].op is not Ops.PROGRAM or not call.src[0].src: continue
+    info = call.src[0].src[0].arg
+    if (isinstance(info, KernelInfo) and info.name.startswith("swiglu_bwd_mxfp4_")
+        and call.src[2].shape[-1] == expected_half_k):
+      assert len(call.src) >= 6
+      return tuple(call.src[i].after(call) for i in range(2, 6))  # type: ignore[return-value]
+  return None
+
 def custom_mxfp4_gemm_bw(gradient:UOp, kernel:UOp):
   inputs = kernel.src[1:]  # out, row operands/scales, BF16 operands, column operands/scales
   assert len(inputs) == 11
@@ -388,7 +408,10 @@ def custom_mxfp4_gemm_bw(gradient:UOp, kernel:UOp):
   a_col, scale_a_col = Tensor(inputs[7], device=a.device), Tensor(inputs[8], device=a.device)
   w_col, scale_w_col = Tensor(inputs[9], device=a.device), Tensor(inputs[10], device=a.device)
   g = Tensor(gradient, device=a.device)[:a.shape[0]].cast(dtypes.bfloat16)
-  g_row, scale_g_row, g_col, scale_g_col = quantize_mxfp4(g, flatten_row=True)
+  if (prequant:=_producer_mxfp4_outputs(gradient, w.shape[0]//2)) is None:
+    g_row, scale_g_row, g_col, scale_g_col = quantize_mxfp4(g, flatten_row=True)
+  else:
+    g_row, scale_g_row, g_col, scale_g_col = (Tensor(x, device=a.device) for x in prequant)
   grad_a = _mxfp4_gemm_quantized(g_row, w_col, scale_g_row, scale_w_col).reshape(*a.shape[:-1], w.shape[-1])
   grad_w = _mxfp4_gemm_quantized(g_col, a_col, scale_g_col, scale_a_col).reshape(w.shape)
   return (None, None, None, None, None, grad_a.uop, grad_w.uop, None, None, None, None)
@@ -398,7 +421,8 @@ def custom_mxfp4_gemm_bw(gradient:UOp, kernel:UOp):
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
              next_grad_amax_state:Tensor|None=None,
              w_post_scale:Tensor|None=None, mx:bool=False, mx_scales:tuple|None=None, mx_w_stored:bool=False, g_amax:Tensor|None=None,
-             a_pretranspose:Tensor|None=None, mxfp4:bool=False) -> Tensor:
+             a_pretranspose:Tensor|None=None, mxfp4:bool=False, mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
+             mxfp4_x:tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]|None=None) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   if mxfp4:
     assert not mx and mx_scales is None, "mxfp4 owns quantization; mx/mx_scales are for mxfp8"
@@ -434,11 +458,18 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   dname, arch = dname.split(":")[0], renderer.target.arch
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
     if mxfp4:
-      tile_m, tile_n = next((tm, tn) for tm, tn in ((256, 256), (192, 256), (128, 512)) if (batch*M) % tm == N % tn == 0)
-      fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
       w = b.T
-      a_q, scale_a, a_col, scale_a_col = quantize_mxfp4(a, shuffle_col=True)
-      b_q, scale_b, b_col, scale_b_col = quantize_mxfp4(w, shuffle_row=True, shuffle_col=True)
+      if mxfp4_x is None: a_q, scale_a, a_col, scale_a_col = quantize_mxfp4(a, shuffle_col=True)
+      else:
+        a_q, scale_a, a_col, scale_a_col = mxfp4_x
+        assert a_q is not None and scale_a is not None
+        if a_col is None or scale_a_col is None:
+          assert a_col is scale_a_col is None
+          _, _, a_col, scale_a_col = quantize_mxfp4(a, shuffle_col=True)
+        assert a_col is not None and scale_a_col is not None
+      b_q, scale_b, b_col, scale_b_col = quantize_mxfp4(w, shuffle_row=True, shuffle_col=True) if mxfp4_w is None else mxfp4_w
+      tile_m, tile_n = select_mxfp4_tile(a_q, b_q)
+      fxn = functools.partial(custom_mxfp4_gemm, tile_m=tile_m, tile_n=tile_n)
       out = Tensor.custom_kernel(out, a_q, b_q, scale_a, scale_b, a, w,
                                  a_col, scale_a_col, b_col, scale_b_col, fxn=fxn, grad_fxn=custom_mxfp4_gemm_bw)[0]
     elif mx:
