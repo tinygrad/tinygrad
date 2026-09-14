@@ -4,7 +4,9 @@ from tinygrad.dtype import AddrSpace, dtypes
 
 # TODO: write this
 # it needs to capture closure properly
-def call(fxn): return fxn
+def call(*ranges):
+  def fxn(x): return x
+  return fxn
 
 N = getenv("N", 4096)
 M = getenv("M", N)
@@ -26,14 +28,15 @@ THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
 TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)
 TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)
 
-@call(UOp.range(WAVES_M, 2, AxisType.LOCAL),
-      UOp.range(WAVES_N, 3, AxisType.LOCAL),
-      UOp.range(WARP_SIZE, -1, AxisType.WARP))
-def block_128x128_gemm(wave_m:UOp, wave_n:UOp, lane:UOp, c:UOp, a:UOp, b:UOp) -> UOp:
+@call(UOp.range(WARP_SIZE, -1, AxisType.WARP),
+      UOp.range(WAVES_M, 2, AxisType.LOCAL),
+      UOp.range(WAVES_N, 3, AxisType.LOCAL))
+def block_128x128_gemm(lane:UOp, wave_m:UOp, wave_n:UOp, c:UOp, a:UOp, b:UOp) -> UOp:
   tid = (wave_m * WAVES_N + wave_n) * WARP_SIZE + lane
 
-  A_local = UOp.placeholder((BLOCK_K, BLOCK_M), a.dtype, slot=0, addrspace=AddrSpace.LOCAL)
-  B_local = UOp.placeholder((BLOCK_K, BLOCK_N), b.dtype, slot=1, addrspace=AddrSpace.LOCAL)
+  # split global for tile reduce
+  a = a.reshape(K // BLOCK_K, BLOCK_K, BLOCK_M)
+  b = b.reshape(K // BLOCK_K, BLOCK_K, BLOCK_N)
 
   # accumulator (unified: both paths use (TM, TN) with scalar dtypes.float)
   acc = UOp.placeholder((TM, TN), dtypes.float, slot=2, addrspace=AddrSpace.REG)
@@ -41,10 +44,15 @@ def block_128x128_gemm(wave_m:UOp, wave_n:UOp, lane:UOp, c:UOp, a:UOp, b:UOp) ->
 
   @call(UOp.range(K // BLOCK_K, 100, AxisType.REDUCE))
   def tile_reduce(k_tile:UOp):
-    a = a.reshape(K // BLOCK_K, BLOCK_K, BLOCK_M)
-    b = b.reshape(K // BLOCK_K, BLOCK_K, BLOCK_N)
+    A_local = UOp.placeholder((BLOCK_K, BLOCK_M), a.dtype, slot=0, addrspace=AddrSpace.LOCAL)
+    B_local = UOp.placeholder((BLOCK_K, BLOCK_N), b.dtype, slot=1, addrspace=AddrSpace.LOCAL)
+
+    # copy global -> local
     A_store = A_local.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(a[k_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid])
     B_store = B_local.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(b[k_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid])
+
+    # NOTE: no explicit barrier needed, the AFTER on the LOCAL buffers implies it in late codegen
+    A_local, B_local = A_local.after(A_store, B_store), B_local.after(A_store, B_store)
 
     @call(UOp.range(BLOCK_K, 101, AxisType.REDUCE))
     def inner_reduce(k:UOp):
@@ -52,7 +60,8 @@ def block_128x128_gemm(wave_m:UOp, wave_n:UOp, lane:UOp, c:UOp, a:UOp, b:UOp) ->
       a_frag = UOp.placeholder((TM//UNROLL_M, UNROLL_M), dtypes.float, slot=0, addrspace=AddrSpace.REG)
       b_frag = UOp.placeholder((TN//UNROLL_N, UNROLL_N), dtypes.float, slot=1, addrspace=AddrSpace.REG)
 
-      # copy from local to reg
+      # copy from local -> reg
+      lane_m, lane_n = lane // LANES_PER_WAVE_N, lane % LANES_PER_WAVE_N
       a_frag = a_frag.after(a_frag.store(A_local[k].reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M)[wave_m, :, lane_m, :]))
       b_frag = b_frag.after(b_frag.store(B_local[k].reshape(WAVES_N, TN//UNROLL_N, LANES_PER_WAVE_N, UNROLL_N)[wave_n, :, lane_n, :]))
 
@@ -62,7 +71,7 @@ def block_128x128_gemm(wave_m:UOp, wave_n:UOp, lane:UOp, c:UOp, a:UOp, b:UOp) ->
       return acc.store(acc + (a_frag * b_frag))
 
     # NOTE: no explicit barrier needed, the AFTER on the LOCAL buffers implies it in late codegen
-    return inner_reduce(acc, A_local.after(A_store, B_store), B_local.after(A_store, B_store))
+    return inner_reduce()
 
   # run the matmul
   acc = acc.after(tile_reduce(acc, a, b))
@@ -81,7 +90,9 @@ def amd_copy_matmul(block_id_m:UOp, block_id_n:UOp, c:UOp, a:UOp, b:UOp) -> UOp:
   b = b.reshape(K, N // BLOCK_N, BLOCK_N)[:, block_id_n, :]
   return block_128x128_gemm(c, a, b)
 
-
+if __name__ == "__main__":
+  from amd_uop_matmul import eval_custom_matmul
+  eval_custom_matmul(amd_copy_matmul, dtypes.float)
 
 
 
