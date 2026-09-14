@@ -30,6 +30,8 @@ class HCQInfo:
   host_deps:tuple[tuple[str, str], ...] = () # (memory owner, accessing device)
   written_bufs:tuple[UOp, ...] = () # write args
 
+  skip_wait:bool = False # TODO: remove. an rdma copy between nodes is two batches, so waiting on the first alone deadlocks
+
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
 def get_enqueue_devs(call:UOp) -> Any|None:
@@ -54,10 +56,10 @@ def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.placeholder((2,), dtypes.uint64, 0, device=devs, volatile=True, tag="timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
 
-def rt_addr(b:UOp, dev="CPU") -> UOp:
+def rt_addr(b:UOp, dev="CPU", *deps:UOp) -> UOp:
   base, off = unwrap_view(b)
-  word = UOp.placeholder((1,), dtypes.uint64, device="CPU", tag="addr")
-  return patch(word, [(0, base.bitcast(dtypes.uint8)[off:off + b.nbytes()].getaddr(dev))]).index(0).load()
+  word = UOp.placeholder((1,), dtypes.uint64, device=Device[to_tuple(dev)[0]].host, tag="addr")
+  return patch(word, [(0, base.bitcast(dtypes.uint8)[off:off + b.nbytes()].getaddr(dev))]).after(*deps).index(0).load()
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   fn = to_name("submit", (devs:=to_tuple(devs))[0].split(":")[0], queue.split(":")[0])
@@ -127,7 +129,21 @@ STAGING_SIZE, STAGING_SLOTS = (4 if DEV.interface.startswith("MOCK") else 128) <
 @functools.cache
 def _staging(device:str) -> Buffer: return Buffer(device, STAGING_SIZE, dtypes.uint8, preallocate=True)
 
+def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
+  devs = [to_tuple(b.device)[0] for b in (dst, src)]
+  if not all(hasattr(Device[d], "iface") for d in devs) or Device[devs[0]].peer_group == Device[devs[1]].peer_group: return None # not 2 nodes
+
+  from tinygrad.runtime.ops_rdma import rdma_nic_for
+  if None in (nics:=[rdma_nic_for(Device[d]) for d in devs]): return None
+
+  # wires: a placeholder per nic in place of the far gpu, tagged by it
+  wires = [UOp.placeholder(src.max_shape, src.dtype, 0, device=unwrap(nic).device, tag=peer) for nic, peer in zip(nics, devs[::-1])]
+  send = call.replace(src=(call.src[0].replace(arg=wires[1].device), wires[1], src))
+  return UOp(Ops.LINEAR, src=(send, call.replace(src=(call.src[0], dst, wires[0]))))
+
 def stage_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
+  if any(to_tuple(b.device)[0].startswith("RDMA") for b in (dst, src)): return None # over the nic
+
   if (device:=get_enqueue_devs(call)) is None: return None
   try:
     for b in (dst, src): cast(Buffer, _resolve(b, ctx).buffer).get_buf(device)
@@ -146,6 +162,7 @@ def stage_copy(ctx:tuple[UOp, ...], call:UOp, dst:UOp, src:UOp) -> UOp|None:
   return lower_and_compile(call.replace(src=(ast, *call.src[1:])))
 
 pm_insert_copy_staging = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call", allow_any_len=True), split_rdma),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call", allow_any_len=True), stage_copy),
 ])
 
@@ -229,7 +246,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
     queues.setdefault(((dev,), queue), []).extend([*waits, bump])
   return queues
 
-def _finalize_batch(ctx:BatchCtx) -> UOp:
+def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   queues = _build_queues(ctx)
 
   # re-arm the batch signals before submitting queues in first-use order
@@ -238,7 +255,7 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
   signals = [ctx.queue_signal((dev,), q) for dev, qs in ctx.queues.items() for q in qs]
   fence = UOp.custom_function("hcq_fence", *timelines, *signals)
   for (devs, queue), cmds in queues.items(): submits.append(make_submit(*cmds, devs=devs, queue=queue).after(fence, *submits[-1:]))
-  sink = UOp.sink(*submits, arg=KernelInfo("hcq_submit"), tag=1)
+  sink = UOp.sink(*submits, arg=KernelInfo("hcq_submit", estimates=Estimates()), tag=1)
   for pm in [Device[d].pm_batch for d in ctx.queues if Device[d].pm_batch is not None]: # a device adds its own work to the batch
     if (r:=pm.rewrite(sink)) is not None: sink = r
 
@@ -251,7 +268,7 @@ def _finalize_batch(ctx:BatchCtx) -> UOp:
   written_bufs = tuple(dedup(b for c, _, _ in ctx.batch for b in get_call_written_bufs(c)))
   host_deps = tuple(dedup((host, devs[0]) for call, devs, _ in ctx.batch for buf in get_call_arg_uops(call)
                          for host in to_tuple(buf.device) if host not in ctx.queues))
-  info = HCQInfo(tuple(ctx.queues), kernels=kerns, written_bufs=written_bufs,
+  info = HCQInfo(tuple(ctx.queues), skip_wait=skip_wait, kernels=kerns, written_bufs=written_bufs,
                  estimates=sum(estimates, start=Estimates()).simplify(), host_deps=host_deps)
   return sink.call(*(ctx.slots.values() if ctx.profile else ()), aux=info)
 
@@ -272,7 +289,8 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
   for hcq, grp in itertools.groupby(zip(l.src, devs, queues), key=lambda e: bool(e[1])):
     nodes:dict[str, list] = {}
     for e in grp: nodes.setdefault(Device[e[1][0]].peer_group if hcq else "", []).append(e)
-    for batch in nodes.values(): srcs += [_finalize_batch(BatchCtx(batch, profile))] if hcq else [c for c, _, _ in batch]
+    batches = list(nodes.values())
+    for batch in batches: srcs += [_finalize_batch(BatchCtx(batch, profile), batch is not batches[-1])] if hcq else [c for c, _, _ in batch]
   return l.replace(src=tuple(srcs))
 
 # *****************
@@ -295,6 +313,7 @@ class HWQueue:
     (UPat(Ops.CALL, arg=InstInfo("wait_eq", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
     (UPat(Ops.CALL, arg=InstInfo("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
     (UPat(Ops.CALL, arg=InstInfo("store", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
+    (UPat(Ops.CALL, arg=InstInfo("write", dtypes.void), name="u"), lambda ctx, u: ctx.write(*u.src)),
   ])
 
   def __init__(self, ctx:EncodeCtx, submit:UOp):
@@ -417,9 +436,10 @@ def lower_call(call:UOp) -> UOp|None:
   if not isinstance(call.arg.aux, HCQInfo) or call.arg.aux.nargs: return None # not an hcq call, or lowered already
 
   # encode bodies
+  from tinygrad.runtime.ops_rdma import pm_rdma_encode
   ctx = EncodeCtx(call.arg.aux.device)
   devs = [Device[d] for d in dedup([d.split(":")[0] for d in ctx.devs])]
-  body = graph_rewrite(call.src[0], sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
+  body = graph_rewrite(call.src[0], pm_rdma_encode + sum([d.pm_encode for d in devs if d.pm_encode is not None], PatternMatcher([])) + pm_hcq_encode,
                        ctx=ctx, bpm=pm_patches, name="encode")
   body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])), ctx=ctx, bpm=pm_patches, name="lower")
 
