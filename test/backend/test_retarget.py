@@ -1,10 +1,11 @@
-import unittest, itertools, torch
+import unittest, itertools, torch, numpy as np
 from tinygrad import Tensor, Device
 from tinygrad.helpers import VIZ
 from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.uop.ops import CallInfo, graph_rewrite, PatternMatcher, UPat, UOp, Ops, ProgramInfo
 from tinygrad.codegen import full_rewrite_to_sink, pm_to_program, to_program_key
 from tinygrad.engine.realize import ExecContext, pm_exec, _get_call_to_compile
+from test.backend.test_ops import prepare_test_op
 
 def _cross_exec(graph:Tensor):
   device = Device[Device.DEFAULT]
@@ -45,6 +46,14 @@ def _cross_exec(graph:Tensor):
 class TestRetarget(unittest.TestCase):
   def test_transfer_gemm(self):
     x, w = Tensor.ones(32,32).contiguous(), Tensor.eye(32).clone()
-    truth = [[1.0] * 32 for _ in range(32)]
-    _cross_exec((out := x@w))
-    self.assertListEqual(out.tolist(), truth)
+    trt, tgt = prepare_test_op(-2, 2, [(32,32), (32,32)], None)
+    truth, out = torch.matmul(*trt), Tensor.matmul(*tgt)
+    _cross_exec(out)
+    np.testing.assert_allclose(out.numpy(), truth.detach().numpy(), atol=1e-6, rtol=1e-3)
+
+  def test_transfer_conv2d(self):
+    bs, cin, cout, h, w, groups = 4, 3, 2, 2, 3, 1
+    trt, tgt = prepare_test_op(-2, 2, [(bs,cin,5,7), (cout,cin//groups,h,w)], None)
+    truth, out = torch.nn.functional.conv2d(*trt, groups=groups), Tensor.conv2d(*tgt, groups=groups)
+    _cross_exec(out)
+    np.testing.assert_allclose(out.numpy(), truth.detach().numpy(), atol=1e-6, rtol=1e-3)
