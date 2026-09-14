@@ -1,12 +1,18 @@
 from tinygrad import UOp, getenv
-from tinygrad.uop.ops import AxisType
+from tinygrad.uop.ops import AxisType, KernelInfo
 from tinygrad.dtype import AddrSpace, dtypes
 
-# TODO: write this
-# it needs to capture closure properly
+# open ranges around a function body: they are passed as the leading args and ended on the return value.
+# values from enclosing scopes are captured by the normal python closure over the UOps.
 def call(*ranges):
-  def fxn(x): return x
-  return fxn
+  def decorator(fxn):
+    def wrapper(*args):
+      ret = fxn(*ranges, *args).end(*ranges)
+      # closing the GLOBAL ranges finishes the kernel
+      if any(r.arg[-1] is AxisType.GLOBAL for r in ranges): ret = ret.sink(arg=KernelInfo(opts_to_apply=()))
+      return ret
+    return wrapper
+  return decorator
 
 N = getenv("N", 4096)
 M = getenv("M", N)
@@ -68,7 +74,8 @@ def block_128x128_gemm(lane:UOp, wave_m:UOp, wave_n:UOp, c:UOp, a:UOp, b:UOp) ->
       # FMA
       a_frag = a_frag.reshape(TM, 1).expand(TM, TN)
       b_frag = b_frag.reshape(1, TN).expand(TM, TN)
-      return acc.store(acc + (a_frag * b_frag))
+      # NOTE: acc.after(k) makes the accumulator load loop-carried on k
+      return acc.store(acc.after(k) + (a_frag * b_frag))
 
     # NOTE: no explicit barrier needed, the AFTER on the LOCAL buffers implies it in late codegen
     return inner_reduce()
