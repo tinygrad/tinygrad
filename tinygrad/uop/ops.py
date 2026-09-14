@@ -587,12 +587,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def ins(self, opc:Any, *src:UOp, **kwargs):
     graph = set(self.toposort())
-    # only value (register) producing operands are bound to the graph. isel rewrites a node before its srcs, so this can't use the tags
-    bound = {s:i for i,s in enumerate(src) if s in graph and s.dtype is not dtypes.void}
+    # only value (register) producing operands are bound to the graph
+    bound = {s:-1-i for i,s in enumerate(src) if s in graph and s.dtype is not dtypes.void}
     sink = self.substitute({o:o.param_like(i) for o,i in bound.items()})
-    ret = UOp(Ops.CALL, (sink,) + src, InstInfo(opc, kwargs.pop("dtype", self.dtype)), kwargs.pop("tag", self.tag))
-    assert not kwargs, f"unknown kwargs to ins: {list(kwargs)}"
-    return ret
+    return UOp(Ops.CALL, (sink,) + src, InstInfo(opc, kwargs.pop("dtype", self.dtype)), kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
