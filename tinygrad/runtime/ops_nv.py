@@ -754,7 +754,7 @@ class NVDevice(Compiled):
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES, power_params)
 
     self.pma_buf = Buffer(self.device, size:=getenv("PMA_BUFFER_SIZE", 512) << 20, dtypes.uint8,
-                          opaque=self.iface.alloc(size, uncached=True, cpu_cached=True, cpu_access=True))
+                          opaque=self.iface.alloc(size, host=True, uncached=True, cpu_cached=True, cpu_access=True))
     self.pma_bytes = Buffer(self.device, size:=0x1000, dtypes.uint8,
                             opaque=self.iface.alloc(size, uncached=True, cpu_cached=True, cpu_access=self.is_nvd(), read_only=True))
     self.pma_rptr = 0

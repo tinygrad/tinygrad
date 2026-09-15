@@ -19,15 +19,37 @@ def _rmsnorm_mul_fwd_fxn(x_in_p, w_p, eps, device):
   return rmsnorm_mul_fwd(Tensor(x_in_p, device=device), Tensor(w_p, device=device), eps)
 
 def _rmsnorm_mul_bwd(grad:UOp, call:UOp) -> tuple:
-  x = Tensor(call.src[1]).float(); weight = Tensor(call.src[2]).float()
-  rrms = Tensor(call.unbound_outputs[1])
-  x_normed = x * rrms                                  # recompute unweighted normed (x is call.src[1])
-  d_y = Tensor(grad).float()
-  dxn = d_y * weight                                   # d/d(x_normed)
-  d_x = rrms * (dxn - x_normed * (dxn * x_normed).mean(-1, keepdim=True))
-  dw = d_y * x_normed
-  d_weight = dw.sum(axis=tuple(range(dw.ndim - 1)))    # reduce batch/seq -> [dim]
-  return (d_x.cast(call.src[1].dtype).uop, d_weight.cast(call.src[2].dtype).uop)
+  x_u, weight_u = call.src[1:3]
+  x, weight, rrms = Tensor(x_u), Tensor(weight_u), Tensor(call.unbound_outputs[1])
+  g = Tensor(grad, device=x_u.device)
+  assert x.dtype == weight.dtype == g.dtype == dtypes.bfloat16 and weight.shape == (x.shape[-1],)
+  device, axis = x.device, (x.uop.axis if isinstance(x.device, tuple) else None)
+  local_rows = math.prod(x.uop.shard_shape[:-1] if axis is not None else x.shape[:-1])
+  n_partials = min(NUM_WG, local_rows)
+  grad_x = alloc_like(x.shape, dtypes.bfloat16, device, axis)
+  partial_shape = (n_partials * len(device), x.shape[-1]) if isinstance(device, tuple) and axis is not None else (n_partials, x.shape[-1])
+  grad_weight_partial = alloc_like(partial_shape, dtypes.float32, device, 0 if isinstance(device, tuple) and axis is not None else None)
+  grad_x, grad_weight_partial, *_ = Tensor.custom_kernel(grad_x, grad_weight_partial, g.contiguous(), x, weight, rrms,
+                                                         fxn=functools.partial(_custom_rmsnorm_mul_bwd, dname=dname_of(device)))
+  return grad_x.uop, grad_weight_partial.sum(0).cast(weight_u.dtype).uop
+
+@functools.cache
+def _custom_rmsnorm_mul_bwd(grad_x:UOp, grad_weight_partial:UOp, grad:UOp, x:UOp, weight:UOp, rrms:UOp, *, dname:str) -> UOp:
+  rows, hidden = math.prod(x.shape[:-1]), x.shape[-1]
+  n_partials = grad_weight_partial.shape[0]
+  assert rows % (2 * n_partials) == 0, "RMSNorm backward requires complete row pairs per partial"
+  assert grad.shape == x.shape == grad_x.shape and grad.dtype == x.dtype == grad_x.dtype == dtypes.bfloat16
+  assert weight.shape == (hidden,) and weight.dtype == dtypes.bfloat16 and rrms.shape == (*x.shape[:-1], 1)
+  assert rrms.dtype == grad_weight_partial.dtype == dtypes.float32 and grad_weight_partial.shape == (n_partials, hidden)
+  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(n_partials, "gidx0")
+  sink = UOp.sink(grad_x.base, grad_weight_partial.base, grad.base, x.base, weight.base, rrms.base,
+                  threads, workgroups,
+                  arg=KernelInfo(f"rmsnorm_mul_bwd_{rows}_{hidden}_{n_partials}",
+                                 estimates=Estimates(ops=10*rows*hidden, mem=rows*hidden*6+rows*4+n_partials*hidden*4+hidden*2)))
+  src = (pathlib.Path(__file__).parent/"rmsnorm_mul_bwd.cpp").read_text()
+  defines = [f"-DROWS={rows}", f"-DHIDDEN={hidden}", f"-DNUM_WG={n_partials}", f"-DTHREADS={THREADS_PER_WG}"]
+  return UOp(Ops.PROGRAM,
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
 
 def rmsnorm_mul(x_in:Tensor, weight:Tensor, eps:float) -> tuple[Tensor, Tensor]:
   fxn = _rmsnorm_mul_fwd_fxn(x_in.as_param(0).uop, weight.as_param(1).uop, eps, x_in.device)
