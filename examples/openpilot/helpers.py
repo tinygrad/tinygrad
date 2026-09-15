@@ -1,26 +1,9 @@
 """Shared compilation and input allocation for model and warp artifacts."""
-import io, pickle, shutil, struct, tempfile, time, json, urllib.request
+import io, pickle, shutil, struct, tempfile, time
 from collections.abc import Callable
 import numpy as np
 from tinygrad import Tensor, TinyJit, Device
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import fetch
-
-# openpilot master: b751b04cdad7dde9c738ede3cab79fa673d15541
-MODELS = {
-  'driving': ('65a08adc31d5c456219687d99b7bf5e44d61dae2d49ea67850e76105c7248cce', 60918562),
-  'dm': ('dd299afabe7a3e0d04cbe2bd97fdb0c93bba8ad6d3cc3663a0e0ededaf243ac2', 7497335),
-  'big': ('6fee5937923c74848df4a63f6239eb6331c6274dd4bdb7a5d6ec0388a8b543d5', 766018462),
-}
-
-def fetch_model(name):
-  sha, size = MODELS[name]
-  request = urllib.request.Request('https://huggingface.co/commaai/openpilot-lfs.git/info/lfs/objects/batch',
-    data=json.dumps({'operation': 'download', 'transfers': ['basic'], 'objects': [{'oid': sha, 'size': size}]}).encode(),
-    headers={'Content-Type': 'application/vnd.git-lfs+json'})
-  with urllib.request.urlopen(request) as response: url = json.load(response)['objects'][0]['actions']['download']['href']
-  return fetch(url, name=f'openpilot_{sha}', sha256=sha)
-
 
 def allocate_inputs(input_specs, initialize=None):
   """Initialize inputs before copying to devices."""
@@ -87,8 +70,3 @@ def compile_jit(function:Callable, make_inputs:Callable[[int], tuple[tuple, dict
     for ref_group, actual_group in zip(reference, actual, strict=True):
       for ref, value in zip(ref_group, actual_group, strict=True): np.testing.assert_array_equal(ref, value)
   return jit
-
-
-if __name__ == '__main__':
-  import sys
-  print(fetch_model(sys.argv[1]))

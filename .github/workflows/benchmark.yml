@@ -530,6 +530,7 @@ jobs:
     env:
       JIT_BATCH_SIZE: "0"
       OPENPILOT_HACKS: "1"
+      LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
     runs-on: [self-hosted, Linux, comma4]
     timeout-minutes: 14
     defaults:
@@ -546,7 +547,7 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: openpilot compile big_driving_supercombo
       run: |
-        FLOAT16=1 TC_OPT=2 TC_MIN_GLOBALS=32 GMMU=0 DEV=USB+AMD:LLVM python3 examples/openpilot/compile_onnx.py "$(python3 examples/openpilot/helpers.py big)" openpilot.pkl --out-of-band --device-input '*'
+        FLOAT16=1 TC_OPT=2 TC_MIN_GLOBALS=32 GMMU=0 DEV=USB+AMD:LLVM python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx" openpilot.pkl --out-of-band --device-input '*'
         BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/load_pickle.py --run openpilot.pkl --out-of-band
     - name: openpilot load_pickle big_driving_supercombo
       run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=25 python3 examples/openpilot/load_pickle.py openpilot.pkl

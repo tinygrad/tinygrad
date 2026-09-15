@@ -296,11 +296,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        model: [driving, dm]
+        model: [driving_supercombo, dmonitoring_model]
     env:
       DEV: CPU:LLVM
       JIT_BATCH_SIZE: "0"
       OPENPILOT_HACKS: "1"
+      LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
       MODEL_PKL: /tmp/openpilot.pkl
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 15
@@ -315,15 +316,16 @@ jobs:
           llvm: 'true'
       - name: Compile and test model
         run: |
-          python examples/openpilot/compile_onnx.py "$(python examples/openpilot/helpers.py ${{ matrix.model }})" "$MODEL_PKL" --device-input '*' --benchmark-runs 1
+          python examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/${{ matrix.model }}.onnx" "$MODEL_PKL" --device-input '*' --benchmark-runs 1
           python examples/openpilot/load_pickle.py --run "$MODEL_PKL" --runs 3
           python -m pytest -n12 test/external/external_test_compile.py
       - name: Compile driving warp
-        if: matrix.model == 'driving'
-        run: python examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output /tmp/warp.pkl --benchmark-runs 1
-      - name: Compile DM warp
-        if: matrix.model == 'dm'
-        run: python examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,4804608 --warp-to 1440x960 --layout luma --border-fill 16 --transform-device NPY --output /tmp/warp.pkl --benchmark-runs 1
+        run: |
+          python examples/openpilot/compile_warp.py --output /tmp/warp.pkl --benchmark-runs 1 \
+            --frame "1928,1208,2048,1216,608,${{ matrix.model == 'driving_supercombo' && '3735552' || '4804608' }}" \
+            --warp-to ${{ matrix.model == 'driving_supercombo' && '512x256' || '1440x960' }} \
+            --layout ${{ matrix.model == 'driving_supercombo' && 'yuv420' || 'luma' }} \
+            ${{ matrix.model == 'driving_supercombo' && '--frames 2' || '--border-fill 16 --transform-device NPY' }}
       - name: Run warp pickle
         run: python examples/openpilot/load_pickle.py --run /tmp/warp.pkl --runs 3
       - name: Run process replay tests
