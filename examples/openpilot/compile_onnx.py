@@ -66,6 +66,7 @@ def compile_onnx(path, *, device_inputs=(), float32=False, output_name=None, ben
   metadata = {'metadata': properties} | {
     f'{kind}_shapes': {name: tuple(d if isinstance(d, int) else 0 for d in shape) for name, shape in shapes.items()}
     for kind, shapes in [('input', {name: spec.shape for name, spec in runner.graph_inputs.items()}), ('output', output_shapes)]}
+  if '*' in device_inputs: device_inputs = tuple(runner.graph_inputs)
   if unknown := set(device_inputs) - runner.graph_inputs.keys(): raise ValueError(f"Unknown inputs: {unknown}")
   if output_name is not None and output_name not in runner.graph_outputs: raise ValueError(f"Unknown output: {output_name}")
 
@@ -123,7 +124,7 @@ if __name__ == '__main__':
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('onnx')
   parser.add_argument('output')
-  parser.add_argument('--device-input', action='append', default=[], help='input placed on DEV instead of host NPY (repeatable)')
+  parser.add_argument('--device-input', action='append', default=[], help='input placed on DEV instead of host NPY (repeatable; * selects all)')
   parser.add_argument('--float32', action='store_true', help='expose float16 inputs and model outputs as float32')
   parser.add_argument('--output-name', help='select one model output')
   parser.add_argument('--benchmark-runs', type=int, default=20)
