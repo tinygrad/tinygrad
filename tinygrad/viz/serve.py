@@ -424,9 +424,9 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       elif in_type == "F8F6F4" and (getattr(inst, "cbsz") < 2 or getattr(inst, "blgp") < 2): duration *= 2
       if (exec_row:=f"ALUEXEC:0 MFMA SIMD:{simd}") not in row_ends: yield ProfilePointEvent(exec_row, "JSON", "pcMap", pc_map, ts=Decimal(0))
       # TODO: there should be a gap between instruction issue and exec, what is it?
-      mfma_latency = 4
-      yield ProfileRangeEvent(exec_row, TracingKey("MFMA", ret="JSON"+json.dumps({"link":f"{row}-{idx}"})), Decimal(p._time+mfma_latency),
-                              Decimal(p._time+mfma_latency+duration))
+      mfma_delay = 4
+      yield ProfileRangeEvent(exec_row, TracingKey("MFMA", ret="JSON"+json.dumps({"link":f"{row}-{idx}"})), Decimal(p._time+mfma_delay),
+                              Decimal(p._time+mfma_delay+duration))
       row_ends[exec_row] = Decimal(p._time+duration)
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:
