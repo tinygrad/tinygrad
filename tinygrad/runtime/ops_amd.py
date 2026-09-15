@@ -482,14 +482,18 @@ class AMDSDMAQueue(HWQueue):
   def wait(self, signal:UOp, value:UOp, eq:bool=False):
     func = WAIT_REG_MEM_FUNCTION_EQ if eq else WAIT_REG_MEM_FUNCTION_GEQ
     op = self.sdma.SDMA_OP_POLL_REGMEM | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(func) | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
-    self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), 0xffffffff,
+    self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), (1 << 8 * min(value.dtype.itemsize, 4)) - 1,
            self.sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | self.sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
 
   def timestamp(self, signal:UOp):
     self.q(self.sdma.SDMA_OP_TIMESTAMP | self.sdma.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
            signal.getaddr(self.devs) + UOp.const(8, dtypes.uint64))
 
-  def signal(self, signal:UOp, value:UOp): # a fence packet then a trap
+  def write(self, dst:UOp, *words):
+    self.q(self.sdma.SDMA_OP_WRITE | self.sdma.SDMA_PKT_WRITE_UNTILED_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_WRITE_LINEAR), dst.getaddr(self.devs),
+           _dw(words) - 1, *words)
+
+  def signal(self, signal:UOp, value:UOp):
     op = self.sdma.SDMA_OP_FENCE | (self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.target[0] != 9 else 0)
     self.q(op, signal.getaddr(self.devs), value.cast(dtypes.uint32), self.sdma.SDMA_OP_TRAP, 0)
 
