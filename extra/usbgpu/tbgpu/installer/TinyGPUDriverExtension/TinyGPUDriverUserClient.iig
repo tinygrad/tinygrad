@@ -9,7 +9,33 @@ enum TinyGPURPC
 	WriteCfg,
 	Reset,
 	PrepareDMA,
+	// x1476 fork additions (upstream selectors above are unchanged):
+	// ResetWait: scalar in [type, options, timeoutMs] (type 0 = pick by device), scalar out [status word]
+	// Ping:      scalar out [TINYGPU_DEXT_VERSION, TinyGPUDextFeatures]
+	ResetWait,
+	Ping,
 };
+
+// Version reported by Ping — bumped whenever the dext's RPC surface or reset behaviour changes.
+#define TINYGPU_DEXT_VERSION 0x00010000u
+
+enum TinyGPUDextFeatures
+{
+	kTinyGPUFeatureResetWait = 1u << 0,
+};
+
+// ResetWait status word (scalar output). Low byte: outcome; bits 8-15: reset type used;
+// bits 16-31: milliseconds waited for the device to answer configuration reads after the reset;
+// bit 32: BARs had to be rewritten from the saved copy.
+enum TinyGPUResetOutcome
+{
+	kTinyGPUResetReady          = 0,  // device answers with the expected vendor/device id
+	kTinyGPUResetTimeout        = 1,  // still 0xffffffff / 0xffff0001 (CRS) after timeoutMs
+	kTinyGPUResetVendorMismatch = 2,  // a device answered, but not the one that was reset
+	kTinyGPUResetFailed         = 3,  // IOPCIDevice::Reset itself failed (status bits 40-63 carry the kern_return_t)
+	kTinyGPUResetTerminated     = 4,  // reset requested a re-probe; the caller must reopen the service
+};
+#define TINYGPU_RESET_FLAG_BARS_RESTORED (1ull << 32)
 
 class TinyGPUDriverUserClient : public IOUserClient
 {

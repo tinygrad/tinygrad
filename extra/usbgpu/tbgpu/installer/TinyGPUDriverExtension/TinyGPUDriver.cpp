@@ -71,8 +71,15 @@ kern_return_t TinyGPUDriver::Start_Impl(IOService* in_provider)
 
 kern_return_t TinyGPUDriver::Stop_Impl(IOService* in_provider)
 {
-	ivars->pci->Close(this, 0);
-	return 0;
+	// x1476 fork: hand the stop to the superclass. Upstream returned 0 here without
+	// SUPERDISPATCH, so DriverKit never finished terminating the service and every
+	// re-enumeration of the GPU left one more dext process behind (25 observed).
+	os_log(OS_LOG_DEFAULT, "tinygpu: stop");
+	if (ivars->pci) {
+		ivars->pci->Close(this, 0);
+		ivars->pci = nullptr;
+	}
+	return Stop(in_provider, SUPERDISPATCH);
 }
 
 kern_return_t TinyGPUDriver::NewUserClient_Impl(uint32_t in_type, IOUserClient** out_user_client)
@@ -190,6 +197,92 @@ kern_return_t TinyGPUDriver::ResetDevice()
 	if (!ivars->pci) return kIOReturnNotReady;
 	kern_return_t ret = ivars->pci->Reset(kIOPCIDeviceResetTypeFunctionReset);
 	return ret == kIOReturnSuccess ? ret : ivars->pci->Reset(kIOPCIDeviceResetTypeHotReset);
+}
+
+// NVIDIA Blackwell (GB20x): the RTX 50 series never returns from a Function-Level Reset (a
+// documented firmware defect; Linux carries quirk_no_flr for 10de:2b85/2b87/2b8c). A hot
+// reset — secondary bus reset from the upstream bridge, what Linux falls back to — is the
+// reset that works for these parts.
+static bool IsNvidiaBlackwell(uint32_t vendorDevice)
+{
+	if ((vendorDevice & 0xffff) != 0x10de) return false;
+	uint32_t family = (vendorDevice >> 16) & 0xff00;
+	return family == 0x2b00 || family == 0x2c00 || family == 0x2d00 || family == 0x2f00;
+}
+
+static const uint32_t kTinyGPUBarCount = 6;
+static const uint32_t kTinyGPUResetPollMs = 10;
+static const uint32_t kTinyGPUResetDefaultTimeoutMs = 30000;
+
+kern_return_t TinyGPUDriver::ResetDeviceWait(uint32_t type, uint32_t options, uint32_t timeoutMs, uint64_t* status)
+{
+	if (!status) return kIOReturnBadArgument;
+	*status = kTinyGPUResetFailed;
+	if (!ivars->pci) return kIOReturnNotReady;
+	if (timeoutMs == 0) timeoutMs = kTinyGPUResetDefaultTimeoutMs;
+
+	uint32_t vendorDevice = 0;
+	ivars->pci->ConfigurationRead32(kIOPCIConfigurationOffsetVendorID, &vendorDevice);
+	if (type == 0) type = IsNvidiaBlackwell(vendorDevice) ? kIOPCIDeviceResetTypeHotReset : kIOPCIDeviceResetTypeFunctionReset;
+
+	// IOPCIFamily saves and restores configuration space around the reset itself, but its
+	// post-reset readiness wait is short (100 ms after an FLR, 1 s after a hot reset). A GB202
+	// takes longer, so keep our own copy of the BARs and the command register and re-apply
+	// them once the device really answers again.
+	uint32_t bars[kTinyGPUBarCount];
+	for (uint32_t i = 0; i < kTinyGPUBarCount; i++) ivars->pci->ConfigurationRead32(kIOPCIConfigurationOffsetBaseAddress0 + 4 * i, &bars[i]);
+	uint16_t command = 0;
+	ivars->pci->ConfigurationRead16(kIOPCIConfigurationOffsetCommand, &command);
+
+	os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait type=0x%x options=0x%x device=%08x timeout=%ums", type, options, vendorDevice, timeoutMs);
+	kern_return_t ret = ivars->pci->Reset(type, options);
+	os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait Reset() -> 0x%08x", ret);
+	if (ret != kIOReturnSuccess) {
+		*status = kTinyGPUResetFailed | ((uint64_t)type << 8) | ((uint64_t)(uint32_t)ret << 40);
+		return ret;
+	}
+	if (options & kIOPCIDeviceResetOptionTerminate) {
+		// The nub is being terminated and re-probed; this service is going away with it.
+		*status = kTinyGPUResetTerminated | ((uint64_t)type << 8);
+		return kIOReturnSuccess;
+	}
+
+	uint32_t waited = 0, now = 0;
+	for (;;) {
+		now = 0;
+		ivars->pci->ConfigurationRead32(kIOPCIConfigurationOffsetVendorID, &now);
+		if (now != 0 && now != 0xffffffffu && now != 0xffff0001u) break;  // 0xffff0001: Configuration Request Retry Status
+		if (waited >= timeoutMs) {
+			os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait timeout after %ums (last read %08x)", waited, now);
+			*status = kTinyGPUResetTimeout | ((uint64_t)type << 8) | ((uint64_t)waited << 16);
+			return kIOReturnTimeout;
+		}
+		IOSleep(kTinyGPUResetPollMs);
+		waited += kTinyGPUResetPollMs;
+	}
+	if (now != vendorDevice) {
+		os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait device changed %08x -> %08x", vendorDevice, now);
+		*status = kTinyGPUResetVendorMismatch | ((uint64_t)type << 8) | ((uint64_t)waited << 16);
+		return kIOReturnNoDevice;
+	}
+
+	uint64_t flags = 0;
+	uint32_t bar0 = 0;
+	ivars->pci->ConfigurationRead32(kIOPCIConfigurationOffsetBaseAddress0, &bar0);
+	if ((bar0 & ~0xfu) == 0 && (bars[0] & ~0xfu) != 0) {
+		for (uint32_t i = 0; i < kTinyGPUBarCount; i++) ivars->pci->ConfigurationWrite32(kIOPCIConfigurationOffsetBaseAddress0 + 4 * i, bars[i]);
+		flags |= TINYGPU_RESET_FLAG_BARS_RESTORED;
+		os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait BARs were cleared by the reset; rewrote the saved values");
+	}
+	uint16_t commandNow = 0;
+	ivars->pci->ConfigurationRead16(kIOPCIConfigurationOffsetCommand, &commandNow);
+	commandNow |= (command & (kIOPCICommandIOSpace | kIOPCICommandBusMaster | kIOPCICommandMemorySpace));
+	commandNow |= (kIOPCICommandIOSpace | kIOPCICommandBusMaster | kIOPCICommandMemorySpace);
+	ivars->pci->ConfigurationWrite16(kIOPCIConfigurationOffsetCommand, commandNow);
+
+	os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait ready after %ums (bars %s)", waited, (flags & TINYGPU_RESET_FLAG_BARS_RESTORED) ? "restored" : "kept");
+	*status = kTinyGPUResetReady | ((uint64_t)type << 8) | ((uint64_t)waited << 16) | flags;
+	return kIOReturnSuccess;
 }
 
 IOPCIDevice* TinyGPUDriver::GetPCI()

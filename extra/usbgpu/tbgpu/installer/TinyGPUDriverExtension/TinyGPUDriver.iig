@@ -34,6 +34,11 @@ public:
 	kern_return_t CfgRead(uint32_t off, uint32_t size, uint32_t* val) LOCALONLY;
 	kern_return_t CfgWrite(uint32_t off, uint32_t size, uint32_t val) LOCALONLY;
 	kern_return_t ResetDevice() LOCALONLY;
+	// x1476 fork: reset with a caller-chosen PCIe reset type (0 = pick by device: hot reset for
+	// NVIDIA Blackwell, FLR otherwise), then wait until the device answers configuration reads
+	// again, restoring BARs and the command register if the reset cleared them. `status` is the
+	// TinyGPUResetOutcome word documented in TinyGPUDriverUserClient.iig.
+	kern_return_t ResetDeviceWait(uint32_t type, uint32_t options, uint32_t timeoutMs, uint64_t* status) LOCALONLY;
 	IOPCIDevice* GetPCI() LOCALONLY;
 };
 

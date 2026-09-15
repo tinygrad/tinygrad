@@ -129,6 +129,26 @@ kern_return_t TinyGPUDriverUserClient::ExternalMethod(uint64_t selector, IOUserC
 	} else if (selector == TinyGPURPC::Reset) {
 		os_log(OS_LOG_DEFAULT, "tinygpu: reset");
 		return ivars->provider->ResetDevice();
+	} else if (selector == TinyGPURPC::ResetWait) {
+		if (args->scalarInputCount != 3 or args->scalarOutputCount < 1) return kIOReturnBadArgument;
+
+		uint32_t type = uint32_t(args->scalarInput[0]);
+		uint32_t options = uint32_t(args->scalarInput[1]);
+		uint32_t timeoutMs = uint32_t(args->scalarInput[2]);
+
+		uint64_t status = 0;
+		err = ivars->provider->ResetDeviceWait(type, options, timeoutMs, &status);
+		// The status word is the answer even when the reset failed; the caller decides.
+		args->scalarOutput[0] = status;
+		args->scalarOutputCount = 1;
+		os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait -> err=0x%08x status=0x%llx", err, status);
+		return kIOReturnSuccess;
+	} else if (selector == TinyGPURPC::Ping) {
+		if (args->scalarOutputCount < 2) return kIOReturnBadArgument;
+		args->scalarOutput[0] = TINYGPU_DEXT_VERSION;
+		args->scalarOutput[1] = kTinyGPUFeatureResetWait;
+		args->scalarOutputCount = 2;
+		return kIOReturnSuccess;
 	} else if (selector == TinyGPURPC::PrepareDMA) {
 		// both input and output buffers must be >= 4097 bytes for IOMemoryDescriptor
 		if (!args->structureInputDescriptor || !args->structureOutputDescriptor) {
