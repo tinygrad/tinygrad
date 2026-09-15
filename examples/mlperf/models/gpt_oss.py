@@ -321,8 +321,8 @@ class GPTOSS:
       h, *_ = self.run_layer(h, freqs_cis, mask_full, i % 2 == 0, attn_kwargs, ffn_kwargs, save=save)
 
     if getenv("FAST_FINAL_RMSNORM", 0):
-      from extra.gptoss_kernels.rmsnorm import gptoss_final_rmsnorm
-      h_normed = gptoss_final_rmsnorm(h, self.norm.weight, self.norm_eps)
+      from extra.gptoss_kernels.rmsnorm import fast_final_rmsnorm
+      h_normed = fast_final_rmsnorm(h, self.norm.weight, self.norm_eps)
     else: h_normed = self.norm(h)
 
     if getenv("FP8_LMHEAD", 0) and ASM_GEMM:
