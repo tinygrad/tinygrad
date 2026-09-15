@@ -2,7 +2,7 @@
 import argparse
 from pathlib import Path
 import numpy as np
-from tinygrad import Device, dtypes
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import _to_np_dtype
 from tinygrad.helpers import fetch
 from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle
@@ -38,6 +38,11 @@ def compile_onnx(path, *, device_inputs=(), benchmark_runs=20, out_of_band=False
   specs = {name: (tuple(s if isinstance(s, int) else 1 for s in spec.shape), np.dtype(_to_np_dtype(spec.dtype)).str,
                   Device.DEFAULT if name in device_inputs else 'NPY') for name, spec in runner.graph_inputs.items()}
 
+  def model(inputs):
+    return {name: value.contiguous() for name, value in runner({name: value.to(Device.DEFAULT) for name, value in inputs.items()}).items()}
+  output_specs = {name: (value.shape, np.dtype(_to_np_dtype(value.dtype)).name, Device.DEFAULT)
+                  for name, value in model(allocate_inputs(specs)).items()}
+
   def make_inputs(seed):
     rng = np.random.default_rng(seed)
     def initialize(arrays):
@@ -46,14 +51,15 @@ def compile_onnx(path, *, device_inputs=(), benchmark_runs=20, out_of_band=False
         value[...] = (rng.standard_normal(value.shape) if dtypes.is_float(dtype) else
                       rng.integers(0, 256, value.shape, dtype=np.uint8) if dtype == dtypes.uint8 else
                       rng.integers(0, 2 if dtype == dtypes.bool else 16, value.shape))
-    return (), allocate_inputs(specs, initialize)
+    return (), allocate_inputs(specs, initialize) | {'output_buffers': allocate_inputs(output_specs)}
 
-  def run(**inputs):
-    outputs = runner({name: value.to(Device.DEFAULT) for name, value in inputs.items()})
-    return {name: value.contiguous() for name, value in outputs.items()}
+  def run(output_buffers, **inputs):
+    outputs = model(inputs)
+    Tensor.realize(*outputs.values())
+    Tensor.realize(*(output_buffers[name].assign(value) for name, value in outputs.items()))
 
   jit = compile_jit(run, make_inputs, benchmark_runs, out_of_band=out_of_band)
-  return {'metadata': metadata, 'run': jit, 'input_specs': specs}
+  return {'metadata': metadata, 'run': jit, 'input_specs': specs, 'output_specs': output_specs}
 
 
 if __name__ == '__main__':

@@ -14,7 +14,9 @@ def make_inputs(artifact, seed=100):
     for value in views.values():
       value[...] = (rng.standard_normal(value.shape) * 8 if np.issubdtype(value.dtype, np.floating) else
                     rng.integers(0, 2 if value.dtype == np.bool_ else 16, value.shape))
-  return allocate_inputs(artifact['input_specs'], initialize)
+  inputs = allocate_inputs(artifact['input_specs'], initialize)
+  if 'output_specs' in artifact: inputs['output_buffers'] = allocate_inputs(artifact['output_specs'])
+  return inputs
 
 
 if __name__ == '__main__':
@@ -41,7 +43,7 @@ if __name__ == '__main__':
       with WallTimeEvent(BenchEvent.STEP) if getenv('BENCHMARK_LOG', '') else nullcontext():
         output = artifact['run'](**inputs)
         enqueued = time.perf_counter()
-        for device in {tensor.device for tensor in get_parameters(output)}: Device[device].synchronize()
+        for device in {tensor.device for tensor in get_parameters((inputs, output))}: Device[device].synchronize()
       times.append((time.perf_counter() - start) * 1e3)
       print(f"enqueue {(enqueued-start)*1e3:6.2f} ms -- total run {times[-1]:6.2f} ms")
     if (limit := getenv("ASSERT_MIN_STEP_TIME", 0.0)):

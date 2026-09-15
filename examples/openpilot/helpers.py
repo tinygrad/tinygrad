@@ -69,7 +69,7 @@ def compile_jit(function:Callable, make_inputs:Callable[[int], tuple[tuple, dict
       Device.default.synchronize()
       start = time.perf_counter()
       output = fn(*args, **kwargs)
-      Tensor.realize(*get_parameters(output))
+      if tensors := get_parameters(output): Tensor.realize(*tensors)
       Device.default.synchronize()
       print(f"  [{i+1}/{count}] {(time.perf_counter()-start)*1e3:.2f} ms")
       if i == 0:
