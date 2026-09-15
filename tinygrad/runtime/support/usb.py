@@ -137,13 +137,21 @@ class CustomASM24Controller:
   def __init__(self, usb:USB3):
     self.usb = usb
 
-    # Custom firmware now boots with PCIe off. Power it on before probing the link.
-    ltssm = self.read(0xB450, 1)[0]
-    if ltssm != 0x78: self.set_pcie_power(True)
-    ltssm = self.read(0xB450, 1)[0]
+    # Custom firmware now boots with PCIe off. Power it on and wait for the link, but only while the GPU rail draws
+    # power, so an enclosure with nothing powered behind the bridge still fails immediately instead of blocking.
+    if (ltssm:=self.read(0xB450, 1)[0]) != 0x78:
+      self.set_pcie_power(True)
+      for _ in range(50):
+        time.sleep(0.1)
+        if (ltssm:=self.read(0xB450, 1)[0]) == 0x78 or not self.rail_powered(): break
     if ltssm != 0x78: raise RuntimeError(f"PCIe link not up (LTSSM=0x{ltssm:02X}), custom firmware not ready")
 
   def set_pcie_power(self, enabled:bool, timeout:int=10000): self.usb.control_write(0xF3, value=int(enabled), timeout=timeout)
+
+  def rail_powered(self) -> bool:
+    # firmware reports the GPU supply as <millivolts, milliamps>; assume powered if the firmware does not implement it
+    try: return struct.unpack('<H', bytes(self.usb.control_read(0xC0, 5))[:2])[0] >= 5000
+    except Exception: return True
 
   def _f0_out(self, fmt_type:int, byte_en:int, address:int, value:int, mode:int=0):
     self.usb.control_write(0xF0, fmt_type | (byte_en << 8), mode & 0x03, struct.pack('<III', address & 0xFFFFFFFF, address >> 32, value), 5000)
