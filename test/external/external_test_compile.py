@@ -69,7 +69,7 @@ class TestConfiguredCompile(unittest.TestCase):
             np.testing.assert_array_equal(variant['run'](**inputs).numpy(), expected[None] * 2)
 
 
-@unittest.skipUnless(getenv("MODEL_PKL", ""), "requires an artifact from python -m examples.openpilot.compile_onnx")
+@unittest.skipUnless(getenv("MODEL_PKL", ""), "requires an artifact from python examples/openpilot/compile_onnx.py")
 class TestCompiledModel(unittest.TestCase):
   def setUp(self):
     with open(getenv("MODEL_PKL", ""), 'rb') as f: self.variant = load_pickle(f, out_of_band=bool(getenv("PICKLE_OOB")))['variants']['default']
