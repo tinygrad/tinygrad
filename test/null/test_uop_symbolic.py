@@ -1056,6 +1056,14 @@ class TestSymbolic(unittest.TestCase):
     self.assertIs(graph_rewrite(cond.where(uconst(4), uconst(9))*3, sym), cond.where(uconst(12), uconst(27)))
     self.assertIs(graph_rewrite(cond.where(uconst(4), uconst(9))*a, sym).op, Ops.MUL)
 
+  def test_where_consts_fold_clones_shared_select(self):
+    x = Variable("x", -3, 3, dtypes.float)
+    s = (x < 0).where(UOp.const(-1.0, dtypes.float), UOp.const(1.0, dtypes.float))
+    # 2*s folds into a second select while s is still consumed by s*x: the rewriter cannot see that s is shared
+    out = graph_rewrite(s*2.0 + s*x, sym)
+    # TODO: should be 1, the fold needs to know the select has no other consumer
+    self.assertEqual(sum(u.op is Ops.WHERE for u in out.toposort()), 2)
+
   def test_where_const_gate_keeps_stated_width(self):
     a = Variable("a", 0, 3, dtypes.half)
     self.assertIs(graph_rewrite(UOp.const(True, dtypes.bool).where(uconst(0.0), a), sym), UOp.const(0.0, dtypes.half))
