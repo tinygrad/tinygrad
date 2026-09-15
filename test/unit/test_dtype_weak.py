@@ -151,12 +151,12 @@ class TestWeakPromotion(unittest.TestCase):
     self.assertIs(mul.src[1], UOp.const(-1.0))
     self.assertIs(graph_rewrite(x * UOp.const(1.0000000106), symbolic_simple+pm_commit_weak), x)
 
-  def test_committed_const_conversion_folds_for_native_format(self):
+  def test_committed_const_conversion_folds(self):
     folded = graph_rewrite(UOp.const(16256, dtypes.ushort).cast(dtypes.uint), symbolic_simple)
     self.assertIs(folded, UOp.const(16256, dtypes.uint))
-    # fmt-less targets are lowered by renderer rewrites, where collapsing this pair would cycle with float-intermediate insertion.
+    # an emulated dtype const is a value too: one committed const, the renderer emits it directly
     emulated = UOp.const(1.0, dtypes.float).cast(dtypes.bfloat16)
-    self.assertIs(graph_rewrite(emulated, symbolic_simple), emulated)
+    self.assertIs(graph_rewrite(emulated, symbolic_simple), UOp.const(1.0, dtypes.bfloat16))
 
   def test_weak_shift_lhs_commits_the_node(self):
     # a shift derives its lhs's dtype, so committing the lhs restates the root (WGSL's packed store writes `mask << shift_am`)
