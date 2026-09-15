@@ -4,7 +4,6 @@ import numpy as np
 from examples.openpilot.load_pickle import make_inputs
 from tinygrad.helpers import fetch, getenv
 from examples.openpilot.helpers import load_pickle
-from tinygrad.nn.state import get_parameters
 from tinygrad.uop.ops import Ops
 
 
@@ -49,7 +48,10 @@ class TestCompiledModel(unittest.TestCase):
     self.model = self.artifact['run']
 
   def test_inputs(self):
-    def run(seed): return [t.numpy().copy() for t in get_parameters(self.model(**make_inputs(self.artifact, seed)))]
+    def run(seed):
+      inputs = make_inputs(self.artifact, seed)
+      self.model(**inputs)
+      return [t.numpy().copy() for t in inputs['output_buffers'].values()]
     original, changed, repeated = run(100), run(101), run(100)
     for before, after, again in zip(original, changed, repeated, strict=True):
       self.assertTrue(np.isfinite(before).all() and np.isfinite(after).all())
@@ -64,8 +66,9 @@ class TestCompiledModel(unittest.TestCase):
     for seed in (100, 101):
       inputs = make_inputs(self.artifact, seed)
       reference = session.run(None, {k: v.numpy().astype({'float': 'float32', 'double': 'float64'}.get(input_types[k], input_types[k]))
-                                    for k, v in inputs.items()})
-      for expected, actual in zip(reference, get_parameters(self.model(**inputs)), strict=True):
+                                    for k, v in inputs.items() if k in input_types})
+      self.model(**inputs)
+      for expected, actual in zip(reference, inputs['output_buffers'].values(), strict=True):
         np.testing.assert_allclose(actual.numpy(), expected, atol=1e-4, rtol=1e-4)
 
   @unittest.skipUnless(getenv("ALLOWED_KERNEL_COUNT", -1) != -1, "requires kernel regression targets")
