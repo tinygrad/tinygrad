@@ -21,7 +21,7 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   return None
 
 def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
-  if c.dtype.fmt is None or root.dtype.fmt is None or c.dtype.itemsize != root.dtype.itemsize: return None
+  if c.dtype.itemsize != root.dtype.itemsize: return None
   # the value is mathematical and may not fit: reading it as bits is the emission that pins it to the stated width
   return root.const_like(bitcast(truncate[c.dtype](c.val), c.dtype, root.dtype))
 
@@ -452,11 +452,15 @@ pm_clean_up_group_sink = PatternMatcher([
       if any(x.op in REMOVE_FROM_SINK_LIKE for x in root.src) else None),
 ])
 
+def fold_where_consts(s:UOp, w:UOp, f:UOp) -> UOp: return s.where(*[f.replace(src=tuple(w.src[k] if x is w else x for x in f.src)) for k in (1, 2)])
+
 sym = symbolic+pm_simplify_valid+PatternMatcher([
   # ** where **
-  # f(s.where(c0, c1)) -> s.where(f(c0), f(c1)) for const c0, c1
-  *[(UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(UPat.var("s").where(c, c).named("w"),), name="f"),
-     lambda s,w,f: s.where(f.replace(src=(w.src[1],)), f.replace(src=(w.src[2],)))) for c in (bare_const, casted_const)],
+  # f(s.where(c0, c1), k) -> s.where(f(c0, k), f(c1, k)) for const c0, c1, k: both new arms fold, so this never grows
+  *[(UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(UPat.var("s").where(c, c).named("w"),), name="f"), fold_where_consts)
+    for c in (bare_const, casted_const)],
+  *[(UPat(GroupOp.Binary-{Ops.THREEFRY}, src=[UPat.var("s").where(c, c).named("w"), UPat.any(bare_const, casted_const)], name="f"), fold_where_consts)
+    for c in (bare_const, casted_const)],
   # ** pow **
   ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
   # ** load/store folding **

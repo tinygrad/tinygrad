@@ -1026,6 +1026,10 @@ class TestSymbolic(unittest.TestCase):
   def test_bitcast_chain(self):
     a = UOp.variable("a", 0, 3, dtype=dtypes.int32, param=True)
     self.assertIs(graph_rewrite(a.bitcast(dtypes.float32).bitcast(a.dtype), sym), a)
+    # a const of an emulated float dtype bitcasts to its storage bits and back
+    for dt, sdt, bits in ((dtypes.bfloat16, dtypes.ushort, 16256), (dtypes.fp8e4m3, dtypes.uchar, 56), (dtypes.fp8e5m2, dtypes.uchar, 60)):
+      self.assertIs(graph_rewrite(UOp.const(1.0, dt).bitcast(sdt), sym), UOp.const(bits, sdt))
+      self.assertIs(graph_rewrite(UOp.const(bits, sdt).bitcast(dt), sym), UOp.const(1.0, dt))
 
   def test_negation_in_where(self):
     cond = Variable("x", 0, 3) < 2
@@ -1048,6 +1052,9 @@ class TestSymbolic(unittest.TestCase):
     h2, h3 = UOp.const(2.0, dtypes.half), UOp.const(3.0, dtypes.half)
     self.assertIs(graph_rewrite(cond.where(uconst(2), uconst(3)).cast(dtypes.half), sym), cond.where(h2, h3))
     self.assertIs(graph_rewrite(cond.where(uconst(4.0), uconst(9.0)).sqrt(), sym), cond.where(uconst(2.0), uconst(3.0)))
+    # a binary op with a const folds through too, with a variable it stays
+    self.assertIs(graph_rewrite(cond.where(uconst(4), uconst(9))*3, sym), cond.where(uconst(12), uconst(27)))
+    self.assertIs(graph_rewrite(cond.where(uconst(4), uconst(9))*a, sym).op, Ops.MUL)
 
   def test_where_const_gate_keeps_stated_width(self):
     a = Variable("a", 0, 3, dtypes.half)
@@ -1528,6 +1535,9 @@ class TestBounds(unittest.TestCase):
     self.assertEqual((w.cast(dtypes.int).vmin, w.cast(dtypes.int).vmax), (0, 3))
     n = cond.where(uconst(math.nan), uconst(1.0))
     self.assertEqual((n.vmin, n.vmax), (-math.inf, math.inf))
+    # an infinite bound passes through the cast, the finite one still rounds
+    i = cond.where(uconst(-math.inf), uconst(2.7)).cast(dtypes.int)
+    self.assertEqual((i.vmin, i.vmax), (dtypes.int.min, 2))
 
 class TestFuzzFailure(unittest.TestCase):
   def test_fuzz_failure1(self):
