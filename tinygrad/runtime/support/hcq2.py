@@ -204,7 +204,7 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   ctx.signal_tags |= set(latest.values())
   return [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64))) for (d, q), t in latest.items()]
 
-def _queue_start(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]: # a queue first waits for prior work of its device and of the peers it touches
+def _start_ins(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]: # a queue first waits for prior work of its device and of the peers it touches
   return [UOp(Ops.INS, arg=("barrier", dtypes.void), src=())] + \
     [UOp(Ops.INS, arg=("wait", dtypes.void), src=(timeline((d,)), timeline_value((d,)))) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
 
@@ -213,7 +213,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
   call_waits = [_wait_ins(ctx, c, d[0], q, tag) for tag, (c, d, q) in enumerate(ctx.batch)]
   queues:dict[tuple[tuple[str, ...], str], list[UOp]] = {}
   for tag, ((call, devices, queue), waits) in enumerate(zip(ctx.batch, call_waits)):
-    if not (q:=queues.setdefault((devices, queue), [])): q += _queue_start(ctx, devices[0], queue) # first use of a queue
+    if not (q:=queues.setdefault((devices, queue), [])): q += _start_ins(ctx, devices[0], queue) # first use of a queue
 
     # dependency waits, then the call between its timestamps
     ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slot(devices, i),)) for i in ctx.stamps(devices, tag)]
@@ -231,7 +231,7 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
     bump = UOp(Ops.INS, arg=("store", dtypes.void), src=(timeline((dev,)), timeline_value((dev,)) + UOp.const(1, dtypes.uint64)))
 
     # multiple copy queues may need a new compute stream. a peer without calls of its own starts like any queue
-    if not (q:=queues.setdefault(((dev,), queue), [])) and dev not in {d for d, _ in ctx.last}: q += _queue_start(ctx, dev, queue)
+    if not (q:=queues.setdefault(((dev,), queue), [])) and dev not in {d for d, _ in ctx.last}: q += _start_ins(ctx, dev, queue)
     q.extend([*waits, bump])
   return queues
 
