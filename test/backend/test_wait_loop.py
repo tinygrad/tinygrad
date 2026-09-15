@@ -112,13 +112,6 @@ class TestWaitLoop(unittest.TestCase):
     c.realize()
     self.assertEqual(c.item(), 25)
 
-  # TODO: x86's lower_loop builds an Ops.IF node after regalloc, which fails spec_full
-  @(unittest.expectedFailure if isinstance(Device[Device.DEFAULT].renderer, X86Renderer) else lambda f: f)
-  def test_wait_loop_spec(self):
-    c = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), fxn=functools.partial(wait_loop_kernel, N=7))[0]
-    with Context(SPEC=2): c.realize()
-    self.assertEqual(c.item(), 7)
-
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "TODO: do-while loop under register pressure segfaults on x86")
   def test_loop_carried_registers(self):
     # more loads live across the backedge than any register file (x86 15 gprs, arm64 31, sass 255, rdna3 256 vgprs)

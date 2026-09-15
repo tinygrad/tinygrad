@@ -6,7 +6,7 @@ from typing import cast
 from dataclasses import replace
 from tinygrad.dtype import dtypes, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, InstInfo
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, promo_dtype, InstInfo, range_str
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, LinearContext, rdef
 from tinygrad.helpers import unwrap, Target
 
@@ -15,7 +15,7 @@ from tinygrad.helpers import unwrap, Target
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
   # these aren't real instructions, DEFINE is a register placeholder that defines a register without emitting an instruction
-  FRAME_INDEX = auto(); LABEL = auto(); DEFINE = auto(); LOOP_CMP = auto()
+  FRAME_INDEX = auto(); LABEL = auto(); DEFINE = auto();
   # index
   LEA = auto()
   # register / memory / immediate moves
@@ -200,8 +200,7 @@ def to_imm(c:UOp) -> UOp|None:
 def cmp(x:UOp) -> UOp:
   if x.src[0].dtype in dtypes.floats: raise RuntimeError(f"no flag compare for {x.src[0].dtype}, a float gate must be a mask")
   # a cmp sets the flags of the subtraction, every comparison of the same operands is the same instruction
-  sub = x.src[0].alu(Ops.SUB, x.src[1])
-  return sub.ins(X86Ops.CMP, *x.src, dtype=dtypes.void) if (i:=to_imm(x.src[1])) is None else sub.ins(X86Ops.CMPi, x.src[0], i, dtype=dtypes.void)
+  return x.ins(X86Ops.CMP, *x.src, dtype=dtypes.void) if (i:=to_imm(x.src[1])) is None else x.ins(X86Ops.CMPi, x.src[0], i, dtype=dtypes.void)
 # comparisons that produce masks, the mask has the width of the operands
 def mask(x:UOp) -> UOp:
   dt, v = x.src[0].dtype, imm(dtypes.uint8, {Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op])
@@ -301,7 +300,6 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # register placeholders with real registers
   if opcode(x) is X86Ops.DEFINE and x.tag is not None: return None
-  if opcode(x) is X86Ops.LOOP_CMP: return None
   # this is an immediate
   if opcode(x) is X86Ops.FRAME_INDEX: return None
   # no register definition
@@ -324,9 +322,7 @@ isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
-  # really all a backedge END is is an IF with a tag referencing the RANGE start label
-  (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
-    lambda x,cond: cond.ins(X86Ops.LOOP_CMP, *cond.src, *x.src[:2], tag=cond.op)),
+  (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="pred")), name="x"), lambda pred,x: x.replace(src=(*x.src[:2], cmp(pred)))),
   # **** Op -> X86Op ****
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
   # so regalloc builds the prologue/epilogue naturally. they all share the stack pointer define's dtype so the the stack pointer define is first
@@ -487,10 +483,11 @@ pre_regalloc_matcher = PatternMatcher([
 # ***** post register allocation *****
 # TODO: control flow should be overhauled so that this isn't necessary
 def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  loop_label = "_".join(str(i) for i in x.arg[:-1])
+  loop_label = range_str(x)
   label = UOp(Ops.NOOP).ins(X86Ops.LABEL, tag=f".LOOP_{loop_label}")
-  # loop, cmp on backedge all we need is a jmp tag
-  if x.dtype is dtypes.void: return (label, [label])
+  if x.dtype is dtypes.void:
+    ctx.loop_label[label] = loop_label
+    return (label, [label])
   else:
     acc = x.ins(X86Ops.MOVi, imm(x.dtype, 0), *x.src[1:])
     cmp = UOp(Ops.NOOP).ins(X86Ops.CMPi if x.src[0].op is Ops.CAST else X86Ops.CMP, acc, x.src[0])
@@ -505,10 +502,10 @@ def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   return (inc, [inc, jmp, end_label])
 
 def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  # the LOOP_CMP operands are the comparison srcs followed by the END srcs, the lowered RANGE (label) is the jump target
-  cond = UOp(x.tag, src=x.src[1:3])
-  jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
-  return (jmp.src[1], [jmp.src[1], jmp.replace(tag=x.src[4].tag)])
+  cjmp = {Ops.CMPLT:X86Ops.JL, Ops.CMPEQ:X86Ops.JE, Ops.CMPNE:X86Ops.JNE}
+  cond = x.src[-1]
+  jmp = UOp(Ops.NOOP).ins(cjmp[cond.src[0].op], cond, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
+  return jmp, [jmp]
 
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
@@ -521,7 +518,7 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(), UPat.cvar("disp").cast()), name="x"), lambda ctx,disp,x:
     (nx:=UOp.cconst(ctx.stack_size + disp.val, x.dtype), [nx]) if opcode(x) is X86Ops.FRAME_INDEX else None),
   # expand the cmp here so we can preserve rng src edge to get label from ctx
-  (UPat(Ops.CALL, name="x"), lambda ctx,x: lower_loop(ctx, x) if opcode(x) is X86Ops.LOOP_CMP else None),
+  (UPat(Ops.END, name="x"), lambda ctx,x: lower_loop(ctx, x) if opcode(x.src[-1]) in {X86Ops.CMP, X86Ops.CMPi} else None),
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
   (UPat(Ops.RANGE, name="x"), lower_range),
   # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
@@ -765,7 +762,6 @@ class X86Renderer(ISARenderer):
     binary = bytearray()
     for u in uops:
       if (op:=opcode(u)) is None or op is X86Ops.DEFINE: continue
-      if op is X86Ops.LOOP_CMP: continue
       if op is X86Ops.LABEL:
         targets[u.tag] = len(binary)
         continue
