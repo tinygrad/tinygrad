@@ -392,22 +392,19 @@ def patch(buf:UOp, rows:list[tuple[int, UOp]], blob:bytes|None=None) -> UOp:
 
 def bufferize_linear(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp: # the queued stream as a patched placeholder
   stream, patches = bytes(hq.blob), hq.patches
+  nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
   # nested linears (like kernargs) merge into a buffer per name, patched before the stream
-  nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
-  views, deps = dict[UOp, UOp](), []
+  bufs = []
   for lname, ls in itertools.groupby(sorted(nested, key=lambda l: l.arg), key=lambda l: l.arg):
-    hq.blob, hq.patches, offs = bytearray(), [], {}
-    for l in ls:
-      hq.blob += bytes(-len(hq.blob) % 128)
-      offs[l] = (len(hq.blob), hq.q(*l.src))
-    buf = UOp.placeholder((len(hq.blob),), dtypes.uint8, device=hq.devs, tag=to_name(lname, hq.queue))
-    views |= {l: buf[o:e] for l, (o, e) in offs.items()}
-    deps.append(patch(buf, hq.patches, bytes(hq.blob)))
+    hq.blob, hq.patches = bytearray(), []
+    offs = {l: (hq.q(UOp(Ops.BINARY, arg=bytes(-len(hq.blob) % 128))), hq.q(*l.src)) for l in ls} # padding is a word too
+    bufs.append((offs, bufferize_linear(hq, lname, hq.devs)))
+  views = {l: buf.without_after[o:e] for offs, buf in bufs for l, (o, e) in offs.items()}
 
   buf = UOp.placeholder((len(stream),), dtypes.uint8, device=device, tag=to_name(name, hq.queue))
   words = UOp.sink(*[w for _, w in patches]).substitute(views).src
-  return patch(buf, list(zip([o for o, _ in patches], words)), stream).after(*deps)
+  return patch(buf, list(zip([o for o, _ in patches], words)), stream).after(*[b for _, b in bufs])
 
 def encode_submit(hq:HWQueue) -> UOp:
   for u in hq.lin.src: hq.q_rewrite.rewrite(u, ctx=hq)
