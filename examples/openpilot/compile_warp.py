@@ -98,15 +98,10 @@ def make_luma_warp(nv12:NV12Frame, width, height, border_fill=None):
   return warp
 
 
-def make_warp(frame, output_size, layout='luma', border_fill=None):
-  width, height = output_size
-  if layout == 'luma': return make_luma_warp(NV12Frame(*frame), width, height, border_fill)
-  if layout == 'yuv420': return make_frame_prepare(NV12Frame(*frame), width, height)
-  raise ValueError(f'Unknown warp layout: {layout}')
-
-
 def compile_warp(frame:NV12Frame, output_size, *, layout='luma', border_fill=None, frames=1, transform_device=None, benchmark_runs=20):
-  function = make_warp(frame, output_size, layout, border_fill)
+  if layout == 'luma': function = make_luma_warp(frame, *output_size, border_fill)
+  elif layout == 'yuv420': function = make_frame_prepare(frame, *output_size)
+  else: raise ValueError(f'Unknown warp layout: {layout}')
   prefix = () if frames == 1 else (frames,)
   specs = {'input_frame': (prefix + (frame.size,), np.dtype(np.uint8).str, Device.DEFAULT),
            'M_inv': (prefix + (3, 3), np.dtype(np.float32).str, transform_device or Device.DEFAULT)}
