@@ -292,30 +292,41 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testopenpilot:
-    name: openpilot Compile Tests
+    name: openpilot Compile Tests (${{ matrix.dev }})
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        dev: ['CPU:LLVM', 'CL']
+    env:
+      DEV: ${{ matrix.dev }}
+      IMAGE: ${{ matrix.dev == 'CL' && '1' || '0' }}
+      FLOAT16: ${{ matrix.dev == 'CL' && '1' || '0' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: openpilot-compile
+          key: openpilot-compile-${{ matrix.dev }}
           deps: testing
+          opencl: ${{ matrix.dev == 'CL' }}
           llvm: 'true'
-          pydeps: pycapnp zstandard opendbc requests onnxruntime==1.29.0
-      - name: Checkout openpilot
-        uses: actions/checkout@v6
-        with:
-          repository: commaai/openpilot
-          ref: 17150b6db01e6669644d7c78440c10e66f86777f
-          path: openpilot
-      - name: Test openpilot modeld compile (kernel counts, numerics vs onnxruntime)
-        run: DEV=CPU:LLVM python test/external/external_test_openpilot_modeld.py --openpilot-root openpilot
+      - name: Test ONNX state feedback and padded camera warps
+        run: python -m pytest test/testextra/test_openpilot_compile.py -x -q -n12
+      - name: Test driving ONNX compile and replay
+        run: python test/external/external_test_openpilot_modeld.py --model driving ${{ matrix.dev == 'CPU:LLVM' && '--kernel-count 164' || '' }}
+      - name: Test driver monitoring ONNX compile and replay
+        run: python test/external/external_test_openpilot_modeld.py --model dm --atol .02 --rtol .01 ${{ matrix.dev == 'CPU:LLVM' && '--kernel-count 87' || '' }}
+      - name: Test model kernel count and image gates
+        if: matrix.dev == 'CL'
+        run: DEV=CL::IMAGE_PITCH_ALIGNMENT=64 OPENPILOT_HACKS=1 JIT_BATCH_SIZE=0 ALLOWED_READ_IMAGE=1361 ALLOWED_GATED_READ_IMAGE=38 python test/external/external_test_openpilot_modeld.py --onnx https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916 --kernel-count 123
+      - name: Test fp32 ONNX numerics
+        if: matrix.dev == 'CL'
+        run: FLOAT16=0 python test/external/external_test_openpilot_modeld.py --onnx https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx --atol 1e-4 --rtol 1e-4
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
-        if: false  # new test has no master baseline to replay against
 
 # ****** ONNX Tests ******
 
