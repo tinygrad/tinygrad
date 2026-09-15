@@ -30,11 +30,8 @@ def onnx_metadata(path):
 def compile_onnx(path, *, benchmark_runs=20, out_of_band=False):
   runner = OnnxRunner(path)
   properties, output_shapes = onnx_metadata(path)
-  metadata = {'metadata': properties} | {
-    f'{kind}_shapes': {name: tuple(d if isinstance(d, int) else 0 for d in shape) for name, shape in shapes.items()}
-    for kind, shapes in [('input', {name: spec.shape for name, spec in runner.graph_inputs.items()}), ('output', output_shapes)]}
-  specs = {name: (tuple(s if isinstance(s, int) else 1 for s in spec.shape), np.dtype(_to_np_dtype(spec.dtype)).str, Device.DEFAULT)
-           for name, spec in runner.graph_inputs.items()}
+  metadata = {'metadata': properties, 'input_shapes': {k:v.shape for k,v in runner.graph_inputs.items()}, 'output_shapes': output_shapes}
+  specs = {name: (spec.shape, np.dtype(_to_np_dtype(spec.dtype)).str, Device.DEFAULT) for name, spec in runner.graph_inputs.items()}
 
   def model(inputs):
     return {name: value.contiguous() for name, value in runner({name: value.to(Device.DEFAULT) for name, value in inputs.items()}).items()}
