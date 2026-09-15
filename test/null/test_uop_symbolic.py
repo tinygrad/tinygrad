@@ -1042,9 +1042,12 @@ class TestSymbolic(unittest.TestCase):
   def test_where_cast(self):
     cond = Variable("s", 0, 3, dtypes.int) < 2
     a = Variable("a", 0, 3, dtypes.int)
-    self.assertIs(graph_rewrite(cond.where(a, a+1).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), (a+1).cast(dtypes.half)))
-    self.assertIs(graph_rewrite(cond.where(a, uconst(2)).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), uconst(2.0)))
+    self.assertIs(graph_rewrite(w:=cond.where(a, a+1).cast(dtypes.half), sym), w)
+    self.assertIs(graph_rewrite(w:=cond.where(a, uconst(2)).cast(dtypes.half), sym), w)
     self.assertIs(graph_rewrite(cond.where(a, UOp.invalid()).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.invalid()))
+    h2, h3 = UOp.const(2.0, dtypes.half), UOp.const(3.0, dtypes.half)
+    self.assertIs(graph_rewrite(cond.where(uconst(2), uconst(3)).cast(dtypes.half), sym), cond.where(h2, h3))
+    self.assertIs(graph_rewrite(cond.where(uconst(4.0), uconst(9.0)).sqrt(), sym), cond.where(uconst(2.0), uconst(3.0)))
 
   def test_where_const_gate_keeps_stated_width(self):
     a = Variable("a", 0, 3, dtypes.half)
