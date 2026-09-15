@@ -1,6 +1,6 @@
 import math, functools
 from typing import Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, OPAQUE_CALL_BODIES
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, InstInfo, OPAQUE_CALL_BODIES
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
@@ -97,9 +97,9 @@ spec_shared = PatternMatcher([
 
   # a CUSTOM_FUNCTION with srcs is the body of an external call, holding the callee (a function pointer)
   (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, str)),
-  # CALL: the body is always an opaque body, the arg is a CallInfo stating the (possibly void) dtype
-  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"),
-   lambda x: isinstance(x.arg, CallInfo) and x.dtype is x.arg.dtype),
+  # CALL: the arg states the (possibly void) dtype. a CallInfo call has an opaque body, a machine instruction (InstInfo) implements src[0]
+  (UPat(Ops.CALL, name="x"), lambda x: isinstance(x.arg, (CallInfo, InstInfo)) and x.dtype is x.arg.dtype and
+   (isinstance(x.arg, InstInfo) or x.src[0].op in OPAQUE_CALL_BODIES)),
 
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),

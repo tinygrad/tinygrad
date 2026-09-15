@@ -29,7 +29,7 @@ def _cross_exec(graph:Tensor):
     # plug through non-assembly backend's render pass
     prg_info = ProgramInfo.from_sink(sink, final_ren.target)
     prg = UOp(Ops.PROGRAM, src=(sink,), arg=prg_info)
-    prg = graph_rewrite(prg, pm_to_program, ctx=final_ren, name="linearize/render") 
+    prg = graph_rewrite(prg, pm_to_program, ctx=final_ren, name="linearize/render")
     if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
     return prg
 

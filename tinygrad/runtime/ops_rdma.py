@@ -100,7 +100,7 @@ def queue_of(call:UOp) -> tuple[tuple[str, str], bool]:
   return (min(gpu, wire.tag), max(gpu, wire.tag)), wire is src
 
 def ins(name:str, *src:UOp|int) -> UOp:
-  return UOp(Ops.INS, arg=(name, dtypes.void), src=tuple(UOp.const(s, dtypes.uint32) if isinstance(s, int) else s for s in src))
+  return UOp(Ops.NOOP).ins(name, *(UOp.const(s, dtypes.uint32) if isinstance(s, int) else s for s in src))
 
 def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the ops of each copy of a submit on one queue
   (pair, is_recv), nic = queue_of(calls[0]), cast(RDMADevice, Device[unwrap(rdma_wire(calls[0])).device])
