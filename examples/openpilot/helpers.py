@@ -22,16 +22,11 @@ def fetch_model(name):
   return fetch(url, name=f'openpilot_{sha}', sha256=sha)
 
 
-def allocate_inputs(input_specs, packed_specs, initialize=None):
-  """Allocate inputs and NumPy views, initializing before copying to devices."""
+def allocate_inputs(input_specs, initialize=None):
+  """Initialize inputs before copying to devices."""
   arrays = {name: np.zeros(shape, dtype=dtype) for name, (shape, dtype, _) in input_specs.items()}
-  views = arrays.copy()
-  if packed_specs:
-    packed = views.pop('packed_inputs')
-    views.update({name: packed[start:start+int(np.prod(shape))*np.dtype(dtype).itemsize].view(dtype).reshape(shape)
-                  for name, (start, shape, dtype) in packed_specs.items()})
-  if initialize is not None: initialize(views)
-  return {name: Tensor(arrays[name], device=device).realize() for name, (_, _, device) in input_specs.items()}, views
+  if initialize is not None: initialize(arrays)
+  return {name: Tensor(arrays[name], device=device).realize() for name, (_, _, device) in input_specs.items()}
 
 
 def dump_pickle(obj, f, *, out_of_band=False):
@@ -91,7 +86,6 @@ def compile_jit(function:Callable, make_inputs:Callable[[int], tuple[tuple, dict
     actual = run(loaded, seed, benchmark_runs)
     for ref_group, actual_group in zip(reference, actual, strict=True):
       for ref, value in zip(ref_group, actual_group, strict=True): np.testing.assert_array_equal(ref, value)
-  # Preserve shared weight buffers when several JITs are saved in one artifact.
   return jit
 
 
