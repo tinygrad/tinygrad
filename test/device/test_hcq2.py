@@ -59,7 +59,7 @@ class TestHCQ2Deps(unittest.TestCase):
       batch = hcq2._finalize_batch(hcq2.BatchCtx(calls, False))
     streams = [s.without_after.src[0] for s in batch.src[0].src]
     self.assertEqual([s.arg[1] for s in streams], ["COPY:0", "COPY:1", "COMPUTE:0"])
-    self.assertEqual([u.arg[0] for u in streams[-1].src], ["wait", "wait", "store"])
+    self.assertEqual([u.arg.opcode for u in streams[-1].src], ["wait", "wait", "store"])
 
   def test_disjoint_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="CPU")
