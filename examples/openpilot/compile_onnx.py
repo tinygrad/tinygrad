@@ -1,4 +1,4 @@
-"""Compile ONNX with optional input warps, temporal sampling and packed host transfers."""
+"""Compile ONNX with optional temporal sampling and packed host transfers."""
 import argparse, json, math
 from pathlib import Path
 import numpy as np
@@ -6,7 +6,6 @@ from tinygrad import Device, dtypes
 from tinygrad.dtype import DType, _to_np_dtype
 from tinygrad.helpers import fetch
 from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle
-from examples.openpilot.compile_warp import NV12Frame, make_warp
 from tinygrad.nn.onnx import OnnxPBParser, OnnxRunner
 
 
@@ -39,7 +38,7 @@ def sample_history(buffer, value, shape, *, axis, size=1, stride=1, reduce='samp
 
 def prepare_inputs(runner, config, device_inputs, float32):
   sources:dict[str, tuple[tuple[int, ...], DType, str]] = {}
-  histories, warps = {}, {}
+  histories = {}
   shapes = {name: tuple(s if isinstance(s, int) else 1 for s in spec.shape) for name, spec in runner.graph_inputs.items()}
   for name, spec in runner.graph_inputs.items():
     cfg = config.get('inputs', {}).get(name, {})
@@ -50,14 +49,9 @@ def prepare_inputs(runner, config, device_inputs, float32):
       samples = shape[axis] // size
       shape = shape[:axis] + (size,) + shape[axis+1:]
       length = (samples*stride if history.get('reduce') == 'max' else (samples-1)*stride + 1) + history.get('delay', 0)
-      histories[name] = ((length, *shape), dtypes.uint8 if 'warp' in cfg else dtype)
-    if warp := cfg.get('warp'):
-      frame = NV12Frame(*warp['frame'])
-      warps[name] = make_warp(frame, warp['output_size'], warp['layout'], warp.get('border_fill'))
-      shape, dtype = (frame.copy_size,), dtypes.uint8
-      sources[warp['transform']] = ((3, 3), dtypes.float32, 'NPY')
+      histories[name] = ((length, *shape), dtype)
     sources[cfg.get('source', name)] = (shape, dtype, Device.DEFAULT if name in device_inputs else 'NPY')
-  return sources, histories, warps, shapes
+  return sources, histories, shapes
 
 
 def compile_onnx(path, *, device_inputs=(), float32=False, output_name=None, benchmark_runs=20, out_of_band=False, configs=None):
@@ -71,7 +65,7 @@ def compile_onnx(path, *, device_inputs=(), float32=False, output_name=None, ben
   if output_name is not None and output_name not in runner.graph_outputs: raise ValueError(f"Unknown output: {output_name}")
 
   def compile_config(config):
-    sources, histories, warps, shapes = prepare_inputs(runner, config, device_inputs, float32)
+    sources, histories, shapes = prepare_inputs(runner, config, device_inputs, float32)
     packed_specs, offset = {}, 0
     for name in config.get('pack', []):
       shape, dtype, _ = sources[name]
@@ -105,7 +99,6 @@ def compile_onnx(path, *, device_inputs=(), float32=False, output_name=None, ben
       for name, spec in runner.graph_inputs.items():
         cfg = config.get('inputs', {}).get(name, {})
         value = values[cfg.get('source', name)]
-        if name in warps: value = warps[name](value, values[cfg['warp']['transform']]).realize()
         if name in histories:
           value = sample_history(inputs[name+'_history'], value.reshape(histories[name][0][1:]), shapes[name], **cfg['history'])
         model_inputs[name] = value.cast(spec.dtype)
@@ -129,7 +122,7 @@ if __name__ == '__main__':
   parser.add_argument('--output-name', help='select one model output')
   parser.add_argument('--benchmark-runs', type=int, default=20)
   parser.add_argument('--out-of-band', action='store_true', help='stream protocol-5 buffers for large models')
-  parser.add_argument('--config', action='append', help='NAME=JSON: per-input source, warp and history settings, plus host input packing order')
+  parser.add_argument('--config', action='append', help='NAME=JSON: per-input source and history settings, plus host input packing order')
   args = parser.parse_args()
   path = fetch(args.onnx) if '://' in args.onnx else Path(args.onnx)
   configs = dict((name, json.loads(config)) for name, config in (value.split('=', 1) for value in args.config)) if args.config else None

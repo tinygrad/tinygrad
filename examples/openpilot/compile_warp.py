@@ -1,4 +1,4 @@
-"""Perspective warps for NV12 frames, standalone or fused into a model JIT."""
+"""Compile perspective warps for NV12 frames."""
 import argparse
 from typing import NamedTuple
 import numpy as np
