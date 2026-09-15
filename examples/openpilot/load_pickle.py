@@ -4,7 +4,7 @@ import numpy as np
 from extra.bench_log import WallTimeEvent, BenchEvent
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters
-from .helpers import allocate_inputs, load_pickle
+from examples.openpilot.helpers import allocate_inputs, load_pickle
 
 
 def make_inputs(variant, seed=100):
