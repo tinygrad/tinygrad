@@ -324,7 +324,7 @@ class HWQueue:
     (UPat(Ops.CALL, arg=InstInfo("timestamp", dtypes.void), src=(UPat(), UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
     (UPat(Ops.CALL, arg=InstInfo("store", dtypes.void), src=(UPat(), UPat(name="dst"), UPat(name="val"))),
       lambda ctx, dst, val: ctx.signal(dst, val)),
-    (UPat(Ops.CALL, arg=InstInfo("write", dtypes.void), name="u"), lambda ctx, u: ctx.write(*u.src)),
+    (UPat(Ops.CALL, arg=InstInfo("write", dtypes.void), name="u"), lambda ctx, u: ctx.write(*u.src[1:])),
   ])
 
   def __init__(self, ctx:EncodeCtx, submit:UOp):

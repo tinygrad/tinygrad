@@ -159,6 +159,7 @@ pre_isel_matcher = PatternMatcher([
 ])
 
 # ***** X86 registers *****
+# TODO: make this a UOp property?
 def opcode(x:UOp) -> X86Ops|None: return x.arg.opcode if x.op is Ops.CALL and isinstance(x.arg, InstInfo) else None
 def def_reg(dt:DType, reg:Register) -> UOp: return UOp(Ops.NOOP).ins(X86Ops.DEFINE, dtype=dt, tag=(reg,))
 # undefined operand, used for VEX instructions
@@ -463,7 +464,7 @@ isel_matcher = PatternMatcher([
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if x.op in (Ops.RANGE, Ops.END) or opcode(x) in X86GroupOp.WriteFlags: ctx.lock = x
+  if (x.op in {Ops.RANGE, Ops.END} and opcode(x.src[-1]) not in [X86Ops.CMP, X86Ops.CMPi]) or opcode(x) in X86GroupOp.WriteFlags: ctx.lock = x
   elif opcode(x) in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
     ctx.lock = flag_def
     return (x, [flag_def, x])
@@ -502,9 +503,9 @@ def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   return (inc, [inc, jmp, end_label])
 
 def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
-  cjmp = {Ops.CMPLT:X86Ops.JL, Ops.CMPEQ:X86Ops.JE, Ops.CMPNE:X86Ops.JNE}
-  cond = x.src[-1]
-  jmp = UOp(Ops.NOOP).ins(cjmp[cond.src[0].op], cond, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
+  cond, cjmp = x.src[-1], {Ops.CMPLT:X86Ops.JL, Ops.CMPEQ:X86Ops.JE, Ops.CMPNE:X86Ops.JNE}
+  op = X86Ops.JB if (cmp := cond.src[0].op) is Ops.CMPLT and x.dtype in dtypes.uints else cjmp[cmp]
+  jmp = UOp(Ops.NOOP).ins(op, cond, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
   return jmp, [jmp]
 
 # final rewrite to match the isa spec
