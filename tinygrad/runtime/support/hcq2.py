@@ -390,7 +390,7 @@ def patch(buf:UOp, rows:list[tuple[int, UOp]], blob:bytes|None=None) -> UOp:
     stores.append(view.index(UOp.stack(*[UOp.const((o - phase) // dt.itemsize) for o, _ in grp])).store(UOp.stack(*[w for _, w in grp])))
   return buf.after(*dep, *stores)
 
-def bufferize_linear(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp: # the queued stream as a patched placeholder
+def bufferize_linear(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
   stream, patches = bytes(hq.blob), hq.patches
   nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
 
