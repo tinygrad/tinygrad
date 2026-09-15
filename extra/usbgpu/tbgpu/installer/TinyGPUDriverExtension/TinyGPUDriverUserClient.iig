@@ -32,7 +32,7 @@ enum TinyGPUResetOutcome
 	kTinyGPUResetReady          = 0,  // device answers with the expected vendor/device id
 	kTinyGPUResetTimeout        = 1,  // still 0xffffffff / 0xffff0001 (CRS) after timeoutMs
 	kTinyGPUResetVendorMismatch = 2,  // a device answered, but not the one that was reset
-	kTinyGPUResetFailed         = 3,  // IOPCIDevice::Reset itself failed (status bits 40-63 carry the kern_return_t)
+	kTinyGPUResetFailed         = 3,  // IOPCIDevice::Reset itself failed (bits 40-63: the low 24 bits of its kern_return_t)
 	kTinyGPUResetTerminated     = 4,  // reset requested a re-probe; the caller must reopen the service
 };
 #define TINYGPU_RESET_FLAG_BARS_RESTORED (1ull << 32)

@@ -218,11 +218,15 @@ kern_return_t TinyGPUDriver::ResetDeviceWait(uint32_t type, uint32_t options, ui
 {
 	if (!status) return kIOReturnBadArgument;
 	*status = kTinyGPUResetFailed;
-	if (!ivars->pci) return kIOReturnNotReady;
+	// A local copy: Stop() nulls ivars->pci when the device goes away, and this call can
+	// outlive that moment (a reset that re-probes the device). The provider keeps the
+	// object alive until Stop returns.
+	IOPCIDevice* pci = ivars->pci;
+	if (!pci) return kIOReturnNotReady;
 	if (timeoutMs == 0) timeoutMs = kTinyGPUResetDefaultTimeoutMs;
 
 	uint32_t vendorDevice = 0;
-	ivars->pci->ConfigurationRead32(kIOPCIConfigurationOffsetVendorID, &vendorDevice);
+	pci->ConfigurationRead32(kIOPCIConfigurationOffsetVendorID, &vendorDevice);
 	if (type == 0) type = IsNvidiaBlackwell(vendorDevice) ? kIOPCIDeviceResetTypeHotReset : kIOPCIDeviceResetTypeFunctionReset;
 
 	// IOPCIFamily saves and restores configuration space around the reset itself, but its
@@ -230,15 +234,16 @@ kern_return_t TinyGPUDriver::ResetDeviceWait(uint32_t type, uint32_t options, ui
 	// takes longer, so keep our own copy of the BARs and the command register and re-apply
 	// them once the device really answers again.
 	uint32_t bars[kTinyGPUBarCount];
-	for (uint32_t i = 0; i < kTinyGPUBarCount; i++) ivars->pci->ConfigurationRead32(kIOPCIConfigurationOffsetBaseAddress0 + 4 * i, &bars[i]);
+	for (uint32_t i = 0; i < kTinyGPUBarCount; i++) pci->ConfigurationRead32(kIOPCIConfigurationOffsetBaseAddress0 + 4 * i, &bars[i]);
 	uint16_t command = 0;
-	ivars->pci->ConfigurationRead16(kIOPCIConfigurationOffsetCommand, &command);
+	pci->ConfigurationRead16(kIOPCIConfigurationOffsetCommand, &command);
 
 	os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait type=0x%x options=0x%x device=%08x timeout=%ums", type, options, vendorDevice, timeoutMs);
-	kern_return_t ret = ivars->pci->Reset(type, options);
+	kern_return_t ret = pci->Reset(type, options);
 	os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait Reset() -> 0x%08x", ret);
 	if (ret != kIOReturnSuccess) {
-		*status = kTinyGPUResetFailed | ((uint64_t)type << 8) | ((uint64_t)(uint32_t)ret << 40);
+		// IOKit errors are 0xE00002xx: the low 24 bits identify them, and they fit above bit 40.
+		*status = kTinyGPUResetFailed | ((uint64_t)type << 8) | ((uint64_t)((uint32_t)ret & 0x00ffffffu) << 40);
 		return ret;
 	}
 	if (options & kIOPCIDeviceResetOptionTerminate) {
@@ -250,7 +255,7 @@ kern_return_t TinyGPUDriver::ResetDeviceWait(uint32_t type, uint32_t options, ui
 	uint32_t waited = 0, now = 0;
 	for (;;) {
 		now = 0;
-		ivars->pci->ConfigurationRead32(kIOPCIConfigurationOffsetVendorID, &now);
+		pci->ConfigurationRead32(kIOPCIConfigurationOffsetVendorID, &now);
 		if (now != 0 && now != 0xffffffffu && now != 0xffff0001u) break;  // 0xffff0001: Configuration Request Retry Status
 		if (waited >= timeoutMs) {
 			os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait timeout after %ums (last read %08x)", waited, now);
@@ -268,17 +273,16 @@ kern_return_t TinyGPUDriver::ResetDeviceWait(uint32_t type, uint32_t options, ui
 
 	uint64_t flags = 0;
 	uint32_t bar0 = 0;
-	ivars->pci->ConfigurationRead32(kIOPCIConfigurationOffsetBaseAddress0, &bar0);
+	pci->ConfigurationRead32(kIOPCIConfigurationOffsetBaseAddress0, &bar0);
 	if ((bar0 & ~0xfu) == 0 && (bars[0] & ~0xfu) != 0) {
-		for (uint32_t i = 0; i < kTinyGPUBarCount; i++) ivars->pci->ConfigurationWrite32(kIOPCIConfigurationOffsetBaseAddress0 + 4 * i, bars[i]);
+		for (uint32_t i = 0; i < kTinyGPUBarCount; i++) pci->ConfigurationWrite32(kIOPCIConfigurationOffsetBaseAddress0 + 4 * i, bars[i]);
 		flags |= TINYGPU_RESET_FLAG_BARS_RESTORED;
 		os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait BARs were cleared by the reset; rewrote the saved values");
 	}
 	uint16_t commandNow = 0;
-	ivars->pci->ConfigurationRead16(kIOPCIConfigurationOffsetCommand, &commandNow);
-	commandNow |= (command & (kIOPCICommandIOSpace | kIOPCICommandBusMaster | kIOPCICommandMemorySpace));
+	pci->ConfigurationRead16(kIOPCIConfigurationOffsetCommand, &commandNow);
 	commandNow |= (kIOPCICommandIOSpace | kIOPCICommandBusMaster | kIOPCICommandMemorySpace);
-	ivars->pci->ConfigurationWrite16(kIOPCIConfigurationOffsetCommand, commandNow);
+	pci->ConfigurationWrite16(kIOPCIConfigurationOffsetCommand, commandNow);
 
 	os_log(OS_LOG_DEFAULT, "tinygpu: reset-wait ready after %ums (bars %s)", waited, (flags & TINYGPU_RESET_FLAG_BARS_RESTORED) ? "restored" : "kept");
 	*status = kTinyGPUResetReady | ((uint64_t)type << 8) | ((uint64_t)waited << 16) | flags;

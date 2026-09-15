@@ -144,6 +144,8 @@ static io_connect_t open_tinygpu(void) {
 // The device is gone (or is being re-probed): drop the BAR mappings and the connection so
 // nothing touches device memory that no longer exists. Which BARs were mapped is remembered
 // so a reopen can map them again at the same indices.
+static uint32_t cfg_read32(uint32_t off);
+
 static void teardown_device(void) {
   for (int i = 0; i < MAX_BARS; i++)
     if (g_bars[i].addr) { IOConnectUnmapMemory64(g_conn, i, mach_task_self(), g_bars[i].addr); g_bars[i].addr = 0; g_bars[i].size = 0; }
@@ -156,8 +158,14 @@ static int reopen_device(uint32_t timeout_ms) {
   teardown_device();
   for (uint32_t waited = 0; ; waited += RESET_REOPEN_POLL_MS) {
     g_conn = open_tinygpu();
-    if (g_conn != IO_OBJECT_NULL) break;
-    if (waited >= timeout_ms) { fprintf(stderr, "tinygpu: no device service after %u ms\n", waited); return -1; }
+    if (g_conn != IO_OBJECT_NULL) {
+      // Right after a re-probe the terminating old service and the new one can both match;
+      // only a service whose device answers configuration reads is the one to keep.
+      uint32_t vd = cfg_read32(0);
+      if (vd != 0 && vd != 0xffffffffu && vd != 0xffff0001u) break;
+      IOServiceClose(g_conn); g_conn = IO_OBJECT_NULL;
+    }
+    if (waited >= timeout_ms) { fprintf(stderr, "tinygpu: no live device service after %u ms\n", waited); return -1; }
     usleep(RESET_REOPEN_POLL_MS * 1000);
   }
   for (int i = 0; i < MAX_BARS; i++) {
