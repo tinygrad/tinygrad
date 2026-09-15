@@ -9,7 +9,7 @@ from tinygrad.helpers import dedup, getenv
 from tinygrad.device import Buffer
 from tinygrad.dtype import Invalid
 
-# PYTHONPATH="." DEV=QCOM FLOAT16=1 IMAGE=2 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
+# PYTHONPATH="." DEV=QCOM FLOAT16=1 IMAGE=2 taskset -c 4-7 python3 examples/openpilot/compile_onnx.py --onnx https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
 
 def vision_conv_143():
   c0 = UOp.param(0, dtypes.half, shape=(16, 1024, 4))
