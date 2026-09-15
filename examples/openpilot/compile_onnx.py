@@ -48,7 +48,9 @@ def compile_onnx(path, *, device_inputs=(), benchmark_runs=20, out_of_band=False
                       rng.integers(0, 2 if dtype == dtypes.bool else 16, value.shape))
     return (), allocate_inputs(specs, initialize)
 
-  def run(**inputs): return runner({name: value.to(Device.DEFAULT) for name, value in inputs.items()})
+  def run(**inputs):
+    outputs = runner({name: value.to(Device.DEFAULT) for name, value in inputs.items()})
+    return {name: value.contiguous() for name, value in outputs.items()}
 
   jit = compile_jit(run, make_inputs, benchmark_runs, out_of_band=out_of_band)
   return {'metadata': metadata, 'run': jit, 'input_specs': specs}
