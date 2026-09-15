@@ -169,19 +169,23 @@ class BatchCtx:
   prev:list[int|None] = field(init=False)
   signal_tags:set[int] = field(init=False)
   slots:dict[str, UOp] = field(init=False)
+  peers:dict[tuple[str, str], set[str]] = field(init=False) # the other devices whose memory a queue touches
 
   def __post_init__(self):
-    self.queues, self.last, self.prev = {}, {}, []
-    for tag, (_, devs, q) in enumerate(self.batch):
+    self.queues, self.last, self.prev, self.peers = {}, {}, [], {}
+    for tag, (c, devs, q) in enumerate(self.batch):
       if q not in self.queues.setdefault(devs[0], []): self.queues[devs[0]].append(q)
       self.prev.append(self.last.get((devs[0], q)))
       self.last[(devs[0], q)] = tag
-    self.signal_tags = {tag for (dev, q), tag in self.last.items() if q != self.epilogue_queue(dev)}
+      for d in {Device.canonicalize(x) for b in get_call_arg_uops(c) for x in to_tuple(b.device) if all_devices_in(x, HCQ_DEVS)} - {devs[0]}:
+        self.peers.setdefault((devs[0], q), set()).add(d)
+        self.queues.setdefault(d, [])
+    self.signal_tags = {tag for (dev, q), tag in self.last.items() if q != self.epilogue_queue(dev) or (dev, q) in self.peers}
     # a slot is [signal][timestamp], 16 bytes: the queue signals, the timeline, then two per call if profiling
     self.slots = {dev: UOp.placeholder((2 * (len(qs) + 1 + (2 * len(self.batch) if self.profile else 0)),), dtypes.uint64, device=(dev,),
                                        volatile=True, tag="slots") for dev, qs in self.queues.items()}
 
-  def epilogue_queue(self, dev:str) -> str: return "COMPUTE:0" if len(self.queues[dev]) > 1 else self.queues[dev][0] # closes the device
+  def epilogue_queue(self, dev:str) -> str: return "COMPUTE:0" if len(self.queues[dev]) != 1 else self.queues[dev][0] # closes the device
 
   def slot(self, devs:tuple[str, ...], i:int) -> UOp: return self.slots[devs[0]].shrink(((2 * i, 2 * i + 2),)) # not a slice: 10x the cost
   def queue_signal(self, devs:tuple[str, ...], queue:str) -> UOp: return self.slot(devs, self.queues[devs[0]].index(queue))
@@ -200,15 +204,16 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   ctx.signal_tags |= set(latest.values())
   return [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64))) for (d, q), t in latest.items()]
 
+def _queue_start(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]: # a queue first waits for prior work of its device and of the peers it touches
+  return [UOp(Ops.INS, arg=("barrier", dtypes.void), src=())] + \
+    [UOp(Ops.INS, arg=("wait", dtypes.void), src=(timeline((d,)), timeline_value((d,)))) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
+
 def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
   # find all waits first to mark calls that must signal
   call_waits = [_wait_ins(ctx, c, d[0], q, tag) for tag, (c, d, q) in enumerate(ctx.batch)]
   queues:dict[tuple[tuple[str, ...], str], list[UOp]] = {}
   for tag, ((call, devices, queue), waits) in enumerate(zip(ctx.batch, call_waits)):
-    # first use of a queue: wait for prior device work
-    if not (q:=queues.setdefault((devices, queue), [])):
-      q += [UOp(Ops.INS, arg=("barrier", dtypes.void), src=()),
-            UOp(Ops.INS, arg=("wait", dtypes.void), src=(timeline(devices), timeline_value(devices)))]
+    if not (q:=queues.setdefault((devices, queue), [])): q += _queue_start(ctx, devices[0], queue) # first use of a queue
 
     # dependency waits, then the call between its timestamps
     ts_ins = [UOp(Ops.INS, arg=("timestamp", dtypes.void), src=(ctx.slot(devices, i),)) for i in ctx.stamps(devices, tag)]
@@ -218,15 +223,16 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
     if tag in ctx.signal_tags:
       q += [UOp(Ops.INS, arg=("store", dtypes.void), src=(ctx.queue_signal(devices, queue), UOp.const(tag + 1, dtypes.uint64)))]
 
-  # one queue advances the device timeline after all other queues finish
+  # one queue advances the device timeline after all other queues finish, and after the queues of the peers that touched the device
   for dev in ctx.queues:
     queue = ctx.epilogue_queue(dev)
-    waits = [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((dev,), q), UOp.const(ctx.last[(dev, q)] + 1, dtypes.uint64)))
-             for q in ctx.queues[dev] if q != queue]
+    waits = [UOp(Ops.INS, arg=("wait", dtypes.void), src=(ctx.queue_signal((d,), q), UOp.const(ctx.last[(d, q)] + 1, dtypes.uint64)))
+             for d, q in [(dev, q) for q in ctx.queues[dev] if q != queue] + sorted(k for k, ds in ctx.peers.items() if dev in ds)]
     bump = UOp(Ops.INS, arg=("store", dtypes.void), src=(timeline((dev,)), timeline_value((dev,)) + UOp.const(1, dtypes.uint64)))
 
-    # multiple copy queues may need a new compute stream
-    queues.setdefault(((dev,), queue), []).extend([*waits, bump])
+    # multiple copy queues may need a new compute stream. a peer without calls of its own starts like any queue
+    if not (q:=queues.setdefault(((dev,), queue), [])) and dev not in {d for d, _ in ctx.last}: q += _queue_start(ctx, dev, queue)
+    q.extend([*waits, bump])
   return queues
 
 def _finalize_batch(ctx:BatchCtx) -> UOp:
