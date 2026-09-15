@@ -61,6 +61,15 @@ class TestHCQ2Deps(unittest.TestCase):
     self.assertEqual([s.arg[1] for s in streams], ["COPY:0", "COPY:1", "COMPUTE:0"])
     self.assertEqual([u.arg[0] for u in streams[-1].src], ["wait", "wait", "store"])
 
+  def test_peer_access_syncs_both_ways(self):
+    from types import SimpleNamespace
+    dst, src = UOp.param(0, dtypes.uint8, 16, device="AMD:1"), UOp.param(1, dtypes.uint8, 16, device="AMD")
+    with patch.object(type(Device), "__getitem__", return_value=SimpleNamespace(pm_batch=None)):
+      batch = hcq2._finalize_batch(hcq2.BatchCtx([(src.copy_to_device("AMD:1").call(dst, src), ("AMD",), "COPY:0")], False))
+    streams = {s.without_after.src[0].arg[1]: [u.arg[0] for u in s.without_after.src[0].src if u.op is Ops.INS] for s in batch.src[0].src}
+    # the copy queue waits for its device and for the peer, then signals and bumps. the peer waits for the signal before its bump
+    self.assertEqual(streams, {"COPY:0": ["barrier", "wait", "wait", "store", "store"], "COMPUTE:0": ["barrier", "wait", "wait", "store"]})
+
   def test_disjoint_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="CPU")
     for write in ([], [0]):
