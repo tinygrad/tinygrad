@@ -316,7 +316,7 @@ jobs:
           llvm: 'true'
       - name: Compile and test model
         run: |
-          python examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/${{ matrix.model }}.onnx" "$MODEL_PKL" --device-input '*' --benchmark-runs 1
+          python examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/${{ matrix.model }}.onnx" "$MODEL_PKL" --benchmark-runs 1
           python examples/openpilot/load_pickle.py --run "$MODEL_PKL" --runs 3
           python -m pytest -n12 test/external/external_test_compile.py
       - name: Compile driving warp
