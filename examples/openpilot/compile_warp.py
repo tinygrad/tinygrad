@@ -105,16 +105,21 @@ def make_warp(frame, output_size, layout='luma', border_fill=None):
   raise ValueError(f'Unknown warp layout: {layout}')
 
 
-def compile_warp(frame:NV12Frame, output_size, *, layout='luma', border_fill=None, benchmark_runs=20):
+def compile_warp(frame:NV12Frame, output_size, *, layout='luma', border_fill=None, frames=1, transform_device=None, benchmark_runs=20):
   function = make_warp(frame, output_size, layout, border_fill)
-  specs = {'input_frame': ((frame.size,), np.dtype(np.uint8).str, Device.DEFAULT), 'M_inv': ((3, 3), np.dtype(np.float32).str, 'NPY')}
+  prefix = () if frames == 1 else (frames,)
+  specs = {'input_frame': (prefix + (frame.size,), np.dtype(np.uint8).str, Device.DEFAULT),
+           'M_inv': (prefix + (3, 3), np.dtype(np.float32).str, transform_device or Device.DEFAULT)}
+  def run(input_frame, M_inv):
+    if frames == 1: return function(input_frame, M_inv)
+    return Tensor.stack(*(function(input_frame[i], M_inv[i]) for i in range(frames)))
   def make_inputs(seed):
     rng = np.random.default_rng(seed)
     def initialize(views):
-      views['input_frame'][:] = rng.integers(0, 256, frame.size, dtype=np.uint8)
-      views['M_inv'][:] = rng.standard_normal((3, 3))*8
+      views['input_frame'][:] = rng.integers(0, 256, views['input_frame'].shape, dtype=np.uint8)
+      views['M_inv'][:] = rng.standard_normal(views['M_inv'].shape)*8
     return (), allocate_inputs(specs, initialize)
-  jit = compile_jit(function, make_inputs, benchmark_runs)
+  jit = compile_jit(run, make_inputs, benchmark_runs)
   return {'metadata': {}, 'run': jit, 'input_specs': specs}
 
 
@@ -124,8 +129,11 @@ if __name__ == '__main__':
   parser.add_argument('--warp-to', type=parse_size, required=True)
   parser.add_argument('--layout', choices=['luma', 'yuv420'], default='luma')
   parser.add_argument('--border-fill', type=int, help='luma outside the frame; omit to clamp coordinates')
+  parser.add_argument('--frames', type=int, default=1, help='number of frames to warp together')
+  parser.add_argument('--transform-device', help='device holding the transforms; defaults to DEV')
   parser.add_argument('--output', required=True)
   parser.add_argument('--benchmark-runs', type=int, default=20)
   args = parser.parse_args()
-  artifact = compile_warp(args.frame, args.warp_to, layout=args.layout, border_fill=args.border_fill, benchmark_runs=args.benchmark_runs)
+  artifact = compile_warp(args.frame, args.warp_to, layout=args.layout, border_fill=args.border_fill, frames=args.frames,
+                          transform_device=args.transform_device, benchmark_runs=args.benchmark_runs)
   with open(args.output, 'wb') as f: dump_pickle(artifact, f)
