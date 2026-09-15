@@ -1,5 +1,5 @@
 import unittest, time, itertools
-from tinygrad import Tensor, Context, dtypes
+from tinygrad import Tensor, Context
 
 class TestScheduleScaling(unittest.TestCase):
   """Test that .schedule() scales linearly with graph size (no O(n^2) behavior)."""

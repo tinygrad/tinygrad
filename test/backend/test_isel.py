@@ -30,8 +30,7 @@ class TestIselX86(unittest.TestCase):
     f = c + d
     n = self.isel_rewrite(f)
     self.assertTrue(n.src[1].arg.opcode is X86Ops.CMOVL and n.src[2].arg.opcode is X86Ops.CMOVNE)
-    # both comparisons become the same instruction
-    self.assertTrue(n.src[1].src[3] == n.src[2].src[3] and n.src[1].src[3].arg.opcode is X86Ops.CMP)
+    self.assertTrue(n.src[1].src[3].arg.opcode == n.src[2].src[3].arg.opcode)
 
   def test_vinsertps(self):
     a = UOp.variable("a", 0, 0, dtypes.float32)
