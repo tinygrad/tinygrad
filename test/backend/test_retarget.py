@@ -1,13 +1,13 @@
 import unittest, itertools, torch, numpy as np
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, dtypes, nn, GlobalCounters
 from tinygrad.helpers import VIZ
 from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, UOp, Ops, ProgramInfo
 from tinygrad.codegen import full_rewrite_to_sink, pm_to_program
-from tinygrad.engine.realize import ExecContext, pm_exec, _get_call_to_compile
+from tinygrad.engine.realize import ExecContext, pm_exec, _get_call_to_compile, run_linear
 from test.backend.test_ops import prepare_test_op
 
-def _cross_exec(graph:Tensor):
+def _cross_exec(graph:Tensor) -> int:
   device = Device[Device.DEFAULT]
   isa_ren, final_ren = device.renderer, next(r for r in device.renderers if not issubclass(r, ISARenderer))
   final_ren = final_ren(isa_ren.target)
@@ -38,10 +38,11 @@ def _cross_exec(graph:Tensor):
   calls = {c: (c.src[0], final_ren) for c in linear.toposort() if c.op is Ops.CALL and _get_call_to_compile(c) is not None}
   prgs = {c: transmute(a[0]) for c,a in calls.items()}
   linear = linear.substitute({c: c.replace(src=(c.src[0].substitute({a[0]: prgs[c]}), *c.src[1:])) for c,a in calls.items()})
+  GlobalCounters.reset()
+  run_linear(linear, jit=True)
+  return GlobalCounters.kernel_count
 
-  # execute and assert
-  for call in linear.src: pm_exec.rewrite(call.without_after, ExecContext({}))
-
+# TODO: verify post-linearize round trip?
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "cross compilation is for asm backends")
 class TestRetarget(unittest.TestCase):
   def test_transfer_gemm(self):
@@ -50,9 +51,34 @@ class TestRetarget(unittest.TestCase):
     _cross_exec(out)
     np.testing.assert_allclose(out.numpy(), truth.detach().numpy(), atol=1e-6, rtol=1e-3)
 
-  def test_transfer_conv2d(self):
-    bs, cin, cout, h, w, groups = 4, 3, 2, 2, 3, 1
-    trt, tgt = prepare_test_op(-2, 2, [(bs,cin,5,7), (cout,cin//groups,h,w)], None)
-    truth, out = torch.nn.functional.conv2d(*trt, groups=groups), Tensor.conv2d(*tgt, groups=groups)
-    _cross_exec(out)
-    np.testing.assert_allclose(out.numpy(), truth.detach().numpy(), atol=1e-6, rtol=1e-3)
+  def test_transfer_mnist_kernel_count(self):
+    layers = [
+      nn.Conv2d(1, 32, 5), Tensor.relu,
+      nn.Conv2d(32, 32, 5), Tensor.relu,
+      nn.BatchNorm(32), Tensor.max_pool2d,
+      nn.Conv2d(32, 64, 3), Tensor.relu,
+      nn.Conv2d(64, 64, 3), Tensor.relu,
+      nn.BatchNorm(64), Tensor.max_pool2d,
+      lambda x: x.flatten(1), nn.Linear(576, 1)]
+
+    Tensor.realize(*[p.replace(Tensor.ones_like(p).contiguous()) for p in nn.state.get_parameters(layers)])
+    x = Tensor.rand(1, 1, 28, 28)
+    Tensor.realize(x)
+    ref, out = x.sequential(layers), x.sequential(layers)
+    GlobalCounters.reset()
+    truth = out.numpy()
+    native = GlobalCounters.kernel_count
+    cross = _cross_exec(out)
+    self.assertEqual(native, cross)
+    np.testing.assert_allclose(out.numpy(), truth, atol=1e-6, rtol=1e-3)
+
+  def test_transfer_loop(self):
+    from test.backend.test_wait_loop import wait_loop_kernel
+    mk = lambda: Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), fxn=wait_loop_kernel)[0]
+    ref, out = mk(), mk()
+    GlobalCounters.reset()
+    truth = ref.item()
+    native = GlobalCounters.kernel_count
+    cross = _cross_exec(out)
+    self.assertEqual(native, cross)
+    self.assertEqual(truth, out.item())
