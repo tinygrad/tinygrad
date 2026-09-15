@@ -5,13 +5,34 @@ from tinygrad.helpers import strip_parens
 
 def pretty_print(x:UOp, cache=None, d=0)->str:
   def dfs(x:UOp, cache:dict):
-    for s in x.src:
+    stack:list[tuple[UOp, int]] = [(x, 0)]
+    while stack:
+      node, i = stack[-1]
+      if i == len(node.src): stack.pop(); continue
+      stack[-1] = (node, i+1)
+      s = node.src[i]
       cache.setdefault(s, [len(cache), 0, False])[1] += 1
-      if cache[s][1] == 1: dfs(s, cache)
+      if cache[s][1] == 1: stack.append((s, 0))
   if cache is None: dfs(x, cache:={})
   if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d}x{cx[0]}"
-  cx[2], srcs = True, (''.join(f'\n{pretty_print(s, cache, d+2)},' for s in x.src))
-  return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{type(x).__name__}({x.op}, arg={x.argstr()}{x.tagstr()}, src=({srcs}))"
+  cx[2] = True
+  stack:list[tuple[UOp, int, int, list[str]]] = [(x, d, 0, [])]
+  while stack:
+    node, depth, i, srcs = stack[-1]
+    if i < len(node.src):
+      stack[-1] = (node, depth, i+1, srcs)
+      child = node.src[i]
+      if (cc:=cache[child])[2]: srcs.append(f"\n{' '*(depth+2)}x{cc[0]},")
+      else:
+        cc[2] = True
+        stack.append((child, depth+2, 0, []))
+      continue
+    cn = cache[node]
+    ret = f"{' '*depth}{f'x{cn[0]}:=' * (cn[1]>1)}{type(node).__name__}({node.op}, arg={node.argstr()}{node.tagstr()}, src=({''.join(srcs)}))"
+    stack.pop()
+    if not stack: return ret
+    stack[-1][3].append(f"\n{ret},")
+  raise RuntimeError("unreachable")
 
 # ***** uop helpers *****
 

@@ -540,6 +540,18 @@ from tinygrad.viz.cli import decode_profile
 def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(VizData(), lst))
 
 class TestVizProfiler(unittest.TestCase):
+  def test_fault_timestamps_do_not_expand_graph(self):
+    d = decimal.Decimal
+    prof = [ProfileDeviceEvent(device="NV", tdiff=d(-1000)),
+            ProfileRangeEvent(device="NV", name="reversed", st=d(1020), en=d(0)),
+            ProfileRangeEvent(device="NV", name="unwritten", st=d(0), en=d(0)),
+            ProfileGraphEvent(ents=[ProfileGraphEntry(device="NV", name=name, st_id=2*i, en_id=2*i+1)
+                                    for i,name in enumerate(("valid", "unwritten", "reversed"))], deps=[[], [], []],
+                              sigs=list(map(d,(1000,1010,0,0,1020,0))))]
+    j = load_profile(prof)
+    self.assertEqual([(e["name"],e["st"],e["dur"]) for e in j["layout"]["NV"]["events"]], [("valid",0,10)])
+    self.assertEqual(j["layout"]["NV Graph"]["events"][0]["dur"], 10)
+
   def test_transfer_uses_copy_device(self):
     with save_viz():
       a = Tensor.ones(1, device="NULL").contiguous().realize()

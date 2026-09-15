@@ -116,7 +116,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
   excluded: set[UOp] = set()
-  for u in (toposort:=x.toposort()):
+  for u in (toposort:=x.toposort(enter_calls=False if getenv("KERNEL_GRAPH") else True)):
     # always exclude CONST
     if u.op is Ops.CONST and u is not x: excluded.add(u)
     if u.op is Ops.STACK and len(u.src) == 0: excluded.add(u)
@@ -147,7 +147,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
       if u.op is Ops.CALL:
         label += f"\n{u.src[0].key.hex()[:8]}\n{u.src[0].op}"
       if u.op in {Ops.INDEX, Ops.STAGE}:
-        label += f"\n{u.render()}" if sum(len(s.toposort()) for s in u.src[1:]) < 30 else "\nINDEX TOO LARGE"
+        # NOTE: INDEX and STAGE rendering don't need src0 which can be a large UOp, do not render those
+        label += f"\n{u.replace(src=(UOp(Ops.NOOP),)+u.src[1:]).render()}" if sum(len(s.toposort()) for s in u.src[1:]) < 30 else "\nINDEX TOO LARGE"
         ranges: list[UOp] = []
         for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
         if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
@@ -184,7 +185,7 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None):
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None, update_sink=True) -> Generator[GraphRewriteDetails, None, None]:
   next_sink, err = _reconstruct(data, ctx.sink, depth=depth), False
-  yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
+  yield {"graph":uop_to_json(data, next_sink), "uop":"" if getenv("KERNEL_GRAPH") else pystr(next_sink), "change":None, "diff":None, "upat":None, "_sink":next_sink}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in ctx.matches:
     if err: break
@@ -222,13 +223,19 @@ def cpu_ts_diff(device_ts_diffs:dict[str, Decimal], device:str) -> Decimal: retu
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent], device_ts_diffs:dict[str, Decimal]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
   for e in profile:
-    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(device_ts_diffs, e.device)), (e.en if e.en is not None else e.st)+diff, e)
+    if isinstance(e, ProfileRangeEvent):
+      if e.en is not None and e.en < e.st: continue  # incomplete device timestamps after a fault
+      if (st:=e.st+(diff:=cpu_ts_diff(device_ts_diffs, e.device))) < 0: continue
+      yield st, (e.en if e.en is not None else e.st)+diff, e
     elif isinstance(e, ProfilePointEvent): yield (e.ts, e.ts, e)
     elif isinstance(e, ProfileGraphEvent):
-      cpu_ts = []
-      for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(device_ts_diffs, ent.device)), e.sigs[ent.en_id]+diff]
-      yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
-      for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
+      entries = [(e.sigs[ent.st_id]+(diff:=cpu_ts_diff(device_ts_diffs, ent.device)), e.sigs[ent.en_id]+diff, ent)
+                 for ent in e.ents if e.sigs[ent.en_id] >= e.sigs[ent.st_id]]
+      entries = [(st,en,ent) for st,en,ent in entries if st >= 0]
+      if not entries: continue
+      st, et = min(x[0] for x in entries), max(x[1] for x in entries)
+      yield st, et, ProfileRangeEvent(f"{entries[0][2].device.split(':')[0]} Graph", f"batched {len(entries)}", st, et)
+      yield from entries
 
 # normalize event timestamps and attach kernel metadata
 def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
@@ -345,7 +352,7 @@ def load_amd_counters(data:VizData, profile:list) -> None:
   for e in profile:
     if type(e).__name__ in {"ProfilePMCEvent", "ProfileSQTTEvent"}:
       counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e).__name__, []).append(e)
-    if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None and e.profile_key is not None:
+    if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None and e.en >= e.st and e.profile_key is not None:
       durations.setdefault(e.profile_key, []).append(float(e.en-e.st))
     if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD") and e.tag is not None: prg_events[e.tag] = e
     if isinstance(e, ProfileDeviceEvent) and e.device.startswith("AMD"): arch = f"gfx{unwrap(e.props)['gfx_target_version']//1000}"
