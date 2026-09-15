@@ -67,6 +67,10 @@ class USB3:
     checked(libusb.libusb_claim_interface)(self.handle, 0)
     checked(libusb.libusb_set_interface_alt_setting)(self.handle, 0, 0)
 
+  def close(self):
+    libusb.libusb_release_interface(self.handle, 0)
+    libusb.libusb_close(self.handle)
+
   def control_write(self, request:int, value:int=0, index:int=0, data:bytes=b'', timeout:int=1000):
     assert len(data) <= len(self._ctrl_mv)
     self._ctrl_mv[:len(data)] = data
