@@ -1,6 +1,7 @@
 import argparse, time
 from contextlib import nullcontext
 import numpy as np
+from tinygrad import Device
 from extra.bench_log import WallTimeEvent, BenchEvent
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters
@@ -44,7 +45,7 @@ if __name__ == '__main__':
         with WallTimeEvent(BenchEvent.STEP) if getenv('BENCHMARK_LOG', '') else nullcontext():
           output = variant['run'](**inputs)
           enqueued = time.perf_counter()
-          for tensor in get_parameters(output): tensor.numpy()
+          for device in {tensor.device for tensor in get_parameters(output)}: Device[device].synchronize()
         times.append((time.perf_counter() - start) * 1e3)
         print(f"enqueue {(enqueued-start)*1e3:6.2f} ms -- total run {times[-1]:6.2f} ms")
       if (limit := getenv("ASSERT_MIN_STEP_TIME", 0.0)):
