@@ -502,9 +502,16 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
   return fp
 
 def fetch_fw(path:str, name:str, sha256:str) -> bytes:
-  if sys.version_info >= (3,14) and (p:=pathlib.Path(f"/lib/firmware/{path}/{name}.zst")).is_file():
-    from compression.zstd import decompress
-    if hashlib.sha256(b:=decompress(p.read_bytes())).hexdigest() == sha256: return b
+  if (p:=pathlib.Path(f"/lib/firmware/{path}/{name}.zst")).is_file():
+    try:
+      if sys.version_info >= (3,14):
+        from compression.zstd import decompress
+        b = decompress(p.read_bytes())
+      else:
+        import zstandard
+        b = zstandard.ZstdDecompressor().stream_reader(p.read_bytes()).read()
+      if hashlib.sha256(b).hexdigest() == sha256: return b
+    except ImportError: pass
   return fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/0a6871b19abf5d6e024b5d208b101ae53e7fa0de/{path}/{name}",
                subdir="fw", sha256=sha256).read_bytes()
 
