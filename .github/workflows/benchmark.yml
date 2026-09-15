@@ -442,18 +442,18 @@ jobs:
     strategy:
       matrix:
         dev: ['QCOM', 'QCOM:IR3']
-        model: [driving, dm]
+        model: [driving_supercombo, dmonitoring_model]
         include:
-          - model: driving
+          - model: driving_supercombo
             timing: 28
           - dev: QCOM:IR3
-            model: driving
+            model: driving_supercombo
             timing: 29
-          - model: dm
+          - model: dmonitoring_model
             timing: 12.5
           # IR3 dmonitoring is slightly slower
           - dev: QCOM:IR3
-            model: dm
+            model: dmonitoring_model
             timing: 13.0
       fail-fast: false
     name: openpilot ${{ matrix.model }} (DEV=${{ matrix.dev }})
@@ -467,8 +467,10 @@ jobs:
       DEV: ${{ matrix.dev }}
       JIT_BATCH_SIZE: "0"
       OPENPILOT_HACKS: "1"
+      # sha for https://huggingface.co/commaai/openpilot-lfs
+      LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
+      BENCHMARK_LOG: ${{ matrix.dev == 'QCOM:IR3' && 'ir3_' || '' }}openpilot_${{ matrix.model }}
       ASSERT_MIN_STEP_TIME: ${{ matrix.timing }}
-      BENCHMARK_LOG: ${{ matrix.dev == 'QCOM:IR3' && 'ir3_' || '' }}openpilot_master_${{ matrix.model }}
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -481,16 +483,17 @@ jobs:
       run: test/external/process_replay/reset.py
     - name: compile
       run: |
-        FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_onnx.py "$(python3 examples/openpilot/helpers.py ${{ matrix.model }})" openpilot.pkl --device-input '*'
+        FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/${{ matrix.model }}.onnx" openpilot.pkl --device-input '*'
         taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run openpilot.pkl
     - name: run pickle
       run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run openpilot.pkl
-    - name: compile driving warp
-      if: matrix.model == 'driving'
-      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output warp.pkl
-    - name: compile DM warp
-      if: matrix.model == 'dm'
-      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,4804608 --warp-to 1440x960 --layout luma --border-fill 16 --transform-device NPY --output warp.pkl
+    - name: Compile driving warp
+      run: |
+        python examples/openpilot/compile_warp.py --output warp.pkl --benchmark-runs 1 \
+          --frame "1928,1208,2048,1216,608,${{ matrix.model == 'driving_supercombo' && '3735552' || '4804608' }}" \
+          --warp-to ${{ matrix.model == 'driving_supercombo' && '512x256' || '1440x960' }} \
+          --layout ${{ matrix.model == 'driving_supercombo' && 'yuv420' || 'luma' }} \
+          ${{ matrix.model == 'driving_supercombo' && '--frames 2' || '--border-fill 16 --transform-device NPY' }}
     - name: run warp pickle
       run: ASSERT_MIN_STEP_TIME=0 BENCHMARK_LOG="${BENCHMARK_LOG}_warp" taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run warp.pkl
     - name: Run process replay tests
