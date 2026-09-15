@@ -14,9 +14,6 @@ class NV12Frame(NamedTuple):
   uv_height: int
   size: int
 
-  @property
-  def copy_size(self): return self.stride * (self.y_height + self.uv_height)
-
 
 def parse_frame(value): return NV12Frame(*map(int, value.split(',')))
 
@@ -116,9 +113,9 @@ def compile_warp(frame:NV12Frame, output_size, *, layout='luma', border_fill=Non
     def initialize(views):
       views['input_frame'][:] = rng.integers(0, 256, frame.size, dtype=np.uint8)
       views['M_inv'][:] = rng.standard_normal((3, 3))*8
-    return (), allocate_inputs(specs, {}, initialize)[0]
+    return (), allocate_inputs(specs, initialize)
   jit = compile_jit(function, make_inputs, benchmark_runs)
-  return {'metadata': {}, 'variants': {'default': {'run': jit, 'input_specs': specs, 'packed_specs': {}}}}
+  return {'metadata': {}, 'run': jit, 'input_specs': specs}
 
 
 if __name__ == '__main__':
