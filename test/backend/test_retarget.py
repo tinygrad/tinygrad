@@ -4,7 +4,7 @@ from tinygrad.helpers import VIZ
 from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, UOp, Ops, ProgramInfo
 from tinygrad.codegen import full_rewrite_to_sink, pm_to_program
-from tinygrad.engine.realize import ExecContext, pm_exec, _get_call_to_compile, run_linear
+from tinygrad.engine.realize import _get_call_to_compile, run_linear
 from test.backend.test_ops import prepare_test_op
 
 def _cross_exec(graph:Tensor) -> int:
@@ -66,7 +66,7 @@ class TestRetarget(unittest.TestCase):
     Tensor.realize(x)
     ref, out = x.sequential(layers), x.sequential(layers)
     GlobalCounters.reset()
-    truth = out.numpy()
+    truth = ref.numpy()
     native = GlobalCounters.kernel_count
     cross = _cross_exec(out)
     self.assertEqual(native, cross)
@@ -74,7 +74,7 @@ class TestRetarget(unittest.TestCase):
 
   def test_transfer_loop(self):
     from test.backend.test_wait_loop import wait_loop_kernel
-    mk = lambda: Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), fxn=wait_loop_kernel)[0]
+    def mk(): return Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), fxn=wait_loop_kernel)[0]
     ref, out = mk(), mk()
     GlobalCounters.reset()
     truth = ref.item()
