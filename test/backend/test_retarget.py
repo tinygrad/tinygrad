@@ -2,7 +2,7 @@ import unittest, itertools, torch, numpy as np
 from tinygrad import Tensor, Device, dtypes, nn, GlobalCounters
 from tinygrad.helpers import VIZ
 from tinygrad.renderer.isa import ISARenderer, IselContext
-from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, UOp, Ops, ProgramInfo
+from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, UOp, Ops, ProgramInfo, AddrSpace
 from tinygrad.codegen import full_rewrite_to_sink, pm_to_program
 from tinygrad.engine.realize import _get_call_to_compile, run_linear
 from test.backend.test_ops import prepare_test_op
@@ -21,7 +21,7 @@ def _cross_exec(graph:Tensor) -> int:
 
     # NOTE: slightly hacky with the negative slot to differentiate from device BUFFERs
     pm_substitute_operands = PatternMatcher([
-      (UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[abs(p.arg.slot)-1] if p.arg.slot < 0 else None),
+      (UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot] if p.addrspace is AddrSpace.OPR else None)
     ])
     # re-expand CALL graphs
     sink = sink.substitute({c:graph_rewrite(c.src[0], pm_substitute_operands, ctx=c.src[1:]) for c in sink.toposort() if c.op is Ops.CALL})
