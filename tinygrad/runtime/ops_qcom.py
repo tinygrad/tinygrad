@@ -109,7 +109,7 @@ class QCOMComputeQueue(HWQueue):
               qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=pitch, pitchalign=ctz(pitch)-6), 0, buf.getaddr(self.devs),
               qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13), 0, 0, 0, 0, 0, 0, 0, 0]
     args += layout_args(flatten(map(_tex, texs)), data.tex_off) + layout_args(flatten(map(functools.partial(_tex, ibo=True), ibos)), data.ibo_off)
-    return UOp(Ops.LINEAR, src=tuple(pack_args(args, data.kernargs_alloc_size)))
+    return UOp(Ops.LINEAR, src=tuple(pack_args(args, data.kernargs_alloc_size)), arg="kernargs")
 
   def exec(self, call:UOp, prg:UOp):
     data, lib = qcom_build_program(self.dev, prg, self.devs)

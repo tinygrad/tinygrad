@@ -390,20 +390,25 @@ def patch(buf:UOp, rows:list[tuple[int, UOp]], blob:bytes|None=None) -> UOp:
     stores.append(view.index(UOp.stack(*[UOp.const((o - phase) // dt.itemsize) for o, _ in grp])).store(UOp.stack(*[w for _, w in grp])))
   return buf.after(*dep, *stores)
 
+def bufferize_linear(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
+  stream, patches = bytes(hq.blob), hq.patches
+  nested = dedup([g.src[0] for _, w in patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR])
+
+  # nested linears (like kernargs) merge into a buffer per name, patched before the stream
+  bufs = []
+  for lname, ls in itertools.groupby(sorted(nested, key=lambda l: l.arg), key=lambda l: l.arg):
+    hq.blob, hq.patches = bytearray(), []
+    offs = {l: (hq.q(UOp(Ops.BINARY, arg=bytes(-len(hq.blob) % 128))), hq.q(*l.src)) for l in ls}
+    bufs.append((offs, bufferize_linear(hq, lname, hq.devs)))
+  views = {l: buf.without_after[o:e] for offs, buf in bufs for l, (o, e) in offs.items()}
+
+  buf = UOp.placeholder((len(stream),), dtypes.uint8, device=device, tag=to_name(name, hq.queue))
+  words = UOp.sink(*[w for _, w in patches]).substitute(views).src
+  return patch(buf, list(zip([o for o, _ in patches], words)), stream).after(*[b for _, b in bufs])
+
 def encode_submit(hq:HWQueue) -> UOp:
-  # applying the rewrite
   for u in hq.lin.src: hq.q_rewrite.rewrite(u, ctx=hq)
-
-  # merge blobs into one
-  stream, views = len(hq.blob), {}
-  for l in dedup([g.src[0] for _, w in hq.patches for g in w.toposort() if g.op is Ops.GETADDR and g.src[0].op is Ops.LINEAR]):
-    hq.blob += bytes(-len(hq.blob) % 128)
-    views[l] = (len(hq.blob), hq.q(*l.src))
-
-  buf = UOp.placeholder((len(hq.blob),), dtypes.uint8, device=hq.devs, tag=to_name("cmdbuf", hq.queue))
-
-  words = UOp.sink(*[w for _, w in hq.patches]).substitute({l: buf[o:e] for l, (o, e) in views.items()}).src
-  return hq.submit(patch(buf, list(zip([o for o, _ in hq.patches], words)), bytes(hq.blob)).shrink(((0, stream),)))
+  return hq.submit(bufferize_linear(hq, "cmdbuf", hq.devs))
 
 # *****************
 # 4. lower call
@@ -477,7 +482,7 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's
   # device owns the placeholders it names
   if (r:=cast(Buffer|None, dev.pm_bufferize.rewrite(b, ctx=dev))) is not None: pass
   elif not ctx.use_rt:
-    spec = BufferSpec(host=b.arg.volatile, uncached=b.arg.volatile, cpu_access=True)
+    spec = BufferSpec(host=b.arg.volatile, uncached=b.arg.volatile or b.tag.startswith("cmdbuf"), cpu_access=True)
     r = Buffer(dev.device, b.max_numel(), b.dtype, options=spec, preallocate=True)
   else:
     off = dev.rt_allocator(True, b.arg.volatile).alloc(max(b.max_numel() * b.dtype.itemsize, 1), alignment=256)
