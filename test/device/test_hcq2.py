@@ -106,6 +106,15 @@ class TestHCQ2Schedule(unittest.TestCase):
             addr = buf._buf
             self.assertFalse(any(addr < end and start < addr + buf.nbytes for start, end in ranges))
 
+  def test_amd_cmdbuf_uncached(self):
+    dev = Device[Device.DEFAULT]
+    if not dev.device.startswith("AMD") or not dev.is_am(): self.skipTest("AMD PCI interface required")
+    for name, uncached in (("cmdbuf", True), ("kernargs", False)):
+      b = UOp.placeholder((256,), dtypes.uint8, device=(dev.device,), tag=hcq2.to_name(name, "COMPUTE:0"))
+      buf = unwrap(hcq2.bufferize_buf(hcq2.LinkCtx({}, use_rt=False), b)).buffer
+      self.assertEqual(buf.base.options.uncached, uncached)
+      self.assertEqual(buf.base.meta.mapping.uncached, uncached)
+
   def test_small_eager_cached(self):
     _, compiled, inputs = self.compiled(1)
     linked = link_linear(compiled, input_uops=inputs)
