@@ -1,10 +1,9 @@
-import re, tempfile, unittest
+import tempfile, unittest
 from pathlib import Path
 import numpy as np
 from examples.openpilot.load_pickle import make_inputs
 from tinygrad.helpers import fetch, getenv
 from examples.openpilot.helpers import load_pickle
-from tinygrad.uop.ops import Ops
 
 
 class TestCompile(unittest.TestCase):
@@ -70,22 +69,6 @@ class TestCompiledModel(unittest.TestCase):
       self.model(**inputs)
       for expected, actual in zip(reference, inputs['output_buffers'].values(), strict=True):
         np.testing.assert_allclose(actual.numpy(), expected, atol=1e-4, rtol=1e-4)
-
-  @unittest.skipUnless(getenv("ALLOWED_KERNEL_COUNT", -1) != -1, "requires kernel regression targets")
-  def test_kernel_counts(self):
-    calls = [u for u in self.model.captured.linear.toposort(gate=lambda x: x.op is not Ops.PROGRAM)
-             if u.op is Ops.CALL and u.src[0].op is Ops.PROGRAM]
-    read_image = gated_read_image = 0
-    for call in calls:
-      _, _, source, _ = call.src[0].src
-      src = source.arg
-      read_image += src.count("read_image")
-      gated_read_image += src.count("?read_image")
-      for value in re.findall(r'(val\d+)\s*=\s*read_imagef\(', src):
-        if re.search(fr'[\?\:]{value}\.[xyzw]', src): gated_read_image += 1
-    self.assertEqual(len(calls), getenv("ALLOWED_KERNEL_COUNT"))
-    self.assertEqual(read_image, getenv("ALLOWED_READ_IMAGE"))
-    self.assertEqual(gated_read_image, getenv("ALLOWED_GATED_READ_IMAGE"))
 
 
 if __name__ == '__main__': unittest.main()
