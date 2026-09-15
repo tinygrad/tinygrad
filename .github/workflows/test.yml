@@ -292,29 +292,34 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testopenpilot:
-    name: openpilot Compile Tests
+    name: openpilot ${{ matrix.model }} (CPU)
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [driving, dm]
+    env:
+      DEV: CPU:LLVM
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: openpilot-compile
+          key: openpilot-compile-cpu
           deps: testing
-          opencl: 'true'
           llvm: 'true'
-      - name: Test openpilot model kernel count and gate usage
-        run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1361 ALLOWED_GATED_READ_IMAGE=38 FLOAT16=1 DEV="CL::IMAGE_PITCH_ALIGNMENT=64" IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
-          # IMAGE_PITCH_ALIGNMENT=64 matches adreno 630
-      - name: Test openpilot CL compile fp32 (test correctness)
-        run: |
-          DEV=CL IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
-          DEV=CL IMAGE=1 SELFTEST=1 RUN_PICKLE=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
-      - name: Test openpilot LLVM compile fp16
-        run: IMAGE=1 FLOAT16=1 DEV=CPU:LLVM python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+      - name: Compile ONNX and check pickle round trip
+        run: python examples/openpilot/compile_onnx.py --onnx "$(python -m examples.openpilot.helpers ${{ matrix.model }})" --output openpilot.pkl
+      - name: Run pickle in a fresh process
+        run: python examples/openpilot/compile_onnx.py --run-pickle openpilot.pkl --benchmark-runs 3
+      - name: Compile and replay driving warp
+        if: matrix.model == 'driving'
+        run: python examples/openpilot/compile_warp.py --camera-resolution 1928x1208 --stride 2048 --uv-offset 2490368 --frame-size 3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output driving_warp.pkl
+      - name: Compile and replay driver monitoring warp
+        if: matrix.model == 'dm'
+        run: python examples/openpilot/compile_warp.py --camera-resolution 1928x1208 --stride 2048 --uv-offset 2490368 --frame-size 4804608 --warp-to 1440x960 --layout luma --border-fill 16 --transform-device NPY --output dm_warp.pkl
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 

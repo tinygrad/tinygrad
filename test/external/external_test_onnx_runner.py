@@ -2,8 +2,8 @@ import unittest, onnx, tempfile, pathlib
 import numpy as np
 from tinygrad import Tensor
 from tinygrad.uop.ops import Ops
-from typing import Any
-from tinygrad.nn.onnx import OnnxRunner, OnnxPBParser, OnnxDataType
+from tinygrad.nn.onnx import OnnxRunner, OnnxDataType
+from examples.openpilot.helpers import MetadataOnnxPBParser
 from hypothesis import given, strategies as st
 
 # copied from test_const_folding.py
@@ -142,17 +142,6 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
         outputs=[onnx.helper.make_tensor_value_info('output', onnx_dtype, (2,))],
         from_disk=False)
     self.assertEqual(runner.graph_nodes[0].opts['value'].dtype, expected_dtype)
-
-# from openpilot selfdrive/modeld/get_model_metadata.py
-class MetadataOnnxPBParser(OnnxPBParser):
-  def _parse_ModelProto(self) -> dict:
-    obj: dict[str, Any] = {"graph": {"input": [], "output": []}, "metadata_props": []}
-    for fid, wire_type in self._parse_message(self.reader.len):
-      match fid:
-        case 7: obj["graph"] = self._parse_GraphProto()
-        case 14: obj["metadata_props"].append(self._parse_StringStringEntryProto())
-        case _: self.reader.skip_field(wire_type)
-    return obj
 
 class TestOnnxMetadata(unittest.TestCase):
   def test_metadata_props(self):
