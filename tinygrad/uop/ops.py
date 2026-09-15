@@ -287,7 +287,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(node.src if enter_calls or node.op is not Ops.CALL else node.src[1:]):
+          for s in reversed(node.src if enter_calls or node.op is not Ops.CALL or node.src[0].op is Ops.CUSTOM_FUNCTION else node.src[1:]):
             stack.append((s, False)) # push srcs on the stack
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
     return cache
@@ -1717,6 +1717,7 @@ class RewriteContext:
     while stack:
       n, processed = stack.pop()
       if n in self.replace: continue
+      opaque = n.op is Ops.CALL and isinstance(n.arg, CallInfo) and not self.enter_calls
       if not processed:
         # bottom-up: try bpm on original node first, if it rewrites, use result as-is (no traversal into replacement)
         if self.bpm is not None and (rewritten:=self.cached_bpm_rewrite(n)) is not None:
@@ -1725,12 +1726,11 @@ class RewriteContext:
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
         # CALL bodies are never rewritten separately, rewrites that need them pass enter_calls=True
-        if n.op is Ops.CALL and isinstance(n.arg, CallInfo) and not self.enter_calls: self.replace[n.src[0]] = n.src[0]
-        for x in reversed(n.src):
+        for x in reversed(n.src[1:] if opaque else n.src):
           if x not in self.replace: stack.append((x, False))
       else:
         # rebuild node with rewritten srcs
-        new_src = tuple(self.replace.get(x, x) for x in n.src)
+        new_src = tuple(x if opaque and i == 0 else self.replace.get(x, x) for i,x in enumerate(n.src))
         new_n = UOp(n.op, new_src, n.arg, n.tag) if new_src != n.src else n
         # top-down: try pm on rebuilt node, use result as-is (no re-traversal)
         if self.pm is not None and (rewritten:=self.pm_rewrite(new_n)) is not None: new_n = rewritten
@@ -1764,9 +1764,7 @@ class RewriteContext:
         stack.append((n, 1, new_n))
         # NOTE: CALLs are handled as a special case: their bodies are not included in the graph_rewrite,
         # rewrites that need them pass enter_calls=True
-        # NOTE: machine instruction src[0] is to call
-        if new_n.op is Ops.CALL and new_n.src[0] not in on_stack and not self.enter_calls: self.replace[new_n.src[0]] = new_n.src[0]
-        for x in reversed(new_n.src):
+        for x in reversed(new_n.src[1:] if new_n.op is Ops.CALL and not self.enter_calls else new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
           on_stack.add(x)
