@@ -320,10 +320,10 @@ jobs:
           python -m pytest -n12 test/external/external_test_compile.py
       - name: Compile driving warp
         if: matrix.model == 'driving'
-        run: python examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --output /tmp/warp.pkl --benchmark-runs 1
+        run: python examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output /tmp/warp.pkl --benchmark-runs 1
       - name: Compile DM warp
         if: matrix.model == 'dm'
-        run: python examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,4804608 --warp-to 1440x960 --layout luma --border-fill 16 --output /tmp/warp.pkl --benchmark-runs 1
+        run: python examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,4804608 --warp-to 1440x960 --layout luma --border-fill 16 --transform-device NPY --output /tmp/warp.pkl --benchmark-runs 1
       - name: Run warp pickle
         run: python examples/openpilot/load_pickle.py --run /tmp/warp.pkl --runs 3
       - name: Run process replay tests

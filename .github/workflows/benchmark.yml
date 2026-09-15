@@ -487,10 +487,10 @@ jobs:
       run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run openpilot.pkl
     - name: compile driving warp
       if: matrix.model == 'driving'
-      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --output warp.pkl
+      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output warp.pkl
     - name: compile DM warp
       if: matrix.model == 'dm'
-      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,4804608 --warp-to 1440x960 --layout luma --border-fill 16 --output warp.pkl
+      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,4804608 --warp-to 1440x960 --layout luma --border-fill 16 --transform-device NPY --output warp.pkl
     - name: run warp pickle
       run: ASSERT_MIN_STEP_TIME=0 BENCHMARK_LOG="${BENCHMARK_LOG}_warp" taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run warp.pkl
     - name: Run process replay tests
@@ -553,7 +553,7 @@ jobs:
     - name: openpilot run_pickle big_driving_supercombo
       run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_run_pickle GMMU=0 DEV=USB+AMD ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/load_pickle.py --run openpilot.pkl --out-of-band
     - name: compile driving warp
-      run: GMMU=0 DEV=USB+AMD:LLVM python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --output warp.pkl
+      run: GMMU=0 DEV=USB+AMD:LLVM python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output warp.pkl
     - name: run warp pickle
       run: BENCHMARK_LOG=usbgpu_openpilot_driving_warp GMMU=0 DEV=USB+AMD python3 examples/openpilot/load_pickle.py --run warp.pkl
     - name: Test copy speeds

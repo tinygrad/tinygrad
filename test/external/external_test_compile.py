@@ -33,11 +33,11 @@ class TestCompile(unittest.TestCase):
     data[8:, 0:8:2], data[8:, 1:8:2] = 100, 200
     image = Tensor(data.reshape(-1)).realize()
     transform = np.eye(3, dtype=np.float32)
-    luma = compile_warp(frame, (4, 4), layout='luma', border_fill=16, benchmark_runs=1)['run']
+    luma = compile_warp(frame, (4, 4), layout='luma', border_fill=16, transform_device='NPY', benchmark_runs=1)['run']
     np.testing.assert_array_equal(luma(input_frame=image, M_inv=Tensor(transform, device='NPY')).numpy(), data[:4, :4].reshape(1, 16))
     transform[0, 2] = 1000
     np.testing.assert_array_equal(luma(input_frame=image, M_inv=Tensor(transform, device='NPY')).numpy(), np.full((1, 16), 16, dtype=np.uint8))
-    yuv = compile_warp(frame, (4, 4), layout='yuv420', benchmark_runs=1)['run']
+    yuv = compile_warp(frame, (4, 4), layout='yuv420', transform_device='NPY', benchmark_runs=1)['run']
     expected = [[[0, 2], [16, 18]], [[8, 10], [24, 26]], [[1, 3], [17, 19]], [[9, 11], [25, 27]], [[100]*2]*2, [[200]*2]*2]
     np.testing.assert_array_equal(yuv(input_frame=image, M_inv=Tensor(np.eye(3, dtype=np.float32), device='NPY')).numpy(), expected)
 
