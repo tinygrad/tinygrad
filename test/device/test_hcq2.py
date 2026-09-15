@@ -66,7 +66,8 @@ class TestHCQ2Deps(unittest.TestCase):
     dst, src = UOp.param(0, dtypes.uint8, 16, device="AMD:1"), UOp.param(1, dtypes.uint8, 16, device="AMD")
     with patch.object(type(Device), "__getitem__", return_value=SimpleNamespace(pm_batch=None)):
       batch = hcq2._finalize_batch(hcq2.BatchCtx([(src.copy_to_device("AMD:1").call(dst, src), ("AMD",), "COPY:0")], False))
-    streams = {s.without_after.src[0].arg[1]: [u.arg.opcode for u in s.without_after.src[0].src if u.op is Ops.CALL and isinstance(u.arg, InstInfo)] for s in batch.src[0].src}
+    streams = {s.without_after.src[0].arg[1]: [u.arg.opcode for u in s.without_after.src[0].src if u.op is Ops.CALL \
+      and isinstance(u.arg, InstInfo)] for s in batch.src[0].src}
     # the copy queue waits for its device and for the peer, then signals and bumps. the peer waits for the signal before its bump
     self.assertEqual(streams, {"COPY:0": ["barrier", "wait", "wait", "store", "store"], "COMPUTE:0": ["barrier", "wait", "wait", "store"]})
 

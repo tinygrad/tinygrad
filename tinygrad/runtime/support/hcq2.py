@@ -306,7 +306,6 @@ class HWQueue:
   ])
 
   def __init__(self, ctx:EncodeCtx, submit:UOp):
-    print(submit)
     self.ctx, self.lin = ctx, submit.src[0]
     self.devs, self.queue = self.lin.arg
     self.dev = Device[self.devs[0]]
