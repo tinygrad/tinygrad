@@ -143,5 +143,12 @@ class TestScheduleScaling(unittest.TestCase):
       return Tensor.cat(*[Tensor.empty(1).assign(call+i) for i in range(n)])
     self._assert_linear(custom_kernel_assign, n_small=50, n_large=500)
 
+  def test_slice_copy_scaling(self):
+    def copy_slices(n):
+      x = Tensor.empty(n+1, device="NULL")
+      for _ in range(n): x = x[1:]
+      return Tensor.cat(*[x.to(f"NULL:{i+1}").to("NULL") for i in range(n)])
+    self._assert_linear(copy_slices, n_small=50, n_large=250)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
