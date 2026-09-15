@@ -1,5 +1,5 @@
 import unittest, threading, functools
-from tinygrad import Tensor, UOp, Context
+from tinygrad import Tensor, UOp
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.engine.realize import run_linear

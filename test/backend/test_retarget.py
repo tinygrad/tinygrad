@@ -2,8 +2,8 @@ import unittest, itertools, torch, numpy as np
 from tinygrad import Tensor, Device
 from tinygrad.helpers import VIZ
 from tinygrad.renderer.isa import ISARenderer, IselContext
-from tinygrad.uop.ops import CallInfo, graph_rewrite, PatternMatcher, UPat, UOp, Ops, ProgramInfo
-from tinygrad.codegen import full_rewrite_to_sink, pm_to_program, to_program_key
+from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, UOp, Ops, ProgramInfo
+from tinygrad.codegen import full_rewrite_to_sink, pm_to_program
 from tinygrad.engine.realize import ExecContext, pm_exec, _get_call_to_compile
 from test.backend.test_ops import prepare_test_op
 
@@ -24,7 +24,7 @@ def _cross_exec(graph:Tensor):
       (UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[abs(p.arg.slot)-1] if p.arg.slot < 0 else None),
     ])
     # re-expand CALL graphs
-    sink = sink.substitute({c : graph_rewrite(c.src[0], pm_substitute_operands, ctx=c.src[1:]) for c in sink.toposort() if c.op is Ops.CALL})
+    sink = sink.substitute({c:graph_rewrite(c.src[0], pm_substitute_operands, ctx=c.src[1:]) for c in sink.toposort() if c.op is Ops.CALL})
 
     # plug through non-assembly backend's render pass
     prg_info = ProgramInfo.from_sink(sink, final_ren.target)
@@ -45,7 +45,6 @@ def _cross_exec(graph:Tensor):
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "cross compilation is for asm backends")
 class TestRetarget(unittest.TestCase):
   def test_transfer_gemm(self):
-    x, w = Tensor.ones(32,32).contiguous(), Tensor.eye(32).clone()
     trt, tgt = prepare_test_op(-2, 2, [(32,32), (32,32)], None)
     truth, out = torch.matmul(*trt), Tensor.matmul(*tgt)
     _cross_exec(out)

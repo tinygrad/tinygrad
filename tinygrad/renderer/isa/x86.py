@@ -15,7 +15,7 @@ from tinygrad.helpers import unwrap, Target
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
   # these aren't real instructions, DEFINE is a register placeholder that defines a register without emitting an instruction
-  FRAME_INDEX = auto(); LABEL = auto(); DEFINE = auto();
+  FRAME_INDEX = auto(); LABEL = auto(); DEFINE = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves

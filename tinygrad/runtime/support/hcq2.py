@@ -292,12 +292,14 @@ class HWQueue:
     (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), lambda ctx, call: ctx.copy(call)),
     (UPat(Ops.CALL, arg=InstInfo("barrier", dtypes.void)), lambda ctx: ctx.memory_barrier()),
     (UPat(Ops.CALL, arg=InstInfo("wait", dtypes.void), src=(UPat(), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
-    (UPat(Ops.CALL, arg=InstInfo("wait_eq", dtypes.void), src=(UPat(), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
+    (UPat(Ops.CALL, arg=InstInfo("wait_eq", dtypes.void), src=(UPat(), UPat(name="dst"), UPat(name="val"))),
+      lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
     (UPat(Ops.CALL, arg=InstInfo("timestamp", dtypes.void), src=(UPat(), UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
     (UPat(Ops.CALL, arg=InstInfo("store", dtypes.void), src=(UPat(), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
   ])
 
   def __init__(self, ctx:EncodeCtx, submit:UOp):
+    print(submit)
     self.ctx, self.lin = ctx, submit.src[0]
     self.devs, self.queue = self.lin.arg
     self.dev = Device[self.devs[0]]
