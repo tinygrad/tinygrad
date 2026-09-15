@@ -31,7 +31,7 @@ def allocate_inputs(input_specs, initialize=None):
 
 def dump_pickle(obj, f, *, out_of_band=False):
   if not out_of_band: return pickle.dump(obj, f)
-  with tempfile.TemporaryFile() as tmp:
+  with tempfile.TemporaryFile(dir=".") as tmp:
     def buffer_callback(pb:pickle.PickleBuffer):
       data = pb.raw()
       tmp.write(struct.pack('<q', data.nbytes))
@@ -77,7 +77,7 @@ def compile_jit(function:Callable, make_inputs:Callable[[int], tuple[tuple, dict
     return result
 
   expected = run(jit, 42, 3)
-  with tempfile.TemporaryFile() as f:
+  with tempfile.TemporaryFile(dir=".") as f:
     dump_pickle(jit, f, out_of_band=out_of_band)
     f.seek(0)
     loaded = load_pickle(f, out_of_band=out_of_band)
