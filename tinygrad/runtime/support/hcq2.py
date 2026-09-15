@@ -16,6 +16,9 @@ from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_c
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
 HCQ_DEVS = frozenset(("NV", "QCOM")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
 
+# TODO: implement queue commands as valid UOp graphs instead of empty SINK
+def ins(name:str, *src, **kwargs): return UOp(Ops.NOOP).ins(name, *src, **kwargs)
+
 @dataclass(frozen=True)
 class HCQInfo:
   device:tuple[str, ...]
@@ -219,11 +222,11 @@ def _wait_ins(ctx:BatchCtx, call:UOp, device:str, queue:str, tag:int) -> list[UO
   if latest and device.split(":")[0] == "NV" and queue.startswith("COMPUTE") and (p:=ctx.prev[tag]) is not None: latest[(device, queue)] = p
 
   ctx.signal_tags |= set(latest.values())
-  return [UOp(Ops.NOOP).ins("wait", ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64)) for (d, q), t in latest.items()]
+  return [ins("wait", ctx.queue_signal((d,), q), UOp.const(t + 1, dtypes.uint64)) for (d, q), t in latest.items()]
 
 def _start_ins(ctx:BatchCtx, dev:str, queue:str) -> list[UOp]: # a queue first waits for prior work of its device and of the peers it touches
-  return [UOp(Ops.NOOP).ins("barrier")] + \
-    [UOp(Ops.NOOP).ins("wait", timeline((d,)), timeline_value((d,))) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
+  return [ins("barrier")] + \
+    [ins("wait", timeline((d,)), timeline_value((d,))) for d in [dev, *sorted(ctx.peers.get((dev, queue), ()))]]
 
 def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
   # find all waits first to mark calls that must signal
@@ -233,19 +236,19 @@ def _build_queues(ctx:BatchCtx) -> dict[tuple[tuple[str, ...], str], list[UOp]]:
     if not (q:=queues.setdefault((devices, queue), [])): q += _start_ins(ctx, devices[0], queue) # first use of a queue
 
     # dependency waits, then the call between its timestamps
-    ts_ins = [UOp(Ops.NOOP).ins("timestamp", ctx.slot(devices, i)) for i in ctx.stamps(devices, tag)]
+    ts_ins = [ins("timestamp", ctx.slot(devices, i)) for i in ctx.stamps(devices, tag)]
     q += waits + ts_ins[:1] + [call] + ts_ins[1:]
 
     # signal the queue if someone waits for us
     if tag in ctx.signal_tags:
-      q += [UOp(Ops.NOOP).ins("store", ctx.queue_signal(devices, queue), UOp.const(tag + 1, dtypes.uint64))]
+      q += [ins("store", ctx.queue_signal(devices, queue), UOp.const(tag + 1, dtypes.uint64))]
 
   # one queue advances the device timeline after all other queues finish, and after the queues of the peers that touched the device
   for dev in ctx.queues:
     queue = ctx.epilogue_queue(dev)
-    waits = [UOp(Ops.NOOP).ins("wait", ctx.queue_signal((d,), q), UOp.const(ctx.last[(d, q)] + 1, dtypes.uint64))
+    waits = [ins("wait", ctx.queue_signal((d,), q), UOp.const(ctx.last[(d, q)] + 1, dtypes.uint64))
              for d, q in [(dev, q) for q in ctx.queues[dev] if q != queue] + sorted(k for k, ds in ctx.peers.items() if dev in ds)]
-    bump = UOp(Ops.NOOP).ins("store", timeline((dev,)), timeline_value((dev,)) + UOp.const(1, dtypes.uint64))
+    bump = ins("store", timeline((dev,)), timeline_value((dev,)) + UOp.const(1, dtypes.uint64))
 
     # multiple copy queues may need a new compute stream. a peer without calls of its own starts like any queue
     if not (q:=queues.setdefault(((dev,), queue), [])) and dev not in {d for d, _ in ctx.last}: q += _start_ins(ctx, dev, queue)
