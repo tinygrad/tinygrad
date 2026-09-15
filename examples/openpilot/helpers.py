@@ -3,6 +3,7 @@ from typing import Any
 from tinygrad.helpers import fetch
 from tinygrad.nn.onnx import OnnxPBParser
 
+# openpilot master: fa9f56ed766182f3c30f37c4155f363749168520
 MODELS = {
   'driving': ('65a08adc31d5c456219687d99b7bf5e44d61dae2d49ea67850e76105c7248cce', 60918562),
   'dm': ('dd299afabe7a3e0d04cbe2bd97fdb0c93bba8ad6d3cc3663a0e0ededaf243ac2', 7497335),
