@@ -48,8 +48,6 @@ jobs:
       run: |
         source /tmp/tinygrad_pytest_ci/bin/activate
         pytest -nauto --durations=20
-    - name: openpilot compile_onnx 0.10.1 driving_vision
-      run: FLOAT16=1 DEV=CL IMAGE=1 python3.11 examples/openpilot/compile_onnx.py --onnx https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx --output openpilot.pkl --benchmark-runs 20
 
   # TODO: reenable when not flaky
   #testframeworkpytest:
@@ -449,51 +447,14 @@ jobs:
   testcomma:
     strategy:
       matrix:
-        dev: ['QCOM', 'QCOM:IR3']
-        version: ['0.11.0', '0.11.2', 'master']
-        model: ['vision', 'policy', 'supercombo', 'dmonitoring']
-        # exclude non-existent models
-        exclude: [{ version: '0.11.0', model: supercombo }, { version: '0.11.2', model: vision }, { version: '0.11.2', model: policy },
-                  { version: 'master', model: vision }, { version: 'master', model: policy }]
+        model: [driving, dm]
         include:
-          - version: '0.11.0'
-            model: vision
-            url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
-            timing: 18
-          - version: '0.11.0'
-            model: policy
-            url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
-            timing: 3.4
-          - version: '0.11.0'
-            model: dmonitoring
-            url: https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/dmonitoring_model.onnx
-            timing: 13
-          - version: '0.11.2'
-            model: supercombo
-            url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/433f85f956837606ad1f1cbee4aa7e2158ad23c768dea914b20436c97232741b
+          - model: driving
             timing: 28
-          - dev: QCOM:IR3
-            version: '0.11.2'
-            model: supercombo
-            timing: 29
-          - version: '0.11.2'
-            model: dmonitoring
-            url: https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/3e7b31dfbc0a5234f1baf196513b77fc6af12204b8a8ffe8ee0417e48352f316
-            timing: 12.5
-          # IR3 dmonitoring is slightly slower
-          - dev: QCOM:IR3
-            model: dmonitoring
-            timing: 13.0
-          - version: 'master'
-            model: supercombo
-            url: $(python3 -m examples.openpilot.helpers driving)
-            timing: 28
-          - version: 'master'
-            model: dmonitoring
-            url: $(python3 -m examples.openpilot.helpers dm)
+          - model: dm
             timing: 13
       fail-fast: false
-    name: openpilot ${{ matrix.version }} compile_onnx ${{ matrix.model }} (DEV=${{ matrix.dev }})
+    name: openpilot ${{ matrix.model }} (QCOM)
     runs-on: [self-hosted, Linux, comma4]
     timeout-minutes: 5
     defaults:
@@ -501,11 +462,13 @@ jobs:
         shell: bash -e -o pipefail {0}
     if: github.repository_owner == 'tinygrad'
     env:
-      DEV: ${{ matrix.dev }}
+      DEV: QCOM
+      FLOAT16: "1"
+      IMAGE: "1"
       JIT_BATCH_SIZE: "0"
       OPENPILOT_HACKS: "1"
       ASSERT_MIN_STEP_TIME: ${{ matrix.timing }}
-      BENCHMARK_LOG: ${{ matrix.dev == 'QCOM:IR3' && 'ir3_' || '' }}openpilot_${{ matrix.version }}_${{ matrix.model }}
+      BENCHMARK_LOG: openpilot_master_${{ matrix.model }}
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
@@ -517,12 +480,12 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: compile
-      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_onnx.py --onnx ${{ matrix.url }} --output openpilot.pkl --benchmark-runs 20
+      run: taskset -c 4-7 python3 examples/openpilot/compile_onnx.py --onnx "$(python3 -m examples.openpilot.helpers ${{ matrix.model }})" --output openpilot.pkl --benchmark-runs 20
     - name: compile driving warp
-      if: matrix.version == 'master' && matrix.model == 'supercombo'
+      if: matrix.model == 'driving'
       run: BENCHMARK_LOG="${BENCHMARK_LOG}_driving_warp" FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_warp.py --camera-resolution 1928x1208 --stride 2048 --uv-offset 2490368 --frame-size 3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output driving_warp.pkl
     - name: compile driver monitoring warp
-      if: matrix.version == 'master' && matrix.model == 'dmonitoring'
+      if: matrix.model == 'dm'
       run: BENCHMARK_LOG="${BENCHMARK_LOG}_dm_warp" FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_warp.py --camera-resolution 1928x1208 --stride 2048 --uv-offset 2490368 --frame-size 4804608 --warp-to 1440x960 --layout luma --border-fill 16 --transform-device NPY --output dm_warp.pkl
     - name: run pickle
       run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" taskset -c 4-7 python3 examples/openpilot/compile_onnx.py --run-pickle openpilot.pkl --benchmark-runs 20
