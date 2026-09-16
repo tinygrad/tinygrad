@@ -126,8 +126,10 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       # always void
       return dtypes.void
     case Ops.CALL:
+      # a machine code dtype is derived from its implementation body
+      if isinstance(arg, InstInfo): return src[0].dtype
       # a call states its (possibly void) dtype in the CallInfo
-      return arg.dtype if isinstance(arg, (CallInfo, InstInfo)) else dtypes.void
+      return arg.dtype if isinstance(arg, CallInfo) else dtypes.void
     case Ops.CUSTOM | Ops.CUSTOMI:
       assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"CUSTOM/CUSTOMI arg must be (str, DType), got {arg}"
       return arg[1]
@@ -590,7 +592,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # only value (register) producing operands are bound to the graph
     graph = set(self.toposort())
     sink = self.substitute({s:bind_opr(s,i) for i,s in enumerate(src) if s in graph and s.dtype is not dtypes.void})
-    return UOp(Ops.CALL, (sink,) + src, InstInfo(opc, kwargs.pop("dtype", self.dtype)), kwargs.pop("tag", self.tag))
+    assert "dtype" not in kwargs
+    return UOp(Ops.CALL, (sink,) + src, InstInfo(opc), kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
@@ -1335,7 +1338,6 @@ class CallInfo:
 @dataclass(frozen=True)
 class InstInfo:
   opcode: Any
-  dtype: DType = dtypes.void
 
 # ******** ops in python ********
 

@@ -317,14 +317,14 @@ class HWQueue:
   q_rewrite = PatternMatcher([ # the ops of a queue: a queue defines the methods it supports
     (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), lambda ctx, call, prg: ctx.exec(call, prg)),
     (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), lambda ctx, call: ctx.copy(call)),
-    (UPat(Ops.CALL, arg=InstInfo("barrier", dtypes.void)), lambda ctx: ctx.memory_barrier()),
-    (UPat(Ops.CALL, arg=InstInfo("wait", dtypes.void), src=(UPat(), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
-    (UPat(Ops.CALL, arg=InstInfo("wait_eq", dtypes.void), src=(UPat(), UPat(name="dst"), UPat(name="val"))),
+    (UPat(Ops.CALL, arg=InstInfo("barrier")), lambda ctx: ctx.memory_barrier()),
+    (UPat(Ops.CALL, arg=InstInfo("wait"), src=(UPat(), UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
+    (UPat(Ops.CALL, arg=InstInfo("wait_eq"), src=(UPat(), UPat(name="dst"), UPat(name="val"))),
       lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
-    (UPat(Ops.CALL, arg=InstInfo("timestamp", dtypes.void), src=(UPat(), UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
-    (UPat(Ops.CALL, arg=InstInfo("store", dtypes.void), src=(UPat(), UPat(name="dst"), UPat(name="val"))),
+    (UPat(Ops.CALL, arg=InstInfo("timestamp"), src=(UPat(), UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
+    (UPat(Ops.CALL, arg=InstInfo("store"), src=(UPat(), UPat(name="dst"), UPat(name="val"))),
       lambda ctx, dst, val: ctx.signal(dst, val)),
-    (UPat(Ops.CALL, arg=InstInfo("write", dtypes.void), name="u"), lambda ctx, u: ctx.write(*u.src[1:])),
+    (UPat(Ops.CALL, arg=InstInfo("write"), name="u"), lambda ctx, u: ctx.write(*u.src[1:])),
   ])
 
   def __init__(self, ctx:EncodeCtx, submit:UOp):

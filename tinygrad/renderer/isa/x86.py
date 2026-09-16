@@ -161,7 +161,7 @@ pre_isel_matcher = PatternMatcher([
 # ***** X86 registers *****
 # TODO: make this a UOp property?
 def opcode(x:UOp) -> X86Ops|None: return x.arg.opcode if x.op is Ops.CALL and isinstance(x.arg, InstInfo) else None
-def def_reg(dt:DType, reg:Register) -> UOp: return UOp(Ops.NOOP).ins(X86Ops.DEFINE, dtype=dt, tag=(reg,))
+def def_reg(dt:DType, reg:Register) -> UOp: return UOp.placeholder((1,), dt, addrspace=AddrSpace.REG).ins(X86Ops.DEFINE, tag=(reg,))
 # undefined operand, used for VEX instructions
 def undef(): return UOp(Ops.NOOP)
 
@@ -200,12 +200,11 @@ def to_imm(c:UOp) -> UOp|None:
 # operand is NaN, so a NaN reads as "below" and as "equal", and it clears sign and overflow, so nothing reads as "less"
 def cmp(x:UOp) -> UOp:
   if x.src[0].dtype in dtypes.floats: raise RuntimeError(f"no flag compare for {x.src[0].dtype}, a float gate must be a mask")
-  # a cmp sets the flags of the subtraction, every comparison of the same operands is the same instruction
-  return x.ins(X86Ops.CMP, *x.src, dtype=dtypes.void) if (i:=to_imm(x.src[1])) is None else x.ins(X86Ops.CMPi, x.src[0], i, dtype=dtypes.void)
+  return x.bitcast(dtypes.void).ins(X86Ops.CMP, *x.src) if (i:=to_imm(x.src[1])) is None else x.bitcast(dtypes.void).ins(X86Ops.CMPi, x.src[0], i)
 # comparisons that produce masks, the mask has the width of the operands
 def mask(x:UOp) -> UOp:
   dt, v = x.src[0].dtype, imm(dtypes.uint8, {Ops.CMPLT: 1, Ops.CMPNE: 4, Ops.CMPEQ: 0}[x.op])
-  return x.ins(X86Ops.VCMPSS if dt is dtypes.float32 else X86Ops.VCMPSD, *x.src, v, dtype=dt)
+  return x.bitcast(dt).ins(X86Ops.VCMPSS if dt is dtypes.float32 else X86Ops.VCMPSD, *x.src, v)
 
 # vinsertps xmm2, xmm0, xmm1, imm
 # inserts any 32 bit element in xmm1 into any position in xmm0 according to immm, result is written to xmm2
@@ -262,7 +261,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp, UOp]:
   return (base, _cast(idx), _disp(0), sz)
 
 # addresses are 64bit values
-def lea(x:UOp) -> UOp: return x.ins(X86Ops.LEA, *fold_address(x), dtype=dtypes.uint64)
+def lea(x:UOp) -> UOp: return x.bitcast(dtypes.uint64).ins(X86Ops.LEA, *fold_address(x))
 
 def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple): return None
@@ -273,12 +272,13 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   # the shape srcs of a PARAM are not values, tag them so they aren't materialized into registers
   def _reg_arg(r:Register) -> tuple[UOp, ...]: return (x.replace(arg=arg, src=tuple(s.rtag() for s in x.src), tag=(r,)),)
   def _stack_arg(disp:int):
-    frame = UOp(Ops.NOOP).ins(X86Ops.FRAME_INDEX, imm(dtypes.int32, disp), dtype=dtypes.int32)
+    # bit hacky
+    frame = UOp(Ops.NOOP).bitcast(dtypes.int32).ins(X86Ops.FRAME_INDEX, imm(dtypes.int32, disp))
     return (stack_pointer, UOp(Ops.NOOP), frame, imm(dtypes.uint8, 8))
   if sys.platform == "win32": src = _reg_arg((RCX, RDX, GPR[8], GPR[9])[i]) if i < 4 else _stack_arg((i-3)*8+32)
   else: src = _reg_arg((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]) if i < 6 else _stack_arg((i-5)*8)
   # this move "cleanses" the abi register constraint
-  return x.ins(X86Ops.MOV, *src, dtype=dt)
+  return x.replace(arg=arg).ins(X86Ops.MOV, *src)
 
 GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI, X86Ops.VMOVDm, X86Ops.VMOVQm}
 XMM_OPS = {op for op in X86Ops if op.name.startswith('V')} - GPR_DEST_OPS
@@ -724,14 +724,14 @@ class X86Renderer(ISARenderer):
     is_xmm = isinstance(x.tag, tuple) and x.tag[0].cons[0].size == 16
     op = X86Ops.VMOVUPSm if is_xmm else X86Ops.MOVm
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return x.ins(op, *fold_address(stack_pointer.index(disp)), x, dtype=dtypes.void, tag=x.tag)
+    return UOp(Ops.NOOP).ins(op, *fold_address(stack_pointer.index(disp)), x, tag=x.tag)
 
   # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
   def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
     is_xmm = reg.cons[0].size == 16
     dt = dtypes.uint64 if x.op is Ops.BUFFER else x.dtype
     disp = UOp.cconst(spill_slot, dtypes.int32)
-    return x.ins(X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, *fold_address(stack_pointer.index(disp)), dtype=dt, tag=(reg,))
+    return x.ins(X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, *fold_address(stack_pointer.index(disp)), tag=(reg,))
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg.opcode))[-1] in ('i', 'm') else o[7:]).lower():7s}"
