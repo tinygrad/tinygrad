@@ -464,10 +464,11 @@ isel_matcher = PatternMatcher([
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if (x.op in {Ops.RANGE, Ops.END} and opcode(x.src[-1]) not in [X86Ops.CMP, X86Ops.CMPi]) or opcode(x) in X86GroupOp.WriteFlags: ctx.lock = x
+  if x.op in {Ops.RANGE, Ops.END} or opcode(x) in X86GroupOp.WriteFlags: ctx.lock = x
   elif opcode(x) in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
     ctx.lock = flag_def
     return (x, [flag_def, x])
+  if x.op is Ops.END and opcode(x.src[-1]) in {X86Ops.CMP, X86Ops.CMPi}: return (x, [x.src[-1], x])
   return None
 
 # TODO: dont use rewrite
@@ -504,7 +505,7 @@ def lower_end(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
 
 def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   cond, cjmp = x.src[-1], {Ops.CMPLT:X86Ops.JL, Ops.CMPEQ:X86Ops.JE, Ops.CMPNE:X86Ops.JNE}
-  op = X86Ops.JB if (cmp := cond.src[0].op) is Ops.CMPLT and x.dtype in dtypes.uints else cjmp[cmp]
+  op = X86Ops.JB if (cmp := cond.body.src[0]).op is Ops.CMPLT and cmp.src[0].dtype in dtypes.uints else cjmp[cmp.op]
   jmp = UOp(Ops.NOOP).ins(op, cond, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
   return jmp, [jmp]
 

@@ -82,3 +82,7 @@ class TestRetarget(unittest.TestCase):
     cross = _cross_exec(out)
     self.assertEqual(native, cross)
     self.assertEqual(truth, out.item())
+
+if __name__ == '__main__':
+  np.random.seed(2973)
+  unittest.main(verbosity=2)
