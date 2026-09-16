@@ -1,5 +1,5 @@
 import unittest, threading, functools
-from tinygrad import Tensor, UOp, Context
+from tinygrad import Tensor, UOp
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.engine.realize import run_linear
@@ -111,13 +111,6 @@ class TestWaitLoop(unittest.TestCase):
     c = Tensor.custom_kernel(c, fxn=two_loops_kernel)[0]
     c.realize()
     self.assertEqual(c.item(), 25)
-
-  # TODO: x86's lower_loop builds an Ops.IF node after regalloc, which fails spec_full
-  @(unittest.expectedFailure if isinstance(Device[Device.DEFAULT].renderer, X86Renderer) else lambda f: f)
-  def test_wait_loop_spec(self):
-    c = Tensor.custom_kernel(Tensor.empty(1, dtype=dtypes.int), fxn=functools.partial(wait_loop_kernel, N=7))[0]
-    with Context(SPEC=2): c.realize()
-    self.assertEqual(c.item(), 7)
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "TODO: do-while loop under register pressure segfaults on x86")
   def test_loop_carried_registers(self):

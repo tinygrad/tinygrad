@@ -5,16 +5,18 @@ from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
+def oprs(u:UOp) -> tuple[UOp, ...]: return u.src[1:] if u.op is Ops.CALL and u.src[0].op is not Ops.CUSTOM_FUNCTION else u.src
+
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(sink.toposort())
+  lst = list(sink.toposort(enter_calls=False))
   out_degree:defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, tuple[int, int, Any]] = {}
 
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
-    for s in u.src: out_degree[s] += 1
+    for s in oprs(u): out_degree[s] += 1
 
     # we place UOps with higher run_counts later
     run_count = prod([int(r.vmax)+1 for r in u.ranges])
@@ -40,7 +42,7 @@ def linearize(sink:UOp) -> list[UOp]:
   newlst = []
   while heap:
     newlst.append(u:=heapq.heappop(heap)[1])
-    for v in u.src:
+    for v in oprs(u):
       out_degree[v] -= 1
       if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
   newlst = newlst[::-1]

@@ -226,7 +226,6 @@ Ternary & $(P, A, B)$
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
 \op{Barrier} & (deps\ldots) & --- & Synchronize threads within a workgroup. \\
-\op{Ins} & \ldots & \ldots & A single machine instruction (e.g.\ AMD ISA). \\
 \op{GetAddr} & (buf,) & dev & Lower buf to its address on device dev. \\
 \op{Special} & (bound,) & name & GPU thread/workgroup index (e.g.\ \texttt{gidx0}, \texttt{lidx1}). \\
 \op{If} & (gate,) & --- & Begin conditional execution block. \\

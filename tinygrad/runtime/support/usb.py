@@ -310,17 +310,17 @@ def usb_copy_slicer(ctx:dict[UOp, tuple[int, int]], call:UOp, dst:UOp, src:UOp) 
   for n, (_, off, nb) in enumerate(usb_chunks(call), start=nums[0]):
     if is_host(src): # copyin: wait for data, copy, release the half
       end = ((n - nums[1]) & 1) * HALF + HALF
-      ops += [UOp(Ops.INS, arg=("wait_eq", dtypes.void), src=(sram[end - 4:end].bitcast(dtypes.uint32), usb_sentinel(UOp.const(n, dtypes.uint32)))),
+      ops += [UOp(Ops.NOOP).ins("wait_eq", sram[end - 4:end].bitcast(dtypes.uint32), usb_sentinel(UOp.const(n, dtypes.uint32))),
               sram.copy_to_device(vram.device).call(vram[off:off + nb], sram[end - usb_wire(nb):end - usb_wire(nb) + nb]),
-              UOp(Ops.INS, arg=("store", dtypes.void), src=(sram[end - 4:end].bitcast(dtypes.uint32), UOp.const(0, dtypes.uint32))),
-              UOp(Ops.INS, arg=("store", dtypes.void), src=(usb_fence(vram.device), UOp.const(n + 1, dtypes.uint32)))]
+              UOp(Ops.NOOP).ins("store", sram[end - 4:end].bitcast(dtypes.uint32), UOp.const(0, dtypes.uint32)),
+              UOp(Ops.NOOP).ins("store", usb_fence(vram.device), UOp.const(n + 1, dtypes.uint32))]
     else: # copyout: wait for the read, fill sram, send
-      ops += [UOp(Ops.INS, arg=("wait", dtypes.void), src=(usb_go(vram.device), UOp.const(n + 1, dtypes.uint32))),
-              UOp(Ops.INS, arg=("store", dtypes.void), src=(usb_go(vram.device), UOp.const(0, dtypes.uint32)))]
+      ops += [UOp(Ops.NOOP).ins("wait", usb_go(vram.device), UOp.const(n + 1, dtypes.uint32)),
+              UOp(Ops.NOOP).ins("store", usb_go(vram.device), UOp.const(0, dtypes.uint32))]
       ops += [vram.copy_to_device(vram.device).call(sram[wo:wo + pb], vram[off + po:off + po + pb])
               for wo, po, pb in ((0, 0, min(nb, CHUNK)), (HALF, CHUNK, nb - CHUNK)) if pb > 0]
-      ops += [UOp(Ops.INS, arg=("store", dtypes.void), src=(usb_cq(vram.device), UOp.const(0, dtypes.uint32))),
-              UOp(Ops.INS, arg=("store", dtypes.void), src=(usb_fence(vram.device), UOp.const(n + 1, dtypes.uint32)))]
+      ops += [UOp(Ops.NOOP).ins("store", usb_cq(vram.device), UOp.const(0, dtypes.uint32)),
+              UOp(Ops.NOOP).ins("store", usb_fence(vram.device), UOp.const(n + 1, dtypes.uint32))]
   return UOp(Ops.LINEAR, src=tuple(ops))
 pm_usb_copy_slicer = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call"), usb_copy_slicer)]) + pm_flatten_linear

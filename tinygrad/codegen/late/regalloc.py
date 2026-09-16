@@ -14,6 +14,8 @@ class LinearScanRegallocContext:
     self.ren = ren
     self.idx = itertools.count()
 
+    def oprs(x:UOp) -> tuple[UOp,...]: return x.src[1:] if x.op is Ops.CALL else x.src
+
     # compute live ranges
     self.live_range: dict[Register, list[int]] = {}
     lr = self.live_range
@@ -21,11 +23,11 @@ class LinearScanRegallocContext:
     for idx,u in reversed(list(enumerate(uops))):
       if u.op in PSEUDO_OPS: continue
       defs = u.tag if isinstance(u.tag, tuple) else ()
-      for v in defs + tuple(rdef(s) for s in dedup(u.src)):
+      for v in defs + tuple(rdef(s) for s in dedup(oprs(u))):
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, idx)
       for v in defs:
         if v in lr and (n:=max((e for s,e in loops.items() if s <= lr[v][-1] < e), default=None)): lr[v].append(n)
-      if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in x.src)
+      if u.op is Ops.RANGE: loops[idx] = max(j for j,x in enumerate(uops) if u in oprs(x))
 
     # allocate registers
     self.locals: dict[UOp, UOp] = {}
@@ -54,7 +56,7 @@ class LinearScanRegallocContext:
     for i,u in enumerate(uops):
       if u.op in PSEUDO_OPS: continue
       # allocate uses
-      for s in u.src:
+      for s in oprs(u):
         # HACK: cause of later hacks to lower range
         if u.op is Ops.END: continue
         if not isinstance(v:=rdef(s), Register): continue
@@ -69,7 +71,7 @@ class LinearScanRegallocContext:
           cons = v.cons
           # two address instructions (src is reused by def) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
           if ren.is_two_address(u) and j == 0:
-            uses = tuple(live.get(rdef(s)) for s in u.src)
+            uses = tuple(live.get(rdef(s)) for s in oprs(u))
             cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
           # HACK: cause the range is missing the comparison
           live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
@@ -112,5 +114,5 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat({Ops.CALL, Ops.RANGE, Ops.END, Ops.BUFFER, Ops.PARAM, Ops.SPECIAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])

@@ -92,7 +92,7 @@ def custom_asm_rdna(A:UOp):
 def custom_asm(A, insts, num_threads, lds_size=0) -> UOp:
   lds = UOp.placeholder((lds_size,), dtypes.uint8, addrspace=AddrSpace.LOCAL) if lds_size else None
   return UOp(Ops.PROGRAM, src=(UOp.sink(A, lds, UOp.special(num_threads, "lidx0"), arg=KernelInfo("asm")), \
-      UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS,arg=(x,dtypes.void)) for x in insts]))))
+      UOp(Ops.LINEAR, src=tuple([UOp(Ops.NOOP).ins(x) for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "only runs on AMD")
 class TestSQTTProfiler(unittest.TestCase):

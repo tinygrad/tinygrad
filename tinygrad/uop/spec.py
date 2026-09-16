@@ -1,6 +1,6 @@
 import math, functools
 from typing import Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, OPAQUE_CALL_BODIES
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg, CallInfo, InstInfo, OPAQUE_CALL_BODIES
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
@@ -84,11 +84,11 @@ spec_shared = PatternMatcher([
   (UPat(Ops.BUFFER, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
   # GROUP of stores (or groups, or NOOPs)
-  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
+  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.CALL, Ops.END))), lambda: True),
 
   # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, RETURNED, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.COPY, Ops.INDEX,
-                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
+                                                     Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.CALL})),),
         allow_any_len=True), lambda: True),
 
   # CUSTOM (inline and non inline): the arg is the source string and the dtype it produces, void for a bare statement
@@ -97,18 +97,15 @@ spec_shared = PatternMatcher([
 
   # a CUSTOM_FUNCTION with srcs is the body of an external call, holding the callee (a function pointer)
   (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, str)),
-  # CALL: the body is always an opaque body, the arg is a CallInfo stating the (possibly void) dtype
-  (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True, name="x"),
-   lambda x: isinstance(x.arg, CallInfo) and x.dtype is x.arg.dtype),
+  # CALL: the arg states the (possibly void) dtype. a CallInfo call has an opaque body, a machine instruction (InstInfo) implements src[0]
+  (UPat(Ops.CALL, name="x"), lambda x: isinstance(x.arg, (CallInfo, InstInfo)) and x.dtype is x.arg.dtype and
+   (isinstance(x.arg, InstInfo) or x.src[0].op in OPAQUE_CALL_BODIES)),
 
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),
 
   # BARRIER (on any length). TODO: this should only be in spec_program
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
-
-  # assembly instruction
-  (UPat(Ops.INS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and isinstance(x.arg[1], DType)),
 
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), validate_index),
@@ -140,9 +137,6 @@ spec_tensor = PatternMatcher([
 
   # a Variable is a 0-d ALU BUFFER with a value range and no device
   (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
-
-  # custom function
-  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
 
   # SPECIAL is index before index lowering. custom_kernel currently has this
   (UPat(Ops.SPECIAL, src=(UPat(dtype=dtypes.weakint),), name="s"), lambda s: isinstance(s.arg, str)),
@@ -254,6 +248,8 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   # all calls are on opaque bodies
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True), lambda: True),
+  # a CUSTOM_FUNCTION with srcs is the body of an external call, holding the callee (a function pointer)
+  (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, str)),
   # after on PARAM or AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),),
         allow_any_len=True), lambda: True),

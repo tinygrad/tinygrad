@@ -4,7 +4,7 @@ from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer, Compiled
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, dedup, partition, unwrap
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, InstInfo
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.codegen import do_to_program
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -59,14 +59,15 @@ class TestHCQ2Deps(unittest.TestCase):
       batch = hcq2._finalize_batch(hcq2.BatchCtx(calls, False))
     streams = [s.without_after.src[0] for s in batch.src[0].src]
     self.assertEqual([s.arg[1] for s in streams], ["COPY:0", "COPY:1", "COMPUTE:0"])
-    self.assertEqual([u.arg[0] for u in streams[-1].src], ["wait", "wait", "store"])
+    self.assertEqual([u.arg.opcode for u in streams[-1].src], ["wait", "wait", "store"])
 
   def test_peer_access_syncs_both_ways(self):
     from types import SimpleNamespace
     dst, src = UOp.param(0, dtypes.uint8, 16, device="AMD:1"), UOp.param(1, dtypes.uint8, 16, device="AMD")
     with patch.object(type(Device), "__getitem__", return_value=SimpleNamespace(pm_batch=None)):
       batch = hcq2._finalize_batch(hcq2.BatchCtx([(src.copy_to_device("AMD:1").call(dst, src), ("AMD",), "COPY:0")], False))
-    streams = {s.without_after.src[0].arg[1]: [u.arg[0] for u in s.without_after.src[0].src if u.op is Ops.INS] for s in batch.src[0].src}
+    streams = {s.without_after.src[0].arg[1]: [u.arg.opcode for u in s.without_after.src[0].src if u.op is Ops.CALL \
+      and isinstance(u.arg, InstInfo)] for s in batch.src[0].src}
     # the copy queue waits for its device and for the peer, then signals and bumps. the peer waits for the signal before its bump
     self.assertEqual(streams, {"COPY:0": ["barrier", "wait", "wait", "store", "store"], "COMPUTE:0": ["barrier", "wait", "wait", "store"]})
 
