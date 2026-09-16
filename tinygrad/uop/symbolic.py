@@ -452,15 +452,7 @@ pm_clean_up_group_sink = PatternMatcher([
       if any(x.op in REMOVE_FROM_SINK_LIKE for x in root.src) else None),
 ])
 
-def fold_where_consts(s:UOp, w:UOp, f:UOp) -> UOp: return s.where(*[f.replace(src=tuple(w.src[k] if x is w else x for x in f.src)) for k in (1, 2)])
-
 sym = symbolic+pm_simplify_valid+PatternMatcher([
-  # ** where **
-  # f(s.where(c0, c1), k) -> s.where(f(c0, k), f(c1, k)) for const c0, c1, k: both new arms fold, so this never grows
-  *[(UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(UPat.var("s").where(c, c).named("w"),), name="f"), fold_where_consts)
-    for c in (bare_const, casted_const)],
-  *[(UPat(GroupOp.Binary-{Ops.THREEFRY}, src=[UPat.var("s").where(c, c).named("w"), UPat.any(bare_const, casted_const)], name="f"), fold_where_consts)
-    for c in (bare_const, casted_const)],
   # ** pow **
   ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
   # ** load/store folding **
