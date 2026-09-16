@@ -66,7 +66,7 @@ def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp,
   return body, tuple(all_args[i] for i,_ in used)
 
 def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
-  fxn, args = k.src[0], k.src[1:]
+  fxn, args = k.body, k.src[1:]
   if k.arg.grad_fxn is not None:
     # put const on a device, also TODO why do we still have NOOP...
     def on_dev(g, i): return g.clone(device=args[i].device) if g.device is None else g

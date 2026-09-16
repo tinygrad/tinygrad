@@ -84,8 +84,13 @@ def _adamw_master_mxfp4_step(param:Tensor, grad:Tensor, m:Tensor, v:Tensor, mast
     full.replace(Tensor(full.uop.after(*(ret[idx].uop for ret in calls))))
   return [x for outputs in cache for x in outputs]
 
-def fclip_grads(grads:list[Tensor], clip_norm) -> Tensor:
-  total_norm = Tensor.stack(*[g.float().square().sum() for g in grads]).sum().sqrt().contiguous()
+def fclip_grads(grads:list[Tensor], clip_norm) -> tuple[list[Tensor], Tensor]:
+  if getenv("FAST_GRAD_NORM", 0):
+    from extra.gptoss_kernels.grad_norm import sum_squares_bf16
+    squares = [sum_squares_bf16(g) if g.dtype == dtypes.bfloat16 else g.float().square().sum() for g in grads]
+  else:
+    squares = [g.float().square().sum() for g in grads]
+  total_norm = Tensor.stack(*squares).sum().sqrt().contiguous()
   scale = (clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
   return [(g * scale).cast(g.dtype) for g in grads], total_norm
 

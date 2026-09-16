@@ -52,8 +52,8 @@ def _call_buf_uop(s:UOp) -> UOp:
 
 @functools.cache
 def _call_overwrite_outputs(call:UOp) -> tuple[UOp, ...]:
-  if call.src[0].op is Ops.LINEAR:
-    return tuple(x for i,x in enumerate(call.src[1:]) if is_allreduce_linear_output(call.src[0], i))
+  if call.body.op is Ops.LINEAR:
+    return tuple(x for i,x in enumerate(call.src[1:]) if is_allreduce_linear_output(call.body, i))
   return ()
 
 def create_schedule(sched_sink:UOp) -> UOp:
@@ -107,7 +107,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
         buf_uops = tuple(_call_buf_uop(s) for s in k.src[1:] if not s.is_bound_var)
-        linearized.append(k.src[0].call(*buf_uops))
+        linearized.append(k.body.call(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
@@ -135,13 +135,13 @@ pm_post_sched_cache = PatternMatcher([
 ])
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[str, UOp]|None=None):
-  linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
+  linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
            **{f"p{i}":x.src[0].replace(op=Ops.PARAM) for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}}
   def apply_binds(si:UOp) -> UOp:
-    if si.op is Ops.CALL and si.src[0].op is Ops.LINEAR: return resolve_linear_call(si, binds)
+    if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
     subs = {v:binds[v.expr] for v in si.variables() if v.expr in binds}
     ret = si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
     # Tagged all-reduce views are physical runtime arguments and must retain their offset while dropping the state
@@ -181,7 +181,7 @@ def remap_paramarg_slots(root:UOp, param_map:dict[int, int], buffer_map:dict[int
   return rebuilt[root]
 
 def canonicalize_call_for_schedule_cache(call:UOp) -> UOp|None:
-  body = call.src[0]
+  body = call.body
   if body.op not in {Ops.SINK, Ops.LINEAR}: return None
   nodes = body.toposort(enter_calls=False)
   params = [x for x in nodes if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
@@ -201,7 +201,7 @@ pm_schedule_cache_key = PatternMatcher([
 
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(call:UOp) -> UOp|None:
-  function = call.src[0]
+  function = call.body
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo): return None
   # value calls (with unbound outputs) are inlined positionally during prepare: their bodies are not programs to schedule
   if call.has_unbound_outputs: return None

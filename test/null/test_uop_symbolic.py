@@ -948,6 +948,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a+b+c*2<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
     self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
 
+  def test_mul_by_zero_casted_to_emulated_dtype(self):
+    # a float zero cast to bfloat16 is one committed const, so the mul-by-zero fold still sees it
+    x = Variable("x", 0, 3, dtypes.bfloat16)
+    self.assertIs(graph_rewrite(x*uconst(0.0).cast(dtypes.float).cast(dtypes.bfloat16), sym), UOp.const(0.0, dtypes.bfloat16))
+
   def test_cast_bool_to_int_ne_const(self):
     cond = Variable("a", 0, 3) < 2
     # CAST(bool -> int) != 0  ->  cond
@@ -1021,6 +1026,10 @@ class TestSymbolic(unittest.TestCase):
   def test_bitcast_chain(self):
     a = UOp.variable("a", 0, 3, dtype=dtypes.int32, param=True)
     self.assertIs(graph_rewrite(a.bitcast(dtypes.float32).bitcast(a.dtype), sym), a)
+    # a const of an emulated float dtype bitcasts to its storage bits and back
+    for dt, sdt, bits in ((dtypes.bfloat16, dtypes.ushort, 16256), (dtypes.fp8e4m3, dtypes.uchar, 56), (dtypes.fp8e5m2, dtypes.uchar, 60)):
+      self.assertIs(graph_rewrite(UOp.const(1.0, dt).bitcast(sdt), sym), UOp.const(bits, sdt))
+      self.assertIs(graph_rewrite(UOp.const(bits, sdt).bitcast(dt), sym), UOp.const(1.0, dt))
 
   def test_negation_in_where(self):
     cond = Variable("x", 0, 3) < 2
@@ -1037,8 +1046,8 @@ class TestSymbolic(unittest.TestCase):
   def test_where_cast(self):
     cond = Variable("s", 0, 3, dtypes.int) < 2
     a = Variable("a", 0, 3, dtypes.int)
-    self.assertIs(graph_rewrite(cond.where(a, a+1).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), (a+1).cast(dtypes.half)))
-    self.assertIs(graph_rewrite(cond.where(a, uconst(2)).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), uconst(2.0)))
+    self.assertIs(graph_rewrite(w:=cond.where(a, a+1).cast(dtypes.half), sym), w)
+    self.assertIs(graph_rewrite(w:=cond.where(a, uconst(2)).cast(dtypes.half), sym), w)
     self.assertIs(graph_rewrite(cond.where(a, UOp.invalid()).cast(dtypes.half), sym), cond.where(a.cast(dtypes.half), UOp.invalid()))
 
   def test_where_const_gate_keeps_stated_width(self):
@@ -1512,6 +1521,17 @@ class TestBounds(unittest.TestCase):
     assert (alu0+2559).vmin == 0 and (alu0+2559).vmax == 2559
     assert ((alu0+2559)//-4).vmin == -640 and ((alu0+2559)//-4).vmax == 0
     assert (((alu0+2559)//-4)*(-1)).vmin == 0 and (((alu0+2559)//-4)*(-1)).vmax == 640
+
+  def test_where_float_consts(self):
+    cond = Variable("s", 0, 3) < 2
+    w = cond.where(uconst(0.0), cond.where(uconst(1.0), uconst(3.0)))
+    self.assertEqual((w.vmin, w.vmax), (0.0, 3.0))
+    self.assertEqual((w.cast(dtypes.int).vmin, w.cast(dtypes.int).vmax), (0, 3))
+    n = cond.where(uconst(math.nan), uconst(1.0))
+    self.assertEqual((n.vmin, n.vmax), (-math.inf, math.inf))
+    # an infinite bound passes through the cast, the finite one still rounds
+    i = cond.where(uconst(-math.inf), uconst(2.7)).cast(dtypes.int)
+    self.assertEqual((i.vmin, i.vmax), (dtypes.int.min, 2))
 
 class TestFuzzFailure(unittest.TestCase):
   def test_fuzz_failure1(self):

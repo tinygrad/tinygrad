@@ -1,6 +1,6 @@
 from __future__ import annotations
 import collections, functools, dataclasses, enum, struct
-from typing import Any, ClassVar
+from typing import Any
 from tinygrad.helpers import round_up, getenv, to_mv
 
 class MMIOInterface:
@@ -179,7 +179,7 @@ class PageTableTraverseContext:
       self.level_up()
 
 class MemoryManager:
-  va_allocator: ClassVar[TLSFAllocator|None] = None
+  va_allocator = TLSFAllocator((1 << 44), base=0x200000000000)
 
   def __init__(self, dev, vram_size:int, boot_size:int, pt_t, va_bits:int, va_shifts:list[int], va_base:int,
                palloc_ranges:list[tuple[int, int]], first_lv:int=0, reserve_ptable=False):
@@ -237,7 +237,6 @@ class MemoryManager:
 
   @classmethod
   def alloc_vaddr(cls, size:int, align=0x1000) -> int:
-    assert cls.va_allocator is not None, "must be set"
     return cls.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
@@ -275,7 +274,6 @@ class MemoryManager:
   def vfree(self, vm:VirtMapping):
     if not getenv("GMMU", 1): return self.pfree(vm.paddrs[0][0])
 
-    assert self.va_allocator is not None, "must be set"
     self.unmap_range(vm.va_addr, vm.size)
     self.va_allocator.free(vm.va_addr)
     for paddr, _ in vm.paddrs: self.pfree(paddr)
