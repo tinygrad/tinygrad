@@ -292,7 +292,9 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testopenpilot:
-    name: openpilot Compile Tests
+    name: openpilot compile tests
+    env:
+      LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
@@ -303,18 +305,32 @@ jobs:
         with:
           key: openpilot-compile
           deps: testing
-          opencl: 'true'
           llvm: 'true'
-      - name: Test openpilot model kernel count and gate usage
+          opencl: 'true'
+      - name: Test models (DEV=CPU:LLVM)
+        env:
+          DEV: CPU:LLVM
         run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1361 ALLOWED_GATED_READ_IMAGE=38 FLOAT16=1 DEV="CL::IMAGE_PITCH_ALIGNMENT=64" IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          for model in driving_supercombo dmonitoring_model; do
+            python examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/$model.onnx" /tmp/openpilot.pkl --benchmark-runs 1
+            python examples/openpilot/load_pickle.py --run /tmp/openpilot.pkl --runs 3
+          done
+          MODEL_PKL=/tmp/openpilot.pkl python -m pytest -n=auto test/external/external_test_compile.py
+      - name: Test warps (DEV=CPU:LLVM)
+        env:
+          DEV: CPU:LLVM
+        run: |
+          python examples/openpilot/compile_warp.py --output /tmp/warp_driving.pkl --benchmark-runs 1 --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2
+          python examples/openpilot/load_pickle.py --run /tmp/warp_driving.pkl --runs 3
+          python examples/openpilot/compile_warp.py --output /tmp/warp_monitoring.pkl --benchmark-runs 1 --frame 1928,1208,2048,1216,608,4804608 --warp-to 1440x960 --layout luma --border-fill 16 --transform-device NPY
+          python examples/openpilot/load_pickle.py --run /tmp/warp_monitoring.pkl --runs 3
+      - name: Test driving_supercombo (DEV=CL::IMAGE_PITCH_ALIGNMENT=64)
+        env:
           # IMAGE_PITCH_ALIGNMENT=64 matches adreno 630
-      - name: Test openpilot CL compile fp32 (test correctness)
+          DEV: CL::IMAGE_PITCH_ALIGNMENT=64
         run: |
-          DEV=CL IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
-          DEV=CL IMAGE=1 SELFTEST=1 RUN_PICKLE=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
-      - name: Test openpilot LLVM compile fp16
-        run: IMAGE=1 FLOAT16=1 DEV=CPU:LLVM python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          VIZ=1 IMAGE=1 FLOAT16=1 python examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/driving_supercombo.onnx" /tmp/openpilot_viz.pkl --benchmark-runs 1
+          ALLOWED_KERNEL_COUNT=163 ALLOWED_READ_IMAGE=1531 ALLOWED_GATED_READ_IMAGE=47 python examples/openpilot/check_image_reads.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 

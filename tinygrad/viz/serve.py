@@ -420,6 +420,15 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
     yield (e:=ProfileRangeEvent(row, TracingKey(name, ret="JSON"+json.dumps(link) if link else None), Decimal(start_time), Decimal(end_time)))
     row_ends[row] = unwrap(e.en)
+    if name == "VALU_MAI_MFMA" and info is not None and info.inst.op_name.startswith("V_MFMA_"):
+      from tinygrad.runtime.autogen.amd.cdna.ins import VOP3PX2, VOP3P_MFMA
+      # derive exec from dispatch and inst, CDNA doesn't have ALUEXEC packets
+      ss = info.inst.op_name.removeprefix("V_MFMA_").removeprefix("SCALE_").split("_")
+      duration = max(8, m:=int(ss[1].split("X", 1)[0]))
+      if (m != 4 and (ss[2].endswith("B") or ss[-1] == "F32")) or \
+         (ss[-1] == "F8F6F4" and isinstance(info.inst, (VOP3P_MFMA, VOP3PX2)) and (info.inst.cbsz < 2 or info.inst.blgp < 2)): duration *= 2
+      yield ProfileRangeEvent(f"ALUEXEC:0 MFMA SIMD:{simd}", TracingKey("MFMA", ret="JSON"+json.dumps({"link":f"{row}-{idx}"})),
+                              Decimal(p._time+(mfma_delay:=4)), Decimal(p._time+mfma_delay+duration))
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:
       if (barrier:=curr_barrier.pop(wave, None)) is not None: barrier.en = Decimal(p._time)
