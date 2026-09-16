@@ -370,8 +370,6 @@ wave_colors = {**{x:"#1F7857" for x in ["WMMA", "MFMA"]}, **{x:"#ffffc0" for x i
                "STORE": "#4fa3cc", **{x:"#b2b7c9" for x in ["VMEM", "SGMEM"]}, "LDS": "#9fb4a6", "IMMEDIATE": "#f3b44a", "BARRIER": "#d00000",
                "JUMP_NO": "#fb8500", "JUMP": "#ffb703", "WAVERDY": "#1a2a2a"}
 
-MFMA_RE = r"V_MFMA_(?:SCALE_)?(F32|I32|F64)_(4|16|32)X\d+X\d+(_\d+B)?_(F32|F16|BF16|I8|F64|(?:BF8|FP8)_(?:BF8|FP8)|F8F6F4)"
-
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, None, None]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
@@ -416,11 +414,11 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
     yield (e:=ProfileRangeEvent(row, TracingKey(name, ret="JSON"+json.dumps(link) if link else None), Decimal(start_time), Decimal(end_time)))
     row_ends[row] = unwrap(e.en)
-    if name == "VALU_MAI_MFMA" and isinstance(info.inst, VOP3PX2) and (mfma:=re.fullmatch(MFMA_RE, info.inst.op_name)):
+    if name == "VALU_MAI_MFMA" and info is not None and isinstance(info.inst, VOP3PX2) and info.inst.op_name.startswith("V_MFMA_"):
       # derive exec from dispatch and inst, CDNA doesn't have ALUEXEC packets
-      _, m, blocks, inp_type = mfma.groups()
-      duration = {"4":8, "16":16, "32":32}[m]
-      if (m != "4" and (blocks or inp_type == "F32")) or (inp_type == "F8F6F4" and (info.inst.cbsz < 2 or info.inst.blgp < 2)): duration *= 2
+      ss = info.inst.op_name.removeprefix("V_MFMA_").removeprefix("SCALE_").split("_")
+      duration = max(8, m:=int(ss[1].split("X", 1)[0]))
+      if (m != 4 and (ss[2].endswith("B") or ss[-1] == "F32")) or (ss[-1] == "F8F6F4" and (info.inst.cbsz < 2 or info.inst.blgp < 2)): duration *= 2
       yield ProfileRangeEvent(exec_row:=f"ALUEXEC:0 MFMA SIMD:{simd}", TracingKey("MFMA", ret="JSON"+json.dumps({"link":f"{row}-{idx}"})),
                               Decimal(p._time+(mfma_delay:=4)), Decimal(p._time+mfma_delay+duration))
       row_ends[exec_row] = Decimal(p._time+duration)
