@@ -5,7 +5,7 @@ from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssim
 from tinygrad.uop.ops import axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
+from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
@@ -235,11 +235,10 @@ class Scheduler:
             gate, mul = (r0.src[0], r0.src[1]) if (r0:=reduceop.src[0]).op is Ops.WHERE else (None, r0)
             if mul.op is Ops.CAST: mul = mul.src[0]
             ins = mul.src if gate is None else tuple(gate.where(x, UOp.const(0, x.dtype)) for x in mul.src)
-            bss = tc.base_shape_str()
-            srcs = [x.substitute(dict(zip(ne, [ne[i] for i in argsort(p)])), walk=True) for x,p in zip(ins, tc.permutes_for_shape_str(bss))]
+            srcs = [x.substitute({ne[a]: ne[b] for a,b in rl.items()}, walk=True) for x,rl in zip(ins, tc.relabel())]
 
             # get upcast axes for the tensor cores
-            base_upcast_axes = [ne[bss.index(s)].arg[0] for s in tc.base_upcast_axes()]
+            base_upcast_axes = [ne[i].arg[0] for i in tc.base_upcast_axes()]
             upcast_cnt = [int(math.log2(tc.elements_per_thread[i])) for i in range(3)]
             # each operand upcasts its first upcast_cnt axes, the axes only A or B upcast are size 1 so the operands broadcast
             tc_upcast_axes = tuple([tuple([(a, 2 if j < cnt else 1) for j,a in enumerate(base_upcast_axes[:max(cnt, *upcast_cnt[:2])])])
