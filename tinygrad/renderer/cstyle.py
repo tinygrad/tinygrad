@@ -379,8 +379,7 @@ class MetalRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix = ["#include <metal_stdlib>","using namespace metal;"]
-    deduped_wmma_args = dedup([(name, dtype_in, dtype_out) for name, _, dtype_in, dtype_out, _ in wmma_args(uops)])
-    for name, dtype_in, dtype_out in deduped_wmma_args:
+    for name, _, dtype_in, dtype_out, _ in wmma_args(uops):
       dstr_out, dstr_in = self._render_dtype(dtype_out, 2, AddrSpace.REG), self._render_dtype(dtype_in, 2, AddrSpace.REG)
       prefix.append(
 f"""{dstr_out} __{name}({dstr_in} a, {dstr_in} b, {dstr_out} c){{
