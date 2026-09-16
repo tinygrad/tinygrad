@@ -33,6 +33,7 @@ class HCQInfo:
 def all_devices_in(d:Any, c:frozenset[str]) -> bool: return {x.split(":")[0] for x in to_tuple(d)} <= c
 
 def get_enqueue_devs(call:UOp) -> Any|None:
+  if call.op is not Ops.CALL: return None # entries can be AFTER-wrapped calls
   if call.body.op not in (Ops.PROGRAM, Ops.COPY): return None # only these bodies can be enqueued
   if not (bufs:=get_call_arg_uops(call)): return None
   if call.body.op is Ops.COPY: bufs = bufs[::-1] # copies push from the src device: p2p writes are faster than reads
@@ -260,12 +261,12 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
   devs = [() if (d:=get_enqueue_devs(c)) is None else tuple(Device.canonicalize(x) for x in to_tuple(d)) for c in l.src]
 
   # assign to queues
-  peers = sorted({Device.canonicalize(d) for c in l.src if c.body.op is Ops.COPY
+  peers = sorted({Device.canonicalize(d) for c in l.src if c.op is Ops.CALL and c.body.op is Ops.COPY
                   for b in get_call_arg_uops(c) for d in to_tuple(b.device) if d.split(":")[0] == "AMD"})
   num_queues = max(1, getenv("HCQ_NUM_SDMA", min(len(peers), 8) if ALL2ALL >= 1 else 1))
-  queues = ["COMPUTE:0" if c.body.op is Ops.PROGRAM else "COPY:0" for c in l.src]
+  queues = ["COMPUTE:0" if c.op is Ops.CALL and c.body.op is Ops.PROGRAM else "COPY:0" for c in l.src]
   for i, c in enumerate(l.src):
-    if c.body.op is Ops.COPY and all(b.device in peers for b in get_call_arg_uops(c)):
+    if c.op is Ops.CALL and c.body.op is Ops.COPY and all(b.device in peers for b in get_call_arg_uops(c)):
       queues[i] = f"COPY:{(peers.index(c.src[1].device) - peers.index(c.src[2].device) - 1) % len(peers) % num_queues}"
 
   srcs:list[UOp] = []

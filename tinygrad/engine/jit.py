@@ -148,14 +148,15 @@ class GraphRunner:
 
   @staticmethod
   def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
-    return new_call.body.op is Ops.PROGRAM and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
+    return new_call.op is Ops.CALL and new_call.body.op is Ops.PROGRAM and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
 
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner):
   @staticmethod
   def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
     # Devices must be the same type
-    return new_call.body.op in (Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
+    return new_call.op is Ops.CALL and new_call.body.op in (Ops.PROGRAM, Ops.COPY) and \
+      len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
 ReturnType = TypeVar('ReturnType')
 @dataclass
@@ -183,7 +184,7 @@ class CapturedJit(Generic[ReturnType]):
   def free_intermediates(self):
     # drop graph runners
     for call in self.linear.src:
-      if call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg == "graph": graph_cache.pop(call.body, None)
+      if call.op is Ops.CALL and call.body.op is Ops.CUSTOM_FUNCTION and call.body.arg == "graph": graph_cache.pop(call.body, None)
     for u in self._written_uops:
       if u.op is not Ops.BUFFER or (buf:=u.arg.buffer) is None: continue
       for b in (buf.bufs if isinstance(buf, MultiBuffer) else (buf,)):
