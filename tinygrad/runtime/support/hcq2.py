@@ -173,9 +173,13 @@ pm_insert_copy_staging = PatternMatcher([
 class HCQDepsTracker(DepsTracker):
   @staticmethod
   def _key(a:UOp) -> tuple[Any, int, int]: # (base, lane) and the byte range: overlapping views of one base depend
-    lane, view = (a.arg, a.src[0]) if a.op is Ops.MSELECT else (None, a)
-    base, off = unwrap_view(view)
-    return (base, lane), off, off + view.max_numel() * view.dtype.itemsize
+    base, off = unwrap_view(a)
+    lane = None
+    if base.op is Ops.MSELECT:
+      lane = base.arg
+      base, inner_off = unwrap_view(base.src[0])
+      off += inner_off
+    return (base, lane), off, off + a.max_numel() * a.dtype.itemsize
 
 @dataclass
 class BatchCtx:
