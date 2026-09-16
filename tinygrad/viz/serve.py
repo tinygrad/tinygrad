@@ -370,6 +370,8 @@ wave_colors = {**{x:"#1F7857" for x in ["WMMA", "MFMA"]}, **{x:"#ffffc0" for x i
                "STORE": "#4fa3cc", **{x:"#b2b7c9" for x in ["VMEM", "SGMEM"]}, "LDS": "#9fb4a6", "IMMEDIATE": "#f3b44a", "BARRIER": "#d00000",
                "JUMP_NO": "#fb8500", "JUMP": "#ffb703", "WAVERDY": "#1a2a2a"}
 
+MFMA_RE = r"V_MFMA_(?:SCALE_)?(F32|I32|F64)_(4|16|32)X\d+X\d+(_\d+B)?_(F32|F16|BF16|I8|F64|(?:BF8|FP8)_(?:BF8|FP8)|F8F6F4)"
+
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, None, None]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
@@ -413,6 +415,19 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
     yield (e:=ProfileRangeEvent(row, TracingKey(name, ret="JSON"+json.dumps(link) if link else None), Decimal(start_time), Decimal(end_time)))
     row_ends[row] = unwrap(e.en)
+    if name == "VALU_MAI_MFMA" and (mfma:=re.fullmatch(MFMA_RE, (inst:=unwrap(info).inst).op_name)):
+      # derive exec from dispatch and inst, CDNA doesn't have ALUEXEC packets
+      out_type, m, blocks, in_type = mfma.groups()
+      duration = {"4":8, "16":16, "32":32}[m]
+      if out_type == "F64": duration = 32 if m == "4" else 64
+      elif m != "4" and (blocks or in_type == "F32"): duration *= 2
+      elif in_type == "F8F6F4" and (getattr(inst, "cbsz") < 2 or getattr(inst, "blgp") < 2): duration *= 2
+      if (exec_row:=f"ALUEXEC:0 MFMA SIMD:{simd}") not in row_ends: yield ProfilePointEvent(exec_row, "JSON", "pcMap", pc_map, ts=Decimal(0))
+      # TODO: there should be a gap between instruction issue and exec, what is it?
+      mfma_delay = 4
+      yield ProfileRangeEvent(exec_row, TracingKey("MFMA", ret="JSON"+json.dumps({"link":f"{row}-{idx}"})), Decimal(p._time+mfma_delay),
+                              Decimal(p._time+mfma_delay+duration))
+      row_ends[exec_row] = Decimal(p._time+duration)
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:
       if (barrier:=curr_barrier.pop(wave, None)) is not None: barrier.en = Decimal(p._time)
