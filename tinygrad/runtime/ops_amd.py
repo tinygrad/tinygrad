@@ -827,7 +827,8 @@ class USBIface(PCIIface):
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False,
             **kwargs) -> BufferStorage:
     # everything, even host-style signals, lives in vram: gpu writes into the bridge's own memory collide with an armed 0xF2 read stream
-    return super().alloc(size, host=False, uncached=uncached, cpu_access=cpu_access or host, contiguous=contiguous, force_devmem=True, **kwargs)
+    return super().alloc(size, host=False, uncached=uncached, cpu_access=cpu_access or host or (size <= 65536 and size % 4 == 0),
+                         contiguous=contiguous, force_devmem=True, **kwargs)
 
   def sleep(self, timeout): pass
 
@@ -886,6 +887,7 @@ class AMDDevice(Compiled):
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.PARAM, tag="scratch", name="b"), lambda ctx, b: ctx.scratch_buffer(b.max_numel())),
       (UPat(Ops.PARAM, tag="program", name="b"), lambda ctx, b: ctx.program_buffer(b)),
+      (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.queue_buffer(b.tag)),
     ]) + self.pm_bufferize
 
     if self.is_usb: # the submits write the rings over the link, the copies go through the controller's sram (usb.py)
@@ -926,16 +928,14 @@ class AMDDevice(Compiled):
     cwsr_buffer = Buffer(self.device, cwsr_buffer_size, dtypes.uint8, preallocate=True) if ctx_save_restore_size else None
     eop_buffer = Buffer(self.device, eop_buffer_size, dtypes.uint8, preallocate=True) if eop_buffer_size else None
 
-    queue = (self.iface.create_queue(queue_type, ring, gart, rptr=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
+    return self.iface.create_queue(queue_type, ring, gart, rptr=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
              wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
-             ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx))
+             ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx)
 
-    qname = f"{'COPY' if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA else 'COMPUTE'}:{idx}"
-    self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag=to_name(name, qname)), lambda ctx, b=getattr(queue, name): b) for name in ["ring", "write_ptr", "doorbell", "put_value"]
-    ]) + self.pm_bufferize
-
-    return queue
+  def queue_buffer(self, tag):
+    if not isinstance(tag, str) or not tag.startswith(("ring_", "write_ptr_", "doorbell_", "put_value_")): return None
+    name, queue, idx = tag.rsplit('_', 2)
+    return getattr(self.compute_queue if queue == 'compute' else self.sdma_queue(int(idx)), name)
 
   @functools.cached_property
   def compute_queue(self) -> AMDQueueDesc:

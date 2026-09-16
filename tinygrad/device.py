@@ -119,7 +119,11 @@ class Buffer:
       if initial_value is not None:
         self.allocate()
         if (host:=self.get_storage().host) is not None: host[:] = memoryview(initial_value).cast('B')
-        else: self.copy_from(Buffer("PYTHON", self.size, self.dtype, opaque=memoryview(bytearray(initial_value))))
+        else:
+          src = Buffer("PYTHON", self.nbytes, dtypes.uint8, opaque=memoryview(bytearray(initial_value)))
+          for offset in range(0, self.nbytes, 1 << 20):
+            size = min(self.nbytes - offset, 1 << 20)
+            self.view(size, dtypes.uint8, offset).ensure_allocated().copy_from(src.view(size, dtypes.uint8, offset).ensure_allocated())
         if isinstance(initial_value, pickle.PickleBuffer): initial_value.release()
     else:
       assert base._base is None, "base can't have a base"
