@@ -91,10 +91,10 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
-  assert c.src[0].op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
+  assert c.body.op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
   # the RETURNED srcs are the call outputs (slots are src positions)
   ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
-  srcs = tuple(st.src[1] for st in c.src[0].src if st.op is Ops.STORE)
+  srcs = tuple(st.src[1] for st in c.body.src if st.op is Ops.STORE)
 
   # add the outputs to the call
   outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
@@ -176,8 +176,8 @@ def canonicalize_unbound_buffer(ctx:AllocCtx, b:UOp):
   return ctx.unbound.get(b)
 
 def canonicalize_call_body(ctx:AllocCtx, c:UOp):
-  body = graph_rewrite(c.src[0], pm_canonicalize_unbound, ctx=ctx, bottom_up=True)
-  return c.replace(src=(body,)+c.src[1:]) if body is not c.src[0] else None
+  body = graph_rewrite(c.body, pm_canonicalize_unbound, ctx=ctx, bottom_up=True)
+  return c.replace(src=(body,)+c.src[1:]) if body is not c.body else None
 
 pm_canonicalize_unbound = PatternMatcher([
   (UPat(Ops.CALL, name="c"), canonicalize_call_body),
