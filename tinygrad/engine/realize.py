@@ -108,6 +108,8 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
 runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp, cache=True):
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
+    if ast.arg.target.device == "CPU" and ast.arg.target.arch != (renderer:=Device[device].renderer).target.arch:
+      ast = to_program(ast.src[0], renderer)
     runtime = Device[device].runtime(ast.to_elf())
     if cache: runtime_cache[key] = runtime
   return runtime
