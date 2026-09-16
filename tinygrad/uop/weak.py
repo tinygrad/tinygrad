@@ -92,7 +92,7 @@ pm_uncast_const = PatternMatcher([(UPat(GroupOp.Broadcastable, name="u"), uncast
 def cast_consts(u:UOp) -> UOp|None:
   if u.op is Ops.CAST and u.src[0].op is Ops.CONST: return None  # a committed const's CONST is its value, not an edge
   if (dts:=derived_dtypes(u, u.src)) is not None: u = commit_weak_consts(u, dts[0])
-  # bool is the one strong bare dtype: .cast(bool) would fold at construction. Invalid never commits.
-  return u.replace(src=tuple(UOp.cconst(s.val, s.dtype) if s.op is Ops.CONST and s.dtype is dtypes.bool and not s.is_invalid else s for s in u.src))
+  # .cast folds at the dtypes a bare CONST derives, so the width is forced. Invalid never commits.
+  return u.replace(src=tuple(UOp.cconst(s.val, s.commit_dtype(dtypes.int)) if s.op is Ops.CONST and not s.is_invalid else s for s in u.src))
 
 pm_cast_const = PatternMatcher([(UPat(GroupOp.All, name="u", custom_early_reject={Ops.CONST}), cast_consts)])

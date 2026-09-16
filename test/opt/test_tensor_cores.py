@@ -89,6 +89,16 @@ class TestTensorCores(unittest.TestCase):
       with self.subTest(tc=tc):
         helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
+  @unittest.skipUnless(Device.DEFAULT == "PYTHON" and any(tc.dtype_out is dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+                       "test requires emulated half tensor cores")
+  def test_tensor_cores_emulated_half_store(self):
+    # a dtype decomp stores the WMMA output element by element, every index a typed const
+    for tc in [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_out is dtypes.half]:
+      with self.subTest(tc=tc):
+        a, b = Tensor.rand(tc.dims[1], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
+        ast = replace_opts(helper_realized_ast(a.matmul(b, dtype=dtypes.half))[0], [Opt(OptOps.TC, 0, (-1, 0, 1))])
+        with Context(EMULATED_DTYPES="half", SPEC=2): to_program(ast, Device[Device.DEFAULT].renderer)
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_partial_sum_in_accumulator(self):
     # the heuristic tiles M, N and K after the TC opt: every partial sum enters the next WMMA's accumulator, never an add after it
