@@ -71,6 +71,15 @@ class TestHCQ2Deps(unittest.TestCase):
     # the copy queue waits for its device and for the peer, then signals and bumps. the peer waits for the signal before its bump
     self.assertEqual(streams, {"COPY:0": ["barrier", "wait", "wait", "store", "store"], "COMPUTE:0": ["barrier", "wait", "wait", "store"]})
 
+  def test_dependencies_through_selected_slices(self):
+    b = UOp.param(0, dtypes.float32, 64, device=("AMD", "AMD:1"))
+    for view in [b.mselect(0).shrink(((8, 16),)), b.shrink(((8, 16),)).mselect(0), b.shrink(((4, 32),)).mselect(0).shrink(((4, 12),))]:
+      tracker = hcq2.HCQDepsTracker()
+      tracker.access_resources([view], [0], 0)
+      self.assertEqual(tracker.access_resources([b.mselect(1)], [], 1), [])
+      self.assertEqual(tracker.access_resources([b.mselect(0).shrink(((16, 24),))], [], 2), [])
+      self.assertEqual(tracker.access_resources([b.mselect(0).shrink(((12, 20),))], [], 3), [0])
+
   def test_disjoint_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="CPU")
     for write in ([], [0]):
