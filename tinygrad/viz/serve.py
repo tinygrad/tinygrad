@@ -419,11 +419,9 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       # derive exec from dispatch and inst, CDNA doesn't have ALUEXEC packets
       _, m, blocks, inp_type = mfma.groups()
       duration = {"4":8, "16":16, "32":32}[m]
-      if m != "4" and (blocks or inp_type == "F32"): duration *= 2
-      elif inp_type == "F8F6F4" and (getattr(inst, "cbsz") < 2 or getattr(inst, "blgp") < 2): duration *= 2
-      exec_row = f"ALUEXEC:0 MFMA SIMD:{simd}"
-      yield ProfileRangeEvent(exec_row, TracingKey("MFMA", ret="JSON"+json.dumps({"link":f"{row}-{idx}"})), Decimal(p._time+(mfma_delay:=4)),
-                              Decimal(p._time+mfma_delay+duration))
+      if (m != "4" and (blocks or inp_type == "F32")) or (inp_type == "F8F6F4" and (inst.cbsz < 2 or inst.blgp < 2)): duration *= 2
+      yield ProfileRangeEvent(exec_row:=f"ALUEXEC:0 MFMA SIMD:{simd}", TracingKey("MFMA", ret="JSON"+json.dumps({"link":f"{row}-{idx}"})),
+                              Decimal(p._time+(mfma_delay:=4)), Decimal(p._time+mfma_delay+duration))
       row_ends[exec_row] = Decimal(p._time+duration)
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:
