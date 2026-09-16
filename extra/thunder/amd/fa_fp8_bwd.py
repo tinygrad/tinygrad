@@ -12,7 +12,7 @@ def custom_fp8_backward(*args:UOp, B:int, N:int, H:int, H_KV:int, arch:str):
   lds = UOp.placeholder((132160,), dtypes.uint8, 0, addrspace=AddrSpace.LOCAL)
   sink = UOp.sink(*(a.base for a in args), lds, UOp.special(512,"lidx0"), UOp.special(N//256,"gidx0"),
                   UOp.special(H,"gidx1"), UOp.special(B,"gidx2"),
-                  arg=KernelInfo(name="hk_fa_fp8_backward", estimates=Estimates(ops=5*B*H*N*N*128)))
+                  arg=KernelInfo(name="hk_asm_fa_fp8_backward", estimates=Estimates(ops=5*B*H*N*N*128)))
   return UOp(Ops.PROGRAM,src=(sink,UOp(Ops.LINEAR,src=tuple(UOp(Ops.INS,arg=(inst,dtypes.void)) for inst in build_kernel(B,N,H,H_KV)))))
 
 def unpack_dq(dq:Tensor):
