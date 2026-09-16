@@ -422,7 +422,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
          (ss[-1] == "F8F6F4" and isinstance(info.inst, (VOP3P_MFMA, VOP3PX2)) and (info.inst.cbsz < 2 or info.inst.blgp < 2)): duration *= 2
       yield ProfileRangeEvent(exec_row:=f"ALUEXEC:0 MFMA SIMD:{simd}", TracingKey("MFMA", ret="JSON"+json.dumps({"link":f"{row}-{idx}"})),
                               Decimal(p._time+(mfma_delay:=4)), Decimal(p._time+mfma_delay+duration))
-      row_ends[exec_row] = Decimal(p._time+duration)
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:
       if (barrier:=curr_barrier.pop(wave, None)) is not None: barrier.en = Decimal(p._time)
