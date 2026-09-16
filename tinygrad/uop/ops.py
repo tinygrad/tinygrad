@@ -1725,7 +1725,6 @@ class RewriteContext:
     while stack:
       n, processed = stack.pop()
       if n in self.replace: continue
-      opaque = n.op is Ops.CALL and isinstance(n.arg, CallInfo) and not self.enter_calls
       if not processed:
         # bottom-up: try bpm on original node first, if it rewrites, use result as-is (no traversal into replacement)
         if self.bpm is not None and (rewritten:=self.cached_bpm_rewrite(n)) is not None:
@@ -1734,11 +1733,12 @@ class RewriteContext:
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
         # CALL bodies are never rewritten separately, rewrites that need them pass enter_calls=True
-        for x in reversed(n.src[1:] if opaque else n.src):
+        if n.op is Ops.CALL and not self.enter_calls and isinstance(n.arg, CallInfo): self.replace[n.body] = n.body
+        for x in reversed(n.src):
           if x not in self.replace: stack.append((x, False))
       else:
         # rebuild node with rewritten srcs
-        new_src = tuple(x if opaque and i == 0 else self.replace.get(x, x) for i,x in enumerate(n.src))
+        new_src = tuple(self.replace.get(x, x) for x in n.src)
         new_n = UOp(n.op, new_src, n.arg, n.tag) if new_src != n.src else n
         # top-down: try pm on rebuilt node, use result as-is (no re-traversal)
         if self.pm is not None and (rewritten:=self.pm_rewrite(new_n)) is not None: new_n = rewritten
