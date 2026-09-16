@@ -99,7 +99,7 @@ pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: c
 def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   if c.arg.precompile: return None
   params: list[UOp] = []
-  graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")
+  graph_rewrite(c.body, pm_gather_params, bottom_up=True, ctx=params, name="gather params")
   params = sorted(params, key=lambda x: x.arg.slot)
   # the RETURNED inputs bind positionally to the output PARAMs, just like the args bind to the input PARAMs
   args = c.src[1:]
@@ -123,7 +123,7 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
     elif a.shape != ():
       raise TypeError(f"arg {i} shape mismatch: expected scalar, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
-  return c.src[0].substitute(dict_map, walk=True)
+  return c.body.substitute(dict_map, walk=True)
 
 # shape-changing bitcast
 def expand_bitcast(bc:UOp) -> UOp|None:

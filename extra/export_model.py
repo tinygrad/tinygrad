@@ -15,7 +15,7 @@ EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CPU", "CUDA", "CL"]
 _KERNEL_ASTS = {Ops.SINK, Ops.PROGRAM}
 def iter_kernel_calls(linear:UOp):
   """Yield kernel CALLs from a LINEAR UOp. Toposort descends naturally into CUSTOM_FUNCTION graph batches; gate stops at kernel ASTs."""
-  return (u for u in linear.toposort(gate=lambda x: x.op not in _KERNEL_ASTS) if u.op is Ops.CALL and u.src[0].op in _KERNEL_ASTS)
+  return (u for u in linear.toposort(gate=lambda x: x.op not in _KERNEL_ASTS) if u.op is Ops.CALL and u.body.op in _KERNEL_ASTS)
 
 def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], List, Dict[str,Tuple[int,DType,int]], Dict[str,Buffer]]:
   output_name = {id(b): f"output{i}" for i, b in enumerate(output_bufs)}
