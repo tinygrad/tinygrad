@@ -445,16 +445,9 @@ jobs:
         model: [driving_supercombo, dmonitoring_model]
         include:
           - model: driving_supercombo
-            timing: 28
-          - dev: QCOM:IR3
-            model: driving_supercombo
-            timing: 29
+            timing: 20
           - model: dmonitoring_model
-            timing: 12.5
-          # IR3 dmonitoring is slightly slower
-          - dev: QCOM:IR3
-            model: dmonitoring_model
-            timing: 13.0
+            timing: 12
       fail-fast: false
     name: openpilot ${{ matrix.model }} (DEV=${{ matrix.dev }})
     runs-on: [self-hosted, Linux, comma4]

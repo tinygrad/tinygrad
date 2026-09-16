@@ -40,7 +40,7 @@ def load_pickle(f, *, out_of_band=False):
   return pickle.load(io.BytesIO(opcodes), buffers=buffers())
 
 
-@Context(OPENPILOT_HACKS=1, TC_OPT=2, TC_MIN_GLOBALS=32)
+@Context(OPENPILOT_HACKS=1, **{'AMD': {'TC_OPT': 2, 'TC_MIN_GLOBALS': 32}}.get(Device.DEFAULT, {}))
 def compile_jit(function:Callable, make_inputs:Callable[[int], tuple[tuple, dict]], benchmark_runs=20, *, out_of_band=False):
   """The factory creates fresh inputs, including any mutable state, for each seed."""
   if benchmark_runs < 1: raise ValueError("benchmark_runs must be at least 1")
