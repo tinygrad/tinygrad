@@ -292,15 +292,9 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testopenpilot:
-    name: openpilot ${{ matrix.model }} (CPU)
-    strategy:
-      fail-fast: false
-      matrix:
-        model: [driving_supercombo, dmonitoring_model]
+    name: openpilot compile tests
     env:
-      DEV: CPU:LLVM
       LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
-      MODEL_PKL: /tmp/openpilot.pkl
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
@@ -312,20 +306,31 @@ jobs:
           key: openpilot-compile
           deps: testing
           llvm: 'true'
-      - name: Compile and test model
+          opencl: 'true'
+      - name: Test models (DEV=CPU:LLVM)
+        env:
+          DEV: CPU:LLVM
         run: |
-          python examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/${{ matrix.model }}.onnx" "$MODEL_PKL" --benchmark-runs 1
-          python examples/openpilot/load_pickle.py --run "$MODEL_PKL" --runs 3
-          python -m pytest -n12 test/external/external_test_compile.py
-      - name: Compile driving warp
+          for model in driving_supercombo dmonitoring_model; do
+            python examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/$model.onnx" /tmp/openpilot.pkl --benchmark-runs 1
+            python examples/openpilot/load_pickle.py --run "$MODEL_PKL" --runs 3
+          done
+          MODEL_PKL=/tmp/openpilot.pkl python -m pytest -n=auto test/external/external_test_compile.py
+      - name: Test warps (DEV=CPU:LLVM)
+        env:
+          DEV: CPU:LLVM
         run: |
-          python examples/openpilot/compile_warp.py --output /tmp/warp.pkl --benchmark-runs 1 \
-            --frame "1928,1208,2048,1216,608,${{ matrix.model == 'driving_supercombo' && '3735552' || '4804608' }}" \
-            --warp-to ${{ matrix.model == 'driving_supercombo' && '512x256' || '1440x960' }} \
-            --layout ${{ matrix.model == 'driving_supercombo' && 'yuv420' || 'luma' }} \
-            ${{ matrix.model == 'driving_supercombo' && '--frames 2' || '--border-fill 16 --transform-device NPY' }}
-      - name: Run warp pickle
-        run: python examples/openpilot/load_pickle.py --run /tmp/warp.pkl --runs 3
+          python examples/openpilot/compile_warp.py --output /tmp/warp_driving.pkl --benchmark-runs 1 --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2
+          python examples/openpilot/load_pickle.py --run /tmp/warp_driving.pkl --runs 3
+          python examples/openpilot/compile_warp.py --output /tmp/warp_monitoring.pkl --benchmark-runs 1 --frame 1928,1208,2048,1216,608,4804608 --warp-to 1440x960 --layout luma --border-fill 16 --transform-device NPY
+          python examples/openpilot/load_pickle.py --run /tmp/warp_monitoring.pkl --runs 3
+      - name: Test driving_supercombo (DEV=CL::IMAGE_PITCH_ALIGNMENT=64)
+        env:
+          # IMAGE_PITCH_ALIGNMENT=64 matches adreno 630
+          DEV: CL::IMAGE_PITCH_ALIGNMENT=64
+        run: |
+          VIZ=1 IMAGE=1 FLOAT16=1 python examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/driving_supercombo.onnx" /tmp/openpilot_viz.pkl --benchmark-runs 1
+          python examples/openpilot/check_viz.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
