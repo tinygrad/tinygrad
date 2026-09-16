@@ -108,9 +108,11 @@ class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:
 class Buffer:
   profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
-               initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
+               initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False,
+               allocator:Allocator|None=None):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype, self.offset, self.allocated_views, self._base = Device.canonicalize(device), size, dtype, offset, 0, base
+    if allocator is not None: self.allocator = allocator
     self.options = options if options is not None else BufferSpec()
     self._storage:BufferStorage|None = None
     if base is None:
