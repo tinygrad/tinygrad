@@ -376,6 +376,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
                                           CDNA_ISSUE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND, WAVERDY)
+  from tinygrad.runtime.autogen.amd.cdna.ins import VOP3PX2
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
@@ -415,11 +416,11 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
     yield (e:=ProfileRangeEvent(row, TracingKey(name, ret="JSON"+json.dumps(link) if link else None), Decimal(start_time), Decimal(end_time)))
     row_ends[row] = unwrap(e.en)
-    if name == "VALU_MAI_MFMA" and (mfma:=re.fullmatch(MFMA_RE, (inst:=unwrap(info).inst).op_name)):
+    if name == "VALU_MAI_MFMA" and isinstance(info.inst, VOP3PX2) and (mfma:=re.fullmatch(MFMA_RE, info.inst.op_name)):
       # derive exec from dispatch and inst, CDNA doesn't have ALUEXEC packets
       _, m, blocks, inp_type = mfma.groups()
       duration = {"4":8, "16":16, "32":32}[m]
-      if (m != "4" and (blocks or inp_type == "F32")) or (inp_type == "F8F6F4" and (inst.cbsz < 2 or inst.blgp < 2)): duration *= 2
+      if (m != "4" and (blocks or inp_type == "F32")) or (inp_type == "F8F6F4" and (info.inst.cbsz < 2 or info.inst.blgp < 2)): duration *= 2
       yield ProfileRangeEvent(exec_row:=f"ALUEXEC:0 MFMA SIMD:{simd}", TracingKey("MFMA", ret="JSON"+json.dumps({"link":f"{row}-{idx}"})),
                               Decimal(p._time+(mfma_delay:=4)), Decimal(p._time+mfma_delay+duration))
       row_ends[exec_row] = Decimal(p._time+duration)
