@@ -540,11 +540,9 @@ jobs:
     - name: openpilot compile big_driving_supercombo
       run: |
         GMMU=0 DEV=USB+AMD:LLVM python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx" openpilot.pkl --out-of-band
-        BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/load_pickle.py --run openpilot.pkl --out-of-band
+        BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=25 python3 examples/openpilot/load_pickle.py --run openpilot.pkl --out-of-band
     - name: openpilot load_pickle big_driving_supercombo
       run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=25 python3 examples/openpilot/load_pickle.py openpilot.pkl
-    - name: openpilot run_pickle big_driving_supercombo
-      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_run_pickle GMMU=0 DEV=USB+AMD ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/load_pickle.py --run openpilot.pkl --out-of-band
     - name: compile driving warp
       run: GMMU=0 DEV=USB+AMD:LLVM python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output warp.pkl
     - name: run warp pickle
