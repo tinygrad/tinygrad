@@ -1777,10 +1777,9 @@ class RewriteContext:
           stack.append((x, 0, x))
           on_stack.add(x)
       elif stage == 1:
-        # NOTE: machine code CALLs get placed as the sink of their own rewrite
-        # must be excluded from normal waitlist handling to avoid cycle
+        # NOTE: machine code CALLs get placed as the sink of their own rewrite must be excluded from normal waitlist handling to avoid cycle
         circular = new_n.op is Ops.CALL and not self.enter_calls
-        tmp = [new_n.src[0]] if circular else []
+        tmp = [new_n.body] if circular else []
         for x in (new_n.src[1:] if circular else new_n.src):
           if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
             # source not ready: register in waitlist instead of spinning
