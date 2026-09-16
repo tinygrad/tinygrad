@@ -1252,10 +1252,7 @@ def _compile_mfma(inst: irc.VOP3P|irc.VOP3PX2, ctx: _Ctx) -> UOp:
     if is_fp8: return _FUNCS[f"{fp8_fmt}_to_f32"](raw >> UOp.const(sub_idx * 8, dtypes.uint32)).bitcast(dtypes.uint32)
     h = (raw >> UOp.const(sub_idx * 16, dtypes.uint32)) & UOp.const(0xFFFF, dtypes.uint32)
     if is_bf16: return h << UOp.const(16, dtypes.uint32)  # bf16 is the upper 16 bits of f32
-    # f16 -> f32 bit pattern, done in integer domain so the optimizer can't fold away the conversion
-    sign, exp, mant = (h >> _c(15)) & _c(1), (h >> _c(10)) & _c(0x1F), h & _c(0x3FF)
-    f32_bits = (sign << _c(31)) | ((exp + _c(112)) << _c(23)) | (mant << _c(13))
-    return exp.eq(_c(0)).where(_c(0), f32_bits)
+    return _FUNCS['f16_to_f32'](h).bitcast(dtypes.uint32)
 
   def mn_idx(lane: UOp) -> UOp:  # M/N matrix index held by a lane
     if M == 32:  # (lane%32)/16 selects the 16-wide block, (lane%32)%16 the index within it
