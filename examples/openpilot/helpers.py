@@ -3,6 +3,7 @@ import io, pickle, shutil, struct, tempfile, time
 import numpy as np
 from typing import Callable
 from tinygrad import Tensor, TinyJit, Device, Context
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, graph_rewrite
 from tinygrad.nn.state import get_parameters
 
 def allocate_inputs(input_specs, initialize=None):
@@ -71,3 +72,9 @@ def compile_jit(function:Callable, make_inputs:Callable[[int], tuple[tuple, dict
     for ref_group, actual_group in zip(reference, actual, strict=True):
       for ref, value in zip(ref_group, actual_group, strict=True): np.testing.assert_array_equal(ref, value)
   return jit
+
+pm_retargetable = PatternMatcher([
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat()), name="p"), lambda p: p.replace(src=p.src[:-1]) if p.arg.target.device == "CPU" else None)
+])
+
+def make_retargetable(jit): jit.captured._linear = graph_rewrite(jit.captured._linear, pm_retargetable, walk=True, enter_calls=True)
