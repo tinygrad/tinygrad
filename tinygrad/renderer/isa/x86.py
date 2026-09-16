@@ -161,7 +161,7 @@ pre_isel_matcher = PatternMatcher([
 # ***** X86 registers *****
 # TODO: make this a UOp property?
 def opcode(x:UOp) -> X86Ops|None: return x.arg.opcode if x.op is Ops.CALL and isinstance(x.arg, InstInfo) else None
-def def_reg(dt:DType, reg:Register) -> UOp: return UOp.placeholder((1,), dt, -1-reg.index, addrspace=AddrSpace.REG).ins(X86Ops.DEFINE, tag=(reg,))
+def def_reg(dt:DType, reg:Register) -> UOp: return UOp(Ops.NOOP).bitcast(dt).ins(X86Ops.DEFINE, tag=(reg,))
 # undefined operand, used for VEX instructions
 def undef(): return UOp(Ops.NOOP)
 
@@ -736,7 +736,6 @@ class X86Renderer(ISARenderer):
   # the value of a BUFFER is its address, it moves through registers and the stack as a 64bit int
   def fill(self, spill_slot:int, x:UOp, reg:Register) -> UOp:
     is_xmm = reg.cons[0].size == 16
-    dt = dtypes.uint64 if x.op is Ops.BUFFER else x.dtype
     disp = UOp.cconst(spill_slot, dtypes.int32)
     return x.ins(X86Ops.VMOVUPS if is_xmm else X86Ops.MOV, *fold_address(stack_pointer.index(disp)), tag=(reg,))
 
