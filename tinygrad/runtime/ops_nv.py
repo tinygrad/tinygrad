@@ -129,7 +129,7 @@ class NVComputeQueue(NVQueue):
   def __init__(self, ctx, submit):
     super().__init__(ctx, submit)
 
-    progs = [nv_build_program(self.dev, u.src[0], self.devs)[0] for u in self.lin.src if u.op is Ops.CALL]
+    progs = [nv_build_program(self.dev, u.body, self.devs)[0] for u in self.lin.src if u.op is Ops.CALL]
     self.qmd_sz = round_up(QMD(self.dev).sz * 4, 256)
     self.stride = self.qmd_sz + max([p.kernargs_size for p in progs], default=0)
     self.qmd_buf = UOp.placeholder((len(progs) * self.stride,), dtypes.uint8, device=self.devs, tag=to_name("qmd", self.queue))
@@ -754,7 +754,7 @@ class NVDevice(Compiled):
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES, power_params)
 
     self.pma_buf = Buffer(self.device, size:=getenv("PMA_BUFFER_SIZE", 512) << 20, dtypes.uint8,
-                          opaque=self.iface.alloc(size, uncached=True, cpu_cached=True, cpu_access=True))
+                          opaque=self.iface.alloc(size, host=True, uncached=True, cpu_cached=True, cpu_access=True))
     self.pma_bytes = Buffer(self.device, size:=0x1000, dtypes.uint8,
                             opaque=self.iface.alloc(size, uncached=True, cpu_cached=True, cpu_access=self.is_nvd(), read_only=True))
     self.pma_rptr = 0
