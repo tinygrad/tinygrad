@@ -299,8 +299,6 @@ jobs:
         model: [driving_supercombo, dmonitoring_model]
     env:
       DEV: CPU:LLVM
-      JIT_BATCH_SIZE: "0"
-      OPENPILOT_HACKS: "1"
       LFS_SHA: "51b12d20a25b76fa8a5717c2e5af01f148e469e2"
       MODEL_PKL: /tmp/openpilot.pkl
     runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}

@@ -1,8 +1,8 @@
 """Shared compilation and input allocation for model and warp artifacts."""
 import io, pickle, shutil, struct, tempfile, time
-from collections.abc import Callable
 import numpy as np
-from tinygrad import Tensor, TinyJit, Device
+from typing import Callable
+from tinygrad import Tensor, TinyJit, Device, Context
 from tinygrad.nn.state import get_parameters
 
 def allocate_inputs(input_specs, initialize=None):
@@ -40,6 +40,7 @@ def load_pickle(f, *, out_of_band=False):
   return pickle.load(io.BytesIO(opcodes), buffers=buffers())
 
 
+@Context(OPENPILOT_HACKS=1, TC_OPT=2, TC_MIN_GLOBALS=32)
 def compile_jit(function:Callable, make_inputs:Callable[[int], tuple[tuple, dict]], benchmark_runs=20, *, out_of_band=False):
   """The factory creates fresh inputs, including any mutable state, for each seed."""
   if benchmark_runs < 1: raise ValueError("benchmark_runs must be at least 1")
