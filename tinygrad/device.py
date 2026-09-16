@@ -511,7 +511,7 @@ class Compiled:
 
   def _select_renderer(self) -> Renderer:
     assert (rn:=next((self._renderer_name(r) for r in self.renderers if getenv(f"{self.device}_{self._renderer_name(r)}")), None)) is None, \
-      f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} or {self.device}_CC={rn} instead"
+      f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} instead"
     t = DEV.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
     return select_first_inited(select_by_name(self.renderers, self._renderer_name, t.renderer, f"{self.device} has no renderer {t.renderer!r}"),
                                f"No renderer for {self.device} is available", self.cached_renderer, t)
