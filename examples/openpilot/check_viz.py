@@ -1,4 +1,4 @@
-import os, pickle, sys
+import pickle, sys
 from tinygrad.helpers import getenv, is_image_shape, temp
 from tinygrad.uop.ops import Ops
 from tinygrad.viz.serve import VizData, _reconstruct
