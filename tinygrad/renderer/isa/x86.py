@@ -161,7 +161,7 @@ pre_isel_matcher = PatternMatcher([
 # ***** X86 registers *****
 # TODO: make this a UOp property?
 def opcode(x:UOp) -> X86Ops|None: return x.arg.opcode if x.op is Ops.CALL and isinstance(x.arg, InstInfo) else None
-def def_reg(dt:DType, reg:Register) -> UOp: return UOp.placeholder((1,), dt, addrspace=AddrSpace.REG).ins(X86Ops.DEFINE, tag=(reg,))
+def def_reg(dt:DType, reg:Register) -> UOp: return UOp.placeholder((1,), dt, -1-reg.index, addrspace=AddrSpace.REG).ins(X86Ops.DEFINE, tag=(reg,))
 # undefined operand, used for VEX instructions
 def undef(): return UOp(Ops.NOOP)
 
@@ -509,11 +509,16 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   jmp = UOp(Ops.NOOP).ins(op, cond, tag=f".LOOP_{ctx.loop_label[x.src[1]]}")
   return jmp, [jmp]
 
+# frame is greedy allocated before first REAL (DEFINE is pseudo) instruction, doesn't depend on graph ordering
+def alloc_frame(ctx:X86LinearContext, x:UOp) -> tuple[UOp, list[UOp]]|None:
+  if not ctx.stack_size or ctx.frame_allocated or opcode(x) is X86Ops.DEFINE: return None
+  ctx.frame_allocated = True
+  return (x, [stack_pointer.ins(X86Ops.SUBi, imm(dtypes.int32, ctx.stack_size)), x])
+
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
-  # the frame is allocated after the stack pointer define at the top of the program and freed before RET
-  (UPat(Ops.CALL, name="x"), lambda ctx,x: (x, [x, x.ins(X86Ops.SUBi, imm(dtypes.int32, ctx.stack_size))])
-    if ctx.stack_size and opcode(x) is X86Ops.DEFINE and rdef(x) == RSP else None),
+  # the frame is allocated before the first real instruction (see alloc_frame) and freed before RET
+  (UPat(Ops.CALL, name="x"), alloc_frame),
   (UPat(Ops.CALL, name="x"), lambda ctx,x: (x, [stack_pointer.ins(X86Ops.ADDi, imm(dtypes.int32, ctx.stack_size)), x])
     if ctx.stack_size and opcode(x) is X86Ops.RET else None),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
@@ -696,6 +701,7 @@ class X86LinearContext(LinearContext):
   def __init__(self, ren:X86Renderer):
     super().__init__(ren)
     self.lock: UOp|None = None
+    self.frame_allocated = False
   def assign_spill_slot(self, r:Register, u:UOp) -> int:
     sz = r.cons[0].size
     offset = self.stack_size + (sz - self.stack_size % sz) %sz

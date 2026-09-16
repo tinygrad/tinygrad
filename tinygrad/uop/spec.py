@@ -98,8 +98,8 @@ spec_shared = PatternMatcher([
   # a CUSTOM_FUNCTION with srcs is the body of an external call, holding the callee (a function pointer)
   (UPat(Ops.CUSTOM_FUNCTION, name="x", allow_any_len=True), lambda x: isinstance(x.arg, str)),
   # CALL: the arg states the (possibly void) dtype. a CallInfo call has an opaque body, a machine instruction (InstInfo) implements src[0]
-  (UPat(Ops.CALL, name="x"), lambda x: isinstance(x.arg, CallInfo) and x.dtype is x.arg.dtype and
-   (isinstance(x.arg, InstInfo) or x.src[0].op in OPAQUE_CALL_BODIES)),
+  (UPat(Ops.CALL, name="x"), lambda x: isinstance(x.arg, InstInfo) or (isinstance(x.arg, CallInfo) and x.dtype is x.arg.dtype
+    and x.src[0].op in OPAQUE_CALL_BODIES)),
 
   # pattern compiler IR ops (not in tensor/program graphs, but spec-compliant)
   (UPat(Ops.PYLITERAL), lambda: True),

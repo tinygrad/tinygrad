@@ -596,8 +596,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     def bind_opr(u:UOp, slot:int): return (p := u.param_like(slot)).replace(arg=replace(p.arg, addrspace=AddrSpace.OPR))
     # only value (register) producing operands are bound to the graph
     graph = set(self.toposort())
+    src = src if len(src) else self.src
     sink = self.substitute({s:bind_opr(s,i) for i,s in enumerate(src) if s in graph and s.dtype is not dtypes.void})
-    assert "dtype" not in kwargs
     return UOp(Ops.CALL, (sink,) + src, InstInfo(opc), kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"

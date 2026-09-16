@@ -4,7 +4,7 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
 from tinygrad.renderer.isa.x86 import X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm, def_reg
 
-def ins(op, dt, src, tag=None): return UOp(Ops.NOOP).ins(op, *src, dtype=dt, tag=tag)
+def ins(op, dt, src, tag=None): return UOp(Ops.NOOP).bitcast(dt).ins(op, *src, tag=tag)
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only on x86")
 class TestEncodingsX86(unittest.TestCase):
