@@ -5,7 +5,6 @@ from tinygrad.uop.ops import PatternMatcher, UOp, UPat, Ops
 
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
-  dims: tuple[int,int,int] # N, M, K
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
   opts: tuple[str, ...] # ordered tuple of "ux" or "lx" specifying kernel opts to perform. "ux" upcasts dim x and "lx" localizes dim x
@@ -35,6 +34,10 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
             for f,ax in zip((self.frag_a, self.frag_b, frag_c), ("mk", "kn", "mn"))]
   def opt_axes(self, t:str) -> list[int]: return [i for i,opt in enumerate(self.opts) if opt[0] == t]
   @property
+  def dims(self) -> tuple[int,int,int]: # N, M, K. each opt splits its dim by 2, A holds every k bit once
+    n, m = (sum(opt[1] == d for opt in self.opts) for d in "01")
+    return (2**n, 2**m, 2**sum(c[0] == "k" for c in self.frag_a[0]+self.frag_a[1]))
+  @property
   def threads(self) -> int: return 2**len(self.opt_axes("l")) # threads that construct the warp
   @property
   def elements_per_thread(self) -> tuple[int, int, int]: # elements per thread to load/store from A/B/C
@@ -44,18 +47,10 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
     return (list(range(len(self.opts), len(self.axis_coords()))) + self.opt_axes("u"))[::-1]
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
   def __post_init__(self):
-    # all axes have size 2
-    local_axes, upcast_axes = len(self.opt_axes("l")), len(self.opt_axes("u"))
-    assert self.dims[0] * self.dims[1] == 2**(local_axes + upcast_axes), \
-      f"N({self.dims[0]}) x M({self.dims[1]}) != local({2**local_axes}) x upcast({2**upcast_axes}) with opts({self.opts})"
-    # check dims match opts
-    assert self.dims[0] == 2**len(gd:=[x for x in self.opts if x[1] == '0']), f"opts wrong on dims[0], {self.dims[0]} vs {gd}"
-    assert self.dims[1] == 2**len(gd:=[x for x in self.opts if x[1] == '1']), f"opts wrong on dims[1], {self.dims[1]} vs {gd}"
-    # NOTE: the K opts is implictly set by the dim
     # each own bit appears once, only lane bits may be foreign
     for f,dims in zip((self.frag_a, self.frag_b), ("mk","kn")):
       own = {c for c in self.axis_coords() if c[0] in dims}
-      assert len(f[0]) == local_axes, f"fragment {f} has the wrong lane count"
+      assert len(f[0]) == len(self.opt_axes("l")), f"fragment {f} has the wrong lane count"
       assert len(set(f[0]+f[1])) == len(f[0]+f[1]) and set(f[1]) <= own <= set(f[0]+f[1]) <= set(self.axis_coords()), \
         f"fragment {f} isn't distinct bits covering {dims}"
     # A and B must relabel k identically
@@ -69,7 +64,8 @@ def mma(K:int, di:DType, do:DType) -> TensorCore:
   # mma.m16n8kK: lane is threadID_in_group (2 k bits) then groupID (m0-m2); elements lsb first are 2**g k in a 32-bit reg, m3 (A row+8), leftover k
   k, g = [f"k{i}" for i in range(int(math.log2(K)))], int(math.log2(4//di.itemsize))
   lane, elem = tuple(k[g:g+2]), tuple(k[:g]+k[g+2:])
-  return TensorCore(dims=(8,16,K), dtype_in=di, dtype_out=do, opts=("u0","l0","l0","l1","l1","l1","u1"),
+  # (8,16,K)
+  return TensorCore(dtype_in=di, dtype_out=do, opts=("u0","l0","l0","l1","l1","l1","u1"),
     frag_a=(lane+("m0","m1","m2"), elem[:g]+("m3",)+elem[g:]), frag_b=(lane+("n0","n1","n2"), elem))
 cuda_81616 = [mma(16,di,do) for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float),(dtypes.half,dtypes.half)]]
 cuda_81632_f8 = [mma(32,di,dtypes.float) for di in [dtypes.fp8e4m3, dtypes.fp8e5m2]]
@@ -84,10 +80,12 @@ def get_cuda(arch): return cuda_sm89 if (ver:=int(arch[3:])) >= 89 else cuda_sm8
 # ***** AMD *****
 
 # https://gpuopen.com/learn/wmma_on_rdna3/
-amd_rdna3 = [TensorCore(dims=(16,16,16), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","l1","u1","u1","u1"),
+# (16,16,16)
+amd_rdna3 = [TensorCore(dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","l1","u1","u1","u1"),
   frag_a=(("m0", "m1", "m2", "m3", "n0"), ("k0", "k1", "k2", "k3")), frag_b=(("n0", "n1", "n2", "n3", "m0"), ("k0", "k1", "k2", "k3")))
   for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.int8,dtypes.int32)]]
-amd_rdna4 = [TensorCore(dims=(16,16,16), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","u1","l1"),
+# (16,16,16)
+amd_rdna4 = [TensorCore(dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","u1","l1"),
   frag_a=(("m0", "m1", "m2", "m3", "k2"), ("k0", "k1", "k3")), frag_b=(("n0", "n1", "n2", "n3", "k2"), ("k0", "k1", "k3")))
   for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
 
@@ -97,7 +95,8 @@ def mfma(K:int, di:DType, do:DType) -> TensorCore:
   # NOTE: fp6 and fp4 K=128 keep K_L = 32 and would need their own case
   k, kl = [f"k{i}" for i in range(int(math.log2(K)))], int(math.log2(min(K, 64)//4))
   lane, elem = tuple(k[kl:kl+2]), tuple(k[:kl]+k[kl+2:])
-  return TensorCore(dims=(16,16,K), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
+  # (16,16,K)
+  return TensorCore(dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
     frag_a=(("m0","m1","m2","m3")+lane, elem), frag_b=(("n0","n1","n2","n3")+lane, elem))
 amd_cdna_161616 = [mfma(16,di,dtypes.float) for di in [dtypes.half, dtypes.bfloat16]]
 amd_cdna_161632 = [mfma(32,di,dtypes.float) for di in [dtypes.fp8e5m2, dtypes.fp8e4m3, dtypes.half, dtypes.bfloat16]]
@@ -145,7 +144,8 @@ pm_validate_wmma_cdna = PatternMatcher([
 ])
 # ***** Apple Metal *****
 
-metal = [TensorCore(dims=(8,8,8), dtype_in=di, dtype_out=do, opts=("u0","l0","l1","l1","l0","l1"),
+# (8,8,8)
+metal = [TensorCore(dtype_in=di, dtype_out=do, opts=("u0","l0","l1","l1","l0","l1"),
   frag_a=(("k1", "m0", "m1", "k2", "m2"), ("k0",)), frag_b=(("n1", "k0", "k1", "n2", "k2"), ("n0",)))
   for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),
                 (dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
