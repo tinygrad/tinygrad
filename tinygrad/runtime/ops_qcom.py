@@ -283,7 +283,8 @@ class QCOMProgramData:
 
 _qcom_program_cache:dict[tuple[bytes, tuple[str, ...]], tuple[QCOMProgramData, UOp]] = {}
 def qcom_build_program(dev:QCOMDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[QCOMProgramData, UOp]:
-  if (cached:=_qcom_program_cache.get(key:=(prg.src[3].arg, devs))) is None:
+  # Identical machine code can have different image formats in its signature; metadata must not be shared between those programs.
+  if (cached:=_qcom_program_cache.get(key:=(prg.key, devs))) is None:
     data = QCOMProgramData(dev, prg.to_elf())
     image = bytes(data.image).ljust(round_up(len(data.image), 4), b"\x00")
     buf = UOp.placeholder((len(image),), dtypes.uint8, next(UOp.unique_num), device=devs).rtag("program")
@@ -362,7 +363,9 @@ class QCOMDevice(Compiled):
 
   def _gpu_map(self, ptr:int, size:int) -> BufferStorage:
     ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
-    dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ceildiv(ptr + size - ptr_line_aligned, 64))
+    # MockGPU reads the same coherent CPU memory; ARM cache-maintenance instructions do not apply to its host.
+    if self.renderer.target.interface != 'MOCK':
+      dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ceildiv(ptr + size - ptr_line_aligned, 64))
     try:
       mi = kgsl.IOCTL_KGSL_MAP_USER_MEM(self.fd, hostptr=ptr_aligned, len=size_aligned, memtype=kgsl.KGSL_USER_MEM_TYPE_ADDR)
       return BufferStorage(mi.gpuaddr + (ptr - ptr_aligned), (mi, False), MMIOInterface(ptr, size, fmt='B'))

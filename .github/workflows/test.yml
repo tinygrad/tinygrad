@@ -641,6 +641,37 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
+  testqcommock:
+    strategy:
+      fail-fast: false
+      matrix:
+        renderer: [IR3, CL]
+    name: Linux (QCOM MockGPU ${{ matrix.renderer }})
+    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    env:
+      DEV: MOCK+QCOM:${{ matrix.renderer }}
+      FORWARD_ONLY: 1
+      SKIP_SLOW_TEST: 1
+      TRANSCENDENTAL: ${{ matrix.renderer == 'IR3' && '2' || '0' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: qcom-mock-${{ matrix.renderer }}
+          deps: "testing_minimal mesa"
+          qemu: ${{ matrix.renderer == 'CL' }}
+      - name: Check QCOM MockGPU
+        run: python -c 'from tinygrad import Device, Tensor; assert Device.DEFAULT == "QCOM"; assert (Tensor([1., 2.]) + 1).tolist() == [2., 3.]'
+      - name: Run emulator tests
+        run: python -m pytest -n12 test/mockgpu/qcom --durations=20
+      - name: Run image tests
+        run: IMAGE=1 FLOAT16=1 python -m pytest -n12 test/mockgpu/qcom/test_qcom.py -k image --durations=20
+      - name: Run operation tests
+        run: python -m pytest -n12 test/backend/test_ops.py --durations=20
+
 # ****** Compile-only Tests ******
 
   compiletests:

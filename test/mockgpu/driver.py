@@ -2,7 +2,11 @@ from typing import Any
 from dataclasses import dataclass
 
 class VirtFileDesc:
-  def __init__(self, fd): self.fd, self.off = fd, 0
+  def __init__(self, fd):
+    self.fd, self.off = fd, 0
+    self.error:Exception|None = None
+  def raise_if_failed(self):
+    if self.error is not None: raise RuntimeError(f'MockGPU execution failed: {self.error}') from self.error
   def ioctl(self, fd, req, argp): raise NotImplementedError()
   def mmap(self, st, sz, prot, flags, fd, off): raise NotImplementedError()
   def close(self, fd): return 0
