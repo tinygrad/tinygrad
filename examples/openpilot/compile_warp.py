@@ -3,7 +3,7 @@ import argparse
 from typing import NamedTuple
 import numpy as np
 from tinygrad import Tensor, Device, Context
-from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle
+from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle, make_retargetable
 
 
 class NV12Frame(NamedTuple):
