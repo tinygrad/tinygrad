@@ -1,4 +1,4 @@
-import math
+import math, functools
 from dataclasses import dataclass
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import PatternMatcher, UOp, UPat, Ops
@@ -26,6 +26,15 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
     # tc axis -> fragment slot axis, per operand
     coords, lanes = self.axis_coords(), [i for i,opt in enumerate(self.opts) if opt[0] == "l"]
     return [{coords.index(c): y for y,c in zip(lanes + self.base_upcast_axes()[:len(f[1])][::-1], f[0]+f[1])} for f in (self.frag_a, self.frag_b)]
+  @functools.cache  # pylint: disable=method-cache-max-size-none
+  def frag_coords(self) -> list[list[list[tuple[int, int]]]]:
+    # [operand][lane][element] -> tile coordinate. c uses local lanes and upcast elements
+    coords = self.axis_coords()
+    frag_c = tuple(tuple(c for c,opt in zip(coords, self.opts) if opt[0] == t) for t in "lu")
+    def coord(f, ax, lane, elem):
+      return tuple(sum(((v>>j)&1) << int(c[1:]) for bits,v in zip(f, (lane, elem)) for j,c in enumerate(bits) if c[0] == d) for d in ax)
+    return [[[coord(f, ax, lane, elem) for elem in range(2**len(f[1]))] for lane in range(2**len(f[0]))]
+            for f,ax in zip((self.frag_a, self.frag_b, frag_c), ("mk", "kn", "mn"))]
   def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
   def get_upcast_axes(self): return [opt for opt in self.opts if opt[0] == "u"]
   def get_local_axes(self): return [opt for opt in self.opts if opt[0] == "l"]
