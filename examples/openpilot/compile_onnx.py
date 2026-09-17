@@ -5,9 +5,9 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes, TinyJit
 from tinygrad.dtype import _to_np_dtype
 from tinygrad.helpers import fetch
-from examples.openpilot.helpers import allocate_inputs, dump_pickle, make_retargetable, benchmark
 from tinygrad.nn.onnx import OnnxPBParser, OnnxRunner
-
+from tinygrad.engine.realize import lower_and_compile
+from examples.openpilot.helpers import allocate_inputs, dump_pickle, load_pickle, make_retargetable, benchmark
 
 def onnx_metadata(path):
   parser = OnnxPBParser(path, load_external_data=False)
@@ -26,8 +26,16 @@ def onnx_metadata(path):
     else: parser.reader.skip_field(wire_type)
   return metadata, output_shapes
 
+if __name__ == '__main__':
+  parser = argparse.ArgumentParser(description=__doc__)
+  parser.add_argument('onnx')
+  parser.add_argument('output')
+  parser.add_argument('--benchmark-runs', type=int, default=20)
+  parser.add_argument('--out-of-band', action='store_true', help='stream protocol-5 buffers for large models')
+  parser.add_argument('--retargetable', action='store_true', help='output retargetable jit (requires recompilation when loading)')
+  args = parser.parse_args()
+  path = fetch(args.onnx) if '://' in args.onnx else Path(args.onnx)
 
-def compile_onnx(path, *, benchmark_runs=20, out_of_band=False):
   runner = OnnxRunner(path)
   properties, output_shapes = onnx_metadata(path)
   metadata = {'metadata': properties, 'input_shapes': {k:v.shape for k,v in runner.graph_inputs.items()}, 'output_shapes': output_shapes}
@@ -56,21 +64,16 @@ def compile_onnx(path, *, benchmark_runs=20, out_of_band=False):
   # test jit output actually changes with different inputs
   with np.testing.assert_raises(AssertionError): np.testing.assert_array_equal(benchmark(run, **make_inputs(43)), expected)
   # benchmarks
-  for i in range(benchmark_runs):
-    np.testing.assert_array_equal(benchmark(run, cb=lambda t: print(f"  [{i}/{benchmark_runs}] {t*1e3:.2f} ms"), **inputs), expected)
+  for i in range(args.benchmark_runs):
+    np.testing.assert_array_equal(benchmark(run, cb=lambda t: print(f"  [{i}/{args.benchmark_runs}] {t*1e3:.2f} ms"), **inputs), expected)
 
-  return {'metadata': metadata, 'run': run, 'input_specs': specs, 'output_specs': output_specs}
+  if args.retargetable: make_retargetable(run)
 
-
-if __name__ == '__main__':
-  parser = argparse.ArgumentParser(description=__doc__)
-  parser.add_argument('onnx')
-  parser.add_argument('output')
-  parser.add_argument('--benchmark-runs', type=int, default=20)
-  parser.add_argument('--out-of-band', action='store_true', help='stream protocol-5 buffers for large models')
-  parser.add_argument('--retargetable', action='store_true', help='output retargetable jit (requires recompilation when loading)')
-  args = parser.parse_args()
-  path = fetch(args.onnx) if '://' in args.onnx else Path(args.onnx)
-  artifact = compile_onnx(path, benchmark_runs=args.benchmark_runs, out_of_band=args.out_of_band)
-  if args.retargetable: make_retargetable(artifact['run'])
+  artifact = {'metadata': metadata, 'run': run, 'input_specs': specs, 'output_specs': output_specs}
   with open(args.output, 'wb') as f: dump_pickle(artifact, f, out_of_band=args.out_of_band)
+
+  # test pickled jit
+  with open(args.output, 'rb') as f:
+    loaded = load_pickle(f, out_of_band=args.out_of_band)
+    if args.retargetable: loaded['run'].captured._linear = lower_and_compile(loaded['run'].captured._linear)
+    np.testing.assert_array_equal(benchmark(loaded['run'], **make_inputs(42)), expected)

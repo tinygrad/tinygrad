@@ -12,7 +12,7 @@ from examples.openpilot.helpers import load_pickle, make_retargetable
 class TestCompile(unittest.TestCase):
   def test_metadata(self):
     import onnx
-    from examples.openpilot.compile_onnx import compile_onnx
+    from examples.openpilot.compile_onnx import onnx_metadata
     graph = onnx.helper.make_graph([onnx.helper.make_node('Identity', ['input'], ['output'])], 'metadata',
       [onnx.helper.make_tensor_value_info('input', onnx.TensorProto.FLOAT, (1, 3))],
       [onnx.helper.make_tensor_value_info('output', onnx.TensorProto.FLOAT, (1, 3))])
@@ -22,8 +22,9 @@ class TestCompile(unittest.TestCase):
       for metadata in ({}, {'model_checkpoint': 'v1.0', 'output_slices': 'dGVzdA=='}):
         onnx.helper.set_model_props(model, metadata)
         onnx.save(model, path)
-        artifact = compile_onnx(path, benchmark_runs=1)
-        self.assertEqual(artifact['metadata'], {'metadata': metadata, 'input_shapes': {'input': (1, 3)}, 'output_shapes': {'output': (1, 3)}})
+        properties, output_shapes = onnx_metadata(path)
+        self.assertEqual(properties, metadata)
+        self.assertEqual(output_shapes, {'output': (1, 3)})
 
   def test_warp_layouts(self):
     from tinygrad import Tensor
