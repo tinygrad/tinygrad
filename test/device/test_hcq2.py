@@ -258,7 +258,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
     dev = Device[Device.DEFAULT]
     names = {"AMD": () if getattr(dev, "is_aql", False) else ("scratch",), # the aql descriptor holds the scratch, nothing addresses it
-             "NV": ("timeline",), "QCOM": ("_stack", "dummy")}[Device.DEFAULT.split(":")[0]]
+             "NV": ("timeline",), "QCOM": ("_stack", "dummy"), "CUDA": ("timeline",)}[Device.DEFAULT.split(":")[0]]
     @TinyJit
     def f(a): return (a * 2 + 1).contiguous().realize()
     x = Tensor.ones(16).contiguous().realize()
