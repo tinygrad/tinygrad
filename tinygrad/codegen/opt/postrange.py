@@ -105,13 +105,11 @@ class Scheduler:
   def unrollable_dims(self) -> list[int]: return [i for i in self.reduce_axes if self.axis_types[i] in (AxisType.GROUP_REDUCE, AxisType.REDUCE) \
                                                   and isinstance(s:=self.full_shape[i], int) and s > 1]
 
-  def real_axis(self, op:OptOps, axis:int|None) -> int:
-    if axis is None or op is OptOps.TC: return -1
-    check(0 <= axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
-    return axis
-
   def apply_opt(self, opt:Opt, append_opt:bool=True):
-    rng = self.rngs[real_axis] if (real_axis:=self.real_axis(opt.op, opt.axis)) >= 0 else UOp(Ops.NOOP)
+    if opt.op is OptOps.TC: rng = UOp(Ops.NOOP)
+    else:
+      check(type(opt.axis) is int and 0 <= opt.axis < self.shape_len, f"invalid axis on {opt.axis=} {opt.op=} {self.shape_len=}")
+      rng = self.rngs[cast(int, opt.axis)]
 
     ret = None
     if opt.op is OptOps.SPLIT:
@@ -165,10 +163,8 @@ class Scheduler:
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
       ret = replaced_rng
     elif opt.op is OptOps.SWAP:
-      try:
-        altrng:UOp = self.rngs[opt.arg]
-      except IndexError:
-        raise KernelOptError
+      check(type(opt.arg) is int and 0 <= opt.arg < self.shape_len, f"invalid swap axis on {opt.arg=} {self.shape_len=}")
+      altrng:UOp = self.rngs[cast(int, opt.arg)]
       check(rng.arg[-1] == AxisType.GLOBAL and altrng.arg[-1] == AxisType.GLOBAL, "swap only for globals")
       self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1])),
                                       altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]))},
