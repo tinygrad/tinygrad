@@ -32,7 +32,7 @@ def _store(m, i, v, dtype: DType):
 
 def wmma(tensor_cores:list[tc.TensorCore], arg, inp, warp_size:int):
   # cores sharing (dims, dtype_in, threads) share fragments, so the first match is the layout
-  tcore = next(x for x in tensor_cores if (x.dims, x.dtype_in, x.threads) == (arg[0], arg[1], arg[3]))
+  tcore = next(x for x in tensor_cores if (x.dims, x.dtype_in, x.threads) == arg[:3])
   frags = tcore.frag_coords()
   for cc,x,co in zip("ABC", inp, frags): assert len(x) == len(co[0]), f"{cc} must have {len(co[0])} elements per thread, it has {len(x)}"
   assert warp_size % tcore.threads == 0, f"must have multiples of {tcore.threads} warp threads"
