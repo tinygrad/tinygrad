@@ -2,8 +2,8 @@
 import argparse
 from typing import NamedTuple
 import numpy as np
-from tinygrad import Tensor, Device, Context
-from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle, make_retargetable
+from tinygrad import Tensor, Device, Context, TinyJit
+from examples.openpilot.helpers import allocate_inputs, benchmark, dump_pickle, make_retargetable
 
 
 class NV12Frame(NamedTuple):
@@ -105,17 +105,29 @@ def compile_warp(frame:NV12Frame, output_size, *, layout='luma', border_fill=Non
   prefix = () if frames == 1 else (frames,)
   specs = {'input_frame': (prefix + (frame.size,), np.dtype(np.uint8).str, Device.DEFAULT),
            'M_inv': (prefix + (3, 3), np.dtype(np.float32).str, transform_device or Device.DEFAULT)}
-  def run(input_frame, M_inv):
-    if frames == 1: return function(input_frame, M_inv)
-    return Tensor.stack(*(function(input_frame[i], M_inv[i]) for i in range(frames)))
+
   def make_inputs(seed):
     rng = np.random.default_rng(seed)
     def initialize(views):
       views['input_frame'][:] = rng.integers(0, 256, views['input_frame'].shape, dtype=np.uint8)
       views['M_inv'][:] = rng.standard_normal(views['M_inv'].shape)*8
-    return (), allocate_inputs(specs, initialize)
-  jit = compile_jit(run, make_inputs, benchmark_runs)
-  return {'metadata': {}, 'run': jit, 'input_specs': specs}
+    return allocate_inputs(specs, initialize)
+
+  @TinyJit(prune=True)
+  def run(input_frame, M_inv):
+    if frames == 1: return function(input_frame, M_inv)
+    return Tensor.stack(*(function(input_frame[i], M_inv[i]) for i in range(frames)))
+
+  expected = benchmark(run, **(inputs:=make_inputs(42)))
+  # capture jit
+  for _ in range(2): np.testing.assert_array_equal(benchmark(run, **inputs), expected)
+  # test jit output actually changes with different inputs
+  with np.testing.assert_raises(AssertionError): np.testing.assert_array_equal(benchmark(run, **make_inputs(43)), expected)
+  # benchmarks
+  for i in range(benchmark_runs):
+    np.testing.assert_array_equal(benchmark(run, cb=lambda t: print(f"  [{i}/{benchmark_runs}] {t*1e3:.2f} ms"), **inputs), expected)
+
+  return {'metadata': {}, 'run': run, 'input_specs': specs}
 
 
 if __name__ == '__main__':

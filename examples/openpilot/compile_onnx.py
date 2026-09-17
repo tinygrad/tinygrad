@@ -2,10 +2,10 @@
 import argparse
 from pathlib import Path
 import numpy as np
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, Device, dtypes, TinyJit
 from tinygrad.dtype import _to_np_dtype
 from tinygrad.helpers import fetch
-from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle, make_retargetable
+from examples.openpilot.helpers import allocate_inputs, dump_pickle, make_retargetable, benchmark
 from tinygrad.nn.onnx import OnnxPBParser, OnnxRunner
 
 
@@ -31,12 +31,9 @@ def compile_onnx(path, *, benchmark_runs=20, out_of_band=False):
   runner = OnnxRunner(path)
   properties, output_shapes = onnx_metadata(path)
   metadata = {'metadata': properties, 'input_shapes': {k:v.shape for k,v in runner.graph_inputs.items()}, 'output_shapes': output_shapes}
-  specs = {name: (spec.shape, np.dtype(_to_np_dtype(spec.dtype)).str, Device.DEFAULT) for name, spec in runner.graph_inputs.items()}
 
-  def model(inputs):
-    return {name: value.contiguous() for name, value in runner({name: value.to(Device.DEFAULT) for name, value in inputs.items()}).items()}
-  output_specs = {name: (value.shape, np.dtype(_to_np_dtype(value.dtype)).name, Device.DEFAULT)
-                  for name, value in model(allocate_inputs(specs)).items()}
+  def get_specs(d): return {k:(t.shape, np.dtype(_to_np_dtype(t.dtype)).name, Device.DEFAULT) for k,t in d.items()}
+  output_specs = get_specs(runner(allocate_inputs(specs:=get_specs(runner.graph_inputs))))
 
   def make_inputs(seed):
     rng = np.random.default_rng(seed)
@@ -46,15 +43,23 @@ def compile_onnx(path, *, benchmark_runs=20, out_of_band=False):
         value[...] = (rng.standard_normal(value.shape) if dtypes.is_float(dtype) else
                       rng.integers(0, 256, value.shape, dtype=np.uint8) if dtype == dtypes.uint8 else
                       rng.integers(0, 2 if dtype == dtypes.bool else 16, value.shape))
-    return (), allocate_inputs(specs, initialize) | {'output_buffers': allocate_inputs(output_specs)}
+    return allocate_inputs(specs, initialize) | {'output_buffers': allocate_inputs(output_specs)}
 
+  @TinyJit(prune=True)
   def run(output_buffers, **inputs):
-    outputs = model(inputs)
-    Tensor.realize(*outputs.values())
-    Tensor.realize(*(output_buffers[name].assign(value) for name, value in outputs.items()))
+    outputs = runner({k:v.to(Device.DEFAULT) for k,v in inputs.items()})
+    Tensor.realize(*(output_buffers[k].assign(v) for k,v in outputs.items()))
 
-  jit = compile_jit(run, make_inputs, benchmark_runs, out_of_band=out_of_band)
-  return {'metadata': metadata, 'run': jit, 'input_specs': specs, 'output_specs': output_specs}
+  expected = benchmark(run, **(inputs:=make_inputs(42)))
+  # capture jit
+  for _ in range(2): np.testing.assert_array_equal(benchmark(run, **inputs), expected)
+  # test jit output actually changes with different inputs
+  with np.testing.assert_raises(AssertionError): np.testing.assert_array_equal(benchmark(run, **make_inputs(43)), expected)
+  # benchmarks
+  for i in range(benchmark_runs):
+    np.testing.assert_array_equal(benchmark(run, cb=lambda t: print(f"  [{i}/{benchmark_runs}] {t*1e3:.2f} ms"), **inputs), expected)
+
+  return {'metadata': metadata, 'run': run, 'input_specs': specs, 'output_specs': output_specs}
 
 
 if __name__ == '__main__':
