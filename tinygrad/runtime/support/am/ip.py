@@ -107,9 +107,8 @@ class AM_GMC(AM_IP):
         ring, ptrs = gfx.kiq.view(base:=0x3000*xcc, 0x1000, fmt='I'), gfx.kiq.view(base + 0x1000, 0x18, fmt='Q') # rptr, wptr, fence
         pkt = [pm4.PACKET3(pm4.PACKET3_WRITE_DATA, 3), 1 << 16, req_addr, 0, req, # write the request
           pm4.PACKET3(pm4.PACKET3_WAIT_REG_MEM, 5), pm4.WAIT_REG_MEM_FUNCTION(3), ack_addr, 0, 1 << vmid, 1 << vmid, 0x20, # wait for the ack
-          pm4.PACKET3(pm4.PACKET3_WRITE_DATA, 3), pm4.WR_CONFIRM | pm4.WRITE_DATA_DST_SEL(5), *data64_le(gfx.kiq_mc+base+0x1010), (wait:=ptrs[1]+1)]
+          pm4.PACKET3(pm4.PACKET3_WRITE_DATA, 3), pm4.WR_CONFIRM | pm4.WRITE_DATA_DST_SEL(5), *data64_le(gfx.kiq_va+base+0x1010), (wait:=ptrs[1]+1)]
         for i, word in enumerate(pkt): ring[(ptrs[1] + i) % 0x400] = word
-        self.flush_hdp()
         ptrs[1] = self.adev.doorbell64[am.AMDGPU_DOORBELL_KIQ + xcc*0x20] = ptrs[1] + len(pkt)
         wait_cond(lambda: ptrs[2], value=wait, msg=f"kiq flush_tlb timeout on xcc {xcc}")
       return
@@ -273,7 +272,6 @@ class AM_GFX(AM_IP):
     self.xccs = sum(1 for i in self.adev.regs_offset[am.GC_HWIP] if i not in self.adev.harvested[am.GC_HWIP])
     self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(2 + self.adev.is_vf)]
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
-    if self.adev.is_vf: self.kiq_paddr = self.adev.mm.palloc(0x3000 * self.xccs, boot=True) # per xcc: ring, pointers (rptr, wptr, fence), eop
 
   def init_hw(self):
     # Wait for RLC autoload to complete
@@ -323,9 +321,12 @@ class AM_GFX(AM_IP):
     self._enable_mec()
 
     if self.adev.is_vf: # create kiq for VF, PF requires RLC_CP_SCHEDULERS to be set
-      self.kiq, self.kiq_mc = self.adev.vram.view(self.kiq_paddr, 0x3000 * self.xccs), self.adev.paddr2mc(self.kiq_paddr)
-      for xcc in range(self.xccs): self.setup_ring(b:=self.kiq_mc+0x3000*xcc, 0x1000, b+0x1000, b+0x1008, b+0x2000, 0x1000, 0, False, kiq_xcc=xcc)
+      va = self.adev.mm.alloc_vaddr(size:=0x3000 * self.xccs) # per xcc: ring, pointers (rptr, wptr, fence), eop
+      kiq, paddrs = self.adev.pci_dev.alloc_sysmem(size, vaddr=va)
+      self.adev.mm.map_range(va, size, [(p, 0x1000) for p in paddrs], aspace=AddrSpace.SYS, snooped=True, uncached=True)
+      for xcc in range(self.xccs): self.setup_ring(b:=va+0x3000*xcc, 0x1000, b+0x1000, b+0x1008, b+0x2000, 0x1000, 0, False, kiq_xcc=xcc)
       for xcc in range(self.xccs): self.adev.reg("regRLC_CP_SCHEDULERS").update(scheduler0=(2 << 5) | (1 << 3) | 0x80, inst=xcc)
+      self.kiq, self.kiq_va = kiq, va
 
     # set 1 partition on bare metal. a VF uses the spatial partition its host PF assigned.
     if self.xccs > 1 and not self.adev.is_vf: self.adev.psp._spatial_partition_cmd(1)
