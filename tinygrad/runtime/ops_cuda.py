@@ -30,7 +30,7 @@ class CUDAQueue(HWQueue):
   def __init__(self, ctx:EncodeCtx, submit:UOp):
     super().__init__(ctx, submit)
     self.rt_vars = UOp.placeholder((4,), dtypes.uint64, 0, device=self.devs, tag="cuda") # [context, compute stream, copy stream, status]
-    self.cmdbuf = UOp.placeholder((8,), dtypes.uint8, device=self.devs) # substituted at submit
+    self.kernargs = UOp.placeholder((8,), dtypes.uint8, device=self.devs)
     self.h = ccall(cuda.cuCtxSetCurrent, self.rt_vars.index(0).load())
 
   @property
@@ -41,8 +41,10 @@ class CUDAQueue(HWQueue):
     rows = layout_args(args, 8)
     size = max([o + w.dtype.itemsize for o, w in rows], default=8) - 8
     addr = UOp(Ops.LINEAR, src=tuple(pack_args([(0, UOp.const(size, dtypes.uint64))] + rows, 8 + size)), arg="kernargs").getaddr(self.devs)
+
+    # use .q() to stack kernargs descs
     extra = self.q(UOp.const(1, dtypes.uint64), addr + 8, UOp.const(2, dtypes.uint64), addr, UOp.const(0, dtypes.uint64)) - 40
-    self.h = ccall(cuda.cuLaunchKernel, func, *global_size, *local_size, 0, self.stream, UOp.const(0, dtypes.uint64), self.cmdbuf.index(extra))
+    self.h = ccall(cuda.cuLaunchKernel, func, *global_size, *local_size, 0, self.stream, UOp.const(0, dtypes.uint64), self.kernargs.index(extra))
 
   def exec(self, call:UOp, prg:UOp):
     obj, bufs, vals = prg.to_elf(), get_call_arg_uops(call), get_call_var_uops(call, prg)
@@ -61,8 +63,7 @@ class CUDAQueue(HWQueue):
   def timestamp(self, signal:UOp): # a slot is [signal][timestamp]
     self.h = ccall(cuda.cuLaunchHostFunc, self.stream, self.extern("stamp"), rt_addr(signal[1:2], self.devs))
 
-  def submit(self, cmdbuf:UOp) -> UOp: # a store roots the body: it and the loads of rt_vars go after the fence
-    return self.rt_vars.after(self.h).index(3).store(self.h.cast(dtypes.uint64)).substitute({self.cmdbuf: cmdbuf})
+  def submit(self, ka:UOp) -> UOp: return self.rt_vars.after(self.h).index(3).store(self.h.cast(dtypes.uint64)).substitute({self.kernargs: ka})
 
 # *****************
 # device
