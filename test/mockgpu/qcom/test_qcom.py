@@ -95,7 +95,9 @@ else:
   def test_default_host_runtime(self):
     environment = os.environ.copy()
     environment.pop('HCQ_RUNTIME_DEV', None)
-    result = subprocess.run([sys.executable, '-c', 'from tinygrad import Tensor; assert (Tensor([1.0])+1).tolist() == [2.0]'],
+    # Verify the fresh-process default directly. A tensor execution here recompiles CL,
+    # making this unit test depend on compiler-server latency.
+    result = subprocess.run([sys.executable, '-c', 'from tinygrad.device import HCQ_RUNTIME_DEV; assert HCQ_RUNTIME_DEV.value == "CPU"'],
                             env=environment, capture_output=True, text=True, timeout=15)
     self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
 
