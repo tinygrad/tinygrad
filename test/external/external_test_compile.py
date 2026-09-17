@@ -28,18 +28,18 @@ class TestCompile(unittest.TestCase):
 
   def test_warp_layouts(self):
     from tinygrad import Tensor
-    from examples.openpilot.compile_warp import NV12Frame, compile_warp
+    from examples.openpilot.compile_warp import NV12Frame, make_luma_warp, make_frame_prepare
     frame = NV12Frame(8, 6, 12, 8, 4, 144)
     data = np.zeros((12, 12), dtype=np.uint8)
     data[:6, :8] = np.arange(48, dtype=np.uint8).reshape(6, 8)
     data[8:, 0:8:2], data[8:, 1:8:2] = 100, 200
     image = Tensor(data.reshape(-1)).realize()
     transform = np.eye(3, dtype=np.float32)
-    luma = compile_warp(frame, (4, 4), layout='luma', border_fill=16, transform_device='NPY', benchmark_runs=1)['run']
+    luma = make_luma_warp(frame, 4, 4, border_fill=16)
     np.testing.assert_array_equal(luma(input_frame=image, M_inv=Tensor(transform, device='NPY')).numpy(), data[:4, :4].reshape(1, 16))
     transform[0, 2] = 1000
     np.testing.assert_array_equal(luma(input_frame=image, M_inv=Tensor(transform, device='NPY')).numpy(), np.full((1, 16), 16, dtype=np.uint8))
-    yuv = compile_warp(frame, (4, 4), layout='yuv420', transform_device='NPY', benchmark_runs=1)['run']
+    yuv = make_frame_prepare(frame, 4, 4)
     expected = [[[0, 2], [16, 18]], [[8, 10], [24, 26]], [[1, 3], [17, 19]], [[9, 11], [25, 27]], [[100]*2]*2, [[200]*2]*2]
     np.testing.assert_array_equal(yuv(input_frame=image, M_inv=Tensor(np.eye(3, dtype=np.float32), device='NPY')).numpy(), expected)
 
