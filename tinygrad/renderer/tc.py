@@ -97,7 +97,7 @@ amd_cdna_161616 = [TensorCore(dims=(16,16,16), dtype_in=di, dtype_out=do, opts=(
   for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
 amd_cdna_161632 = [TensorCore(dims=(16,16,32), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
-  frag_a=(("m0", "m1", "m2", "m3", "k3", "k4"), ("k2", "k0", "k1")), frag_b=(("n0", "n1", "n2", "n3", "k3", "k4"), ("k2", "k0", "k1")))
+  frag_a=(("m0", "m1", "m2", "m3", "k3", "k4"), ("k0", "k1", "k2")), frag_b=(("n0", "n1", "n2", "n3", "k3", "k4"), ("k0", "k1", "k2")))
   for di,do in [(dtypes.fp8e5m2,dtypes.float),(dtypes.fp8e4m3,dtypes.float),(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
 amd_cdna_1616128 = [TensorCore(dims=(16,16,128), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
