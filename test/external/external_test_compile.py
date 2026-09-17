@@ -1,9 +1,12 @@
 import tempfile, unittest
+from dataclasses import replace
 from pathlib import Path
 import numpy as np
 from examples.openpilot.load_pickle import make_inputs
-from tinygrad.helpers import fetch, getenv
-from examples.openpilot.helpers import load_pickle
+from tinygrad.helpers import Context, DEV, fetch, getenv
+from tinygrad.engine.realize import lower_and_compile
+from tinygrad.uop.ops import Ops
+from examples.openpilot.helpers import load_pickle, make_retargetable
 
 
 class TestCompile(unittest.TestCase):
@@ -45,6 +48,14 @@ class TestCompiledModel(unittest.TestCase):
   def setUp(self):
     with open(getenv("MODEL_PKL", ""), 'rb') as f: self.artifact = load_pickle(f, out_of_band=bool(getenv("PICKLE_OOB")))
     self.model = self.artifact['run']
+
+  def test_retarget(self):
+    from tinygrad.runtime.autogen.libc import Elf64_Ehdr, EM_AARCH64
+    make_retargetable(self.model)
+    with Context(DEV=replace(DEV.target("CPU"), arch="arm64,generic")): linear = lower_and_compile(self.model.captured._linear)
+    for p in linear.toposort(enter_calls=True):
+      if p.op is Ops.PROGRAM and p.arg.target.device == "CPU":
+        self.assertEqual(Elf64_Ehdr.from_buffer_copy(p.src[-1].arg).e_machine, EM_AARCH64)
 
   def test_inputs(self):
     def run(seed):

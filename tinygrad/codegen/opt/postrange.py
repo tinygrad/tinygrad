@@ -5,7 +5,7 @@ from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssim
 from tinygrad.uop.ops import axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
+from tinygrad.helpers import colored, getenv, DEBUG, NOOPT, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
@@ -105,13 +105,11 @@ class Scheduler:
   def unrollable_dims(self) -> list[int]: return [i for i in self.reduce_axes if self.axis_types[i] in (AxisType.GROUP_REDUCE, AxisType.REDUCE) \
                                                   and isinstance(s:=self.full_shape[i], int) and s > 1]
 
-  def real_axis(self, op:OptOps, axis:int|None) -> int:
-    if axis is None or op is OptOps.TC: return -1
-    check(0 <= axis < self.shape_len, f"invalid axis on {axis=} {op=} {self.shape_len=}")
-    return axis
-
   def apply_opt(self, opt:Opt, append_opt:bool=True):
-    rng = self.rngs[real_axis] if (real_axis:=self.real_axis(opt.op, opt.axis)) >= 0 else UOp(Ops.NOOP)
+    if opt.op is OptOps.TC: rng = UOp(Ops.NOOP)
+    else:
+      check(type(opt.axis) is int and 0 <= opt.axis < self.shape_len, f"invalid axis on {opt.axis=} {opt.op=} {self.shape_len=}")
+      rng = self.rngs[cast(int, opt.axis)]
 
     ret = None
     if opt.op is OptOps.SPLIT:
@@ -165,10 +163,8 @@ class Scheduler:
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
       ret = replaced_rng
     elif opt.op is OptOps.SWAP:
-      try:
-        altrng:UOp = self.rngs[opt.arg]
-      except IndexError:
-        raise KernelOptError
+      check(type(opt.arg) is int and 0 <= opt.arg < self.shape_len, f"invalid swap axis on {opt.arg=} {self.shape_len=}")
+      altrng:UOp = self.rngs[cast(int, opt.arg)]
       check(rng.arg[-1] == AxisType.GLOBAL and altrng.arg[-1] == AxisType.GLOBAL, "swap only for globals")
       self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1])),
                                       altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]))},
@@ -223,8 +219,8 @@ class Scheduler:
               else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")
               ne.append(new_range)
 
-            for _, amt in tc.get_reduce_axes():
-              axes[2], new_range = self.shift_to(axes[2], amt, AxisType.UNROLL)
+            for _ in range(int(math.log2(tc.dims[2]))):
+              axes[2], new_range = self.shift_to(axes[2], 2, AxisType.UNROLL)
               ne.append(new_range)
           except KernelOptError:
             self.ast = ast
@@ -235,11 +231,10 @@ class Scheduler:
             gate, mul = (r0.src[0], r0.src[1]) if (r0:=reduceop.src[0]).op is Ops.WHERE else (None, r0)
             if mul.op is Ops.CAST: mul = mul.src[0]
             ins = mul.src if gate is None else tuple(gate.where(x, UOp.const(0, x.dtype)) for x in mul.src)
-            bss = tc.base_shape_str()
-            srcs = [x.substitute(dict(zip(ne, [ne[i] for i in argsort(p)])), walk=True) for x,p in zip(ins, tc.permutes_for_shape_str(bss))]
+            srcs = [x.substitute({ne[a]: ne[b] for a,b in rl.items()}, walk=True) for x,rl in zip(ins, tc.relabel())]
 
             # get upcast axes for the tensor cores
-            base_upcast_axes = [ne[bss.index(s)].arg[0] for s in tc.base_upcast_axes()]
+            base_upcast_axes = [ne[i].arg[0] for i in tc.base_upcast_axes()]
             upcast_cnt = [int(math.log2(tc.elements_per_thread[i])) for i in range(3)]
             # each operand upcasts its first upcast_cnt axes, the axes only A or B upcast are size 1 so the operands broadcast
             tc_upcast_axes = tuple([tuple([(a, 2 if j < cnt else 1) for j,a in enumerate(base_upcast_axes[:max(cnt, *upcast_cnt[:2])])])
@@ -247,10 +242,8 @@ class Scheduler:
 
             # construct the op
             # TODO: remove tc_upcast_axes from the arg
-            # do the reduce_axes always disappear? i think they don't
-            # they need to be moved into the WMMA srcs
             tc_uop = UOp.wmma(srcs[0], srcs[1], UOp.const((0.0,)*tc.elements_per_thread[2], tc.dtype_out),
-                              tc.dims, self.ren.target.device, tc.threads, tc_upcast_axes=tc_upcast_axes)
+                              tc.dims, tc.threads, tc_upcast_axes=tc_upcast_axes)
 
             # preserve extra reduces
             reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x not in ne[len(tc.opts):]]

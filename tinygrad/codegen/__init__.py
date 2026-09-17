@@ -70,10 +70,10 @@ def unroll_axis(u:UOp, dims:list[int], sizes:list[int]) -> UOp:
   return out.permute(argsort([i for i in range(out.ndim) if i not in dims]+dims))
 
 def expand_wmma(ctx:dict[int, int], u:UOp):
-  if u.arg[4] is None: return None
-  in0, in1, out0 = [[ctx[rn] for rn,_ in upcast_axes] for upcast_axes in u.arg[4]]
-  wmma = u.replace(src=(contract_axis(u.src[0], in0), contract_axis(u.src[1], in1), u.src[2]), arg=(*u.arg[:4], None))
-  return unroll_axis(wmma, out0, [sz for _,sz in u.arg[4][2]])
+  if u.arg[3] is None: return None
+  in0, in1, out0 = [[ctx[rn] for rn,_ in upcast_axes] for upcast_axes in u.arg[3]]
+  wmma = u.replace(src=(contract_axis(u.src[0], in0), contract_axis(u.src[1], in1), u.src[2]), arg=(*u.arg[:3], None))
+  return unroll_axis(wmma, out0, [sz for _,sz in u.arg[3][2]])
 
 expander = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
@@ -219,14 +219,10 @@ def expand_horizontal_reduce(r:UOp):
   vals = [inp.index(*idx) for idx in itertools.product(*[range(inp.max_shape[a]) for a in range(r.arg[1])])]
   return functools.reduce(lambda x,y: x.alu(r.arg[0], y), vals)
 
-# an Invalid in a REDUCE source is that reduce's identity. a WMMA is a rangeless reduce, so it takes the ADD identity
+# an Invalid in a REDUCE source is that reduce's identity
 pm_reduce_identity = PatternMatcher([
   (invalid_gate.reduce(allow_any_len=True, name="red"), lambda red,cond,x,i:
    red.replace(src=(cond.where(x, x.const_like(identity_element(red.arg[0], red.dtype))),)+red.src[1:])),
-  (UPat(Ops.WMMA, src=(invalid_gate, UPat.var("b"), UPat.var("acc")), name="w"),
-   lambda w,cond,x,i,b,acc: w.replace(src=(cond.where(x, x.const_like(0)), b, acc))),
-  (UPat(Ops.WMMA, src=(UPat.var("a"), invalid_gate, UPat.var("acc")), name="w"),
-   lambda w,cond,x,i,a,acc: w.replace(src=(a, cond.where(x, x.const_like(0)), acc))),
 ])
 
 pm_reduce_local = pm_wmma_add+PatternMatcher([

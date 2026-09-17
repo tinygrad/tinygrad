@@ -437,7 +437,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
           j, k, n = s.index(c), s.index(c, s.index(c)+1), x.shape[s.index(c)]
           perm = [d for d in range(x.ndim) if d not in (j,k)]+[j,k]
           x = x.permute(perm).flatten(-2).pad(((0,0),)*(x.ndim-2)+((0,n),)).unflatten(-1,(n,n+1))[...,0] if x.ndim > 2 else x.diagonal()
-          s = s[:k] + s[k+1:]
+          s = s[:j] + s[j+1:k] + s[k+1:] + c
       inputs[i], xs[i] = s, x
     # check sizes and build sorted alphabet
     sz = merge_dicts([dict(zip(s, x.shape)) for s, x in zip(inputs, xs)])

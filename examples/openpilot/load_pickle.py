@@ -2,6 +2,7 @@ import argparse, time
 from contextlib import nullcontext
 import numpy as np
 from tinygrad import Device
+from tinygrad.engine.realize import lower_and_compile
 from extra.bench_log import WallTimeEvent, BenchEvent
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters
@@ -25,6 +26,7 @@ if __name__ == '__main__':
   parser.add_argument('--run', action='store_true', help='benchmark inference instead of loading')
   parser.add_argument('--out-of-band', action='store_true', default=bool(getenv('PICKLE_OOB')))
   parser.add_argument('--runs', type=int, help='defaults to 10 loads or 20 inference runs')
+  parser.add_argument('--retarget', action='store_true', help='retarget loaded jit (requires jit to have been compiled with --retargetable)')
   args = parser.parse_args()
   if not args.run:
     load_times = []
@@ -36,6 +38,7 @@ if __name__ == '__main__':
       assert min(load_times) < limit, f"Speed regression, expected < {limit} s but took {min(load_times)} s"
   else:
     with open(args.pickle, 'rb') as f: artifact = load_pickle(f, out_of_band=args.out_of_band)
+    if args.retarget: artifact['run'].captured._linear = lower_and_compile(artifact['run'].captured._linear)
     inputs = make_inputs(artifact)
     times = []
     for _ in range(args.runs or 20):

@@ -473,14 +473,12 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: compile
-      run: |
-        FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/${{ matrix.model }}.onnx" openpilot.pkl
-        taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run openpilot.pkl
+      run: FLOAT16=1 IMAGE=1 taskset -c 4-7 python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/${{ matrix.model }}.onnx" openpilot.pkl
     - name: run pickle
       run: BENCHMARK_LOG="${BENCHMARK_LOG}_run_pickle" taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run openpilot.pkl
     - name: Compile driving warp
       run: |
-        python examples/openpilot/compile_warp.py --output warp.pkl --benchmark-runs 1 \
+        taskset -c 4-7 python examples/openpilot/compile_warp.py --output warp.pkl --benchmark-runs 1 \
           --frame "1928,1208,2048,1216,608,${{ matrix.model == 'driving_supercombo' && '3735552' || '4804608' }}" \
           --warp-to ${{ matrix.model == 'driving_supercombo' && '512x256' || '1440x960' }} \
           --layout ${{ matrix.model == 'driving_supercombo' && 'yuv420' || 'luma' }} \
@@ -539,16 +537,16 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: openpilot compile big_driving_supercombo
       run: |
-        GMMU=0 DEV=USB+AMD:LLVM python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx" openpilot.pkl --out-of-band
-        BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=25 python3 examples/openpilot/load_pickle.py --run openpilot.pkl --out-of-band
+        GMMU=0 DEV=USB+AMD:LLVM taskset -c 4-7 python3 examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx" openpilot.pkl --out-of-band --retargetable
+        BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=25 taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run openpilot.pkl --out-of-band --retarget
     - name: openpilot load_pickle big_driving_supercombo
-      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle PICKLE_OOB=1 PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=25 python3 examples/openpilot/load_pickle.py openpilot.pkl
+      run: BENCHMARK_LOG=usbgpu_openpilot_big_driving_supercombo_load_pickle GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=25 taskset -c 4-7 python3 examples/openpilot/load_pickle.py openpilot.pkl --out-of-band
     - name: compile driving warp
-      run: GMMU=0 DEV=USB+AMD:LLVM python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output warp.pkl
+      run: GMMU=0 DEV=USB+AMD:LLVM taskset -c 4-7 python3 examples/openpilot/compile_warp.py --frame 1928,1208,2048,1216,608,3735552 --warp-to 512x256 --layout yuv420 --frames 2 --output warp.pkl --retargetable
     - name: run warp pickle
-      run: BENCHMARK_LOG=usbgpu_openpilot_driving_warp GMMU=0 DEV=USB+AMD python3 examples/openpilot/load_pickle.py --run warp.pkl
+      run: BENCHMARK_LOG=usbgpu_openpilot_driving_warp GMMU=0 DEV=USB+AMD taskset -c 4-7 python3 examples/openpilot/load_pickle.py --run warp.pkl --retarget
     - name: Test copy speeds
-      run: SIZE=64000000 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3 test/external/external_test_usb_asm24.py
+      run: SIZE=64000000 GMMU=0 DEV=USB+AMD taskset -c 4-7 python3 test/external/external_test_usb_asm24.py
 
   driverbenchmarks:
     name: PCI Driver Benchmark (DEV=${{ matrix.dev }})

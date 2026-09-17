@@ -21,7 +21,7 @@ class LLVMCompiler(Compiler):
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
-    if (opt:=bool(getenv("LLVMOPT", "1"))):
+    if (opt:=getenv("LLVMOPT", 1)):
       self.passes = b'default<O2>'
       llvm.LLVMPassBuilderOptionsSetLoopUnrolling(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetLoopVectorization(self.pbo, True)
