@@ -7,7 +7,7 @@ from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
 from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype, commit_int
-from tinygrad.helpers import all_int, argfix, argsort, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, merge_dicts, prod
+from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, fully_flatten, get_shape, make_tuple, merge_dicts, prod
 from tinygrad.helpers import resolve_pool_pads, round_up, IMAGE, FLOAT16, WINO
 
 if TYPE_CHECKING:
@@ -420,32 +420,29 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     xs, formula = list(argfix(*operands)), formula.replace(" ", "")
-    # expand ellipsis to letters, determine output
-    if "..." in formula:
-      ell, lhs = "".join(c for c in string.ascii_letters if c not in formula), (formula.split("->") + [""])[0]
-      ell_n = [max(0, x.ndim - len(s) + 3) if "..." in s else 0 for s, x in zip(lhs.split(","), xs)]
-      for i, (s, x) in enumerate(zip(inputs := lhs.split(","), xs)): inputs[i] = s.replace("...", ell[max(ell_n)-ell_n[i]:max(ell_n)])
-      lhs, auto = ",".join(inputs), "".join(sorted(c for c in lhs if lhs.count(c) == 1 and c.isalpha() and c not in ell))
-      formula = f"{lhs}->{formula.split('->')[1].replace('...', ell[:max(ell_n)]) if '->' in formula else ell[:max(ell_n)] + auto}"
-    lhs, rhs = formula.split("->") if "->" in formula else (formula, "".join(sorted(c for c in formula if formula.count(c)==1 and c.isalpha())))
+    # implicit output is the ellipsis, then the letters that appear once, sorted
+    lhs, rhs = formula.split("->") if "->" in formula else \
+      (formula, "..."*("..." in formula) + "".join(sorted(c for c in formula if formula.count(c) == 1 and c.isalpha())))
     inputs = lhs.split(",")
     if len(xs) != len(inputs): raise ValueError(f"number of operands doesn't match, expected {len(inputs)}, got {len(xs)}")
-    # trace: take diagonal when letter repeats in single input
+    # expand each ellipsis to a suffix of the unused letters, so ellipsis dims align from the right
+    ell = "".join(c for c in string.ascii_letters if c not in formula)
+    ells = [ell[len(ell)-(x.ndim-len(s)+3):] if "..." in s else "" for s, x in zip(inputs, xs)]
+    inputs, rhs = [s.replace("...", e) for s, e in zip(inputs, ells)], rhs.replace("...", max(ells, key=len))
+    # check sizes
+    sz = merge_dicts([{c:n} for s, x in zip(inputs, xs) for c, n in zip(s, x.shape, strict=True)])
+    if not set(rhs) <= set(sz): raise ValueError(f"output letters {rhs} must appear in the inputs {inputs}")
+    # trace: take diagonal when letter repeats in single input, the diagonal is the last axis
     for i, (s, x) in enumerate(zip(inputs, xs)):
-      for c in set(s):
+      for c in dict.fromkeys(s):
         while s.count(c) > 1:
-          j, k, n = s.index(c), s.index(c, s.index(c)+1), x.shape[s.index(c)]
-          perm = [d for d in range(x.ndim) if d not in (j,k)]+[j,k]
-          x = x.permute(perm).flatten(-2).pad(((0,0),)*(x.ndim-2)+((0,n),)).unflatten(-1,(n,n+1))[...,0] if x.ndim > 2 else x.diagonal()
-          s = s[:j] + s[j+1:k] + s[k+1:] + c
+          j = s.index(c)
+          x, s = x.diagonal(dim1=j, dim2=s.index(c, j+1)), s.replace(c, "", 2) + c
       inputs[i], xs[i] = s, x
-    # check sizes and build sorted alphabet
-    sz = merge_dicts([dict(zip(s, x.shape)) for s, x in zip(inputs, xs)])
-    alpha = sorted(sz)
-    # align all tensors to alphabet, multiply, sum non-output, permute to output order
-    xs = [x.permute(*[s.index(c) for c in sorted(s)]).reshape([sz[c] if c in s else 1 for c in alpha]) if s else x
-          for s, x in zip(inputs, xs)]
-    return xs[0].uprod(*xs[1:]).sum([i for i,c in enumerate(alpha) if c not in rhs], dtype=dtype).permute(argsort(argsort(list(rhs))))
+    # align all tensors to output letters then summed letters, multiply, sum
+    alpha = rhs + "".join(sorted(c for c in sz if c not in rhs))
+    xs = [x.permute([s.index(c) for c in alpha if c in s]).reshape([sz[c] if c in s else 1 for c in alpha]) for s, x in zip(inputs, xs)]
+    return xs[0].uprod(*xs[1:]).sum(list(range(len(rhs), len(alpha))), dtype=dtype)
 
   def gradient(self, *targets:Self, gradient:Self|None=None) -> list[Self]:
     """
