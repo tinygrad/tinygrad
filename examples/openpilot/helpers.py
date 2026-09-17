@@ -2,7 +2,7 @@
 import io, pickle, shutil, struct, tempfile, time
 import numpy as np
 from typing import Callable
-from tinygrad import Tensor, TinyJit, Device, Context
+from tinygrad import Tensor, Device, Context
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, graph_rewrite
 from tinygrad.nn.state import get_parameters
 
@@ -42,36 +42,14 @@ def load_pickle(f, *, out_of_band=False):
 
 
 @Context(OPENPILOT_HACKS=1, **{'AMD': {'TC_OPT': 2, 'TC_MIN_GLOBALS': 32}}.get(Device.DEFAULT, {}))
-def compile_jit(function:Callable, make_inputs:Callable[[int], tuple[tuple, dict]], benchmark_runs=20, *, out_of_band=False):
-  """The factory creates fresh inputs, including any mutable state, for each seed."""
-  if benchmark_runs < 1: raise ValueError("benchmark_runs must be at least 1")
-  jit = TinyJit(function, prune=True)
-
-  def run(fn, seed, count):
-    args, kwargs = make_inputs(seed)
-    result = None
-    for i in range(count):
-      Device.default.synchronize()
-      start = time.perf_counter()
-      output = fn(*args, **kwargs)
-      if tensors := get_parameters(output): Tensor.realize(*tensors)
-      Device.default.synchronize()
-      print(f"  [{i+1}/{count}] {(time.perf_counter()-start)*1e3:.2f} ms")
-      if i == 0:
-        result = [t.numpy().copy() for t in get_parameters(output)], [t.numpy().copy() for t in get_parameters((args, kwargs))]
-    return result
-
-  expected = run(jit, 42, 3)
-  with tempfile.TemporaryFile(dir=".") as f:
-    dump_pickle(jit, f, out_of_band=out_of_band)
-    f.seek(0)
-    loaded = load_pickle(f, out_of_band=out_of_band)
-  for seed in (42, 43):
-    reference = expected if seed == 42 else run(function, seed, 1)
-    actual = run(loaded, seed, benchmark_runs)
-    for ref_group, actual_group in zip(reference, actual, strict=True):
-      for ref, value in zip(ref_group, actual_group, strict=True): np.testing.assert_array_equal(ref, value)
-  return jit
+def benchmark(fxn:Callable, cb=None, **kwargs):
+  Device.default.synchronize()
+  start = time.perf_counter()
+  if (output := fxn(**kwargs)) is not None: output.realize()
+  Device.default.synchronize()
+  end = time.perf_counter()
+  if cb: cb(end-start)
+  return [t.numpy().copy() for t in get_parameters(kwargs.get('output_buffers', output))]
 
 pm_retargetable = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat()), name="p"), lambda p: p.replace(src=p.src[:-1]) if p.arg.target.device == "CPU" else None)
