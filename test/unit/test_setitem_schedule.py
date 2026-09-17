@@ -147,7 +147,7 @@ class TestSetitemInto(unittest.TestCase):
     Tensor.realize(a, b)
     GlobalCounters.reset()
     a[10:12].assign(b[13:15].to(a.device)).realize()
-    assert_kernel_count(2)
+    assert_kernel_count(1)
     self.assertListEqual(a.tolist(), [1.0]*10 + [13.0, 14.0] + [1.0]*8)
 
 if __name__ == '__main__':
