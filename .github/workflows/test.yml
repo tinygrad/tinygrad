@@ -666,11 +666,19 @@ jobs:
       - name: Check QCOM MockGPU
         run: python -c 'from tinygrad import Device, Tensor; assert Device.DEFAULT == "QCOM"; assert (Tensor([1., 2.]) + 1).tolist() == [2., 3.]'
       - name: Run emulator tests
-        run: python -m pytest -n12 test/mockgpu/qcom --durations=20
+        run: >-
+          python -m pytest -n12 test/mockgpu/qcom
+          test/backend/test_dtype.py::TestHalfDType::test_float_cast_rounds_to_nearest_even
+          test/backend/test_dtype.py::TestEmulatedHalf::test_float_cast_rounds_to_nearest_even --durations=20
       - name: Run image tests
         run: IMAGE=1 FLOAT16=1 python -m pytest -n12 test/mockgpu/qcom/test_qcom.py -k image --durations=20
       - name: Run operation tests
-        run: python -m pytest -n12 test/backend/test_ops.py --durations=20
+        run: >-
+          python -m pytest -n12 test/backend/test_ops.py
+          --deselect=test/backend/test_ops.py::TestOps::test_all_large --durations=20
+      # Run the CPU-bound large reduction without other tests competing for its wall-clock timeout.
+      - name: Run large reduction test
+        run: python -m pytest -n12 test/backend/test_ops.py::TestOps::test_all_large --durations=20
 
 # ****** Compile-only Tests ******
 

@@ -207,6 +207,15 @@ class TestA630Scalar(unittest.TestCase):
           program = struct.pack('<2Q', 0x2014400100000000 | (rounding << 55), 0x0300000000000000)
           self.assertEqual(run_scalar(program, (), Memory(()), {0:value}).regs[1], f32bits(target))
 
+  def test_float_to_half_rounding(self):
+    # COV.f32f16 must honor the encoded mode, not silently turn ROUND_ZERO into nearest-even.
+    for value,expected in ((1+3*2**-12, (0x3c00,0x3c01,0x3c01,0x3c00)),
+                           (-1-3*2**-12, (0xbc00,0xbc01,0xbc00,0xbc01))):
+      for rounding,target in enumerate(expected):
+        with self.subTest(value=value, rounding=rounding):
+          program = struct.pack('<2Q', 0x2004000100000000 | (rounding << 55), 0x0300000000000000)
+          self.assertEqual(run_scalar(program, (), Memory(()), {0:f32bits(value)}).half_regs[1], target)
+
   def test_signed_selection_includes_zero(self):
     # Vendor-compiled indexing uses SEL.S32 to implement index >= 0 ? index : index+length.
     program = struct.pack('<2Q', 0x6580800300020000, 0x0300000000000000)

@@ -213,7 +213,15 @@ class TestBFloat16DTypeCast(unittest.TestCase):
     converted = random_values.cast(dtypes.bfloat16).cast(dtypes.float32)
     np.testing.assert_allclose(converted.numpy(), random_values.cast(dtypes.float32).numpy(), rtol=1e-2, atol=1e-3)
 
-class TestHalfDType(TestDType): DTYPE = dtypes.half
+class TestHalfDType(TestDType):
+  DTYPE = dtypes.half
+
+  def test_float_cast_rounds_to_nearest_even(self):
+    # Exercise both sides of a midpoint and ties with even and odd low mantissa bits.
+    positive = np.array([0.0, 1.0006, 1+2**-11-2**-23, 1+2**-11, 1+2**-11+2**-23, 1+3*2**-11], dtype=np.float32)
+    values = np.concatenate((positive, -positive))
+    actual = Tensor(values).cast(dtypes.half).numpy()
+    np.testing.assert_array_equal(actual.view(np.uint16), values.astype(np.float16).view(np.uint16))
 
 class TestEmulatedHalf(TestHalfDType):
   @classmethod
