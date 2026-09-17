@@ -21,30 +21,28 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
     for opt in self.opts:
       ret.append("nm"[d:=int(opt[1])] + str(bit[d]))
       bit[d] += 1
-    return ret + [f"k{i}" for i,_ in enumerate(self.get_reduce_axes())]
+    return ret + [f"k{i}" for i in range(int(math.log2(self.dims[2])))]
   def relabel(self) -> list[dict[int, int]]:
     # tc axis -> fragment slot axis, per operand
-    coords, lanes = self.axis_coords(), [i for i,opt in enumerate(self.opts) if opt[0] == "l"]
+    coords, lanes = self.axis_coords(), self.opt_axes("l")
     return [{coords.index(c): y for y,c in zip(lanes + self.base_upcast_axes()[:len(f[1])][::-1], f[0]+f[1])} for f in (self.frag_a, self.frag_b)]
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def frag_coords(self) -> list[list[list[tuple[int, int]]]]:
     # [operand][lane][element] -> tile coordinate. c uses local lanes and upcast elements
     coords = self.axis_coords()
-    frag_c = tuple(tuple(c for c,opt in zip(coords, self.opts) if opt[0] == t) for t in "lu")
+    frag_c = tuple(tuple(coords[i] for i in self.opt_axes(t)) for t in "lu")
     def coord(f, ax, lane, elem):
       return tuple(sum(((v>>j)&1) << int(c[1:]) for bits,v in zip(f, (lane, elem)) for j,c in enumerate(bits) if c[0] == d) for d in ax)
     return [[[coord(f, ax, lane, elem) for elem in range(2**len(f[1]))] for lane in range(2**len(f[0]))]
             for f,ax in zip((self.frag_a, self.frag_b, frag_c), ("mk", "kn", "mn"))]
-  def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))]
-  def get_upcast_axes(self): return [opt for opt in self.opts if opt[0] == "u"]
-  def get_local_axes(self): return [opt for opt in self.opts if opt[0] == "l"]
+  def opt_axes(self, t:str) -> list[int]: return [i for i,opt in enumerate(self.opts) if opt[0] == t]
   def base_upcast_axes(self):
     # element slots, most significant bit first: upcast then reduce
-    return (list(range(len(self.opts), len(self.opts)+len(self.get_reduce_axes()))) + [i for i,opt in enumerate(self.opts) if opt[0] == "u"])[::-1]
+    return (list(range(len(self.opts), len(self.axis_coords()))) + self.opt_axes("u"))[::-1]
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
   def __post_init__(self):
     # all axes have size 2
-    local_axes, upcast_axes = len(self.get_local_axes()), len(self.get_upcast_axes())
+    local_axes, upcast_axes = len(self.opt_axes("l")), len(self.opt_axes("u"))
     assert self.dims[0] * self.dims[1] == 2**(local_axes + upcast_axes), \
       f"N({self.dims[0]}) x M({self.dims[1]}) != local({2**local_axes}) x upcast({2**upcast_axes}) with opts({self.opts})"
     assert 2**local_axes == self.threads, f"{self.threads} threads construct the warp but found {2**local_axes} in {self.opts}"

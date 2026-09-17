@@ -223,8 +223,8 @@ class Scheduler:
               else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")
               ne.append(new_range)
 
-            for _, amt in tc.get_reduce_axes():
-              axes[2], new_range = self.shift_to(axes[2], amt, AxisType.UNROLL)
+            for _ in range(int(math.log2(tc.dims[2]))):
+              axes[2], new_range = self.shift_to(axes[2], 2, AxisType.UNROLL)
               ne.append(new_range)
           except KernelOptError:
             self.ast = ast
