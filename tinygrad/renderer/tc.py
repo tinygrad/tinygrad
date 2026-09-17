@@ -58,23 +58,23 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
       assert len(f[0]) == local_axes, f"fragment {f} has the wrong lane count"
       assert len(set(f[0]+f[1])) == len(f[0]+f[1]) and set(f[1]) <= own <= set(f[0]+f[1]) <= set(self.axis_coords()), \
         f"fragment {f} isn't distinct bits covering {dims}"
+    # A and B must relabel k identically
+    ka, kb = ([c for c in f[1]+f[0] if c[0] == "k"] for f in (self.frag_a, self.frag_b))
+    assert ka == kb, f"{ka=} vs {kb=}"
 
 # ***** NVIDIA *****
 
-cuda_tc_opts = ("u0","l0","l0","l1","l1","l1","u1")  # shared by all shapes with M=16 N=8
-
-# https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-multiply-accumulate-instructions
-cuda_81616 = [TensorCore(dims=(8,16,16), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
-  frag_a=(("k1", "k2", "m0", "m1", "m2"), ("k0", "m3", "k3")), frag_b=(("k1", "k2", "n0", "n1", "n2"), ("k0", "k3")))
-  for di,do in [(dtypes.half,dtypes.float), (dtypes.bfloat16,dtypes.float), (dtypes.half,dtypes.half)]]
-cuda_81632_f8 = [TensorCore(dims=(8,16,32), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
-  frag_a=(("k2", "k3", "m0", "m1", "m2"), ("k0", "k1", "m3", "k4")), frag_b=(("k2", "k3", "n0", "n1", "n2"), ("k0", "k1", "k4")))
-  for di,do in [(dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
-cuda_8168_f16 = [TensorCore(dims=(8,16,8), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
-  frag_a=(("k1", "k2", "m0", "m1", "m2"), ("k0", "m3")), frag_b=(("k1", "k2", "n0", "n1", "n2"), ("k0",)))
-  for di,do in [(dtypes.half,dtypes.float), (dtypes.half,dtypes.half)]]
-cuda_8168_tf32 = [TensorCore(dims=(8,16,8), dtype_in=dtypes.float, dtype_out=dtypes.float, opts=cuda_tc_opts,
-  frag_a=(("k0", "k1", "m0", "m1", "m2"), ("m3", "k2")), frag_b=(("k0", "k1", "n0", "n1", "n2"), ("k2",)))]
+# https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-instructions-for-mma
+def mma(K:int, di:DType, do:DType) -> TensorCore:
+  # mma.m16n8kK: lane is threadID_in_group (2 k bits) then groupID (m0-m2); elements lsb first are 2**g k in a 32-bit reg, m3 (A row+8), leftover k
+  k, g = [f"k{i}" for i in range(int(math.log2(K)))], int(math.log2(4//di.itemsize))
+  lane, elem = tuple(k[g:g+2]), tuple(k[:g]+k[g+2:])
+  return TensorCore(dims=(8,16,K), dtype_in=di, dtype_out=do, opts=("u0","l0","l0","l1","l1","l1","u1"),
+    frag_a=(lane+("m0","m1","m2"), elem[:g]+("m3",)+elem[g:]), frag_b=(lane+("n0","n1","n2"), elem))
+cuda_81616 = [mma(16,di,do) for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float),(dtypes.half,dtypes.half)]]
+cuda_81632_f8 = [mma(32,di,dtypes.float) for di in [dtypes.fp8e4m3, dtypes.fp8e5m2]]
+cuda_8168_f16 = [mma(8,dtypes.half,do) for do in [dtypes.float, dtypes.half]]
+cuda_8168_tf32 = [mma(8,dtypes.float,dtypes.float)]
 cuda_sm75: list[TensorCore] = cuda_8168_f16
 cuda_sm80: list[TensorCore] = cuda_81616 + cuda_8168_f16 + cuda_8168_tf32
 cuda_sm89: list[TensorCore] = cuda_sm80 + cuda_81632_f8
@@ -91,20 +91,17 @@ amd_rdna4 = [TensorCore(dims=(16,16,16), dtype_in=di, dtype_out=do, opts=("l0","
   frag_a=(("m0", "m1", "m2", "m3", "k2"), ("k0", "k1", "k3")), frag_b=(("n0", "n1", "n2", "n3", "k2"), ("k0", "k1", "k3")))
   for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
 
-# https://gpuopen.com/learn/amd-lab-notes/amd-lab-notes-matrix-cores-readme
-amd_cdna_161616 = [TensorCore(dims=(16,16,16), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
-  frag_a=(("m0", "m1", "m2", "m3", "k2", "k3"), ("k0", "k1")), frag_b=(("n0", "n1", "n2", "n3", "k2", "k3"), ("k0", "k1")))
-  for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
-
-amd_cdna_161632 = [TensorCore(dims=(16,16,32), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
-  frag_a=(("m0", "m1", "m2", "m3", "k3", "k4"), ("k2", "k0", "k1")), frag_b=(("n0", "n1", "n2", "n3", "k3", "k4"), ("k2", "k0", "k1")))
-  for di,do in [(dtypes.fp8e5m2,dtypes.float),(dtypes.fp8e4m3,dtypes.float),(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
-
-amd_cdna_1616128 = [TensorCore(dims=(16,16,128), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
-  frag_a=(("m0", "m1", "m2", "m3", "k5", "k6"), ("k2", "k3", "k4", "k0", "k1")),
-  frag_b=(("n0", "n1", "n2", "n3", "k5", "k6"), ("k2", "k3", "k4", "k0", "k1")))
-  for di,do in [(dtypes.fp8e5m2,dtypes.float),(dtypes.fp8e4m3,dtypes.float)]]
-
+# https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf
+def mfma(K:int, di:DType, do:DType) -> TensorCore:
+  # 16x16xK (7.1.4.1): A[i,k] is item k%K_L of lane i + 16*(k//K_L), K_L = K/4; fp8 K=128 is two K=64 halves, k//64 the high item (7.1.5.1)
+  # NOTE: fp6 and fp4 K=128 keep K_L = 32 and would need their own case
+  k, kl = [f"k{i}" for i in range(int(math.log2(K)))], int(math.log2(min(K, 64)//4))
+  lane, elem = tuple(k[kl:kl+2]), tuple(k[:kl]+k[kl+2:])
+  return TensorCore(dims=(16,16,K), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
+    frag_a=(("m0","m1","m2","m3")+lane, elem), frag_b=(("n0","n1","n2","n3")+lane, elem))
+amd_cdna_161616 = [mfma(16,di,dtypes.float) for di in [dtypes.half, dtypes.bfloat16]]
+amd_cdna_161632 = [mfma(32,di,dtypes.float) for di in [dtypes.fp8e5m2, dtypes.fp8e4m3, dtypes.half, dtypes.bfloat16]]
+amd_cdna_1616128 = [mfma(128,di,dtypes.float) for di in [dtypes.fp8e5m2, dtypes.fp8e4m3]]
 amd_cdna3 = amd_cdna_161632[:2] + amd_cdna_161616
 
 amd_cdna4 = amd_cdna_1616128 + amd_cdna_161632 + amd_cdna_161616
