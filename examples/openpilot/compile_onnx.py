@@ -2,9 +2,9 @@
 import argparse
 from pathlib import Path
 import numpy as np
-from tinygrad import Tensor, Device, dtypes, TinyJit
+from tinygrad import Tensor, Device, TinyJit, Context, dtypes
 from tinygrad.dtype import _to_np_dtype
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, DEBUG
 from tinygrad.nn.onnx import OnnxPBParser, OnnxRunner
 from tinygrad.engine.realize import lower_and_compile
 from examples.openpilot.helpers import allocate_inputs, dump_pickle, load_pickle, make_retargetable, benchmark
@@ -58,7 +58,7 @@ if __name__ == '__main__':
     outputs = runner({k:v.to(Device.DEFAULT) for k,v in inputs.items()})
     Tensor.realize(*(output_buffers[k].assign(v) for k,v in outputs.items()))
 
-  expected = benchmark(run, **(inputs:=make_inputs(42)))
+  with Context(DEBUG=max(DEBUG.value, 1)): expected = benchmark(run, **(inputs:=make_inputs(42)))
   # capture jit
   for _ in range(2): np.testing.assert_array_equal(benchmark(run, **inputs), expected)
   # test jit output actually changes with different inputs
