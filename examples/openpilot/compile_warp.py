@@ -144,6 +144,6 @@ if __name__ == '__main__':
 
   # test pickled jit
   with open(args.output, 'rb') as f:
-    loaded = load_pickle(f, out_of_band=args.out_of_band)
+    loaded = load_pickle(f)
     if args.retargetable: loaded['run'].captured._linear = lower_and_compile(loaded['run'].captured._linear)
     np.testing.assert_array_equal(benchmark(loaded['run'], **make_inputs(42)), expected)
