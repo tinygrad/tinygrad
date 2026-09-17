@@ -6,8 +6,6 @@ from tinygrad.uop.ops import PatternMatcher, UOp, UPat, Ops
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
   dims: tuple[int,int,int] # N, M, K
-  threads: int # number of threads that construct the warp
-  elements_per_thread: tuple[int, int, int] # elements per-thread to load/store from A/B/C
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
   opts: tuple[str, ...] # ordered tuple of "ux" or "lx" specifying kernel opts to perform. "ux" upcasts dim x and "lx" localizes dim x
@@ -36,6 +34,11 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
     return [[[coord(f, ax, lane, elem) for elem in range(2**len(f[1]))] for lane in range(2**len(f[0]))]
             for f,ax in zip((self.frag_a, self.frag_b, frag_c), ("mk", "kn", "mn"))]
   def opt_axes(self, t:str) -> list[int]: return [i for i,opt in enumerate(self.opts) if opt[0] == t]
+  @property
+  def threads(self) -> int: return 2**len(self.opt_axes("l")) # threads that construct the warp
+  @property
+  def elements_per_thread(self) -> tuple[int, int, int]: # elements per thread to load/store from A/B/C
+    return (2**len(self.frag_a[1]), 2**len(self.frag_b[1]), 2**len(self.opt_axes("u")))
   def base_upcast_axes(self):
     # element slots, most significant bit first: upcast then reduce
     return (list(range(len(self.opts), len(self.axis_coords()))) + self.opt_axes("u"))[::-1]
@@ -45,17 +48,14 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
     local_axes, upcast_axes = len(self.opt_axes("l")), len(self.opt_axes("u"))
     assert self.dims[0] * self.dims[1] == 2**(local_axes + upcast_axes), \
       f"N({self.dims[0]}) x M({self.dims[1]}) != local({2**local_axes}) x upcast({2**upcast_axes}) with opts({self.opts})"
-    assert 2**local_axes == self.threads, f"{self.threads} threads construct the warp but found {2**local_axes} in {self.opts}"
-    assert 2**upcast_axes == self.elements_per_thread[2], \
-      f"{self.elements_per_thread[2]} elements from C are processed per thread but found {2**upcast_axes} in {self.opts}"
     # check dims match opts
     assert self.dims[0] == 2**len(gd:=[x for x in self.opts if x[1] == '0']), f"opts wrong on dims[0], {self.dims[0]} vs {gd}"
     assert self.dims[1] == 2**len(gd:=[x for x in self.opts if x[1] == '1']), f"opts wrong on dims[1], {self.dims[1]} vs {gd}"
     # NOTE: the K opts is implictly set by the dim
     # each own bit appears once, only lane bits may be foreign
-    for i,(f,dims) in enumerate(zip((self.frag_a, self.frag_b), ("mk","kn"))):
+    for f,dims in zip((self.frag_a, self.frag_b), ("mk","kn")):
       own = {c for c in self.axis_coords() if c[0] in dims}
-      assert 2**len(f[0]) == self.threads and 2**len(f[1]) == self.elements_per_thread[i], f"fragment {f} has the wrong size"
+      assert len(f[0]) == local_axes, f"fragment {f} has the wrong lane count"
       assert len(set(f[0]+f[1])) == len(f[0]+f[1]) and set(f[1]) <= own <= set(f[0]+f[1]) <= set(self.axis_coords()), \
         f"fragment {f} isn't distinct bits covering {dims}"
 
@@ -64,16 +64,16 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
 cuda_tc_opts = ("u0","l0","l0","l1","l1","l1","u1")  # shared by all shapes with M=16 N=8
 
 # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-multiply-accumulate-instructions
-cuda_81616 = [TensorCore(dims=(8,16,16), threads=32, elements_per_thread=(8,4,4), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
+cuda_81616 = [TensorCore(dims=(8,16,16), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
   frag_a=(("k1", "k2", "m0", "m1", "m2"), ("k0", "m3", "k3")), frag_b=(("k1", "k2", "n0", "n1", "n2"), ("k0", "k3")))
   for di,do in [(dtypes.half,dtypes.float), (dtypes.bfloat16,dtypes.float), (dtypes.half,dtypes.half)]]
-cuda_81632_f8 = [TensorCore(dims=(8,16,32), threads=32, elements_per_thread=(16,8,4), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
+cuda_81632_f8 = [TensorCore(dims=(8,16,32), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
   frag_a=(("k2", "k3", "m0", "m1", "m2"), ("k0", "k1", "m3", "k4")), frag_b=(("k2", "k3", "n0", "n1", "n2"), ("k0", "k1", "k4")))
   for di,do in [(dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
-cuda_8168_f16 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
+cuda_8168_f16 = [TensorCore(dims=(8,16,8), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
   frag_a=(("k1", "k2", "m0", "m1", "m2"), ("k0", "m3")), frag_b=(("k1", "k2", "n0", "n1", "n2"), ("k0",)))
   for di,do in [(dtypes.half,dtypes.float), (dtypes.half,dtypes.half)]]
-cuda_8168_tf32 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2,4), dtype_in=dtypes.float, dtype_out=dtypes.float, opts=cuda_tc_opts,
+cuda_8168_tf32 = [TensorCore(dims=(8,16,8), dtype_in=dtypes.float, dtype_out=dtypes.float, opts=cuda_tc_opts,
   frag_a=(("k0", "k1", "m0", "m1", "m2"), ("m3", "k2")), frag_b=(("k0", "k1", "n0", "n1", "n2"), ("k2",)))]
 cuda_sm75: list[TensorCore] = cuda_8168_f16
 cuda_sm80: list[TensorCore] = cuda_81616 + cuda_8168_f16 + cuda_8168_tf32
@@ -84,28 +84,23 @@ def get_cuda(arch): return cuda_sm89 if (ver:=int(arch[3:])) >= 89 else cuda_sm8
 # ***** AMD *****
 
 # https://gpuopen.com/learn/wmma_on_rdna3/
-amd_rdna3 = [TensorCore(dims=(16,16,16), threads=32, elements_per_thread=(16,16,8), dtype_in=di, dtype_out=do,
-  opts=("l0","l0","l0","l0","l1","u1","u1","u1"),
+amd_rdna3 = [TensorCore(dims=(16,16,16), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","l1","u1","u1","u1"),
   frag_a=(("m0", "m1", "m2", "m3", "n0"), ("k0", "k1", "k2", "k3")), frag_b=(("n0", "n1", "n2", "n3", "m0"), ("k0", "k1", "k2", "k3")))
   for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.int8,dtypes.int32)]]
-amd_rdna4 = [TensorCore(dims=(16,16,16), threads=32, elements_per_thread=(8,8,8), dtype_in=di, dtype_out=do,
-  opts=("l0","l0","l0","l0","u1","u1","u1","l1"),
+amd_rdna4 = [TensorCore(dims=(16,16,16), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","u1","l1"),
   frag_a=(("m0", "m1", "m2", "m3", "k2"), ("k0", "k1", "k3")), frag_b=(("n0", "n1", "n2", "n3", "k2"), ("k0", "k1", "k3")))
   for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
 
 # https://gpuopen.com/learn/amd-lab-notes/amd-lab-notes-matrix-cores-readme
-amd_cdna_161616 = [TensorCore(dims=(16,16,16), threads=64, elements_per_thread=(4,4,4), dtype_in=di, dtype_out=do,
-  opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
+amd_cdna_161616 = [TensorCore(dims=(16,16,16), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
   frag_a=(("m0", "m1", "m2", "m3", "k2", "k3"), ("k0", "k1")), frag_b=(("n0", "n1", "n2", "n3", "k2", "k3"), ("k0", "k1")))
   for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
-amd_cdna_161632 = [TensorCore(dims=(16,16,32), threads=64, elements_per_thread=(8,8,4), dtype_in=di, dtype_out=do,
-  opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
+amd_cdna_161632 = [TensorCore(dims=(16,16,32), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
   frag_a=(("m0", "m1", "m2", "m3", "k3", "k4"), ("k2", "k0", "k1")), frag_b=(("n0", "n1", "n2", "n3", "k3", "k4"), ("k2", "k0", "k1")))
   for di,do in [(dtypes.fp8e5m2,dtypes.float),(dtypes.fp8e4m3,dtypes.float),(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
-amd_cdna_1616128 = [TensorCore(dims=(16,16,128), threads=64, elements_per_thread=(32,32,4), dtype_in=di, dtype_out=do,
-  opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
+amd_cdna_1616128 = [TensorCore(dims=(16,16,128), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
   frag_a=(("m0", "m1", "m2", "m3", "k5", "k6"), ("k2", "k3", "k4", "k0", "k1")),
   frag_b=(("n0", "n1", "n2", "n3", "k5", "k6"), ("k2", "k3", "k4", "k0", "k1")))
   for di,do in [(dtypes.fp8e5m2,dtypes.float),(dtypes.fp8e4m3,dtypes.float)]]
@@ -153,8 +148,7 @@ pm_validate_wmma_cdna = PatternMatcher([
 ])
 # ***** Apple Metal *****
 
-metal = [TensorCore(dims=(8,8,8), threads=32, elements_per_thread=(2,2,2), dtype_in=di, dtype_out=do,
-  opts=("u0","l0","l1","l1","l0","l1"),
+metal = [TensorCore(dims=(8,8,8), dtype_in=di, dtype_out=do, opts=("u0","l0","l1","l1","l0","l1"),
   frag_a=(("k1", "m0", "m1", "k2", "m2"), ("k0",)), frag_b=(("n1", "k0", "k1", "n2", "k2"), ("n0",)))
   for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),
                 (dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
