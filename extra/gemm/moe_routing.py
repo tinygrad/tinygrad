@@ -141,12 +141,15 @@ class Routing:
     self.m_l, self.n_groups, self.t_local = m_l, n_groups, t_local
 
   @property
-  def rows_e(self) -> Tensor:
+  def tile_e(self) -> Tensor:
     G, E = self.off.shape[0], self.off.shape[1] - 1
     tr = Tensor.arange(self.m_l // BLOCK_ROW, dtype=dtypes.int32).reshape(1, -1, 1) * BLOCK_ROW
     tr = tr.shard(self.off.device) if isinstance(self.off.device, tuple) else tr.to(self.off.device)
-    tile_e = ((tr >= self.off[:, :E].reshape(G, 1, E)).sum(-1) - 1).cast(dtypes.int32)
-    return tile_e.reshape(-1, 1).expand(-1, BLOCK_ROW).reshape(-1)
+    return ((tr >= self.off[:, :E].reshape(G, 1, E)).sum(-1) - 1).cast(dtypes.int32).reshape(-1)
+
+  @property
+  def rows_e(self) -> Tensor:
+    return self.tile_e.reshape(-1, 1).expand(-1, BLOCK_ROW).reshape(-1)
 
 def n_groups_of(t:Tensor) -> int:
   return len(t.device) if isinstance(t.device, tuple) else 1
