@@ -85,10 +85,8 @@ def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dic
   acted, max_up, max_lcl = {0:s} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256) if max_up is None else max_up, getenv("BEAM_LOCAL_MAX", 1024)
   for i,a in enumerate(actions):
     if a.axis is not None and a.op is not OptOps.TC:
-      try: ax = s.real_axis(a.op, a.axis)
-      except KernelOptError: continue
-      if (ax >= s.shape_len) or (a.op is OptOps.SPLIT and isinstance(arg:=a.arg, tuple) and s.full_shape[ax] == arg[0]
-                                 and replace(a, arg=(0,)+arg[1:]) in actions): continue
+      if (a.axis >= s.shape_len) or (a.op is OptOps.SPLIT and isinstance(arg:=a.arg, tuple) and s.full_shape[a.axis] == arg[0]
+                                     and replace(a, arg=(0,)+arg[1:]) in actions): continue
     s2 = s.copy()
     try:
       s2.apply_opt(a)

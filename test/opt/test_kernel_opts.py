@@ -2,11 +2,22 @@ import unittest
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.uop.ops import AxisType
+from tinygrad.codegen.opt.postrange import Scheduler
 
 # TODO: write a clean version of this
 from test.backend.test_linearizer import helper_linearizer_opt
 
 class TestKernelOpts(unittest.TestCase):
+  def test_opt_without_axis(self):
+    ast = Tensor.empty(32, 32).sum(1).schedule_linear().src[-1].src[0]
+    for opt in [Opt(OptOps.SPLIT, None, (2, AxisType.UPCAST)), Opt(OptOps.PADTO, None, 32), Opt(OptOps.SWAP, None, 1)]:
+      with self.assertRaises(KernelOptError): Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(opt)
+
+  def test_swap_invalid_arg(self):
+    ast = (Tensor.empty(32, 32) + 1).schedule_linear().src[-1].src[0]
+    for opt in [Opt(OptOps.SWAP, 0, None), Opt(OptOps.SWAP, 0, 99), Opt(OptOps.SWAP, 0, -1), Opt(OptOps.SWAP, 0, True)]:
+      with self.assertRaisesRegex(KernelOptError, "invalid swap axis"): Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(opt)
+
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipIf(Device.DEFAULT == "AMD", "TODO: segfaults on MOCKKFD with AMD:LLVM")
