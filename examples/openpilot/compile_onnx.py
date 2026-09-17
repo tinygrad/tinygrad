@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import _to_np_dtype
 from tinygrad.helpers import fetch
-from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle
+from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle, make_retargetable
 from tinygrad.nn.onnx import OnnxPBParser, OnnxRunner
 
 
@@ -63,7 +63,9 @@ if __name__ == '__main__':
   parser.add_argument('output')
   parser.add_argument('--benchmark-runs', type=int, default=20)
   parser.add_argument('--out-of-band', action='store_true', help='stream protocol-5 buffers for large models')
+  parser.add_argument('--retargetable', action='store_true', help='output retargetable jit (requires recompilation when loading)')
   args = parser.parse_args()
   path = fetch(args.onnx) if '://' in args.onnx else Path(args.onnx)
   artifact = compile_onnx(path, benchmark_runs=args.benchmark_runs, out_of_band=args.out_of_band)
+  if args.retargetable: make_retargetable(artifact['run'])
   with open(args.output, 'wb') as f: dump_pickle(artifact, f, out_of_band=args.out_of_band)

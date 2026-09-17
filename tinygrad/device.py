@@ -108,9 +108,11 @@ class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:
 class Buffer:
   profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
-               initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
+               initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False,
+               allocator:Allocator|None=None):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype, self.offset, self.allocated_views, self._base = Device.canonicalize(device), size, dtype, offset, 0, base
+    if allocator is not None: self.allocator = allocator
     self.options = options if options is not None else BufferSpec()
     self._storage:BufferStorage|None = None
     if base is None:
@@ -511,7 +513,7 @@ class Compiled:
 
   def _select_renderer(self) -> Renderer:
     assert (rn:=next((self._renderer_name(r) for r in self.renderers if getenv(f"{self.device}_{self._renderer_name(r)}")), None)) is None, \
-      f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} or {self.device}_CC={rn} instead"
+      f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} instead"
     t = DEV.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
     return select_first_inited(select_by_name(self.renderers, self._renderer_name, t.renderer, f"{self.device} has no renderer {t.renderer!r}"),
                                f"No renderer for {self.device} is available", self.cached_renderer, t)

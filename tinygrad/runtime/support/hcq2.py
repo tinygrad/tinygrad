@@ -50,6 +50,11 @@ def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte o
   base, off = unwrap_view(v.src[0])
   return base, off + v.src[1].val * v.dtype.itemsize
 
+def unwrap_lane(v:UOp) -> tuple[UOp, int|None, int]: # look through views and a lane select to (base, lane, byte offset)
+  sel, off = unwrap_view(v)
+  if sel.op is not Ops.MSELECT: return sel, None, off
+  return (inner:=unwrap_view(sel.src[0]))[0], sel.arg, off + inner[1]
+
 def select_lane(u:UOp, lane:int) -> UOp: return u.src[lane] if u.op is Ops.MSTACK else u.mselect(lane) if len(to_tuple(u.device)) > 1 else u
 
 def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
@@ -173,12 +178,7 @@ pm_insert_copy_staging = PatternMatcher([
 class HCQDepsTracker(DepsTracker):
   @staticmethod
   def _key(a:UOp) -> tuple[Any, int, int]: # (base, lane) and the byte range: overlapping views of one base depend
-    base, off = unwrap_view(a)
-    lane = None
-    if base.op is Ops.MSELECT:
-      lane = base.arg
-      base, inner_off = unwrap_view(base.src[0])
-      off += inner_off
+    base, lane, off = unwrap_lane(a)
     return (base, lane), off, off + a.max_numel() * a.dtype.itemsize
 
 @dataclass
@@ -383,10 +383,7 @@ pm_hcq_encode = PatternMatcher([
 # *****************
 # 3.2. split
 
-def _is_input_addr(g:UOp) -> bool:
-  base = unwrap_view(g.src[0])[0]
-  if base.op is Ops.MSELECT: base = unwrap_view(base.src[0])[0] # a lane of a view
-  return base.op is Ops.PARAM and base.tag is None
+def _is_input_addr(g:UOp) -> bool: return (base:=unwrap_lane(g.src[0])[0]).op is Ops.PARAM and base.tag is None
 
 def addrs_to_table(ctx:EncodeCtx, g:UOp) -> UOp|None:
   if not _is_input_addr(g): return None

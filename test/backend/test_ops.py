@@ -1419,6 +1419,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3, 5, 5)], lambda a: torch.einsum('...ii->...i', a), lambda a: Tensor.einsum('...ii->...i', a))
     # batch trace
     helper_test_op([(3, 5, 5)], lambda a: torch.einsum('...ii->...', a), lambda a: Tensor.einsum('...ii->...', a))
+    # diagonal not at the end
+    helper_test_op([(3, 3, 4)], lambda a: torch.einsum('iij->ij', a), lambda a: Tensor.einsum('iij->ij', a))
+    helper_test_op([(3, 4, 3)], lambda a: torch.einsum('iji->ij', a), lambda a: Tensor.einsum('iji->ij', a))
 
   def test_einsum_shape_check(self):
     self.helper_test_exception([(3,8,10,5), (11,5,13,16,8)], lambda a, b: torch.einsum('pqrs,tuqvr->pstuv', [a, b]),

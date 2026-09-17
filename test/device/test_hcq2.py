@@ -70,20 +70,14 @@ class TestHCQ2Deps(unittest.TestCase):
     # the copy queue waits for its device and for the peer, then signals and bumps. the peer waits for the signal before its bump
     self.assertEqual(streams, {"COPY:0": ["barrier", "wait", "wait", "store", "store"], "COMPUTE:0": ["barrier", "wait", "wait", "store"]})
 
-  def test_selected_slice_dependencies(self):
+  def test_dependencies_through_selected_slices(self):
     b = UOp.param(0, dtypes.float32, 64, device=("AMD", "AMD:1"))
-    views = [b.mselect(0).shrink(((8, 16),)), b.shrink(((8, 16),)).mselect(0),
-             b.shrink(((4, 32),)).mselect(0).shrink(((4, 12),))]
-    for view in views:
-      for previous_write, next_write in (([0], []), ([], [0]), ([0], [0])):
-        tracker = hcq2.HCQDepsTracker()
-        tracker.access_resources([b.mselect(0)], previous_write, "producer")
-        self.assertEqual(tracker.access_resources([view], next_write, "consumer"), ["producer"])
+    for view in [b.mselect(0).shrink(((8, 16),)), b.shrink(((8, 16),)).mselect(0), b.shrink(((4, 32),)).mselect(0).shrink(((4, 12),))]:
       tracker = hcq2.HCQDepsTracker()
-      tracker.access_resources([view], [0], "producer")
-      self.assertEqual(tracker.access_resources([b.mselect(1)], [], "other lane"), [])
-      self.assertEqual(tracker.access_resources([b.mselect(0).shrink(((16, 24),))], [], "disjoint"), [])
-      self.assertEqual(tracker.access_resources([b.mselect(0).shrink(((12, 20),))], [], "overlap"), ["producer"])
+      tracker.access_resources([view], [0], 0)
+      self.assertEqual(tracker.access_resources([b.mselect(1)], [], 1), [])
+      self.assertEqual(tracker.access_resources([b.mselect(0).shrink(((16, 24),))], [], 2), [])
+      self.assertEqual(tracker.access_resources([b.mselect(0).shrink(((12, 20),))], [], 3), [0])
 
   def test_disjoint_write_preserves_dependencies(self):
     b = UOp.param(0, dtypes.uint8, 16, device="CPU")

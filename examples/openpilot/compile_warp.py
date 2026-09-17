@@ -3,7 +3,7 @@ import argparse
 from typing import NamedTuple
 import numpy as np
 from tinygrad import Tensor, Device, Context
-from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle
+from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle, make_retargetable
 
 
 class NV12Frame(NamedTuple):
@@ -128,7 +128,9 @@ if __name__ == '__main__':
   parser.add_argument('--transform-device', help='device holding the transforms; defaults to DEV')
   parser.add_argument('--output', required=True)
   parser.add_argument('--benchmark-runs', type=int, default=20)
+  parser.add_argument('--retargetable', action='store_true', help='output retargetable jit (requires recompilation when loading)')
   args = parser.parse_args()
   artifact = compile_warp(args.frame, args.warp_to, layout=args.layout, border_fill=args.border_fill, frames=args.frames,
                           transform_device=args.transform_device, benchmark_runs=args.benchmark_runs)
+  if args.retargetable: make_retargetable(artifact['run'])
   with open(args.output, 'wb') as f: dump_pickle(artifact, f)

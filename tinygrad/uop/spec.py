@@ -123,7 +123,7 @@ spec_shared = PatternMatcher([
    True if (b:=x.storage_base).op in {Ops.BUFFER, Ops.PARAM, Ops.COPY} else None if b.op is Ops.INDEX else False),
 
   # WMMA has a <a, b, acc>
-  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 5),
+  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 4),
 ])
 
 def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isinstance(s, str) for s in d))

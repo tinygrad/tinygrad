@@ -18,7 +18,7 @@ cudart_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cud
 nvrtc_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.0.140-archive.tar.xz"
 opencl_src = "https://github.com/KhronosGroup/OpenCL-Headers/archive/2e30669d48718fd460f085b4b35b160dad51ce9d.tar.gz"
 comgr_2_src = "https://repo.radeon.com/rocm/apt/6.2/pool/main/c/comgr/comgr_2.8.0.60200-66~24.04_amd64.deb"
-macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+def macossdk(): return system("xcrun --show-sdk-path")
 
 llvm_lib = (
   (win_llvm:=r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else ") +
@@ -169,14 +169,13 @@ def __getattr__(nm):
                   lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],
                   dll=clang_lib, prolog=["from tinygrad.helpers import WIN, OSX"], args=lambda: system("llvm-config-20 --cflags").split())
     case "metal":
-      return load("metal", [f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
+      return load("metal", lambda: [f"{macossdk()}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
                   ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],
-                  dll="'Metal'", args=["-xobjective-c","-isysroot",macossdk], types={"dispatch_data_t":"objc.id_"})
-    case "iokit": return load("iokit", [f"{macossdk}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"], dll="'IOKit'",
-                              args=["-isysroot", macossdk])
-    case "corefoundation": return load("corefoundation",
-                                       [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
-                                       dll="'CoreFoundation'",args=["-isysroot", macossdk])
+                  dll="'Metal'", args=lambda: ["-xobjective-c", "-isysroot", macossdk()], types={"dispatch_data_t":"objc.id_"})
+    case "iokit": return load("iokit", lambda: [f"{macossdk()}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"], dll="'IOKit'",
+                              args=lambda: ["-isysroot", macossdk()])
+    case "corefoundation": return load("corefoundation", lambda: [f"{macossdk()}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h"
+                                       for s in ["String", "Data"]], dll="'CoreFoundation'", args=lambda: ["-isysroot", macossdk()])
     case "llvm_qcom": return load("llvm_qcom", [root/"extra/tinydreno.h"], dll="'llvm-qcom'")
     case "ggml_common": return load("ggml_common", ["{}/ggml-common.h"], srcs=ggml_common_src,
                                     args=["-DGGML_COMMON_DECL_C", "-DGGML_COMMON_IMPL_C"], macros=False)
