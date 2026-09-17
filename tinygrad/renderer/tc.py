@@ -5,76 +5,68 @@ from tinygrad.uop.ops import PatternMatcher, UOp, UPat, Ops
 
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
-  dims: tuple[int,int,int] # N, M, K
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
-  opts: tuple[str, ...] # ordered tuple of "ux" or "lx" specifying kernel opts to perform. "ux" upcasts dim x and "lx" localizes dim x
-  # A and B fragments as (lane bits, element bits), least significant bit first, in tile bits m<i>/n<i>/k<i>. opts defines C
+  # A, B and C fragments as (lane bits, element bits), least significant bit first, in tile bits m<i>/n<i>/k<i>. C lanes are locals, elements upcasts
   # a foreign lane bit is broadcast. the k bits may be permuted, identically in A and B
   frag_a: tuple[tuple[str, ...], tuple[str, ...]]
   frag_b: tuple[tuple[str, ...], tuple[str, ...]]
+  frag_c: tuple[tuple[str, ...], tuple[str, ...]]
   def axis_coords(self) -> list[str]:
-    # tile bit of each tc axis in creation order, the opts then the k unrolls. split j of a dim is bit j
-    bit, ret = [0, 0], []
-    for opt in self.opts:
-      ret.append("nm"[d:=int(opt[1])] + str(bit[d]))
-      bit[d] += 1
-    return ret + [f"k{i}" for i in range(int(math.log2(self.dims[2])))]
+    # tile bit of each tc axis in creation order, C then the k unrolls. split j of a dim is bit j, so a bit follows the lower bits of its dim
+    ret: list[str] = []
+    for c in self.frag_c[0] + self.frag_c[1] + self.frag_a[0] + self.frag_a[1]:
+      ret += [b for j in range(int(c[1:])+1) if (b:=f"{c[0]}{j}") not in ret]
+    return ret
   def relabel(self) -> list[dict[int, int]]:
     # tc axis -> fragment slot axis, per operand
-    coords, lanes = self.axis_coords(), self.opt_axes("l")
+    coords = self.axis_coords()
+    lanes = [coords.index(c) for c in self.frag_c[0]]
     return [{coords.index(c): y for y,c in zip(lanes + self.base_upcast_axes()[:len(f[1])][::-1], f[0]+f[1])} for f in (self.frag_a, self.frag_b)]
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def frag_coords(self) -> list[list[list[tuple[int, int]]]]:
-    # [operand][lane][element] -> tile coordinate. c uses local lanes and upcast elements
-    coords = self.axis_coords()
-    frag_c = tuple(tuple(coords[i] for i in self.opt_axes(t)) for t in "lu")
+    # [operand][lane][element] -> tile coordinate
     def coord(f, ax, lane, elem):
       return tuple(sum(((v>>j)&1) << int(c[1:]) for bits,v in zip(f, (lane, elem)) for j,c in enumerate(bits) if c[0] == d) for d in ax)
     return [[[coord(f, ax, lane, elem) for elem in range(2**len(f[1]))] for lane in range(2**len(f[0]))]
-            for f,ax in zip((self.frag_a, self.frag_b, frag_c), ("mk", "kn", "mn"))]
-  def opt_axes(self, t:str) -> list[int]: return [i for i,opt in enumerate(self.opts) if opt[0] == t]
+            for f,ax in zip((self.frag_a, self.frag_b, self.frag_c), ("mk", "kn", "mn"))]
   @property
-  def threads(self) -> int: return 2**len(self.opt_axes("l")) # threads that construct the warp
+  def dims(self) -> tuple[int,int,int]: # N, M, K. every axis has size 2
+    n, m, k = (sum(c[0] == d for c in self.axis_coords()) for d in "nmk")
+    return (2**n, 2**m, 2**k)
   @property
-  def elements_per_thread(self) -> tuple[int, int, int]: # elements per thread to load/store from A/B/C
-    return (2**len(self.frag_a[1]), 2**len(self.frag_b[1]), 2**len(self.opt_axes("u")))
+  def threads(self) -> int: return 2**len(self.frag_c[0]) # threads that construct the warp
   def base_upcast_axes(self):
     # element slots, most significant bit first: upcast then reduce
-    return (list(range(len(self.opts), len(self.axis_coords()))) + self.opt_axes("u"))[::-1]
+    coords = self.axis_coords()
+    return ([i for i,c in enumerate(coords) if c[0] == "k"] + [coords.index(c) for c in self.frag_c[1]])[::-1]
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
   def __post_init__(self):
-    # all axes have size 2
-    local_axes, upcast_axes = len(self.opt_axes("l")), len(self.opt_axes("u"))
-    assert self.dims[0] * self.dims[1] == 2**(local_axes + upcast_axes), \
-      f"N({self.dims[0]}) x M({self.dims[1]}) != local({2**local_axes}) x upcast({2**upcast_axes}) with opts({self.opts})"
-    # check dims match opts
-    assert self.dims[0] == 2**len(gd:=[x for x in self.opts if x[1] == '0']), f"opts wrong on dims[0], {self.dims[0]} vs {gd}"
-    assert self.dims[1] == 2**len(gd:=[x for x in self.opts if x[1] == '1']), f"opts wrong on dims[1], {self.dims[1]} vs {gd}"
-    # NOTE: the K opts is implictly set by the dim
-    # each own bit appears once, only lane bits may be foreign
-    for f,dims in zip((self.frag_a, self.frag_b), ("mk","kn")):
-      own = {c for c in self.axis_coords() if c[0] in dims}
-      assert len(f[0]) == local_axes, f"fragment {f} has the wrong lane count"
-      assert len(set(f[0]+f[1])) == len(f[0]+f[1]) and set(f[1]) <= own <= set(f[0]+f[1]) <= set(self.axis_coords()), \
+    # each own bit appears once, only lane bits may be foreign and k never is
+    coords = self.axis_coords()
+    for f,dims in zip((self.frag_a, self.frag_b, self.frag_c), ("mk","kn","mn")):
+      own = {c for c in coords if c[0] in dims}
+      assert len(f[0]) == len(self.frag_c[0]), f"fragment {f} has the wrong lane count"
+      assert len(set(f[0]+f[1])) == len(f[0]+f[1]) and set(f[1]) <= own <= set(f[0]+f[1]) <= own | {c for c in coords if c[0] in "mn"}, \
         f"fragment {f} isn't distinct bits covering {dims}"
+    # A and B must relabel k identically
+    ka, kb = ([c for c in f[1]+f[0] if c[0] == "k"] for f in (self.frag_a, self.frag_b))
+    assert ka == kb, f"{ka=} vs {kb=}"
 
 # ***** NVIDIA *****
 
-cuda_tc_opts = ("u0","l0","l0","l1","l1","l1","u1")  # shared by all shapes with M=16 N=8
-
-# https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-multiply-accumulate-instructions
-cuda_81616 = [TensorCore(dims=(8,16,16), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
-  frag_a=(("k1", "k2", "m0", "m1", "m2"), ("k0", "m3", "k3")), frag_b=(("k1", "k2", "n0", "n1", "n2"), ("k0", "k3")))
-  for di,do in [(dtypes.half,dtypes.float), (dtypes.bfloat16,dtypes.float), (dtypes.half,dtypes.half)]]
-cuda_81632_f8 = [TensorCore(dims=(8,16,32), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
-  frag_a=(("k2", "k3", "m0", "m1", "m2"), ("k0", "k1", "m3", "k4")), frag_b=(("k2", "k3", "n0", "n1", "n2"), ("k0", "k1", "k4")))
-  for di,do in [(dtypes.fp8e4m3,dtypes.float),(dtypes.fp8e5m2,dtypes.float)]]
-cuda_8168_f16 = [TensorCore(dims=(8,16,8), dtype_in=di, dtype_out=do, opts=cuda_tc_opts,
-  frag_a=(("k1", "k2", "m0", "m1", "m2"), ("k0", "m3")), frag_b=(("k1", "k2", "n0", "n1", "n2"), ("k0",)))
-  for di,do in [(dtypes.half,dtypes.float), (dtypes.half,dtypes.half)]]
-cuda_8168_tf32 = [TensorCore(dims=(8,16,8), dtype_in=dtypes.float, dtype_out=dtypes.float, opts=cuda_tc_opts,
-  frag_a=(("k0", "k1", "m0", "m1", "m2"), ("m3", "k2")), frag_b=(("k0", "k1", "n0", "n1", "n2"), ("k2",)))]
+# https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-instructions-for-mma
+def mma(K:int, di:DType, do:DType) -> TensorCore:
+  # mma.m16n8kK: lane is threadID_in_group (2 k bits) then groupID (m0-m2); elements lsb first are 2**g k in a 32-bit reg, m3 (A row+8), leftover k
+  k, g = [f"k{i}" for i in range(int(math.log2(K)))], int(math.log2(4//di.itemsize))
+  lane, elem = tuple(k[g:g+2]), tuple(k[:g]+k[g+2:])
+  # (8,16,K)
+  return TensorCore(dtype_in=di, dtype_out=do, frag_c=(("n1","n2","m0","m1","m2"), ("n0","m3")),
+    frag_a=(lane+("m0","m1","m2"), elem[:g]+("m3",)+elem[g:]), frag_b=(lane+("n0","n1","n2"), elem))
+cuda_81616 = [mma(16,di,do) for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float),(dtypes.half,dtypes.half)]]
+cuda_81632_f8 = [mma(32,di,dtypes.float) for di in [dtypes.fp8e4m3, dtypes.fp8e5m2]]
+cuda_8168_f16 = [mma(8,dtypes.half,do) for do in [dtypes.float, dtypes.half]]
+cuda_8168_tf32 = [mma(8,dtypes.float,dtypes.float)]
 cuda_sm75: list[TensorCore] = cuda_8168_f16
 cuda_sm80: list[TensorCore] = cuda_81616 + cuda_8168_f16 + cuda_8168_tf32
 cuda_sm89: list[TensorCore] = cuda_sm80 + cuda_81632_f8
@@ -84,27 +76,27 @@ def get_cuda(arch): return cuda_sm89 if (ver:=int(arch[3:])) >= 89 else cuda_sm8
 # ***** AMD *****
 
 # https://gpuopen.com/learn/wmma_on_rdna3/
-amd_rdna3 = [TensorCore(dims=(16,16,16), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","l1","u1","u1","u1"),
+# (16,16,16)
+amd_rdna3 = [TensorCore(dtype_in=di, dtype_out=do, frag_c=(("n0","n1","n2","n3","m0"), ("m1","m2","m3")),
   frag_a=(("m0", "m1", "m2", "m3", "n0"), ("k0", "k1", "k2", "k3")), frag_b=(("n0", "n1", "n2", "n3", "m0"), ("k0", "k1", "k2", "k3")))
   for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.int8,dtypes.int32)]]
-amd_rdna4 = [TensorCore(dims=(16,16,16), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","u1","l1"),
+# (16,16,16)
+amd_rdna4 = [TensorCore(dtype_in=di, dtype_out=do, frag_c=(("n0","n1","n2","n3","m3"), ("m0","m1","m2")),
   frag_a=(("m0", "m1", "m2", "m3", "k2"), ("k0", "k1", "k3")), frag_b=(("n0", "n1", "n2", "n3", "k2"), ("k0", "k1", "k3")))
   for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
 
-# https://gpuopen.com/learn/amd-lab-notes/amd-lab-notes-matrix-cores-readme
-amd_cdna_161616 = [TensorCore(dims=(16,16,16), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
-  frag_a=(("m0", "m1", "m2", "m3", "k2", "k3"), ("k0", "k1")), frag_b=(("n0", "n1", "n2", "n3", "k2", "k3"), ("k0", "k1")))
-  for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
-
-amd_cdna_161632 = [TensorCore(dims=(16,16,32), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
-  frag_a=(("m0", "m1", "m2", "m3", "k3", "k4"), ("k2", "k0", "k1")), frag_b=(("n0", "n1", "n2", "n3", "k3", "k4"), ("k2", "k0", "k1")))
-  for di,do in [(dtypes.fp8e5m2,dtypes.float),(dtypes.fp8e4m3,dtypes.float),(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
-
-amd_cdna_1616128 = [TensorCore(dims=(16,16,128), dtype_in=di, dtype_out=do, opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
-  frag_a=(("m0", "m1", "m2", "m3", "k5", "k6"), ("k2", "k3", "k4", "k0", "k1")),
-  frag_b=(("n0", "n1", "n2", "n3", "k5", "k6"), ("k2", "k3", "k4", "k0", "k1")))
-  for di,do in [(dtypes.fp8e5m2,dtypes.float),(dtypes.fp8e4m3,dtypes.float)]]
-
+# https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf
+def mfma(K:int, di:DType, do:DType) -> TensorCore:
+  # 16x16xK (7.1.4.1): A[i,k] is item k%K_L of lane i + 16*(k//K_L), K_L = K/4; fp8 K=128 is two K=64 halves, k//64 the high item (7.1.5.1)
+  # NOTE: fp6 and fp4 K=128 keep K_L = 32 and would need their own case
+  k, kl = [f"k{i}" for i in range(int(math.log2(K)))], int(math.log2(min(K, 64)//4))
+  lane, elem = tuple(k[kl:kl+2]), tuple(k[:kl]+k[kl+2:])
+  # (16,16,K)
+  return TensorCore(dtype_in=di, dtype_out=do, frag_c=(("n0","n1","n2","n3","m2","m3"), ("m0","m1")),
+    frag_a=(("m0","m1","m2","m3")+lane, elem), frag_b=(("n0","n1","n2","n3")+lane, elem))
+amd_cdna_161616 = [mfma(16,di,dtypes.float) for di in [dtypes.half, dtypes.bfloat16]]
+amd_cdna_161632 = [mfma(32,di,dtypes.float) for di in [dtypes.fp8e5m2, dtypes.fp8e4m3, dtypes.half, dtypes.bfloat16]]
+amd_cdna_1616128 = [mfma(128,di,dtypes.float) for di in [dtypes.fp8e5m2, dtypes.fp8e4m3]]
 amd_cdna3 = amd_cdna_161632[:2] + amd_cdna_161616
 
 amd_cdna4 = amd_cdna_1616128 + amd_cdna_161632 + amd_cdna_161616
@@ -148,7 +140,8 @@ pm_validate_wmma_cdna = PatternMatcher([
 ])
 # ***** Apple Metal *****
 
-metal = [TensorCore(dims=(8,8,8), dtype_in=di, dtype_out=do, opts=("u0","l0","l1","l1","l0","l1"),
+# (8,8,8)
+metal = [TensorCore(dtype_in=di, dtype_out=do, frag_c=(("n1","m0","m1","n2","m2"), ("n0",)),
   frag_a=(("k1", "m0", "m1", "k2", "m2"), ("k0",)), frag_b=(("n1", "k0", "k1", "n2", "k2"), ("n0",)))
   for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),
                 (dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]

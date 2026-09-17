@@ -25,6 +25,9 @@ FIXES = {"rdna3": {"SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_
                   "VOP3P": {44: "V_MFMA_LD_SCALE_B32", 62: "V_MFMA_F32_16X16X8_XF32", 63: "V_MFMA_F32_32X32X4_XF32"}}}
 # Fields missing from XML but present in hardware (format: {arch: {encoding: [(name, hi, lo), ...]}})
 FIELD_FIXES = {"cdna": {"VOP3P": [("opsel_hi2", 14, 14)]}}
+# Fields variable in XML but fixed in hardware (format: {arch: {encoding: {name: value or (encoding, opcode) of the embedded instruction}}})
+FIXED_FIELDS: dict[str, dict[str, dict[str, int|tuple[str, str]]]] = {
+  "cdna": {"VOP3PX2": {"x2encoding": ("VOP3P", "V_MFMA_LD_SCALE_B32"), "abid": 1}}}
 # Encoding suffixes to strip (variants we don't generate separate classes for)
 _ENC_SUFFIXES = ("_NSA1",)
 # Encoding suffix to class suffix mapping (for variants we DO generate)
@@ -293,6 +296,10 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
     bits = hi - lo + 1
     base_fmt = get_base_fmt(fmt)
     if name == "encoding" and enc_bits: return f"FixedBitField({hi}, {lo}, 0b{enc_bits})"
+    if (fixed := FIXED_FIELDS.get(arch, {}).get(fmt, {}).get(name)) is not None:
+      if isinstance(fixed, int): return f"FixedBitField({hi}, {lo}, {fixed})"
+      fixed_bits, opcode = encodings[fixed[0]][1], next(op for op, n in enums[fixed[0]].items() if n == fixed[1])
+      return f"FixedBitField({hi}, {lo}, 0b{fixed_bits}{opcode:0{bits-len(fixed_bits)}b})"
     if name == "op" and fmt not in ("DPP", "SDWA"): return f"EnumBitField({hi}, {lo}, {base_fmt}Op)"
     if name in ("opx", "opy"): return f"EnumBitField({hi}, {lo}, VOPDOp)"
     if name == "vdsty": return f"VDSTYField({hi}, {lo})"

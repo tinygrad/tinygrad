@@ -143,6 +143,9 @@ class TestIntegrationCDNA(IntegrationTestBase):
   def test_mfma_fp8(self):
     from tinygrad.runtime.autogen.amd.cdna.ins import v_mfma_f32_16x16x128_f8f6f4
     self.inst = v_mfma_f32_16x16x128_f8f6f4(v[0:3], v[0:5], v[0:5], 1, cbsz=2, blgp=2)
+  def test_mfma_scale_fp8(self):
+    from tinygrad.runtime.autogen.amd.cdna.ins import v_mfma_scale_f32_16x16x128_f8f6f4
+    self.inst = v_mfma_scale_f32_16x16x128_f8f6f4(v[0:3], v[4:11], v[12:19], v[0:3], scale_src0=v[20].offset, scale_src1=v[21].offset)
 
 class TestRegisterSliceSyntax(unittest.TestCase):
   """

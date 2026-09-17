@@ -14,8 +14,8 @@ class Kernel:
     return self.instructions
 
 def v_mfma_fp4(dst, a, b, opsel, opsel_hi, scale_a, scale_b):
-  # select fp4 for both inputs, 0xD3AC is the load scale encoding and write to acc vgprs
-  return v_mfma_scale_f32_16x16x128_f8f6f4(dst, a, b, dst, 0, 0, opsel, opsel_hi, 4, 1, 1, 0, 4, 0xD3AC, scale_a.offset, scale_b.offset)
+  # select fp4 for both inputs and write to acc vgprs
+  return v_mfma_scale_f32_16x16x128_f8f6f4(dst, a, b, dst, 0, 0, opsel, opsel_hi, 4, 1, 0, 4, scale_a.offset, scale_b.offset)
 
 def build_kernel(M: int, N: int, K: int, tile_m: int, tile_n: int):
   k = Kernel()
