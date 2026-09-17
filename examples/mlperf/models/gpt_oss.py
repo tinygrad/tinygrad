@@ -92,7 +92,12 @@ def matmul_mx(x:Tensor|tuple[Tensor, Tensor], w_q:Tensor, w_scale:Tensor) -> Ten
     if (npad := (-N) % 256):
       wq = wq.pad(((0, npad), (0, 0)))
       ws = ws.pad(((0, npad), (0, 0)), value=127).cast(dtypes.uint8)
-    x_q, x_e8, x_si = quantize_mxfp8(x2)
+    local_rows = x2.shape[0] // len(x2.device) if isinstance(x2.device, tuple) and x2.uop.axis == 0 else x2.shape[0]
+    if getenv("FUSED_ATTN_QE8", 0) and (local_rows, x2.shape[1]) == (16384, 4096) and w_q.shape == (2880, 4096):
+      from extra.gptoss_kernels.quantize_mxfp8 import quantize_mxfp8_fused_qe8
+      x_q, x_e8 = quantize_mxfp8_fused_qe8(x2)
+      x_si = mx_pack(x_e8)
+    else: x_q, x_e8, x_si = quantize_mxfp8(x2)
     if x_si is not None and can_use_asm_gemm(x_q, wq.T):
       out = asm_gemm(x_q, wq.T, mx=True, mx_scales=(x_si, x_e8, mx_pack(ws), ws), mx_w_stored=True)
       return (out[:, :N] if npad else out).reshape(*l_shape, N).cast(dtypes.bfloat16)
