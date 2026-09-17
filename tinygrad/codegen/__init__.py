@@ -70,10 +70,10 @@ def unroll_axis(u:UOp, dims:list[int], sizes:list[int]) -> UOp:
   return out.permute(argsort([i for i in range(out.ndim) if i not in dims]+dims))
 
 def expand_wmma(ctx:dict[int, int], u:UOp):
-  if u.arg[4] is None: return None
-  in0, in1, out0 = [[ctx[rn] for rn,_ in upcast_axes] for upcast_axes in u.arg[4]]
-  wmma = u.replace(src=(contract_axis(u.src[0], in0), contract_axis(u.src[1], in1), u.src[2]), arg=(*u.arg[:4], None))
-  return unroll_axis(wmma, out0, [sz for _,sz in u.arg[4][2]])
+  if u.arg[3] is None: return None
+  in0, in1, out0 = [[ctx[rn] for rn,_ in upcast_axes] for upcast_axes in u.arg[3]]
+  wmma = u.replace(src=(contract_axis(u.src[0], in0), contract_axis(u.src[1], in1), u.src[2]), arg=(*u.arg[:3], None))
+  return unroll_axis(wmma, out0, [sz for _,sz in u.arg[3][2]])
 
 expander = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
