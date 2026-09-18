@@ -304,6 +304,7 @@ class GPTOSS:
     attn, attn_saves = self.attention(x, freqs_cis, mask, sliding, **attn_kwargs)
     h = x + attn
     ffn, ffn_saves = self.feed_forward(h, **ffn_kwargs)
+    if save: ffn_saves.append(h)
     h = h + ffn
     if save: return (h, *attn_saves, *ffn_saves)
     return (h,)
