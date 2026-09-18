@@ -90,6 +90,23 @@ class TestTensorCores(unittest.TestCase):
         helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_nan(self):
+    for tc in [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if dtypes.is_float(tc.dtype_in)]:
+      with self.subTest(tc=tc):
+        _skip_unsupported_tc_dtypes(tc.dtype_in, tc.dtype_out)
+        a, b = Tensor.full((tc.dims[1], tc.dims[2]), float("nan"), dtype=tc.dtype_in), Tensor.ones(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
+        realized_ast, bufs = helper_realized_ast(a.matmul(b, dtype=tc.dtype_out))
+        run_program(replace_opts(realized_ast, [Opt(OptOps.TC, 0, (-1, 0, 1))]), bufs)
+        self.assertTrue(np.isnan(bufs[0].numpy()).all())
+
+  @unittest.skipUnless(Device.DEFAULT == "PYTHON" and Device[Device.DEFAULT].renderer.tensor_cores, "test requires emulated tensor cores")
+  def test_tensor_cores_emulated_half(self):
+    # the fragment layout is the instruction's, a dtype decomp only changes what carries the operands
+    for tc in [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if dtypes.half in (tc.dtype_in, tc.dtype_out)]:
+      with self.subTest(tc=tc), Context(EMULATED_DTYPES="half", SPEC=2):
+        helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_partial_sum_in_accumulator(self):
     # the heuristic tiles M, N and K after the TC opt: every partial sum enters the next WMMA's accumulator, never an add after it
     for i, tc in enumerate(Device[Device.DEFAULT].renderer.tensor_cores):

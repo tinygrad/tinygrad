@@ -14,7 +14,7 @@ from extra.models.llama import apply_rotary_emb
 from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.gemm.cdna_asm_gemm import _mx_block_scale, _mx_block_scale_3d, quantize_mxfp8, asm_gemm, can_use_asm_gemm, mx_pack
 from extra.gemm.moe_gemm import grouped_mx_gemm
-from extra.gemm.moe_routing import route, dispatch, combine, router_mfma
+from extra.gemm.moe_routing import route, dispatch, combine, router_mfma, Routing, BLOCK_ROW
 from extra.gptoss_kernels.embedding import GPTOSSEmbedding
 
 FP8_DTYPE = dtypes.fp8e4m3
@@ -92,7 +92,12 @@ def matmul_mx(x:Tensor|tuple[Tensor, Tensor], w_q:Tensor, w_scale:Tensor) -> Ten
     if (npad := (-N) % 256):
       wq = wq.pad(((0, npad), (0, 0)))
       ws = ws.pad(((0, npad), (0, 0)), value=127).cast(dtypes.uint8)
-    x_q, x_e8, x_si = quantize_mxfp8(x2)
+    local_rows = x2.shape[0] // len(x2.device) if isinstance(x2.device, tuple) and x2.uop.axis == 0 else x2.shape[0]
+    if getenv("FUSED_ATTN_QE8", 0) and (local_rows, x2.shape[1]) == (16384, 4096) and w_q.shape == (2880, 4096):
+      from extra.gptoss_kernels.quantize_mxfp8 import quantize_mxfp8_fused_qe8
+      x_q, x_e8 = quantize_mxfp8_fused_qe8(x2)
+      x_si = mx_pack(x_e8)
+    else: x_q, x_e8, x_si = quantize_mxfp8(x2)
     if x_si is not None and can_use_asm_gemm(x_q, wq.T):
       out = asm_gemm(x_q, wq.T, mx=True, mx_scales=(x_si, x_e8, mx_pack(ws), ws), mx_w_stored=True)
       return (out[:, :N] if npad else out).reshape(*l_shape, N).cast(dtypes.bfloat16)
@@ -114,6 +119,10 @@ def swiglu(x:Tensor, limit:float=7.0, alpha:float=1.702) -> Tensor:
   x_glu = x_glu.clamp(max_=limit)
   x_linear = x_linear.clamp(-limit, limit)
   return (x_glu * (alpha * x_glu).sigmoid()) * (x_linear + 1)
+
+def _moe_bias_tile(bias:Tensor, r:Routing) -> Tensor:
+  tile_bias = r.tile_e.one_hot(bias.shape[0]).float() @ bias.float()
+  return tile_bias.reshape(-1, 1, bias.shape[1]).expand(-1, BLOCK_ROW, -1).reshape(-1, bias.shape[1])
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2, dtype=dtypes.float32)[:(dim // 2)] / dim))
@@ -269,12 +278,11 @@ class GPTOSS:
       bsz, seqlen = x.shape[:2]
       inp, logits = inp.reshape(-1, dim), logits.reshape(-1, self.n_experts)
       r = route(logits, self.experts_per_tok, self.n_experts)
-      onehot = r.rows_e.one_hot(self.n_experts).float()
       xg = dispatch(_pad_cols(inp.cast(dtypes.bfloat16)), r)
-      h = grouped_mx_gemm(xg, (w_gate_up, w_gate_up_scale), r.off)[:, :2*inter] + (onehot @ w_gate_up_bias.float()).cast(dtypes.bfloat16)
+      h = grouped_mx_gemm(xg, (w_gate_up, w_gate_up_scale), r.off)[:, :2*inter] + _moe_bias_tile(w_gate_up_bias, r).cast(dtypes.bfloat16)
       y = swiglu(h, self.swiglu_limit)
       z = grouped_mx_gemm(_pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
-          + (onehot @ w_down_bias.float()).cast(dtypes.bfloat16)
+          + _moe_bias_tile(w_down_bias, r).cast(dtypes.bfloat16)
       out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
       return out, [x_normed, rrms, xg, h, y, z, r.weights, r.dest_row, r.off]
     else:

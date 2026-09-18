@@ -1403,7 +1403,7 @@ class TestOps(unittest.TestCase):
                lambda a, b: Tensor.einsum('ij...,ij...->ij', [a, b]))
     # multiple ellipsis in one operand are not allowed
     self.helper_test_exception([(2, 3, 4), (2, 3, 4)], lambda a, b: torch.einsum('...ik..., ...jk ->', [a, b]),
-                lambda a, b: Tensor.einsum('...ik..., ...jk ->', [a, b]), expected=(RuntimeError, IndexError))
+                lambda a, b: Tensor.einsum('...ik..., ...jk ->', [a, b]), expected=(RuntimeError, ValueError))
     # multiple ellipsis must broadcast together
     self.helper_test_exception([(2, 3, 4), (2, 3, 4)], lambda a, b: torch.einsum('i...j,ji...->...', [a, b]),
                 lambda a, b: Tensor.einsum('i...j,ji...->...', [a, b]), expected=RuntimeError)
@@ -1419,10 +1419,24 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3, 5, 5)], lambda a: torch.einsum('...ii->...i', a), lambda a: Tensor.einsum('...ii->...i', a))
     # batch trace
     helper_test_op([(3, 5, 5)], lambda a: torch.einsum('...ii->...', a), lambda a: Tensor.einsum('...ii->...', a))
+    # diagonal not at the end
+    helper_test_op([(3, 3, 4)], lambda a: torch.einsum('iij->ij', a), lambda a: Tensor.einsum('iij->ij', a))
+    helper_test_op([(3, 4, 3)], lambda a: torch.einsum('iji->ij', a), lambda a: Tensor.einsum('iji->ij', a))
+    # two repeated letters, and a letter repeated three times
+    helper_test_op([(3, 4, 3, 4)], lambda a: torch.einsum('ijij->ji', a), lambda a: Tensor.einsum('ijij->ji', a))
+    helper_test_op([(3, 3, 4, 3)], lambda a: torch.einsum('iiji->ij', a), lambda a: Tensor.einsum('iiji->ij', a))
 
   def test_einsum_shape_check(self):
     self.helper_test_exception([(3,8,10,5), (11,5,13,16,8)], lambda a, b: torch.einsum('pqrs,tuqvr->pstuv', [a, b]),
                 lambda a, b: Tensor.einsum('pqrs,tuqvr->pstuv', [a, b]), expected=RuntimeError)
+    # repeated letter with different sizes
+    self.helper_test_exception([(3,4)], lambda a: torch.einsum('ii->i', a), lambda a: Tensor.einsum('ii->i', a), expected=RuntimeError)
+    # number of letters doesn't match ndim
+    self.helper_test_exception([(3,4,5)], lambda a: torch.einsum('ij->ij', a), lambda a: Tensor.einsum('ij->ij', a),
+                expected=(ValueError, RuntimeError))
+    # output letter not in the inputs
+    self.helper_test_exception([(3,4)], lambda a: torch.einsum('ij->ik', a), lambda a: Tensor.einsum('ij->ik', a),
+                expected=(ValueError, RuntimeError))
 
   def test_einsum_arity_check1(self):
     self.helper_test_exception([(10,15), (15,20), (20,10)], lambda a, b, c: torch.einsum('ij,jk->ij', [a, b, c]),
