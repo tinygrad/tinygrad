@@ -74,7 +74,7 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
   if DEBUG < 2 and not PROFILE: return
 
   kernels = get_call_kernels(call) # everything below is the per kernel display: exec events for the profiler and DEBUG=2 lines
-  args = resolve_params(call, ctx.input_uops) if kernels and kernels[0][2] is None else []
+  args = [] if isinstance(call.arg.aux, HCQInfo) else resolve_params(call, ctx.input_uops)
   lanes = list(unwrap_multi(call, [args[g] for g in call.body.arg.globals] if call.body.op is Ops.PROGRAM else args)) if args else []
   for i, (device, kcall, stats) in enumerate(kernels):
     et = ets[i] if i < len(ets) else None

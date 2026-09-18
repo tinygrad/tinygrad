@@ -2,7 +2,7 @@ from typing import TypeVar, Generic, Callable, Any, overload
 import functools
 from tinygrad.tensor import Tensor, all_tensors
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ, disable_gc
-from tinygrad.device import Buffer, Compiled, Device, MultiBuffer, DepsTracker
+from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, rewrite_group, graph_rewrite
 from tinygrad.renderer import Estimates
@@ -121,9 +121,6 @@ class GraphRunner:
 
     estimates = sum((estimate_uop(call) for call in self.linear.src), Estimates())
 
-    # used in MultiGraphRunner
-    self.deps = DepsTracker()
-
     self.device, self.estimates = self.calls[0][2][0].device.split(":")[0], estimates.simplify()
 
   def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None: raise NotImplementedError("override this")
@@ -138,9 +135,6 @@ class GraphRunner:
     for j, (gl, lc) in self.launch_dims_replace.items():
       yield j, (dims[gl] if gl is not None else self.launch_dims_base[j][0]), (dims[lc] if lc is not None else self.launch_dims_base[j][1])
 
-  def _access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
-    return self.deps.access_resources(bufs, write, new_dependency)
-
   @staticmethod
   def _all_devs(batch_devs:list[Compiled], new_call:UOp) -> list[Compiled]:
     return dedup(batch_devs + [Device[x] for b in get_call_arg_uops(new_call)
@@ -149,14 +143,6 @@ class GraphRunner:
   @staticmethod
   def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
     return new_call.op is Ops.CALL and new_call.body.op is Ops.PROGRAM and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
-
-# a marker for your graph supporting multiple devices of the same type
-class MultiGraphRunner(GraphRunner):
-  @staticmethod
-  def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
-    # Devices must be the same type
-    return new_call.op is Ops.CALL and new_call.body.op in (Ops.PROGRAM, Ops.COPY) and \
-      len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
 ReturnType = TypeVar('ReturnType')
 @dataclass
