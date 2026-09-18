@@ -831,8 +831,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     ret = UOp.empty(self.shard_shape if axis is not None else self.shape, dtype=self.commit_dtype() if dtype is None else dtype, device=device)
     return ret.unshard(axis) if axis is not None else ret
   @staticmethod
-  def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str, ...]|None=None) -> UOp:
-    device = canonicalize_device(device)
+  def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
     if isinstance(x, bytes): ret, data = UOp.new_buffer("PYTHON", len(x)//dtype.itemsize, dtype), x
     else:
       # bfloat16 and fp8 have no struct format, so pack a float32 buffer and cast
@@ -843,7 +842,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if not data: ret.buffer.allocate(memoryview(bytearray()))
     else: ret.buffer.ensure_allocated().host[:] = data
     if ret.dtype != dtype: ret = ret.cast(dtype)
-    return ret if ret.device == device else ret.copy_to_device(device)
+    return ret
   def clone(self, device=None) -> UOp:
     device = device or self.device
     ret = self.empty_like(device=device)
