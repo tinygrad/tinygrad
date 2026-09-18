@@ -243,10 +243,14 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   replace_args:dict[UOp, UOp] = {}
   buffer_map:dict[UOp, UOp] = {}
   for u in big_sink.toposort(enter_calls=False):
-    if u.op is Ops.BUFFER and not u.is_unbound:
-      replace_args[u] = UOp.param_like(u, len(replace_args))
-    if u.op is Ops.AFTER:
-      buffer_map[u] = u.src[0]
+    if u.addrspace == AddrSpace.ALU:
+      if u.op is Ops.AFTER:
+        replace_args[u] = UOp.param_like(u, len(replace_args))
+    else:
+      if u.op is Ops.BUFFER and not u.is_unbound:
+        replace_args[u] = UOp.param_like(u, len(replace_args))
+      if u.op is Ops.AFTER:
+        buffer_map[u] = u.src[0]
   ret = big_sink.substitute(replace_args).call(*replace_args.keys())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, buffer_map
