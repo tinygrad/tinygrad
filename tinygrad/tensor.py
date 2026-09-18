@@ -16,6 +16,10 @@ from tinygrad.schedule.multi import multi_pm
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 
+def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_identity()
+def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
+def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
+
 # *** callify: transform a tensor graph into a CALL UOp such that all state is properly scoped ***
 
 @dataclass
@@ -27,24 +31,10 @@ class AllocCtx:
   unbound: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
 
-# a tag is the tuple of original pre-rewrite UOps a node provides storage for
 def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
-
-# a base needs storage of its own if it can back a buffer and doesn't already have one
-def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_identity()
-
-def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
-def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
-
-def creation_copy_is_realized(u:UOp):
-  # all copies from disk/numpy are realized into a real buffer
-  if is_creation_device(u.src[0]): return tag_uop(u)
-
-# CONTIGUOUS and AFTER + parents are the only nodes that get updated
 add_tags = PatternMatcher([
-  (UPat(Ops.COPY, name="u"), creation_copy_is_realized),
-  # no tag on copies that fill an AFTER's whole dest via STORE: merge COPY tag into AFTER (the copy reads that storage).
-  # a partial STORE keeps the tag: the copy mints its own storage like any bare creation copy
+  (UPat(Ops.COPY, name="u"), lambda u: tag_uop(u) if is_creation_device(u.src[0]) else None),
+  # FAILED test/backend/test_assign.py::TestAssign::test_assign_copy - test.helpers.KernelCountException: expected 1, got 2
   (UPat(Ops.AFTER, src=(UPat(name="dest"),
     UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
