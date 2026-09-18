@@ -45,6 +45,14 @@ class TestAssign(unittest.TestCase):
     c.realize()
     assert_kernel_count(1)
 
+  def test_assign_cross_device(self):
+    a = Tensor([1.,2,3], device="PYTHON")
+    c = Tensor.empty(3).assign(a)
+    # it should copy into the empty buffer
+    GlobalCounters.reset()
+    self.assertListEqual(c.tolist(), [1.,2,3])
+    assert_kernel_count(1)
+
   def test_assign_slice(self):
     X = Tensor([1,2,3,4]).realize()
     xs = X[2:4]
@@ -634,7 +642,7 @@ class TestAssign(unittest.TestCase):
 
   def test_assign_temporary_copy_reshape(self):
     a = Tensor([[1., 2], [3, 4]], device="PYTHON")
-    c = Tensor.empty(2, 2).assign(a.to(None))
+    c = Tensor.empty(2, 2).assign(a)
     GlobalCounters.reset()
     c.realize()
     assert_kernel_count(1)
