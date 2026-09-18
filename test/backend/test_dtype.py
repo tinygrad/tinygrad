@@ -95,6 +95,12 @@ class TestDType(unittest.TestCase):
       if dtype.itemsize < self.DTYPE.itemsize:
         _test_ops(a_dtype=self.DTYPE, b_dtype=dtype)
 
+  def test_max_reduce(self):
+    # NOOPT keeps the reduce a loop with an accumulator; the rows are nondecreasing, so the max of each is its last element
+    with Context(NOOPT=1):
+      t = Tensor(list(range(8))).cast(self.DTYPE).reshape(2, 4).contiguous()
+      self.assertEqual(t.max(axis=1).tolist(), t[:, -1].tolist())
+
   def test_bitcast(self):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
     for dtype in get_available_cast_dtypes(self.DTYPE):
