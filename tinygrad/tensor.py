@@ -122,9 +122,9 @@ class Tensor(RandMixin):
     elif not isinstance(data, UOp):
       if _dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {_dtype}")
       if isinstance(data, bytes):
-        data = UOp._frompy(data, _dtype or dtypes.uint8, _device)
+        data = UOp._frompy(data, _dtype or dtypes.uint8)
       elif isinstance(data, (list, tuple)):
-        data = UOp._frompy(data, _dtype or dtypes.from_py(data), _device)
+        data = UOp._frompy(data, _dtype or dtypes.from_py(data))
       elif is_numpy_ndarray(data):
         data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)
       elif isinstance(data, pathlib.Path):
@@ -255,8 +255,6 @@ class Tensor(RandMixin):
     x = x._broadcast_to(self.shape)
     if x.dtype in dtypes.weaks: x = x.cast(least_upper_dtype(self.dtype, x.dtype))
     if x.dtype != self.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
-    if not is_disk and x.uop.device is not None and self.device is not None and self.device != x.device:
-      raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
     if isinstance(self.device, tuple) and x.uop.device is not None and self.uop.axis != x.uop.axis:
       raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
 
@@ -372,7 +370,9 @@ class Tensor(RandMixin):
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
     # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
-    if isinstance(device, str) and device.startswith("DISK"): ret = Tensor(self.uop.clone(device))
+    # a copy from a creation device is clone
+    if (isinstance(device, str) and device.startswith("DISK")) or is_creation_device(self.uop):
+      ret = Tensor(self.uop.clone(device))
     else: ret = Tensor(self.uop.copy_to_device(device))
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret.is_param_(self.is_param)
