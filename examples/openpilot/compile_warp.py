@@ -1,10 +1,10 @@
 """Compile perspective warps for NV12 frames."""
-import argparse
+import argparse, pickle
 from typing import NamedTuple
 import numpy as np
 from tinygrad import Tensor, Device, Context, TinyJit
 from tinygrad.engine.realize import lower_and_compile
-from examples.openpilot.helpers import allocate_inputs, benchmark, dump_pickle, load_pickle, make_retargetable
+from examples.openpilot.helpers import allocate_inputs, benchmark, make_retargetable
 
 
 class NV12Frame(NamedTuple):
@@ -140,10 +140,9 @@ if __name__ == '__main__':
   if args.retargetable: make_retargetable(run)
 
   artifact = {'metadata': {}, 'run': run, 'input_specs': specs}
-  with open(args.output, 'wb') as f: dump_pickle(artifact, f)
+  with open(args.output, 'wb') as f: pickle.dump(artifact, f)
 
   # test pickled jit
-  with open(args.output, 'rb') as f:
-    loaded = load_pickle(f)
-    if args.retargetable: loaded['run'].captured._linear = lower_and_compile(loaded['run'].captured._linear)
-    np.testing.assert_array_equal(benchmark(loaded['run'], **make_inputs(42)), expected)
+  with open(args.output, 'rb') as f: loaded = pickle.load(f)
+  if args.retargetable: loaded['run'].captured._linear = lower_and_compile(loaded['run'].captured._linear)
+  np.testing.assert_array_equal(benchmark(loaded['run'], **make_inputs(42)), expected)

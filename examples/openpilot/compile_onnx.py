@@ -1,5 +1,5 @@
 """Compile an ONNX model into a TinyJit artifact."""
-import argparse
+import argparse, pickle
 from pathlib import Path
 import numpy as np
 from tinygrad import Tensor, Device, TinyJit, Context, dtypes
@@ -70,10 +70,11 @@ if __name__ == '__main__':
   if args.retargetable: make_retargetable(run)
 
   artifact = {'metadata': metadata, 'run': run, 'input_specs': specs, 'output_specs': output_specs}
-  with open(args.output, 'wb') as f: dump_pickle(artifact, f, out_of_band=args.out_of_band)
+
+  if args.out_of_band: dump_pickle(artifact, args.output)
+  else: pickle.dump(artifact, open(args.output, 'wb'))
 
   # test pickled jit
-  with open(args.output, 'rb') as f:
-    loaded = load_pickle(f, out_of_band=args.out_of_band)
-    if args.retargetable: loaded['run'].captured._linear = lower_and_compile(loaded['run'].captured._linear)
-    np.testing.assert_equal(benchmark(loaded['run'], **make_inputs(42)), expected)
+  loaded = load_pickle(args.output, out_of_band=args.out_of_band)
+  if args.retargetable: loaded['run'].captured._linear = lower_and_compile(loaded['run'].captured._linear)
+  np.testing.assert_equal(benchmark(loaded['run'], **make_inputs(42)), expected)
