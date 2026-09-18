@@ -304,7 +304,8 @@ def usb_split(nbytes:int, win:int) -> list[tuple[UOp|int, int]]: # (chunk, bytes
   r = UOp.range(full, next(UOp.unique_num), dtype=dtypes.int) if full > 1 else 0 # no one-trip loops: the linearizer misplaces them
   return ([(r, win)] if full else []) + ([(full, tail)] if tail else [])
 
-def usb_ins(name:str, *src:UOp|int) -> UOp: return UOp(Ops.INS, arg=(name, dtypes.void), src=tuple(usb_word(s, dtypes.uint32) for s in src))
+def usb_ins(name:str, *src:UOp|int) -> UOp:
+  return UOp(Ops.INS, arg=(name, dtypes.void), src=tuple(s if isinstance(s, UOp) else UOp.const(s, dtypes.uint32) for s in src))
 
 def usb_copy_slicer(ctx:dict[UOp, tuple[int, int]], call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if (nums:=ctx.get(call)) is None: return None
