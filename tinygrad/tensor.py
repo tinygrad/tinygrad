@@ -18,6 +18,7 @@ from tinygrad.engine.realize import run_linear
 
 def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
 def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_identity()
+def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
 # *** callify: transform a tensor graph into a CALL UOp such that all state is properly scoped ***
 
@@ -26,18 +27,30 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
 
-  replace_args:dict[UOp, UOp] = {}
-  buffer_map:dict[UOp, UOp] = {}
+  # allocate new buffers
+  realize = {base for x in big_sink.src if needs_storage(base:=x.base) and base.op is not Ops.AFTER}
+  call_args:list[UOp] = []           # args to the big call
+  replace_args:dict[UOp, UOp] = {}   # sink replace arg
+  buffer_map:dict[UOp, UOp] = {}     # replacements in the big tensor graph
   for u in big_sink.toposort(enter_calls=False):
     if u.addrspace == AddrSpace.ALU:
       if u.op is Ops.AFTER:
         replace_args[u] = UOp.param_like(u, len(replace_args))
+        call_args.append(u)
     else:
+      if u.op is Ops.COPY and is_creation_device(u.src[0]): realize.add(u)
       if u.op is Ops.BUFFER and not u.is_unbound:
         replace_args[u] = UOp.param_like(u, len(replace_args))
+        call_args.append(u)
       if u.op is Ops.AFTER:
         buffer_map[u] = u.src[0]
-  ret = big_sink.substitute(replace_args).call(*replace_args.keys())
+      if u in realize:
+        # here we create a new buffer for something being realized
+        param = UOp.param_like(u, len(replace_args))
+        replace_args[u] = param.after(param.store(u.rtag()))
+        buffer_map[u] = buf = u.empty_like()
+        call_args.append(buf.base)
+  ret = graph_rewrite(big_sink.substitute(replace_args), remove_all_tags).call(*call_args)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, buffer_map
 
@@ -204,11 +217,7 @@ class Tensor(RandMixin):
     # weakness ends where storage begins
     if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
-    to_realize = dedup([x for x in (self,)+lst if needs_storage(x.uop.base)])
-    for t in to_realize:
-      # AFTER is already a buffer
-      if t.uop.base.op is not Ops.AFTER: t.uop = (t.uop.src[0] if t.uop.is_self_copy else t.uop).clone()
-    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in to_realize]))
+    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
 
@@ -282,7 +291,8 @@ class Tensor(RandMixin):
     if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
-    x = self.clone("CPU")
+    x = self.contiguous()
+    if self.uop.device is None or isinstance(self.device, tuple): x = x.clone("CPU")
     return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
 
   def _data(self) -> memoryview: return self._buffer().as_memoryview()
