@@ -194,6 +194,7 @@ pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
   (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])
 
+"""
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
@@ -232,6 +233,23 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, ctx.buffer_map
+"""
+
+@rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
+def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
+  if SPEC: type_verify(big_sink, spec_tensor)
+
+  replace_args:dict[UOp, UOp] = {}
+  buffer_map:dict[UOp, UOp] = {}
+  for u in big_sink.toposort(enter_calls=False):
+    if u.op is Ops.BUFFER:
+      replace_args[u] = UOp.param_like(u, len(replace_args))
+    if u.op is Ops.AFTER:
+      buffer_map[u] = u.src[0]
+  ret = big_sink.substitute(replace_args).call(*replace_args.keys())
+  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
+  return ret, buffer_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -470,8 +488,7 @@ class Tensor(RandMixin):
     if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
-    x = self.contiguous()
-    if self.uop.device is None or isinstance(self.device, tuple): x = x.clone("CPU")
+    x = self.clone("CPU")
     return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
 
   def _data(self) -> memoryview: return self._buffer().as_memoryview()
