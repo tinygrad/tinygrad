@@ -316,6 +316,13 @@ class TestFastIdiv(unittest.TestCase):
       self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORDIV by pow2 kept the round toward zero correction")
       self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
 
+  def test_unsigned_floordiv_is_cdiv(self):
+    for op in (Ops.FLOORDIV, Ops.FLOORMOD):
+      a, b = (UOp.param(i, dtypes.uint32, 3).index(UOp.const(2)) for i in range(2))
+      ops = [x.op for x in to_uops_list([UOp(op, src=(a, b))], ren=Device[Device.DEFAULT].renderer)]
+      self.assertNotIn(Ops.CMPLT, ops, f"{op} on unsigned kept the sign correction")
+      self.assertEqual(ops.count(Ops.CDIV) + ops.count(Ops.CMOD), 1)
+
   @Context(DISABLE_FAST_IDIV=0)
   @unittest.skipUnless(dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "fast_idiv widens uint32 to uint64")
   def test_fast_idiv_and_mod(self):
