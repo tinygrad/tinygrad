@@ -6,11 +6,12 @@ from extra.llama_kernels import alloc_like, compile_hip
 @functools.cache
 def _router_topk_fwd(weights:UOp, indices:UOp, logits:UOp) -> UOp:
   tokens = math.prod(logits.shape[:-1])
-  sink = UOp.sink(weights.base, indices.base, logits.base, UOp.special(256, "lidx0"), UOp.special((tokens+255)//256, "gidx0"),
+  sink = UOp.sink(weights.base, indices.base, logits.base,
+                  UOp.special(256, "lidx0"), UOp.special((tokens+255)//256, "gidx0"),
                   arg=KernelInfo(f"moe_router_topk_{tokens}_32_4"))
   src = (pathlib.Path(__file__).parent/"forward.cpp").read_text()
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=compile_hip(src, [f"-DTOKENS={tokens}"]))))
+  return UOp(Ops.PROGRAM,
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, [f"-DTOKENS={tokens}"]))))
 
 @functools.cache
 def _router_topk_bwd_kernel(grad_logits:UOp, grad_weights:UOp, weights:UOp, indices:UOp) -> UOp:
@@ -19,8 +20,8 @@ def _router_topk_bwd_kernel(grad_logits:UOp, grad_weights:UOp, weights:UOp, indi
                   UOp.special(256, "lidx0"), UOp.special((tokens+255)//256, "gidx0"),
                   arg=KernelInfo(f"moe_router_topk_bwd_{tokens}_32_4"))
   src = (pathlib.Path(__file__).parent/"backward.cpp").read_text()
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=compile_hip(src, [f"-DTOKENS={tokens}"]))))
+  return UOp(Ops.PROGRAM,
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, [f"-DTOKENS={tokens}"]))))
 
 def _router_topk_bwd(gradient:UOp, kernel:UOp) -> tuple:
   weights_u, indices_u, logits_u = kernel.src[1:4]
