@@ -429,7 +429,9 @@ class Tensor(RandMixin):
     """Triggers the computation needed to create these Tensor(s)."""
     to_realize = dedup([x for x in (self,)+lst if needs_storage(x.uop.base)])
     if len(to_realize):
-      for t in to_realize: t.uop = (t.uop.src[0] if t.uop.is_self_copy else t.uop).clone()
+      for t in to_realize:
+        # AFTER is already a buffer
+        if t.uop.base.op is not Ops.AFTER: t.uop = (t.uop.src[0] if t.uop.is_self_copy else t.uop).clone()
       run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
 
