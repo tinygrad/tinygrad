@@ -31,13 +31,13 @@ if __name__ == '__main__':
   if not args.run:
     load_times = []
     for _ in range(args.runs or 10):
-      with WallTimeEvent(BenchEvent.STEP) as wte, open(args.pickle, 'rb') as f: load_pickle(f, out_of_band=args.out_of_band)
+      with WallTimeEvent(BenchEvent.STEP) as wte: load_pickle(args.pickle, out_of_band=args.out_of_band)
       load_times.append(wte.time)
       print(f"pickle load: {wte.time:6.2f} s")
     if (limit := getenv("ASSERT_MIN_LOAD_TIME", 0.0)):
       assert min(load_times) < limit, f"Speed regression, expected < {limit} s but took {min(load_times)} s"
   else:
-    with open(args.pickle, 'rb') as f: artifact = load_pickle(f, out_of_band=args.out_of_band)
+    artifact = load_pickle(args.pickle, out_of_band=args.out_of_band)
     if args.retarget: artifact['run'].captured._linear = lower_and_compile(artifact['run'].captured._linear)
     inputs = make_inputs(artifact)
     times = []
