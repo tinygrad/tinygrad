@@ -124,15 +124,18 @@ class APLRemotePCIDevice(RemotePCIDevice):
 
   def __init__(self, devpref:str, pcibus:str):
     self.ensure_app()
-    sock_path, sock = getenv("APL_REMOTE_SOCK", temp("tinygpu.sock")), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    # TINYGPU_DEVICE=<i> drives the i-th card (registry-entry-id order) through its own server and socket.
+    dev = getenv("TINYGPU_DEVICE", 0)
+    sock_path = getenv("APL_REMOTE_SOCK", temp("tinygpu.sock" if dev == 0 else f"tinygpu-{dev}.sock"))
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     for i in range(100):
       with contextlib.suppress(ConnectionRefusedError, FileNotFoundError):
         sock.connect(sock_path)
         break
-      if i == 0: subprocess.Popen([self.APP_PATH, "server", sock_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+      if i == 0: subprocess.Popen([self.APP_PATH, "server", sock_path, "--device", str(dev)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
       time.sleep(0.05)
     else: raise RuntimeError(f"Failed to connect to TinyGPU server at {sock_path}.")
-    super().__init__(devpref, "usb4", sock=sock)
+    super().__init__(devpref, "usb4" if dev == 0 else f"usb4:{dev}", sock=sock)
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     mapped_size, _, _, fd = self._rpc(self.sock, self.dev_id, RemoteCmd.MAP_SYSMEM_FD, size, int(contiguous), has_fd=True)

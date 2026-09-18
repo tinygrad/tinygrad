@@ -93,9 +93,87 @@ static void on_disconnect(void *refcon, io_service_t svc, uint32_t msg, void *ar
   if (msg == kIOMessageServiceIsTerminated) _exit(0);
 }
 
+// Which of the Mac's tinygpu services this server drives: `server <sock> --device <i>` picks the
+// i-th in ascending registry-entry-id order (the order the cards were matched in). Default 0.
+static uint32_t g_device_index = 0;
+#define MAX_DEVICES 8
+typedef struct { io_service_t svc; uint64_t entry_id; } tinygpu_service_t;
+
+// Every tinygpu service, sorted by registry entry id; the caller releases them.
+static size_t list_tinygpu_services(tinygpu_service_t *out, size_t max) {
+  io_iterator_t iter = IO_OBJECT_NULL;
+  if (IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceNameMatching("tinygpu"), &iter) != KERN_SUCCESS) return 0;
+  size_t n = 0;
+  io_service_t svc;
+  while ((svc = IOIteratorNext(iter)) != IO_OBJECT_NULL) {
+    uint64_t entry_id = 0;
+    if (n < max && IORegistryEntryGetRegistryEntryID(svc, &entry_id) == KERN_SUCCESS) out[n++] = (tinygpu_service_t){svc, entry_id};
+    else IOObjectRelease(svc);
+  }
+  IOObjectRelease(iter);
+  for (size_t i = 1; i < n; i++)
+    for (size_t j = i; j > 0 && out[j - 1].entry_id > out[j].entry_id; j--) { tinygpu_service_t t = out[j]; out[j] = out[j - 1]; out[j - 1] = t; }
+  return n;
+}
+
+// A 32-bit property of the service's provider (the IOPCIDevice): vendor-id, device-id. 0 when absent.
+static uint32_t provider_u32(io_service_t svc, const char *key) {
+  io_registry_entry_t parent = IO_OBJECT_NULL;
+  if (IORegistryEntryGetParentEntry(svc, kIOServicePlane, &parent) != KERN_SUCCESS) return 0;
+  CFStringRef cfkey = CFStringCreateWithCString(NULL, key, kCFStringEncodingUTF8);
+  CFTypeRef value = IORegistryEntryCreateCFProperty(parent, cfkey, kCFAllocatorDefault, 0);
+  CFRelease(cfkey);
+  IOObjectRelease(parent);
+  uint32_t result = 0;
+  if (value) {
+    if (CFGetTypeID(value) == CFDataGetTypeID()) {
+      uint8_t buf[4] = {0};
+      CFIndex len = CFDataGetLength((CFDataRef)value);
+      CFDataGetBytes((CFDataRef)value, CFRangeMake(0, len < 4 ? len : 4), buf);
+      result = (uint32_t)buf[0] | (uint32_t)buf[1] << 8 | (uint32_t)buf[2] << 16 | (uint32_t)buf[3] << 24;
+    } else if (CFGetTypeID(value) == CFNumberGetTypeID()) {
+      int64_t num = 0;
+      CFNumberGetValue((CFNumberRef)value, kCFNumberSInt64Type, &num);
+      result = (uint32_t)num;
+    }
+    CFRelease(value);
+  }
+  return result;
+}
+
+// CMD_PROBE: one line per tinygpu service in --device order, "<vendor>:<device>:<registry entry id>:<index>"
+// (hex, hex, hex, decimal) — the shape RemotePCIDevice.scan() reads (data length in resp0, then the text;
+// the last ':' field is the dev_id). The request's payload (arg1 bytes) is consumed and ignored.
+static void probe_devices(int fd, const request_t *req) {
+  for (uint64_t left = req->arg1; left > 0; ) {
+    uint8_t skip[256];
+    size_t take = left < sizeof(skip) ? (size_t)left : sizeof(skip);
+    recvall(fd, skip, take);
+    left -= take;
+  }
+  tinygpu_service_t services[MAX_DEVICES];
+  size_t n = list_tinygpu_services(services, MAX_DEVICES);
+  char text[MAX_DEVICES * 48];
+  size_t len = 0;
+  for (size_t i = 0; i < n; i++) {
+    uint32_t vendor = provider_u32(services[i].svc, "vendor-id") & 0xffff, device = provider_u32(services[i].svc, "device-id") & 0xffff;
+    len += (size_t)snprintf(text + len, sizeof(text) - len, "%s%04x:%04x:%llx:%zu", i ? "\n" : "", vendor, device,
+                            (unsigned long long)services[i].entry_id, i);
+    IOObjectRelease(services[i].svc);
+  }
+  response_t resp = {.status = RESP_OK, .resp0 = len, .resp1 = n};
+  send_response(fd, &resp, -1);
+  if (len) send(fd, text, len, 0);
+}
+
 static io_connect_t open_tinygpu(void) {
   static io_object_t notif;
-  io_service_t svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("tinygpu"));
+  tinygpu_service_t services[MAX_DEVICES];
+  size_t n = list_tinygpu_services(services, MAX_DEVICES);
+  io_service_t svc = IO_OBJECT_NULL;
+  for (size_t i = 0; i < n; i++) {
+    if (i == g_device_index) svc = services[i].svc; else IOObjectRelease(services[i].svc);
+  }
   if (!svc) return IO_OBJECT_NULL;
 
   if (!notif) {
@@ -188,18 +266,22 @@ static void handle_client(int fd) {
   setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
   printf("client connected\n");
 
-  g_conn = open_tinygpu();
-  if (g_conn == IO_OBJECT_NULL) {
-    fprintf(stderr, "failed to connect to tinygpu driver\n");
-    request_t req; recv(fd, &req, sizeof(req), 0);
-    send_error(fd, "Driver not available. Check: System Report > PCI for GPU, System Settings > Privacy & Security.");
-    return;
-  }
-
+  // The device is opened on the first command that needs it, so a client can PROBE
+  // (list the cards) a server whose own card is not there.
   request_t req;
   response_t resp;
   while (recv(fd, &req, sizeof(req), 0) == sizeof(req)) {
     resp = (response_t){0};
+
+    if (req.cmd == CMD_PROBE) { probe_devices(fd, &req); continue; }
+    if (g_conn == IO_OBJECT_NULL) {
+      g_conn = open_tinygpu();
+      if (g_conn == IO_OBJECT_NULL) {
+        fprintf(stderr, "failed to connect to tinygpu driver (device %u)\n", g_device_index);
+        send_error(fd, "Driver not available. Check: System Report > PCI for GPU, System Settings > Privacy & Security.");
+        return;
+      }
+    }
 
     switch (req.cmd) {
     case CMD_MAP_BAR:
@@ -256,7 +338,8 @@ static void handle_client(int fd) {
   cleanup();
 }
 
-int run_server(const char *sock_path) {
+int run_server(const char *sock_path, uint32_t device_index) {
+  g_device_index = device_index;
   int server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (server_fd < 0) { perror("socket"); return 1; }
 

@@ -63,7 +63,15 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
       submitRequest(activate: false)
     case "server":
       guard args.count > 2 else { print("Error: server requires socket path\n"); return usage() }
-      done(run_server(args[2]) == 0 ? .ok : .failed)
+      // `server <path> [--device <i>]`: the i-th tinygpu service in registry-entry-id order (default 0).
+      var device: UInt32 = 0
+      if args.count > 4, args[3] == "--device" {
+        guard let parsed = UInt32(args[4]) else { print("Error: --device takes a number\n"); return usage() }
+        device = parsed
+      } else if args.count > 3 {
+        print("Error: unknown server option \(args[3])\n"); return usage()
+      }
+      done(run_server(args[2], device) == 0 ? .ok : .failed)
     case "help", "-h", "--help":
       usage(); done(.ok)
     default:
@@ -77,7 +85,7 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
         status     Show extension status
         install    Install the driver extension
         uninstall  Remove the driver extension
-        server <path>  Start server on Unix socket
+        server <path> [--device <i>]  Start server on Unix socket for the i-th card (default 0)
       """)
     done?(.usage)
   }
