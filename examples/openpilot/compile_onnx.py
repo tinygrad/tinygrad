@@ -60,12 +60,12 @@ if __name__ == '__main__':
 
   with Context(DEBUG=max(DEBUG.value, 1)): expected = benchmark(run, **(inputs:=make_inputs(42)))
   # capture jit
-  for _ in range(2): np.testing.assert_array_equal(benchmark(run, **inputs), expected)
+  for _ in range(2): np.testing.assert_equal(benchmark(run, **inputs), expected)
   # test jit output actually changes with different inputs
-  with np.testing.assert_raises(AssertionError): np.testing.assert_array_equal(benchmark(run, **make_inputs(43)), expected)
+  with np.testing.assert_raises(AssertionError): np.testing.assert_equal(benchmark(run, **make_inputs(43)), expected)
   # benchmarks
   for i in range(args.benchmark_runs):
-    np.testing.assert_array_equal(benchmark(run, cb=lambda t: print(f"  [{i}/{args.benchmark_runs}] {t*1e3:.2f} ms"), **inputs), expected)
+    np.testing.assert_equal(benchmark(run, cb=lambda t: print(f"  [{i}/{args.benchmark_runs}] {t*1e3:.2f} ms"), **inputs), expected)
 
   if args.retargetable: make_retargetable(run)
 
@@ -76,4 +76,4 @@ if __name__ == '__main__':
   with open(args.output, 'rb') as f:
     loaded = load_pickle(f, out_of_band=args.out_of_band)
     if args.retargetable: loaded['run'].captured._linear = lower_and_compile(loaded['run'].captured._linear)
-    np.testing.assert_array_equal(benchmark(loaded['run'], **make_inputs(42)), expected)
+    np.testing.assert_equal(benchmark(loaded['run'], **make_inputs(42)), expected)
