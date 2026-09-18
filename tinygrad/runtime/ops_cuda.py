@@ -10,7 +10,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
 from tinygrad.runtime.support.compiler_cuda import pretty_ptx
 from tinygrad.runtime.support.c import init_c_var
-from tinygrad.runtime.support.hcq2 import HWQueue, EncodeCtx, encode_submit, ccall, rt_addr, layout_args, pack_args
+from tinygrad.runtime.support.hcq2 import HWQueue, EncodeCtx, encode_submit, ccall, layout_args, pack_args
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 if DEV.target("CUDA").interface == "MOCK": import test.mockgpu.cuda.cuda  # noqa: F401  # pylint: disable=unused-import
 
@@ -35,7 +35,7 @@ class CUDAQueue(HWQueue):
 
   @property
   def stream(self) -> UOp: return self.rt_vars.after(self.h).index(2 if self.queue.startswith("COPY") else 1).load() # read after the last call
-  def extern(self, tag) -> UOp: return rt_addr(UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, tag=tag), self.dev.host)
+  def extern(self, tag) -> UOp: return UOp.placeholder((1,), dtypes.uint64, 0, device=self.devs, tag=tag).getaddr(self.dev.host)
 
   def launch(self, func:UOp, global_size, local_size, args:list[UOp]):
     rows = layout_args(args, 8)
@@ -52,16 +52,16 @@ class CUDAQueue(HWQueue):
                 [bufs[i].getaddr(self.devs) for i in prg.arg.globals] + [v.ccast(var.dtype) for v, var in zip(vals, prg.arg.vars)])
 
   def copy(self, dst:UOp, src:UOp, sz:int):
-    self.h = ccall(cuda.cuMemcpyAsync, rt_addr(dst, self.devs), rt_addr(src, self.devs), UOp.const(sz, dtypes.uint64), self.stream)
+    self.h = ccall(cuda.cuMemcpyAsync, dst.getaddr(self.devs), src.getaddr(self.devs), UOp.const(sz, dtypes.uint64), self.stream)
 
   def wait(self, signal:UOp, value:UOp):
-    self.h = ccall(cuda.cuStreamWaitValue64_v2, self.stream, rt_addr(signal, self.devs), value, cuda.CU_STREAM_WAIT_VALUE_GEQ)
+    self.h = ccall(cuda.cuStreamWaitValue64_v2, self.stream, signal.getaddr(self.devs), value, cuda.CU_STREAM_WAIT_VALUE_GEQ)
 
   def signal(self, signal:UOp, value:UOp):
-    self.h = ccall(cuda.cuStreamWriteValue64_v2, self.stream, rt_addr(signal, self.devs), value, cuda.CU_STREAM_WRITE_VALUE_DEFAULT)
+    self.h = ccall(cuda.cuStreamWriteValue64_v2, self.stream, signal.getaddr(self.devs), value, cuda.CU_STREAM_WRITE_VALUE_DEFAULT)
 
   def timestamp(self, signal:UOp): # a slot is [signal][timestamp]
-    self.h = ccall(cuda.cuLaunchHostFunc, self.stream, self.extern("stamp"), rt_addr(signal[1:2], self.devs))
+    self.h = ccall(cuda.cuLaunchHostFunc, self.stream, self.extern("stamp"), signal[1:2].getaddr(self.devs))
 
   def submit(self, ka:UOp) -> UOp: return self.rt_vars.after(self.h).index(3).store(self.h.cast(dtypes.uint64)).substitute({self.kernargs: ka})
 
