@@ -47,7 +47,7 @@ class TestCompile(unittest.TestCase):
 @unittest.skipUnless(getenv("MODEL_PKL", ""), "requires an artifact from python examples/openpilot/compile_onnx.py")
 class TestCompiledModel(unittest.TestCase):
   def setUp(self):
-    with open(getenv("MODEL_PKL", ""), 'rb') as f: self.artifact = load_pickle(f, out_of_band=bool(getenv("PICKLE_OOB")))
+    self.artifact = load_pickle(getenv("MODEL_PKL", ""), out_of_band=bool(getenv("PICKLE_OOB")))
     self.model = self.artifact['run']
 
   def test_retarget(self):
