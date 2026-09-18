@@ -26,7 +26,7 @@ class HCQInfo:
 
   nargs:int = 0
   table:int = -1
-  inputs:tuple[tuple[UOp, str, int], ...] = ()
+  inputs:tuple[tuple[UOp, int, str], ...] = ()
   slots:tuple[tuple[str, int], ...] = () # per device, the position of its batch slots in the args
   host_deps:tuple[tuple[str, str], ...] = () # (memory owner, accessing device)
   written_bufs:tuple[UOp, ...] = () # write args
@@ -62,11 +62,6 @@ def to_name(*parts:str) -> str: return "_".join(parts).replace(":", "_").lower()
 
 def timeline(devs:tuple[str, ...]) -> UOp: return UOp.placeholder((2,), dtypes.uint64, 0, device=devs, volatile=True, tag="timeline")
 def timeline_value(devs:tuple[str, ...]) -> UOp: return timeline(devs).index(1).load()
-
-def rt_addr(b:UOp, dev="CPU", *deps:UOp) -> UOp:
-  base, off = unwrap_view(b)
-  word = UOp.placeholder((1,), dtypes.uint64, device=Device[to_tuple(dev)[0]].host, tag="addr")
-  return patch(word, [(0, base.bitcast(dtypes.uint8)[off:off + b.nbytes()].getaddr(dev))]).after(*deps).index(0).load()
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   fn = to_name("submit", (devs:=to_tuple(devs))[0].split(":")[0], queue.split(":")[0])
@@ -311,10 +306,7 @@ def sched_batches(l:UOp, profile:bool) -> UOp:
 @dataclass
 class EncodeCtx:
   devs:tuple[str, ...]
-  inputs:dict[tuple[UOp, str, int], int] = field(default_factory=dict)
   lt_patches:list[UOp] = field(default_factory=list)
-
-  def __post_init__(self): self.table = UOp.placeholder((1,), dtypes.uint64, device=Device[self.devs[0]].host, tag="inputs")
 
 class HWQueue:
   q_rewrite = PatternMatcher([
@@ -403,12 +395,6 @@ pm_hcq_encode = PatternMatcher([
 
 def _is_input_addr(g:UOp) -> bool: return (base:=unwrap_lane(g.src[0])[0]).op is Ops.PARAM and base.tag is None
 
-def addrs_to_table(ctx:EncodeCtx, g:UOp) -> UOp|None:
-  if not _is_input_addr(g): return None
-  base, off = unwrap_view(g.src[0])
-  slot = ctx.inputs.setdefault((base, to_tuple(g.arg)[0], off), len(ctx.inputs))
-  return ctx.table.index(slot).load()
-
 def _is_link_patch(w:UOp) -> bool:
   if w.op is Ops.GETADDR: return not _is_input_addr(w)
   if w.op is Ops.PARAM: return w.tag is not None
@@ -422,7 +408,7 @@ def hoist_links(ctx:EncodeCtx, a:UOp) -> UOp|None:
   ctx.lt_patches.extend(links)
   return a.src[0].after(*rest)
 
-pm_patches = PatternMatcher([(UPat(Ops.GETADDR, name="g"), addrs_to_table), (UPat(Ops.AFTER, name="a"), hoist_links)])
+pm_patches = PatternMatcher([(UPat(Ops.AFTER, name="a"), hoist_links)])
 
 def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> UOp:
   # group into stacks based on dtype, alignment, is_link (rt/lt can't share a store) and ranges (a ranged offset is a loop)
@@ -488,8 +474,13 @@ def lower_call(call:UOp) -> UOp|None:
                        ctx=ctx, bpm=pm_patches, name="encode")
   body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])), ctx=ctx, bpm=pm_patches, name="lower")
 
-  # resize table
-  body = body.substitute({ctx.table: (table:=ctx.table.replace(arg=replace(ctx.table.arg, size=len(ctx.inputs))))})
+  # runtime addrs load from a table: inputs filled per call, the rest at link
+  rt_addrs = dedup(u for u in body.toposort() if u.op is Ops.GETADDR)
+  input_addrs, link_addrs = partition(rt_addrs, _is_input_addr)
+  table = UOp.placeholder((len(rt_addrs),), dtypes.uint64, device=Device[ctx.devs[0]].host, tag="inputs")
+  slot_of = {g: i for i, g in enumerate(input_addrs + link_addrs)}
+  body = body.substitute({g: table.index(i).load() for g, i in slot_of.items()})
+  ctx.lt_patches += patch(table, [(8 * slot_of[g], g) for g in link_addrs]).src[1:]
 
   # combine placeholders into one and replace with views
   words = [u for u in body.toposort() if u.op is Ops.PARAM and u.tag not in (None, "program") and u.arg.slot]
@@ -515,7 +506,8 @@ def lower_call(call:UOp) -> UOp|None:
   if VIZ: graph_rewrite(UOp.sink(*patches), PatternMatcher([]), name="View Link-Time Patches")
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Body")
 
-  info = replace(call.arg.aux, nargs=len(bufs), table=bufs.index(table) if table in bufs else -1, inputs=tuple(ctx.inputs),
+  info = replace(call.arg.aux, nargs=len(bufs), table=bufs.index(table) if table in bufs else -1,
+                 inputs=tuple((*unwrap_view(g.src[0]), to_tuple(g.arg)[0]) for g in input_addrs),
                  slots=tuple((to_tuple(b.device)[0], i) for i, b in enumerate(bufs) if b.tag == "slots"))
   return call.replace(src=(sink, *bufs), arg=replace(call.arg, aux=info)).after(*patches)
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])

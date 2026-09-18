@@ -7,7 +7,7 @@ from tinygrad.helpers import round_up, ceildiv, unwrap, to_tuple, flatten
 from tinygrad.engine.realize import get_call_arg_uops
 from tinygrad.runtime.autogen import bnxt
 from tinygrad.runtime.support.rdma.bnxtdev import BNXTDev, BNXTQP, db_value, send_wqe, recv_wqe, WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU
-from tinygrad.runtime.support.hcq2 import unwrap_view, rt_addr, to_name
+from tinygrad.runtime.support.hcq2 import unwrap_view, to_name
 from tinygrad.runtime.support.memory import AddrSpace, MMIOInterface, VirtMapping, MemoryManager
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System
 from tinygrad.runtime.support.hcq import hcq_filter_visible_devices
@@ -113,11 +113,10 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
   assert wqes <= min(RING_ENTRIES, CQ_ENTRIES), "a batch posts at most a ring of wqes per pair"
 
   # next slot and psn persist in nic memory. read once per submit and own it
-  n, p = seq.index(0).load(), psn.index(0).load()
-  advances = [seq.index(0).store(n + wqes)] + ([] if is_recv else [psn.index(0).store(p + packets)])
+  bumps = [seq.index(0).store(seq.index(0).load() + wqes)] + ([] if is_recv else [psn.index(0).store(psn.index(0).load() + packets)])
+  n, p = seq.after(*bumps).index(0).load() - wqes, psn.after(*bumps).index(0).load() - packets
 
-  # gpu addresses are rt patches
-  ring_addr, cq_addr = rt_addr(ring, devs, *advances), rt_addr(cq, devs)
+  ring_addr, cq_addr = ring.getaddr(devs), cq.getaddr(devs)
   db = rdma_db(nic.device, pair).getaddr(devs) + (nic.iface.dev_impl.db_off & 0xfff)
   ring_db = db_value(qp.qpn, bnxt.DBC_DBC_TYPE_RQ if is_recv else bnxt.DBC_DBC_TYPE_SQ, 0, 0)
   cq_db = db_value(qp.rcq_id if is_recv else qp.scq_id, bnxt.DBC_DBC_TYPE_CQ, 0, 0)
