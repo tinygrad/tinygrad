@@ -749,6 +749,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @property
   def metadata(self) -> tuple[Metadata, ...]|None: return all_metadata.get(self, None)
 
+  # little helpers
+  def on_disk(self:UOp): return isinstance(self.device, str) and self.device.startswith("DISK")
+  def on_creation_device(self:UOp): return isinstance(self.device, str) and self.device.startswith(("DISK", "NPY", "PYTHON"))
+  def needs_storage(self:UOp) -> bool: return not self.is_virtual and not self.has_buffer_identity()
+
   # *** uop movement ops ***
 
   @property
