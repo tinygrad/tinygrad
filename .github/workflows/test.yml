@@ -330,7 +330,7 @@ jobs:
           DEV: CL::IMAGE_PITCH_ALIGNMENT=64
         run: |
           VIZ=1 IMAGE=1 FLOAT16=1 python examples/openpilot/compile_onnx.py "https://huggingface.co/commaai/openpilot-lfs/resolve/$LFS_SHA/openpilot/selfdrive/modeld/models/driving_supercombo.onnx" /tmp/openpilot_viz.pkl --benchmark-runs 1
-          ALLOWED_KERNEL_COUNT=162 ALLOWED_READ_IMAGE=1530 ALLOWED_GATED_READ_IMAGE=47 python examples/openpilot/check_image_reads.py
+          ALLOWED_KERNEL_COUNT=162 ALLOWED_READ_IMAGE=1530 ALLOWED_GATED_READ_IMAGE=44 python examples/openpilot/check_image_reads.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 

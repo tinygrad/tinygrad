@@ -472,12 +472,10 @@ class AMDSDMAQueue(HWQueue):
     super().__init__(ctx, submit)
     self.sdma, self.target, self.max_copy_size = self.dev.sdma, self.dev.target, self.dev.max_copy_size
 
-  def copy(self, call:UOp):
-    sz = call.src[2].max_numel() * call.src[2].dtype.itemsize
-    hdr = self.sdma.SDMA_OP_COPY | self.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_COPY_LINEAR)
+  def copy(self, dst:UOp, src:UOp, sz:int):
     for off in range(0, sz, self.max_copy_size):
-      self.q(hdr, min(sz-off, self.max_copy_size)-1, 0,
-             *(a + UOp.const(off, dtypes.uint64) if off else a for a in (call.src[2].getaddr(self.devs), call.src[1].getaddr(self.devs))))
+      self.q(self.sdma.SDMA_OP_COPY|self.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_COPY_LINEAR), min(sz-off, self.max_copy_size)-1,
+            0, *(a + UOp.const(off, dtypes.uint64) if off else a for a in (src.getaddr(self.devs), dst.getaddr(self.devs))))
 
   def wait(self, signal:UOp, value:UOp, eq:bool=False):
     func = WAIT_REG_MEM_FUNCTION_EQ if eq else WAIT_REG_MEM_FUNCTION_GEQ
@@ -735,7 +733,7 @@ class KFDIface:
 
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x74b5,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0,0x75b0,0x75b3)),),
+    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x74b5,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0,0x75a8,0x75b0,0x75b3)),),
       vram_bar=0, va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
     self._compute_props()
 
@@ -1012,8 +1010,8 @@ class AMDDevice(Compiled):
     self.aql_desc.compute_tmpring_size = self.tmpring_size(self.max_private_segment_size)
     self.aql_gart.host.view(fmt='B')[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
 
-  def _prof_buffer(self, size:int, dtype) -> Buffer:
-    buf = Buffer(self.device, size, dtype, options=BufferSpec(host=True, nolru=True, uncached=True, cpu_access=True), preallocate=True)
+  def _prof_buffer(self, size:int, dtype, host:bool=True) -> Buffer:
+    buf = Buffer(self.device, size, dtype, options=BufferSpec(host=host, nolru=True, uncached=host, cpu_access=True), preallocate=True)
     buf.host.view(fmt='B')[:buf.nbytes] = bytes(buf.nbytes)
     return buf
 
@@ -1024,7 +1022,7 @@ class AMDDevice(Compiled):
   @functools.cached_property
   def pmc_buf(self) -> Buffer: return self._prof_buffer(self.pmc_size * self.prof_slots, dtypes.uint8)
   @functools.cached_property
-  def sqtt_buf(self) -> Buffer: return self._prof_buffer(self.sqtt_win * self.prof_slots * self.sqtt_ses, dtypes.uint8)
+  def sqtt_buf(self) -> Buffer: return self._prof_buffer(self.sqtt_win * self.prof_slots * self.sqtt_ses, dtypes.uint8, host=False)
   @functools.cached_property
   def sqtt_wptrs(self) -> Buffer: return self._prof_buffer(self.prof_slots * self.sqtt_ses, dtypes.uint32)
 

@@ -8,6 +8,7 @@ from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, AxisType, ParamArg, PatternMatcher, UOp, UPat, dtype_from_uop, exec_alu, graph_rewrite  # noqa: F401  # ParamArg used by eval(str(uop)) roundtrip tests
 from tinygrad.codegen.late.coalesce import memory_coalescing
 from tinygrad.renderer import Renderer
+from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.uop.weak import pm_lower_weak
 from tinygrad.uop.spec import spec_program, spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, pm_remove_invalid
@@ -302,6 +303,13 @@ class TestFastIdiv(unittest.TestCase):
       self.assertIn(Ops.AND, ops, f"For dtype={dt} FLOORMOD by pow2 did not simplify to AND")
       self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORMOD by pow2 left a MOD")
       self.assertNotIn(Ops.FLOORMOD, ops, f"For dtype={dt} FLOORMOD survived past late rewrite")
+
+  def test_max_keeps_bound_for_idiv(self):
+    # MAX is lowered to CMPLT+WHERE only after floordiv_to_idiv, so the bound it carries still proves the division same-sign
+    x = UOp.param(0, dtypes.int32, 3).index(UOp.const(2)).maximum(0) + 1
+    ops = [u.op for u in to_uops_list([x // 3], ren=CStyleLanguage(Target()))]
+    self.assertNotIn(Ops.MAX, ops, "the renderer has no MAX")
+    self.assertNotIn(Ops.CMOD, ops, "a provably positive dividend kept the round toward zero correction")
 
   def test_floordiv_power_of_two(self):
     # FLOORDIV by a power of two lowers to a shift, with no round toward zero correction (a shift is exactly floor division)

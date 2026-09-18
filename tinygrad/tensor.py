@@ -36,18 +36,7 @@ def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_i
 def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
 def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
 
-def creation_copy_is_realized(u:UOp):
-  # all copies from disk/numpy are realized into a real buffer
-  if is_creation_device(u.src[0]): return tag_uop(u)
-
-# CONTIGUOUS and AFTER + parents are the only nodes that get updated
 add_tags = PatternMatcher([
-  (UPat(Ops.COPY, name="u"), creation_copy_is_realized),
-  # no tag on copies that fill an AFTER's whole dest via STORE: merge COPY tag into AFTER (the copy reads that storage).
-  # a partial STORE keeps the tag: the copy mints its own storage like any bare creation copy
-  (UPat(Ops.AFTER, src=(UPat(name="dest"),
-    UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
-   lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
@@ -299,9 +288,9 @@ class Tensor(RandMixin):
     elif not isinstance(data, UOp):
       if _dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {_dtype}")
       if isinstance(data, bytes):
-        data = UOp._frompy(data, _dtype or dtypes.uint8, _device)
+        data = UOp._frompy(data, _dtype or dtypes.uint8)
       elif isinstance(data, (list, tuple)):
-        data = UOp._frompy(data, _dtype or dtypes.from_py(data), _device)
+        data = UOp._frompy(data, _dtype or dtypes.from_py(data))
       elif is_numpy_ndarray(data):
         data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)
       elif isinstance(data, pathlib.Path):
@@ -432,8 +421,6 @@ class Tensor(RandMixin):
     x = x._broadcast_to(self.shape)
     if x.dtype in dtypes.weaks: x = x.cast(least_upper_dtype(self.dtype, x.dtype))
     if x.dtype != self.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
-    if not is_disk and x.uop.device is not None and self.device is not None and self.device != x.device:
-      raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
     if isinstance(self.device, tuple) and x.uop.device is not None and self.uop.axis != x.uop.axis:
       raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
 
@@ -549,7 +536,9 @@ class Tensor(RandMixin):
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
     # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
-    if isinstance(device, str) and device.startswith("DISK"): ret = Tensor(self.uop.clone(device))
+    # a copy from a creation device is clone
+    if (isinstance(device, str) and device.startswith("DISK")) or is_creation_device(self.uop):
+      ret = Tensor(self.uop.clone(device))
     else: ret = Tensor(self.uop.copy_to_device(device))
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret.is_param_(self.is_param)

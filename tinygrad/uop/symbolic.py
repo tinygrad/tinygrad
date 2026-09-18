@@ -196,11 +196,6 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate").where(UPat.var("c0"), UPat.var("c1")).named("w"), fold_const_where),
-  (UPat.var("gate").where(UPat.var("x"), 0) != 0, lambda gate,x: gate & (x != 0)),
-  # a.where(b.where(c, d), d) -> (a & b).where(c, d)
-  (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
-  # a.where(c, b.where(c, d)) -> (a | b).where(c, d)
-  (UPat.var("a").where(UPat.var("c"), UPat.var("b").where(UPat.var("c"), UPat.var("d"))), lambda a,b,c,d: (a|b).where(c,d)),
 ])+mop_cleanup
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
@@ -257,6 +252,11 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
    lambda cond, t, f: cond.where(f,t) if not f.is_invalid else None),
   # in cond.where(t, f), uses of cond fold to True within t and False within f
   (UPat.var("cond", dtype=dtypes.bool).where(UPat.var("t"), UPat.var("f")), fold_where_closure),
+  (UPat.var("gate").where(UPat.var("x"), 0) != 0, lambda gate,x: gate & (x != 0)),
+  # a.where(b.where(c, d), d) -> (a & b).where(c, d)
+  (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
+  # a.where(c, b.where(c, d)) -> (a | b).where(c, d)
+  (UPat.var("a").where(UPat.var("c"), UPat.var("b").where(UPat.var("c"), UPat.var("d"))), lambda a,b,c,d: (a|b).where(c,d)),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
