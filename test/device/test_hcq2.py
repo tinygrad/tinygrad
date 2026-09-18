@@ -102,6 +102,9 @@ class TestHCQ2Schedule(unittest.TestCase):
   @staticmethod
   def input(value:int=2) -> Tensor: return Tensor.full((4,), value, dtype=dtypes.int32).contiguous().realize()
 
+  def assertOutput(self, out:Tensor, expected:list): # NULL runs nothing, its outputs stay zero
+    if not Device.DEFAULT.startswith("NULL"): self.assertEqual(out.tolist(), expected)
+
   def compiled(self, n:int, jit=False):
     x, inputs = self.input(), []
     if jit:
@@ -140,7 +143,7 @@ class TestHCQ2Schedule(unittest.TestCase):
 
   def test_profile_slots_survive_indirect_access(self):
     pm = PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat())),), allow_any_len=True),
-                          lambda buf: buf.getaddr("CPU") if hcq2.unwrap_view(buf)[0].tag == "slots" else None)])
+                          lambda buf: buf.getaddr(Device[Device.DEFAULT].host) if hcq2.unwrap_view(buf)[0].tag == "slots" else None)])
     with patch.object(Device[Device.DEFAULT], "pm_lower", pm):
       compiled = compile_linear(Tensor.ones(4).contiguous().schedule_linear(), profile=True)
     self.assertFalse(any(param.op is Ops.PARAM and (param.arg.name or "").startswith("slots_")
@@ -169,7 +172,7 @@ class TestHCQ2Schedule(unittest.TestCase):
           self.assertEqual(tuple(inputs), before)
           self.assertFalse(borrowed)
           run_linear(linked, input_uops=inputs, jit=True, wait=True)
-          self.assertEqual(out.tolist(), [2 + n] * 4)
+          self.assertOutput(out, [2 + n] * 4)
 
   def test_double_link(self):
     for n in (1, 65):
@@ -182,7 +185,7 @@ class TestHCQ2Schedule(unittest.TestCase):
           self.assertIs(again, linked)
           self.assertFalse(borrowed)
           run_linear(again, input_uops=inputs, jit=True, wait=True)
-          self.assertEqual(out.tolist(), [2 + n] * 4)
+          self.assertOutput(out, [2 + n] * 4)
 
   def test_jit_new_inputs_each_call(self):
     @TinyJit
@@ -191,7 +194,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     for a, b in ins[:3]: f(a, b).tolist() # warm the jit and the copyout
 
     before = len(hcq_compile_cache)
-    self.assertEqual([f(a, b).tolist() for a, b in ins[3:]], [[i * 3.0] * 23 for i in range(3, 6)])
+    for i, (a, b) in enumerate(ins[3:], 3): self.assertOutput(f(a, b), [i * 3.0] * 23)
     self.assertEqual(len(hcq_compile_cache), before)
 
   def test_jit_symbolic(self):
@@ -246,7 +249,7 @@ class TestHCQ2Schedule(unittest.TestCase):
       @TinyJit
       def f(a): return (a * 2 + 1).contiguous().realize()
       for _ in range(3): out = f(x)
-      self.assertEqual(out.to("CPU").tolist(), [2.0 * i + 1] * 1024)
+      self.assertOutput(out.to("CPU"), [2.0 * i + 1] * 1024)
     step(1) # warms the programs, templates and rings
     gc.collect()
     used = GlobalCounters.mem_used
@@ -258,7 +261,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     # a buffer the commands only address, never a param of the body, is kept by the linked call as a ref of what its getaddr resolved into
     dev = Device[Device.DEFAULT]
     names = {"AMD": () if getattr(dev, "is_aql", False) else ("scratch",), # the aql descriptor holds the scratch, nothing addresses it
-             "NV": ("timeline",), "QCOM": ("_stack", "dummy"), "CUDA": ("timeline",)}[Device.DEFAULT.split(":")[0]]
+             "NV": ("timeline",), "QCOM": ("_stack", "dummy"), "CUDA": ("timeline",), "NULL": ("timeline",)}[Device.DEFAULT.split(":")[0]]
     @TinyJit
     def f(a): return (a * 2 + 1).contiguous().realize()
     x = Tensor.ones(16).contiguous().realize()
