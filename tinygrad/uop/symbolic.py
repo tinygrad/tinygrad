@@ -413,9 +413,10 @@ def where_on_load(cond:UOp, buf:UOp, idx:UOp, or_cast:UOp) -> UOp|None:
   where_clauses, load_valid = list(cond.split_uop(Ops.AND)), idx.get_valid()
   in_load = set(load_valid.split_uop(Ops.AND))
   idx_index = {u for u in idx.backward_slice_with_self if u.op is Ops.INDEX}
-  # can move if: condition's ranges are subset of idx's ranges, and no data dependent INDEX (only idx's INDEX allowed)
+  # can move if: not a const, condition's ranges are subset of idx's ranges, and no data dependent INDEX (only idx's INDEX allowed)
   def can_move(c:UOp) -> bool:
-    return c.ranges.keys() <= idx.ranges.keys() and all(u in idx_index for u in c.backward_slice_with_self if u.op is Ops.INDEX)
+    return c.op is not Ops.CONST and c.ranges.keys() <= idx.ranges.keys() and \
+      all(u in idx_index for u in c.backward_slice_with_self if u.op is Ops.INDEX)
   moved, keep = partition([c for c in where_clauses if c not in in_load], can_move)
   if len(keep) == len(where_clauses): return None
   idx = buf.index(idx.get_idx().valid(load_valid.uprod(*moved)))
