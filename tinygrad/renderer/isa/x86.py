@@ -329,7 +329,7 @@ isel_matcher = PatternMatcher([
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
   # so regalloc builds the prologue/epilogue naturally. they all share the stack pointer define's dtype so the the stack pointer define is first
   (UPat(Ops.SINK, name="x"), lambda x:
-   x.replace(src=(x.ins(X86Ops.RET, *x.src, stack_pointer, *(def_reg(dtypes.uint64, r) for r in CALLEE_SAVED)),))
+   x.replace(src=(UOp(Ops.NOOP).ins(X86Ops.RET, *x.src, stack_pointer, *(def_reg(dtypes.uint64, r) for r in CALLEE_SAVED)),*x.src))
     if not x.src or (x.src[0].op is Ops.CALL and x.src[0].opcode) is not X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
