@@ -28,7 +28,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if SPEC: type_verify(big_sink, spec_tensor)
 
   # allocate new buffers
-  realize = {base for x in big_sink.src if needs_storage(base:=x.base) and base.op is not Ops.AFTER}
+  realize = {base for x in big_sink.src if needs_storage(base:=x.base)}
   call_args:list[UOp] = []           # args to the big call
   replace_args:dict[UOp, UOp] = {}   # sink replace arg
   buffer_map:dict[UOp, UOp] = {}     # replacements in the big tensor graph

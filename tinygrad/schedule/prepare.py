@@ -148,7 +148,54 @@ def materialize_cross_device_src(dest:UOp, src:UOp):
   if src.device is None or dest.device == src.device or src.has_buffer_identity(after_ok=True): return None
   return dest.store(src.contiguous())
 
+def transform_precompiled_call(c:UOp) -> UOp|None:
+  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
+  assert c.body.op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
+  # the RETURNED srcs are the call outputs (slots are src positions)
+  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
+  srcs = tuple(st.src[1] for st in c.body.src if st.op is Ops.STORE)
+
+  # add the outputs to the call
+  outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
+  targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
+
+  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
+  # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
+  placed:dict[UOp, UOp] = {}
+  items:list[UOp] = []
+  for s, t in zip(srcs, targets):
+    deps:list[UOp] = []
+    while s.op is Ops.AFTER:
+      deps.extend(s.src[1:])
+      s = s.src[0]
+    if s not in placed:
+      if s.is_self_copy: placed[s] = t.after(t.store(s.src[0]))
+      elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = t
+      if s in placed:
+        items.append(s.after(*deps))
+        continue
+    items.append(t.after(t.store(s.after(*deps))))
+  # swap every placed value for its target storage, also inside other stores' AFTER deps
+  fxn = UOp.sink(*(x.substitute(placed) for x in items))
+
+  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
+  # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
+  rmap = dict(zip(ret_pos, outs))
+  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                   for i, a in enumerate(c.src[1:])]))
+  rets = tuple(o.after(new_call) for o in outs)
+
+  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
+  # NOTE: must use the resolved shapes of the RETURNED placeholders (which substitute PARAMs with external args), not raw body shapes
+  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
+
+  # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
+  return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
+  # transform precompiled value-producing calls into opaque CALLs (outputs become real buffers)
+  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
+
   # resolve calls with RETURNED inputs (inline the body)
   (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.has_unbound_outputs else None),
 
