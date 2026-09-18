@@ -4,7 +4,7 @@ from tinygrad.function import function
 from tinygrad import Tensor, GlobalCounters, Device
 from tinygrad.dtype import Invalid
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, ProgramInfo
-from test.helpers import assert_kernel_count
+from test.helpers import assert_kernel_count, KernelCountException
 
 class TestFunction(unittest.TestCase):
   def test_simple(self):
@@ -537,7 +537,7 @@ class TestFunctionTuple(unittest.TestCase):
 
     # Scheduling replaces the forward graph with storage, so build gradients first.
     c.sum().backward()
-    self.assertEqual(count_kernels(c), 1)
+    if (count:=count_kernels(c)) != 1: raise KernelCountException(1, count)
     Tensor.realize(a.grad)
     np.testing.assert_allclose(a.grad.numpy(), [2., 2., 2., 2.])
 
