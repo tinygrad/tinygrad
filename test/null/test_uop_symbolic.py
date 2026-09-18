@@ -5,7 +5,7 @@ import z3
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.spec import spec_shared, type_verify
-from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load, symbolic_simple
+from tinygrad.uop.symbolic import sym, symbolic, commutative, pm_simplify_valid, pm_move_where_on_load, symbolic_simple
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
@@ -1107,6 +1107,13 @@ class TestSymbolic(unittest.TestCase):
     c = Variable("c", 0, 3)
     expr = (x<5).where((x<5).logical_not().where(a, b)*2, c)
     self.helper_test_variable(expr, 0, 6, "(x<5).where((b*2), c)")
+
+  def test_where_closure_folding_before_gate_merge(self):
+    # the outer cond folds inside the inner gate before the two gates merge, so the merged gate carries no redundant conjunct
+    x = Variable("x", 0, 10)
+    a = Variable("a", 0, 3)
+    cond, gate = x < 5, Variable("y", 0, 10) < 7
+    check_uop_against_string(self, graph_rewrite(cond.where((cond & gate).where(a, 0), 0), symbolic), "((x<5)&(y<7)).where(a, 0)")
 
   def test_where_closure_folding_valid(self):
     # a valid gate on the same cond folds in the true branch, the live else value is kept
