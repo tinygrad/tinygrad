@@ -16,10 +16,6 @@ from tinygrad.schedule.multi import multi_pm
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 
-def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
-def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_identity()
-def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
-
 # *** callify: transform a tensor graph into a CALL UOp such that all state is properly scoped ***
 
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
@@ -28,7 +24,8 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if SPEC: type_verify(big_sink, spec_tensor)
 
   # allocate new buffers
-  realize = {base for x in big_sink.src if needs_storage(base:=x.base) and (base.op is not Ops.AFTER or base.storage_base.is_unbound)}
+  realize = {base for x in big_sink.src if (base:=x.base).needs_storage() and not base.on_disk()
+             and (base.op is not Ops.AFTER or base.storage_base.is_unbound)}
   call_args:list[UOp] = []           # args to the big call
   replace_args:dict[UOp, UOp] = {}   # sink replace arg
   buffer_map:dict[UOp, UOp] = {}     # replacements in the big tensor graph
@@ -231,7 +228,7 @@ class Tensor(RandMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    to_realize = [x for x in (self,)+lst if needs_storage(x.uop.base)]
+    to_realize = [x for x in (self,)+lst if x.uop.base.needs_storage()]
     if len(to_realize):
       run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
@@ -247,7 +244,7 @@ class Tensor(RandMixin):
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
     if self.dtype in dtypes.weaks: self.uop = self.uop.clone()
-    is_disk = on_disk(self.uop)
+    is_disk = self.uop.on_disk()
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
     # broadcast x (shape only, dtype must match)
@@ -370,7 +367,7 @@ class Tensor(RandMixin):
     if (device:=canonicalize_device(device)) == self.device: return self
     # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
     # a copy from a creation device is clone
-    if (isinstance(device, str) and device.startswith("DISK")) or is_creation_device(self.uop):
+    if (isinstance(device, str) and device.startswith("DISK")) or self.uop.on_creation_device():
       ret = Tensor(self.uop.clone(device))
     else: ret = Tensor(self.uop.copy_to_device(device))
     if self.grad is not None: ret.grad = self.grad.to(device)
@@ -398,7 +395,7 @@ class Tensor(RandMixin):
     if len(devices) == 1: return self.to(devices[0])
     devices = cast(tuple[str, ...], canonicalize_device(devices))
     # a shard of a load from a creation device (disk/npy/python) wants the copy to persist, so it inserts a clone
-    src = self.uop.clone(devices) if is_creation_device(self.uop) else self.uop
+    src = self.uop.clone(devices) if self.uop.on_creation_device() else self.uop
     uop = src.shard(devices, None if axis is None else self._resolve_dim(axis))
     return Tensor(uop).is_param_(self.is_param)
 
@@ -522,7 +519,7 @@ class Tensor(RandMixin):
              if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
         raise RuntimeError("can't setitem on a tensor with other uses")
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
-    is_disk = on_disk(self.uop)
+    is_disk = self.uop.on_disk()
     advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
     realized = is_disk or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized()
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
