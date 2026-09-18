@@ -116,6 +116,10 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
 
 class TestFp8sConversions(unittest.TestCase):
+  def test_min_max_representable(self):
+    # e4m3 and the fnuz fp8s have no inf, so their extremes (the MAX/MIN reduce identities) are finite values that round trip
+    for dt in dtypes.fp8s: self.assertEqual(Tensor([dt.min, dt.max], dtype=dt).float().tolist(), [dt.min, dt.max])
+
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
   def test_float_to_fp8e4m3(self, x):
     np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3), torch.tensor(x, dtype=torch.float8_e4m3fn).view(torch.uint8).item())

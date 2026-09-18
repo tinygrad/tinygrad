@@ -69,10 +69,12 @@ class DType(metaclass=DTypeMetaClass):
   @functools.cached_property
   def min(self):
     if dtypes.is_int(self): return 0 if dtypes.is_unsigned(self) else -2**(self.bitsize-1)
-    return -float("inf") if dtypes.is_float(self) else False
+    return -self.max if dtypes.is_float(self) else False
   @functools.cached_property
   def max(self):
     if dtypes.is_int(self): return 2**(self.bitsize)-1+self.min
+    # e4m3 and the fnuz fp8s have no inf: their largest value is the largest normal
+    if self in dtypes.fp8s and self is not dtypes.fp8e5m2: return fp8_to_float(_fp8_cfg[self][5], self)
     return float("inf") if dtypes.is_float(self) else True
   def const(self, val: ConstType):
     if isinstance(val, InvalidType): return val
