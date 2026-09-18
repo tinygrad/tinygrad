@@ -536,6 +536,10 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, src=tuple([x for x in srcs if x is not None]), **kwargs)
   @property
+  def opcode(self) -> Any:
+    if self.op is not Ops.CALL or not isinstance(self.arg, InstInfo): raise RuntimeError(f"opcode requested, but {self.op}, {self.arg} is not a machine instruction CALL")
+    return self.arg.opcode
+  @property
   def body(self) -> UOp:
     """the body of a CALL: the program, copy or function reference being called (its first src)"""
     if self.op is not Ops.CALL: raise RuntimeError(f"body requested, but {self.op} is not a CALL")

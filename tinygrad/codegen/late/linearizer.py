@@ -7,9 +7,9 @@ from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
 def oprs(u:UOp) -> tuple[UOp, ...]: return u.src[1:] if u.op is Ops.CALL and u.src[0].op is not Ops.CUSTOM_FUNCTION else u.src
 
-def linearize(sink:UOp, enter_calls=True) -> list[UOp]:
+def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(sink.toposort(enter_calls=enter_calls))
+  lst = list(sink.toposort(enter_calls=False))
   out_degree:defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, tuple[int, int, Any]] = {}
 

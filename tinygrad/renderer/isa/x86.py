@@ -160,7 +160,7 @@ pre_isel_matcher = PatternMatcher([
 
 # ***** X86 registers *****
 # TODO: make this a UOp property?
-def opcode(x:UOp) -> X86Ops|None: return x.arg.opcode if x.op is Ops.CALL and isinstance(x.arg, InstInfo) else None
+# def opcode(x:UOp) -> X86Ops|None: return x.arg.opcode if x.op is Ops.CALL and isinstance(x.arg, InstInfo) else None
 def def_reg(dt:DType, reg:Register) -> UOp: return UOp(Ops.NOOP).bitcast(dt).ins(X86Ops.DEFINE, tag=(reg,))
 # undefined operand, used for VEX instructions
 def undef(): return UOp(Ops.NOOP)
@@ -284,7 +284,7 @@ GPR_DEST_OPS = {X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VCVTTSS2SI, X86Ops.VCVTTS
 XMM_OPS = {op for op in X86Ops if op.name.startswith('V')} - GPR_DEST_OPS
 
 def _is_vec_xmm(y: UOp) -> bool:
-  return opcode(y) in XMM_OPS or (y.op not in (Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.CALL) and y.max_numel() > 1)
+  return (y.op is Ops.CALL and y.opcode in XMM_OPS) or (y.op not in (Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.CALL) and y.max_numel() > 1)
 
 def _xmm_sz(x: UOp) -> X86Ops:
   bits = x.max_numel() * x.dtype.itemsize
@@ -299,10 +299,11 @@ def _xmm_sz_m(x: UOp) -> X86Ops:
   return X86Ops.VMOVSSm
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
-  # register placeholders with real registers
-  if opcode(x) is X86Ops.DEFINE and x.tag is not None: return None
-  # this is an immediate
-  if opcode(x) is X86Ops.FRAME_INDEX: return None
+  if x.op is Ops.CALL:
+    # register placeholders with real registers
+    if x.opcode is X86Ops.DEFINE and x.tag is not None: return None
+    # this is an immediate
+    if x.opcode is X86Ops.FRAME_INDEX: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -311,7 +312,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   defs = []
   if isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag)]
   elif x.op is Ops.BUFFER: defs = [ctx.vreg(WGPR)]
-  elif x.dtype in dtypes.floats or opcode(x) in XMM_OPS or x.max_numel() > 1: defs = [ctx.vreg(XMM)]
+  elif x.dtype in dtypes.floats or (x.op is Ops.CALL and x.opcode in XMM_OPS) or x.max_numel() > 1: defs = [ctx.vreg(XMM)]
   elif x.dtype in dtypes.ints+(dtypes.bool,): defs = [ctx.vreg(WGPR)]
   # TODO: add this once the scheduler can track register pressure
   # if opcode(x) in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
@@ -329,7 +330,7 @@ isel_matcher = PatternMatcher([
   # so regalloc builds the prologue/epilogue naturally. they all share the stack pointer define's dtype so the the stack pointer define is first
   (UPat(Ops.SINK, name="x"), lambda x:
    x.replace(src=(x.ins(X86Ops.RET, *x.src, stack_pointer, *(def_reg(dtypes.uint64, r) for r in CALLEE_SAVED)),))
-    if not x.src or opcode(x.src[0]) is not X86Ops.RET else None),
+    if not x.src or (x.src[0].op is Ops.CALL and x.src[0].opcode) is not X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.SPECIAL), name="x"), abi),
   # conditional moves between addresses, lea both srcs
@@ -464,11 +465,11 @@ isel_matcher = PatternMatcher([
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if x.op in {Ops.RANGE, Ops.END} or opcode(x) in X86GroupOp.WriteFlags: ctx.lock = x
-  elif opcode(x) in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
+  if x.op in {Ops.RANGE, Ops.END} or x.opcode in X86GroupOp.WriteFlags: ctx.lock = x
+  elif x.opcode in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
     ctx.lock = flag_def
     return (x, [flag_def, x])
-  if x.op is Ops.END and opcode(x.src[-1]) in {X86Ops.CMP, X86Ops.CMPi}: return (x, [x.src[-1], x])
+  if x.op is Ops.END and x.src[-1].op is Ops.CALL and x.src[-1].opcode in {X86Ops.CMP, X86Ops.CMPi}: return (x, [x.src[-1], x])
   return None
 
 # TODO: dont use rewrite
@@ -511,7 +512,7 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
 
 # frame is greedy allocated before first REAL (DEFINE is pseudo) instruction, doesn't depend on graph ordering
 def alloc_frame(ctx:X86LinearContext, x:UOp) -> tuple[UOp, list[UOp]]|None:
-  if not ctx.stack_size or ctx.frame_allocated or opcode(x) is X86Ops.DEFINE: return None
+  if not ctx.stack_size or ctx.frame_allocated or x.opcode is X86Ops.DEFINE: return None
   ctx.frame_allocated = True
   return (x, [stack_pointer.ins(X86Ops.SUBi, imm(dtypes.int32, ctx.stack_size)), x])
 
@@ -520,19 +521,19 @@ post_regalloc_matcher = PatternMatcher([
   # the frame is allocated before the first real instruction (see alloc_frame) and freed before RET
   (UPat(Ops.CALL, name="x"), alloc_frame),
   (UPat(Ops.CALL, name="x"), lambda ctx,x: (x, [stack_pointer.ins(X86Ops.ADDi, imm(dtypes.int32, ctx.stack_size)), x])
-    if ctx.stack_size and opcode(x) is X86Ops.RET else None),
+    if ctx.stack_size and x.opcode is X86Ops.RET else None),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(Ops.CALL, src=(UPat(), UPat.cvar("disp").cast()), name="x"), lambda ctx,disp,x:
-    (nx:=UOp.cconst(ctx.stack_size + disp.val, x.dtype), [nx]) if opcode(x) is X86Ops.FRAME_INDEX else None),
+    (nx:=UOp.cconst(ctx.stack_size + disp.val, x.dtype), [nx]) if x.opcode is X86Ops.FRAME_INDEX else None),
   # expand the cmp here so we can preserve rng src edge to get label from ctx
-  (UPat(Ops.END, name="x"), lambda ctx,x: lower_loop(ctx, x) if opcode(x.src[-1]) in {X86Ops.CMP, X86Ops.CMPi} else None),
+  (UPat(Ops.END, name="x"), lambda ctx,x: lower_loop(ctx, x) if x.src[-1].opcode in {X86Ops.CMP, X86Ops.CMPi} else None),
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
   (UPat(Ops.RANGE, name="x"), lower_range),
   # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
   (UPat(Ops.END, name="x"), lower_end),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.CALL, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[:1] + x.src[2:]),
-   [ctx.ren.copy(x.src[1], rdef(x)), nx] if rdef(x) != rdef(x.src[1]) else [nx]) if opcode(x) in X86GroupOp.TwoAddress else None),
+   [ctx.ren.copy(x.src[1], rdef(x)), nx] if rdef(x) != rdef(x.src[1]) else [nx]) if x.opcode in X86GroupOp.TwoAddress else None),
 ])
 
 # ***** X86 instruction encoding *****
@@ -565,7 +566,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
       # bit signaling 64 bit variant of instruction
       w = sz == 8
       # legacy 8bit opcode is 1 less than 16-64bit variants
-      demote = (rm_sz == 1 or reg_sz == 1) and x.arg.opcode not in X86GroupOp.ReadFlags | {X86Ops.LEA}
+      demote = (rm_sz == 1 or reg_sz == 1) and x.opcode not in X86GroupOp.ReadFlags | {X86Ops.LEA}
       # REX byte is required when 64 bit or an extended reg is used (index 8 - 15) or lower 8 bits of (rsp, rbp, rsi, rdi) are accessed
       if w | r | _x | b | (reg_sz == 1 & reg >> 2) | (rm_sz == 1 & rm >> 2) | (demote and disp_uop is None and rm >= 4):
         inst += bytes([0b0100 << 4 | w << 3 | r << 2 | _x << 1 | b])
@@ -724,7 +725,7 @@ class X86Renderer(ISARenderer):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
-  def is_two_address(self, x:UOp) -> bool: return opcode(x) in X86GroupOp.TwoAddress
+  def is_two_address(self, x:UOp) -> bool: return x.op is Ops.CALL and x.opcode in X86GroupOp.TwoAddress
   def copy(self, x:UOp, reg:Register) -> UOp: return x.ins(X86Ops.MOV, x, tag=reg)
 
   def spill(self, spill_slot:int, x:UOp) -> UOp:
@@ -757,7 +758,7 @@ class X86Renderer(ISARenderer):
 
     asm = [f".{function_name}:"]
     for u in uops:
-      if (op:=opcode(u)) is None or op is X86Ops.DEFINE: continue
+      if (op:=u.opcode) is None or op is X86Ops.DEFINE: continue
       if op is X86Ops.LABEL: asm.append(f"{str(u.tag)}:")
       elif op is X86Ops.RET: asm.append(_format_op(u))
       else: asm.append(_format_op(u) + " " + _format_operands(u))
@@ -768,7 +769,7 @@ class X86Renderer(ISARenderer):
     jumps: dict[UOp, int] = {}
     binary = bytearray()
     for u in uops:
-      if (op:=opcode(u)) is None or op is X86Ops.DEFINE: continue
+      if u.op is not Ops.CALL or (op := u.opcode) is X86Ops.DEFINE: continue
       if op is X86Ops.LABEL:
         targets[u.tag] = len(binary)
         continue
