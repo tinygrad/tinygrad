@@ -84,7 +84,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
         flat = fully_flatten(index)
         inferred = dtypes.from_py(flat)
         if not dtypes.is_int(inferred): raise IndexError(f"{index=} contains non-int element")
-        index = self._wrap_uop(UOp._frompy([i+size if i<0 else i for i in flat], inferred, self.device)).reshape(get_shape(index))
+        index_uop = UOp._frompy([i+size if i<0 else i for i in flat], inferred)
+        if index_uop.device != self.device and self.device is not None: index_uop = index_uop.copy_to_device(self.device)
+        index = self._wrap_uop(index_uop).reshape(get_shape(index))
       elif is_adv(index):
         if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
         if index.device is not None and self.device is not None and index.device != self.device:
