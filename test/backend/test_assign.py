@@ -642,7 +642,7 @@ class TestAssign(unittest.TestCase):
 
   def test_assign_temporary_copy_reshape(self):
     a = Tensor([[1., 2], [3, 4]], device="PYTHON")
-    c = Tensor.empty(2, 2).assign(a.to(None))
+    c = Tensor.empty(2, 2).assign(a)
     GlobalCounters.reset()
     c.realize()
     assert_kernel_count(1)
