@@ -284,7 +284,7 @@ class GPTOSS:
       z = grouped_mx_gemm(_pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
           + _moe_bias_tile(w_down_bias, r).cast(dtypes.bfloat16)
       out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
-      return out, [x_normed, rrms, xg, h, y, z, r.weights, r.dest_row, r.off]
+      return out, [x_normed, rrms, xg, h, y, z, r.weights, r.topi, r.dest_row, r.off]
     else:
       thresh = logits.topk(self.experts_per_tok)[0][..., -1:]
       weights = (logits >= thresh).where(logits, -float("inf")).softmax(-1)
