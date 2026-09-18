@@ -418,7 +418,11 @@ class Tensor(RandMixin):
     # weakness ends where storage begins
     if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
-    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
+    to_realize = dedup([x for x in (self,)+lst if needs_storage(x.uop.base)])
+    for t in to_realize:
+      # AFTER is already a buffer
+      if t.uop.base.op is not Ops.AFTER: t.uop = (t.uop.src[0] if t.uop.is_self_copy else t.uop).clone()
+    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in to_realize]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
 
@@ -431,11 +435,8 @@ class Tensor(RandMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    to_realize = dedup([x for x in (self,)+lst if needs_storage(x.uop.base)])
+    to_realize = [x for x in (self,)+lst if needs_storage(x.uop.base)]
     if len(to_realize):
-      for t in to_realize:
-        # AFTER is already a buffer
-        if t.uop.base.op is not Ops.AFTER: t.uop = (t.uop.src[0] if t.uop.is_self_copy else t.uop).clone()
       run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
 
