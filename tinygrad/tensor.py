@@ -44,12 +44,12 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
         call_args.append(u)
       if u.op is Ops.AFTER:
         buffer_map[u] = u.src[0]
-      if u in realize:
-        # here we create a new buffer for something being realized
-        param = UOp.param_like(u, len(replace_args))
-        replace_args[u] = param.after(param.store(u.rtag()))
-        buffer_map[u] = buf = u.empty_like()
-        call_args.append(buf.base)
+    # here we create a new buffer for something being realized
+    if u in realize:
+      param = UOp.param_like(u, len(replace_args))
+      replace_args[u] = param.after(param.store(u.rtag()))
+      buffer_map[u] = buf = u.empty_like()
+      call_args.append(buf.base)
   ret = graph_rewrite(big_sink.substitute(replace_args), remove_all_tags).call(*call_args)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, buffer_map
