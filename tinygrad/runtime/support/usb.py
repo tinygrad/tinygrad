@@ -269,7 +269,6 @@ def usb_scratch(dev) -> UOp: return usb_vram(dev)[1:] # dummy target for empty c
 # bridge memory: sys, cq, sram
 def usb_asm24(dev) -> UOp: return UOp.placeholder((0x85000,), dtypes.uint8, 0, device=to_tuple(dev)[0], tag="usb_asm24")
 def usb_fence(dev) -> UOp: return usb_asm24(dev)[0x800:0x804].bitcast(dtypes.uint32) # completed gpu chunks
-def usb_fence_addr(dev) -> UOp: return usb_fence(dev).getaddr("CPU")
 def usb_cq(dev) -> UOp: return usb_asm24(dev)[0x100c:0x1010].bitcast(dtypes.uint32) # completion queue (gpu reset to zero)
 def usb_sram(dev) -> UOp: return usb_asm24(dev)[0x5000:0x5000 + 2 * HALF]
 
@@ -350,7 +349,8 @@ def usb_copy_rewriter(s:UOp) -> UOp|None:
   # host side
   # TODO: maybe as cf and then unwrap?
   h = usb_link(lins[0].arg[0][0]).after(s.src[-1])
-  h = h.after(usb_ctrl(h.after(usb_drained(h, h.index(2).load() + 1)), 0x40, 0xE5, usb_fence_addr(h.device), 0, UOp.const(0, dtypes.uint64), 0))
+  drained = h.after(usb_drained(h, h.index(2).load() + 1))
+  h = h.after(usb_ctrl(drained, 0x40, 0xE5, usb_fence(h.device).getaddr("CPU"), 0, UOp.const(0, dtypes.uint64), 0))
   for cin, run, table, k in runs: h = (usb_copyin if cin else usb_copyout)(h, table, k, run)
   return s.replace(src=(*s.src, h.index(2).store(UOp.const(n, dtypes.uint64))))
 pm_usb_batch = PatternMatcher([(UPat(Ops.SINK, name="s"), usb_copy_rewriter)])
@@ -374,9 +374,9 @@ def usb_reap(h:UOp, xfer:UOp) -> UOp: # poll while pending (0xff); idle transfer
   status = cfield(xfer.after(events), libusb.struct_libusb_transfer, "status").load()
   return status.end(loop, status.eq(0xff))
 
-def usb_drained(h:UOp, need:UOp) -> UOp: # wait for fence == need - 1 or need, mod 256
+def usb_drained(h:UOp, need:UOp) -> UOp: # wait for fence == need - 1 or need, mod 256. one byte read avoids tearing
   loop, slot = UOp.range(UOp(Ops.NOOP), next(UOp.unique_num), dtype=dtypes.void, src=(h,)), usb_stack(dtypes.uint32)
-  fence = slot.after(usb_ctrl(h.after(loop), 0xC0, 0xE4, usb_fence_addr(h.device), 0, slot.index(0), 1)).index(0).load() # one byte avoids tearing
+  fence = slot.after(usb_ctrl(h.after(loop), 0xC0, 0xE4, usb_fence(h.device).getaddr("CPU"), 0, slot.index(0), 1)).index(0).load()
   return fence.end(loop, ((need - fence.cast(dtypes.uint64)) & 0xff) > 1)
 
 def usb_chunk(h:UOp, table:UOp, i:UOp, half:int, run:int) -> UOp: # send chunk i, numbered run + i
