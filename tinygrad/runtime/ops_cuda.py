@@ -51,8 +51,8 @@ class CUDAQueue(HWQueue):
     self.launch(self.extern(("function", obj.lib, obj.name)), prg.arg.global_size, prg.arg.local_size,
                 [bufs[i].getaddr(self.devs) for i in prg.arg.globals] + [v.ccast(var.dtype) for v, var in zip(vals, prg.arg.vars)])
 
-  def copy(self, dst:UOp, src:UOp, sz:int):
-    self.h = ccall(cuda.cuMemcpyAsync, rt_addr(dst, self.devs), rt_addr(src, self.devs), UOp.const(sz, dtypes.uint64), self.stream)
+  def copy(self, call:UOp):
+    self.h = ccall(cuda.cuMemcpyAsync, *[rt_addr(a, self.devs) for a in call.src[1:3]], UOp.const(call.src[2].nbytes(), dtypes.uint64), self.stream)
 
   def wait(self, signal:UOp, value:UOp):
     self.h = ccall(cuda.cuStreamWaitValue64_v2, self.stream, rt_addr(signal, self.devs), value, cuda.CU_STREAM_WAIT_VALUE_GEQ)
