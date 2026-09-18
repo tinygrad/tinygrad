@@ -51,6 +51,18 @@ class TestRetarget(unittest.TestCase):
     _cross_exec(out)
     np.testing.assert_allclose(out.numpy(), truth.detach().numpy(), atol=1e-6, rtol=1e-3)
 
+  def test_transfer_idiv(self):
+    x,y = Tensor([5, 6, 7]), Tensor([1, 2, 3])
+    Tensor.realize(x,y)
+    truth = x // y
+    GlobalCounters.reset()
+    truth.realize()
+    out = x // y
+    native = GlobalCounters.kernel_count
+    cross = _cross_exec(out)
+    self.assertEqual(native, cross)
+    np.testing.assert_allclose(out.numpy(), truth.numpy(), atol=1e-6, rtol=1e-3)
+
   def test_transfer_mnist_kernel_count(self):
     layers = [
       nn.Conv2d(1, 32, 5), Tensor.relu,
