@@ -594,11 +594,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def ins(self, opc:Any, *src:UOp, **kwargs):
     def bind_opr(u:UOp, slot:int): return (p := u.param_like(slot)).replace(arg=replace(p.arg, addrspace=AddrSpace.OPR))
-    # only value (register) producing operands are bound to the graph
-    graph = set(self.toposort())
     # if there is only 1 UOp in the graph and 1 src its the exact implemenation
-    if len(graph) == 1 and len(src) == 1: sink = src[0].param_like(0)
-    else: sink = self.substitute({s:bind_opr(s,i) for i,s in enumerate(src) if s in graph and s.dtype is not dtypes.void})
+    if len(self.src) == 0 and len(src) == 1: sink = src[0].param_like(0)
+    else:
+      # only value (register) producing operands are bound to the graph
+      sink = self.substitute({s:bind_opr(s,i) for i,s in enumerate(src) if s.dtype is not dtypes.void})
     return UOp(Ops.CALL, (sink,) + src, InstInfo(opc), kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
