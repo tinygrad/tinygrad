@@ -1,5 +1,6 @@
 import ctypes, unittest
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
+import tinygrad.runtime.autogen.amd.cdna.ins as rc
 from test.mockgpu.amd.emu import run_asm
 
 class TestFlatRDNA4(unittest.TestCase):
@@ -29,5 +30,29 @@ class TestFlatRDNA4(unittest.TestCase):
           expected = values + [0xDEADBEEF] * 12
           expected[8:8+width] = values[:width]
           self.assertEqual(list(mem), expected)
+
+class TestFlatCDNA(unittest.TestCase):
+  def test_flat_ignores_saddr(self):
+    mem = (ctypes.c_uint32 * 8)(*([0xDEADBEEF] * 8))
+    addr = ctypes.addressof(mem)
+    # LLVM encodes FLAT's unused saddr bits as zero. If treated as a GLOBAL saddr, this
+    # SGPR pair redirects the access by 8 bytes within mem, so the regression fails without a segfault.
+    saddr = (addr & ~0xFFFFFFFF) + 8
+    instructions = [
+      rc.s_mov_b32(rc.s[0], saddr & 0xFFFFFFFF), rc.s_mov_b32(rc.s[1], saddr >> 32),
+      rc.v_mov_b32_e32(rc.v[0], addr & 0xFFFFFFFF), rc.v_mov_b32_e32(rc.v[1], addr >> 32),
+      rc.v_mov_b32_e32(rc.v[2], 0x12345678),
+      rc.flat_store_dword(addr=rc.v[0], data=rc.v[2], saddr=rc.s[0], offset=4),
+      rc.v_mov_b32_e32(rc.v[2], 0),
+      rc.flat_load_dword(vdst=rc.v[2], addr=rc.v[0], saddr=rc.s[0], offset=4),
+      rc.global_store_dword(addr=rc.v[0:1], data=rc.v[2], saddr=rc.NULL, offset=16),
+      rc.s_endpgm(),
+    ]
+    code = b''.join(inst.to_bytes() for inst in instructions)
+    kernel = ctypes.create_string_buffer(code)
+    self.assertEqual(run_asm(ctypes.addressof(kernel), len(code), 1, 1, 1, 1, 1, 1, 0, arch='cdna'), 0)
+    expected = [0xDEADBEEF] * 8
+    expected[1] = expected[4] = 0x12345678
+    self.assertEqual(list(mem), expected)
 
 if __name__ == '__main__': unittest.main()
