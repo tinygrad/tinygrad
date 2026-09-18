@@ -37,6 +37,14 @@ class TestAssign(unittest.TestCase):
     a.realize()
     np.testing.assert_allclose(b.numpy(), 0)
 
+  def test_assign_copy(self):
+    a = Tensor([1.,2,3], device="PYTHON")
+    c = Tensor.empty(3).assign(a.to(None))
+    # it should copy into the empty buffer
+    GlobalCounters.reset()
+    c.realize()
+    assert_kernel_count(1)
+
   def test_assign_cross_device(self):
     a = Tensor([1.,2,3], device="PYTHON")
     c = Tensor.empty(3).assign(a)
