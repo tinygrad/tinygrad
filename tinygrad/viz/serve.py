@@ -659,7 +659,8 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   if fmt.startswith("sqtt"):
     ret = {}
     with soft_err(lambda err:ret.update(err)):
-      if (events:=get_profile(viz_data, list(itertools.islice(sqtt_timeline(*data), getenv("MAX_SQTT_PKTS", 50_000))), sort_fn=row_tuple)):
+      if (events:=get_profile(viz_data, list(itertools.islice(sqtt_timeline(*data), None if (max_pkts:=getenv("MAX_SQTT_PKTS", 50_000)) == -1
+                                                              else max_pkts)), sort_fn=row_tuple)):
         ret = {"value":events, "content_type":"application/octet-stream"}
       else: ret = {"src":"No SQTT trace on this SE."}
     return ret
