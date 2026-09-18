@@ -384,7 +384,7 @@ def usb_chunk(h:UOp, table:UOp, i:UOp, half:int, run:int) -> UOp: # send chunk i
   h = h.after(usb_drained(h, n))
   h = h.after(usb_ctrl(h, 0x40, 0xF2, wire // 512, ((end - wire) // SLOT) | (wire // SLOT << 8), UOp.const(0, dtypes.uint64), 0))
   field = functools.partial(cfield, xfer:=xfer.after(h), libusb.struct_libusb_transfer)
-  xfer = xfer.after(field("status").store(0xff), field("length").store(wire),
+  xfer = xfer.after(field("status").store(0xff), field("length").store(wire.cast(dtypes.uint)),
                     field("buffer").store(rt_addr(stage) + (end - wire).cast(dtypes.uint64)))
   return ccall(libusb.libusb_submit_transfer, xfer.index(0))
 
@@ -443,8 +443,16 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp:
 
   # each control transfer writes 32 bits
   h, addr = usb_link(b.device).after(*usb_deps(b)), usb_addr(b, idx, v.dtype)
-  if v.dtype.itemsize == 4: return usb_poke(h, addr, v)
-  return usb_poke(h.after(usb_poke(h, addr, v.cast(dtypes.uint32))), addr + 4, (v >> 32).cast(dtypes.uint32))
+  loop, value = None, v
+  if v.dtype.itemsize == 8 and str(unwrap_view(b)[0].tag).startswith("kernargs"):
+    cache = UOp.placeholder((1,), v.dtype, device=HCQ_RUNTIME_DEV.value, volatile=True, tag="usb_arg_cache")
+    cache = cache.after(cache.store(UOp(Ops.BINARY, arg=bytes(v.dtype.itemsize)).bitcast(v.dtype)))
+    loop = UOp.range(cache.index(0).load().ne(v).cast(dtypes.int), next(UOp.unique_num), dtype=dtypes.int,
+                     src=(h, v.cast(dtypes.uint32).cast(dtypes.uint64), (v >> 32).cast(dtypes.uint32).cast(dtypes.uint64)))
+    h = h.after(loop)
+  ret = usb_poke(h, addr, v) if v.dtype.itemsize == 4 else \
+    usb_poke(h.after(usb_poke(h, addr, v.cast(dtypes.uint32))), addr + 4, (v >> 32).cast(dtypes.uint32))
+  return cache.after(ret.end(loop)).index(0).store(value) if loop is not None else ret
 
 def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill loop to one stream
   if not is_remote(dst): return None

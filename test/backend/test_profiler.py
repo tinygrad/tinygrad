@@ -129,6 +129,7 @@ class TestProfiler(unittest.TestCase):
   def test_profile_multidev_transfer(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
     except Exception as e: self.skipTest(f"second device not available {e}")
+    if Device.DEFAULT == "CUDA": self.skipTest("CUDA has no p2p: a transfer is two staged copies")
 
     buf1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:0").realize()
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
@@ -142,6 +143,7 @@ class TestProfiler(unittest.TestCase):
   def test_profile_graph(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
     except Exception as e: self.skipTest(f"second device not available {e}")
+    if Device.DEFAULT == "CUDA": self.skipTest("CUDA has no p2p: a transfer is two staged copies")
 
     def f(a):
       x = (a + 1).realize()

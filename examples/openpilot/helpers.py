@@ -1,8 +1,9 @@
 """Shared compilation and input allocation for model and warp artifacts."""
-import io, pickle, shutil, struct, tempfile, time
+import io, pathlib, pickle, shutil, struct, time, tempfile
 import numpy as np
 from typing import Callable
-from tinygrad import Tensor, TinyJit, Device, Context
+from tinygrad import Tensor, Device, Context, dtypes
+from tinygrad.device import Buffer
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, graph_rewrite
 from tinygrad.nn.state import get_parameters
 
@@ -12,66 +13,52 @@ def allocate_inputs(input_specs, initialize=None):
   if initialize is not None: initialize(arrays)
   return {name: Tensor(arrays[name], device=device).realize() for name, (_, _, device) in input_specs.items()}
 
+def dump_pickle(obj, path):
+  with tempfile.TemporaryFile(dir=".") as buffers:
+    opcodes, offset = io.BytesIO(), 0
 
-def dump_pickle(obj, f, *, out_of_band=False):
-  if not out_of_band: return pickle.dump(obj, f)
-  with tempfile.TemporaryFile(dir=".") as tmp:
-    def buffer_callback(pb:pickle.PickleBuffer):
-      data = pb.raw()
-      tmp.write(struct.pack('<q', data.nbytes))
-      tmp.write(data)
-      pb.release()
-    stream = io.BytesIO()
-    pickle.Pickler(stream, protocol=5, buffer_callback=buffer_callback).dump(obj)
-    opcodes = stream.getvalue()
-    f.write(struct.pack('<q', len(opcodes)))
-    f.write(opcodes)
-    tmp.seek(0)
-    shutil.copyfileobj(tmp, f)
+    def persistent_id(b):
+      nonlocal offset
+      if not isinstance(b, Buffer) or b.device != Device.DEFAULT: return None
+      offset += buffers.write(bytes((-offset) % 256))
+      offset = (off:=offset) + buffers.write(b.as_memoryview())
+      return b.size, b.dtype, off
 
+    p = pickle.Pickler(opcodes)
+    p.persistent_id = persistent_id
+    p.dump(obj)
+    with open(path, "wb") as f:
+      f.write(struct.pack('<q', len(opcodes_b:=opcodes.getvalue())))
+      f.write(opcodes_b)
+      buffers.seek(0)
+      shutil.copyfileobj(buffers, f)
 
-def load_pickle(f, *, out_of_band=False):
-  if not out_of_band: return pickle.load(f)
-  opcodes = f.read(struct.unpack('<q', f.read(8))[0])
-  def buffers():
-    while h := f.read(8):
-      pb = pickle.PickleBuffer(bytearray(struct.unpack('<q', h)[0]))
-      if f.readinto(pb) != pb.raw().nbytes: raise EOFError("incomplete model buffer")
-      yield pb
-  return pickle.load(io.BytesIO(opcodes), buffers=buffers())
+def load_pickle(path, *, out_of_band=False):
+  with open(path, "rb") as f:
+    if not out_of_band: return pickle.load(f)
+    opcodes, buffers = f.read(struct.unpack('<q', f.read(8))[0]), Tensor(pathlib.Path(path))[f.tell():].uop.buffer.ensure_allocated()
 
+  # FIXME: we load in chunks here because hcq_submit for one large copy is very slow to compile
+  arena, CHUNK_SIZE = Buffer(Device.DEFAULT, buffers.nbytes, dtypes.uchar, preallocate=True), 32 << 20
+  for off in range(0, buffers.nbytes, CHUNK_SIZE):
+    size = min(CHUNK_SIZE, buffers.nbytes-off)
+    arena.view(size, dtypes.uchar, off).ensure_allocated().copy_from(buffers.view(size, dtypes.uchar, off).ensure_allocated())
+
+  def persistent_load(pid): return arena.view(*pid)
+
+  u = pickle.Unpickler(io.BytesIO(opcodes))
+  u.persistent_load = persistent_load
+  return u.load()
 
 @Context(OPENPILOT_HACKS=1, **{'AMD': {'TC_OPT': 2, 'TC_MIN_GLOBALS': 32}}.get(Device.DEFAULT, {}))
-def compile_jit(function:Callable, make_inputs:Callable[[int], tuple[tuple, dict]], benchmark_runs=20, *, out_of_band=False):
-  """The factory creates fresh inputs, including any mutable state, for each seed."""
-  if benchmark_runs < 1: raise ValueError("benchmark_runs must be at least 1")
-  jit = TinyJit(function, prune=True)
-
-  def run(fn, seed, count):
-    args, kwargs = make_inputs(seed)
-    result = None
-    for i in range(count):
-      Device.default.synchronize()
-      start = time.perf_counter()
-      output = fn(*args, **kwargs)
-      if tensors := get_parameters(output): Tensor.realize(*tensors)
-      Device.default.synchronize()
-      print(f"  [{i+1}/{count}] {(time.perf_counter()-start)*1e3:.2f} ms")
-      if i == 0:
-        result = [t.numpy().copy() for t in get_parameters(output)], [t.numpy().copy() for t in get_parameters((args, kwargs))]
-    return result
-
-  expected = run(jit, 42, 3)
-  with tempfile.TemporaryFile(dir=".") as f:
-    dump_pickle(jit, f, out_of_band=out_of_band)
-    f.seek(0)
-    loaded = load_pickle(f, out_of_band=out_of_band)
-  for seed in (42, 43):
-    reference = expected if seed == 42 else run(function, seed, 1)
-    actual = run(loaded, seed, benchmark_runs)
-    for ref_group, actual_group in zip(reference, actual, strict=True):
-      for ref, value in zip(ref_group, actual_group, strict=True): np.testing.assert_array_equal(ref, value)
-  return jit
+def benchmark(fxn:Callable, cb=None, **kwargs):
+  Device.default.synchronize()
+  start = time.perf_counter()
+  if (output := fxn(**kwargs)) is not None: output.realize()
+  Device.default.synchronize()
+  end = time.perf_counter()
+  if cb: cb(end-start)
+  return [t.numpy().copy() for t in get_parameters(kwargs.get('output_buffers', output))]
 
 pm_retargetable = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat()), name="p"), lambda p: p.replace(src=p.src[:-1]) if p.arg.target.device == "CPU" else None)

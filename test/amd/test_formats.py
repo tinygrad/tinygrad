@@ -5,6 +5,7 @@ Note: Graphics-only formats (EXP, MUBUF, MTBUF, MIMG) are not supported - use GL
 """
 import unittest
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
+from tinygrad.runtime.autogen.amd.cdna import ins as cdna
 from tinygrad.renderer.amd.dsl import VCC_HI, EXEC_LO, NULL
 OFF = NULL  # OFF is alias for NULL
 from tinygrad.renderer.amd import detect_format
@@ -203,6 +204,14 @@ class TestDetectFormat(unittest.TestCase):
 
   def test_detect_vop3p(self):
     self.assertEqual(detect_format(VOP3P(VOP3POp.V_PK_ADD_F16, v[0], v[1], v[2], v[3]).to_bytes()), VOP3P)
+
+  def test_detect_cdna_vop3px2(self):
+    mfma = cdna.v_mfma_f32_16x16x128_f8f6f4(v[0:3], v[0:7], v[8:15], 0, cbsz=1, blgp=1).to_bytes()
+    self.assertEqual(detect_format(mfma, "cdna"), cdna.VOP3P_MFMA)
+    self.assertEqual(detect_format(cdna.s_nop(0).to_bytes()*2 + mfma, "cdna"), cdna.SOPP)
+    self.assertEqual(detect_format(cdna.v_mfma_scale_f32_16x16x128_f8f6f4(v[0:3], v[0:7], v[8:15], 0).to_bytes(), "cdna"), cdna.VOP3PX2)
+    # a v_mfma_ld_scale_b32 followed by an unscaled MFMA is two instructions, not one scaled MFMA
+    self.assertEqual(detect_format(cdna.v_mfma_ld_scale_b32(v[0], v[20], v[21]).to_bytes() + mfma, "cdna"), cdna.VOP3P)
 
   def test_detect_smem(self):
     self.assertEqual(detect_format(s_load_b32(sdata=s[0], sbase=s[2:3], offset=0).to_bytes()), SMEM)

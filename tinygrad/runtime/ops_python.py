@@ -79,7 +79,7 @@ class PythonProgram(Program['PythonDevice']):
           exec_masks.pop()
           i += 1
           continue
-        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP) or (u.op is Ops.RANGE and u.dtype == dtypes.void):
+        if u.op in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.CUSTOM_FUNCTION) or (u.op is Ops.RANGE and u.dtype == dtypes.void):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -141,16 +141,16 @@ class PythonProgram(Program['PythonDevice']):
           else:
             values[u] = load(src_values, 0, u.dtype)
         elif u.op is Ops.CALL:
-          assert u.dtype is dtypes.void
-          cfunc = ctypes.CFUNCTYPE(None, *[ctypes.c_uint64] * (len(src_values)-1))
+          restype = None if u.dtype is dtypes.void else getattr(ctypes, f"c_{'u' if u.dtype in dtypes.uints else ''}int{u.dtype.bitsize}")
+          cfunc = ctypes.CFUNCTYPE(restype, *[ctypes.c_uint64] * len(src_values))
           values[u] = []
-          for args,gate in zip(zip(*src_values), exec_masks[-1]):
+          for fptr,args,gate in zip(values[u.src[0].src[0]], zip(*src_values), exec_masks[-1]):
             call_args = [(mv_address(x[0]) + x[1]*dt.itemsize) if isinstance(x, tuple) else x for x,dt in zip(args, src_dtypes)]
-            values[u].append(cfunc(call_args[0])(*call_args[1:]) if gate else None)
+            values[u].append(cfunc(fptr)(*call_args) if gate else None)
         elif u.op is Ops.WMMA: values[u] = wmma(self.tensor_cores, u.arg, src_values, warp_size)
         elif u.op in GroupOp.ALU:
           assert all_same([len(x) for x in src_values]), f"{[len(x) for x in src_values]} doesn't match on {u.op}"
-          assert all_same([u.dtype] + src_dtypes) or u.op in {*GroupOp.Comparison, Ops.WHERE}, f"dtype mismatch on {u.op}"
+          assert all_same([u.dtype] + src_dtypes) or u.op in {*GroupOp.Comparison, Ops.WHERE, Ops.SHL, Ops.SHR}, f"dtype mismatch on {u.op}"
           values[u] = [exec_alu(u.op, u.dtype, p) for p in zip(*src_values)]
         assert u in values, u
         i += 1

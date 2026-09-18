@@ -735,7 +735,7 @@ class KFDIface:
 
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x74b5,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0,0x75b0,0x75b3)),),
+    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x74b5,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0,0x75a8,0x75b0,0x75b3)),),
       vram_bar=0, va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
     self._compute_props()
 
@@ -1012,8 +1012,8 @@ class AMDDevice(Compiled):
     self.aql_desc.compute_tmpring_size = self.tmpring_size(self.max_private_segment_size)
     self.aql_gart.host.view(fmt='B')[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
 
-  def _prof_buffer(self, size:int, dtype) -> Buffer:
-    buf = Buffer(self.device, size, dtype, options=BufferSpec(host=True, nolru=True, uncached=True, cpu_access=True), preallocate=True)
+  def _prof_buffer(self, size:int, dtype, host:bool=True) -> Buffer:
+    buf = Buffer(self.device, size, dtype, options=BufferSpec(host=host, nolru=True, uncached=host, cpu_access=True), preallocate=True)
     buf.host.view(fmt='B')[:buf.nbytes] = bytes(buf.nbytes)
     return buf
 
@@ -1024,7 +1024,7 @@ class AMDDevice(Compiled):
   @functools.cached_property
   def pmc_buf(self) -> Buffer: return self._prof_buffer(self.pmc_size * self.prof_slots, dtypes.uint8)
   @functools.cached_property
-  def sqtt_buf(self) -> Buffer: return self._prof_buffer(self.sqtt_win * self.prof_slots * self.sqtt_ses, dtypes.uint8)
+  def sqtt_buf(self) -> Buffer: return self._prof_buffer(self.sqtt_win * self.prof_slots * self.sqtt_ses, dtypes.uint8, host=False)
   @functools.cached_property
   def sqtt_wptrs(self) -> Buffer: return self._prof_buffer(self.prof_slots * self.sqtt_ses, dtypes.uint32)
 

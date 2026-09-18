@@ -1,5 +1,5 @@
 from __future__ import annotations
-import math, itertools
+import itertools
 from typing import cast
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, identity_element
 from tinygrad.uop.ops import axis_colors, axis_to_pos
@@ -195,7 +195,7 @@ class Scheduler:
           if not len(in0_ranges) or not len(in1_ranges) or not len(red_ranges): continue
 
           # pick ranges
-          # NOTE: why are in1 and in0 switched?
+          # NOTE: in1 and in0 are switched because tc.dims is (N, M, K)
           axis_choices = list(itertools.product(in1_ranges, in0_ranges, red_ranges))
           if not (axis < len(axis_choices)): continue
           axes = list(axis_choices[axis])
@@ -203,25 +203,17 @@ class Scheduler:
           if any(a.arg[-1] is AxisType.REDUCE for a in axes[:2]): raise KernelOptError("tensor core X/Y axes can't be REDUCE")
 
           # do optimizations and save the ranges
-          ast, warp, ne = self.ast, UOp.range(tc.threads, -1, AxisType.WARP), []
+          ast, warp, ne = self.ast, UOp.range(tc.threads, -1, AxisType.WARP), {}
           try:
             for i,a in enumerate(axes):
               if (a.vmax+1) % tc.dims[i] != 0:
                 if opt_level < 2: raise KernelOptError("tc padding requires opt_level >= 2")
                 axes[i] = self.apply_opt(Opt(OptOps.PADTO, self.rngs.index(a), tc.dims[i]), append_opt=False) # PADTO might fail
             # we create the warp as a whole thing, in case some of these ranges are moved/removed later
-            for opt in tc.opts:
-              if opt[0] == "l":
-                axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.LOCAL, input_new_rng=warp%2)
-                warp //= 2
-              elif opt[0] == "u":
-                axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.UPCAST)
-              else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")
-              ne.append(new_range)
-
-            for _ in range(int(math.log2(tc.dims[2]))):
-              axes[2], new_range = self.shift_to(axes[2], 2, AxisType.UNROLL)
-              ne.append(new_range)
+            for c in tc.axis_coords():
+              d = "nmk".index(c[0])
+              if c in tc.frag_c[0]: axes[d], ne[c] = self.shift_to(axes[d], 2, AxisType.LOCAL, input_new_rng=warp//2**tc.frag_c[0].index(c)%2)
+              else: axes[d], ne[c] = self.shift_to(axes[d], 2, AxisType.UNROLL if d == 2 else AxisType.UPCAST)
           except KernelOptError:
             self.ast = ast
             continue
@@ -234,19 +226,19 @@ class Scheduler:
             srcs = [x.substitute({ne[a]: ne[b] for a,b in rl.items()}, walk=True) for x,rl in zip(ins, tc.relabel())]
 
             # get upcast axes for the tensor cores
-            base_upcast_axes = [ne[i].arg[0] for i in tc.base_upcast_axes()]
-            upcast_cnt = [int(math.log2(tc.elements_per_thread[i])) for i in range(3)]
+            base_upcast_axes = [ne[c].arg[0] for c in tc.base_upcast_axes()]
+            upcast_cnt = [len(f[1]) for f in (tc.frag_a, tc.frag_b, tc.frag_c)]
             # each operand upcasts its first upcast_cnt axes, the axes only A or B upcast are size 1 so the operands broadcast
             tc_upcast_axes = tuple([tuple([(a, 2 if j < cnt else 1) for j,a in enumerate(base_upcast_axes[:max(cnt, *upcast_cnt[:2])])])
                                     for cnt in upcast_cnt])
 
             # construct the op
             # TODO: remove tc_upcast_axes from the arg
-            tc_uop = UOp.wmma(srcs[0], srcs[1], UOp.const((0.0,)*tc.elements_per_thread[2], tc.dtype_out),
+            tc_uop = UOp.wmma(srcs[0], srcs[1], UOp.const((0.0,)*2**upcast_cnt[2], tc.dtype_out),
                               tc.dims, tc.threads, tc_upcast_axes=tc_upcast_axes)
 
             # preserve extra reduces
-            reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x not in ne[len(tc.opts):]]
+            reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x not in [ne[c] for c in ne if c[0] == "k"]]
             if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, src=(tc_uop,)+tuple(reduce_ranges), arg=(Ops.ADD, 0))
             self.ast = self.ast.substitute({reduceop: tc_uop})
           self.tensor_core = tc

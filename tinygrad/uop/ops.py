@@ -1372,8 +1372,8 @@ class CallInfo:
   def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.aux, self.dtype))
   def __repr__(self):
     gf = id(self.grad_fxn) if self.grad_fxn else None
-    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward})" + \
-      (f", {self.dtype}" if self.dtype is not dtypes.void else "")
+    return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward}" + \
+      (f", dtype={self.dtype})" if self.dtype is not dtypes.void else ")")
 
 # ******** ops in python ********
 
