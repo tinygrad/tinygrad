@@ -38,7 +38,6 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
         replace_args[u] = UOp.param_like(u, len(replace_args))
         call_args.append(u)
     else:
-      if u.op is Ops.COPY and is_creation_device(u.src[0]): realize.add(u)
       if u.op is Ops.BUFFER and not u.is_unbound:
         replace_args[u] = UOp.param_like(u, len(replace_args))
         call_args.append(u)
