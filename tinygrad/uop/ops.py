@@ -260,7 +260,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # graphs, which is both quadratic and deep enough to overflow on large HCQ submission programs.
     def skey(x): return x.key if isinstance(x, UOp) else x
     if isinstance(self.arg, ProgramInfo):
-      arg = (tuple(map(skey, self.arg.global_size)), tuple(map(skey, self.arg.local_size)),
+      arg:Any = (tuple(map(skey, self.arg.global_size)), tuple(map(skey, self.arg.local_size)),
              tuple(x.key for x in self.arg.vars), self.arg.globals, self.arg.outs, self.arg.ins, self.arg.target)
     elif isinstance(self.arg, KernelInfo):
       est = None if self.arg.estimates is None else tuple(skey(x) for x in

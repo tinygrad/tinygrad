@@ -8,7 +8,9 @@ def pretty_print(x:UOp, cache=None, d=0)->str:
     stack:list[tuple[UOp, int]] = [(x, 0)]
     while stack:
       node, i = stack[-1]
-      if i == len(node.src): stack.pop(); continue
+      if i == len(node.src):
+        stack.pop()
+        continue
       stack[-1] = (node, i+1)
       s = node.src[i]
       cache.setdefault(s, [len(cache), 0, False])[1] += 1
