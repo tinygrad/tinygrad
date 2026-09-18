@@ -243,7 +243,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   replace_args:dict[UOp, UOp] = {}
   buffer_map:dict[UOp, UOp] = {}
   for u in big_sink.toposort(enter_calls=False):
-    if u.op is Ops.BUFFER:
+    if u.op is Ops.BUFFER and not u.is_unbound:
       replace_args[u] = UOp.param_like(u, len(replace_args))
     if u.op is Ops.AFTER:
       buffer_map[u] = u.src[0]
