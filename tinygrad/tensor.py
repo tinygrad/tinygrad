@@ -50,7 +50,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
       param = UOp.param_like(u, len(replace_args))
       replace_args[u] = param.after(param.store(u.rtag()))
       buffer_map[u] = buf = u.empty_like()
-      call_args.append(buf.base)
+      call_args.append(buf.unsharded_base)
   ret = graph_rewrite(big_sink.substitute(replace_args), remove_all_tags, name="remove tags").call(*call_args)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, buffer_map
