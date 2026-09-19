@@ -26,8 +26,7 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
 pm_fold_moved_after = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src")))), name="after"), found_after),
   # contiguous is also a materialization point (it bufferizes in the scheduler)
-  (UPat(Ops.COPY, src=(UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src"),), name="after"),
-   lambda ctx,after,src: found_after(ctx, after, src) if after.is_self_copy else None),
+  (UPat(Ops.STAGE, src=(UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src"),), name="after"), found_after),
   # replace ALU sources with AFTER versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
@@ -56,9 +55,9 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
-# stop at materialization boundaries, including COPYs already lowered to AFTER+STORE
+# stop at materialization boundaries, including COPYs/STAGEs already lowered to AFTER+STORE
 def store_hazard_boundary(s:UOp):
-  if s.op is Ops.COPY: return False
+  if s.op in {Ops.COPY, Ops.STAGE}: return False
   if s.op is Ops.AFTER: return not any(d.op is Ops.STORE and d.src[0].base is s.src[0].base for d in s.src[1:])
   return True
 
@@ -138,10 +137,15 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
 def copy_to_anon_store(x:UOp, copy:UOp):
-  if copy.is_self_copy and (x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY): return x
-  if not copy.is_self_copy: x = x.pad_to(x.max_shape)
+  # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
+  x = x.pad_to(x.max_shape)
   buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
+
+def stage_to_anon_store(x:UOp, stg:UOp):
+  # the buffer created here is inside the call and is not persisted, like the buffers created for copies
+  buf = UOp.new_buffer(x.device, prod(x.max_shape), stg.dtype).reshape(x.max_shape)
+  return buf.after(buf.store(x)).shrink_to(stg.shape)
 
 def materialize_cross_device_src(dest:UOp, src:UOp):
   # cross-device copies must read a whole buffer (SDMA can't do offset copies)
@@ -169,12 +173,24 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # ** copy rules **
 
+  # a copy to the same device as the source is not allowed: it is a no-op, STAGE materializes on the same device
+  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
+
   # a COPY in src[1] of a plain STORE can just be removed: a STORE to a buffer on a different device is a COPY
   (UPat(Ops.STORE, src=(UPat.var("dst"), UPat(Ops.COPY, src=(UPat.var("x"),), name="cpy"))),
-   lambda dst,x,cpy: dst.store(x) if not cpy.is_self_copy and dst.device == cpy.device and dst.has_buffer_identity(after_ok=True) else None),
+   lambda dst,x,cpy: dst.store(x) if dst.device == cpy.device and dst.has_buffer_identity(after_ok=True) else None),
 
   # a bare COPY is an anonymous store: realize it as a STORE into a fresh call-local buffer on the copy device
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), copy_to_anon_store),
+
+  # ** stage rules **
+
+  # a STAGE of an already materialized value (or of a COPY, which materializes itself) is a no-op
+  (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"),
+   lambda x,stg: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
+
+  # a bare STAGE is an anonymous same-device materialization: realize it as a STORE into a fresh call-local buffer
+  (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"), stage_to_anon_store),
 
   # reshaping on STORE can be a NOOP
   (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),

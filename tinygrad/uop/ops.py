@@ -692,8 +692,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def axis(self) -> int|None:
-    # COPY removes axis, except a self COPY (contiguous) which keeps the sharding of its source
-    if self.op is Ops.COPY: return self.src[0].axis if self.is_self_copy else None
+    # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
+    if self.op is Ops.COPY: return None
     if self.op is Ops.UNSHARD:
       if len(self.arg) != 1: raise RuntimeError(f"UOp is sharded on multiple axes {self.arg}, use .sharding")
       return self.arg[0]
@@ -856,7 +856,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   @recursive_property
   def device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.PARAM: return self.arg.device
-    if self.op is Ops.STAGE: return self.arg.device
+    if self.op is Ops.STAGE: return self.src[0].device if self.arg is None else self.arg.device
     if self.op is Ops.AFTER: return self.src[0].device
     if self.op is Ops.MSELECT:
       assert isinstance(self.src[0].device, tuple), f"mselect must be on tuple device, getting {self.src[0].device}"
@@ -868,8 +868,6 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     for x in self.src:
       if x.device is not None: return x.device
     return None
-  @property
-  def is_self_copy(self) -> bool: return self.op is Ops.COPY and self.device == self.src[0].device
   @property
   def is_virtual(self) -> bool:
     # NOTE: no device means no place to store, weak means no width to store. neither can back a buffer as-is
@@ -936,7 +934,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:
-    if self.op in {Ops.COPY, Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
+    # a bare STAGE (same-device materialization) keeps the source's buffer
+    if self.op is Ops.STAGE and self.arg is None: return self.src[0].buffer
+    if self.op in {Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops.
     # NOTE: the view Buffer returned here is transient (short-lived), it only wraps an offset into the base BUFFER's storage
     if self is not self.base or self.op is Ops.BITCAST:
