@@ -1,8 +1,10 @@
 from dataclasses import replace, dataclass
 import itertools, functools
+from math import prod
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops, UPat, rewrite_group, KernelInfo, ProgramInfo, GroupOp, AxisType
+from tinygrad.uop.ops import shape_to_shape_arg
 from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
@@ -28,7 +30,7 @@ from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regallo
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
 from tinygrad.helpers import all_same, all_int, flatten, argsort, partition
 from tinygrad.uop.ops import _broadcast_shape, identity_element
-from tinygrad.schedule.rangeify import BufferizeOpts
+from tinygrad.schedule.rangeify import BufferizeOpts, pm_remove_reshape_after
 
 def do_number_param(ctx:list[int], x:UOp):
   if x.arg.slot != -1: return None
@@ -46,6 +48,177 @@ def build_range_map(sink:UOp) -> dict[int, int]:
       ctx[x.arg[0]] = len(ctx)
   return ctx
 
+ExpansionAxes = tuple[tuple[UOp, int, int], ...]  # original RANGE, current physical axis, width
+
+class ExpanderContext(dict[int, int]):
+  def __init__(self, ranges:dict[int, int]):
+    super().__init__(ranges)
+    self.axes:dict[UOp, ExpansionAxes] = {}
+
+def same_expansion_axes(a:ExpansionAxes, b:ExpansionAxes) -> bool:
+  return len(a) == len(b) and all(ar is br and aa == ba and aw == bw for (ar,aa,aw),(br,ba,bw) in zip(a,b))
+
+def mark_expansion_axes(ctx:ExpanderContext, u:UOp, axes:ExpansionAxes) -> None:
+  if (existing:=ctx.axes.get(u)) is not None:
+    if not same_expansion_axes(existing, axes): raise RuntimeError("conflicting expander axes on result")
+  else: ctx.axes[u] = axes
+
+def expand_range(ctx:ExpanderContext, r:UOp) -> UOp|None:
+  if r.arg[0] not in ctx or not isinstance(r.vmax, int): return None
+  width = r.vmax+1
+  range_shape = tuple(width if i == ctx[r.arg[0]] else 1 for i in range(len(ctx)))
+  expanded = UOp.const(tuple(range(width)), r.dtype).reshape(range_shape)
+  if r.arg[1] is AxisType.UPCAST and width > 1: mark_expansion_axes(ctx, expanded, ((r, ctx[r.arg[0]], width),))
+  return expanded
+
+def mark_expanded_index(ctx:ExpanderContext, u:UOp) -> None:
+  if len(u.src) == 2 and u.src[0] not in ctx.axes and (axes:=ctx.axes.get(u.src[1])) is not None:
+    mark_expansion_axes(ctx, u, axes)
+
+def mark_expanded_load(ctx:ExpanderContext, u:UOp) -> None:
+  if len(u.src) == 1 and u.src[0].op is Ops.INDEX and (axes:=ctx.axes.get(u.src[0])) is not None:
+    mark_expansion_axes(ctx, u, axes)
+
+def move_expansion_axis(rank:int, source_axis:int, target_axis:int) -> tuple[int, ...]:
+  permutation = list(range(rank))
+  permutation.insert(target_axis, permutation.pop(source_axis))
+  return tuple(permutation)
+
+def align_same_origin_mul(ctx:ExpanderContext, u:UOp) -> UOp|None:
+  if u in ctx.axes or len(u.src) != 2: return None
+  first, second = (ctx.axes.get(s) for s in u.src)
+  if first is None or second is None or len(first) != 1 or len(second) != 1: return None
+  origin, canonical_axis, width = first[0]
+  other_origin, other_axis, other_width = second[0]
+  if origin is not other_origin or width != other_width or type(width) is not int or width <= 1 or canonical_axis == other_axis: return None
+  input_shapes = tuple(s.shape for s in u.src)
+  if not all_int(input_shapes[0] + input_shapes[1]) or len(input_shapes[0]) != len(input_shapes[1]): return None
+  rank = len(input_shapes[0])
+  if not 0 <= canonical_axis < rank or not 0 <= other_axis < rank or \
+     input_shapes[0][canonical_axis] != width or input_shapes[1][other_axis] != width: return None
+  base_shapes = tuple(shape[:axis] + shape[axis+1:] for shape, axis in zip(input_shapes, (canonical_axis, other_axis)))
+  try: _broadcast_shape(*base_shapes)
+  except IndexError: return None
+  permutation = move_expansion_axis(rank, other_axis, canonical_axis)
+  aligned_shapes = (input_shapes[0], tuple(input_shapes[1][i] for i in permutation))
+  try: _broadcast_shape(*aligned_shapes)
+  except IndexError: return None
+  aligned_second = u.src[1].permute(permutation)
+  aligned_axes = ((origin, canonical_axis, width),)
+  mark_expansion_axes(ctx, aligned_second, aligned_axes)
+  expanded = u.replace(src=(u.src[0], aligned_second))
+  mark_expansion_axes(ctx, expanded, aligned_axes)
+  return expanded
+
+def align_same_origin_store(ctx:ExpanderContext, u:UOp) -> UOp|None:
+  if len(u.src) != 2: return None
+  address, value = u.src
+  address_axes, value_axes = ctx.axes.get(address), ctx.axes.get(value)
+  if address_axes is None or value_axes is None or len(address_axes) != 1 or len(value_axes) != 1: return None
+  origin, address_axis, width = address_axes[0]
+  value_origin, value_axis, value_width = value_axes[0]
+  if origin is not value_origin or width != value_width or type(width) is not int or width <= 1 or address_axis == value_axis: return None
+  address_shape, value_shape = address.shape, value.shape
+  if not all_int(address_shape + value_shape) or len(address_shape) != len(value_shape): return None
+  rank = len(address_shape)
+  if not 0 <= address_axis < rank or not 0 <= value_axis < rank or \
+     address_shape[address_axis] != width or value_shape[value_axis] != width: return None
+  if address_shape[:address_axis] + address_shape[address_axis+1:] != value_shape[:value_axis] + value_shape[value_axis+1:]: return None
+  permutation = move_expansion_axis(rank, value_axis, address_axis)
+  if tuple(value_shape[i] for i in permutation) != address_shape: return None
+  aligned_value = value.permute(permutation)
+  mark_expansion_axes(ctx, aligned_value, ((origin, address_axis, width),))
+  return u.replace(src=(address, aligned_value))
+
+def mark_expanded_elementwise(ctx:ExpanderContext, u:UOp) -> None:
+  if len(u.src) != (3 if u.op is Ops.WHERE else 2): return None
+  source_axes = [ctx.axes.get(s) for s in u.src]
+  marked = [axes for axes in source_axes if axes is not None]
+  if not marked or any(not same_expansion_axes(axes, marked[0]) for axes in marked[1:]) or \
+     any(axes is None and s.op is not Ops.CONST for s,axes in zip(u.src, source_axes)): return None
+  mark_expansion_axes(ctx, u, marked[0])
+
+def mark_expanded_stack(ctx:ExpanderContext, u:UOp) -> None:
+  if not u.src or (axes:=ctx.axes.get(u.src[0])) is None or any((other:=ctx.axes.get(s)) is None or not same_expansion_axes(other, axes)
+                                                               for s in u.src[1:]): return None
+  mark_expansion_axes(ctx, u, tuple((origin, axis+1, width) for origin,axis,width in axes))
+
+def expand_reshape(ctx:ExpanderContext, u:UOp) -> UOp|None:
+  if u in ctx.axes or (axes:=ctx.axes.get(u.src[0])) is None: return None
+  data_shape, target = u.src[0].shape, u.marg
+  if not all_int(data_shape + target): return None
+  if tuple(axis for _,axis,_ in axes) == tuple(range(len(axes))):
+    prefix = tuple(width for _,_,width in axes)
+    if data_shape[:len(prefix)] != prefix: return None
+    base_shape, expanded_target, output_axes = data_shape[len(prefix):], prefix + target, axes
+  elif len(axes) == 1 and axes[0][1] == len(data_shape)-1 and axes[0][2] > 1 and data_shape[-1] == axes[0][2]:
+    origin, _, width = axes[0]
+    base_shape, expanded_target, output_axes = data_shape[:-1], target + (width,), ((origin, len(target), width),)
+  else: return None
+  base_elements = prod(base_shape)
+  if base_elements == 0 or base_elements != prod(target): return None
+  expanded = u.replace(src=(u.src[0], shape_to_shape_arg(expanded_target)))
+  mark_expansion_axes(ctx, expanded, output_axes)
+  return expanded
+
+def expand_permute_trailing(ctx:ExpanderContext, u:UOp) -> UOp|None:
+  if u in ctx.axes or (axes:=ctx.axes.get(u.src[0])) is None or len(axes) != 1: return None
+  input_shape = u.src[0].shape
+  origin, axis, width = axes[0]
+  if axis != len(input_shape)-1 or not isinstance(width, int) or width <= 1 or input_shape[axis] != width: return None
+  if len(u.arg) != axis or sorted(u.arg) != list(range(axis)): return None
+  permutation = u.arg + (axis,)
+  expanded = u.replace(arg=permutation)
+  mark_expansion_axes(ctx, expanded, ((origin, permutation.index(axis), width),))
+  return expanded
+
+def expand_permute_leading(ctx:ExpanderContext, u:UOp) -> UOp|None:
+  if u in ctx.axes or (axes:=ctx.axes.get(u.src[0])) is None or len(axes) != 1: return None
+  origin, axis, width = axes[0]
+  input_shape = u.src[0].shape
+  if len(input_shape) != len(u.arg)+1 or not all(isinstance(x, int) for x in u.arg): return None
+  if axis != 0 or not isinstance(width, int) or width <= 1 or input_shape[0] != width: return None
+  if sorted(u.arg) != list(range(len(u.arg))): return None
+  permutation = (axis,) + tuple(x+1 for x in u.arg)
+  expanded = u.replace(arg=permutation)
+  mark_expansion_axes(ctx, expanded, ((origin, permutation.index(axis), width),))
+  return expanded
+
+def mark_valid_permute_expansion(ctx:ExpanderContext, u:UOp) -> None:
+  if not (axes:=ctx.axes.get(u.src[0])): return None
+  rank = len(u.src[0].shape)
+  if len(u.arg) != rank or not all(isinstance(axis, int) for axis in u.arg) or sorted(u.arg) != list(range(rank)): return None
+  input_axes = tuple(axis for _,axis,_ in axes)
+  if any(axis < 0 or axis >= rank for axis in input_axes) or len(set(input_axes)) != len(input_axes): return None
+  output_axes = tuple((origin, u.arg.index(axis), width) for origin,axis,width in axes)
+  if len({axis for _,axis,_ in output_axes}) != len(output_axes): return None
+  mark_expansion_axes(ctx, u, output_axes)
+
+def expand_shrink_prefix(ctx:ExpanderContext, u:UOp) -> UOp|None:
+  if u in ctx.axes or (axes:=ctx.axes.get(u.src[0])) is None or len(ctx) != 1 or len(axes) != 1 or axes[0][1] != 0: return None
+  width = axes[0][2]
+  if width <= 1: return None
+  data_shape, bounds = u.src[0].shape, u.marg
+  if data_shape[:1] != (width,) or not bounds or len(bounds) != len(data_shape)-1: return None
+  if not all_int(data_shape + tuple(x for pair in bounds for x in pair)): return None
+  if any(offset < 0 or size < 0 or offset + size > extent for extent, (offset, size) in zip(data_shape[1:], bounds)): return None
+  offsets, sizes = zip(*bounds)
+  expanded = u.replace(src=(u.src[0], shape_to_shape_arg((0,) + offsets), shape_to_shape_arg((width,) + sizes)))
+  mark_expansion_axes(ctx, expanded, axes)
+  return expanded
+
+def expand_shrink_trailing(ctx:ExpanderContext, u:UOp) -> UOp|None:
+  if u in ctx.axes or (axes:=ctx.axes.get(u.src[0])) is None or len(ctx) != 1 or len(axes) != 1: return None
+  data_shape, bounds = u.src[0].shape, u.marg
+  _, axis, width = axes[0]
+  if axis != len(data_shape)-1 or not isinstance(width, int) or width <= 1 or data_shape[axis] != width: return None
+  if not bounds or len(bounds) != axis or not all_int(data_shape + tuple(x for pair in bounds for x in pair)): return None
+  if any(offset < 0 or size < 0 or offset + size > extent for extent, (offset, size) in zip(data_shape[:-1], bounds)): return None
+  offsets, sizes = zip(*bounds)
+  expanded = u.replace(src=(u.src[0], shape_to_shape_arg(offsets + (0,)), shape_to_shape_arg(sizes + (width,))))
+  mark_expansion_axes(ctx, expanded, axes)
+  return expanded
+
 def expand_reduce(r:UOp):
   range_srcs = []
   new_axes = []
@@ -62,6 +235,12 @@ def expand_reduce(r:UOp):
   out_shape = tuple([1 if i in new_axes else s for i,s in enumerate(r.src[0].shape)])
   return r.src[0].permute(perm).reduce(*range_srcs, arg=(r.arg[0], len(new_axes))).reshape(out_shape)
 
+def mark_expanded_reduce(ctx:ExpanderContext, r:UOp) -> None:
+  if (axes:=ctx.axes.get(r.src[0])) is None: return None
+  num_axes, input_rank = r.arg[1], len(r.src[0].shape)
+  if not isinstance(num_axes, int) or not 0 <= num_axes <= input_rank or any(axis < num_axes or axis >= input_rank for _,axis,_ in axes): return None
+  mark_expansion_axes(ctx, r, tuple((origin, axis-num_axes, width) for origin,axis,width in axes))
+
 def contract_axis(u:UOp, dims:list[int]) -> UOp:
   return u.permute([i for i in range(u.ndim) if i not in dims]+dims).flatten(-len(dims))
 
@@ -77,10 +256,21 @@ def expand_wmma(ctx:dict[int, int], u:UOp):
 
 expander = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
-  (UPat(Ops.RANGE, name="r"),
-   lambda ctx, r: UOp.const(tuple(range(r.vmax+1)), r.dtype) \
-    .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
+  (UPat(Ops.REDUCE, src=(UPat(),), name="r"), mark_expanded_reduce),
+  (UPat(Ops.RANGE, name="r"), expand_range),
   (UPat(Ops.WMMA, name="u"), expand_wmma),
+  (UPat(Ops.INDEX, name="u"), mark_expanded_index),
+  (UPat(Ops.LOAD, name="u"), mark_expanded_load),
+  (UPat(Ops.MUL, name="u"), align_same_origin_mul),
+  (UPat(Ops.STORE, name="u"), align_same_origin_store),
+  (UPat((Ops.CMPLT, Ops.MUL, Ops.ADD, Ops.WHERE), name="u"), mark_expanded_elementwise),
+  (UPat(Ops.STACK, name="u"), mark_expanded_stack),
+  (UPat(Ops.SHRINK, name="u"), expand_shrink_prefix),
+  (UPat(Ops.SHRINK, name="u"), expand_shrink_trailing),
+  (UPat(Ops.RESHAPE, name="u"), expand_reshape),
+  (UPat(Ops.PERMUTE, name="u"), expand_permute_trailing),
+  (UPat(Ops.PERMUTE, name="u"), expand_permute_leading),
+  (UPat(Ops.PERMUTE, name="u"), mark_valid_permute_expansion),
 ])+pm_flatten_range+mop_cleanup
 
 def expand_broadcast(x:UOp):
@@ -316,7 +506,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_range+pm_reduce_unparented+pm_reduce_identity, name="postopt symbolic")
 
   # expand
-  sink = graph_rewrite(sink, expander, ctx=build_range_map(sink), name="expander")
+  sink = graph_rewrite(sink, expander, ctx=ExpanderContext(build_range_map(sink)), name="expander")
 
   # remove reduce
   sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove reduces")
@@ -389,6 +579,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # put unnumbered variable PARAMs in slots
   num_params = len([x for x in sink.toposort() if x.op is Ops.PARAM and x.arg.slot != -1])
   sink = graph_rewrite(sink, pm_number_params, ctx=[num_params], name="number params with -1", walk=True)
+  # dependency views must remain shaped until shape-sensitive lowering is complete
+  sink = graph_rewrite(sink, pm_remove_reshape_after, name="remove reshapes over dependencies")
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
   if SPEC:

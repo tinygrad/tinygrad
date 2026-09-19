@@ -2,6 +2,15 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops
 
 # TODO: pm_mops from rangeify belongs here. this is all pattern matchers that strictly clean up movement ops
 
+def compose_partial_shaped_index(buf, idx1_arg, idx1, idx2):
+  if idx1.arg is not None or idx2.arg is not None: return None
+  if (idx1_shape:=idx1_arg._shape) is None or (buf_shape:=buf._shape) is None or idx2._shape != (): return None
+  coords, idx_rank = idx2.src[1:], len(idx1_shape)
+  if not 0 < idx_rank < len(coords): return None
+  if len(coords) != idx_rank + len(buf_shape) - 1 or len(coords) - idx_rank > len(buf_shape) - 1: return None
+  composed = buf.index(idx1_arg.index(*coords[:idx_rank]), *coords[idx_rank:])
+  return composed if composed._shape == idx2._shape else None
+
 mop_cleanup = PatternMatcher([
   # merge adjacent RESHAPES
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
@@ -23,4 +32,7 @@ mop_cleanup = PatternMatcher([
   # INDEX on shaped INDEX (TODO: this can be more generic)
   (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx1_arg"))),), allow_any_len=True, name="idx2"),
    lambda buf,idx1_arg,idx2: buf.index(idx1_arg.index(*idx2.src[1:])) if len(idx1_arg.shape) == len(idx2.src[1:]) else None),
+  # fully indexing INDEX(buf, shaped_idx) splits coordinates between shaped_idx and the untouched buffer tail
+  (UPat(Ops.INDEX, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx1_arg")), name="idx1"),), allow_any_len=True, name="idx2"),
+   compose_partial_shaped_index),
 ])
