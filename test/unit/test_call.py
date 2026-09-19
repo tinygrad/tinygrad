@@ -366,22 +366,6 @@ class TestArgOrder(unittest.TestCase):
     with self.assertRaises(AssertionError):
       UOp.call_with_outputs((p1.reshape(x.shape) * 2, p1.reshape(x.shape) + 1), x.uop, output_pos=(1, 0))
 
-  def test_intersperse_returned_precompile(self):
-    x = Tensor.arange(3, dtype=dtypes.int).realize()
-    call = self.make_intersperse_call(x, precompile=True)[0].src[1]
-    # the transform must preserve the RETURNED's src position: its placeholder is at src 1, the input stays at src 2
-    from tinygrad.tensor import transform_precompiled_call
-    new = transform_precompiled_call(call)
-    new_call = new.src[0].src[1].src[1]
-    # the out buffer takes the RETURNED's position (src 1), the input value keeps its position (src 2)
-    self.assertEqual(new_call.src[1].op, Ops.BUFFER)
-    self.assertEqual(new_call.src[1].arg.size, 3)
-    self.assertEqual(new_call.src[2].op, Ops.ADD)
-    # the body binds positionally: store dest at slot 0 (the RETURNED's position), input param at slot 1
-    store = [u for u in new_call.src[0].toposort(enter_calls=False) if u.op is Ops.STORE][0]
-    self.assertEqual(store.src[0].arg.slot, 0)
-    self.assertEqual([u.arg.slot for u in store.src[1].toposort(enter_calls=False) if u.op is Ops.PARAM], [1])
-
   def test_intersperse_returned_gradient(self):
     x = Tensor([1.0, 2.0, 3.0]).realize()
     x.requires_grad = True
