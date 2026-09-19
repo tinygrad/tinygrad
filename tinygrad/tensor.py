@@ -56,8 +56,32 @@ def contiguous_mops_to_view(ctx:AllocCtx|None, c:UOp, src:UOp):
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
+def forward_call_outputs(c:UOp):
+  if c.arg is None or not c.arg.precompile or c.has_unbound_outputs or c.body.op is not Ops.SINK: return None
+  if not c.body.src or not all(st.op is Ops.STORE for st in c.body.src): return None
+  placed:dict[UOp, UOp] = {}
+  items:list[UOp] = []
+  for st in c.body.src:
+    target, src = st.src
+    deps:list[UOp] = []
+    while src.op is Ops.AFTER:
+      deps.extend(src.src[1:])
+      src = src.src[0]
+    # Forward a producer into the existing output PARAM once; shared outputs copy from that first placement.
+    if src not in placed:
+      if src.op is Ops.STAGE: placed[src] = target.after(target.store(src.src[0]))
+      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[src] = target
+      if src in placed:
+        items.append(src.after(*deps))
+        continue
+    items.append(target.after(target.store(src.after(*deps))))
+  return c.replace(src=(UOp.sink(*items).substitute(placed),)+c.src[1:])
+
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
+  # Forward precompiled outputs into their already-bound storage without allocating buffers.
+  (UPat(Ops.CALL, name="c"), forward_call_outputs),
+
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
@@ -301,25 +325,8 @@ class Tensor(RandMixin):
         assert u.body.op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
         args = u.src[1:]
         outs = {i:a.empty_like() for i,a in enumerate(args) if a.unsharded_base.is_unbound}
-        placed:dict[UOp, UOp] = {}
-        items:list[UOp] = []
-        # Place shared storage once; subsequent outputs copy from it. Preserve all ordering dependencies.
-        for (i, out), s in zip(outs.items(), (st.src[1] for st in u.body.src if st.op is Ops.STORE)):
-          target = out.param_like(i).shrink_to(s.shape)
-          deps:list[UOp] = []
-          while s.op is Ops.AFTER:
-            deps.extend(s.src[1:])
-            s = s.src[0]
-          if s not in placed:
-            if s.op is Ops.STAGE: placed[s] = target.after(target.store(s.src[0]))
-            elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = target
-            if s in placed:
-              items.append(s.after(*deps))
-              continue
-          items.append(target.after(target.store(s.after(*deps))))
-        body = UOp.sink(*items).substitute(placed)
-        u = u.replace(src=(body, *[outs[i] if i in outs else a if a.has_buffer_identity(after_ok=True) else a.contiguous()
-                                  for i,a in enumerate(args)]))
+        u = u.replace(src=(u.body, *[outs[i] if i in outs else a if a.has_buffer_identity(after_ok=True) else a.contiguous()
+                                    for i,a in enumerate(args)]))
         # Bind every output, including siblings outside this sink. Shapes are resolved in the caller's scope.
         tensor_map.update({x.src[1+i].after(x):out.after(u).shrink_to(args[i].shape) for i,out in outs.items()})
       if x in bases and u.needs_storage():
