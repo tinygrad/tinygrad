@@ -24,6 +24,11 @@ class TestLinear(unittest.TestCase):
       self.assertEqual((linear.ggml_type, linear.weight.numel()), (ggml_type, words))
 
 class TestAttention(unittest.TestCase):
+  def _make_config(self, **kwargs):
+    return TransformerConfig(**({"num_blocks":1, "dim":4, "hidden_dim":4, "n_heads":2, "n_kv_heads":1,
+                                 "norm_eps":1e-5, "vocab_size":32, "head_dim":2, "rope_theta":10000.0,
+                                 "rope_dim":2, "v_head_dim":2, "max_context":4} | kwargs))
+
   def test_apply_rope(self):
     x = Tensor.randn(1, 2, 4, 8, dtype=dtypes.float32)
     result = apply_rope(x, 0)
@@ -31,6 +36,29 @@ class TestAttention(unittest.TestCase):
     self.assertEqual(result.dtype, x.dtype)
     self.assertGreater((result - apply_rope(x, 5)).abs().max().item(), 1e-6)
     with self.assertRaises(AssertionError): apply_rope(Tensor.randn(1, 1, 4, 7, dtype=dtypes.float32), 0)
+
+  def test_attention_sink(self):
+    x = Tensor([[[2., 4.]]])
+    def attention(attn_sinks:bool):
+      block = TransformerBlock(self._make_config(dim=2, hidden_dim=2, n_heads=1, attn_sinks=attn_sinks))
+      block.attn_q.weight, block.attn_k.weight = Tensor.zeros(2, 2), Tensor.zeros(2, 2)
+      block.attn_v.weight, block.attn_output.weight = Tensor.eye(2), Tensor.eye(2)
+      block._init_state(x)
+      return block._attention(x, 0)
+    self.assertTrue(attention(False).allclose(x, rtol=0, atol=1e-6).item())
+    # the token and zero-value sink have equal weights: ([2,4] + [0,0]) / 2
+    self.assertTrue(attention(True).allclose(x / 2, rtol=0, atol=1e-6).item())
+
+  def test_sliding_window(self):
+    x = Tensor([[[1., 1.], [3., 3.], [5., 5.]]])
+    block = TransformerBlock(self._make_config(dim=2, hidden_dim=2, n_heads=1, sliding_window=2))
+    block.attn_q.weight, block.attn_k.weight = Tensor.zeros(2, 2), Tensor.zeros(2, 2)
+    block.attn_v.weight, block.attn_output.weight = Tensor.eye(2), Tensor.eye(2)
+    block._init_state(x)
+    expected = Tensor([[[1., 1.],  # only itself
+                        [2., 2.],  # ([1,1] + [3,3]) / 2
+                        [4., 4.]]]) # ([3,3] + [5,5]) / 2
+    self.assertTrue(block._attention(x, 0).allclose(expected, rtol=0, atol=1e-6).item())
 
   def test_partial_rope_in_attention(self):
     dim, rope_dim, seqlen = 8, 4, 3
