@@ -279,7 +279,7 @@ class TestJitGraphSplit(unittest.TestCase):
     assert inp.device == device, f"Input device {inp.device} does not match expected {device}"
     return inp.to(to_device).realize()
 
-  def expect(self, f, *args, graph=None, multigraph=None, hcqgraph=None):
+  def expect(self, f, *args, graph=None):
     def _numpies(tpl): return tpl.numpy() if tpl.__class__ is Tensor else tuple([t.numpy() for t in tpl])
 
     expected = _numpies(f(*args))
@@ -292,14 +292,7 @@ class TestJitGraphSplit(unittest.TestCase):
     if graph_t is None: return
 
     got = f.captured.linear.src
-    from extra.hcq1.graph import HCQGraph
-    from tinygrad.engine.jit import MultiGraphRunner
-    if graph_t is HCQGraph:
-      validate = hcqgraph
-    elif issubclass(graph_t, MultiGraphRunner):
-      validate = multigraph
-    else:
-      validate = graph
+    validate = graph
 
     assert len(got) == len(validate), f"Expected {len(validate)} operations, got {len(got)}"
     for expected, si in zip(validate, got):
@@ -328,9 +321,7 @@ class TestJitGraphSplit(unittest.TestCase):
 
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     self.expect(f, inp,
-      graph=[self.ji_graph(3)],
-      multigraph=[self.ji_graph(3)],
-      hcqgraph=[self.ji_graph(3)])
+      graph=[self.ji_graph(3)])
 
   def test_jit_cpu_simple(self):
     if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
@@ -346,9 +337,7 @@ class TestJitGraphSplit(unittest.TestCase):
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     inp_cpu = Tensor.randn(10, 10, device="CPU").realize()
     self.expect(f, inp, inp_cpu,
-      graph=[self.ji_graph(2), self.ji_comp(), self.ji_comp()],
-      multigraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp()],
-      hcqgraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp()]) # cpu is hcq2 now, it does not join hcq graphs
+      graph=[self.ji_graph(2), self.ji_comp(), self.ji_comp()])
 
   def test_jit_cpu_several(self):
     if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
@@ -365,9 +354,7 @@ class TestJitGraphSplit(unittest.TestCase):
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     inp_cpu = Tensor.randn(10, 10, device="CPU").realize()
     self.expect(f, inp, inp_cpu,
-      graph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()],
-      multigraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()],
-      hcqgraph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()])
+      graph=[self.ji_graph(2), self.ji_comp(), self.ji_comp(), self.ji_comp()])
 
   def test_jit_multidev(self):
     if Device.DEFAULT == "CPU": raise unittest.SkipTest("CPU is not a valid default device for this test")
@@ -387,9 +374,7 @@ class TestJitGraphSplit(unittest.TestCase):
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     inp_d1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:1").realize()
     self.expect(f, inp, inp_d1,
-      graph=[self.ji_graph(2), self.ji_graph(2), self.ji_comp()],
-      multigraph=[self.ji_graph(5)],
-      hcqgraph=[self.ji_graph(5)])
+      graph=[self.ji_graph(2), self.ji_graph(2), self.ji_comp()])
 
   def test_jit_multidev_xfer(self):
     if Device.DEFAULT in {"CPU"}: raise unittest.SkipTest("CPU is not a valid default device for this test (zero-copies)")
@@ -411,9 +396,7 @@ class TestJitGraphSplit(unittest.TestCase):
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     inp_d1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:1").realize()
     self.expect(f, inp, inp_d1,
-      graph=[self.ji_graph(2), self.ji_comp(), self.ji_xfer(), self.ji_comp(), self.ji_comp()],
-      multigraph=[self.ji_graph(6)],
-      hcqgraph=[self.ji_graph(6)])
+      graph=[self.ji_graph(2), self.ji_comp(), self.ji_xfer(), self.ji_comp(), self.ji_comp()])
 
   @unittest.skip("this fails if you don't have SDMA or are using AMD_DISABLE_SDMA=1")
   @unittest.skipIf(DEV.interface.startswith("MOCK"), "MockGPU does not support parallel copies")
@@ -430,9 +413,7 @@ class TestJitGraphSplit(unittest.TestCase):
 
     inp = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
     self.expect(f, inp,
-      graph=[self.ji_graph(2), self.ji_copy(), self.ji_comp()],
-      multigraph=[self.ji_graph(2), self.ji_copy(), self.ji_comp()],
-      hcqgraph=[self.ji_graph(4)])
+      graph=[self.ji_graph(2), self.ji_copy(), self.ji_comp()])
 
 if __name__ == '__main__':
   unittest.main()

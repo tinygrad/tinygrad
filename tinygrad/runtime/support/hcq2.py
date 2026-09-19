@@ -16,13 +16,13 @@ from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_c
 # 0. helpers
 
 HCQ_CACHE_THRESH = ContextVar("HCQ_CACHE_THRESH", 64)
-HCQ_DEVS = frozenset(("NV", "QCOM", "CUDA")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
+HCQ_DEVS = frozenset(("NV", "QCOM", "CUDA", "NULL")) | (frozenset(("AMD",)) if HCQ2 else frozenset())
 
 @dataclass(frozen=True)
 class HCQInfo:
   device:tuple[str, ...]
 
-  kernels:tuple[tuple, ...] = () # (devices, name, estimates, timestamp slots, profile key, buffers, (outs, ins))
+  kernels:tuple[tuple, ...] = () # (devices, name, estimates, timestamp slots, profile key, input slots of the buffers, (outs, ins))
   estimates:Estimates = Estimates()
 
   nargs:int = 0
@@ -272,7 +272,8 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   estimates = [estimate_uop(c) for c, _, _ in ctx.batch]
   stamps = [tuple(2 * s + 1 for s in ctx.stamps(d, tag)) for tag, (_, d, _) in enumerate(ctx.batch)]
   profile_keys = [c.body.key if c.body.op is Ops.PROGRAM else None for c, _, _ in ctx.batch]
-  bufs = [tuple(unwrap_view(get_call_arg_uops(c)[g])[0] for g in getattr(c.body.arg, "globals", (0, 1))) for c, _, _ in ctx.batch] # copy is dst, src
+  args = [[unwrap_lane(get_call_arg_uops(c)[g])[:2] for g in getattr(c.body.arg, "globals", (0, 1))] for c, _, _ in ctx.batch] # copy is dst, src
+  bufs = [tuple(b.arg.slot for b, _ in a) if all(b.op is Ops.PARAM and lane is None for b, lane in a) else () for a in args]
   kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
   written_bufs = tuple(dedup(b for c, _, _ in ctx.batch for b in get_call_written_bufs(c)))
   host_deps = tuple(dedup((host, devs[0]) for call, devs, _ in ctx.batch for buf in get_call_arg_uops(call)
