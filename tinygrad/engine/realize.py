@@ -77,13 +77,14 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
   args = resolve_params(call, ctx.input_uops) if kernels and kernels[0][2] is None else []
   lanes = list(unwrap_multi(call, [args[g] for g in call.body.arg.globals] if call.body.op is Ops.PROGRAM else args)) if args else []
   for i, (device, kcall, stats) in enumerate(kernels):
-    et, bufs = ets[i] if i < len(ets) else None, lanes[i][0] if i < len(lanes) else [ctx.input_uops[s].buffer for s in (stats[3] if stats else ())]
+    et = ets[i] if i < len(ets) else None
+    bufs = lanes[i][0] if i < len(lanes) else [_resolve(u, ctx.input_uops).buffer for u in (stats[3] if stats else ())]
     display_name = get_call_name(kcall, bufs, ctx.var_vals) if stats is None else stats[0]
     if PROFILE: # backdate the event to the start of the call, the viz matches a device range with the exec event before it
       outputs, inputs = get_call_outs_ins(kcall) if stats is None else stats[4]
       cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": ctx.var_vals,
         "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}, ts=st))
-    if DEBUG < 2 or not ctx.update_stats: continue
+    if DEBUG < (3 if stats is None and isinstance(call.arg.aux, HCQInfo) else 2) or not ctx.update_stats: continue
     if et is None and not getattr(call.arg.aux, "skip_wait", False):
       Device[device].synchronize()
       et, st = float(perf_counter_us() - st)*1e-6, perf_counter_us()
@@ -248,7 +249,7 @@ def _get_call_to_compile(c:UOp) -> tuple[UOp, Renderer]|None:
     return ast, Device[c.device if isinstance(c.device, str) else c.device[0]].renderer
   return None
 
-def lower_and_compile(linear:UOp) -> UOp:
+def lower_and_compile(linear:UOp, verbose=True) -> UOp:
   # collect the kernels to lower and compile, deduped by their compile cache key
   if not len(ar:={c: a for c in linear.toposort() if c.op is Ops.CALL and (a:=_get_call_to_compile(c)) is not None}): return linear
 
@@ -262,7 +263,7 @@ def lower_and_compile(linear:UOp) -> UOp:
     ctx = {v.key: v.value for v in to_program_context}
     tasks = ((i, ast_ren, ctx) for i, (_, ast_ren) in enumerate(todo))
     try:
-      with tqdm(total=len(todo), desc="compiling", disable=DEBUG<1) as pbar:
+      with tqdm(total=len(todo), desc="compiling", disable=DEBUG<1 or not verbose) as pbar:
         for i, prg in (map if pool is None else pool.imap_unordered)(_compile_kernel, tasks):
           pbar.set_description(f"compiling {ansipad(prg.src[0].arg.name, 40)}")
           to_program_cache[todo[i][0]] = prg

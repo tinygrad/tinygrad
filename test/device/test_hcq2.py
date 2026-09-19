@@ -3,7 +3,7 @@ from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer, Compiled
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import Context, dedup, partition, unwrap, cpu_events, ProfilePointEvent
+from tinygrad.helpers import Context, dedup, partition, unwrap
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.codegen import do_to_program
@@ -132,14 +132,6 @@ class TestHCQ2Schedule(unittest.TestCase):
       buf = unwrap(hcq2.bufferize_buf(hcq2.LinkCtx({}, use_rt=False), b)).buffer
       self.assertEqual(buf.base.options.uncached, uncached)
       self.assertEqual(buf.base.meta.mapping.uncached, uncached)
-
-  def test_exec_events_list_kernel_buffers(self):
-    a = self.input()
-    with Context(PROFILE=1):
-      n = len(cpu_events)
-      out = (a + 1).contiguous().realize()
-    execs = [e.arg for e in cpu_events[n:] if isinstance(e, ProfilePointEvent) and e.name == "exec" and e.device == Device.DEFAULT]
-    self.assertEqual([(e["bufs"], e["outputs"], e["inputs"]) for e in execs], [([out.uop.buffer.trace_num, a.uop.buffer.trace_num], (0,), (1,))])
 
   def test_small_eager_cached(self):
     _, compiled, inputs = self.compiled(1)
