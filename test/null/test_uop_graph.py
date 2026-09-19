@@ -445,6 +445,20 @@ class TestReduceCollapse(unittest.TestCase):
     self.assertIn(12.0, [u.val for u in uops if u.op is Ops.CONST])
 
 class TestMovementOps(unittest.TestCase):
+  def test_partial_shaped_index_composition(self):
+    from tinygrad.uop.movement import mop_cleanup
+    base = UOp.param(0, dtypes.int, shape=(4, 2, 2))
+    mapping = UOp.stack(*[UOp.const(x) for x in (3, 1, 0, 2)])
+    for e in range(4):
+      for a in range(2):
+        for b in range(2):
+          original = base.index(mapping).index(UOp.const(e), UOp.const(a), UOp.const(b))
+          result = graph_rewrite(original, mop_cleanup, name="test")
+          self.assertEqual(result.op, Ops.INDEX)
+          self.assertIs(result.src[0], base)
+          self.assertEqual(tuple(x.val for x in result.src[1:]), ((3, 1, 0, 2)[e], a, b))
+          self.assertEqual(result.shape, ())
+
   def test_pm_mops_partial_reshape_index_removes_reshape(self):
     from tinygrad.schedule.prepare import pm_mops
     src = UOp.param(0, dtypes.float, shape=(32, 4))
