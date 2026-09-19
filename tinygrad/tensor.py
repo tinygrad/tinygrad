@@ -72,10 +72,24 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   view = view.reshape(c.shape)
   return view if c.is_self_copy else c.replace(src=(view,)+c.src[1:])
 
+def bind_precompiled_call(c:UOp) -> UOp|None:
+  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
+  # Bind storage before callification collects stores and remaps live tensors. The body is expanded later in prepare.
+  outs = {i:a.pad_to(a.max_shape).empty_like() for i,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound}
+  call = c.replace(src=(c.body, *[outs.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                for i,a in enumerate(c.src[1:])]))
+  return UOp.sink(*(c.src[1+i].store(o.after(call).shrink_to(c.src[1+i].shape)) for i,o in outs.items()))
+
+def resolve_tagged_returned_after(a:UOp, r:UOp, t:UOp) -> UOp|None:
+  if (v := resolve_returned_after(r, t)) is None: return None
+  # Keep the original tensor's tag on the storage state, below any symbolic shape views.
+  return v.substitute({v.base:v.base.replace(tag=(v.base.tag or ()) + a.tag)}) if a.tag else v
+
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
+  (UPat(Ops.CALL, name="c"), bind_precompiled_call),
   # resolve AFTER on RETURNED placeholders (for precompiled calls)
-  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
+  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), name="a", allow_any_len=True), resolve_tagged_returned_after),
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
@@ -145,7 +159,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   srcs:list[UOp] = []
   for u in big_sink.src:
     if u.op is Ops.AFTER and u.src[0].unsharded_base.is_unbound and u.src[1].op is Ops.CALL:
-      # precompiled calls don't need this: transform_precompiled_call gives their outputs real buffers
+      # precompiled calls bind their output storage in bind_precompiled_call
       call = u.src[1]
       if not (call.arg is not None and call.arg.precompile):
         buf = u.empty_like()

@@ -32,7 +32,8 @@ def create_schedule(sched_sink:UOp) -> UOp:
     in_degree: dict[UOp, int] = {}
     writes: dict[UOp, list[tuple[UOp, tuple[UOp, ...]]]] = {}  # superseded state -> (AFTER, new kernels)
     reads: list[tuple[UOp, UOp, UOp]] = []  # (reader AFTER, reader kernel, buffer state read)
-    for u in sched_sink.toposort(gate_kernel_sink):
+    # Late-expanded callees may still have SINK bodies; their internal states belong to their own schedule.
+    for u in sched_sink.toposort(gate_kernel_sink, enter_calls=False):
       if u.op is not Ops.AFTER: continue
       kernels, after_deps = _split_after(u)
       prev_state = _unwrap_src(u.src[0])
@@ -80,7 +81,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
 
 from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear
-from tinygrad.schedule.prepare import prepare_rangeify
+from tinygrad.schedule.prepare import prepare_rangeify, transform_precompiled_call
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg
@@ -122,6 +123,8 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo): return None
   # value calls (with unbound outputs) are inlined positionally during prepare: their bodies are not programs to schedule
   if call.has_unbound_outputs: return None
+  # Outputs bound by callification still have value bodies. Expand those before scheduling the callee.
+  if (expanded := transform_precompiled_call(call)) is not None: return expanded
   st = time.perf_counter()
   cache_key = function.key
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:

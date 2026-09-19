@@ -144,6 +144,28 @@ class TestCallShape(unittest.TestCase):
     self.assertEqual(shape[0], sz.bind(5))
 
 class TestCallSchedule(unittest.TestCase):
+  def test_precompile_callify_binds_outputs_without_expanding_body(self):
+    @function(precompile=True)
+    def f(x:Tensor) -> Tensor: return x * 2 + 1
+    out = f(Tensor([1., 2., 3.]).realize())
+    call, buffer_map = transform_to_call(UOp.sink(out.uop))
+    inner = next(u for u in call.body.toposort(enter_calls=False) if u.op is Ops.CALL and u.arg.precompile)
+    self.assertFalse(inner.has_unbound_outputs)
+    self.assertEqual(inner.body.src[0].op, Ops.STORE)
+    self.assertTrue(buffer_map[out.uop].has_buffer_identity())
+    np.testing.assert_equal(out.numpy(), [3., 5., 7.])
+
+  def test_precompile_nested_symbolic(self):
+    @function(precompile=True)
+    def inner(x:Tensor) -> Tensor: return x * 2
+    @function(precompile=True)
+    def outer(x:Tensor) -> Tensor: return inner(x) + 1
+    x = Tensor.arange(32).reshape(8, 4).float().clone().realize()
+    sz = UOp.variable("sz", 1, 8)
+    for n in (3, 5, 3):
+      out = outer(x[:sz.bind(n)])
+      np.testing.assert_equal(out[:n].numpy(), np.arange(32).reshape(8, 4)[:n] * 2 + 1)
+
   def test_precompile_slice_assign(self):
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x * 2 + 1
@@ -326,6 +348,13 @@ class TestArgOrder(unittest.TestCase):
     outs = self.make_intersperse_call(x)
     out = Tensor(outs[0], device=x.device) + 1
     np.testing.assert_equal(out.numpy(), [1, 3, 5])
+
+  def test_intersperse_returned_precompile(self):
+    x = Tensor([1, 2, 3]).realize()
+    out = Tensor(self.make_intersperse_call(x, precompile=True)[0])
+    out.realize()
+    self.assertTrue(out.uop.has_buffer_identity())
+    np.testing.assert_equal(out.numpy(), [2, 4, 6])
 
   def test_outputs_arbitrary_order(self):
     x = Tensor([1.0, 2.0, 3.0])

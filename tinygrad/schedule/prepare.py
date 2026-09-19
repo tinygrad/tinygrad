@@ -149,14 +149,15 @@ def materialize_cross_device_src(dest:UOp, src:UOp):
   return dest.store(src.contiguous())
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
-  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
-  assert c.body.op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
-  # the RETURNED srcs are the call outputs (slots are src positions)
-  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
-  srcs = tuple(st.src[1] for st in c.body.src if st.op is Ops.STORE)
+  if c.arg is None or not c.arg.precompile or c.body.op is not Ops.SINK: return None
+  # Value bodies store into their output PARAMs; expanded opaque bodies contain AFTERs instead.
+  if not c.body.src or any(st.op is not Ops.STORE for st in c.body.src): return None
+  ret_pos = [st.src[0].unsharded_base.arg.slot for st in c.body.src]
+  srcs = tuple(st.src[1] for st in c.body.src)
 
-  # add the outputs to the call
-  outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
+  # Callification binds externally visible outputs. Nested value calls still need call-local storage.
+  outs = tuple(a.pad_to(a.max_shape).empty_like() if a.unsharded_base.is_unbound else a
+               for p in ret_pos for a in (c.src[1+p],))
   targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
 
   # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
@@ -178,22 +179,23 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # swap every placed value for its target storage, also inside other stores' AFTER deps
   fxn = UOp.sink(*(x.substitute(placed) for x in items))
 
-  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
-  # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
+  # The expanded body is an opaque CALL. AFTERs on real buffers are input storage; AFTERs on unbound
+  # placeholders have no storage yet and must be materialized.
   rmap = dict(zip(ret_pos, outs))
   new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
                                    for i, a in enumerate(c.src[1:])]))
+  if not c.has_unbound_outputs: return new_call
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
   # NOTE: must use the resolved shapes of the RETURNED placeholders (which substitute PARAMs with external args), not raw body shapes
   rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
 
-  # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
+  # Unbound outputs resolve against stores into their placeholders.
   return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
 
 transform_calls = PatternMatcher([
-  # transform precompiled value-producing calls into opaque CALLs (outputs become real buffers)
+  # expand precompiled value bodies and bind call-local outputs
   (UPat(Ops.CALL, name="c"), transform_precompiled_call),
 ])
 
