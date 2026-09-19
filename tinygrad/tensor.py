@@ -20,17 +20,13 @@ from tinygrad.engine.realize import run_linear
 
 @dataclass
 class AllocCtx:
-  buffer_map: dict[UOp, UOp] = field(default_factory=dict)
-  stores: list[UOp] = field(default_factory=list)
   replacements: list[UOp] = field(default_factory=list)
   unbound: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
 
 # a tag is the tuple of original pre-rewrite UOps a node provides storage for
-def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
-
 add_tags = PatternMatcher([
-  (UPat(Ops.AFTER, name="x"), tag_uop),
+  (UPat(Ops.AFTER, name="x"), lambda x: None if x.tag is not None else x.replace(tag=(x,))),
 ])
 
 def contiguous_mops_to_view(ctx:AllocCtx|None, c:UOp, src:UOp):
@@ -74,7 +70,7 @@ def forward_call_outputs(c:UOp):
       if src in placed:
         items.append(src.after(*deps))
         continue
-    items.append(target.after(target.store(src.after(*deps))))
+    items.append(target.after(st))
   return c.replace(src=(UOp.sink(*items).substitute(placed),)+c.src[1:])
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
@@ -93,12 +89,10 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
    x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) if x.on_disk() else None),
 
-  # strip DETACH/CONTIGUOUS_BACKWARD before minting (tags carry over)
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"),
-   lambda x: x.src[0].replace(tag=(x.src[0].tag or ())+(x.tag or ())) if x.tag else x.src[0]),
-  # contiguous of an already-materialized value is a no-op (tags carry over for held values)
-  (UPat(Ops.STAGE, src=(UPat(Ops.AFTER, name="a"),), name="c"),
-   lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
+  # strip DETACH/CONTIGUOUS_BACKWARD before minting
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+  # contiguous of an already-materialized value is a no-op
+  (UPat(Ops.STAGE, src=(UPat(Ops.AFTER, name="a"),)), lambda a: a if a.src[0].has_buffer_identity() else None),
 ])
 
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
@@ -148,15 +142,17 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
   # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
   # AFTERs on unbound STORAGE (clones) are collected too: the clone's own buffer is the storage, no fresh copy
+  stores:list[UOp] = []
+  buffer_map:dict[UOp, UOp] = {}
   for u in big_sink.toposort(enter_calls=False):
     if (u.op is Ops.COPY and u.on_disk()) or (u.op is Ops.AFTER and not u.is_bound_var and
         (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
-      ctx.stores.append(u)
-      if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
-  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
-  assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
+      stores.append(u)
+      if u.tag: buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
+  ret = graph_rewrite(UOp.sink(*stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
+  assert not any(x in buffer_map for x in buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
-  return ret, ctx.buffer_map
+  return ret, buffer_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
