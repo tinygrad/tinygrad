@@ -64,7 +64,7 @@ def mark_expansion_axes(ctx:ExpanderContext, u:UOp, axes:ExpansionAxes) -> None:
   else: ctx.axes[u] = axes
 
 def expand_range(ctx:ExpanderContext, r:UOp) -> UOp|None:
-  if r.arg[0] not in ctx: return None
+  if r.arg[0] not in ctx or not isinstance(r.vmax, int): return None
   width = r.vmax+1
   range_shape = tuple(width if i == ctx[r.arg[0]] else 1 for i in range(len(ctx)))
   expanded = UOp.const(tuple(range(width)), r.dtype).reshape(range_shape)
