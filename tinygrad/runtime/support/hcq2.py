@@ -5,7 +5,7 @@ from dataclasses import replace, dataclass, field
 from tinygrad.helpers import dedup, pluralize, unwrap, VIZ, HCQ2, to_tuple, ContextVar, Context, panic, partition, DEV, ALL2ALL, getenv, round_up
 from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker, TinyELF, HCQ_RUNTIME_DEV
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
-from tinygrad.dtype import dtypes, DType, DTYPES_DICT, AddrSpace
+from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.schedule.prepare import pm_mops
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, get_call_written_bufs
@@ -317,22 +317,31 @@ class EncodeCtx:
   def __post_init__(self): self.table = UOp.placeholder((1,), dtypes.uint64, device=Device[self.devs[0]].host, tag="inputs")
 
 class HWQueue:
-  q_rewrite = PatternMatcher([ # the ops of a queue: a queue defines the methods it supports
+  q_rewrite = PatternMatcher([
+    # rewrites from calls
     (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), lambda ctx, call, prg: ctx.exec(call, prg)),
-    (UPat(Ops.CALL, src=(UPat(Ops.COPY),), name="call", allow_any_len=True), lambda ctx, call: ctx.copy(call)),
+    (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), allow_any_len=True),
+     lambda ctx, dst, src: ctx.copy(dst, src, src.max_numel() * src.dtype.itemsize)),
+
+    # ins
+    (UPat(Ops.INS, arg=("copy", dtypes.void), src=(UPat(name="dst"), UPat(name="src"), UPat(name="n"))),
+     lambda ctx, dst, src, n: ctx.copy(dst, src, n.val)),
     (UPat(Ops.INS, arg=("barrier", dtypes.void)), lambda ctx: ctx.memory_barrier()),
     (UPat(Ops.INS, arg=("wait", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val)),
     (UPat(Ops.INS, arg=("wait_eq", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.wait(dst, val, eq=True)),
     (UPat(Ops.INS, arg=("timestamp", dtypes.void), src=(UPat(name="dst"),)), lambda ctx, dst: ctx.timestamp(dst)),
     (UPat(Ops.INS, arg=("store", dtypes.void), src=(UPat(name="dst"), UPat(name="val"))), lambda ctx, dst, val: ctx.signal(dst, val)),
     (UPat(Ops.INS, arg=("write", dtypes.void), name="u"), lambda ctx, u: ctx.write(*u.src)),
+
+    # loop in cmdbufs
+    (UPat(Ops.END, src=(UPat(Ops.LINEAR, name="body"), UPat(Ops.RANGE, name="r"))), lambda ctx, body, r: ctx.loop(body, r)),
   ])
 
   def __init__(self, ctx:EncodeCtx, submit:UOp):
     self.ctx, self.lin = ctx, submit.src[0]
     self.devs, self.queue = self.lin.arg
     self.dev = Device[self.devs[0]]
-    self.blob, self.patches = bytearray(), list[tuple[int, UOp]]()
+    self.blob, self.patches = bytearray(), list[tuple[int|UOp, UOp]]()
 
   def q(self, *words) -> int:
     for w in words:
@@ -346,6 +355,14 @@ class HWQueue:
         v, n = (c.val, w.dtype.itemsize) if isinstance(w, UOp) else (c, 4)
         self.blob += (v & (1 << 8 * n) - 1).to_bytes(n, 'little')
     return len(self.blob)
+
+  def loop(self, body:UOp, r:UOp):
+    start, first = len(self.blob), len(self.patches)
+    for u in body.src: self.q_rewrite.rewrite(u, ctx=self)
+    trip, words = len(self.blob) - start, self.patches[first:]
+    # each trip gets its words as dwords: a trip need not be 8 bytes aligned
+    self.patches[first:] = [(o + 4 * k + r * trip, (w >> (32 * k)).cast(dtypes.uint32)) for o, w in words for k in range(w.dtype.itemsize // 4)]
+    self.blob += self.blob[start:] * int(r.vmax)
 
   def memory_barrier(self): pass # a copy queue has nothing to flush
   def submit(self, cmdbuf:UOp) -> UOp: raise NotImplementedError("queues need a submit")
@@ -400,22 +417,24 @@ def _is_link_patch(w:UOp) -> bool:
   return all(_is_link_patch(s) for s in w.src)
 
 def hoist_links(ctx:EncodeCtx, a:UOp) -> UOp|None:
-  links, rest = partition(a.src[1:], lambda s: s.op is Ops.STORE and _is_link_patch(s))
+  links, rest = partition(a.src[1:], lambda s: s.op in (Ops.STORE, Ops.END) and _is_link_patch(s))
   if not links: return None
   ctx.lt_patches.extend(links)
   return a.src[0].after(*rest)
 
 pm_patches = PatternMatcher([(UPat(Ops.GETADDR, name="g"), addrs_to_table), (UPat(Ops.AFTER, name="a"), hoist_links)])
 
-def patch(buf:UOp, rows:list[tuple[int, UOp]], blob:bytes|None=None) -> UOp:
-  groups:dict[tuple[DType, int, bool], list[tuple[int, UOp]]] = {} # split by: dtype, alignment, is_link (rt/lt can't share a store)
-  for offb, w in rows: groups.setdefault((w.dtype, offb % w.dtype.itemsize, _is_link_patch(w)), []).append((offb, w))
+def patch(buf:UOp, rows:Sequence[tuple[int|UOp, UOp]], blob:bytes|None=None) -> UOp:
+  # group into stacks based on dtype, alignment, is_link (rt/lt can't share a store) and ranges (a ranged offset is a loop)
+  keys = [(w.dtype, (o if isinstance(o, int) else o.vmin) % w.dtype.itemsize, _is_link_patch(w), tuple(getattr(o, "ranges", ()))) for o, w in rows]
+  groups = [(key, [row for row, k in zip(rows, keys) if k == key]) for key in dedup(keys)]
 
   dep = [buf.store(UOp(Ops.BINARY, arg=blob).bitcast(buf.dtype))] if blob is not None else []
   base, stores = buf.after(*dep), [] # keep buf.after to be sure that link applies patches after the blob
-  for (dt, phase, _), grp in groups.items():
+  for (dt, phase, _, rngs), grp in groups:
     view = base[phase:phase + (buf.max_numel() - phase) // dt.itemsize * dt.itemsize].bitcast(dt)
-    stores.append(view.index(UOp.stack(*[UOp.const((o - phase) // dt.itemsize) for o, _ in grp])).store(UOp.stack(*[w for _, w in grp])))
+    offs = [UOp.const(i) if isinstance(i:=(o - phase) // dt.itemsize, int) else i for o, _ in grp]
+    stores.append(view.index(UOp.stack(*offs)).store(UOp.stack(*[w for _, w in grp])).end(*rngs))
   return buf.after(*dep, *stores)
 
 def bufferize_linear(hq:HWQueue, name:str, device:str|tuple[str, ...]) -> UOp:
@@ -553,12 +572,16 @@ def fold_binary(buf:UOp, blob:UOp) -> UOp:
     b.host.view(fmt='B')[off:off + len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
-def fold_words(buf:UOp, offs:UOp, ws:UOp) -> UOp:
+def fold_words(buf:UOp, offs:UOp, ws:UOp, r:UOp|None=None) -> UOp:
+  def trips(x:UOp) -> list[int]: return [x.val] if r is None else [x.sym_infer({"i": i}) for i in range(int(r.vmax) + 1)]
+
   base, off = unwrap_view(buf)
   mv = cast(Buffer, base.buffer).ensure_allocated().host.view(fmt='B')
-  for o, w in zip(offs.src, ws.src):
-    n, at = w.dtype.itemsize, off + o.val * w.dtype.itemsize
-    mv[at:at + n] = (w.val & (1 << 8 * n) - 1).to_bytes(n, 'little')
+  # a ranged word has a value per trip
+  if r is not None: offs, ws = (x.substitute({r: UOp.variable("i", 0, r.vmax, r.dtype)}) for x in (offs, ws))
+
+  writes = [(off + i * w.dtype.itemsize, w.dtype.itemsize, v) for o, w in zip(offs.src, ws.src) for i, v in zip(trips(o), trips(w))]
+  for at, n, v in writes: mv[at:at + n] = (v & (1 << 8 * n) - 1).to_bytes(n, 'little')
   return UOp(Ops.NOOP)
 
 pm_link = PatternMatcher([
@@ -570,6 +593,7 @@ pm_link = PatternMatcher([
   (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast())), fold_binary),
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")),
     fold_words),
+  (UPat(name="buf").index(UPat(Ops.STACK, name="offs")).store(UPat(Ops.STACK, name="ws")).end(UPat(Ops.RANGE, name="r")), fold_words),
   (UPat(Ops.AFTER, src=(UPat(Ops.CALL),), allow_any_len=True, name="a"),
     lambda a: a.src[0].after(*(s for s in a.src[1:] if s.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="a"), lambda a: None if a.is_bound_var or a.src[0].op is Ops.CALL else

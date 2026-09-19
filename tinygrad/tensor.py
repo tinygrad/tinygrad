@@ -31,27 +31,19 @@ class AllocCtx:
 # a tag is the tuple of original pre-rewrite UOps a node provides storage for
 def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
 
-# a base needs storage of its own if it can back a buffer and doesn't already have one
-def needs_storage(u:UOp) -> bool: return not u.is_virtual and not u.has_buffer_identity()
-
-def on_disk(u:UOp): return isinstance(u.device, str) and u.device.startswith("DISK")
-def is_creation_device(u:UOp): return isinstance(u.device, str) and u.device.startswith(("DISK", "NPY", "PYTHON"))
-
 def creation_copy_is_realized(u:UOp):
-  # all copies from disk/numpy are realized into a real buffer
-  if is_creation_device(u.src[0]): return tag_uop(u)
+  # Transfers from a creation device already own destination storage and must remain persistent across Callify.
+  if u.src[0].on_creation_device(): return tag_uop(u)
 
-# CONTIGUOUS and AFTER + parents are the only nodes that get updated
 add_tags = PatternMatcher([
   (UPat(Ops.COPY, name="u"), creation_copy_is_realized),
-  # no tag on copies that fill an AFTER's whole dest via STORE: merge COPY tag into AFTER (the copy reads that storage).
-  # a partial STORE keeps the tag: the copy mints its own storage like any bare creation copy
+  # A full STORE of a creation COPY uses the AFTER destination as that COPY's storage.
   (UPat(Ops.AFTER, src=(UPat(name="dest"),
     UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="x"), tag_uop),
   # materializations synthesized at function boundaries still need storage outside the nested call
-  (UPat(Ops.COPY, src=(UPat((Ops.COPY, Ops.AFTER, Ops.CAST)),), name="x"), lambda x: tag_uop(x) if x.is_self_copy else None),
+  (UPat(Ops.STAGE, src=(UPat((Ops.COPY, Ops.STAGE, Ops.AFTER, Ops.CAST)),), name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
 
@@ -77,9 +69,9 @@ def mint_tagged_storage(x:UOp):
   # () is falsy but not None, so it isn't re-tagged like a bare (tag=None) node would be; just strip it here
   if not x.tag: return x.rtag(None)
   # a tagged CONTIGUOUS is consumed by the mint: the buffer stores its source directly
-  src = x.src[0] if x.is_self_copy else x.rtag(None)
+  src = x.src[0] if x.op is Ops.STAGE else x.rtag(None)
   # virtual values and DISK tensors don't get real buffers: keep the (single) annotation, drop the tag
-  if x.is_virtual or on_disk(x): return src.alu(Ops.COPY, arg=src.device) if src.device is not None else src
+  if x.is_virtual or x.on_disk(): return src.alu(Ops.STAGE) if src.device is not None else src
   # if size is 0, remove the contig
   if 0 in x.shape: return src
   buf = x.empty_like()
@@ -92,8 +84,7 @@ def mint_function_materialization(x:UOp) -> UOp|None:
   return buf.after(buf.store(x.src[0])).replace(tag=x.tag)
 
 pm_mint_function_materializations = PatternMatcher([
-  (UPat(Ops.COPY, src=(UPat((Ops.COPY, Ops.AFTER, Ops.CAST)),), name="x"),
-   lambda x: mint_function_materialization(x) if x.is_self_copy else None),
+  (UPat(Ops.STAGE, src=(UPat((Ops.COPY, Ops.STAGE, Ops.AFTER, Ops.CAST)),), name="x"), mint_function_materialization),
 ])
 
 # Allocation provenance is local to Callify, while physical allreduce annotations are consumed later by the scheduler.
@@ -121,12 +112,12 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   ctx.views.add(view)
   if unshard is not None: return view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:])
   view = view.reshape(c.shape)
-  return view if c.is_self_copy else c.replace(src=(view,)+c.src[1:])
+  return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
 def _precompiled_output_redirect(s:UOp, t:UOp) -> tuple[UOp, dict[UOp, UOp]]|None:
   # how output s lands in the caller's buffer t, or None if it must be copied into t
   # materialize straight into t
-  if s.is_self_copy:
+  if s.op is Ops.STAGE:
     placed = t.after(t.store(s.src[0]))
     return placed, {s:placed}
   # rebind output storage to t
@@ -203,23 +194,22 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
 
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
-  (UPat(Ops.COPY, src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
+  (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
 
   # remove contiguous on movement ops before a copy on disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="cont").f(Ops.COPY, name="copy"), lambda x,cont,copy:
-   copy.replace(src=(x,), tag=None) if cont.is_self_copy and on_disk(x) else None),
+  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
+   copy.replace(src=(x,), tag=None) if x.on_disk() else None),
   # push copy past movement ops to disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
-   x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) if on_disk(x) else None),
+   x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) if x.on_disk() else None),
 
   # strip DETACH/CONTIGUOUS_BACKWARD before minting (tags carry over)
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"),
    lambda x: x.src[0].replace(tag=(x.src[0].tag or ())+(x.tag or ())) if x.tag else x.src[0]),
   # contiguous of an already-materialized value is a no-op (tags carry over for held values)
-  (UPat(Ops.COPY, src=(UPat(Ops.AFTER, name="a"),), name="c"),
-   lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ()))
-   if c.is_self_copy and c.tag != ("replicate",) and a.src[0].has_buffer_identity() else None),
+  (UPat(Ops.STAGE, src=(UPat(Ops.AFTER, name="a"),), name="c"),
+   lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
   # mint buffers for tagged values; an untagged CONTIGUOUS flows through to the scheduler, which bufferizes it
   (UPat(GroupOp.All-{Ops.AFTER, Ops.STORE}, name="x"), mint_tagged_storage),
 ])
@@ -275,7 +265,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
   # bases to realize. an AFTER already names the storage its store writes into
-  ctx = AllocCtx(bases={base for x in big_sink.src if needs_storage(base:=x.base) and base.op is not Ops.AFTER})
+  ctx = AllocCtx(bases={base for x in big_sink.src if (base:=x.base).needs_storage() and base.op is not Ops.AFTER})
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
@@ -301,7 +291,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
   # AFTERs on unbound STORAGE (clones) are collected too: the clone's own buffer is the storage, no fresh copy
   for u in big_sink.toposort(enter_calls=False):
-    if (u.op is Ops.COPY and on_disk(u) and not u.is_self_copy) or (u.op is Ops.AFTER and not u.is_bound_var and
+    if (u.op is Ops.COPY and u.on_disk()) or (u.op is Ops.AFTER and not u.is_bound_var and
         (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
       ctx.stores.append(u)
       if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
@@ -379,9 +369,9 @@ class Tensor(RandMixin):
     elif not isinstance(data, UOp):
       if _dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {_dtype}")
       if isinstance(data, bytes):
-        data = UOp._frompy(data, _dtype or dtypes.uint8, _device)
+        data = UOp._frompy(data, _dtype or dtypes.uint8)
       elif isinstance(data, (list, tuple)):
-        data = UOp._frompy(data, _dtype or dtypes.from_py(data), _device)
+        data = UOp._frompy(data, _dtype or dtypes.from_py(data))
       elif is_numpy_ndarray(data):
         data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)
       elif isinstance(data, pathlib.Path):
@@ -489,7 +479,7 @@ class Tensor(RandMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    to_realize = [x for x in (self,)+lst if needs_storage(x.uop.base)]
+    to_realize = [x for x in (self,)+lst if x.uop.base.needs_storage()]
     if len(to_realize):
       run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
@@ -505,15 +495,13 @@ class Tensor(RandMixin):
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
     if self.dtype in dtypes.weaks: self.uop = self.uop.clone()
-    is_disk = on_disk(self.uop)
+    is_disk = self.uop.on_disk()
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
     # broadcast x (shape only, dtype must match)
     x = x._broadcast_to(self.shape)
     if x.dtype in dtypes.weaks: x = x.cast(least_upper_dtype(self.dtype, x.dtype))
     if x.dtype != self.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
-    if not is_disk and x.uop.device is not None and self.device is not None and self.device != x.device:
-      raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
     if isinstance(self.device, tuple) and x.uop.device is not None and self.uop.axis != x.uop.axis:
       raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
 
@@ -524,8 +512,8 @@ class Tensor(RandMixin):
     assigned_to = self.uop.storage_base
     # assigning to a value is initialization, not a write: the whole tensor is overwritten, so the pending value is dead.
     # a pending CONTIGUOUS counts only if it's the whole target: writes through views of it store into its storage
-    if not assigned_to.has_buffer_identity() and (not assigned_to.is_self_copy or self.uop is assigned_to):
-      self.uop = (x.uop.src[0] if x.uop.is_self_copy else x.uop).clone()
+    if not assigned_to.has_buffer_identity() and (assigned_to.op is not Ops.STAGE or self.uop is assigned_to):
+      self.uop = (x.uop.src[0] if x.uop.op is Ops.STAGE else x.uop).clone()
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(store := self.uop.store(x.uop))
@@ -629,7 +617,9 @@ class Tensor(RandMixin):
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
     # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
-    if isinstance(device, str) and device.startswith("DISK"): ret = Tensor(self.uop.clone(device))
+    # a copy from a creation device is clone
+    if (isinstance(device, str) and device.startswith("DISK")) or self.uop.on_creation_device():
+      ret = Tensor(self.uop.clone(device))
     else: ret = Tensor(self.uop.copy_to_device(device))
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret.is_param_(self.is_param)
@@ -656,7 +646,7 @@ class Tensor(RandMixin):
     if len(devices) == 1: return self.to(devices[0])
     devices = cast(tuple[str, ...], canonicalize_device(devices))
     # a shard of a load from a creation device (disk/npy/python) wants the copy to persist, so it inserts a clone
-    src = self.uop.clone(devices) if is_creation_device(self.uop) else self.uop
+    src = self.uop.clone(devices) if self.uop.on_creation_device() else self.uop
     uop = src.shard(devices, None if axis is None else self._resolve_dim(axis))
     return Tensor(uop).is_param_(self.is_param)
 
@@ -780,7 +770,7 @@ class Tensor(RandMixin):
              if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
         raise RuntimeError("can't setitem on a tensor with other uses")
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
-    is_disk = on_disk(self.uop)
+    is_disk = self.uop.on_disk()
     advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
     realized = is_disk or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized()
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):

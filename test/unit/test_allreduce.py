@@ -177,7 +177,7 @@ class TestRingAllReduce(unittest.TestCase):
     buf = UOp.new_buffer(devices, 4096, dtypes.float) + 1
     ret = create_allreduce_function(buf, buf.allreduce(Ops.ADD, devices))
     assert ret is not None
-    contiguous = [x for x in ret.toposort() if x.is_self_copy]
+    contiguous = [x for x in ret.toposort() if x.op is Ops.STAGE]
     self.assertEqual(len(contiguous), 1)
     call = next(x for x in ret.toposort() if x.op is Ops.CALL)
     self.assertIs(call.src[-1], contiguous[0])
@@ -244,7 +244,7 @@ class TestRingAllReduce(unittest.TestCase):
     self_stores = [x for x in stores if x.src[0] in x.src[1].toposort(enter_calls=False)]
     self.assertEqual(len(self_stores), 4)
     self.assertTrue(all(x.src[1].tag == ("allreduce_accumulate",) for x in self_stores))
-    self.assertEqual(sum(x.op is Ops.COPY for x in prepared.toposort()), 24)
+    self.assertEqual(sum(x.op in {Ops.COPY, Ops.STAGE} for x in prepared.toposort()), 12)
 
   @Context(ALL2ALL=2, RING=0)
   def test_correct_persistent_allreduce_accumulate_bf16(self):

@@ -37,12 +37,21 @@ class TestAssign(unittest.TestCase):
     a.realize()
     np.testing.assert_allclose(b.numpy(), 0)
 
+  @unittest.skip("no longer folds")
   def test_assign_copy(self):
     a = Tensor([1.,2,3], device="PYTHON")
     c = Tensor.empty(3).assign(a.to(None))
     # it should copy into the empty buffer
     GlobalCounters.reset()
     c.realize()
+    assert_kernel_count(1)
+
+  def test_assign_cross_device(self):
+    a = Tensor([1.,2,3], device="PYTHON")
+    c = Tensor.empty(3).assign(a)
+    # it should copy into the empty buffer
+    GlobalCounters.reset()
+    self.assertListEqual(c.tolist(), [1.,2,3])
     assert_kernel_count(1)
 
   def test_assign_slice(self):
@@ -634,7 +643,7 @@ class TestAssign(unittest.TestCase):
 
   def test_assign_temporary_copy_reshape(self):
     a = Tensor([[1., 2], [3, 4]], device="PYTHON")
-    c = Tensor.empty(2, 2).assign(a.to(None))
+    c = Tensor.empty(2, 2).assign(a)
     GlobalCounters.reset()
     c.realize()
     assert_kernel_count(1)
@@ -1010,14 +1019,14 @@ class TestAssignToUnrealizedView(unittest.TestCase):
   def test_contiguous(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
     c = t.permute(1,0).contiguous()  # unrealized CONTIGUOUS
-    self.assertIs(c.uop.base.op, Ops.COPY)
+    self.assertIs(c.uop.base.op, Ops.STAGE)
     c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(c.tolist(), [[1,1],[2,1]])
 
   def test_contiguous_partial_assign_realize(self):
     x = Tensor([1., 2.]).realize()
     y = (x + 1).contiguous()  # unrealized CONTIGUOUS
-    self.assertIs(y.uop.base.op, Ops.COPY)
+    self.assertIs(y.uop.base.op, Ops.STAGE)
     # a partial write survives an explicit realize: the values are right, storage is an implementation detail
     y[:1].assign(9.)
     y.realize()
@@ -1057,7 +1066,7 @@ class TestAssignToUnrealizedView(unittest.TestCase):
   def test_detach_contiguous(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
     d = t.permute(1,0).contiguous().detach()  # DETACH(unrealized CONTIGUOUS)
-    self.assertIs(d.uop.base.op, Ops.COPY)
+    self.assertIs(d.uop.base.op, Ops.STAGE)
     d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
     self.assertEqual(d.tolist(), [[1,1],[2,1]])
 

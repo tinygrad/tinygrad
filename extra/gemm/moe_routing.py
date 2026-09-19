@@ -135,9 +135,10 @@ def m_max_for(t_local:int, experts_per_tok:int, n_experts:int) -> int:
   return (-(-t_local * experts_per_tok // BLOCK_ROW) + n_experts) * BLOCK_ROW
 
 class Routing:
-  def __init__(self, weights:Tensor, dest_row:Tensor, off:Tensor, m_l:int, n_groups:int, t_local:int):
+  def __init__(self, weights:Tensor, dest_row:Tensor, off:Tensor, m_l:int, n_groups:int, t_local:int, topi:Tensor|None=None):
     self.weights, self.dest_row = weights, dest_row
     self.off = off
+    self.topi = topi
     self.m_l, self.n_groups, self.t_local = m_l, n_groups, t_local
 
   @property
@@ -158,16 +159,25 @@ def route(logits:Tensor, experts_per_tok:int, n_experts:int) -> Routing:
   T, E = logits.shape
   k, G = experts_per_tok, n_groups_of(logits)
   assert T % G == 0, f"tokens {T} must split across {G} devices"
-  T_l, m_l = T // G, m_max_for(T // G, k, n_experts)
+  T_l = T // G
 
-  topv, topi = logits.reshape(G, T_l, E).topk(k)
-  weights = topv.softmax(-1)
+  if getenv("FUSED_ROUTER_TOPK", 0):
+    from extra.gptoss_kernels.router_topk import fused_router_topk
+    weights, topi = fused_router_topk(logits.reshape(G, T_l, E))
+  else:
+    topv, topi = logits.reshape(G, T_l, E).topk(k)
+    weights = topv.softmax(-1)
+  return route_topk(weights, topi, n_experts)
+
+def route_topk(weights:Tensor, topi:Tensor, n_experts:int) -> Routing:
+  G, T_l, k = weights.shape
+  E, m_l = n_experts, m_max_for(T_l, k, n_experts)
   m = topi.reshape(G, T_l * k).cast(dtypes.int32).one_hot(E).cast(dtypes.int32)
 
   pad = ((m.sum(1) + (BLOCK_ROW - 1)) // BLOCK_ROW) * BLOCK_ROW
   off = pad.cumsum(1).pad(((0, 0), (1, 0)))
   dest_row = ((m.cumsum(1) + off[:, :E].reshape(G, 1, E)) * m).sum(-1).sub(1).cast(dtypes.int32)
-  return Routing(weights, dest_row, off, m_l, G, T_l)
+  return Routing(weights, dest_row, off, m_l, G, T_l, topi=topi)
 
 def dispatch(x:Tensor, r:Routing) -> Tensor:
   G, D = r.n_groups, x.shape[-1]

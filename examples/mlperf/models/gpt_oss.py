@@ -271,21 +271,28 @@ class GPTOSS:
       x_normed, rrms = rmsnorm(x, self.norm_eps)
       inp = x_normed * ffn_norm
 
-    logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else inp.float() @ gate.float().T + gate_bias.float()
     dim, inter = self.dim, self.intermediate_size
 
     if getenv("GROUPED_MOE", 0):
       bsz, seqlen = x.shape[:2]
-      inp, logits = inp.reshape(-1, dim), logits.reshape(-1, self.n_experts)
-      r = route(logits, self.experts_per_tok, self.n_experts)
+      if getenv("FUSED_ROUTER_TOPK", 0):
+        from extra.gptoss_kernels.router_topk import fused_router
+        from extra.gemm.moe_routing import route_topk
+        weights, topi = fused_router(inp, gate, gate_bias)
+        r = route_topk(weights, topi, self.n_experts)
+      else:
+        logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else inp.float() @ gate.float().T + gate_bias.float()
+        r = route(logits.reshape(-1, self.n_experts), self.experts_per_tok, self.n_experts)
+      inp = inp.reshape(-1, dim)
       xg = dispatch(_pad_cols(inp.cast(dtypes.bfloat16)), r)
       h = grouped_mx_gemm(xg, (w_gate_up, w_gate_up_scale), r.off)[:, :2*inter] + _moe_bias_tile(w_gate_up_bias, r).cast(dtypes.bfloat16)
       y = swiglu(h, self.swiglu_limit)
       z = grouped_mx_gemm(_pad_cols(y.cast(dtypes.bfloat16)), (w_down, w_down_scale), r.off)[:, :dim] \
           + _moe_bias_tile(w_down_bias, r).cast(dtypes.bfloat16)
       out = combine(z, r, inp.shape[0], self.experts_per_tok).reshape(bsz, seqlen, dim)
-      return out, [x_normed, rrms, xg, h, y, z, r.weights, r.dest_row, r.off]
+      return out, [x_normed, rrms, xg, h, y, z, r.weights, r.topi, r.dest_row, r.off]
     else:
+      logits = router_mfma(inp, gate, gate_bias) if getenv("ROUTER_MFMA", 0) else inp.float() @ gate.float().T + gate_bias.float()
       thresh = logits.topk(self.experts_per_tok)[0][..., -1:]
       weights = (logits >= thresh).where(logits, -float("inf")).softmax(-1)
 
@@ -304,6 +311,7 @@ class GPTOSS:
     attn, attn_saves = self.attention(x, freqs_cis, mask, sliding, **attn_kwargs)
     h = x + attn
     ffn, ffn_saves = self.feed_forward(h, **ffn_kwargs)
+    if save: ffn_saves.append(h)
     h = h + ffn
     if save: return (h, *attn_saves, *ffn_saves)
     return (h,)

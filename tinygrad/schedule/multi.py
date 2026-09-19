@@ -12,21 +12,21 @@ def _resolve_shrink_marg(marg, i:int):
 
 def _apply_shrink(marg, s:UOp, i:int) -> UOp: return s._mop(Ops.SHRINK, _resolve_shrink_marg(marg, i))
 
-def _shrink_self_copy(x:UOp, marg, i:int) -> UOp:
+def _shrink_stage(x:UOp, marg, i:int) -> UOp:
   resolved = _resolve_shrink_marg(marg, i)
   has_device_range = tuple(any(isinstance(v, UOp) and any(r.arg[-1] is AxisType.DEVICE for r in v.ranges) for v in ss) for ss in marg)
   inner = tuple(r if is_device else (0, s) for r,s,is_device in zip(resolved, x.src[0].shape, has_device_range))
   outer = tuple((0, r[1]) if is_device else r for r,is_device in zip(resolved, has_device_range))
-  materialized = UOp(Ops.COPY, src=(x.src[0]._mop(Ops.SHRINK, inner),), arg=x.device, tag=("force_contiguous",))
+  materialized = UOp(Ops.STAGE, src=(x.src[0]._mop(Ops.SHRINK, inner),), tag=("force_contiguous",))
   return materialized._mop(Ops.SHRINK, outer)
 
 def mstack_early_shrink(ms:UOp, shrink:UOp):
   ret:list[UOp] = []
   for i, x in enumerate(ms.src):
-    if x.is_self_copy:
-      # Before COPY/CONTIGUOUS unification, shrink stayed outside a contiguous materialization. Preserve that
+    if x.op is Ops.STAGE or (x.op is Ops.COPY and x.device == x.src[0].device):
+      # Shrink stays outside a contiguous materialization. Preserve that
       # ordering, while resolving the device-axis slice first so each shard materializes only its physical local view.
-      ret.append(_shrink_self_copy(x, shrink.marg, i))
+      ret.append(_shrink_stage(x, shrink.marg, i))
     elif x.op is Ops.COPY:
       src = _apply_shrink(shrink.marg, x.src[0], i)
       ret.append(src.contiguous() if src.device == x.device else src.copy_to_device(x.device))
@@ -312,10 +312,8 @@ multi_pm = PatternMatcher([
   (UPat(Ops.STACK, name="root", custom_early_reject=set([Ops.UNSHARD])), stack_multi),
   (UPat(Ops.INDEX, src=(UPat(Ops.UNSHARD, name="multi"),), name="root", allow_any_len=True), index_multi),
   (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD), UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="dest"), UPat(Ops.UNSHARD, name="src"))))), store_after_multi),
-  # a self COPY of a sharded value is a contiguous of every shard
-  (UPat(Ops.COPY, src=(UPat(Ops.UNSHARD, name="multi"),), name="copy"),
-   lambda multi,copy: copy_multi(multi, copy.arg) if copy.tag == ("replicate",) else
-                      passthrough_multi(copy, multi) if copy.is_self_copy else copy_multi(multi, copy.arg)),
+  # a COPY of a sharded value copies every shard to the target device
+  (UPat(Ops.COPY, src=(UPat(Ops.UNSHARD, name="multi"),), name="copy"), lambda multi,copy: copy_multi(multi, copy.arg)),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.UNSHARD, name="multi"),), name="red"),
     lambda multi,red: multi.src[0].allreduce(*red.arg).unshard(multi.arg, multi.src[1:])),
 
@@ -325,7 +323,7 @@ multi_pm = PatternMatcher([
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
     UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg) if not root.has_unbound_outputs else None),
-  (UPat((Ops.CAST, Ops.BITCAST, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
+  (UPat((Ops.CAST, Ops.BITCAST, Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), passthrough_multi),
   # STORE of a sharded value into an unsharded dest (e.g. a fragment into a full output tile)
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat(Ops.UNSHARD, name="multi"))), store_value_multi),
