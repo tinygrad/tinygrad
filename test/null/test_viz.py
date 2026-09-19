@@ -461,7 +461,7 @@ class TestVizIntegration(unittest.TestCase):
     self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0", "NULL:1", "NULL:1:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
     self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
     self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
-    self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 2)
+    self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 3)
     for graph in out["layout"]["NULL Graph"]["events"]:
       graph_st, graph_et = graph["st"], graph["st"]+graph["dur"]
       for k in ["NULL", "NULL:1", "NULL:SDMA:0", "NULL:1:SDMA:0"]:
@@ -544,7 +544,7 @@ class TestVizProfiler(unittest.TestCase):
     with save_viz():
       a = Tensor.ones(1, device="NULL").contiguous().realize()
       a.to("NULL:1").realize()
-    range_events = [e for e in cpu_events if isinstance(e, ProfileRangeEvent)]
+    range_events = flatten(e.ents for e in cpu_events if isinstance(e, ProfileGraphEvent))
     compute_events = [e for e in range_events if e.device == "NULL"]
     copy_events = [e for e in range_events if e.device.endswith(":SDMA:0")]
     self.assertGreater(len(compute_events), 0, "expected compute events on base device")
