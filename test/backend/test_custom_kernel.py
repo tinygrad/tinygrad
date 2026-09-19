@@ -71,6 +71,39 @@ def slice_sum_kernel(dest:UOp, src:UOp):
   ast = dest[G].set(reg[0], end=G)
   return ast.sink(arg=KernelInfo(name=f"slice_sum_{src.shape[0]}_{src.shape[1]}", opts_to_apply=()))
 
+def flatlocal_matmul_scan_kernel(out:UOp, src:UOp) -> UOp:
+  def load_matrix(buf:UOp, pos:UOp) -> UOp:
+    base = pos * 4
+    return UOp.stack(*[buf[base+i].load() for i in range(4)]).reshape((2, 2))
+  def store_matrix(buf:UOp, pos:UOp, value:UOp) -> UOp:
+    base = pos * 4
+    return UOp.group(*[buf[base+i].store(value[i//2, i%2]) for i in range(4)])
+
+  n = out.shape[0]
+  scratch = UOp.placeholder((n*4,), src.dtype, addrspace=AddrSpace.LOCAL)
+  tid = UOp.range(n, 0, AxisType.LOCAL)
+  scratch = scratch.after(store_matrix(scratch, tid, src[tid].load()).barrier())
+  offset = 1
+  while offset < n:
+    idx = (tid+1) * (2*offset) - 1
+    valid = idx < n
+    lhs, rhs = load_matrix(scratch, (idx-offset).valid(valid)), load_matrix(scratch, idx.valid(valid))
+    scratch = scratch.after(store_matrix(scratch, idx.valid(valid), lhs @ rhs).barrier())
+    offset *= 2
+  root = (n-1) * 4
+  scratch = scratch.after(UOp.group(*[scratch[root+i].store(v) for i,v in enumerate((1, 0, 0, 1))]).barrier())
+  offset = n//2
+  while offset:
+    idx = (tid+1) * (2*offset) - 1
+    valid = idx < n
+    left, prefix = load_matrix(scratch, (idx-offset).valid(valid)), load_matrix(scratch, idx.valid(valid))
+    stores = UOp.group(store_matrix(scratch, (idx-offset).valid(valid), prefix),
+                       store_matrix(scratch, idx.valid(valid), prefix @ left))
+    scratch = scratch.after(stores.barrier())
+    offset //= 2
+  value = load_matrix(scratch, tid) @ src[tid].load()
+  return out[tid].store(value).end(tid).sink(arg=KernelInfo(name="flatlocal_matmul_scan"))
+
 def simple_qkv_kernel(O:UOp, Q:UOp, K:UOp, V:UOp) -> UOp:
   # attention without softmax
   N, d = Q.shape[0], Q.shape[1]
@@ -123,6 +156,13 @@ class TestCustomKernel(unittest.TestCase):
 
     out = c.flatten().tolist()
     assert all(x == 2 for x in out), "all 2"
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "flatlocal scan requires LOCAL memory")
+  def test_flatlocal_matmul_scan(self):
+    src = Tensor([[[1, 1], [0, 1]], [[1, 0], [1, 1]], [[2, 0], [0, 1]], [[1, 2], [0, 1]]], dtype=dtypes.int32).realize()
+    out = Tensor.custom_kernel(Tensor.empty(4, 2, 2, dtype=dtypes.int32), src, fxn=flatlocal_matmul_scan_kernel)[0]
+    expected = np.array([[[1, 1], [0, 1]], [[2, 1], [1, 1]], [[4, 1], [2, 1]], [[4, 9], [2, 5]]], dtype=np.int32)
+    np.testing.assert_array_equal(out.numpy(), expected)
 
   def test_duplicate_call_arg(self):
     x = Tensor.arange(4).clone().realize()
