@@ -5,7 +5,6 @@ from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context
 from tinygrad.dtype import dtypes
-from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.uop.ops import UOp, Ops
 
@@ -63,6 +62,7 @@ class TestGraph(unittest.TestCase):
 
   def skip_if_not_multigraph(self):
     graph = g.func if isinstance(g:=(d:=Device[Device.DEFAULT]).graph, functools.partial) else g
+    from extra.hcq1.graph import MultiGraphRunner
     if not issubclass(graph, MultiGraphRunner): self.skipTest("graph is not supported (not MultiGraphRunner)")
     if not hasattr(d.allocator, '_transfer') or not d.allocator.supports_transfer: self.skipTest("device is not supported (no transfers)")
 
