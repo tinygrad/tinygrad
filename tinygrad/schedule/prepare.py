@@ -194,12 +194,10 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # Unbound outputs resolve against stores into their placeholders.
   return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
 
-transform_calls = PatternMatcher([
+earliest_rewrites = mop_cleanup+PatternMatcher([
   # expand precompiled value bodies and bind call-local outputs
   (UPat(Ops.CALL, name="c"), transform_precompiled_call),
-])
 
-earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls with RETURNED inputs (inline the body)
   (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.has_unbound_outputs else None),
 
@@ -268,8 +266,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
-  tsink = graph_rewrite(sink, transform_calls, bottom_up=True, name="transform calls")
-  tsink = graph_rewrite(tsink, multi_pm, name="multi_pm")
+  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink
