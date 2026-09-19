@@ -175,12 +175,14 @@ class TestFp8sConversions(unittest.TestCase):
   def test_fp8e5m2fnuz_to_float(self, x):
     np.testing.assert_equal(fp8_to_float(x, dtypes.fp8e5m2fnuz), torch.tensor(x, dtype=torch.uint8).view(torch.float8_e5m2fnuz).float().item())
 
-  def test_fp8e5m2fnuz_to_float_smallest_normals(self):
-    # fnuz bias exceeds half's, so exp-1 normals land below half's normal range: they flush to zero like denormals
-    if dtypes.half not in supported_dtypes or dtypes.half in EMULATED_DTYPES.tolist(dtypes) or dtypes.fp8e5m2fnuz in supported_dtypes:
-      self.skipTest("needs the emulated fp8 with a native half intermediate")
-    vals = Tensor([0x04, 0x05, 0x06, 0x07], dtype=dtypes.uint8).bitcast(dtypes.fp8e5m2fnuz).float().numpy()
-    np.testing.assert_equal(vals, [0., 0., 0., 0.])
+  def test_smallest_normals(self):
+    for dt in dtypes.fp8s:
+      exp1 = [(1 << dtypes.finfo(dt)[1]) + m for m in range(1 << dtypes.finfo(dt)[1])]
+      self.assertEqual(Tensor(exp1, dtype=dtypes.uint8).bitcast(dt).float().tolist(), [fp8_to_float(x, dt) for x in exp1])
+
+  def test_cast_of_zero(self):
+    for dt in dtypes.fp8s:
+      self.assertEqual(Tensor([0.0, -0.0]).cast(dt).bitcast(dtypes.uint8).tolist(), [0, 0 if dt in dtypes.fp8_fnuz else 0x80])
 
 class TestBFloat16DType(unittest.TestCase):
   def test_bf16_to_float(self):
