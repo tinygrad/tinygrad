@@ -1,13 +1,12 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
-from dataclasses import dataclass, field, replace
 from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC
-from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
+from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
 from tinygrad.uop.ops import remove_all_tags
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
@@ -18,18 +17,33 @@ from tinygrad.engine.realize import run_linear
 
 # *** callify: transform a tensor graph into a CALL UOp such that all state is properly scoped ***
 
-@dataclass
-class AllocCtx:
-  replacements: list[UOp] = field(default_factory=list)
-  unbound: dict[UOp, UOp] = field(default_factory=dict)
-  views: set[UOp] = field(default_factory=set)
+@rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
+def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
+  if SPEC: type_verify(big_sink, spec_tensor)
 
-# a tag is the tuple of original pre-rewrite UOps a node provides storage for
-add_tags = PatternMatcher([
-  (UPat(Ops.AFTER, name="x"), lambda x: None if x.tag is not None else x.replace(tag=(x,))),
-])
+  # allocate new buffers
+  call_args:list[UOp] = []           # args to the big call
+  replace_args:dict[UOp, UOp] = {}   # sink replace arg
+  buffer_map:dict[UOp, UOp] = {}     # replacements in the big tensor graph
+  for u in big_sink.toposort(enter_calls=False):
+    if u.addrspace == AddrSpace.ALU:
+      if u.op is Ops.AFTER:
+        replace_args[u] = UOp.param_like(u, len(replace_args))
+        call_args.append(u)
+    else:
+      if u.op is Ops.BUFFER and not u.is_unbound:
+        replace_args[u] = UOp.param_like(u, len(replace_args))
+        call_args.append(u)
+      if u.op is Ops.AFTER:
+        buf = u
+        while buf.op is Ops.AFTER: buf = buf.src[0]
+        buffer_map[u] = buf
+  ret = graph_rewrite(big_sink.substitute(replace_args), remove_all_tags, name="remove tags").call(*call_args)
+  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
+  return ret, buffer_map
 
-def contiguous_mops_to_view(ctx:AllocCtx|None, c:UOp, src:UOp):
+def contiguous_mops_to_view(c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
   buf = src.base
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
@@ -47,112 +61,9 @@ def contiguous_mops_to_view(ctx:AllocCtx|None, c:UOp, src:UOp):
   if (cv := src.contiguous_view()) is None or (buf := cv[0]).op is not Ops.BUFFER: return None
   # NB: make offset a UOp.variable here to do the offset computation in the kernels
   view = buf[cv[1]:cv[1] + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
-  if ctx is not None: ctx.views.add(view)
   if unshard is not None: return view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:])
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
-
-def forward_call_outputs(c:UOp):
-  if c.arg is None or not c.arg.precompile or c.has_unbound_outputs or c.body.op is not Ops.SINK: return None
-  if not c.body.src or not all(st.op is Ops.STORE for st in c.body.src): return None
-  placed:dict[UOp, UOp] = {}
-  items:list[UOp] = []
-  for st in c.body.src:
-    target, src = st.src
-    deps:list[UOp] = []
-    while src.op is Ops.AFTER:
-      deps.extend(src.src[1:])
-      src = src.src[0]
-    # Forward a producer into the existing output PARAM once; shared outputs copy from that first placement.
-    if src not in placed:
-      if src.op is Ops.STAGE: placed[src] = target.after(target.store(src.src[0]))
-      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[src] = target
-      if src in placed:
-        items.append(src.after(*deps))
-        continue
-    items.append(target.after(st))
-  return c.replace(src=(UOp.sink(*items).substitute(placed),)+c.src[1:])
-
-# NOTE: adding rules to here is bad. these all need to run before the schedule cache
-pm_early_transform_tensor_graph = PatternMatcher([
-  # Forward precompiled outputs into their already-bound storage without allocating buffers.
-  (UPat(Ops.CALL, name="c"), forward_call_outputs),
-
-  # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
-  (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
-  (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
-
-  # remove contiguous on movement ops before a copy on disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
-   copy.replace(src=(x,), tag=None) if x.on_disk() else None),
-  # push copy past movement ops to disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
-   x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) if x.on_disk() else None),
-
-  # strip DETACH/CONTIGUOUS_BACKWARD before minting
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
-  # contiguous of an already-materialized value is a no-op
-  (UPat(Ops.STAGE, src=(UPat(Ops.AFTER, name="a"),)), lambda a: a if a.src[0].has_buffer_identity() else None),
-])
-
-# a store's storage keeps the views and drops AFTERs (they only sequence stores)
-pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
-
-def replace_input_buffer(ctx:AllocCtx, b:UOp):
-  ctx.replacements.append(b)
-  return b.param_like(len(ctx.replacements)-1)
-
-# unbound BUFFERs get canonical scope-local id slots here so structurally identical calls hash identically for the
-# schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
-def canonicalize_unbound_buffer(ctx:AllocCtx, b:UOp):
-  if b.arg.slot >= 0 and b not in ctx.unbound: ctx.unbound[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.unbound)))
-  return ctx.unbound.get(b)
-
-def canonicalize_call_body(ctx:AllocCtx, c:UOp):
-  body = graph_rewrite(c.body, pm_canonicalize_unbound, ctx=ctx, bottom_up=True)
-  return c.replace(src=(body,)+c.src[1:]) if body is not c.body else None
-
-pm_canonicalize_unbound = PatternMatcher([
-  (UPat(Ops.CALL, name="c"), canonicalize_call_body),
-  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: canonicalize_unbound_buffer(ctx, b) if b.is_unbound else None),
-])
-
-pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
-  # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay, and unbound BUFFERs too)
-  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
-   replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL and not b.is_unbound else None),
-  # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
-  (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
-  # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
-  (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
-])
-
-@rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
-def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
-  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
-  if SPEC: type_verify(big_sink, spec_tensor)
-
-  # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
-  # this is the only one where we have to be careful to not break the tensor graph
-  big_sink = graph_rewrite(big_sink, add_tags, ctx=(ctx:=AllocCtx()), bottom_up=True, name="add tags")
-
-  # here we can break the tensor graph. tags propagate through replaces so we can still find the original UOps
-  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
-
-  # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
-  # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
-  # AFTERs on unbound STORAGE (clones) are collected too: the clone's own buffer is the storage, no fresh copy
-  stores:list[UOp] = []
-  buffer_map:dict[UOp, UOp] = {}
-  for u in big_sink.toposort(enter_calls=False):
-    if (u.op is Ops.COPY and u.on_disk()) or (u.op is Ops.AFTER and not u.is_bound_var and
-        (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
-      stores.append(u)
-      if u.tag: buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
-  ret = graph_rewrite(UOp.sink(*stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
-  assert not any(x in buffer_map for x in buffer_map.values())
-  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
-  return ret, buffer_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -334,7 +245,7 @@ class Tensor(RandMixin):
           src = src.src[0]
         if src.is_virtual or src.on_disk() or 0 in src.shape or src.has_buffer_identity(): u = src
         elif src.op is Ops.AFTER and (not src.storage_base.is_unbound or src.src[1].op is Ops.STORE): u = src
-        elif contiguous and (view := contiguous_mops_to_view(None, u, src)) is not None: u = view
+        elif contiguous and (view := contiguous_mops_to_view(u, src)) is not None: u = view
         else: u = src.clone()
       if u is not x: tensor_map[x] = u
     _apply_map_to_tensors(tensor_map, name="bufferize")
