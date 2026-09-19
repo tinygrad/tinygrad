@@ -173,7 +173,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
       deps.extend(s.src[1:])
       s = s.src[0]
     if s not in placed:
-      if s.is_self_copy: placed[s] = t.after(t.store(s.src[0]))
+      if s.op is Ops.STAGE: placed[s] = t.after(t.store(s.src[0]))
       elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = t
       if s in placed:
         items.append(s.after(*deps))
