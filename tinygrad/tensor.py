@@ -52,6 +52,28 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, buffer_map
 
+def contiguous_mops_to_view(c:UOp, src:UOp):
+  """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
+  buf = src.base
+  while buf.op is Ops.BITCAST: buf = buf.src[0].base
+  # no symbolic shape
+  if buf.op not in {Ops.BUFFER, Ops.UNSHARD} or not all_int(c.shape): return None
+
+  # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then view the resolved shard
+  unshard = None
+  if buf.op is Ops.UNSHARD:
+    if isinstance(c.device, str): return None
+    if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
+    src = unshard.src[0]
+
+  # offset the base buffer by the collapsed movement ops and view it
+  if (cv := src.contiguous_view()) is None or (buf := cv[0]).op is not Ops.BUFFER: return None
+  # NB: make offset a UOp.variable here to do the offset computation in the kernels
+  view = buf[cv[1]:cv[1] + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
+  if unshard is not None: return view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:])
+  view = view.reshape(c.shape)
+  return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
+
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
@@ -232,7 +254,7 @@ class Tensor(RandMixin):
           src = src.src[0]
         if src.is_virtual or src.on_disk() or 0 in src.shape or src.has_buffer_identity(): u = src
         elif src.op is Ops.AFTER and (not src.storage_base.is_unbound or src.src[1].op is Ops.STORE): u = src
-        elif contiguous and (view := contiguous_mops_to_view(None, u, src)) is not None: u = view
+        elif contiguous and (view := contiguous_mops_to_view(u, src)) is not None: u = view
         else: u = src.clone()
       if u is not x: tensor_map[x] = u
     _apply_map_to_tensors(tensor_map, name="bufferize")
