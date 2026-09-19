@@ -8,7 +8,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtyp
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
-from tinygrad.uop.ops import resolve_returned_after, remove_all_tags
+from tinygrad.uop.ops import remove_all_tags
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
@@ -55,50 +55,6 @@ def contiguous_mops_to_view(ctx:AllocCtx|None, c:UOp, src:UOp):
   if unshard is not None: return view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:])
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
-
-def transform_precompiled_call(c:UOp) -> UOp|None:
-  if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
-  assert c.body.op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
-  # the RETURNED srcs are the call outputs (slots are src positions)
-  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
-  srcs = tuple(st.src[1] for st in c.body.src if st.op is Ops.STORE)
-
-  # add the outputs to the call
-  outs = tuple(c.src[1+p].empty_like() for p in ret_pos)
-  targets = [o.param_like(p).shrink_to(s.shape) for p,o,s in zip(ret_pos, outs, srcs)]
-
-  # how each stored value lands in its output PARAM target: a CONTIGUOUS materializes straight into the target and
-  # a real buffer/UNSHARD rebinds its storage to the target (once per unique value); everything else is copied into it
-  placed:dict[UOp, UOp] = {}
-  items:list[UOp] = []
-  for s, t in zip(srcs, targets):
-    deps:list[UOp] = []
-    while s.op is Ops.AFTER:
-      deps.extend(s.src[1:])
-      s = s.src[0]
-    if s not in placed:
-      if s.op is Ops.STAGE: placed[s] = t.after(t.store(s.src[0]))
-      elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = t
-      if s in placed:
-        items.append(s.after(*deps))
-        continue
-    items.append(t.after(t.store(s.after(*deps))))
-  # swap every placed value for its target storage, also inside other stores' AFTER deps
-  fxn = UOp.sink(*(x.substitute(placed) for x in items))
-
-  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
-  # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
-  rmap = dict(zip(ret_pos, outs))
-  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
-                                   for i, a in enumerate(c.src[1:])]))
-  rets = tuple(o.after(new_call) for o in outs)
-
-  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  # NOTE: must use the resolved shapes of the RETURNED placeholders (which substitute PARAMs with external args), not raw body shapes
-  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, (c.src[1+p] for p in ret_pos)))
-
-  # the AFTER outputs resolve against this: stores of each real output into its RETURNED placeholder
-  return UOp.sink(*[c.src[1+p].store(v) for p, v in zip(ret_pos, rets)])
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
@@ -337,19 +293,43 @@ class Tensor(RandMixin):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
     bases = {x.uop.base for x in (self,)+lst}
     tensor_map:dict[UOp, UOp] = {}
-    # Rebuild in dependency order: replacement values must already reference the other outputs' storage.
+    # Rebuild in dependency order: replacement values already reference the other outputs' storage.
     for x in UOp.sink(*[t.uop for t in (self,)+lst]).toposort(enter_calls=False):
+      if x in tensor_map: continue  # already bound as a precompiled call output
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
-      if u.op is Ops.CALL and (ret := transform_precompiled_call(u)) is not None: u = ret
-      elif u.op is Ops.AFTER and u.src[1].op is Ops.SINK and (ret := resolve_returned_after(u.src[0], u.src[1])) is not None: u = ret
+      if u.op is Ops.CALL and u.arg is not None and u.arg.precompile and u.has_unbound_outputs:
+        assert u.body.op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
+        args = u.src[1:]
+        outs = {i:a.empty_like() for i,a in enumerate(args) if a.unsharded_base.is_unbound}
+        placed:dict[UOp, UOp] = {}
+        items:list[UOp] = []
+        # Place shared storage once; subsequent outputs copy from it. Preserve all ordering dependencies.
+        for (i, out), s in zip(outs.items(), (st.src[1] for st in u.body.src if st.op is Ops.STORE)):
+          target = out.param_like(i).shrink_to(s.shape)
+          deps:list[UOp] = []
+          while s.op is Ops.AFTER:
+            deps.extend(s.src[1:])
+            s = s.src[0]
+          if s not in placed:
+            if s.op is Ops.STAGE: placed[s] = target.after(target.store(s.src[0]))
+            elif s.op in {Ops.BUFFER, Ops.UNSHARD} and s.has_buffer_identity(): placed[s] = target
+            if s in placed:
+              items.append(s.after(*deps))
+              continue
+          items.append(target.after(target.store(s.after(*deps))))
+        body = UOp.sink(*items).substitute(placed)
+        u = u.replace(src=(body, *[outs[i] if i in outs else a if a.has_buffer_identity(after_ok=True) else a.contiguous()
+                                  for i,a in enumerate(args)]))
+        # Bind every output, including siblings outside this sink. Shapes are resolved in the caller's scope.
+        tensor_map.update({x.src[1+i].after(x):out.after(u).shrink_to(args[i].shape) for i,out in outs.items()})
       if x in bases and u.needs_storage():
-        while u.op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: u = u.src[0]
-        src = u.src[0] if u.op is Ops.STAGE else u
-        while src.op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: src = src.src[0]
-        if src.is_virtual or src.on_disk() or 0 in src.shape: u = src
+        src, contiguous = u, False
+        while src.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}:
+          contiguous |= src.op is Ops.STAGE
+          src = src.src[0]
+        if src.is_virtual or src.on_disk() or 0 in src.shape or src.has_buffer_identity(): u = src
         elif src.op is Ops.AFTER and (not src.storage_base.is_unbound or src.src[1].op is Ops.STORE): u = src
-        elif u.op is Ops.STAGE and (view := contiguous_mops_to_view(None, u, src)) is not None: u = view
-        elif src.has_buffer_identity(): u = src
+        elif contiguous and (view := contiguous_mops_to_view(None, u, src)) is not None: u = view
         else: u = src.clone()
       if u is not x: tensor_map[x] = u
     _apply_map_to_tensors(tensor_map, name="bufferize")
