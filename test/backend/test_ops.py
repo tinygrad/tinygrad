@@ -292,6 +292,11 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(OverflowError): Tensor.arange(128, 0, -1, dtype=dtypes.int8)     # start=128 overflows
     with self.assertRaises(OverflowError): Tensor.arange(127, -130, -1, dtype=dtypes.int8)  # last=-129 overflows
 
+  def test_arange_low_precision_dtype(self):
+    for dt in (*dtypes.fp8s, dtypes.half, dtypes.bfloat16):
+      for args in ((0, 10, 3), (0, 200, 1), (5.5, 175.5, 2.5)):
+        self.assertEqual(Tensor.arange(*args, dtype=dt).float().tolist(), Tensor.arange(*args).cast(dt).float().tolist())
+
   def test_arange_big(self):
     helper_test_op([], lambda: torch.arange(256, dtype=torch.int32), lambda: Tensor.arange(256), forward_only=True)
 
