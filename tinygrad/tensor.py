@@ -308,22 +308,21 @@ class Tensor(RandMixin):
 
   @rewrite_group(lambda *_,ret: "Bufferize")
   def _bufferize_outputs(self, *lst:Tensor):
-    sink = UOp.sink(*[t.uop for t in (self,)+lst])
     # weakness ends where storage begins
-    if any(u.dtype in dtypes.weaks and u.device is not None for u in sink.src):
+    if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
-    bases = {u.base for u in sink.src}
+    bases = {x.uop.base for x in (self,)+lst}
     tensor_map:dict[UOp, UOp] = {}
     # Rebuild in dependency order: replacement values already reference the other outputs' storage.
-    for x in sink.toposort(enter_calls=False):
+    for x in UOp.sink(*[t.uop for t in (self,)+lst]).toposort(enter_calls=False):
       if x in tensor_map: continue  # already bound as a precompiled call output
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
       if u.op is Ops.CALL and u.arg is not None and u.arg.precompile and u.has_unbound_outputs:
         assert u.body.op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
         args = u.src[1:]
         outs = {i:a.empty_like() for i,a in enumerate(args) if a.unsharded_base.is_unbound}
-        bound_args = [outs.get(i, a) for i,a in enumerate(args)]
-        u = u.replace(src=(u.body, *[a if a.has_buffer_identity(after_ok=True) else a.contiguous() for a in bound_args]))
+        u = u.replace(src=(u.body, *[outs[i] if i in outs else a if a.has_buffer_identity(after_ok=True) else a.contiguous()
+                                    for i,a in enumerate(args)]))
         # Bind every output, including siblings outside this sink. Shapes are resolved in the caller's scope.
         tensor_map.update({x.src[1+i].after(x):out.after(u).shrink_to(args[i].shape) for i,out in outs.items()})
       if x in bases and u.needs_storage():
@@ -331,7 +330,7 @@ class Tensor(RandMixin):
         while src.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}:
           contiguous |= src.op is Ops.STAGE
           src = src.src[0]
-        if not src.needs_storage() or src.on_disk() or 0 in src.shape: u = src
+        if src.is_virtual or src.on_disk() or 0 in src.shape or src.has_buffer_identity(): u = src
         elif src.op is Ops.AFTER and (not src.storage_base.is_unbound or src.src[1].op is Ops.STORE): u = src
         elif contiguous and (view := contiguous_mops_to_view(None, u, src)) is not None: u = view
         else: u = src.clone()
