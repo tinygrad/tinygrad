@@ -459,6 +459,18 @@ class TestMovementOps(unittest.TestCase):
           self.assertEqual(tuple(x.val for x in result.src[1:]), ((3, 1, 0, 2)[e], a, b))
           self.assertEqual(result.shape, ())
 
+  def test_remove_reshape_after_preserves_shaped_param_views(self):
+    from tinygrad.schedule.rangeify import pm_remove_reshape_after
+    param = UOp.param(0, dtypes.int, 16)
+    shaped_param = param.reshape((4, 2, 2))
+    dep = UOp.const(0).end(UOp.range(1, 0))
+    shaped_after = param.after(dep).reshape((4, 2, 2))
+    self.assertIs(graph_rewrite(shaped_param, pm_remove_reshape_after, name="test"), shaped_param)
+    result = graph_rewrite(shaped_after, pm_remove_reshape_after, name="test")
+    self.assertEqual(result.op, Ops.AFTER)
+    self.assertIs(result.src[0], param)
+    self.assertIs(result.src[1], dep)
+
   def test_pm_mops_partial_reshape_index_removes_reshape(self):
     from tinygrad.schedule.prepare import pm_mops
     src = UOp.param(0, dtypes.float, shape=(32, 4))

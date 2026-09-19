@@ -162,8 +162,12 @@ pm_no_indexing_calls = PatternMatcher([
 ])
 
 # the kernel graph is what gets executed: no shape views left in it, the storage of a value is just the storage
-pm_no_views = PatternMatcher([
-  (UPat((Ops.RESHAPE, Ops.SHRINK), name="v", src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER)),), allow_any_len=True), lambda v:
+pm_remove_reshape_after = PatternMatcher([
+  (UPat(Ops.RESHAPE, name="v", src=(UPat(Ops.AFTER),), allow_any_len=True), lambda v: v.src[0]),
+])
+pm_no_views = pm_remove_reshape_after+PatternMatcher([
+  (UPat(Ops.SHRINK, name="v", src=(UPat(Ops.AFTER),), allow_any_len=True), lambda v: v.src[0]),
+  (UPat((Ops.RESHAPE, Ops.SHRINK), name="v", src=(UPat((Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER)),), allow_any_len=True), lambda v:
    v.src[0]),
 ])
 
