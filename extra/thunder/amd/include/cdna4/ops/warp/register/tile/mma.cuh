@@ -356,6 +356,28 @@ __device__ static inline void mma_AtB_base(rt_base<float, ducks::rt_layout::col,
         static_assert(false, "Unsupported shape combination");
     }
 }
+
+// FP8 form of A^T B.  CDNA4 exposes this as a 16x16x128 scaled MFMA (with
+// identity hardware scales here); per-tensor Q/K descales are applied once to
+// the FP32 score tile by the attention kernel.
+template<ducks::rt_shape::all D_shape, ducks::rt_shape::all A_shape, ducks::rt_shape::all B_shape, ducks::rt_shape::all C_shape>
+__device__ static inline void mma_AtB_base(rt_base<float, ducks::rt_layout::col, D_shape> &d,
+                                           const rt_base<fp8e4m3, ducks::rt_layout::col, A_shape> &a,
+                                           const rt_base<fp8e4m3, ducks::rt_layout::col, B_shape> &b,
+                                           const rt_base<float, ducks::rt_layout::col, C_shape> &c) {
+    static_assert(std::is_same_v<D_shape, C_shape>, "D and C must have the same shape");
+    if constexpr (std::is_same_v<D_shape, typename ducks::rt_shape::rt_16x16> &&
+                  std::is_same_v<A_shape, typename ducks::rt_shape::rt_128x16> &&
+                  std::is_same_v<B_shape, typename ducks::rt_shape::rt_128x16>) {
+        mfma1616128(d.data, a.data, b.data, c.data);
+    } else if constexpr (std::is_same_v<D_shape, typename ducks::rt_shape::rt_32x32> &&
+                         std::is_same_v<A_shape, typename ducks::rt_shape::rt_64x32> &&
+                         std::is_same_v<B_shape, typename ducks::rt_shape::rt_64x32>) {
+        mfma323264(d.data, a.data, b.data, c.data);
+    } else {
+        static_assert(false, "Unsupported FP8 A^T B shape combination");
+    }
+}
 /**
  * @brief Base matrix multiply-accumulate operation for row layout with transposed A and B.
  *
@@ -591,7 +613,9 @@ __device__ static inline void mma_AtB(D &d,
         (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, bf16> &&
             std::is_same_v<typename B::T, bf16> && std::is_same_v<typename C::T, float>) ||
         (std::is_same_v<typename D::T, half> && std::is_same_v<typename A::T, half> &&
-            std::is_same_v<typename B::T, half> && std::is_same_v<typename C::T, half>)
+            std::is_same_v<typename B::T, half> && std::is_same_v<typename C::T, half>) ||
+        (std::is_same_v<typename D::T, float> && std::is_same_v<typename A::T, fp8e4m3> &&
+            std::is_same_v<typename B::T, fp8e4m3> && std::is_same_v<typename C::T, float>)
     );
 
     #pragma unroll
