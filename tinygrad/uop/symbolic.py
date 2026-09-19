@@ -148,6 +148,9 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False, dtypes.bool)), # x != x -> False (only ints)
   # ** constant folding **
+  # ALU/variable min==max -> CONST
+  (UPat({Ops.CMPLT, Ops.CMPNE, Ops.FLOORDIV, Ops.FLOORMOD, Ops.PARAM, Ops.AFTER, Ops.SPECIAL}, name="x"),
+   lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # canonicalize casted CONST
   (UPat(Ops.CAST, dtypes.all, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.val)),
   # collapse committed const conversions
@@ -265,9 +268,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
    lambda y,c,t,tt,f,ff: y+c.where(t+tt, f+ff) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
   # complementary zero branches under the same condition select directly
   (UPat.var("c").where(UPat.var("t"), 0) + UPat.var("c").where(0, UPat.var("f")), lambda c,t,f: c.where(t, f)),
-  # ALU/variable min==max -> CONST
-  (UPat({Ops.CMPLT, Ops.CMPNE, Ops.FLOORDIV, Ops.FLOORMOD, Ops.PARAM, Ops.AFTER, Ops.SPECIAL}, name="x"),
-   lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST,)), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
   ((UPat.cvar("a") < UPat.var("b")).where(UPat.var("b"), UPat.cvar("c")), lambda a,b,c: UOp.maximum(a,b) if a.val == c.val else None),
