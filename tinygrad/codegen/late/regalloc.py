@@ -42,7 +42,7 @@ class LinearScanRegallocContext:
       # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
       reg,vreg = max(((r,live_inv.get(r)) for r in cons),
                     key=lambda rv: next((j-i for j in ([] if rv[1] is None else lr[rv[1]]) if j >= i), len(uops)))
-      return replace(live.pop(vreg) if vreg is not None else reg, size=v.size)
+      return live.pop(vreg) if vreg is not None else reg
 
     # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
@@ -102,12 +102,13 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   nsrc = []
   for j,s in enumerate(x.src):
     # v here is the virtual defined by the original s as s is the rewritten version
-    if i in ctx.reals and (v:=rdef(ctx.uops[i].src[j])) in ctx.spills: nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), ctx.reals[i][v]))
+    if i in ctx.reals and (v:=rdef(ctx.uops[i].src[j])) in ctx.spills:
+      nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.vdef(v), replace(ctx.reals[i][v], size=v.size)))
     else: nsrc.append(s)
-  ndefs = tuple(ctx.reals[i][v] for v in x.tag) if isinstance(x.tag, tuple) else x.tag
+  ndefs = tuple(replace(ctx.reals[i][v], size=v.size) for v in x.tag) if isinstance(x.tag, tuple) else x.tag
   nx = x.replace(src=tuple(nsrc), tag=ndefs)
 
-  before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), r) for v,r in ctx.insert_before.get(i, [])]
+  before = [ctx.ren.fill(ctx.spills[v], ctx.vdef(v), replace(r, size=v.size)) for v,r in ctx.insert_before.get(i, [])]
   after = [ctx.ren.spill(ctx.spills[v], nx) for v in x.tag if v in ctx.spills] if isinstance(x.tag, tuple) else []
 
   return nx, before + [nx] + after
