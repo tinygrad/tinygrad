@@ -308,21 +308,23 @@ class Tensor(RandMixin):
 
   @rewrite_group(lambda *_,ret: "Bufferize")
   def _bufferize_outputs(self, *lst:Tensor):
+    sink = UOp.sink(*[t.uop for t in (self,)+lst])
     # weakness ends where storage begins
-    if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
+    if any(u.dtype in dtypes.weaks and u.device is not None for u in sink.src):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
-    bases = {x.uop.base for x in (self,)+lst}
+    bases = {u.base for u in sink.src}
     tensor_map:dict[UOp, UOp] = {}
     # Rebuild in dependency order: replacement values already reference the other outputs' storage.
-    for x in UOp.sink(*[t.uop for t in (self,)+lst]).toposort(enter_calls=False):
+    for x in sink.toposort(enter_calls=False):
       if x in tensor_map: continue  # already bound as a precompiled call output
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
       if u.op is Ops.CALL and u.arg is not None and u.arg.precompile and u.has_unbound_outputs:
         assert u.body.op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
         args = u.src[1:]
         outs = {i:a.empty_like() for i,a in enumerate(args) if a.unsharded_base.is_unbound}
-        u = u.replace(src=(u.body, *[outs[i] if i in outs else a if a.has_buffer_identity(after_ok=True) else a.contiguous()
-                                    for i,a in enumerate(args)]))
+        u = u.replace(src=(u.body, *[outs[i] if i in outs else
+                                     (a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+                                     for i,a in enumerate(args)]))
         # Bind every output, including siblings outside this sink. Shapes are resolved in the caller's scope.
         tensor_map.update({x.src[1+i].after(x):out.after(u).shrink_to(args[i].shape) for i,out in outs.items()})
       if x in bases and u.needs_storage():
