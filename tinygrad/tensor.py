@@ -33,20 +33,6 @@ add_tags = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), tag_uop),
 ])
 
-def mint_tagged_storage(x:UOp):
-  if x.tag is None: return None          # untouched
-  # empty tag from rtag(()): a COPY already handled via buffer_map or merged into a parent AFTER.
-  # () is falsy but not None, so it isn't re-tagged like a bare (tag=None) node would be; just strip it here
-  if not x.tag: return x.rtag(None)
-  # a tagged CONTIGUOUS is consumed by the mint: the buffer stores its source directly
-  src = x.src[0] if x.op is Ops.STAGE else x.rtag(None)
-  # virtual values and DISK tensors don't get real buffers: keep the (single) annotation, drop the tag
-  if x.is_virtual or x.on_disk(): return src.alu(Ops.STAGE) if src.device is not None else src
-  # if size is 0, remove the contig
-  if 0 in x.shape: return src
-  buf = x.empty_like()
-  return buf.after(buf.store(src)).replace(tag=x.tag)
-
 def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
   buf = src.base
@@ -116,12 +102,6 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
-  # transform precompiled value-producing calls into opaque CALLs (outputs become real buffers)
-  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
-
-  # resolve AFTER on RETURNED placeholders (for precompiled calls)
-  (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
-
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
@@ -139,8 +119,6 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # contiguous of an already-materialized value is a no-op (tags carry over for held values)
   (UPat(Ops.STAGE, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
-  # mint buffers for tagged values; an untagged CONTIGUOUS flows through to the scheduler, which bufferizes it
-  (UPat(GroupOp.All-{Ops.AFTER, Ops.STORE}, name="x"), mint_tagged_storage),
 ])
 
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
@@ -183,18 +161,6 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
   big_sink = graph_rewrite(big_sink, add_tags, ctx=(ctx:=AllocCtx()), bottom_up=True, name="add tags")
-
-  # final outputs of value calls materialize with fresh storage
-  srcs:list[UOp] = []
-  for u in big_sink.src:
-    if u.op is Ops.AFTER and u.src[0].unsharded_base.is_unbound and u.src[1].op is Ops.CALL:
-      # precompiled calls don't need this: transform_precompiled_call gives their outputs real buffers
-      call = u.src[1]
-      if not (call.arg is not None and call.arg.precompile):
-        buf = u.empty_like()
-        u = buf.after(buf.store(u.rtag(None))).replace(tag=u.tag)
-    srcs.append(u)
-  big_sink = big_sink.replace(src=tuple(srcs))
 
   # here we can break the tensor graph. tags propagate through replaces so we can still find the original UOps
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
@@ -366,32 +332,36 @@ class Tensor(RandMixin):
 
   @rewrite_group(lambda _,ret: "Bufferize")
   def _bufferize_outputs(self, *lst:Tensor):
-    tensor_map = {}
-    for x in (self,)+lst:
-      base = x.uop.base
-      if not base.needs_storage(): continue
-      if base.op is Ops.AFTER: continue
-      if base.op is Ops.STAGE and base.src[0].op is Ops.AFTER and not base.src[0].storage_base.is_unbound:
-        tensor_map[base] = base.src[0]
-      elif base.op is Ops.STAGE:
-        tensor_map[base] = base.src[0].clone()
-      else:
-        tensor_map[base] = base.clone()
+    # weakness ends where storage begins
+    if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
+      raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
+    bases = {x.uop.base for x in (self,)+lst}
+    tensor_map:dict[UOp, UOp] = {}
+    # Rebuild in dependency order: replacement values must already reference the other outputs' storage.
+    for x in UOp.sink(*[t.uop for t in (self,)+lst]).toposort(enter_calls=False):
+      u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
+      if u.op is Ops.CALL and (ret := transform_precompiled_call(u)) is not None: u = ret
+      elif u.op is Ops.AFTER and u.src[1].op is Ops.SINK and (ret := resolve_returned_after(u.src[0], u.src[1])) is not None: u = ret
+      if x in bases and u.needs_storage():
+        src = u.src[0] if u.op is Ops.STAGE else u
+        while src.op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: src = src.src[0]
+        if src.is_virtual or src.on_disk() or 0 in src.shape: u = src
+        elif src.op is Ops.AFTER and (not src.storage_base.is_unbound or src.src[1].op is Ops.STORE): u = src
+        elif u.op is Ops.STAGE and (view := contiguous_mops_to_view(AllocCtx(), u, src)) is not None: u = view
+        elif src.has_buffer_identity(): u = src
+        else: u = src.clone()
+      if u is not x: tensor_map[x] = u
     _apply_map_to_tensors(tensor_map, name="bufferize")
 
   def callify(self, *lst:Tensor) -> Tensor:
     self._bufferize_outputs(*lst)
-    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
-    big_sink, buffer_map = transform_to_call(big_sink)
-    _apply_map_to_tensors({x:y.after(big_sink) for x,y in buffer_map.items()}, name="callify")
+    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
+    _apply_map_to_tensors({x:y.after(big_sink) for x,y in becomes_map.items()}, name="callify")
     return self
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
     self._bufferize_outputs(*lst)
-    # weakness ends where storage begins
-    if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
-      raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
     big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
