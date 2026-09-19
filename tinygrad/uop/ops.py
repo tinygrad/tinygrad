@@ -845,7 +845,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp.empty(shape:=get_shape(x), dtype=bdtype, device="PYTHON")
       data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
     if not data: ret.buffer.allocate(memoryview(bytearray()))
-    else: ret.buffer.ensure_allocated().host[:] = data
+    else: (buf:=ret.buffer.ensure_allocated()).allocator._copyin(buf._buf, memoryview(data))
     if ret.dtype != dtype: ret = ret.cast(dtype)
     return ret
   def clone(self, device=None) -> UOp:
