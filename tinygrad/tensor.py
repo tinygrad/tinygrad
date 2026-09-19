@@ -1,13 +1,12 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, functools, sys, inspect, pathlib, hashlib, weakref
-from dataclasses import dataclass, field, replace
 from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC, dedup
-from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
+from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC
+from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
 from tinygrad.uop.ops import remove_all_tags
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
@@ -24,8 +23,6 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if SPEC: type_verify(big_sink, spec_tensor)
 
   # allocate new buffers
-  realize = {base for x in big_sink.src if (base:=x.base).needs_storage() and not base.on_disk()
-             and (base.op is not Ops.AFTER or base.storage_base.is_unbound)}
   call_args:list[UOp] = []           # args to the big call
   replace_args:dict[UOp, UOp] = {}   # sink replace arg
   buffer_map:dict[UOp, UOp] = {}     # replacements in the big tensor graph
@@ -42,12 +39,6 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
         buf = u
         while buf.op is Ops.AFTER: buf = buf.src[0]
         buffer_map[u] = buf
-    # here we create a new buffer for something being realized
-    if u in realize:
-      param = UOp.param_like(u, len(replace_args))
-      replace_args[u] = param.after(param.store(u.rtag()))
-      buffer_map[u] = buf = u.empty_like()
-      call_args.append(buf.unsharded_base)
   ret = graph_rewrite(big_sink.substitute(replace_args), remove_all_tags, name="remove tags").call(*call_args)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, buffer_map
