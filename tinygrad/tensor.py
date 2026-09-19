@@ -330,7 +330,7 @@ class Tensor(RandMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
-  @rewrite_group(lambda _,ret: "Bufferize")
+  @rewrite_group(lambda *_,ret: "Bufferize")
   def _bufferize_outputs(self, *lst:Tensor):
     # weakness ends where storage begins
     if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
@@ -343,6 +343,7 @@ class Tensor(RandMixin):
       if u.op is Ops.CALL and (ret := transform_precompiled_call(u)) is not None: u = ret
       elif u.op is Ops.AFTER and u.src[1].op is Ops.SINK and (ret := resolve_returned_after(u.src[0], u.src[1])) is not None: u = ret
       if x in bases and u.needs_storage():
+        while u.op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: u = u.src[0]
         src = u.src[0] if u.op is Ops.STAGE else u
         while src.op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: src = src.src[0]
         if src.is_virtual or src.on_disk() or 0 in src.shape: u = src
