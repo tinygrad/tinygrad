@@ -474,12 +474,15 @@ def lower_call(call:UOp) -> UOp|None:
                        ctx=ctx, bpm=pm_patches, name="encode")
   body = graph_rewrite(body, sum([d.pm_lower for d in devs if d.pm_lower is not None], PatternMatcher([])), ctx=ctx, bpm=pm_patches, name="lower")
 
+  # unwrap to base and byte offset. drops afters (an address has no deps) and merges views into one slot
+  def normalize(g:UOp) -> UOp: return (v:=unwrap_view(g.src[0]))[0].bitcast(dtypes.uint8)[v[1]:v[0].nbytes()].getaddr(to_tuple(g.arg)[0])
+  normalized = {g: normalize(g) for g in body.toposort() if g.op is Ops.GETADDR}
+
   # runtime addrs load from a table: inputs filled per call, the rest at link
-  rt_addrs = dedup(u for u in body.toposort() if u.op is Ops.GETADDR)
-  input_addrs, link_addrs = partition(rt_addrs, _is_input_addr)
+  input_addrs, link_addrs = partition(rt_addrs:=dedup(normalized.values()), _is_input_addr)
   table = UOp.placeholder((len(rt_addrs),), dtypes.uint64, device=Device[ctx.devs[0]].host, tag="inputs")
   slot_of = {g: i for i, g in enumerate(input_addrs + link_addrs)}
-  body = body.substitute({g: table.index(i).load() for g, i in slot_of.items()})
+  body = body.substitute({g: table.index(slot_of[n]).load() for g, n in normalized.items()})
   ctx.lt_patches += patch(table, [(8 * slot_of[g], g) for g in link_addrs]).src[1:]
 
   # combine placeholders into one and replace with views
@@ -507,7 +510,7 @@ def lower_call(call:UOp) -> UOp|None:
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Body")
 
   info = replace(call.arg.aux, nargs=len(bufs), table=bufs.index(table) if table in bufs else -1,
-                 inputs=tuple((*unwrap_view(g.src[0]), to_tuple(g.arg)[0]) for g in input_addrs),
+                 inputs=tuple((*unwrap_view(g.src[0]), g.arg) for g in input_addrs),
                  slots=tuple((to_tuple(b.device)[0], i) for i, b in enumerate(bufs) if b.tag == "slots"))
   return call.replace(src=(sink, *bufs), arg=replace(call.arg, aux=info)).after(*patches)
 pm_encode = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK),), name="call", allow_any_len=True), lower_call)])

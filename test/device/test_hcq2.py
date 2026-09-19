@@ -140,7 +140,7 @@ class TestHCQ2Schedule(unittest.TestCase):
 
   def test_profile_slots_survive_indirect_access(self):
     pm = PatternMatcher([(UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat())),), allow_any_len=True),
-                          lambda buf: buf.without_after.getaddr("CPU") if hcq2.unwrap_view(buf)[0].tag == "slots" else None)])
+                          lambda buf: buf.getaddr("CPU") if hcq2.unwrap_view(buf)[0].tag == "slots" else None)])
     with patch.object(Device[Device.DEFAULT], "pm_lower", pm):
       compiled = compile_linear(Tensor.ones(4).contiguous().schedule_linear(), profile=True)
     self.assertFalse(any(param.op is Ops.PARAM and (param.arg.name or "").startswith("slots_")
