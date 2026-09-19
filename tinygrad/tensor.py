@@ -21,7 +21,6 @@ from tinygrad.engine.realize import run_linear
 @dataclass
 class AllocCtx:
   buffer_map: dict[UOp, UOp] = field(default_factory=dict)
-  bases: set[UOp] = field(default_factory=set)
   stores: list[UOp] = field(default_factory=list)
   replacements: list[UOp] = field(default_factory=list)
   unbound: dict[UOp, UOp] = field(default_factory=dict)
@@ -32,7 +31,6 @@ def tag_uop(x:UOp): return None if x.tag is not None else x.replace(tag=(x,))
 
 add_tags = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), tag_uop),
-  (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(x) if x in ctx.bases else None),
 ])
 
 def mint_tagged_storage(x:UOp):
@@ -181,12 +179,10 @@ pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
-  # bases to realize. an AFTER already names the storage its store writes into
-  ctx = AllocCtx(bases={base for x in big_sink.src if (base:=x.base).needs_storage() and base.op is not Ops.AFTER})
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
-  big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="add tags")
+  big_sink = graph_rewrite(big_sink, add_tags, ctx=(ctx:=AllocCtx()), bottom_up=True, name="add tags")
 
   # final outputs of value calls materialize with fresh storage
   srcs:list[UOp] = []
@@ -368,7 +364,23 @@ class Tensor(RandMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
+  @rewrite_group(lambda _,ret: "Bufferize")
+  def _bufferize_outputs(self, *lst:Tensor):
+    tensor_map = {}
+    for x in (self,)+lst:
+      base = x.uop.base
+      if not base.needs_storage(): continue
+      if base.op is Ops.AFTER: continue
+      if base.op is Ops.STAGE and base.src[0].op is Ops.AFTER and not base.src[0].storage_base.is_unbound:
+        tensor_map[base] = base.src[0]
+      elif base.op is Ops.STAGE:
+        tensor_map[base] = base.src[0].clone()
+      else:
+        tensor_map[base] = base.clone()
+    _apply_map_to_tensors(tensor_map, name="bufferize")
+
   def callify(self, *lst:Tensor) -> Tensor:
+    self._bufferize_outputs(*lst)
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
     big_sink, buffer_map = transform_to_call(big_sink)
     _apply_map_to_tensors({x:y.after(big_sink) for x,y in buffer_map.items()}, name="callify")
@@ -376,6 +388,7 @@ class Tensor(RandMixin):
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+    self._bufferize_outputs(*lst)
     # weakness ends where storage begins
     if any(t.dtype in dtypes.weaks and t.uop.device is not None for t in (self,)+lst):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
