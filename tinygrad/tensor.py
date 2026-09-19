@@ -33,7 +33,7 @@ add_tags = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), tag_uop),
 ])
 
-def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
+def contiguous_mops_to_view(ctx:AllocCtx|None, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
   buf = src.base
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
@@ -51,7 +51,7 @@ def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
   if (cv := src.contiguous_view()) is None or (buf := cv[0]).op is not Ops.BUFFER: return None
   # NB: make offset a UOp.variable here to do the offset computation in the kernels
   view = buf[cv[1]:cv[1] + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
-  ctx.views.add(view)
+  if ctx is not None: ctx.views.add(view)
   if unshard is not None: return view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:])
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
@@ -348,7 +348,7 @@ class Tensor(RandMixin):
         while src.op in {Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: src = src.src[0]
         if src.is_virtual or src.on_disk() or 0 in src.shape: u = src
         elif src.op is Ops.AFTER and (not src.storage_base.is_unbound or src.src[1].op is Ops.STORE): u = src
-        elif u.op is Ops.STAGE and (view := contiguous_mops_to_view(AllocCtx(), u, src)) is not None: u = view
+        elif u.op is Ops.STAGE and (view := contiguous_mops_to_view(None, u, src)) is not None: u = view
         elif src.has_buffer_identity(): u = src
         else: u = src.clone()
       if u is not x: tensor_map[x] = u
