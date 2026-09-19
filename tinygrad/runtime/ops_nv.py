@@ -184,9 +184,9 @@ class NVComputeQueue(NVQueue):
     self.prev_qmd = qmd
 
 class NVCopyQueue(NVQueue):
-  def copy(self, call:UOp):
-    dest, src = (a.getaddr(self.devs) for a in call.src[1:3])
-    for off in range(0, sz:=call.src[2].max_numel() * call.src[2].dtype.itemsize, step:=(1 << 31)):
+  def copy(self, dest:UOp, src:UOp, sz:int):
+    dest, src = dest.getaddr(self.devs), src.getaddr(self.devs)
+    for off in range(0, sz, step:=(1 << 31)):
       self.nvm(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, *hilo(src + UOp.const(off, dtypes.uint64)), *hilo(dest + UOp.const(off, dtypes.uint64)))
       self.nvm(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, min(sz - off, step))
       self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA,

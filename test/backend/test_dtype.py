@@ -95,6 +95,12 @@ class TestDType(unittest.TestCase):
       if dtype.itemsize < self.DTYPE.itemsize:
         _test_ops(a_dtype=self.DTYPE, b_dtype=dtype)
 
+  def test_max_reduce(self):
+    # NOOPT keeps the reduce a loop with an accumulator; the rows are nondecreasing, so the max of each is its last element
+    with Context(NOOPT=1):
+      t = Tensor(list(range(8))).cast(self.DTYPE).reshape(2, 4).contiguous()
+      self.assertEqual(t.max(axis=1).tolist(), t[:, -1].tolist())
+
   def test_bitcast(self):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
     for dtype in get_available_cast_dtypes(self.DTYPE):
@@ -116,6 +122,10 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
 
 class TestFp8sConversions(unittest.TestCase):
+  def test_min_max_representable(self):
+    # e4m3 and the fnuz fp8s have no inf, so their extremes (the MAX/MIN reduce identities) are finite values that round trip
+    for dt in dtypes.fp8s: self.assertEqual(Tensor([dt.min, dt.max], dtype=dt).float().tolist(), [dt.min, dt.max])
+
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
   def test_float_to_fp8e4m3(self, x):
     np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3), torch.tensor(x, dtype=torch.float8_e4m3fn).view(torch.uint8).item())
