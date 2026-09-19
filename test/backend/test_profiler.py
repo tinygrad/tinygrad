@@ -76,6 +76,7 @@ class TestProfiler(unittest.TestCase):
     kernel_runs = [x for x in profile if x.device == TestProfiler.d0.device]
     assert len(kernel_runs) == 1, "one kernel run is expected"
     assert ansistrip(kernel_runs[0].name) == runner_name, "kernel name is not correct"
+    self.assertEqual(kernel_runs[0].profile_key, TestProfiler.prg.key)
     assert _dev_base(kernel_runs[0].device) == kernel_runs[0].device, "kernel should not be on a sub-device"
 
   def test_profile_kernel_run_wait(self):
