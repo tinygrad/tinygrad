@@ -40,6 +40,12 @@ def custom_elementwise_addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:
   store_d = D[i].store(A[i]*B[i])
   return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name=f"custom_addmul_kernel_{C.numel()}")).simplify()
 
+def custom_ignore_first_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
+  # A is unused on purpose: the kernel takes call buffers 0 and 2, not 0, 1, 2
+  C, B = C.flatten(), B.flatten()
+  i = UOp.range(C.numel(), 0)
+  return C[i].store(B[i] + 1).end(i).sink(arg=KernelInfo(name=f"ignore_first_{C.numel()}"))
+
 def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   assert A.shape[1] == B.shape[0]
   i, j, k = UOp.range(C.shape[0], 0), UOp.range(C.shape[1], 1), UOp.range(A.shape[1], 2, axis_type=AxisType.REDUCE)
@@ -187,6 +193,11 @@ class TestCustomKernel(unittest.TestCase):
     b = a+1
     b_p1 = Tensor.custom_kernel(tst, b, fxn=custom_add_one_kernel)[0]
     self.assertTrue((b_p1 == 3).all().item())
+
+  def test_unused_buffer_arg(self):
+    a, b = Tensor([100.0, 200, 300, 400]), Tensor([1.0, 2, 3, 4])
+    out = Tensor.custom_kernel(Tensor.empty(4), a, b, fxn=custom_ignore_first_kernel)[0]
+    self.assertEqual(out.tolist(), [2, 3, 4, 5])
 
   def test_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])
