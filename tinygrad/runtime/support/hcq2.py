@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import cast, Any, Sequence
 import functools, itertools, weakref, ctypes, importlib
 from dataclasses import replace, dataclass, field
-from tinygrad.helpers import dedup, pluralize, unwrap, VIZ, HCQ2, to_tuple, ContextVar, Context, panic, partition, DEV, ALL2ALL, getenv, round_up
+from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Context, panic, partition, getenv, round_up
+from tinygrad.helpers import DEBUG, VIZ, HCQ2, DEV, ALL2ALL
 from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker, TinyELF, HCQ_RUNTIME_DEV
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
@@ -21,7 +22,7 @@ HCQ_DEVS = frozenset(("NV", "QCOM", "CUDA")) | (frozenset(("AMD",)) if HCQ2 else
 class HCQInfo:
   device:tuple[str, ...]
 
-  kernels:tuple[tuple[tuple[str, ...], str, Estimates, tuple[int, ...], bytes], ...] = () # (devices, name, estimates, timestamp slots, profile key)
+  kernels:tuple[tuple, ...] = () # (devices, name, estimates, timestamp slots, profile key, buffers, (outs, ins))
   estimates:Estimates = Estimates()
 
   nargs:int = 0
@@ -271,7 +272,8 @@ def _finalize_batch(ctx:BatchCtx, skip_wait:bool=False) -> UOp:
   estimates = [estimate_uop(c) for c, _, _ in ctx.batch]
   stamps = [tuple(2 * s + 1 for s in ctx.stamps(d, tag)) for tag, (_, d, _) in enumerate(ctx.batch)]
   profile_keys = [getattr(c.body.arg, "profile_key", None) for c, _, _ in ctx.batch]
-  kerns:tuple[tuple, ...] = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys))
+  bufs = [tuple(unwrap_view(get_call_arg_uops(c)[g])[0] for g in getattr(c.body.arg, "globals", (0, 1))) for c, _, _ in ctx.batch] # copy is dst, src
+  kerns = tuple(zip([d for _, d, _ in ctx.batch], names, estimates, stamps, profile_keys, bufs, [get_call_outs_ins(c) for c, _, _ in ctx.batch]))
   written_bufs = tuple(dedup(b for c, _, _ in ctx.batch for b in get_call_written_bufs(c)))
   host_deps = tuple(dedup((host, devs[0]) for call, devs, _ in ctx.batch for buf in get_call_arg_uops(call)
                          for host in to_tuple(buf.device) if host not in ctx.queues))
@@ -528,7 +530,7 @@ def hcq_compile(linear:UOp, input_uops:list[UOp]|None, profile:bool, cache=False
   linear = graph_rewrite(linear, pm_unwrap_multi+pm_insert_copy_staging+pm_flatten_linear, ctx=tuple(input_uops or ()), name="prep calls")
   if cache and input_uops is not None and (cached:=hcq_compile_cache.get(key:=(linear, profile, ALL2ALL >= 1))) is not None: return cached
   lin = graph_rewrite(sched_batches(linear, profile), pm_encode, walk=True, name="encode")
-  with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin)
+  with Context(EMULATED_DTYPES=""): final_linear = lower_and_compile(lin, verbose=DEBUG>=3)
   if cache and input_uops is not None and final_linear is not linear: hcq_compile_cache[key] = final_linear
   return final_linear
 
