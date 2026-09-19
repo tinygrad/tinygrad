@@ -31,10 +31,10 @@ def get_call_written_bufs(call:UOp) -> list[UOp]:
   bufs = [b.src[0].storage_base if (b:=arg_uops[k].storage_base).op is Ops.MSELECT else b for k in outs if k not in ins]
   return dedup([b for b in bufs if b.op is Ops.BUFFER])
 
-def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]]:
+def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
   if isinstance(call.arg.aux, HCQInfo): # the submitter itself, then every kernel it enqueues
-    kernels:list[tuple[str, UOp, tuple[str, Estimates, bytes]|None]] = [(Device[call.arg.aux.device[0]].host, call, None)]
-    return kernels + [(d, call, (name, estimates, profile_key)) for devices,name,estimates,_,profile_key in call.arg.aux.kernels for d in devices]
+    kernels:list[tuple[str, UOp, tuple|None]] = [(Device[call.arg.aux.device[0]].host, call, None)]
+    return kernels + [(d, call, (name, estimates, key, bufs, io)) for devices,name,estimates,_,key,bufs,io in call.arg.aux.kernels for d in devices]
   ast = call.body
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call, None)]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "validate": return []
@@ -77,10 +77,10 @@ def track_stats(ctx:ExecContext, call:UOp, st:decimal.Decimal, ets:list[float|No
   args = resolve_params(call, ctx.input_uops) if kernels and kernels[0][2] is None else []
   lanes = list(unwrap_multi(call, [args[g] for g in call.body.arg.globals] if call.body.op is Ops.PROGRAM else args)) if args else []
   for i, (device, kcall, stats) in enumerate(kernels):
-    et, bufs = ets[i] if i < len(ets) else None, lanes[i][0] if i < len(lanes) else []
+    et, bufs = ets[i] if i < len(ets) else None, lanes[i][0] if i < len(lanes) else [ctx.input_uops[s].buffer for s in (stats[3] if stats else ())]
     display_name = get_call_name(kcall, bufs, ctx.var_vals) if stats is None else stats[0]
     if PROFILE: # backdate the event to the start of the call, the viz matches a device range with the exec event before it
-      outputs, inputs = get_call_outs_ins(kcall)
+      outputs, inputs = get_call_outs_ins(kcall) if stats is None else stats[4]
       cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"var_vals": ctx.var_vals,
         "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}, ts=st))
     if DEBUG < 2 or not ctx.update_stats: continue
@@ -208,14 +208,14 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   if not (ctx.wait or PROFILE): return ets
 
   slots = {d: cast(Buffer, call.src[1 + i].buffer) for d, i in info.slots}
-  for devs, name, _, prof, pkey in info.kernels:
+  for devs, name, _, prof, pkey, *_ in info.kernels:
     for d in (devs if prof else ()): cast(Any, Device[d]).prof_ents[(slots[d], prof[0])] = ProfileGraphEntry(d, name, prof[0], prof[1], pkey)
   if ctx.wait:
     for device in info.device: cast(Any, Device[device]).synchronize(timeout=ctx.timeout)
   def _prof_tm(device:str, prof:tuple[int, ...]) -> float:
     st, en = (slots[device].host.view(fmt='Q')[x] for x in prof)
     return float(en-st) / cast(Any, Device[device]).timestamp_divider / 1e6
-  return ets + [_prof_tm(device, prof) if ctx.wait else None for devices, _, _, prof, _ in info.kernels if prof for device in devices]
+  return ets + [_prof_tm(device, prof) if ctx.wait else None for devices, _, _, prof, *_ in info.kernels if prof for device in devices]
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
