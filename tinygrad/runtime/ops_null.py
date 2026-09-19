@@ -37,8 +37,11 @@ class NullQueue(HWQueue):
 class NullProgram(Program['NullDevice']):
   def __init__(self, dev, obj): self.streams = [(i, prod(s)) for i, (n, _, _, s) in enumerate(obj.signature) if (n or "").startswith("cmdbuf")]
   def __call__(self, *bufs, **kwargs):
-    st, words = perf_counter_us(), [w for i, n in self.streams for w in MMIOInterface(bufs[i], n, fmt='Q')[:]] if PROFILE else []
-    descs = [list(null_events)[event] for op, event in zip(words[0::4], words[3::4]) if op in (EXEC, COPY)]
+    st, words = perf_counter_us(), [w for i, n in self.streams for w in MMIOInterface(bufs[i], n, fmt='Q')[:]]
+    # timestamps are emulated: every exec and copy takes 1us
+    for op, addr, done in zip(words[0::4], words[1::4], itertools.accumulate(op in (EXEC, COPY) for op in words[0::4])):
+      if op == TIMESTAMP: MMIOInterface(addr, 8, fmt='Q')[0] = int((st + done) * 1000)
+    descs = [list(null_events)[event] for op, event in zip(words[0::4], words[3::4]) if op in (EXEC, COPY)] if PROFILE else []
     sigs = [st + sum(x[0] == d[0] for x in descs[:i]) + k for i, d in enumerate(descs) for k in (0, 1)]
     if descs: cpu_events.append(ProfileGraphEvent([ProfileGraphEntry(d, n, 2*i, 2*i+1, k) for i, (d, n, k) in enumerate(descs)], [], sigs))
 
