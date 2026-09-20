@@ -7,6 +7,26 @@ from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
+def forward_call_outputs(sink:UOp) -> UOp:
+  if not sink.src or not all(st.op is Ops.STORE for st in sink.src): return sink
+  placed:dict[UOp, UOp] = {}
+  items:list[UOp] = []
+  for st in sink.src:
+    target, src = st.src
+    deps:list[UOp] = []
+    while src.op is Ops.AFTER:
+      deps.extend(src.src[1:])
+      src = src.src[0]
+    # Forward a producer into the existing output PARAM once; shared outputs copy from that first placement.
+    if src not in placed:
+      if src.op is Ops.STAGE: placed[src] = target.after(target.store(src.src[0]))
+      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[src] = target
+      if src in placed:
+        items.append(src.after(*deps))
+        continue
+    items.append(target.after(st))
+  return UOp.sink(*items).substitute(placed)
+
 def walk_mop(u:UOp):
   if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD, Ops.BITCAST}: return walk_mop(u.src[0])
   if u.op is Ops.AFTER and (b:=walk_mop(u.src[0])) is not u.src[0]: return b.after(*u.src[1:])
@@ -233,7 +253,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
-  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
+  tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink
