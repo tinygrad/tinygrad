@@ -2,13 +2,15 @@ import unittest
 from dataclasses import replace
 from tinygrad import Device
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, DType
 from tinygrad.renderer.isa import Register
 from tinygrad.renderer.isa.x86 import X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm, def_reg
 
 def ins(op, dt, src, tag=None): return UOp(Ops.INS, arg=(op, dt), src=src, tag=tag)
 # the operand width is carried by the register in the tag, not by the dtype
 def reg(r:Register, size:int) -> Register: return replace(r, size=size)
+# the element size of a memory operand comes from the dtype of its base
+def ptr(r:Register, dt:DType) -> UOp: return UOp(Ops.INS, arg=(X86Ops.DEFINE, dt), tag=(r,))
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only on x86")
 class TestEncodingsX86(unittest.TestCase):
@@ -18,49 +20,49 @@ class TestEncodingsX86(unittest.TestCase):
 
   # displacement of 0 isn't emitted
   def test_base_address(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (def_reg(RDI), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), reg(RDI, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (ptr(RDI, dtypes.int32), UOp(Ops.NOOP), imm(dtypes.int8, 0)), reg(RDI, 4))
     # mov edi, dword ptr [rdi]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 3F"))
 
   # rsp/r12 require a sib byte when used as base memory address
   def test_rsp_base_address(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (def_reg(RSP), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), reg(RSP, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (ptr(RSP, dtypes.int32), UOp(Ops.NOOP), imm(dtypes.int8, 0)), reg(RSP, 4))
     # mov esp, dword ptr [rsp]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 24 24"))
 
   # rbp/r13 require a displacement when used as base memory address
   def test_rbp_base_address(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (def_reg(RBP), UOp(Ops.NOOP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), reg(RBP, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (ptr(RBP, dtypes.int32), UOp(Ops.NOOP), imm(dtypes.int8, 0)), reg(RBP, 4))
     # mov ebp, dword ptr [rbp + 0]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 6D 00"))
 
   # test [base + index*scale]
   def test_base_index_address(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (def_reg(RAX), def_reg(RDX), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), reg(RAX, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (ptr(RAX, dtypes.int32), def_reg(RDX), imm(dtypes.int8, 0)), reg(RAX, 4))
     # mov eax, dword ptr [rax + rdx*4]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 04 90"))
 
   # rsp as index means no index
   def test_rsp_index_address(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (def_reg(RAX), def_reg(RSP), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), reg(RAX, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (ptr(RAX, dtypes.int32), def_reg(RSP), imm(dtypes.int8, 0)), reg(RAX, 4))
     # mov eax, dword ptr [rax]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 00"))
 
   # however r12 is a valid index
   def test_r12_index_address(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (def_reg(RAX), def_reg(GPR[12]), imm(dtypes.int8, 0), imm(dtypes.uint8, 4)), reg(RAX, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (ptr(RAX, dtypes.int32), def_reg(GPR[12]), imm(dtypes.int8, 0)), reg(RAX, 4))
     # mov eax, dword ptr [rax + r12*4]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("42 8B 04 A0"))
 
   # test [base + index*scale + 8bit disp]
   def test_complex_address_8bit_disp(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (def_reg(RDI), def_reg(RSI), imm(dtypes.int8, 10), imm(dtypes.uint8, 4)), reg(RDI, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (ptr(RDI, dtypes.int32), def_reg(RSI), imm(dtypes.int8, 10)), reg(RDI, 4))
     # mov edi, dword ptr [rdi + rsi*4 + 0xa]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B 7C B7 0A"))
 
   # test [base + index*scale + 32bit disp]
   def test_complex_address_32bit_disp(self):
-    load = ins(X86Ops.MOV, dtypes.int32, (def_reg(RDI), def_reg(RSI), imm(dtypes.int32, 10000), imm(dtypes.uint8, 4)), reg(RDI, 4))
+    load = ins(X86Ops.MOV, dtypes.int32, (ptr(RDI, dtypes.int32), def_reg(RSI), imm(dtypes.int32, 10000)), reg(RDI, 4))
     # mov edi, dword ptr [rdi + rsi*4 + 0x2710]
     self.assertEqual(bytes.fromhex(self.encode(load)), bytes.fromhex("8B BC B7 10 27 00 00"))
 
@@ -117,7 +119,7 @@ class TestEncodingsX86(unittest.TestCase):
 
   # when writting to mem the uop takes the store form where dtype is void and there's no definition
   def test_write_mem(self):
-    address = (def_reg(RDI), def_reg(RSI), imm(dtypes.int8, 10), imm(dtypes.uint8, 4))
+    address = (ptr(RDI, dtypes.int32), def_reg(RSI), imm(dtypes.int8, 10))
     xmm0 = def_reg(XMM[0])
     extr = ins(X86Ops.VPEXTRD, dtypes.void, address + (xmm0, imm(dtypes.uint8, 0)))
     # vpextrd dword ptr [rdi + rsi*4 + 0xa], xmm0, 0
@@ -125,19 +127,19 @@ class TestEncodingsX86(unittest.TestCase):
 
   # test two address instruction with fused load works
   def test_two_address_load(self):
-    address = (def_reg(RDI), def_reg(RSI), imm(dtypes.int8, 10), imm(dtypes.uint8, 4))
+    address = (ptr(RDI, dtypes.int32), def_reg(RSI), imm(dtypes.int8, 10))
     cmove = ins(X86Ops.CMOVE, dtypes.int32, address, reg(RAX, 4))
     # cmove eax, dword ptr [rdi + rsi*4 + 0xa]
     self.assertEqual(bytes.fromhex(self.encode(cmove)), bytes.fromhex("0F 44 44 B7 0A"))
 
   # test instruction where displacement and imm have the same value
   def test_disp_imm_same_value(self):
-    address = (def_reg(RDI), def_reg(RSI), imm(dtypes.int8, 10), imm(dtypes.uint8, 1))
+    address = (ptr(RDI, dtypes.int8), def_reg(RSI), imm(dtypes.int8, 10))
     mov = ins(X86Ops.MOVi, dtypes.void, address + (imm(dtypes.int8, 10),))
     # mov byte ptr [rdi + rsi + 0xa], 0xa
     self.assertEqual(bytes.fromhex(self.encode(mov)), bytes.fromhex("40 C6 44 37 0A 0A"))
 
-    address = (def_reg(RDI), def_reg(RSI), imm(dtypes.int32, 10), imm(dtypes.uint8, 4))
+    address = (ptr(RDI, dtypes.int32), def_reg(RSI), imm(dtypes.int32, 10))
     imul = ins(X86Ops.IMULi, dtypes.int32, address + (imm(dtypes.int32, 10),), reg(RDI, 4))
     # imul edi, dword ptr [rdi + rsi*4 + 0xa], 0xa
     self.assertEqual(bytes.fromhex(self.encode(imul)), bytes.fromhex("69 BC B7 0A 00 00 00 0A 00 00 00"))

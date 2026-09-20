@@ -36,7 +36,7 @@ class LinearScanRegallocContext:
     live: dict[Register, Register] = {} # mapping from virtual to real that's currently assigned to it
     live_ins: list[dict[Register, Register]] = [] # mapping from virtual to real at loop entry
 
-    def alloc(v:Register, cons:tuple[Register, ...], i:int) -> Register:
+    def alloc(cons:tuple[Register, ...], i:int) -> Register:
       live_inv = {v:k for k,v in live.items()}
       # allocate the best register. Registers not in live or not used again are free and have priority,
       # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
@@ -48,7 +48,7 @@ class LinearScanRegallocContext:
     def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
       if v not in self.spills:
         self.spills[v] = ctx.assign_spill_slot(v, self.vdef(v))
-      r = alloc(v, cons if cons is not None else v.cons, i)
+      r = alloc(cons if cons is not None else v.cons, i)
       self.insert_before.setdefault(i, []).append((v, r))
       return r
 
@@ -73,7 +73,7 @@ class LinearScanRegallocContext:
             uses = tuple(live.get(rdef(s)) for s in u.src)
             cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
           # HACK: cause the range is missing the comparison
-          live[v] = alloc(v, cons, i+1 if u.op is not Ops.RANGE else i)
+          live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
           self.reals.setdefault(i, {})[v] = live[v]
 
       # loop prologue, avoid loading inside the loop
