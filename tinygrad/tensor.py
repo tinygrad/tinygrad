@@ -52,32 +52,8 @@ def contiguous_mops_to_view(ctx:AllocCtx|None, c:UOp, src:UOp):
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
-def forward_call_outputs(c:UOp):
-  if c.arg is None or not c.arg.precompile or c.has_unbound_outputs or c.body.op is not Ops.SINK: return None
-  if not c.body.src or not all(st.op is Ops.STORE for st in c.body.src): return None
-  placed:dict[UOp, UOp] = {}
-  items:list[UOp] = []
-  for st in c.body.src:
-    target, src = st.src
-    deps:list[UOp] = []
-    while src.op is Ops.AFTER:
-      deps.extend(src.src[1:])
-      src = src.src[0]
-    # Forward a producer into the existing output PARAM once; shared outputs copy from that first placement.
-    if src not in placed:
-      if src.op is Ops.STAGE: placed[src] = target.after(target.store(src.src[0]))
-      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[src] = target
-      if src in placed:
-        items.append(src.after(*deps))
-        continue
-    items.append(target.after(st))
-  return c.replace(src=(UOp.sink(*items).substitute(placed),)+c.src[1:])
-
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
-  # Forward precompiled outputs into their already-bound storage without allocating buffers.
-  (UPat(Ops.CALL, name="c"), forward_call_outputs),
-
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
@@ -88,11 +64,6 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # push copy past movement ops to disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
    x.replace(src=(copy.replace(src=(x.src[0],), tag=None),)+x.src[1:]) if x.on_disk() else None),
-
-  # strip DETACH/CONTIGUOUS_BACKWARD before minting
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
-  # contiguous of an already-materialized value is a no-op
-  (UPat(Ops.STAGE, src=(UPat(Ops.AFTER, name="a"),)), lambda a: a if a.src[0].has_buffer_identity() else None),
 ])
 
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
