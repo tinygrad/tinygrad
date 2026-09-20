@@ -57,7 +57,7 @@ class TestHCQ2Deps(unittest.TestCase):
   def test_copy_only_batch_with_multiple_queues(self):
     from types import SimpleNamespace
     bufs = [UOp.param(i, dtypes.uint8, 16, device="AMD") for i in range(4)]
-    calls = [(src.copy_to_device("AMD").call(dst, src), ("AMD",), f"COPY:{i}") for i, (dst, src) in enumerate(zip(bufs[:2], bufs[2:]))]
+    calls = [(dst.store_call(src), ("AMD",), f"COPY:{i}") for i, (dst, src) in enumerate(zip(bufs[:2], bufs[2:]))]
     with patch.object(type(Device), "__getitem__", return_value=SimpleNamespace(pm_batch=None)):
       batch = hcq2._finalize_batch(hcq2.BatchCtx(calls, False))
     streams = [s.without_after.src[0] for s in batch.src[0].src]
@@ -68,7 +68,7 @@ class TestHCQ2Deps(unittest.TestCase):
     from types import SimpleNamespace
     dst, src = UOp.param(0, dtypes.uint8, 16, device="AMD:1"), UOp.param(1, dtypes.uint8, 16, device="AMD")
     with patch.object(type(Device), "__getitem__", return_value=SimpleNamespace(pm_batch=None)):
-      batch = hcq2._finalize_batch(hcq2.BatchCtx([(src.copy_to_device("AMD:1").call(dst, src), ("AMD",), "COPY:0")], False))
+      batch = hcq2._finalize_batch(hcq2.BatchCtx([(dst.store_call(src), ("AMD",), "COPY:0")], False))
     streams = {s.without_after.src[0].arg[1]: [u.arg[0] for u in s.without_after.src[0].src if u.op is Ops.INS] for s in batch.src[0].src}
     # the copy queue waits for its device and for the peer, then signals and bumps. the peer waits for the signal before its bump
     self.assertEqual(streams, {"COPY:0": ["barrier", "wait", "wait", "store", "store"], "COMPUTE:0": ["barrier", "wait", "wait", "store"]})

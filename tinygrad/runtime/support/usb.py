@@ -296,7 +296,7 @@ def usb_stream(h:UOp, addr:UOp, data:UOp, n:UOp|int, write:bool) -> UOp: # 0xF0 
 def is_host(b:UOp) -> bool: return b.device is None or not all_devices_in(b.device, HCQ_DEVS - {"CPU"}) # stack or host memory
 def usb_wire(size:UOp|int) -> UOp|int: return (size + 512 + SLOT - 1) // SLOT * SLOT # payload and sentinel block, slot aligned
 def usb_sentinel(g:UOp) -> UOp: return ((g & 0xFFFFFF) | 0x51000000).cast(dtypes.uint32)
-def is_staged(call:UOp) -> bool: return call.op is Ops.CALL and call.body.op is Ops.COPY and is_host(call.src[1]) != is_host(call.src[2])
+def is_staged(call:UOp) -> bool: return call.op is Ops.CALL and call.body.op is Ops.STORE and is_host(call.src[1]) != is_host(call.src[2])
 def usb_window(call:UOp) -> tuple[UOp, int]: # host view and the bytes a chunk moves
   return (call.src[2], CHUNK) if is_host(call.src[2]) else (call.src[1], 2 * CHUNK)
 def usb_split(nbytes:int, win:int) -> list[tuple[UOp|int, int]]: # (chunk, bytes): the full chunks are one range, then the tail
@@ -327,7 +327,7 @@ def usb_copy_slicer(ctx:dict[UOp, tuple[int, int]], call:UOp, dst:UOp, src:UOp) 
     ops += [UOp(Ops.LINEAR, src=tuple(ins)).end(r)] if isinstance(r, UOp) else ins # the full chunks are one ranged block
   return UOp(Ops.LINEAR, src=tuple(ops))
 pm_usb_copy_slicer = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY), UPat(name="dst"), UPat(name="src")), name="call"), usb_copy_slicer)]) + pm_flatten_linear
+  (UPat(Ops.CALL, src=(UPat(Ops.STORE), UPat(name="dst"), UPat(name="src")), name="call"), usb_copy_slicer)]) + pm_flatten_linear
 
 def usb_copy_rewriter(s:UOp) -> UOp|None:
   lins = [submit.without_after.src[0] for submit in s.src]

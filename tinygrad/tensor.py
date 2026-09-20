@@ -13,7 +13,7 @@ from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.device import Buffer, canonicalize_device
+from tinygrad.device import Buffer, canonicalize_device, is_disk_device
 from tinygrad.engine.realize import run_linear
 
 # *** callify: transform a tensor graph into a CALL UOp such that all state is properly scoped ***
@@ -50,8 +50,7 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
 def collect_stores(ctx:CallifyCtx, u:UOp):
-  if (u.op is Ops.COPY and u.on_disk()) or (u.op is Ops.AFTER and not u.is_bound_var and
-      (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
+  if not u.is_bound_var and (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE):
     ctx.stores.append(u)
     if u.tag:
       storage = graph_rewrite(u.src[0], pm_drop_after, bottom_up=True)
@@ -71,7 +70,7 @@ pm_callify_ctx_collect = PatternMatcher([
    x.replace(src=(copy.replace(src=(x.src[0],)),)+x.src[1:]) if x.on_disk() else None),
 
   # Collect effects after their sources have been rewritten, without entering call bodies.
-  (UPat((Ops.AFTER, Ops.COPY), name="u"), collect_stores),
+  (UPat(Ops.AFTER, name="u"), collect_stores),
 ])
 
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
@@ -465,10 +464,12 @@ class Tensor(RandMixin):
     """
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
-    # a copy to disk wants to persist, so it inserts a clone: the disk buffer is the storage of the copied value
-    # a copy from a creation device is clone
-    if (isinstance(device, str) and device.startswith("DISK")) or self.uop.on_creation_device():
-      ret = Tensor(self.uop.clone(device))
+    if isinstance(device, str) and is_disk_device(device):
+      if isinstance(self.device, tuple): raise RuntimeError("gather to a single device before storing to DISK")
+      if self.grad is not None: raise RuntimeError("tensor and gradient need separate DISK destinations; use explicit STOREs")
+      dst = self.uop.empty_like(device=device)
+      ret = Tensor(dst.after(dst.store(self.uop.cast(dst.dtype))))
+    elif self.uop.on_creation_device(): ret = Tensor(self.uop.clone(device))
     else: ret = Tensor(self.uop.copy_to_device(device))
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret.is_param_(self.is_param)

@@ -94,7 +94,7 @@ def rdma_psn(nic:str, pair:tuple[str, str]) -> UOp: return rdma_mem(nic, pair, "
 def rdma_db(nic:str, pair:tuple[str, str]) -> UOp: return rdma_mem(nic, pair, "db", 0x1000)
 
 def rdma_wire(call:UOp) -> UOp|None:
-  if call.op is not Ops.CALL or call.src[0].op is not Ops.COPY: return None
+  if call.op is not Ops.CALL or call.src[0].op is not Ops.STORE: return None
   return next((b for b in get_call_arg_uops(call) if to_tuple(b.device)[0].startswith("RDMA")), None)
 def is_rdma(call:UOp) -> bool: return rdma_wire(call) is not None
 
