@@ -1,5 +1,5 @@
 import functools, itertools
-from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, getenv
+from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, ALLREDUCE_NODE_NDEVS, getenv
 from tinygrad.uop.ops import UOp
 
 # *** allreduce implementation ***
@@ -18,6 +18,14 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   buf = buf.pad_to(buf.max_shape)
   # contiguous before we copy it
   buf = buf.contiguous()
+
+  if concrete and (hdev:=ALLREDUCE_NODE_NDEVS.value) > 0 and ndev % hdev == 0:
+    d, flat, fold = buf.device, buf.reshape((numel,)), functools.partial(functools.reduce, lambda x, y: x.alu(op, y))
+    boxes, cs = [range(b, b + hdev) for b in range(0, ndev, hdev)], [(numel * k // hdev, numel * (k + 1) // hdev) for k in range(hdev)]
+    owned = {i: fold([flat.mselect(j).shrink((cs[k],)).copy_to_device(d[i]) for j in box]) for box in boxes for k, i in enumerate(box)}
+    summed = {i: fold([owned[i], *(owned[j].copy_to_device(d[i]) for j in rank if j != i)]) for rank in zip(*boxes) for i in rank}
+    gathered = [UOp.mstack(*(summed[box[k]].copy_to_device(d[j]) for box in boxes for j in box)) for k in range(hdev)]
+    return UOp.usum(*[c.pad(((s, numel - e),)) for (s, e), c in zip(cs, gathered)]).reshape(shape)
 
   # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:
