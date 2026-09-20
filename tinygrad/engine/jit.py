@@ -7,7 +7,7 @@ from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, rewrite_group, graph_rewrite
 from tinygrad.renderer import Estimates
 from tinygrad.engine.realize import capturing, compile_linear, link_linear, run_linear, graph_cache, estimate_uop, get_runtime
-from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_written_bufs, copy_call
+from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_written_bufs
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
 from tinygrad.uop.movement import mop_cleanup
@@ -60,7 +60,7 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
 
 def _copy_input(u:UOp) -> UOp:
   if u.on_disk(): raise JitError("cannot make an independent copy of a written DISK input")
-  run_linear(UOp(Ops.LINEAR, src=(copy_call(new:=UOp.new_buffer(u.device, u.max_numel(), u.dtype), u),)))
+  run_linear(UOp(Ops.LINEAR, src=((new:=UOp.new_buffer(u.device, u.max_numel(), u.dtype)).copy_call(u),)))
   return new
 
 @rewrite_group(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")

@@ -746,6 +746,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     inp = self if arg is None else UOp(Ops.MSELECT, src=(self,), arg=arg)
     if inp.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {inp.dtype}")
     return UOp(Ops.COPY, src=(inp,), arg=device)
+  def copy_call(self, src:UOp) -> UOp:
+    """Executable transfer into this buffer, not a tensor COPY allocating a result."""
+    return UOp(Ops.COPY, src=(src.param_like(1),), arg=self.device).call(self, src)
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, src=(self,), arg=arg)
   def mstack(self, *srcs: UOp) -> UOp: return UOp(Ops.MSTACK, src=(self,)+srcs) if len(srcs) else self
   @property

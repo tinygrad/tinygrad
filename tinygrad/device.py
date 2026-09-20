@@ -242,10 +242,10 @@ class Buffer:
   def copy_from(self, src:Buffer) -> Buffer:
     assert self.nbytes == src.nbytes, f"copy size mismatch, {self.nbytes} != {src.nbytes}"
     assert self.is_allocated() and src.is_allocated(), "copy requires allocated buffers"
-    from tinygrad.engine.realize import run_linear, copy_call
+    from tinygrad.engine.realize import run_linear
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self), UOp.from_buffer(src)
-    run_linear(UOp(Ops.LINEAR, src=(copy_call(du, su),)), update_stats=False)
+    run_linear(UOp(Ops.LINEAR, src=(du.copy_call(su),)), update_stats=False)
     return self
 
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
