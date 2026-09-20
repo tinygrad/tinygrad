@@ -53,12 +53,14 @@ class BNXTAllocator(Allocator):
   def _unmap(self, storage:BufferStorage): self.dev.iface.dev_impl.unregister_mem(storage.meta)
 
 @functools.cache
-def rdma_nic_for(dev, anchor) -> RDMADevice|None: # boxes are cabled nic k to nic k: both gpus of a pair go by the bus of one of them
+def rdma_nic_for(dev, anchor) -> RDMADevice|None:
   def node(s:str) -> str: return ":".join(s.split(":")[:3]) if s.startswith("remote:") else ""
   def bus(s:str) -> int: return int(re.findall(r":([0-9a-f]{2}):[0-9a-f]{2}\.[0-7]", s)[-1], 16)
   gpu = dev.iface.pci_dev.pcibus
   try: nics = [(i, n) for i, (_, n) in enumerate(hcq_filter_visible_devices(System.list_devices(*BNXT_IDS), "RDMA")) if node(n) == node(gpu)]
   except RuntimeError: return None # no pcie on this machine
+
+  # the closest nic to the anchor on dev's node
   return cast(RDMADevice, Device[f"RDMA:{min(nics, key=lambda x: abs(bus(x[1]) - bus(anchor.iface.pci_dev.pcibus)))[0]}"]) if nics else None
 
 class RDMADevice(Compiled):
