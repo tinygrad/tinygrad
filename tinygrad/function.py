@@ -27,7 +27,7 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
 
 def renumber_invalid_outputs(uret:UOp) -> UOp:
   invalid = invalid_outputs(uret)
-  return uret.substitute({b:b.replace(arg=replace(b.arg, slot=i))
+  return uret.substitute({b:b.replace(arg=replace(b.arg, slot=i, buffer=None))
                           for i,b in enumerate(x for x in uret.toposort(enter_calls=False) if x in invalid)})
 
 ReturnType = TypeVar('ReturnType')

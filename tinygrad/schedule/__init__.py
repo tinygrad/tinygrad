@@ -71,7 +71,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
         buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
-        linearized.append(k.body.call(*buf_uops))
+        linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
@@ -87,7 +87,9 @@ from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg
 from tinygrad.dtype import AddrSpace
 
 def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
-  if (ret:=ctx[0].get(b, None)) is None: ctx[0][b] = ret = UOp.new_buffer(b.device, b.max_numel(), b.dtype)
+  if (ret:=ctx[0].get(b, None)) is None:
+    device = b.device if b.device is not None else next(a.device for a in ctx[1] if a.device is not None)
+    ctx[0][b] = ret = UOp.new_buffer(device, b.max_numel(), b.dtype)
   return ret
 
 pm_post_sched_cache = PatternMatcher([
@@ -119,9 +121,7 @@ schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.body
-  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo): return None
-  # value calls (with unbound outputs) are inlined positionally during prepare: their bodies are not programs to schedule
-  if call.has_unbound_outputs: return None
+  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
   st = time.perf_counter()
   cache_key = function.key
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:

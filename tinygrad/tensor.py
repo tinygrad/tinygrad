@@ -115,7 +115,8 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
   # here we can break the tensor graph. tags propagate through replaces so we can still find the original UOps
   graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
-  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
+  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs")
+  ret = ret.call(*ctx.replacements, precompile=True)
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, ctx.buffer_map
@@ -279,27 +280,21 @@ class Tensor(RandMixin):
     if any(u.dtype in dtypes.weaks and u.device is not None for u in sink.src):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
     bases = {u.base for u in sink.src}
+    for u in sink.src:
+      while u.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: u = u.src[0]
+      if (b:=u.storage_base).is_unbound: bases.add(b)
     tensor_map:dict[UOp, UOp] = {}
     # Rebuild in dependency order: replacement values already reference the other outputs' storage.
     for x in sink.toposort(enter_calls=False):
-      if x in tensor_map: continue  # already bound as a precompiled call output
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
-      if u.op is Ops.CALL and u.arg is not None and u.arg.precompile and u.has_unbound_outputs:
-        assert u.body.op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
-        args = u.src[1:]
-        outs = {i:a.empty_like() for i,a in enumerate(args) if a.unsharded_base.is_unbound}
-        u = u.replace(src=(u.body, *[outs[i] if i in outs else
-                                     (a if a.has_buffer_identity(after_ok=True) else a.contiguous())
-                                     for i,a in enumerate(args)]))
-        # Bind every output, including siblings outside this sink. Shapes are resolved in the caller's scope.
-        tensor_map.update({x.src[1+i].after(x):out.after(u).shrink_to(args[i].shape) for i,out in outs.items()})
+      if x in bases and x.is_unbound: u = x.empty_like()
       if x in bases and u.needs_storage():
         src, contiguous = u, False
         while src.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}:
           contiguous |= src.op is Ops.STAGE
           src = src.src[0]
         if src.is_virtual or src.on_disk() or 0 in src.shape or src.has_buffer_identity(): u = src
-        elif src.op is Ops.AFTER and (not src.storage_base.is_unbound or src.src[1].op is Ops.STORE): u = src
+        elif src.op is Ops.AFTER and (src.has_buffer_identity(after_ok=True) or src.src[1].op is Ops.STORE): u = src
         elif contiguous and (view := contiguous_mops_to_view(None, u, src)) is not None: u = view
         else: u = src.clone()
       if u is not x: tensor_map[x] = u
