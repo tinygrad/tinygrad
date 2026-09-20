@@ -581,17 +581,18 @@ def fold_words(buf:UOp, offs:UOp, ws:UOp, r:UOp|None=None) -> UOp:
   return UOp(Ops.NOOP)
 
 pm_link = PatternMatcher([
-  (UPat(Ops.CAST, src=(UPat(Ops.CAST, src=(UPat.cvar(),), name="inner"),), name="c"), lambda c, inner: inner.src[0].cast(c.dtype)),
+  # a placeholder becomes a buffer
   (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.inputs[b] if b in ctx.inputs else bufferize_buf(ctx, b)),
+  # the address of a buffer is a const
   (UPat(Ops.GETADDR, name="g"), resolve_getaddr),
-  (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"),
-    lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)),
+  # math on consts is a const
+  (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"), lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)),
+  # fold rules
   (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast())), fold_binary),
-  (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")),
-    fold_words),
+  (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")), fold_words),
   (UPat(name="buf").index(UPat(Ops.STACK, name="offs")).store(UPat(Ops.STACK, name="ws")).end(UPat(Ops.RANGE, name="r")), fold_words),
-  (UPat(Ops.AFTER, src=(UPat(Ops.CALL),), allow_any_len=True, name="a"),
-    lambda a: a.src[0].after(*(s for s in a.src[1:] if s.op is not Ops.NOOP))),
+  # a call keeps the deps that are not written yet
+  (UPat(Ops.AFTER, src=(UPat(Ops.CALL),), allow_any_len=True, name="a"), lambda a: a.src[0].after(*(s for s in a.src[1:] if s.op is not Ops.NOOP))),
   (UPat(Ops.AFTER, name="a"), lambda a: None if a.is_bound_var or a.src[0].op is Ops.CALL else
    a.src[0] if all(s.op is Ops.NOOP for s in a.src[1:]) else panic(RuntimeError, f"unresolved link words on {a.src[0].op}")),
 ])
