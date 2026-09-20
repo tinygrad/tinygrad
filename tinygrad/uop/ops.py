@@ -1236,7 +1236,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     the remaining positions in order; when it's given, input params must already be slotted at their final positions.
     output_pos must be strictly ascending: the body's stores and the call args pair positionally by values order"""
     # the device defaults to the first device in the values or args, like srcs-based device resolution
-    default_dev = canonicalize_device(next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None))
+    default_dev = next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None)
     pos = tuple(range(len(srcs), len(srcs)+len(values))) if output_pos is None else output_pos
     assert len(pos) == len(values) and len(set(pos)) == len(pos), "output_pos must be one distinct position per output"
     assert all(a < b for a, b in zip(pos, pos[1:])), f"output_pos {output_pos} must be strictly ascending"
@@ -1268,8 +1268,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     call = body.call(*[r if r is not None else next(it) for r in args], grad_fxn=grad_fxn, name=name, precompile=precompile,
                      precompile_backward=precompile_backward, aux=aux)
     if precompile:
-      from tinygrad.function import precompiled_call
-      return precompiled_call(call, rets)
+      # Declare call-local storage; binding and allocation belong to the outer call.
+      buffers = {}
+      for o in rets:
+        buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), o.dtype, prod(o.max_shard_shape), device=o.device))
+        ret = buf.reshape(o.max_shard_shape).shrink_to(o.shard_shape)
+        buffers[o] = ret.unshard(o.axis) if o.axis is not None else ret
+      call = call.replace(src=(call.body, *[buffers[a] if a in buffers else a.contiguous() for a in call.src[1:]]))
+      rets = tuple(buffers[o] for o in rets)
     return tuple(r.after(call) for r in rets)
 
   # one-line convenience for the single-output case: self is the value

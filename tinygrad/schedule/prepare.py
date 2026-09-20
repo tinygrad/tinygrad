@@ -1,5 +1,5 @@
 from tinygrad.dtype import dtypes, to_dtype
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, ParamArg
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
@@ -165,7 +165,7 @@ def copy_to_anon_store(x:UOp, copy:UOp):
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp.empty(x.max_shape, dtype=stg.dtype, device=x.device)
+  buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(stg.shape)
 
 def materialize_cross_device_src(dest:UOp, src:UOp):
