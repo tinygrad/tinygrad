@@ -245,7 +245,7 @@ class Buffer:
     from tinygrad.engine.realize import run_linear
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self), UOp.from_buffer(src)
-    run_linear(UOp(Ops.LINEAR, src=(du.copy_call(su),)), update_stats=False)
+    run_linear(UOp(Ops.LINEAR, src=(du.store_call(su),)), update_stats=False)
     return self
 
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:

@@ -746,9 +746,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     inp = self if arg is None else UOp(Ops.MSELECT, src=(self,), arg=arg)
     if inp.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {inp.dtype}")
     return UOp(Ops.COPY, src=(inp,), arg=device)
-  def copy_call(self, src:UOp) -> UOp:
-    """Executable transfer into this buffer, not a tensor COPY allocating a result."""
-    return UOp(Ops.COPY, src=(src.param_like(1),), arg=self.device).call(self, src)
+  def store_call(self, src:UOp) -> UOp:
+    """Executable bulk transfer into this buffer."""
+    return self.param_like(0).store(src.param_like(1)).call(self, src)
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, src=(self,), arg=arg)
   def mstack(self, *srcs: UOp) -> UOp: return UOp(Ops.MSTACK, src=(self,)+srcs) if len(srcs) else self
   @property
@@ -1332,8 +1332,8 @@ class ProgramInfo:
                        tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),
                        tuple(sorted(dedup(ins))), target)
 
-# the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), copies, and function references
-OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}
+# the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, and function references
+OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION}
 
 @dataclass(frozen=True)
 class CallInfo:

@@ -152,9 +152,9 @@ def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
 
-def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
+def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
-  return call.replace(src=(UOp(Ops.COPY, src=(src,), arg=dst.device),) + call.src[1:])
+  return call.replace(src=(dst.store(src),) + call.src[1:])
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
@@ -169,13 +169,13 @@ pm_copy_from_store = PatternMatcher([
   # simplify copy kernels
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
 
-  # replace this with a copy if it's a copy
+  # lower copy kernels to bulk STOREs
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+                name="call", allow_any_len=True), copy_kernel_to_store),
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+                name="call", allow_any_len=True), copy_kernel_to_store),
 
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
@@ -190,7 +190,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # create copies
-  linear = graph_rewrite(linear, pm_copy_from_store, name="create COPY kernels for SDMA")
+  linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])

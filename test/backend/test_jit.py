@@ -304,7 +304,7 @@ class TestJitGraphSplit(unittest.TestCase):
       elif expected["type"] == "comp":
         assert ast.op in (Ops.SINK, Ops.PROGRAM), f"Expected kernel, got {ast.op}"
       elif expected["type"] in ("copy", "xfer"):
-        assert ast.op is Ops.COPY, f"Expected COPY, got {ast.op}"
+        assert ast.op is Ops.STORE, f"Expected STORE, got {ast.op}"
 
   def ji_graph(self, cnt): return {"type": "graph", "cnt": cnt}
   def ji_comp(self): return {"type": "comp"}
