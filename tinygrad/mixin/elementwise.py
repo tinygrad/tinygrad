@@ -777,7 +777,7 @@ class ElementwiseMixin(CreationMixin):
     """
     return self * (self * 1.702).sigmoid()
 
-  def gelu(self, approximate:str="tanh") -> Self:
+  def gelu(self, approximate:Literal["tanh", "none"]="tanh") -> Self:
     """
     Applies the Gaussian Error Linear Unit (GELU) function element-wise.
 

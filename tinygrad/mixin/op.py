@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
 ReductionStr = Literal["mean", "sum", "none"]
 
-
 class OpMixin(ElementwiseMixin, ReduceMixin):
   def data(self) -> memoryview: raise NotImplementedError("data requires Tensor realization to host memory")
 
@@ -318,7 +317,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # shrink after for negative pads (reflection/replication must see full data first)
     return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
 
-  def pad(self, padding:Sequence[sint]|Sequence[tuple[sint, sint]|None], mode:str="constant", value:ConstType=0.0) -> Self:
+  def pad(self, padding:Sequence[sint]|Sequence[tuple[sint, sint]|None],
+          mode:Literal["constant", "reflect", "replicate", "circular"]="constant", value:ConstType=0.0) -> Self:
     """
     Returns a tensor with padding applied based on the input `padding`.
 
@@ -1040,7 +1040,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     x = self.shrink_to(tuple(i if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).where(x, 0)).sum(-1, dtype=self.dtype)
 
-  def interpolate(self, size:tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Self:
+  def interpolate(self, size:tuple[int, ...], mode:Literal["linear", "nearest", "nearest-exact"]="linear", align_corners:bool=False) -> Self:
     """
     Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
 
