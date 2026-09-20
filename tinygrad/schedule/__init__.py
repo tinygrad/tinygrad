@@ -123,7 +123,9 @@ from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg
 from tinygrad.dtype import AddrSpace
 
 def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
-  if (ret:=ctx[0].get(b, None)) is None: ctx[0][b] = ret = UOp.new_buffer(b.device, b.max_numel(), b.dtype)
+  if (ret:=ctx[0].get(b, None)) is None:
+    device = b.device if b.device is not None else next(a.device for a in ctx[1] if a.device is not None)
+    ctx[0][b] = ret = UOp.new_buffer(device, b.max_numel(), b.dtype)
   return ret
 
 pm_post_sched_cache = PatternMatcher([
@@ -202,9 +204,7 @@ pm_schedule_cache_key = PatternMatcher([
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.body
-  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo): return None
-  # value calls (with unbound outputs) are inlined positionally during prepare: their bodies are not programs to schedule
-  if call.has_unbound_outputs: return None
+  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
   st = time.perf_counter()
   # Gradient callbacks have been consumed before scheduling, and opaque CALL parameter numbering is local to each
   # body. Canonicalize each body together with its arguments, then alpha-rename this enclosing function's inputs.
@@ -258,9 +258,9 @@ def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
 
-def copy_kernel_to_copy_uop(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
+def copy_kernel_to_store(call:UOp, dst:UOp, src:UOp, r:UOp|None=None):
   if dst.device == src.device and not (isinstance(dst.device, str) and dst.device.startswith("DISK")): return None
-  return call.replace(src=(UOp(Ops.COPY, src=(src,), arg=dst.device),) + call.src[1:])
+  return call.replace(src=(dst.store(src),) + call.src[1:])
 
 def simplify_copy_kernel(call:UOp, ast:UOp, dst:UOp, src:UOp):
   # NOTE: this is a codegen for SDMA devices
@@ -285,16 +285,20 @@ pm_copy_from_store = PatternMatcher([
   # simplify copy kernels
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"), UPat.var("dst"), UPat.var("src")), name="call"), simplify_copy_kernel),
 
-  # replace this with a copy if it's a copy
+  # lower an explicit COPY-valued identity kernel to the upstream bulk STORE representation
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r")).f(Ops.COPY)).end(UPat(Ops.RANGE, name="r")).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+                name="call", allow_any_len=True), copy_kernel_to_store),
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.CONST, arg=0))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.CONST, arg=0))).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+                name="call", allow_any_len=True), copy_kernel_to_store),
   (UPat(Ops.CALL, src=(UPat(Ops.PARAM, name="dst").index(UPat(Ops.RANGE, name="r"))
                 .store(UPat(Ops.PARAM, name="src").index(UPat(Ops.RANGE, name="r"))).end(UPat(Ops.RANGE, name="r")).sink(),),
-                name="call", allow_any_len=True), copy_kernel_to_copy_uop),
+                name="call", allow_any_len=True), copy_kernel_to_store),
+  # Callify can preserve the destination state as AFTER(dst, STORE(dst, COPY(src))). It is the same bulk transfer.
+  (UPat(Ops.CALL, src=(UPat(Ops.AFTER, src=(UPat.var("dst"),
+                UPat(Ops.STORE, src=(UPat.var("dst"), UPat(Ops.COPY, src=(UPat.var("src"),)))))).sink(),),
+                name="call", allow_any_len=True), copy_kernel_to_store),
 
   # if it wasn't copy, it currently can't be cross device
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
@@ -309,7 +313,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # create copies
-  linear = graph_rewrite(linear, pm_copy_from_store, name="create COPY kernels for SDMA")
+  linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])

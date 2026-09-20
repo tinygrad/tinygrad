@@ -535,9 +535,10 @@ class TestFunctionTuple(unittest.TestCase):
     Tensor.realize(a)
     c = f(a)
 
-    if count_kernels(c) != 1: raise KernelCountException(1, count_kernels(c))
-
+    # Build gradients before scheduling replaces the forward graph with its output buffers.
     c.sum().backward()
+    if (cnt := count_kernels(c)) != 1: raise KernelCountException(1, cnt)
+
     Tensor.realize(a.grad)
     np.testing.assert_allclose(a.grad.numpy(), [2., 2., 2., 2.])
 

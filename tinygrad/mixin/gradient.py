@@ -67,6 +67,8 @@ def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp,
 
 def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fxn, args = k.body, k.src[1:]
+  outputs = {st.src[0].unsharded_base.arg.slot:st for st in fxn.src
+             if st.op is Ops.STORE and st.src[0].unsharded_base.op is Ops.PARAM} if fxn.op is Ops.SINK and fxn.arg is None else {}
   if k.arg.grad_fxn is not None:
     # put const on a device, also TODO why do we still have NOOP...
     def on_dev(g, i): return g.clone(device=args[i].device) if g.device is None else g
@@ -203,7 +205,6 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
   for t0 in reversed(walk):
     if t0 not in grads or grads[t0].op is Ops.NOOP: continue
     # CALL: pass needed param set so backward only computes required gradients
-    # (calls with RETURNED inputs use the implicit body gradient or grad_fxn; opaque CALLs require an explicit grad_fxn)
     if t0.op is Ops.CALL:
       needed = {i for i, arg in enumerate(t0.src[1:]) if arg in targets or in_target_path.get(arg, False)}
       lgrads:tuple[UOp|None, ...]|None = call_gradient(grads[t0], t0, needed)

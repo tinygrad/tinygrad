@@ -397,7 +397,9 @@ def split_copy_slice(x:UOp) -> UOp|None:
   psrc = UOp(Ops.PARAM, arg=ParamArg(1, src.dtype, prod(physical_shape), addrspace=src.addrspace)).reshape(physical_shape)
   if physical_shape != src.shape: psrc = psrc.shrink(tuple((0, s) for s in src.shape))
   target = store.src[0].src[0] if store.src[0].op is Ops.INDEX else store.src[0]
-  return copy.replace(src=(psrc,)).call(target, source_state)
+  # Upstream executable copies are bulk STORE calls. Keep the branch's physical source view and dependency-bearing
+  # source argument, but express the transfer with destination/source PARAMs instead of an opaque COPY body.
+  return target.param_like(0).store(psrc).call(target, source_state)
 
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split. open DEVICE ranges are fine, they are bound per device at launch
