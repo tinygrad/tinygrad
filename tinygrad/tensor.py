@@ -23,6 +23,8 @@ class AllocCtx:
   replacements: list[UOp] = field(default_factory=list)
   unbound: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
+  stores: list[UOp] = field(default_factory=list)
+  buffer_map: dict[UOp, UOp] = field(default_factory=dict)
 
 # a tag is the tuple of original pre-rewrite UOps a node provides storage for
 add_tags = PatternMatcher([
@@ -47,6 +49,14 @@ def contiguous_mops_to_view(ctx:AllocCtx|None, c:UOp, src:UOp):
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
+def collect_stores(ctx:AllocCtx, u:UOp):
+  if (u.op is Ops.COPY and u.on_disk()) or (u.op is Ops.AFTER and not u.is_bound_var and
+      (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
+    ctx.stores.append(u)
+    if u.tag:
+      storage = graph_rewrite(u.src[0], pm_drop_after, bottom_up=True)
+      ctx.buffer_map.update({t:storage.shrink_to(t.shape) for t in u.tag})
+
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
@@ -59,6 +69,9 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # push copy past movement ops to disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
    x.replace(src=(copy.replace(src=(x.src[0],)),)+x.src[1:]) if x.on_disk() else None),
+
+  # Collect effects after their sources have been rewritten, without entering call bodies.
+  (UPat((Ops.AFTER, Ops.COPY), name="u"), collect_stores),
 ])
 
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
@@ -98,29 +111,15 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
 
-  # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
-  # this is the only one where we have to be careful to not break the tensor graph
-  big_sink = graph_rewrite(big_sink, add_tags, ctx=(ctx:=AllocCtx()), bottom_up=True, name="add tags")
+  # Tag original states before rewrites change their identities.
+  big_sink = graph_rewrite(big_sink, add_tags, bottom_up=True, name="add tags")
 
   # here we can break the tensor graph. tags propagate through replaces so we can still find the original UOps
-  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=ctx, name="early transform tensor graph")
-
-  # collect the stores (never entering call bodies) and map tagged AFTERs to their storage; tags are stripped at the end
-  # copies to disk are stores to the disk buffer; bound Variables are call inputs and RETURNEDs are call outputs
-  # AFTERs on unbound STORAGE (clones) are collected too: the clone's own buffer is the storage, no fresh copy
-  stores:list[UOp] = []
-  buffer_map:dict[UOp, UOp] = {}
-  for u in big_sink.toposort(enter_calls=False):
-    if (u.op is Ops.COPY and u.on_disk()) or (u.op is Ops.AFTER and not u.is_bound_var and
-        (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
-      stores.append(u)
-      if u.tag:
-        storage = graph_rewrite(u.src[0], pm_drop_after)
-        buffer_map.update({t:storage.shrink_to(t.shape) for t in u.tag})
-  ret = graph_rewrite(UOp.sink(*stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
-  assert not any(x in buffer_map for x in buffer_map.values())
+  graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx=(ctx:=AllocCtx()), name="early transform tensor graph")
+  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
+  assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
-  return ret, buffer_map
+  return ret, ctx.buffer_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
