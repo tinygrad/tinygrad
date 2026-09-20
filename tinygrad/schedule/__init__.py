@@ -71,7 +71,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
         buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
-        linearized.append(k.body.call(*buf_uops))
+        linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
@@ -119,9 +119,7 @@ schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(call:UOp) -> UOp|None:
   function = call.body
-  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo): return None
-  # value calls (with unbound outputs) are inlined positionally during prepare: their bodies are not programs to schedule
-  if call.has_unbound_outputs: return None
+  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo) or not call.arg.precompile: return None
   st = time.perf_counter()
   cache_key = function.key
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:

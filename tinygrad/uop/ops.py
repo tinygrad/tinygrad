@@ -546,6 +546,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is not Ops.CALL: raise RuntimeError(f"body requested, but {self.op} is not a CALL")
     return self.src[0]
   @property
+  def is_inline_call(self) -> bool:
+    return self.op is Ops.CALL and self.body.op is Ops.SINK and self.body.arg is None and not self.arg.precompile
+  @property
   def has_unbound_outputs(self) -> bool:
     """does this call still have unresolved outputs: unbound BUFFERs among its inputs (minted by call_with_outputs,
     resolved when the call is inlined or the outputs are materialized). a lifecycle query, not a call type"""
@@ -923,11 +926,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def contiguous_view_offset(self) -> int|None: return None if (view := self.contiguous_view()) is None else view[1]
 
   def has_buffer_identity(self, after_ok=False):
-    """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/UNSHARD -> BUFFER chain)."""
+    """Check if this UOp has a storage identity in the graph, whether or not its buffer is bound."""
     # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
-    return self.op in {Ops.BUFFER, Ops.PARAM} and not self.is_unbound
+    return self.op in {Ops.BUFFER, Ops.PARAM}
   @property
   def is_unbound(self) -> bool:
     # an unbound GLOBAL BUFFER has no storage bound yet: it's a declaration of storage (call output, scheduler temp)
@@ -1233,7 +1236,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     the remaining positions in order; when it's given, input params must already be slotted at their final positions.
     output_pos must be strictly ascending: the body's stores and the call args pair positionally by values order"""
     # the device defaults to the first device in the values or args, like srcs-based device resolution
-    default_dev = next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None)
+    default_dev = canonicalize_device(next((x.device for x in itertools.chain(values, srcs) if x.device is not None), None))
     pos = tuple(range(len(srcs), len(srcs)+len(values))) if output_pos is None else output_pos
     assert len(pos) == len(values) and len(set(pos)) == len(pos), "output_pos must be one distinct position per output"
     assert all(a < b for a, b in zip(pos, pos[1:])), f"output_pos {output_pos} must be strictly ascending"
@@ -1264,6 +1267,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     it = iter(srcs)
     call = body.call(*[r if r is not None else next(it) for r in args], grad_fxn=grad_fxn, name=name, precompile=precompile,
                      precompile_backward=precompile_backward, aux=aux)
+    if precompile:
+      from tinygrad.function import precompiled_call
+      return precompiled_call(call, rets)
     return tuple(r.after(call) for r in rets)
 
   # one-line convenience for the single-output case: self is the value
@@ -1828,11 +1834,10 @@ _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot])])
 
 def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
-  """AFTER on a RETURNED placeholder extracts the call output value: the value of its matching store in a SINK body
-  (called from patterns that bind t to a SINK)"""
-  vals = [st.src[1] for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is r.unsharded_base] \
-    if r.unsharded_base.is_unbound else []
-  return vals[0] if len(vals) == 1 else None
+  """Extract a call output's matching store, preserving writes to the enclosing scope's output PARAMs."""
+  stores = [st for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is r.unsharded_base]
+  if len(stores) != 1: return None
+  return r.after(stores[0]) if r.unsharded_base.op is Ops.PARAM else stores[0].src[1]
 remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool:

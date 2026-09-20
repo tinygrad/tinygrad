@@ -1,8 +1,9 @@
 import functools, time
 from dataclasses import replace
 from typing import Generic, TypeVar, Callable, cast, overload
-from tinygrad.helpers import Context, dedup, getenv, DEBUG
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
+from tinygrad.helpers import Context, dedup, getenv, DEBUG, prod
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat, ParamArg
+from tinygrad.device import canonicalize_device
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
 
@@ -27,8 +28,18 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
 
 def renumber_invalid_outputs(uret:UOp) -> UOp:
   invalid = invalid_outputs(uret)
-  return uret.substitute({b:b.replace(arg=replace(b.arg, slot=i))
+  return uret.substitute({b:b.replace(arg=replace(b.arg, slot=i, buffer=None))
                           for i,b in enumerate(x for x in uret.toposort(enter_calls=False) if x in invalid)})
+
+def precompiled_call(call:UOp, outputs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+  # Declare call-local storage; binding and allocation belong to the outer call.
+  def late_buffer(o:UOp) -> UOp:
+    buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), o.dtype, prod(o.max_shard_shape), device=canonicalize_device(o.device)))
+    ret = buf.reshape(o.max_shard_shape).shrink_to(o.shard_shape)
+    return ret.unshard(o.axis) if o.axis is not None else ret
+  buffers = {o:late_buffer(o) for o in outputs}
+  call = call.replace(src=(call.body, *[buffers[a] if a in buffers else a.contiguous() for a in call.src[1:]]))
+  return tuple(buffers[o].after(call) for o in outputs)
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):

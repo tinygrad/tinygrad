@@ -279,11 +279,33 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.empty(4, 8)
     b = Tensor.empty(4, 8)
     r0, r1 = f(a), f(b)
-    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.has_unbound_outputs)
-    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.has_unbound_outputs)
+    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.arg.precompile)
+    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.arg.precompile)
+    self.assertTrue(c0.has_unbound_outputs)
+    self.assertTrue(c1.has_unbound_outputs)
     # output identities stay unique per call; they canonicalize only when combined into a scheduling scope
     self.assertIsNot(c0.src[-1], c1.src[-1])
     self.assertEqual(sched_key(r0), sched_key(r1))
+
+  def test_precompile_nested(self):
+    for precompile in (False, True):
+      for devices in (None, ("CPU:0", "CPU:1")):
+        with self.subTest(precompile=precompile, devices=devices):
+          @function(precompile=True, precompile_backward=True)
+          def inner(x:Tensor): return x * 2, x + 3
+          @function(precompile=precompile, precompile_backward=True)
+          def outer(x:Tensor):
+            a, b = inner(x)
+            return a + b
+          x = Tensor([1., 2., 3., 4.]).realize()
+          if devices is not None: x = x.shard(devices, axis=0).realize()
+          out = outer(x)
+          for call in (u for u in out.uop.toposort() if u.op is Ops.CALL):
+            self.assertTrue(all(b.is_unbound for b in call.body.toposort() if b.op is Ops.BUFFER))
+          self.assertEqual(sched_key(out), sched_key(outer(x)))
+          out.sum().backward()
+          np.testing.assert_equal(out.numpy(), [6., 9., 12., 15.])
+          np.testing.assert_equal(x.grad.numpy(), [3., 3., 3., 3.])
 
   def test_precompile_consumes_call_output(self):
     """a precompiled function consuming the output of a non-precompiled function"""
