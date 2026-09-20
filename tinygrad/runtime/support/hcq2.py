@@ -581,6 +581,8 @@ def fold_words(buf:UOp, offs:UOp, ws:UOp, r:UOp|None=None) -> UOp:
   return UOp(Ops.NOOP)
 
 pm_link = PatternMatcher([
+  # collapse committed const conversions
+  (UPat(Ops.CAST, src=(UPat(Ops.CAST, src=(UPat.cvar(),), name="inner"),), name="c"), lambda c, inner: inner.src[0].cast(c.dtype)),
   # a placeholder becomes a buffer
   (UPat(Ops.PARAM, name="b"), lambda ctx, b: ctx.inputs[b] if b in ctx.inputs else bufferize_buf(ctx, b)),
   # the address of a buffer is a const
