@@ -31,24 +31,19 @@ add_tags = PatternMatcher([
 
 def contiguous_mops_to_view(ctx:AllocCtx|None, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
+  if not all_int(c.shape): return None
   buf = src.base
   while buf.op is Ops.BITCAST: buf = buf.src[0].base
-  # no symbolic shape
-  if buf.op not in {Ops.BUFFER, Ops.UNSHARD} or not all_int(c.shape): return None
-
-  # for UNSHARD tensors, use multi_pm to resolve per-shard movement ops, then view the resolved shard
-  unshard = None
   if buf.op is Ops.UNSHARD:
     if isinstance(c.device, str): return None
     if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
-    src = unshard.src[0]
+    view = contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])
+    return None if view is None else view.unshard(unshard.arg, unshard.src[1:])
 
-  # offset the base buffer by the collapsed movement ops and view it
-  if (cv := src.contiguous_view()) is None or (buf := cv[0]).op is not Ops.BUFFER: return None
-  # NB: make offset a UOp.variable here to do the offset computation in the kernels
-  view = buf[cv[1]:cv[1] + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
+  if buf.op is not Ops.BUFFER or (cv := src.contiguous_view()) is None or cv[0].op is not Ops.BUFFER: return None
+  buf, offset = cv
+  view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
   if ctx is not None: ctx.views.add(view)
-  if unshard is not None: return view.reshape(src.shape).unshard(unshard.arg, unshard.src[1:])
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
@@ -119,7 +114,9 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
     if (u.op is Ops.COPY and u.on_disk()) or (u.op is Ops.AFTER and not u.is_bound_var and
         (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
       stores.append(u)
-      if u.tag: buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
+      if u.tag:
+        storage = graph_rewrite(u.src[0], pm_drop_after)
+        buffer_map.update({t:storage.shrink_to(t.shape) for t in u.tag})
   ret = graph_rewrite(UOp.sink(*stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
   assert not any(x in buffer_map for x in buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
