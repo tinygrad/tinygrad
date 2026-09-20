@@ -66,6 +66,9 @@ def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
   if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
   return canonical[0] if len(canonical:=tuple(Device.canonicalize(d) for d in device)) == 1 else canonical
 
+def is_disk_device(device:str|tuple[str, ...]) -> bool:
+  return any(d.split(":", 1)[0].upper() == "DISK" for d in ((device,) if isinstance(device, str) else device))
+
 # **************** Profile ****************
 
 @dataclass(frozen=True)
@@ -239,10 +242,10 @@ class Buffer:
   def copy_from(self, src:Buffer) -> Buffer:
     assert self.nbytes == src.nbytes, f"copy size mismatch, {self.nbytes} != {src.nbytes}"
     assert self.is_allocated() and src.is_allocated(), "copy requires allocated buffers"
-    from tinygrad.engine.realize import run_linear
+    from tinygrad.engine.realize import run_linear, copy_call
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self), UOp.from_buffer(src)
-    run_linear(UOp(Ops.LINEAR, src=(su.param_like(1).copy_to_device(self.device).call(du, su),)), update_stats=False)
+    run_linear(UOp(Ops.LINEAR, src=(copy_call(du, su),)), update_stats=False)
     return self
 
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:

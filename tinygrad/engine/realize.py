@@ -12,6 +12,10 @@ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
 
 # **************** Helpers ****************
 
+def copy_call(dst:UOp, src:UOp) -> UOp:
+  """Executable transfer between explicit buffers, not a tensor COPY allocating a result."""
+  return UOp(Ops.COPY, src=(src.param_like(1),), arg=dst.device).call(dst, src)
+
 def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if not s.is_bound_var)
 def get_call_var_uops(call:UOp, prg:UOp) -> list[UOp]:
   bound = {s.src[0].expr: s.src[1].src[1] for s in call.src[1:] if s.is_bound_var}
@@ -227,7 +231,7 @@ pm_flatten_linear = PatternMatcher([
 def _validate(call:UOp, sink:UOp) -> UOp:
   params = get_call_arg_uops(call)
   shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype) for p in params)
-  copies = tuple(p.copy_to_device(s.device).call(s, p) for s, p in zip(shadows, params))
+  copies = tuple(copy_call(s, p) for s, p in zip(shadows, params))
   return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, src=(sink,), arg="validate").call(*shadows, *params)))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
 
