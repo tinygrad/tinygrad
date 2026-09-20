@@ -280,15 +280,14 @@ class Tensor(RandMixin):
     if any(u.dtype in dtypes.weaks and u.device is not None for u in sink.src):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
     bases = {u.base for u in sink.src}
-    # Only storage escaping the outer call needs a persistent binding.
-    tensor_map:dict[UOp, UOp] = {}
     for u in sink.src:
       while u.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: u = u.src[0]
-      if (b:=u.storage_base).is_unbound and b not in tensor_map: tensor_map[b] = b.empty_like()
+      if (b:=u.storage_base).is_unbound: bases.add(b)
+    tensor_map:dict[UOp, UOp] = {}
     # Rebuild in dependency order: replacement values already reference the other outputs' storage.
     for x in sink.toposort(enter_calls=False):
-      if x in tensor_map: continue
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
+      if x in bases and x.is_unbound: u = x.empty_like()
       if x in bases and u.needs_storage():
         src, contiguous = u, False
         while src.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}:
