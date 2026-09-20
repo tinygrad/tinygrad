@@ -473,10 +473,10 @@ class AM_IH(AM_IP):
     for _, rwptr_vm, suf, ring_id in self.rings:
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
 
-  def drain(self):
+  def drain(self, wptr:dict[str, int]|None=None):
     _, _, suf, _ = self.rings[0]
-    wptr = self.adev.reg(f"regIH_RB_WPTR{suf}").read_bitfields()
-    self.adev.regIH_RB_RPTR.write(wptr['offset'] % (self.ring_size // 4))
+    if wptr is None: wptr = self.adev.reg(f"regIH_RB_WPTR{suf}").read_bitfields()
+    self.adev.regIH_RB_RPTR.write(offset=wptr['offset'] % (self.ring_size // 4))
 
     if wptr['rb_overflow']:
       self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
@@ -486,10 +486,14 @@ class AM_IH(AM_IP):
   def interrupt_handler(self):
     _, _, suf, _ = self.rings[0]
     wptr = self.adev.reg(f"regIH_RB_WPTR{suf}").read_bitfields()
-    rptr = self.adev.regIH_RB_RPTR.read()
+    rptr = self.adev.regIH_RB_RPTR.read_bitfields()['offset']
 
-    while rptr != wptr['offset']:
-      entry = [self.ring_view[(rptr + i) % (self.ring_size // 4)] for i in range(8)]
+    ranges = [(rptr, wptr['offset'])] if rptr <= wptr['offset'] else [(rptr, self.ring_size // 4), (0, wptr['offset'])]
+    # Snapshot each range before the next read can reuse the USB transfer buffer.
+    entries = memoryview(b''.join(bytes(self.ring_view.view(start * 4, (end - start) * 4, fmt='B')[:])
+                                 for start, end in ranges if start != end)).cast('I')
+    for i in range(0, len(entries), 8):
+      entry = entries[i:i + 8]
       rptr = (rptr + 8) % (self.ring_size // 4)
 
       client, src, ring_id, vmid, vmid_type, pasid, node = \
@@ -516,7 +520,7 @@ class AM_IH(AM_IP):
         self.adev.is_err_state = True
       else: self.adev.is_err_state = True
 
-    self.drain()
+    self.drain(wptr)
 
     if self.adev.is_vf: return # fatal RAS events are handled by the host PF
     bif_intr = self.adev.regBIF_BX0_BIF_DOORBELL_INT_CNTL.read_bitfields()
