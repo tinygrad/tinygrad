@@ -287,6 +287,22 @@ class TestCallSchedule(unittest.TestCase):
     self.assertIsNot(c0.src[-1], c1.src[-1])
     self.assertEqual(sched_key(r0), sched_key(r1))
 
+  def test_bufferize_keeps_intermediate_call_output_unbound(self):
+    for precompile in (False, True):
+      with self.subTest(precompile=precompile):
+        @function(precompile=precompile)
+        def f(x:Tensor): return x * 2
+        x = Tensor.empty(4).assign(Tensor.arange(4).float())
+        intermediate = f(x)
+        out = f(intermediate)
+        alias = Tensor(out.uop.storage_base)
+        out._bufferize_outputs()
+        self.assertFalse(x.uop.storage_base.is_unbound)
+        self.assertTrue(intermediate.uop.storage_base.is_unbound)
+        self.assertFalse(out.uop.storage_base.is_unbound)
+        self.assertIs(alias.uop, out.uop.storage_base)
+        np.testing.assert_equal(out.numpy(), np.arange(4, dtype=np.float32) * 4)
+
   def test_precompile_nested(self):
     for precompile in (False, True):
       for devices in (None, ("CPU:0", "CPU:1")):

@@ -284,10 +284,9 @@ class Tensor(RandMixin):
       while u.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: u = u.src[0]
       if (b:=u.storage_base).is_unbound: bases.add(b)
     tensor_map:dict[UOp, UOp] = {}
-    # Rebuild in dependency order: replacement values already reference the other outputs' storage.
+    # Rebuild in dependency order without binding scratch inside nested calls.
     for x in sink.toposort(enter_calls=False):
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
-      if x in bases and x.is_unbound: u = x.empty_like()
       if x in bases and u.needs_storage():
         src, contiguous = u, False
         while src.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}:
@@ -297,6 +296,8 @@ class Tensor(RandMixin):
         elif src.op is Ops.AFTER and (src.has_buffer_identity(after_ok=True) or src.src[1].op is Ops.STORE): u = src
         elif contiguous and (view := contiguous_mops_to_view(None, u, src)) is not None: u = view
         else: u = src.clone()
+      if (x in bases or (x.is_unbound and x.arg.bind_on_realize)) and (b:=u.storage_base).is_unbound and b.device is not None:
+        u = u.substitute({b: UOp.new_buffer(b.device, b.arg.size, b.dtype)})
       if u is not x: tensor_map[x] = u
     _apply_map_to_tensors(tensor_map, name="bufferize")
 

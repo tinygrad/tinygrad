@@ -2,10 +2,31 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function
-from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill
+from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, q8_linear, f16_gemv, flash_attention, gated_delta_prefill
+from tinygrad.uop.ops import Ops
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 class TestQ8Quantize(unittest.TestCase):
+  def test_quantize_scratch_is_call_local(self):
+    @function(precompile=True)
+    def run(x:Tensor): return q8_quantize(x, 1, 32)
+    outputs = run(Tensor.empty(1, 32, device="NULL"))
+    call = outputs[0].uop.src[1]
+    self.assertEqual(len(call.src), 1 + 1 + 3)  # body, input, returned outputs; no implicit scratch
+    self.assertTrue(all(u.is_unbound for u in call.body.toposort(enter_calls=False) if u.op is Ops.BUFFER))
+
+  def test_linear_scratch_is_call_local(self):
+    for op, shape, dtype in ((q8_linear, (16*53,), dtypes.uint32), (f16_gemv, (16, 256), dtypes.half)):
+      with self.subTest(kernel=op.__name__):
+        layer = Linear(256, 16, bias=False)
+        layer.ggml_type, layer.weight = 14, Tensor.empty(shape, dtype=dtype, device="NULL")
+        @function(precompile=True)
+        def run(x:Tensor, weight:Tensor): return op(layer, x)
+        out = run(Tensor.empty(1, 256, device="NULL"), layer.weight)
+        call = out.uop.src[1]
+        self.assertEqual(len(call.src), 1 + 2 + 1)  # body, activation, weight, output
+        self.assertTrue(all(u.is_unbound for u in call.body.toposort(enter_calls=False) if u.op is Ops.BUFFER))
+
   def test_word_quant_weights_use_typed_buffer_view(self):
     for ggml_type, type_size in ((13, 176), (23, 136)):
       with self.subTest(ggml_type=ggml_type):

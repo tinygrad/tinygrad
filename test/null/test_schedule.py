@@ -15,6 +15,10 @@ class TestBufferUOp(unittest.TestCase):
   # BUFFER has a ShapeTracker of shape=(n,) and stride=(1,)
   def test_buffer_has_buffer(self):
     buf = Tensor.empty(10)
+    self.assertTrue(buf.uop.is_unbound)
+    with self.assertRaises(AssertionError): buf.uop.buffer
+    buf._bufferize_outputs()
+    self.assertFalse(buf.uop.is_unbound)
     self.assertIsNotNone(buf.uop.buffer)
     self.assertEqual(buf.uop.shape, (10,))
     # the device Buffer remains unallocated until it's we run the schedule
@@ -27,9 +31,9 @@ class TestBufferUOp(unittest.TestCase):
 
   def test_buffer_has_unique_buffer(self):
     buf = Tensor.empty(10)
-    buf1 = buf.uop.buffer
-    buf2 = buf.uop.buffer
-    self.assertIs(buf1, buf2)
+    view = buf.reshape(2, 5).realize()
+    self.assertIs(buf.uop.buffer, view.uop.buffer)
+    self.assertIs(buf.uop.buffer, buf.realize().uop.buffer)
 
   # we also allow VIEW(BUFFER) to access the underlying device Buffer, as long as it's contiguous
   def test_buffer_view_allowed(self):

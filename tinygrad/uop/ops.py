@@ -35,9 +35,11 @@ class ParamArg:
   image: tuple[int, int]|None = None
   # the device Buffer for a realized BUFFER. the UOp is the owner of the Buffer: they live and die together (1:1)
   buffer: Buffer|MultiBuffer|None = None
+  # empty() declarations acquire persistent storage during tensor bufferization, unlike call-local temporaries
+  bind_on_realize: bool = False
   def __repr__(self):
     fields = (("vmin_vmax", None), ("multiple_of", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
-              ("volatile", False), ("image", None))
+              ("volatile", False), ("image", None), ("bind_on_realize", False))
     args = [repr(self.slot), repr(self.dtype)] + ([repr(self.size)] if self.size is not None else []) + \
       [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     return f"ParamArg({', '.join(args)})"
@@ -760,7 +762,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # little helpers
   def on_disk(self:UOp): return isinstance(self.device, str) and self.device.startswith("DISK")
   def on_creation_device(self:UOp): return isinstance(self.device, str) and self.device.startswith(("DISK", "NPY", "PYTHON"))
-  def needs_storage(self:UOp) -> bool: return not self.is_virtual and not self.has_buffer_identity()
+  def needs_storage(self:UOp) -> bool: return not self.is_virtual and (self.storage_base.is_unbound or not self.has_buffer_identity())
 
   # *** uop movement ops ***
 
@@ -850,7 +852,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       # bfloat16 and fp8 have no struct format, so pack a float32 buffer and cast
       bdtype = dtypes.float32 if dtype in [dtypes.bfloat16, *dtypes.fp8s] else dtype
       assert bdtype.fmt is not None, f"{bdtype=} has None fmt"
-      ret = UOp.empty(shape:=get_shape(x), dtype=bdtype, device="PYTHON")
+      ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), bdtype).reshape(shape)
       data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
     if not data: ret.buffer.allocate(memoryview(bytearray()))
     else: (buf:=ret.buffer.ensure_allocated()).allocator._copyin(buf._buf, memoryview(data))
