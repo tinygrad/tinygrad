@@ -94,11 +94,15 @@ def transform_to_image(ctx, buf:UOp, x:UOp) -> UOp|None:
   else:
     return buf.index(cidx.src[1], cidx.src[0])
 
+def store_image(x:UOp, d:UOp) -> UOp:
+  # image load/store is always float, a half image converts on store
+  def as_float(s:UOp):
+    return s.src[0] if x.src[0].dtype is dtypes.half and s.op is Ops.CAST and s.src[0].dtype is dtypes.float else s.cast(dtypes.float)
+  return x.store(UOp.stack(*[as_float(s) for s in d.src]) if d.op is Ops.STACK else as_float(d))
+
 pm_simplify_add_image = PatternMatcher([
   (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM, name="buf"), UPat(name="x"), UPat(arg=4))), transform_to_image),
-  # image load/store is always float
-  (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), lambda x,d: x.store(d.cast(dtypes.float))),
-  (UPat.var("x", dtype=dtypes.float).cast(dtypes.half).cast(dtypes.float), lambda x: x),
+  (UPat(Ops.INDEX, dtype=dtypes.float, name="x").store(UPat(name="d", dtype=dtypes.half)), store_image),
 ])
 
 def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:

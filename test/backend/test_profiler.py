@@ -32,6 +32,9 @@ def helper_collect_profile(*devs):
 
 def filter_ranges(p): return flatten([e.ents for e in p if isinstance(e, ProfileGraphEvent)])+[e for e in p if isinstance(e, ProfileRangeEvent)]
 
+def helper_host_buffer(dev:Compiled, **kwargs) -> Buffer:
+  return Buffer(getattr(dev, "host", "PYTHON"), 2, dtypes.float, **kwargs)
+
 def helper_profile_filter_device(profile, device:str):
   assert any(getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent) for x in profile), f"device {device} is not registred"
   dev_events = [x for x in profile if getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent)]
@@ -73,6 +76,7 @@ class TestProfiler(unittest.TestCase):
     kernel_runs = [x for x in profile if x.device == TestProfiler.d0.device]
     assert len(kernel_runs) == 1, "one kernel run is expected"
     assert ansistrip(kernel_runs[0].name) == runner_name, "kernel name is not correct"
+    self.assertEqual(kernel_runs[0].profile_key, TestProfiler.prg.key)
     assert _dev_base(kernel_runs[0].device) == kernel_runs[0].device, "kernel should not be on a sub-device"
 
   def test_profile_kernel_run_wait(self):
@@ -80,19 +84,19 @@ class TestProfiler(unittest.TestCase):
 
   def test_profile_copyin(self):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
+    src = helper_host_buffer(TestProfiler.d0, initial_value=struct.pack("ff", 0, 1))
 
     with helper_collect_profile(TestProfiler.d0) as profile:
-      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
+      buf1.copy_from(src)
 
     profile = filter_ranges(profile)
-    kernel_runs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, "PYTHON"))]
-    self.assertEqual(len(kernel_runs), 2 if Device.DEFAULT in HCQ_DEVS else 1)
+    kernel_runs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, f"{src.device}:COPY"))]
+    self.assertEqual(len(kernel_runs), 1)
 
   def test_profile_multiops(self):
     runner_name = ansistrip(TestProfiler.prg.src[0].arg.name)
-    host = getattr(TestProfiler.d0, "host", "PYTHON") # allocator-owned host memory always maps, opaque bytearrays only when page aligned by luck
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
-    src, dst = Buffer(host, 2, dtypes.float, initial_value=struct.pack("ff", 0, 1)), Buffer(host, 2, dtypes.float, preallocate=True)
+    src, dst = helper_host_buffer(TestProfiler.d0, initial_value=struct.pack("ff", 0, 1)), helper_host_buffer(TestProfiler.d0, preallocate=True)
 
     with helper_collect_profile(TestProfiler.d0) as profile:
       buf1.copy_from(src)
@@ -100,7 +104,7 @@ class TestProfiler(unittest.TestCase):
       dst.copy_from(buf1)
 
     profile = filter_ranges(profile)
-    evs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, f"{host}:COPY"))]
+    evs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, f"{src.device}:COPY"))]
 
     assert len(evs) == 3, "unexpected number of kernel and copy events"
     # NOTE: order of events does not matter, the tool is responsible for sorting them

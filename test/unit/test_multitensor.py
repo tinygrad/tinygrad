@@ -433,7 +433,7 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [call for call in out.schedule_linear().src if call.src[0].op is not Ops.COPY and set(call.device) <= set(devices_4)]
+    scheds = [call for call in out.schedule_linear().src if call.src[0].op is not Ops.STORE and set(call.device) <= set(devices_4)]
     self.assertEqual(set(scheds[0].device), set(devices_4), "should have ast on each shard device")
     self.assertEqual(len(set(s.src[0] for s in scheds)), 1)
 

@@ -1,13 +1,13 @@
 from __future__ import annotations
 from typing import cast
-import functools, struct, operator
+import functools, struct, operator, re
 from tinygrad.device import Allocator, Buffer, BufferSpec, BufferStorage, Compiled, Device
 from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import round_up, ceildiv, unwrap, to_tuple, flatten
 from tinygrad.engine.realize import get_call_arg_uops
 from tinygrad.runtime.autogen import bnxt
 from tinygrad.runtime.support.rdma.bnxtdev import BNXTDev, BNXTQP, db_value, send_wqe, recv_wqe, WQE_SIZE, RING_ENTRIES, CQ_ENTRIES, MTU
-from tinygrad.runtime.support.hcq2 import unwrap_view, rt_addr, to_name
+from tinygrad.runtime.support.hcq2 import unwrap_view, to_name
 from tinygrad.runtime.support.memory import AddrSpace, MMIOInterface, VirtMapping, MemoryManager
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System
 from tinygrad.runtime.support.hcq import hcq_filter_visible_devices
@@ -52,10 +52,14 @@ class BNXTAllocator(Allocator):
   def _offset(self, buf, size:int, offset:int): return buf
   def _unmap(self, storage:BufferStorage): self.dev.iface.dev_impl.unregister_mem(storage.meta)
 
+@functools.cache
 def rdma_nic_for(dev) -> RDMADevice|None:
-  try: count = len(hcq_filter_visible_devices(System.list_devices(*BNXT_IDS), "RDMA"))
-  except RuntimeError: return None
-  return next((cast(RDMADevice, n) for i in range(count) if (n:=Device[f"RDMA:{i}"]).peer_group == dev.peer_group), None)
+  def node(s:str) -> str: return ":".join(s.split(":")[:3]) if s.startswith("remote:") else ""
+  def bus(s:str) -> int: return int(re.findall(r":([0-9a-f]{2}):[0-9a-f]{2}\.[0-7]", s)[-1], 16)
+  gpu = dev.iface.pci_dev.pcibus
+  try: nics = [(i, n) for i, (_, n) in enumerate(hcq_filter_visible_devices(System.list_devices(*BNXT_IDS), "RDMA")) if node(n) == node(gpu)]
+  except RuntimeError: return None # no pcie on this machine
+  return cast(RDMADevice, Device[f"RDMA:{min(nics, key=lambda x: abs(bus(x[1]) - bus(gpu)))[0]}"]) if nics else None
 
 class RDMADevice(Compiled):
   ifaces = [BNXTIface]
@@ -90,7 +94,7 @@ def rdma_psn(nic:str, pair:tuple[str, str]) -> UOp: return rdma_mem(nic, pair, "
 def rdma_db(nic:str, pair:tuple[str, str]) -> UOp: return rdma_mem(nic, pair, "db", 0x1000)
 
 def rdma_wire(call:UOp) -> UOp|None:
-  if call.op is not Ops.CALL or call.src[0].op is not Ops.COPY: return None
+  if call.op is not Ops.CALL or call.src[0].op is not Ops.STORE: return None
   return next((b for b in get_call_arg_uops(call) if to_tuple(b.device)[0].startswith("RDMA")), None)
 def is_rdma(call:UOp) -> bool: return rdma_wire(call) is not None
 
@@ -113,11 +117,10 @@ def rdma_copies(devs:tuple[str, ...], calls:list[UOp]) -> list[list[UOp]]: # the
   assert wqes <= min(RING_ENTRIES, CQ_ENTRIES), "a batch posts at most a ring of wqes per pair"
 
   # next slot and psn persist in nic memory. read once per submit and own it
-  n, p = seq.index(0).load(), psn.index(0).load()
-  advances = [seq.index(0).store(n + wqes)] + ([] if is_recv else [psn.index(0).store(p + packets)])
+  bumps = [seq.index(0).store(seq.index(0).load() + wqes)] + ([] if is_recv else [psn.index(0).store(psn.index(0).load() + packets)])
+  n, p = seq.after(*bumps).index(0).load() - wqes, psn.after(*bumps).index(0).load() - packets
 
-  # gpu addresses are rt patches
-  ring_addr, cq_addr = rt_addr(ring, devs, *advances), rt_addr(cq, devs)
+  ring_addr, cq_addr = ring.getaddr(devs), cq.getaddr(devs)
   db = rdma_db(nic.device, pair).getaddr(devs) + (nic.iface.dev_impl.db_off & 0xfff)
   ring_db = db_value(qp.qpn, bnxt.DBC_DBC_TYPE_RQ if is_recv else bnxt.DBC_DBC_TYPE_SQ, 0, 0)
   cq_db = db_value(qp.rcq_id if is_recv else qp.scq_id, bnxt.DBC_DBC_TYPE_CQ, 0, 0)

@@ -337,7 +337,7 @@ class TestMultiTensor(unittest.TestCase):
     assert len(sis) == 6
     for si in (sis[0], sis[1], sis[2], sis[3], sis[5]):
       assert call_is_graph(si)
-    assert sis[4].src[0].op is Ops.COPY
+    assert sis[4].src[0].op is Ops.STORE
 
   def test_rand_on_multiple_devices(self):
     # different devices generate different rand

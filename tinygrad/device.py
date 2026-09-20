@@ -66,6 +66,9 @@ def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
   if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
   return canonical[0] if len(canonical:=tuple(Device.canonicalize(d) for d in device)) == 1 else canonical
 
+def is_disk_device(device:str|tuple[str, ...]) -> bool:
+  return any(d.split(":", 1)[0].upper() == "DISK" for d in ((device,) if isinstance(device, str) else device))
+
 # **************** Profile ****************
 
 @dataclass(frozen=True)
@@ -242,7 +245,7 @@ class Buffer:
     from tinygrad.engine.realize import run_linear
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self), UOp.from_buffer(src)
-    run_linear(UOp(Ops.LINEAR, src=(su.param_like(1).copy_to_device(self.device).call(du, su),)), update_stats=False)
+    run_linear(UOp(Ops.LINEAR, src=(du.store_call(su),)), update_stats=False)
     return self
 
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:

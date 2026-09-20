@@ -6,7 +6,7 @@ from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, dtypes, DType, DTypeLike, truncate, least_upper_dtype, least_upper_float, Invalid, AddrSpace, strong_dtype
 from tinygrad.dtype import PyConst, InvalidType, bitcast
-from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, TinyELF
+from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, is_disk_device, TinyELF
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
 from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, get_shape, fully_flatten, to_tuple
@@ -546,6 +546,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is not Ops.CALL: raise RuntimeError(f"body requested, but {self.op} is not a CALL")
     return self.src[0]
   @property
+  def is_inline_call(self) -> bool:
+    return self.op is Ops.CALL and self.body.op is Ops.SINK and self.body.arg is None and not self.arg.precompile
+  @property
   def has_unbound_outputs(self) -> bool:
     """does this call still have unresolved outputs: unbound BUFFERs among its inputs (minted by call_with_outputs,
     resolved when the call is inlined or the outputs are materialized). a lifecycle query, not a call type"""
@@ -595,7 +598,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, src=(self,)+src, **kwargs) if len(src) else self
   @property
-  def without_after(self) -> UOp: return self.src[0] if self.op is Ops.AFTER else self
+  def without_after(self) -> UOp: return self.src[0].without_after if self.op is Ops.AFTER else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("src", self.src), (arg, kwargs.pop("dtype", self.dtype)), kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
@@ -740,10 +743,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return copied if axis is None else copied._shard(axis, UOp.range(len(devices), -1, AxisType.DEVICE)).unshard(axis)
 
   def copy_to_device(self, device:str|tuple[str, ...], arg=None):
+    if is_disk_device(device):
+      raise RuntimeError("COPY to DISK is not allowed; use STORE to an explicit disk buffer")
     assert arg is None or isinstance(self.device, tuple)
     inp = self if arg is None else UOp(Ops.MSELECT, src=(self,), arg=arg)
     if inp.dtype in dtypes.weaks: raise RuntimeError(f"cannot create storage for weak dtype {inp.dtype}")
     return UOp(Ops.COPY, src=(inp,), arg=device)
+  def store_call(self, src:UOp) -> UOp:
+    """Executable bulk transfer into this buffer."""
+    return self.param_like(0).store(src.param_like(1)).call(self, src)
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, src=(self,), arg=arg)
   def mstack(self, *srcs: UOp) -> UOp: return UOp(Ops.MSTACK, src=(self,)+srcs) if len(srcs) else self
   @property
@@ -845,11 +853,13 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       ret = UOp.empty(shape:=get_shape(x), dtype=bdtype, device="PYTHON")
       data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
     if not data: ret.buffer.allocate(memoryview(bytearray()))
-    else: ret.buffer.ensure_allocated().host[:] = data
+    else: (buf:=ret.buffer.ensure_allocated()).allocator._copyin(buf._buf, memoryview(data))
     if ret.dtype != dtype: ret = ret.cast(dtype)
     return ret
   def clone(self, device=None) -> UOp:
-    device = device or self.device
+    device = canonicalize_device(device or self.device)
+    if is_disk_device(device):
+      raise RuntimeError("cannot clone DISK storage; use STORE to an explicit disk buffer")
     ret = self.empty_like(device=device)
     src = self if self.device is None or self.device == device else self.copy_to_device(device)
     return ret.after(ret.store(src.cast(ret.dtype)))
@@ -916,11 +926,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def contiguous_view_offset(self) -> int|None: return None if (view := self.contiguous_view()) is None else view[1]
 
   def has_buffer_identity(self, after_ok=False):
-    """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/UNSHARD -> BUFFER chain)."""
+    """Check if this UOp has a storage identity in the graph, whether or not its buffer is bound."""
     # TODO: this is confusing because UOp.variable('v', 0, 1, dtypes.weakfloat) is True for jit to work, but it doesn't have a buffer
     if self.op in {Ops.RESHAPE, Ops.UNSHARD, Ops.MSELECT}: return self.src[0].has_buffer_identity(after_ok)
     if after_ok and self.op == Ops.AFTER: return self.src[0].has_buffer_identity(after_ok)
-    return self.op in {Ops.BUFFER, Ops.PARAM} and not self.is_unbound
+    return self.op in {Ops.BUFFER, Ops.PARAM}
   @property
   def is_unbound(self) -> bool:
     # an unbound GLOBAL BUFFER has no storage bound yet: it's a declaration of storage (call output, scheduler temp)
@@ -1247,14 +1257,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       axis = o.axis if isinstance(o.device, tuple) else None
       # multi-device values have a per-shard sized storage: the sharding lives in the graph, not the arg
       if shp and isinstance(dev, tuple): shp = tuple(s//len(dev) if i == axis else s for i,s in enumerate(shp))
-      ret = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), o.dtype, None if not shp else prod(to_max_shape(shp)), device=dev))
-      return ret if not shp else ret.view_as(shp, axis)
+      ret = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), o.dtype, None if shp is None else prod(to_max_shape(shp)), device=dev))
+      return ret if shp is None else ret.reshape(()) if not shp else ret.view_as(shp, axis)
     rets = tuple(mint(o) for o in values)
     # the body only knows PARAMs: the output PARAMs get the slots of the outputs' positions in the arg list
     body = UOp.sink(*[v.param_like(p).store(v) for v, p in zip(values, pos)])
     args: list[UOp|None] = [None] * (len(srcs) + len(values))
     for p, r in zip(pos, rets): args[p] = r
-    it = iter(srcs)
+    it = iter(x.contiguous() if precompile else x for x in srcs)
     call = body.call(*[r if r is not None else next(it) for r in args], grad_fxn=grad_fxn, name=name, precompile=precompile,
                      precompile_backward=precompile_backward, aux=aux)
     return tuple(r.after(call) for r in rets)
@@ -1325,8 +1335,8 @@ class ProgramInfo:
                        tuple(sorted(dedup(_vars), key=lambda v: v.arg.slot)), tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))),
                        tuple(sorted(dedup(ins))), target)
 
-# the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), copies, and function references
-OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}
+# the body of a CALL is always one of these: programs (SINK/PROGRAM/LINEAR), bulk stores, and function references
+OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION}
 
 @dataclass(frozen=True)
 class CallInfo:
@@ -1821,11 +1831,10 @@ _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot])])
 
 def resolve_returned_after(r:UOp, t:UOp) -> UOp|None:
-  """AFTER on a RETURNED placeholder extracts the call output value: the value of its matching store in a SINK body
-  (called from patterns that bind t to a SINK)"""
-  vals = [st.src[1] for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is r.unsharded_base] \
-    if r.unsharded_base.is_unbound else []
-  return vals[0] if len(vals) == 1 else None
+  """Extract a call output's matching store, preserving writes to the enclosing scope's output PARAMs."""
+  stores = [st for st in t.src if st.op is Ops.STORE and st.src[0].unsharded_base is r.unsharded_base]
+  if len(stores) != 1: return None
+  return r.after(stores[0]) if r.unsharded_base.op is Ops.PARAM else stores[0].src[1]
 remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool:

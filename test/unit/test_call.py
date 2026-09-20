@@ -279,11 +279,33 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.empty(4, 8)
     b = Tensor.empty(4, 8)
     r0, r1 = f(a), f(b)
-    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.has_unbound_outputs)
-    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.has_unbound_outputs)
+    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.arg.precompile)
+    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.arg.precompile)
+    self.assertTrue(c0.has_unbound_outputs)
+    self.assertTrue(c1.has_unbound_outputs)
     # output identities stay unique per call; they canonicalize only when combined into a scheduling scope
     self.assertIsNot(c0.src[-1], c1.src[-1])
     self.assertEqual(sched_key(r0), sched_key(r1))
+
+  def test_precompile_nested(self):
+    for precompile in (False, True):
+      for devices in (None, ("CPU:0", "CPU:1")):
+        with self.subTest(precompile=precompile, devices=devices):
+          @function(precompile=True, precompile_backward=True)
+          def inner(x:Tensor): return x * 2, x + 3
+          @function(precompile=precompile, precompile_backward=True)
+          def outer(x:Tensor):
+            a, b = inner(x)
+            return a + b
+          x = Tensor([1., 2., 3., 4.]).realize()
+          if devices is not None: x = x.shard(devices, axis=0).realize()
+          out = outer(x)
+          for call in (u for u in out.uop.toposort() if u.op is Ops.CALL):
+            self.assertTrue(all(b.is_unbound for b in call.body.toposort() if b.op is Ops.BUFFER))
+          self.assertEqual(sched_key(out), sched_key(outer(x)))
+          out.sum().backward()
+          np.testing.assert_equal(out.numpy(), [6., 9., 12., 15.])
+          np.testing.assert_equal(x.grad.numpy(), [3., 3., 3., 3.])
 
   def test_precompile_consumes_call_output(self):
     """a precompiled function consuming the output of a non-precompiled function"""
@@ -365,22 +387,6 @@ class TestArgOrder(unittest.TestCase):
     p1 = UOp.param(1, x.dtype, x.shape, self._dev(x))
     with self.assertRaises(AssertionError):
       UOp.call_with_outputs((p1.reshape(x.shape) * 2, p1.reshape(x.shape) + 1), x.uop, output_pos=(1, 0))
-
-  def test_intersperse_returned_precompile(self):
-    x = Tensor.arange(3, dtype=dtypes.int).realize()
-    call = self.make_intersperse_call(x, precompile=True)[0].src[1]
-    # the transform must preserve the RETURNED's src position: its placeholder is at src 1, the input stays at src 2
-    from tinygrad.tensor import transform_precompiled_call
-    new = transform_precompiled_call(call)
-    new_call = new.src[0].src[1].src[1]
-    # the out buffer takes the RETURNED's position (src 1), the input value keeps its position (src 2)
-    self.assertEqual(new_call.src[1].op, Ops.BUFFER)
-    self.assertEqual(new_call.src[1].arg.size, 3)
-    self.assertEqual(new_call.src[2].op, Ops.ADD)
-    # the body binds positionally: store dest at slot 0 (the RETURNED's position), input param at slot 1
-    store = [u for u in new_call.src[0].toposort(enter_calls=False) if u.op is Ops.STORE][0]
-    self.assertEqual(store.src[0].arg.slot, 0)
-    self.assertEqual([u.arg.slot for u in store.src[1].toposort(enter_calls=False) if u.op is Ops.PARAM], [1])
 
   def test_intersperse_returned_gradient(self):
     x = Tensor([1.0, 2.0, 3.0]).realize()

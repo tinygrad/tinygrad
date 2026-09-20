@@ -34,7 +34,7 @@ class TestMovedConstFolding(unittest.TestCase):
 
   def test_copy_padded_const(self):
     schedule = Tensor.ones(4, buffer=False).pad(((1, 1),)).to("CPU:1").schedule_linear()
-    assert not any(si.src[0].op is Ops.COPY for si in schedule.src), "const copy should be folded"
+    assert not any(si.src[0].op is Ops.STORE for si in schedule.src), "const copy should be folded"
     np.testing.assert_equal(Tensor.ones(4, buffer=False).pad(((1, 1),)).to("CPU:1").numpy(), [0, 1, 1, 1, 1, 0])
 
   def test_cast_padded(self):

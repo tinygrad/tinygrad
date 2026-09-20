@@ -1,11 +1,31 @@
 from tinygrad.dtype import dtypes, to_dtype
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, ParamArg
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
 from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
+
+def forward_call_outputs(sink:UOp) -> UOp:
+  if not sink.src or not all(st.op is Ops.STORE for st in sink.src): return sink
+  placed:dict[UOp, UOp] = {}
+  items:list[UOp] = []
+  for st in sink.src:
+    target, src = st.src
+    deps:list[UOp] = []
+    while src.op is Ops.AFTER:
+      deps.extend(src.src[1:])
+      src = src.src[0]
+    # Forward a producer into the existing output PARAM once; shared outputs copy from that first placement.
+    if src not in placed:
+      if src.op is Ops.STAGE: placed[src] = target.after(target.store(src.src[0]))
+      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[src] = target
+      if src in placed:
+        items.append(src.after(*deps))
+        continue
+    items.append(target.after(st))
+  return UOp.sink(*items).substitute(placed)
 
 def walk_mop(u:UOp):
   if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD, Ops.BITCAST}: return walk_mop(u.src[0])
@@ -96,7 +116,7 @@ def split_reduceop(reduce:UOp, x:UOp):
 
 pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p) if p.arg.slot >= 0 else None), ])
 def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
-  if c.arg.precompile: return None
+  if not c.is_inline_call: return None
   params: list[UOp] = []
   graph_rewrite(c.body, pm_gather_params, bottom_up=True, ctx=params, name="gather params")
   params = sorted(params, key=lambda x: x.arg.slot)
@@ -112,6 +132,7 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   # substitute args by their flat max-shaped storage view so the movement views on the params stay valid
   def flat_storage(a:UOp) -> tuple[int, UOp]:  # returns (size, view of a as flat max-shaped storage)
     shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
+    if a.op is Ops.SHRINK and a.src[0].shape == shp and all(s == 0 for s,_ in a.marg): a = a.src[0]
     return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
   dict_map = {x:args[x.arg.slot] for x in params}
   for i, (p, a) in enumerate(dict_map.items()):
@@ -144,7 +165,7 @@ def copy_to_anon_store(x:UOp, copy:UOp):
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp.new_buffer(x.device, prod(x.max_shape), stg.dtype).reshape(x.max_shape)
+  buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(stg.shape)
 
 def materialize_cross_device_src(dest:UOp, src:UOp):
@@ -152,13 +173,12 @@ def materialize_cross_device_src(dest:UOp, src:UOp):
   if src.device is None or dest.device == src.device or src.has_buffer_identity(after_ok=True): return None
   return dest.store(src.contiguous())
 
-earliest_rewrites = mop_cleanup+PatternMatcher([
-  # resolve calls with RETURNED inputs (inline the body)
-  (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.has_unbound_outputs else None),
-
-  # resolve AFTER on RETURNED (call outputs)
+pm_inline_calls = PatternMatcher([
+  (UPat(Ops.CALL, name="c"), resolve_function),
   (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
+])
 
+earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve allreduce (must be bottom up)
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
 
@@ -233,7 +253,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
-  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
+  tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
+  tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls, name="inline calls")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink
