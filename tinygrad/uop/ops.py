@@ -1257,25 +1257,16 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       axis = o.axis if isinstance(o.device, tuple) else None
       # multi-device values have a per-shard sized storage: the sharding lives in the graph, not the arg
       if shp and isinstance(dev, tuple): shp = tuple(s//len(dev) if i == axis else s for i,s in enumerate(shp))
-      ret = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), o.dtype, None if not shp else prod(to_max_shape(shp)), device=dev))
-      return ret if not shp else ret.view_as(shp, axis)
+      ret = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), o.dtype, None if shp is None else prod(to_max_shape(shp)), device=dev))
+      return ret if shp is None else ret.reshape(()) if not shp else ret.view_as(shp, axis)
     rets = tuple(mint(o) for o in values)
     # the body only knows PARAMs: the output PARAMs get the slots of the outputs' positions in the arg list
     body = UOp.sink(*[v.param_like(p).store(v) for v, p in zip(values, pos)])
     args: list[UOp|None] = [None] * (len(srcs) + len(values))
     for p, r in zip(pos, rets): args[p] = r
-    it = iter(srcs)
+    it = iter(x.contiguous() if precompile else x for x in srcs)
     call = body.call(*[r if r is not None else next(it) for r in args], grad_fxn=grad_fxn, name=name, precompile=precompile,
                      precompile_backward=precompile_backward, aux=aux)
-    if precompile:
-      # Declare call-local storage; binding and allocation belong to the outer call.
-      buffers = {}
-      for o in rets:
-        buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), o.dtype, prod(o.max_shard_shape), device=o.device))
-        ret = buf.reshape(o.max_shard_shape).shrink_to(o.shard_shape)
-        buffers[o] = ret.unshard(o.axis) if o.axis is not None else ret
-      call = call.replace(src=(call.body, *[buffers[a] if a in buffers else a.contiguous() for a in call.src[1:]]))
-      rets = tuple(buffers[o] for o in rets)
     return tuple(r.after(call) for r in rets)
 
   # one-line convenience for the single-output case: self is the value
