@@ -139,8 +139,6 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       must_divide = False
     elif buf.dtype not in (dtypes.float, dtypes.half, dtypes.int, dtypes.uint, *dtypes.fp8s) and not is_image_shape(buf._shape):
       pass
-    elif buf.addrspace == AddrSpace.REG:
-      pass
     elif is_image_shape(buf._shape):
       lengths = [4]
     elif ctx is not None and ctx.supports_float4:
