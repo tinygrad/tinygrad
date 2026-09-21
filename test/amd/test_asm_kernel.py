@@ -3,7 +3,7 @@ import functools
 from dataclasses import dataclass
 from typing import Callable
 import numpy as np
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
@@ -13,6 +13,7 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
 from tinygrad.renderer.amd.dsl import s, v, NULL, Reg, Inst
+from test.amd.helpers import TARGET_TO_ARCH
 from extra.gemm.amd_asm_matmul import Kernel
 
 # small pattern matcher converting CALL to INS
@@ -203,10 +204,9 @@ def custom_data_deps(A:UOp) -> UOp:
   sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
 
-#@unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
+@unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestAsmKernel(unittest.TestCase):
-  def setUp(self):
-    self.arch = "rdna3" #TARGET_TO_ARCH[Device["AMD"].arch]
+  def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
 
   def test_simple(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
