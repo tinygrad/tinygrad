@@ -552,7 +552,10 @@ class MovementMixin:
     if len(dims) != len(shifts): raise RuntimeError(f"{len(dims)=} != {len(shifts)=}")
     if 0 in self.shape: return self
     shrink_arg: list[tuple[sint, sint]|None] = [None] * self.ndim
-    for d, s in zip(dims, shifts): shrink_arg[d] = (delta:=self.shape[d]-s%self.shape[d], delta+self.shape[d])
+    for d, s in zip(dims, shifts):
+      delta = self.shape[d]-s%self.shape[d]
+      if (previous:=shrink_arg[d]) is not None: delta = (previous[0]+delta)%self.shape[d]
+      shrink_arg[d] = (delta, delta+self.shape[d])
     return self.repeat(*tuple(2 if i in dims else 1 for i in range(self.ndim))).shrink(tuple(shrink_arg))
 
   # *** movement ops with expand ***

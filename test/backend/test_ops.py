@@ -2241,6 +2241,12 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([(3, 3)], lambda x: x.roll(shifts=1, dims=(0, 1)), expected=RuntimeError)
     self.helper_test_exception([(10,)], lambda x: x.roll(shifts=(1, 2), dims=0), expected=RuntimeError)
 
+  def test_roll_repeated_dims(self):
+    for shifts, dims in (((1, 2), (1, 1)), ((1, -1), (1, 1)), ((1, 0), (1, 1)), ((8, -1, 2), (1, 0, -1))):
+      with self.subTest(shifts=shifts, dims=dims):
+        helper_test_op([(3, 5)], lambda x: x.roll(shifts, dims))
+    helper_test_op([(3, 5)], lambda x: x.roll((1, 2), (1, 1))[:, 0])
+
   def test_detach(self):
     helper_test_op([(4,3,6,6)], lambda x: x.detach(), forward_only=True)
     helper_test_op([()], lambda x: x.detach(), forward_only=True)

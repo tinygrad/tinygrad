@@ -87,6 +87,14 @@ class TestTensorVariable(unittest.TestCase):
     v0 = Variable("z", 0, 10).bind(2)
     self.assertEqual((Tensor.ones(10).contiguous()[:v0] * Tensor(v0)).sum().item(), 4.0)
 
+  def test_symbolic_roll_large_negative_shift(self):
+    for size, shifts in ((2, (-2**63,)), (5, (0, -2**63+1))):
+      with self.subTest(size=size, shifts=shifts):
+        v = Variable("roll_size", 1, 8).bind(size)
+        t = Tensor.arange(8).realize()[:v]
+        out = t.roll(shifts, (0,)*len(shifts)).realize()[:size]
+        self.assertEqual(out.tolist(), [(i - sum(shifts)) % size for i in range(size)])
+
   def test_inner_tvar_node(self):
     vv = Variable("w", 0, 10).bind(2)
     ret = Tensor(vv * 4).item()
