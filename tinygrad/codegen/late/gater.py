@@ -17,9 +17,11 @@ pm_move_gates_from_index = PatternMatcher([
 
   # here we create the alt value for load to be 0s and remove the where Invalid
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(), UPat.var("gate").where(UPat.var("idx"), UPat(arg=Invalid)),), name="mop", allow_any_len=True) \
-   .load(name="l"), lambda mop,gate,idx,l: mop.replace(src=(mop.src[0],idx)+mop.src[2:]).load(l.vconst_like(0), gate)),
+   .or_bitcasted().load(name="l"), lambda mop,gate,idx,l:
+   l.src[0].substitute({mop:mop.replace(src=(mop.src[0],idx)+mop.src[2:])}).load(l.vconst_like(0), gate)),
   (UPat((Ops.INDEX, Ops.SHRINK), src=(UPat(), UPat.var("gate").where(UPat.var("idx"), UPat(arg=Invalid)),), name="mop", allow_any_len=True) \
-   .store(UPat.var("data")), lambda mop,gate,idx,data: mop.replace(src=(mop.src[0],idx)+mop.src[2:]).store(data, gate)),
+   .or_bitcasted().store(UPat.var("data"), name="s"), lambda mop,gate,idx,data,s:
+   s.src[0].substitute({mop:mop.replace(src=(mop.src[0],idx)+mop.src[2:])}).store(data, gate)),
 
   # Where after gated load becomes alt value
   (UPat.var("gate").where(UPat().load(UPat(), UPat.var("gate", dtype=dtypes.bool), name="l").or_casted(), UPat.var("a")).named("w"),

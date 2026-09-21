@@ -140,9 +140,11 @@ ew_devectorizer = PatternMatcher([
 ])
 
 def lower_bitcast_index(b:UOp, idx:UOp) -> UOp|None:
-  if idx.shape or b.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL): return None
+  if idx.shape or b.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.ALU): return None
   x, inds = b.src[0], idx.src[1:]
-  if x.dtype.itemsize < b.dtype.itemsize: return x.index(*inds).alu(Ops.BITCAST, arg=b.dtype)
+  if x.dtype.itemsize < b.dtype.itemsize:
+    span = UOp.stack(*(x.index(*inds, i) for i in range(b.dtype.itemsize//x.dtype.itemsize))) if b.addrspace is AddrSpace.ALU else x.index(*inds)
+    return span.alu(Ops.BITCAST, arg=b.dtype)
   return x.index(*inds[:-1]).alu(Ops.BITCAST, arg=b.dtype).index(inds[-1]) if x.shape and x.dtype.itemsize > b.dtype.itemsize else None
 
 devectorizer2 = PatternMatcher([
@@ -152,7 +154,7 @@ devectorizer2 = PatternMatcher([
                        UOp.const(idx.shape[0]))) if len(r.src[0].shape) == len(idx.shape) == 1 and len(idx.src) == len(r.shape)
    and r.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) and not any(i.is_invalid for i in idx.src[1:]) else None),
 ])+mop_cleanup+pm_mops+PatternMatcher([
-  # resolve the element's storage span before discarding the bitcast's shape
+  # resolve the element's packed span before discarding the bitcast's shape
   (UPat(Ops.BITCAST, name="b").f(Ops.INDEX, name="idx", allow_any_len=True), lower_bitcast_index),
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
@@ -423,7 +425,7 @@ pm_linearize_cleanups = PatternMatcher([
   # if statements are not allowed in the graph
   (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
-  (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
+  (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted().or_bitcasted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
    lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
 ])
 

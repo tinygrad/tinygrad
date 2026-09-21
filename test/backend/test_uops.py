@@ -84,6 +84,26 @@ class TestBitcastBufferView(unittest.TestCase):
     run_uops([view.index(0).store(val ^ 0xff), view.index(1).store(val)], [buf])
     self.assertEqual(np.frombuffer(buf.as_memoryview(), dtype=np.uint64, count=2, offset=4).tolist(), [val ^ 0xff, val])
 
+  @Context(SPEC=2)
+  def test_gated_load(self):
+    src, out = UOp.param(0, dtypes.uint8, 16), UOp.param(1, dtypes.uint32, 8)
+    r = UOp.range(8, 0, AxisType.LOOP)
+    ibuf = Buffer(Device.DEFAULT, 16, dtypes.uint8, initial_value=bytes(range(1, 17)))
+    obuf = Buffer(Device.DEFAULT, 8, dtypes.uint32).allocate()
+    val = src.bitcast(dtypes.uint32).index(r.valid(r < 4)).load()
+    run_uops([out.index(r).store(val).end(r)], [ibuf, obuf])
+    self.assertEqual(np.frombuffer(obuf.as_memoryview(), dtype=np.uint32).tolist(),
+                     [0x04030201, 0x08070605, 0x0c0b0a09, 0x100f0e0d, 0, 0, 0, 0])
+
+  @Context(SPEC=2)
+  def test_gated_store(self):
+    dst = UOp.param(0, dtypes.uint8, 16)
+    r = UOp.range(4, 0, AxisType.LOOP)
+    buf = Buffer(Device.DEFAULT, 16, dtypes.uint8, initial_value=bytes(16))
+    dest = dst.bitcast(dtypes.uint32).index(r.valid((r % 2).eq(0)))
+    run_uops([dest.store((r + 1).cast(dtypes.uint32)).end(r)], [buf])
+    self.assertEqual(np.frombuffer(buf.as_memoryview(), dtype=np.uint32).tolist(), [1, 0, 3, 0])
+
   def test_vector_load_store(self):
     for src_dt, dst_dt in [(dtypes.uint8, dtypes.uint32), (dtypes.uint32, dtypes.uint8)]:
       with self.subTest(src=src_dt, dst=dst_dt):
@@ -93,6 +113,18 @@ class TestBitcastBufferView(unittest.TestCase):
                 for i, dt in enumerate((src_dt, dst_dt))]
         run_uops([dst.store(src.load())], bufs)
         self.assertEqual(bytes(bufs[1].as_memoryview()), bytes(range(16)))
+
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "requires native vector bitcasts")
+class TestBitcastValues(unittest.TestCase):
+  @Context(SPEC=2)
+  def test_widen(self):
+    val = UOp.stack(*(UOp.const(i, dtypes.uint8) for i in range(1, 9))).bitcast(dtypes.uint32).index(1)
+    self.assertEqual(_test_uops_result(dtypes.uint32, [], val), 0x08070605)
+
+  @Context(SPEC=2)
+  def test_narrow(self):
+    val = UOp.stack(UOp.const(0x04030201, dtypes.uint32)).bitcast(dtypes.uint8).index(1)
+    self.assertEqual(_test_uops_result(dtypes.uint8, [], val), 2)
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):

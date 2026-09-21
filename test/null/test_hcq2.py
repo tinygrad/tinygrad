@@ -53,6 +53,13 @@ def cpu_buf(size:int=1, dtype=dtypes.uint8, **kwargs) -> UOp: return UOp.placeho
 def lower_hcq(body:UOp) -> UOp:
   return unwrap(hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test")).call(aux=hcq2.HCQInfo(("CPU",)))))
 
+class TestHCQ2Buffers(unittest.TestCase):
+  def test_empty_owned_buffer(self):
+    buf = unwrap(hcq2.bufferize_buf(hcq2.LinkCtx({}, use_rt=False), cpu_buf(0, tag="kernargs")))
+    self.assertEqual(buf.shape, (0,))
+    self.assertTrue(buf.buffer.is_allocated())
+    self.assertGreater(buf.buffer._buf, 0)
+
 class TestHCQ2Deps(unittest.TestCase):
   def test_copy_only_batch_with_multiple_queues(self):
     from types import SimpleNamespace
