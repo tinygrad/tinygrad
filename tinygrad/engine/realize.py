@@ -312,4 +312,4 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
       else:
         from tinygrad.tensor import Tensor
         with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
-    yield max(pm_exec.rewrite(linear.src[0].without_after, ctx) or [0.0])
+    yield unwrap((pm_exec.rewrite(linear.src[0].without_after, ctx) or [0.0])[-1])
