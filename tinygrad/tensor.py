@@ -447,11 +447,11 @@ class Tensor(RandMixin):
     if self.grad is not None: ret.grad = self.grad.clone(device=device)
     return ret.is_param_(self.is_param)
 
-  def to(self, device:str|tuple[str, ...]|None) -> Tensor:
+  def to(self, device:str|tuple[str, ...]|None, force:bool=False) -> Tensor:
     """
-    Moves the tensor to the given device.
+    Moves the tensor to the given device. `force=True` inserts a transfer even for device-less values.
     """
-    if self.uop.device is None: return self
+    if self.uop.device is None and not force: return self
     if (device:=canonicalize_device(device)) == self.device: return self
     if isinstance(device, str) and is_disk_device(device):
       if isinstance(self.device, tuple): raise RuntimeError("gather to a single device before storing to DISK")
@@ -460,7 +460,7 @@ class Tensor(RandMixin):
       ret = Tensor(dst.after(dst.store(self.uop.cast(dst.dtype))))
     elif self.uop.on_creation_device(): ret = Tensor(self.uop.clone(device))
     else: ret = Tensor(self.uop.copy_to_device(device))
-    if self.grad is not None: ret.grad = self.grad.to(device)
+    if self.grad is not None: ret.grad = self.grad.to(device, force=force)
     return ret.is_param_(self.is_param)
 
   def to_(self, device:str|tuple[str, ...]|None) -> Tensor:
