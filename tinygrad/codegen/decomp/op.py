@@ -52,11 +52,9 @@ def threefry2x32(x: UOp, key: UOp):
 # ***** decomposition patterns *****
 
 def floordiv_to_idiv(a:UOp, b:UOp) -> UOp:
-  if (a.vmin >= 0 and b.vmin >= 0) or (a.vmax <= 0 and b.vmax <= 0): return a.alu(Ops.CDIV, b)
   return a.alu(Ops.CDIV, b) - (a.alu(Ops.CMOD, b).ne(0) & (a<0).ne(b<0))
 
 def floormod_to_mod(a:UOp, b:UOp) -> UOp:
-  if (a.vmin >= 0 and b.vmin >= 0) or (a.vmax <= 0 and b.vmax <= 0): return a.alu(Ops.CMOD, b)
   r = a.alu(Ops.CMOD, b)
   # use where instead of mul to avoid being fused into MULACC (which int64 long-decomp doesn't handle)
   return r + (r.ne(0) & (a<0).ne(b<0)).where(b, b.const_like(0))
