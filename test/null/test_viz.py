@@ -731,7 +731,7 @@ class TestVizProfiler(unittest.TestCase):
     self.assertListEqual(layout[2:], ["TEST:1", "TEST:1 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:2 N1"])
 
 def _alloc(b:int):
-  a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
+  a = Tensor.empty(b, device="NULL", dtype=dtypes.char).realize()
   a.uop.buffer.allocate()
   return a
 

@@ -35,9 +35,10 @@ class ParamArg:
   image: tuple[int, int]|None = None
   # the device Buffer for a realized BUFFER. the UOp is the owner of the Buffer: they live and die together (1:1)
   buffer: Buffer|MultiBuffer|None = None
+  bind_on_realize: bool = False
   def __repr__(self):
     fields = (("vmin_vmax", None), ("multiple_of", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("device", None),
-              ("volatile", False), ("image", None))
+              ("volatile", False), ("image", None), ("bind_on_realize", False))
     args = [repr(self.slot), repr(self.dtype)] + ([repr(self.size)] if self.size is not None else []) + \
       [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     if self.buffer is not None:
@@ -553,11 +554,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def has_unbound_outputs(self) -> bool:
     """does this call still have unresolved outputs: ALLOCs among its inputs (minted by call_with_outputs,
     resolved when the call is inlined or the outputs are materialized). a lifecycle query, not a call type"""
-    return self.op is Ops.CALL and any(x.unsharded_base.op is Ops.ALLOC for x in self.src[1:])
+    return self.op is Ops.CALL and any((b:=x.unsharded_base).op is Ops.ALLOC and not b.arg.bind_on_realize for x in self.src[1:])
   @property
   def unbound_outputs(self) -> tuple[UOp, ...]:
     """the unresolved outputs of this call: an AFTER on each ALLOC input, usable like a normal buffer"""
-    return tuple(x.after(self) for x in self.src[1:] if x.unsharded_base.op is Ops.ALLOC)
+    return tuple(x.after(self) for x in self.src[1:] if (b:=x.unsharded_base).op is Ops.ALLOC and not b.arg.bind_on_realize)
   def index(self, *srcs:UOp|int|None, **kwargs):
     new_srcs: list[UOp] = [UOp.const(x) if isinstance(x, int) else x for x in srcs if x is not None]
     if len(new_srcs) == 1 and new_srcs[0].op is Ops.CONST and self.op is Ops.STACK: return self.src[new_srcs[0].val]
@@ -761,7 +762,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   # little helpers
   def on_disk(self:UOp): return isinstance(self.device, str) and self.device.startswith("DISK")
   def on_creation_device(self:UOp): return isinstance(self.device, str) and self.device.startswith(("DISK", "NPY", "PYTHON"))
-  def needs_storage(self:UOp) -> bool: return not self.is_virtual and not self.has_buffer_identity()
+  def needs_storage(self:UOp) -> bool: return not self.is_virtual and (self.storage_base.op is Ops.ALLOC or not self.has_buffer_identity())
 
   # *** uop movement ops ***
 
@@ -852,7 +853,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       # bfloat16 and fp8 have no struct format, so pack a float32 buffer and cast
       bdtype = dtypes.float32 if dtype in [dtypes.bfloat16, *dtypes.fp8s] else dtype
       assert bdtype.fmt is not None, f"{bdtype=} has None fmt"
-      ret = UOp.empty(shape:=get_shape(x), dtype=bdtype, device="PYTHON")
+      ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), bdtype).reshape(shape)
       data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
     if not data: ret.buffer.allocate(memoryview(bytearray()))
     else: (buf:=ret.buffer.ensure_allocated()).allocator._copyin(buf._buf, memoryview(data))

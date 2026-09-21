@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst, AddrSpace
-from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray
+from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray, prod
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
 from tinygrad.uop.ops import remove_all_tags
@@ -86,8 +86,8 @@ def canonicalize_alloc(ctx:CallifyCtx, b:UOp):
   if b.arg.slot >= 0 and b not in ctx.allocs: ctx.allocs[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.allocs)))
   return ctx.allocs.get(b)
 
-def canonicalize_call_body(ctx:CallifyCtx, c:UOp):
-  body = graph_rewrite(c.body, pm_canonicalize_alloc, ctx=ctx, bottom_up=True)
+def canonicalize_call_body(c:UOp):
+  body = graph_rewrite(c.body, pm_canonicalize_alloc, ctx=CallifyCtx(), bottom_up=True)
   return c.replace(src=(body,)+c.src[1:]) if body is not c.body else None
 
 pm_canonicalize_alloc = PatternMatcher([
@@ -279,23 +279,28 @@ class Tensor(RandMixin):
     if any(u.dtype in dtypes.weaks and u.device is not None for u in sink.src):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
     bases = {u.base for u in sink.src}
+    # Bind output allocations beneath wrappers so all aliases retain the same storage and call dependencies.
     for u in sink.src:
-      while u.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: u = u.src[0]
+      u = u.base
+      while u.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: u = u.src[0].base
       if (b:=u.storage_base).op is Ops.ALLOC: bases.add(b)
     tensor_map:dict[UOp, UOp] = {}
     # Rebuild in dependency order: replacement values already reference the other outputs' storage.
     for x in sink.toposort(enter_calls=False):
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
-      if x in bases and x.op is Ops.ALLOC: u = x.empty_like()
+      if x.op is Ops.ALLOC and (x.arg.bind_on_realize or x in bases): u = UOp.new_buffer(x.device, x.max_numel(), x.dtype)
       if x in bases and u.needs_storage():
         src, contiguous = u, False
         while src.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}:
           contiguous |= src.op is Ops.STAGE
           src = src.src[0]
-        if src.is_virtual or src.on_disk() or 0 in src.shape or src.has_buffer_identity(): u = src
-        elif src.op is Ops.AFTER and (src.has_buffer_identity(after_ok=True) or src.src[1].op is Ops.STORE): u = src
+        if src.is_virtual or src.on_disk() or 0 in src.shape or src.has_buffer_identity(after_ok=True): u = src
+        elif src.op is Ops.AFTER and (src.src[1].op is Ops.STORE or (not contiguous and src.storage_base.has_buffer_identity())): u = src
         elif contiguous and (view := contiguous_mops_to_view(None, u, src)) is not None: u = view
-        else: u = src.clone()
+        else:
+          buf = UOp.new_buffer(src.device, prod(src.max_shard_shape), src.dtype).reshape(src.max_shard_shape).shrink_to(src.shard_shape)
+          if isinstance(src.device, tuple) and src.axis is not None: buf = buf.unshard(src.axis)
+          u = buf.after(buf.store(src))
       if u is not x: tensor_map[x] = u
     _apply_map_to_tensors(tensor_map, name="bufferize")
 
@@ -521,7 +526,7 @@ class Tensor(RandMixin):
     """
     r = Tensor.empty(*shape, **kwargs)
     assert isinstance(r.device, str)
-    cast(Buffer, r.uop.buffer).allocate(external_ptr=ptr)
+    cast(Buffer, r.realize().uop.buffer).allocate(external_ptr=ptr)
     return r
 
   @staticmethod
@@ -608,7 +613,7 @@ class Tensor(RandMixin):
       if v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
     # raise if mutation would diverge from eager (allow only pure views of a realized buffer; exclude +=/-= RHS via v_uop/v_bw)
     v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
-    if self.uop.op_in_backward_slice_with_self(Ops.BUFFER):
+    if self.uop.op_in_backward_slice_with_self(Ops.BUFFER, Ops.ALLOC):
       shared = self.uop.base if self.uop.base.is_realized else None
       if any(self.uop in t.uop.backward_slice_with_self and t.uop.base is not shared for tref in all_tensors
              if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
@@ -616,7 +621,7 @@ class Tensor(RandMixin):
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
     is_disk = self.uop.on_disk()
     advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
-    realized = is_disk or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized()
+    realized = is_disk or self.uop.base.op in {Ops.BUFFER, Ops.ALLOC} or self.uop._base_buffer_is_realized()
     if (not self.uop.base.is_realized and self.is_floating_point()) or not (advanced or realized):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.replace(self._getitem(indices, v))

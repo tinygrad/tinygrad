@@ -562,20 +562,35 @@ class TestFunctionTuple(unittest.TestCase):
     np.testing.assert_allclose(f(a).numpy(), 14.0)
 
     # g is f with empty output instead of invalids
-    @function(precompile=True, allow_implicit=True)
+    @function(precompile=True, allow_implicit=False)
     def g(a:Tensor):
       c = Tensor(Tensor.empty(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.unshard(0), device=devs)
       return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
 
     np.testing.assert_allclose(g(a).numpy(), 14.0)
 
+  def test_custom_kernel_empty_is_local(self):
+    def write(C:UOp, A:UOp) -> UOp:
+      i = UOp.range(A.shape[0], 0)
+      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="write"))
+    for precompile in (False, True):
+      with self.subTest(precompile=precompile):
+        @function(precompile=precompile, allow_implicit=False)
+        def f(a:Tensor): return Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=write)[0]
+        a, b = f(Tensor([1., 2.])), f(Tensor([3., 4.]))
+        Tensor.realize(a, b)
+        self.assertEqual(a.tolist(), [2., 4.])
+        self.assertEqual(b.tolist(), [6., 8.])
+        self.assertIsNot(a.uop.buffer, b.uop.buffer)
+
   def test_custom_kernel_inplace_output_is_implicit(self):
-    # a custom_kernel output the kernel also READS (in-place add) is not write-only, so it must be captured as an input
+    # caller-owned storage must be captured, even before its Buffer is bound
+    state = Tensor.empty(4)
     def inplace_add(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)
       return C[i].store(C[i].load() + A[i]).end(i).sink(arg=KernelInfo(name="inplace_add"))
     @function(precompile=True, allow_implicit=False)
-    def f(a:Tensor): return Tensor.custom_kernel(Tensor.empty(*a.shape, dtype=a.dtype, device=a.device), a, fxn=inplace_add)[0]
+    def f(a:Tensor): return Tensor.custom_kernel(state, a, fxn=inplace_add)[0]
     with self.assertRaisesRegex(RuntimeError, "implicit buffer"): f(Tensor([1., 2., 3., 4.]).contiguous().realize())
 
   def test_custom_kernel_write_only_persistent_output_is_implicit(self):
@@ -583,11 +598,14 @@ class TestFunctionTuple(unittest.TestCase):
     def write(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)
       return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="write"))
-    state = Tensor([100., 200., 300., 400.], device="CPU").contiguous().realize()
-    @function(precompile=True, allow_implicit=True)
-    def f(a:Tensor): return Tensor.custom_kernel(state, a, fxn=write)[0]
-    f(Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize()).realize()
-    np.testing.assert_allclose(state.numpy(), [2., 4., 6., 8.])
+    for realize in (False, True):
+      with self.subTest(realize=realize):
+        state = Tensor.empty(4, device="CPU")
+        if realize: state.realize()
+        @function(precompile=True, allow_implicit=True)
+        def f(a:Tensor): return Tensor.custom_kernel(state, a, fxn=write)[0]
+        f(Tensor([1., 2., 3., 4.], device="CPU").contiguous().realize()).realize()
+        np.testing.assert_allclose(state.numpy(), [2., 4., 6., 8.])
 
   def test_custom_kernel_program_invalids_not_captured(self):
     # llama FP8 kernels are PROGRAM with bare-buffer sinks (no analyzable stores), so the invalids scratch
