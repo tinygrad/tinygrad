@@ -1020,15 +1020,18 @@ class TestCfg(unittest.TestCase):
     from tinygrad.runtime.autogen.amd.cdna.ins import v_accvgpr_read, s_endpgm, v_mfma_scale_f32_16x16x128_f8f6f4
     k = Kernel()
     k.emit(v_accvgpr_read(v[0], v[0]))
-    k.emit(mfma:=v_mfma_scale_f32_16x16x128_f8f6f4(v[0:3], v[4:7], v[8:11], v[0:3], neg=0, neg_hi=0, opsel=0, opsel_hi=0, cbsz=4, acc_cd=1, acc=0,
-                                                 blgp=4, scale_src0=v[12].offset, scale_src1=v[13].offset))
+    k.emit(v_mfma_scale_f32_16x16x128_f8f6f4(v[0:3], v[4:7], v[8:11], v[0:3], neg=0, neg_hi=0, opsel=0, opsel_hi=0, cbsz=4, acc_cd=1, acc=0,
+                                             blgp=4, scale_src0=v[12].offset, scale_src1=v[13].offset))
     k.emit(s_endpgm())
     ret = self.get_cfg("agpr", k, target="gfx950")
-    self.assertIn("v_accvgpr_read(v[0], a[0])", ret["src"])
-    tokens = next(iter(ret["data"]["pc_tokens"].values()))
-    dst, src = tokens[1:3]
-    self.assertEqual((dst["st"], src["st"]), ("v0", "a0"))
-    self.assertTrue(set(dst["keys"]).isdisjoint(src["keys"]))
+    read_asm, mfma_asm, *_ = [line.split("#")[0].strip() for line in ret["src"].splitlines()]
+    read_tok, mfma_tok, *_ = ret["data"]["pc_tokens"].values()
+    self.assertEqual(read_asm, "v_accvgpr_read(v[0], a[0])")
+    self.assertTrue(mfma_asm.startswith("v_mfma_scale_f32_16x16x128_f8f6f4(a[0:3], v[4:7], v[8:11], a[0:3],"))
+    self.assertEqual([t["st"] for t in read_tok[1:3]], ["v0", "a0"])
+    self.assertEqual([t["st"] for t in mfma_tok[1:5]], ["a[0:3]", "v[4:7]", "v[8:11]", "a[0:3]"])
+    self.assertTrue(set(read_tok[1]["keys"]).isdisjoint(read_tok[2]["keys"]))
+    #self.assertEqual(eval(mfma_text, vars(ins)).to_bytes(), mfma.to_bytes())
 
 # launch viz cli without subprocess
 def run_cli(*cli_args, json_fmt=True) -> list[dict]:
