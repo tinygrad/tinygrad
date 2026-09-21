@@ -230,6 +230,15 @@ class TestCustomKernel(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(Opt(OptOps.SPLIT, 2, (4, AxisType.GROUP_REDUCE)))
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "GROUP_REDUCE needs LOCAL ranges")
+  def test_group_reduce_split_range(self):
+    # j%2 splits j into two ranges, both are still GROUP_REDUCE
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.GROUP_REDUCE)
+      return C[i].store((A[i, j] * (j%2).cast(A.dtype)).reduce(j, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), a[:, 1::2].sum(1).tolist())
+
   def test_loop_acc_gemm_tc_refused(self):
     # ACC[j] += A[t,:] @ B[:,j] over t: the recurrence on ACC makes t a serial LOOP, so no tensor core may split it
     ren = AMDLLVMRenderer(Target("AMD", arch="gfx1100"))
@@ -242,6 +251,17 @@ class TestCustomKernel(unittest.TestCase):
     a, b, acc = Tensor.empty(M, K, dtype=dtypes.half), Tensor.empty(K, N, dtype=dtypes.half), Tensor.empty(N, dtype=dtypes.float)
     ast = Tensor.custom_kernel(acc, a, b, fxn=kernel)[0].schedule_linear().src[-1].src[0]
     with self.assertRaises(KernelOptError): to_program(ast, ren)
+
+  def test_split_loop_local_barrier(self):
+    # t%2 splits the t loop. tmp is stored and loaded in the loop, so the end of the loop still needs a barrier
+    def kernel(C:UOp, A:UOp) -> UOp:
+      l, t = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1, AxisType.LOOP)
+      tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
+      v = tmp.after(tmp[l].store(A[t%2, l]))[(l+1)%4]
+      return C[l].set(C.after(t)[l] + v, end=t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(2, 4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
+    self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
 
   def test_gemm_multi(self):
     devs = ("CPU:0", "CPU:1")
