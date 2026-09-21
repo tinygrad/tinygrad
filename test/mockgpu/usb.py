@@ -200,19 +200,6 @@ class MockUSB3:
     else: raise RuntimeError(f"cannot bulk write for {op}")
     self._bulk_write_op = None
 
-  def bulk_write_async(self, payload:memoryview, timeout:int=10000) -> int:  # the mock completes transfers synchronously
-    self.bulk_write(bytes(payload), timeout)
-    return 0
-
-  def control_write_async(self, request:int, value:int=0, index:int=0, data:bytes=b"", timeout:int=1000) -> int:
-    self.control_write(request, value, index, data, timeout)
-    return 0
-
-  def control_read_async(self, request:int, length:int, value:int=0, index:int=0, timeout:int=1000) -> tuple[int, memoryview]:
-    return 0, self.control_read(request, length, value, index, timeout)
-
-  def bulk_wait(self, tag:int): pass
-
   def bulk_read(self, length:int, timeout:int=1000) -> memoryview:
     assert self._bulk_read_op is not None
     op, address, size = self._bulk_read_op
