@@ -114,7 +114,7 @@ class TestBitcastBufferView(unittest.TestCase):
         run_uops([dst.store(src.load())], bufs)
         self.assertEqual(bytes(bufs[1].as_memoryview()), bytes(range(16)))
 
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "requires native vector bitcasts")
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "requires C-style value bitcasts")
 class TestBitcastValues(unittest.TestCase):
   @Context(SPEC=2)
   def test_widen(self):
@@ -125,6 +125,20 @@ class TestBitcastValues(unittest.TestCase):
   def test_narrow(self):
     val = UOp.stack(UOp.const(0x04030201, dtypes.uint32)).bitcast(dtypes.uint8).index(1)
     self.assertEqual(_test_uops_result(dtypes.uint8, [], val), 2)
+
+  @Context(SPEC=2)
+  def test_loaded_values(self):
+    data = bytes(range(128, 144))
+    for narrow in (dtypes.uint8, dtypes.int8, dtypes.uint16, dtypes.int16):
+      for src_dt, dst_dt in ((narrow, dtypes.uint32), (dtypes.uint32, narrow)):
+        with self.subTest(src=src_dt, dst=dst_dt):
+          src, dst = [UOp.param(i, dt, 16 // dt.itemsize) for i, dt in enumerate((src_dt, dst_dt))]
+          val = src.index(UOp.stack(*(UOp.const(i) for i in range(src.max_numel())))).load().bitcast(dst_dt)
+          dest = dst.index(UOp.stack(*(UOp.const(i) for i in range(dst.max_numel()))))
+          bufs = [Buffer(Device.DEFAULT, 16 // dt.itemsize, dt, initial_value=data if i == 0 else bytes(16))
+                  for i, dt in enumerate((src_dt, dst_dt))]
+          run_uops([dest.store(val)], bufs)
+          self.assertEqual(bytes(bufs[1].as_memoryview()), data)
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
