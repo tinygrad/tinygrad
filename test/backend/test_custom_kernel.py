@@ -4,6 +4,7 @@ import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
+from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.renderer import Target
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -220,6 +221,14 @@ class TestCustomKernel(unittest.TestCase):
 
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
     self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "GROUP_REDUCE needs LOCAL ranges")
+  def test_gemm_group_refused(self):
+    # k is tagged REDUCE but custom_gemm has no Ops.REDUCE
+    a, b, c = Tensor.empty(16, 16), Tensor.empty(16, 16), Tensor.empty(16, 16)
+    ast = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0].schedule_linear().src[-1].src[0]
+    with self.assertRaises(KernelOptError):
+      Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(Opt(OptOps.SPLIT, 2, (4, AxisType.GROUP_REDUCE)))
 
   def test_loop_acc_gemm_tc_refused(self):
     # ACC[j] += A[t,:] @ B[:,j] over t: the recurrence on ACC makes t a serial LOOP, so no tensor core may split it
