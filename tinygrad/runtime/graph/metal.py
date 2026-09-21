@@ -1,8 +1,8 @@
 from typing import Any, cast
-import ctypes, decimal, struct
-from tinygrad.helpers import dedup, getenv, unwrap, PROFILE
+import ctypes, decimal, struct, itertools
+from tinygrad.helpers import dedup, getenv, unwrap, PROFILE, round_up
 from tinygrad.device import Buffer, Device, ProfileGraphEntry, ProfileGraphEvent
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.runtime.ops_metal import MetalDevice, wait_check, to_ns_str
 from tinygrad.runtime.autogen import metal
@@ -17,32 +17,32 @@ class MetalGraph(GraphRunner):
     icb_descriptor.setCommandTypes(metal.MTLIndirectCommandTypeConcurrentDispatch)
     icb_descriptor.setInheritBuffers(False)
     icb_descriptor.setInheritPipelineState(False)
-    icb_descriptor.setMaxKernelBufferBindCount(31)
+    icb_descriptor.setMaxKernelBufferBindCount(1)
 
     self.icb = self.dev.sysdevice.newIndirectCommandBufferWithDescriptor_maxCommandCount_options(icb_descriptor, len(self.calls),
                                                                                                  metal.MTLResourceCPUCacheModeDefaultCache)
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
     self.needs_icb_fix = int(not self.dev.arch.startswith("Apple") or int(self.dev.arch[5:]) < 9)  # ICB fix not required on M3+ (Apple9+)
 
-    self.var_bind_data = []
-    if len(self.vars):
-      storage = self.dev.allocator.alloc(sum(dt.itemsize for r in self.runtimes for (_,_,dt,s) in unwrap(r).signature if s == ()))
-      self.var_buf, self.var_buf_view, var_buf_offset = storage.buf, unwrap(storage.host).mv, 0
+    # one args buffer: a 256-aligned struct region per kernel holding its buffer addresses and scalars
+    self.layouts = [unwrap(r).layout for r in self.runtimes]
+    self.offs = list(itertools.accumulate([round_up(unwrap(r).args_size, 256) for r in self.runtimes], initial=0))
+    storage = self.dev.allocator.alloc(self.offs[-1])
+    self.var_buf, self.var_buf_view, self.var_bind_data = storage.buf, unwrap(storage.host).mv, []
 
-    all_pipelines, all_resources = [], [self.var_buf.buf] if len(self.vars) else []
+    all_pipelines, all_resources = [], [self.var_buf.buf]
     for j, ((_, ast, bufs, _), runtime, replace) in enumerate(zip(self.calls, self.runtimes, self.uop_replace)):
       assert runtime is not None
       icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
       icb_command.setComputePipelineState(runtime.pipeline_state)
       all_pipelines.append(runtime.pipeline_state)
+      icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, self.offs[j], 0)
       for i, b in enumerate(bufs):
         if not any(pos == i for pos, _ in replace):
-          icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
+          struct.pack_into("Q", self.var_buf_view, self.offs[j] + self.layouts[j][i][0], b._buf.addr)
           all_resources.append(b._buf.buf)
-      for nm,i,dt,_ in runtime.signature[len(bufs):]:
-        icb_command.setKernelBuffer_offset_atIndex(self.var_buf.buf, var_buf_offset, i)
-        self.var_bind_data.append((nm, var_buf_offset, dt.fmt))
-        var_buf_offset += dt.itemsize
+      for (nm,_,dt,_), (off, _) in zip(runtime.signature[len(bufs):], self.layouts[j][len(bufs):]):
+        self.var_bind_data.append((nm, self.offs[j] + off, dt.fmt))
       global_size, local_size = ast.arg.launch_dims({v: 0 for v in self.vars})
       icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
       icb_command.setBarrier()
@@ -60,10 +60,9 @@ class MetalGraph(GraphRunner):
 
     updated_bufs = []
     for j in self.updatable:
-      computeCommand = self.icb.indirectComputeCommandAtIndex(j)
       for pos, iidx in self.uop_replace[j]:
         buf = cast(Buffer, input_uops[iidx].buffer)
-        computeCommand.setKernelBuffer_offset_atIndex(buf._buf.buf, buf._buf.offset, pos)
+        struct.pack_into("Q", self.var_buf_view, self.offs[j] + self.layouts[j][pos][0], buf._buf.addr)
         updated_bufs.append(buf._buf.buf)
 
     all_resources = dedup(self.all_resources + updated_bufs)
@@ -109,10 +108,3 @@ class MetalGraph(GraphRunner):
     if PROFILE and self.command_buffer is not None:
       wait_check(self.command_buffer)
       self.collect_timestamps()
-
-  @staticmethod
-  def supports_uop(batch_devs, new_call:UOp) -> bool:
-    # Metal ICB replay encodes offsets as uint32; reject if any Metal buffer offset exceeds 32-bit range.
-    for shrink in [s for src in new_call.src[1:] if (s:=src.src[0] if src.op is Ops.BITCAST else src).op is Ops.SHRINK]:
-      if shrink.src[1].val * shrink.src[0].dtype.itemsize > 0xFFFFFFFF: return False
-    return GraphRunner.supports_uop(batch_devs, new_call)

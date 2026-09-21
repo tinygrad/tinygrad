@@ -518,6 +518,13 @@ class TestDropTrueGate(unittest.TestCase):
     # the True valid should be dropped (INDEX should only have 2 sources)
     self.assertEqual(len(result.src), 2, "True valid should be dropped from INDEX")
 
+  def test_const_gate_clause_is_not_moved_to_load(self):
+    # a const clause constrains nothing, so moving it only adds "&True" to the load's valid
+    r0, r1 = Range(0, 32), Range(1, 32)
+    idx = UOp.param(0, dtypes.float, 1024).index((r0+r1+r1*32-31).valid((r0+r1<31).ne(True)))
+    where = UOp.const(True).where(idx, UOp.const(0.0))
+    self.assertIs(graph_rewrite(where, pm_move_where_on_load), where)
+
 class TestRangeShrink(unittest.TestCase):
   def get_ranges(self, sink):
     with Context(NOOPT=1, SPEC=0):

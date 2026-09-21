@@ -4,6 +4,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, 
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, dtypes, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, SPEC, Metadata, panic, CHECK_OOB, all_same, is_image_shape
+from tinygrad.device import is_disk_device
 
 # ***** uop helpers *****
 
@@ -86,8 +87,8 @@ spec_shared = PatternMatcher([
   # GROUP of stores (or groups, or NOOPs)
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
 
-  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, RETURNED, or another AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.COPY, Ops.INDEX,
+  # AFTER on Movement Op, PARAM, BUFFER, ALLOC, STAGE, or another AFTER
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.STAGE, Ops.INDEX,
                                                      Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
         allow_any_len=True), lambda: True),
 
@@ -117,13 +118,13 @@ spec_shared = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
-  # STORE: the target must be storage or a CONTIGUOUS realization point (or an AFTER/BITCAST/view of one);
-  # CONTIGUOUS targets are written into the buffer the CONTIGUOUS creates. INDEX stores are checked above
+  # STORE: the target must be storage or a STAGE realization point (or an AFTER/BITCAST/view of one);
+  # STAGE targets are written into the buffer the STAGE creates. INDEX stores are checked above
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x:
-   True if (b:=x.storage_base).op in {Ops.BUFFER, Ops.PARAM, Ops.COPY} else None if b.op is Ops.INDEX else False),
+   True if (b:=x.storage_base).op in {Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.STAGE} else None if b.op is Ops.INDEX else False),
 
   # WMMA has a <a, b, acc>
-  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 5),
+  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 4),
 ])
 
 def is_device(d): return isinstance(d, str) or (isinstance(d, tuple) and all(isinstance(s, str) for s in d))
@@ -133,10 +134,13 @@ spec_tensor = PatternMatcher([
   (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(),), name="u"),
    lambda u: dtypes.is_float(u.dtype) or u.src[0].base.is_invalid),
 
-  # BUFFER
+  # BUFFER has bound storage; ALLOC declares storage without a runtime buffer
   (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf:
-   True if buf.is_unbound else (isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device))
+   isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device) and buf.arg.buffer is not None
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
+  (UPat(Ops.ALLOC, src=(), name="buf"), lambda buf: isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL
+   and buf.arg.buffer is None and (buf.arg.size is None or isinstance(buf.arg.size, int))
+   and (buf.arg.device is None or is_device(buf.arg.device))),
 
   # a Variable is a 0-d ALU BUFFER with a value range and no device
   (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
@@ -158,7 +162,7 @@ spec_tensor = PatternMatcher([
    and isinstance(x.arg[1], int) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
 
   # COPY
-  (UPat(Ops.COPY, name="copy", src=(UPat(),)), lambda copy: is_device(copy.arg)),
+  (UPat(Ops.COPY, name="copy", src=(UPat(),)), lambda copy: is_device(copy.arg) and not is_disk_device(copy.arg)),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat(),)),
    lambda red: isinstance(red.arg, tuple) and len(red.arg) == 2 and red.arg[0] in GroupOp.Reduce and is_device(red.arg[1])),
 
@@ -213,7 +217,7 @@ spec_program = PatternMatcher([
 
 spec_hcq = PatternMatcher([
   (UPat(Ops.GETADDR, dtypes.uint64, name="x",
-        src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.SHRINK, Ops.BITCAST, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR)).or_after(),)),
+        src=(UPat((Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.SHRINK, Ops.BITCAST, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR)).or_after(),)),
    lambda x: is_device(x.arg)),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),)), lambda: True),
 ])+spec_shared
@@ -245,9 +249,12 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) or x.is_variable or x.is_bound_var for x in s.src) or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
-  # param is outside buffer, buffer is local buffer. params have a size in the arg, no shape input
+  # PARAM is caller-provided storage, ALLOC is call-local storage; size is in the arg, no shape input
   (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
-  (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.ALU)),
+  (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and
+   (x.arg.buffer is not None if x.addrspace is AddrSpace.GLOBAL else x.addrspace is AddrSpace.ALU)),
+  (UPat(Ops.ALLOC, src=(), name="x"), lambda x:
+   isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL and x.arg.buffer is None),
   (UPat(Ops.BITCAST), lambda: True),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
@@ -255,8 +262,8 @@ spec_kernel_graph = PatternMatcher([
   # all calls are on opaque bodies
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True), lambda: True),
   # after on PARAM or AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),),
-        allow_any_len=True), lambda: True),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.ALLOC,
+                                                  Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),), allow_any_len=True), lambda: True),
 ])
 
 # **** pyrender (move this) ****
@@ -270,7 +277,7 @@ def pyrender_globals() -> dict[str, Any]:
   return {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
           "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
           "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates}
+          "ConstFloat": ConstFloat, "ParamArg": ParamArg, "Estimates": Estimates, "CallInfo": CallInfo}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
   exec(code, pyrender_globals(), lcls)

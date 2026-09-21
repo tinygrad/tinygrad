@@ -359,7 +359,7 @@ class MetalRenderer(CStyleLanguage):
   float4 = "float4"
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+int(x))}", "l": lambda x: f"lid.{chr(120+int(x))}"}
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
-  extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
+  extra_args = ['constant args_t& args [[buffer(0)]]', 'uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.uint32: "uint", dtypes.bfloat16: "bfloat"}
 
   # precise::sin
@@ -379,8 +379,7 @@ class MetalRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix = ["#include <metal_stdlib>","using namespace metal;"]
-    deduped_wmma_args = dedup([(name, dtype_in, dtype_out) for name, _, dtype_in, dtype_out, _ in wmma_args(uops)])
-    for name, dtype_in, dtype_out in deduped_wmma_args:
+    for name, _, dtype_in, dtype_out, _ in wmma_args(uops):
       dstr_out, dstr_in = self._render_dtype(dtype_out, 2, AddrSpace.REG), self._render_dtype(dtype_in, 2, AddrSpace.REG)
       prefix.append(
 f"""{dstr_out} __{name}({dstr_in} a, {dstr_in} b, {dstr_out} c){{
@@ -388,7 +387,10 @@ f"""{dstr_out} __{name}({dstr_in} a, {dstr_in} b, {dstr_out} c){{
   mat_a.thread_elements()[0] = a[0]; mat_b.thread_elements()[0] = b[0]; mat_c.thread_elements()[0] = c[0];
   mat_a.thread_elements()[1] = a[1]; mat_b.thread_elements()[1] = b[1]; mat_c.thread_elements()[1] = c[1];
   simdgroup_multiply_accumulate(mat_c, mat_a, mat_b, mat_c);\n  return {dstr_out}(mat_c.thread_elements()[0], mat_c.thread_elements()[1]);\n}}""")
-    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+    # one argument buffer: a struct of the buffer pointers and the scalars, so a binding is a gpu address (an icb offset keeps 32 bits, an address 64)
+    args = [(name, self._render_dtype(u.dtype, addrspace=u.addrspace)) for name, (u, _) in bufs]
+    prefix.append("struct args_t { " + " ".join(f"{t} {n};" for n, t in args) + " };")
+    return super().render_kernel(function_name, ["  " + " ".join(f"{t} {n} = args.{n};" for n, t in args)] + kernel, [], uops, prefix)
 
   def supported_dtypes(self):
     return {d for d in super().supported_dtypes() if (d != dtypes.bfloat16 or ((arch:=self.target.arch).startswith("Apple") and int(arch[5:]) >= 6))
@@ -476,7 +478,8 @@ class CUDARenderer(CStyleLanguage):
 class NVCCRenderer(CUDARenderer):
   def __init__(self, target:Target): super().__init__(target, use_nvcc=True)
 
-def fp8_index(dtype: DType): return (dtypes.fp8e4m3, dtypes.fp8e5m2).index(dtype)
+def fp8_index(dtype: DType): return dtypes.fp8s.index(dtype) % 2
+def amd_fp8s(arch:str): return {"gfx942": dtypes.fp8_fnuz, "gfx950": dtypes.fp8_ocp}.get(arch, ())
 def _ocml(op): return lambda x,dtype: f"__ocml_{op}_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"
 
 class HIPRenderer(CStyleLanguage):
@@ -523,11 +526,11 @@ class HIPRenderer(CStyleLanguage):
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
-  type_map = {dtypes.bfloat16: "hip_bfloat16", dtypes.fp8e4m3: "hip_fp8", dtypes.fp8e5m2: "hip_bf8"}
+  type_map = {dtypes.bfloat16: "hip_bfloat16", **{d: ("hip_fp8", "hip_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s)) + PatternMatcher([
     (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
       lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64), x.src[2]))
-      if x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8_ocp else None),
+      if x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8s else None),
   ])
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
@@ -541,7 +544,7 @@ class HIPRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     prefix, ockl = [], []
-    type_map = { dtypes.bfloat16: "bf16", dtypes.float: "f32", dtypes.half: "f16", dtypes.fp8e4m3: "_fp8_fp8", dtypes.fp8e5m2: "_bf8_bf8" }
+    type_map = {dtypes.bfloat16: "bf16", dtypes.float: "f32", dtypes.half: "f16", **{d: ("_fp8_fp8", "_bf8_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
     used_dtypes = uops_to_dtypes(uops)
     if any(u.op is Ops.CAST and u.src[0].op is Ops.CONST and not math.isfinite(u.src[0].val) for u in uops):
       prefix += ["#define INFINITY (__builtin_inff())", "#define NAN (__builtin_nanf(\"\"))"]
@@ -558,9 +561,10 @@ class HIPRenderer(CStyleLanguage):
       prefix += ["typedef unsigned char hip_bf8;", "typedef unsigned char hip_fp8;"]
     if any((u.op is Ops.CAST and u.dtype in dtypes.fp8s and u.src[0].dtype == dtypes.float) or
            (u.op is Ops.CAST and u.src[0].op is Ops.CONST and u.dtype in dtypes.fp8s) for u in uops):
-      prefix.append("""static inline __attribute__((device)) unsigned char f32_to_fp8(float v, int is_bf8) {
-  v = (((*(unsigned*)&v)&0x7F800000)!=0x7F800000)?__builtin_amdgcn_fmed3f(v,is_bf8?57344.0f:448.0f,is_bf8?-57344.0f:-448.0f) : v;
-  return (unsigned char)(is_bf8?__builtin_amdgcn_cvt_pk_bf8_f32(v,v,0,false):__builtin_amdgcn_cvt_pk_fp8_f32(v,v,0,false));\n}""")
+      fp8_max = amd_fp8s(self.target.arch)[0].max
+      prefix.append(f"""static inline __attribute__((device)) unsigned char f32_to_fp8(float v, int is_bf8) {{
+  v = (((*(unsigned*)&v)&0x7F800000)!=0x7F800000)?__builtin_amdgcn_fmed3f(v,is_bf8?57344.0f:{fp8_max}f,is_bf8?-57344.0f:-{fp8_max}f) : v;
+  return (unsigned char)(is_bf8?__builtin_amdgcn_cvt_pk_bf8_f32(v,v,0,false):__builtin_amdgcn_cvt_pk_fp8_f32(v,v,0,false));\n}}""")
     prefix += [f'extern "C" __attribute__((device{f", {atr}" if atr else ""})) {dto} {meth}({dti});' for meth,dti,dto,atr in ockl+ocml]
     prefix += [self.render_vector_prefix(dt, count) for dt, count in used_dtypes if count > 1]
 
@@ -586,8 +590,7 @@ class HIPRenderer(CStyleLanguage):
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def supported_dtypes(self): return {d for d in super().supported_dtypes()
-                                      if (d not in dtypes.fp8_ocp or self.target.arch == "gfx950") and d not in dtypes.fp8_fnuz}
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s or d in amd_fp8s(self.target.arch)}
 
 class HIPCCRenderer(HIPRenderer):
   def __init__(self, target:Target): super().__init__(target, use_hipcc=True)

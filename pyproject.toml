@@ -25,6 +25,7 @@ packages = [
   'tinygrad.codegen.late',
   'tinygrad.engine',
   'tinygrad.llm',
+  'tinygrad.llm.kernels',
   'tinygrad.mixin',
   'tinygrad.nn',
   'tinygrad.renderer',

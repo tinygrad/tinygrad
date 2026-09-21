@@ -45,23 +45,24 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 %% ============================================================
 \subsection*{Source Ops \normalfont\small--- leaf nodes}
 
-\begin{tabular}{@{}l p{3.2cm} p{3.0cm} p{6.2cm}@{}}
+\begin{tabular}{@{}l l l l@{}}
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Param} & () & \texttt{ParamArg} &
-  Placeholder with flat storage of $\mathrm{size}$ elements. Substituted in \op{Call}. \\[4pt]
 \op{Buffer} & () & \texttt{ParamArg} &
-  Flat storage of $\mathrm{size}$ elements. \textbf{Unbound} if not allocated yet. \\
-\op{Const} & () & value, dtype &
+  Persistent storage on device. \\
+\op{Alloc} & () & \texttt{ParamArg} &
+  Unbound storage of $\mathrm{size}$ elements. \\
+\op{Param} & () & \texttt{ParamArg} &
+  Caller-provided storage. \\
+\op{Const} & () & value &
   A scalar constant with shape $(\ )$. \\
-  & & & Form vector consts with \op{Stack} \\
 \op{Binary} & () & data & Raw binary data, has dtype uint8 and shape len($data$)  \\
 \bottomrule
 \end{tabular}
 
 \smallskip
-\texttt{ParamArg} contains slot, dtype, concrete size (or \textsc{null} for a scalar), value bounds, alignment, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for unbound \op{Buffer}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}.
+\texttt{ParamArg} contains slot, dtype, concrete size (or \textsc{null} for a scalar), value bounds, alignment, name, addrspace, device, volatility, optional image shape, and an optional bound device buffer (absent for \op{Alloc}s). \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}.
 
 %% ============================================================
 \subsection*{{\color{callblue}Call Ops} \normalfont\small--- function abstraction, like the lambda calculus}
@@ -75,7 +76,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \end{tabular}
 
 \smallskip
-A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound positionally to the call's unbound \op{Buffer} arguments; output $a_k$ is \op{After}$(a_k, \op{Call})$. Unbound \op{Buffer}s are scoped to their \op{Call}: they are never implicit inputs of the enclosing graph.
+A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound positionally to the call's \op{Alloc} arguments; output $a_k$ is \op{After}$(a_k, \op{Call})$. \op{Alloc}s are scoped to their \op{Call}: they are never implicit inputs of the enclosing graph.
 
 %% ============================================================
 \subsection*{{\color{movgreen}Movement Ops} \normalfont\small--- no arithmetic; view, indexing, and reinterpretation only}
@@ -254,9 +255,9 @@ Every UOp has a \textbf{dtype}, \textbf{shape}, \textbf{device}, \textbf{addrspa
 \toprule
 \textbf{Op} & \textbf{dtype} & \textbf{shape} & \textbf{device} & \textbf{min\_max} \\
 \midrule
-\op{Buffer} & from arg & from arg ($\mathrm{size}$) & from arg & dtype range \\
-\op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\
-\op{Param} & from arg & from arg ($\mathrm{size}$) & from arg & from src or dtype range \\[3pt]
+\op{Buffer}, \op{Alloc} & from arg & from arg ($\mathrm{size}$) & from arg & dtype range \\
+\op{Param} & from arg & from arg ($\mathrm{size}$) & from arg & from src or dtype range \\
+\op{Const} & from arg & $()$ & \textsc{null} & $[v, v]$ \\[3pt]
 Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Unshard} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0]$, each $a_k \times n_k$ & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Reduce} & $\mathrm{src}[0].\mathrm{dtype}$ & remove first $n$ axes & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\[3pt]
@@ -284,7 +285,7 @@ $[a,A]$, $[b,B]$, $[c,C]$ denote min\_max of $\mathrm{src}[0]$, $\mathrm{src}[1]
 Default \emph{dtype range}: $[\mathrm{dtype\_min},\, \mathrm{dtype\_max}]$.
 
 \medskip
-\textbf{sharding} tracks multi-device sharding as a set of (axis, \op{Range}) pairs. \op{Unshard} defines it: arg is the tuple of sharded axes, one \op{Range} in src per axis (positional: the $k$-th \op{Range} shards the $k$-th axis). \op{Buffer} with $n$-tuple device: sharded on axis $0$ (device dim). The single-axis convenience \textbf{axis} is \textsc{null} unless exactly one axis is sharded.
+\textbf{sharding} tracks multi-device sharding as a set of (axis, \op{Range}) pairs. \op{Unshard} defines it: arg is the tuple of sharded axes, one \op{Range} in src per axis (positional: the $k$-th \op{Range} shards the $k$-th axis). \op{Buffer}, \op{Alloc}, or \op{Param} with $n$-tuple device: sharded on axis $0$ (device dim). The single-axis convenience \textbf{axis} is \textsc{null} unless exactly one axis is sharded.
 \op{Reshape} remaps each sharded axis to preserve its shard boundary. \op{Permute} follows the permutation. \op{Expand} shifts all sharded axes right by $|\mathbf{n}|$.
 \op{Reduce} on a sharded axis drops it. \op{Replicated} on the shard axis $\to$ \textsc{null}. \op{Copy} $\to$ \textsc{null}. ALU ops inherit from sources. Default: \textsc{null}.
 
@@ -430,13 +431,13 @@ When \texttt{f(x, y)} is called, the decorator:
   \item \textbf{Extracts inputs}: walks all arguments to find every Tensor, deduplicates by identity.
   \item \textbf{Runs the function} lazily (no device execution), building a UOp graph from each returned value.
   \item \textbf{Parameterizes inputs}: replaces each input UOp with a positional \op{Param}$(k)$ placeholder.
-  \item \textbf{Parameterizes outputs}: for each returned value $v_i$, creates an output \op{Param}$(m+i)$ and a matching unbound \op{Buffer} $b_i$ (unique identity), where $m$ is the number of inputs.
+  \item \textbf{Parameterizes outputs}: for each returned value $v_i$, creates an output \op{Param}$(m+i)$ and a matching \op{Alloc} $b_i$ (unique symbolic storage identity), where $m$ is the number of inputs.
   \item \textbf{Builds the call}: stores every $v_i$ into its output parameter and creates\\
         \op{Call}(\op{Sink}(\op{Store}(\op{Param}$(m)$, $v_0$), \ldots), $x$, $y$, $b_0$, \ldots).
   \item \textbf{Returns values}: exposes each result as \op{After}($b_i$, \op{Call}).
 \end{enumerate}
 
-The result is a reusable graph fragment: the body contains only \op{Param} references, not concrete buffers, and a single call can return any number of values. At schedule time, an ordinary value-producing \op{Call} is inlined by positional \op{Param} substitution and each output \op{After} resolves to the value stored in the body. A precompiled call instead materializes real output buffers in place of the unbound \op{Buffer}s and lowers the body to an opaque call that writes them.
+The result is a reusable graph fragment: the body's storage is represented by \op{Param} references and local \op{Alloc}s, not concrete buffers, and a single call can return any number of values. At schedule time, an ordinary value-producing \op{Call} is inlined by positional \op{Param} substitution and each output \op{After} resolves to the value stored in the body, preserving required output writes. A precompiled call keeps the body opaque and binds its \op{Alloc}s to concrete buffers for execution.
 
 %% ============================================================
 \subsection*{Lowering Pipeline \normalfont\small--- from Tensor graph to machine code}

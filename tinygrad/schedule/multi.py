@@ -270,7 +270,7 @@ def passthrough_multi(root:UOp, multi:UOp):
   return UOp(root.op, src=new_src, arg=root.arg).unshard(multi.arg, multi.src[1:])
 
 def rewrite_into_function(call:UOp):
-  if call.arg is None or call.arg.precompile: return None
+  if not call.is_inline_call: return None
   # the call body is a plain parametric program: multi rewrites it like anything else (the output PARAM dests sub-view per
   # shard through the normal store rules), and all srcs (args and RETURNEDs) become their per-shard views
   new_body = graph_rewrite(call.body, multi_pm, name="subcall")
@@ -290,19 +290,18 @@ multi_pm = PatternMatcher([
   (UPat(Ops.STACK, name="root", custom_early_reject=set([Ops.UNSHARD])), stack_multi),
   (UPat(Ops.INDEX, src=(UPat(Ops.UNSHARD, name="multi"),), name="root", allow_any_len=True), index_multi),
   (UPat(Ops.AFTER, src=(UPat(Ops.UNSHARD), UPat(Ops.STORE, src=(UPat(Ops.UNSHARD, name="dest"), UPat(Ops.UNSHARD, name="src"))))), store_after_multi),
-  # a self COPY of a sharded value is a contiguous of every shard
-  (UPat(Ops.COPY, src=(UPat(Ops.UNSHARD, name="multi"),), name="copy"),
-   lambda multi,copy: passthrough_multi(copy, multi) if copy.is_self_copy else copy_multi(multi, copy.arg)),
+  # a COPY of a sharded value copies every shard to the target device
+  (UPat(Ops.COPY, src=(UPat(Ops.UNSHARD, name="multi"),), name="copy"), lambda multi,copy: copy_multi(multi, copy.arg)),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.UNSHARD, name="multi"),), name="red"),
     lambda multi,red: multi.src[0].allreduce(*red.arg).unshard(multi.arg, multi.src[1:])),
 
   # rewrite value-producing calls explicitly for UNSHARD
-  (UPat(Ops.CALL, name="call"), lambda call: rewrite_into_function(call) if call.has_unbound_outputs else None),
+  (UPat(Ops.CALL, name="call"), rewrite_into_function),
   (UPat((Ops.CALL, Ops.AFTER), src=(UPat(Ops.UNSHARD, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # just strip the UNSHARD from non-value-producing CALLs (custom kernels, etc.) — value-producing CALLs are handled by rewrite_into_function
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.UNSHARD])), lambda root:
-    UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg) if not root.has_unbound_outputs else None),
-  (UPat((Ops.CAST, Ops.BITCAST, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
+    UOp(root.op, src=tuple(x.src[0] if x.op is Ops.UNSHARD else x for x in root.src), arg=root.arg)),
+  (UPat((Ops.CAST, Ops.BITCAST, Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.UNSHARD, name="multi"), ), name="root"), passthrough_multi),
   # STORE of a sharded value into an unsharded dest (e.g. a fragment into a full output tile)
   (UPat(Ops.STORE, src=(UPat.var("dest"), UPat(Ops.UNSHARD, name="multi"))), store_value_multi),

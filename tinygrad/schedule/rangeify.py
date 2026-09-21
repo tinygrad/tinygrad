@@ -163,11 +163,11 @@ pm_no_indexing_calls = PatternMatcher([
 
 # the kernel graph is what gets executed: no shape views left in it, the storage of a value is just the storage
 pm_no_views = PatternMatcher([
-  (UPat((Ops.RESHAPE, Ops.SHRINK), name="v", src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER)),), allow_any_len=True), lambda v:
-   v.src[0]),
+  (UPat((Ops.RESHAPE, Ops.SHRINK), name="v",
+        src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER, Ops.ALLOC)),), allow_any_len=True), lambda v: v.src[0]),
 ])
 
-DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8, "CPU": 31} # TODO: get from device?
+DEVICE_MAX_BUFS = {"WEBGPU": 8} # TODO: get from device?
 @dataclass
 class LimitBufsContext:
   buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
@@ -228,7 +228,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
 
   # NOTE: the local BUFFER needs to be disambiguated here
   if x.arg.addrspace == AddrSpace.GLOBAL:
-    buf = UOp.new_buffer(x.arg.device, size, dtype)
+    buf = UOp(Ops.ALLOC, arg=ParamArg(next(ctx), dtype, size, device=x.arg.device))
     do_store = buf.index(idx).store(x.src[0].cast(dtype)).end(*rngs)
     return buf.after(do_store).cast(x.dtype)
 
@@ -314,12 +314,12 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
 def check_buf_states(x:UOp):
   idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
   read_from: dict[UOp, UOp] = {}
-  if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.PARAM} and read_from.setdefault(buf, state:=idx.src[0]) is not state for idx in idxs):
+  if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.ALLOC, Ops.PARAM} and read_from.setdefault(buf, state:=idx.src[0]) is not state for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")
 
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), check_buf_states),
-  (UPat((Ops.BUFFER, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
+  (UPat((Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT), name="buf"), debuf),
   (UPat(Ops.PARAM, name="v"), lambda v:
    v.replace(arg=replace(v.arg, slot=-1)) if v.arg.name is not None and v.arg.vmin_vmax is not None and v.arg.slot != -1 else None),
 
@@ -377,7 +377,7 @@ def get_kernel_graph(tsink:UOp) -> UOp:
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
   # bufferize -> store
-  slots = [x.arg.slot for x in tsink.toposort() if x.op is Ops.BUFFER and isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL]
+  slots = [x.arg.slot for x in tsink.toposort() if x.op is Ops.ALLOC]
   paramarg_start: int = max([-1]+slots) + 1
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_param_range_tags, ctx=itertools.count(paramarg_start), bottom_up=True, name="stage to store")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")

@@ -461,7 +461,7 @@ class TestVizIntegration(unittest.TestCase):
     self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0", "NULL:1", "NULL:1:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
     self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
     self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
-    self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 2)
+    self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 3)
     for graph in out["layout"]["NULL Graph"]["events"]:
       graph_st, graph_et = graph["st"], graph["st"]+graph["dur"]
       for k in ["NULL", "NULL:1", "NULL:SDMA:0", "NULL:1:SDMA:0"]:
@@ -544,7 +544,7 @@ class TestVizProfiler(unittest.TestCase):
     with save_viz():
       a = Tensor.ones(1, device="NULL").contiguous().realize()
       a.to("NULL:1").realize()
-    range_events = [e for e in cpu_events if isinstance(e, ProfileRangeEvent)]
+    range_events = flatten(e.ents for e in cpu_events if isinstance(e, ProfileGraphEvent))
     compute_events = [e for e in range_events if e.device == "NULL"]
     copy_events = [e for e in range_events if e.device.endswith(":SDMA:0")]
     self.assertGreater(len(compute_events), 0, "expected compute events on base device")
@@ -731,7 +731,7 @@ class TestVizProfiler(unittest.TestCase):
     self.assertListEqual(layout[2:], ["TEST:1", "TEST:1 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:2 N1"])
 
 def _alloc(b:int):
-  a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
+  a = Tensor.empty(b, device="NULL", dtype=dtypes.char).realize()
   a.uop.buffer.allocate()
   return a
 
@@ -836,7 +836,7 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 @needs_tracked_pm
 class TestCfg(unittest.TestCase):
-  def get_cfg(self, name:str, k:Kernel):
+  def get_cfg(self, name:str, k:Kernel, target:str="gfx1100"):
     insts = k.finalize()
     def fxn(out:UOp) -> UOp:
       lidx = UOp.special(1, "lidx0")
@@ -844,7 +844,7 @@ class TestCfg(unittest.TestCase):
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
     with save_viz() as viz:
-      with Context(DEV="NULL::gfx1100"):
+      with Context(DEV=f"NULL::{target}"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
         _ = do_to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
     codegen_rewrites = next(s for s in viz.list_items() if s["name"] == name)
@@ -1014,6 +1014,20 @@ class TestCfg(unittest.TestCase):
     k.emit(s_branch(), target="end")
     k.emit(s_code_end())
     self.get_cfg("jump_back_to_end", k)
+
+  def test_agpr(self):
+    from tinygrad.renderer.amd.dsl import v
+    from tinygrad.runtime.autogen.amd.cdna.ins import v_accvgpr_read, s_endpgm, v_mfma_scale_f32_16x16x128_f8f6f4
+    k = Kernel()
+    k.emit(v_accvgpr_read(v[0], v[0]))
+    k.emit(v_mfma_scale_f32_16x16x128_f8f6f4(v[0:3], v[4:7], v[8:11], v[0:3], neg=0, neg_hi=0, opsel=0, opsel_hi=0, cbsz=4, acc_cd=1, acc=0,
+                                             blgp=4, scale_src0=v[12].offset, scale_src1=v[13].offset))
+    k.emit(s_endpgm())
+    ret = self.get_cfg("agpr", k, target="gfx950")
+    read_tok, mfma_tok, *_ = ret["data"]["pc_tokens"].values()
+    self.assertEqual([t["st"] for t in read_tok[1:3]], ["v0", "a0"])
+    self.assertEqual([t["st"] for t in mfma_tok[1:5]], ["a[0:3]", "v[4:7]", "v[8:11]", "a[0:3]"])
+    self.assertTrue(set(read_tok[1]["keys"]).isdisjoint(read_tok[2]["keys"]))
 
 # launch viz cli without subprocess
 def run_cli(*cli_args, json_fmt=True) -> list[dict]:

@@ -1,11 +1,41 @@
+from dataclasses import replace
 from tinygrad.dtype import dtypes, to_dtype
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, ParamArg
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
 from tinygrad.helpers import prod, getenv, all_int, DEBUG, SPLIT_REDUCEOP, OPENPILOT_HACKS, FLOAT16, argsort
 from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
+
+def forward_call_outputs(sink:UOp) -> UOp:
+  placed:dict[UOp, UOp] = {}
+  items:list[UOp] = []
+  for item in sink.src:
+    st = item.src[1] if item.op is Ops.AFTER and len(item.src) == 2 and item.src[1].op is Ops.STORE else item
+    if st.op is not Ops.STORE or (item is not st and item.src[0] is not st.src[0]):
+      items.append(item)
+      continue
+    target, src = st.src
+    while src.op is Ops.AFTER: src = src.src[0]
+    base = src.storage_base
+    if item is not st and base.op is not Ops.ALLOC:
+      items.append(item)
+      continue
+    # Forward the allocation, not just one view of it, so saved values and other aliases follow the same placement.
+    key = base if base.op is Ops.ALLOC else src
+    if key not in placed and (src.op is Ops.STAGE or target.has_buffer_identity()) and \
+       target.storage_base not in st.src[1].toposort(enter_calls=False):
+      if base.op is Ops.ALLOC and src.has_buffer_identity() and base.max_numel() == target.storage_base.max_numel():
+        placed[key] = target.storage_base
+      elif src.op is Ops.STAGE: placed[key] = target.after(target.store(src.src[0]))
+      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[key] = target
+      if key in placed:
+        if item is not st: placed[item] = st.src[1]
+        items.append(st.src[1])
+        continue
+    items.append(target.after(st))
+  return UOp.sink(*items).substitute(placed, walk=True)
 
 def walk_mop(u:UOp):
   if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD, Ops.BITCAST}: return walk_mop(u.src[0])
@@ -26,8 +56,7 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
 pm_fold_moved_after = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src")))), name="after"), found_after),
   # contiguous is also a materialization point (it bufferizes in the scheduler)
-  (UPat(Ops.COPY, src=(UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src"),), name="after"),
-   lambda ctx,after,src: found_after(ctx, after, src) if after.is_self_copy else None),
+  (UPat(Ops.STAGE, src=(UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src"),), name="after"), found_after),
   # replace ALU sources with AFTER versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
@@ -56,9 +85,9 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
-# stop at materialization boundaries, including COPYs already lowered to AFTER+STORE
+# stop at materialization boundaries, including COPYs/STAGEs already lowered to AFTER+STORE
 def store_hazard_boundary(s:UOp):
-  if s.op is Ops.COPY: return False
+  if s.op in {Ops.COPY, Ops.STAGE}: return False
   if s.op is Ops.AFTER: return not any(d.op is Ops.STORE and d.src[0].base is s.src[0].base for d in s.src[1:])
   return True
 
@@ -95,34 +124,29 @@ def split_reduceop(reduce:UOp, x:UOp):
   # reduce original axes, then split
   return splitted._rop(reduce.arg[0], tuple(range(reduce.arg[1]))).contiguous()._rop(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
-pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p) if p.arg.slot >= 0 else None), ])
-def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
-  if c.arg.precompile: return None
-  params: list[UOp] = []
-  graph_rewrite(c.body, pm_gather_params, bottom_up=True, ctx=params, name="gather params")
-  params = sorted(params, key=lambda x: x.arg.slot)
-  # the RETURNED inputs bind positionally to the output PARAMs, just like the args bind to the input PARAMs
+def resolve_function(c:UOp) -> UOp|None:
+  if not c.is_inline_call: return None
+  nodes = c.body.toposort(enter_calls=False)
+  # Input and output PARAMs both bind to explicit arguments by slot; unused arguments are allowed.
   args = c.src[1:]
-
-  # NOTE: this isn't really needed. it's okay if there's unused args in the function
-  if not allow_param_mismatch:
-    if [x.arg.slot for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg.slot for x in params]}")
-    if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
 
   # params have a flat storage size in the arg, the logical shape is a view (RESHAPE/SHRINK/UNSHARD) on top of it.
   # substitute args by their flat max-shaped storage view so the movement views on the params stay valid
   def flat_storage(a:UOp) -> tuple[int, UOp]:  # returns (size, view of a as flat max-shaped storage)
     shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
+    if a.op is Ops.SHRINK and a.src[0].shape == shp and all(s == 0 for s,_ in a.marg): a = a.src[0]
     return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
-  dict_map = {x:args[x.arg.slot] for x in params}
-  for i, (p, a) in enumerate(dict_map.items()):
+  dict_map = {p:args[p.arg.slot] for p in nodes if p.op is Ops.PARAM and p.arg.slot >= 0}
+  for p, a in dict_map.items():
     if p.arg.size is not None:
       n, flat = flat_storage(a)
-      if p.arg.size != n: raise TypeError(f"arg {i} shape mismatch: expected size {p.arg.size}, got {a.shape}")
+      if p.arg.size != n: raise TypeError(f"arg {p.arg.slot} shape mismatch: expected size {p.arg.size}, got {a.shape}")
       dict_map[p] = flat
     elif a.shape != ():
-      raise TypeError(f"arg {i} shape mismatch: expected scalar, got {a.shape}")
-    if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
+      raise TypeError(f"arg {p.arg.slot} shape mismatch: expected scalar, got {a.shape}")
+    if p.dtype != a.dtype: raise TypeError(f"arg {p.arg.slot} dtype mismatch: expected {p.dtype}, got {a.dtype}")
+  # Inlining removes the call scope, so its local allocations need fresh identities.
+  dict_map.update({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in nodes if b.op is Ops.ALLOC})
   return c.body.substitute(dict_map, walk=True)
 
 # shape-changing bitcast
@@ -138,23 +162,38 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
 
 def copy_to_anon_store(x:UOp, copy:UOp):
-  if copy.is_self_copy and (x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY): return x
-  if not copy.is_self_copy: x = x.pad_to(x.max_shape)
-  buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
+  # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
+  x = x.pad_to(x.max_shape)
+  buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(x.max_shape), device=copy.device)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
+
+def stage_to_anon_store(x:UOp, stg:UOp):
+  # the buffer created here is inside the call and is not persisted, like the buffers created for copies
+  buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
+  view = buf.shrink_to(stg.shape)
+  return view.after(view.store(x))
 
 def materialize_cross_device_src(dest:UOp, src:UOp):
   # cross-device copies must read a whole buffer (SDMA can't do offset copies)
   if src.device is None or dest.device == src.device or src.has_buffer_identity(after_ok=True): return None
   return dest.store(src.contiguous())
 
-earliest_rewrites = mop_cleanup+PatternMatcher([
-  # resolve calls with RETURNED inputs (inline the body)
-  (UPat(Ops.CALL, name="c"), lambda c: resolve_function(c) if c.has_unbound_outputs else None),
-
-  # resolve AFTER on RETURNED (call outputs)
+pm_inline_calls = PatternMatcher([
+  (UPat(Ops.CALL, name="c"), resolve_function),
   (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
+])
 
+pm_disk_copy = PatternMatcher([
+  # remove contiguous on movement ops before a copy on disk
+  (UPat(GroupOp.Movement, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
+   copy.replace(src=(x,)) if x.on_disk() else None),
+  # push all movement ops to the destination: views exposed here are no longer normalized into input PARAMs,
+  # so leaving SHRINK/RESHAPE behind can cause materialize_cross_device_src to allocate a temporary on disk
+  (UPat(GroupOp.Movement, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
+   x.replace(src=(copy.replace(src=(x.src[0],)),)+x.src[1:]) if x.on_disk() else None),
+])
+
+earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve allreduce (must be bottom up)
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
 
@@ -169,12 +208,24 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # ** copy rules **
 
+  # a copy to the same device as the source is not allowed: it is a no-op, STAGE materializes on the same device
+  (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), lambda x,copy: x if x.device == copy.device else None),
+
   # a COPY in src[1] of a plain STORE can just be removed: a STORE to a buffer on a different device is a COPY
   (UPat(Ops.STORE, src=(UPat.var("dst"), UPat(Ops.COPY, src=(UPat.var("x"),), name="cpy"))),
-   lambda dst,x,cpy: dst.store(x) if not cpy.is_self_copy and dst.device == cpy.device and dst.has_buffer_identity(after_ok=True) else None),
+   lambda dst,x,cpy: dst.store(x) if dst.device == cpy.device and dst.has_buffer_identity(after_ok=True) else None),
 
   # a bare COPY is an anonymous store: realize it as a STORE into a fresh call-local buffer on the copy device
   (UPat(Ops.COPY, src=(UPat.var("x"),), name="copy"), copy_to_anon_store),
+
+  # ** stage rules **
+
+  # a STAGE of an already materialized value (or of a COPY, which materializes itself) is a no-op
+  (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"),
+   lambda x,stg: x if x.has_buffer_identity(after_ok=True) or x.op is Ops.COPY else None),
+
+  # a bare STAGE is an anonymous same-device materialization: realize it as a STORE into a fresh call-local buffer
+  (UPat(Ops.STAGE, src=(UPat.var("x"),), name="stg"), stage_to_anon_store),
 
   # reshaping on STORE can be a NOOP
   (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("dst",),), allow_any_len=True),
@@ -217,7 +268,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 @rewrite_group(new_ctx=False)
 def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
-  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
+  tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
+  tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink

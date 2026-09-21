@@ -71,8 +71,10 @@ def universal_test(a, b, dtype, op):
   # lt and max with nan is undefined in tinygrad
   if op[0] in (operator.lt, Tensor.maximum) and (math.isnan(a) or math.isnan(b)): return
   ta, tb = Tensor([a], dtype=dtype), Tensor([b], dtype=dtype)
-  if dtype in dtypes.fp8s and op[0] not in (operator.lt, operator.eq):
-    tensor_value = fp8_to_float((op[0](ta.realize(), tb.realize())).bitcast(dtypes.uint8).item(), dtype)
+  if dtype in (*dtypes.fp8s, dtypes.bfloat16) and op[0] not in (operator.lt, operator.eq):
+    storage_dtype = dtypes.uint16 if dtype == dtypes.bfloat16 else dtypes.uint8
+    tensor_value = from_storage_scalar((op[0](ta.realize(), tb.realize())).bitcast(storage_dtype).item(), dtype)
+    # numpy represents these dtypes as float32, so round the reference result too (including overflow).
     numpy_value = truncate[dtype](op[1](ta.numpy(), tb.numpy()).item())
   else: tensor_value, numpy_value = (op[0](ta, tb)).numpy(), op[1](ta.numpy(), tb.numpy())
   if dtype in dtypes.floats:

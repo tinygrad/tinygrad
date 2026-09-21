@@ -1,9 +1,10 @@
 """Compile perspective warps for NV12 frames."""
-import argparse
+import argparse, pickle
 from typing import NamedTuple
 import numpy as np
-from tinygrad import Tensor, Device, Context
-from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle
+from tinygrad import Tensor, Device, Context, TinyJit
+from tinygrad.engine.realize import lower_and_compile
+from examples.openpilot.helpers import allocate_inputs, benchmark, make_retargetable
 
 
 class NV12Frame(NamedTuple):
@@ -97,27 +98,6 @@ def make_luma_warp(nv12:NV12Frame, width, height, border_fill=None):
                                     border_fill_val=border_fill).reshape(-1, height*width)
   return warp
 
-
-def compile_warp(frame:NV12Frame, output_size, *, layout='luma', border_fill=None, frames=1, transform_device=None, benchmark_runs=20):
-  if layout == 'luma': function = make_luma_warp(frame, *output_size, border_fill)
-  elif layout == 'yuv420': function = make_frame_prepare(frame, *output_size)
-  else: raise ValueError(f'Unknown warp layout: {layout}')
-  prefix = () if frames == 1 else (frames,)
-  specs = {'input_frame': (prefix + (frame.size,), np.dtype(np.uint8).str, Device.DEFAULT),
-           'M_inv': (prefix + (3, 3), np.dtype(np.float32).str, transform_device or Device.DEFAULT)}
-  def run(input_frame, M_inv):
-    if frames == 1: return function(input_frame, M_inv)
-    return Tensor.stack(*(function(input_frame[i], M_inv[i]) for i in range(frames)))
-  def make_inputs(seed):
-    rng = np.random.default_rng(seed)
-    def initialize(views):
-      views['input_frame'][:] = rng.integers(0, 256, views['input_frame'].shape, dtype=np.uint8)
-      views['M_inv'][:] = rng.standard_normal(views['M_inv'].shape)*8
-    return (), allocate_inputs(specs, initialize)
-  jit = compile_jit(run, make_inputs, benchmark_runs)
-  return {'metadata': {}, 'run': jit, 'input_specs': specs}
-
-
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--frame', type=parse_frame, required=True, help='width,height,stride,y_height,uv_height,buffer_size')
@@ -128,7 +108,41 @@ if __name__ == '__main__':
   parser.add_argument('--transform-device', help='device holding the transforms; defaults to DEV')
   parser.add_argument('--output', required=True)
   parser.add_argument('--benchmark-runs', type=int, default=20)
+  parser.add_argument('--retargetable', action='store_true', help='output retargetable jit (requires recompilation when loading)')
   args = parser.parse_args()
-  artifact = compile_warp(args.frame, args.warp_to, layout=args.layout, border_fill=args.border_fill, frames=args.frames,
-                          transform_device=args.transform_device, benchmark_runs=args.benchmark_runs)
-  with open(args.output, 'wb') as f: dump_pickle(artifact, f)
+
+  warp = make_luma_warp(args.frame, *args.warp_to, args.border_fill) if args.layout == 'luma' else make_frame_prepare(args.frame, *args.warp_to)
+  prefix = () if args.frames == 1 else (args.frames,)
+  specs = {'input_frame': (prefix + (args.frame.size,), np.dtype(np.uint8).str, Device.DEFAULT),
+           'M_inv': (prefix + (3, 3), np.dtype(np.float32).str, args.transform_device or Device.DEFAULT)}
+
+  def make_inputs(seed):
+    rng = np.random.default_rng(seed)
+    def initialize(views):
+      views['input_frame'][:] = rng.integers(0, 256, views['input_frame'].shape, dtype=np.uint8)
+      views['M_inv'][:] = rng.standard_normal(views['M_inv'].shape)*8
+    return allocate_inputs(specs, initialize)
+
+  @TinyJit(prune=True)
+  def run(input_frame, M_inv):
+    if args.frames == 1: return warp(input_frame, M_inv)
+    return Tensor.stack(*(warp(input_frame[i], M_inv[i]) for i in range(args.frames)))
+
+  expected = benchmark(run, **(inputs:=make_inputs(42)))
+  # capture jit
+  for _ in range(2): np.testing.assert_array_equal(benchmark(run, **inputs), expected)
+  # test jit output actually changes with different inputs
+  with np.testing.assert_raises(AssertionError): np.testing.assert_array_equal(benchmark(run, **make_inputs(43)), expected)
+  # benchmarks
+  for i in range(args.benchmark_runs):
+    np.testing.assert_array_equal(benchmark(run, cb=lambda t: print(f"  [{i}/{args.benchmark_runs}] {t*1e3:.2f} ms"), **inputs), expected)
+
+  if args.retargetable: make_retargetable(run)
+
+  artifact = {'metadata': {}, 'run': run, 'input_specs': specs}
+  with open(args.output, 'wb') as f: pickle.dump(artifact, f)
+
+  # test pickled jit
+  with open(args.output, 'rb') as f: loaded = pickle.load(f)
+  if args.retargetable: loaded['run'].captured._linear = lower_and_compile(loaded['run'].captured._linear)
+  np.testing.assert_array_equal(benchmark(loaded['run'], **make_inputs(42)), expected)

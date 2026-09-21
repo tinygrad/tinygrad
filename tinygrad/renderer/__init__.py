@@ -9,7 +9,7 @@ from tinygrad.device import Compiler
 
 # an access takes its dtype from the buffer it indexes, so accessing at another dtype restates the storage on the buffer that owns it
 def with_storage(x:UOp, dt:DType) -> UOp:
-  if x.op in {Ops.PARAM, Ops.BUFFER}: return x.replace(arg=replace(x.arg, dtype=dt))
+  if x.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: return x.replace(arg=replace(x.arg, dtype=dt))
   return x.replace(src=(with_storage(x.src[0], dt),)+x.src[1:])
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ class Estimates:
       elif u.op in GroupOp.ALU and u not in excluded:
         flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
       elif u.op is Ops.WMMA and u not in excluded:
-        flops += 2 * prod(u.arg[0]) // u.arg[3] * mults
+        flops += 2 * prod(u.arg[0]) // u.arg[2] * mults
     return Estimates(flops, lds, sum(mem.values()))
 
 class Renderer:

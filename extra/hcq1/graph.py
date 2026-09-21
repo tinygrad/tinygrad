@@ -3,12 +3,16 @@ from typing import Any, cast
 from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, suppress_finalizing, TracingKey, unwrap
 from extra.hcq1.hcq import HCQBuffer, HCQCompiled, HCQAllocator, HCQSignal, HWQueue, HCQArgsState
 from tinygrad.runtime.support.hcq import BumpAllocator, MMIOInterface
-from tinygrad.device import BufferStorage, Buffer, BufferSpec, Compiled, Device, MultiBuffer, ProfileGraphEntry, ProfileGraphEvent
+from tinygrad.device import BufferStorage, Buffer, BufferSpec, Compiled, Device, MultiBuffer, ProfileGraphEntry, ProfileGraphEvent, DepsTracker
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable
-from tinygrad.engine.jit import GraphRunner, MultiGraphRunner
+from tinygrad.engine.jit import GraphRunner
 
-class HCQGraph(MultiGraphRunner):
+class HCQGraph(GraphRunner):
+  def _access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
+    if not hasattr(self, "deps"): self.deps = DepsTracker()
+    return self.deps.access_resources(bufs, write, new_dependency)
+
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
     self.devices = list({cast(HCQCompiled, Device[b.device]) for (_,_,bufs,_) in self.calls for b in bufs})
@@ -84,7 +88,7 @@ class HCQGraph(MultiGraphRunner):
     self.device_vars: dict[HCQCompiled, dict[str, int]] = {}
 
     for j, ((_, ast, bufs, device_vars), runtime) in enumerate(zip(self.calls, self.runtimes)):
-      is_xfer = ast.op is Ops.COPY and hasattr(alc:=Device[bufs[0].device].allocator, '_transfer') and alc.supports_transfer \
+      is_xfer = ast.op is Ops.STORE and hasattr(alc:=Device[bufs[0].device].allocator, '_transfer') and alc.supports_transfer \
                 and bufs[0].device.split(":")[0] == bufs[1].device.split(":")[0]
       ji_devs = [cast(HCQCompiled, Device[b.device]) for b in bufs] if is_xfer else []
       is_rdma = len(ji_devs) > 0 and not any(d._is_cpu() for d in ji_devs) and len(set(d.peer_group for d in ji_devs)) > 1
@@ -196,7 +200,7 @@ class HCQGraph(MultiGraphRunner):
 
         dest_queue.signal(dest_out_signal, dest_out_val)
         self.num_rdma_ops[(dest_rdma, src_rdma)] += 1
-      elif ast.op is Ops.COPY:
+      elif ast.op is Ops.STORE:
         dest, src = bufs[0], bufs[1]
         uop_replace_j = dict(self.uop_replace[j])
         for bufid in range(len(bufs)):
@@ -330,7 +334,7 @@ class HCQGraph(MultiGraphRunner):
       try: [d.rdma_dev() for d in all_devs if not d._is_cpu()]
       except RuntimeError: return False
 
-    if new_call.src[0].op is Ops.COPY:
+    if new_call.src[0].op is Ops.STORE:
       # MOCKGPU is not supported, since it can't execute commands in parallel
       is_xfer = len(set(type(d) for d in all_devs)) == 1 and hasattr(alc:=all_devs[0].allocator, '_transfer') and alc.supports_transfer
       return is_xfer or (all_devs[0].hw_copy_queue_t is not None and not getattr(all_devs[0], 'iface', None).__class__.__name__.startswith("MOCK"))

@@ -32,6 +32,9 @@ def helper_collect_profile(*devs):
 
 def filter_ranges(p): return flatten([e.ents for e in p if isinstance(e, ProfileGraphEvent)])+[e for e in p if isinstance(e, ProfileRangeEvent)]
 
+def helper_host_buffer(dev:Compiled, **kwargs) -> Buffer:
+  return Buffer(getattr(dev, "host", "PYTHON"), 2, dtypes.float, **kwargs)
+
 def helper_profile_filter_device(profile, device:str):
   assert any(getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent) for x in profile), f"device {device} is not registred"
   dev_events = [x for x in profile if getattr(x, "device", None) == device and isinstance(x, ProfileDeviceEvent)]
@@ -73,6 +76,7 @@ class TestProfiler(unittest.TestCase):
     kernel_runs = [x for x in profile if x.device == TestProfiler.d0.device]
     assert len(kernel_runs) == 1, "one kernel run is expected"
     assert ansistrip(kernel_runs[0].name) == runner_name, "kernel name is not correct"
+    self.assertEqual(kernel_runs[0].profile_key, TestProfiler.prg.key)
     assert _dev_base(kernel_runs[0].device) == kernel_runs[0].device, "kernel should not be on a sub-device"
 
   def test_profile_kernel_run_wait(self):
@@ -80,27 +84,29 @@ class TestProfiler(unittest.TestCase):
 
   def test_profile_copyin(self):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
+    src = helper_host_buffer(TestProfiler.d0, initial_value=struct.pack("ff", 0, 1))
 
     with helper_collect_profile(TestProfiler.d0) as profile:
-      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
+      buf1.copy_from(src)
 
     profile = filter_ranges(profile)
-    kernel_runs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, "PYTHON"))]
-    self.assertEqual(len(kernel_runs), 2 if Device.DEFAULT in HCQ_DEVS else 1)
+    kernel_runs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, f"{src.device}:COPY"))]
+    self.assertEqual(len(kernel_runs), 1)
 
   def test_profile_multiops(self):
     runner_name = ansistrip(TestProfiler.prg.src[0].arg.name)
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
+    src, dst = helper_host_buffer(TestProfiler.d0, initial_value=struct.pack("ff", 0, 1)), helper_host_buffer(TestProfiler.d0, preallocate=True)
 
     with helper_collect_profile(TestProfiler.d0) as profile:
-      buf1.copy_from(Buffer("PYTHON", 2, dtypes.float, opaque=memoryview(bytearray(struct.pack("ff", 0, 1)))))
+      buf1.copy_from(src)
       run_linear(UOp(Ops.LINEAR, src=(TestProfiler.prg.call(UOp.from_buffer(buf1), TestProfiler.a.uop),)))
-      buf1.as_memoryview()
+      dst.copy_from(buf1)
 
     profile = filter_ranges(profile)
-    evs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, "PYTHON", "CPU:COPY"))]
+    evs = [x for x in profile if x.device.startswith((TestProfiler.d0.device, f"{src.device}:COPY"))]
 
-    assert len(evs) == (5 if Device.DEFAULT in HCQ_DEVS else 3), "unexpected number of kernel and copy events"
+    assert len(evs) == 3, "unexpected number of kernel and copy events"
     # NOTE: order of events does not matter, the tool is responsible for sorting them
     prg_events = [e for e in evs if e.device == TestProfiler.d0.device]
     assert any(ansistrip(e.name) == runner_name for e in prg_events), "kernel name is not correct"
@@ -127,6 +133,7 @@ class TestProfiler(unittest.TestCase):
   def test_profile_multidev_transfer(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
     except Exception as e: self.skipTest(f"second device not available {e}")
+    if Device.DEFAULT == "CUDA": self.skipTest("CUDA has no p2p: a transfer is two staged copies")
 
     buf1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:0").realize()
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
@@ -140,6 +147,7 @@ class TestProfiler(unittest.TestCase):
   def test_profile_graph(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
     except Exception as e: self.skipTest(f"second device not available {e}")
+    if Device.DEFAULT == "CUDA": self.skipTest("CUDA has no p2p: a transfer is two staged copies")
 
     def f(a):
       x = (a + 1).realize()

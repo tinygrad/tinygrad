@@ -105,6 +105,13 @@ class TestGGUF(unittest.TestCase):
     expected = np.array(lut + [lut[0]]*16, dtype=np.float32)
     np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, 20).numpy().flatten(), expected)
 
+  def test_dequantization_iq4_xs_hardcoded(self):
+    # d=1, all eight scales=1, each group has low nibbles 0..15 and high nibbles 0.
+    block = np.frombuffer(np.float16(1.0).tobytes() + bytes([0xAA, 0xAA] + [0x11]*4) + bytes(range(16))*8, dtype=np.uint8).copy()
+    decoded = ggml_data_to_tensor(Tensor(block), 256, GGMLQuantizationType.IQ4_XS.value)
+    expected = np.array((list(_ggml.kvalues_iq4nl) + [_ggml.kvalues_iq4nl[0]]*16)*8, dtype=np.float32)
+    np.testing.assert_equal(decoded.numpy().flatten(), expected)
+
   def test_dequantization_mxfp4_hardcoded(self):
     # MXFP4: 1 byte shared exponent E + 16 packed bytes (32 x 4-bit values)
     # nibble: bit3=sign, bit2:1=exp, bit0=mant; E=128 gives scale=1.0

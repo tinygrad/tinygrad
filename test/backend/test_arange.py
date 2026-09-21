@@ -19,6 +19,11 @@ class TestArange(unittest.TestCase):
     self.assertLess(self._get_flops(Tensor.arange(256).clone(), np.arange(256)), 256*4)
     self.assertLess(self._get_flops(Tensor.arange(2560).clone(), np.arange(2560)), 2560*4)
 
+  @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "emulated half costs more ops")
+  def test_arange_complexity_half(self):
+    self.assertLess(self._get_flops(Tensor.arange(256, dtype=dtypes.half).clone(), np.arange(256, dtype=np.float16)), 256*4)
+    self.assertLess(self._get_flops(Tensor.arange(2560, dtype=dtypes.half).clone(), np.arange(2560, dtype=np.float16)), 2560*4)
+
   def test_cat_complexity(self):
     x = Tensor.arange(2**10) + Tensor.empty((), dtype=dtypes.uint32)
     out = x.cat(x).cat(Tensor.empty(1, dtype=dtypes.uint32))
@@ -86,6 +91,16 @@ class TestIndexing(unittest.TestCase):
       # no global ops because they are all indexing
       self.assertLess(GlobalCounters.global_ops, 1000)
     np.testing.assert_allclose(comp, dataset.numpy()[12])
+
+  def test_index_two_in_one_reduce(self):
+    a, b = Tensor.rand(DSET, DDIM).realize(), Tensor.rand(DSET, DDIM).realize()
+    i, j = Tensor([3, 50, 99]).realize(), Tensor([7, 1, 2000]).realize()
+    with Context(NOOPT=1):
+      GlobalCounters.reset()
+      r = Tensor.arange(DSET)[None, :, None]
+      comp = ((r == i[:, None, None]).where(a[None], 0) + (r == j[:, None, None]).where(b[None], 0)).sum(1).numpy()
+      self.assertLess(GlobalCounters.global_ops, 4*DSET)
+    np.testing.assert_allclose(comp, a.numpy()[[3, 50, 99]] + b.numpy()[[7, 1, 2000]])
 
   def test_index(self):
     dataset = Tensor.rand(DSET, DDIM).realize()

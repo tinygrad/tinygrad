@@ -12,12 +12,19 @@ class TestRingAllReduce(unittest.TestCase):
       ds = tuple(f"CPU:{i}" for i in range(N))
       t = Tensor.empty(N, N*100).shard(ds, axis=0).realize()
       linear = t.sum(0).linear_with_vars()[0]
-      copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
+      copies = [si for si in linear.src if si.src[0].op is Ops.STORE]
       pairs = [(c.src[1].buffer.device, c.src[2].buffer.device) for c in copies]
       # N*(N-1) scatter reduce, and N*(N-1) allgather
       if len(pairs) != N*(N-1)*2: raise KernelCountException(N*(N-1)*2, len(pairs))
       # copy topology forms a ring
       self.assertEqual(len(set(pairs)), N)
+
+  def test_hierarchy(self):
+    ds = tuple(f"CPU:{i}" for i in range(4))
+    with Context(ALL2ALL=1, ALLREDUCE_NODE_NDEVS=2): # two nodes of 2
+      for size in (1, 17):
+        x = (Tensor.arange(4 * size, dtype=dtypes.int32).reshape(4, size) % 13).realize()
+        self.assertEqual(x.shard(ds, axis=0).sum(0).tolist(), x.sum(0).tolist())
 
   def test_schedule_all2all(self):
     with Context(ALL2ALL=2):
@@ -28,7 +35,7 @@ class TestRingAllReduce(unittest.TestCase):
       t = (x*x).clone().shard(ds, axis=0).realize()
       out = t.sum(0).mul(2.).contiguous()
       linear, var_vals = out.linear_with_vars()
-      copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
+      copies = [si for si in linear.src if si.src[0].op is Ops.STORE]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       # N*(N-1) copies for input and output
       copy_count = N*(N-1)*2
@@ -50,7 +57,7 @@ class TestRingAllReduce(unittest.TestCase):
     t = Tensor.empty(N, 4096).shard(ds, axis=0).realize()
     linear = t.sum(0).linear_with_vars()[0]
 
-    copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
+    copies = [si for si in linear.src if si.src[0].op is Ops.STORE]
     sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
     pairs = [(c.src[1].buffer.device, c.src[2].buffer.device) for c in copies]
 
@@ -79,7 +86,7 @@ class TestAllreduceCast(unittest.TestCase):
     with Context(ALLREDUCE_CAST=allreduce_cast, RING=0, SCACHE=0):
       t = Tensor.empty(4, 4, dtype=dtype).shard(ds, axis=0)
       linear = t.sum(0).linear_with_vars()[0]
-      return {si.src[1].buffer.dtype for si in linear.src if si.src[0].op is Ops.COPY}
+      return {si.src[1].buffer.dtype for si in linear.src if si.src[0].op is Ops.STORE}
 
   def test_allreduce_cast_bf16(self):
     # with ALLREDUCE_CAST, allreduce copies stay in bfloat16 instead of promoting to float32

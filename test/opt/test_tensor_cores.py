@@ -89,6 +89,37 @@ class TestTensorCores(unittest.TestCase):
       with self.subTest(tc=tc):
         helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_nan(self):
+    for tc in [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if dtypes.is_float(tc.dtype_in)]:
+      with self.subTest(tc=tc):
+        _skip_unsupported_tc_dtypes(tc.dtype_in, tc.dtype_out)
+        a, b = Tensor.full((tc.dims[1], tc.dims[2]), float("nan"), dtype=tc.dtype_in), Tensor.ones(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
+        realized_ast, bufs = helper_realized_ast(a.matmul(b, dtype=tc.dtype_out))
+        run_program(replace_opts(realized_ast, [Opt(OptOps.TC, 0, (-1, 0, 1))]), bufs)
+        self.assertTrue(np.isnan(bufs[0].numpy()).all())
+
+  @unittest.skipUnless(Device.DEFAULT == "PYTHON" and Device[Device.DEFAULT].renderer.tensor_cores, "test requires emulated tensor cores")
+  def test_tensor_cores_emulated_half(self):
+    # the fragment layout is the instruction's, a dtype decomp only changes what carries the operands
+    for tc in [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if dtypes.half in (tc.dtype_in, tc.dtype_out)]:
+      with self.subTest(tc=tc), Context(EMULATED_DTYPES="half", SPEC=2):
+        helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
+  def test_tensor_cores_partial_sum_in_accumulator(self):
+    # the heuristic tiles M, N and K after the TC opt: every partial sum enters the next WMMA's accumulator, never an add after it
+    for i, tc in enumerate(Device[Device.DEFAULT].renderer.tensor_cores):
+      with self.subTest(tc=tc):
+        _skip_unsupported_tc_dtypes(tc.dtype_in, tc.dtype_out)
+        with Context(ALLOW_TF32=1, TC_SELECT=i, TC_OPT=2):
+          a = _tc_rand(tc.dims[1]*8, tc.dims[2]*8, dtype=tc.dtype_in)
+          b = _tc_rand(tc.dims[2]*8, tc.dims[0]*8, dtype=tc.dtype_in)
+          ast = a.matmul(b, dtype=tc.dtype_out).schedule_linear().src[-1].src[0]
+          wmmas = [u for u in to_program(ast, Device[Device.DEFAULT].renderer).src[1].src if u.op is Ops.WMMA]
+        self.assertGreater(len(wmmas), 0)
+        for u in wmmas: self.assertTrue(any(x.op is Ops.LOAD for x in u.src[2].toposort()), f"accumulator is {u.src[2]}")
+
   @Context(ALLOW_TF32=1)
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith("gfx9"),
@@ -345,7 +376,7 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "AMD" and Device[Device.DEFAULT].renderer.target.arch.startswith(("gfx11", "gfx12")),
                    "TODO: LLVM AMDGPU miscompiles RDNA WMMA with masked operands, passes on PYTHON::gfx1100")
   def test_tc_padto_full_upcast(self):
-    # a fully upcast pad lane makes a WMMA operand entirely Invalid
+    # a fully upcast pad lane is gated to 0 on the WMMA operand
     tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in in (dtypes.half, dtypes.float))
     Tensor.manual_seed(3)
     a, b = Tensor.rand(17, 23, dtype=tc.dtype_in).realize(), Tensor.rand(23, 29, dtype=tc.dtype_in).realize()

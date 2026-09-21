@@ -66,6 +66,9 @@ def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
   if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
   return canonical[0] if len(canonical:=tuple(Device.canonicalize(d) for d in device)) == 1 else canonical
 
+def is_disk_device(device:str|tuple[str, ...]) -> bool:
+  return any(d.split(":", 1)[0].upper() == "DISK" for d in ((device,) if isinstance(device, str) else device))
+
 # **************** Profile ****************
 
 @dataclass(frozen=True)
@@ -108,9 +111,11 @@ class BufferStorage: buf:Any; meta:Any=None; host:MMIOInterface|None=None; maps:
 class Buffer:
   profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
-               initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False):
+               initial_value:bytes|pickle.PickleBuffer|None=None, base:Buffer|None=None, offset:int=0, preallocate=False,
+               allocator:Allocator|None=None):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype, self.offset, self.allocated_views, self._base = Device.canonicalize(device), size, dtype, offset, 0, base
+    if allocator is not None: self.allocator = allocator
     self.options = options if options is not None else BufferSpec()
     self._storage:BufferStorage|None = None
     if base is None:
@@ -240,7 +245,7 @@ class Buffer:
     from tinygrad.engine.realize import run_linear
     from tinygrad.uop.ops import UOp, Ops
     du, su = UOp.from_buffer(self), UOp.from_buffer(src)
-    run_linear(UOp(Ops.LINEAR, src=(su.param_like(1).copy_to_device(self.device).call(du, su),)), update_stats=False)
+    run_linear(UOp(Ops.LINEAR, src=(du.store_call(su),)), update_stats=False)
     return self
 
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
@@ -511,7 +516,7 @@ class Compiled:
 
   def _select_renderer(self) -> Renderer:
     assert (rn:=next((self._renderer_name(r) for r in self.renderers if getenv(f"{self.device}_{self._renderer_name(r)}")), None)) is None, \
-      f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} or {self.device}_CC={rn} instead"
+      f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} instead"
     t = DEV.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
     return select_first_inited(select_by_name(self.renderers, self._renderer_name, t.renderer, f"{self.device} has no renderer {t.renderer!r}"),
                                f"No renderer for {self.device} is available", self.cached_renderer, t)
