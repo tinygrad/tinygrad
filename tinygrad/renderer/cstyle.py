@@ -117,7 +117,7 @@ def _wmma_name(u:UOp) -> str:
 
 # (name, dims, dtype_in, dtype_out, upcast_sizes)
 def wmma_args(uops:list[UOp]):
-  return dedup((_wmma_name(uop), uop.arg[0], uop.arg[1], uop.dtype, tuple(x.shape[-1] for x in uop.src)) for uop in uops if uop.op is Ops.WMMA)
+  return dedup((_wmma_name(uop), uop.arg[0], uop.arg[1], uop.dtype, tuple(x.max_numel() for x in uop.src)) for uop in uops if uop.op is Ops.WMMA)
 
 class CStyleLanguage(Renderer):
   abi: str = ""
@@ -532,7 +532,7 @@ class HIPRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "hip_bfloat16", **{d: ("hip_fp8", "hip_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s)) + PatternMatcher([
     (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-      lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64), x.src[2]))
+      lambda x: x.replace(src=(x.src[0].alu(Ops.BITCAST, arg=dtypes.uint64), x.src[1].alu(Ops.BITCAST, arg=dtypes.uint64), x.src[2]))
       if x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8s else None),
   ])
 
