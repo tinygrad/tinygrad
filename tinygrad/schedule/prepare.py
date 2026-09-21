@@ -191,6 +191,16 @@ pm_inline_calls = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(name="r"), UPat(Ops.SINK, name="t")), allow_any_len=True), resolve_returned_after),
 ])
 
+pm_disk_copy = PatternMatcher([
+  # remove contiguous on movement ops before a copy on disk
+  (UPat(GroupOp.Movement, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
+   copy.replace(src=(x,)) if x.on_disk() else None),
+  # push all movement ops to the destination: views exposed here are no longer normalized into input PARAMs,
+  # so leaving SHRINK/RESHAPE behind can cause materialize_cross_device_src to allocate a temporary on disk
+  (UPat(GroupOp.Movement, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
+   x.replace(src=(copy.replace(src=(x.src[0],)),)+x.src[1:]) if x.on_disk() else None),
+])
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve allreduce (must be bottom up)
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"),), name="red"), create_allreduce_function),
@@ -267,7 +277,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 def prepare_rangeify(sink:UOp) -> UOp:
   # prepare for rangeify
   tsink = graph_rewrite(forward_call_outputs(sink), multi_pm, name="multi_pm")
-  tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls, name="inline calls")
+  tsink = graph_rewrite(tsink, pm_mops+pm_inline_calls+pm_disk_copy, name="inline calls")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
   return tsink
