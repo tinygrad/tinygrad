@@ -1,8 +1,8 @@
 import unittest
 import functools
 import numpy as np
-from tinygrad import Tensor, Device, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad import Tensor, dtypes
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, ParamArg
 from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
@@ -11,13 +11,52 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
 from tinygrad.renderer.amd.dsl import s, v, NULL
-from test.amd.helpers import TARGET_TO_ARCH
 from extra.gemm.amd_asm_matmul import Kernel
+
+from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, rewrite_group
+
+isel_sink_pm = PatternMatcher([
+  (UPat(Ops.PARAM, dtype=dtypes.int32, name="dst").store(UPat(Ops.PARAM, dtype=dtypes.int32, name="src").load()),
+   lambda dst, src: UOp(Ops.CUSTOM, arg=(s_load_b64(s[0:1], s[0:1], soffset=NULL), dtypes.void))
+   if dst.arg.slot == 0 and src.arg.slot == 1 and dst.shape == src.shape == (2,) else None),
+  (UPat(Ops.PARAM, dtype=dtypes.int32, name="dst").store(UPat(Ops.PARAM, dtype=dtypes.int32, name="src").load() << 2),
+   lambda dst, src: UOp(Ops.CUSTOM, arg=(v_lshlrev_b32_e32(v[0], 2, v[0]), dtypes.void))
+   if dst.arg.slot == 0 and src.arg.slot == 1 and dst.shape == src.shape == (32,) else None),
+  (UPat(Ops.ALLOC, dtype=(dtypes.int32, dtypes.float32), name="dst").store(
+     UPat(Ops.AFTER, name="offset"), UPat(Ops.AFTER, name="base")),
+   lambda dst, offset, base: UOp(Ops.CUSTOM, src=(base, offset), arg=(global_load_b32(v[1], v[0], saddr=s[0:1]), dtypes.void))
+   if dst.shape == offset.shape == (32,) and base.shape == (2,) else None),
+  (UPat(Ops.ALLOC, dtype=dtypes.float32, name="dst").store(UPat(Ops.EXPAND, src=(UPat.cvar("c").cast(dtypes.float32), UPat()),)),
+   lambda dst, c: UOp(Ops.CUSTOM, arg=(v_mov_b32_e32(v[2], 1.0), dtypes.void)) if dst.shape == (32,) and c.arg == 1.0 else None),
+  (UPat(Ops.PARAM, dtype=dtypes.float32, name="dst").store(
+     UPat(Ops.PARAM, dtype=dtypes.float32, name="a").load() + UPat(Ops.PARAM, dtype=dtypes.float32, name="b").load()),
+   lambda dst, a, b: UOp(Ops.CUSTOM, arg=(v_add_f32_e32(v[1], v[1], v[2]), dtypes.void))
+   if dst.arg.slot == 0 and {a.arg.slot, b.arg.slot} == {1, 2} and dst.shape == a.shape == b.shape == (32,) else None),
+  (UPat(Ops.PARAM, dtype=dtypes.int32, name="offset").store(
+     UPat(Ops.PARAM, dtype=dtypes.int32, name="val").load(UPat(Ops.PARAM, dtype=dtypes.int32, name="base"))),
+   lambda offset, val, base: UOp(Ops.CUSTOM, arg=(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), dtypes.void))
+   if (offset.arg.slot, val.arg.slot, base.arg.slot) == (0, 1, 2) and offset.shape == val.shape == (32,) and base.shape == (2,) else None),
+])
+
+assemble_sink_pm = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, src=(UPat(Ops.CUSTOM, name="ins"),)),), name="call", allow_any_len=True),
+   lambda call, ins: ins.replace(op=Ops.INS, src=ins.src+call.src[1:])),
+  (UPat(Ops.AFTER, src=(UPat(Ops.INS, name="ins"),), name="after", allow_any_len=True),
+   lambda after, ins: ins.replace(src=after.src[1:]+ins.src)),
+])
+
+@rewrite_group("asm_sink")
+def asm_sink(sink:UOp) -> UOp:
+  sink = graph_rewrite(sink, isel_sink_pm, enter_calls=True, name="instruction selection")
+  ins = graph_rewrite(sink, assemble_sink_pm, enter_calls=True)
+  lin = UOp(Ops.LINEAR, src=tuple(u for u in ins.toposort() if u.op is Ops.INS))
+  return UOp(Ops.PROGRAM, src=(sink.replace(src=tuple(u for u in sink.src if u.op not in {Ops.CALL, Ops.AFTER})), lin))
 
 def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
   assert dtypes.is_float(A.dtype), f"buffer dtype must be float32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
+  """
   insts = [
     s_load_b64(s[0:1], s[0:1], soffset=NULL),
     s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
@@ -29,8 +68,30 @@ def custom_add_one(A:UOp) -> UOp:
     global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]),
     s_endpgm(),
   ]
-  sink = UOp.sink(A.base, threads, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
+  """
+  kernarg = UOp.param(0, dtypes.int32, (2,))
+  dest = UOp(Ops.ALLOC, arg=ParamArg(0, dtypes.int32, 2))
+  store_load = UOp.param(0, dtypes.int32, (2,)).store(UOp.param(1, dtypes.int32, (2,)).load())
+  load_call = UOp.call(store_load.sink(), dest, kernarg)
+  load_call = UOp.call(UOp(Ops.CUSTOM, arg=(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0), dtypes.void)).sink()).after(dest, load_call)
+  offset_val = UOp(Ops.ALLOC, arg=ParamArg(1, dtypes.int32, 32))
+  lane_id = UOp.param(1, dtypes.int32, (32,))
+  shift = UOp.param(0, dtypes.int32, (32,)).store(UOp.param(1, dtypes.int32, (32,)).load() << 2)
+  offset_call = UOp.call(shift.sink(), offset_val, lane_id)
+  val = UOp(Ops.ALLOC, arg=ParamArg(2, dtypes.float32, 32))
+  load_call = UOp.call(val.store(offset_val.after(offset_call), dest.after(load_call)).sink())
+  wait_call = UOp.call(UOp(Ops.CUSTOM, arg=(s_waitcnt_vmcnt(sdst=NULL, simm16=0), dtypes.void)).sink()).after(val, load_call)
+  c1_dest = UOp(Ops.ALLOC, arg=ParamArg(3, dtypes.float32, 32))
+  mov_call = UOp.call(c1_dest.store(1.0).sink())
+  add_dest = UOp(Ops.ALLOC, arg=ParamArg(4, dtypes.float32, 32))
+  add_call = UOp.call(UOp.param(0, dtypes.float32, (32,)).store(
+                        UOp.param(1, dtypes.float32, (32,)).load() + UOp.param(2, dtypes.float32, (32,)).load()).sink(),
+                      add_dest, val.after(wait_call), c1_dest.after(mov_call))
+  global_store_impl = UOp.param(0, dtypes.int32, (32,)).store(UOp.param(1, dtypes.int32, (32,)).load(UOp.param(2, dtypes.int32, (2,))))
+  store_to_global = UOp.call(global_store_impl.sink(), offset_val, add_dest.after(add_call), dest)
+  end_call = UOp.call(UOp(Ops.CUSTOM, arg=(s_endpgm(), dtypes.void)).sink()).after(store_to_global)
+  sink = UOp.sink(A.base, threads, end_call, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
+  return asm_sink(sink)
 
 def custom_add_var(A:UOp, B:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
@@ -161,9 +222,10 @@ def custom_data_deps(A:UOp) -> UOp:
   sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
 
-@unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
+#@unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestAsmKernel(unittest.TestCase):
-  def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
+  def setUp(self):
+    self.arch = "rdna3" #TARGET_TO_ARCH[Device["AMD"].arch]
 
   def test_simple(self):
     if self.arch != "rdna3": self.skipTest("only rdna3")
