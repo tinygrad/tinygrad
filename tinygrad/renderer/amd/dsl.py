@@ -457,6 +457,7 @@ class Inst:
   def __repr__(self):
     # collect (repr, is_default) pairs, strip trailing defaults so repr roundtrips with eval
     name = self.op.name.lower() if hasattr(self, 'op') else type(self).__name__
-    parts = [(repr(v := getattr(self, n)), v == f.default) for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
+    parts = [(repr(v := getattr(self, n)).replace('v[', 'a[' if self.is_acc_operand(n) else 'v['), v == f.default) for n, f in self._fields
+             if n != 'op' and not isinstance(f, FixedBitField)]
     while parts and parts[-1][1]: parts.pop()
     return f"{name}({', '.join(p[0] for p in parts)})"
