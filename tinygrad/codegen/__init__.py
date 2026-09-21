@@ -140,11 +140,6 @@ ew_devectorizer = PatternMatcher([
 ])
 
 devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
-  # Narrowing buffer bitcasts add an axis: index the original element before selecting its smaller pieces.
-  (UPat(Ops.BITCAST, name="b").f(Ops.INDEX, name="idx", allow_any_len=True), lambda b,idx:
-   b.src[0].index(*idx.src[1:-1]).alu(Ops.BITCAST, arg=b.dtype).index(idx.src[-1])
-   if b.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) and b.dtype.itemsize < b.src[0].dtype.itemsize and
-   len(idx.src) == len(b.shape)+1 and len(b.shape) > 1 and all(i.shape == () for i in idx.src[1:]) else None),
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)

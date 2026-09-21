@@ -146,8 +146,6 @@ def flag_gate(m:UOp) -> UOp|None:
 
 # legalize the new style graph for isel. NOTE: this runs after the spec is verified, some of these rewrites violate it
 pre_isel_matcher = PatternMatcher([
-  # widening a uint32 is free, the 32bit write that produced it already zeroed the upper half
-  (UPat(dtype=dtypes.uint32).cast(dtypes.int64s, name="x"), lambda x: x.replace(op=Ops.BITCAST)),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).cast(dtypes.ints, name="x"),
    lambda y,x: x.replace(op=Ops.BITCAST) if x.dtype.itemsize == y.dtype.itemsize else None),
   # gated load/store become a conditional move on the address, the load/store are unconditional
@@ -342,7 +340,7 @@ isel_matcher = PatternMatcher([
    a.ins(X86Ops.VBLENDVPD, src=(b, a, mask(m))) if not is_address(a) else None),
   # in this case we have a mask producing comparison whose user expects a bool, so we convert to bool
   (UPat(GroupOp.Comparison, src=(UPat.var("y", (dtypes.float32, dtypes.float64)), UPat()), name="x"), lambda y,x:
-   UOp(Ops.AND, src=(mask(x).bitcast(dt:=to_int(y.dtype)), UOp.cconst(1, dt))).bitcast(dtypes.bool)),
+   mask(x).bitcast(dt:=to_int(y.dtype)).ne(UOp.cconst(0, dt))),
   # conditional moves that use flags
   # TODO: remove this once we allow all flag producing ops in cmove
   # the blends took every float gate a mask can serve, so a gate that is still not an integer comparison becomes one here

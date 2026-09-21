@@ -155,8 +155,8 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   if (ns:=bc.dtype.itemsize) == (os:=x.dtype.itemsize) or (isinstance(x.device, str) and x.device.startswith("DISK")): return None
   new_uint, tmp = to_dtype(f"uint{8*ns}"), x.bitcast(to_dtype(f"uint{8*os}"))
   if ns > os:
-    parts = [tmp.shrink((None,)*(len(tmp.shape)-1) + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(ns//os)]
-    return parts[0].usum(*parts[1:]).squeeze(-1).bitcast(bc.dtype)
+    parts = [tmp[..., i].cast(new_uint)<<8*i*os for i in range(ns//os)]
+    return parts[0].usum(*parts[1:]).bitcast(bc.dtype)
   parts = [tmp>>8*i*ns for i in range(os//ns)]
   return parts[0].stack(*parts[1:], dim=-1).cast(new_uint).bitcast(bc.dtype)
 

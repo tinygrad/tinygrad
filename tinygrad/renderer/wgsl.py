@@ -45,7 +45,7 @@ wgsl_matcher = PatternMatcher([
    lambda a,b,c: a.cast(dtypes.int).alu(c.op, b.cast(dtypes.int)).cast(dtypes.bool)),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX),), allow_any_len=True, name="l"), lambda l: packed_load(l) if is_packed(l) else None),
   (UPat(Ops.STORE, name="s"), lambda s: packed_store(s) if is_packed(s) else None),
-  (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
+  (UPat.var("a") << UPat.var("b"), lambda a,b: (a.cast(dtypes.uint32)<<b.cast(dtypes.uint32)).cast(a.dtype) if b.dtype!=dtypes.uint32 else None),
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, src=(x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
   # fix nan check: 'a != a -> is_nan()'. the decomp rewrites (a != a).logical_not() to CMPEQ, so match both forms
   (UPat.var("a", dtypes.floats) != UPat.var("a"), is_nan),

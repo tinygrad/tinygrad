@@ -590,7 +590,8 @@ pm_link = PatternMatcher([
   # math on consts is a const
   (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"), lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)),
   # fold rules
-  (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast())), fold_binary),
+  (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"),
+                                 UPat(Ops.BINARY, name="blob").f(Ops.RESHAPE, allow_any_len=True)).or_bitcasted()), fold_binary),
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")), fold_words),
   (UPat(name="buf").index(UPat(Ops.STACK, name="offs")).store(UPat(Ops.STACK, name="ws")).end(UPat(Ops.RANGE, name="r")), fold_words),
   # a call keeps the deps that are not written yet

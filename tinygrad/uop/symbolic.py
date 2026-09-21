@@ -80,8 +80,7 @@ pm_data_invalid = PatternMatcher([
   (invalid_pat.broadcast(), lambda i: i),
   (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_pat,)), lambda i: i),
   (UPat(GroupOp.Unary|{Ops.CAST, Ops.BITCAST}, src=(invalid_gate,), name="op"),
-   lambda cond,x,op,i: cond.where(op.replace(src=(x,)), i)
-   if op.op is not Ops.BITCAST or op.dtype.itemsize == x.dtype.itemsize else None),
+   lambda cond,x,op,i: cond.where(op.replace(src=(x,)), i) if op.shape == x.shape else None),
   # binary ops move inside the gate, with Invalid in the false branch
   (UPat(GroupOp.Binary, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i)),
   (UPat(GroupOp.Binary, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i)),
@@ -184,7 +183,7 @@ symbolic_simple = pm_data_invalid + PatternMatcher([
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_lossless_cast(b.dtype, a.dtype) else None),
   # bitcast twice
   (UPat(Ops.BITCAST, name="b", src=(UPat.var('x').bitcast(),)),
-   lambda x,b: x.bitcast(b.dtype) if x.dtype.itemsize == b.dtype.itemsize and x.shape == b.shape else None),
+   lambda x,b: x.bitcast(b.dtype) if x.dtype.itemsize == b.dtype.itemsize else None),
   (UPat.var("x").cast(dtypes.bool), lambda x: x != 0),
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c")), simplify_pow),
