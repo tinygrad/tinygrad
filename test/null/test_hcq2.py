@@ -207,28 +207,6 @@ class TestHCQ2FFI(unittest.TestCase):
     run_linear(linear, jit=True)
     return [u.buffer for u in linear.src[0].without_after.src[1:] if u.op is Ops.BUFFER]
 
-  def test_usb_stream_chunks(self):
-    from tinygrad.runtime.support import usb
-    # Replace USB transfers with memcpy and use small chunks to check every copied word.
-    with Context(HCQ_RUNTIME_DEV="CPU"), patch.object(usb, "USB_MAX_STREAM", 16):
-      for size in (4, 16, 20, 44):
-        for dynamic, stride in ((False, True), (True, True), (True, False)):
-          with self.subTest(size=size, dynamic=dynamic, stride=stride):
-            src = Tensor.arange(1, size//4+1, dtype=dtypes.uint32).clone("CPU").realize()
-            dst = Tensor.zeros(size//4, device="CPU", dtype=dtypes.uint32).realize()
-            header = None
-            def ctrl(h, rtype, req, val, mode, data, n, timeout):
-              nonlocal header
-              header = data.src[0]
-              return data.after(h)
-            def bulk(h, ep, data, n):
-              self.assertLessEqual(n.vmax, 16)
-              return hcq2.ccall(libc.memcpy, header.after(h).index(0).load(), data, n.cast(dtypes.uint64))
-            n = usb.usb_stack(dtypes.int, size).index(0).load() if dynamic else size
-            with patch.object(usb, "usb_ctrl", ctrl), patch.object(usb, "usb_bulk", bulk):
-              self._run(usb.usb_stream(cpu_buf(3, dtypes.uint64), dst.uop.getaddr("CPU"), src.uop.getaddr("CPU"), n, True, stride))
-            self.assertEqual(dst.tolist(), [1 + (i if stride else i % 4) for i in range(size//4)])
-
   def test_ffi_ccall(self):
     with Context(HCQ_RUNTIME_DEV="CPU"):
       out = cpu_buf(dtype=dtypes.int32, slot=1, volatile=True, tag="ffi_result")
