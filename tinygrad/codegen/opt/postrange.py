@@ -152,7 +152,7 @@ class Scheduler:
       check(rng.axis_type not in {AxisType.UPCAST, AxisType.UNROLL, AxisType.WARP}, "cannot pad upcasted or warp")
       new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
-      replaced_rng = UOp.range(new_sz, *rng.arg, dtype=rng.dtype)
+      replaced_rng = rng.replace(src=(rng.src[0].const_like(new_sz),))
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
       for b in self.bufs:
