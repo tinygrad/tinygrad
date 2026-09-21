@@ -6,17 +6,20 @@ from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_qu
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 class TestQ8Quantize(unittest.TestCase):
-  def test_word_quant_weights_use_typed_buffer_view(self):
-    for ggml_type, type_size in ((13, 176), (23, 136)):
+  def test_quant_weights_share_storage(self):
+    for ggml_type, type_size in ((12, 144), (13, 176), (14, 210), (23, 136)):
       with self.subTest(ggml_type=ggml_type):
-        raw = Tensor(np.zeros(type_size + 4, dtype=np.uint8), device="CPU").contiguous().realize()[4:]
+        packed = np.arange(type_size + 4, dtype=np.uint8)
+        raw = Tensor(packed, device="CPU").realize()[4:]
         decoded = ggml_data_to_tensor(raw, 256, ggml_type).reshape(1, 256)
         linear = Linear(256, 1, bias=False)
         linear.set_quantized(decoded)
-        self.assertEqual(linear.ggml_type, ggml_type)
-        self.assertEqual(linear.weight.dtype, dtypes.uint32)
+        linear.weight.realize()
+        self.assertEqual(linear.weight.dtype, dtypes.uint16 if ggml_type == 14 else dtypes.uint32)
         self.assertEqual(linear.weight.nbytes(), type_size)
-        self.assertEqual(linear.weight.uop.buf_uop.buffer.offset, 4)
+        np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), packed[4:])
+        raw.assign(raw.full_like(1)).realize()
+        np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), np.ones(type_size, dtype=np.uint8))
 
   def test_values_and_scales(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
@@ -40,20 +43,20 @@ class TestQ8Quantize(unittest.TestCase):
     rng = np.random.default_rng(42)
     packed = rng.integers(0, 256, 210, dtype=np.uint8)
     packed[-2:] = np.array([0.01], dtype=np.float16).view(np.uint8)
-    raw = Tensor(np.pad(packed, (4, 0))).contiguous().realize()[4:]
+    raw = Tensor(np.pad(packed, (2, 0))).contiguous().realize()[2:]
     decoded = ggml_data_to_tensor(raw, 256, 14).reshape(1, 256)
     linear = Linear(256, 1, bias=False)
     nn.state.load_state_dict(linear, {"weight":decoded}, verbose=False, realize=False)
     @function(allow_implicit=True)
     def run(x:Tensor): return linear(x)
     self.assertTrue(np.isfinite(run(Tensor.randn(1, 256)).realize().item()))
-    # the Q6 weight is repacked: 210-byte blocks padded to 212 (one block = 53 words)
-    self.assertEqual(linear.weight.uop.buf_uop.buffer.nbytes, 53*4)
-    self.assertEqual(linear.weight.dtype, dtypes.uint32)
+    self.assertEqual(linear.weight.nbytes(), 210)
+    self.assertEqual(linear.weight.dtype, dtypes.uint16)
 
   def test_q4_k_linear(self): self._test_quant_linear(12, 144)
   def test_iq4_linear(self): self._test_quant_linear(23, 136)
   def test_q5_linear(self): self._test_quant_linear(13, 176)
+  def test_q6_linear_odd_blocks(self): self._test_quant_linear(14, 210, in_features=768, out_features=3, token_counts=(1, 3, 16))
 
   def test_quant_linear_partial_output_tile(self):
     # Cover a sub-tile output, a trailing tile, and IQ4's larger-output tile selection.
@@ -152,7 +155,8 @@ class TestQ8Quantize(unittest.TestCase):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
     packed = rng.integers(0, 256, (out_features*in_features//256, block_bytes), dtype=np.uint8)
-    packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
+    if ggml_type == 14: packed[:, -2:] = np.array([0.001], dtype=np.float16).view(np.uint8)
+    else: packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
     if ggml_type in (12, 13): packed[:, 2:4] = np.array([0.0002], dtype=np.float16).view(np.uint8)
     raw = Tensor(np.pad(packed.flatten(), (4, 0))).contiguous().realize()[4:]
     decoded = ggml_data_to_tensor(raw, out_features*in_features, ggml_type).reshape(out_features, in_features)
@@ -163,11 +167,11 @@ class TestQ8Quantize(unittest.TestCase):
       with self.subTest(tokens=tokens):
         x = rng.normal(size=(tokens, in_features)).astype(np.float32 if tokens == 3 else np.float16)
         reference_x = x.astype(np.float32)
-        if tokens < 16:
+        if tokens < 16 or ggml_type == 14:
           grouped = reference_x.reshape(tokens, -1, 32)
           scale = np.maximum(np.abs(grouped).max(-1, keepdims=True) / 127, 1e-8)
           reference_x = (np.clip(np.rint(grouped/scale), -127, 127)*scale).reshape(tokens, in_features)
-        reference_w = weight if tokens < 16 else weight.astype(np.float16).astype(np.float32)
+        reference_w = weight if tokens < 16 or ggml_type == 14 else weight.astype(np.float16).astype(np.float32)
         np.testing.assert_allclose(linear(Tensor(x)).numpy(), reference_x @ reference_w.T, rtol=3e-3, atol=2e-2)
     self.assertEqual(linear.ggml_type, ggml_type)
 
