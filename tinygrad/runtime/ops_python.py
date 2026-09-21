@@ -91,7 +91,13 @@ class PythonProgram(Program['PythonDevice']):
               if g: _store(m, o+j*_step(m, src_dtypes[1]), v, src_dtypes[1])
           i += 1
           continue
-        if u.op is Ops.AFTER or (u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]
+        if u.op is Ops.AFTER or (u.op is Ops.RESHAPE and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)): values[u] = src_values[0]
+        elif u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL):
+          values[u] = []
+          for p in src_values[0]:
+            m, o = p if isinstance(p, tuple) else (p, 0)
+            raw = m.cast('B')[o*m.itemsize:]
+            values[u].append((raw[:len(raw)//u.dtype.itemsize*u.dtype.itemsize].cast(storage_fmt_for_dtype(u.dtype)), 0))
         elif u.op is Ops.PARAM and u.addrspace is AddrSpace.ALU: values[u] = [pvals.pop(0)] * warp_size
         elif u.op in {Ops.PARAM, Ops.BUFFER}:
           storage_fmt = storage_fmt_for_dtype(u.dtype)
@@ -117,8 +123,7 @@ class PythonProgram(Program['PythonDevice']):
               if ox < 0 or ox >= u.src[0]._shape[1] or oy < 0 or oy >= u.src[0]._shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*u.src[0]._shape[1]*4))
           else:
-            scale = u.src[0].dtype.itemsize // u.src[0].src[0].dtype.itemsize if u.src[0].op is Ops.BITCAST else 1
-            for m,o in zip(src_values[0], src_values[1]): ret.append((m[0], m[1]+o*scale) if isinstance(m, tuple) else (m, o*scale))
+            for m,o in zip(src_values[0], src_values[1]): ret.append((m[0], m[1]+o) if isinstance(m, tuple) else (m, o))
           values[u] = ret
         elif u.op is Ops.RANGE:
           if u not in values: values[u] = [0] * warp_size

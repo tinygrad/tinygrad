@@ -7,6 +7,7 @@ from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, 
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad import Context, Device, Tensor, dtypes
+from tinygrad.uop.ops import Ops
 from hypothesis import given, settings, strategies as strat
 from test.helpers import rand_for_dtype, min_normal
 from test.unit.test_dtype_spec import _assert_eq, core_dtypes, FP8E4M3_MAX, FP8E5M2_MAX, FP8E4M3FNUZ_MAX, FP8E5M2FNUZ_MAX
@@ -296,6 +297,42 @@ class TestUint8DType(TestDType):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
 class TestBitCast(unittest.TestCase):
+  def test_raw_bitcast_roundtrip(self):
+    for shape in ((), (3,), (2, 3), (0,)):
+      for big, small in ((dtypes.uint32, dtypes.uint8), (dtypes.uint32, dtypes.uint16), (dtypes.uint64, dtypes.uint8)):
+        with self.subTest(shape=shape, big=big, small=small):
+          if big not in supported_dtypes: continue
+          data = rand_for_dtype(big, math.prod(shape)).reshape(shape)
+          x = Tensor(data, dtype=big)
+          y = Tensor(x.uop.alu(Ops.BITCAST, arg=small))
+          expected = data.reshape(-1).view(_to_np_dtype(small)).reshape(shape + (big.itemsize//small.itemsize,))
+          np.testing.assert_array_equal(y.numpy(), expected)
+          # Realize between casts so the roundtrip cannot be folded away.
+          z = Tensor(y.uop.alu(Ops.BITCAST, arg=big))
+          np.testing.assert_array_equal(z.numpy(), data)
+          np.testing.assert_array_equal(Tensor(z.uop.alu(Ops.BITCAST, arg=small)).numpy(), expected)
+
+  def test_raw_bitcast_noncontiguous(self):
+    x = Tensor([[0x12345678, 0x87654321], [0x01020304, 0x04030201]], dtype=dtypes.uint32).T
+    y = Tensor(x.uop.alu(Ops.BITCAST, arg=dtypes.uint8))
+    expected = np.ascontiguousarray(x.numpy()).view(np.uint8).reshape(2, 2, 4)
+    np.testing.assert_array_equal(y.numpy(), expected)
+    x = Tensor(expected).permute(1, 0, 2)
+    np.testing.assert_array_equal(Tensor(x.uop.alu(Ops.BITCAST, arg=dtypes.uint32)).numpy(),
+                                  np.ascontiguousarray(expected.transpose(1, 0, 2)).view(np.uint32).reshape(2, 2))
+
+  def test_raw_bitcast_assign(self):
+    for realized in (False, True):
+      for src, dst, shape in ((dtypes.uint32, dtypes.uint8, (2, 3)), (dtypes.uint8, dtypes.uint32, (2, 4))):
+        with self.subTest(realized=realized, src=src, dst=dst):
+          x = Tensor.zeros(shape, dtype=src).contiguous()
+          if realized: x.realize()
+          y = Tensor(x.uop.alu(Ops.BITCAST, arg=dst))
+          data = rand_for_dtype(dst, math.prod(y.shape)).reshape(y.shape)
+          y.assign(Tensor(data)).realize()
+          expected = data.reshape(-1).view(_to_np_dtype(src)).reshape(shape)
+          np.testing.assert_array_equal(x.numpy(), expected)
+
   def test_shape_change_bitcast(self):
     for dt1, dt2 in [(dtypes.uint8, dtypes.int64), (dtypes.int64, dtypes.uint8)]:
       a = Tensor(rand_for_dtype(dt1, 32).reshape(2, 2, 8), dtype=dt1)

@@ -385,9 +385,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.BITCAST:
         ps = self.src[0]._shape
         if ps is None: return None
-        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize) and len(ps) > 0:
-          if isinstance(ps[-1], int) and (ps[-1]*input_sz) % output_sz: raise RuntimeError("unsupported size in bitcast")
-          return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
+        output_sz, input_sz = self.dtype.itemsize, self.src[0].dtype.itemsize
+        if input_sz > output_sz: return ps + (input_sz // output_sz,)
+        if input_sz < output_sz:
+          if not ps or not resolve(ps[-1]*input_sz == output_sz, False): raise RuntimeError("unsupported size in bitcast")
+          return ps[:-1]
         return ps
 
       # UNSHARD marker has no shape
@@ -1847,12 +1849,19 @@ def do_unbind(ctx:dict[Variable, int], x:UOp):
   return v
 pm_unbind = PatternMatcher([(UPat(Ops.AFTER, name="x"), lambda ctx,x: do_unbind(ctx,x) if x.is_bound_var else None)])
 
+def contiguous_bitcast_index(ctx:UOp, b:UOp, idx:UOp):
+  if len(idx.src)-1 != len(b.shape): return None
+  linear = sum((i*prod(b.shape[n+1:]) for n,i in enumerate(idx.src[1:])), UOp.const(0)).simplify()
+  r, c = linear.pop_const()
+  if r is not UOp.range(ctx.numel(), 0) and not (ctx.numel() == 1 and linear.op is Ops.CONST): return None
+  if linear.op is Ops.CONST: c = linear.val
+  osz, isz = b.element_size(), b.src[0].element_size()
+  if (c*osz) % isz or (ctx.numel()*osz) % isz: return None
+  return b.src[0].flatten().index(UOp.range(ctx.numel()*osz//isz, 0) + c*osz//isz)
+
 # ctx is source UOp for which we are finding a contiguous view for. used in contiguous_view_offset
 pm_contiguous_view_offset = PatternMatcher([
-  # normalize to 1d bitcasts
-  (UPat(Ops.BITCAST, name="b"), lambda b: b.src[0].flatten().bitcast(b.dtype).reshape(b.shape) if len(b.shape) != 1 else None),
-  (UPat(Ops.BITCAST, name="b").index(UPat.cvar("c")), lambda ctx, b, c:
-   b.src[0].flatten().index(UOp.range(ctx.numel() * (osz:=b.element_size())//(isz:=b.src[0].element_size()), 0) + (c * osz//isz)) if b.tag else None),
+  (UPat(Ops.BITCAST, name="b").f(Ops.INDEX, name="idx", allow_any_len=True), contiguous_bitcast_index),
   (UPat(Ops.INDEX, src=(UPat.var("b"),)), lambda b: b.rtag().index(0)),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat(Ops.RANGE))), lambda b: b.rtag().index(0)),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat(Ops.RANGE)+UPat.cvar('c'))), lambda ctx, b, c: b.rtag().index(c)),

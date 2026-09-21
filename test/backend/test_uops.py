@@ -65,7 +65,8 @@ class TestBitcastBufferView(unittest.TestCase):
     buf = UOp.param(0, dtypes.uint32, 4)
     uops = to_uops_list([buf.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0).store(1)], ren=Device[Device.DEFAULT].renderer)
     idx = next(u for u in uops if u.op is Ops.INDEX and u.src[0].op is Ops.BITCAST)
-    self.assertEqual(idx.src[0].src[0].op, Ops.SHRINK)
+    self.assertEqual(idx.src[0].src[0].op, Ops.RESHAPE)
+    self.assertEqual(idx.src[0].src[0].src[0].op, Ops.SHRINK)
     Device[Device.DEFAULT].renderer.render(uops)
 
   @Context(SPEC=2)
@@ -85,6 +86,12 @@ class TestBitcastBufferView(unittest.TestCase):
     view = dst.shrink(((1, 5),)).bitcast(dtypes.uint64)  # two stores through one view: it must inline, not get a declared vector-pointer
     run_uops([view.index(0).store(val ^ 0xff), view.index(1).store(val)], [buf])
     self.assertEqual(np.frombuffer(buf.as_memoryview(), dtype=np.uint64, count=2, offset=4).tolist(), [val ^ 0xff, val])
+
+  def test_narrow_load_store(self):
+    src, dst = [UOp.param(i, dtypes.uint32, 4).bitcast(dtypes.uint8) for i in range(2)]
+    bufs = [Buffer(Device.DEFAULT, 4, dtypes.uint32, initial_value=bytes(range(16)) if i == 0 else bytes(16)) for i in range(2)]
+    run_uops([dst.index(i).store(src.index(15-i).load()) for i in range(16)], bufs)
+    self.assertEqual(bytes(bufs[1].as_memoryview()), bytes(reversed(range(16))))
 
   def test_vector_load_store(self):
     for src_dt, dst_dt in [(dtypes.uint8, dtypes.uint32), (dtypes.uint32, dtypes.uint8)]:
