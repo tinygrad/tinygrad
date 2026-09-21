@@ -1,8 +1,10 @@
 import unittest
 import functools
+from dataclasses import dataclass
+from typing import Callable
 import numpy as np
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, InstInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
@@ -10,11 +12,24 @@ from tinygrad.helpers import getenv
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
-from tinygrad.renderer.amd.dsl import s, v, NULL, Reg
+from tinygrad.renderer.amd.dsl import s, v, NULL, Reg, Inst
 from extra.gemm.amd_asm_matmul import Kernel
 
 # small pattern matcher converting CALL to INS
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, rewrite_group
+
+@dataclass(frozen=True)
+class InstInfo:
+  op: Callable[..., Inst]
+  def __repr__(self):
+    op = self.op
+    if isinstance(op, functools.partial):
+      args = [op.args[0].name.lower(), *map(repr, op.args[1:]), *(f"{k}={v!r}" for k, v in op.keywords.items())]
+      return f"InstInfo({', '.join(args)})"
+    return f"InstInfo({op.__name__})"
+  def __reduce__(self):
+    from test.amd.test_asm_kernel import InstInfo
+    return (InstInfo, (self.op,))
 
 def assemble_inst(call:UOp) -> UOp|None:
   if not isinstance(call.arg, InstInfo): return None
@@ -35,12 +50,15 @@ def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
   assert dtypes.is_float(A.dtype), f"buffer dtype must be float32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
+  # SGPRs have shape (1,)
   dest = tuple(UOp.param(i, dtypes.int32, (1,), addrspace=AddrSpace.REG).rtag("s") for i in range(2))
+  # use STACK for SGPR pairs, s[0:1] has shape (2, 1)
   kernarg = UOp.stack(*dest)
   # NOTE: this call body doesn't implement the instruction, this exists in the emulator
   kernarg_load = UOp(Ops.CALL, src=(UOp.sink(), UOp.stack(*dest), kernarg), arg=InstInfo(functools.partial(s_load_b64, soffset=NULL)))
   kernarg_wait = UOp(Ops.CALL, src=(UOp.sink(), kernarg_load), arg=InstInfo(functools.partial(s_waitcnt_lgkmcnt, sdst=NULL, simm16=0)))
   saddr_after = UOp.stack(*(d.after(kernarg_wait) for d in dest))
+  # VPGRs have shape (32,)
   offset_val = UOp.param(0, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v")
   offset_call = UOp(Ops.CALL, src=(UOp.sink(), offset_val, offset_val), arg=InstInfo(functools.partial(v_lshlrev_b32_e32, src0=2)))
   offset_after = offset_val.after(offset_call)

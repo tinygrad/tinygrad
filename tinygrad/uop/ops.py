@@ -1338,11 +1338,6 @@ class ProgramInfo:
 OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION}
 
 @dataclass(frozen=True)
-class InstInfo:
-  """Instruction constructor carried by a CALL before assembly lowering."""
-  op: Callable[..., Any]
-
-@dataclass(frozen=True)
 class CallInfo:
   grad_fxn: Callable|None = None
   name: str|None = None
