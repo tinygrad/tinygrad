@@ -10,33 +10,17 @@ from tinygrad.helpers import getenv
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
-from tinygrad.renderer.amd.dsl import s, v, NULL
+from tinygrad.renderer.amd.dsl import s, v, NULL, Reg
 from extra.gemm.amd_asm_matmul import Kernel
 
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, rewrite_group
 
 def assemble_inst(call:UOp) -> UOp|None:
   if not isinstance(call.arg, InstInfo): return None
-  op = call.arg.op
-  name = op().op_name
-  fields = {"S_LOAD_B64": ("sdata", "sbase"), "S_WAITCNT_LGKMCNT": ("simm16",), "S_WAITCNT_VMCNT": ("simm16",),
-            "V_LSHLREV_B32_E32": ("vdst", "src0", "vsrc1"), "GLOBAL_LOAD_B32": ("vdst", "addr", "saddr"),
-            "V_MOV_B32_E32": ("vdst", "src0"), "V_ADD_F32_E32": ("vdst", "src0", "vsrc1"),
-            "GLOBAL_STORE_B32": ("addr", "data", "saddr"), "S_ENDPGM": ()}[name]
-  kwargs = {}
-  for field, arg in zip(fields, call.src[1:], strict=False):
-    u = arg.without_after
-    if u.op is Ops.CONST: kwargs[field] = u.val
-    else:
-      regs = tuple(x.without_after for x in u.src) if u.op is Ops.STACK else (u,)
-      assert all(r.op is Ops.PARAM and r.addrspace is AddrSpace.REG and r.tag == regs[0].tag for r in regs)
-      assert [r.arg.slot for r in regs] == list(range(regs[0].arg.slot, regs[0].arg.slot+len(regs)))
-      bank = {"s": s, "v": v}[regs[0].tag]
-      kwargs[field] = bank[regs[0].arg.slot] if len(regs) == 1 else bank[regs[0].arg.slot:regs[-1].arg.slot]
-  assert len(kwargs) == len(fields)
-  if name == "S_LOAD_B64": kwargs["soffset"] = NULL
-  if name in {"S_WAITCNT_LGKMCNT", "S_WAITCNT_VMCNT"}: kwargs["sdst"] = NULL
-  return UOp(Ops.INS, src=call.src[1:], arg=(op(**kwargs), dtypes.void))
+  src = [u.without_after for u in call.src[1:] if u.dtype != dtypes.void]
+  regs = [(u.src[0].without_after, len(u.src)) if u.op is Ops.STACK else (u, 1) for u in src]
+  args = [u.val if u.op is Ops.CONST else Reg(u.arg.slot + (256 if u.tag == "v" else 0), size) for u, size in regs]
+  return UOp(Ops.INS, src=call.src[1:], arg=(call.arg.op(*args), dtypes.void))
 
 assemble_sink_pm = PatternMatcher([
   (UPat(Ops.CALL, name="call"), assemble_inst),
@@ -54,8 +38,9 @@ def custom_add_one(A:UOp) -> UOp:
   threads = UOp.special(A.numel(), "lidx0")
   dest = tuple(UOp.param(i, dtypes.int32, (1,), addrspace=AddrSpace.REG).rtag("s") for i in range(2))
   kernarg = UOp.stack(*dest)
-  kernarg_load = UOp(Ops.CALL, src=(UOp.sink(), UOp.stack(*dest), kernarg), arg=InstInfo(s_load_b64))
-  kernarg_wait = UOp(Ops.CALL, src=(UOp.sink(), UOp.const(0), UOp.stack(*(d.after(kernarg_load) for d in dest))),
+  null = UOp.param(NULL.offset, dtypes.int32, (1,), addrspace=AddrSpace.REG).rtag("s")
+  kernarg_load = UOp(Ops.CALL, src=(UOp.sink(), UOp.stack(*dest), kernarg, null), arg=InstInfo(s_load_b64))
+  kernarg_wait = UOp(Ops.CALL, src=(UOp.sink(), null, UOp.const(0), kernarg_load),
                     arg=InstInfo(s_waitcnt_lgkmcnt))
   saddr_after = UOp.stack(*(d.after(kernarg_wait) for d in dest))
   offset_val = UOp.param(0, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v")
@@ -63,8 +48,8 @@ def custom_add_one(A:UOp) -> UOp:
   offset_call = UOp(Ops.CALL, src=(UOp.sink(), offset_val, UOp.const(2), lane_id), arg=InstInfo(v_lshlrev_b32_e32))
   offset_after = offset_val.after(offset_call)
   val = UOp.param(1, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v")
-  load_call = UOp(Ops.CALL, src=(UOp.sink(), val, offset_after, saddr_after), arg=InstInfo(global_load_b32))
-  wait_call = UOp(Ops.CALL, src=(UOp.sink(), UOp.const(0), val.after(load_call)), arg=InstInfo(s_waitcnt_vmcnt))
+  load_call = UOp(Ops.CALL, src=(UOp.sink(), val, offset_after, offset_val, saddr_after), arg=InstInfo(global_load_b32))
+  wait_call = UOp(Ops.CALL, src=(UOp.sink(), null, UOp.const(0), load_call), arg=InstInfo(s_waitcnt_vmcnt))
   val_after = val.after(wait_call)
   c1_dest = UOp.param(2, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v")
   mov_call = UOp(Ops.CALL, src=(UOp.sink(), c1_dest, UOp.const(1.0)), arg=InstInfo(v_mov_b32_e32))
@@ -72,7 +57,7 @@ def custom_add_one(A:UOp) -> UOp:
   add_dest = val
   add_call = UOp(Ops.CALL, src=(UOp.sink(), add_dest, val_after, c1_after), arg=InstInfo(v_add_f32_e32))
   add_after = add_dest.after(add_call)
-  store_to_global = UOp(Ops.CALL, src=(UOp.sink(), offset_after, add_after, saddr_after), arg=InstInfo(global_store_b32))
+  store_to_global = UOp(Ops.CALL, src=(UOp.sink(), offset_val, offset_after, add_after, saddr_after), arg=InstInfo(global_store_b32))
   end_call = UOp(Ops.CALL, src=(UOp.sink(), store_to_global), arg=InstInfo(s_endpgm))
   sink = UOp.sink(A.base, threads, end_call, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
   return asm_sink(sink)
