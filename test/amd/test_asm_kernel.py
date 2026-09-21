@@ -10,14 +10,10 @@ from tinygrad.helpers import getenv
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
-from tinygrad.renderer.amd.dsl import s, v, NULL, Inst
+from tinygrad.renderer.amd.dsl import s, v, NULL
 from extra.gemm.amd_asm_matmul import Kernel
 
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, rewrite_group
-
-def sgpr_pair(slot:int) -> UOp: return UOp.stack(UOp.param(slot, dtypes.int32, (1,)), UOp.param(slot+1, dtypes.int32, (1,)))
-def sgpr_pair_param(slot:int) -> UOp: return UOp.param(slot, dtypes.int32, (2, 1))
-def inst_call(inst:Inst, body:UOp, *args:UOp) -> UOp: return UOp(Ops.CALL, src=(body,)+args, arg=InstInfo(inst))
 
 assemble_sink_pm = PatternMatcher([
   (UPat(Ops.CALL, name="call"), lambda call: UOp(Ops.INS, src=call.src[1:], arg=(call.arg.inst, dtypes.void))
@@ -34,33 +30,35 @@ def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
   assert dtypes.is_float(A.dtype), f"buffer dtype must be float32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
-  kernarg = sgpr_pair(0)
+  kernarg = UOp.stack(UOp.param(0, dtypes.int32, (1,)), UOp.param(1, dtypes.int32, (1,)))
   dest = tuple(UOp(Ops.ALLOC, arg=ParamArg(i, dtypes.int32, 1)) for i in range(2))
-  store_load = sgpr_pair_param(0).store(sgpr_pair_param(1).load())
-  kernarg_load = inst_call(s_load_b64(s[0:1], s[0:1], soffset=NULL), store_load.sink(), UOp.stack(*dest), kernarg)
-  kernarg_wait = inst_call(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0), UOp.sink(), UOp.stack(*(d.after(kernarg_load) for d in dest)))
+  store_load = UOp.param(0, dtypes.int32, (2, 1)).store(UOp.param(1, dtypes.int32, (2, 1)).load())
+  kernarg_load = UOp(Ops.CALL, src=(store_load.sink(), UOp.stack(*dest), kernarg), arg=InstInfo(s_load_b64(s[0:1], s[0:1], soffset=NULL)))
+  kernarg_wait = UOp(Ops.CALL, src=(UOp.sink(), UOp.stack(*(d.after(kernarg_load) for d in dest))),
+                    arg=InstInfo(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0)))
   base_ready = UOp.stack(*(d.after(kernarg_wait) for d in dest))
   offset_val = UOp(Ops.ALLOC, arg=ParamArg(2, dtypes.int32, 32))
   lane_id = UOp.param(2, dtypes.int32, (32,))
   shift = UOp.param(0, dtypes.int32, (32,)).store(UOp.param(1, dtypes.int32, (32,)).load() << 2)
-  offset_call = inst_call(v_lshlrev_b32_e32(v[0], 2, v[0]), shift.sink(), offset_val, lane_id)
+  offset_call = UOp(Ops.CALL, src=(shift.sink(), offset_val, lane_id), arg=InstInfo(v_lshlrev_b32_e32(v[0], 2, v[0])))
   offset_ready = offset_val.after(offset_call)
   val = UOp(Ops.ALLOC, arg=ParamArg(3, dtypes.float32, 32))
-  global_load_impl = UOp.param(0, dtypes.float32, (32,)).store(UOp.param(2, dtypes.int32, (32,)), sgpr_pair_param(1))
-  load_call = inst_call(global_load_b32(v[1], v[0], saddr=s[0:1]), global_load_impl.sink(), val, base_ready, offset_ready)
-  wait_call = inst_call(s_waitcnt_vmcnt(sdst=NULL, simm16=0), UOp.sink(), val.after(load_call))
+  global_load_impl = UOp.param(0, dtypes.float32, (32,)).store(UOp.param(2, dtypes.int32, (32,)), UOp.param(1, dtypes.int32, (2, 1)))
+  load_call = UOp(Ops.CALL, src=(global_load_impl.sink(), val, base_ready, offset_ready), arg=InstInfo(global_load_b32(v[1], v[0], saddr=s[0:1])))
+  wait_call = UOp(Ops.CALL, src=(UOp.sink(), val.after(load_call)), arg=InstInfo(s_waitcnt_vmcnt(sdst=NULL, simm16=0)))
   val_ready = val.after(wait_call)
   c1_dest = UOp(Ops.ALLOC, arg=ParamArg(4, dtypes.float32, 32))
-  mov_call = inst_call(v_mov_b32_e32(v[2], 1.0), UOp.param(0, dtypes.float32, (32,)).store(1.0).sink(), c1_dest)
+  mov_call = UOp(Ops.CALL, src=(UOp.param(0, dtypes.float32, (32,)).store(1.0).sink(), c1_dest), arg=InstInfo(v_mov_b32_e32(v[2], 1.0)))
   c1_ready = c1_dest.after(mov_call)
   add_dest = UOp(Ops.ALLOC, arg=ParamArg(5, dtypes.float32, 32))
-  add_call = inst_call(v_add_f32_e32(v[1], v[1], v[2]), UOp.param(0, dtypes.float32, (32,)).store(
-                        UOp.param(1, dtypes.float32, (32,)).load() + UOp.param(2, dtypes.float32, (32,)).load()).sink(),
-                      add_dest, val_ready, c1_ready)
+  add_call = UOp(Ops.CALL, src=(UOp.param(0, dtypes.float32, (32,)).store(
+                  UOp.param(1, dtypes.float32, (32,)).load() + UOp.param(2, dtypes.float32, (32,)).load()).sink(),
+                add_dest, val_ready, c1_ready), arg=InstInfo(v_add_f32_e32(v[1], v[1], v[2])))
   add_ready = add_dest.after(add_call)
-  global_store_impl = UOp.param(0, dtypes.int32, (32,)).store(UOp.param(1, dtypes.float32, (32,)).load(sgpr_pair_param(2)))
-  store_to_global = inst_call(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), global_store_impl.sink(), offset_ready, add_ready, base_ready)
-  end_call = inst_call(s_endpgm(), UOp.sink(), store_to_global)
+  global_store_impl = UOp.param(0, dtypes.int32, (32,)).store(UOp.param(1, dtypes.float32, (32,)).load(UOp.param(2, dtypes.int32, (2, 1))))
+  store_to_global = UOp(Ops.CALL, src=(global_store_impl.sink(), offset_ready, add_ready, base_ready),
+                        arg=InstInfo(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1])))
+  end_call = UOp(Ops.CALL, src=(UOp.sink(), store_to_global), arg=InstInfo(s_endpgm()))
   sink = UOp.sink(A.base, threads, end_call, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
   return asm_sink(sink)
 
