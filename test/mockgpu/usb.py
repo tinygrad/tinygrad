@@ -1,5 +1,6 @@
 from __future__ import annotations
 import ctypes, mmap, struct, sys
+from typing import Any, Callable
 from tinygrad.runtime.autogen import libusb
 if sys.platform != "win32": from tinygrad.runtime.autogen import libc
 
@@ -141,6 +142,7 @@ class MockASM24State:
     return None
 
 class MockUSB3:
+  inst: MockUSB3
   ctx = staticmethod(lambda ctx=ctypes.pointer(ctypes.c_uint64()): ctx) # the link block packs the context and handle addresses
   @classmethod
   def list_devices(cls, vendor, dev): return [(0, "usb:mock")]
@@ -228,7 +230,10 @@ def _submit(t):
   t.contents.status = 0
   return 0
 _transfers:list = []
-for _fn, _impl in [(libusb.libusb_control_transfer, _control), (libusb.libusb_bulk_transfer, _bulk), (libusb.libusb_submit_transfer, _submit),
-                   (libusb.libusb_handle_events_timeout, lambda ctx, tv: 0),
-                   (libusb.libusb_alloc_transfer, lambda n: _transfers.append(t:=libusb.struct_libusb_transfer()) or ctypes.addressof(t))]:
+def _alloc(n):
+  _transfers.append(t:=libusb.struct_libusb_transfer())
+  return ctypes.addressof(t)
+_mocked:list[tuple[Any, Callable]] = [(libusb.libusb_control_transfer, _control), (libusb.libusb_bulk_transfer, _bulk),
+  (libusb.libusb_submit_transfer, _submit), (libusb.libusb_handle_events_timeout, lambda ctx, tv: 0), (libusb.libusb_alloc_transfer, _alloc)]
+for _fn, _impl in _mocked:
   setattr(libusb.dll, _fn.__name__, ctypes.CFUNCTYPE(ctypes.c_void_p if _fn is libusb.libusb_alloc_transfer else _fn.restype, *_fn.argtypes)(_impl))
