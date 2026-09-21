@@ -1338,6 +1338,11 @@ class ProgramInfo:
 OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_FUNCTION}
 
 @dataclass(frozen=True)
+class InstInfo:
+  """Concrete instruction carried by a CALL before assembly lowering."""
+  inst: Any
+
+@dataclass(frozen=True)
 class CallInfo:
   grad_fxn: Callable|None = None
   name: str|None = None
