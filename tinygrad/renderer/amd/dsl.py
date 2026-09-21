@@ -349,7 +349,11 @@ class Inst:
   def is_acc_operand(self, name:str) -> bool:
     if not isinstance(val:=getattr(self, name), Reg) or not 256 <= val.offset < 512: return False
     if (opr:=self.operands.get(name)) and opr[2] in {OpType.OPR_ACCVGPR, OpType.OPR_SRC_ACCVGPR}: return True
-    return False
+    if not hasattr(self, 'acc'): return False
+    if hasattr(self, 'acc_cd'):
+      if name in ('src0', 'src1'): return bool(self.acc & (1 << int(name[-1])))
+      return bool(self.acc_cd) and (name == 'vdst' or (name == 'src2' and 'SMFMAC' not in self.op_name))
+    return bool(self.acc) and name in ('vdst', 'vdata', 'data')
 
   @functools.cached_property
   def op_bits(self) -> dict[str, int]:
