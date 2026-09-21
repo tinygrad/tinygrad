@@ -836,7 +836,7 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 @needs_tracked_pm
 class TestCfg(unittest.TestCase):
-  def get_cfg(self, name:str, k:Kernel):
+  def get_cfg(self, name:str, k:Kernel, target:str="gfx1100"):
     insts = k.finalize()
     def fxn(out:UOp) -> UOp:
       lidx = UOp.special(1, "lidx0")
@@ -844,7 +844,7 @@ class TestCfg(unittest.TestCase):
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=(x, dtypes.void)) for x in insts]))))
     with save_viz() as viz:
-      with Context(DEV="NULL::gfx1100"):
+      with Context(DEV=f"NULL::{target}"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
         _ = do_to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
     codegen_rewrites = next(s for s in viz.list_items() if s["name"] == name)
@@ -1014,6 +1014,19 @@ class TestCfg(unittest.TestCase):
     k.emit(s_branch(), target="end")
     k.emit(s_code_end())
     self.get_cfg("jump_back_to_end", k)
+
+  def test_agpr(self):
+    from tinygrad.renderer.amd.dsl import v
+    from tinygrad.runtime.autogen.amd.cdna.ins import v_accvgpr_read, s_endpgm
+    k = Kernel()
+    k.emit(v_accvgpr_read(v[0], v[0]))
+    k.emit(s_endpgm())
+    ret = self.get_cfg("agpr", k, target="gfx950")
+    self.assertIn("v_accvgpr_read(v[0], a[0])", ret["src"])
+    tokens = next(iter(ret["data"]["pc_tokens"].values()))
+    dst, src = tokens[1:3]
+    self.assertEqual((dst["st"], src["st"]), ("v0", "a0"))
+    self.assertTrue(set(dst["keys"]).isdisjoint(src["keys"]))
 
 # launch viz cli without subprocess
 def run_cli(*cli_args, json_fmt=True) -> list[dict]:
