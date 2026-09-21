@@ -44,11 +44,11 @@ def add_gpudims(ctx:Renderer, s:UOp):
   if any(x.op is Ops.SPECIAL for x in s_topo): return None
 
   # get ranges
-  all_ranges = {x.arg[0:-1]:x for x in s_topo if x.op is Ops.RANGE}
+  all_ranges = {x.axis_id:x for x in s_topo if x.op is Ops.RANGE}
 
   # extract global/local dims
-  global_dims = sorted([x.arg[0:-1] for x in all_ranges.values() if x.axis_type is AxisType.GLOBAL])
-  local_dims = sorted([x.arg[0:-1] for x in all_ranges.values() if x.axis_type in (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
+  global_dims = sorted([x.axis_id for x in all_ranges.values() if x.axis_type is AxisType.GLOBAL])
+  local_dims = sorted([x.axis_id for x in all_ranges.values() if x.axis_type in (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
   if not global_dims and not local_dims: return None
 
   # get global and local shape
@@ -77,7 +77,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
         subs[idx] = idx.replace(src=(idx.src[0], idx.src[1].valid(mask)))
     if r.op is not Ops.RANGE: continue
     try:
-      ii = (global_dims+local_dims).index(r.arg[0:-1])
+      ii = (global_dims+local_dims).index(r.axis_id)
       subs[r] = idxs[ii]
     except ValueError: continue
   return s.substitute(subs)
