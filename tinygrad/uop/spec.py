@@ -87,8 +87,8 @@ spec_shared = PatternMatcher([
   # GROUP of stores (or groups, or NOOPs)
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
 
-  # AFTER on Movement Op, PARAM, BUFFER, STAGE, RETURNED, or another AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.STAGE, Ops.INDEX,
+  # AFTER on Movement Op, PARAM, BUFFER, ALLOC, STAGE, or another AFTER
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.STAGE, Ops.INDEX,
                                                      Ops.AFTER, Ops.UNSHARD, Ops.BITCAST, Ops.INS})),),
         allow_any_len=True), lambda: True),
 
@@ -121,7 +121,7 @@ spec_shared = PatternMatcher([
   # STORE: the target must be storage or a STAGE realization point (or an AFTER/BITCAST/view of one);
   # STAGE targets are written into the buffer the STAGE creates. INDEX stores are checked above
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x:
-   True if (b:=x.storage_base).op in {Ops.BUFFER, Ops.PARAM, Ops.STAGE} else None if b.op is Ops.INDEX else False),
+   True if (b:=x.storage_base).op in {Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.STAGE} else None if b.op is Ops.INDEX else False),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 4),
@@ -134,10 +134,13 @@ spec_tensor = PatternMatcher([
   (UPat((Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.SQRT, Ops.RECIPROCAL), src=(UPat(),), name="u"),
    lambda u: dtypes.is_float(u.dtype) or u.src[0].base.is_invalid),
 
-  # BUFFER
+  # BUFFER has bound storage; ALLOC declares storage without a runtime buffer
   (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf:
-   True if buf.is_unbound else (isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device))
+   isinstance(buf.dtype, DType) and isinstance(buf.arg.size, int) and is_device(buf.arg.device) and buf.arg.buffer is not None
    if isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL else None),
+  (UPat(Ops.ALLOC, src=(), name="buf"), lambda buf: isinstance(buf.arg, ParamArg) and buf.addrspace is AddrSpace.GLOBAL
+   and buf.arg.buffer is None and (buf.arg.size is None or isinstance(buf.arg.size, int))
+   and (buf.arg.device is None or is_device(buf.arg.device))),
 
   # a Variable is a 0-d ALU BUFFER with a value range and no device
   (UPat(Ops.BUFFER, src=(), name="buf"), lambda buf: buf.arg.device is None if buf.is_variable else None),
@@ -214,7 +217,7 @@ spec_program = PatternMatcher([
 
 spec_hcq = PatternMatcher([
   (UPat(Ops.GETADDR, dtypes.uint64, name="x",
-        src=(UPat((Ops.BUFFER, Ops.PARAM, Ops.SHRINK, Ops.BITCAST, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR)).or_after(),)),
+        src=(UPat((Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.SHRINK, Ops.BITCAST, Ops.MSTACK, Ops.MSELECT, Ops.LINEAR)).or_after(),)),
    lambda x: is_device(x.arg)),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat((Ops.BUFFER, Ops.PARAM)).or_after(),)), lambda: True),
 ])+spec_shared
@@ -246,9 +249,12 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.STACK, name="s"), lambda s: all(x.op in (Ops.CONST, Ops.PARAM) or x.is_variable or x.is_bound_var for x in s.src) or None),
   # linear for more kernels (TODO: we should enter non sink calls)
   #(UPat(Ops.LINEAR), lambda: True),
-  # param is outside buffer, buffer is local buffer. params have a size in the arg, no shape input
+  # PARAM is caller-provided storage, ALLOC is call-local storage; size is in the arg, no shape input
   (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
-  (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.GLOBAL, AddrSpace.ALU)),
+  (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and
+   (x.arg.buffer is not None if x.addrspace is AddrSpace.GLOBAL else x.addrspace is AddrSpace.ALU)),
+  (UPat(Ops.ALLOC, src=(), name="x"), lambda x:
+   isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL and x.arg.buffer is None),
   # tagged all-reduce SHRINKs are physical runtime buffer views whose byte offsets must survive in call arguments
   (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM), UPat(Ops.CONST), UPat(Ops.CONST)), name="x"),
    lambda x: x.tag == ("allreduce",) and x.contiguous_view_offset() is not None),
@@ -257,14 +263,14 @@ spec_kernel_graph = PatternMatcher([
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
   # physical allreduce views are direct copy arguments in the kernel graph
-  (UPat(Ops.SHRINK, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.PARAM, Ops.AFTER, Ops.MSELECT})),
+  (UPat(Ops.SHRINK, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.AFTER, Ops.MSELECT})),
                          UPat(Ops.CONST, dtype=dtypes.weakint), UPat(Ops.CONST, dtype=dtypes.weakint)), name="x"),
    lambda x: True),
   # all calls are on opaque bodies
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True), lambda: True),
   # after on PARAM or AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),),
-        allow_any_len=True), lambda: True),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.AFTER, Ops.BUFFER, Ops.ALLOC,
+                                                  Ops.MSTACK, Ops.MSELECT, Ops.BITCAST, Ops.RESHAPE})),), allow_any_len=True), lambda: True),
 ])
 
 # **** pyrender (move this) ****

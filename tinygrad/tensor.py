@@ -24,7 +24,7 @@ class AllocCtx:
   bases: set[UOp] = field(default_factory=set)
   stores: list[UOp] = field(default_factory=list)
   replacements: list[UOp] = field(default_factory=list)
-  unbound: dict[UOp, UOp] = field(default_factory=dict)
+  allocs: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
   physical_views: dict[UOp, UOp] = field(default_factory=dict)
 
@@ -91,7 +91,7 @@ pm_mint_function_materializations = PatternMatcher([
 pm_remove_allocation_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x:
   x.replace(tag=None) if x.tag is not None and x.tag not in {("allreduce",), ("allreduce_accumulate",), ("replicate",)} else None)])
 
-def contiguous_mops_to_view(ctx:AllocCtx, c:UOp, src:UOp):
+def contiguous_mops_to_view(ctx:AllocCtx|None, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
   if not all_int(c.shape): return None
   buf = src.base
@@ -116,10 +116,10 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> tuple[UOp, dict[UOp, UOp]]|Non
     placed = t.after(t.store(s.src[0]))
     return placed, {s:placed}
   # rebind output storage to t
-  if s.op in {Ops.BUFFER, Ops.UNSHARD} and (s.has_buffer_identity() or s.unsharded_base.is_unbound): return t, {s:t}
+  if s.op in {Ops.BUFFER, Ops.ALLOC, Ops.UNSHARD} and s.has_buffer_identity(): return t, {s:t}
   # a full-buffer reshape is the same storage with a different logical shape, so rebind both the view and its base
   if (s.op is Ops.RESHAPE and s.has_buffer_identity() and s.contiguous_view_offset() == 0 and resolve(s.numel() == s.base.numel(), False)
-      and s.base.op in {Ops.BUFFER, Ops.UNSHARD}):
+      and s.base.op in {Ops.BUFFER, Ops.ALLOC, Ops.UNSHARD}):
     return t, {s:t, s.base:t.reshape(s.base.shape)}
   # A shard-local full-buffer view can still be expressed as movement over UNSHARD here. Resolve it before deciding
   # whether the function output needs a materializing copy.
@@ -131,7 +131,7 @@ def _precompiled_output_redirect(s:UOp, t:UOp) -> tuple[UOp, dict[UOp, UOp]]|Non
     while physical.op in GroupOp.Movement|{Ops.UNSHARD, Ops.AFTER}: physical = physical.src[0]
     target_physical = t
     while target_physical.op in GroupOp.Movement|{Ops.UNSHARD, Ops.AFTER}: target_physical = target_physical.src[0]
-    if (physical.op is Ops.BUFFER and target_physical.op is Ops.PARAM and resolve(physical.numel() == target_physical.numel(), False)
+    if (physical.op in {Ops.BUFFER, Ops.ALLOC} and target_physical.op is Ops.PARAM and resolve(physical.numel() == target_physical.numel(), False)
         and resolve(local.numel() == physical.numel(), False) and local.contiguous_view_offset() == 0):
       return t, {physical:target_physical.reshape(physical.shape)}
   return None
@@ -140,7 +140,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.arg is None or not c.arg.precompile or not c.has_unbound_outputs: return None
   assert c.body.op is Ops.SINK, "precompiled call bodies are SINKs of stores into the output PARAMs"
   # the RETURNED srcs are the call outputs (slots are src positions)
-  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.is_unbound]
+  ret_pos = [p for p,a in enumerate(c.src[1:]) if a.unsharded_base.op is Ops.ALLOC]
   srcs = tuple(graph_rewrite(st.src[1], lift_full_buffer_after_views, name="lift full-buffer AFTER views")
                for st in c.body.src if st.op is Ops.STORE)
 
@@ -166,10 +166,10 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # swap every placed value for its target storage, also inside other stores' AFTER deps
   fxn = UOp.sink(*(x.substitute(placed) for x in items))
 
-  # all bodies are SINKs now, the node just becomes an opaque CALL: outs take the RETURNEDs' places; afters on real
-  # buffers are the input storage, afters on RETURNED placeholders have no storage yet, materialize them
+  # ALLOC has buffer identity, but an unresolved inline-call output is not materialized yet. Opaque calls need
+  # caller-owned storage for those inputs; mint_function_materialization supplies it for the synthesized STAGE.
   rmap = dict(zip(ret_pos, outs))
-  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) else a.contiguous())
+  new_call = c.replace(src=(fxn, *[rmap.get(i, a if a.has_buffer_identity(after_ok=True) and a.storage_base.op is not Ops.ALLOC else a.contiguous())
                                    for i, a in enumerate(c.src[1:])]))
   rets = tuple(o.after(new_call) for o in outs)
 
@@ -202,9 +202,10 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # strip DETACH/CONTIGUOUS_BACKWARD before minting (tags carry over)
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"),
    lambda x: x.src[0].replace(tag=(x.src[0].tag or ())+(x.tag or ())) if x.tag else x.src[0]),
-  # contiguous of an already-materialized value is a no-op (tags carry over for held values)
+  # contiguous of an already-materialized value is a no-op. ALLOC identity alone does not establish materialization.
   (UPat(Ops.STAGE, src=(UPat(Ops.AFTER, name="a"),), name="c"),
-   lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
+   lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ()))
+   if a.src[0].has_buffer_identity() and a.storage_base.op is not Ops.ALLOC else None),
   # mint buffers for tagged values; an untagged CONTIGUOUS flows through to the scheduler, which bufferizes it
   (UPat(GroupOp.All-{Ops.AFTER, Ops.STORE}, name="x"), mint_tagged_storage),
 ])
@@ -223,27 +224,27 @@ def replace_realized_allreduce_view(ctx:AllocCtx, b:UOp):
   ctx.physical_views[placeholder] = b
   return placeholder
 
-# unbound BUFFERs get canonical scope-local id slots here so structurally identical calls hash identically for the
+# ALLOCs get canonical scope-local id slots here so structurally identical calls hash identically for the
 # schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
-def canonicalize_unbound_buffer(ctx:AllocCtx, b:UOp):
-  if b.arg.slot >= 0 and b not in ctx.unbound: ctx.unbound[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.unbound)))
-  return ctx.unbound.get(b)
+def canonicalize_alloc(ctx:AllocCtx, b:UOp):
+  if b.arg.slot >= 0 and b not in ctx.allocs: ctx.allocs[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.allocs)))
+  return ctx.allocs.get(b)
 
 def canonicalize_call_body(ctx:AllocCtx, c:UOp):
-  body = graph_rewrite(c.body, pm_canonicalize_unbound, ctx=ctx, bottom_up=True)
+  body = graph_rewrite(c.body, pm_canonicalize_alloc, ctx=ctx, bottom_up=True)
   return c.replace(src=(body,)+c.src[1:]) if body is not c.body else None
 
-pm_canonicalize_unbound = PatternMatcher([
+pm_canonicalize_alloc = PatternMatcher([
   (UPat(Ops.CALL, name="c"), canonicalize_call_body),
-  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: canonicalize_unbound_buffer(ctx, b) if b.is_unbound else None),
+  (UPat(Ops.ALLOC, src=(), name="b"), canonicalize_alloc),
 ])
 
-pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
+pm_replace_buf = pm_canonicalize_alloc+PatternMatcher([
   # Number shielded physical views alongside ordinary buffers so CALL arguments retain graph order.
   (UPat(Ops.PARAM, name="p"), lambda ctx,p: replace_input_buffer(ctx, ctx.physical_views[p]) if p in ctx.physical_views else None),
-  # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay, and unbound BUFFERs too)
+  # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay)
   (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
-   replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL and not b.is_unbound else None),
+   replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
   # replace buffer views created in this Callify
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
   # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
@@ -268,7 +269,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # Inline calls materialize their unresolved outputs here; precompiled calls bind them in transform_precompiled_call.
   srcs:list[UOp] = []
   for u in big_sink.src:
-    if u.op is Ops.AFTER and u.src[0].unsharded_base.is_unbound and u.src[1].op is Ops.CALL:
+    if u.op is Ops.AFTER and u.src[0].unsharded_base.op is Ops.ALLOC and u.src[1].op is Ops.CALL:
       call = u.src[1]
       if not (call.arg is not None and call.arg.precompile):
         buf = u.empty_like()
@@ -285,7 +286,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # AFTERs on unbound STORAGE (clones) are collected too: the clone's own buffer is the storage, no fresh copy
   for u in big_sink.toposort(enter_calls=False):
     if (u.op is Ops.COPY and u.on_disk()) or (u.op is Ops.AFTER and not u.is_bound_var and
-        (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE)):
+        (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)):
       ctx.stores.append(u)
       if u.tag: ctx.buffer_map.update({t:graph_rewrite(u.src[0], pm_drop_after).shrink_to(t.shape) for t in u.tag})
   stores = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_realized_allreduce_views, ctx=ctx,
@@ -457,12 +458,12 @@ class Tensor(RandMixin):
     bases = {u.base for u in sink.src}
     for u in sink.src:
       while u.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: u = u.src[0]
-      if (b:=u.storage_base).is_unbound: bases.add(b)
+      if (b:=u.storage_base).op is Ops.ALLOC: bases.add(b)
     tensor_map:dict[UOp, UOp] = {}
     # Rebuild in dependency order: replacement values already reference the other outputs' storage.
     for x in sink.toposort(enter_calls=False):
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
-      if x in bases and x.is_unbound: u = x.empty_like()
+      if x in bases and x.op is Ops.ALLOC: u = x.empty_like()
       if x in bases and u.needs_storage():
         src, contiguous = u, False
         while src.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}:

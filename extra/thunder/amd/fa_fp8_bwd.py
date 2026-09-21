@@ -91,7 +91,8 @@ def fp8_backward(q8:Tensor, k8:Tensor, v8:Tensor, v_descale:Tensor, do:Tensor, o
   if delayed_state is not None:
     assert reset_next_amax
     # The assembly consumes the first four entries; prep also needs the unnormalized dO scale in entry four.
-    scales,next_amax = Tensor.custom_kernel(Tensor.empty(5,device=q8.device,dtype=dtypes.float32),next_amax,
+    # All five entries are written here; invalids keeps the scratch allocation local to a precompiled call.
+    scales,next_amax = Tensor.custom_kernel(Tensor.invalids(5,device=q8.device,dtype=dtypes.float32),next_amax,
       partial,delayed_state,v_descale.reshape(1),fxn=functools.partial(custom_fp8_backward_scales,D=D))[:2]
   else:
     do_scale = ((local_abs_max(partial)+1e-8)/57344.).reshape(1)

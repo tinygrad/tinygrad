@@ -11,16 +11,16 @@ from tinygrad.schedule.allreduce import is_allreduce_linear_output
 
 # unwrap VIEW/CAST/etc to find the actual data source (kernel output, buffer, or multi-device op)
 def _unwrap_src(s: UOp) -> UOp:
-  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK} and \
+  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.MSELECT, Ops.MSTACK} and \
         not (s.op is Ops.SHRINK and s.tag == ("allreduce",) and s.src[0].op is not Ops.INDEX): s = s.src[0]
   return s
 
-# a buffer state is AFTER | BUFFER | PARAM. MSELECT/MSTACK join per-device states
+# a buffer state is AFTER | BUFFER | ALLOC | PARAM. MSELECT/MSTACK join per-device states
 def _states(s: UOp) -> list[UOp]:
   s = _unwrap_src(s)
   if s.op in {Ops.MSELECT, Ops.MSTACK}: return [st for ss in s.src for st in _states(ss)]
   if s.op is Ops.SHRINK and s.tag == ("allreduce",): return _states(s.src[0])
-  assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
+  assert s.op in {Ops.AFTER, Ops.BUFFER, Ops.ALLOC, Ops.PARAM}, f"input to kernel must resolve to a buffer state, not {s.op}"
   return [s]
 
 def _slice_region(s:UOp) -> tuple[UOp, int, int]|None:
@@ -120,7 +120,6 @@ from tinygrad.schedule.prepare import prepare_rangeify
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg
-from tinygrad.dtype import AddrSpace
 
 def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
   if (ret:=ctx[0].get(b, None)) is None:
@@ -131,9 +130,8 @@ def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
 pm_post_sched_cache = PatternMatcher([
   # only resolve buffer PARAMs (slot>=0); ALU/shape vars use slot=-1 and must not be swapped for call args
   (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg.slot] if x.arg.slot >= 0 else None),
-  # create new BUFFERs
-  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
-   create_new_buffer(ctx, b) if isinstance(b.arg, ParamArg) and b.addrspace is AddrSpace.GLOBAL else None),
+  # bind ALLOCs to fresh BUFFERs for this invocation
+  (UPat(Ops.ALLOC, src=(), name="b"), create_new_buffer),
 ])
 
 def resolve_linear_call(linear_call:UOp, outer_binds:dict[str, UOp]|None=None):
@@ -174,7 +172,7 @@ def remap_paramarg_slots(root:UOp, param_map:dict[int, int], buffer_map:dict[int
   rebuilt:dict[UOp, UOp] = {}
   for x in root.toposort(enter_calls=False):
     src = tuple(rebuilt.get(s, s) for s in x.src)
-    mapping = param_map if x.op is Ops.PARAM else buffer_map if x.op is Ops.BUFFER else None
+    mapping = param_map if x.op is Ops.PARAM else buffer_map if x.op is Ops.ALLOC else None
     arg = x.arg
     if mapping is not None and isinstance(arg, ParamArg) and arg.slot in mapping:
       mapped = mapping[arg.slot]
@@ -184,17 +182,18 @@ def remap_paramarg_slots(root:UOp, param_map:dict[int, int], buffer_map:dict[int
 
 def canonicalize_call_for_schedule_cache(call:UOp) -> UOp|None:
   body = call.body
-  if body.op not in {Ops.SINK, Ops.LINEAR}: return None
+  arg = replace(call.arg, grad_fxn=None) if isinstance(call.arg, CallInfo) and call.arg.grad_fxn is not None else call.arg
+  if body.op not in {Ops.SINK, Ops.LINEAR}: return call.replace(arg=arg) if arg is not call.arg else None
   nodes = body.toposort(enter_calls=False)
   params = [x for x in nodes if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
   param_slots = list(dict.fromkeys(x.arg.slot for x in params))
   if any(slot+1 >= len(call.src) for slot in param_slots): return None
-  bufs = [x for x in nodes if x.op is Ops.BUFFER and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
+  # Callify's negative ALLOC slots are canonical in its enclosing scope, not in this nested body.
+  bufs = [x for x in nodes if x.op is Ops.ALLOC]
   buf_slots = list(dict.fromkeys(x.arg.slot for x in bufs))
   pmap:dict[int, int] = {slot:i for i,slot in enumerate(param_slots)}
   bmap:dict[int, int|ParamArg] = {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)}
   body = remap_paramarg_slots(body, pmap, bmap, clear_buffer=True)
-  arg = replace(call.arg, grad_fxn=None) if isinstance(call.arg, CallInfo) and call.arg.grad_fxn is not None else call.arg
   return call.replace(src=(body,)+tuple(call.src[1+slot] for slot in param_slots), arg=arg)
 
 pm_schedule_cache_key = PatternMatcher([
@@ -211,7 +210,7 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   canonical = graph_rewrite(function, pm_schedule_cache_key, name="canonicalize schedule cache calls", walk=True)
   nodes = canonical.toposort(enter_calls=False)
   params = [x for x in nodes if x.op is Ops.PARAM and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
-  bufs = [x for x in nodes if x.op is Ops.BUFFER and isinstance(x.arg, ParamArg) and x.arg.slot >= 0]
+  bufs = [x for x in nodes if x.op is Ops.ALLOC]
   param_slots, buf_slots = (list(dict.fromkeys(x.arg.slot for x in xs)) for xs in (params, bufs))
   pmap:dict[int, int] = {slot:i for i,slot in enumerate(param_slots)}
   bmap:dict[int, int|ParamArg] = {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)}

@@ -163,14 +163,14 @@ class TestRingAllReduce(unittest.TestCase):
     self.assertTrue(_is_stable_custom_output(produced))
     with Context(ALL2ALL=2): reduced = handle_allreduce(produced, produced.allreduce(Ops.ADD, devices))
     assert reduced is not None
-    self.assertFalse(any(x.op is Ops.STORE and x.src[0].base.op is Ops.BUFFER for x in reduced.toposort()))
+    self.assertFalse(any(x.op is Ops.STORE and x.src[0].base.op is Ops.ALLOC for x in reduced.toposort()))
 
     rw_sink = UOp.sink(p0.index(idx).store(p0.index(idx).load()), p1.index(idx).load(), arg=KernelInfo("opaque_readwrite"))
     readwrite = out.after(UOp(Ops.PROGRAM, src=(rw_sink,)).call(out, inp))
     self.assertFalse(_is_stable_custom_output(readwrite))
     with Context(ALL2ALL=2): reduced = handle_allreduce(readwrite, readwrite.allreduce(Ops.ADD, devices))
     assert reduced is not None
-    self.assertTrue(any(x.op is Ops.STORE and x.src[0].base.op is Ops.BUFFER for x in reduced.toposort()))
+    self.assertTrue(any(x.op is Ops.STORE and x.src[0].base.op is Ops.ALLOC for x in reduced.toposort()))
 
   def test_precompiled_input_staged_once(self):
     devices = tuple(f"NULL:{i}" for i in range(4))
@@ -194,6 +194,13 @@ class TestRingAllReduce(unittest.TestCase):
       if len(pairs) != N*(N-1)*2: raise KernelCountException(N*(N-1)*2, len(pairs))
       # copy topology forms a ring
       self.assertEqual(len(set(pairs)), N)
+
+  def test_hierarchy(self):
+    ds = tuple(f"CPU:{i}" for i in range(4))
+    with Context(ALL2ALL=1, ALLREDUCE_NODE_NDEVS=2): # two nodes of 2
+      for size in (1, 17):
+        x = (Tensor.arange(4 * size, dtype=dtypes.int32).reshape(4, size) % 13).realize()
+        self.assertEqual(x.shard(ds, axis=0).sum(0).tolist(), x.sum(0).tolist())
 
   def test_schedule_all2all(self):
     with Context(ALL2ALL=2):

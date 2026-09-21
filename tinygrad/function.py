@@ -13,10 +13,10 @@ def add_to_ctx(ctx, x:UOp):
   return ret
 
 pm_ctx = PatternMatcher([
-  # unbound BUFFERs and their AFTER outputs are scoped inside their CALL: they are never implicit inputs
-  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: None if x.is_unbound else add_to_ctx(ctx,x)),
+  # ALLOCs and their AFTER outputs are scoped inside their CALL: they are never implicit inputs
+  (UPat(Ops.BUFFER, name="x"), add_to_ctx),
   (UPat((Ops.AFTER, Ops.STAGE), name="x"), lambda ctx,x: add_to_ctx(ctx,x) if
-   not x.buf_uop.is_unbound and not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
+   x.buf_uop.op is not Ops.ALLOC and not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
 ])
 
 def invalid_outputs(uret:UOp) -> set[UOp]:
@@ -27,7 +27,7 @@ def invalid_outputs(uret:UOp) -> set[UOp]:
 
 def renumber_invalid_outputs(uret:UOp) -> UOp:
   invalid = invalid_outputs(uret)
-  return uret.substitute({b:b.replace(arg=replace(b.arg, slot=i, buffer=None))
+  return uret.substitute({b:b.replace(op=Ops.ALLOC, arg=replace(b.arg, slot=i, buffer=None))
                           for i,b in enumerate(x for x in uret.toposort(enter_calls=False) if x in invalid)})
 
 ReturnType = TypeVar('ReturnType')

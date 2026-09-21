@@ -1,5 +1,5 @@
 import functools, itertools
-from tinygrad.helpers import all_int, all_same, prod, DEBUG, RING, ALL2ALL, getenv
+from tinygrad.helpers import all_int, all_same, prod, DEBUG, RING, ALL2ALL, ALLREDUCE_NODE_NDEVS, getenv
 from tinygrad.uop.ops import Ops, UOp, ParamArg, sint, shape_to_shape_arg
 
 def _allreduce_view(buf:UOp, start:sint, end:sint) -> UOp:
@@ -95,8 +95,16 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   # A precompiled allreduce's PARAM is already backed by the contiguous CALL argument below.
   stable_custom_output = _is_stable_custom_output(buf)
   if not input_staged and not stable_custom_output:
-    staged = buf.empty_like()
+    staged = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), buf.dtype, buf.max_numel(), device=buf.device)).reshape(buf.max_shape)
     buf = staged.after(staged.store(buf))
+
+  if concrete and (hdev:=ALLREDUCE_NODE_NDEVS.value) > 0 and ndev % hdev == 0:
+    d, flat, fold = buf.device, buf.reshape((numel,)), functools.partial(functools.reduce, lambda x, y: x.alu(op, y))
+    boxes, cs = [range(b, b + hdev) for b in range(0, ndev, hdev)], [(numel * k // hdev, numel * (k + 1) // hdev) for k in range(hdev)]
+    owned = {i: fold([flat.mselect(j).shrink((cs[k],)).copy_to_device(d[i]) for j in box]) for box in boxes for k, i in enumerate(box)}
+    summed = {i: fold([owned[i], *(owned[j].copy_to_device(d[i]) for j in rank if j != i)]) for rank in zip(*boxes) for i in rank}
+    gathered = [UOp.mstack(*(summed[box[k]].copy_to_device(d[j]) for box in boxes for j in box)) for k in range(hdev)]
+    return UOp.usum(*[c.pad(((s, numel - e),)) for (s, e), c in zip(cs, gathered)]).reshape(shape)
 
   # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:
@@ -127,7 +135,8 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   # Equal chunks can be reduced and gathered directly into their final storage. This avoids materializing
   # a padded MSTACK and then running a full-size reassembly kernel on every device.
   if direct_stack:
-    if output is None: output = UOp.empty(*shape, dtype=reduced_chunks[0].dtype, device=device)
+    if output is None:
+      output = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), reduced_chunks[0].dtype, red.max_numel(), device=device)).reshape(shape)
     states = [[_allreduce_view(output.mselect(j).buf_uop, s, e) for s,e in chunks] for j in range(ndev)]
     for i,rc in enumerate(reduced_chunks):
       owner = i if use_all2all else (i-1) % ndev
@@ -156,7 +165,9 @@ def handle_allreduce(buf:UOp, red:UOp, output:UOp|None=None, input_staged:bool=F
   return UOp.usum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
-  if output is None: output = UOp.empty(*red.shape, dtype=red.dtype, device=red.device)
+  if output is None:
+    output = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), red.dtype, red.max_numel(), device=red.device))
+    output = output.reshape(red.max_shape).shrink_to(red.shape)
   if isinstance(buf.device, tuple) and all_int(buf.shape) and allreduce_modes(len(buf.device), prod(buf.shape))[0]:
     ret = handle_allreduce(buf, red, output)
     assert ret is not None

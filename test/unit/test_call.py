@@ -2,9 +2,9 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, function, Device
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, ParamArg
 from tinygrad.tensor import transform_to_call
-from tinygrad.schedule import resolve_linear_call
+from tinygrad.schedule import resolve_linear_call, canonicalize_call_for_schedule_cache
 from tinygrad.schedule.allreduce import _allreduce_view
 
 def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop))[0].src[0].key
@@ -302,6 +302,27 @@ class TestCallSchedule(unittest.TestCase):
     self.assertIsNot(c0.src[-1], c1.src[-1])
     self.assertEqual(sched_key(r0), sched_key(r1))
 
+  def test_schedule_cache_normalizes_call_local_allocs(self):
+    p = UOp.param(0, dtypes.float, (4,), device="CPU")
+    def key(slots):
+      a, b = [UOp(Ops.ALLOC, arg=ParamArg(slot, dtypes.float, 4, device="CPU")) for slot in slots]
+      first = a.after(a.store(p + 1))
+      second = b.after(b.store(first * 2))
+      call = canonicalize_call_for_schedule_cache(UOp.sink(p.store(second)).call(p, precompile=True))
+      assert call is not None
+      return call.body.key
+    self.assertEqual(key((-5, -8)), key((-40, -11)))
+    self.assertEqual(key((-5, -8)), key((5, 8)))
+    self.assertNotEqual(key((-5, -8)), key((-5, -5)))
+
+  def test_schedule_cache_ignores_consumed_custom_grad_callback(self):
+    program = UOp(Ops.PROGRAM, src=(UOp.sink(),))
+    calls = [program.call(grad_fxn=lambda *args: None) for _ in range(2)]
+    normalized = [canonicalize_call_for_schedule_cache(c) for c in calls]
+    assert all(c is not None for c in normalized)
+    self.assertEqual(normalized[0].key, normalized[1].key)
+    self.assertTrue(all(c.arg.grad_fxn is not None for c in calls))
+
   def test_precompile_nested(self):
     for precompile in (False, True):
       for devices in (None, ("CPU:0", "CPU:1")):
@@ -316,7 +337,7 @@ class TestCallSchedule(unittest.TestCase):
           if devices is not None: x = x.shard(devices, axis=0).realize()
           out = outer(x)
           for call in (u for u in out.uop.toposort() if u.op is Ops.CALL):
-            self.assertTrue(all(b.is_unbound for b in call.body.toposort() if b.op is Ops.BUFFER))
+            self.assertFalse(any(b.op is Ops.BUFFER for b in call.body.toposort()))
           self.assertEqual(sched_key(out), sched_key(outer(x)))
           out.sum().backward()
           np.testing.assert_equal(out.numpy(), [6., 9., 12., 15.])
@@ -330,6 +351,15 @@ class TestCallSchedule(unittest.TestCase):
     def outer(x:Tensor) -> Tensor: return x + 1
     x = Tensor.arange(8).float().contiguous().realize()
     np.testing.assert_equal(outer(inner(x)).numpy(), np.arange(8, dtype=np.float32) * 2 + 1)
+
+  def test_precompile_materializes_inline_reduction(self):
+    """An inline output ALLOC has identity, but its reduction still needs storage at an opaque call boundary."""
+    @function
+    def inner(x:Tensor) -> Tensor: return x.sum(axis=0)
+    @function(precompile=True)
+    def outer(x:Tensor) -> Tensor: return x * 2 + 1
+    x = Tensor(np.arange(8, dtype=np.float32).reshape(2, 4)).realize()
+    np.testing.assert_equal(outer(inner(x)).numpy(), np.arange(8, dtype=np.float32).reshape(2, 4).sum(axis=0) * 2 + 1)
 
   def test_precompile_symbolic_2d(self):
     """precompile with symbolic shapes in 2D (tests debuf reshape with symbolic PARAM)"""

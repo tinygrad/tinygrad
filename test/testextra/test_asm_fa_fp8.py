@@ -8,6 +8,25 @@ from extra.models.llama import precompute_freqs_cis
 from extra.thunder.amd.fa import quantize_v_fp8, flash_attention, fused_qkv_rope
 
 class TestASMFP8FA(unittest.TestCase):
+  def test_backward_scale_scratch_is_call_local(self):
+    device = Device.DEFAULT
+    if Device[device].renderer.target.arch != 'gfx950': self.skipTest('requires gfx950')
+    from extra.thunder.amd.fa_fp8_bwd import fp8_backward
+    def empty(shape, dtype): return Tensor.empty(shape, device=device, dtype=dtype)
+    q = empty((2,8192,32,128), dtypes.fp8e4m3)
+    k, v = [empty((2,8192,8,128), dtypes.fp8e4m3) for _ in range(2)]
+    do, out = [empty((2,8192,32,128), dtypes.bfloat16) for _ in range(2)]
+    lse = empty((2,32,8192), dtypes.float32)
+    vs, ps, ds = [empty((1,), dtypes.float32) for _ in range(3)]
+    state, nxt = [empty((2,), dtypes.float32) for _ in range(2)]
+    @function(precompile=True)
+    def backward(q, k, v, vs, do, out, lse, ps, ds, nxt, state):
+      return fp8_backward(q,k,v,vs,do,out,lse,ps,ds,nxt,reset_next_amax=True,delayed_state=state)
+    dq,*_ = backward(q,k,v,vs,do,out,lse,ps,ds,nxt,state)
+    scales = [u for u in dq.uop.toposort() if u.op in {Ops.BUFFER, Ops.ALLOC} and u.dtype == dtypes.float32 and u.shape == (5,)]
+    self.assertTrue(scales)
+    self.assertTrue(all(u.op is Ops.ALLOC for u in scales))
+
   def test_v_descale(self):
     if Device[Device.DEFAULT].renderer.target.arch != 'gfx950': self.skipTest('requires gfx950')
     from extra.llama_kernels import local_abs_max

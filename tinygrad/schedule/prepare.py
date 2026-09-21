@@ -21,7 +21,7 @@ def forward_call_outputs(sink:UOp) -> UOp:
     # Forward a producer into the existing output PARAM once; shared outputs copy from that first placement.
     if src not in placed:
       if src.op is Ops.STAGE: placed[src] = target.after(target.store(src.src[0]))
-      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[src] = target
+      elif src.op in {Ops.BUFFER, Ops.ALLOC, Ops.UNSHARD} and src.has_buffer_identity(): placed[src] = target
       if src in placed:
         items.append(src.after(*deps))
         continue
@@ -179,12 +179,12 @@ def copy_to_anon_store(x:UOp, copy:UOp):
   if is_physical_allreduce_copy(copy): return None
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
   x = x.pad_to(x.max_shape)
-  buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(x.max_shape), device=copy.device)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device), tag=("anonymous",)).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device), tag=("anonymous",)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(stg.shape)
 
 def materialize_cross_device_src(dest:UOp, src:UOp):
@@ -233,7 +233,7 @@ def forward_assembled_store(output:UOp, target:UOp, src:UOp) -> UOp|None:
           produced = targets[0].after(*(d.substitute({base:targets[0]}) for d in origin.src[1:]))
           states = [produced] + [t.after(t.store(produced.copy_to_device(s.device))) for t,s in zip(targets[1:], src.src[1:])]
           return output.after(*states)
-  if src.op is not Ops.AFTER or src.src[0].base.op not in {Ops.BUFFER, Ops.PARAM}: return None
+  if src.op is not Ops.AFTER or src.src[0].base.op not in {Ops.BUFFER, Ops.ALLOC, Ops.PARAM}: return None
   if not any(s.op is Ops.AFTER and s.src[0].op is Ops.SHRINK and s.src[0].tag == ("allreduce",) for s in src.src[1:]): return None
   return output.after(*(s.substitute({src.src[0].base:destination}) for s in src.src[1:]))
 
@@ -529,7 +529,7 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
   if is_slice_copy:
     # Preserve the old SLICE lowering shape: standalone transfers first acquire their destination, then the
     # resulting STORE is split into a direct runtime copy whose source and destination retain their offsets.
-    buf = UOp.new_buffer(copy.device, prod(input_src.max_shape), copy.dtype).reshape(input_src.max_shape)
+    buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(input_src.max_shape), device=copy.device)).reshape(input_src.max_shape)
     return buf.after(buf.store(copy.rtag(("allreduce",)))).reshape(copy.shape)
   # if it's a COPY, we need to give the input buffer identity
   if not input_src.has_buffer_identity(after_ok=True) and copy.op is Ops.COPY: input_src = input_src.contiguous()
@@ -540,7 +540,7 @@ def convert_copy_to_store(ctx, copy:UOp, existing_buf:UOp|None=None):
     # if there's already a buffer, we just use it
     return existing_buf.flatten().store(input_src)
   # create the output buffer
-  buf = UOp.new_buffer(copy.device, prod(input_src.max_shape), copy.dtype)
+  buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(input_src.max_shape), device=copy.device))
   # reshape back to input
   return buf.reshape(input_src.max_shape).after(buf.store(input_src)).reshape(copy.shape)
 

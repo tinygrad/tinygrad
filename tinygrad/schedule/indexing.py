@@ -22,7 +22,7 @@ class IndexingContext:
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(0)
 
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.AFTER, Ops.BUFFER,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.AFTER, Ops.BUFFER, Ops.ALLOC,
                       Ops.CONST, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
                       Ops.LOAD, Ops.CALL}
 
@@ -103,7 +103,7 @@ def broadcast_rngs(x:UOp, src:UOp, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
 def is_allreduce_view(x:UOp) -> bool: return x.op is Ops.SHRINK and x.tag == ("allreduce",)
 
 def data_srcs(x:UOp) -> tuple[UOp, ...]:
-  if x.op in {Ops.PARAM, Ops.BUFFER, Ops.RANGE, Ops.SPECIAL} or is_allreduce_view(x): return ()
+  if x.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.RANGE, Ops.SPECIAL} or is_allreduce_view(x): return ()
   # the store of a bound Variable only carries the input value, it has no data srcs
   if x.op is Ops.STORE and x.src[0].is_variable: return ()
   if x.op in GroupOp.Movement|{Ops.INDEX, Ops.STAGE, Ops.REDUCE, Ops.AFTER, Ops.END}: return x.src[:1]
@@ -116,7 +116,7 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
   for i, s in enumerate(x.src):
     new_src = s
     src_rngs = broadcast_rngs(x, s, ctx.range_map[x][0]) if x in ctx.range_map else ()
-    if s.op in {Ops.PARAM, Ops.BUFFER, Ops.MSTACK, Ops.MSELECT, Ops.AFTER} or is_allreduce_view(s):
+    if s.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT, Ops.AFTER} or is_allreduce_view(s):
       if x in ctx.range_map and i < data_src_count: new_src = new_src.index(*src_rngs)
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
