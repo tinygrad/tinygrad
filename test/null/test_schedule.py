@@ -609,6 +609,7 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d_half(self): self.test_conv2d(4, dtype=dtypes.half)
 
   def test_schedule_mem_used_with_inputs(self):
+    Tensor.ones(256).contiguous().realize() # hcq2 caches the linked schedule with its buffers
     gc.collect()
     base = GlobalCounters.mem_used
     x = Tensor.ones(256).contiguous().realize()
@@ -1697,6 +1698,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   def test_schedule_mem_used(self):
+    Tensor.ones(256).contiguous().realize() # hcq2 caches the linked schedule with its buffers
     gc.collect()
     base = GlobalCounters.mem_used
     Tensor.ones(256).contiguous().realize()
