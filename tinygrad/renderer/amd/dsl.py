@@ -239,6 +239,7 @@ import functools
 from tinygrad.runtime.autogen.amd.rdna3.operands import OPERANDS as OPERANDS_RDNA3
 from tinygrad.runtime.autogen.amd.rdna4.operands import OPERANDS as OPERANDS_RDNA4
 from tinygrad.runtime.autogen.amd.cdna.operands import OPERANDS as OPERANDS_CDNA
+from tinygrad.runtime.autogen.amd.common import OpType
 OPERANDS = {**OPERANDS_CDNA, **OPERANDS_RDNA3, **OPERANDS_RDNA4}
 
 # ══════════════════════════════════════════════════════════════
@@ -344,6 +345,11 @@ class Inst:
   @property
   def operands(self) -> dict: return OPERANDS.get(getattr(self, 'op'), {}) if hasattr(self, 'op') else {}
   def _is_cdna(self) -> bool: return 'cdna' in type(self).__module__
+
+  def is_acc_operand(self, name:str) -> bool:
+    if not isinstance(val:=getattr(self, name), Reg) or not 256 <= val.offset < 512: return False
+    if (opr:=self.operands.get(name)) and opr[2] in {OpType.OPR_ACCVGPR, OpType.OPR_SRC_ACCVGPR}: return True
+    return False
 
   @functools.cached_property
   def op_bits(self) -> dict[str, int]:

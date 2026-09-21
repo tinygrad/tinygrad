@@ -595,9 +595,12 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
   for pc, inst in pc_table.items():
     pc_tokens[pc] = tokens = []
     for name, f in inst._fields:
+      if "v_accvgpr_read" in str(inst):
+        print(inst.is_acc_operand(name))
       if isinstance(val:=getattr(inst, name), Reg): tokens.append({"st":val.fmt(), "keys":[f"r{val.offset+i}" for i in range(val.sz)], "kind":1})
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != f.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
+  print("------")
   # show a smaller view for repeated instructions in the graph
   lines:list[str] = []
   disasm = {pc:str(inst) for pc,inst in pc_table.items()}
