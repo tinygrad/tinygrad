@@ -56,18 +56,11 @@ def collect_stores(ctx:CallifyCtx, u:UOp):
       storage = graph_rewrite(u.src[0], pm_drop_after, bottom_up=True)
       ctx.buffer_map.update({t:storage.shrink_to(t.shape) for t in u.tag})
 
-# NOTE: adding rules to here is bad. these all need to run before the schedule cache
+# NOTE: scheduling rewrites belong in prepare; only storage/interface normalization belongs here.
 pm_callify_ctx_collect = PatternMatcher([
   # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
   (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
-
-  # remove contiguous on movement ops before a copy on disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
-   copy.replace(src=(x,)) if x.on_disk() else None),
-  # push copy past movement ops to disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, name="copy"), lambda x,copy:
-   x.replace(src=(copy.replace(src=(x.src[0],)),)+x.src[1:]) if x.on_disk() else None),
 
   # Collect effects after their sources have been rewritten, without entering call bodies.
   (UPat(Ops.AFTER, name="u"), collect_stores),
