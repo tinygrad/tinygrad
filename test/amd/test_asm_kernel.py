@@ -34,19 +34,6 @@ def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
   assert dtypes.is_float(A.dtype), f"buffer dtype must be float32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
-  """
-  insts = [
-    s_load_b64(s[0:1], s[0:1], soffset=NULL),
-    s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
-    v_lshlrev_b32_e32(v[0], 2, v[0]), # element offset
-    global_load_b32(v[1], v[0], saddr=s[0:1]),
-    s_waitcnt_vmcnt(sdst=NULL, simm16=0),
-    v_mov_b32_e32(v[2], 1.0),
-    v_add_f32_e32(v[1], v[1], v[2]),
-    global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]),
-    s_endpgm(),
-  ]
-  """
   kernarg = sgpr_pair(0)
   dest = tuple(UOp(Ops.ALLOC, arg=ParamArg(i, dtypes.int32, 1)) for i in range(2))
   store_load = sgpr_pair_param(0).store(sgpr_pair_param(1).load())
