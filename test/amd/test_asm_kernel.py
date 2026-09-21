@@ -15,9 +15,31 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, rewrite_group
 
+def assemble_inst(call:UOp) -> UOp|None:
+  if not isinstance(call.arg, InstInfo): return None
+  op = call.arg.op
+  name = op().op_name
+  fields = {"S_LOAD_B64": ("sdata", "sbase"), "S_WAITCNT_LGKMCNT": ("simm16",), "S_WAITCNT_VMCNT": ("simm16",),
+            "V_LSHLREV_B32_E32": ("vdst", "src0", "vsrc1"), "GLOBAL_LOAD_B32": ("vdst", "addr", "saddr"),
+            "V_MOV_B32_E32": ("vdst", "src0"), "V_ADD_F32_E32": ("vdst", "src0", "vsrc1"),
+            "GLOBAL_STORE_B32": ("addr", "data", "saddr"), "S_ENDPGM": ()}[name]
+  kwargs = {}
+  for field, arg in zip(fields, call.src[1:], strict=False):
+    u = arg.without_after
+    if u.op is Ops.CONST: kwargs[field] = u.val
+    else:
+      regs = tuple(x.without_after for x in u.src) if u.op is Ops.STACK else (u,)
+      assert all(r.op is Ops.PARAM and r.addrspace is AddrSpace.REG and r.tag == regs[0].tag for r in regs)
+      assert [r.arg.slot for r in regs] == list(range(regs[0].arg.slot, regs[0].arg.slot+len(regs)))
+      bank = {"s": s, "v": v}[regs[0].tag]
+      kwargs[field] = bank[regs[0].arg.slot] if len(regs) == 1 else bank[regs[0].arg.slot:regs[-1].arg.slot]
+  assert len(kwargs) == len(fields)
+  if name == "S_LOAD_B64": kwargs["soffset"] = NULL
+  if name in {"S_WAITCNT_LGKMCNT", "S_WAITCNT_VMCNT"}: kwargs["sdst"] = NULL
+  return UOp(Ops.INS, src=call.src[1:], arg=(op(**kwargs), dtypes.void))
+
 assemble_sink_pm = PatternMatcher([
-  (UPat(Ops.CALL, name="call"), lambda call: UOp(Ops.INS, src=call.src[1:], arg=(call.arg.inst, dtypes.void))
-   if isinstance(call.arg, InstInfo) else None),
+  (UPat(Ops.CALL, name="call"), assemble_inst),
 ])
 
 @rewrite_group("asm_sink")
@@ -32,41 +54,26 @@ def custom_add_one(A:UOp) -> UOp:
   threads = UOp.special(A.numel(), "lidx0")
   dest = tuple(UOp.param(i, dtypes.int32, (1,), addrspace=AddrSpace.REG).rtag("s") for i in range(2))
   kernarg = UOp.stack(*dest)
-  store_load = UOp.param(0, dtypes.int32, (2, 1), addrspace=AddrSpace.REG).rtag("s").store(
-    UOp.param(1, dtypes.int32, (2, 1), addrspace=AddrSpace.REG).rtag("s").load())
-  kernarg_load = UOp(Ops.CALL, src=(store_load.sink(), UOp.stack(*dest), kernarg), arg=InstInfo(s_load_b64(s[0:1], s[0:1], soffset=NULL)))
-  kernarg_wait = UOp(Ops.CALL, src=(UOp.sink(), UOp.stack(*(d.after(kernarg_load) for d in dest))),
-                    arg=InstInfo(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0)))
-  base_ready = UOp.stack(*(d.after(kernarg_wait) for d in dest))
+  kernarg_load = UOp(Ops.CALL, src=(UOp.sink(), UOp.stack(*dest), kernarg), arg=InstInfo(s_load_b64))
+  kernarg_wait = UOp(Ops.CALL, src=(UOp.sink(), UOp.const(0), UOp.stack(*(d.after(kernarg_load) for d in dest))),
+                    arg=InstInfo(s_waitcnt_lgkmcnt))
+  saddr_ready = UOp.stack(*(d.after(kernarg_wait) for d in dest))
   offset_val = UOp.param(0, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v")
   lane_id = offset_val
-  shift = UOp.param(0, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v").store(
-    UOp.param(1, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v").load() << 2)
-  offset_call = UOp(Ops.CALL, src=(shift.sink(), offset_val, lane_id), arg=InstInfo(v_lshlrev_b32_e32(v[0], 2, v[0])))
+  offset_call = UOp(Ops.CALL, src=(UOp.sink(), offset_val, UOp.const(2), lane_id), arg=InstInfo(v_lshlrev_b32_e32))
   offset_ready = offset_val.after(offset_call)
   val = UOp.param(1, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v")
-  global_load_impl = UOp.param(0, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").store(
-    UOp.param(2, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v"),
-    UOp.param(1, dtypes.int32, (2, 1), addrspace=AddrSpace.REG).rtag("s"))
-  load_call = UOp(Ops.CALL, src=(global_load_impl.sink(), val, base_ready, offset_ready), arg=InstInfo(global_load_b32(v[1], v[0], saddr=s[0:1])))
-  wait_call = UOp(Ops.CALL, src=(UOp.sink(), val.after(load_call)), arg=InstInfo(s_waitcnt_vmcnt(sdst=NULL, simm16=0)))
+  load_call = UOp(Ops.CALL, src=(UOp.sink(), val, offset_ready, saddr_ready), arg=InstInfo(global_load_b32))
+  wait_call = UOp(Ops.CALL, src=(UOp.sink(), UOp.const(0), val.after(load_call)), arg=InstInfo(s_waitcnt_vmcnt))
   val_ready = val.after(wait_call)
   c1_dest = UOp.param(2, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v")
-  mov_call = UOp(Ops.CALL, src=(UOp.param(0, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").store(1.0).sink(), c1_dest),
-                 arg=InstInfo(v_mov_b32_e32(v[2], 1.0)))
+  mov_call = UOp(Ops.CALL, src=(UOp.sink(), c1_dest, UOp.const(1.0)), arg=InstInfo(v_mov_b32_e32))
   c1_ready = c1_dest.after(mov_call)
   add_dest = val
-  add_call = UOp(Ops.CALL, src=(UOp.param(0, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").store(
-                  UOp.param(1, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").load() +
-                  UOp.param(2, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").load()).sink(),
-                add_dest, val_ready, c1_ready), arg=InstInfo(v_add_f32_e32(v[1], v[1], v[2])))
+  add_call = UOp(Ops.CALL, src=(UOp.sink(), add_dest, val_ready, c1_ready), arg=InstInfo(v_add_f32_e32))
   add_ready = add_dest.after(add_call)
-  global_store_impl = UOp.param(0, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v").store(
-    UOp.param(1, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").load(
-      UOp.param(2, dtypes.int32, (2, 1), addrspace=AddrSpace.REG).rtag("s")))
-  store_to_global = UOp(Ops.CALL, src=(global_store_impl.sink(), offset_ready, add_ready, base_ready),
-                        arg=InstInfo(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1])))
-  end_call = UOp(Ops.CALL, src=(UOp.sink(), store_to_global), arg=InstInfo(s_endpgm()))
+  store_to_global = UOp(Ops.CALL, src=(UOp.sink(), offset_ready, add_ready, saddr_ready), arg=InstInfo(global_store_b32))
+  end_call = UOp(Ops.CALL, src=(UOp.sink(), store_to_global), arg=InstInfo(s_endpgm))
   sink = UOp.sink(A.base, threads, end_call, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
   return asm_sink(sink)
 

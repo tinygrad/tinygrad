@@ -1339,8 +1339,8 @@ OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.STORE, Ops.CUSTOM_F
 
 @dataclass(frozen=True)
 class InstInfo:
-  """Concrete instruction carried by a CALL before assembly lowering."""
-  inst: Any
+  """Instruction constructor carried by a CALL before assembly lowering."""
+  op: Callable[..., Any]
 
 @dataclass(frozen=True)
 class CallInfo:
