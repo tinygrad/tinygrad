@@ -51,7 +51,7 @@ def collect_stores(ctx:CallifyCtx, u:UOp):
   if not u.is_bound_var and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE):
     ctx.stores.append(u)
     if u.tag:
-      storage = graph_rewrite(u.src[0], pm_drop_after, bottom_up=True)
+      storage = graph_rewrite(u.src[0], pm_drop_after, bottom_up=True, name="drop after")
       ctx.buffer_map.update({t:storage.shrink_to(t.shape) for t in u.tag})
 
 # NOTE: scheduling rewrites belong in prepare; only storage/interface normalization belongs here.
