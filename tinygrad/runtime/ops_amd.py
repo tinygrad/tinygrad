@@ -504,6 +504,7 @@ class AMDSDMAQueue(HWQueue):
     cmdbuf = cmdbuf.substitute({base: base.replace(arg=replace(base.arg, device=self.dev.host))})
 
     rs, size_dw = q.ring.size, cmdbuf.max_numel() // 4
+    if size_dw > rs: raise RuntimeError(f"SDMA command buffer ({size_dw*4} bytes) exceeds ring size ({rs*4} bytes)")
     put_b = put.index(0).load()
     tail = ((put_b % (rs * 4)) // 4).cast(dtypes.int)
     fits = (size_dw <= rs - tail).cast(dtypes.int)
@@ -964,7 +965,7 @@ class AMDDevice(Compiled):
     if getenv("AMD_DISABLE_SDMA"): return None
     if idx in self.sdma_queues: return self.sdma_queues[idx]
     with contextlib.suppress(OSError):
-      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, (1 << 20) if self.is_usb else (16 << 20), idx=idx)
+      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 16 << 20, idx=idx)
     return self.sdma_queues.get(idx, None)
 
   def tmpring_size(self, private_segment_size):
