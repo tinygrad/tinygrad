@@ -250,6 +250,15 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), a[:, 1::2].sum(1).tolist())
 
+  def test_upcast_split_range(self):
+    # j%2 splits j into two UPCAST ranges, the expander expands both, so no loop is left
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.UPCAST)
+      return C[i, j].store(A[i, j] + (j%2).cast(A.dtype)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(4, 8), Tensor.empty(4, 8), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
+    self.assertEqual(len([u for u in uops if u.op is Ops.RANGE]), 0)
+
   def test_loop_acc_gemm_tc_refused(self):
     # ACC[j] += A[t,:] @ B[:,j] over t: the recurrence on ACC makes t a serial LOOP, so no tensor core may split it
     ren = AMDLLVMRenderer(Target("AMD", arch="gfx1100"))
