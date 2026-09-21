@@ -15,34 +15,40 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, rewrite_group
 
+def sgpr_pair(slot:int) -> UOp: return UOp.stack(UOp.param(slot, dtypes.int32, (1,)), UOp.param(slot+1, dtypes.int32, (1,)))
+def sgpr_pair_param(slot:int) -> UOp: return UOp.param(slot, dtypes.int32, (2, 1))
+def sgpr_pair_pat(name:str) -> UPat:
+  return UPat(Ops.RESHAPE, src=(UPat(Ops.PARAM, dtype=dtypes.int32), UPat()), name=name)
+def is_sgpr_pair(pair:UOp, slot:int) -> bool:
+  return pair.shape == (2, 1) and pair.src[0].arg.slot == slot
+
 isel_sink_pm = PatternMatcher([
-  (UPat(Ops.PARAM, dtype=dtypes.int32, name="dst").store(UPat(Ops.PARAM, dtype=dtypes.int32, name="src").load()),
+  (sgpr_pair_pat("dst").store(sgpr_pair_pat("src").load()),
    lambda dst, src: UOp(Ops.CUSTOM, arg=(s_load_b64(s[0:1], s[0:1], soffset=NULL), dtypes.void))
-   if dst.arg.slot == 0 and src.arg.slot == 1 and dst.shape == src.shape == (2,) else None),
+   if is_sgpr_pair(dst, 0) and is_sgpr_pair(src, 1) else None),
   (UPat(Ops.PARAM, dtype=dtypes.int32, name="dst").store(UPat(Ops.PARAM, dtype=dtypes.int32, name="src").load() << 2),
    lambda dst, src: UOp(Ops.CUSTOM, arg=(v_lshlrev_b32_e32(v[0], 2, v[0]), dtypes.void))
    if dst.arg.slot == 0 and src.arg.slot == 1 and dst.shape == src.shape == (32,) else None),
-  (UPat(Ops.ALLOC, dtype=(dtypes.int32, dtypes.float32), name="dst").store(
-     UPat(Ops.AFTER, name="offset"), UPat(Ops.AFTER, name="base")),
-   lambda dst, offset, base: UOp(Ops.CUSTOM, src=(base, offset), arg=(global_load_b32(v[1], v[0], saddr=s[0:1]), dtypes.void))
-   if dst.shape == offset.shape == (32,) and base.shape == (2,) else None),
-  (UPat(Ops.ALLOC, dtype=dtypes.float32, name="dst").store(UPat(Ops.EXPAND, src=(UPat.cvar("c").cast(dtypes.float32), UPat()),)),
-   lambda dst, c: UOp(Ops.CUSTOM, arg=(v_mov_b32_e32(v[2], 1.0), dtypes.void)) if dst.shape == (32,) and c.arg == 1.0 else None),
+  (UPat(Ops.PARAM, dtype=(dtypes.int32, dtypes.float32), name="dst").store(
+     UPat(Ops.PARAM, dtype=dtypes.int32, name="offset"), sgpr_pair_pat("base")),
+   lambda dst, offset, base: UOp(Ops.CUSTOM, arg=(global_load_b32(v[1], v[0], saddr=s[0:1]), dtypes.void))
+   if (dst.arg.slot, offset.arg.slot) == (0, 2) and dst.shape == offset.shape == (32,) and is_sgpr_pair(base, 1) else None),
+  (UPat(Ops.PARAM, dtype=dtypes.float32, name="dst").store(UPat(Ops.EXPAND, src=(UPat.cvar("c").cast(dtypes.float32), UPat()),)),
+   lambda dst, c: UOp(Ops.CUSTOM, arg=(v_mov_b32_e32(v[2], 1.0), dtypes.void))
+   if dst.arg.slot == 0 and dst.shape == (32,) and c.arg == 1.0 else None),
   (UPat(Ops.PARAM, dtype=dtypes.float32, name="dst").store(
      UPat(Ops.PARAM, dtype=dtypes.float32, name="a").load() + UPat(Ops.PARAM, dtype=dtypes.float32, name="b").load()),
    lambda dst, a, b: UOp(Ops.CUSTOM, arg=(v_add_f32_e32(v[1], v[1], v[2]), dtypes.void))
    if dst.arg.slot == 0 and {a.arg.slot, b.arg.slot} == {1, 2} and dst.shape == a.shape == b.shape == (32,) else None),
   (UPat(Ops.PARAM, dtype=dtypes.int32, name="offset").store(
-     UPat(Ops.PARAM, dtype=dtypes.int32, name="val").load(UPat(Ops.PARAM, dtype=dtypes.int32, name="base"))),
+     UPat(Ops.PARAM, dtype=dtypes.float32, name="val").load(sgpr_pair_pat("base"))),
    lambda offset, val, base: UOp(Ops.CUSTOM, arg=(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]), dtypes.void))
-   if (offset.arg.slot, val.arg.slot, base.arg.slot) == (0, 1, 2) and offset.shape == val.shape == (32,) and base.shape == (2,) else None),
+   if (offset.arg.slot, val.arg.slot) == (0, 1) and offset.shape == val.shape == (32,) and is_sgpr_pair(base, 2) else None),
 ])
 
 assemble_sink_pm = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, src=(UPat(Ops.CUSTOM, name="ins"),)),), name="call", allow_any_len=True),
    lambda call, ins: ins.replace(op=Ops.INS, src=ins.src+call.src[1:])),
-  (UPat(Ops.AFTER, src=(UPat(Ops.INS, name="ins"),), name="after", allow_any_len=True),
-   lambda after, ins: ins.replace(src=after.src[1:]+ins.src)),
 ])
 
 @rewrite_group("asm_sink")
@@ -69,27 +75,34 @@ def custom_add_one(A:UOp) -> UOp:
     s_endpgm(),
   ]
   """
-  kernarg = UOp.param(0, dtypes.int32, (2,))
-  dest = UOp(Ops.ALLOC, arg=ParamArg(0, dtypes.int32, 2))
-  store_load = UOp.param(0, dtypes.int32, (2,)).store(UOp.param(1, dtypes.int32, (2,)).load())
-  load_call = UOp.call(store_load.sink(), dest, kernarg)
-  load_call = UOp.call(UOp(Ops.CUSTOM, arg=(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0), dtypes.void)).sink()).after(dest, load_call)
-  offset_val = UOp(Ops.ALLOC, arg=ParamArg(1, dtypes.int32, 32))
-  lane_id = UOp.param(1, dtypes.int32, (32,))
+  kernarg = sgpr_pair(0)
+  dest = tuple(UOp(Ops.ALLOC, arg=ParamArg(i, dtypes.int32, 1)) for i in range(2))
+  store_load = sgpr_pair_param(0).store(sgpr_pair_param(1).load())
+  kernarg_load = UOp.call(store_load.sink(), UOp.stack(*dest), kernarg)
+  kernarg_wait = UOp.call(UOp(Ops.CUSTOM, arg=(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0), dtypes.void)).sink(),
+                         UOp.stack(*(d.after(kernarg_load) for d in dest)))
+  base_ready = UOp.stack(*(d.after(kernarg_wait) for d in dest))
+  offset_val = UOp(Ops.ALLOC, arg=ParamArg(2, dtypes.int32, 32))
+  lane_id = UOp.param(2, dtypes.int32, (32,))
   shift = UOp.param(0, dtypes.int32, (32,)).store(UOp.param(1, dtypes.int32, (32,)).load() << 2)
   offset_call = UOp.call(shift.sink(), offset_val, lane_id)
-  val = UOp(Ops.ALLOC, arg=ParamArg(2, dtypes.float32, 32))
-  load_call = UOp.call(val.store(offset_val.after(offset_call), dest.after(load_call)).sink())
-  wait_call = UOp.call(UOp(Ops.CUSTOM, arg=(s_waitcnt_vmcnt(sdst=NULL, simm16=0), dtypes.void)).sink()).after(val, load_call)
-  c1_dest = UOp(Ops.ALLOC, arg=ParamArg(3, dtypes.float32, 32))
-  mov_call = UOp.call(c1_dest.store(1.0).sink())
-  add_dest = UOp(Ops.ALLOC, arg=ParamArg(4, dtypes.float32, 32))
+  offset_ready = offset_val.after(offset_call)
+  val = UOp(Ops.ALLOC, arg=ParamArg(3, dtypes.float32, 32))
+  global_load_impl = UOp.param(0, dtypes.float32, (32,)).store(UOp.param(2, dtypes.int32, (32,)), sgpr_pair_param(1))
+  load_call = UOp.call(global_load_impl.sink(), val, base_ready, offset_ready)
+  wait_call = UOp.call(UOp(Ops.CUSTOM, arg=(s_waitcnt_vmcnt(sdst=NULL, simm16=0), dtypes.void)).sink(), val.after(load_call))
+  val_ready = val.after(wait_call)
+  c1_dest = UOp(Ops.ALLOC, arg=ParamArg(4, dtypes.float32, 32))
+  mov_call = UOp.call(UOp.param(0, dtypes.float32, (32,)).store(1.0).sink(), c1_dest)
+  c1_ready = c1_dest.after(mov_call)
+  add_dest = UOp(Ops.ALLOC, arg=ParamArg(5, dtypes.float32, 32))
   add_call = UOp.call(UOp.param(0, dtypes.float32, (32,)).store(
                         UOp.param(1, dtypes.float32, (32,)).load() + UOp.param(2, dtypes.float32, (32,)).load()).sink(),
-                      add_dest, val.after(wait_call), c1_dest.after(mov_call))
-  global_store_impl = UOp.param(0, dtypes.int32, (32,)).store(UOp.param(1, dtypes.int32, (32,)).load(UOp.param(2, dtypes.int32, (2,))))
-  store_to_global = UOp.call(global_store_impl.sink(), offset_val, add_dest.after(add_call), dest)
-  end_call = UOp.call(UOp(Ops.CUSTOM, arg=(s_endpgm(), dtypes.void)).sink()).after(store_to_global)
+                      add_dest, val_ready, c1_ready)
+  add_ready = add_dest.after(add_call)
+  global_store_impl = UOp.param(0, dtypes.int32, (32,)).store(UOp.param(1, dtypes.float32, (32,)).load(sgpr_pair_param(2)))
+  store_to_global = UOp.call(global_store_impl.sink(), offset_ready, add_ready, base_ready)
+  end_call = UOp.call(UOp(Ops.CUSTOM, arg=(s_endpgm(), dtypes.void)).sink(), store_to_global)
   sink = UOp.sink(A.base, threads, end_call, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
   return asm_sink(sink)
 
