@@ -1,5 +1,5 @@
 from typing import Optional, Any
-import unittest, math
+import unittest, math, itertools, inspect
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import Context, ceildiv
@@ -179,32 +179,20 @@ class TestNonFloatUOps(TestUOps):
     self._test_top_fxn(Ops.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float16, dtypes.float16))
 
 class TestBoolUOps(TestUOps):
-  def _test_uop_bool_fxn(self, op, fxn):
+  def _test_op_bool_fxn(self, op, fxn):
+    cases = [*itertools.product([False, True], repeat=(nargs:=len(inspect.signature(fxn).parameters)))]
     for f in [_test_single_value, _test_single_value_const]:
-      for a in [False, True]:
-        self._equal(f([a], op, (dtypes.bool, )*1), fxn(a))
+      for args in cases:
+        self._equal(f(args, op, (dtypes.bool,)*nargs), fxn(*args))
 
-  def _test_bop_bool_fxn(self, op, fxn):
-    for f in [_test_single_value, _test_single_value_const]:
-      for a in [False, True]:
-        for b in [False, True]:
-          self._equal(f([a,b], op, (dtypes.bool, )*2), fxn(a,b))
-
-  def _test_top_bool_fxn(self, op, fxn):
-    for f in [_test_single_value, _test_single_value_const]:
-      for a in [False, True]:
-        for b in [False, True]:
-          for c in [False, True]:
-            self._equal(f([a,b,c], op, (dtypes.bool, )*3), fxn(a,b,c))
-
-  def test_add_bool(self): self._test_bop_bool_fxn(Ops.ADD, lambda a,b: a or b)
-  def test_mul_bool(self): self._test_bop_bool_fxn(Ops.MUL, lambda a,b: a and b)
-  def test_xor_bool(self): self._test_bop_bool_fxn(Ops.XOR, lambda a,b: a != b)
-  def test_and_bool(self): self._test_bop_bool_fxn(Ops.AND, lambda a,b: a & b)
-  def test_or_bool(self): self._test_bop_bool_fxn(Ops.OR, lambda a,b: a | b)
-  def test_cmpne_bool(self): self._test_bop_bool_fxn(Ops.CMPNE, lambda a,b: a != b)
-  def test_cmplt_bool(self): self._test_bop_bool_fxn(Ops.CMPLT, lambda a,b: a < b)
-  def test_where_bool(self): self._test_top_bool_fxn(Ops.WHERE, lambda a,b,c: b if a else c)
+  def test_add_bool(self): self._test_op_bool_fxn(Ops.ADD, lambda a,b: a or b)
+  def test_mul_bool(self): self._test_op_bool_fxn(Ops.MUL, lambda a,b: a and b)
+  def test_xor_bool(self): self._test_op_bool_fxn(Ops.XOR, lambda a,b: a != b)
+  def test_and_bool(self): self._test_op_bool_fxn(Ops.AND, lambda a,b: a & b)
+  def test_or_bool(self): self._test_op_bool_fxn(Ops.OR, lambda a,b: a | b)
+  def test_cmpne_bool(self): self._test_op_bool_fxn(Ops.CMPNE, lambda a,b: a != b)
+  def test_cmplt_bool(self): self._test_op_bool_fxn(Ops.CMPLT, lambda a,b: a < b)
+  def test_where_bool(self): self._test_op_bool_fxn(Ops.WHERE, lambda a,b,c: b if a else c)
 
 class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
