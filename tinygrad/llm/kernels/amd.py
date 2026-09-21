@@ -76,7 +76,7 @@ class Linear(nn.Linear):
       # Q6 blocks are 210 bytes, so consecutive blocks are only 2-byte aligned. pad each block to 212 bytes
       # the kernel can do all its reads as aligned u32 words
       nblocks = raw.max_numel() // Q6_BYTES
-      padded = Tensor(raw).reshape((nblocks, Q6_BYTES)).pad_to((nblocks, Q6_PADDED)).bitcast(dtypes.uint32)
+      padded = Tensor(raw).contiguous().reshape((nblocks, Q6_BYTES)).pad_to((nblocks, Q6_PADDED)).bitcast(dtypes.uint32)
       self.weight = padded.clone().reshape(nblocks * Q6_WORDS)
     else:
       self.weight = Tensor(raw).bitcast(dtypes.uint32).contiguous()
