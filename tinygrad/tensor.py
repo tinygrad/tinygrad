@@ -279,24 +279,23 @@ class Tensor(RandMixin):
     if any(u.dtype in dtypes.weaks and u.device is not None for u in sink.src):
       raise RuntimeError("cannot realize a weak dtype; cast to a concrete dtype first")
     bases = {u.base for u in sink.src}
-    # Materialize call results beneath wrappers first so their aliases share the same storage and do not replay the call.
+    # Bind output allocations beneath wrappers so all aliases retain the same storage and call dependencies.
     for u in sink.src:
       u = u.base
       while u.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: u = u.src[0].base
-      if u.storage_base.op is Ops.ALLOC: bases.add(u)
+      if (b:=u.storage_base).op is Ops.ALLOC: bases.add(b)
     tensor_map:dict[UOp, UOp] = {}
     # Rebuild in dependency order: replacement values already reference the other outputs' storage.
     for x in sink.toposort(enter_calls=False):
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
-      if x.op is Ops.ALLOC and x.arg.bind_on_realize: u = UOp.new_buffer(x.device, x.max_numel(), x.dtype)
+      if x.op is Ops.ALLOC and (x.arg.bind_on_realize or x in bases): u = UOp.new_buffer(x.device, x.max_numel(), x.dtype)
       if x in bases and u.needs_storage():
         src, contiguous = u, False
         while src.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}:
           contiguous |= src.op is Ops.STAGE
           src = src.src[0]
-        if src.storage_base.op is Ops.ALLOC: u = src.clone()
-        elif src.is_virtual or src.on_disk() or 0 in src.shape or src.has_buffer_identity(after_ok=True): u = src
-        elif src.op is Ops.AFTER and src.src[1].op is Ops.STORE: u = src
+        if src.is_virtual or src.on_disk() or 0 in src.shape or src.has_buffer_identity(after_ok=True): u = src
+        elif src.op is Ops.AFTER and (src.src[1].op is Ops.STORE or (not contiguous and src.storage_base.has_buffer_identity())): u = src
         elif contiguous and (view := contiguous_mops_to_view(None, u, src)) is not None: u = view
         else: u = src.clone()
         if (b:=u.storage_base).op is Ops.ALLOC and b.arg.bind_on_realize:
