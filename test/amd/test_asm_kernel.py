@@ -36,7 +36,7 @@ def assemble_inst(call:UOp) -> UOp|None:
   if not isinstance(call.arg, InstInfo): return None
   src = [u.without_after for u in call.src[1:] if u.dtype != dtypes.void]
   regs = [(u.src[0].without_after, len(u.src)) if u.op is Ops.STACK else (u, 1) for u in src]
-  args = [Reg(u.arg.slot + (256 if u.tag == "v" else 0), size) for u, size in regs]
+  args = [Reg(u.arg.slot + (256 if u.arg.name == "v" else 0), size) for u, size in regs]
   return UOp(Ops.INS, src=call.src[1:], arg=(call.arg.op(*args), dtypes.void))
 
 assemble_sink_pm = PatternMatcher([(UPat(Ops.CALL, name="call"), assemble_inst),])
@@ -52,7 +52,7 @@ def custom_add_one(A:UOp) -> UOp:
   assert dtypes.is_float(A.dtype), f"buffer dtype must be float32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
   # SGPRs have shape (1,)
-  dest = tuple(UOp.param(i, dtypes.int32, (1,), addrspace=AddrSpace.REG).rtag("s") for i in range(2))
+  dest = tuple(UOp.param(i, dtypes.int32, (1,), addrspace=AddrSpace.REG, name="s") for i in range(2))
   # use STACK for SGPR pairs, s[0:1] has shape (2, 1)
   kernarg = UOp.stack(*dest)
   # NOTE: this call body doesn't implement the instruction, this exists in the emulator
@@ -60,13 +60,13 @@ def custom_add_one(A:UOp) -> UOp:
   kernarg_wait = UOp(Ops.CALL, src=(UOp.sink(), kernarg_load), arg=InstInfo(functools.partial(s_waitcnt_lgkmcnt, sdst=NULL, simm16=0)))
   saddr_after = UOp.stack(*(d.after(kernarg_wait) for d in dest))
   # VPGRs have shape (32,)
-  offset_val = UOp.param(0, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v")
+  offset_val = UOp.param(0, dtypes.int32, (32,), addrspace=AddrSpace.REG, name="v")
   offset_call = UOp(Ops.CALL, src=(UOp.sink(), offset_val, offset_val), arg=InstInfo(functools.partial(v_lshlrev_b32_e32, src0=2)))
   offset_after = offset_val.after(offset_call)
-  val = UOp.param(1, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v")
+  val = UOp.param(1, dtypes.float32, (32,), addrspace=AddrSpace.REG, name="v")
   load_call = UOp(Ops.CALL, src=(UOp.sink(), val, offset_after, offset_val, saddr_after), arg=InstInfo(global_load_b32))
   wait_call = UOp(Ops.CALL, src=(UOp.sink(), load_call), arg=InstInfo(functools.partial(s_waitcnt_vmcnt, sdst=NULL, simm16=0)))
-  c1_dest = UOp.param(2, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v")
+  c1_dest = UOp.param(2, dtypes.float32, (32,), addrspace=AddrSpace.REG, name="v")
   mov_call = UOp(Ops.CALL, src=(UOp.sink(), c1_dest), arg=InstInfo(functools.partial(v_mov_b32_e32, src0=1.0)))
   add_dest = val
   add_after = add_dest.after(UOp(Ops.CALL, src=(UOp.sink(), add_dest, val.after(wait_call), c1_dest.after(mov_call)), arg=InstInfo(v_add_f32_e32)))
