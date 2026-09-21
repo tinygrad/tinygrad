@@ -186,8 +186,10 @@ class CustomASM24Controller:
     """Streaming PCIe memory write via 0xF0 mode 1 + bulk OUT. Data is little-endian dwords on the wire."""
     if not data: return
     assert len(data) % 4 == 0, f"pcie_mem_write requires 4-byte aligned size, got {len(data)}"
-    self._f0_out(0x60, 0x0F, address, len(data) // 4, mode=1)
-    self.usb.bulk_write(data)
+    for off in range(0, len(data), USB_MAX_STREAM):
+      chunk = data[off:off+USB_MAX_STREAM]
+      self._f0_out(0x60, 0x0F, address + off, len(chunk) // 4, mode=1)
+      self.usb.bulk_write(chunk)
 
   def pcie_mem_read(self, address:int, nbytes:int) -> memoryview:
     """Streaming PCIe memory read via 0xF0 mode 2 + bulk IN. Returns little-endian bytes."""
@@ -253,8 +255,10 @@ class USBMMIOInterface(MMIOInterface):
 # sram layout: two halves, each with a reserved sentinel block
 HALF, CHUNK, SLOT = 0x40000, 0x40000 - 512, 0x4000
 
-# host memory: link, staging, zeros
-def usb_host(dev) -> UOp: return UOp.placeholder((0x180020,), dtypes.uint8, 0, device=to_tuple(dev)[0], tag="usb_host")
+USB_MAX_STREAM = 1 << 20
+# host memory: link, staging, one stream's worth of zeros
+USB_HOST_SIZE = 32 + 2 * HALF + USB_MAX_STREAM
+def usb_host(dev) -> UOp: return UOp.placeholder((USB_HOST_SIZE,), dtypes.uint8, 0, device=to_tuple(dev)[0], tag="usb_host")
 def usb_link(dev) -> UOp: return usb_host(dev)[:24].bitcast(dtypes.uint64) # [handle, context, previous batch chunks]
 def usb_stage(dev) -> UOp: return usb_host(dev)[32:32 + 2 * HALF] # host buffers for the sram halves
 
@@ -286,7 +290,13 @@ def usb_bulk(h:UOp, ep:int, data:UOp, n:UOp|int, timeout:int=10000) -> UOp: # NU
 def usb_poke(h:UOp, addr:UOp, val:UOp) -> UOp: # 0xF0 mode 0: write a dword
   return usb_ctrl(h, 0x40, 0xF0, 0x60 | 0x0F00, 0, usb_stack(dtypes.uint64, addr, val.bitcast(dtypes.uint32).cast(dtypes.uint64)).index(0), 12, 5000)
 
-def usb_stream(h:UOp, addr:UOp, data:UOp, n:UOp|int, write:bool) -> UOp: # 0xF0 mode 1/2: header, then bulk data
+def usb_stream(h:UOp, addr:UOp, data:UOp, n:UOp|int, write:bool, src_stride:bool=True) -> UOp: # 0xF0 mode 1/2: header, then bulk data
+  n = usb_word(n, dtypes.int)
+  if n.vmax > USB_MAX_STREAM: # byte addresses; fills reuse the same zero slab
+    r = UOp.range((n + USB_MAX_STREAM - 1) // USB_MAX_STREAM, next(UOp.unique_num), dtype=dtypes.int, src=(h,))
+    off = r * USB_MAX_STREAM
+    size = UOp.const(USB_MAX_STREAM, dtypes.int).minimum(n - off)
+    return usb_stream(h.after(r), addr + off.cast(dtypes.uint64), data + off.cast(dtypes.uint64) if src_stride else data, size, write).end(r)
   hdr = usb_ctrl(h, 0x40, 0xF0, (0x60 if write else 0x20) | 0x0F00, 1 if write else 2, usb_stack(dtypes.uint64, addr, n // 4).index(0), 12, 5000)
   return usb_bulk(h.after(hdr), 0x02 if write else 0x81, data, n)
 
@@ -462,7 +472,7 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp:
     usb_poke(h.after(usb_poke(h, addr, v.cast(dtypes.uint32))), addr + 4, (v >> 32).cast(dtypes.uint32))
   return cache.after(ret.end(loop)).index(0).store(value) if loop is not None else ret
 
-def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill loop to one stream
+def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill
   if not is_remote(dst): return None
 
   # source buffer or zeros
@@ -474,7 +484,8 @@ def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill 
   # empty loops write to scratch: zero-byte streams hang
   h, cnt = usb_link(dst.device).after(*usb_deps(dst), *deps, *r.src[1:]), r.src[0]
   addr = (cnt > 0).where(usb_addr(dst, d0, v.dtype), usb_scratch(dst.device).getaddr("CPU"))
-  return usb_stream(h, addr, sb.index(s0.minimum(sb.max_numel() - 1)), (cnt * v.dtype.itemsize).maximum(v.dtype.itemsize), True)
+  return usb_stream(h, addr, usb_addr(sb, s0.minimum(sb.max_numel() - 1), v.dtype),
+                    (cnt * v.dtype.itemsize).maximum(v.dtype.itemsize), True, src_stride=v.op is Ops.LOAD)
 
 pm_usb_lower = PatternMatcher([
   (UPat.var("dst").index(UPat.var("di")).store(UPat.var("v")).end(UPat(Ops.RANGE, name="r")), usb_copy),
@@ -487,7 +498,7 @@ pm_usb_lower = PatternMatcher([
 
 @functools.cache
 def _host_block(dev) -> Buffer: # link, staging, zeros
-  b = Buffer("CPU", 0x180020, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
+  b = Buffer("CPU", USB_HOST_SIZE, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
   b.host.view(fmt='B')[:16] = struct.pack('QQ', *[ctypes.addressof(x.contents) for x in (dev.iface.pci_dev.usb.usb.handle, USB3.ctx())])
   return b
 @functools.cache
