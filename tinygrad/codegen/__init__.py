@@ -39,12 +39,11 @@ pm_number_params = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), do_number_param),
 ])
 
-def build_range_map(sink:UOp) -> dict[int, int]:
-  ctx: dict[int, int] = {}
+def build_range_map(sink:UOp) -> dict[tuple[int, ...], int]:
+  ctx: dict[tuple[int, ...], int] = {}
   for x in sink.toposort():
-    # TODO: the AxisType is arg[-1]
-    if x.op is Ops.RANGE and x.arg[1] in {AxisType.UNROLL, AxisType.UPCAST}:
-      ctx[x.arg[0]] = len(ctx)
+    if x.op is Ops.RANGE and x.axis_type in {AxisType.UNROLL, AxisType.UPCAST}:
+      ctx[x.axis_id] = len(ctx)
   return ctx
 
 def expand_reduce(r:UOp):
@@ -70,7 +69,7 @@ def unroll_axis(u:UOp, dims:list[int], sizes:list[int]) -> UOp:
   out = u.unflatten(-1, tuple(sizes))
   return out.permute(argsort([i for i in range(out.ndim) if i not in dims]+dims))
 
-def expand_wmma(ctx:dict[int, int], u:UOp):
+def expand_wmma(ctx:dict[tuple[int, ...], int], u:UOp):
   if u.arg[3] is None: return None
   in0, in1, out0 = [[ctx[rn] for rn,_ in upcast_axes] for upcast_axes in u.arg[3]]
   wmma = u.replace(src=(contract_axis(u.src[0], in0), contract_axis(u.src[1], in1), u.src[2]), arg=(*u.arg[:3], None))
@@ -80,7 +79,7 @@ expander = PatternMatcher([
   (UPat(Ops.REDUCE, name="r"), expand_reduce),
   (UPat(Ops.RANGE, name="r"),
    lambda ctx, r: UOp.const(tuple(range(r.vmax+1)), r.dtype) \
-    .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
+    .reshape(tuple([r.vmax+1 if i == ctx[r.axis_id] else 1 for i in range(len(ctx))])) if r.axis_id in ctx else None),
   (UPat(Ops.WMMA, name="u"), expand_wmma),
 ])+pm_flatten_range+mop_cleanup
 
