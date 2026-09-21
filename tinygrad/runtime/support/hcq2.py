@@ -9,6 +9,7 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.schedule.prepare import pm_mops
+from tinygrad.uop.movement import mop_cleanup
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, get_call_written_bufs
 from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_compile, _resolve
 
@@ -449,18 +450,6 @@ def encode_submit(hq:HWQueue) -> UOp:
 # *****************
 # 4. lower call
 
-def bitcast_view(x:UOp, v:UOp, b:UOp) -> UOp|None:
-  (o, n), k, m = v.marg[0], x.dtype.itemsize, b.dtype.itemsize
-  return x.bitcast(b.dtype)[o*k//m:(o+n)*k//m] if len(v.shape) == 1 and not ((o*k) % m or (n*k) % m or (x.max_numel()*k) % m) else None
-
-pm_views = PatternMatcher([
-  # a shrink of a shrink is one shrink
-  (UPat(Ops.SHRINK, name="x").f(Ops.SHRINK, allow_any_len=True, name="s"),
-   lambda s,x: x.src[0].shrink(tuple((o+p, o+p+n) for (o,_),(p,n) in zip(x.marg, s.marg)))),
-  # a bitcast of a 1-d view of storage is a view of the bitcast, so pm_mops folds the view into the index
-  (UPat((Ops.PARAM, Ops.BUFFER)).or_after("x").f(Ops.SHRINK, allow_any_len=True, name="v").bitcast().named("b"), bitcast_view),
-])
-
 pm_renumber = PatternMatcher([
   (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(next(ctx),)+u.arg[1:])),
   (UPat(Ops.BUFFER, name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
@@ -496,7 +485,7 @@ def lower_call(call:UOp) -> UOp|None:
   offs = {g[0]: list(itertools.accumulate([round_up(u.nbytes(), 128) // u.dtype.itemsize for u in g], initial=0)) for g in groups}
   merged = {g[0]: g[0].replace(arg=replace(g[0].arg, size=offs[g[0]][-1])) for g in groups if len(g) > 1}
   views = {u: merged[g[0]][o:o + u.max_numel()] for g in groups if len(g) > 1 for u, o in zip(g, offs[g[0]])}
-  body = body.substitute(views, extra_pm=pm_mops+pm_views, enter_calls=True)
+  body = body.substitute(views, extra_pm=pm_mops+mop_cleanup, enter_calls=True)
   patches = UOp.sink(*dedup(ctx.lt_patches)).substitute(views).src
 
   # the placeholders become the body's params in visit order, variables bind by name after them, the ranges renumber

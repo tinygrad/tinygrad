@@ -112,11 +112,11 @@ spec_shared = PatternMatcher([
   (UPat(Ops.INS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and isinstance(x.arg[1], DType)),
 
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
-  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), validate_index),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().or_bitcasted().load(), validate_index),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().or_bitcasted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
    lambda uidx,gate,alt,load: validate_index(uidx, gate) if matches_dtype(alt, load.dtype) else False),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
-  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().or_bitcasted().store(UPat()), validate_index),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().or_bitcasted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
   # STORE: the target must be storage or a STAGE realization point (or an AFTER/BITCAST/view of one);
   # STAGE targets are written into the buffer the STAGE creates. INDEX stores are checked above
@@ -196,11 +196,7 @@ spec_program = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CONST}, dtypes.weaks), lambda: False),
 
   # allow special SHRINK of a buffer or its bitcast
-  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER, Ops.RESHAPE)).or_bitcasted(), UPat(), UPat.cvar().or_casted())), lambda: True),
-
-  # buffer bitcasts may reshape the storage to group elements before consuming the last dimension
-  (UPat(Ops.RESHAPE, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.SHRINK, Ops.AFTER)), UPat()), name="x"),
-   lambda x: x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)),
+  (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)).or_bitcasted(), UPat(), UPat.cvar().or_casted())), lambda: True),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),
