@@ -86,7 +86,7 @@ class QCOMComputeQueue(HWQueue):
              value.cast(dtypes.uint32), qreg.cp_wait_reg_mem_4(mask=0xFFFFFFFF), qreg.cp_wait_reg_mem_5(delay_loop_cycles=32))
 
   def kernargs(self, call:UOp, prg:UOp, data:QCOMProgramData) -> UOp:
-    bufs, vals = get_call_arg_uops(call), get_call_var_uops(call, prg)
+    bufs, vals = [get_call_arg_uops(call)[g] for g in prg.arg.globals], get_call_var_uops(call, prg)
     ubos = [bufs[slot] for _,slot,_,shape in data.signature if slot < len(bufs) and not is_image_shape(shape)]
     uavs = [(dt,shape,bufs[slot]) for _,slot,dt,shape in data.signature if slot < len(bufs) and is_image_shape(shape)]
     # NIR can reorder images to different texture slots
