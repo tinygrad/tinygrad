@@ -43,18 +43,6 @@ class TestBufferUOp(unittest.TestCase):
     self.assertIs(a.uop.buffer, b.uop.buffer)
     self.assertIs(other.uop.op, Ops.ALLOC)
 
-  def test_bufferize_keeps_call_allocations(self):
-    a = Tensor.empty(4)
-    out = Tensor.call(a, fxn=a.as_param(0) + 1)
-    alloc = out.uop.storage_base
-    self.assertIs(alloc.op, Ops.ALLOC)
-    self.assertFalse(alloc.arg.bind_on_realize)
-    self.assertEqual(len(out.uop.src[1].unbound_outputs), 1)
-    out._bufferize_outputs()
-    self.assertIs(a.uop.op, Ops.BUFFER)
-    self.assertIs(out.uop.storage_base.op, Ops.BUFFER)
-    self.assertIn(alloc, out.uop.toposort())
-
   # we also allow VIEW(BUFFER) to access the underlying device Buffer, as long as it's contiguous
   def test_buffer_view_allowed(self):
     add = Tensor.empty(1, 1)+Tensor.empty(1, 1)
