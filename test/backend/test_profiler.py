@@ -16,7 +16,9 @@ def _dev_base(d):
 @contextlib.contextmanager
 def helper_collect_profile(*devs):
   for dev in devs: dev.synchronize()
+  saved = [x for x in Compiled.profile_events if isinstance(x, ProfileDeviceEvent) and x.device.startswith("METAL")]
   Compiled.profile_events.clear()
+  for x in saved: Compiled.profile_events.append(x)
 
   cpu_events.clear()
 
@@ -39,7 +41,7 @@ def helper_profile_filter_device(profile, device:str):
   assert len(dev_events) == 1, "only one device registration event is expected"
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT], HCQCompiled) or Device.DEFAULT in HCQ_DEVS | {"CPU"}, "Dev not supported")
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT], HCQCompiled) or Device.DEFAULT in HCQ_DEVS | {"CPU", "METAL"}, "Dev not supported")
 class TestSimpleProfiler(unittest.TestCase):
   def test_profiler(self):
     with helper_collect_profile(Device[Device.DEFAULT]) as profile:
@@ -50,7 +52,7 @@ class TestSimpleProfiler(unittest.TestCase):
 # TODO: support in HCQCompiled
 is_cpu_hcq = Device.DEFAULT in {"CPU"}
 
-@unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in HCQ_DEVS,
+@unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in HCQ_DEVS | {"METAL"},
                      "Dev not supported")
 class TestProfiler(unittest.TestCase):
   @classmethod
