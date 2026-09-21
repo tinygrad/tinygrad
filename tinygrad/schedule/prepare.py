@@ -1,3 +1,4 @@
+from dataclasses import replace
 from tinygrad.dtype import dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, ParamArg
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
@@ -8,24 +9,32 @@ from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
 def forward_call_outputs(sink:UOp) -> UOp:
-  if not sink.src or not all(st.op is Ops.STORE for st in sink.src): return sink
   placed:dict[UOp, UOp] = {}
   items:list[UOp] = []
-  for st in sink.src:
+  for item in sink.src:
+    st = item.src[1] if item.op is Ops.AFTER and len(item.src) == 2 and item.src[1].op is Ops.STORE else item
+    if st.op is not Ops.STORE or (item is not st and item.src[0] is not st.src[0]):
+      items.append(item)
+      continue
     target, src = st.src
-    deps:list[UOp] = []
-    while src.op is Ops.AFTER:
-      deps.extend(src.src[1:])
-      src = src.src[0]
-    # Forward a producer into the existing output PARAM once; shared outputs copy from that first placement.
-    if src not in placed:
-      if src.op is Ops.STAGE: placed[src] = target.after(target.store(src.src[0]))
-      elif src.op in {Ops.BUFFER, Ops.ALLOC, Ops.UNSHARD} and src.has_buffer_identity(): placed[src] = target
-      if src in placed:
-        items.append(src.after(*deps))
+    while src.op is Ops.AFTER: src = src.src[0]
+    base = src.storage_base
+    if item is not st and base.op is not Ops.ALLOC:
+      items.append(item)
+      continue
+    # Forward the allocation, not just one view of it, so saved values and other aliases follow the same placement.
+    key = base if base.op is Ops.ALLOC else src
+    if key not in placed and target.has_buffer_identity() and target.storage_base not in st.src[1].toposort(enter_calls=False):
+      if base.op is Ops.ALLOC and src.has_buffer_identity() and base.max_numel() == target.storage_base.max_numel():
+        placed[key] = target.storage_base
+      elif src.op is Ops.STAGE: placed[key] = target.after(target.store(src.src[0]))
+      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[key] = target
+      if key in placed:
+        if item is not st: placed[item] = st.src[1]
+        items.append(st.src[1])
         continue
     items.append(target.after(st))
-  return UOp.sink(*items).substitute(placed)
+  return UOp.sink(*items).substitute(placed, walk=True)
 
 def walk_mop(u:UOp):
   if u.op in GroupOp.Movement or u.op in {Ops.INDEX, Ops.UNSHARD, Ops.BITCAST}: return walk_mop(u.src[0])
@@ -143,6 +152,9 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
     elif a.shape != ():
       raise TypeError(f"arg {i} shape mismatch: expected scalar, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
+  # Inlining removes the call scope, so its local allocations need fresh identities.
+  dict_map.update({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num)))
+                   for b in c.body.toposort(enter_calls=False) if b.op is Ops.ALLOC})
   return c.body.substitute(dict_map, walk=True)
 
 # shape-changing bitcast

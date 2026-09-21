@@ -15,6 +15,10 @@ class TestBufferUOp(unittest.TestCase):
   # BUFFER has a ShapeTracker of shape=(n,) and stride=(1,)
   def test_buffer_has_buffer(self):
     buf = Tensor.empty(10)
+    self.assertIs(buf.uop.op, Ops.ALLOC)
+    self.assertTrue(buf.uop.arg.bind_on_realize)
+    self.assertIsNone(buf.uop.arg.buffer)
+    buf.realize()
     self.assertIsNotNone(buf.uop.buffer)
     self.assertEqual(buf.uop.shape, (10,))
     # the device Buffer remains unallocated until it's we run the schedule
@@ -26,10 +30,30 @@ class TestBufferUOp(unittest.TestCase):
     self.assertTrue(buf.uop.buffer.is_allocated())
 
   def test_buffer_has_unique_buffer(self):
-    buf = Tensor.empty(10)
+    buf = Tensor.empty(10).realize()
     buf1 = buf.uop.buffer
     buf2 = buf.uop.buffer
     self.assertIs(buf1, buf2)
+
+  def test_empty_aliases_bind_together(self):
+    a, other = Tensor.empty(6), Tensor.empty(6)
+    b = a.reshape(2, 3)
+    self.assertIsNot(a.uop, other.uop)
+    b.realize()
+    self.assertIs(a.uop.buffer, b.uop.buffer)
+    self.assertIs(other.uop.op, Ops.ALLOC)
+
+  def test_bufferize_keeps_call_allocations(self):
+    a = Tensor.empty(4)
+    out = Tensor.call(a, fxn=a.as_param(0) + 1)
+    alloc = out.uop.storage_base
+    self.assertIs(alloc.op, Ops.ALLOC)
+    self.assertFalse(alloc.arg.bind_on_realize)
+    self.assertEqual(len(out.uop.src[1].unbound_outputs), 1)
+    out._bufferize_outputs()
+    self.assertIs(a.uop.op, Ops.BUFFER)
+    self.assertIs(out.uop.storage_base.op, Ops.BUFFER)
+    self.assertIn(alloc, out.uop.toposort())
 
   # we also allow VIEW(BUFFER) to access the underlying device Buffer, as long as it's contiguous
   def test_buffer_view_allowed(self):

@@ -196,6 +196,15 @@ class TestCallSchedule(unittest.TestCase):
     def s(x): return x*2
     s(s(a).contiguous()).realize()
 
+  def test_assign_call_output_to_input(self):
+    for precompile in (False, True):
+      with self.subTest(precompile=precompile):
+        @function(precompile=precompile)
+        def f(x:Tensor): return x.flip(0).contiguous()
+        a = Tensor.arange(1024).clone().realize()
+        a.assign(f(a)).realize()
+        self.assertEqual(a.tolist(), list(reversed(range(1024))))
+
   def test_call_double_gemm(self):
     a = Tensor.randn(4, 8)
     b = Tensor.randn(8, 12)
