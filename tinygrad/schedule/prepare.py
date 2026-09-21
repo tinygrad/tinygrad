@@ -20,7 +20,7 @@ def forward_call_outputs(sink:UOp) -> UOp:
     # Forward a producer into the existing output PARAM once; shared outputs copy from that first placement.
     if src not in placed:
       if src.op is Ops.STAGE: placed[src] = target.after(target.store(src.src[0]))
-      elif src.op in {Ops.BUFFER, Ops.UNSHARD} and src.has_buffer_identity(): placed[src] = target
+      elif src.op in {Ops.BUFFER, Ops.ALLOC, Ops.UNSHARD} and src.has_buffer_identity(): placed[src] = target
       if src in placed:
         items.append(src.after(*deps))
         continue
@@ -160,12 +160,12 @@ def expand_bitcast(bc:UOp) -> UOp|None:
 def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
   x = x.pad_to(x.max_shape)
-  buf = UOp.new_buffer(copy.device, prod(x.max_shape), copy.dtype).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), copy.dtype, prod(x.max_shape), device=copy.device)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(copy.shape)
 
 def stage_to_anon_store(x:UOp, stg:UOp):
   # the buffer created here is inside the call and is not persisted, like the buffers created for copies
-  buf = UOp(Ops.BUFFER, arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
+  buf = UOp(Ops.ALLOC, arg=ParamArg(next(UOp.unique_num), stg.dtype, prod(x.max_shape), device=x.device)).reshape(x.max_shape)
   return buf.after(buf.store(x)).shrink_to(stg.shape)
 
 def materialize_cross_device_src(dest:UOp, src:UOp):

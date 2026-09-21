@@ -72,7 +72,7 @@ pm_lower_weak = PatternMatcher([
   # two stacked weak casts are two kind conversions: each resolves at its own kind's default
   (UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat(Ops.CAST, dtype=dtypes.weaks, src=(UPat.var("x"),)),), name="u"),
    lambda u,x: x.cast(u.src[0].commit_dtype(dtypes.int)).cast(u.commit_dtype(dtypes.int)).cast(u.dtype) if x.dtype not in dtypes.weaks else None),
-  (UPat((Ops.PARAM, Ops.BUFFER), dtype=dtypes.weakint, name="u"),
+  (UPat((Ops.PARAM, Ops.BUFFER, Ops.ALLOC), dtype=dtypes.weakint, name="u"),
     lambda u: u.replace(arg=replace(u.arg, dtype=u.commit_dtype(dtypes.int))).cast(dtypes.weakint) if u.addrspace == AddrSpace.ALU else None),
   (UPat(GroupOp.All, name="u"), lower_weak_node),
 ])

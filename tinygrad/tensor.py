@@ -21,7 +21,7 @@ from tinygrad.engine.realize import run_linear
 @dataclass
 class CallifyCtx:
   replacements: list[UOp] = field(default_factory=list)
-  unbound: dict[UOp, UOp] = field(default_factory=dict)
+  allocs: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
   stores: list[UOp] = field(default_factory=list)
   buffer_map: dict[UOp, UOp] = field(default_factory=dict)
@@ -50,7 +50,7 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
 def collect_stores(ctx:CallifyCtx, u:UOp):
-  if not u.is_bound_var and (not u.src[0].unsharded_base.is_unbound or u.src[1].op is Ops.STORE):
+  if not u.is_bound_var and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE):
     ctx.stores.append(u)
     if u.tag:
       storage = graph_rewrite(u.src[0], pm_drop_after, bottom_up=True)
@@ -80,25 +80,24 @@ def replace_input_buffer(ctx:CallifyCtx, b:UOp):
   ctx.replacements.append(b)
   return b.param_like(len(ctx.replacements)-1)
 
-# unbound BUFFERs get canonical scope-local id slots here so structurally identical calls hash identically for the
+# ALLOCs get canonical scope-local id slots here so structurally identical calls hash identically for the
 # schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
-def canonicalize_unbound_buffer(ctx:CallifyCtx, b:UOp):
-  if b.arg.slot >= 0 and b not in ctx.unbound: ctx.unbound[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.unbound)))
-  return ctx.unbound.get(b)
+def canonicalize_alloc(ctx:CallifyCtx, b:UOp):
+  if b.arg.slot >= 0 and b not in ctx.allocs: ctx.allocs[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.allocs)))
+  return ctx.allocs.get(b)
 
 def canonicalize_call_body(ctx:CallifyCtx, c:UOp):
-  body = graph_rewrite(c.body, pm_canonicalize_unbound, ctx=ctx, bottom_up=True)
+  body = graph_rewrite(c.body, pm_canonicalize_alloc, ctx=ctx, bottom_up=True)
   return c.replace(src=(body,)+c.src[1:]) if body is not c.body else None
 
-pm_canonicalize_unbound = PatternMatcher([
+pm_canonicalize_alloc = PatternMatcher([
   (UPat(Ops.CALL, name="c"), canonicalize_call_body),
-  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: canonicalize_unbound_buffer(ctx, b) if b.is_unbound else None),
+  (UPat(Ops.ALLOC, src=(), name="b"), canonicalize_alloc),
 ])
 
-pm_replace_buf = pm_canonicalize_unbound+PatternMatcher([
-  # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay, and unbound BUFFERs too)
-  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b:
-   replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL and not b.is_unbound else None),
+pm_replace_buf = pm_canonicalize_alloc+PatternMatcher([
+  # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay)
+  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
   # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
   (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
   # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
@@ -282,12 +281,12 @@ class Tensor(RandMixin):
     bases = {u.base for u in sink.src}
     for u in sink.src:
       while u.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}: u = u.src[0]
-      if (b:=u.storage_base).is_unbound: bases.add(b)
+      if (b:=u.storage_base).op is Ops.ALLOC: bases.add(b)
     tensor_map:dict[UOp, UOp] = {}
     # Rebuild in dependency order: replacement values already reference the other outputs' storage.
     for x in sink.toposort(enter_calls=False):
       u = x.replace(src=tuple(tensor_map.get(s, s) for s in x.src))
-      if x in bases and x.is_unbound: u = x.empty_like()
+      if x in bases and x.op is Ops.ALLOC: u = x.empty_like()
       if x in bases and u.needs_storage():
         src, contiguous = u, False
         while src.op in {Ops.STAGE, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD}:
