@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, function, Device
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.tensor import transform_to_call
 
 def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop))[0].src[0].key
@@ -195,6 +195,29 @@ class TestCallSchedule(unittest.TestCase):
     @function(precompile=True)
     def s(x): return x*2
     s(s(a).contiguous()).realize()
+
+  def test_contiguous_call_output_realizes_aliases(self):
+    def increment(x:UOp):
+      i = UOp.range(x.shape[0], 0)
+      return x[i].store(x[i].load() + 1).end(i).sink(arg=KernelInfo(name="increment"))
+
+    for precompile in (False, True):
+      for reshape in (False, True):
+        with self.subTest(precompile=precompile, reshape=reshape):
+          @function(precompile=precompile)
+          def f(x:Tensor): return x.custom_kernel(fxn=increment)[0]
+          state = Tensor([1., 2.]).realize()
+          a = f(state)
+          alias = a.reshape(1, 2)
+          b = (alias if reshape else a).contiguous().realize()
+          self.assertEqual(b.flatten().tolist(), [2., 3.])
+          a.realize(alias)
+          self.assertEqual(state.tolist(), [2., 3.])
+          self.assertIs(a.uop.buffer, b.uop.buffer)
+          self.assertIs(alias.uop.buffer, b.uop.buffer)
+          b.assign([9., 10.]).realize()
+          self.assertEqual(a.tolist(), [9., 10.])
+          self.assertEqual(alias.tolist(), [[9., 10.]])
 
   def test_assign_call_output_to_input(self):
     for precompile in (False, True):
