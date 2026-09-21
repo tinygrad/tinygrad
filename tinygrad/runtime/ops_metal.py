@@ -1,6 +1,6 @@
 from __future__ import annotations
 import subprocess, pathlib, struct, ctypes, tempfile, functools, platform, weakref, threading, array, sys
-from tinygrad.helpers import to_mv, round_up, cache_dir, unwrap, prod
+from tinygrad.helpers import to_mv, round_up, cache_dir, unwrap, prod, dedup
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Buffer, BufferStorage, BufferSpec, Allocator, Compiled, Compiler, CompileError, MMIOInterface
 from tinygrad.dtype import dtypes
@@ -125,8 +125,9 @@ class MetalQueue(HWQueue):
   def signal(self, dst:UOp, val:UOp): self.value = val
 
   def submit(self, cmdbuf:UOp) -> UOp:
-    n, zero = len(self.cmds), round_up(self.nbytes, 8)
-    buf = UOp.placeholder((zero + 24 + 8 * (1 + 2 * n),), dtypes.uint8, device=self.devs, volatile=True, tag=("mtl_icb", tuple(self.cmds), zero + 24))
+    n, zero, pipes = len(self.cmds), round_up(self.nbytes, 8), dedup(c[:2] for c in self.cmds)
+    buf = UOp.placeholder((zero + 24 + 8 * (1 + n + len(pipes)),), dtypes.uint8, device=self.devs, volatile=True,
+                          tag=("mtl_icb", tuple(self.cmds), zero + 24))
     args = patch(buf, self.rows + [(zero + 8 * i, UOp.const(0, dtypes.uint64)) for i in range(3)])
     header, cb, enc, h = args.bitcast(dtypes.uint64)[zero // 8 + 3:], mtl_cb(self.devs), mtl_enc(self.devs), args
 
@@ -143,9 +144,9 @@ class MetalQueue(HWQueue):
 
       # before apple9 the encoder must use the pipelines
       if not self.dev.arch.startswith("Apple") or int(self.dev.arch[5:]) < 9:
-        for ci in [first] if count == 1 else {c[:2]: i for i, c in enumerate(self.cmds)}.values():
-          h = mtl_msg(h, enc, "setComputePipelineState:", header.index(1 + n + ci).load())
-          h = mtl_msg(h, enc, "dispatchThreadgroups:threadsPerThreadgroup:", args.index(zero), args.index(zero))
+        r = UOp.range(len(pipes), next(UOp.unique_num), dtype=dtypes.uint64)
+        h = mtl_msg(h, enc, "setComputePipelineState:", header.index(1 + n + r).load())
+        h = mtl_msg(h, enc, "dispatchThreadgroups:threadsPerThreadgroup:", args.index(zero), args.index(zero)).end(r)
 
       h = mtl_msg(h, enc, "executeCommandsInBuffer:withRange:", header.after(h).index(0).load(), first, count)
       h = mtl_msg(h, enc, "updateFence:", mtl_sel(self.devs, "fence").load())
@@ -163,7 +164,7 @@ class MetalQueue(HWQueue):
 
     # collect timestamps using cmdbuf metrics, so sep cmdbufs
     if not self.stamps: return run(h, 0, n, True)
-    if n > 1: h = run(h.after(r:=UOp.range(n - 1, 0, dtype=dtypes.uint64)), r, 1, False).end(r)
+    if n > 1: h = run(h.after(r:=UOp.range(n - 1, next(UOp.unique_num), dtype=dtypes.uint64)), r, 1, False).end(r)
     return run(h, n - 1, 1, True)
 
 # *****************
@@ -248,7 +249,8 @@ class MetalDevice(Compiled):
     return checked(self.sysdevice.newComputePipelineStateWithDescriptor_options_reflection_error, descriptor, metal.MTLPipelineOptionNone, None)
 
   def new_icb(self, cmds:tuple[tuple[bytes, str, tuple[int, ...], int], ...], header:int) -> Buffer:
-    buf = Buffer(self.device, header + 8 * (1 + 2 * len(cmds)), dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
+    pipes = dedup(c[:2] for c in cmds)
+    buf = Buffer(self.device, header + 8 * (1 + len(cmds) + len(pipes)), dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
     desc = metal.MTLIndirectCommandBufferDescriptor.new()
     desc.setCommandTypes(metal.MTLIndirectCommandTypeConcurrentDispatch)
     desc.setMaxKernelBufferBindCount(1)
@@ -261,7 +263,7 @@ class MetalDevice(Compiled):
       cmd.setKernelBuffer_offset_atIndex(buf.get_storage().meta, off, 0)
       cmd.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*dims[:3]), metal.MTLSize(*dims[3:]))
       cmd.setBarrier()
-    buf.host.view(fmt='Q')[header // 8:] = array.array('Q', [icb.value, *[c.value for c in commands], *[self.pipeline(*c[:2]).value for c in cmds]])
+    buf.host.view(fmt='Q')[header // 8:] = array.array('Q', [icb.value, *[c.value for c in commands], *[self.pipeline(*p).value for p in pipes]])
     self.icbs[buf] = (icb, commands)
     return buf
 
