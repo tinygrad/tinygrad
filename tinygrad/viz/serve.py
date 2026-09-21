@@ -8,8 +8,9 @@ from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip
-from tinygrad.renderer.amd.dsl import Inst
+from tinygrad.renderer.amd.dsl import Inst, Reg
 from tinygrad.renderer.amd import detect_format
+from tinygrad.runtime.autogen.amd.common import OpType
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer):
@@ -566,6 +567,15 @@ def parse_branch(inst) -> int|None:
     return (x - 0x10000 if x & 0x8000 else x)*4
   return None
 
+def is_acc_operand(inst, name:str) -> bool:
+  if not isinstance(val:=getattr(inst, name), Reg) or not 256 <= val.offset < 512: return False
+  if (opr:=inst.operands.get(name)) and opr[2] in {OpType.OPR_ACCVGPR, OpType.OPR_SRC_ACCVGPR}: return True
+  if not hasattr(inst, 'acc'): return False
+  if hasattr(inst, 'acc_cd'):
+    if name in ('src0', 'src1'): return bool(inst.acc & (1 << int(name[-1])))
+    return bool(inst.acc_cd) and (name == 'vdst' or (name == 'src2' and 'SMFMAC' not in inst.op_name))
+  return bool(inst.acc) and name in ('vdst', 'vdata', 'data')
+
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
 def amdgpu_cfg(lib:bytes, target:str) -> dict:
   # decode
@@ -591,11 +601,12 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders: paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}
-  from tinygrad.renderer.amd.dsl import Reg
   for pc, inst in pc_table.items():
     pc_tokens[pc] = tokens = []
     for name, f in inst._fields:
-      if isinstance(val:=getattr(inst, name), Reg): tokens.append({"st":val.fmt(), "keys":[f"r{val.offset+i}" for i in range(val.sz)], "kind":1})
+      if isinstance(val:=getattr(inst, name), Reg):
+        reg_str = val.fmt().replace("v", "a", 1) if (is_acc:=is_acc_operand(inst, name)) else val.fmt()
+        tokens.append({"st":reg_str, "keys":[f"{'a' if is_acc else 'r'}{val.offset+i}" for i in range(val.sz)], "kind":1})
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != f.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
   # show a smaller view for repeated instructions in the graph
