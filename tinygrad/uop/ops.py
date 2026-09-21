@@ -95,7 +95,7 @@ def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_inf
 
 def range_str(u:UOp, color=False) -> str:
   ret = '_'.join([str(x) if x >= 0 else "m"+str(-x) for x in u.arg[0:-1]])
-  return colored(ret, axis_colors[u.arg[-1]]) if color else ret
+  return colored(ret, axis_colors[u.axis_type]) if color else ret
 
 def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
   ret = ','.join([range_str(x, color=color) for x in sorted(rngs, key=lambda x: x.arg)])
@@ -489,6 +489,11 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.RANGE: return {self:None} | self._ranges
     return self._ranges
 
+  @property
+  def axis_type(self) -> AxisType:
+    assert self.op is Ops.RANGE, f"axis_type is only for RANGE, not {self.op}"
+    return self.arg[-1]
+
   # *** uop evaluation ***
 
   def simplify(self, tracked=False):
@@ -604,7 +609,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("src", self.src), (arg, kwargs.pop("dtype", self.dtype)), kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
-    assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
+    assert all(x.axis_type == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp.stack(*[self.substitute(dict(zip(rngs, [r.const_like(i) for r,i in zip(rngs, idx)])))
                            for idx in itertools.product(*[range(int(r.vmax)+1) for r in rngs])])
   def alu(self, op, *src:UOp, **kwargs): return UOp(op, src=(self, *src), **kwargs)
@@ -1023,7 +1028,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return graph_rewrite(self, pm_unbind, ctx=ret), ret
   def variables(self) -> list[Variable]:
     return sorted({x if x.op in {Ops.PARAM, Ops.BUFFER} else UOp.variable("_device_num", 0, x.vmax, dtype=x.dtype, param=True)
-                   for x in self.backward_slice_with_self if (x.op is Ops.RANGE and x.arg[-1] is AxisType.DEVICE) or
+                   for x in self.backward_slice_with_self if (x.op is Ops.RANGE and x.axis_type is AxisType.DEVICE) or
                    (x.op is Ops.PARAM and x.arg.addrspace is AddrSpace.ALU) or x.is_variable}, key=lambda v: v.expr)
 
   # *** uop symbolic stuff ***
@@ -1222,7 +1227,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     creates ALLOCs: use call_with_outputs for calls that produce values"""
     assert self.op in OPAQUE_CALL_BODIES, f"cannot call a {self.op} body, use call_with_outputs for value-producing bodies"
     # calls are launched per device, so an open DEVICE range is allowed to cross the call boundary
-    assert all(r.arg[-1] is AxisType.DEVICE for r in self.ranges), \
+    assert all(r.axis_type is AxisType.DEVICE for r in self.ranges), \
       f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     # the (possibly void) return dtype lives in the CallInfo; an external C call is a CALL on a CUSTOM_FUNCTION
     # body holding the callee (a function pointer), rendered as an indirect call

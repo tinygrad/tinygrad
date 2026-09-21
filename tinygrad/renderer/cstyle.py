@@ -231,7 +231,7 @@ class CStyleLanguage(Renderer):
       # naming
       prefix = None
       if u.op is Ops.SPECIAL: r[u] = u.arg
-      elif u.op is Ops.RANGE: r[u] = f"{axis_letters[u.arg[-1]]}idx"+range_str(u)
+      elif u.op is Ops.RANGE: r[u] = f"{axis_letters[u.axis_type]}idx"+range_str(u)
       else:
         prefix = {Ops.WMMA: "wmma", Ops.BUFFER: "buf", Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.STACK: "cast",
                   Ops.INDEX: "bidx", Ops.LOAD: "val"}.get(u.op, "alu")

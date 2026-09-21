@@ -190,7 +190,7 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
       if s.op in GroupOp.Elementwise and s.device is not None:
         # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.WEAK, the DEVICE range stays a launched axis
         orig_ranges = s.ranges
-        end_ranges = [x.replace(arg=(next(ctx.range_idx), AxisType.WEAK)) if x.op is Ops.RANGE and x.arg[-1] is not AxisType.DEVICE else x
+        end_ranges = [x.replace(arg=(next(ctx.range_idx), AxisType.WEAK)) if x.op is Ops.RANGE and x.axis_type is not AxisType.DEVICE else x
                       for x in s.ranges]
         s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*orig_ranges)
       srcs.append(s)
@@ -347,7 +347,7 @@ pm_add_param_range_tags = PatternMatcher([
 
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split. open DEVICE ranges are fine, they are bound per device at launch
-  if any(r.arg[-1] is not AxisType.DEVICE for r in x.ranges): return None
+  if any(r.axis_type is not AxisType.DEVICE for r in x.ranges): return None
   # the store of a bound Variable is an input value, not a kernel
   st = x.src[0] if x.op is Ops.END else x
   if st.op is Ops.STORE and st.src[0].is_variable: return None
