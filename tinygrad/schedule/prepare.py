@@ -193,7 +193,7 @@ pm_inline_calls = PatternMatcher([
 
 pm_disk_copy = PatternMatcher([
   # remove contiguous on movement ops before a copy on disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
+  (UPat(GroupOp.Movement, name="x").f(Ops.STAGE).f(Ops.COPY, name="copy"), lambda x,copy:
    copy.replace(src=(x,)) if x.on_disk() else None),
   # push all movement ops to the destination: views exposed here are no longer normalized into input PARAMs,
   # so leaving SHRINK/RESHAPE behind can cause materialize_cross_device_src to allocate a temporary on disk

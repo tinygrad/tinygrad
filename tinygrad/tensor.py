@@ -26,11 +26,6 @@ class CallifyCtx:
   stores: list[UOp] = field(default_factory=list)
   buffer_map: dict[UOp, UOp] = field(default_factory=dict)
 
-# a tag is the tuple of original pre-rewrite UOps a node provides storage for
-add_tags = PatternMatcher([
-  (UPat(Ops.AFTER, name="x"), lambda x: None if x.tag is not None else x.replace(tag=(x,))),
-])
-
 def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
   if not all_int(c.shape): return None
@@ -49,6 +44,9 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   view = view.reshape(c.shape)
   return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
 
+# a store's storage keeps the views and drops AFTERs (they only sequence stores)
+pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
+
 def collect_stores(ctx:CallifyCtx, u:UOp):
   if not u.is_bound_var and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE):
     ctx.stores.append(u)
@@ -66,13 +64,6 @@ pm_callify_ctx_collect = PatternMatcher([
   (UPat(Ops.AFTER, name="u"), collect_stores),
 ])
 
-# a store's storage keeps the views and drops AFTERs (they only sequence stores)
-pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
-
-def replace_input_buffer(ctx:CallifyCtx, b:UOp):
-  ctx.replacements.append(b)
-  return b.param_like(len(ctx.replacements)-1)
-
 # ALLOCs get canonical scope-local id slots here so structurally identical calls hash identically for the
 # schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
 def canonicalize_alloc(ctx:CallifyCtx, b:UOp):
@@ -80,15 +71,18 @@ def canonicalize_alloc(ctx:CallifyCtx, b:UOp):
   return ctx.allocs.get(b)
 
 def canonicalize_call_body(c:UOp):
-  body = graph_rewrite(c.body, pm_canonicalize_alloc, ctx=CallifyCtx(), bottom_up=True)
-  return c.replace(src=(body,)+c.src[1:]) if body is not c.body else None
+  return c.replace(src=(graph_rewrite(c.body, pm_canonicalize_alloc, ctx=CallifyCtx(), bottom_up=True),)+c.src[1:])
 
 pm_canonicalize_alloc = PatternMatcher([
   (UPat(Ops.CALL, name="c"), canonicalize_call_body),
   (UPat(Ops.ALLOC, src=(), name="b"), canonicalize_alloc),
 ])
 
-pm_replace_buf = pm_canonicalize_alloc+PatternMatcher([
+def replace_input_buffer(ctx:CallifyCtx, b:UOp):
+  ctx.replacements.append(b)
+  return b.param_like(len(ctx.replacements)-1)
+
+pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay)
   (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
   # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
@@ -97,17 +91,20 @@ pm_replace_buf = pm_canonicalize_alloc+PatternMatcher([
   (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])
 
+# we tag all Ops.AFTER with their UOps in the incoming Tensor graph
+add_after_tags = PatternMatcher([(UPat(Ops.AFTER, name="x"), lambda x: None if x.tag is not None else x.replace(tag=(x,)))])
+
 @rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
 
   # Tag original states before rewrites change their identities.
-  big_sink = graph_rewrite(big_sink, add_tags, bottom_up=True, name="add tags")
+  big_sink = graph_rewrite(big_sink, add_after_tags, bottom_up=True, name="add after tags")
 
   # here we can break the tensor graph. tags propagate through replaces so we can still find the original UOps
   graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
-  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs")
+  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_canonicalize_alloc+pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs")
   ret = ret.call(*ctx.replacements, precompile=True)
   assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
