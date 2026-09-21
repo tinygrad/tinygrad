@@ -19,7 +19,7 @@ class Scheduler:
     self.ast, self.ren = ast, ren
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
     self.tensor_core:TensorCore|None = None
-    self.opt_range = count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
+    self.opt_range = count(start=max([x.arg[0] for x in self.ast.backward_slice if x.op is Ops.RANGE], default=0)+1)
 
   @property
   def rngs(self):
@@ -128,12 +128,13 @@ class Scheduler:
         upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
         smem_sz = amt*upcast_local_sz*self.reduceop.dtype.itemsize
         check(smem_sz <= self.ren.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.ren.shared_max}")
-      if new_type is AxisType.GROUP_REDUCE:
+      if new_type in (AxisType.UNROLL, AxisType.GROUP_REDUCE) and rng.axis_type in split_targets[new_type]:
         reduces = [u for u in self.reduceops if rng in merge_dicts([r.ranges for r in u.src[1:]])]
-        check(len(reduces) > 0, "cannot GROUP_REDUCE an axis that's not in a REDUCE")
+        check(len(reduces) > 0, f"cannot {new_type.name} an axis that's not in a REDUCE")
         # We currently dont support a group within another rudece, TODO: fix if-contexts
-        check(not any(u.axis_type in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduces[0].ranges),
-          "cannot have a GROUP_REDUCE inside another reduce")
+        if new_type is AxisType.GROUP_REDUCE:
+          check(not any(u.axis_type in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduces[0].ranges),
+            "cannot have a GROUP_REDUCE inside another reduce")
       ret = self.shift_to(rng, amt, new_type, top=top)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps

@@ -241,6 +241,13 @@ class TestCustomKernel(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(Opt(OptOps.SPLIT, 2, (4, AxisType.GROUP_REDUCE)))
 
+  def test_gemm_unroll_refused(self):
+    # k is tagged REDUCE but custom_gemm has no Ops.REDUCE, so the expander has nothing to contract the stores back with
+    a, b, c = Tensor.empty(16, 16), Tensor.empty(16, 16), Tensor.empty(16, 16)
+    ast = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0].schedule_linear().src[-1].src[0]
+    with self.assertRaises(KernelOptError):
+      Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(Opt(OptOps.SPLIT, 2, (4, AxisType.UNROLL)))
+
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "GROUP_REDUCE needs LOCAL ranges")
   def test_group_reduce_split_range(self):
     # j%2 splits j into two ranges, both are still GROUP_REDUCE
@@ -282,6 +289,17 @@ class TestCustomKernel(unittest.TestCase):
     ast = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(2, 4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
+
+  def test_split_range_id_free_of_loop(self):
+    # the UPCAST range minted by the split gets a fresh id, the while loop's id 1 is taken
+    def kernel(C:UOp, A:UOp) -> UOp:
+      r, l = UOp.range(4, 0), UOp.loop(1)
+      cnt = UOp.placeholder((1,), dtypes.int, slot=0, addrspace=AddrSpace.REG)
+      cnt = cnt.after(r)[0].set(0)
+      cnt = cnt[0].set(nxt:=cnt.after(l)[0] + 1, end=(l, nxt < 3))
+      return C[r].set(A[r] + cnt[0].cast(C.dtype), end=r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)),)))
+    a = Tensor([1., 2, 3, 4])
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), [4., 5, 6, 7])
 
   def test_gemm_multi(self):
     devs = ("CPU:0", "CPU:1")
