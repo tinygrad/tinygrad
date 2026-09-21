@@ -71,7 +71,7 @@ def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|No
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
-    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.axis_type))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.axis_type)))),
+    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.axis_id+(0,k.axis_type))*v + k.replace(src=(v,), arg=k.axis_id+(1,k.axis_type)))),
 ])
 
 # **** reduce simplification ****
