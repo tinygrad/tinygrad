@@ -2,7 +2,6 @@ from __future__ import annotations
 import functools, math
 from typing import Callable, cast
 from tinygrad import Tensor, UOp, nn, Device, Context
-from tinygrad.device import Buffer
 from tinygrad.llm.gguf import ggml_data_to_tensor
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import prod
@@ -73,18 +72,14 @@ class Linear(nn.Linear):
     raw_offset = raw.contiguous_view_offset()
     assert raw_offset is not None and raw_offset % 4 == 0 and raw.buf_uop.dtype == dtypes.uint8
     self.ggml_type = ggml_type
-    raw_buf = cast(Buffer, Tensor(raw.buf_uop).realize().uop.buffer)
-    # store a typed buffer view: a lazy BITCAST is decomposed into byte-combining ALU before custom-kernel
-    # scheduling and would copy the entire packed weight on every JIT graph
     if self.ggml_type == Q6_K:
       # Q6 blocks are 210 bytes, so consecutive blocks are only 2-byte aligned. pad each block to 212 bytes
       # the kernel can do all its reads as aligned u32 words
-      nbytes, nblocks = raw.max_numel(), raw.max_numel() // Q6_BYTES
-      byte_view = Tensor(UOp.from_buffer(raw_buf.view(nbytes, dtypes.uint8, raw_offset)))
-      padded = byte_view.reshape((nblocks, Q6_BYTES)).pad_to((nblocks, Q6_PADDED)).bitcast(dtypes.uint32)
+      nblocks = raw.max_numel() // Q6_BYTES
+      padded = Tensor(raw).reshape((nblocks, Q6_BYTES)).pad_to((nblocks, Q6_PADDED)).bitcast(dtypes.uint32)
       self.weight = padded.clone().reshape(nblocks * Q6_WORDS)
     else:
-      self.weight = Tensor(UOp.from_buffer(raw_buf.view(raw.max_numel() * raw.dtype.itemsize // dtypes.uint32.itemsize, dtypes.uint32, raw_offset)))
+      self.weight = Tensor(raw).bitcast(dtypes.uint32).contiguous()
   def __call__(self, x:Tensor) -> Tensor:
     supported = self.use_custom_quant and amd_custom_kernels_supported(self.weight.device)
     if self.ggml_type is None and supported:
