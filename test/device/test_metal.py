@@ -1,5 +1,6 @@
 import unittest
-from tinygrad.device import CompileError, Device, BufferSpec
+from tinygrad.device import CompileError, Device, BufferSpec, TinyELF
+from tinygrad.helpers import Target
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
@@ -48,12 +49,11 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
 """)
     with self.assertRaises(RuntimeError):
       compiled = compiled[:40] # corrupt the compiled program
-      device.pipeline(compiled, "r_5")
+      device.runtime(TinyELF(compiled, "r_5", Target("METAL"), ()))
 
   def test_free(self):
     size = 2**16
     device = Device['METAL']
-    device.synchronize() # the device's timeline buffer is allocated on first use
     before = device.sysdevice.currentAllocatedSize()
 
     buf = device.allocator.alloc(size, BufferSpec(nolru=True))
