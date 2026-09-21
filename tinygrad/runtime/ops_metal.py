@@ -2,6 +2,7 @@ import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platfo
 from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import BufferStorage, MMIOInterface, Compiled, Compiler, CompileError, Program, TinyELF, Allocator, ProfileDeviceEvent
+from tinygrad.dtype import dtypes, DType
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support.c import DLL
@@ -23,6 +24,10 @@ def wait_check(cbuf:metal.MTLCommandBuffer):
   error_check(cbuf.error().retained())
 
 def cmdbuf_label(cbuf:metal.MTLCommandBuffer) -> str|None: return from_ns_str(label) if (label:=cbuf.label()).value is not None else None
+
+# a kernel takes one args struct (buffer 0): the address of each buffer, then the scalars, at their natural alignment
+def arg_layout(signature:tuple[tuple[str|None, int, DType, tuple], ...]) -> list[tuple[int, DType]]:
+  return list(TinyELF.iter_sig(tuple((n, i, dt if s == () else dtypes.uint64, s) for n, i, dt, s in signature)))
 
 def error_check(error: metal.NSError, error_constructor: type[Exception] = RuntimeError):
   if error.value is None: return None
@@ -127,6 +132,8 @@ class MetalProgram(Program[MetalDevice]):
     error_check(error_pipeline_creation)
     # cache these msg calls
     self.max_total_threads: int = self.pipeline_state.maxTotalThreadsPerThreadgroup()
+    self.layout = arg_layout(self.signature)
+    self.args_size = max((o + dt.itemsize for o, dt in self.layout), default=8) # a kernel without params still binds a struct
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     if prod(local_size) > self.max_total_threads:
@@ -138,9 +145,12 @@ class MetalProgram(Program[MetalDevice]):
     command_buffer = self.dev.mtl_queue.commandBuffer().retained()
     encoder = command_buffer.computeCommandEncoder().retained()
     encoder.setComputePipelineState(self.pipeline_state)
-    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
-    for a,(_,i,dt,_) in zip(vals, self.signature[len(bufs):]):
-      encoder.setBytes_length_atIndex(bytes(getattr(ctypes, f"c_int{dt.bitsize}")(a)), dt.itemsize, i)
+    args = bytearray(self.args_size)
+    for (o, dt), v in zip(self.layout, [a.addr for a in bufs] + list(vals)): struct.pack_into(unwrap(dt.fmt), args, o, v)
+    encoder.setBytes_length_atIndex(bytes(args), len(args), 0)
+    # the kernel reaches its buffers through the addresses in the struct: metal can't track them, declare them
+    encoder.useResources_count_usage(ctypes.cast((metal.MTLBuffer * len(bufs))(*[a.buf for a in bufs]), ctypes.POINTER(metal.MTLResource)),
+                                     len(bufs), metal.MTLResourceUsageRead | metal.MTLResourceUsageWrite)
     encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?
@@ -152,7 +162,8 @@ class MetalProgram(Program[MetalDevice]):
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
 
 class MetalBuffer:
-  def __init__(self, buf:metal.MTLBuffer, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
+  def __init__(self, buf:metal.MTLBuffer, size:int, offset=0):
+    self.buf, self.size, self.offset, self.addr = buf, size, offset, buf.gpuAddress() + offset
 
 class MetalAllocator(Allocator[MetalDevice]):
   def _alloc(self, size:int, options) -> BufferStorage:
