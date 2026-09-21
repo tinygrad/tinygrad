@@ -1017,9 +1017,11 @@ class TestCfg(unittest.TestCase):
 
   def test_agpr(self):
     from tinygrad.renderer.amd.dsl import v
-    from tinygrad.runtime.autogen.amd.cdna.ins import v_accvgpr_read, s_endpgm
+    from tinygrad.runtime.autogen.amd.cdna.ins import v_accvgpr_read, s_endpgm, v_mfma_scale_f32_16x16x128_f8f6f4
     k = Kernel()
     k.emit(v_accvgpr_read(v[0], v[0]))
+    k.emit(mfma:=v_mfma_scale_f32_16x16x128_f8f6f4(v[0:3], v[4:7], v[8:11], v[0:3], neg=0, neg_hi=0, opsel=0, opsel_hi=0, cbsz=4, acc_cd=1, acc=0,
+                                                 blgp=4, scale_src0=v[12].offset, scale_src1=v[13].offset))
     k.emit(s_endpgm())
     ret = self.get_cfg("agpr", k, target="gfx950")
     self.assertIn("v_accvgpr_read(v[0], a[0])", ret["src"])
