@@ -596,8 +596,8 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
     pc_tokens[pc] = tokens = []
     for name, f in inst._fields:
       if isinstance(val:=getattr(inst, name), Reg):
-        reg_str = val.fmt().replace("v", "a", 1) if inst.is_acc_operand(name) else val.fmt()
-        tokens.append({"st":reg_str, "keys":[f"r{val.offset+i}" for i in range(val.sz)], "kind":1})
+        reg_str = val.fmt().replace("v", "a", 1) if (is_acc:=inst.is_acc_operand(name)) else val.fmt()
+        tokens.append({"st":reg_str, "keys":[f"{'a' if is_acc else 'r'}{val.offset+i}" for i in range(val.sz)], "kind":1})
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != f.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
   # show a smaller view for repeated instructions in the graph
