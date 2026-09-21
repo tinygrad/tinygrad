@@ -2,7 +2,7 @@ import unittest
 import functools
 import numpy as np
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, ParamArg, InstInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, InstInfo
 from tinygrad.engine.realize import run_linear, estimate_uop, lower_and_compile
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
@@ -30,32 +30,40 @@ def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
   assert dtypes.is_float(A.dtype), f"buffer dtype must be float32, got {A.dtype}"
   threads = UOp.special(A.numel(), "lidx0")
-  kernarg = UOp.stack(UOp.param(0, dtypes.int32, (1,)), UOp.param(1, dtypes.int32, (1,)))
-  dest = tuple(UOp(Ops.ALLOC, arg=ParamArg(i, dtypes.int32, 1)) for i in range(2))
-  store_load = UOp.param(0, dtypes.int32, (2, 1)).store(UOp.param(1, dtypes.int32, (2, 1)).load())
+  dest = tuple(UOp.param(i, dtypes.int32, (1,), addrspace=AddrSpace.REG).rtag("s") for i in range(2))
+  kernarg = UOp.stack(*dest)
+  store_load = UOp.param(0, dtypes.int32, (2, 1), addrspace=AddrSpace.REG).rtag("s").store(
+    UOp.param(1, dtypes.int32, (2, 1), addrspace=AddrSpace.REG).rtag("s").load())
   kernarg_load = UOp(Ops.CALL, src=(store_load.sink(), UOp.stack(*dest), kernarg), arg=InstInfo(s_load_b64(s[0:1], s[0:1], soffset=NULL)))
   kernarg_wait = UOp(Ops.CALL, src=(UOp.sink(), UOp.stack(*(d.after(kernarg_load) for d in dest))),
                     arg=InstInfo(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0)))
   base_ready = UOp.stack(*(d.after(kernarg_wait) for d in dest))
-  offset_val = UOp(Ops.ALLOC, arg=ParamArg(2, dtypes.int32, 32))
-  lane_id = UOp.param(2, dtypes.int32, (32,))
-  shift = UOp.param(0, dtypes.int32, (32,)).store(UOp.param(1, dtypes.int32, (32,)).load() << 2)
+  offset_val = UOp.param(0, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v")
+  lane_id = offset_val
+  shift = UOp.param(0, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v").store(
+    UOp.param(1, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v").load() << 2)
   offset_call = UOp(Ops.CALL, src=(shift.sink(), offset_val, lane_id), arg=InstInfo(v_lshlrev_b32_e32(v[0], 2, v[0])))
   offset_ready = offset_val.after(offset_call)
-  val = UOp(Ops.ALLOC, arg=ParamArg(3, dtypes.float32, 32))
-  global_load_impl = UOp.param(0, dtypes.float32, (32,)).store(UOp.param(2, dtypes.int32, (32,)), UOp.param(1, dtypes.int32, (2, 1)))
+  val = UOp.param(1, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v")
+  global_load_impl = UOp.param(0, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").store(
+    UOp.param(2, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v"),
+    UOp.param(1, dtypes.int32, (2, 1), addrspace=AddrSpace.REG).rtag("s"))
   load_call = UOp(Ops.CALL, src=(global_load_impl.sink(), val, base_ready, offset_ready), arg=InstInfo(global_load_b32(v[1], v[0], saddr=s[0:1])))
   wait_call = UOp(Ops.CALL, src=(UOp.sink(), val.after(load_call)), arg=InstInfo(s_waitcnt_vmcnt(sdst=NULL, simm16=0)))
   val_ready = val.after(wait_call)
-  c1_dest = UOp(Ops.ALLOC, arg=ParamArg(4, dtypes.float32, 32))
-  mov_call = UOp(Ops.CALL, src=(UOp.param(0, dtypes.float32, (32,)).store(1.0).sink(), c1_dest), arg=InstInfo(v_mov_b32_e32(v[2], 1.0)))
+  c1_dest = UOp.param(2, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v")
+  mov_call = UOp(Ops.CALL, src=(UOp.param(0, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").store(1.0).sink(), c1_dest),
+                 arg=InstInfo(v_mov_b32_e32(v[2], 1.0)))
   c1_ready = c1_dest.after(mov_call)
-  add_dest = UOp(Ops.ALLOC, arg=ParamArg(5, dtypes.float32, 32))
-  add_call = UOp(Ops.CALL, src=(UOp.param(0, dtypes.float32, (32,)).store(
-                  UOp.param(1, dtypes.float32, (32,)).load() + UOp.param(2, dtypes.float32, (32,)).load()).sink(),
+  add_dest = val
+  add_call = UOp(Ops.CALL, src=(UOp.param(0, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").store(
+                  UOp.param(1, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").load() +
+                  UOp.param(2, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").load()).sink(),
                 add_dest, val_ready, c1_ready), arg=InstInfo(v_add_f32_e32(v[1], v[1], v[2])))
   add_ready = add_dest.after(add_call)
-  global_store_impl = UOp.param(0, dtypes.int32, (32,)).store(UOp.param(1, dtypes.float32, (32,)).load(UOp.param(2, dtypes.int32, (2, 1))))
+  global_store_impl = UOp.param(0, dtypes.int32, (32,), addrspace=AddrSpace.REG).rtag("v").store(
+    UOp.param(1, dtypes.float32, (32,), addrspace=AddrSpace.REG).rtag("v").load(
+      UOp.param(2, dtypes.int32, (2, 1), addrspace=AddrSpace.REG).rtag("s")))
   store_to_global = UOp(Ops.CALL, src=(global_store_impl.sink(), offset_ready, add_ready, base_ready),
                         arg=InstInfo(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1])))
   end_call = UOp(Ops.CALL, src=(UOp.sink(), store_to_global), arg=InstInfo(s_endpgm()))
