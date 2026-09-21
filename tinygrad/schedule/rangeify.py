@@ -167,7 +167,7 @@ pm_no_views = PatternMatcher([
         src=(UPat((Ops.AFTER, Ops.PARAM, Ops.UNSHARD, Ops.MSTACK, Ops.BUFFER, Ops.ALLOC)),), allow_any_len=True), lambda v: v.src[0]),
 ])
 
-DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8, "CPU": 31} # TODO: get from device?
+DEVICE_MAX_BUFS = {"WEBGPU": 8} # TODO: get from device?
 @dataclass
 class LimitBufsContext:
   buf_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
