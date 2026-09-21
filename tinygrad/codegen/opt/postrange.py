@@ -50,7 +50,7 @@ class Scheduler:
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts)), tag=1)
 
   def _output_rngs(self) -> list[UOp]:
-    return flatten([[r for r in UOp.sink(*s.src[1:]).ranges if r.arg[-1] != AxisType.REDUCE] for s in self.ast.src if s.op is Ops.END])
+    return flatten([UOp.sink(*s.src[1:]).ranges for s in self.ast.src if s.op is Ops.END])
   def _globalizable_rngs(self) -> list[UOp]:
     ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.WEAK]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
@@ -119,7 +119,6 @@ class Scheduler:
             f"invalid split arg {opt.arg}")
       check(not top or new_type is AxisType.GROUP_REDUCE, "top is only for group reduce")
       if new_type in (AxisType.LOCAL, AxisType.GROUP_REDUCE): check(self.ren.has_local, "locals needed for opt")
-      check(rng.arg[-1] in split_targets[new_type], f"{new_type} is from {split_targets[new_type]}, not {rng.arg[-1]}")
 
       if amt == 0: amt = int(rng.vmax+1)
       if new_type is AxisType.UNROLL: check(amt <= 32, "don't unroll more than 32")
@@ -200,8 +199,6 @@ class Scheduler:
           axis_choices = list(itertools.product(in1_ranges, in0_ranges, red_ranges))
           if not (axis < len(axis_choices)): continue
           axes = list(axis_choices[axis])
-
-          if any(a.arg[-1] is AxisType.REDUCE for a in axes[:2]): raise KernelOptError("tensor core X/Y axes can't be REDUCE")
 
           # do optimizations and save the ranges
           ast, warp, ne = self.ast, UOp.range(tc.threads, -1, AxisType.WARP), {}
