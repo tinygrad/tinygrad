@@ -301,7 +301,7 @@ class TestCallSchedule(unittest.TestCase):
           if devices is not None: x = x.shard(devices, axis=0).realize()
           out = outer(x)
           for call in (u for u in out.uop.toposort() if u.op is Ops.CALL):
-            self.assertTrue(all(b.is_unbound for b in call.body.toposort() if b.op is Ops.BUFFER))
+            self.assertFalse(any(b.op is Ops.BUFFER for b in call.body.toposort()))
           self.assertEqual(sched_key(out), sched_key(outer(x)))
           out.sum().backward()
           np.testing.assert_equal(out.numpy(), [6., 9., 12., 15.])
