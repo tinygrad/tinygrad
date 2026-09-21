@@ -290,13 +290,7 @@ def usb_bulk(h:UOp, ep:int, data:UOp, n:UOp|int, timeout:int=10000) -> UOp: # NU
 def usb_poke(h:UOp, addr:UOp, val:UOp) -> UOp: # 0xF0 mode 0: write a dword
   return usb_ctrl(h, 0x40, 0xF0, 0x60 | 0x0F00, 0, usb_stack(dtypes.uint64, addr, val.bitcast(dtypes.uint32).cast(dtypes.uint64)).index(0), 12, 5000)
 
-def usb_stream(h:UOp, addr:UOp, data:UOp, n:UOp|int, write:bool, src_stride:bool=True) -> UOp: # 0xF0 mode 1/2: header, then bulk data
-  n = usb_word(n, dtypes.int)
-  if n.vmax > USB_MAX_STREAM: # byte addresses; fills reuse the same zero slab
-    r = UOp.range((n + USB_MAX_STREAM - 1) // USB_MAX_STREAM, next(UOp.unique_num), dtype=dtypes.int, src=(h,))
-    off = r * USB_MAX_STREAM
-    size = UOp.const(USB_MAX_STREAM, dtypes.int).minimum(n - off)
-    return usb_stream(h.after(r), addr + off.cast(dtypes.uint64), data + off.cast(dtypes.uint64) if src_stride else data, size, write).end(r)
+def usb_stream(h:UOp, addr:UOp, data:UOp, n:UOp|int, write:bool) -> UOp: # 0xF0 mode 1/2: header, then bulk data
   hdr = usb_ctrl(h, 0x40, 0xF0, (0x60 if write else 0x20) | 0x0F00, 1 if write else 2, usb_stack(dtypes.uint64, addr, n // 4).index(0), 12, 5000)
   return usb_bulk(h.after(hdr), 0x02 if write else 0x81, data, n)
 
@@ -484,8 +478,12 @@ def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill
   # empty loops write to scratch: zero-byte streams hang
   h, cnt = usb_link(dst.device).after(*usb_deps(dst), *deps, *r.src[1:]), r.src[0]
   addr = (cnt > 0).where(usb_addr(dst, d0, v.dtype), usb_scratch(dst.device).getaddr("CPU"))
-  return usb_stream(h, addr, usb_addr(sb, s0.minimum(sb.max_numel() - 1), v.dtype),
-                    (cnt * v.dtype.itemsize).maximum(v.dtype.itemsize), True, src_stride=v.op is Ops.LOAD)
+  size = (cnt * v.dtype.itemsize).maximum(v.dtype.itemsize)
+  loops = (UOp.range(ceildiv(size, USB_MAX_STREAM), next(UOp.unique_num), dtype=dtypes.int, src=(h,)),) if size.vmax > USB_MAX_STREAM else ()
+  off = loops[0] * USB_MAX_STREAM if loops else UOp.const(0, dtypes.int)
+  if v.op is Ops.LOAD: s0 += off // v.dtype.itemsize # fills reuse the zero buffer
+  return usb_stream(h.after(*loops), addr + off.cast(dtypes.uint64), sb.index(s0.minimum(sb.max_numel() - 1)),
+                    (size - off).minimum(USB_MAX_STREAM), True).end(*loops)
 
 pm_usb_lower = PatternMatcher([
   (UPat.var("dst").index(UPat.var("di")).store(UPat.var("v")).end(UPat(Ops.RANGE, name="r")), usb_copy),
