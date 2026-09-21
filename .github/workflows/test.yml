@@ -6,6 +6,7 @@ env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
   CHECK_OOB: 1
+  PYTHONFAULTHANDLER: 1
 
 on:
   push:
