@@ -70,6 +70,16 @@ class TestScheduleCache(unittest.TestCase):
       print(num)
     self.assertEqual(len(schedule_cache), start_len_schedule_cache)
 
+  def test_chained_functions_with_local_allocations_reuse_cache(self):
+    @function(precompile=True)
+    def f(x:Tensor): return (x + 1).clone() + (x + 2).clone()
+
+    x = Tensor([1., 1., 1., 1.]).realize()
+    schedule_cache.clear()
+    out = f(f(f(x))).realize()
+    self.assertEqual(len(schedule_cache), 2)  # one function body and the outer schedule
+    self.assertEqual(out.tolist(), [29., 29., 29., 29.])
+
   def test_simple_precompile(self):
     @function(precompile=True, precompile_backward=True)
     def f(x:Tensor) -> Tensor:

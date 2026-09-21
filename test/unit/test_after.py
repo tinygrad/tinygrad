@@ -94,7 +94,7 @@ class TestAfterCounterexamples(unittest.TestCase):
     x = Tensor([2.]).realize()
     y = x * 2
     y.callify()
-    # Currently raises: "expected a CALL with unbound BUFFER outputs or a grad_fxn".
+    # Currently raises: "expected a CALL with output STOREs or a grad_fxn".
     self.assertEqual(y.sum().gradient(x)[0].tolist(), [2.])
 
 if __name__ == "__main__":

@@ -80,7 +80,7 @@ class TestGC(unittest.TestCase):
       del x
 
   def test_buffer_ownership(self):
-    a = Tensor.empty(10)
+    a = Tensor.empty(10).realize()
     real_buf = a.uop.buffer
     with assert_freed(real_buf):
       self.assertFalse(real_buf.is_allocated())

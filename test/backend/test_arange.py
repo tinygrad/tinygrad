@@ -92,6 +92,16 @@ class TestIndexing(unittest.TestCase):
       self.assertLess(GlobalCounters.global_ops, 1000)
     np.testing.assert_allclose(comp, dataset.numpy()[12])
 
+  def test_index_two_in_one_reduce(self):
+    a, b = Tensor.rand(DSET, DDIM).realize(), Tensor.rand(DSET, DDIM).realize()
+    i, j = Tensor([3, 50, 99]).realize(), Tensor([7, 1, 2000]).realize()
+    with Context(NOOPT=1):
+      GlobalCounters.reset()
+      r = Tensor.arange(DSET)[None, :, None]
+      comp = ((r == i[:, None, None]).where(a[None], 0) + (r == j[:, None, None]).where(b[None], 0)).sum(1).numpy()
+      self.assertLess(GlobalCounters.global_ops, 4*DSET)
+    np.testing.assert_allclose(comp, a.numpy()[[3, 50, 99]] + b.numpy()[[7, 1, 2000]])
+
   def test_index(self):
     dataset = Tensor.rand(DSET, DDIM).realize()
     idxs = Tensor([0,3,5,6]).realize()

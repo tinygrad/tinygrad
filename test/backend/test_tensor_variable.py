@@ -166,7 +166,7 @@ class TestTensorVariable(unittest.TestCase):
     # TODO: Tensor creation from unbound variable should assert
     # with self.assertRaises(AssertionError): t = Tensor.empty(3, v)
     vb = v.bind(3)
-    t = Tensor.empty(3, vb)
+    t = Tensor.empty(3, vb).realize()
     assert t.uop.base.buffer.size == 30
     assert t.uop.shape == (3, vb)
 

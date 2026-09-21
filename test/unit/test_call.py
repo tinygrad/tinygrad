@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, function, Device
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.tensor import transform_to_call
 
 def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop))[0].src[0].key
@@ -196,6 +196,38 @@ class TestCallSchedule(unittest.TestCase):
     def s(x): return x*2
     s(s(a).contiguous()).realize()
 
+  def test_contiguous_call_output_realizes_aliases(self):
+    def increment(x:UOp):
+      i = UOp.range(x.shape[0], 0)
+      return x[i].store(x[i].load() + 1).end(i).sink(arg=KernelInfo(name="increment"))
+
+    for precompile in (False, True):
+      for reshape in (False, True):
+        with self.subTest(precompile=precompile, reshape=reshape):
+          @function(precompile=precompile)
+          def f(x:Tensor): return x.custom_kernel(fxn=increment)[0]
+          state = Tensor([1., 2.]).realize()
+          a = f(state)
+          alias = a.reshape(1, 2)
+          b = (alias if reshape else a).contiguous().realize()
+          self.assertEqual(b.flatten().tolist(), [2., 3.])
+          a.realize(alias)
+          self.assertEqual(state.tolist(), [2., 3.])
+          self.assertIs(a.uop.buffer, b.uop.buffer)
+          self.assertIs(alias.uop.buffer, b.uop.buffer)
+          b.assign([9., 10.]).realize()
+          self.assertEqual(a.tolist(), [9., 10.])
+          self.assertEqual(alias.tolist(), [[9., 10.]])
+
+  def test_assign_call_output_to_input(self):
+    for precompile in (False, True):
+      with self.subTest(precompile=precompile):
+        @function(precompile=precompile)
+        def f(x:Tensor): return x.flip(0).contiguous()
+        a = Tensor.arange(1024).clone().realize()
+        a.assign(f(a)).realize()
+        self.assertEqual(a.tolist(), list(reversed(range(1024))))
+
   def test_call_double_gemm(self):
     a = Tensor.randn(4, 8)
     b = Tensor.randn(8, 12)
@@ -279,11 +311,33 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.empty(4, 8)
     b = Tensor.empty(4, 8)
     r0, r1 = f(a), f(b)
-    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.has_unbound_outputs)
-    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.has_unbound_outputs)
+    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL and u.arg.precompile)
+    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL and u.arg.precompile)
+    self.assertTrue(c0.has_unbound_outputs)
+    self.assertTrue(c1.has_unbound_outputs)
     # output identities stay unique per call; they canonicalize only when combined into a scheduling scope
     self.assertIsNot(c0.src[-1], c1.src[-1])
     self.assertEqual(sched_key(r0), sched_key(r1))
+
+  def test_precompile_nested(self):
+    for precompile in (False, True):
+      for devices in (None, ("CPU:0", "CPU:1")):
+        with self.subTest(precompile=precompile, devices=devices):
+          @function(precompile=True, precompile_backward=True)
+          def inner(x:Tensor): return x * 2, x + 3
+          @function(precompile=precompile, precompile_backward=True)
+          def outer(x:Tensor):
+            a, b = inner(x)
+            return a + b
+          x = Tensor([1., 2., 3., 4.]).realize()
+          if devices is not None: x = x.shard(devices, axis=0).realize()
+          out = outer(x)
+          for call in (u for u in out.uop.toposort() if u.op is Ops.CALL):
+            self.assertFalse(any(b.op is Ops.BUFFER for b in call.body.toposort()))
+          self.assertEqual(sched_key(out), sched_key(outer(x)))
+          out.sum().backward()
+          np.testing.assert_equal(out.numpy(), [6., 9., 12., 15.])
+          np.testing.assert_equal(x.grad.numpy(), [3., 3., 3., 3.])
 
   def test_precompile_consumes_call_output(self):
     """a precompiled function consuming the output of a non-precompiled function"""

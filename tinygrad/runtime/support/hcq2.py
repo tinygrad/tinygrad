@@ -137,7 +137,7 @@ def split_rdma(call:UOp, dst:UOp, src:UOp) -> UOp|None:
   if not all(hasattr(Device[d], "iface") for d in devs) or Device[devs[0]].peer_group == Device[devs[1]].peer_group: return None # not 2 nodes
 
   from tinygrad.runtime.ops_rdma import rdma_nic_for
-  if None in (nics:=[rdma_nic_for(Device[d]) for d in devs]): return None
+  if None in (nics:=[rdma_nic_for(Device[d], Device[min(devs)]) for d in devs]): return None
 
   # wires: a placeholder per nic in place of the far gpu, tagged by it
   wires = [UOp.placeholder(src.max_shape, src.dtype, 0, device=unwrap(nic).device, tag=peer) for nic, peer in zip(nics, devs[::-1])]

@@ -9,7 +9,7 @@ from tinygrad.device import Compiler
 
 # an access takes its dtype from the buffer it indexes, so accessing at another dtype restates the storage on the buffer that owns it
 def with_storage(x:UOp, dt:DType) -> UOp:
-  if x.op in {Ops.PARAM, Ops.BUFFER}: return x.replace(arg=replace(x.arg, dtype=dt))
+  if x.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}: return x.replace(arg=replace(x.arg, dtype=dt))
   return x.replace(src=(with_storage(x.src[0], dt),)+x.src[1:])
 
 @dataclass(frozen=True)

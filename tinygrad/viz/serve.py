@@ -8,8 +8,9 @@ from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.helpers import printable, Context, START_TIME, NO_COLOR, ansistrip
-from tinygrad.renderer.amd.dsl import Inst
+from tinygrad.renderer.amd.dsl import Inst, Reg
 from tinygrad.renderer.amd import detect_format
+from tinygrad.runtime.autogen.amd.common import OpType
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer):
@@ -39,7 +40,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     except (BrokenPipeError, ConnectionResetError): source.close()
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
-from tinygrad.uop.ops import KernelInfo
+from tinygrad.uop.ops import KernelInfo, CallInfo
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes, AddrSpace
@@ -51,7 +52,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
                Ops.BUFFER: "#B0BDFF", Ops.GETADDR: "#9DB1F0", Ops.COPY: "#ff90c0", Ops.CUSTOM_FUNCTION: "#bf71b6",
                Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
-               Ops.LINEAR: "#7DF4FF",
+               Ops.LINEAR: "#7DF4FF", Ops.ALLOC: "#C07788",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
                Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
 
@@ -162,10 +163,9 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     # limit SOURCE labels line count
     if u.op is Ops.SOURCE and len(lines:=label.split("\n")) > 40:
       label = "\n".join(lines[:30]) + "\n..."
-    if u.is_unbound: label += "\nUNBOUND"
     addrspace_color:str|None = None
     with soft_err(): addrspace_color = addrspace_colors.get(u.addrspace, None) if u.addrspace is not None else None
-    color = "#C07788" if u.is_unbound else uops_colors.get(u.op, "#ffffff")
+    color = uops_colors.get(u.op, "#ffffff")
     graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":color,
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_color}
   return graph
@@ -174,7 +174,7 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None):
   if depth is None and a in data.all_uops: return data.all_uops[a]
   op, src, arg, *rest = data.trace.uop_fields[a]
   # mirror of the trace_num encoding, viz must not save buffers
-  if op is Ops.CALL and hasattr(aux:=arg.aux, "written_bufs"):
+  if op is Ops.CALL and isinstance(arg, CallInfo) and hasattr(aux:=arg.aux, "written_bufs"):
     arg = replace(arg, aux=replace(aux, written_bufs=tuple(_reconstruct(data, b, depth) for b in aux.written_bufs),
                                    inputs=tuple((_reconstruct(data, u, depth), d, i) for u, d, i in aux.inputs)))
   if depth is not None and depth <= 0: return UOp(op, (), arg, *rest)
@@ -567,6 +567,15 @@ def parse_branch(inst) -> int|None:
     return (x - 0x10000 if x & 0x8000 else x)*4
   return None
 
+def is_acc_operand(inst, name:str) -> bool:
+  if not isinstance(val:=getattr(inst, name), Reg) or not 256 <= val.offset < 512: return False
+  if (opr:=inst.operands.get(name)) and opr[2] in {OpType.OPR_ACCVGPR, OpType.OPR_SRC_ACCVGPR}: return True
+  if not hasattr(inst, 'acc'): return False
+  if hasattr(inst, 'acc_cd'):
+    if name in ('src0', 'src1'): return bool(inst.acc & (1 << int(name[-1])))
+    return bool(inst.acc_cd) and (name == 'vdst' or (name == 'src2' and 'SMFMAC' not in inst.op_name))
+  return bool(inst.acc) and name in ('vdst', 'vdata', 'data')
+
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
 def amdgpu_cfg(lib:bytes, target:str) -> dict:
   # decode
@@ -592,11 +601,12 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders: paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}
-  from tinygrad.renderer.amd.dsl import Reg
   for pc, inst in pc_table.items():
     pc_tokens[pc] = tokens = []
     for name, f in inst._fields:
-      if isinstance(val:=getattr(inst, name), Reg): tokens.append({"st":val.fmt(), "keys":[f"r{val.offset+i}" for i in range(val.sz)], "kind":1})
+      if isinstance(val:=getattr(inst, name), Reg):
+        reg_str = val.fmt().replace("v", "a", 1) if (is_acc:=is_acc_operand(inst, name)) else val.fmt()
+        tokens.append({"st":reg_str, "keys":[f"{'a' if is_acc else 'r'}{val.offset+i}" for i in range(val.sz)], "kind":1})
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != f.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
   # show a smaller view for repeated instructions in the graph

@@ -21,7 +21,6 @@ pm_flatten_range = PatternMatcher([
 # index/range arithmetic uses FLOORDIV/FLOORMOD prior to late rewrite
 def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.FLOORDIV, Ops.FLOORMOD} for u in x.backward_slice)
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
-  if not all(r.op is Ops.RANGE for r in u.ended_ranges): return None
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
   for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):

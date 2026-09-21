@@ -561,6 +561,23 @@ class TestDiskTensorMovement(TempDirTestCase):
     t = Tensor(self.fn)
     self.assertTrue(Tensor.all(t.to(None) == Tensor.arange(100, dtype=dtypes.uint8)).item())
 
+  def test_permuted_copy(self):
+    t = Tensor(self.fn).reshape(10, 10).T.to("CPU")
+    np.testing.assert_array_equal(t.numpy(), np.arange(100, dtype=np.uint8).reshape(10, 10).T)
+
+  def test_contiguous_permuted_copy(self):
+    t = Tensor(self.fn).reshape(10, 10).T.contiguous().to("CPU")
+    np.testing.assert_array_equal(t.numpy(), np.arange(100, dtype=np.uint8).reshape(10, 10).T)
+
+  def test_permuted_copy_after_shrink(self):
+    for offset in (0, 1):
+      for contiguous in (False, True):
+        with self.subTest(offset=offset, contiguous=contiguous):
+          t = Tensor(self.fn)[offset:offset+4].reshape(2, 2).T
+          if contiguous: t = t.contiguous()
+          np.testing.assert_array_equal(t.to("CPU").numpy(), np.arange(offset, offset+4, dtype=np.uint8).reshape(2, 2).T)
+          self.assertEqual(self.fn.read_bytes(), bytes(range(100)))
+
   def test_slice_read(self):
     t = Tensor(self.fn)
     self.assertListEqual(t[16:18].tolist(), [16,17])
