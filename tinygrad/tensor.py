@@ -85,8 +85,8 @@ def replace_input_buffer(ctx:CallifyCtx, b:UOp):
 pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay)
   (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
-  # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
-  (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
+  # replace buffer views with PARAM (only the views created by contiguous_mops_to_view)
+  (UPat((Ops.SHRINK, Ops.BITCAST, Ops.RESHAPE), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
   # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
   (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])

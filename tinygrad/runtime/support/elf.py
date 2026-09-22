@@ -54,10 +54,16 @@ def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None) ->
   image = bytearray(image_)
 
   def relocate(instr: int, base: int, ploc: int, tgt: int, r_type: int):
+    nonlocal image
     match r_type:
       # https://refspecs.linuxfoundation.org/elf/x86_64-abi-0.95.pdf
       case libc.R_X86_64_PC32: return i2u(32, tgt-ploc)
-      case libc.R_X86_64_PLT32: return i2u(32, tgt-ploc-base)
+      case libc.R_X86_64_PLT32:
+        if -(2**31) <= tgt-ploc-base < 2**31: return i2u(32, tgt-ploc-base)
+        # JMP [RIP+0] through an absolute address. Undo the call's -4 addend for the trampoline target.
+        trampoline = len(image)
+        image += b'\xff\x25\x00\x00\x00\x00' + struct.pack('<Q', tgt+4)
+        return i2u(32, trampoline-ploc-4)
       # https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst for definitions of relocations
       # https://www.scs.stanford.edu/~zyedidia/arm64/index.html for instruction encodings
       case libc.R_AARCH64_ADR_PREL_PG_HI21:
@@ -70,7 +76,6 @@ def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None) ->
       case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
       case libc.R_AARCH64_CALL26:
         if -(2**25) <= tgt-ploc-base and tgt-ploc-base <= (2**25 - 1) * 4: return instr | getbits(tgt-ploc-base, 2, 27)
-        nonlocal image
         # create trampoline:         LDR x17, 8  BR x17
         image += struct.pack("<IIQ", 0x58000051, 0xD61F0220, tgt)
         return instr | getbits(len(image)-ploc-16, 2, 27)

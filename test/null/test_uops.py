@@ -533,5 +533,19 @@ class TestContiguousViewOffset(unittest.TestCase):
   def test_shrink_invalid(self): self._check(UOp.empty(4).pad((2,2))[0], None)
   def test_strided(self): self._check(UOp.empty(4)[::2], None)
 
+  def test_bitcast_views(self):
+    buf = UOp.param(0, dtypes.uint32, 8, device="CPU")
+    for view, offset in ((buf.bitcast(dtypes.uint8), 0), (buf[1:5].bitcast(dtypes.uint8), 1),
+                         (buf.reshape((2, 4)).bitcast(dtypes.uint8), 0), (buf.bitcast(dtypes.uint8)[4:12], 1),
+                         (buf.bitcast(dtypes.uint64)[1:3], 2), (buf[1:2].bitcast(dtypes.uint8), 1),
+                         (buf[1:2].bitcast(dtypes.uint16).bitcast(dtypes.uint8), 1)):
+      with self.subTest(view=view):
+        self.assertEqual(view.contiguous_view(), (buf, offset))
+
+  def test_noncontiguous_bitcast_views(self):
+    buf = UOp.param(0, dtypes.uint32, 8, device="CPU").bitcast(dtypes.uint8)
+    for view in (buf[::2], buf.reshape((8, 4))[:, 0], buf[1:5], buf[:3]):
+      with self.subTest(view=view): self._check(view, None)
+
 if __name__ == '__main__':
   unittest.main()

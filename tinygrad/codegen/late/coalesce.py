@@ -117,6 +117,8 @@ def memory_coalescing(sink:UOp, ctx:Renderer) -> UOp:
       assert u.src[0].op is Ops.INDEX, f"memory coalescing should be on INDEX, not {u.src[0].op}"
       buf, idx_u = u.src[0].src
       if buf.addrspace == AddrSpace.REG: continue
+      # Shape-changing pointer bitcasts are lowered to scalar source-element slices just before rendering.
+      if buf.op is Ops.BITCAST and buf.shape != buf.src[0].shape: continue
       if buf.buf_uop.op is Ops.PARAM and buf.buf_uop.arg.volatile: continue # volatile accesses never merge
       idx, valid = idx_u.get_idx(), idx_u.get_valid()
       root_src: UOp|str

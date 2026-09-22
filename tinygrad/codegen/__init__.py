@@ -8,7 +8,7 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext
-from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.dtype import dtypes, AddrSpace, commit_int
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -257,6 +257,23 @@ pm_cast_float_alu = PatternMatcher([
    lambda u,x: u.replace(src=(x.cast(u.dtype),)) if x.dtype != u.dtype else None),
 ])
 
+def lower_bitcast_index(b:UOp, idx:UOp):
+  x = b.src[0].src[0]
+  if x.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL) or x.ndim != 1 or b.ndim != 1 or idx.shape != (): return None
+  if b.dtype.itemsize <= x.dtype.itemsize: return None
+  count = b.dtype.itemsize // x.dtype.itemsize
+  # Index widths are already lowered; scaling to the source elements may need a wider offset.
+  idx = idx.cast(commit_int(idx.vmin * count, idx.vmax * count, idx.dtype if idx.dtype not in dtypes.weaks else None))
+  return UOp(Ops.SHRINK, src=(x, idx * UOp.const(count, idx.dtype), UOp.const(count))).alu(Ops.BITCAST, arg=b.dtype)
+
+pm_render_bitcast = PatternMatcher([
+  # Keep shape-changing pointer bitcasts intact until indexing and memory coalescing are finished.
+  (UPat(Ops.BITCAST, src=(UPat(Ops.RESHAPE),), name="b").index(UPat.var("idx")), lower_bitcast_index),
+  # A bitcast of a buffer view already has an offset into the original storage.
+  (UPat(Ops.SHRINK, src=(UPat(Ops.SHRINK, name="s"), UPat.var("idx"), UPat.var("size"))),
+   lambda s,idx,size: UOp(Ops.SHRINK, src=(s.src[0], s.src[1]+idx, size)) if s.ndim == 1 else None),
+])
+
 def _is_local_store(x:UOp): return x.op is Ops.STORE and x.addrspace is AddrSpace.LOCAL
 
 def add_raw_barrier(after:UOp):
@@ -374,7 +391,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_commit_weak+pm_decomp+extra_matcher+pm_split_ends
+  pm_final_rewrite = pm_render_bitcast+pm_commit_weak+pm_decomp+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite+pm_remove_invalid, ctx=ren, name="final rewrite")
 
   # commit every const still bare so no renderer reads one
@@ -409,7 +426,7 @@ pm_linearize_cleanups = PatternMatcher([
   # if statements are not allowed in the graph
   (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
-  (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
+  (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_bitcasted().or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
    lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
 ])
 

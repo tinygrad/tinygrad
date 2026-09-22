@@ -54,6 +54,15 @@ def lower_hcq(body:UOp) -> UOp:
   return unwrap(hcq2.lower_call(UOp.sink(body, arg=KernelInfo("test")).call(aux=hcq2.HCQInfo(("CPU",)))))
 
 class TestHCQ2Deps(unittest.TestCase):
+  def test_bitcast_view_addresses(self):
+    buf = UOp.param(0, dtypes.uint8, 256, device=("NULL", "NULL:1"))
+    view = buf[32:96].bitcast(dtypes.uint64)[2:4]
+    self.assertEqual(hcq2.unwrap_view(view), (buf, 48))
+    self.assertEqual(hcq2.unwrap_lane(view.mselect(1)), (buf, 1, 48))
+    self.assertTrue(hcq2._is_input_addr(view.mselect(1).getaddr("NULL:1")))
+    # Narrowing also inserts a reshape, and both forms must retain the original byte offset.
+    self.assertEqual(hcq2.unwrap_view(view.bitcast(dtypes.uint8)[3:9]), (buf, 51))
+
   def test_copy_only_batch_with_multiple_queues(self):
     from types import SimpleNamespace
     bufs = [UOp.param(i, dtypes.uint8, 16, device="AMD") for i in range(4)]

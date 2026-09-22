@@ -1864,16 +1864,27 @@ def do_unbind(ctx:dict[Variable, int], x:UOp):
   return v
 pm_unbind = PatternMatcher([(UPat(Ops.AFTER, name="x"), lambda ctx,x: do_unbind(ctx,x) if x.is_bound_var else None)])
 
+def contiguous_view_bitcast(ctx:UOp, b:UOp, idx:UOp):
+  if len(idx.src)-1 != b.ndim or any(i.shape != () for i in idx.src[1:]): return None
+  # Flatten the output indices, not the bitcast itself: narrowing bitcasts always add an axis.
+  offset = UOp.const(0).usum([i * prod(b.shape[a+1:]) for a,i in enumerate(idx.src[1:])]).simplify()
+  if offset.op is Ops.RANGE: offset = UOp.const(0)
+  elif offset.op is Ops.ADD and offset.src[0].op is Ops.RANGE and offset.src[1].op is Ops.CONST: offset = offset.src[1]
+  elif offset.op is not Ops.CONST or not (b.tag or resolve(ctx.numel() * ctx.element_size() == b.element_size(), False)): return None
+  osz, isz = b.element_size(), b.src[0].element_size()
+  nbytes = ctx.numel() * ctx.element_size()
+  # A buffer view must start and end on source-element boundaries.
+  if offset.val * osz % isz or not resolve(nbytes % isz == 0, False): return None
+  return b.src[0].flatten().index(UOp.range(nbytes // isz, 0) + offset.val * osz // isz)
+
 # ctx is source UOp for which we are finding a contiguous view for. used in contiguous_view_offset
 pm_contiguous_view_offset = PatternMatcher([
-  # normalize to 1d bitcasts
-  (UPat(Ops.BITCAST, name="b"), lambda b: b.src[0].flatten().bitcast(b.dtype).reshape(b.shape) if len(b.shape) != 1 else None),
-  (UPat(Ops.BITCAST, name="b").index(UPat.cvar("c")), lambda ctx, b, c:
-   b.src[0].flatten().index(UOp.range(ctx.numel() * (osz:=b.element_size())//(isz:=b.src[0].element_size()), 0) + (c * osz//isz)) if b.tag else None),
+  (UPat(Ops.BITCAST, name="b").index(name="idx", allow_any_len=True), contiguous_view_bitcast),
   (UPat(Ops.INDEX, src=(UPat.var("b"),)), lambda b: b.rtag().index(0)),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat(Ops.RANGE))), lambda b: b.rtag().index(0)),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat(Ops.RANGE)+UPat.cvar('c'))), lambda ctx, b, c: b.rtag().index(c)),
-  (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.cvar('c'))), lambda ctx, b, c: b.rtag().index(c) if resolve(ctx.numel() == 1, False) else None),
+  (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.cvar('c'))), lambda ctx, b, c:
+   b.rtag().index(c) if resolve(ctx.numel() * ctx.element_size() == b.element_size(), False) else None),
 ])
 
 # *** what was symbolic.py ***

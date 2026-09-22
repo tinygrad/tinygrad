@@ -1,10 +1,11 @@
 import itertools, unittest
 from tinygrad import Tensor, dtypes
-from tinygrad.dtype import Invalid
+from tinygrad.dtype import Invalid, AddrSpace
 from tinygrad.uop.ops import Ops, UOp, graph_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.uop.spec import test_pyrender as check_pyrender
 from tinygrad.schedule.prepare import expand_bitcast
+from tinygrad.codegen import pm_render_bitcast
 
 
 def bitcast(x:UOp, dtype): return x.alu(Ops.BITCAST, arg=dtype)
@@ -76,5 +77,28 @@ class TestBitcastShape(unittest.TestCase):
     self.assertEqual(z.shape, x.shape)
     self.assertEqual(z.uop.op, Ops.RESHAPE)
     self.assertEqual(z.uop.src[0].shape, (2, 2, 4))
+
+class TestLateBitcast(unittest.TestCase):
+  def test_large_offset(self):
+    buf = UOp.param(0, dtypes.uint8, 2**33)
+    idx = UOp.variable('i', 0, 2**31-1, dtype=dtypes.int32)
+    lowered = graph_rewrite(buf.bitcast(dtypes.float32).index(idx), pm_render_bitcast)
+    offset = lowered.src[0].src[1]
+    self.assertEqual(offset.dtype, dtypes.int64)
+    self.assertEqual(offset.vmax, (2**31-1)*4)
+
+  def test_index_to_shrink(self):
+    for addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL):
+      for src, dst in ((dtypes.uint8, dtypes.float32), (dtypes.uint16, dtypes.uint64)):
+        with self.subTest(addrspace=addrspace, src=src, dst=dst):
+          buf = UOp.placeholder((32,), src, 0, addrspace=addrspace)
+          idx = UOp.variable('i', 0, 7, dtype=dtypes.int32)
+          indexed = buf.bitcast(dst).index(idx)
+          lowered = graph_rewrite(indexed, pm_render_bitcast)
+          self.assertEqual(lowered.op, Ops.BITCAST)
+          self.assertEqual(lowered.src[0].op, Ops.SHRINK)
+          self.assertIs(lowered.src[0].src[0], buf)
+          self.assertEqual(lowered.src[0].src[1].simplify(), (idx * (dst.itemsize // src.itemsize)).simplify())
+          self.assertEqual((lowered.shape, lowered.dtype, lowered.addrspace), (indexed.shape, indexed.dtype, indexed.addrspace))
 
 if __name__ == '__main__': unittest.main()

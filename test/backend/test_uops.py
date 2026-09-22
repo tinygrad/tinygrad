@@ -7,6 +7,7 @@ from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
 from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
@@ -57,15 +58,17 @@ def _test_uops_result(output_dtype, uops, res):
   run_uops([out], [buf])
   return np.frombuffer(buf.as_memoryview(), _to_np_dtype(output_dtype))[0]
 
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, PythonRenderer)) and
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, LLVMRenderer, PythonRenderer)) and
                      dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires buffer bitcast and 64-bit ints")
 class TestBitcastBufferView(unittest.TestCase):
   @Context(SPEC=2)
   def test_render(self):
     buf = UOp.param(0, dtypes.uint32, 4)
     uops = to_uops_list([buf.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0).store(1)], ren=Device[Device.DEFAULT].renderer)
-    idx = next(u for u in uops if u.op is Ops.INDEX and u.src[0].op is Ops.BITCAST)
-    self.assertEqual(idx.src[0].src[0].op, Ops.SHRINK)
+    ptr = next(u for u in uops if u.op is Ops.BITCAST)
+    self.assertEqual(ptr.src[0].op, Ops.SHRINK)
+    self.assertIs(ptr.src[0].src[0], buf)
+    self.assertEqual(ptr.src[0].marg, ((1, 2),))
     Device[Device.DEFAULT].renderer.render(uops)
 
   @Context(SPEC=2)

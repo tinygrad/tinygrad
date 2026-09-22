@@ -135,7 +135,7 @@ class ExecContext:
   cache: bool = True
 
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
-  if b.op in (Ops.MSELECT, Ops.SHRINK, Ops.BITCAST): return b.replace(src=(_resolve(b.src[0], inputs), *b.src[1:]))
+  if b.op in (Ops.MSELECT, Ops.SHRINK, Ops.RESHAPE, Ops.BITCAST): return b.replace(src=(_resolve(b.src[0], inputs), *b.src[1:]))
   if b.op is Ops.MSTACK: return b.replace(src=tuple(_resolve(x, inputs) for x in b.src))
   return inputs[b.arg.slot] if b.op is Ops.PARAM else b
 def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in get_call_arg_uops(call)]

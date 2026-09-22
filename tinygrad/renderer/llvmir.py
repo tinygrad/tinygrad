@@ -105,6 +105,8 @@ base_rewrite = PatternMatcher([
                f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
   # unary/binary/ternary ops
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
+   f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype, ptr=True)} {ctx[x.src[0]]} to {ldt(x.dtype, ptr=True)}"
+   if x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else
    f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]} to {ldt(x.dtype, x.max_numel())}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.TRUNC, name="x"),
