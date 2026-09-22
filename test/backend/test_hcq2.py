@@ -2,6 +2,7 @@ import unittest, contextlib, gc, struct, numpy as np
 from unittest.mock import patch
 from tinygrad import Device, Tensor, TinyJit, Variable, dtypes, GlobalCounters
 from tinygrad.device import Buffer, Compiled
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.engine.realize import compile_linear, link_linear, run_linear
 from tinygrad.runtime.support.hcq2 import HCQ_DEVS, all_devices_in, hcq_compile_cache
@@ -102,7 +103,7 @@ class TestHCQ2Schedule(unittest.TestCase):
       x, f = chain_input(device=dev.device), TinyJit(lambda a: chain(a, n).realize())
       for _ in range(2): f(x)
       for u in f.captured.linear.toposort():
-        if u.op is Ops.BUFFER and (buf:=u.buffer).device == dev.device:
+        if u.op is Ops.BUFFER and u.addrspace is AddrSpace.GLOBAL and (buf:=u.buffer).device == dev.device:
           self.assertFalse(any(buf._buf < end and start < buf._buf + buf.nbytes for start, end in ranges))
 
   def test_device_state_survives_as_link_refs(self):
