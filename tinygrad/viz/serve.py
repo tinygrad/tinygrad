@@ -199,7 +199,7 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
 def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, depth:int|None=None, alt:str=None) -> UOp|None:
   for i in range(lin_idx+1, len(rewrites:=viz_data.trace.rewrites[kernel_idx])):
     if (r:=rewrites[i]).name == alt: return _reconstruct(viz_data, r.sink, depth=depth)
-  for s in get_full_rewrite(viz_data, ctx:=rewrites[lin_idx], depth=depth):
+  for s in get_full_rewrite(viz_data, rewrites[lin_idx], depth=depth):
     if (s["upat"] is not None and any(n in s["upat"][1] for n in upats)): return s["_sink"]
   return None
 
