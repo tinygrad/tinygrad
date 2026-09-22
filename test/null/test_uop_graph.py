@@ -16,14 +16,16 @@ simple_pm = PatternMatcher([
 class TestTuplize(unittest.TestCase):
   def test_equality_is_identity(self):
     # the invariant that makes identity equality correct: tuples are equal iff the UOps are the same object
-    a, b = UOp.const(1), UOp.const(1).rtag("tagged")
+    a, b = UOp.const(1), UOp.const(2)
     pairs = [(a, UOp.const(1)), (a, b), (a, a+b), (a+b, b+a), (UOp.sink(a, b), UOp.sink(a, b))]
     for x, y in pairs: self.assertEqual(x.tuplize == y.tuplize, x is y)
-    self.assertNotEqual(a.tuplize < b.tuplize, b.tuplize < a.tuplize)  # tags order them, exactly one direction holds
+    # tags are not part of the order: tag-only differences order neither way, like value-equal plain tuples
+    self.assertFalse(a.tuplize < a.rtag("tagged").tuplize)
+    self.assertFalse(a.rtag("tagged").tuplize < a.tuplize)
 
   def test_deep_shared_subgraphs(self):
     # long equal prefixes with a difference at the bottom: correct order, and the pathological case for value equality
-    a, b = UOp.const(1).rtag("left"), UOp.const(1).rtag("right")
+    a, b = UOp.const(1), UOp.const(2)
     for _ in range(256):
       a, b = [UOp(Ops.ADD, src=(u, u)) for u in (a, b)]
     self.assertNotEqual(a.tuplize < b.tuplize, b.tuplize < a.tuplize)

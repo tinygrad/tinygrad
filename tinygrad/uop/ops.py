@@ -226,7 +226,7 @@ class recursive_property(property):
     return x.__dict__[self.nm]
 
 class _UOpTuple(tuple):
-  # UOps are hash-consed on (op, src, arg, tag), so identical tuples are the same object and equality can be identity.
+  # UOps are hash-consed, so structurally identical UOps are the same object and equality can be identity.
   # This keeps tuple < from rescanning deep equal prefixes with O(n) value equality at every level of the walk.
   __hash__ = tuple.__hash__
   def __eq__(self, other): return self is other
@@ -320,8 +320,8 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self) -> _UOpTuple:
-    # arg and tag go through repr: args of different types (None, str, tuple) must stay mutually comparable for the sort
-    return _UOpTuple((self.op.value, repr(self.arg), self.dtype, repr(self.tag))+tuple([x.tuplize for x in self.src]))
+    # arg goes through repr: args of different types (None, str, tuple) must stay mutually comparable for the sort
+    return _UOpTuple((self.op.value, repr(self.arg), self.dtype,)+tuple([x.tuplize for x in self.src]))
 
   # *** uop shape stuff ***
 
