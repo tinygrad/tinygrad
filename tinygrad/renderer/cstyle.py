@@ -206,6 +206,7 @@ class CStyleLanguage(Renderer):
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
+    bitcast_count = Counter(u.src[0] for u in uops if u.op is Ops.BITCAST and u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL))
     # find which PARAMs are stored to with a single toposort
     writable_params = {u for u in UOp.sink(*[u.src[0] for u in uops if u.op is Ops.STORE]).toposort(lambda u: u.op != Ops.END) if u.op is Ops.PARAM}
     bufs: dict[UOp, tuple[str, tuple[UOp, bool]]] = {}
@@ -216,7 +217,8 @@ class CStyleLanguage(Renderer):
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP, Ops.CONST, Ops.CUSTOM_FUNCTION}: continue
       if u.op == Ops.STACK and len(u.src) == 0: continue
-      if u.op is Ops.AFTER:
+      # only storage reshapes used exclusively by BITCAST are pointer aliases
+      if u.op is Ops.AFTER or (u.op is Ops.RESHAPE and child_count[u] == bitcast_count[u] > 0):
         r[u] = r[u.src[0]]
         continue
       if u.op is Ops.SINK:
