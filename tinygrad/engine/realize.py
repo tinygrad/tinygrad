@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import weakref, decimal, array
+import decimal, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
@@ -36,7 +36,6 @@ def get_call_kernels(call:UOp) -> list[tuple[str, UOp, tuple|None]]:
     kernels:list[tuple[str, UOp, tuple|None]] = [(Device[call.arg.aux.device[0]].host, call, None)]
     return kernels + [(d, call, (name, estimates, key, bufs, io)) for devices,name,estimates,_,key,bufs,io in call.arg.aux.kernels for d in devices]
   ast = call.body
-  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return [(to_tuple(ast.device)[0], call, None)]
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "validate": return []
   return [(d, call, None) for d in to_tuple(call.src[1].device)]
 
@@ -48,7 +47,6 @@ def get_call_name(call:UOp, bufs:Sequence[Buffer|UOp], var_vals:dict[str, int]|N
   if ast.op is Ops.PROGRAM: return ast.src[0].arg.name
   if ast.op is Ops.STORE: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {_dev_str(bufs[0]):>7s} <- {_dev_str(bufs[1]):7s}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
-  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return colored(f"batched {len(ast.src[0].src)}", "cyan")
   raise NotImplementedError("get_call_name is not implemented")
 
 # **************** Stat ****************
@@ -59,7 +57,6 @@ def estimate_uop(call:UOp) -> Estimates:
   if (ast:=call.body).op is Ops.PROGRAM: return ast.src[0].arg.estimates or Estimates()
   if ast.op is Ops.STORE or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec"):
     return Estimates(lds=(nbytes:=prod(call.src[1].shape) * call.src[1].dtype.itemsize), mem=nbytes)
-  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return get_graph_runtime(ast).estimates
   return Estimates()
 
 first_run_cache:set[bytes] = set()
@@ -111,13 +108,6 @@ def get_runtime(device:str, ast:UOp, cache=True):
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
     runtime = Device[device].runtime(ast.to_elf())
     if cache: runtime_cache[key] = runtime
-  return runtime
-
-graph_cache:weakref.WeakKeyDictionary[UOp, Any] = weakref.WeakKeyDictionary()
-def get_graph_runtime(ast:UOp, input_uops:tuple[UOp, ...]|None=None):
-  assert ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph", "get_graph_runtime should only be called with a graph ast"
-  if (runtime:=graph_cache.get(ast)) is None and input_uops is not None:
-    graph_cache[ast] = runtime = Device[ast.device if isinstance(ast.device, str) else ast.device[0]].graph(ast, input_uops=input_uops)
   return runtime
 
 # **************** run linear ****************
@@ -194,9 +184,6 @@ def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   shape, pos_var = tuple(s.val for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
   bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
   return []
-
-def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
-  return [get_graph_runtime(ast, ctx.input_uops)(ctx.input_uops, ctx.var_vals, wait=ctx.wait)]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   if (info:=call.arg.aux).inputs:
@@ -281,7 +268,6 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True),
    lambda ctx, call, ast: exec_hcq(ctx, call, ast) if isinstance(call.arg.aux, HCQInfo) else exec_kernel(ctx, call, ast)),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
-  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="ast"),), name="call", allow_any_len=True), exec_graph),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
