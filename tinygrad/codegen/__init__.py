@@ -206,7 +206,7 @@ def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
   acc = UOp.placeholder_like(r, ctx.acc_num, AddrSpace.REG)
   ctx.acc_num += 1
   topo = r.src[0].toposort()
-  ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
+  ended_ranges = flatten([x.ended_ranges for x in topo if x.op in {Ops.END, Ops.BACKEDGE}])
   input_ranges = tuple(x for x in topo if x.op is Ops.RANGE and x not in r.src[1:] and x not in ended_ranges)
   acc_init = acc.after(*input_ranges).store(UOp.const(identity_element(r.arg[0], r.dtype)))
   acc_initted = acc.after(acc_init, *r.src[1:])
@@ -269,7 +269,7 @@ def add_raw_barrier(after:UOp):
 
 def add_war_barrier(end:UOp):
   # a LOCAL buffer stored and loaded in the same loop needs a barrier at the end of the loop body
-  rngs = [r for r in end.src[1:] if r.op is Ops.RANGE and r.axis_type in (AxisType.REDUCE, AxisType.WEAK, AxisType.LOOP) and r.vmax > 0]
+  rngs = [r for r in end.ended_ranges if r.axis_type in (AxisType.REDUCE, AxisType.WEAK, AxisType.LOOP) and r.vmax > 0]
   if not rngs or end.src[0].op is Ops.BARRIER: return None
   sl = end.src[0].backward_slice_with_self
   # only stores that are inside this loop body (not in the backward slice through AFTER chains from other loops)
@@ -280,7 +280,7 @@ def add_war_barrier(end:UOp):
 
 pm_implicit_barriers = PatternMatcher([
   (UPat(Ops.AFTER, name="after"), add_raw_barrier),
-  (UPat(Ops.END, name="end"), add_war_barrier),
+  (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
