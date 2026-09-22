@@ -2,7 +2,7 @@ import ctypes, struct
 from dataclasses import dataclass
 from tinygrad.helpers import ceildiv, getenv, wait_cond, DEBUG
 from tinygrad.runtime.autogen import bnxt, pci
-from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support.system import PCIDevice, System
 
 BNXT_DEBUG = getenv("BNXT_DEBUG", 0)

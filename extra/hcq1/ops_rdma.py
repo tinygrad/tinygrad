@@ -3,7 +3,7 @@ import mmap, struct, functools, atexit
 from typing import cast
 from tinygrad.uop.ops import sint
 from extra.hcq1.hcq import HCQCompiled, HCQAllocatorBase, HCQAllocator, HWQueue, HCQBuffer
-from tinygrad.runtime.support.hcq import FileIOInterface
+from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace
 from extra.mlx_driver.mlxdev import MLXDev, MLXQP
