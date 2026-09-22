@@ -8,7 +8,7 @@ from tinygrad.runtime.autogen import libc, pci, vfio
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator, MMIOInterface
 from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, USBMMIOInterface
 
-def hcq_filter_visible_devices(devs, device):
+def filter_visible_devices(devs, device):
   assert (v:=getenv("HCQ_VISIBLE_DEVICES", "")) == "", f"HCQ_VISIBLE_DEVICES={v} is deprecated, use DEV={DEV.target(device, indices=v)} instead"
   if '-' in (idstr:=DEV.target(device).indices): ids = list(range(int(idstr.split('-')[0]), int(idstr.split('-')[1])+1))
   else: ids = [int(x) for x in idstr.split(',') if x.strip()]
@@ -131,7 +131,7 @@ class _System:
     return [(PCIDevice, x) for x in System.pci_scan_bus(vendor, devices, base_class)]
 
   def pci_probe_device(self, device:str, dev_id:int, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
-    try: cl, pcibus = (ds:=hcq_filter_visible_devices(self.list_devices(vendor, devices, base_class), device))[dev_id]
+    try: cl, pcibus = (ds:=filter_visible_devices(self.list_devices(vendor, devices, base_class), device))[dev_id]
     except IndexError: raise RuntimeError(f"{device}:{dev_id} does not exist ({pluralize('device', len(ds))} available)")
     return cl(device[:2], pcibus)
 
@@ -305,7 +305,7 @@ class PCIIfaceBase:
     if self.remote is None: System.reserve_va(va_start, va_size)
     with contextlib.suppress(Exception): self.pci_dev.resize_bar(vram_bar)
     self.dev_impl = dev_impl_t(self.pci_dev)
-    self.dev, self.vram_bar, self.count = dev, vram_bar, len(hcq_filter_visible_devices(System.list_devices(vendor, devices, base_class), dn))
+    self.dev, self.vram_bar, self.count = dev, vram_bar, len(filter_visible_devices(System.list_devices(vendor, devices, base_class), dn))
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False,
             **kwargs) -> BufferStorage:
