@@ -74,8 +74,7 @@ class TestHCQ2Schedule(unittest.TestCase):
       vi = Variable("i", 1, 10).bind(i)
       np.testing.assert_allclose(f(a[:, :vi]).item(), (a[:, :i] + 1).sum().item(), atol=1e-5, rtol=1e-5)
 
-  def test_usb_repeated_copy(self):
-    if not getattr(Device[Device.DEFAULT], "is_usb", False): self.skipTest("usb device required")
+  def test_repeated_copy(self):
     vram, host, new = [Buffer(d, 4096, dtypes.uint8, preallocate=True) for d in (Device.DEFAULT, "CPU", "CPU")]
     new.host[:] = bytes(range(256)) * 16
     copyout, copyin = UOp.from_buffer(host).store_call(UOp.from_buffer(vram)), UOp.from_buffer(vram).store_call(UOp.from_buffer(new))
