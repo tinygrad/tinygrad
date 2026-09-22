@@ -76,8 +76,8 @@ spec_shared = PatternMatcher([
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.INDEX, name="x"), lambda x: len(x.src)>0 and all(dtypes.is_int(y.dtype) or y.base.is_invalid for y in x.src[1:]) or None),
   # END closes bounded RANGEs around a void effect; it does not discard a value. Conditional loops use BACKEDGE.
-  (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"),
-   lambda x: x.arg is None and x.src[0].dtype is dtypes.void and all(u.op is Ops.RANGE and dtypes.is_int(u.dtype) for u in x.src[1:])),
+  (UPat(Ops.END, src=(UPat(dtype=dtypes.void),), allow_any_len=True, name="x"),
+   lambda x: x.arg is None and all(u.op is Ops.RANGE and dtypes.is_int(u.dtype) for u in x.src[1:])),
   # Execute body (discarding its value), then repeat the unbounded loop while the scalar condition is true.
   (UPat(Ops.BACKEDGE, dtypes.void, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool)), name="x"),
    lambda x: x.arg is None and x.src[2].shape == () and not x.src[2].base.is_invalid),
@@ -229,8 +229,8 @@ spec_full = PatternMatcher([
   (UPat(Ops.REWRITE_ERROR, dtypes.void, name="x"), lambda x: isinstance(x.arg, str)),
 
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
-  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True, name="x"),
-   lambda x: x.arg is None and x.src[0].dtype is dtypes.void and all(dtypes.is_int(u.dtype) for u in x.src[1:])),
+  (UPat(Ops.END, src=(UPat(dtype=dtypes.void), UPat()), allow_any_len=True, name="x"),
+   lambda x: x.arg is None and all(dtypes.is_int(u.dtype) for u in x.src[1:])),
 
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
