@@ -385,7 +385,12 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
       case Ops.BITCAST:
         ps = self.src[0]._shape
         if ps is None: return None
-        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize) and len(ps) > 0:
+        output_sz, input_sz = self.dtype.itemsize, self.src[0].dtype.itemsize
+        if output_sz != input_sz and not ps:
+          # a scalar's bits are its lanes: narrow unpacks them, widening a lone scalar is not a bitcast
+          if input_sz > output_sz: return (input_sz // output_sz,)
+          raise RuntimeError("unsupported size in bitcast")
+        if output_sz != input_sz and len(ps) > 0:
           if isinstance(ps[-1], int) and (ps[-1]*input_sz) % output_sz: raise RuntimeError("unsupported size in bitcast")
           return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
         return ps

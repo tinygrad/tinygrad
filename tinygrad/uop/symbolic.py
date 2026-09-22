@@ -2,7 +2,7 @@
 import math
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, promo_dtype
-from tinygrad.dtype import PyConst, dtypes, can_lossless_cast, Invalid, bitcast, truncate
+from tinygrad.dtype import PyConst, dtypes, can_lossless_cast, Invalid, bitcast, truncate, to_dtype
 from tinygrad.helpers import partition, all_same, prod, flatten, unwrap, IMAGE, dedup
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 from tinygrad.uop.movement import mop_cleanup
@@ -21,9 +21,14 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   return None
 
 def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
-  if c.dtype.itemsize != root.dtype.itemsize: return None
+  if (ns:=root.dtype.itemsize) > (os:=c.dtype.itemsize) or (ns != os and root.shape != (os//ns,)): return None
   # the value is mathematical and may not fit: reading it as bits is the emission that pins it to the stated width
-  return root.const_like(bitcast(truncate[c.dtype](c.val), c.dtype, root.dtype))
+  val = truncate[c.dtype](c.val)
+  if ns == os: return root.const_like(bitcast(val, c.dtype, root.dtype))
+  # narrowing adds a last axis, with the least significant storage bits first
+  bits = bitcast(val, c.dtype, to_dtype(f"uint{8*os}"))
+  return UOp.const(tuple(bitcast((bits >> (8*ns*i)) & ((1 << (8*ns))-1), to_dtype(f"uint{8*ns}"), root.dtype)
+                         for i in range(os//ns)), root.dtype)
 
 # no truncate: ints stay mathematical past the fold (emission truncates); floats re-round in the mint
 def fold_const_alu(a:UOp) -> UOp: return a.const_like(exec_alu(a.op, a.dtype, [const_arg(s) for s in a.src], False))
