@@ -321,7 +321,7 @@ isel_matcher = PatternMatcher([
     lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
   # **** Op -> X86Op ****
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
-  # so regalloc builds the prologue/epilogue naturally. they all share the stack pointer define's dtype so the the stack pointer define is first
+  # so regalloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x:
    x.replace(src=(x.ins(X86Ops.RET, src=x.src + (stack_pointer,) + tuple(def_reg(r) for r in CALLEE_SAVED)),))
     if not x.src or x.src[0].op is not Ops.INS or x.src[0].arg[0] is not X86Ops.RET else None),
@@ -498,11 +498,15 @@ def lower_loop(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   jmp = isel_matcher.rewrite(UOp(Ops.IF, src=(cond,)))
   return (jmp.src[0], [jmp.src[0], jmp.replace(tag=x.src[3].tag)])
 
+def alloc_stack(ctx:X86LinearContext, x:UOp):
+  if not ctx.stack_size or ctx.stack_allocated or x.arg[0] is not X86Ops.DEFINE: return None
+  ctx.stack_allocated = True
+  return x, [stack_pointer.ins(X86Ops.SUBi, src=(imm(dtypes.int32, ctx.stack_size),)), x]
+
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
-  # the frame is allocated after the stack pointer define at the top of the program and freed before RET
-  (UPat(Ops.INS, name="x"), lambda ctx,x: (x, [x, x.ins(X86Ops.SUBi, src=(imm(dtypes.int32, ctx.stack_size),))])
-    if ctx.stack_size and x.arg[0] is X86Ops.DEFINE and rdef(x) == RSP else None),
+  # allocate the frame before any callee saves, regardless of the order of register definitions, and free it before RET
+  (UPat(Ops.INS, name="x"), alloc_stack),
   (UPat(Ops.INS, name="x"), lambda ctx,x: (x, [stack_pointer.ins(X86Ops.ADDi, src=(imm(dtypes.int32, ctx.stack_size),)), x])
     if ctx.stack_size and x.arg[0] is X86Ops.RET else None),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
@@ -686,6 +690,7 @@ class X86LinearContext(LinearContext):
   def __init__(self, ren:X86Renderer):
     super().__init__(ren)
     self.lock: UOp|None = None
+    self.stack_allocated = False
   def assign_spill_slot(self, r:Register, u:UOp) -> int:
     sz = r.cons[0].size
     offset = self.stack_size + (sz - self.stack_size % sz) %sz
