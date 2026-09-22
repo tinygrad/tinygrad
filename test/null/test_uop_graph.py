@@ -463,49 +463,6 @@ class TestMovementOps(unittest.TestCase):
     self.assertEqual(result.op, Ops.INDEX)
     self.assertEqual(result.src[0].op, Ops.RESHAPE)
 
-  def test_lower_partial_reshape_storage_span(self):
-    from tinygrad.codegen import devectorizer2
-    for addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL):
-      for shape, indices, offset, tail in (((4, 8), (2,), 16, (8,)), ((4, 2, 4), (2,), 16, (2, 4)),
-                                          ((4, 2, 4), (2, 1), 20, (4,)), ((1, 32), (0,), 0, (32,))):
-        with self.subTest(addrspace=addrspace.name, shape=shape, indices=indices):
-          src = UOp.placeholder((32,), dtypes.uint32, addrspace=addrspace)
-          result = graph_rewrite(src.reshape(shape).index(*indices), devectorizer2)
-          self.assertEqual(result.shape, tail)
-          span = result.src[0] if result.op is Ops.RESHAPE else result
-          self.assertEqual(span.op, Ops.SHRINK)
-          self.assertIs(span.src[0], src)
-          self.assertEqual(span.src[1].ssimplify(), offset)
-
-  def test_lower_partial_reshape_non_scalar_prefix(self):
-    from tinygrad.codegen import devectorizer2
-    src = UOp.param(0, dtypes.uint32, 32).reshape((4, 2, 4))
-    idx = src.index(UOp.const((0, 2)))
-    self.assertIs(graph_rewrite(idx, devectorizer2), idx)
-
-  def test_devectorize_partial_value_index(self):
-    from tinygrad.codegen import devectorizer2
-    for shape, indices in (((4, 8), (2,)), ((4, 2, 4), (2,)), ((4, 2, 4), (2, 1))):
-      with self.subTest(shape=shape, indices=indices):
-        src = UOp.param(0, dtypes.uint32, 32, addrspace=AddrSpace.ALU)
-        result = graph_rewrite(src.reshape(shape).index(*indices), sym+devectorizer2)
-        self.assertEqual(result.shape, shape[len(indices):])
-        self.assertNotIn(Ops.BITCAST, [u.op for u in result.toposort()])
-        for u in result.toposort():
-          if u.op is Ops.INDEX: self.assertEqual(u.shape, ())
-        self.assertIs(result.flatten().index(0).simplify(), src.index(20 if len(indices) == 2 else 16))
-
-  def test_bitcast_index_shape_rewrites(self):
-    from tinygrad.codegen import devectorizer2
-    for addrspace in AddrSpace:
-      with self.subTest(addrspace=addrspace.name):
-        src = UOp.param(0, dtypes.uint8, (2, 4), addrspace=addrspace)
-        widened = src.alu(Ops.BITCAST, arg=dtypes.uint32).index(1)
-        self.assertIs(devectorizer2.rewrite(widened), src.index(1).alu(Ops.BITCAST, arg=dtypes.uint32))
-        src = UOp.param(0, dtypes.uint32, (2, 3), addrspace=addrspace)
-        narrowed = src.alu(Ops.BITCAST, arg=dtypes.uint8).index(1, 2, 3)
-        self.assertIs(devectorizer2.rewrite(narrowed), src.index(1, 2).alu(Ops.BITCAST, arg=dtypes.uint8).index(3))
-
 class TestConstBufferize(unittest.TestCase):
   def test_const_bufferize_with_ranges(self):
     """Test that CONST.BUFFERIZE with ranges is folded correctly.

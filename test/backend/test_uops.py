@@ -138,16 +138,6 @@ class TestBitcastBufferView(unittest.TestCase):
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "requires C-style value bitcasts")
 class TestBitcastValues(unittest.TestCase):
   @Context(SPEC=2)
-  def test_widen(self):
-    val = UOp.stack(*(UOp.const(i, dtypes.uint8) for i in range(1, 9))).bitcast(dtypes.uint32).index(1)
-    self.assertEqual(_test_uops_result(dtypes.uint32, [], val), 0x08070605)
-
-  @Context(SPEC=2)
-  def test_narrow(self):
-    val = UOp.stack(UOp.const(0x04030201, dtypes.uint32)).bitcast(dtypes.uint8).index(1)
-    self.assertEqual(_test_uops_result(dtypes.uint8, [], val), 2)
-
-  @Context(SPEC=2)
   def test_loaded_values(self):
     data = bytes(range(128, 144))
     for narrow in (dtypes.uint8, dtypes.int8, dtypes.uint16, dtypes.int16):

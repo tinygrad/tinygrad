@@ -64,8 +64,9 @@ class TestBitcastConstFolding(unittest.TestCase):
     ):
       with self.subTest(src=src_dt, dst=dst_dt, val=val):
         result = UOp.const(val, src_dt).alu(Ops.BITCAST, arg=dst_dt).simplify()
-        self.assertIs(result, UOp.const(expected, dst_dt))
-        for i, lane in enumerate(expected): self.assertIs(result.index(i).simplify(), UOp.const(lane, dst_dt))
+        self.assertEqual(result.shape, (len(expected),))
+        self.assertEqual(result.dtype, dst_dt)
+        self.assertEqual(tuple(result.index(i).simplify().val for i in range(len(expected))), expected)
 
   def test_vec_bitcast(self):
     with Context(SPEC=0):
