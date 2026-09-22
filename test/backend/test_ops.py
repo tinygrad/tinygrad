@@ -90,6 +90,11 @@ def prepare_test_op(low, high, shps, vals, forward_only=False):
   return ts, tst
 
 class TestOps(unittest.TestCase):
+  def test_nested_shrink(self):
+    a = Tensor.arange(32).reshape(4, 8).contiguous().realize()
+    out = a.shrink(((1, 4), (1, 7))).shrink(((1, 3), (2, 5)))
+    self.assertEqual(out.shape, (2, 3))
+    self.assertEqual(out.tolist(), [[19, 20, 21], [27, 28, 29]])
 
   def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn=None, expected=None, forward_only=False, exact=False, vals=None, low=-1.5, high=1.5):
     if DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV": self.skipTest('helper_test_exception fails in CI CUDA')
