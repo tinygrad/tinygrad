@@ -89,8 +89,7 @@ pm_generate_realize_map = PatternMatcher([
 
 @dataclass(frozen=True)
 class BufferizeOpts:
-  # on AddrSpace.LOCAL, device is the id
-  device: str|tuple[str, ...]|int|None
+  device: str|tuple[str, ...]|None
   addrspace: AddrSpace = AddrSpace.GLOBAL
   removable: bool = True
 

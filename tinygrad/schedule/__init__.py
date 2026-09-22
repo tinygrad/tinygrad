@@ -180,6 +180,12 @@ def remap_paramarg_slots(root:UOp, param_map:dict[int, int], buffer_map:dict[int
     rebuilt[x] = x.replace(src=src, arg=arg)
   return rebuilt[root]
 
+def canonicalize_sink_outputs(body:UOp) -> UOp:
+  # A bound final output retains STORE, while Callify's nested output placement produces AFTER(dest, STORE).
+  # They have the same effects; normalize this interface distinction before forming a schedule-cache key.
+  return body.replace(src=tuple(s.src[0].after(s) if s.op is Ops.STORE else s for s in body.src)) if \
+    body.op is Ops.SINK and body.arg is None else body
+
 def canonicalize_call_for_schedule_cache(call:UOp) -> UOp|None:
   body = call.body
   arg = replace(call.arg, grad_fxn=None) if isinstance(call.arg, CallInfo) and call.arg.grad_fxn is not None else call.arg
@@ -193,7 +199,7 @@ def canonicalize_call_for_schedule_cache(call:UOp) -> UOp|None:
   buf_slots = list(dict.fromkeys(x.arg.slot for x in bufs))
   pmap:dict[int, int] = {slot:i for i,slot in enumerate(param_slots)}
   bmap:dict[int, int|ParamArg] = {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)}
-  body = remap_paramarg_slots(body, pmap, bmap, clear_buffer=True)
+  body = canonicalize_sink_outputs(remap_paramarg_slots(body, pmap, bmap, clear_buffer=True))
   return call.replace(src=(body,)+tuple(call.src[1+slot] for slot in param_slots), arg=arg)
 
 pm_schedule_cache_key = PatternMatcher([
@@ -214,7 +220,7 @@ def lower_sink_to_linear(call:UOp) -> UOp|None:
   param_slots, buf_slots = (list(dict.fromkeys(x.arg.slot for x in xs)) for xs in (params, bufs))
   pmap:dict[int, int] = {slot:i for i,slot in enumerate(param_slots)}
   bmap:dict[int, int|ParamArg] = {slot:len(param_slots)+i for i,slot in enumerate(buf_slots)}
-  canonical = remap_paramarg_slots(canonical, pmap, bmap, clear_buffer=True)
+  canonical = canonicalize_sink_outputs(remap_paramarg_slots(canonical, pmap, bmap, clear_buffer=True))
   param_map = {pmap[x.arg.slot]:x.arg.slot for x in params}
   buffer_map = {cast(int, bmap[x.arg.slot]):x.arg for x in bufs}
   cache_key = canonical.key

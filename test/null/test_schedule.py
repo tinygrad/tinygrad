@@ -15,6 +15,10 @@ class TestBufferUOp(unittest.TestCase):
   # BUFFER has a ShapeTracker of shape=(n,) and stride=(1,)
   def test_buffer_has_buffer(self):
     buf = Tensor.empty(10)
+    self.assertIs(buf.uop.op, Ops.ALLOC)
+    self.assertTrue(buf.uop.arg.bind_on_realize)
+    self.assertIsNone(buf.uop.arg.buffer)
+    buf.realize()
     self.assertIsNotNone(buf.uop.buffer)
     self.assertEqual(buf.uop.shape, (10,))
     # the device Buffer remains unallocated until it's we run the schedule
@@ -26,7 +30,7 @@ class TestBufferUOp(unittest.TestCase):
     self.assertTrue(buf.uop.buffer.is_allocated())
 
   def test_buffer_has_unique_buffer(self):
-    buf = Tensor.empty(10)
+    buf = Tensor.empty(10).realize()
     buf1 = buf.uop.buffer
     buf2 = buf.uop.buffer
     self.assertIs(buf1, buf2)
@@ -34,6 +38,14 @@ class TestBufferUOp(unittest.TestCase):
   def test_buffer_view_has_unique_buffer(self):
     view = Tensor.empty(10).realize()[2:8]
     self.assertIs(view.uop.buffer, view.uop.buffer)
+
+  def test_empty_aliases_bind_together(self):
+    a, other = Tensor.empty(6), Tensor.empty(6)
+    b = a.reshape(2, 3)
+    self.assertIsNot(a.uop, other.uop)
+    b.realize()
+    self.assertIs(a.uop.buffer, b.uop.buffer)
+    self.assertIs(other.uop.op, Ops.ALLOC)
 
   # we also allow VIEW(BUFFER) to access the underlying device Buffer, as long as it's contiguous
   def test_buffer_view_allowed(self):
@@ -601,6 +613,7 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d_half(self): self.test_conv2d(4, dtype=dtypes.half)
 
   def test_schedule_mem_used_with_inputs(self):
+    Tensor.ones(256).contiguous().realize() # hcq2 caches the linked schedule with its buffers
     gc.collect()
     base = GlobalCounters.mem_used
     x = Tensor.ones(256).contiguous().realize()
@@ -1689,6 +1702,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   def test_schedule_mem_used(self):
+    Tensor.ones(256).contiguous().realize() # hcq2 caches the linked schedule with its buffers
     gc.collect()
     base = GlobalCounters.mem_used
     Tensor.ones(256).contiguous().realize()

@@ -4,6 +4,7 @@ import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
+from tinygrad.codegen.opt.postrange import Scheduler
 from tinygrad.renderer import Target
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -39,6 +40,12 @@ def custom_elementwise_addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:
   store_c = C[i].store(A[i]+B[i])
   store_d = D[i].store(A[i]*B[i])
   return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name=f"custom_addmul_kernel_{C.numel()}")).simplify()
+
+def custom_ignore_first_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
+  # A is unused on purpose: the kernel takes call buffers 0 and 2, not 0, 1, 2
+  C, B = C.flatten(), B.flatten()
+  i = UOp.range(C.numel(), 0)
+  return C[i].store(B[i] + 1).end(i).sink(arg=KernelInfo(name=f"ignore_first_{C.numel()}"))
 
 def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   assert A.shape[1] == B.shape[0]
@@ -188,6 +195,11 @@ class TestCustomKernel(unittest.TestCase):
     b_p1 = Tensor.custom_kernel(tst, b, fxn=custom_add_one_kernel)[0]
     self.assertTrue((b_p1 == 3).all().item())
 
+  def test_unused_buffer_arg(self):
+    a, b = Tensor([100.0, 200, 300, 400]), Tensor([1.0, 2, 3, 4])
+    out = Tensor.custom_kernel(Tensor.empty(4), a, b, fxn=custom_ignore_first_kernel)[0]
+    self.assertEqual(out.tolist(), [2, 3, 4, 5])
+
   def test_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])
     tst = Tensor.empty(1)
@@ -221,6 +233,39 @@ class TestCustomKernel(unittest.TestCase):
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
     self.assertTrue(tst.allclose(a@b, atol=1e-3).item())
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "GROUP_REDUCE needs LOCAL ranges")
+  def test_gemm_group_refused(self):
+    # k is tagged REDUCE but custom_gemm has no Ops.REDUCE
+    a, b, c = Tensor.empty(16, 16), Tensor.empty(16, 16), Tensor.empty(16, 16)
+    ast = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0].schedule_linear().src[-1].src[0]
+    with self.assertRaises(KernelOptError):
+      Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(Opt(OptOps.SPLIT, 2, (4, AxisType.GROUP_REDUCE)))
+
+  def test_gemm_unroll_refused(self):
+    # k is tagged REDUCE but custom_gemm has no Ops.REDUCE, so the expander has nothing to contract the stores back with
+    a, b, c = Tensor.empty(16, 16), Tensor.empty(16, 16), Tensor.empty(16, 16)
+    ast = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0].schedule_linear().src[-1].src[0]
+    with self.assertRaises(KernelOptError):
+      Scheduler(ast, Device[Device.DEFAULT].renderer).apply_opt(Opt(OptOps.SPLIT, 2, (4, AxisType.UNROLL)))
+
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "GROUP_REDUCE needs LOCAL ranges")
+  def test_group_reduce_split_range(self):
+    # j%2 splits j into two ranges, both are still GROUP_REDUCE
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.GROUP_REDUCE)
+      return C[i].store((A[i, j] * (j%2).cast(A.dtype)).reduce(j, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), a[:, 1::2].sum(1).tolist())
+
+  def test_upcast_split_range(self):
+    # j%2 splits j into two UPCAST ranges, the expander expands both, so no loop is left
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.UPCAST)
+      return C[i, j].store(A[i, j] + (j%2).cast(A.dtype)).end(i, j).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(4, 8), Tensor.empty(4, 8), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
+    self.assertEqual(len([u for u in uops if u.op is Ops.RANGE]), 0)
+
   def test_loop_acc_gemm_tc_refused(self):
     # ACC[j] += A[t,:] @ B[:,j] over t: the recurrence on ACC makes t a serial LOOP, so no tensor core may split it
     ren = AMDLLVMRenderer(Target("AMD", arch="gfx1100"))
@@ -233,6 +278,28 @@ class TestCustomKernel(unittest.TestCase):
     a, b, acc = Tensor.empty(M, K, dtype=dtypes.half), Tensor.empty(K, N, dtype=dtypes.half), Tensor.empty(N, dtype=dtypes.float)
     ast = Tensor.custom_kernel(acc, a, b, fxn=kernel)[0].schedule_linear().src[-1].src[0]
     with self.assertRaises(KernelOptError): to_program(ast, ren)
+
+  def test_split_loop_local_barrier(self):
+    # t%2 splits the t loop. tmp is stored and loaded in the loop, so the end of the loop still needs a barrier
+    def kernel(C:UOp, A:UOp) -> UOp:
+      l, t = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1, AxisType.LOOP)
+      tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
+      v = tmp.after(tmp[l].store(A[t%2, l]))[(l+1)%4]
+      return C[l].set(C.after(t)[l] + v, end=t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(2, 4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
+    self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
+
+  def test_split_range_id_free_of_loop(self):
+    # the UPCAST range minted by the split gets a fresh id, the while loop's id 1 is taken
+    def kernel(C:UOp, A:UOp) -> UOp:
+      r, l = UOp.range(4, 0), UOp.loop(1)
+      cnt = UOp.placeholder((1,), dtypes.int, slot=0, addrspace=AddrSpace.REG)
+      cnt = cnt.after(r)[0].set(0)
+      cnt = cnt[0].set(nxt:=cnt.after(l)[0] + 1, end=(l, nxt < 3))
+      return C[r].set(A[r] + cnt[0].cast(C.dtype), end=r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)),)))
+    a = Tensor([1., 2, 3, 4])
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), [4., 5, 6, 7])
 
   def test_gemm_multi(self):
     devs = ("CPU:0", "CPU:1")

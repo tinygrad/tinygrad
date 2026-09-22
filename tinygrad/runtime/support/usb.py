@@ -1,7 +1,7 @@
 from typing import cast
 import ctypes, struct, time, functools, itertools
 from tinygrad.runtime.autogen import libusb, libc
-from tinygrad.helpers import DEBUG, DEV, to_mv, from_mv, round_up, ceildiv, to_tuple
+from tinygrad.helpers import DEBUG, DEV, to_mv, round_up, ceildiv, to_tuple
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
 from tinygrad.engine.realize import pm_flatten_linear
@@ -41,11 +41,6 @@ class USB3:
     self._tags, self._transferred = itertools.count(1), ctypes.c_int(0)
     self._bulk_buf, self._bulk_mv = alloc_cbuffer(4 << 20)
     self._ctrl_buf, self._ctrl_mv = alloc_cbuffer(0x1000)
-    # async bulk OUT state: tag -> (pooled transfer, keepalive payload mv); transfer errors latch into _async_err
-    self._async_seq, self._async_err = itertools.count(1), 0
-    self._async_pending: dict = {}
-    self._async_pool: list = []
-    self._async_cb = libusb.libusb_transfer_cb_fn(self._on_bulk_done)
 
     self.handle = c.init_c_var(c.POINTER[libusb.struct_libusb_device_handle], lambda x: checked(libusb.libusb_open)(dev, x))
 
@@ -83,42 +78,6 @@ class USB3:
     checked(libusb.libusb_bulk_transfer, "bulk OUT 0x02 failed") \
       (self.handle, 0x02, self._bulk_buf, len(payload), self._transferred, timeout)
     assert self._transferred.value == len(payload), f"bulk OUT short write: {self._transferred.value}/{len(payload)} bytes"
-
-  def _on_bulk_done(self, xfer):  # runs in libusb event handling; latch errors (exceptions here are unraisable)
-    exp = xfer.contents.length - 8 if xfer.contents.type == libusb.LIBUSB_TRANSFER_TYPE_CONTROL else xfer.contents.length
-    if xfer.contents.status != 0 or xfer.contents.actual_length != exp: self._async_err = xfer.contents.status or -1
-    self._async_pool.append(self._async_pending.pop(int(xfer.contents.user_data or 0))[0])
-
-  def _submit_async(self, endpoint:int, xtype:int, payload:bytes|bytearray|memoryview, timeout:int) -> int:  # payload kept alive till bulk_wait
-    tr = self._async_pool.pop() if self._async_pool else libusb.libusb_alloc_transfer(0)
-    tr.contents.dev_handle, tr.contents.endpoint, tr.contents.type = self.handle, endpoint, xtype
-    tr.contents.timeout, tr.contents.length = timeout, len(payload)
-    tr.contents.buffer = ctypes.cast(from_mv(memoryview(payload), ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte))
-    tr.contents.callback, tr.contents.user_data = self._async_cb, (tag := next(self._async_seq))
-    self._async_pending[tag] = (tr, payload)
-    checked(libusb.libusb_submit_transfer, "async submit failed")(tr)
-    return tag
-
-  def bulk_write_async(self, payload:memoryview, timeout:int=10000) -> int:
-    """Queue a bulk OUT transfer without blocking; payload is kept alive until bulk_wait(tag)."""
-    return self._submit_async(0x02, libusb.LIBUSB_TRANSFER_TYPE_BULK, payload, timeout)
-
-  def control_write_async(self, request:int, value:int=0, index:int=0, data:bytes=b"", timeout:int=1000) -> int:
-    """Queue a vendor control OUT without blocking; completes via bulk_wait(tag) like bulk_write_async."""
-    setup = bytearray(struct.pack('<BBHHH', 0x40, request, value, index, len(data)) + data)
-    return self._submit_async(0, libusb.LIBUSB_TRANSFER_TYPE_CONTROL, setup, timeout)
-
-  def control_read_async(self, request:int, length:int, value:int=0, index:int=0, timeout:int=1000) -> tuple[int, memoryview]:
-    """Queue a vendor control IN without blocking; the data lands in the returned buffer by bulk_wait(tag)."""
-    buf = bytearray(struct.pack('<BBHHH', 0xC0, request, value, index, length)) + bytearray(length)
-    return self._submit_async(0, libusb.LIBUSB_TRANSFER_TYPE_CONTROL, buf, timeout), memoryview(buf)[8:]
-
-  def bulk_wait(self, tag:int):
-    """Block until the tagged transfer completes; raises if any async transfer failed. LIBUSB_ERROR_INTERRUPTED is retried."""
-    while tag in self._async_pending:
-      if (rc:=libusb.libusb_handle_events(None)) < 0 and rc != libusb.LIBUSB_ERROR_INTERRUPTED:
-        raise RuntimeError(f"libusb_handle_events: {ctypes.string_at(libusb.libusb_strerror(rc)).decode()}")
-    if self._async_err: raise RuntimeError(f"async bulk OUT failed: status={self._async_err}")
 
   def bulk_read(self, length:int, timeout:int=1000) -> memoryview:
     if length > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(length)
@@ -186,8 +145,10 @@ class CustomASM24Controller:
     """Streaming PCIe memory write via 0xF0 mode 1 + bulk OUT. Data is little-endian dwords on the wire."""
     if not data: return
     assert len(data) % 4 == 0, f"pcie_mem_write requires 4-byte aligned size, got {len(data)}"
-    self._f0_out(0x60, 0x0F, address, len(data) // 4, mode=1)
-    self.usb.bulk_write(data)
+    for off in range(0, len(data), USB_MAX_STREAM):
+      chunk = data[off:off+USB_MAX_STREAM]
+      self._f0_out(0x60, 0x0F, address + off, len(chunk) // 4, mode=1)
+      self.usb.bulk_write(chunk)
 
   def pcie_mem_read(self, address:int, nbytes:int) -> memoryview:
     """Streaming PCIe memory read via 0xF0 mode 2 + bulk IN. Returns little-endian bytes."""
@@ -213,12 +174,6 @@ class CustomASM24Controller:
     self.usb.control_write(0xF2, value=len(buf_padded) // 512, index=(slot_start & 0xFF) | (ceildiv(len(buf_padded), 0x4000) << 8))
     self.usb.bulk_write(buf_padded)
 
-  def scsi_read_arm(self, size:int):
-    windex = (ceildiv(size, 0x4000) & 0xFF) << 8
-    self.usb.control_write(0xF2, value=(ceildiv(size, 512) & 0x7FFF) | 0x8000, index=windex)
-
-  def scsi_read(self, size:int) -> memoryview: return self.usb.bulk_read(round_up(size, 512), timeout=10000)[:size]
-
 class USBMMIOInterface(MMIOInterface):
   def __init__(self, usb, addr, size, fmt, pcimem=True): # pylint: disable=super-init-not-called
     self.usb, self.addr, self.nbytes, self.fmt, self.el_sz, self.pcimem = usb, addr, size, fmt, struct.calcsize(fmt), pcimem
@@ -232,7 +187,7 @@ class USBMMIOInterface(MMIOInterface):
     if self.pcimem:
       assert sz % 4 == 0 and off % 4 == 0, f"pcie_mem_read requires 4-byte aligned access, got off={off}, sz={sz}"
       data = self.usb.pcie_mem_read(self.addr + off, sz)
-    else: data = self.usb.scsi_read(sz) if self.addr == 0xf000 else self.usb.read(self.addr + off, sz)
+    else: data = self.usb.read(self.addr + off, sz)
     return data if isinstance(index, slice) else int.from_bytes(data, "little")
 
   def __setitem__(self, index, data):
@@ -253,8 +208,10 @@ class USBMMIOInterface(MMIOInterface):
 # sram layout: two halves, each with a reserved sentinel block
 HALF, CHUNK, SLOT = 0x40000, 0x40000 - 512, 0x4000
 
-# host memory: link, staging, zeros
-def usb_host(dev) -> UOp: return UOp.placeholder((0x180020,), dtypes.uint8, 0, device=to_tuple(dev)[0], tag="usb_host")
+USB_MAX_STREAM = 1 << 20
+# host memory: link, staging, one stream's worth of zeros
+USB_HOST_SIZE = 32 + 2 * HALF + USB_MAX_STREAM
+def usb_host(dev) -> UOp: return UOp.placeholder((USB_HOST_SIZE,), dtypes.uint8, 0, device=to_tuple(dev)[0], tag="usb_host")
 def usb_link(dev) -> UOp: return usb_host(dev)[:24].bitcast(dtypes.uint64) # [handle, context, previous batch chunks]
 def usb_stage(dev) -> UOp: return usb_host(dev)[32:32 + 2 * HALF] # host buffers for the sram halves
 
@@ -462,7 +419,7 @@ def usb_store(b:UOp, idx:UOp, v:UOp) -> UOp:
     usb_poke(h.after(usb_poke(h, addr, v.cast(dtypes.uint32))), addr + 4, (v >> 32).cast(dtypes.uint32))
   return cache.after(ret.end(loop)).index(0).store(value) if loop is not None else ret
 
-def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill loop to one stream
+def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill
   if not is_remote(dst): return None
 
   # source buffer or zeros
@@ -474,7 +431,12 @@ def usb_copy(dst:UOp, di:UOp, v:UOp, r:UOp) -> UOp|None: # contiguous copy/fill 
   # empty loops write to scratch: zero-byte streams hang
   h, cnt = usb_link(dst.device).after(*usb_deps(dst), *deps, *r.src[1:]), r.src[0]
   addr = (cnt > 0).where(usb_addr(dst, d0, v.dtype), usb_scratch(dst.device).getaddr("CPU"))
-  return usb_stream(h, addr, sb.index(s0.minimum(sb.max_numel() - 1)), (cnt * v.dtype.itemsize).maximum(v.dtype.itemsize), True)
+  size = (cnt * v.dtype.itemsize).maximum(v.dtype.itemsize)
+  loops = (UOp.range(ceildiv(size, USB_MAX_STREAM), next(UOp.unique_num), dtype=dtypes.int, src=(h,)),) if size.vmax > USB_MAX_STREAM else ()
+  off = loops[0] * USB_MAX_STREAM if loops else UOp.const(0, dtypes.int)
+  if v.op is Ops.LOAD: s0 += off // v.dtype.itemsize # fills reuse the zero buffer
+  return usb_stream(h.after(*loops), addr + off.cast(dtypes.uint64), sb.index(s0.minimum(sb.max_numel() - 1)),
+                    (size - off).minimum(USB_MAX_STREAM), True).end(*loops)
 
 pm_usb_lower = PatternMatcher([
   (UPat.var("dst").index(UPat.var("di")).store(UPat.var("v")).end(UPat(Ops.RANGE, name="r")), usb_copy),
@@ -487,7 +449,7 @@ pm_usb_lower = PatternMatcher([
 
 @functools.cache
 def _host_block(dev) -> Buffer: # link, staging, zeros
-  b = Buffer("CPU", 0x180020, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
+  b = Buffer("CPU", USB_HOST_SIZE, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
   b.host.view(fmt='B')[:16] = struct.pack('QQ', *[ctypes.addressof(x.contents) for x in (dev.iface.pci_dev.usb.usb.handle, USB3.ctx())])
   return b
 @functools.cache

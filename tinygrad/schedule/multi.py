@@ -8,13 +8,13 @@ from tinygrad.schedule.allreduce import handle_allreduce
 
 def _resolve_shrink_marg(marg, i:int):
   return tuple(tuple(x.substitute({drng[0]:drng[0].const_like(i)}) if isinstance(x, UOp) and
-                           (drng:=[r for r in x.ranges if r.arg[-1] is AxisType.DEVICE]) else x for x in ss) for ss in marg)
+                           (drng:=[r for r in x.ranges if r.axis_type is AxisType.DEVICE]) else x for x in ss) for ss in marg)
 
 def _apply_shrink(marg, s:UOp, i:int) -> UOp: return s._mop(Ops.SHRINK, _resolve_shrink_marg(marg, i))
 
 def _shrink_stage(x:UOp, marg, i:int) -> UOp:
   resolved = _resolve_shrink_marg(marg, i)
-  has_device_range = tuple(any(isinstance(v, UOp) and any(r.arg[-1] is AxisType.DEVICE for r in v.ranges) for v in ss) for ss in marg)
+  has_device_range = tuple(any(isinstance(v, UOp) and any(r.axis_type is AxisType.DEVICE for r in v.ranges) for v in ss) for ss in marg)
   inner = tuple(r if is_device else (0, s) for r,s,is_device in zip(resolved, x.src[0].shape, has_device_range))
   outer = tuple((0, r[1]) if is_device else r for r,is_device in zip(resolved, has_device_range))
   materialized = UOp(Ops.STAGE, src=(x.src[0]._mop(Ops.SHRINK, inner),), tag=("force_contiguous",))
@@ -244,7 +244,7 @@ def index_multi(root:UOp, multi:UOp):
   return multi.src[0].index(*idxs)
 
 def _shard_idx(rng:UOp, dev_idx:int) -> int:
-  drngs = [r for r in rng.ranges if r.arg[-1] is AxisType.DEVICE]
+  drngs = [r for r in rng.ranges if r.axis_type is AxisType.DEVICE]
   return 0 if not drngs else int(rng.substitute({drngs[0]: drngs[0].const_like(dev_idx)}).ssimplify())
 
 def copy_multi(multi:UOp, device:str | tuple[str, ...]):

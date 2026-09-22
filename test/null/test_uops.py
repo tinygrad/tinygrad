@@ -49,7 +49,7 @@ class TestDTypeFromUOp(unittest.TestCase):
     self.assertIs(invalid.dtype, dtypes.bool)
     self.assertIs(UOp.const(Invalid, dtypes.float32), invalid)
     scratch = Tensor.invalids(4, dtype=dtypes.float32)
-    self.assertEqual((scratch.dtype, next(u.dtype for u in scratch.uop.toposort() if u.op is Ops.BUFFER), next(u.dtype for u in scratch.uop.toposort()
+    self.assertEqual((scratch.dtype, next(u.dtype for u in scratch.uop.toposort() if u.op is Ops.ALLOC), next(u.dtype for u in scratch.uop.toposort()
       if u.is_invalid)), (dtypes.float32, dtypes.float32, dtypes.bool))
     invalid, value = UOp.invalid(), UOp.const(1, dtypes.float32)
     for u in (UOp.param(0, dtypes.bool, ()).where(value, invalid), value+invalid, UOp.stack(value, invalid)): self.assertIs(u.src[-1], invalid)

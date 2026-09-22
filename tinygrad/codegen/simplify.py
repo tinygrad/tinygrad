@@ -25,7 +25,7 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
   for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
     # check same type
-    if r0.arg[-1] == r1.arg[-1]:
+    if r0.axis_type == r1.axis_type:
       # check if the ranges to merge are in the same reduces
       if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
         s0, s1 = r0.src[0], r1.src[0]
@@ -60,7 +60,7 @@ pm_simplify_ranges = PatternMatcher([
 
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   # ranges that aren't looped over can't be split
-  if r not in ctx and r.arg[-1] not in {AxisType.WARP, AxisType.DEVICE} \
+  if r not in ctx and r.axis_type not in {AxisType.WARP, AxisType.DEVICE} \
     and r.src[0].op is Ops.CONST and r.src[0].divides(c.val) is not None: ctx[r] = c
 
 def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
@@ -71,7 +71,7 @@ def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|No
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
-    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1])))),
+    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.axis_id+(0,k.axis_type))*v + k.replace(src=(v,), arg=k.axis_id+(1,k.axis_type)))),
 ])
 
 # **** reduce simplification ****

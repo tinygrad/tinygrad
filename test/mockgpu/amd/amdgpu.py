@@ -284,7 +284,7 @@ class SDMAExecutor(AMDQueue):
 
   def _execute_fence(self):
     struct = sdma_pkts.fence.from_address(self.base + self.rptr[0] % self.size)
-    to_mv(self.gpu.translate_addr(struct.addr), 8).cast('Q')[0] = struct.data
+    to_mv(self.gpu.translate_addr(struct.addr), 4).cast('I')[0] = struct.data
     self.rptr[0] += ctypes.sizeof(struct)
 
   def _execute_trap(self):

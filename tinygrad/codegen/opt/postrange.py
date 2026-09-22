@@ -19,19 +19,19 @@ class Scheduler:
     self.ast, self.ren = ast, ren
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
     self.tensor_core:TensorCore|None = None
-    self.opt_range = count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
+    self.opt_range = count(start=max([x.arg[0] for x in self.ast.backward_slice if x.op is Ops.RANGE], default=0)+1)
 
   @property
   def rngs(self):
     # always in order by axistype. void RANGEs are loops, not opt axes. the DEVICE axis is launched, not an opt axis
     return sorted([u for u in self.ast.backward_slice if u.op is Ops.RANGE and u.dtype is not dtypes.void and u.vmax > 0
-                   and u.arg[-1] is not AxisType.DEVICE], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
+                   and u.axis_type is not AxisType.DEVICE], key=lambda x: (axis_to_pos[x.axis_type],) + x.axis_id)
   @property
   def shape_len(self) -> int: return len(self.rngs)
   @property
   def full_shape(self): return [ssimplify(x.src[0]) for x in self.rngs]
   @property
-  def axis_types(self) -> list[AxisType]: return [x.arg[-1] for x in self.rngs]
+  def axis_types(self) -> list[AxisType]: return [x.axis_type for x in self.rngs]
 
   def copy(self) -> Scheduler:
     ret = Scheduler(self.ast, self.ren)
@@ -50,9 +50,9 @@ class Scheduler:
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts)), tag=1)
 
   def _output_rngs(self) -> list[UOp]:
-    return flatten([[r for r in UOp.sink(*s.src[1:]).ranges if r.arg[-1] != AxisType.REDUCE] for s in self.ast.src if s.op is Ops.END])
+    return flatten([UOp.sink(*s.src[1:]).ranges for s in self.ast.src if s.op is Ops.END])
   def _globalizable_rngs(self) -> list[UOp]:
-    ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.WEAK]
+    ret = [r for r in self._output_rngs() if r.axis_type == AxisType.WEAK]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
     for x in self.ast.toposort():
       if x.op is Ops.STAGE:
@@ -63,7 +63,7 @@ class Scheduler:
     if not self.ren.has_local: return
 
     globalizible_rngs = self._globalizable_rngs()
-    rng = [x.replace(arg=x.arg[0:-1]+(AxisType.GLOBAL,)) if x in globalizible_rngs else x for x in self.rngs]
+    rng = [x.replace(arg=x.axis_id+(AxisType.GLOBAL,)) if x in globalizible_rngs else x for x in self.rngs]
 
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
 
@@ -79,16 +79,16 @@ class Scheduler:
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
 
   def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False, input_new_rng:UOp|None=None):
-    check(rng.arg[-1] in split_targets[new_type], f"{new_type} is from {split_targets[new_type]}, not {rng.arg[-1]}")
+    check(rng.axis_type in split_targets[new_type], f"{new_type} is from {split_targets[new_type]}, not {rng.axis_type}")
     if (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
     new_rng = UOp.range(amount, next(self.opt_range), new_type, dtype=rng.dtype) if input_new_rng is None else input_new_rng
     replaced_rng = rng.replace(src=(old_sz,))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
-    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
+    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.axis_id} {amount} {str(new_type).split('.')[1].lower()}")
     return replaced_rng, new_rng
 
-  def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
+  def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.axis_type in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
 
   @property
@@ -119,7 +119,6 @@ class Scheduler:
             f"invalid split arg {opt.arg}")
       check(not top or new_type is AxisType.GROUP_REDUCE, "top is only for group reduce")
       if new_type in (AxisType.LOCAL, AxisType.GROUP_REDUCE): check(self.ren.has_local, "locals needed for opt")
-      check(rng.arg[-1] in split_targets[new_type], f"{new_type} is from {split_targets[new_type]}, not {rng.arg[-1]}")
 
       if amt == 0: amt = int(rng.vmax+1)
       if new_type is AxisType.UNROLL: check(amt <= 32, "don't unroll more than 32")
@@ -129,11 +128,13 @@ class Scheduler:
         upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
         smem_sz = amt*upcast_local_sz*self.reduceop.dtype.itemsize
         check(smem_sz <= self.ren.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.ren.shared_max}")
-      if self.reduceop is not None and new_type is AxisType.GROUP_REDUCE:
+      if new_type in (AxisType.UNROLL, AxisType.GROUP_REDUCE) and rng.axis_type in split_targets[new_type]:
+        reduces = [u for u in self.reduceops if rng in merge_dicts([r.ranges for r in u.src[1:]])]
+        check(len(reduces) > 0, f"cannot {new_type.name} an axis that's not in a REDUCE")
         # We currently dont support a group within another rudece, TODO: fix if-contexts
-        reduce = [u for u in self.ast.backward_slice if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
-        check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
-          "cannot have a GROUP_REDUCE inside another reduce")
+        if new_type is AxisType.GROUP_REDUCE:
+          check(not any(u.axis_type in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduces[0].ranges),
+            "cannot have a GROUP_REDUCE inside another reduce")
       ret = self.shift_to(rng, amt, new_type, top=top)
     elif opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
@@ -149,10 +150,10 @@ class Scheduler:
       check(type(opt.arg) is int and opt.arg > 1, f"padto arg is a multiple > 1, not {opt.arg}")
       check(rng.src[0].op is Ops.CONST, "only pad const axes")
       # TODO: upcasted is only wrong for a range pinned in WMMA tc_upcast_axes
-      check(rng.arg[-1] not in {AxisType.UPCAST, AxisType.UNROLL, AxisType.WARP}, "cannot pad upcasted or warp")
+      check(rng.axis_type not in {AxisType.UPCAST, AxisType.UNROLL, AxisType.WARP}, "cannot pad upcasted or warp")
       new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
-      replaced_rng = UOp.range(new_sz, *rng.arg, dtype=rng.dtype)
+      replaced_rng = rng.replace(src=(rng.src[0].const_like(new_sz),))
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
       for b in self.bufs:
@@ -160,15 +161,15 @@ class Scheduler:
       for r in self.reduceops:
         if any(rng in y.ranges for y in r.src[1:]):
           replaces[r] = r.replace(src=(valid.where(r.src[0], UOp.const(identity_element(r.arg[0], r.dtype), r.dtype)),)+r.src[1:])
-      self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
+      self.ast = self.ast.substitute(replaces, f"padto {rng.axis_id} {opt.arg}")
       ret = replaced_rng
     elif opt.op is OptOps.SWAP:
       check(type(opt.arg) is int and 0 <= opt.arg < self.shape_len, f"invalid swap axis on {opt.arg=} {self.shape_len=}")
       altrng:UOp = self.rngs[cast(int, opt.arg)]
-      check(rng.arg[-1] == AxisType.GLOBAL and altrng.arg[-1] == AxisType.GLOBAL, "swap only for globals")
-      self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1])),
-                                      altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]))},
-                                      name=f"swap {rng.arg[:-1]} {altrng.arg[:-1]}", walk=True)
+      check(rng.axis_type == AxisType.GLOBAL and altrng.axis_type == AxisType.GLOBAL, "swap only for globals")
+      self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.axis_id, rng.axis_type)),
+                                      altrng:altrng.replace(arg=(*rng.axis_id, altrng.axis_type))},
+                                      name=f"swap {rng.axis_id} {altrng.axis_id}", walk=True)
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
 
@@ -200,8 +201,6 @@ class Scheduler:
           if not (axis < len(axis_choices)): continue
           axes = list(axis_choices[axis])
 
-          if any(a.arg[-1] is AxisType.REDUCE for a in axes[:2]): raise KernelOptError("tensor core X/Y axes can't be REDUCE")
-
           # do optimizations and save the ranges
           ast, warp, ne = self.ast, UOp.range(tc.threads, -1, AxisType.WARP), {}
           try:
@@ -226,7 +225,7 @@ class Scheduler:
             srcs = [x.substitute({ne[a]: ne[b] for a,b in rl.items()}, walk=True) for x,rl in zip(ins, tc.relabel())]
 
             # get upcast axes for the tensor cores
-            base_upcast_axes = [ne[c].arg[0] for c in tc.base_upcast_axes()]
+            base_upcast_axes = [ne[c].axis_id for c in tc.base_upcast_axes()]
             upcast_cnt = [len(f[1]) for f in (tc.frag_a, tc.frag_b, tc.frag_c)]
             # each operand upcasts its first upcast_cnt axes, the axes only A or B upcast are size 1 so the operands broadcast
             tc_upcast_axes = tuple([tuple([(a, 2 if j < cnt else 1) for j,a in enumerate(base_upcast_axes[:max(cnt, *upcast_cnt[:2])])])
