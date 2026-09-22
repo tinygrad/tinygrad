@@ -56,7 +56,7 @@ class AMDComputeQueue(HWQueue):
   def __del__(self):
     if self.binded_device is not None:
       self.binded_device.allocator.free(BufferStorage(self.hw_page, self.hw_page.meta, self.hw_page.view), self.hw_page.size,
-                                       BufferSpec(cpu_access=True, nolru=True, uncached=True))
+                                       BufferSpec(host=True, cpu_access=True, nolru=True, uncached=True))
 
   def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, len(vals) - 1), *vals)
 
@@ -396,7 +396,7 @@ class AMDComputeQueue(HWQueue):
 
   def bind(self, dev:AMDDevice):
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True)).buf
+    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(host=True, cpu_access=True, nolru=True, uncached=True)).buf
     hw_view = self.hw_page.cpu_view().view(fmt='I')
     for i, value in enumerate(self._q): hw_view[i] = value
 
@@ -447,7 +447,7 @@ class AMDComputeAQLQueue(AMDComputeQueue):
 
   def bind(self, dev:AMDDevice):
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True)).buf
+    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(host=True, cpu_access=True, nolru=True, uncached=True)).buf
     self._cmds = self._prep_aql(self._q, self.hw_page)
     self._q = self.hw_page.cpu_view().view(fmt='I')
     return self
@@ -512,7 +512,8 @@ class AMDCopyQueue(HWQueue):
     if not getenv("AMD_SDMA_BIND", 0) or not dev.is_am(): return
 
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True)).buf
+    self.hw_page = dev.allocator.alloc((qsz:=round_up(len(self._q), 8)) * 4,
+                                       BufferSpec(host=True, cpu_access=True, nolru=True, uncached=True)).buf
     hw_view = self.hw_page.cpu_view().view(fmt='I')
     for i in range(qsz): hw_view[i] = self._q[i] if i < len(self._q) else 0
 
@@ -1063,7 +1064,7 @@ class AMDDevice(HCQCompiled):
 
     self.is_aql = getenv("AMD_AQL", int(self.xccs > 1))
     if self.is_aql:
-      self.pm4_ibs = self.iface.alloc(0x2000 if self.is_usb() else (16 << 20), uncached=True, cpu_access=True)
+      self.pm4_ibs = self.iface.alloc(0x2000 if self.is_usb() else (16 << 20), host=True, uncached=True, cpu_access=True)
       self.pm4_ib_alloc = BumpAllocator(self.pm4_ibs.size, wrap=True)
 
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
@@ -1117,8 +1118,8 @@ class AMDDevice(HCQCompiled):
       if self.iface.dev_impl.vf_access: self.iface.dev_impl.release_vf_access()
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, idx=0):
-    ring = self.iface.alloc(ring_size, uncached=True, cpu_access=True)
-    gart = self.iface.alloc(0x100, uncached=True, cpu_access=True)
+    ring = self.iface.alloc(ring_size, host=True, uncached=True, cpu_access=True)
+    gart = self.iface.alloc(0x100, host=True, uncached=True, cpu_access=True)
 
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL:
       self.aql_gart = gart

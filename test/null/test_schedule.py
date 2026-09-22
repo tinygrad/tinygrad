@@ -35,6 +35,10 @@ class TestBufferUOp(unittest.TestCase):
     buf2 = buf.uop.buffer
     self.assertIs(buf1, buf2)
 
+  def test_buffer_view_has_unique_buffer(self):
+    view = Tensor.empty(10).realize()[2:8]
+    self.assertIs(view.uop.buffer, view.uop.buffer)
+
   def test_empty_aliases_bind_together(self):
     a, other = Tensor.empty(6), Tensor.empty(6)
     b = a.reshape(2, 3)

@@ -255,10 +255,17 @@ spec_kernel_graph = PatternMatcher([
    (x.arg.buffer is not None if x.addrspace is AddrSpace.GLOBAL else x.addrspace is AddrSpace.ALU)),
   (UPat(Ops.ALLOC, src=(), name="x"), lambda x:
    isinstance(x.arg, ParamArg) and x.addrspace is AddrSpace.GLOBAL and x.arg.buffer is None),
+  # tagged all-reduce SHRINKs are physical runtime buffer views whose byte offsets must survive in call arguments
+  (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM), UPat(Ops.CONST), UPat(Ops.CONST)), name="x"),
+   lambda x: x.tag == ("allreduce",) and x.contiguous_view_offset() is not None),
   (UPat(Ops.BITCAST), lambda: True),
   # mstack/mselect
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
+  # physical allreduce views are direct copy arguments in the kernel graph
+  (UPat(Ops.SHRINK, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.ALLOC, Ops.PARAM, Ops.AFTER, Ops.MSELECT})),
+                         UPat(Ops.CONST, dtype=dtypes.weakint), UPat(Ops.CONST, dtype=dtypes.weakint)), name="x"),
+   lambda x: True),
   # all calls are on opaque bodies
   (UPat(Ops.CALL, src=(UPat(tuple(OPAQUE_CALL_BODIES)),), allow_any_len=True), lambda: True),
   # after on PARAM or AFTER

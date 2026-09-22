@@ -310,8 +310,14 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   # for multi-device: replicate grad_emb and idx on all devices
   if isinstance(weight.device, tuple):
     assert weight.axis is None or weight.axis == 0, "only vocab (axis=0) sharding supported on Embedding with USE_ATOMICS"
-    grad_emb = grad_emb.copy_to_device(weight.device)
-    idx = idx.copy_to_device(weight.device)
+    def replicate(x:UOp) -> UOp:
+      if x.device != weight.device or x.axis is None: return x.copy_to_device(weight.device)
+      rng = UOp.range(len(weight.device), -1, AxisType.DEVICE)
+      return x._shard(x.axis, rng)._unshard(x.axis).allreduce(Ops.ADD, weight.device)
+    grad_emb = replicate(grad_emb)
+    # This same-device-tuple COPY is a replication, not a contiguous materialization. Preserve that intent through
+    # multi lowering now that COPY represents both operations.
+    idx = UOp(Ops.COPY, src=(idx,), arg=weight.device, tag=("replicate",))
   if is_vocab_sharded:
     ndev = len(weight.device)
     local_vocab_size = weight.shape[0] // ndev
