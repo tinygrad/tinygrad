@@ -288,8 +288,9 @@ def lower_call_linear(ctx, linear:UOp) -> UOp|None:
   prev = UOp.sink()
   for call in linear.src:
     body = call.body.substitute({r:r.replace(arg=(next(ctx), *r.arg[1:])) for r in call.body.toposort() if r.op is Ops.RANGE})
-    prev = resolve_function(call.replace(src=(body, *(a.after(prev) for a in call.src[1:]))))
-    assert prev is not None
+    resolved = resolve_function(call.replace(src=(body, *(a.after(prev) for a in call.src[1:]))))
+    assert resolved is not None
+    prev = UOp.sink(prev, resolved)
   return prev
 
 pm_call_linear = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), lower_call_linear)])

@@ -6,6 +6,25 @@ from tinygrad.engine.realize import get_runtime
 from tinygrad.renderer.amd import InstDecodeError, decode_inst
 from tinygrad.uop.ops import KernelInfo, Ops, UOp
 from test.mockgpu.amd.emu import _Ctx, _INST_HANDLERS, _MXCSRContext, _init_wave, _op_name, _wave_size
+from test.mockgpu.amd.emu import PC_LO_IDX, PC_HI_IDX
+
+class _CallCtx(_Ctx):
+  def __init__(self, code:bytes, pc:int, wave_size:int):
+    super().__init__(len(code), wave_size)
+    self.code, self.pc = code, pc
+
+  def inst_word(self, dword_idx:int) -> UOp:
+    return UOp.const(int.from_bytes(self.code[dword_idx*4:(dword_idx+1)*4], "little"), dtypes.uint32)
+
+  def rpc(self) -> UOp: return UOp.const(self.pc, dtypes.uint64)
+  def inc_pc(self) -> list[UOp]: return []
+
+  def wsgpr_dyn(self, reg:UOp, val:UOp) -> UOp:
+    if reg.vmin == reg.vmax and reg.vmin in (PC_LO_IDX, PC_HI_IDX):
+      # The old emulator terminates by storing an all-ones PC. No runtime PC is needed here.
+      if val.vmin == val.vmax == 0xffffffff: return UOp.sink()
+      raise NotImplementedError("ASM_CALL requires control-flow lifting for PC writes")
+    return super().wsgpr_dyn(reg, val)
 
 def run_asm(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, args_ptr:int, rsrc2:int=0x19c,
             scratch_size:int=0, arch:str="rdna3", user_data:list[int]|None=None) -> int:
@@ -19,8 +38,8 @@ def run_asm(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int,
     if _op_name(inst) == "S_CODE_END": break
     handler = next((_INST_HANDLERS[cls] for cls in type(inst).__mro__ if cls in _INST_HANDLERS), None)
     if handler is None: raise RuntimeError(f"unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
-    ctx = _Ctx(inst.size(), _wave_size(arch))
-    body = handler(inst, ctx)
+    ctx = _CallCtx(code[offset:offset+inst.size()], lib + offset, _wave_size(arch))
+    body = handler(inst, ctx).simplify(tracked=True)
     calls.append(body.call(ctx.sgpr, ctx.vgpr, ctx.vmem, ctx.lds, ctx.scratch, ctx.accvgpr, name=f"{_op_name(inst).lower()}_{offset:x}"))
     offset += inst.size()
   sink = UOp.sink(UOp(Ops.LINEAR, src=tuple(calls)), arg=KernelInfo(name="asm_call")).rtag(1)
