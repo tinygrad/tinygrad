@@ -23,9 +23,8 @@ ERRORS RAISED (lower priority - at least users know):
 """
 import unittest
 import numpy as np
-from tinygrad import Tensor, TinyJit, Device
+from tinygrad import Tensor, TinyJit
 from tinygrad.engine.jit import JitError
-from tinygrad.helpers import JIT
 
 class TestJitFootguns(unittest.TestCase):
 
@@ -53,23 +52,18 @@ class TestJitFootguns(unittest.TestCase):
 
     self.assertEqual([r1.item(), r2.item(), r3.item()], [2, 4, 6])
 
-  def test_graph_input_output_aliasing(self):
+  def test_input_output_aliasing(self):
     """Test that JIT handles input=output aliasing correctly, simulating LLM generate pattern.
 
     The LLM generate pattern:
     1. First "session": multiple iterations where output becomes next input
     2. Second "session": starts with a NEW input tensor (not the previous output)
 
-    The bug: GraphRunner computes input_replace during _first_run. If at that time input buffer == output buffer
-    (aliasing), it incorrectly includes the output position in input_replace. Later, when a DIFFERENT input
-    is passed, the output position gets overwritten with the input, corrupting the computation.
-
-    This requires multiple kernels to trigger because single-kernel JITs don't get graphed ("only one kernel doesn't graph").
+    The bug: if the input replacement is computed while input buffer == output buffer (aliasing), it incorrectly
+    includes the output position. Later, when a DIFFERENT input is passed, the output position gets overwritten
+    with the input, corrupting the computation.
     """
-    if Device[Device.DEFAULT].graph is None or JIT != 1:
-      self.skipTest("test requires JIT graph support")
-
-    # Multiple operations to create multiple kernels that get batched into a GraphRunner
+    # Multiple operations to create multiple kernels that get batched together
     @TinyJit
     def step(x):
       y = (x + 1).realize()  # kernel 1
@@ -82,13 +76,13 @@ class TestJitFootguns(unittest.TestCase):
     b = Tensor([20]).contiguous().realize()
     x = step(b)  # capture (cnt=1), x = (20+1)*2 = 42
 
-    # Phase 2: first "session" - iterations where output becomes input (triggers _first_run with aliasing)
+    # Phase 2: first "session" - iterations where output becomes input (aliasing)
     for _ in range(3):
       x = step(x)  # (42+1)*2=86, (86+1)*2=174, (174+1)*2=350
     self.assertEqual(x.item(), 350)
 
     # Phase 3: second "session" - NEW input tensor (simulates new generate() call)
-    # The bug: GraphRunner's input_replace incorrectly includes the output position
+    # The bug: the input replacement incorrectly includes the output position
     # When new input y is passed, it overwrites the output buffer, using old value (350) instead of new (100)
     y = Tensor([100]).contiguous().realize()
     for _ in range(3):
