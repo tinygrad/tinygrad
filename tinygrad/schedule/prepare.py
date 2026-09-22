@@ -76,10 +76,13 @@ def _mop_index(r:UOp, idx:UOp):
 pm_mops = PatternMatcher([
   # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
-  # move movement ops and INDEX after AFTER
-  (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
+  # move views after AFTER so indexing can reach the underlying storage
+  (UPat(GroupOp.Movement|{Ops.INDEX, Ops.BITCAST}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
+  # a loop's ordering dependencies do not use a view's shape or dtype
+  (UPat(Ops.RANGE, name="r"), lambda r: r.replace(src=(r.src[0],)+tuple(
+    s.src[0] if s.op in (Ops.RESHAPE, Ops.BITCAST) else s for s in r.src[1:]))),
 ])
 
 # *****************
