@@ -558,8 +558,14 @@ if PROFILE:
   @atexit.register
   def finalize_profile():
     devs = [Device[d] for d in Device._opened_devices]
-    for dev in devs: dev.synchronize()
-    for dev in devs: dev._at_profile_finalize()
+    synced = []
+    for dev in devs:
+      try: dev.synchronize()
+      except RuntimeError as e: print(f"{dev.device} profile synchronization failed: {e}")
+      else: synced.append(dev)
+    for dev in synced:
+      try: dev._at_profile_finalize()
+      except RuntimeError as e: print(f"{dev.device} profile finalization failed: {e}")
 
     with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
 
