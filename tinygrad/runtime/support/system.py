@@ -261,7 +261,7 @@ class PCIDevice:
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     fd, sz = self.bar_fd(bar), size or (self.bar_info(bar)[1] - off)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
-    return MMIOInterface(loc, sz, fmt=fmt)
+    return MMIOInterface(loc, sz, fmt=fmt, view_factory=getattr(fd, "mmio_view", None))
   def resize_bar(self, bar_idx:int):
     rpath = f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}_resize"
     try: FileIOInterface(rpath, os.O_RDWR).write(str(int(FileIOInterface(rpath, os.O_RDONLY).read(), 16).bit_length() - 1))

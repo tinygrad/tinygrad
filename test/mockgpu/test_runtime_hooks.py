@@ -1,6 +1,35 @@
 import os, subprocess, sys, textwrap, unittest
 
 class TestRuntimeHooks(unittest.TestCase):
+  def test_mockpci_amd_discovery(self):
+    source_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    result = subprocess.run([sys.executable, '-c', textwrap.dedent('''
+      from tinygrad.runtime.support.system import PCIDevice
+      from tinygrad.runtime.support.am.amdev import AMDev
+      dev = object.__new__(AMDev)
+      dev.pci_dev = PCIDevice("AM", "mock:am:0")
+      dev.vram = dev.pci_dev.map_bar(0)
+      dev.mmio = dev.pci_dev.map_bar(5, fmt="I")
+      dev.vf_rlc_gated = []
+      dev._run_discovery()
+      assert dev.vram_size == dev.pci_dev.bar_info(0)[1] > 0
+    ''')], cwd=source_root,
+                            env=os.environ | {'DEV': 'MOCKPCI+AMD', 'PYTHONPATH': '.'}, capture_output=True, text=True, timeout=60)
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    self.assertEqual(result.stderr, '')
+
+  def test_missing_file_close(self):
+    source_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    result = subprocess.run([sys.executable, '-c', textwrap.dedent('''
+      from tinygrad.runtime.support.system import FileIOInterface
+      fd = FileIOInterface('/definitely/not/a/mock/file')
+      assert fd.fd is None
+      fd.close()
+      fd.close()
+    ''')], cwd=source_root, env=os.environ | {'DEV': 'MOCKPCI+AMD', 'PYTHONPATH': '.'}, capture_output=True, text=True, timeout=60)
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    self.assertEqual(result.stderr, '')
+
   def test_virtual_binary_read(self):
     source_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     result = subprocess.run([sys.executable, '-c', textwrap.dedent('''

@@ -1,4 +1,4 @@
-import ctypes, time, os, fcntl, typing, threading
+import ctypes, time, os, builtins, fcntl, typing, threading
 from contextlib import contextmanager
 from tinygrad.helpers import DEV
 from tinygrad.runtime.support.system import FileIOInterface
@@ -83,6 +83,14 @@ class TrackedMemoryView:
   def __len__(self): return len(self.mv)
   def __repr__(self): return repr(self.mv)
 
+def _memoryview(cls, mem):
+  view = runtime.mmio_view(mem)
+  return view if view is not None else original_memoryview(mem)
+class _MockMemoryviewMeta(type):
+  def __instancecheck__(cls, instance): return isinstance(instance, (original_memoryview, TrackedMemoryView))
+if any(not isinstance(driver, QCOMDriver) for driver in drivers):
+  builtins.memoryview = _MockMemoryviewMeta("memoryview", (), {'__new__': _memoryview}) # type: ignore
+
 def _open(path, flags, owner=None):
   owner = runtime if owner is None else owner
   for d in owner.drivers:
@@ -110,7 +118,7 @@ class MockFileIOInterface(FileIOInterface):
       if fd in self._tracked_fds:
         self._tracked_fds[fd].close(fd)
         self._tracked_fds.pop(fd, None)
-    else:
+    elif fd is not None:
       os.close(fd)
 
   def __del__(self):
