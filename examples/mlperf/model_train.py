@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, MXFP8, MXFP4
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, clip_grads
@@ -1424,8 +1424,7 @@ def train_llama3():
   )
 
   for p in optim.params:
-    grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
-    p.grad = p.zeros_like(dtype=grad_dtype).contiguous()
+    p.grad = p.zeros_like().contiguous()
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
@@ -1439,28 +1438,7 @@ def train_llama3():
     print(f"loading optim checkpoint from {fn}")
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
-  fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
-  fp8_next_amax = [t for ts in model._fp8_next_amax.values() for t in ts]
-  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts]
-  fp8_next_grad_amax = [t for ts in model._fp8_next_grad_amax.values() for t in ts]
-  fp8_inv_scales = list(model._fp8_inv_scale.values()) + list(model._fp8_next_inv_scale.values())
-
-  from tinygrad.nn.state import get_state_dict
-  model_state = get_state_dict(model)
-  for wname in model._fp8_inv_scale:
-    w = model_state[wname]
-    w._inv_scale = model._fp8_inv_scale[wname]
-    w._next_inv_scale = model._fp8_next_inv_scale[wname]
-    if optim.master_params:
-      idx = next(j for j, p in enumerate(optim.params) if p is w)
-      master = optim.master_params[idx]
-      inv = w._inv_scale if w._inv_scale.device == master.device else w._inv_scale.to(master.device)
-      if MXFP8:
-        from extra.gemm.cdna_asm_gemm import _mx_block_scale
-        bs = _mx_block_scale(inv.reshape(-1, inv.shape[-1])).reshape(w.shape)
-        master.assign(Tensor.empty_like(master).assign(master * bs))
-      else:
-        master.assign(Tensor.empty_like(master).assign(master * inv.reshape(*inv.shape, *([1]*(w.ndim-inv.ndim)))))
+  fa_bwd_amax, next_fa_bwd_amax = model._fa_bwd_amax, model._next_fa_bwd_amax
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
@@ -1469,13 +1447,11 @@ def train_llama3():
   # Keep the optimizer's shared clip scale in stable storage across TinyJit captures. Upstream now mints storage for
   # pending contiguous values, so leaving this as a temporary makes it an internal BUFFER instead of a call PARAM.
   clip_coeff_buf = Tensor.empty(1, dtype=dtypes.float32, device=device).realize()
-  Tensor.realize(loss_acc, *optim.params, *fp8_inv_scales, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
-  mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
-  if mxfp4_weights is not None:
-    Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
+  Tensor.realize(loss_acc, *optim.params, *fa_bwd_amax, *next_fa_bwd_amax)
+  mxfp4_weights = model.create_mxfp4_weight_cache()
+  Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
 
   def minibatch_impl(tokens:Tensor, accumulate:bool):
-    model.reset_amax()
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
@@ -1490,7 +1466,7 @@ def train_llama3():
       apply_grad(g, new_g.uop, accumulate)
 
     loss_acc.assign(loss_acc + loss.flatten().float())
-    return loss_acc.realize(*grads, *fp8_amax, *fp8_next_amax, *fp8_grad_amax, *fp8_next_grad_amax)
+    return loss_acc.realize(*grads, *fa_bwd_amax, *next_fa_bwd_amax)
 
   @TinyJit
   def minibatches(tokens:list[Tensor]):
@@ -1503,12 +1479,12 @@ def train_llama3():
     scheduler.step()
 
     loss_cpu = loss_acc.to("CPU")
-    loss_reset = model.update_amax(reset=loss_acc)
-    updated_mxfp4 = model.update_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
+    loss_reset = model.update_fa_amax(reset=loss_acc)
+    updated_mxfp4 = model.update_mxfp4_weight_cache(mxfp4_weights)
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_reset, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax,
+    Tensor.realize(lr_cpu, grad_norm_cpu, loss_cpu, loss_reset, *fa_bwd_amax,
                    *updated_mxfp4)
 
     return lr_cpu, grad_norm_cpu, loss_cpu
@@ -1598,7 +1574,7 @@ def train_llama3():
 
       mem_gb = GlobalCounters.mem_used / 1e9
       gflops = GlobalCounters.global_ops / 1e9 / dev_time
-      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * (9.2e15 if MXFP4 else 4.6e15))) * 100
+      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * 9.2e15)) * 100
       tqdm.write(
           f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
           f"{lr:.12f} LR, {grad_norm:.6f} grad_norm, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
