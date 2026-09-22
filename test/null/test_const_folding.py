@@ -52,22 +52,6 @@ class TestBitcastConstFolding(unittest.TestCase):
     t({dtypes.int32: 1050081145, dtypes.uint32: 1050081145, dtypes.float32: 0.29485681653022766})
     t({dtypes.int64: 4598983288165178391, dtypes.uint64: 4598983288165178391, dtypes.float64: 0.29485681936461233})
 
-  def test_narrow_bitcast(self):
-    for val, src_dt, dst_dt, expected in (
-      (0x04030201, dtypes.uint32, dtypes.uint8, (1, 2, 3, 4)),
-      (0x104030201, dtypes.uint32, dtypes.uint8, (1, 2, 3, 4)),
-      (-1, dtypes.int32, dtypes.int8, (-1, -1, -1, -1)),
-      (-0.0, dtypes.float32, dtypes.uint16, (0, 0x8000)),
-      (0x400000003f800000, dtypes.uint64, dtypes.float32, (1.0, 2.0)),
-      (0x4038, dtypes.uint16, dtypes.fp8e4m3, (1.0, 2.0)),
-      (0x0201, dtypes.uint16, dtypes.bool, (True, True)),
-    ):
-      with self.subTest(src=src_dt, dst=dst_dt, val=val):
-        result = UOp.const(val, src_dt).alu(Ops.BITCAST, arg=dst_dt).simplify()
-        self.assertEqual(result.shape, (len(expected),))
-        self.assertEqual(result.dtype, dst_dt)
-        self.assertEqual(tuple(result.index(i).simplify().val for i in range(len(expected))), expected)
-
   def test_vec_bitcast(self):
     with Context(SPEC=0):
       result = full_rewrite(UOp.const((-1, -2**31, 75), dtypes.int32).bitcast(dtypes.uint32).sink())

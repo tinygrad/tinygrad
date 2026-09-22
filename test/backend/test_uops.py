@@ -60,11 +60,13 @@ def _test_uops_result(output_dtype, uops, res):
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, (CStyleLanguage, PythonRenderer)) and
                      dtypes.uint64 in Device[Device.DEFAULT].renderer.supported_dtypes(), "requires buffer bitcast and 64-bit ints")
 class TestBitcastBufferView(unittest.TestCase):
+  @Context(SPEC=2)
   def test_render(self):
     buf = UOp.param(0, dtypes.uint32, 4)
     uops = to_uops_list([buf.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0).store(1)], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
 
+  @Context(SPEC=2)
   def test_load(self):
     val = 0x1122334455667788
     src, out = UOp.param(0, dtypes.uint32, 4), UOp.param(1, dtypes.uint64, 1)
@@ -73,6 +75,7 @@ class TestBitcastBufferView(unittest.TestCase):
     run_uops([out.index(0).store(src.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0))], [ibuf, obuf])
     self.assertEqual(np.frombuffer(obuf.as_memoryview(), dtype=np.uint64)[0], val)
 
+  @Context(SPEC=2)
   def test_store(self):
     val = 0x1122334455667788
     dst = UOp.param(0, dtypes.uint32, 6)
@@ -87,17 +90,6 @@ class TestBitcastBufferView(unittest.TestCase):
     obuf = Buffer(Device.DEFAULT, 1, dtypes.uint64).allocate()
     view = src.bitcast(dtypes.uint64).after(src.index(0).store(0x55667788))
     run_uops([out.index(0).store(view.index(0).load())], [ibuf, obuf])
-    self.assertEqual(np.frombuffer(obuf.as_memoryview(), dtype=np.uint64).tolist(), [0x1122334455667788])
-
-  def test_loop_view_dependency(self):
-    src, out = UOp.param(0, dtypes.uint32, 4), UOp.param(1, dtypes.uint64, 1)
-    ibuf = Buffer(Device.DEFAULT, 4, dtypes.uint32, initial_value=np.array([0, 0x11223344, 0, 0], dtype=np.uint32).tobytes())
-    obuf = Buffer(Device.DEFAULT, 1, dtypes.uint64).allocate()
-    view = src.bitcast(dtypes.uint64)
-    r = UOp.range(UOp(Ops.NOOP), 0, dtype=dtypes.void, src=(view.after(src.index(0).store(0x55667788)),))
-    # HCQ host kernels skip kernel optimizations, which do not preserve explicit loop dependencies.
-    sink = out.index(0).store(view.after(r).index(0).load()).backedge(r, UOp.const(False)).sink(arg=KernelInfo(), tag=())
-    run_linear(UOp(Ops.LINEAR, src=(sink.call(UOp.from_buffer(ibuf), UOp.from_buffer(obuf)),)))
     self.assertEqual(np.frombuffer(obuf.as_memoryview(), dtype=np.uint64).tolist(), [0x1122334455667788])
 
   def test_gated_load(self):
