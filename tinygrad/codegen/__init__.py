@@ -26,7 +26,7 @@ from tinygrad.schedule.prepare import pm_mops, expand_bitcast
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, flatten, argsort, partition, strides_for_shape
+from tinygrad.helpers import all_same, all_int, flatten, argsort, partition, prod, strides_for_shape
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -141,23 +141,24 @@ ew_devectorizer = PatternMatcher([
   (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
 ])
 
-def lower_bitcast_index(b:UOp, idx:UOp) -> UOp|None:
-  if idx.shape or b.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.ALU): return None
-  x, inds = b.src[0], idx.src[1:]
-  if x.dtype.itemsize < b.dtype.itemsize:
-    span = UOp.stack(*(x.index(*inds, i) for i in range(b.dtype.itemsize//x.dtype.itemsize))) if b.addrspace is AddrSpace.ALU else x.index(*inds)
-    return span.alu(Ops.BITCAST, arg=b.dtype)
-  return x.index(*inds[:-1]).alu(Ops.BITCAST, arg=b.dtype).index(inds[-1]) if x.shape and x.dtype.itemsize > b.dtype.itemsize else None
+def lower_index(idx:UOp) -> UOp|None:
+  # Materialize unindexed axes: values become scalar selections, contiguous storage becomes a span.
+  if not idx.shape or len(idx.src) == 1 or not all(i.shape == () and not i.is_invalid for i in idx.src[1:]): return None
+  x, inds = idx.src[0], idx.src[1:]
+  if idx.addrspace is AddrSpace.ALU and all_int(idx.shape) and 0 not in idx.shape:
+    return UOp.stack(*(x.index(*inds, *coords) for coords in itertools.product(*(range(s) for s in idx.shape)))).reshape(idx.shape)
+  if idx.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) and x.op is Ops.RESHAPE and len(x.src[0].shape) == 1:
+    offset = sum((i.cast(dtypes.weakint)*s for i,s in zip(inds, strides_for_shape(x.shape))), UOp.const(0))
+    return UOp(Ops.SHRINK, src=(x.src[0], offset, UOp.const(prod(idx.shape)))).reshape(idx.shape)
+  return None
 
-devectorizer2 = PatternMatcher([
-  # selecting a row of reshaped storage is a contiguous span
-  (UPat(Ops.RESHAPE, name="r").f(Ops.INDEX, name="idx", allow_any_len=True), lambda r,idx:
-   UOp(Ops.SHRINK, src=(r.src[0], sum((i.cast(dtypes.weakint)*s for i,s in zip(idx.src[1:], strides_for_shape(r.shape))), UOp.const(0)),
-                       UOp.const(idx.shape[0]))) if len(r.src[0].shape) == len(idx.shape) == 1 and len(idx.src) == len(r.shape)
-   and r.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) and not any(i.is_invalid for i in idx.src[1:]) else None),
-])+mop_cleanup+pm_mops+PatternMatcher([
-  # resolve the element's packed span before discarding the bitcast's shape
-  (UPat(Ops.BITCAST, name="b").f(Ops.INDEX, name="idx", allow_any_len=True), lower_bitcast_index),
+devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
+  # Widening consumes a row; narrowing adds a lane axis. Row lowering is independent of BITCAST.
+  (UPat(Ops.BITCAST, src=(UPat(name="x"),), name="b").f(Ops.INDEX, name="idx", allow_any_len=True), lambda x,b,idx:
+   b.replace(src=(x.index(*idx.src[1:]),)) if not idx.shape and x.dtype.itemsize < b.dtype.itemsize else None),
+  (UPat(Ops.BITCAST, src=(UPat(name="x"),), name="b").f(Ops.INDEX, name="idx", allow_any_len=True), lambda x,b,idx:
+   b.replace(src=(x.index(*idx.src[1:-1]),)).index(idx.src[-1]) if not idx.shape and x.shape and x.dtype.itemsize > b.dtype.itemsize else None),
+  (UPat(Ops.INDEX, name="idx", allow_any_len=True), lower_index),
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)

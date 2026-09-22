@@ -161,6 +161,29 @@ class TestBitcastValues(unittest.TestCase):
           run_uops([dest.store(val)], bufs)
           self.assertEqual(bytes(bufs[1].as_memoryview()), data)
 
+class TestPartialIndex(unittest.TestCase):
+  @Context(SPEC=2)
+  def test_value_row(self):
+    src, dst = UOp.param(0, dtypes.uint32, 32), UOp.param(1, dtypes.uint32, 8)
+    values = src.index(UOp.const(tuple(range(32)))).load().reshape((4, 2, 4)).index(2)
+    ibuf = Buffer(Device.DEFAULT, 32, dtypes.uint32, initial_value=np.arange(32, dtype=np.uint32).tobytes())
+    obuf = Buffer(Device.DEFAULT, 8, dtypes.uint32).allocate()
+    run_uops([dst.reshape((2, 4)).store(values + 1)], [ibuf, obuf])
+    self.assertEqual(np.frombuffer(obuf.as_memoryview(), dtype=np.uint32).tolist(), list(range(17, 25)))
+
+  @Context(SPEC=2)
+  def test_storage_row(self):
+    for gated in (False, True):
+      with self.subTest(gated=gated):
+        src, dst = UOp.param(0, dtypes.uint32, 32), UOp.param(1, dtypes.uint32, 16)
+        r = UOp.range(4, 0, AxisType.LOOP)
+        row = src.reshape((4, 2, 4)).index(r.valid(r < 3) if gated else r, 1).load()
+        ibuf = Buffer(Device.DEFAULT, 32, dtypes.uint32, initial_value=np.arange(32, dtype=np.uint32).tobytes())
+        obuf = Buffer(Device.DEFAULT, 16, dtypes.uint32).allocate()
+        run_uops([dst.reshape((4, 4)).index(r).store(row + 1).end(r)], [ibuf, obuf])
+        expected = [i*8+j+5 if not gated or i < 3 else 1 for i in range(4) for j in range(4)]
+        self.assertEqual(np.frombuffer(obuf.as_memoryview(), dtype=np.uint32).tolist(), expected)
+
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
     assert isinstance(v2, (float, int, bool))
