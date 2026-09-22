@@ -225,6 +225,13 @@ class recursive_property(property):
     for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
 
+class _UOpTuple(tuple):
+  # UOps are hash-consed, so structurally identical UOps are the same object and equality can be identity.
+  # This keeps tuple < from rescanning deep equal prefixes with O(n) value equality at every level of the walk.
+  __hash__ = tuple.__hash__
+  def __eq__(self, other): return self is other
+  def __ne__(self, other): return self is not other
+
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin.rand import RandMixin
 
@@ -312,9 +319,9 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return cache[self]
 
   @functools.cached_property
-  def tuplize(self:UOp) -> tuple:
+  def tuplize(self) -> _UOpTuple:
     # arg goes through repr: args of different types (None, str, tuple) must stay mutually comparable for the sort
-    return (self.op.value, repr(self.arg), self.dtype,)+tuple([x.tuplize for x in self.src])
+    return _UOpTuple((self.op.value, repr(self.arg), self.dtype,)+tuple([x.tuplize for x in self.src]))
 
   # *** uop shape stuff ***
 
