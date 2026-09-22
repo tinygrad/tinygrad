@@ -201,7 +201,6 @@ spec_program = PatternMatcher([
                         UPat(), UPat.cvar().or_casted())), lambda: True),
 
   (UPat(Ops.RESHAPE, name="x"), lambda x: x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)),
-  (UPat(Ops.BITCAST, src=(UPat(Ops.RESHAPE),), name="x"), lambda x: len(x.shape) == 1),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),

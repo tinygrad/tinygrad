@@ -93,15 +93,6 @@ class TestBitcastRenderer(unittest.TestCase):
     self.assertIn("unsigned int val0", code)
     self.assertNotIn("unsigned_char8", code)
 
-  def test_bitcast_reshape_spec_rank(self):
-    self.assertIs(spec_program.rewrite(self.bitcast), True)
-    scalar = bitcast(self.reshape.reshape((8,)), dtypes.uint64)
-    matrix = bitcast(self.x.reshape((1, 2, 4)), dtypes.uint32)
-    for x in (scalar, matrix):
-      with self.subTest(shape=x.shape):
-        self.assertIs(x.src[0].op, Ops.RESHAPE)
-        self.assertIs(spec_program.rewrite(x), False)
-
   def test_shrink_bitcast_reshape(self):
     offset, size = UOp.const(0, dtypes.int32), UOp.const(1, dtypes.int32)
     shrink = UOp(Ops.SHRINK, src=(self.bitcast, offset, size))
