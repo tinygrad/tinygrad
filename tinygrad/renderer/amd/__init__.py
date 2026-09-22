@@ -2,6 +2,8 @@
 from __future__ import annotations
 from tinygrad.renderer.amd.dsl import Inst, FixedBitField, EnumBitField
 
+class InstDecodeError(ValueError): pass
+
 # SDWA/DPP variant detection: src0 field (bits 0-8) encodes the variant
 # 0xf9 (249) = SDWA, 0xfa (250) = DPP16 for CDNA (GFX9)
 _VARIANT_SRC0 = {"_SDWA_SDST": 0xf9, "_SDWA": 0xf9, "_DPP16": 0xfa}
@@ -68,7 +70,7 @@ def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   assert len(data) >= 4, f"need at least 4 bytes, got {len(data)}"
   for cls in _load_formats()[arch]:
     if _matches(data, cls): return cls
-  raise ValueError(f"unknown {arch} format word={int.from_bytes(data[:4], 'little'):#010x}")
+  raise InstDecodeError(f"unknown {arch} format word={int.from_bytes(data[:4], 'little'):#010x}")
 
 def decode_inst(data: bytes, arch: str = "rdna3") -> Inst:
   """Decode machine code bytes into an instruction."""
