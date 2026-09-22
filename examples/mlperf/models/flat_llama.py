@@ -91,7 +91,6 @@ class FlatTransformer:
     if w is None:
       if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
       else: w = Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std)
-    # FP4 is produced dynamically so optimizer updates always start from the current BF16 weight.
     return w.cast(dtypes.bfloat16)
 
   def attention(self, x:Tensor, freqs_cis:Tensor, *, attention_norm:Tensor, wqkv:Tensor, wo:Tensor, mxfp4_wqkv=None, mxfp4_wo=None):
