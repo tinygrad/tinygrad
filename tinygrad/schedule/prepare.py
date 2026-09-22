@@ -155,11 +155,10 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   if (ns:=bc.dtype.itemsize) == (os:=x.dtype.itemsize) or (isinstance(x.device, str) and x.device.startswith("DISK")): return None
   new_uint, tmp = to_dtype(f"uint{8*ns}"), x.bitcast(to_dtype(f"uint{8*os}"))
   if ns > os:
-    tmp = tmp.reshape(x.shape[:-1] + (x.shape[-1]//(rate := ns//os), rate))
-    parts = [tmp.shrink((None,)*(len(tmp.shape)-1) + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(rate)]
-    return parts[0].usum(*parts[1:]).squeeze(-1).bitcast(bc.dtype)
+    parts = [tmp[..., i].cast(new_uint)<<8*i*os for i in range(ns//os)]
+    return parts[0].usum(*parts[1:]).bitcast(bc.dtype)
   parts = [tmp>>8*i*ns for i in range(os//ns)]
-  return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
+  return parts[0].stack(*parts[1:], dim=-1).cast(new_uint).bitcast(bc.dtype)
 
 def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
@@ -248,7 +247,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # move bitcast from store dest to source: TestAssign.test_assign_bitcast
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src"))),
-   lambda target, src: target.store(src.bitcast(target.dtype))),
+   lambda target, src: target.store(src.alu(Ops.BITCAST, arg=target.dtype))),
 
   (UPat(Ops.BITCAST, name="bc"), expand_bitcast),
 

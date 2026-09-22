@@ -50,7 +50,14 @@ class DTypeMixin:
     """
     dt = to_dtype(dtype)
     if self.dtype in dtypes.weaks or dt in dtypes.weaks: raise RuntimeError(f"bitcast requires concrete dtypes, got {self.dtype} -> {dt}")
-    return self if self.dtype == dt else self._wrap_uop(self._uop.alu(Ops.BITCAST, arg=dt))
+    if self.dtype == dt: return self
+    x = self._uop
+    ns, os = dt.itemsize, self.dtype.itemsize
+    if ns == os: return self._wrap_uop(x.alu(Ops.BITCAST, arg=dt))
+    if not x.shape or (isinstance(x.shape[-1], int) and x.shape[-1]*os % ns): raise RuntimeError("unsupported size in bitcast")
+    shape = x.shape[:-1] + (x.shape[-1]*os//ns,)
+    if ns > os: x = x.reshape(shape + (ns//os,))
+    return self._wrap_uop(x.alu(Ops.BITCAST, arg=dt).reshape(shape))
 
   def element_size(self) -> int:
     """
