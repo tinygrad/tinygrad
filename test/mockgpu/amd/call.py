@@ -3,7 +3,6 @@ from tinygrad.codegen import to_program
 from tinygrad.device import Buffer, Device
 from tinygrad.dtype import dtypes
 from tinygrad.engine.realize import get_runtime
-from tinygrad.helpers import Context
 from tinygrad.renderer.amd import InstDecodeError, decode_inst
 from tinygrad.uop.ops import KernelInfo, Ops, UOp
 from test.mockgpu.amd.emu import _Ctx, _INST_HANDLERS, _MXCSRContext, _init_wave, _op_name, _wave_size
@@ -25,9 +24,8 @@ def run_asm(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int,
     calls.append(body.call(ctx.sgpr, ctx.vgpr, ctx.vmem, ctx.lds, ctx.scratch, ctx.accvgpr, name=f"{_op_name(inst).lower()}_{offset:x}"))
     offset += inst.size()
   sink = UOp.sink(UOp(Ops.LINEAR, src=tuple(calls)), arg=KernelInfo(name="asm_call")).rtag(1)
-  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
-    prg = to_program(sink, Device["CPU"].renderer)
-    runtime = get_runtime("CPU", prg)
+  prg = to_program(sink, Device["CPU"].renderer)
+  runtime = get_runtime("CPU", prg)
   wave_size, total_threads = _wave_size(arch), lx * ly * lz
   lds_size = ((rsrc2 >> 15) & 0x1ff) * 512
   lds = Buffer("CPU", max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
