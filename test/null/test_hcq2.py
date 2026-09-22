@@ -4,7 +4,7 @@ from tinygrad import Device, Tensor, TinyJit, dtypes
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context, dedup, partition, unwrap
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, AxisType
 from tinygrad.engine.realize import compile_linear, link_linear, lower_and_compile, run_linear
 from tinygrad.codegen import do_to_program
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -213,6 +213,15 @@ class TestHCQ2FFI(unittest.TestCase):
       out = cpu_buf(dtype=dtypes.int32, slot=1, volatile=True, tag="ffi_result")
       bufs = self._run(out.index(0).store(hcq2.ccall(libc.dll.ffs, 0x10)))
     self.assertEqual(next(b for b in bufs if b.dtype is dtypes.int).host.view(fmt='i')[0], 5)
+
+  def test_ffi_void_call_in_loop(self):
+    with Context(HCQ_RUNTIME_DEV="CPU"):
+      out = cpu_buf(4, tag="ffi_loop_result")
+      r = UOp.range(4, 0, AxisType.LOOP, dtype=dtypes.int)
+      call = hcq2.ccall(libc.memset, out.index(r), r+1, UOp.const(1, dtypes.uint64), ret_dtype=dtypes.void)
+      self.assertEqual(call.dtype, dtypes.void)
+      bufs = self._run(call.end(r))
+    self.assertEqual(bytes(next(b for b in bufs if b.dtype is dtypes.uint8 and b.size == 4).host.view(fmt='B')), bytes((1, 2, 3, 4)))
 
   def test_ffi_cstruct(self):
     struct_t = init_c_struct_t(16, (("u8", ctypes.c_uint8, 0), ("u16", ctypes.c_uint16, 2),
