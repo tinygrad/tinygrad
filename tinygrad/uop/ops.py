@@ -10,7 +10,7 @@ from tinygrad.device import Buffer, MultiBuffer, canonicalize_device, is_disk_de
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
 from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, get_shape, fully_flatten, to_tuple
-from tinygrad.helpers import colored, ansilen, printable, Target, is_image_shape
+from tinygrad.helpers import colored, ansilen, printable, Target, is_image_shape, strides_for_shape
 if TYPE_CHECKING:
   from tinygrad.renderer import Estimates
 
@@ -1865,12 +1865,16 @@ def do_unbind(ctx:dict[Variable, int], x:UOp):
   return v
 pm_unbind = PatternMatcher([(UPat(Ops.AFTER, name="x"), lambda ctx,x: do_unbind(ctx,x) if x.is_bound_var else None)])
 
+def contiguous_bitcast_index(ctx:UOp, b:UOp, idx:UOp):
+  if len(idx.src)-1 != len(b.shape): return None
+  offset = (sum(i*s for i,s in zip(idx.src[1:], strides_for_shape(b.shape))) - UOp.range(ctx.numel(), 0)).ssimplify()
+  osz, isz = b.element_size(), b.src[0].element_size()
+  if not isinstance(offset, int) or (offset*osz) % isz or (ctx.numel()*osz) % isz: return None
+  return b.src[0].flatten().index(UOp.range(ctx.numel()*osz//isz, 0) + offset*osz//isz)
+
 # ctx is source UOp for which we are finding a contiguous view for. used in contiguous_view_offset
 pm_contiguous_view_offset = PatternMatcher([
-  # normalize to 1d bitcasts
-  (UPat(Ops.BITCAST, name="b"), lambda b: b.src[0].flatten().bitcast(b.dtype).reshape(b.shape) if len(b.shape) != 1 else None),
-  (UPat(Ops.BITCAST, name="b").index(UPat.cvar("c")), lambda ctx, b, c:
-   b.src[0].flatten().index(UOp.range(ctx.numel() * (osz:=b.element_size())//(isz:=b.src[0].element_size()), 0) + (c * osz//isz)) if b.tag else None),
+  (UPat(Ops.BITCAST, name="b").f(Ops.INDEX, name="idx", allow_any_len=True), contiguous_bitcast_index),
   (UPat(Ops.INDEX, src=(UPat.var("b"),)), lambda b: b.rtag().index(0)),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat(Ops.RANGE))), lambda b: b.rtag().index(0)),
   (UPat(Ops.INDEX, src=(UPat.var("b"), UPat(Ops.RANGE)+UPat.cvar('c'))), lambda ctx, b, c: b.rtag().index(c)),
