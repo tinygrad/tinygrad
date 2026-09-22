@@ -17,6 +17,7 @@ export USE_ATOMICS=1
 export ASM_GEMM=1
 export WQKV=1
 export MASTER_WEIGHTS=1
+export MXFP4=1
 export ALLREDUCE_CAST=1
 export FAST_CE=1
 export FUSED_SILU_W13=1

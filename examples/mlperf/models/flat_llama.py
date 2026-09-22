@@ -21,6 +21,7 @@ from extra.thunder.amd.fa import FP8_FA
 ASM_GEMM = getenv("ASM_GEMM", 0)
 FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
 SPLIT_W13 = getenv("SPLIT_W13", 0)
+MXFP4 = getenv("MXFP4", 0)
 
 def _update_fa_amax_and_reset_loss(loss:UOp, *states:UOp):
   count = len(states)//2
@@ -28,31 +29,39 @@ def _update_fa_amax_and_reset_loss(loss:UOp, *states:UOp):
   stores.extend(states[i][j].store(states[count+i][j]) for i in range(count) for j in range(2))
   return UOp.group(*stores).sink(arg=KernelInfo("update_fa_amax_and_reset_loss"))
 
-def matmul(x:Tensor, w:Tensor, mxfp4:bool=True, mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
+def matmul(x:Tensor, w:Tensor, mxfp4:bool=bool(MXFP4), mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
            x_prequant_mxfp4:tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]|None=None,
            save_original_input:bool=False, save_mxfp4_input:bool=False) -> tuple[Tensor,...]:
   if mxfp4 or ASM_GEMM:
     from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm
     if can_use_asm_gemm(x, w.T):
       ret = asm_gemm(x, w.T, mxfp4=mxfp4, mxfp4_w=mxfp4_w, mxfp4_x=x_prequant_mxfp4, save_original_input=save_original_input,
-                     return_mxfp4_saves=save_mxfp4_input)
+                     return_mxfp4_saves=save_mxfp4_input and mxfp4)
       return ret if isinstance(ret, tuple) else (ret,)
   return (x @ w.T,)
 
 def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, eps:float, mxfp4_w=None):
+  if not MXFP4:
+    normed, rrms = rmsnorm(x, eps)
+    out, *ret = matmul(normed * norm, w)
+    return out, normed, rrms, [normed, *ret]
   from extra.llama_kernels.rmsnorm import rmsnorm_mul_mxfp4
   normed, rrms, normed_mxfp4 = rmsnorm_mul_mxfp4(x, norm, eps, quantized_only=True)
   out, *ret = matmul(normed, w, mxfp4_w=mxfp4_w, x_prequant_mxfp4=normed_mxfp4, save_mxfp4_input=True)
   return out, normed, rrms, ret
 
 def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, eps:float, mxfp4_w=None):
+  if not MXFP4:
+    h = x + residual
+    out, normed, rrms, ret = norm_quantize_matmul(h, norm, w, eps)
+    return out, h, normed, rrms, ret
   from extra.llama_kernels.rmsnorm import rmsnorm_add_mul_mxfp4
   normed, h, rrms, normed_mxfp4 = rmsnorm_add_mul_mxfp4(x, residual, norm, eps, quantized_only=True)
   out, *ret = matmul(normed, w, mxfp4_w=mxfp4_w, x_prequant_mxfp4=normed_mxfp4, save_mxfp4_input=True)
   return out, h, normed, rrms, ret
 
 def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, mxfp4_w=None):
-  if FUSED_SILU_W13:
+  if FUSED_SILU_W13 and MXFP4:
     from extra.llama_kernels.swiglu import swiglu_mxfp4
     x2, x2_mxfp4 = swiglu_mxfp4(x_w13)
     out, *ret = matmul(x2, w2, mxfp4_w=mxfp4_w, x_prequant_mxfp4=x2_mxfp4, save_mxfp4_input=True)
@@ -105,7 +114,6 @@ class FlatTransformer:
     if w is None:
       if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
       else: w = Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std)
-    # FP4 is produced dynamically so optimizer updates always start from the current BF16 weight.
     return w.cast(dtypes.bfloat16)
 
   def attention(self, x:Tensor, freqs_cis:Tensor, *, attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
@@ -125,7 +133,7 @@ class FlatTransformer:
       from extra.thunder.amd.fa import flash_attention, fused_qkv_rope
       fp8_fa = bool(FP8_FA)
       xq, xk, xv, *fp8_qk = fused_qkv_rope(xqkv, freqs_cis, self.n_heads, self.n_kv_heads, self.head_dim,
-                                           prequantize_grad_mxfp4=True, prequantize_fp8=fp8_fa,
+                                           prequantize_grad_mxfp4=bool(MXFP4), prequantize_fp8=fp8_fa,
                                            write_bf16_qk=not fp8_fa)
       attn, *save = flash_attention(xq, xk, xv, is_causal=True, write_flat=True, save_fp8=True,
                                     q_fp8=fp8_qk[0] if fp8_fa else None, k_fp8=fp8_qk[1] if fp8_fa else None,
@@ -233,6 +241,7 @@ class FlatTransformer:
         for i in range(len(states)): states[i] = states[i].to(device).contiguous().is_param_(False)
 
   def create_mxfp4_weight_cache(self) -> dict[str, list[tuple[Tensor, Tensor, Tensor, Tensor]]]:
+    assert MXFP4
     from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
     from examples.mlperf.optim import register_mxfp4_weight_cache
     names = ("wqkv", "wo", "w1", "w3", "w2") if SPLIT_W13 else ("wqkv", "wo", "w13", "w2")

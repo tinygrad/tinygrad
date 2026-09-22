@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, MXFP4
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW, GradAccClipAdamWGroup, clip_grads
@@ -1448,8 +1448,8 @@ def train_llama3():
   # pending contiguous values, so leaving this as a temporary makes it an internal BUFFER instead of a call PARAM.
   clip_coeff_buf = Tensor.empty(1, dtype=dtypes.float32, device=device).realize()
   Tensor.realize(loss_acc, *optim.params, *fa_bwd_amax, *next_fa_bwd_amax)
-  mxfp4_weights = model.create_mxfp4_weight_cache()
-  Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
+  mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
+  if mxfp4_weights is not None: Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
 
   def minibatch_impl(tokens:Tensor, accumulate:bool):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
@@ -1480,7 +1480,7 @@ def train_llama3():
 
     loss_cpu = loss_acc.to("CPU")
     loss_reset = model.update_fa_amax(reset=loss_acc)
-    updated_mxfp4 = model.update_mxfp4_weight_cache(mxfp4_weights)
+    updated_mxfp4 = model.update_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
@@ -1574,7 +1574,7 @@ def train_llama3():
 
       mem_gb = GlobalCounters.mem_used / 1e9
       gflops = GlobalCounters.global_ops / 1e9 / dev_time
-      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * 9.2e15)) * 100
+      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * (9.2e15 if MXFP4 else 4.6e15))) * 100
       tqdm.write(
           f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
           f"{lr:.12f} LR, {grad_norm:.6f} grad_norm, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
