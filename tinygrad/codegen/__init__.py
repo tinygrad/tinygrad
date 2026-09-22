@@ -1,4 +1,4 @@
-from dataclasses import replace, dataclass
+from dataclasses import replace
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
@@ -178,10 +178,6 @@ def fix_group_for_reduce(x:UOp):
   # NOTE: we remove all horizontal reduces here, they remain in the first reduce
   return buf.reduce(*reduce_loop, arg=(x.arg[0], 0))
 
-@dataclass
-class ReduceContext:
-  acc_num: int = 0
-
 def merge_reduce_ends(sink:UOp):
   # merge ENDs that share the same range and nesting context (only those created by reduce_to_acc)
   # ENDs at different nesting depths get cloned RANGEs so each RANGE maps to one END
@@ -202,9 +198,8 @@ def merge_reduce_ends(sink:UOp):
       for e in group: subs[e] = merged
   return sink.substitute(subs) if subs else None
 
-def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
-  acc = UOp.placeholder_like(r, ctx.acc_num, AddrSpace.REG)
-  ctx.acc_num += 1
+def reduce_ranges_to_acc(ctx:itertools.count, r:UOp):
+  acc = UOp.placeholder_like(r, next(ctx), AddrSpace.REG)
   input_ranges = tuple(x for x in r.src[0].ranges if x not in r.src[1:])
   acc_init = acc.after(*input_ranges).store(UOp.const(identity_element(r.arg[0], r.dtype)))
   acc_initted = acc.after(acc_init, *r.src[1:])
@@ -316,11 +311,13 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # expand
   sink = graph_rewrite(sink, expander, ctx=build_range_map(sink), name="expander")
 
+  slots = itertools.count(max([u.arg.slot+1 for u in sink.toposort() if u.op is Ops.BUFFER], default=0))
+
   # remove reduce
-  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove reduces")
+  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=slots, name="remove reduces")
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
+  sink = graph_rewrite(sink, pm_add_local_buffers, ctx=slots, name="add local buffers")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
