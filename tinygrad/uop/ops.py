@@ -225,6 +225,19 @@ class recursive_property(property):
     for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
 
+def _compare_uops(a:UOp, b:UOp) -> int:
+  if a is b: return 0
+  if a._sort_head != b._sort_head: return -1 if a._sort_head < b._sort_head else 1
+  if (ret:=a._sort_cmp.get(b)) is not None: return ret
+  ret = (len(a.src) > len(b.src)) - (len(a.src) < len(b.src))
+  for x,y in zip(a.src, b.src):
+    if (cmp:=_compare_uops(x, y)):
+      ret = cmp
+      break
+  a._sort_cmp[b] = ret
+  return ret
+_uop_sort_key = functools.cmp_to_key(_compare_uops)
+
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin.rand import RandMixin
 
@@ -312,9 +325,14 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     return cache[self]
 
   @functools.cached_property
-  def tuplize(self:UOp) -> tuple:
-    # arg goes through repr: args of different types (None, str, tuple) must stay mutually comparable for the sort
-    return (self.op.value, repr(self.arg), self.dtype,)+tuple([x.tuplize for x in self.src])
+  def _sort_head(self) -> tuple[int, str, DType]:
+    # repr keeps args of different types mutually comparable.
+    return (self.op.value, repr(self.arg), self.dtype)
+  @functools.cached_property
+  def _sort_cmp(self) -> weakref.WeakKeyDictionary[UOp, int]: return weakref.WeakKeyDictionary()
+  # Don't cache the wrapper: it holds self and would create a reference cycle.
+  @property
+  def sort_key(self) -> tuple: return self._sort_head + (_uop_sort_key(self),)
 
   # *** uop shape stuff ***
 

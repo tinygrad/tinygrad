@@ -276,7 +276,7 @@ SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
 CHECK_OOB = ContextVar("CHECK_OOB", 0)
 DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
-# set to 1, this uses tuplize in the linearizer sort order
+# set to 1, this uses structural keys in the linearizer sort order
 TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 # set to 0 to disable the compiler cache
 CCACHE = ContextVar("CCACHE", 1)

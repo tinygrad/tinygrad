@@ -1,4 +1,4 @@
-import unittest, pytest
+import unittest, pytest, functools, weakref
 from tinygrad import dtypes, Variable, Device
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes, KernelInfo
@@ -12,6 +12,35 @@ simple_pm = PatternMatcher([
   (UPat.cvar('x') * UPat.cvar('y') * UPat.cvar('z'), lambda x,y,z: UOp.const(x.val*y.val*z.val)),
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.val+c2.val)),
 ])
+
+class TestSortKey(unittest.TestCase):
+  def test_matches_tuple_order(self):
+    @functools.cache
+    def reference(u): return (u.op.value, repr(u.arg), u.dtype) + tuple(reference(s) for s in u.src)
+    nodes = [UOp.const(v) for v in (-1, 0, 1, 2, 1.0, True, False)]
+    nodes += [UOp(Ops.ADD, src=(a, b)) for a in nodes for b in nodes]
+    nodes += [UOp.sink(*nodes[:n]) for n in (0, 1, 2, 3)]
+    nodes += [u.rtag("different identity") for u in nodes]
+    self.assertEqual(sorted(nodes, key=lambda u: u.sort_key), sorted(nodes, key=reference))
+    for a,b in zip(nodes, reversed(nodes)):
+      self.assertEqual(a.sort_key == b.sort_key, reference(a) == reference(b))
+      self.assertEqual(a.sort_key < b.sort_key, reference(a) < reference(b))
+
+  def test_shared_subgraphs(self):
+    a, b = UOp.const(1).rtag("left"), UOp.const(1).rtag("right")
+    for _ in range(256):
+      a, b = [UOp(Ops.ADD, src=(u, u)) for u in (a, b)]
+    self.assertEqual(a.sort_key, b.sort_key)
+    self.assertFalse(a.sort_key < b.sort_key)
+
+  def test_does_not_retain_uops(self):
+    a, b = [UOp(Ops.ADD, src=(UOp.const(v), UOp.const(1)), tag=object()) for v in (1, 2)]
+    refs = weakref.ref(a), weakref.ref(b)
+    self.assertLess(a.sort_key, b.sort_key)
+    del b
+    self.assertIsNone(refs[1]())
+    del a
+    self.assertIsNone(refs[0]())
 
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):

@@ -222,7 +222,8 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.weakint, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative, dtype=dtypes.weakint, name='x'),
+   lambda x: x.replace(src=x.src[::-1]) if x.src[1].sort_key < x.src[0].sort_key else None),
 ])
 
 def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
