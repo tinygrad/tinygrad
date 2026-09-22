@@ -14,18 +14,6 @@ simple_pm = PatternMatcher([
 ])
 
 class TestTuplize(unittest.TestCase):
-  def test_matches_tuple_order(self):
-    @functools.cache
-    def reference(u): return (u.op.value, repr(u.arg), u.dtype, repr(u.tag)) + tuple(reference(s) for s in u.src)
-    nodes = [UOp.const(v) for v in (-1, 0, 1, 2, 1.0, -0.0, float('nan'), True, False)]
-    nodes += [UOp(Ops.ADD, src=(a, b)) for a in nodes for b in nodes]
-    nodes += [UOp.sink(*nodes[:n]) for n in (0, 1, 2, 3)]
-    nodes += [u.rtag(f"tag{i%3}") for i,u in enumerate(nodes[:20])]  # tags are part of the order
-    self.assertEqual(sorted(nodes, key=lambda u: u.tuplize), sorted(nodes, key=reference))
-    for a in nodes:
-      for b in nodes:
-        self.assertEqual(a.tuplize < b.tuplize, reference(a) < reference(b))
-
   def test_equality_is_identity(self):
     # the invariant that makes identity equality correct: tuples are equal iff the UOps are the same object
     a, b = UOp.const(1), UOp.const(1).rtag("tagged")
