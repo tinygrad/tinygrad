@@ -196,9 +196,11 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite, depth:int|None=None,
            "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr), "_sink":new_sink}
     if not ctx.bottom_up: next_sink = new_sink
 
-def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, depth:int|None=None) -> UOp|None:
-  for s in get_full_rewrite(viz_data, ctx:=viz_data.trace.rewrites[kernel_idx][lin_idx], depth=depth):
-    if (s["upat"] is not None and any(n in s["upat"][1] for n in upats)) or len(ctx.matches) == 0: return s["_sink"]
+def get_sink_at(upats:tuple[str, ...], viz_data:VizData, kernel_idx:int, lin_idx:int, depth:int|None=None, alt:str=None) -> UOp|None:
+  for i in range(lin_idx+1, len(rewrites:=viz_data.trace.rewrites[kernel_idx])):
+    if (r:=rewrites[i]).name == alt: return _reconstruct(viz_data, r.sink, depth=depth)
+  for s in get_full_rewrite(viz_data, ctx:=rewrites[lin_idx], depth=depth):
+    if (s["upat"] is not None and any(n in s["upat"][1] for n in upats)): return s["_sink"]
   return None
 
 # encoder helpers
@@ -641,15 +643,15 @@ def get_render(viz_data:VizData, query:str, **kwargs) -> dict:
   data = viz_data.ctxs[i]["steps"][j]["_data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j], **kwargs), "content_type":"text/event-stream"}
   if fmt == "uops":
-    if (sink:=get_sink_at(("do_linearize",), viz_data, i, data)) is None: return {"src":"No linear found"}
+    if (sink:=get_sink_at(("do_linearize",), viz_data, i, data, alt="View Program")) is None: return {"src":"No linear found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":get_stdout(lambda: print_uops(list(unwrap(sink).src[1].src)))}
   if fmt == "code":
-    if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1)) is None: return {"src":"No source found"}
+    if (sink:=get_sink_at(("do_render",), viz_data, i, data, depth=1, alt="View Program")) is None: return {"src":"No source found"}
     return {"src":sink.arg} if sink.op is Ops.REWRITE_ERROR else {"src":sink.src[2].arg, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}
     renderer, idx = data
-    if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, i, idx, depth=1)) is None: return {"src":"No binary found"}
+    if (sink:=get_sink_at(("do_compile","do_assemble"), viz_data, i, idx, depth=1, alt="View Program")) is None: return {"src":"No binary found"}
     if sink.op is Ops.REWRITE_ERROR: return {"src":sink.arg}
     lib:bytes = sink.src[3].arg
     if renderer.target.arch.startswith("gfx"):
