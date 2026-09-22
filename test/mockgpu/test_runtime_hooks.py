@@ -1,6 +1,21 @@
 import os, subprocess, sys, textwrap, unittest
 
 class TestRuntimeHooks(unittest.TestCase):
+  def test_virtual_binary_read(self):
+    source_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    result = subprocess.run([sys.executable, '-c', textwrap.dedent('''
+      from tinygrad.runtime.support.system import FileIOInterface
+      from test.mockgpu.mockgpu import runtime
+      config = FileIOInterface('/sys/bus/pci/devices/mock:am:0/config')
+      config.write(bytes((127,)), binary=True, offset=0x34)
+      assert config.read(1, binary=True, offset=0x34) == bytes((127,))
+      config.close()
+      assert not runtime.tracked_fds
+      runtime.close()
+    ''')], cwd=source_root, env=os.environ | {'DEV': 'MOCKPCI+AMD', 'PYTHONPATH': '.'}, capture_output=True, text=True, timeout=60)
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    self.assertEqual(result.stderr, '')
+
   def test_backend_runtime_isolation(self):
     source_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     for backend in ('MOCK+AMD', 'MOCK+NV'):

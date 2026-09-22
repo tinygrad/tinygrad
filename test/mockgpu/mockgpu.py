@@ -137,7 +137,6 @@ class MockFileIOInterface(FileIOInterface):
 
   def read(self, size=None, binary=False, offset=None):
     if self.fd in self._tracked_fds:
-      if binary: raise NotImplementedError('MockFileIOInterface binary read is unsupported')
       if offset is not None: self._tracked_fds[self.fd].seek(offset)
       return self._tracked_fds[self.fd].read_contents(size)
     with open(self.fd, "rb" if binary else "r", closefd=False) as file:
