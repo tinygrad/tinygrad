@@ -22,11 +22,11 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.schedule.prepare import pm_mops
+from tinygrad.schedule.prepare import pm_mops, expand_bitcast
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, flatten, argsort, partition
+from tinygrad.helpers import all_same, all_int, flatten, argsort, partition, strides_for_shape
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -110,6 +110,8 @@ pm_wmma_add = PatternMatcher([
 ])
 
 pm_expand_broadcast = pm_wmma_add+PatternMatcher([
+  # renderers without vectors must pack/unpack values before broadcasting and devectorization
+  (UPat(Ops.BITCAST, name="b"), lambda ctx,b: expand_bitcast(b) if not ctx.supports_float4 and b.addrspace is AddrSpace.ALU else None),
   (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), expand_broadcast),
   (UPat(Ops.WMMA, name="b"), broadcast_and_devec_wmma),
 ])
@@ -139,7 +141,23 @@ ew_devectorizer = PatternMatcher([
   (UPat(GroupOp.Elementwise, name="b"), do_devectorize),
 ])
 
-devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
+def lower_bitcast_index(b:UOp, idx:UOp) -> UOp|None:
+  if idx.shape or b.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.ALU): return None
+  x, inds = b.src[0], idx.src[1:]
+  if x.dtype.itemsize < b.dtype.itemsize:
+    span = UOp.stack(*(x.index(*inds, i) for i in range(b.dtype.itemsize//x.dtype.itemsize))) if b.addrspace is AddrSpace.ALU else x.index(*inds)
+    return span.alu(Ops.BITCAST, arg=b.dtype)
+  return x.index(*inds[:-1]).alu(Ops.BITCAST, arg=b.dtype).index(inds[-1]) if x.shape and x.dtype.itemsize > b.dtype.itemsize else None
+
+devectorizer2 = PatternMatcher([
+  # selecting a row of reshaped storage is a contiguous span
+  (UPat(Ops.RESHAPE, name="r").f(Ops.INDEX, name="idx", allow_any_len=True), lambda r,idx:
+   UOp(Ops.SHRINK, src=(r.src[0], sum((i.cast(dtypes.weakint)*s for i,s in zip(idx.src[1:], strides_for_shape(r.shape))), UOp.const(0)),
+                       UOp.const(idx.shape[0]))) if len(r.src[0].shape) == len(idx.shape) == 1 and len(idx.src) == len(r.shape)
+   and r.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) and not any(i.is_invalid for i in idx.src[1:]) else None),
+])+mop_cleanup+pm_mops+PatternMatcher([
+  # resolve the element's packed span before discarding the bitcast's shape
+  (UPat(Ops.BITCAST, name="b").f(Ops.INDEX, name="idx", allow_any_len=True), lower_bitcast_index),
   # unpack broadcasting
   (UPat(GroupOp.Elementwise|{Ops.LOAD,Ops.STORE}, name="b"), do_devectorize),
   # INDEX without src is nothing (TODO: this should be in mop_cleanup)
@@ -329,7 +347,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, name="*** expand broadcast / add loads")
+  sink = graph_rewrite(sink, symbolic_simple+pm_expand_broadcast+pm_add_loads, ctx=ren, name="*** expand broadcast / add loads")
 
   # devectorize
   sink = graph_rewrite(sink, symbolic_simple+devectorizer2+indexing_simplify, ctx=ren, name="devectorize2")
@@ -409,7 +427,7 @@ pm_linearize_cleanups = PatternMatcher([
   # if statements are not allowed in the graph
   (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
-  (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
+  (UPat(Ops.STORE, name="u", src=(UPat((Ops.INDEX, Ops.SHRINK)).or_casted().or_bitcasted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
    lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
 ])
 

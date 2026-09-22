@@ -93,7 +93,7 @@ A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound
 \op{Shrink} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Keep $s'_k$ elements starting at offset $o_k$ per axis. Inverse of \op{Pad}. \\
 \op{Index} & $(T, i_0, i_1, \ldots)$ & --- & Index from left. $()$-shaped $i$ removes dim; $(k,)$-shaped makes it $k$. \\
 \op{Stack} & $(T_0, T_1, \ldots)$ & --- & Join along a newly created leading axis. All shapes must match. \\
-\op{Bitcast} & $(T,)$ & dtype & Reinterpret bits; arrays rescale the last axis, a scalar becomes its lanes. \\
+\op{Bitcast} & $(T,)$ & dtype & Reinterpret bits; narrow/widen adds/drops a size-ratio last axis. \\
 \op{Unshard} & $(T, R_0, R_1, \ldots)$ & axes $(a_0, a_1, \ldots)$ & Concatenate shards of \op{Range} $R_k$ along axis $a_k$; $R_k$ is outer. \\
 \bottomrule
 \end{tabular}
