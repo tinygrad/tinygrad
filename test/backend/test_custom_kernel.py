@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
+from tinygrad.renderer.nir import NIRRenderer
 import numpy as np
 from tinygrad.dtype import AddrSpace, dtypes, Invalid
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
@@ -199,6 +200,17 @@ class TestCustomKernel(unittest.TestCase):
     a, b = Tensor([100.0, 200, 300, 400]), Tensor([1.0, 2, 3, 4])
     out = Tensor.custom_kernel(Tensor.empty(4), a, b, fxn=custom_ignore_first_kernel)[0]
     self.assertEqual(out.tolist(), [2, 3, 4, 5])
+
+  @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, NIRRenderer), "checks the nir tinygrad emits")
+  def test_nir_load_after_store_not_reorderable(self):
+    # custom_sum reloads B[0] after storing it. if that load is reorderable mesa keeps one load (QCOM:IR3 gave 5, not 15). inputs stay reorderable
+    import ctypes
+    from tinygrad.runtime.autogen import mesa
+    from tinygrad.runtime.support.compiler_mesa import deserialize
+    ren = Device[Device.DEFAULT].renderer
+    prg = to_program(custom_sum(UOp.placeholder((1,), dtypes.float, slot=0), UOp.placeholder((5,), dtypes.float, slot=1)), ren)
+    nir = ctypes.string_at(mesa.nir_shader_as_str(deserialize(prg.src[2].arg, ren.nir_options), None)).decode()
+    self.assertEqual({"access=reorderable" in l for l in nir.splitlines() if "load_global" in l}, {False, True})
 
   def test_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])
