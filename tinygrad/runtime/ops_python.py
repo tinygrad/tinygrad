@@ -48,7 +48,7 @@ class PythonProgram(Program['PythonDevice']):
     self.uops: list[UOp] = pickle.loads(obj.lib)
     self.tensor_cores = PythonRenderer(obj.target).tensor_cores
     self.uop_to_index: dict[UOp, int] = {u:i for i,u in enumerate(self.uops)}
-    self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op == Ops.END}
+    self.loop_ends: dict[UOp, int] = {u.src[1]:i for i, u in enumerate(self.uops) if u.op in {Ops.END, Ops.BACKEDGE}}
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
@@ -64,12 +64,11 @@ class PythonProgram(Program['PythonDevice']):
         src_values = [values[v] for v in u.src if v.dtype is not dtypes.void]
         src_dtypes = [v.dtype for v in u.src if v.dtype is not dtypes.void]
         if getenv("TRACE"): print(i, u.op, u.dtype, u.arg, src_values, src_dtypes)
+        if u.op is Ops.BACKEDGE:
+          i = self.uop_to_index[u.src[1]] if values[u.src[2]][0] else i+1
+          continue
         if u.op is Ops.END:
-          if len(u.src) == 3:
-            # conditional backedge on a loop: jump back while the condition is true
-            if values[u.src[2]][0]: i = self.uop_to_index[u.src[1]]
-            else: i += 1
-          else: i = self.uop_to_index[u.src[1]]
+          i = self.uop_to_index[u.src[1]]
           continue
         if u.op is Ops.IF:
           exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])

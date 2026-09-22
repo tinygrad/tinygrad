@@ -412,9 +412,9 @@ class TestUOpGraph(unittest.TestCase):
     call = fn.call(r + 1, ret_dtype=dtypes.int)
     self.assertEqual(set(call.ranges), {r})
 
-  def test_conditional_end_preserves_outer_range(self):
+  def test_backedge_preserves_outer_range(self):
     outer, inner = UOp.range(4, 0), UOp.loop(1)
-    end = UOp.const(1).end(inner, outer < 2)
+    end = UOp.const(1).backedge(inner, outer < 2)
     self.assertEqual(set(end.ranges), {outer})
     self.assertEqual(set((outer + 1).after(end).ranges), {outer})
 
