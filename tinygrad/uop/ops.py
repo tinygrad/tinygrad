@@ -124,7 +124,7 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
   # here are the dtype production rules, total over all Ops
   match op:
     case Ops.STORE | Ops.LINEAR | Ops.SINK | Ops.PROGRAM | Ops.SOURCE | \
-         Ops.END | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | Ops.NOOP | \
+         Ops.END | Ops.BACKEDGE | Ops.BARRIER | Ops.GROUP | Ops.IF | Ops.ENDIF | Ops.NOOP | \
          Ops.CUSTOM_FUNCTION | Ops.REWRITE_ERROR | Ops.PYLITERAL:
       # always void
       return dtypes.void
@@ -322,7 +322,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
-      case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.GROUP | \
+      case Ops.IF | Ops.BARRIER | Ops.SINK | Ops.REWRITE_ERROR | Ops.ENDIF | Ops.BACKEDGE | Ops.GROUP | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE:
         return None
 
@@ -465,6 +465,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
   def ended_ranges(self) -> tuple[UOp, ...]:
     if self.op is Ops.CALL and self.body.op is Ops.CUSTOM_FUNCTION and self.body.src: return ()
     if self.op is Ops.END: return tuple(r for r in self.src[1:] if r.op is Ops.RANGE)
+    if self.op is Ops.BACKEDGE: return self.src[1:2]  # the condition's other ranges remain live
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
     # UNSHARD ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
@@ -610,6 +611,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     srcs = (self, self.const_like(src) if not isinstance(src, UOp) else src) + ((gate,) if gate is not None else ())
     return UOp(Ops.STORE, src=srcs, **kwargs)
   def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
+  def backedge(self, loop:UOp, cond:UOp): return UOp(Ops.BACKEDGE, src=(self, loop, cond))
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, src=(self,)+src, **kwargs) if len(src) else self
   @property
   def without_after(self) -> UOp: return self.src[0].without_after if self.op is Ops.AFTER else self
@@ -1488,6 +1490,7 @@ class UPat(RandMixin):
   def broadcast(self, **kwargs): return UPat(Ops.STACK, self.match_dtype, src=self, **kwargs)
   def after(self, *src:UPat, **kwargs): return UPat(Ops.AFTER, self.match_dtype, (self,)+src, **kwargs)
   def end(self, *src:UPat, **kwargs): return UPat(Ops.END, src=(self,)+src, **kwargs)
+  def backedge(self, loop:UPat, cond:UPat, **kwargs): return UPat(Ops.BACKEDGE, src=(self, loop, cond), **kwargs)
 
   def _broadcasted(self, y, reverse=False) -> tuple[UPat, UPat]:
     y = self.ufix(y)

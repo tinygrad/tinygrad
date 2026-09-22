@@ -117,7 +117,7 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), lambda ctx, x: [] if x.addrspace == AddrSpace.REG else [
     f".shared .align 16 .b8 local{x.arg.slot}[{x.max_numel()*x.dtype.itemsize}];", f"mov.u64 {ctx.r[x]}, local{x.arg.slot}[0];"]),
   (UPat(Ops.RANGE, dtypes.void, name="l"), lambda ctx, l: f"WAITLOOP_{ctx.uops.index(l)}:"),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx, l, c:
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(Ops.RANGE, dtypes.void, name="l"), UPat(name="c"))), lambda ctx, l, c:
     f"@{ctx.r[c]} bra WAITLOOP_{ctx.uops.index(l)};"),
   (UPat(Ops.RANGE, name="r"), lambda ctx, r: [
     f"mov.u32 {ctx.r[r]}, -1;",

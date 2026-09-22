@@ -176,7 +176,8 @@ class TestHCQ2Schedule(unittest.TestCase):
           a, b = [r.after(r.index(0).store(v)) for r, v in zip(regs, (3, 5))]
           i, j = [UOp.range(UOp(Ops.NOOP), n, dtype=dtypes.void, src=(a, b)) for n in ids[2:]]
           out = cpu_buf(dtype=dtypes.uint32, tag="out")
-          body = out.index(0).store(a.after(i, j).index(0).load()*10 + b.index(0).load()).end(j, UOp.const(False)).end(i, UOp.const(False))
+          body = out.index(0).store(a.after(i, j).index(0).load()*10 + b.index(0).load()) \
+            .backedge(j, UOp.const(False)).backedge(i, UOp.const(False))
           compiled = lower_and_compile(UOp(Ops.LINEAR, src=(lower_hcq(body),)))
           programs.append(compiled.src[0].without_after.src[0])
           self.assertIs(programs[-1], programs[0])

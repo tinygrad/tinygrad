@@ -141,7 +141,8 @@ A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
 \op{Range} & $(\text{bound},)$ & type & Iterator from $0$ to bound. \\
-\op{End} & (body, range) & --- & Close a \op{Range} loop. \\
+\op{End} & (body, $range_0$, $range_1$, \ldots) & --- & Close one or more \op{Range} loop. \\
+\op{Backedge} & (body, range, condition) & --- & Conditional loop. \\
 \op{After} & (buf, deps\ldots) & --- & Passthrough of buf; guarantees deps execute first. \\
 \op{Group} & $(u_0, u_1, \ldots)$ & --- & Void no-op that merges multiple \op{Store}s into one node, unordered. \\
 \op{Sink} & $(s_0, s_1, \ldots)$ & --- & Collect side effects into a single root node. \\

@@ -152,7 +152,7 @@ pre_isel_matcher = PatternMatcher([
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").load(UPat.var("alt"), UPat.var("gate"), name="x"), gated_load),
   (UPat((Ops.INDEX, Ops.SHRINK), name="addr").store(UPat.var("val"), UPat.var("gate")), gated_store),
   # a conditional backedge picks with the flags, and so does the cmove, which is legalized in isel
-  (UPat(Ops.END, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat.var("m", dtypes.bool)), name="x"),
    lambda m,x: x.replace(src=x.src[:2]+(g,)) if (g:=flag_gate(m)) is not None else None),
 ])
 
@@ -314,8 +314,8 @@ isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c").cast(),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(x.dtype, c.val),) + x.src[1:])),
-  # really all a backedge END is is an IF with a tag referencing the RANGE start label
-  (UPat(Ops.END, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
+  # BACKEDGE becomes a conditional jump referencing the RANGE start label
+  (UPat(Ops.BACKEDGE, src=(UPat(), UPat(), UPat(GroupOp.Comparison, name="cond")), name="x"),
     lambda x,cond: cond.ins(X86Ops.LOOP_CMP, tag=cond.op, src=cond.src + x.src[:2])),
   # **** Op -> X86Op ****
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
@@ -454,7 +454,7 @@ isel_matcher = PatternMatcher([
 # handle it), so a consumer that no longer owns its compare re-emits it. Unlike a regalloc rematerialization this is not
 # optional, there is no fallback load from stack
 def flag_rematerialize(ctx:X86LinearContext, x:UOp):
-  if x.op in (Ops.RANGE, Ops.END) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
+  if x.op in (Ops.RANGE, Ops.END, Ops.BACKEDGE) or x.arg[0] in X86GroupOp.WriteFlags: ctx.lock = x
   elif x.arg[0] in X86GroupOp.ReadFlags and ctx.lock is not (flag_def:=x.src[-1]):
     ctx.lock = flag_def
     return (x, [flag_def, x])
@@ -468,7 +468,7 @@ def alloc_buffer(ctx:X86LinearContext, x:UOp):
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat(Ops.BUFFER, name="x"), alloc_buffer),
-  (UPat((Ops.INS, Ops.RANGE, Ops.END), name="x"), flag_rematerialize),
+  (UPat((Ops.INS, Ops.RANGE, Ops.END, Ops.BACKEDGE), name="x"), flag_rematerialize),
 ])
 
 # ***** post register allocation *****

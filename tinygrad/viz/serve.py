@@ -54,7 +54,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
                Ops.LINEAR: "#7DF4FF", Ops.ALLOC: "#C07788",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0",
-               Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
+               Ops.STAGE: "#FFC14D", Ops.REWRITE_ERROR: "#1a1b26", Ops.AFTER: "#8A7866", Ops.END: "#524C46", Ops.BACKEDGE: "#464752"}
 
 addrspace_colors = {AddrSpace.ALU: "#AAAAAA", AddrSpace.REG:"#e68181", AddrSpace.LOCAL:"#e7c86a", AddrSpace.GLOBAL:"#75bd7b"}
 
@@ -152,7 +152,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         ranges: list[UOp] = []
         for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
         if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
-      if u.op in {Ops.END, Ops.REDUCE} and len(trngs:=list(UOp.sink(*u.src[range_start[u.op]:]).ranges)):
+      if u.op in {Ops.END, Ops.REDUCE, Ops.BACKEDGE} and len(trngs:=list(u.ended_ranges if u.op is Ops.BACKEDGE else
+                                                                 UOp.sink(*u.src[range_start[u.op]:]).ranges)):
         label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
