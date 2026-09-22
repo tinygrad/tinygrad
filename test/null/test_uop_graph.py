@@ -1,4 +1,4 @@
-import unittest, pytest, functools, weakref
+import unittest, pytest, weakref
 from tinygrad import dtypes, Variable, Device
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes, KernelInfo
