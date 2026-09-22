@@ -15,7 +15,9 @@ from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, hcq_filter_visible_devices
+from tinygrad.runtime.support.memory import MMIOInterface
+from tinygrad.runtime.support.system import FileIOInterface
+from tinygrad.runtime.support.system import hcq_filter_visible_devices
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
 from tinygrad.runtime.support.system import PCIIfaceBase, USBPCIDevice, MAP_FIXED, MAP_NORESERVE

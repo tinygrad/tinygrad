@@ -4,8 +4,9 @@ import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, co
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from extra.hcq1.hcq import HCQBuffer, HCQCompiled, HCQAllocator, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, hcq_profile
-from tinygrad.runtime.support.hcq import FileIOInterface
-from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filter_visible_devices
+from tinygrad.runtime.support.system import FileIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
+from tinygrad.runtime.support.system import hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferStorage, Compiled, BufferSpec, TinyELF
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, TracingKey
