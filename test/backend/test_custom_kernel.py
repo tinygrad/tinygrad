@@ -258,6 +258,7 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), a[:, 1::2].sum(1).tolist())
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_shared, "LOCAL STAGE needs shared memory")
   def test_stage_then_reduce(self):
     # the STAGE ends j, so the accumulator of the reduce over jj is initialized before the jj loop, not inside it
     def kernel(C:UOp, A:UOp) -> UOp:
