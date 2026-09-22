@@ -540,7 +540,6 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's
   elif not ctx.use_rt:
     spec = BufferSpec(host=b.arg.volatile, uncached=b.arg.volatile or b.tag.startswith("cmdbuf"), cpu_access=True)
     r = Buffer(dev.device, max(b.max_numel(), 1), b.dtype, options=spec, preallocate=True)
-    if b.max_numel() == 0: r = r.view(0, b.dtype, 0).ensure_allocated() # empty kernargs still need a valid address
   else:
     off = dev.rt_allocator(True, b.arg.volatile).alloc(max(b.max_numel() * b.dtype.itemsize, 1), alignment=256)
     r = dev.rt_buffer(True, b.arg.volatile).view(b.max_numel(), b.dtype, off).ensure_allocated()
