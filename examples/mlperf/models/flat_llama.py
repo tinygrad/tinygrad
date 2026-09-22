@@ -20,8 +20,9 @@ from extra.llama_kernels.rmsnorm import rmsnorm
 ASM_GEMM = getenv("ASM_GEMM", 0)
 FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
 SPLIT_W13 = getenv("SPLIT_W13", 0)
+MXFP4 = getenv("MXFP4", 0)
 
-def matmul(x:Tensor, w:Tensor, mxfp4:bool=True, mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
+def matmul(x:Tensor, w:Tensor, mxfp4:bool=bool(MXFP4), mxfp4_w:tuple[Tensor, Tensor, Tensor, Tensor]|None=None,
            x_prequant_mxfp4:tuple[Tensor|None, Tensor|None, Tensor|None, Tensor|None]|None=None) -> tuple[Tensor,...]:
   if mxfp4 or ASM_GEMM:
     from extra.gemm.cdna_asm_gemm import asm_gemm, can_use_asm_gemm
@@ -40,7 +41,7 @@ def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, e
   return out, h, x_normed, rrms, ret
 
 def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, mxfp4_w=None):
-  if FUSED_SILU_W13:
+  if FUSED_SILU_W13 and MXFP4:
     from extra.llama_kernels.swiglu import swiglu_mxfp4
     x2, x2_mxfp4 = swiglu_mxfp4(x_w13)
     out, *ret = matmul(x2, w2, mxfp4_w=mxfp4_w, x_prequant_mxfp4=x2_mxfp4)
@@ -171,6 +172,7 @@ class FlatTransformer:
       self.freqs_cis.shard_(device, axis=None).realize()
 
   def create_mxfp4_weight_cache(self) -> dict[str, list[tuple[Tensor, Tensor, Tensor, Tensor]]]:
+    assert MXFP4
     from extra.llama_kernels.quantize_mxfp4 import quantize_mxfp4
     names = ("wqkv", "wo", "w1", "w3", "w2") if SPLIT_W13 else ("wqkv", "wo", "w13", "w2")
     return {name:[quantize_mxfp4(w, shuffle_row=True, shuffle_col=True) for w in getattr(self, name)] for name in names}

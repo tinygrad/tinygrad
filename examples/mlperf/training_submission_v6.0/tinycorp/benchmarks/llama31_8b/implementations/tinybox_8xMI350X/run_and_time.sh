@@ -15,6 +15,7 @@ export ALL2ALL=1
 export LATE_ALLREDUCE=0
 export USE_ATOMICS=1
 export ASM_GEMM=1
+export MXFP4=1
 export WQKV=1
 export MASTER_WEIGHTS=1
 export ALLREDUCE_CAST=1

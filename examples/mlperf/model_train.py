@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, MXFP4
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW, clip_grads
@@ -1436,8 +1436,8 @@ def train_llama3():
   if optim.master_params: Tensor.realize(*optim.master_params)
   loss_acc = Tensor.zeros(1, dtype=dtypes.float32, device=device)
   Tensor.realize(loss_acc, *optim.params)
-  mxfp4_weights = model.create_mxfp4_weight_cache()
-  Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
+  mxfp4_weights = model.create_mxfp4_weight_cache() if MXFP4 else None
+  if mxfp4_weights is not None: Tensor.realize(*[x for layers in mxfp4_weights.values() for outputs in layers for x in outputs])
 
   @TinyJit
   def minibatch(tokens:Tensor):
@@ -1464,7 +1464,7 @@ def train_llama3():
     scheduler.step()
 
     for g in grads: g.assign(0)
-    new_mxfp4_w = model.update_mxfp4_weight_cache(mxfp4_weights)
+    new_mxfp4_w = model.update_mxfp4_weight_cache(mxfp4_weights) if mxfp4_weights is not None else []
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
