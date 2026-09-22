@@ -1,0 +1,63 @@
+QCOM A630 compute emulator
+
+Runs the existing QCOM runtime and Mesa compiler without a GPU on Linux.
+The interpreter models a subset of A6xx instructions, not cycle timing.
+Instruction encoding and lowering follow Mesa 461196a1c827769168304ff3f5b36360f16618ca:
+https://gitlab.freedesktop.org/mesa/mesa/-/tree/461196a1c827769168304ff3f5b36360f16618ca/src/freedreno
+
+From a tinygrad checkout with these changes applied:
+  python -m venv .venv
+  . .venv/bin/activate
+  python -m pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
+  python -m pip install -e '.[testing_unit,mesa]' pytest-subtests
+  PYTHONPATH=. python -m pytest test/mockgpu/qcom -q
+
+Run the unchanged upstream div/sqrt/exp/softmax/matmul tests, including gradients:
+  PYTHONPATH=. DEV=MOCK+QCOM:IR3 HCQ_RUNTIME_DEV=PYTHON python -m test.mockgpu.qcom.test_math --backend
+  PYTHONPATH=. DEV=MOCK+QCOM:IR3 HCQ_RUNTIME_DEV=CPU python -m test.mockgpu.qcom.test_math --backend
+The QCOM workflow runs these commands on Linux with Python 3.12. The CPU-only
+PyTorch install avoids installing GPU libraries for the independent reference.
+
+The integration tests launch separate processes for HCQ_RUNTIME_DEV=PYTHON and
+CPU, set DEV=MOCK+QCOM:IR3, and check normal teardown. The CPU HCQ runtime needs
+clang available. test_workloads.py covers deterministic matrix products,
+reduction/elementwise chains and JIT capture/replay with changing inputs.
+Raw semantic tests do not require PyTorch; broader upstream backend comparisons do.
+
+To run a workload and print actual dispatch dimensions and shader hashes:
+  PYTHONPATH=. DEV=MOCK+QCOM:IR3 HCQ_RUNTIME_DEV=CPU python test/mockgpu/qcom/test_workloads.py matmul_17_33_9
+  PYTHONPATH=. DEV=MOCK+QCOM:IR3 HCQ_RUNTIME_DEV=CPU python test/mockgpu/qcom/test_workloads.py jit
+Set DUMP_IR3=1 to include the compiled instruction listing.
+
+qcomdriver.py owns KGSL resources and submission transactions; state.py and
+compute.py interpret PM4 state and dispatches; ir3.py executes instructions.
+ioctl.py bridges compiled HCQ calls into tracked mock file descriptors.
+Unsupported instructions, state and resources raise contextual errors. Failed
+submissions preserve prior memory/timestamps and permit subsequent valid calls.
+Submission execution is single-threaded; this is not a concurrent memory model.
+
+Supported paths include full32 integer and float arithmetic, unfused mad.f32,
+rcp/rsq/sqrt/exp2 with ss dependencies, half-source AND, sel.b32, u32/u8 global
+memory, shared u32 memory with barriers, and uniform br/jump loops. Arithmetic
+and comparisons handle Inf/NaN; numeric NaN results use a canonical quiet NaN.
+Subnormal numeric inputs/results and non-finite float-to-integer conversions
+remain unsupported. Bit moves and sel.b32 preserve all payload bits.
+Full/half register banks remain separate. Divergent branches, arbitrary
+predication, atomics and general narrow conversions remain unsupported.
+Programs are limited to 4096 encoded instructions and 65536 executed steps per
+lane. These are emulator resource policies, not hardware limits.
+
+SFU results use the NIR mathematical operations rounded to binary32. This source
+model does not reproduce undocumented hardware approximation errors or NaN payload
+selection. Semantic mappings are in ir3_compiler_nir.c:784-799, definitions in
+src/compiler/nir/nir_opcodes.py:229-232, and ss hazards in ir3_legalize.c at the
+fixed Mesa revision above. ir3.c:1582-1595 supplies the exact FLUT bit patterns.
+
+Compiled fixtures are compiler output, not GPU captures. Offline results do not
+require byte-identical output from a newer compiler: production tests check results
+and dispatch state, while raw tests replay fixed binaries. fixtures/compute stores
+four unique binaries; manifest.json retains the original ten compilation profiles
+and scalar execution inputs, expected bytes, dimensions and source identities.
+Offline results do not establish hardware agreement. Fixes should include independent instruction tests
+and relevant production-path regressions; hardware comparisons are useful
+additional evidence when a device is available.

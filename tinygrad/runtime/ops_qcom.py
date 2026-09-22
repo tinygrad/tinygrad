@@ -155,7 +155,8 @@ class QCOMComputeQueue(HWQueue):
     self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_SHADER, state_src=mesa.SS6_INDIRECT,
                                                              state_block=mesa.SB6_CS_SHADER, num_unit=ceildiv(data.image_size, 128)), lib_addr)
 
-    self.reg(mesa.REG_A6XX_SP_REG_PROG_ID_0, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc, qreg.a6xx_sp_cs_const_config(constlen=1024 // 4, enabled=True))
+    self.reg(mesa.REG_A6XX_SP_REG_PROG_ID_0, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc,
+             qreg.a6xx_sp_cs_const_config(constlen=1024 // 16, enabled=True))
 
     self.reg(mesa.REG_A6XX_SP_CS_PVT_MEM_STACK_OFFSET, qreg.a6xx_sp_cs_pvt_mem_stack_offset(data.hw_stack_offset))
     # image_size is in bytes, but INSTR_SIZE is measured in units of instruction groups (16 instructions, 8 bytes each)
@@ -201,7 +202,8 @@ class QCOMComputeQueue(HWQueue):
 
     idir, base, nr, struct_t = kgsl.IOCTL_KGSL_GPU_COMMAND.args
     ioctl_cmd = (idir << 30) | (ctypes.sizeof(struct_t) << 16) | (base << 8) | nr
-    return ret.index(0).store(ccall(libc.dll.ioctl, fd, UOp.const(ioctl_cmd, dtypes.uint32), req.after(cmdbuf).index(0)))
+    ioctl_fn = getattr(self.dev.fd, 'ioctl_function', libc.dll.ioctl)
+    return ret.index(0).store(ccall(ioctl_fn, fd, UOp.const(ioctl_cmd, dtypes.uint32), req.after(cmdbuf).index(0)))
 
 class QCOMProgramData:
   def __init__(self, dev:QCOMDevice, obj:TinyELF):
@@ -313,36 +315,66 @@ class QCOMDevice(Compiled):
 
   def __init__(self, device:str=""):
     self.fd = FileIOInterface('/dev/kgsl-3d0', os.O_RDWR)
+    self.mmio_view_factory = getattr(self.fd, 'mmio_view', None)
+    ctx = None
+    try:
+      flags = kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC \
+        | flag("KGSL_CONTEXT_PRIORITY", getenv("QCOM_PRIORITY", 8)) | flag("KGSL_CONTEXT_PREEMPT_STYLE", kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)
+      ctx = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=flags).drawctxt_id
+      self.ctx = ctx
+      self._stack:Buffer|None = None # private-memory stack
 
-    flags = kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC \
-      | flag("KGSL_CONTEXT_PRIORITY", getenv("QCOM_PRIORITY", 8)) | flag("KGSL_CONTEXT_PREEMPT_STYLE", kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)
-    self.ctx = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=flags).drawctxt_id
-    self._stack:Buffer|None = None # private-memory stack
+      # Set max power
+      struct.pack_into('IIQQ', pwr:=memoryview(bytearray(0x18)), 0, 1, self.ctx, mv_address(_:=memoryview(array.array('I', [1]))), 4)
+      kgsl.IOCTL_KGSL_SETPROPERTY(self.fd, type=kgsl.KGSL_PROP_PWR_CONSTRAINT, value=mv_address(pwr), sizebytes=pwr.nbytes)
 
-    # Set max power
-    struct.pack_into('IIQQ', pwr:=memoryview(bytearray(0x18)), 0, 1, self.ctx, mv_address(_:=memoryview(array.array('I', [1]))), 4)
-    kgsl.IOCTL_KGSL_SETPROPERTY(self.fd, type=kgsl.KGSL_PROP_PWR_CONSTRAINT, value=mv_address(pwr), sizebytes=pwr.nbytes)
+      # Load info about qcom device
+      info = kgsl.struct_kgsl_devinfo()
+      kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
+      self.gpu_id = (info.chip_id >> 24, (info.chip_id >> 16) & 0xFF, (info.chip_id >> 8) & 0xFF)
 
-    # Load info about qcom device
-    info = kgsl.struct_kgsl_devinfo()
-    kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
-    self.gpu_id = (info.chip_id >> 24, (info.chip_id >> 16) & 0xFF, (info.chip_id >> 8) & 0xFF)
+      # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
+      if self.gpu_id[:2] >= (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={info.chip_id:#x}")
 
-    # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
-    if self.gpu_id[:2] >= (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={info.chip_id:#x}")
+      if PROFILE and self.gpu_id[:2] < (7, 3):
+        System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    if PROFILE and self.gpu_id[:2] < (7, 3):
-      System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
+      super().__init__(device, QCOMAllocator(self), [QCOMCLRenderer, IR3Renderer], None,
+                       arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
 
-    super().__init__(device, QCOMAllocator(self), [QCOMCLRenderer, IR3Renderer], None,
-                     arch=("a%d%d%d" + (",IMAGE_PITCH_ALIGNMENT=64" if IMAGE else "")) % self.gpu_id)
+      self.var_vals = {"kgsl_fd": self.fd.fd, "kgsl_ctx": self.ctx}
+      self.pm_bufferize = PatternMatcher([
+        (UPat(Ops.PARAM, tag="stack", name="b"), lambda ctx, b: ctx._ensure_stack_size(b.max_numel())),
+        (UPat(Ops.PARAM, tag="dummy"), lambda ctx: ctx.dummy),
+        (UPat(Ops.PARAM, tag="border_color"), lambda ctx: ctx.border_color),
+      ]) + self.pm_bufferize
+    except BaseException as error:
+      if ctx is not None:
+        try: kgsl.IOCTL_KGSL_DRAWCTXT_DESTROY(self.fd, drawctxt_id=ctx)
+        except BaseException as cleanup: error.add_note(f"QCOM init context cleanup failed: {cleanup}")
+      try: self.fd.close()  # type: ignore[attr-defined]
+      except BaseException as cleanup: error.add_note(f"QCOM init fd cleanup failed: {cleanup}")
+      raise
 
-    self.var_vals = {"kgsl_fd": self.fd.fd, "kgsl_ctx": self.ctx}
-    self.pm_bufferize = PatternMatcher([
-      (UPat(Ops.PARAM, tag="stack", name="b"), lambda ctx, b: ctx._ensure_stack_size(b.max_numel())),
-      (UPat(Ops.PARAM, tag="dummy"), lambda ctx: ctx.dummy),
-      (UPat(Ops.PARAM, tag="border_color"), lambda ctx: ctx.border_color),
-    ]) + self.pm_bufferize
+  @contextlib.contextmanager
+  def launch_scope(self, call:UOp):
+    if (runtime:=getattr(self.fd, 'mock_runtime', None)) is None:
+      yield
+      return
+    timeline = self.timeline.host.view(fmt='Q')
+    slots = [call.src[1+index].buffer.ensure_allocated().host.view(fmt='B')
+             for name, index in call.arg.aux.slots if Device[name] is self]
+    saved = [(view, bytes(view)) for view in slots]
+    def recover(fd):
+      if fd != self.fd.fd: return
+      timeline[1] = timeline[0]
+      for view, contents in saved: view[:] = contents
+    try:
+      with runtime.launch_scope():
+        with runtime.ioctl_bridge.scope(recover): yield
+    except Exception as error:
+      error.__traceback__ = None
+      raise
 
   @functools.cached_property
   def dummy(self) -> Buffer: return Buffer(self.device, 0x1000, dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True) # cache flush target
@@ -354,21 +386,31 @@ class QCOMDevice(Compiled):
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> BufferStorage:
     flags |= flag("KGSL_MEMALIGN", alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP
     if uncached: flags |= flag("KGSL_CACHEMODE", kgsl.KGSL_CACHEMODE_UNCACHED)
-
-    alloc = kgsl.IOCTL_KGSL_GPUOBJ_ALLOC(self.fd, size=(bosz:=round_up(size, 1<<alignment_hint)), flags=flags, mmapsize=bosz)
-    va_addr = self.fd.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, alloc.id * 0x1000)
-
-    if fill_zeroes: ctypes.memset(va_addr, 0, size)
-    return BufferStorage(va_addr, (alloc, True), MMIOInterface(va_addr, size, fmt='B'))
+    alloc = None
+    va_addr = None
+    bosz = round_up(size, 1<<alignment_hint)
+    try:
+      alloc = kgsl.IOCTL_KGSL_GPUOBJ_ALLOC(self.fd, size=bosz, flags=flags, mmapsize=bosz)
+      va_addr = self.fd.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, alloc.id * 0x1000)
+      if fill_zeroes: ctypes.memset(va_addr, 0, size)
+      return BufferStorage(va_addr, (alloc, True), MMIOInterface(va_addr, size, fmt='B', view_factory=self.mmio_view_factory))
+    except BaseException as error:
+      if va_addr is not None:
+        try: FileIOInterface.munmap(va_addr, bosz)
+        except BaseException as cleanup: error.add_note(f"QCOM alloc mmap cleanup failed: {cleanup}")
+      if alloc is not None:
+        try: kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=alloc.id)
+        except BaseException as cleanup: error.add_note(f"QCOM alloc object cleanup failed: {cleanup}")
+      raise
 
   def _gpu_map(self, ptr:int, size:int) -> BufferStorage:
     ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
     dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ceildiv(ptr + size - ptr_line_aligned, 64))
     try:
       mi = kgsl.IOCTL_KGSL_MAP_USER_MEM(self.fd, hostptr=ptr_aligned, len=size_aligned, memtype=kgsl.KGSL_USER_MEM_TYPE_ADDR)
-      return BufferStorage(mi.gpuaddr + (ptr - ptr_aligned), (mi, False), MMIOInterface(ptr, size, fmt='B'))
+      return BufferStorage(mi.gpuaddr + (ptr - ptr_aligned), (mi, False), MMIOInterface(ptr, size, fmt='B', view_factory=self.mmio_view_factory))
     except OSError as e:
-      if e.errno == 14: return BufferStorage(ptr, (None, False), MMIOInterface(ptr, size, fmt='B'))
+      if e.errno == 14: return BufferStorage(ptr, (None, False), MMIOInterface(ptr, size, fmt='B', view_factory=self.mmio_view_factory))
       raise RuntimeError("Failed to map external pointer to GPU memory") from e
 
   def _gpu_free(self, storage:BufferStorage):
@@ -378,11 +420,25 @@ class QCOMDevice(Compiled):
       kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=storage.meta[0].id)
       FileIOInterface.munmap(storage.buf, storage.meta[0].mmapsize)
 
+  def finalize(self):
+    super().finalize()
+    for buf in self.prog_bufs.values():
+      if buf.is_allocated(): buf.deallocate()
+    self.prog_bufs.clear()
+    from tinygrad.runtime.support import hcq2
+    hcq2.hcq_compile_cache.clear()
+    hcq2.link_linear_cache.clear()
+    _qcom_program_cache.clear()
+
   def _wait_signal(self, sig:MMIOInterface|memoryview, value:int, timeout:int|None=None):
     if sig[0] < value:
       ts = kgsl.IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID(self.fd, context_id=self.ctx, type=kgsl.KGSL_TIMESTAMP_QUEUED).timestamp
-      with contextlib.suppress(OSError, RuntimeError):
+      try:
         kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.fd, context_id=self.ctx, timestamp=ts, timeout=int(timeout or self.wait_timeout_ms))
+      except OSError as error:
+        raise OSError(error.errno, f"QCOM wait context={self.ctx} timestamp={ts}: {error}") from error
+      except RuntimeError as error:
+        raise RuntimeError(f"QCOM wait context={self.ctx} timestamp={ts}: {error}") from error
     super()._wait_signal(sig, value, timeout)
 
   def _ensure_stack_size(self, sz:int) -> Buffer: # one stack for the device, grown to the deepest program's private memory

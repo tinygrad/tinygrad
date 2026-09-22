@@ -1,0 +1,37 @@
+name: QCOM emulator
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: qcom-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  testqcom:
+    name: Linux (QCOM A630)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .
+      BEAM: 0
+      NOOPT: 0
+      CACHE_VERSION: '1'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          python-version: '3.12'
+          deps: testing_unit mesa
+          pydeps: pytest-subtests
+      - name: Run QCOM semantic and integration tests
+        run: python -m pytest test/mockgpu/qcom test/mockgpu/test_runtime_hooks.py -q
+      - name: Run upstream mathematical operations and gradients
+        run: |
+          DEV=MOCK+QCOM:IR3 HCQ_RUNTIME_DEV=PYTHON python -m test.mockgpu.qcom.test_math --backend
+          DEV=MOCK+QCOM:IR3 HCQ_RUNTIME_DEV=CPU python -m test.mockgpu.qcom.test_math --backend

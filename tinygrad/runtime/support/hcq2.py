@@ -82,17 +82,22 @@ def pack_args(args:list[tuple[int, UOp]], size:int) -> list[UOp]:
   return words + [UOp(Ops.BINARY, arg=bytes(size - end))]
 
 @functools.cache
-def cfunc_buf(lib:str, name:str) -> Buffer:
-  fn = getattr(importlib.import_module(f"tinygrad.runtime.autogen.{lib}").dll, name)
-  (b:=Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, preallocate=True)).host.view(fmt='Q')[0] = unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
+def cfunc_buf(lib:str, name:str, ref:Any|None=None) -> Buffer:
+  fn = getattr(importlib.import_module(f"tinygrad.runtime.autogen.{lib}").dll, name) if ref is None else ref
+  address = ref.address() if ref is not None else unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
+  (b:=Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, preallocate=True)).host.view(fmt='Q')[0] = address
   return b
 
 def ccall(fn:Any, *args:UOp|int) -> UOp:
-  ptr = UOp.placeholder((1,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.value, tag=("cfunc", fn.__module__.split(".")[-1], fn.__name__))
+  name = fn.name if hasattr(fn, 'name') else fn.__name__
+  module = fn.lib if hasattr(fn, 'lib') else fn.__module__.split(".")[-1]
+  ref = fn if hasattr(fn, 'address') else None
+  ptr = UOp.placeholder((1,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.value,
+                        tag=("cfunc", module, name, ref) if ref is not None else ("cfunc", module, name))
   ret = dtypes.void if fn.restype is None else dtypes.uint64 if fn.restype is ctypes.c_void_p else \
     next(d for d in DTYPES_DICT.values() if d.fmt == fn.restype._type_)
   cargs = [UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args]
-  return UOp.custom_function(fn.__name__, ptr.index(0).load()).call(*cargs, ret_dtype=ret)
+  return UOp.custom_function(name, ptr.index(0).load()).call(*cargs, ret_dtype=ret)
 
 CDTYPE = {1: dtypes.uchar, 2: dtypes.ushort, 4: dtypes.uint, 8: dtypes.ulong} # a C field as the unsigned int of its size
 

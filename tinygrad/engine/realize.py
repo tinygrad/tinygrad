@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any, Sequence
-import decimal, array
+import contextlib, decimal, array
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansipad, prod, flatten, Context, to_tuple, tqdm, dedup
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events, perf_counter_us, cpu_profile
@@ -191,7 +191,11 @@ def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
     cast(Buffer, call.src[1 + info.table].buffer).host.view(fmt='Q')[:len(addrs)] = array.array('Q', addrs)
   ctx = replace(ctx, wait=ctx.wait and not info.skip_wait,
                 var_vals={**ctx.var_vals, **{k: v for d in info.device for k, v in cast(Any, Device[d]).var_vals.items()}})
-  ets = exec_kernel(ctx, call, ast, devices=(Device[info.device[0]].host,))
+  with contextlib.ExitStack() as scopes:
+    for device in info.device:
+      if (scope:=getattr(Device[device], "launch_scope", None)) is not None:
+        scopes.enter_context(scope(call))
+    ets = exec_kernel(ctx, call, ast, devices=(Device[info.device[0]].host,))
   for host, dev in info.host_deps: Device[host].pending[Device[dev]] = Device[dev].timeline.host.view(fmt='Q')[1]
   if not (ctx.wait or PROFILE): return ets
 

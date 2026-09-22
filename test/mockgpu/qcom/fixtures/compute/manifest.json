@@ -1,0 +1,319 @@
+{
+  "ir3-compiled-add/1": {
+    "kind": "compiler-output-not-capture",
+    "size": 1,
+    "dtype": "uint32",
+    "tinymesa": "25.2.7.2",
+    "tinygrad": "1a58c3ae9d5ff5605d81085cf1a364c113e95cf6",
+    "device": "NULL:IR3:a630",
+    "BEAM": 0,
+    "NOOPT": 0,
+    "code_bytes": 256,
+    "sha256": "1297f1ad5dabdbbeb2deb11cc0c3708cb7fefd48e630888d95a93e397ec90128",
+    "constlen_vec4": 4,
+    "num_uavs": 0,
+    "immediates": "",
+    "global_size": [
+      1,
+      1,
+      1
+    ],
+    "local_size": [
+      1,
+      1,
+      1
+    ],
+    "program": "scalar.bin"
+  },
+  "ir3-compiled-add/128": {
+    "kind": "compiler-output-not-capture",
+    "size": 128,
+    "dtype": "uint32",
+    "tinymesa": "25.2.7.2",
+    "tinygrad": "1a58c3ae9d5ff5605d81085cf1a364c113e95cf6",
+    "device": "NULL:IR3:a630",
+    "BEAM": 0,
+    "NOOPT": 0,
+    "code_bytes": 256,
+    "sha256": "b810589dc647126f29492be6bf6b70bf8c626a3cbaed58db5b99fb1072ce04d7",
+    "constlen_vec4": 4,
+    "num_uavs": 0,
+    "immediates": "",
+    "global_size": [
+      1,
+      1,
+      1
+    ],
+    "local_size": [
+      32,
+      1,
+      1
+    ],
+    "program": "vector128.bin"
+  },
+  "ir3-dispatch-add/1024": {
+    "kind": "compiler-output-not-capture",
+    "tinymesa": "25.2.7.2",
+    "tinygrad": "1a58c3ae9d5ff5605d81085cf1a364c113e95cf6",
+    "dtype": "uint32",
+    "BEAM": 0,
+    "NOOPT": 0,
+    "target_device": "NULL",
+    "size": 1024,
+    "global": [
+      8,
+      1,
+      1
+    ],
+    "local": [
+      32,
+      1,
+      1
+    ],
+    "wgid": 192,
+    "lid": 0,
+    "bytes": 384,
+    "sha256": "7b10c5d37d187388bed33fab4fd20fb81702a46404a9d920c0913cf1796527fd",
+    "program": "vector32.bin"
+  },
+  "ir3-dispatch-add/256": {
+    "kind": "compiler-output-not-capture",
+    "tinymesa": "25.2.7.2",
+    "tinygrad": "1a58c3ae9d5ff5605d81085cf1a364c113e95cf6",
+    "dtype": "uint32",
+    "BEAM": 0,
+    "NOOPT": 0,
+    "target_device": "NULL",
+    "size": 256,
+    "global": [
+      2,
+      1,
+      1
+    ],
+    "local": [
+      32,
+      1,
+      1
+    ],
+    "wgid": 192,
+    "lid": 0,
+    "bytes": 384,
+    "sha256": "7b10c5d37d187388bed33fab4fd20fb81702a46404a9d920c0913cf1796527fd",
+    "program": "vector32.bin"
+  },
+  "ir3-dispatch-add/4096": {
+    "kind": "compiler-output-not-capture",
+    "tinymesa": "25.2.7.2",
+    "tinygrad": "1a58c3ae9d5ff5605d81085cf1a364c113e95cf6",
+    "dtype": "uint32",
+    "BEAM": 0,
+    "NOOPT": 0,
+    "target_device": "NULL",
+    "size": 4096,
+    "global": [
+      32,
+      1,
+      1
+    ],
+    "local": [
+      32,
+      1,
+      1
+    ],
+    "wgid": 192,
+    "lid": 0,
+    "bytes": 384,
+    "sha256": "7b10c5d37d187388bed33fab4fd20fb81702a46404a9d920c0913cf1796527fd",
+    "program": "vector32.bin"
+  },
+  "ir3-dispatch-add/production/1": {
+    "kind": "compiler-output-not-capture",
+    "tinymesa": "25.2.7.2",
+    "tinygrad": "1a58c3ae9d5ff5605d81085cf1a364c113e95cf6",
+    "dtype": "uint32",
+    "BEAM": 0,
+    "NOOPT": 0,
+    "target_device": "QCOM",
+    "size": 1,
+    "global": [
+      1,
+      1,
+      1
+    ],
+    "local": [
+      1,
+      1,
+      1
+    ],
+    "wgid": 252,
+    "lid": 252,
+    "bytes": 256,
+    "sha256": "1297f1ad5dabdbbeb2deb11cc0c3708cb7fefd48e630888d95a93e397ec90128",
+    "program": "scalar.bin"
+  },
+  "ir3-dispatch-add/production/1024": {
+    "kind": "compiler-output-not-capture",
+    "tinymesa": "25.2.7.2",
+    "tinygrad": "1a58c3ae9d5ff5605d81085cf1a364c113e95cf6",
+    "dtype": "uint32",
+    "BEAM": 0,
+    "NOOPT": 0,
+    "target_device": "QCOM",
+    "size": 1024,
+    "global": [
+      2,
+      1,
+      1
+    ],
+    "local": [
+      128,
+      1,
+      1
+    ],
+    "wgid": 192,
+    "lid": 0,
+    "bytes": 384,
+    "sha256": "e6093ee7d99c0e56054ab1ae5c12ac39d0a78a747d44d5ba786409942f20ddde",
+    "program": "multigroup.bin"
+  },
+  "ir3-dispatch-add/production/128": {
+    "kind": "compiler-output-not-capture",
+    "tinymesa": "25.2.7.2",
+    "tinygrad": "1a58c3ae9d5ff5605d81085cf1a364c113e95cf6",
+    "dtype": "uint32",
+    "BEAM": 0,
+    "NOOPT": 0,
+    "target_device": "QCOM",
+    "size": 128,
+    "global": [
+      1,
+      1,
+      1
+    ],
+    "local": [
+      32,
+      1,
+      1
+    ],
+    "wgid": 252,
+    "lid": 0,
+    "bytes": 256,
+    "sha256": "b810589dc647126f29492be6bf6b70bf8c626a3cbaed58db5b99fb1072ce04d7",
+    "program": "vector128.bin"
+  },
+  "ir3-dispatch-add/production/256": {
+    "kind": "compiler-output-not-capture",
+    "tinymesa": "25.2.7.2",
+    "tinygrad": "1a58c3ae9d5ff5605d81085cf1a364c113e95cf6",
+    "dtype": "uint32",
+    "BEAM": 0,
+    "NOOPT": 0,
+    "target_device": "QCOM",
+    "size": 256,
+    "global": [
+      1,
+      1,
+      1
+    ],
+    "local": [
+      64,
+      1,
+      1
+    ],
+    "wgid": 252,
+    "lid": 0,
+    "bytes": 256,
+    "sha256": "b810589dc647126f29492be6bf6b70bf8c626a3cbaed58db5b99fb1072ce04d7",
+    "program": "vector128.bin"
+  },
+  "ir3-dispatch-add/production/4096": {
+    "kind": "compiler-output-not-capture",
+    "tinymesa": "25.2.7.2",
+    "tinygrad": "1a58c3ae9d5ff5605d81085cf1a364c113e95cf6",
+    "dtype": "uint32",
+    "BEAM": 0,
+    "NOOPT": 0,
+    "target_device": "QCOM",
+    "size": 4096,
+    "global": [
+      8,
+      1,
+      1
+    ],
+    "local": [
+      128,
+      1,
+      1
+    ],
+    "wgid": 192,
+    "lid": 0,
+    "bytes": 384,
+    "sha256": "e6093ee7d99c0e56054ab1ae5c12ac39d0a78a747d44d5ba786409942f20ddde",
+    "program": "multigroup.bin"
+  },
+  "scalar_execution": {
+    "kind": "offline-source-model-inputs-and-hand-derived-expectations",
+    "program_sha256": "1297f1ad5dabdbbeb2deb11cc0c3708cb7fefd48e630888d95a93e397ec90128",
+    "lane": 0,
+    "active_lanes": 1,
+    "global_size": [
+      1,
+      1,
+      1
+    ],
+    "local_size": [
+      1,
+      1,
+      1
+    ],
+    "initial_registers": {},
+    "constant_dwords": [
+      12288,
+      3,
+      4096,
+      1,
+      8192,
+      2
+    ],
+    "regions": {
+      "input_a": 4294971392,
+      "input_b": 8589942784,
+      "output": 12884914176
+    },
+    "region_bytes": 4,
+    "output_before": "aaaaaaaa",
+    "padded": true,
+    "cases": [
+      {
+        "a": "00000000",
+        "b": "00000000",
+        "expected": "00000000",
+        "derivation": "0 + 0 = 0"
+      },
+      {
+        "a": "01000000",
+        "b": "02000000",
+        "expected": "03000000",
+        "derivation": "1 + 2 = 3"
+      },
+      {
+        "a": "ffffffff",
+        "b": "01000000",
+        "expected": "00000000",
+        "derivation": "4294967295 + 1 = 4294967296; remainder modulo 4294967296 is 0"
+      },
+      {
+        "a": "ffffff7f",
+        "b": "01000000",
+        "expected": "00000080",
+        "derivation": "2147483647 + 1 = 2147483648"
+      },
+      {
+        "a": "ffffffff",
+        "b": "ffffffff",
+        "expected": "feffffff",
+        "derivation": "4294967295 + 4294967295 = 8589934590; remainder modulo 4294967296 is 4294967294"
+      }
+    ]
+  }
+}
