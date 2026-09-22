@@ -276,6 +276,17 @@ class TestDoubleDType(TestDType):
              dtypes.float32, [float('inf'), 3.4e38, 1, 0])
 
 
+class TestIntegerCast(unittest.TestCase):
+  def test_narrow_then_widen(self):
+    values = [0, 127, 128, 255, 256, 32767, 32768, 65535, 65536, 0x040302, 0x12345678]
+    a = Tensor(values, dtype=dtypes.uint32).realize()
+    for dtype in (dtypes.uint8, dtypes.int8, dtypes.uint16, dtypes.int16):
+      with self.subTest(dtype=dtype):
+        bits = 8*dtype.itemsize
+        expected = [v & ((1 << bits)-1) for v in values]
+        if dtypes.is_int(dtype) and not dtypes.is_unsigned(dtype): expected = [v-(1 << bits) if v >= 1 << (bits-1) else v for v in expected]
+        self.assertEqual(a.cast(dtype).cast(dtypes.int32).tolist(), expected)
+
 class TestInt8DType(TestDType):
   DTYPE = dtypes.int8
   @unittest.skipIf(Device.DEFAULT == "CUDA" or isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "cuda saturation works differently")
