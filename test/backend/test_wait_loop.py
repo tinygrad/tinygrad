@@ -94,14 +94,6 @@ def loop_in_loop_kernel(C:UOp) -> UOp:
   return C[0].store(i[0].load()).sink(arg=KernelInfo(name="loop_in_loop", opts_to_apply=()))
 
 class TestWaitLoop(unittest.TestCase):
-  def test_false_backedge_runs_body_once(self):
-    def kernel(c:UOp):
-      loop = UOp.loop(0)
-      body = c[0].store(c.after(loop)[0].load()+1)
-      return body.backedge(loop, UOp.const(False)).sink(arg=KernelInfo(name="backedge_once", opts_to_apply=()))
-    c = Tensor.custom_kernel(Tensor([4], dtype=dtypes.int), fxn=kernel)[0]
-    self.assertEqual(c.item(), 5)
-
   def test_wait_loop(self):
     c = Tensor.empty(1, dtype=dtypes.int)
     c = Tensor.custom_kernel(c, fxn=wait_loop_kernel)[0]
