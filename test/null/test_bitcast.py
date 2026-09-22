@@ -1,11 +1,9 @@
 import itertools, unittest
 from tinygrad import Tensor, dtypes
 from tinygrad.dtype import Invalid
-from tinygrad.helpers import Target
-from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.uop.ops import Ops, UOp, graph_rewrite
 from tinygrad.uop.symbolic import sym
-from tinygrad.uop.spec import spec_program, test_pyrender as check_pyrender
+from tinygrad.uop.spec import test_pyrender as check_pyrender
 from tinygrad.schedule.prepare import expand_bitcast
 
 
@@ -78,34 +76,5 @@ class TestBitcastShape(unittest.TestCase):
     self.assertEqual(z.shape, x.shape)
     self.assertEqual(z.uop.op, Ops.RESHAPE)
     self.assertEqual(z.uop.src[0].shape, (2, 2, 4))
-
-class TestBitcastRenderer(unittest.TestCase):
-  def setUp(self):
-    self.renderer = CStyleLanguage(Target())
-    self.x = UOp.param(0, dtypes.uint8, 8)
-    self.reshape = self.x.reshape((2, 4))
-    self.bitcast = bitcast(self.reshape, dtypes.uint32)
-
-  def test_bitcast_reshape(self):
-    zero = UOp.const(0, dtypes.int32)
-    index = self.bitcast.index(zero)
-    code = self.renderer.render([self.x, self.reshape, self.bitcast, *zero.toposort(), index, index.load()])
-    self.assertIn("unsigned int val0", code)
-    self.assertNotIn("unsigned_char8", code)
-
-  def test_shrink_bitcast_reshape(self):
-    offset, size = UOp.const(0, dtypes.int32), UOp.const(1, dtypes.int32)
-    shrink = UOp(Ops.SHRINK, src=(self.bitcast, offset, size))
-    self.assertIs(spec_program.rewrite(shrink), True)
-    code = self.renderer.render([self.x, self.reshape, self.bitcast, *offset.toposort(), *size.toposort(), shrink, shrink.load()])
-    self.assertIn("unsigned int val0", code)
-
-  def test_reject_arbitrary_reshape(self):
-    with self.assertRaisesRegex(AssertionError, "failed to render Ops.RESHAPE"):
-      self.renderer.render([self.x, self.reshape, self.reshape.sink()])
-
-  def test_reject_reshape_with_non_bitcast_user(self):
-    with self.assertRaisesRegex(AssertionError, "failed to render Ops.RESHAPE"):
-      self.renderer.render([self.x, self.reshape, self.bitcast, UOp.sink(self.reshape, self.bitcast)])
 
 if __name__ == '__main__': unittest.main()

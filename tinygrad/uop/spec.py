@@ -197,10 +197,6 @@ spec_program = PatternMatcher([
 
   # allow special SHRINK of a buffer or its bitcast
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)).or_bitcasted(), UPat(), UPat.cvar().or_casted())), lambda: True),
-  (UPat(Ops.SHRINK, src=(UPat(Ops.RESHAPE, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)), UPat())).bitcast(),
-                        UPat(), UPat.cvar().or_casted())), lambda: True),
-
-  (UPat(Ops.RESHAPE, name="x"), lambda x: x.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),
