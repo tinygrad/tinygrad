@@ -296,6 +296,19 @@ class TestUint8DType(TestDType):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
 class TestBitCast(unittest.TestCase):
+  def test_subword_slice(self):
+    for dtype, values in ((dtypes.uint16, [0x0201, 0x0403, 0x0605, 0x0807]), (dtypes.uint32, [0x04030201, 0x08070605])):
+      a = Tensor(values, dtype=dtype).realize()
+      for start, end in ((0, 1), (1, 3), (2, 3), (1, 5), (2, 6), (0, 8)):
+        with self.subTest(dtype=dtype, start=start, end=end):
+          out = a.bitcast(dtypes.uint8)[start:end].contiguous()
+          self.assertEqual(out.shape, (end-start,))
+          self.assertEqual(out.tolist(), list(range(1, 9))[start:end])
+
+  def test_subword_slice_bitcast(self):
+    a = Tensor([0x04030201, 0x08070605], dtype=dtypes.uint32).realize()
+    self.assertEqual(a.bitcast(dtypes.uint8)[1:3].bitcast(dtypes.uint16).contiguous().tolist(), [0x0302])
+
   def test_shape_change_bitcast(self):
     for dt1, dt2 in [(dtypes.uint8, dtypes.int64), (dtypes.int64, dtypes.uint8)]:
       a = Tensor(rand_for_dtype(dt1, 32).reshape(2, 2, 8), dtype=dt1)
