@@ -361,7 +361,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
                signal_t:Type[SignalType]|None=None, comp_queue_t:Callable[..., HWQueue]|None=None, copy_queue_t:Callable[..., HWQueue]|None=None,
                kernargs_size=(16 << 20), sigalloc_size=0x1000, can_recover:bool=False, arch=None):
     from extra.hcq1.graph import HCQGraph
-    super().__init__(device, allocator, compilers, runtime, HCQGraph, arch=arch)
+    super().__init__(device, allocator, compilers, runtime, arch=arch)
+    self.graph = HCQGraph
 
     self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
     HCQCompiled.peer_groups[self.peer_group].append(self)

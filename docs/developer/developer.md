@@ -33,7 +33,7 @@ Then we render the UOps into code with a `Renderer`, then we compile the code to
 
 ## Execution
 
-`run_linear` walks the `LINEAR` UOp, dispatching each `CALL` to a runner (kernel, copy, view, encdec, or graph).
+`run_linear` walks the `LINEAR` UOp, dispatching each `CALL` to a runner (kernel, hcq batch, copy, encdec, or validate).
 
 ## Runtime
 

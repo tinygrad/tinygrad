@@ -531,6 +531,19 @@ class TestVizIntegration(unittest.TestCase):
     events = [e for e in profile["layout"]["NULL"]["events"] if e["name"] == kernel_name]
     self.assertEqual({e["ref"] for e in events}, kernels)
 
+  @needs_tracked_pm
+  def test_index_label(self):
+    with save_viz() as viz:
+      vals = Tensor.empty(16, device="NULL")
+      idxs = Tensor.empty(4, device="NULL", dtype=dtypes.uint)
+      vals[idxs % 16].realize()
+    labels:list[str] = []
+    for i in range(len(viz.list_items())):
+      for j in range(len(viz.data.trace.rewrites[i])):
+        for u in (step:=next(viz.get_details(i, j)))["_sink"].toposort():
+          if u.op is Ops.INDEX: labels.append(step["graph"][id(u)]["label"])
+    for label in labels: self.assertNotIn("UOp(", label)
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 from tinygrad.viz.cli import decode_profile

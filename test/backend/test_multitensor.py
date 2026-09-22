@@ -5,7 +5,7 @@ from tinygrad.helpers import prod, Context
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import run_linear, lower_and_compile, pm_beam
 import numpy as np
-from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph, check_schedule, assert_kernel_count, KernelCountException
+from test.helpers import not_support_multi_device, needs_second_gpu, slow, check_schedule, assert_kernel_count, KernelCountException
 
 d0 = f"{Device.DEFAULT}:0"
 d1 = f"{Device.DEFAULT}:1"
@@ -304,40 +304,6 @@ class TestMultiTensor(unittest.TestCase):
       jf(out)
       np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-5)
     assert jf.captured is not None
-
-  @unittest.skip("test broken")
-  def test_multi_device_jit_graph(self):
-    if Device[d0].graph is None or Device[d1].graph is None: raise unittest.SkipTest("only test graphs")
-
-    @TinyJit
-    def jf(a: Tensor, b: Tensor, c: Tensor, d:Tensor):
-      # Create 80 entries on device 0: 2 batches.
-      for _ in range(40):
-        a = ((a + b).realize() + (a * b).realize()).realize()
-      # Create 80 entries on device 1: 2 batches.
-      for _ in range(40):
-        c = ((c + d).realize() + (c * d).realize()).realize()
-      # Create a copy from device 0 to 1: 1 entry.
-      a = a.to(d1).realize()
-      # Creates one last entry on device 1: 1 batch.
-      return (a + c).realize()
-
-    a = Tensor.randn(10, 10, device=d0).realize()
-    b = Tensor.randn(10, 10, device=d0).realize()
-    c = Tensor.randn(10, 10, device=d1).realize()
-    d = Tensor.randn(10, 10, device=d1).realize()
-
-    ref = jf(a, b, c, d).numpy()
-    for _ in range(5):
-      o = jf(a, b, c, d).numpy()
-      np.testing.assert_allclose(ref, o, atol=1e-4, rtol=1e-5)
-
-    # Checking that 2 graphs per device, 1 copy and 1 last graph on device 1 are created.
-    sis = jf.captured.linear.src
-    assert len(sis) == 6
-    for si in (sis[0], sis[1], sis[2], sis[3], sis[5]):
-      assert call_is_graph(si)
-    assert sis[4].src[0].op is Ops.STORE
 
   def test_rand_on_multiple_devices(self):
     # different devices generate different rand

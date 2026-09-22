@@ -296,7 +296,7 @@ class TestCustomKernel(unittest.TestCase):
       r, l = UOp.range(4, 0), UOp.loop(1)
       cnt = UOp.placeholder((1,), dtypes.int, slot=0, addrspace=AddrSpace.REG)
       cnt = cnt.after(r)[0].set(0)
-      cnt = cnt[0].set(nxt:=cnt.after(l)[0] + 1, end=(l, nxt < 3))
+      cnt = cnt.after(cnt[0].store(nxt:=cnt.after(l)[0] + 1).backedge(l, nxt < 3))
       return C[r].set(A[r] + cnt[0].cast(C.dtype), end=r).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)),)))
     a = Tensor([1., 2, 3, 4])
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), [4., 5, 6, 7])

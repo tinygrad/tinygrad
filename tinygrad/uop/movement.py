@@ -3,6 +3,9 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops
 # TODO: pm_mops from rangeify belongs here. this is all pattern matchers that strictly clean up movement ops
 
 mop_cleanup = PatternMatcher([
+  # merge adjacent SHRINKs
+  (UPat(Ops.SHRINK, name="x").f(Ops.SHRINK, allow_any_len=True, name="s"),
+   lambda s,x: x.src[0]._mop(Ops.SHRINK, tuple((o+p, n) for (o,_),(p,n) in zip(x.marg, s.marg)))),
   # merge adjacent RESHAPES
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
   # remove noop RESHAPEs
