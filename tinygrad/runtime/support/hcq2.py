@@ -376,7 +376,7 @@ def hcq_fence(ctx:EncodeCtx, f:UOp) -> UOp:
     slots = patch(slots, [], bytes(slots.max_numel() * slots.dtype.itemsize)) # zeroed at link
     target = slots.after(*last, tv:=timeline_value((dev,))).index(off // slots.dtype.itemsize).load()
     done = timeline((dev,)).after(target, loop:=UOp.loop(i)).index(0).load()
-    bumped = timeline((dev,)).after(done.end(loop, done < target)).index(1).store(nxt:=tv + UOp.const(1, dtypes.uint64))
+    bumped = timeline((dev,)).after(done.backedge(loop, done < target)).index(1).store(nxt:=tv + UOp.const(1, dtypes.uint64))
     last = (slots.after(bumped).index(off // slots.dtype.itemsize).store(nxt),)
 
   # re-arm the signals
