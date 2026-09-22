@@ -22,7 +22,7 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.schedule.prepare import pm_mops
+from tinygrad.schedule.prepare import pm_mops, resolve_function
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
@@ -283,10 +283,24 @@ pm_implicit_barriers = PatternMatcher([
   (UPat(Ops.END, name="end"), add_war_barrier),
 ])
 
+def lower_call_linear(ctx, linear:UOp) -> UOp|None:
+  if not linear.src or not all(c.is_inline_call for c in linear.src): return None
+  prev = UOp.sink()
+  for call in linear.src:
+    body = call.body.substitute({r:r.replace(arg=(next(ctx), *r.arg[1:])) for r in call.body.toposort() if r.op is Ops.RANGE})
+    prev = resolve_function(call.replace(src=(body, *(a.after(prev) for a in call.src[1:]))))
+    assert prev is not None
+  return prev
+
+pm_call_linear = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), lower_call_linear)])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
+
+  ast = graph_rewrite(ast, pm_call_linear, ctx=itertools.count(max((r.arg[0] for r in ast.toposort() if r.op is Ops.RANGE), default=0)+1),
+                      name="lower linear call")
 
   # resolve UNSHARDs (multi-device UNSHARDs are already resolved by the scheduler; this handles in-kernel shards, e.g. fragments)
   sink = graph_rewrite(ast, multi_pm, name="multi_pm")
