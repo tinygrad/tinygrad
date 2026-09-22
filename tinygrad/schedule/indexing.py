@@ -82,20 +82,17 @@ def create_bufferize_and_index_srcs(ctx:IndexingContext, x:UOp) -> list[UOp]:
     if s.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
       if x in ctx.range_map and i < data_src_count: new_src = new_src.index(*src_rngs)
     elif s in ctx.realize_map:
-      realized_ranges = ctx.realize_map[s]
-      assert isinstance(realized_ranges, list), "realize map must contain range list"
-      closed_ranges = tuple([r for i,r in enumerate(ctx.range_map[s][1]) if i in realized_ranges])
+      assert isinstance(ctx.realize_map[s], list), "realize map must contain range list"
+      closed_ranges = ctx.range_map[s][1]
       if s.op is Ops.STORE:
         # add the ends if this is a store
         new_src = s.end(*[r for r in closed_ranges if r.op is Ops.RANGE])
         del ctx.realize_map[s]
       else:
         removable = s.op not in ALWAYS_CONTIGUOUS and s not in ctx.non_removable
-        # LOCAL: None in the device assigns it a number later
-        opts = BufferizeOpts(device=s.device, removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
-               BufferizeOpts(device=s.device, addrspace=AddrSpace.LOCAL, removable=removable)
+        opts = BufferizeOpts(device=s.device, removable=removable)
         new_src = UOp(Ops.STAGE, src=(new_src,)+closed_ranges, arg=opts)
-        if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(src_rngs) if i in realized_ranges])
+        if x in ctx.range_map: new_src = new_src.index(*src_rngs)
     new_srcs.append(new_src)
   return new_srcs
 
@@ -145,7 +142,7 @@ pm_apply_rangeify = PatternMatcher([
 
 pm_fix_deviceless = PatternMatcher([
   (UPat(Ops.STAGE, name="b"),
-    lambda ctx,b: b.replace(arg=replace(b.arg, device=ctx)) if b.arg.addrspace is AddrSpace.GLOBAL and b.arg.device is None else None),
+    lambda ctx,b: b.replace(arg=replace(b.arg, device=ctx)) if b.arg.device is None else None),
 ])
 
 @functools.cache
