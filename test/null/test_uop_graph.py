@@ -1,4 +1,4 @@
-import unittest, pytest
+import unittest, pytest, functools, weakref
 from tinygrad import dtypes, Variable, Device
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes, KernelInfo
@@ -12,6 +12,40 @@ simple_pm = PatternMatcher([
   (UPat.cvar('x') * UPat.cvar('y') * UPat.cvar('z'), lambda x,y,z: UOp.const(x.val*y.val*z.val)),
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.val+c2.val)),
 ])
+
+class TestTuplize(unittest.TestCase):
+  def test_matches_tuple_order(self):
+    @functools.cache
+    def reference(u): return (u.op.value, repr(u.arg), u.dtype, repr(u.tag)) + tuple(reference(s) for s in u.src)
+    nodes = [UOp.const(v) for v in (-1, 0, 1, 2, 1.0, -0.0, float('nan'), True, False)]
+    nodes += [UOp(Ops.ADD, src=(a, b)) for a in nodes for b in nodes]
+    nodes += [UOp.sink(*nodes[:n]) for n in (0, 1, 2, 3)]
+    nodes += [u.rtag(f"tag{i%3}") for i,u in enumerate(nodes[:20])]  # tags are part of the order
+    self.assertEqual(sorted(nodes, key=lambda u: u.tuplize), sorted(nodes, key=reference))
+    for a in nodes:
+      for b in nodes:
+        self.assertEqual(a.tuplize < b.tuplize, reference(a) < reference(b))
+
+  def test_equality_is_identity(self):
+    # the invariant that makes identity equality correct: tuples are equal iff the UOps are the same object
+    a, b = UOp.const(1), UOp.const(1).rtag("tagged")
+    pairs = [(a, UOp.const(1)), (a, b), (a, a+b), (a+b, b+a), (UOp.sink(a, b), UOp.sink(a, b))]
+    for x, y in pairs: self.assertEqual(x.tuplize == y.tuplize, x is y)
+    self.assertNotEqual(a.tuplize < b.tuplize, b.tuplize < a.tuplize)  # tags order them, exactly one direction holds
+
+  def test_deep_shared_subgraphs(self):
+    # long equal prefixes with a difference at the bottom: correct order, and the pathological case for value equality
+    a, b = UOp.const(1).rtag("left"), UOp.const(1).rtag("right")
+    for _ in range(256):
+      a, b = [UOp(Ops.ADD, src=(u, u)) for u in (a, b)]
+    self.assertNotEqual(a.tuplize < b.tuplize, b.tuplize < a.tuplize)
+
+  def test_does_not_retain_uops(self):
+    a = UOp.const(1).rtag(object())
+    ref = weakref.ref(a)
+    _ = a.tuplize
+    del a
+    self.assertIsNone(ref())
 
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
