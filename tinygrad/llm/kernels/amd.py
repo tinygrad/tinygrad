@@ -85,7 +85,7 @@ class Linear(nn.Linear):
     # Some blocks are only halfword-aligned; keep all formats as zero-copy views of the GGUF storage.
     word_dtype = dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32
     raw_offset = raw.contiguous_view_offset()
-    assert raw_offset is not None and raw_offset % word_dtype.itemsize == 0 and raw.buf_uop.dtype == dtypes.uint8
+    if raw_offset is None or raw_offset % word_dtype.itemsize or raw.buf_uop.dtype != dtypes.uint8: return
     self.ggml_type = ggml_type
     self.weight = Tensor(raw).bitcast(word_dtype).contiguous()
   def __call__(self, x:Tensor) -> Tensor:
@@ -618,6 +618,8 @@ def _amd_flash_decode_combine(o:UOp, partial:UOp, stats:UOp, live:int|UOp) -> UO
     .end(lane, block_dt, block_bh).sink(arg=KernelInfo(name="flash_decode_combine", opts_to_apply=()))
 
 def amd_flash_attention_decode(q:Tensor, cache_kv:Tensor, valid_kv_len:int|UOp, max_kv_len:int) -> Tensor:
+  # Carry length bindings even when the cache was populated independently of this call.
+  if isinstance(valid_kv_len, UOp): cache_kv = Tensor(cache_kv.uop.after(valid_kv_len))
   B, H, D = cache_kv.shape[1], q.shape[1], cache_kv.shape[4]
   chunks = min(48, max_kv_len // 64)
   partial = Tensor.empty(B, H, chunks, D, dtype="float32", device=q.device)
@@ -747,6 +749,7 @@ def flash_attention(q:Tensor, assigned_kv:Tensor, valid_end:int|UOp) -> Tensor:
   B, H, T, D = q.shape
   out = Tensor.empty(B*H, T, D, dtype="float32", device=q.device)
   fxn = functools.partial(_amd_flash_attention, valid_kv_len=valid_end, q_start=q_start, rdna4=_wmma_rdna4(q.device))
+  if isinstance(valid_end, UOp): assigned_kv = Tensor(assigned_kv.uop.after(valid_end))
   out = Tensor.custom_kernel(out, q.half().reshape(B*H, T, D), assigned_kv, fxn=fxn)[0].reshape(B, H, T, D)
   return out if q_start is None else out[:, :, :T_real]
 
