@@ -17,7 +17,6 @@ class _CallCtx(_Ctx):
     return UOp.const(int.from_bytes(self.code[dword_idx*4:(dword_idx+1)*4], "little"), dtypes.uint32)
 
   def rpc(self) -> UOp: return UOp.const(self.pc, dtypes.uint64)
-  def inc_pc(self) -> list[UOp]: return []
 
   def rsgpr_dyn(self, reg:UOp, valid:UOp|None=None) -> UOp:
     reg = reg.simplify()
@@ -31,13 +30,6 @@ class _CallCtx(_Ctx):
         return valid.where(ret, UOp.const(0, dtypes.uint32)) if valid is not None else ret
     return super().rsgpr_dyn(reg, valid)
 
-  def wsgpr_dyn(self, reg:UOp, val:UOp) -> UOp:
-    if reg.vmin == reg.vmax and reg.vmin in (PC_LO_IDX, PC_HI_IDX):
-      # The old emulator terminates by storing an all-ones PC. No runtime PC is needed here.
-      if val.vmin == val.vmax == 0xffffffff: return UOp.sink()
-      raise NotImplementedError("ASM_CALL requires control-flow lifting for PC writes")
-    return super().wsgpr_dyn(reg, val)
-
 class _CallGraph:
   def __init__(self, ctx:_CallCtx):
     self.banks = {ctx.sgpr:("s", 1), ctx.vgpr:("v", ctx.wave_size)}
@@ -47,6 +39,11 @@ class _CallGraph:
     self.values:dict[UOp, UOp] = {}
     self.readers:dict[UOp, list[UOp]] = {}
     self.calls:list[UOp] = []
+    self.loop = UOp.loop(7)
+
+  def pc(self, *deps:UOp) -> UOp:
+    lo, hi = [self.param(_Ctx.sgpr, i).after(*deps).index(0).load().cast(dtypes.uint64) for i in (PC_LO_IDX, PC_HI_IDX)]
+    return lo | (hi << 32)
 
   def param(self, bank:UOp, reg:int=0) -> UOp:
     if (key:=(bank, reg)) not in self.params:
@@ -69,10 +66,11 @@ class _CallGraph:
     if idx.src[0].op is Ops.AFTER: buf = buf.after(*idx.src[0].src[1:])
     return buf.index((offset % width).valid(idx.src[1].get_valid()))
 
-  def append(self, body:UOp, name:str):
+  def append(self, body:UOp, name:str, pc:int):
     body = graph_rewrite(body, pm_add_loads, name="explicit instruction loads")
     body = graph_rewrite(body, pm_register_operands, ctx=self, name="bind instruction registers")
     if not any(u.op is Ops.STORE for u in body.toposort()): return
+    body = graph_rewrite(body, pm_gate_instruction, ctx=self.pc().eq(pc), walk=True, name="gate instruction memory")
     used = {p for p in body.toposort() if p.op is Ops.PARAM}
     if not used <= self.operands: raise NotImplementedError("unbound register bank")
     writes = {u.src[0].buf_uop for u in body.toposort() if u.op is Ops.STORE}
@@ -91,6 +89,8 @@ class _CallGraph:
       vals = [self.values[p].after(*self.readers[p]) if p in writes else self.values[p] for p in group]
       arg = UOp.stack(*vals) if len(vals) > 1 else vals[0]
       args.append(arg)
+    deps = (self.calls[-1],) if self.calls else (self.loop,)
+    args = [UOp.stack(*(v.after(*deps) for v in a.src)) if a.op is Ops.STACK else a.after(*deps) for a in args]
     call = body.call(*args, name=name)
     self.calls.append(call)
     for p in used:
@@ -100,6 +100,10 @@ class _CallGraph:
 pm_register_operands = PatternMatcher([
   (UPat(Ops.INDEX, name="idx"), lambda ctx,idx: ctx.index(idx)),
   (UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx.param(p) if p not in ctx.banks and p not in ctx.operands else None),
+])
+
+pm_gate_instruction = PatternMatcher([
+  (UPat(Ops.INDEX, name="idx"), lambda ctx,idx: idx.replace(src=(idx.src[0], idx.src[1].valid(ctx), *idx.src[2:]))),
 ])
 
 def lower_register(ctx, p:UOp) -> UOp|None:
@@ -135,7 +139,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
     if handler is None: raise RuntimeError(f"unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
     ctx = _CallCtx(code[offset:offset+inst.size()], lib + offset, _wave_size(arch))
     body = handler(inst, ctx).simplify(tracked=True)
-    graph.append(body, name=f"{_op_name(inst).lower()}_{offset:x}")
+    graph.append(body, name=f"{_op_name(inst).lower()}_{offset:x}", pc=lib+offset)
     offset += inst.size()
   wave_size, total_threads = _wave_size(arch), lx * ly * lz
   sizes = {"s":SGPR_COUNT, "v":256*wave_size, "lds":max(((rsrc2 >> 15) & 0x1ff)*128, 1),
@@ -154,6 +158,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   sgpr = banks["s"].after(*clears)
   words = UOp.param(6, dtypes.uint32, user_words, name="user_data")
   stores = [sgpr.index(i).store(words.index(i)) for i in range(user_words)]
+  stores += [sgpr.index(PC_LO_IDX).store(lib & 0xffffffff), sgpr.index(PC_HI_IDX).store(lib >> 32)]
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
   for i in range(wave_size//32):
     bits = (n_lanes-i*32).maximum(0).minimum(32).cast(dtypes.uint64)
@@ -174,9 +179,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   tid = wave*wave_size+lane
   stores.append(banks["v"].after(*clears).index(lane).store(((tid//(lx*ly)) << 20) | (((tid//lx)%ly) << 10) | (tid%lx)).end(lane))
   init = state_call(UOp.sink(*stores), "init_wave", [banks[n] for n in ("s", "v", "a") if n in banks]+[words, group, wave], lds_init, wave)
-  referenced = {u for c in graph.calls for a in c.src[1:] for u in a.toposort(enter_calls=False) if u.op is Ops.CALL}
-  roots = [c for c in graph.calls if c not in referenced]
-  body = roots[-1].after(*roots[:-1]) if roots else init
+  body = graph.calls[-1].backedge(graph.loop, graph.pc(graph.calls[-1]).ne(0xffffffffffffffff)) if graph.calls else init
   body = body.substitute({p:p.after(init) for p in graph.operands}, walk=True)
   sink = UOp.sink(body.end(wave, group), arg=KernelInfo(name="asm_call")).rtag(1)
   return to_program(sink, _CallRenderer(Device["CPU"].renderer.target, banks))
