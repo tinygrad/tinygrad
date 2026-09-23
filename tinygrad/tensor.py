@@ -6,7 +6,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray, prod
 from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc
-from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite
+from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
 from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars, contiguous_mops_to_view, is_store_after
 from tinygrad.device import Buffer, canonicalize_device, is_disk_device
@@ -173,6 +173,7 @@ class Tensor(RandMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
+  @rewrite_group(lambda *tensors,ret: f"Bufferize {len(tensors)}")
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
     sink = UOp.sink(*[t.uop for t in (self,)+lst])
@@ -203,11 +204,13 @@ class Tensor(RandMixin):
           if isinstance(src.device, tuple) and src.axis is not None: buf = buf.unshard(src.axis)
           u = buf.after(buf.store(src))
       if u is not x: tensor_map[x] = u
-    _apply_map_to_tensors(tensor_map, name="bufferize")
 
+    # TODO: this should be one _apply_map_to_tensors
+    _apply_map_to_tensors(tensor_map, name="bufferize")
     sink = UOp.sink(*[x.uop for x in (self,)+lst])
     becomes_map = get_becomes_map(sink)
-    _apply_map_to_tensors(becomes_map, name="buffers")
+    _apply_map_to_tensors(becomes_map, name="becomes")
+
     return create_linear_with_vars(sink)
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
@@ -221,7 +224,8 @@ class Tensor(RandMixin):
     """Triggers the computation needed to create these Tensor(s)."""
     to_realize = [x for x in (self,)+lst if x.uop.base.needs_storage()]
     if len(to_realize):
-      run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
+      linear, var_vals = Tensor.linear_with_vars(*to_realize)
+      run_linear(linear, var_vals, update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:

@@ -253,7 +253,6 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])
 
-@rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret.src)-1)}")
 def transform_to_call(big_sink:UOp) -> UOp:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
