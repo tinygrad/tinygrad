@@ -174,6 +174,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
     if offset + inst.size() > lib_sz: raise RuntimeError(f"truncated instruction at {offset:#x}")
     if _op_name(inst) == "S_CODE_END": break
     name = _op_name(inst)
+    assert "BARRIER" not in name, f"barriers are not supported by ASM_CALL: {name}"
     branch = name == "S_BRANCH" or name.startswith("S_CBRANCH_")
     if not branch and name != "S_ENDPGM" and hasattr(inst, "op") and inst.op in _get_pcode_dict(inst.op):
       assert not re.search(r'\bPC\b', get_pcode(inst.op)), f"explicit PC access is not supported: {name}"
