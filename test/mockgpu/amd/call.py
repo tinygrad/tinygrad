@@ -305,7 +305,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
     if target is not None and target <= p: loops[target] = max(loops.get(target, p), p)
   axis = 7
 
-  def emit(start:int, end:int, active_loop:int|None=None):
+  def emit(start:int, end:int):
     nonlocal axis
     positions = [p for p in instructions if start <= p < end]
     branches = [p for p in positions if instructions[p][3] is not None]
@@ -373,9 +373,9 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
     graph.deps = ()
     for p in graph.operands: graph.values[p], graph.readers[p] = p, []
 
-  def phase(start:int, end:int, active_loop:int|None=None) -> tuple[UOp, bool]:
+  def phase(start:int, end:int) -> tuple[UOp, bool]:
     before = len(graph.calls)
-    terminated = emit(start, end, active_loop)
+    terminated = emit(start, end)
     result = graph.calls[-1] if len(graph.calls) > before else UOp(Ops.NOOP)
     reset_dependencies()
     return UOp(Ops.LINEAR, src=(result,)), terminated
@@ -406,7 +406,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
         axis += 1
         start = latch+instructions[latch][0]
       else:
-        item, terminated = phase(start, stop, active_loop)
+        item, terminated = phase(start, stop)
         result.append(item)
         if terminated: break
         start = stop
