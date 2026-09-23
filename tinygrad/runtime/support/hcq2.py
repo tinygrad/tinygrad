@@ -6,7 +6,7 @@ from tinygrad.helpers import dedup, pluralize, unwrap, to_tuple, ContextVar, Con
 from tinygrad.helpers import DEBUG, VIZ, HCQ2, DEV, ALL2ALL
 from tinygrad.device import Device, Buffer, BufferSpec, DepsTracker, TinyELF, HCQ_RUNTIME_DEV
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp, graph_rewrite, rewrite_group, exec_alu
-from tinygrad.dtype import DType, dtypes, DTYPES_DICT, AddrSpace
+from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.schedule.prepare import pm_mops
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, get_call_written_bufs
@@ -87,12 +87,12 @@ def cfunc_buf(lib:str, name:str) -> Buffer:
   (b:=Buffer(HCQ_RUNTIME_DEV.value, 1, dtypes.uint64, preallocate=True)).host.view(fmt='Q')[0] = unwrap(ctypes.cast(fn, ctypes.c_void_p).value)
   return b
 
-def ccall(fn:Any, *args:UOp|int, ret_dtype:DType|None=None) -> UOp:
+def ccall(fn:Any, *args:UOp|int) -> UOp:
   ptr = UOp.placeholder((1,), dtypes.uint64, 0, device=HCQ_RUNTIME_DEV.value, tag=("cfunc", fn.__module__.split(".")[-1], fn.__name__))
   ret = dtypes.void if fn.restype is None else dtypes.uint64 if fn.restype is ctypes.c_void_p else \
     next(d for d in DTYPES_DICT.values() if d.fmt == fn.restype._type_)
   cargs = [UOp.const(a, dtypes.int) if isinstance(a, int) else a for a in args]
-  return UOp.custom_function(fn.__name__, ptr.index(0).load()).call(*cargs, ret_dtype=ret if ret_dtype is None else ret_dtype)
+  return UOp.custom_function(fn.__name__, ptr.index(0).load()).call(*cargs, ret_dtype=ret)
 
 CDTYPE = {1: dtypes.uchar, 2: dtypes.ushort, 4: dtypes.uint, 8: dtypes.ulong} # a C field as the unsigned int of its size
 
