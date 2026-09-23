@@ -257,6 +257,15 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), a[:, 1::2].sum(1).tolist())
 
+  @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_local, "GROUP_REDUCE needs LOCAL ranges")
+  def test_nested_group_reduce(self):
+    # the inner group's stage is indexed by the outer group's range, which is live at the inner reduce
+    def kernel(C:UOp, B:UOp) -> UOp:
+      i, g1, g2 = UOp.range(4, 0), UOp.range(4, 1, AxisType.GROUP_REDUCE), UOp.range(8, 2, AxisType.GROUP_REDUCE)
+      return C[i].store(B[i, g1, g2].reduce(g2, arg=Ops.ADD).reduce(g1, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    b = Tensor.arange(128).reshape(4, 4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), b, fxn=kernel)[0].tolist(), b.sum((1, 2)).tolist())
+
   @unittest.skipIf(not Device[Device.DEFAULT].renderer.has_shared, "LOCAL STAGE needs shared memory")
   def test_stage_then_reduce(self):
     # the STAGE ends j, so the accumulator of the reduce over jj is initialized before the jj loop, not inside it

@@ -1,8 +1,11 @@
 import time, inspect
 from collections import deque
+from dataclasses import dataclass, field, replace
+from tinygrad.dtype import AddrSpace
+from tinygrad.uop.ops import GroupOp, remove_all_tags
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition, dedup, all_int, VIZ
 
 # **** schedule linearizer
 
@@ -81,6 +84,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
 from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear
 from tinygrad.schedule.prepare import prepare_rangeify
+from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat
@@ -179,8 +183,90 @@ pm_copy_from_store = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="ast"),), allow_any_len=True), assert_all_same_devices),
 ])
 
+# **** callify: transform a tensor graph into a CALL UOp such that all state is properly scoped
+
+@dataclass
+class CallifyCtx:
+  replacements: list[UOp] = field(default_factory=list)
+  allocs: dict[UOp, UOp] = field(default_factory=dict)
+  views: set[UOp] = field(default_factory=set)
+  stores: list[UOp] = field(default_factory=list)
+
+def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
+  """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
+  if not all_int(c.shape): return None
+  buf = src.base
+  while buf.op is Ops.BITCAST: buf = buf.src[0].base
+  if buf.op is Ops.UNSHARD:
+    if isinstance(c.device, str): return None
+    if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
+    view = contiguous_mops_to_view(ctx, unshard.src[0], unshard.src[0])
+    return None if view is None else view.unshard(unshard.arg, unshard.src[1:])
+
+  if buf.op is not Ops.BUFFER or (cv := src.contiguous_view()) is None or cv[0].op is not Ops.BUFFER: return None
+  buf, offset = cv
+  view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
+  if ctx is not None: ctx.views.add(view)
+  view = view.reshape(c.shape)
+  return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
+
+def is_store_after(u:UOp) -> bool:
+  return u.op is Ops.AFTER and not u.is_bound_var and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)
+
+def collect_stores(ctx:CallifyCtx, u:UOp):
+  if is_store_after(u): ctx.stores.append(u)
+
+# NOTE: scheduling rewrites belong in prepare; only storage/interface normalization belongs here.
+pm_callify_ctx_collect = PatternMatcher([
+  # fold MOPS+BITCAST over BUFFER into SHRINK when movement ops collapse to contiguous range
+  (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"), contiguous_mops_to_view),
+  (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True), contiguous_mops_to_view),
+
+  # Collect effects after their sources have been rewritten, without entering call bodies.
+  (UPat(Ops.AFTER, name="u"), collect_stores),
+])
+
+# ALLOCs get canonical scope-local id slots here so structurally identical calls hash identically for the
+# schedule cache (fresh slots are all positive from the global counter; negative slots are already canonical)
+def canonicalize_alloc(ctx:CallifyCtx, b:UOp):
+  if b.arg.slot >= 0 and b not in ctx.allocs: ctx.allocs[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx.allocs)))
+  return ctx.allocs.get(b)
+
+def canonicalize_call_body(c:UOp):
+  return c.replace(src=(graph_rewrite(c.body, pm_canonicalize_alloc, ctx=CallifyCtx(), bottom_up=True),)+c.src[1:])
+
+pm_canonicalize_alloc = PatternMatcher([
+  (UPat(Ops.CALL, name="c"), canonicalize_call_body),
+  (UPat(Ops.ALLOC, src=(), name="b"), canonicalize_alloc),
+])
+
+def replace_input_buffer(ctx:CallifyCtx, b:UOp):
+  ctx.replacements.append(b)
+  return b.param_like(len(ctx.replacements)-1)
+
+pm_replace_buf = PatternMatcher([
+  # replace BUFFER with PARAM for cache key normalization (ALU addrspace buffers are Variables, they stay)
+  (UPat(Ops.BUFFER, src=(), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.addrspace is AddrSpace.GLOBAL else None),
+  # replace buffer views (SHRINK/BITCAST) with PARAM (only the views created by contiguous_mops_to_view)
+  (UPat((Ops.SHRINK, Ops.BITCAST), name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b in ctx.views else None),
+  # strip the stored value from bound Variables for cache key normalization, so different values hit same cache
+  (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
+])
+
+def transform_to_call(big_sink:UOp) -> UOp:
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
+  if SPEC: type_verify(big_sink, spec_tensor)
+
+  # The tensor replacement map is collected before these rewrites change node identities.
+  graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
+  ret = graph_rewrite(UOp.sink(*ctx.stores), pm_canonicalize_alloc+pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs")
+  ret = ret.call(*ctx.replacements, precompile=True)
+  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
+  return ret
+
 @rewrite_group(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
+  big_sink = transform_to_call(big_sink)
   # big_sink srcs are all the Tensors
   linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
 
