@@ -129,7 +129,8 @@ def launch(graph:_CallGraph, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsr
            "scratch":max(scratch_size*wave_size, 1)}
   if wave_size == 64: sizes["a"] = 256*wave_size
   banks = {name:UOp.placeholder((size,), dtypes.uint8 if name == "scratch" else dtypes.uint32,
-                               slot=i, addrspace=AddrSpace.REG) for i, (name, size) in enumerate(sizes.items())}
+                               slot=i, addrspace=AddrSpace.REG, tag={"s":"sgpr", "v":"vgpr", "a":"accvgpr"}.get(name, name))
+           for i, (name, size) in enumerate(sizes.items())}
   group = UOp.range(gx*gy*gz, 0, dtype=dtypes.int)
   clear_lds = UOp.range(sizes["lds"], 1)
   lds_init = state_call(UOp.sink(banks["lds"].index(clear_lds).store(0).end(clear_lds)), "init_workgroup", [banks["lds"]], group)

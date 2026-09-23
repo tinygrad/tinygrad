@@ -232,6 +232,9 @@ class CStyleLanguage(Renderer):
       prefix = None
       if u.op is Ops.SPECIAL: r[u] = u.arg
       elif u.op is Ops.RANGE: r[u] = f"{axis_letters[u.axis_type]}idx"+range_str(u)
+      elif u.op is Ops.BUFFER and u.arg.name is not None:
+        prefix = u.arg.name.replace(":", "_")
+        r[u] = prefix if c[prefix] == 0 else f"{prefix}_{c[prefix]}"
       else:
         prefix = {Ops.WMMA: "wmma", Ops.BUFFER: "buf", Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.STACK: "cast",
                   Ops.INDEX: "bidx", Ops.LOAD: "val"}.get(u.op, "alu")
