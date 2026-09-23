@@ -3,7 +3,7 @@ import unittest, pickle, functools, math
 import z3
 
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, graph_rewrite, sym_infer
 from tinygrad.uop.spec import spec_shared, type_verify
 from tinygrad.uop.symbolic import sym, symbolic, commutative, pm_simplify_valid, pm_move_where_on_load, symbolic_simple
 from tinygrad.uop.validate import uops_to_z3
@@ -1500,7 +1500,7 @@ class TestRangeSplitting(unittest.TestCase):
     buf = UOp.param(0, dtypes.int, 1)
     val = (r0 % uconst(2)).cast(dtypes.int)
     store = UOp(Ops.STORE, src=(buf.index(uconst(0)), val))
-    sink = UOp(Ops.SINK, src=(UOp(Ops.END, src=(store, r0)),))
+    sink = store.sink().end(r0).sink(arg=KernelInfo())  # nested SINK must not split the range independently of END
     # count RANGEs before
     ranges_before = len([u for u in sink.toposort() if u.op is Ops.RANGE])
     # apply the range splitting optimization
@@ -1508,6 +1508,7 @@ class TestRangeSplitting(unittest.TestCase):
     # count RANGEs after - should have more due to splitting
     ranges_after = len([u for u in sink_after.toposort() if u.op is Ops.RANGE])
     self.assertGreater(ranges_after, ranges_before, "RANGE should be split when used with mod of divisible constant")
+    self.assertFalse(sink_after.ranges, "split ranges must still be closed by END")
 
 class TestBounds(unittest.TestCase):
   def test_unrolled_arange(self):

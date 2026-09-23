@@ -39,7 +39,6 @@ packages = [
   'tinygrad.runtime.autogen.amd.rdna4',
   'tinygrad.runtime.autogen.amd.cdna',
   'tinygrad.runtime.autogen.nv_regs',
-  'tinygrad.runtime.graph',
   'tinygrad.runtime.support',
   'tinygrad.runtime.support.am',
   'tinygrad.runtime.support.rdma',

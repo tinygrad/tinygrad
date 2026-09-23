@@ -70,22 +70,12 @@ def is_hcq2_device() -> bool: # an hcq2 device stages every copy from the host t
   from tinygrad.runtime.support.hcq2 import HCQ_DEVS
   return Device.DEFAULT.split(":")[0] in HCQ_DEVS
 
-def call_is_graph(call:UOp) -> bool:
-  ast = call.src[0]
-  return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph"
-
 def call_is_hcq(call:UOp) -> bool: # an hcq2 batch: a compiled body whose aux lists the kernels it submits
   from tinygrad.runtime.support.hcq2 import HCQInfo
   return isinstance(getattr(call.without_after.arg, "aux", None), HCQInfo)
 
 def jit_cache_count(linear:UOp) -> int:
-  n = 0
-  for call in linear.src:
-    ast = call.src[0]
-    if call_is_hcq(call): n += len(call.without_after.arg.aux.kernels)
-    elif ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": n += jit_cache_count(ast.src[0])
-    else: n += 1
-  return n
+  return sum(len(call.without_after.arg.aux.kernels) if call_is_hcq(call) else 1 for call in linear.src)
 
 def assert_jit_cache_len(fxn, expected_len):
   linear = fxn.captured.linear if fxn.captured is not None else None
@@ -96,12 +86,7 @@ def assert_jit_cache_len(fxn, expected_len):
     count = sum(len(call.without_after.arg.aux.kernels) if call_is_hcq(call) else 1 for call in linear.src)
     if count != expected_len: raise KernelCountException(expected_len, count)
     return
-  if call_is_graph(linear.src[0]):
-    if len(linear.src) != 1: raise KernelCountException(1, len(linear.src))
-    inner = linear.src[0].src[0].src[0]  # LINEAR UOp inside CUSTOM_FUNCTION
-    if len(inner.src) != expected_len: raise KernelCountException(expected_len, len(inner.src))
-  else:
-    if len(linear.src) != expected_len: raise KernelCountException(expected_len, len(linear.src))
+  if len(linear.src) != expected_len: raise KernelCountException(expected_len, len(linear.src))
 
 def min_normal(dt:DType) -> float: return 2.0 ** (2 - (1 << (dtypes.finfo(dt)[0] - 1)))
 
@@ -137,7 +122,7 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple
   return out_buf.as_memoryview().cast(uop.dtype.fmt or "").tolist()[0]
 
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
-  sink = UOp.group(*u)
+  sink = UOp.sink(*u)
   for r in sink.ranges: sink = sink.end(r)
   ret = get_uops(sink.sink(arg=KernelInfo(opts_to_apply=())), ren)
   assert ret[-1].op is Ops.SINK

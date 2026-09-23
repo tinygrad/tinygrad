@@ -5,7 +5,7 @@ from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
 from tinygrad.runtime.support.system import PCIDevice
-from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
 

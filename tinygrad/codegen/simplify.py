@@ -62,6 +62,8 @@ def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
     and r.src[0].op is Ops.CONST and r.src[0].divides(c.val) is not None: ctx[r] = c
 
 def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
+  # Only the kernel root: rewriting a nested SINK would leave its enclosing END's binders unchanged.
+  if x.arg is None: return None
   ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
   ctx.clear()
   return None if ret is x else ret.simplify()

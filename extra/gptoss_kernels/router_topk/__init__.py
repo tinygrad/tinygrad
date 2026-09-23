@@ -1,6 +1,7 @@
 import functools, math, pathlib
 from tinygrad import Tensor, dtypes, function
 from tinygrad.helpers import getenv
+from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from extra.llama_kernels import alloc_like, compile_hip
 
@@ -39,11 +40,33 @@ def _router_topk_bwd(gradient:UOp, kernel:UOp) -> tuple:
   grad_logits, _ = router_topk_backward(Tensor(gradient), Tensor(weights_u.after(kernel)), Tensor(indices_u.after(kernel)))
   return None, None, grad_logits.uop
 
+@functools.cache
+def _router_weight_bwd_kernel(out:UOp, x:UOp, gradient:UOp) -> UOp:
+  rows, hidden = math.prod(x.shape[:-1]), x.shape[-1]
+  assert rows % 512 == 0 and hidden % 16 == 0
+  sink = UOp.sink(out.base, x.base, gradient.base, UOp.special(1024, "lidx0"), UOp.special(hidden//16, "gidx0"),
+                  arg=KernelInfo(f"moe_router_fp32_wgrad_{rows}_{hidden}_32"))
+  src = (pathlib.Path(__file__).parent/"weight_backward.cpp").read_text()
+  include = pathlib.Path(__file__).parents[2]/"thunder"/"amd"/"include"
+  lib = HIPCCCompiler("gfx950", [f"-I{include}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS",
+                                 f"-DROUTER_M={rows}", f"-DROUTER_K={hidden}"]).compile_cached(src)
+  return UOp(Ops.PROGRAM,
+             src=(sink, UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+
+def router_weight_gradient(x:Tensor, gradient:Tensor) -> Tensor:
+  assert x.dtype == dtypes.bfloat16 and gradient.dtype == dtypes.float32
+  groups = len(x.device) if isinstance(x.device, tuple) and x.uop.axis is not None else 1
+  # Sum FP32 local contributions before rounding to BF16, matching ordinary matmul backward.
+  partial = alloc_like((groups, 32, x.shape[-1]), dtypes.float32, x.device, x.uop.axis)
+  partial, *_ = Tensor.custom_kernel(partial, x, gradient, fxn=_router_weight_bwd_kernel)
+  return partial.sum(0).cast(x.dtype)
+
 def _router_bwd(gradient:UOp, call:UOp) -> tuple:
   x, weight, bias = (Tensor(u) for u in call.src[1:4])
   weights, indices = (Tensor(u) for u in call.unbound_outputs)
   grad_logits, bias_partials = router_topk_backward(Tensor(gradient), weights, indices)
-  grad_x, grad_weight = (x.float() @ weight.float().T).gradient(x, weight, gradient=grad_logits.reshape(*x.shape[:-1], 32))
+  grad_x, = (x.float() @ weight.float().T).gradient(x, gradient=grad_logits.reshape(*x.shape[:-1], 32))
+  grad_weight = router_weight_gradient(x, grad_logits)
   return grad_x.uop, grad_weight.uop, bias_partials.sum((0, 1)).cast(bias.dtype).uop
 
 @function(grad_fxn=_router_bwd)

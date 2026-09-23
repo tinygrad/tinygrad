@@ -10,7 +10,7 @@ from tinygrad.runtime.support.rdma.bnxtdev import BNXTDev, BNXTQP, db_value, sen
 from tinygrad.runtime.support.hcq2 import unwrap_view, to_name
 from tinygrad.runtime.support.memory import AddrSpace, MMIOInterface, VirtMapping, MemoryManager
 from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, System
-from tinygrad.runtime.support.hcq import hcq_filter_visible_devices
+from tinygrad.runtime.support.system import filter_visible_devices
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat
 
 RDMA_CHUNK = 1 << 30 # a wqe length is 32 bits
@@ -57,7 +57,7 @@ def rdma_nic_for(dev, anchor) -> RDMADevice|None:
   def node(s:str) -> str: return ":".join(s.split(":")[:3]) if s.startswith("remote:") else ""
   def bus(s:str) -> int: return int(re.findall(r":([0-9a-f]{2}):[0-9a-f]{2}\.[0-7]", s)[-1], 16)
   gpu = dev.iface.pci_dev.pcibus
-  try: nics = [(i, n) for i, (_, n) in enumerate(hcq_filter_visible_devices(System.list_devices(*BNXT_IDS), "RDMA")) if node(n) == node(gpu)]
+  try: nics = [(i, n) for i, (_, n) in enumerate(filter_visible_devices(System.list_devices(*BNXT_IDS), "RDMA")) if node(n) == node(gpu)]
   except RuntimeError: return None # no pcie on this machine
 
   # the closest nic to the anchor on dev's node
