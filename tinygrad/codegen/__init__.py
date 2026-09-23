@@ -163,11 +163,12 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
 ])
 
 def fix_group_for_reduce(x:UOp):
-  reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.axis_type == AxisType.GROUP_REDUCE)
+  threads = (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)
+  reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.axis_type in threads)
   if len(reduce_gfr) == 0: return None
 
   # NOTE: if there's other locals here, we need them in the buffer too
-  upstream_locals = [u for u in x.ranges if u.axis_type in (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)]
+  upstream_locals = [u for u in x.ranges if u.axis_type in threads]
 
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
