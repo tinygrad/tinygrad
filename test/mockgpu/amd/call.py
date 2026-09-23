@@ -7,13 +7,27 @@ from tinygrad.renderer.amd import InstDecodeError, decode_inst
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import KernelInfo, Ops, UOp, UPat, PatternMatcher, graph_rewrite
 from test.mockgpu.amd.emu import _Ctx, _INST_HANDLERS, _op_name, _wave_size, get_pcode, _get_pcode_dict
-from test.mockgpu.amd.emu import PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE, EXEC_LO, ttmp, hsa
+from test.mockgpu.amd.emu import PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE, EXEC_LO, VCC_LO, SCC, ttmp, hsa
 
 class _CallCtx(_Ctx):
   def __init__(self, code:bytes, pc:int, wave_size:int):
     super().__init__(len(code), wave_size)
     self.code, self.pc = code, pc
     self.targets:dict[int, UOp] = {}
+    self.immediates:dict[UOp, UOp] = {}
+    self.lift_immediates = False
+
+  def immediate(self, value:UOp, slot:int, name:str) -> UOp:
+    if not self.lift_immediates: return value
+    p = UOp.param(slot, value.dtype, (), name=name, addrspace=AddrSpace.ALU)
+    self.immediates[p] = value.simplify()
+    return p
+
+  def inst_field(self, field) -> UOp:
+    value = super().inst_field(field)
+    if field.name in ("offset", "ioffset", "offset0", "offset1", "literal", "simm16"):
+      return self.immediate(value, -field.lo-1, field.name)
+    return value
 
   def wmask(self, reg:UOp, val:UOp) -> list[UOp]:
     val = val.simplify()
@@ -56,7 +70,7 @@ class _CallCtx(_Ctx):
       # Operand reads are gated. Ungated reads in this range also hold the emulator's HW registers.
       if idx in F32_INLINE and valid is not None: value = F32_INLINE[idx]
       if value is not None:
-        ret = UOp.const(value, dtypes.uint32)
+        ret = self.immediate(UOp.const(value, dtypes.uint32), -1024-idx, "imm")
         return valid.where(ret, UOp.const(0, dtypes.uint32)) if valid is not None else ret
     return super().rsgpr_dyn(reg, valid)
 
@@ -96,9 +110,10 @@ class _CallGraph:
     if reg.vmin != reg.vmax: raise NotImplementedError(f"dynamic register index: {reg.render()}")
     buf = self.param(bank, int(reg.vmin))
     if idx.src[0].op is Ops.AFTER: buf = buf.after(*idx.src[0].src[1:])
-    return buf.index((offset % width).valid(idx.src[1].get_valid()))
+    return buf.index((offset - int(reg.vmin)*width).simplify().valid(idx.src[1].get_valid()))
 
-  def append(self, body:UOp, name:str):
+  def append(self, body:UOp, name:str, immediates:dict[UOp, UOp]|None=None):
+    immediates = immediates or {}
     body = graph_rewrite(body, pm_add_loads, name="explicit instruction loads")
     body = graph_rewrite(body, pm_register_operands, ctx=self, name="bind instruction registers")
     if not any(u.op is Ops.STORE for u in body.toposort()): return
@@ -107,35 +122,58 @@ class _CallGraph:
       for p in self.guards: gate = gate & p.index(0).load()
       body = graph_rewrite(body, pm_gate_instruction, ctx=gate, walk=True, name="gate instruction memory")
     used = {p for p in body.toposort() if p.op is Ops.PARAM}
-    if not used <= self.operands: raise NotImplementedError("unbound register bank")
+    if not used <= self.operands | immediates.keys(): raise NotImplementedError("unbound register bank")
     writes = {u.src[0].buf_uop for u in body.toposort() if u.op is Ops.STORE}
     reads = {u.src[0].buf_uop for u in body.toposort() if u.op is Ops.LOAD}
-    # Consecutive registers with the same access mode form an operand STACK.
-    groups:list[list[UOp]] = []
-    last = None
-    for (bank, reg), p in sorted(self.params.items(), key=lambda item: (item[0][0].arg.slot, item[0][1])):
-      if p not in used: continue
-      mode = (p in reads, p in writes)
-      if bank in self.banks and last == (bank, reg-1, mode): groups[-1].append(p)
-      else: groups.append([p])
-      last = (bank, reg, mode)
-    args = []
-    for group in groups:
-      vals = [self.values[p].after(*self.readers[p]) if p in writes else self.values[p] for p in group]
-      arg = UOp.stack(*vals) if len(vals) > 1 else vals[0]
-      args.append(arg)
-    deps = self.deps
-    args = [UOp.stack(*(v.after(*deps) for v in a.src)) if a.op is Ops.STACK else a.after(*deps) for a in args]
-    call = body.call(*args, name=name)
+    # Input and output roles are separate formals even when the caller binds them to the same register.
+    inputs = {p:UOp.param(p.arg.slot, p.dtype, p.shape, name=f"{p.arg.name}_input", addrspace=p.addrspace)
+              for p in reads & writes if p.addrspace is AddrSpace.REG}
+    loads = {}
+    for u in body.toposort():
+      if u.op is not Ops.LOAD or (p:=u.src[0].buf_uop) not in inputs: continue
+      idx = u.src[0]
+      buf = inputs[p].after(*idx.src[0].src[1:]) if idx.src[0].op is Ops.AFTER else inputs[p]
+      loads[u] = u.replace(src=(idx.replace(src=(buf, *idx.src[1:])), *u.src[1:]))
+    body = body.substitute(loads, walk=True)
+    aliases = {v:k for k,v in inputs.items()}
+    # Formal operands follow their use in the body, independent of hardware register numbering.
+    params = [p for p in body.toposort() if p.op is Ops.PARAM]
+    formal, args = {}, []
+    counts:dict[str, int] = {}
+    for i, p in enumerate(params):
+      if p in immediates:
+        n = counts.get(p.arg.name, 0)
+        counts[p.arg.name] = n+1
+        formal[p] = UOp.param(i, p.dtype, (), name=f"{p.arg.name}{n}", addrspace=AddrSpace.ALU)
+        args.append(immediates[p])
+        continue
+      actual = aliases.get(p, p)
+      role = "dst" if p in writes else "src"
+      bank_name = {"s":"sgpr", "v":"vgpr", "a":"agpr"}.get(actual.arg.name, actual.arg.name)
+      prefix = f"{bank_name}_{role}"
+      operand_name = prefix
+      if p.addrspace is not AddrSpace.REG: operand_name = p.arg.name or operand_name
+      elif actual.arg.name == "s":
+        special = {EXEC_LO.offset:"exec_lo", EXEC_LO.offset+1:"exec_hi", VCC_LO.offset:"vcc_lo",
+                   VCC_LO.offset+1:"vcc_hi", SCC.offset:"scc"}
+        if p.arg.slot in special: operand_name = f"{special[p.arg.slot]}_{role}"
+      if operand_name == prefix:
+        n = counts.get(prefix, 0)
+        counts[prefix] = n+1
+        operand_name += str(n)
+      formal[p] = UOp.param(i, p.dtype, p.shape, name=operand_name, addrspace=AddrSpace.GLOBAL)
+      val = self.values[actual].after(*self.readers[actual]) if actual in writes else self.values[actual]
+      args.append(val.after(*self.deps))
+    call = body.substitute(formal, walk=True).call(*args, name=name)
     self.calls.append(call)
     self.deps = (call,)
-    for p in used:
+    for p in used - immediates.keys():
       if p in writes: self.values[p], self.readers[p] = p.after(call), []
       elif p in reads: self.readers[p].append(call)
 
 pm_register_operands = PatternMatcher([
   (UPat(Ops.INDEX, name="idx"), lambda ctx,idx: ctx.index(idx)),
-  (UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx.param(p) if p not in ctx.banks and p not in ctx.operands else None),
+  (UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx.param(p) if p.shape and p not in ctx.banks and p not in ctx.operands else None),
 ])
 
 pm_gate_instruction = PatternMatcher([
@@ -167,6 +205,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   offset = 0
   graph = _CallGraph(_CallCtx(b"", lib, _wave_size(arch)))
   instructions:dict[int, tuple[int, str, UOp, int|None, UOp]] = {}
+  immediates:dict[int, dict[UOp, UOp]] = {}
   loops:dict[int, int] = {}
   while offset < lib_sz:
     try: inst = decode_inst(code[offset:], arch)
@@ -182,7 +221,9 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
     handler = next((_INST_HANDLERS[cls] for cls in type(inst).__mro__ if cls in _INST_HANDLERS), None)
     if handler is None: raise RuntimeError(f"unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
     ctx = _CallCtx(code[offset:offset+inst.size()], offset, _wave_size(arch))
+    ctx.lift_immediates = not branch
     body = handler(inst, ctx).simplify(tracked=True)
+    immediates[offset] = ctx.immediates
     target, cond = None, UOp.const(False)
     if branch:
       assert ctx.targets, f"missing branch semantics: {name}"
@@ -232,10 +273,10 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
         bank = UOp.param(7+len(graph.storage), dtypes.bool, 1, name=flag_name)
         graph.storage[flag_name] = UOp.placeholder((1,), dtypes.bool, addrspace=AddrSpace.REG, tag=flag_name)
         flag = graph.param(bank)
-        graph.append(UOp.sink(flag.index(0).store(cond.logical_not())), name=f"branch_{pos:x}")
+        graph.append(UOp.sink(flag.index(0).store(cond.logical_not())), name="branch")
         graph.guards.append(flag)
         forward.append(target)
-      else: graph.append(body, name=f"{name.lower()}_{pos:x}")
+      else: graph.append(body, name=name.lower(), immediates=immediates[pos])
       pos += size
     for _ in forward: graph.guards.pop()
 

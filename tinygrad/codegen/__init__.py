@@ -300,22 +300,28 @@ def lower_inline_call(ctx, call:UOp) -> UOp|None:
 
 pm_call_linear = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), lower_call_linear), (UPat(Ops.CALL, name="call"), lower_inline_call)])
 
-def outline_call(ctx:ClangRenderer, call:UOp) -> UOp|None:
+def outline_call(ctx:tuple[ClangRenderer, dict[tuple[str, UOp], tuple[str, list[UOp]]]], call:UOp) -> UOp|None:
   if not call.is_inline_call: return None
+  ren, cache = ctx
   bindings = bind_call_args(call)
-  if not any(p.addrspace is AddrSpace.REG for p in bindings): return None
+  if not any(p.addrspace is AddrSpace.REG or (a.without_after.op is Ops.PARAM and a.addrspace is AddrSpace.REG)
+             for p,a in bindings.items()): return None
   params, args = list(bindings), list(bindings.values())
   formal = [UOp.param(i, p.dtype, p.shape, addrspace=AddrSpace.GLOBAL if p.shape else AddrSpace.ALU,
                       name=f"{p.arg.name}{p.arg.slot}" if p.addrspace is AddrSpace.REG else p.arg.name) for i,p in enumerate(params)]
   name = to_function_name(call.arg.name or "call")
   if name in {p.arg.name for p in params}: name += "_call"
-  if name in ctx.call_functions: name += f"_{len(ctx.call_functions)}"
-  body = call.body.substitute(dict(zip(params, formal)), walk=True).replace(arg=KernelInfo(name=name))
-  renderer = ClangRenderer(ctx.target)
-  lowered = full_rewrite_to_sink(body, renderer, optimize=False)
-  uops = line_rewrite(linearize(lowered), pm_linearize_cleanups)
-  ctx.call_functions.update(renderer.call_functions)
-  ctx.call_functions[name] = uops
+  body = call.body.substitute(dict(zip(params, formal)), walk=True)
+  key = (name, body)
+  if key in cache: name, uops = cache[key]
+  else:
+    if name in ren.call_functions: name += f"_{sum(n == name for n,_ in cache)}"
+    renderer = ClangRenderer(ren.target)
+    lowered = full_rewrite_to_sink(body.replace(arg=KernelInfo(name=name)), renderer, optimize=False)
+    uops = line_rewrite(linearize(lowered), pm_linearize_cleanups)
+    ren.call_functions.update(renderer.call_functions)
+    ren.call_functions[name] = uops
+    cache[key] = (name, uops)
   return UOp.custom_function(name).call(*(args[p.arg.slot] for p in uops if p.op is Ops.PARAM), name=call.arg.name)
 
 pm_outline_calls = PatternMatcher([(UPat(Ops.CALL, name="call"), outline_call)])
@@ -327,7 +333,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   if isinstance(ren, ClangRenderer):
     ren.call_functions = {}
-    ast = graph_rewrite(ast, pm_outline_calls, ctx=ren, name="outline calls")
+    ast = graph_rewrite(ast, pm_outline_calls, ctx=(ren, {}), name="outline calls")
   ast = graph_rewrite(ast, pm_call_linear, ctx=itertools.count(max((r.arg[0] for r in ast.toposort() if r.op is Ops.RANGE), default=0)+1),
                       name="lower calls")
   if ren.pre_matcher is not None: ast = graph_rewrite(ast, ren.pre_matcher, ctx=ren, name="lower renderer inputs")
