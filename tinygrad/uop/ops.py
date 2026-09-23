@@ -473,6 +473,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BACKEDGE: return self.src[1:2]  # the condition's other ranges remain live
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
+    if self.op is Ops.BARRIER: return tuple(flatten([x.ended_ranges for x in self.src]))
     # UNSHARD ends the DEVICE range: its src is per-device index math, the device axis is carried by the axis metadata
     if self.op is Ops.UNSHARD: return self.src[1:]
     return ()

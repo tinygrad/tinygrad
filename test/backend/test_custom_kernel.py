@@ -339,6 +339,30 @@ class TestCustomKernel(unittest.TestCase):
     uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
 
+  def test_loop_local_barrier_inner_loop_load(self):
+    # tmp is loaded inside the k loop. the end of the t loop still needs a barrier, and it leaves no range open
+    def kernel(C:UOp, A:UOp) -> UOp:
+      l, t, k = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1, AxisType.LOOP), UOp.range(4, 2, AxisType.REDUCE)
+      tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
+      v = tmp.after(tmp[l].store(A[t, l]))[k].reduce(k, arg=Ops.ADD)
+      return C[l].store(C.after(t)[l] + v).end(t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(8, 4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    prg = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
+    self.assertEqual(prg.ranges, {})
+    self.assertEqual(len([u for u in prg.src[1].src if u.op is Ops.BARRIER]), 2)
+
+  def test_local_barrier_after_ended_loop(self):
+    # tmp is read after the k loop that stored it. the barrier before the read leaves no range open
+    def kernel(C:UOp, A:UOp) -> UOp:
+      k = UOp.range(4, 0, AxisType.REDUCE)
+      tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
+      tmp = tmp.after(k)[k].set(A[k], end=k)
+      return C[0].store(tmp[0]).sink(arg=KernelInfo(opts_to_apply=()))
+    ast = Tensor.custom_kernel(Tensor.empty(1), Tensor.empty(4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
+    prg = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100")))
+    self.assertEqual(prg.ranges, {})
+    self.assertEqual(len([u for u in prg.src[1].src if u.op is Ops.BARRIER]), 1)
+
   def test_split_range_id_free_of_loop(self):
     # the UPCAST range minted by the split gets a fresh id, the while loop's id 1 is taken
     def kernel(C:UOp, A:UOp) -> UOp:
