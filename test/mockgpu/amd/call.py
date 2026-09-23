@@ -78,7 +78,8 @@ class _CallGraph:
   def __init__(self, ctx:_CallCtx):
     self.banks = {ctx.sgpr:("s", 1), ctx.vgpr:("v", ctx.wave_size)}
     if ctx.accvgpr is not ctx.vgpr: self.banks[ctx.accvgpr] = ("a", ctx.wave_size)
-    self.params:dict[tuple[UOp, int], UOp] = {}
+    self.buffers:dict[tuple[UOp, int], UOp] = {}
+    self.registers:dict[UOp, tuple[str, int]] = {}
     self.operands:set[UOp] = set()
     self.values:dict[UOp, UOp] = {}
     self.readers:dict[UOp, list[UOp]] = {}
@@ -92,16 +93,20 @@ class _CallGraph:
     cond = graph_rewrite(cond, pm_register_operands, ctx=self)
     return cond.substitute({p:p.after(*self.deps) for p in self.operands}, walk=True)
 
-  def param(self, bank:UOp, reg:int=0) -> UOp:
-    if (key:=(bank, reg)) not in self.params:
+  def operand(self, bank:UOp, reg:int=0) -> UOp:
+    if (key:=(bank, reg)) not in self.buffers:
       name, width = self.banks.get(bank, (bank.arg.name, bank.arg.size))
-      is_reg = bank in self.banks
-      p = self.params[key] = UOp.param(reg if is_reg else bank.arg.slot, bank.dtype, (width,), name=name,
-                                      addrspace=AddrSpace.REG if is_reg else bank.addrspace)
+      if bank in self.banks:
+        label = {EXEC_LO.offset:"exec", EXEC_LO.offset+1:"exec_hi", VCC_LO.offset:"vcc",
+                 VCC_LO.offset+1:"vcc_hi", SCC.offset:"scc"}.get(reg, f"s{reg}") if name == "s" else f"{name}{reg}"
+        p = UOp.placeholder((width,), bank.dtype, addrspace=AddrSpace.REG, tag=label)
+        self.registers[p] = (name, reg)
+      else: p = self.storage.get(name, bank)
+      self.buffers[key] = p
       self.operands.add(p)
       self.values[p] = p
       self.readers[p] = []
-    return self.params[key]
+    return self.buffers[key]
 
   def index(self, idx:UOp) -> UOp|None:
     if (bank:=idx.src[0].without_after) not in self.banks: return None
@@ -109,7 +114,7 @@ class _CallGraph:
     offset = idx.src[1].get_idx()
     reg = (offset // width).simplify()
     if reg.vmin != reg.vmax: raise NotImplementedError(f"dynamic register index: {reg.render()}")
-    buf = self.param(bank, int(reg.vmin))
+    buf = self.operand(bank, int(reg.vmin))
     if idx.src[0].op is Ops.AFTER: buf = buf.after(*idx.src[0].src[1:])
     return buf.index((offset - int(reg.vmin)*width).simplify().valid(idx.src[1].get_valid()))
 
@@ -122,13 +127,13 @@ class _CallGraph:
       gate = UOp.const(True)
       for p in self.guards: gate = gate & p.index(0).load()
       body = graph_rewrite(body, pm_gate_instruction, ctx=gate, walk=True, name="gate instruction memory")
-    used = {p for p in body.toposort() if p.op is Ops.PARAM}
+    used = {p for p in body.toposort() if p in self.operands or p.op is Ops.PARAM}
     if not used <= self.operands | immediates.keys(): raise NotImplementedError("unbound register bank")
     writes = {u.src[0].buf_uop for u in body.toposort() if u.op is Ops.STORE}
     reads = {u.src[0].buf_uop for u in body.toposort() if u.op is Ops.LOAD}
     # Input and output roles are separate formals even when the caller binds them to the same register.
     inputs = {p:UOp.param(p.arg.slot, p.dtype, p.shape, name=f"{p.arg.name}_input", addrspace=p.addrspace)
-              for p in reads & writes if p.addrspace is AddrSpace.REG}
+              for p in reads & writes if p in self.registers}
     loads = {}
     for u in body.toposort():
       if u.op is not Ops.LOAD or (p:=u.src[0].buf_uop) not in inputs: continue
@@ -138,7 +143,7 @@ class _CallGraph:
     body = body.substitute(loads, walk=True)
     aliases = {v:k for k,v in inputs.items()}
     # Formal operands follow their use in the body, independent of hardware register numbering.
-    params = [p for p in body.toposort() if p.op is Ops.PARAM]
+    params = [p for p in body.toposort() if p in used or p in aliases]
     formal, args = {}, []
     counts:dict[str, int] = {}
     for i, p in enumerate(params):
@@ -154,13 +159,14 @@ class _CallGraph:
         continue
       actual = aliases.get(p, p)
       role = "dst" if p in writes else "src"
-      prefix = f"{actual.arg.name}_{role}"
+      bank_name, reg = self.registers.get(actual, (actual.arg.name, 0))
+      prefix = f"{bank_name}_{role}"
       operand_name = prefix
-      if p.addrspace is not AddrSpace.REG: operand_name = p.arg.name or operand_name
-      elif actual.arg.name == "s":
+      if actual not in self.registers: operand_name = actual.arg.name or operand_name
+      elif bank_name == "s":
         special = {EXEC_LO.offset:"exec_lo", EXEC_LO.offset+1:"exec_hi", VCC_LO.offset:"vcc_lo",
                    VCC_LO.offset+1:"vcc_hi", SCC.offset:"scc"}
-        if p.arg.slot in special: operand_name = f"{special[p.arg.slot]}_{role}"
+        if reg in special: operand_name = f"{special[reg]}_{role}"
       if operand_name == prefix:
         n = counts.get(prefix, 0)
         counts[prefix] = n+1
@@ -177,26 +183,12 @@ class _CallGraph:
 
 pm_register_operands = PatternMatcher([
   (UPat(Ops.INDEX, name="idx"), lambda ctx,idx: ctx.index(idx)),
-  (UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx.param(p) if p.shape and p not in ctx.banks and p not in ctx.operands else None),
+  (UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx.operand(p) if p.shape and p not in ctx.banks and p not in ctx.operands else None),
 ])
 
 pm_gate_instruction = PatternMatcher([
   (UPat(Ops.INDEX, name="idx"), lambda ctx,idx: idx.replace(src=(idx.src[0], idx.src[1].valid(ctx), *idx.src[2:]))),
 ])
-
-def lower_register(ctx, p:UOp) -> UOp|None:
-  if p.addrspace is not AddrSpace.REG: return ctx.banks.get(p.arg.name)
-  start = p.arg.slot * p.arg.size
-  return ctx.banks[p.arg.name].shrink(((start, start + p.arg.size),))
-
-class _CallRenderer(ClangRenderer):
-  pre_matcher = PatternMatcher([(UPat(Ops.PARAM, name="p"), lower_register)])
-
-  def __init__(self, target, banks:dict[str, UOp]):
-    super().__init__(target)
-    self.banks = banks
-
-  def __reduce__(self): return self.__class__, (self.target, self.banks)
 
 def state_call(body:UOp, name:str, inputs:list[UOp], *deps:UOp) -> UOp:
   params = {u:UOp.param(i, u.dtype, u.shape, addrspace=AddrSpace.ALU if u.shape == () else AddrSpace.GLOBAL)
@@ -208,6 +200,9 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   code = ctypes.string_at(lib, lib_sz)
   offset = 0
   graph = _CallGraph(_CallCtx(b"", lib, _wave_size(arch)))
+  sizes = {"lds":max(((rsrc2 >> 15) & 0x1ff)*128, 1), "scratch":max(scratch_size*_wave_size(arch), 1)}
+  graph.storage.update({name:UOp.placeholder((size,), dtypes.uint8 if name == "scratch" else dtypes.uint32,
+                                             addrspace=AddrSpace.REG, tag=name) for name, size in sizes.items()})
   instructions:dict[int, tuple[int, str, UOp, int|None, UOp]] = {}
   immediates:dict[int, dict[UOp, UOp]] = {}
   loops:dict[int, int] = {}
@@ -276,7 +271,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
         flag_name = f"branch_{pos:x}"
         bank = UOp.param(7+len(graph.storage), dtypes.bool, 1, name=flag_name)
         graph.storage[flag_name] = UOp.placeholder((1,), dtypes.bool, addrspace=AddrSpace.REG, tag=flag_name)
-        flag = graph.param(bank)
+        flag = graph.operand(bank)
         graph.append(UOp.sink(flag.index(0).store(cond.logical_not())), name="branch")
         graph.guards.append(flag)
         forward.append(target)
@@ -286,44 +281,39 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
 
   emit(0, offset)
   wave_size, total_threads = _wave_size(arch), lx * ly * lz
-  sizes = {"s":SGPR_COUNT, "v":256*wave_size, "lds":max(((rsrc2 >> 15) & 0x1ff)*128, 1),
-           "scratch":max(scratch_size*wave_size, 1)}
-  if wave_size == 64: sizes["a"] = 256*wave_size
-  banks = {name:UOp.placeholder((size,), dtypes.uint8 if name == "scratch" else dtypes.uint32, slot=i, addrspace=AddrSpace.REG, tag=name)
-           for i, (name, size) in enumerate(sizes.items())}
-  banks.update(graph.storage)
   group = UOp.range(gx*gy*gz, 0, dtype=dtypes.int, tag="workgroup")
   clear_lds = UOp.range(sizes["lds"], 1)
-  lds_init = state_call(UOp.sink(banks["lds"].index(clear_lds).store(0).end(clear_lds)), "init_workgroup", [banks["lds"]], group)
+  lds = graph.storage["lds"]
+  lds_init = state_call(UOp.sink(lds.index(clear_lds).store(0).end(clear_lds)), "init_workgroup", [lds], group)
   wave = UOp.range((total_threads+wave_size-1)//wave_size, 2, dtype=dtypes.int, tag="wave")
-  clears = []
-  for i, name in enumerate(("s", "v", "a") if wave_size == 64 else ("s", "v")):
-    idx = UOp.range(sizes[name], 3+i)
-    clears.append(banks[name].index(idx).store(0).end(idx))
-  sgpr = banks["s"].after(*clears)
   words = UOp.param(6, dtypes.uint32, user_words, name="user_data")
-  stores = [sgpr.index(i).store(words.index(i)) for i in range(user_words)]
+  initial = {i:words.index(i).load() for i in range(user_words)}
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
   for i in range(wave_size//32):
     bits = (n_lanes-i*32).maximum(0).minimum(32).cast(dtypes.uint64)
-    stores.append(sgpr.index(EXEC_LO.offset+i).store(((UOp.const(1, dtypes.uint64) << bits)-1).cast(dtypes.uint32)))
+    initial[EXEC_LO.offset+i] = ((UOp.const(1, dtypes.uint64) << bits)-1).cast(dtypes.uint32)
   gidx, gidy, gidz = group%gx, (group//gx)%gy, group//(gx*gy)
   if arch == "rdna4":
-    stores += [sgpr.index(ttmp[7].offset).store((gidy & 0xffff) | ((gidz & 0xffff) << 16)), sgpr.index(ttmp[9].offset).store(gidx)]
+    initial.update({ttmp[7].offset:(gidy & 0xffff) | ((gidz & 0xffff) << 16), ttmp[9].offset:gidx})
   else:
     slot = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
     for flag, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
                       (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
                       (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
       if rsrc2 & flag:
-        stores.append(sgpr.index(slot).store(gid))
+        initial[slot] = gid
         slot += 1
-  stores += [sgpr.index(SCRATCH_STRIDE_IDX).store(scratch_size), sgpr.index(SGPR_COUNT-12).store((wave & 15) | ((wave & 3) << 4))]
-  lane = UOp.range(n_lanes, 6)
+  initial.update({SCRATCH_STRIDE_IDX:UOp.const(scratch_size), SGPR_COUNT-12:(wave & 15) | ((wave & 3) << 4)})
+  lane = UOp.range(wave_size, 6, tag="lane")
   tid = wave*wave_size+lane
-  stores.append(banks["v"].after(*clears).index(lane).store(((tid//(lx*ly)) << 20) | (((tid//lx)%ly) << 10) | (tid%lx)).end(lane))
-  init = state_call(UOp.sink(*stores), "init_wave", [banks[n] for n in ("s", "v", "a") if n in banks]+[words, group, wave], lds_init, wave)
+  tid_value = (lane < n_lanes).where(((tid//(lx*ly)) << 20) | (((tid//lx)%ly) << 10) | (tid%lx), 0)
+  stores, vector_stores = [], []
+  for buf, (name, reg) in graph.registers.items():
+    if name == "s": stores.append(buf.index(0).store(initial.get(reg, UOp.const(0)).cast(dtypes.uint32)))
+    else: vector_stores.append(buf.index(lane).store((tid_value if name == "v" and reg == 0 else UOp.const(0)).cast(dtypes.uint32)))
+  if vector_stores: stores.append(UOp.group(*vector_stores).end(lane))
+  init = state_call(UOp.sink(*stores), "init_wave", [*graph.registers, words, group, wave], lds_init, wave)
   body = graph.calls[-1] if graph.calls else init
   body = body.substitute({p:p.after(init) for p in graph.operands}, walk=True)
   sink = UOp.sink(body.end(wave, group), arg=KernelInfo(name="asm_call")).rtag(1)
-  return to_program(sink, _CallRenderer(Device["CPU"].renderer.target, banks))
+  return to_program(sink, ClangRenderer(Device["CPU"].renderer.target))

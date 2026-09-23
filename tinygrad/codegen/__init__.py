@@ -304,8 +304,7 @@ def outline_call(ctx:tuple[ClangRenderer, dict[tuple[str, UOp], tuple[str, list[
   if not call.is_inline_call: return None
   ren, cache = ctx
   bindings = bind_call_args(call)
-  if not any(p.addrspace is AddrSpace.REG or (a.without_after.op is Ops.PARAM and a.addrspace is AddrSpace.REG)
-             for p,a in bindings.items()): return None
+  if not any(a.addrspace is AddrSpace.REG for a in bindings.values()): return None
   params, args = list(bindings), list(bindings.values())
   formal = [UOp.param(i, p.dtype, p.shape, addrspace=AddrSpace.GLOBAL if p.shape else AddrSpace.ALU,
                       name=f"{p.arg.name}{p.arg.slot}" if p.addrspace is AddrSpace.REG else p.arg.name) for i,p in enumerate(params)]
@@ -336,7 +335,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     ast = graph_rewrite(ast, pm_outline_calls, ctx=(ren, {}), name="outline calls")
   ast = graph_rewrite(ast, pm_call_linear, ctx=itertools.count(max((r.arg[0] for r in ast.toposort() if r.op is Ops.RANGE), default=0)+1),
                       name="lower calls")
-  if ren.pre_matcher is not None: ast = graph_rewrite(ast, ren.pre_matcher, ctx=ren, name="lower renderer inputs")
 
   # resolve UNSHARDs (multi-device UNSHARDs are already resolved by the scheduler; this handles in-kernel shards, e.g. fragments)
   sink = graph_rewrite(ast, multi_pm, name="multi_pm")
