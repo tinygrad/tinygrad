@@ -64,6 +64,9 @@ runs:
         # no buffers should be over 300MB in CI
         echo "MAX_BUFFER_SIZE=300000000" >> "$GITHUB_ENV"
         if [[ "$RUNNER_OS" != "Windows" ]]; then
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            sudo install -d -o "$USER" /opt/venv /opt/python
+          fi
           echo "VIRTUAL_ENV=/opt/venv/${{ inputs.python-version }}" >> "$GITHUB_ENV"
           echo "UV_PYTHON_INSTALL_DIR=/opt/python" >> "$GITHUB_ENV"
         else
