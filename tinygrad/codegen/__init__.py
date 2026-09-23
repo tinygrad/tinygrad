@@ -163,7 +163,7 @@ devectorizer2 = mop_cleanup+pm_mops+PatternMatcher([
 ])
 
 def fix_group_for_reduce(x:UOp):
-  threads = (AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)
+  threads = (AxisType.WARP, AxisType.LOCAL)
   reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.axis_type in threads)
   if len(reduce_gfr) == 0: return None
 

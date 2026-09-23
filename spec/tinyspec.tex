@@ -25,7 +25,6 @@
 \definecolor{axbrcyan}{HTML}{00ACC1}     % WARP
 \definecolor{axwhite}{HTML}{616161}      % LOOP (gray on white paper)
 \definecolor{axred}{HTML}{C62828}        % REDUCE
-\definecolor{axbrred}{HTML}{E53935}      % GROUP_REDUCE
 \definecolor{axyellow}{HTML}{F9A825}     % UPCAST
 \definecolor{axmagenta}{HTML}{7B1FA2}    % UNROLL
 \definecolor{axgreen}{HTML}{2E7D32}      % DEVICE
@@ -302,13 +301,12 @@ Each kernel's iteration space is a set of \op{Range} axes. Every range has an \t
 \midrule
 {\color{axgreen}\texttt{DEVICE}} & \texttt{d} & --- & --- & Multi-device sharding dimension. \\
 {\color{axblue}\texttt{GLOBAL}} & \texttt{g} & --- & --- & GPU global workgroup dimension. \\
-{\color{axcyan}\texttt{LOCAL}} & \texttt{l} & g, L & inner & Workgroup local dimension (shared memory). \\
+{\color{axcyan}\texttt{LOCAL}} & \texttt{l} & g, L, R & inner/outer & Workgroup local dimension (shared memory). \\
 {\color{axbrcyan}\texttt{WARP}} & \texttt{w} & \multicolumn{2}{l}{(created by \op{TC})} & Warp-level lanes for tensor cores. \\
 {\color{axwhite}\texttt{LOOP}} & \texttt{L} & --- & --- & Generic sequential loop (initial state). \\
 {\color{axred}\texttt{REDUCE}} & \texttt{R} & --- & --- & Reduction axis. \\
-{\color{axbrred}\texttt{GROUP\_REDUCE}} & \texttt{G} & R & inner/outer & Shared-memory group reduction. \\
 {\color{axyellow}\texttt{UPCAST}} & \texttt{u} & g, l, L & inner & Register-level vectorization. \\
-{\color{axmagenta}\texttt{UNROLL}} & \texttt{r} & R, G & inner & Fully unrolled loop. \\
+{\color{axmagenta}\texttt{UNROLL}} & \texttt{r} & R, l & inner & Fully unrolled loop. \\
 \bottomrule
 \end{tabular}
 
