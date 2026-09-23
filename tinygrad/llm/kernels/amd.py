@@ -14,7 +14,10 @@ WAVES_M, WAVES_N, LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 2, 2, 16
 WMMA_ACC, THREADS_PER_BLOCK = WMMA_M // LANES_PER_WAVE_M, WARP_SIZE * WAVES_M * WAVES_N
 LDS_PAD, WMMA_ARG, LOG2E = 4, ((WMMA_M, WMMA_N, WMMA_K), 32), math.log2(math.e)
 Q4_K, Q5_K, Q6_K, IQ4_XS, GGML_BLOCK_SIZE, Q8_GROUP_SIZE, Q4_WORDS, Q5_WORDS, Q6_BYTES, IQ4_WORDS = 12, 13, 14, 23, 256, 32, 36, 44, 210, 34
-QUANT_SIZES = {Q4_K: Q4_WORDS*4, Q5_K: Q5_WORDS*4, Q6_K: Q6_BYTES, IQ4_XS: IQ4_WORDS*4}  # bytes per 256-weight block
+Q2_K, Q3_K, IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S = 10, 11, 17, 18, 20, 21, 22
+QUANT_SIZES = {Q4_K: Q4_WORDS*4, Q5_K: Q5_WORDS*4, Q6_K: Q6_BYTES, IQ4_XS: IQ4_WORDS*4,
+               Q2_K: 84, Q3_K: 110, IQ2_XS: 74, IQ3_XXS: 98, IQ4_NL: 144, IQ3_S: 110, IQ2_S: 82}  # bytes per 256 weights
+HALFWORD_QUANTS = (Q6_K, Q2_K, Q3_K, IQ2_XS, IQ3_XXS, IQ4_NL, IQ3_S, IQ2_S)
 
 def kernel_var(x:UOp) -> UOp:
   # a Variable is a 0-d ALU BUFFER in the tensor graph; inside kernels it takes the ALU PARAM form (same name keeps the value binding)
@@ -56,21 +59,24 @@ class Linear(nn.Linear):
     self.in_features, self.out_features = in_features, out_features
   def set_quantized(self, decoded:Tensor):
     if self.in_features % GGML_BLOCK_SIZE: return
-    packed_sizes = {decoded.numel() // 256 * type_size:typ for typ,type_size in QUANT_SIZES.items()}
+    packed_sizes = {typ: decoded.numel() // 256 * type_size for typ,type_size in QUANT_SIZES.items()}
     graph = decoded.uop.toposort()
-    raw = next((u for u in graph if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes), None)
+    raw = next((u for u in graph if u.op is Ops.SHRINK and u.dtype == dtypes.uint8 and prod(u.shape) in packed_sizes.values()), None)
     if raw is None: return
-    ggml_type = packed_sizes[prod(raw.shape)]
     # Only unwrap storage/order-preserving views, then require the exact dequantization expression.
     # This rejects subsequent arithmetic and permutations, including RoPE's concatenated query weights.
     def unwrapped(u:UOp) -> UOp:
       while u.op in (Ops.RESHAPE, Ops.STAGE) or (u.op is Ops.CAST and dtypes.is_float(u.dtype) and dtypes.is_float(u.src[0].dtype)):
         u = u.src[0]
       return u
-    expected = ggml_data_to_tensor(Tensor(raw), self.in_features * self.out_features, ggml_type)
-    if unwrapped(decoded.uop).key != unwrapped(expected.uop).key: return
-    # Q6's 210-byte blocks are only halfword-aligned; keep all formats as zero-copy views of the GGUF storage.
-    word_dtype = dtypes.uint16 if ggml_type == Q6_K else dtypes.uint32
+    # Several formats have the same byte count (Q3_K/IQ3_S and Q4_K/IQ4_NL). Match the expression, not just the size.
+    for ggml_type, size in packed_sizes.items():
+      if size != prod(raw.shape): continue
+      expected = ggml_data_to_tensor(Tensor(raw), self.in_features * self.out_features, ggml_type)
+      if unwrapped(decoded.uop).key == unwrapped(expected.uop).key: break
+    else: return
+    # Some blocks are only halfword-aligned; keep all formats as zero-copy views of the GGUF storage.
+    word_dtype = dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32
     raw_offset = raw.contiguous_view_offset()
     assert raw_offset is not None and raw_offset % word_dtype.itemsize == 0 and raw.buf_uop.dtype == dtypes.uint8
     self.ggml_type = ggml_type
@@ -89,7 +95,7 @@ class Linear(nn.Linear):
             out = f16_gemv(self, x if isinstance(numel, int) else x.pad_to(max_shape))
             return out if isinstance(numel, int) else out.shrink(tuple((0, s) for s in (*x.shape[:-1], self.out_features)))
         self.use_custom_quant = supported = False  # not a supported quant format
-    if self.ggml_type in (Q4_K, Q5_K, Q6_K, IQ4_XS) and supported:
+    if self.ggml_type in QUANT_SIZES and supported:
       if isinstance(x.numel(), int): return q8_linear(self, x)
       # symbolic token count: pad to the max chunk size so the kernels see static shapes, garbage rows are sliced off
       out = q8_linear(self, x.pad_to(x.max_shape))
@@ -229,6 +235,81 @@ def _quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, out_features:
   names = {Q4_K: "linear_q4_k", Q5_K: "linear_q5_k", IQ4_XS: "linear_iq4_xs", Q6_K: "linear_q6"}
   return _decode_linear(out, out_features, group_count, group_dot, names[ggml_type])
 
+@functools.cache
+def _iq_grid(device:str, ggml_type:int) -> Tensor:
+  from tinygrad.runtime.autogen import ggml_common as ggml
+  grid, words = {IQ2_XS: (ggml.iq2xs_grid, 2), IQ2_S: (ggml.iq2s_grid, 2),
+                 IQ3_XXS: (ggml.iq3xxs_grid, 1), IQ3_S: (ggml.iq3s_grid, 1)}[ggml_type]
+  return Tensor([(v >> (32*i)) & 0xffffffff for v in grid for i in range(words)], dtype=dtypes.uint32, device=device).contiguous()
+
+def _iq_even_signs(signs:UOp) -> UOp:
+  parity = signs ^ (signs >> 4)
+  parity ^= parity >> 2
+  parity ^= parity >> 1
+  return signs | ((parity & 1) << 7)
+
+def _iq_signed_word(word:UOp, signs:UOp) -> UOp:
+  mask = sum(((signs >> i) & 1) * (255 << (8*i)) for i in range(4))
+  # Grid magnitudes are nonzero and <128, so each byte can be negated without a carry into its neighbor.
+  return (word ^ mask) + (mask & 0x01010101)
+
+@functools.cache
+def _mixed_quant_decode_kernel(out:UOp, raw:UOp, xq:UOp, xd:UOp, xs:UOp, *grids:UOp,
+                               out_features:int, in_features:int, ggml_type:int) -> UOp:
+  def group_dot(token:UOp, output:UOp, group:UOp) -> UOp:
+    block, subgroup = group//8, group%8
+    base = (output*in_features//256 + block) * (QUANT_SIZES[ggml_type]//2)
+    if ggml_type == IQ4_NL: base = (output*in_features//32 + group)*9
+    def byte(offset): return (raw[base + offset//2].cast(dtypes.uint32) >> ((offset%2)*8)) & 255
+    def word(offset): return raw[base + offset//2].cast(dtypes.uint32) | (raw[base + offset//2+1].cast(dtypes.uint32) << 16)
+    xwords = _amd_load(xq[token, group, 0], 8)
+    dots = [UOp.const(0, dtypes.int32)] * 2
+    for i in range(8):
+      if ggml_type in (Q2_K, Q3_K):
+        offset = (16 if ggml_type == Q2_K else 32) + (subgroup//4)*32 + i*4
+        weights = (word(offset) >> ((subgroup%4)*2)) & 0x03030303
+        if ggml_type == Q3_K: weights |= ((word(i*4) >> subgroup) & 0x01010101) << 2
+      elif ggml_type == IQ4_NL:
+        weights = _iq4_bytes(word(2+(i%4)*4), 4*(i//4))
+      elif ggml_type in (IQ3_S, IQ3_XXS):
+        index = byte(2 + subgroup*8 + i)
+        if ggml_type == IQ3_S:
+          index |= ((byte(66+subgroup) >> i) & 1) << 8
+          signs = byte(74+subgroup*4+i//2)
+        else:
+          signs = _iq_even_signs((word(66+subgroup*4) >> (7*(i//2))) & 127)
+        weights = _iq_signed_word(grids[0][index], signs >> (4*(i%2)))
+      else:
+        if ggml_type == IQ2_XS:
+          packed = raw[base+1+subgroup*4+i//2].cast(dtypes.uint32)
+          index, signs = packed & 511, _iq_even_signs(packed >> 9)
+        else:
+          index = byte(2+subgroup*4+i//2) | (((byte(66+subgroup) >> (2*(i//2))) & 3) << 8)
+          signs = byte(34+subgroup*4+i//2)
+        weights = _iq_signed_word(grids[0][index*2+i%2], signs >> (4*(i%2)))
+      dots[i//4] = _amd_dp4a(weights, xwords[i], dots[i//4])
+    if ggml_type in (Q2_K, Q3_K):
+      total = UOp.const(0, dtypes.float32)
+      for half in range(2):
+        j = subgroup*2+half
+        if ggml_type == Q2_K:
+          scale = byte(j)
+          total += dots[half].float() * (scale & 15).float() * _half(raw[base+40]) - \
+                   xs[token, group, half] * (scale >> 4).float() * _half(raw[base+41])
+        else:
+          scale = ((byte(96+j%8) >> ((j//8)*4)) & 15) | (((byte(104+j%4) >> ((j//4)*2)) & 3) << 4)
+          total += (dots[half].float() - 4*xs[token, group, half]) * (scale.cast(dtypes.int32)-32).float() * _half(raw[base+54])
+    elif ggml_type in (IQ2_XS, IQ2_S):
+      scales = byte((66 if ggml_type == IQ2_XS else 74)+subgroup)
+      total = sum(dots[h].float() * (((scales >> (h*4)) & 15).float()+0.5) for h in range(2)) * 0.25 * _half(raw[base])
+    else:
+      total = (dots[0]+dots[1]).float() * _half(raw[base])
+      if ggml_type == IQ3_S: total *= (1+2*((byte(106+subgroup//2) >> ((subgroup%2)*4)) & 15)).float()
+      if ggml_type == IQ3_XXS: total *= ((word(66+subgroup*4) >> 28).float()+0.5)*0.5
+    return total * xd[token, group]
+  names = {Q2_K: "q2_k", Q3_K: "q3_k", IQ2_XS: "iq2_xs", IQ3_XXS: "iq3_xxs", IQ4_NL: "iq4_nl", IQ3_S: "iq3_s", IQ2_S: "iq2_s"}
+  return _decode_linear(out, out_features, in_features//32, group_dot, "linear_"+names[ggml_type])
+
 def _wmma_layout(out:UOp, out_features:int, token_tile:int, output_tiles:int):
   if out_features % (16*output_tiles): output_tiles = 1
   output_waves = 2 if out_features % (32*output_tiles) == 0 else 1
@@ -315,7 +396,7 @@ def _iq4_linear_f16_wmma_kernel(out:UOp, raw:UOp, x:UOp, lut:UOp, out_features:i
   return _quant_linear_wmma(out, x, out_features, in_features, IQ4_WORDS, layout, dequant, "linear_iq4_xs_f16_wmma")
 
 def q8_linear(layer:Linear, x:Tensor) -> Tensor:
-  assert layer.ggml_type in (Q4_K, Q5_K, Q6_K, IQ4_XS)
+  assert layer.ggml_type in QUANT_SIZES
   tokens = int(x.numel()) // layer.in_features
   raw, out_features, in_features = layer.weight.uop, layer.out_features, layer.in_features
   def run(fxn:Callable[..., UOp], out:UOp, *srcs:UOp) -> Tensor:
@@ -332,9 +413,11 @@ def q8_linear(layer:Linear, x:Tensor) -> Tensor:
     extra = (iq4_half_lut(str(x.device)).uop,) if layer.ggml_type == IQ4_XS else ()
     return run(fxn, out, raw, x.cast(dtypes.float16).contiguous().uop, *extra)
   xq_, xd, xs = q8_quantize(x, tokens, in_features)
-  decode = functools.partial(_quant_decode_kernel, ggml_type=layer.ggml_type)
+  mixed = layer.ggml_type not in (Q4_K, Q5_K, Q6_K, IQ4_XS)
+  decode = functools.partial(_mixed_quant_decode_kernel if mixed else _quant_decode_kernel, ggml_type=layer.ggml_type)
+  extra = (_iq_grid(str(x.device), layer.ggml_type).uop,) if layer.ggml_type in (IQ2_XS, IQ3_XXS, IQ3_S, IQ2_S) else ()
   out = Tensor.empty(tokens, out_features, (in_features+1023)//1024, dtype=dtypes.float32, device=x.device).uop
-  return run(decode, out, raw, xq_.uop, xd.uop, xs.uop)
+  return run(decode, out, raw, xq_.uop, xd.uop, xs.uop, *extra)
 
 # ******** tiny dense fp16 gemv ********
 
