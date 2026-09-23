@@ -49,8 +49,8 @@ class _CallCtx(_Ctx):
       dst = self.sgpr.after(*reads).index(idx.valid(valid))
       init = dst.store(0)
       dst = self.sgpr.after(init, lane).index(idx.valid(valid))
-      stores.append(dst.store(dst.load() | (bit >> (word*32)).cast(dtypes.uint32)).end(lane))
-    return stores
+      stores.append(dst.store(dst.load() | (bit >> (word*32)).cast(dtypes.uint32)))
+    return [UOp.group(*stores).end(lane)]
 
   def inst_word(self, dword_idx:int) -> UOp:
     return UOp.const(int.from_bytes(self.code[dword_idx*4:(dword_idx+1)*4], "little"), dtypes.uint32)
