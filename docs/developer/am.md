@@ -16,6 +16,8 @@ Optional requirements:
 |----------|------------------|-------------|
 | AM_RESET | [1] | Performs a full GPU reset (reloading all firmware and IP blocks) |
 | AM_DEBUG | [0-4] | Sets the level of additional debugging information |
+| AM_POWER_LIMIT | [watts] | Sets the GPU power limit |
+| AM_PERF_LEVEL | [auto, high, low] | Sets the clock policy (default: auto with AM_POWER_LIMIT, high without) |
 
 ## AM Driver Details
 
