@@ -64,6 +64,10 @@ class TestBitcastBufferView(unittest.TestCase):
   def test_render(self):
     buf = UOp.param(0, dtypes.uint32, 4)
     uops = to_uops_list([buf.shrink(((1, 3),)).bitcast(dtypes.uint64).index(0).store(1)], ren=Device[Device.DEFAULT].renderer)
+    # the canonical form of a reinterpreted access is BITCAST around a SHRINK span of the flat storage
+    st = next(u for u in uops if u.op is Ops.STORE)
+    self.assertEqual(st.src[0].op, Ops.BITCAST)
+    self.assertEqual(st.src[0].src[0].op, Ops.SHRINK)
     Device[Device.DEFAULT].renderer.render(uops)
 
   @Context(SPEC=2)

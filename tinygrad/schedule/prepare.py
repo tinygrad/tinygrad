@@ -81,9 +81,6 @@ pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement|{Ops.INDEX, Ops.BITCAST}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
-  # a loop's ordering dependencies do not use a view's shape or dtype
-  (UPat(Ops.RANGE, name="r"), lambda r: r.replace(src=(r.src[0],)+tuple(
-    s.src[0] if s.op in (Ops.RESHAPE, Ops.BITCAST) else s for s in r.src[1:]))),
 ])
 
 # *****************
