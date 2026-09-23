@@ -24,7 +24,6 @@ class CallifyCtx:
   allocs: dict[UOp, UOp] = field(default_factory=dict)
   views: set[UOp] = field(default_factory=set)
   stores: list[UOp] = field(default_factory=list)
-  buffer_map: dict[UOp, UOp] = field(default_factory=dict)
 
 def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
   """MOPS(BUFFER) → SHRINK when movement ops collapse to a contiguous range."""
@@ -47,12 +46,17 @@ def contiguous_mops_to_view(ctx:CallifyCtx|None, c:UOp, src:UOp):
 # a store's storage keeps the views and drops AFTERs (they only sequence stores)
 pm_drop_after = PatternMatcher([(UPat(Ops.AFTER, name="a"), lambda a: a.src[0])])
 
+def is_store_after(u:UOp) -> bool:
+  return u.op is Ops.AFTER and not u.is_bound_var and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)
+
+def get_becomes_map(big_sink:UOp) -> dict[UOp, UOp]:
+  becomes = {u:graph_rewrite(u.src[0], pm_drop_after, bottom_up=True, name="drop after").shrink_to(u.shape)
+             for u in big_sink.toposort(enter_calls=False) if is_store_after(u)}
+  assert not any(x in becomes for x in becomes.values())
+  return becomes
+
 def collect_stores(ctx:CallifyCtx, u:UOp):
-  if not u.is_bound_var and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE):
-    ctx.stores.append(u)
-    if u.tag:
-      storage = graph_rewrite(u.src[0], pm_drop_after, bottom_up=True, name="drop after")
-      ctx.buffer_map.update({t:storage.shrink_to(t.shape) for t in u.tag})
+  if is_store_after(u): ctx.stores.append(u)
 
 # NOTE: scheduling rewrites belong in prepare; only storage/interface normalization belongs here.
 pm_callify_ctx_collect = PatternMatcher([
@@ -91,24 +95,17 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.AFTER, name="b"), lambda ctx,b: replace_input_buffer(ctx, b) if b.is_bound_var else None),
 ])
 
-# we tag all Ops.AFTER with their UOps in the incoming Tensor graph
-add_after_tags = PatternMatcher([(UPat(Ops.AFTER, name="x"), lambda x: None if x.tag is not None else x.replace(tag=(x,)))])
-
-@rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
-def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+@rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret.src)-1)}")
+def transform_to_call(big_sink:UOp) -> UOp:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   if SPEC: type_verify(big_sink, spec_tensor)
 
-  # Tag original states before rewrites change their identities.
-  big_sink = graph_rewrite(big_sink, add_after_tags, bottom_up=True, name="add after tags")
-
-  # here we can break the tensor graph. tags propagate through replaces so we can still find the original UOps
+  # The tensor replacement map is collected before these rewrites change node identities.
   graph_rewrite(big_sink, pm_callify_ctx_collect, ctx=(ctx:=CallifyCtx()), name="early transform tensor graph")
   ret = graph_rewrite(UOp.sink(*ctx.stores), pm_canonicalize_alloc+pm_replace_buf+remove_all_tags, ctx=ctx, bottom_up=True, name="replace bufs")
   ret = ret.call(*ctx.replacements, precompile=True)
-  assert not any(x in ctx.buffer_map for x in ctx.buffer_map.values())
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
-  return ret, ctx.buffer_map
+  return ret
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -297,7 +294,9 @@ class Tensor(RandMixin):
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
     self._bufferize_outputs(*lst)
-    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
+    sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    becomes_map = get_becomes_map(sink)
+    big_sink = transform_to_call(sink)
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
 
