@@ -53,11 +53,16 @@ def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None) ->
   image_, _, relocs = elf_loader(obj, link_libs=link_libs)
   image = bytearray(image_)
 
-  def relocate(instr: int, base: int, ploc: int, tgt: int, r_type: int):
+  def relocate(instr: int, base: int, ploc: int, tgt: int, r_type: int, addend: int):
+    nonlocal image
     match r_type:
       # https://refspecs.linuxfoundation.org/elf/x86_64-abi-0.95.pdf
       case libc.R_X86_64_PC32: return i2u(32, tgt-ploc)
-      case libc.R_X86_64_PLT32: return i2u(32, tgt-ploc-base)
+      case libc.R_X86_64_PLT32:
+        if -2**31 <= tgt-ploc-base < 2**31: return i2u(32, tgt-ploc-base)
+        # ext lib address is out of rel32 range, create a trampoline: JMP [RIP+0] .quad target
+        image += struct.pack("<HIQ", 0x25FF, 0, tgt-addend)
+        return i2u(32, len(image)-14+addend-ploc)
       # https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst for definitions of relocations
       # https://www.scs.stanford.edu/~zyedidia/arm64/index.html for instruction encodings
       case libc.R_AARCH64_ADR_PREL_PG_HI21:
@@ -70,7 +75,6 @@ def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None) ->
       case libc.R_AARCH64_LDST128_ABS_LO12_NC: return instr | (getbits(tgt, 4, 11) << 10)
       case libc.R_AARCH64_CALL26:
         if -(2**25) <= tgt-ploc-base and tgt-ploc-base <= (2**25 - 1) * 4: return instr | getbits(tgt-ploc-base, 2, 27)
-        nonlocal image
         # create trampoline:         LDR x17, 8  BR x17
         image += struct.pack("<IIQ", 0x58000051, 0xD61F0220, tgt)
         return instr | getbits(len(image)-ploc-16, 2, 27)
@@ -78,5 +82,5 @@ def jit_loader(obj: bytes, base:int=0, link_libs:list[ctypes.CDLL]|None=None) ->
 
   # This is needed because we have an object file, not a .so that has all internal references (like loads of constants from .rodata) resolved.
   for ploc,tgt,r_type,r_addend in relocs:
-    image[ploc:ploc+4] = struct.pack("<I", relocate(struct.unpack("<I", image[ploc:ploc+4])[0], base, ploc, tgt+r_addend, r_type))
+    image[ploc:ploc+4] = struct.pack("<I", relocate(struct.unpack("<I", image[ploc:ploc+4])[0], base, ploc, tgt+r_addend, r_type, r_addend))
   return bytes(image)
