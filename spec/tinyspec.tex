@@ -93,7 +93,7 @@ A value \op{Call} is void: its \op{Sink} body stores to output \op{Param}s bound
 \op{Shrink} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Keep $s'_k$ elements starting at offset $o_k$ per axis. Inverse of \op{Pad}. \\
 \op{Index} & $(T, i_0, i_1, \ldots)$ & --- & Index from left. $()$-shaped $i$ removes dim; $(k,)$-shaped makes it $k$. \\
 \op{Stack} & $(T_0, T_1, \ldots)$ & --- & Join along a newly created leading axis. All shapes must match. \\
-\op{Bitcast} & $(T,)$ & dtype & Reinterpret storage as target dtype; preserve total bytes. \\
+\op{Bitcast} & $(T,)$ & dtype & Reinterpret bits; narrow/widen adds/drops a size-ratio last axis. \\
 \op{Unshard} & $(T, R_0, R_1, \ldots)$ & axes $(a_0, a_1, \ldots)$ & Concatenate shards of \op{Range} $R_k$ along axis $a_k$; $R_k$ is outer. \\
 \bottomrule
 \end{tabular}
@@ -263,7 +263,7 @@ Movement ops & $\mathrm{src}[0].\mathrm{dtype}$ & (see op) & $\mathrm{src}[0].\m
 \op{Unshard} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0]$, each $a_k \times n_k$ & $\mathrm{src}[0].\mathrm{device}$ & $\mathrm{src}[0]$ \\
 \op{Reduce} & $\mathrm{src}[0].\mathrm{dtype}$ & remove first $n$ axes & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\[3pt]
 \op{Cast} & from arg & $\mathrm{src}[0].\mathrm{shape}$ & $\mathrm{src}[0].\mathrm{device}$ & clamped to dtype \\
-\op{Bitcast} & from arg & $\mathrm{src}[0].\mathrm{shape}$ & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
+\op{Bitcast} & from arg & (see op) & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
 \op{Copy} & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0].\mathrm{shape}$ & from arg & $\mathrm{src}[0]$ \\
 ALU unary & $\mathrm{src}[0].\mathrm{dtype}$ & $\mathrm{src}[0].\mathrm{shape}$ & $\mathrm{src}[0].\mathrm{device}$ & dtype range \\
 \op{Add} & $\mathrm{src}[0].\mathrm{dtype}$ & broadcast & $\mathrm{src}[0].\mathrm{device}$ & $[a+b,\, A+B]$ \\

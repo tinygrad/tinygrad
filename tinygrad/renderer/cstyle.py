@@ -114,7 +114,7 @@ def _wmma_name(u:UOp) -> str:
 
 # (name, dims, dtype_in, dtype_out, upcast_sizes)
 def wmma_args(uops:list[UOp]):
-  return dedup((_wmma_name(uop), uop.arg[0], uop.arg[1], uop.dtype, tuple(x.shape[-1] for x in uop.src)) for uop in uops if uop.op is Ops.WMMA)
+  return dedup((_wmma_name(uop), uop.arg[0], uop.arg[1], uop.dtype, tuple(x.max_numel() for x in uop.src)) for uop in uops if uop.op is Ops.WMMA)
 
 class CStyleLanguage(Renderer):
   abi: str = ""
@@ -325,7 +325,7 @@ class OpenCLRenderer(CStyleLanguage):
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
 
   string_rewrite = pm_bf16_ushort_const + PatternMatcher([
-    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_dtype(x.dtype)}(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"
+    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_type(x)}(({ctx.render_type(x.src[0])})({ctx[x.src[0]]}))"
      if x.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
     # load/store image (OpenCL)
     (UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')), lambda ctx,buf,idx_y,idx_x: f"IMAGE<{ctx[buf]}, {ctx[idx_y]}, {ctx[idx_x]}>"),
@@ -362,7 +362,7 @@ class MetalRenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+int(x))}", "l": lambda x: f"lid.{chr(120+int(x))}"}
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['constant args_t& args [[buffer(0)]]', 'uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
-  type_map = {dtypes.uint32: "uint", dtypes.bfloat16: "bfloat"}
+  type_map = {dtypes.int8: "char", dtypes.uint8: "uchar", dtypes.uint16: "ushort", dtypes.uint32: "uint", dtypes.bfloat16: "bfloat"}
 
   # precise::sin
   code_for_op = {**CStyleLanguage.code_for_op, Ops.SIN: lambda x,dtype: f"precise::sin({x})"}
@@ -375,7 +375,7 @@ class MetalRenderer(CStyleLanguage):
   ]) + pm_manual_bf16_cast
 
   string_rewrite = PatternMatcher([
-    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_type<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"
+    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_type<{ctx.render_type(x)}>(({ctx.render_type(x.src[0])})({ctx[x.src[0]]}))"
      if x.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
   ]) + base_rewrite
 
@@ -433,7 +433,7 @@ class CUDARenderer(CStyleLanguage):
     (UPat(Ops.CAST, dtypes.fp8s, UPat.var("x", dtypes.fp8s), name='y'), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=y.dtype else None),
   ])
   string_rewrite = PatternMatcher([
-    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"tg_bitcast<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"
+    (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"tg_bitcast<{ctx.render_type(x)}>(({ctx.render_type(x.src[0])})({ctx[x.src[0]]}))"
      if x.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None),
   ]) + base_rewrite
 
@@ -452,7 +452,7 @@ class CUDARenderer(CStyleLanguage):
     if any(dt == dtypes.half for dt, _ in used_dtypes): prefix.append("#include <cuda_fp16.h>")
     if any(dt == dtypes.bfloat16 for dt, _ in used_dtypes): prefix.append("#include <cuda_bf16.h>")
     prefix += [self.render_vector_prefix(dt, count) for dt, count in used_dtypes if (count in (4,8) and dt in {dtypes.half, dtypes.bfloat16})
-      or (count in (2,4,8,16) and dt in dtypes.fp8s)]
+      or (count in (2,4,8,16) and dt in dtypes.fp8s) or (count > 1 and dt in (dtypes.int8, dtypes.uint8, dtypes.uint16))]
     dt_map_in = { dtypes.float: "tf32", dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.fp8e4m3: "e4m3", dtypes.fp8e5m2: "e5m2" }
     dt_map_out = { dtypes.float: "f32", dtypes.half: "f16" }
     for name, (N, M, K), dtype_in, dtype_out, upcast_sizes in wmma_args(uops):
@@ -531,7 +531,7 @@ class HIPRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "hip_bfloat16", **{d: ("hip_fp8", "hip_bf8")[fp8_index(d)] for d in dtypes.fp8s}}
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16, *dtypes.fp8s)) + PatternMatcher([
     (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-      lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64), x.src[2]))
+      lambda x: x.replace(src=(x.src[0].alu(Ops.BITCAST, arg=dtypes.uint64), x.src[1].alu(Ops.BITCAST, arg=dtypes.uint64), x.src[2]))
       if x.src[0].max_numel() == 8 and x.src[0].dtype in dtypes.fp8s else None),
   ])
 

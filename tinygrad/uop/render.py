@@ -86,7 +86,8 @@ sugar = {Ops.SINK, Ops.END, Ops.BACKEDGE, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.IND
          Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.BARRIER, Ops.DETACH}
 pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val})"),
-  (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})" if x.dtype != x.src[0].dtype else None),
+  (UPat((Ops.CAST, Ops.BITCAST), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.dtype})"
+   if x.dtype != x.src[0].dtype and (x.op is Ops.CAST or x.dtype.itemsize == x.src[0].dtype.itemsize) else None),
   (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].val}, {repr(x.arg)})"),
   (UPat(Ops.BUFFER, src=(), name="x"), lambda x:
     f"UOp.new_buffer({repr(x.arg.device)}, {x.max_numel()}, {x.dtype}, {x.arg.slot})"

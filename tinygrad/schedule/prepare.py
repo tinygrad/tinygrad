@@ -1,5 +1,5 @@
 from dataclasses import replace
-from tinygrad.dtype import dtypes, to_dtype
+from tinygrad.dtype import dtypes, to_dtype, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, ParamArg
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
@@ -61,7 +61,7 @@ pm_fold_moved_after = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
-# movement op on INDEX as a PatternMatcher
+# Push indexing through views using their shape semantics.
 def _mop_index(r:UOp, idx:UOp):
   idxs = idx.src[1:]
   if len(idxs) == len(r.shape):
@@ -69,17 +69,21 @@ def _mop_index(r:UOp, idx:UOp):
   if r.op is Ops.RESHAPE:
     src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
     if src_prefix >= 0 and r.src[0].shape[src_prefix:] == r.shape[len(idxs):]:
-      if src_prefix == 0: return r.src[0]
+      # Storage still needs an addressable span for LOAD/STORE, even when selecting the whole buffer.
+      if src_prefix == 0: return r.src[0] if r.addrspace not in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else None
       ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs), arg=idx.arg)
       return ret if ret.shape == idx.shape else None
 
 pm_mops = PatternMatcher([
   # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
-  # move movement ops and INDEX after AFTER
-  (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
+  # move views after AFTER so indexing can reach the underlying storage
+  (UPat(GroupOp.Movement|{Ops.INDEX, Ops.BITCAST}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, src=(a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], arg=r.arg)),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
+  # a loop's ordering dependencies do not use a view's shape or dtype
+  (UPat(Ops.RANGE, name="r"), lambda r: r.replace(src=(r.src[0],)+tuple(
+    s.src[0] if s.op in (Ops.RESHAPE, Ops.BITCAST) else s for s in r.src[1:]))),
 ])
 
 # *****************
@@ -155,11 +159,10 @@ def expand_bitcast(bc:UOp) -> UOp|None:
   if (ns:=bc.dtype.itemsize) == (os:=x.dtype.itemsize) or (isinstance(x.device, str) and x.device.startswith("DISK")): return None
   new_uint, tmp = to_dtype(f"uint{8*ns}"), x.bitcast(to_dtype(f"uint{8*os}"))
   if ns > os:
-    tmp = tmp.reshape(x.shape[:-1] + (x.shape[-1]//(rate := ns//os), rate))
-    parts = [tmp.shrink((None,)*(len(tmp.shape)-1) + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(rate)]
-    return parts[0].usum(*parts[1:]).squeeze(-1).bitcast(bc.dtype)
+    parts = [tmp[..., i].cast(new_uint)<<8*i*os for i in range(ns//os)]
+    return parts[0].usum(*parts[1:]).bitcast(bc.dtype)
   parts = [tmp>>8*i*ns for i in range(os//ns)]
-  return parts[0].stack(*parts[1:], dim=-1).flatten(-2).cast(new_uint).bitcast(bc.dtype)
+  return parts[0].stack(*parts[1:], dim=-1).cast(new_uint).bitcast(bc.dtype)
 
 def copy_to_anon_store(x:UOp, copy:UOp):
   # copies are always cross device: pad to the max shape so the copy reads a whole buffer (SDMA can't do offset copies)
@@ -248,7 +251,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # move bitcast from store dest to source: TestAssign.test_assign_bitcast
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src"))),
-   lambda target, src: target.store(src.bitcast(target.dtype))),
+   lambda target, src: target.store(src.alu(Ops.BITCAST, arg=target.dtype))),
 
   (UPat(Ops.BITCAST, name="bc"), expand_bitcast),
 

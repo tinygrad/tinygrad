@@ -9,6 +9,7 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo, GroupOp
 from tinygrad.dtype import dtypes, DTYPES_DICT, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.schedule.prepare import pm_mops
+from tinygrad.uop.movement import mop_cleanup
 from tinygrad.engine.realize import get_call_arg_uops, get_call_name, get_call_outs_ins, get_call_written_bufs
 from tinygrad.engine.realize import estimate_uop, pm_flatten_linear, lower_and_compile, _resolve
 
@@ -47,7 +48,7 @@ def get_enqueue_devs(call:UOp) -> Any|None:
   return devs
 
 def unwrap_view(v:UOp) -> tuple[UOp, int]: # look through views to (base, byte offset)
-  if v.op in (Ops.BITCAST, Ops.AFTER): return unwrap_view(v.src[0])
+  if v.op in (Ops.BITCAST, Ops.RESHAPE, Ops.AFTER): return unwrap_view(v.src[0])
   if v.op is not Ops.SHRINK: return v, 0
   base, off = unwrap_view(v.src[0])
   return base, off + v.src[1].val * v.dtype.itemsize
@@ -449,18 +450,6 @@ def encode_submit(hq:HWQueue) -> UOp:
 # *****************
 # 4. lower call
 
-def bitcast_view(x:UOp, v:UOp, b:UOp) -> UOp|None:
-  (o, n), k, m = v.marg[0], x.dtype.itemsize, b.dtype.itemsize
-  return x.bitcast(b.dtype)[o*k//m:(o+n)*k//m] if len(v.shape) == 1 and not ((o*k) % m or (n*k) % m or (x.max_numel()*k) % m) else None
-
-pm_views = PatternMatcher([
-  # a shrink of a shrink is one shrink
-  (UPat(Ops.SHRINK, name="x").f(Ops.SHRINK, allow_any_len=True, name="s"),
-   lambda s,x: x.src[0].shrink(tuple((o+p, o+p+n) for (o,_),(p,n) in zip(x.marg, s.marg)))),
-  # a bitcast of a 1-d view of storage is a view of the bitcast, so pm_mops folds the view into the index
-  (UPat((Ops.PARAM, Ops.BUFFER)).or_after("x").f(Ops.SHRINK, allow_any_len=True, name="v").bitcast().named("b"), bitcast_view),
-])
-
 pm_renumber = PatternMatcher([
   (UPat(Ops.RANGE, name="u"), lambda ctx, u: u.replace(arg=(next(ctx),)+u.arg[1:])),
   (UPat(Ops.BUFFER, name="u"), lambda ctx, u: u.replace(arg=replace(u.arg, slot=next(ctx))) if u.addrspace is AddrSpace.REG else None),
@@ -496,7 +485,7 @@ def lower_call(call:UOp) -> UOp|None:
   offs = {g[0]: list(itertools.accumulate([round_up(u.nbytes(), 128) // u.dtype.itemsize for u in g], initial=0)) for g in groups}
   merged = {g[0]: g[0].replace(arg=replace(g[0].arg, size=offs[g[0]][-1])) for g in groups if len(g) > 1}
   views = {u: merged[g[0]][o:o + u.max_numel()] for g in groups if len(g) > 1 for u, o in zip(g, offs[g[0]])}
-  body = body.substitute(views, extra_pm=pm_mops+pm_views, enter_calls=True)
+  body = body.substitute(views, extra_pm=pm_mops+mop_cleanup, enter_calls=True)
   patches = UOp.sink(*dedup(ctx.lt_patches)).substitute(views).src
 
   # the placeholders become the body's params in visit order, variables bind by name after them, the ranges renumber
@@ -551,6 +540,7 @@ def bufferize_buf(ctx:LinkCtx, b:UOp) -> UOp|None: # ctx: a kept link (the jit's
   elif not ctx.use_rt:
     spec = BufferSpec(host=b.arg.volatile, uncached=b.arg.volatile or b.tag.startswith("cmdbuf"), cpu_access=True)
     r = Buffer(dev.device, max(b.max_numel(), 1), b.dtype, options=spec, preallocate=True)
+    if b.max_numel() == 0: r = r.view(0, b.dtype, 0).ensure_allocated() # empty kernargs still need a valid address
   else:
     off = dev.rt_allocator(True, b.arg.volatile).alloc(max(b.max_numel() * b.dtype.itemsize, 1), alignment=256)
     r = dev.rt_buffer(True, b.arg.volatile).view(b.max_numel(), b.dtype, off).ensure_allocated()
@@ -590,7 +580,8 @@ pm_link = PatternMatcher([
   # math on consts is a const
   (UPat(GroupOp.ALU, src=UPat.cvar().or_casted(), name="a"), lambda a: UOp.const(exec_alu(a.op, a.dtype, [s.val for s in a.src], False), a.dtype)),
   # fold rules
-  (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"), UPat(Ops.BINARY, name="blob").bitcast())), fold_binary),
+  (UPat(name="buf").store(UPat.any(UPat(Ops.BINARY, name="blob"),
+                                 UPat(Ops.BINARY, name="blob").f(Ops.RESHAPE, allow_any_len=True)).or_bitcasted()), fold_binary),
   (UPat(name="buf").index(UPat(Ops.STACK, src=UPat.cvar(), name="offs")).store(UPat(Ops.STACK, src=UPat.cvar().or_casted(), name="ws")), fold_words),
   (UPat(name="buf").index(UPat(Ops.STACK, name="offs")).store(UPat(Ops.STACK, name="ws")).end(UPat(Ops.RANGE, name="r")), fold_words),
   # a call keeps the deps that are not written yet

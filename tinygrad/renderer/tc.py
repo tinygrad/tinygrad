@@ -97,9 +97,14 @@ amd_cdna4 = amd_cdna_1616128 + amd_cdna_161632 + amd_cdna_161616
 
 def get_amd(arch): return {"gfx942": amd_cdna3, "gfx950": amd_cdna4, "gfx1200": amd_rdna4, "gfx1201": amd_rdna4}.get(arch, amd_rdna3)
 
+def pack_bits(x:UOp, dtype:DType) -> UOp:
+  count = dtype.itemsize//x.dtype.itemsize
+  return UOp.stack(*(UOp.stack(*(x.index(j) for j in range(i, i+count))).alu(Ops.BITCAST, arg=dtype)
+                     for i in range(0, x.max_numel(), count)))
+
 pm_validate_wmma_rdna3 = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.int32), lambda x: x.replace(
-    src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
+    src=(pack_bits(x.src[0], dtypes.uint32), pack_bits(x.src[1], dtypes.uint32), x.src[2]))
     if x.src[0].dtype == dtypes.int8 and x.src[0].max_numel() == 16 else None),
   (UPat(Ops.WMMA, name="x", dtype=dtypes.half), lambda x: UOp(Ops.STACK, src=tuple(x.replace(
       src=(x.src[0], x.src[1], UOp(Ops.STACK, src=tuple(x.src[2].index(UOp.const(j//2, dtypes.int16))
@@ -123,13 +128,13 @@ pm_validate_wmma_rdna4 = PatternMatcher([
 
 pm_validate_wmma_cdna = PatternMatcher([
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-    lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint32), x.src[1].bitcast(dtypes.uint32), x.src[2]))
-    if x.arg[0][2] == 128 and x.src[0].dtype.itemsize <= 8 else None),
+    lambda x: x.replace(src=(pack_bits(x.src[0], dtypes.uint32), pack_bits(x.src[1], dtypes.uint32), x.src[2]))
+    if x.arg[0][2] == 128 and x.src[0].dtype.itemsize < 4 else None),
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
     lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint16), x.src[1].bitcast(dtypes.uint16), x.src[2]))
     if x.max_numel() == 4 and x.src[0].dtype == dtypes.bfloat16 and x.src[0].max_numel() == 4 else None),
   (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
-    lambda x: x.replace(src=(x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64), x.src[2]))
+    lambda x: x.replace(src=(x.src[0].alu(Ops.BITCAST, arg=dtypes.uint64), x.src[1].alu(Ops.BITCAST, arg=dtypes.uint64), x.src[2]))
     if x.max_numel() == 4 and x.src[0].dtype in dtypes.fp8s and x.src[0].max_numel() == 8 else None),
 ])
 
