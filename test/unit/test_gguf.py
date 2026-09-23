@@ -230,6 +230,21 @@ class TestGGUF(unittest.TestCase):
     for _, _, _, data in tensors: buf += data
     return bytes(buf)
 
+  def test_per_tensor_device(self):
+    a = np.array([1, 2, 3, 4], np.float32)
+    quant = np.float16(.5).tobytes() + np.arange(32, dtype=np.int8).tobytes()
+    with tempfile.TemporaryDirectory() as d:
+      path = pathlib.Path(d) / 'test.gguf'
+      path.write_bytes(self._build_gguf([('a', (4,), 0, a.tobytes()), ('b', (32,), 8, quant)], []))
+      _, ts = gguf_load(path, device=lambda name: 'CPU' if name == 'a' else 'CPU:1')
+      self.assertEqual(ts['a'].device, 'CPU')
+      self.assertEqual(ts['b'].device, 'CPU:1')
+      np.testing.assert_equal(ts['a'].numpy(), a)
+      np.testing.assert_equal(ts['b'].numpy(), np.arange(32) * .5)
+      # Only packed bytes cross devices, not a materialized FP32 weight or the entire GGUF.
+      from tinygrad.uop.ops import Ops
+      self.assertEqual([u.nbytes() for u in ts['b'].uop.toposort() if u.op is Ops.BUFFER and u.device == 'CPU:1'], [34])
+
   def test_multi_part_load(self):
     with tempfile.TemporaryDirectory() as d:
       d = pathlib.Path(d)

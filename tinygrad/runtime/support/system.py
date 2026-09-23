@@ -264,7 +264,12 @@ class PCIDevice:
     return MMIOInterface(loc, sz, fmt=fmt)
   def resize_bar(self, bar_idx:int):
     rpath = f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}_resize"
-    try: FileIOInterface(rpath, os.O_RDWR).write(str(int(FileIOInterface(rpath, os.O_RDONLY).read(), 16).bit_length() - 1))
+    try:
+      size = int(FileIOInterface(rpath, os.O_RDONLY).read(), 16).bit_length() - 1
+      # Even writing the current size releases/reassigns BARs and bridge windows. Avoid disrupting an already configured device.
+      if self.bar_info(bar_idx)[1] == 1 << (size + 20): return
+      FileIOInterface(rpath, os.O_RDWR).write(str(size))
+      self.bar_info.cache_clear()
     except OSError as e: raise RuntimeError(f"Cannot resize BAR {bar_idx}: {e}. Ensure the resizable BAR option is enabled.") from e
 
 class USBPCIDevice(PCIDevice):
