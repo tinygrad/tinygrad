@@ -82,7 +82,7 @@ def render_marg(ctx,x:UOp):
   if x.op in {Ops.PAD, Ops.SHRINK}: pieces = [f"({marg_str(ctx, a[0])}, {marg_str(ctx, a[1])})" for a in x.marg]
   return f"({','.join(pieces)})" if len(pieces) != 1 else f"({pieces[0]},)"
 
-sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,
+sugar = {Ops.SINK, Ops.END, Ops.BACKEDGE, Ops.STORE, Ops.LOAD, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,
          Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.BARRIER, Ops.DETACH}
 pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.val})"),
@@ -144,7 +144,7 @@ def pyrender(ast:UOp) -> str:
   cmap = consumer_map_from_toposort(lst)
   not_rendered = {Ops.CONST}
   always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.STACK,
-                     Ops.BUFFER, Ops.ALLOC, Ops.COPY, Ops.CALL, Ops.WHERE, Ops.END}
+                     Ops.BUFFER, Ops.ALLOC, Ops.COPY, Ops.CALL, Ops.WHERE, Ops.END, Ops.BACKEDGE}
 
   to_render: set[UOp] = {ast}
   for u in lst:

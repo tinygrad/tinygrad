@@ -304,7 +304,7 @@ class TestSetitem(unittest.TestCase):
 
 class TestAssignBitcast(unittest.TestCase):
   def test_assign_through_bitcast(self):
-    # the dest is unrealized, so callify cannot fold the BITCAST into a buffer view and the STORE keeps a
+    # the dest is unrealized, so the call transform cannot fold the BITCAST into a buffer view and the STORE keeps a
     # BITCAST dest; the bitcast has to move to the value side or the store never reaches the buffer
     a = Tensor.full((4,), 1.0, dtype=dtypes.float32).contiguous()
     a.bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.uint32)).realize()

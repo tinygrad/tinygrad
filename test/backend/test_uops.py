@@ -322,7 +322,7 @@ class TestUOpPrograms(unittest.TestCase):
 
     ptr = UOp.placeholder(out.shape, out.dtype, slot=0)
     i, j = UOp.range(10, axis_id=0), UOp.range(10, axis_id=1)
-    prog = ptr[i,j].set(42).end(i,j)
+    prog = ptr[i,j].store(42).end(i,j)
     self._run(prog.sink(arg=KernelInfo()), out)
 
     with Context(DEBUG=0): self.assertTrue((out == 42).all().item())
@@ -352,11 +352,8 @@ class TestUOpPrograms(unittest.TestCase):
     # Zero-init: write a scalar 0 to each (i,j).
     C = C[i, j].set(0.0)
 
-    # Accumulate: C_after(k) enforces the dependency along the reduction axis
-    C = C[i, j].set(C.after(k)[i, j] + A[i, k] * B[k, j])
-
-    # Finalize the loop nest / schedule in (i, j, k) order
-    prog = C.end(i, j, k)
+    # Accumulate: end the store, with C.after(k) enforcing the dependency along the reduction axis
+    prog = C[i, j].store(C.after(k)[i, j] + A[i, k] * B[k, j]).end(i, j, k)
 
     # run program
     self._run(prog.sink(arg=KernelInfo()), a, b, c)
@@ -373,9 +370,7 @@ class TestUOpPrograms(unittest.TestCase):
 
     C = C[i, j].set(0.0)
     C = C[i, j].set(C.after(k)[i, j] + A[i, k] * B[k, j], end=k)
-    C = C[i, j].set(C[i, j].maximum(0.0))
-
-    prog = C.end(i, j)
+    prog = C[i, j].store(C[i, j].maximum(0.0)).end(i, j)
 
     self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), a, b, c)
     with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)

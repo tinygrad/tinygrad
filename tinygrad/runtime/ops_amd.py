@@ -15,7 +15,9 @@ from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, hcq_filter_visible_devices
+from tinygrad.runtime.support.memory import MMIOInterface
+from tinygrad.runtime.support.system import FileIOInterface
+from tinygrad.runtime.support.system import filter_visible_devices
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
 from tinygrad.runtime.support.system import PCIIfaceBase, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
@@ -593,7 +595,7 @@ class KFDIface:
     if KFDIface.kfd is None:
       KFDIface.kfd = FileIOInterface("/dev/kfd", os.O_RDWR)
       gpus = [g for g in FileIOInterface(kfd_topo_path).listdir() if self._is_usable_gpu(FileIOInterface(f"{kfd_topo_path}/{g}/gpu_id"))]
-      KFDIface.gpus = hcq_filter_visible_devices(sorted(gpus, key=lambda x: int(x.split('/')[-1])), "AMD")
+      KFDIface.gpus = filter_visible_devices(sorted(gpus, key=lambda x: int(x.split('/')[-1])), "AMD")
       KFDIface.count = len(KFDIface.gpus)
 
     if device_id >= len(KFDIface.gpus): raise RuntimeError(f"No device found for {device_id}. Requesting more devices than the system has?")
@@ -807,7 +809,7 @@ class USBAllocator(AMDAllocator): # the host program reads another device's memo
 
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
-    if dev_id >= len(visible:=hcq_filter_visible_devices(USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001), "AMD")):
+    if dev_id >= len(visible:=filter_visible_devices(USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001), "AMD")):
       raise RuntimeError(f"AMD:{dev_id} does not exist ({pluralize('device', len(visible))} available)")
     self.dev, self.pci_dev, self.vram_bar, self.count = dev, USBPCIDevice("AM", *visible[dev_id]), 0, len(visible)
     self.dev_impl = AMDev(self.pci_dev)

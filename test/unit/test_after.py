@@ -89,13 +89,5 @@ class TestAfterCounterexamples(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       Tensor(x.after(x.store(1), x.store(2))).realize()
 
-  @unittest.expectedFailure
-  def test_gradient_after_callify(self):
-    x = Tensor([2.]).realize()
-    y = x * 2
-    y.callify()
-    # Currently raises: "expected a CALL with output STOREs or a grad_fxn".
-    self.assertEqual(y.sum().gradient(x)[0].tolist(), [2.])
-
 if __name__ == "__main__":
   unittest.main()

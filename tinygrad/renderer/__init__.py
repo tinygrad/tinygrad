@@ -33,7 +33,7 @@ class Estimates:
     if ignore_indexing:
       for u in uops:
         if u.op in {Ops.INDEX, Ops.SHRINK}:
-          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op is not Ops.END)))
+          excluded = excluded.union(set(UOp.sink(*u.src[1:]).toposort(lambda x: x.op not in {Ops.END, Ops.BACKEDGE})))
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
@@ -48,7 +48,7 @@ class Estimates:
           mults *= cast(sint, u.src[0].ssimplify())
           # SPECIAL are already counted in mults
           mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
-      elif u.op is Ops.END: mults = mult_stack.pop(-1)
+      elif u.op in {Ops.END, Ops.BACKEDGE}: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
       elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
         lds += u.max_numel() * u.dtype.itemsize * mults

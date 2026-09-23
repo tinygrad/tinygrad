@@ -1,4 +1,4 @@
-from dataclasses import replace, dataclass
+from dataclasses import replace
 import itertools, functools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, USE_TC
 from tinygrad.helpers import ALLOW_TF32, DEFAULT_FLOAT, DEFAULT_INT, TC_SELECT, TC_OPT, TC_MIN_GLOBALS, TracingKey, Context, panic
@@ -26,7 +26,7 @@ from tinygrad.schedule.prepare import pm_mops, resolve_function
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, flatten, argsort, partition
+from tinygrad.helpers import all_same, all_int, argsort, partition
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -178,10 +178,6 @@ def fix_group_for_reduce(x:UOp):
   # NOTE: we remove all horizontal reduces here, they remain in the first reduce
   return buf.reduce(*reduce_loop, arg=(x.arg[0], 0))
 
-@dataclass
-class ReduceContext:
-  acc_num: int = 0
-
 def merge_reduce_ends(sink:UOp):
   # merge ENDs that share the same range and nesting context (only those created by reduce_to_acc)
   # ENDs at different nesting depths get cloned RANGEs so each RANGE maps to one END
@@ -202,12 +198,9 @@ def merge_reduce_ends(sink:UOp):
       for e in group: subs[e] = merged
   return sink.substitute(subs) if subs else None
 
-def reduce_ranges_to_acc(ctx:ReduceContext, r:UOp):
-  acc = UOp.placeholder_like(r, ctx.acc_num, AddrSpace.REG)
-  ctx.acc_num += 1
-  topo = r.src[0].toposort()
-  ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
-  input_ranges = tuple(x for x in topo if x.op is Ops.RANGE and x not in r.src[1:] and x not in ended_ranges)
+def reduce_ranges_to_acc(ctx:itertools.count, r:UOp):
+  acc = UOp.placeholder_like(r, next(ctx), AddrSpace.REG)
+  input_ranges = tuple(x for x in r.src[0].ranges if x not in r.src[1:])
   acc_init = acc.after(*input_ranges).store(UOp.const(identity_element(r.arg[0], r.dtype)))
   acc_initted = acc.after(acc_init, *r.src[1:])
   inp = r.src[0].reduce(arg=r.arg) if r.arg[1] else r.src[0]
@@ -269,7 +262,7 @@ def add_raw_barrier(after:UOp):
 
 def add_war_barrier(end:UOp):
   # a LOCAL buffer stored and loaded in the same loop needs a barrier at the end of the loop body
-  rngs = [r for r in end.src[1:] if r.op is Ops.RANGE and r.axis_type in (AxisType.REDUCE, AxisType.WEAK, AxisType.LOOP) and r.vmax > 0]
+  rngs = [r for r in end.ended_ranges if r.axis_type in (AxisType.REDUCE, AxisType.WEAK, AxisType.LOOP) and r.vmax > 0]
   if not rngs or end.src[0].op is Ops.BARRIER: return None
   sl = end.src[0].backward_slice_with_self
   # only stores that are inside this loop body (not in the backward slice through AFTER chains from other loops)
@@ -280,7 +273,7 @@ def add_war_barrier(end:UOp):
 
 pm_implicit_barriers = PatternMatcher([
   (UPat(Ops.AFTER, name="after"), add_raw_barrier),
-  (UPat(Ops.END, name="end"), add_war_barrier),
+  (UPat((Ops.END, Ops.BACKEDGE), name="end"), add_war_barrier),
 ])
 
 def lower_call_linear(ctx, linear:UOp) -> UOp|None:
@@ -344,11 +337,13 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # expand
   sink = graph_rewrite(sink, expander, ctx=build_range_map(sink), name="expander")
 
+  slots = itertools.count(max([u.arg.slot+1 for u in sink.toposort() if u.op is Ops.BUFFER], default=0))
+
   # remove reduce
-  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=ReduceContext(), name="remove reduces")
+  sink = graph_rewrite(sink, mop_cleanup+pm_reduce_local, ctx=slots, name="remove reduces")
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_local_buffers, ctx=itertools.count(0), name="add local buffers")
+  sink = graph_rewrite(sink, pm_add_local_buffers, ctx=slots, name="add local buffers")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")

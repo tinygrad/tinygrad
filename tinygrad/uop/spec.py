@@ -75,17 +75,19 @@ spec_shared = PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat(),), allow_any_len=True, name="rng"), lambda rng: isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.INDEX, name="x"), lambda x: len(x.src)>0 and all(dtypes.is_int(y.dtype) or y.base.is_invalid for y in x.src[1:]) or None),
-  # END closes RANGEs
-  (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:]) or None),
-  # a loop-ended END requires a trailing bool condition for the backedge (loop again while true)
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool))), lambda: True),
+  # END closes bounded RANGEs around a void effect; it does not discard a value. Conditional loops use BACKEDGE.
+  (UPat(Ops.END, src=(UPat(dtype=dtypes.void),), allow_any_len=True, name="x"),
+   lambda x: x.arg is None and all(u.op is Ops.RANGE and dtypes.is_int(u.dtype) for u in x.src[1:])),
+  # Execute body (discarding its value), then repeat the unbounded loop while the scalar condition is true.
+  (UPat(Ops.BACKEDGE, dtypes.void, src=(UPat(), UPat(Ops.RANGE, dtypes.void), UPat(dtype=dtypes.bool)), name="x"),
+   lambda x: x.arg is None and x.src[2].shape == () and not x.src[2].base.is_invalid),
 
   # PARAM/BUFFER have a size in the arg, no shape input
   (UPat(Ops.PARAM, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg)),
   (UPat(Ops.BUFFER, src=(), name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
 
-  # GROUP of stores (or groups, or NOOPs)
-  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.INS, Ops.END))), lambda: True),
+  # GROUP combines void effects, not values.
+  (UPat(Ops.GROUP, dtypes.void, src=UPat(dtype=dtypes.void)), lambda: True),
 
   # AFTER on Movement Op, PARAM, BUFFER, ALLOC, STAGE, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.STAGE, Ops.INDEX,
@@ -227,7 +229,8 @@ spec_full = PatternMatcher([
   (UPat(Ops.REWRITE_ERROR, dtypes.void, name="x"), lambda x: isinstance(x.arg, str)),
 
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
-  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
+  (UPat(Ops.END, src=(UPat(dtype=dtypes.void), UPat()), allow_any_len=True, name="x"),
+   lambda x: x.arg is None and all(dtypes.is_int(u.dtype) for u in x.src[1:])),
 
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),

@@ -9,9 +9,7 @@ def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
-  # ranges in the cond should not be ended
-  backedge = tuple(x for x in rngs if x.dtype in (dtypes.void, dtypes.bool))
-  return r.replace(src=r.src[:off]+tuple(UOp.sink(*[x for x in rngs if x not in backedge]).ranges)+backedge)
+  return r.replace(src=r.src[:off]+tuple(UOp.sink(*rngs).ranges))
 
 pm_flatten_range = PatternMatcher([
   # real ranges only
@@ -64,6 +62,8 @@ def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
     and r.src[0].op is Ops.CONST and r.src[0].divides(c.val) is not None: ctx[r] = c
 
 def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
+  # Only the kernel root: rewriting a nested SINK would leave its enclosing END's binders unchanged.
+  if x.arg is None: return None
   ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
   ctx.clear()
   return None if ret is x else ret.simplify()

@@ -420,12 +420,12 @@ class Compiled:
   pm_encode:Any = None
   pm_lower:Any = None
 
-  def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, graph=None, arch=None):
+  def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime:type[Program[Self]]|None, arch=None):
     from tinygrad.renderer import Renderer
     from tinygrad.uop.ops import Ops, UPat, PatternMatcher
     from tinygrad.runtime.support.hcq2 import cfunc_buf
 
-    self.device, self.allocator, self.runtime_t, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
+    self.device, self.allocator, self.runtime_t, self.renderers = device, allocator, runtime, renderers or [Renderer]
     self.device_id, self.arch = (int(idx) if ":" in device and (idx:=device.split(":")[1]).isdigit() else 0), arch
     self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
     self.cached_renderer:dict[Any, Renderer] = {}

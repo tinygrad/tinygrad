@@ -2,11 +2,70 @@ import collections, time
 from typing import Any, cast
 from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, suppress_finalizing, TracingKey, unwrap
 from extra.hcq1.hcq import HCQBuffer, HCQCompiled, HCQAllocator, HCQSignal, HWQueue, HCQArgsState
-from tinygrad.runtime.support.hcq import BumpAllocator, MMIOInterface
+from tinygrad.runtime.support.memory import BumpAllocator, MMIOInterface
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Compiled, Device, MultiBuffer, ProfileGraphEntry, ProfileGraphEvent, DepsTracker
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable
-from tinygrad.engine.jit import GraphRunner
+from tinygrad.engine.realize import estimate_uop, get_runtime, unwrap_multi, resolve_params, get_call_arg_uops
+from tinygrad.renderer import Estimates
+
+class GraphRunner:
+  def __init__(self, linear:UOp, input_uops:tuple[UOp, ...]=()):
+    self.linear = linear.src[0]
+    self.calls: list[tuple[int, UOp, list[Buffer], dict[str, int]]] = []
+    self.runtimes: list[Any|None] = []
+    self.uop_replace: list[list[tuple[int, int]]] = []
+    for call in self.linear.src:
+      replace = [(p, b.arg.slot) for p, b in enumerate(get_call_arg_uops(call)) if b.op is Ops.PARAM]
+      for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(call, resolve_params(call, input_uops))):
+        self.calls.append((dev_idx, call.body, [b.ensure_allocated() for b in bufs], device_vars))
+        self.runtimes.append(get_runtime(bufs[0].device, call.body) if call.body.op is Ops.PROGRAM else None)
+        self.uop_replace.append(replace)
+
+    self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
+    self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
+    self.launch_dims_base:dict[int, tuple[tuple[int|float, ...], tuple[int, ...]]] = {}
+
+    def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
+
+    crs = [(j, self.calls[j][1].arg, self.calls[j][3]) for j in range(len(self.calls)) if self.calls[j][1].op is Ops.PROGRAM]
+    self.vars = sorted({v.expr for _,p,dv in crs for v in p.vars if v.expr not in dv})
+    self.symbolic_dims = dedup(tuple(d) for _,p,_ in crs for d in (p.local_size, p.global_size) if is_sym_dim(d))
+
+    def find_symbolic_dim(dim:tuple[int,int,int]): return self.symbolic_dims.index(tuple(dim)) if tuple(dim) in self.symbolic_dims else None
+
+    for j,p,dv in crs:
+      if (replace:=[(i, self.vars.index(v.expr)) for i, v in enumerate(p.vars) if v.expr not in dv]):
+        self.var_vals_replace[j] = replace
+      global_dim_idx, local_dim_idx = find_symbolic_dim(p.global_size), find_symbolic_dim(p.local_size)
+      if global_dim_idx is not None or local_dim_idx is not None:
+        self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
+        self.launch_dims_base[j] = (tuple(p.global_size), tuple(p.local_size))
+
+    estimates = sum((estimate_uop(call) for call in self.linear.src), Estimates())
+
+    self.device, self.estimates = self.calls[0][2][0].device.split(":")[0], estimates.simplify()
+
+  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None: raise NotImplementedError("override this")
+
+  def updated_vars(self, var_vals: dict[str, int]):
+    vals = [var_vals[v] for v in self.vars]
+    for j, vidxs in self.var_vals_replace.items():
+      for i, v in vidxs: yield j, i, vals[v]
+
+  def updated_launch_dims(self, var_vals: dict[str, int]):
+    dims = [tuple(sym_infer(s, var_vals) for s in dim) for dim in self.symbolic_dims]
+    for j, (gl, lc) in self.launch_dims_replace.items():
+      yield j, (dims[gl] if gl is not None else self.launch_dims_base[j][0]), (dims[lc] if lc is not None else self.launch_dims_base[j][1])
+
+  @staticmethod
+  def _all_devs(batch_devs:list[Compiled], new_call:UOp) -> list[Compiled]:
+    return dedup(batch_devs + [Device[x] for b in get_call_arg_uops(new_call)
+                 for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
+
+  @staticmethod
+  def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
+    return new_call.op is Ops.CALL and new_call.body.op is Ops.PROGRAM and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
 
 class HCQGraph(GraphRunner):
   def _access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):

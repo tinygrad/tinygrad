@@ -6,7 +6,7 @@ from tinygrad.renderer import Renderer
 def _dim_max(d:sint) -> int: return d if isinstance(d, int) else int(d.vmax)
 
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
-  while len(dims) > len(max_sizes) or any(d > m for d,m in zip(dims, max_sizes)):
+  while len(dims) > len(max_sizes) or any(_dim_max(d) > m for d,m in zip(dims, max_sizes)):
     for i,m in enumerate(max_sizes):
       if i < (len(dims)-1) and _dim_max(dims[i]) * _dim_max(dims[i+1]) <= m:
         dims = dims[:i] + (dims[i]*dims[i+1],) + dims[i+2:]
