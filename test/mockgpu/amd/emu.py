@@ -1957,7 +1957,7 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  call_render, call_exec = getenv("AMD_CALL_RENDER"), getenv("AMD_CALL_EXEC", getenv("ASM_CALL"))
+  call_render, call_exec = getenv("ASM_CALL_RENDER"), getenv("ASM_CALL")
   if call_render or call_exec:
     from test.mockgpu.amd.call import render_call
     words = user_data or [args_ptr & 0xffffffff, args_ptr >> 32]
