@@ -307,46 +307,67 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
 
   def emit(start:int, end:int, active_loop:int|None=None):
     nonlocal axis
-    pos = start
-    forward:list[int] = []
-    while pos < end:
-      while forward and forward[-1] == pos:
-        forward.pop()
-        graph.guards.pop()
-      if pos in loops and pos != active_loop:
-        latch = loops[pos]
-        assert latch < end, "overlapping branch regions"
-        loop = UOp.loop(axis)
-        axis += 1
-        graph.deps += (loop,)
-        emit(pos, latch, pos)
-        cond = graph.condition(instructions[latch][4])
-        for guard in graph.guards: cond = cond & guard.after(*graph.deps).index(0).load()
-        effect = UOp.group(*graph.deps).backedge(loop, cond)
-        graph.calls.append(effect)
-        graph.deps = (effect,)
-        for p in graph.operands: graph.values[p], graph.readers[p] = p.after(effect), []
-        pos = latch + instructions[latch][0]
-        continue
-      size, name, body, target, cond = instructions[pos]
-      if name == "S_ENDPGM":
-        assert not graph.guards and active_loop is None, "conditional termination is not supported"
-        break
+    positions = [p for p in instructions if start <= p < end]
+    branches = [p for p in positions if instructions[p][3] is not None]
+    if not branches:
+      for p in positions:
+        _, name, body, _, _ = instructions[p]
+        if name == "S_ENDPGM": return True
+        graph.append(body, name=name.lower(), immediates=immediates[p])
+      if end == offset and decode_error is not None: raise decode_error
+      return False
+
+    # Each basic block has an execution predicate. Forward edges run later in this sweep;
+    # backward edges activate blocks for the next iteration. Instruction bodies remain static CALLs.
+    heads = {start, end}
+    for p in positions:
+      size, name, _, target, _ = instructions[p]
       if target is not None:
-        assert pos < target <= end, f"branch crosses region boundary: {pos:#x} -> {target:#x}"
-        assert not forward or target <= forward[-1], "overlapping forward branch regions are not supported"
-        flag_name = f"branch_{pos:x}"
-        bank = UOp.param(7+len(graph.storage), dtypes.bool, 1, name=flag_name)
-        graph.storage[flag_name] = UOp.placeholder((1,), dtypes.bool, addrspace=AddrSpace.REG, tag=flag_name)
-        flag = graph.operand(bank)
-        graph.append(UOp.sink(flag.index(0).store(cond.logical_not())), name="branch")
-        graph.guards.append(flag)
-        forward.append(target)
-      else: graph.append(body, name=name.lower(), immediates=immediates[pos])
-      pos += size
-    if pos == offset and decode_error is not None: raise decode_error
-    for _ in forward: graph.guards.pop()
-    return pos < end and instructions[pos][1] == "S_ENDPGM"
+        assert start <= target <= end, f"branch crosses barrier phase: {p:#x} -> {target:#x}"
+        heads.update((target, p+size))
+      elif name == "S_ENDPGM": heads.add(p+size)
+    blocks = sorted(heads)
+    flags = {}
+    for p in blocks[:-1]:
+      name = f"block_{p:x}"
+      bank = UOp.param(7+len(graph.storage), dtypes.bool, 1, name=name)
+      graph.storage[name] = UOp.placeholder((1,), dtypes.bool, addrspace=AddrSpace.REG, tag=name)
+      flags[p] = graph.operand(bank)
+    graph.append(UOp.sink(*(flag.index(0).store(p == start) for p,flag in flags.items())), "enter_blocks")
+    loop = UOp.loop(axis) if any(target is not None and target <= p for p in branches for target in [instructions[p][3]]) else None
+    axis += 1
+    if loop is not None: graph.deps += (loop,)
+    terminated = False
+    for head, stop in zip(blocks, blocks[1:]):
+      flag = flags[head]
+      graph.guards.append(flag)
+      outgoing = [(stop, UOp.const(True))]
+      for p in positions:
+        if not head <= p < stop: continue
+        size, name, body, target, cond = instructions[p]
+        if target is not None: outgoing = [(target, cond), (p+size, cond.logical_not())]
+        elif name == "S_ENDPGM":
+          outgoing, terminated = [], True
+          break
+        else: graph.append(body, name=name.lower(), immediates=immediates[p])
+      graph.guards.pop()
+      active = flag.index(0).load()
+      edges:dict[int, UOp] = {}
+      for dest, cond in outgoing:
+        if dest < end: edges[dest] = edges.get(dest, UOp.const(False)) | (active & cond)
+      stores = [flags[dest].index(0).store(flags[dest].index(0).load() | cond) for dest,cond in edges.items() if dest != head]
+      # Consume this block only after its outgoing edges have read the old predicate.
+      stores.append(flag.after(*stores).index(0).store(edges.get(head, UOp.const(False))))
+      graph.append(UOp.sink(*stores), "branch")
+    if loop is not None:
+      cond = UOp.const(False)
+      for flag in flags.values(): cond = cond | flag.index(0).load()
+      effect = UOp.group(*graph.deps).backedge(loop, graph.condition(cond))
+      graph.calls.append(effect)
+      graph.deps = (effect,)
+      for operand in graph.operands: graph.values[operand], graph.readers[operand] = operand.after(effect), []
+    if not terminated and end == offset and decode_error is not None: raise decode_error
+    return terminated
 
   def reset_dependencies():
     graph.deps = ()
