@@ -174,7 +174,7 @@ class TestLinearizer(unittest.TestCase):
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
-    opts_to_apply = [Opt(op=OptOps.SPLIT, axis=1, arg=(8, AxisType.GROUP_REDUCE)), Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL)),
+    opts_to_apply = [Opt(op=OptOps.SPLIT, axis=1, arg=(8, AxisType.LOCAL)), Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.LOCAL)),
                      Opt(op=OptOps.SPLIT, axis=0, arg=(4, AxisType.UPCAST))]
     program = to_program(replace_opts(r.schedule_linear().src[-1].src[0], opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
 
@@ -344,7 +344,7 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_store_locals_and_globals(self):
     x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     out = x@y
-    opt = [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 3, (8, AxisType.GROUP_REDUCE, True)),
+    opt = [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 3, (8, AxisType.LOCAL, True)),
             Opt(OptOps.SPLIT, 3, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),
             Opt(OptOps.SPLIT, 1, (2, AxisType.UPCAST))] # upcast accs in both reduces
     ast = helper_linearizer_opt(out, opts=[opt])
@@ -384,9 +384,9 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_two_grouped_stores_local(self):
-    # GROUP_REDUCE on both reduces puts two LOCAL buffers in one kernel, and the store to each needs its own barrier
+    # grouping both reduces puts two LOCAL buffers in one kernel, and the store to each needs its own barrier
     a = Tensor.rand(32, 32).realize()
-    opts = [Opt(OptOps.SPLIT, 3, (4, AxisType.GROUP_REDUCE)), Opt(OptOps.SPLIT, 5, (4, AxisType.GROUP_REDUCE))]
+    opts = [Opt(OptOps.SPLIT, 3, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 5, (4, AxisType.LOCAL))]
     ast = helper_linearizer_opt(single_kernel_softmax(a), [opts])
     uops = to_program(replace_opts(ast, opts), renderer=Device[Device.DEFAULT].renderer).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)

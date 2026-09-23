@@ -30,23 +30,23 @@ class TestKernelOpts(unittest.TestCase):
     helper_linearizer_opt(r, [
       [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))],
       [Opt(OptOps.SPLIT, 0, (16, AxisType.LOCAL))], # Checking how it works with locals
-      [Opt(OptOps.SPLIT, 1, (2, AxisType.GROUP_REDUCE, True))],
-      [Opt(OptOps.SPLIT, 1, (64, AxisType.GROUP_REDUCE, True))], # Checking how it works with grouped reduce
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.GROUP_REDUCE, True))],
-      [Opt(OptOps.SPLIT, 0, (32, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.GROUP_REDUCE, True))],
+      [Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL, True))],
+      [Opt(OptOps.SPLIT, 1, (64, AxisType.LOCAL, True))], # Checking how it works with grouped reduce
+      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True))],
+      [Opt(OptOps.SPLIT, 0, (32, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True))],
       # Checking how it works with locals + grouped reduce
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (64, AxisType.GROUP_REDUCE, True))],
+      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (64, AxisType.LOCAL, True))],
       # Checking how it works with locals + grouped reduce + upcasts
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.GROUP_REDUCE, True)), Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST)),
+      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST)),
        Opt(OptOps.SPLIT, 4, (4, AxisType.UNROLL))],
       # many local + many group
-      [Opt(OptOps.SPLIT, 1, (2, AxisType.GROUP_REDUCE)), Opt(OptOps.SPLIT, 2, (2, AxisType.GROUP_REDUCE)),
-       Opt(OptOps.SPLIT, 3, (2, AxisType.GROUP_REDUCE)), Opt(OptOps.SPLIT, 4, (2, AxisType.GROUP_REDUCE))],
+      [Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL)),
+       Opt(OptOps.SPLIT, 3, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL))],
       [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))] * 4,
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.GROUP_REDUCE)),
-       Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (2, AxisType.GROUP_REDUCE)),
-       Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 6, (2, AxisType.GROUP_REDUCE)),
-       Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 8, (2, AxisType.GROUP_REDUCE))],
+      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL)),
+       Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL)),
+       Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 6, (2, AxisType.LOCAL)),
+       Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 8, (2, AxisType.LOCAL))],
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -56,16 +56,16 @@ class TestKernelOpts(unittest.TestCase):
     a = Tensor.rand(7, 11, 13)
     helper_linearizer_opt(a.sum((1, 2)) + a.max((1, 2)), [
       [Opt(OptOps.SPLIT, 0, (0, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (11, AxisType.UNROLL)),
-       Opt(OptOps.SPLIT, 2, (0, AxisType.GROUP_REDUCE, True)), Opt(OptOps.PADTO, 2, 32)],
+       Opt(OptOps.SPLIT, 2, (0, AxisType.LOCAL, True)), Opt(OptOps.PADTO, 2, 32)],
     ])
     b = Tensor.rand(17, 19)
     helper_linearizer_opt(b.flip(0).pad(((2, 3), (0, 0))).sum(0), [
-      [Opt(OptOps.SPLIT, 1, (0, AxisType.GROUP_REDUCE, True)), Opt(OptOps.PADTO, 0, 8),
+      [Opt(OptOps.SPLIT, 1, (0, AxisType.LOCAL, True)), Opt(OptOps.PADTO, 0, 8),
        Opt(OptOps.SPLIT, 0, (12, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (0, AxisType.LOCAL))],
     ])
     x, w = Tensor.rand(1, 3, 15, 15), Tensor.rand(4, 3, 3, 3)
     helper_linearizer_opt(x.conv2d(w, padding=1, stride=2), [
-      [Opt(OptOps.SPLIT, 5, (0, AxisType.GROUP_REDUCE, True)), Opt(OptOps.SPLIT, 1, (0, AxisType.LOCAL))],
+      [Opt(OptOps.SPLIT, 5, (0, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 1, (0, AxisType.LOCAL))],
     ])
 
   def test_unrolled_padded_cumsum(self):
@@ -108,20 +108,27 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(OptOps.SPLIT, 1, (32, AxisType.LOCAL))],
       [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL))],
       [Opt(OptOps.SPLIT, 0, (16, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (8, AxisType.LOCAL))], # Checking how it works with locals
-      [Opt(OptOps.SPLIT, 2, (32, AxisType.GROUP_REDUCE, True))],
-      [Opt(OptOps.SPLIT, 2, (32, AxisType.GROUP_REDUCE, True)),
+      [Opt(OptOps.SPLIT, 2, (32, AxisType.LOCAL, True))],
+      [Opt(OptOps.SPLIT, 2, (32, AxisType.LOCAL, True)),
        Opt(OptOps.SPLIT, 2, (4, AxisType.UNROLL))], # Checking how it works with grouped_reduce
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (32, AxisType.GROUP_REDUCE, True))],
+      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (32, AxisType.LOCAL, True))],
       [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 0, (8, AxisType.LOCAL)),
-       Opt(OptOps.SPLIT, 4, (4, AxisType.GROUP_REDUCE, True))], # Checking how it works with local+grouped_reduce
+       Opt(OptOps.SPLIT, 4, (4, AxisType.LOCAL, True))], # Checking how it works with local+grouped_reduce
       # Checking all together
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.GROUP_REDUCE, True)),
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.LOCAL, True)),
        Opt(OptOps.SPLIT, 4, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (4, AxisType.UPCAST)),
        Opt(OptOps.SPLIT, 1, (2, AxisType.UPCAST))],
       # Full global upcast + local
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.GROUP_REDUCE, True)),
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.LOCAL, True)),
        Opt(OptOps.SPLIT, 4, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (8, AxisType.UPCAST))],
     ])
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_matmul_upcast_group(self):
+    Tensor.manual_seed(1552)
+    helper_linearizer_opt(Tensor.rand(128, 128)@Tensor.rand(128, 128),
+                          [[Opt(OptOps.SPLIT, 2, (32, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 2, (4, AxisType.UPCAST))]])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -132,33 +139,33 @@ class TestKernelOpts(unittest.TestCase):
     r = a.sum(axis=(1,3))
     helper_linearizer_opt(r, [
       # openCL / DEV=CL is 256 max threads
-      [Opt(OptOps.SPLIT, 2, (2, AxisType.GROUP_REDUCE, True))], [Opt(OptOps.SPLIT, 2, (32, AxisType.GROUP_REDUCE, True))],
+      [Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True))], [Opt(OptOps.SPLIT, 2, (32, AxisType.LOCAL, True))],
       # Checking how it works with 1 grouped_reduce.
-      [Opt(OptOps.SPLIT, 3, (2, AxisType.GROUP_REDUCE, True))], [Opt(OptOps.SPLIT, 3, (32, AxisType.GROUP_REDUCE, True))],
-      [Opt(OptOps.SPLIT, 2, (2, AxisType.GROUP_REDUCE, True)), Opt(OptOps.SPLIT, 4, (2, AxisType.GROUP_REDUCE, True))],
-      [Opt(OptOps.SPLIT, 2, (16, AxisType.GROUP_REDUCE, True)), Opt(OptOps.SPLIT, 4, (2, AxisType.GROUP_REDUCE, True))],
-      [Opt(OptOps.SPLIT, 2, (4, AxisType.GROUP_REDUCE, True)),
-       Opt(OptOps.SPLIT, 4, (64, AxisType.GROUP_REDUCE, True))], # Checking how it works with 2 grouped_reduces.
-      [Opt(OptOps.SPLIT, 2, (16, AxisType.GROUP_REDUCE, True)), Opt(OptOps.SPLIT, 4, (2, AxisType.GROUP_REDUCE, True)),
+      [Opt(OptOps.SPLIT, 3, (2, AxisType.LOCAL, True))], [Opt(OptOps.SPLIT, 3, (32, AxisType.LOCAL, True))],
+      [Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL, True))],
+      [Opt(OptOps.SPLIT, 2, (16, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL, True))],
+      [Opt(OptOps.SPLIT, 2, (4, AxisType.LOCAL, True)),
+       Opt(OptOps.SPLIT, 4, (64, AxisType.LOCAL, True))], # Checking how it works with 2 grouped_reduces.
+      [Opt(OptOps.SPLIT, 2, (16, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL, True)),
        Opt(OptOps.SPLIT, 2, (4, AxisType.UNROLL))],
       # Checking how it works with 2 grouped_reduces + upcasts.
-      [Opt(OptOps.SPLIT, 2, (2, AxisType.GROUP_REDUCE, True)), Opt(OptOps.SPLIT, 4, (32, AxisType.GROUP_REDUCE, True)),
+      [Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 4, (32, AxisType.LOCAL, True)),
        Opt(OptOps.SPLIT, 4, (4, AxisType.UNROLL))],
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (4, AxisType.GROUP_REDUCE, True)),
-       Opt(OptOps.SPLIT, 6, (4, AxisType.GROUP_REDUCE, True))],
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (4, AxisType.LOCAL, True)),
+       Opt(OptOps.SPLIT, 6, (4, AxisType.LOCAL, True))],
       # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (2, AxisType.GROUP_REDUCE, True)),
-       Opt(OptOps.SPLIT, 6, (32, AxisType.GROUP_REDUCE, True)),
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (2, AxisType.LOCAL, True)),
+       Opt(OptOps.SPLIT, 6, (32, AxisType.LOCAL, True)),
        Opt(OptOps.SPLIT, 5, (4, AxisType.UNROLL))],
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.GROUP_REDUCE, True)),
-       Opt(OptOps.SPLIT, 6, (4, AxisType.GROUP_REDUCE, True)),
+      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.LOCAL, True)),
+       Opt(OptOps.SPLIT, 6, (4, AxisType.LOCAL, True)),
        Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST))],
-      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.GROUP_REDUCE, True)),
-       Opt(OptOps.SPLIT, 6, (4, AxisType.GROUP_REDUCE, True)),
+      [Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (2, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (8, AxisType.LOCAL, True)),
+       Opt(OptOps.SPLIT, 6, (4, AxisType.LOCAL, True)),
        Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)), Opt(OptOps.SPLIT, 4, (4, AxisType.UNROLL)),
        Opt(OptOps.SPLIT, 5, (4, AxisType.UNROLL))], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (4, AxisType.GROUP_REDUCE, True)),
-       Opt(OptOps.SPLIT, 6, (4, AxisType.GROUP_REDUCE, True)),
+      [Opt(OptOps.SPLIT, 0, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL)), Opt(OptOps.SPLIT, 4, (4, AxisType.LOCAL, True)),
+       Opt(OptOps.SPLIT, 6, (4, AxisType.LOCAL, True)),
        Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST)), Opt(OptOps.SPLIT, 0, (2, AxisType.UPCAST))], # No globals
     ])
 
@@ -231,7 +238,7 @@ class TestKernelOpts(unittest.TestCase):
   def test_padto_group_full_unroll_sum(self):
     a = Tensor.ones(2, 28, 4096).realize()
     out = ((a * 0.5).float().square()).sum(axis=(0, 2))
-    opts_to_apply = [Opt(OptOps.SPLIT, 2, (256, AxisType.GROUP_REDUCE, True)), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.SPLIT, 3, (0, AxisType.UNROLL)),
+    opts_to_apply = [Opt(OptOps.SPLIT, 2, (256, AxisType.LOCAL, True)), Opt(OptOps.PADTO, 3, 32), Opt(OptOps.SPLIT, 3, (0, AxisType.UNROLL)),
                      Opt(OptOps.SPLIT, 0, (7, AxisType.UPCAST))]
     helper_linearizer_opt(out, [opts_to_apply], check_default_opt=False)
 
@@ -352,14 +359,14 @@ class TestKernelOpts(unittest.TestCase):
     r = a@b
     opts_shapes = [
       ([Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL))], [("blue",16),("blue",32),("cyan",2),("red",32)]),
-      ([Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)),Opt(OptOps.SPLIT, 3, (2, AxisType.GROUP_REDUCE))],
+      ([Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)),Opt(OptOps.SPLIT, 3, (2, AxisType.LOCAL))],
        [("blue",16),("blue",32),("cyan",2),("green",2),("red",16)]),
       # check to ensure local_dims are stable for full UNROLL of the first reduce
       ([Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)),Opt(OptOps.SPLIT, 3, (0, AxisType.UNROLL))], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
-      # check behavior for full UNROLL on an existing GROUP
-      ([Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)),Opt(OptOps.SPLIT, 3, (0, AxisType.GROUP_REDUCE)),Opt(OptOps.SPLIT, 3, (2, AxisType.UNROLL))],
+      # check behavior for full UNROLL on an existing group
+      ([Opt(OptOps.SPLIT, 0, (2, AxisType.LOCAL)),Opt(OptOps.SPLIT, 3, (0, AxisType.LOCAL)),Opt(OptOps.SPLIT, 3, (2, AxisType.UNROLL))],
        [("blue",16),("blue",32),("cyan",2),("green",16),("magenta",2)]),
-      ([Opt(OptOps.SPLIT, 2, (2, AxisType.GROUP_REDUCE)),Opt(OptOps.SPLIT, 2, (0, AxisType.UNROLL))],
+      ([Opt(OptOps.SPLIT, 2, (2, AxisType.LOCAL)),Opt(OptOps.SPLIT, 2, (0, AxisType.UNROLL))],
        [("blue",32),("blue",32),("red",16),("magenta",2)]),
     ]
     helper_linearizer_opt(r, [x[0] for x in opts_shapes], color_sizes=[x[1] for x in opts_shapes])
@@ -375,11 +382,6 @@ class TestKernelOpts(unittest.TestCase):
       [Opt(op=OptOps.SPLIT, axis=0, arg=(8, AxisType.LOCAL)), Opt(op=OptOps.SPLIT, axis=0, arg=(0, AxisType.UPCAST))],
     ])
 
-  def test_group_non_reduce_axis(self):
-    # GROUP_REDUCE splits only a reduce axis
-    with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(Tensor.rand(64, 64).sum(1), [[Opt(OptOps.SPLIT, 0, (16, AxisType.GROUP_REDUCE, True))]])
-
   def test_top_split_non_reduce_axis(self):
     # top puts the new range as the outer factor of any split
     helper_linearizer_opt(Tensor.rand(64, 64).sum(1), [[Opt(OptOps.SPLIT, 0, (16, AxisType.UPCAST, True))]])
@@ -388,13 +390,13 @@ class TestKernelOpts(unittest.TestCase):
     a = Tensor.rand(4, 4, 4)
     r = a.sum((1, 2)).sum()
     with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(r, [[Opt(OptOps.SPLIT, 0, (16, AxisType.GROUP_REDUCE, True))],])
+      helper_linearizer_opt(r, [[Opt(OptOps.SPLIT, 0, (16, AxisType.LOCAL, True))],])
     r = a.sum((1, 2)).sum()
     with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(r, [[Opt(OptOps.SPLIT, 1, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (16, AxisType.GROUP_REDUCE, True))],])
+      helper_linearizer_opt(r, [[Opt(OptOps.SPLIT, 1, (4, AxisType.UNROLL)), Opt(OptOps.SPLIT, 0, (16, AxisType.LOCAL, True))],])
     r = a.sum((1, 2)).sum()
     with self.assertRaises(KernelOptError):
-      helper_linearizer_opt(r, [[Opt(OptOps.SPLIT, 1, (4, AxisType.GROUP_REDUCE, True)), Opt(OptOps.SPLIT, 1, (16, AxisType.GROUP_REDUCE, True))],])
+      helper_linearizer_opt(r, [[Opt(OptOps.SPLIT, 1, (4, AxisType.LOCAL, True)), Opt(OptOps.SPLIT, 1, (16, AxisType.LOCAL, True))],])
 
 if __name__ == '__main__':
   unittest.main()
