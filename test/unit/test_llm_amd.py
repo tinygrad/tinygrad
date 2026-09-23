@@ -1,13 +1,22 @@
-import unittest
+import gc, unittest, weakref
 from unittest.mock import patch
 import numpy as np
 from tinygrad import Tensor, UOp, dtypes, nn, function
-from tinygrad.llm.kernels.amd import Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill
+from tinygrad.llm.kernels.amd import (Linear, amd_custom_kernels_supported, q8_quantize, flash_attention, gated_delta_prefill,
+                                      QUANT_SIZES, HALFWORD_QUANTS, iq4_half_lut, _iq_grid)
 from tinygrad.llm.gguf import ggml_data_to_tensor
 
 class TestQ8Quantize(unittest.TestCase):
+  def test_quant_tables_not_retained(self):
+    for typ in (17, 18, 21, 22, 23):
+      table = (iq4_half_lut("CPU") if typ == 23 else _iq_grid("CPU", typ)).realize()
+      ref = weakref.ref(table)
+      del table
+      gc.collect()
+      self.assertIsNone(ref())
+
   def test_quant_weights_share_storage(self):
-    for ggml_type, type_size in ((12, 144), (13, 176), (14, 210), (23, 136)):
+    for ggml_type, type_size in QUANT_SIZES.items():
       with self.subTest(ggml_type=ggml_type):
         packed = np.arange(type_size + 4, dtype=np.uint8)
         raw = Tensor(packed, device="CPU").realize()[4:]
@@ -15,7 +24,8 @@ class TestQ8Quantize(unittest.TestCase):
         linear = Linear(256, 1, bias=False)
         linear.set_quantized(decoded)
         linear.weight.realize()
-        self.assertEqual(linear.weight.dtype, dtypes.uint16 if ggml_type == 14 else dtypes.uint32)
+        self.assertEqual(linear.ggml_type, ggml_type)
+        self.assertEqual(linear.weight.dtype, dtypes.uint16 if ggml_type in HALFWORD_QUANTS else dtypes.uint32)
         self.assertEqual(linear.weight.nbytes(), type_size)
         np.testing.assert_array_equal(linear.weight.bitcast(dtypes.uint8).numpy(), packed[4:])
         raw.assign(raw.full_like(1)).realize()
@@ -57,6 +67,29 @@ class TestQ8Quantize(unittest.TestCase):
   def test_iq4_linear(self): self._test_quant_linear(23, 136)
   def test_q5_linear(self): self._test_quant_linear(13, 176)
   def test_q6_linear_odd_blocks(self): self._test_quant_linear(14, 210, in_features=768, out_features=3, token_counts=(1, 3, 16))
+  def test_q2_k_linear(self): self._test_quant_linear(10, 84, in_features=768, token_counts=(1, 3, 16))
+  def test_q3_k_linear(self): self._test_quant_linear(11, 110, in_features=768, token_counts=(1, 3, 16))
+  def test_iq2_xs_linear(self): self._test_quant_linear(17, 74, in_features=768, token_counts=(1, 3, 16))
+  def test_iq3_xxs_linear(self): self._test_quant_linear(18, 98, in_features=768, token_counts=(1, 3, 16))
+  def test_iq4_nl_linear(self): self._test_quant_linear(20, 144, in_features=768, token_counts=(1, 3, 16))
+  def test_iq3_s_linear(self): self._test_quant_linear(21, 110, in_features=768, token_counts=(1, 3, 16))
+  def test_iq2_s_linear(self): self._test_quant_linear(22, 82, in_features=768, token_counts=(1, 3, 16))
+
+  def test_mixed_quant_linear_split_k(self):
+    for typ in (10, 11, 17, 18, 20, 21, 22):
+      with self.subTest(ggml_type=typ):
+        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=3, token_counts=(1,))
+
+  def test_quant_linear_fallback(self):
+    if amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("run with DISABLE_AMD_KERNELS=1")
+    for typ, size in QUANT_SIZES.items():
+      with self.subTest(ggml_type=typ):
+        self._test_quant_linear(typ, size, in_features=256, out_features=16, token_counts=(1, 3, 16), bias=True, custom=False)
+
+  def test_quant_linear_bias(self):
+    for typ in (12, 21, 23):
+      with self.subTest(ggml_type=typ):
+        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=16, token_counts=(1, 3, 16), bias=True)
 
   def test_quant_linear_partial_output_tile(self):
     # Cover a sub-tile output, a trailing tile, and IQ4's larger-output tile selection.
@@ -151,11 +184,15 @@ class TestQ8Quantize(unittest.TestCase):
         x = rng.normal(size=(tokens, 128)).astype(np.float16)
         np.testing.assert_allclose(linear(Tensor(x)).numpy(), x.astype(np.float32) @ w.astype(np.float32).T + bias, rtol=2e-3, atol=2e-3)
 
-  def _test_quant_linear(self, ggml_type, block_bytes, in_features=2048, out_features=64, token_counts=(1, 3, 32, 64, 128)):
-    if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
+  def _test_quant_linear(self, ggml_type, block_bytes, in_features=2048, out_features=64, token_counts=(1, 3, 32, 64, 128), bias=False, custom=True):
+    if custom and not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
     packed = rng.integers(0, 256, (out_features*in_features//256, block_bytes), dtype=np.uint8)
-    if ggml_type == 14: packed[:, -2:] = np.array([0.001], dtype=np.float16).view(np.uint8)
+    if ggml_type in (11, 14): packed[:, -2:] = np.array([0.001], dtype=np.float16).view(np.uint8)
+    elif ggml_type == 10:
+      packed[:, 80:82] = np.array([0.001], dtype=np.float16).view(np.uint8)
+      packed[:, 82:84] = np.array([0.0002], dtype=np.float16).view(np.uint8)
+    elif ggml_type == 20: packed.reshape(-1, 18)[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
     else: packed[:, :2] = np.array([0.001], dtype=np.float16).view(np.uint8)
     if ggml_type in (12, 13): packed[:, 2:4] = np.array([0.0002], dtype=np.float16).view(np.uint8)
     raw = Tensor(np.pad(packed.flatten(), (4, 0))).contiguous().realize()[4:]
@@ -163,17 +200,26 @@ class TestQ8Quantize(unittest.TestCase):
     weight = decoded.numpy()
     linear = Linear(in_features, out_features, bias=False)
     linear.weight = decoded
+    bias_value = rng.normal(size=out_features).astype(np.float32) if bias else 0
+    if bias: linear.bias = Tensor(bias_value)
+    @function(allow_implicit=True)
+    def run(x:Tensor): return linear(x)
     for tokens in token_counts:
       with self.subTest(tokens=tokens):
         x = rng.normal(size=(tokens, in_features)).astype(np.float32 if tokens == 3 else np.float16)
         reference_x = x.astype(np.float32)
-        if tokens < 16 or ggml_type == 14:
+        if custom and (tokens < 16 or ggml_type not in (12, 13, 23)):
           grouped = reference_x.reshape(tokens, -1, 32)
           scale = np.maximum(np.abs(grouped).max(-1, keepdims=True) / 127, 1e-8)
           reference_x = (np.clip(np.rint(grouped/scale), -127, 127)*scale).reshape(tokens, in_features)
-        reference_w = weight if tokens < 16 or ggml_type == 14 else weight.astype(np.float16).astype(np.float32)
-        np.testing.assert_allclose(linear(Tensor(x)).numpy(), reference_x @ reference_w.T, rtol=3e-3, atol=2e-2)
-    self.assertEqual(linear.ggml_type, ggml_type)
+        reference_w = weight if not custom or tokens < 16 or ggml_type not in (12, 13, 23) else weight.astype(np.float16).astype(np.float32)
+        actual = (run if tokens == 1 else linear)(Tensor(x)).numpy()
+        self.assertEqual(linear.ggml_type, ggml_type if custom else None)
+        np.testing.assert_allclose(actual, reference_x @ reference_w.T + bias_value, rtol=3e-3, atol=2e-2)
+        if tokens == 3 and ggml_type not in (12, 13, 14, 23):
+          sym = Tensor(np.pad(x, ((0, 1), (0, 0)))).contiguous()[:UOp.variable("tokens", 1, 4).bind(3)]
+          np.testing.assert_allclose(linear(sym)[:3].numpy(), reference_x @ reference_w.T + bias_value, rtol=3e-3, atol=2e-2)
+    self.assertEqual(linear.ggml_type, ggml_type if custom else None)
 
   def test_q6_linear_multiple_tokens(self):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")

@@ -1,7 +1,7 @@
-import os, struct, unittest, tempfile, pathlib, sys
+import gc, os, struct, unittest, tempfile, pathlib, sys, weakref
 from tinygrad import dtypes, Tensor, fetch, Device
 from tinygrad.helpers import disable_gc
-from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
+from tinygrad.llm.gguf import _ggml_iq_grid, _ggml_iq_signs, ggml_data_to_tensor, gguf_load
 from tinygrad.runtime.autogen import ggml_common as _ggml
 import numpy as np
 from gguf import GGUFReader, GGUFValueType, GGMLQuantizationType, GGML_QUANT_SIZES, dequantize, quantize
@@ -11,6 +11,18 @@ ggml_test_block_count = 4
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
 class TestGGUFTables(unittest.TestCase):
+  def test_iq_signs(self):
+    expected = [i | ((i.bit_count() % 2) << 7) for i in range(128)]
+    np.testing.assert_array_equal(_ggml_iq_signs(Device.DEFAULT).numpy(), expected)
+
+  def test_iq_tables_not_retained(self):
+    for make_table in (lambda: _ggml_iq_signs(Device.DEFAULT), lambda: _ggml_iq_grid(Device.DEFAULT, _ggml.iq3s_grid, (512, 4))):
+      table = make_table().realize()
+      ref = weakref.ref(table)
+      del table
+      gc.collect()
+      self.assertIsNone(ref())
+
   def test_iq2_xxs_grid_matches_gguf_py(self):
     IQ2_XXS.init_grid()
     grid = _ggml_iq_grid(Device.DEFAULT, _ggml.iq2xxs_grid, (256, 8)).numpy()
