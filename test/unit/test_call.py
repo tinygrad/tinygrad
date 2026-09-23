@@ -3,9 +3,9 @@ import numpy as np
 from tinygrad import Tensor, function, Device
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.tensor import transform_to_call
+from tinygrad.schedule import transform_to_call
 
-def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop))[0].src[0].key
+def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop)).body.key
 
 class TestCall(unittest.TestCase):
   def test_call_plus(self):
