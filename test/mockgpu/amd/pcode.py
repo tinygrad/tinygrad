@@ -208,6 +208,7 @@ def _f_to_i32(a: UOp) -> UOp:
   """v_cvt_i32_f32/f64: truncate toward zero, saturate to [INT_MIN, INT_MAX], NaN -> 0.
   (x86 cvttss2si returns 0x80000000 for all of these, which matches hardware only for negative overflow.)"""
   res = (a >= _const(a.dtype, 2147483648.0)).where(_const(dtypes.int, 0x7FFFFFFF), UOp(Ops.TRUNC, src=(a,)).cast(dtypes.int))
+  res = (a <= _const(a.dtype, -2147483648.0)).where(_const(dtypes.int, -2147483648), res)
   return _isnan(a).where(_const(dtypes.int, 0), res)
 
 def _ftz_f32(v: UOp) -> UOp:
@@ -333,8 +334,9 @@ def _ff1(val: UOp, bits: int) -> UOp:
   dt = dtypes.uint64 if bits == 64 else dtypes.uint32
   val = val.cast(dt) if val.dtype != dt else val
   result = _const(dtypes.int, -1)
-  for i in range(bits):
-    cond = ((val >> _const(dt, i)) & _const(dt, 1)).ne(_const(dt, 0)) & result.eq(_const(dtypes.int, -1))
+  # Lower bits override higher bits without duplicating the accumulated expression in each condition.
+  for i in reversed(range(bits)):
+    cond = ((val >> _const(dt, i)) & _const(dt, 1)).ne(_const(dt, 0))
     result = cond.where(_const(dtypes.int, i), result)
   return result
 
@@ -644,7 +646,8 @@ class Parser:
         vgpr = self.vars.get('_vgpr')
         if vgpr is None: return _u32(0)
         ws = self.vars.get('_wave_size', 32)
-        return vgpr.index(_to_u32(reg) * _u32(ws) + _to_u32(lane)).load()
+        if lane.vmin == lane.vmax: return vgpr.index(_to_u32(reg) * _u32(ws) + _to_u32(lane)).load()
+        return vgpr.reshape((-1, ws)).index(_to_u32(reg), _to_u32(lane)).load()
       if self.try_eat('LPAREN'):
         args = self._parse_args()
         self.eat('RPAREN')
@@ -1147,7 +1150,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           ln = parse_tokens(lane_toks, env, funcs)
           rg, val = parse_tokens(reg_toks, env, funcs), parse_tokens(toks[j:], env, funcs)
           ws = env.get('_wave_size', 32)
-          vgpr_idx = _to_u32(rg) * _u32(ws) + _to_u32(ln)
+          vgpr_idx = rg.cast(dtypes.uint32) * _u32(ws) + ln.cast(dtypes.uint32)
           if assigns is not None:
             assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}][{hi_val}:{lo_val}]', (vgpr_idx, val, _u32(hi_val), _u32(lo_val))))
           i += 1
@@ -1158,7 +1161,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         rg, val = parse_tokens(reg_toks, env, funcs), parse_tokens(toks[j:], env, funcs)
         if assigns is not None:
           ws = env.get('_wave_size', 32)
-          assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(ws) + _to_u32(ln), val)))
+          assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (rg.cast(dtypes.uint32) * _u32(ws) + ln.cast(dtypes.uint32), val)))
         i += 1
         continue
 
@@ -1447,4 +1450,3 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None, funcs: dic
           break
       else: assigns.append((var, val))
   return env, assigns
-

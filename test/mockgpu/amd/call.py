@@ -1,4 +1,5 @@
 import ctypes
+import itertools
 import re
 from tinygrad.codegen import pm_add_loads, to_program
 from tinygrad.device import Device
@@ -8,6 +9,8 @@ from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import KernelInfo, Ops, UOp, UPat, PatternMatcher, graph_rewrite
 from test.mockgpu.amd.emu import _Ctx, _INST_HANDLERS, _op_name, _wave_size, get_pcode, _get_pcode_dict
 from test.mockgpu.amd.emu import PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE, EXEC_LO, VCC_LO, SCC, ttmp, hsa
+
+_call_ids = itertools.count()
 
 class _CallCtx(_Ctx):
   def __init__(self, code:bytes, pc:int, wave_size:int):
@@ -109,14 +112,23 @@ class _CallGraph:
     return self.buffers[key]
 
   def index(self, idx:UOp) -> UOp|None:
-    if (bank:=idx.src[0].without_after) not in self.banks: return None
+    view = idx.src[0].without_after
+    bank = view.src[0].without_after if view.op is Ops.RESHAPE else view
+    if bank not in self.banks: return None
     width = self.banks[bank][1]
-    offset = idx.src[1].get_idx()
-    reg = (offset // width).simplify()
+    if view.op is Ops.RESHAPE and len(idx.src) == 3:
+      reg = idx.src[1].get_idx().simplify()
+      offset = idx.src[2].get_idx()
+      valid = idx.src[1].get_valid() & idx.src[2].get_valid()
+    else:
+      offset = idx.src[1].get_idx()
+      reg = (offset // width).simplify()
+      offset = offset - reg*width
+      valid = idx.src[1].get_valid()
     if reg.vmin != reg.vmax: raise NotImplementedError(f"dynamic register index: {reg.render()}")
     buf = self.operand(bank, int(reg.vmin))
     if idx.src[0].op is Ops.AFTER: buf = buf.after(*idx.src[0].src[1:])
-    return buf.index((offset - int(reg.vmin)*width).simplify().valid(idx.src[1].get_valid()))
+    return buf.index(offset.simplify().valid(valid))
 
   def append(self, body:UOp, name:str, immediates:dict[UOp, UOp]|None=None):
     immediates = immediates or {}
@@ -225,6 +237,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
                 rsrc2:int, scratch_size:int, arch:str, user_words:int) -> UOp:
   code = ctypes.string_at(lib, lib_sz)
   offset = 0
+  decode_error = None
   graph = _CallGraph(_CallCtx(b"", lib, _wave_size(arch)))
   sizes = {"lds":max(((rsrc2 >> 15) & 0x1ff)*128, 1), "scratch":max(scratch_size*_wave_size(arch), 1)}
   graph.storage.update({name:UOp.placeholder((size,), dtypes.uint8 if name == "scratch" else dtypes.uint32,
@@ -234,7 +247,9 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   loops:dict[int, int] = {}
   while offset < lib_sz:
     try: inst = decode_inst(code[offset:], arch)
-    except InstDecodeError: break
+    except InstDecodeError as e:
+      decode_error = e
+      break
     if offset + inst.size() > lib_sz: raise RuntimeError(f"truncated instruction at {offset:#x}")
     if _op_name(inst) == "S_CODE_END": break
     name = _op_name(inst)
@@ -303,6 +318,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
         forward.append(target)
       else: graph.append(body, name=name.lower(), immediates=immediates[pos])
       pos += size
+    if pos == offset and decode_error is not None: raise decode_error
     for _ in forward: graph.guards.pop()
 
   emit(0, offset)
@@ -341,5 +357,5 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   init = state_call(UOp.sink(*stores), "init_wave", [*graph.registers, words, group, wave], lds_init, wave)
   body = graph.calls[-1] if graph.calls else init
   body = body.substitute({p:p.after(init) for p in graph.operands}, walk=True)
-  sink = UOp.sink(body.end(wave, group), arg=KernelInfo(name="asm_call")).rtag(1)
+  sink = UOp.sink(body.end(wave, group), arg=KernelInfo(name=f"asm_call_{next(_call_ids)}")).rtag(1)
   return to_program(sink, ClangRenderer(Device["CPU"].renderer.target))
