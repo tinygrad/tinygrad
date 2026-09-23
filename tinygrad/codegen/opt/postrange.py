@@ -199,6 +199,7 @@ class Scheduler:
           axis_choices = list(itertools.product(in1_ranges, in0_ranges, red_ranges))
           if not (axis < len(axis_choices)): continue
           axes = list(axis_choices[axis])
+          check(not any(self.rngs[i] in axes[:2] for i in self.reduce_axes), "tensor core N and M can't be contracted")
 
           # do optimizations and save the ranges
           ast, warp, ne = self.ast, UOp.range(tc.threads, -1, AxisType.WARP), {}
