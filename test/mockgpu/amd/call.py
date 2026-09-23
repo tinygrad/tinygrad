@@ -278,6 +278,31 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
     offset += inst.size()
   for _, _, _, target, _ in instructions.values():
     assert target is None or target in instructions or target == offset, f"branch target is not an instruction boundary: {target}"
+  # Rotate loops whose initial entry skips the increment/check block. The check becomes the loop latch.
+  order = list(instructions)
+  for head, latch in list(loops.items()):
+    hi, li = order.index(head), order.index(latch)
+    if not hi: continue
+    entry = instructions[order[hi-1]]
+    if entry[1] != "S_BRANCH" or entry[3] not in order[hi+1:li]: continue
+    split = order.index(entry[3])
+    check = instructions[order[split-1]]
+    if not check[1].startswith("S_CBRANCH_") or check[3] != latch+instructions[latch][0]: continue
+    size, _, body, _, _ = instructions[latch]
+    instructions[latch] = (size, check[1], body, entry[3], check[4].logical_not())
+    order[hi:li+1] = order[split:li] + order[hi:split-1] + [latch]
+  positions, end = {}, 0
+  for pos in order:
+    positions[pos], end = end, end+instructions[pos][0]
+  positions[offset] = end
+  instructions = {positions[p]:(size, name, body, positions[target] if target is not None else None, cond)
+                  for p in order for size,name,body,target,cond in [instructions[p]]}
+  immediates = {positions[p]:immediates[p] for p in order}
+  offset = end
+  barriers = [p+size for p,(size,name,_,_,_) in instructions.items() if "BARRIER" in name]
+  loops = {}
+  for p, (_, _, _, target, _) in instructions.items():
+    if target is not None and target <= p: loops[target] = max(loops.get(target, p), p)
   axis = 7
 
   def emit(start:int, end:int, active_loop:int|None=None):
@@ -323,16 +348,50 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
     for _ in forward: graph.guards.pop()
     return pos < end and instructions[pos][1] == "S_ENDPGM"
 
-  phases:list[UOp] = []
-  start = 0
-  for end in [*barriers, offset]:
-    before = len(graph.calls)
-    terminated = emit(start, end)
-    phases.append(graph.calls[-1] if len(graph.calls) > before else UOp(Ops.NOOP))
+  def reset_dependencies():
     graph.deps = ()
     for p in graph.operands: graph.values[p], graph.readers[p] = p, []
-    start = end
-    if terminated: break
+
+  def phase(start:int, end:int, active_loop:int|None=None) -> tuple[UOp, bool]:
+    before = len(graph.calls)
+    terminated = emit(start, end, active_loop)
+    result = graph.calls[-1] if len(graph.calls) > before else UOp(Ops.NOOP)
+    reset_dependencies()
+    return UOp(Ops.LINEAR, src=(result,)), terminated
+
+  def phases_for(start:int, end:int, active_loop:int|None=None) -> list[UOp]:
+    nonlocal axis
+    result = []
+    while start < end:
+      nested = next((h for h,l in sorted(loops.items()) if start <= h < end and h != active_loop and any(h < b <= l for b in barriers)), None)
+      stop = min([b for b in barriers if start < b <= end]+[end, nested if nested is not None else end])
+      if stop == start:
+        latch = loops[start]
+        flag_bank = UOp.param(7+len(graph.storage), dtypes.bool, 1, name=f"loop_{start:x}")
+        graph.storage[flag_bank.arg.name] = UOp.placeholder((1,), dtypes.bool, addrspace=AddrSpace.REG, tag=flag_bank.arg.name)
+        flag = graph.operand(flag_bank)
+        graph.append(UOp.sink(flag.index(0).store(True)), "loop_enter")
+        result.append(UOp(Ops.LINEAR, src=(graph.calls[-1],)))
+        reset_dependencies()
+        graph.guards.append(flag)
+        children = phases_for(start, latch, start)
+        graph.append(UOp.sink(flag.index(0).store(instructions[latch][4])), "loop_condition")
+        last = children.pop().src[0]
+        condition = graph.calls[-1].substitute({p:p.after(last) for p in graph.operands}, walk=True)
+        children.append(UOp(Ops.LINEAR, src=(condition,)))
+        graph.guards.pop()
+        reset_dependencies()
+        result.append(UOp(Ops.LINEAR, src=tuple(children)).backedge(UOp.loop(axis), flag))
+        axis += 1
+        start = latch+instructions[latch][0]
+      else:
+        item, terminated = phase(start, stop, active_loop)
+        result.append(item)
+        if terminated: break
+        start = stop
+    return result
+
+  phases = phases_for(0, offset)
   wave_size, total_threads = _wave_size(arch), lx * ly * lz
   group = UOp.range(gx*gy*gz, 0, dtype=dtypes.int, tag="workgroup")
   clear_lds = UOp.range(sizes["lds"], 1)
@@ -369,13 +428,26 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   # Each phase visits every wave before the next phase starts. Register and scratch storage survives the barrier.
   n_waves = (total_threads+wave_size-1)//wave_size
   persistent = {p:UOp.placeholder((n_waves*p.max_numel(),), p.dtype, addrspace=AddrSpace.REG, tag=p.tag)
-                for p in [*graph.registers, graph.storage["scratch"]]} if len(phases) > 1 else {}
-  body = lds_init
-  for i, phase in enumerate(phases):
-    phase_wave = wave if i == 0 else UOp.range(n_waves, axis+i, dtype=dtypes.int, tag=f"wave_phase_{i}")
-    views = {p:buf.shrink(((phase_wave*p.max_numel(), phase_wave*p.max_numel()+p.max_numel()),)).simplify() for p,buf in persistent.items()}
-    begin = init.substitute({wave:phase_wave, **views}, walk=True) if i == 0 else body
-    phase = phase.substitute({p:views.get(p, p).after(begin) for p in graph.operands}, walk=True)
-    body = UOp.group(begin, phase).end(phase_wave)
+                for p in [*graph.registers, *(v for k,v in graph.storage.items() if k != "lds")]} if barriers else {}
+  def lower_phases(items:list[UOp], previous:UOp, first:bool=False) -> UOp:
+    nonlocal axis
+    for item in items:
+      if item.op is Ops.BACKEDGE:
+        plan, loop, flag = item.src
+        effect = lower_phases(list(plan.src), UOp.group(previous, loop))
+        check_wave = UOp.range(n_waves, axis, tag="active_wave")
+        axis += 1
+        cond = persistent[flag].after(effect).index(check_wave).load().cast(dtypes.uint32).reduce(check_wave, arg=Ops.ADD).ne(0)
+        previous = effect.backedge(loop, cond)
+      else:
+        phase_wave = wave if first else UOp.range(n_waves, axis, dtype=dtypes.int, tag="wave_phase")
+        axis += 1
+        views = {p:buf.shrink(((phase_wave*p.max_numel(), phase_wave*p.max_numel()+p.max_numel()),)).simplify() for p,buf in persistent.items()}
+        begin = init.substitute({wave:phase_wave, **views}, walk=True) if first else previous
+        body = item.src[0].substitute({p:views.get(p, p).after(begin) for p in graph.operands}, walk=True)
+        previous = UOp.group(begin, body).end(phase_wave)
+      first = False
+    return previous
+  body = lower_phases(phases, lds_init, True)
   sink = UOp.sink(body.end(group), arg=KernelInfo(name=f"asm_call_{next(_call_ids)}")).rtag(1)
   return to_program(sink, ClangRenderer(Device["CPU"].renderer.target))

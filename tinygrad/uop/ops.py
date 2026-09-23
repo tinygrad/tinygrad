@@ -515,7 +515,7 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic, name="simplify")
+      return graph_rewrite(self, symbolic, bpm=pm_simplify_control, name="simplify")
   def ssimplify(self) -> UOp|ConstType:
     if (ret := self.simplify()).op is Ops.CAST and ret.src[0].op is Ops.CONST: return ret.dtype.const(ret.src[0].val)
     return ret.val if ret.op is Ops.CONST else ret
@@ -1734,6 +1734,13 @@ if TRACK_MATCH_STATS or PROFILE:
 # A pure Python sentinel, but *typed* as UOp so it fits all the dict annotations
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
+
+def gate_control_range(x:UOp):
+  # Once control flow is attached, a range is a symbolic variable. Its ordering dependencies are not part of its value.
+  if len(x.src) > 1: raise BottomUpGate
+
+pm_simplify_control = PatternMatcher([(UPat(Ops.RANGE, name="x"), gate_control_range)])
+
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None, enter_calls=False):
     self.pm: PatternMatcher|None = pm

@@ -197,6 +197,10 @@ spec_program = PatternMatcher([
   (UPat(GroupOp.All, name="x"), lambda x: False if x.op is not Ops.CAST and any(s.op is Ops.CONST for s in x.src) else None),
   (UPat(GroupOp.All-{Ops.CONST}, dtypes.weaks), lambda: False),
 
+  # Native CALL stacks contain pointers, not tensors requiring equal pointee shapes.
+  (UPat(Ops.STACK, tag="call_args", name="s"),
+   lambda s: all(x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL, AddrSpace.GLOBAL) and matches_dtype(x, s.dtype) for x in s.src)),
+
   # allow special SHRINK of a buffer or its bitcast
   (UPat(Ops.SHRINK, src=(UPat((Ops.PARAM, Ops.BUFFER, Ops.AFTER)).or_bitcasted(), UPat(), UPat.cvar().or_casted())), lambda: True),
 
