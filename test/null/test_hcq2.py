@@ -11,7 +11,7 @@ from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
-from tinygrad.runtime.support.hcq2 import HCQInfo, hcq_compile_cache, link_linear_cache
+from tinygrad.runtime.support.hcq2 import HCQInfo, hcq_compile_cache
 
 def chain(x:Tensor, n:int) -> Tensor:
   for _ in range(n): x = (x + 1).contiguous()
@@ -223,18 +223,15 @@ class TestHCQ2Link(unittest.TestCase):
       self.assertEqual(inner_buf.host.view(fmt='I')[1], 42)
       self.assertEqual(outer_buf.host.view(fmt='Q')[0], inner_buf._buf + 4)
 
-  def test_small_links_serve_any_input(self):
-    for thresh, reusable in ((64, True), (1, False)):
-      with Context(HCQ_CACHE_THRESH=thresh):
-        a, inputs = chain_input(), list[UOp]()
-        linear = compile_linear(chain(a, 2).schedule_linear(), input_uops=inputs, cache=True)
-        linked = link_linear(linear, input_uops=inputs)
-        self.assertEqual(link_linear(linear, input_uops=[chain_input(3).uop.base, *inputs[1:]]) is linked, reusable)
-        self.assertEqual(linear in link_linear_cache, reusable)
-        bufs = [cast(Buffer, u.buffer) for u in linked.toposort() if u.op is Ops.BUFFER]
-        self.assertEqual(any(b is a.uop.base.buffer for b in bufs), not reusable)
-        words = [w for b in bufs if b.options.external_ptr and b.nbytes % 8 == 0 for w in b.host.view(fmt='Q')[:]]
-        self.assertEqual(cast(Buffer, a.uop.base.buffer)._buf in words, not reusable)
+  def test_links_serve_any_input(self):
+    a, inputs = chain_input(), list[UOp]()
+    linear = compile_linear(chain(a, 2).schedule_linear(), input_uops=inputs, cache=True)
+    linked = link_linear(linear, input_uops=inputs)
+    self.assertIs(link_linear(linear, input_uops=[chain_input(3).uop.base, *inputs[1:]]), linked)
+    bufs = [cast(Buffer, u.buffer) for u in linked.toposort() if u.op is Ops.BUFFER]
+    self.assertNotIn(a.uop.base.buffer, bufs)
+    words = [w for b in bufs if b.options.external_ptr and b.nbytes % 8 == 0 for w in b.host.view(fmt='Q')[:]]
+    self.assertNotIn(cast(Buffer, a.uop.base.buffer)._buf, words)
 
   def test_eager_templates_compile_once(self):
     linear = compiled_chain(3)[1]
