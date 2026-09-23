@@ -144,11 +144,10 @@ def _iq4_scales(raw:UOp, base:UOp, subgroup:UOp) -> tuple[UOp, UOp]:
   scale = ((low >> (4*(subgroup%2)).cast(dtypes.uint32)) & 15) | ((((raw[base] >> 16) >> (2*subgroup).cast(dtypes.uint32)) & 3) << 4)
   return _half(raw[base] & 0xffff), (scale.cast(dtypes.uint8).bitcast(dtypes.int8)-32).float()
 
-@functools.cache
 def iq4_half_lut(device:str) -> Tensor:
   from tinygrad.runtime.autogen.ggml_common import kvalues_iq4nl
-  return Tensor([x for j in range(16) for i in range(16) for x in (kvalues_iq4nl[i], kvalues_iq4nl[j])],
-                dtype=dtypes.float16, device=device).bitcast(dtypes.uint32).contiguous()
+  return Tensor.const(tuple(x for j in range(16) for i in range(16) for x in (kvalues_iq4nl[i], kvalues_iq4nl[j])),
+                      dtypes.float16).to(device, force=True).bitcast(dtypes.uint32)
 
 @functools.cache
 def _q8_quantize_kernel(q:UOp, scale:UOp, xsum:UOp, x:UOp, tokens:int, in_features:int) -> UOp:
@@ -189,12 +188,12 @@ def _decode_linear(out:UOp, out_features:int, group_count:int, group_dot, name:s
   return out[token, output, chunk.valid(lane.eq(0))].store(total.cast(out.dtype)).end(token_output, chunk, lane).sink(
     arg=KernelInfo(name=name, opts_to_apply=()))
 
-@functools.cache
 def _iq_grid(device:str, ggml_type:int) -> Tensor:
   from tinygrad.runtime.autogen import ggml_common as ggml
   grid, words = {IQ2_XS: (ggml.iq2xs_grid, 2), IQ2_S: (ggml.iq2s_grid, 2),
                  IQ3_XXS: (ggml.iq3xxs_grid, 1), IQ3_S: (ggml.iq3s_grid, 1)}[ggml_type]
-  return Tensor([(v >> (32*i)) & 0xffffffff for v in grid for i in range(words)], dtype=dtypes.uint32, device=device).contiguous()
+  return Tensor.const(tuple((v >> (32*i)) & 0xffffffff for v in grid for i in range(words)),
+                      dtypes.uint32).to(device, force=True)
 
 def _iq_even_signs(signs:UOp) -> UOp:
   parity = signs ^ (signs >> 4)

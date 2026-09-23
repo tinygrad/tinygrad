@@ -7,14 +7,12 @@ from tinygrad.helpers import prod, round_up
 from tinygrad.nn.state import TensorIO
 
 # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
-@functools.lru_cache(None)
-def _ggml_iq_grid(device: str, grid: tuple[int, ...], grid_shape: tuple[int, int]) -> Tensor:
-  values = [float((w >> (8*i)) & 0xFF) for w in grid for i in range(grid_shape[1])]
-  return Tensor(values, dtype=dtypes.float32, device=device).reshape(grid_shape)
+def _ggml_iq_grid(device: str|tuple[str, ...]|None, grid: tuple[int, ...], grid_shape: tuple[int, int]) -> Tensor:
+  dtype = dtypes.uint32 if grid_shape[1] == 4 else dtypes.uint64
+  return Tensor.const(grid, dtype).to(device, force=True).bitcast(dtypes.uint8).float().reshape(grid_shape)
 
-@functools.lru_cache(None)
-def _ggml_iq_signs(device: str) -> Tensor:
-  return Tensor([i | (0x80 if i.bit_count() % 2 else 0) for i in range(128)], dtype=dtypes.uint8, device=device)
+def _ggml_iq_signs(device: str|tuple[str, ...]|None) -> Tensor:
+  return Tensor.const(tuple(i | (0x80 if i.bit_count() % 2 else 0) for i in range(128)), dtypes.uint8).to(device, force=True)
 
 # native types {ggml_type: dtype}
 _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtypes.int16,
