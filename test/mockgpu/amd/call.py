@@ -86,6 +86,7 @@ class _CallGraph:
     self.deps:tuple[UOp, ...] = ()
     self.guards:list[UOp] = []
     self.storage:dict[str, UOp] = {}
+    self.constants:dict[UOp, UOp] = {}
 
   def condition(self, cond:UOp) -> UOp:
     cond = graph_rewrite(cond, pm_register_operands, ctx=self)
@@ -142,10 +143,14 @@ class _CallGraph:
     counts:dict[str, int] = {}
     for i, p in enumerate(params):
       if p in immediates:
-        n = counts.get(p.arg.name, 0)
-        counts[p.arg.name] = n+1
-        formal[p] = UOp.param(i, p.dtype, (), name=f"{p.arg.name}{n}", addrspace=AddrSpace.ALU)
-        args.append(immediates[p])
+        n = counts.get("s_src", 0)
+        counts["s_src"] = n+1
+        formal[p] = UOp.param(i, p.dtype, (1,), name=f"s_src{n}", addrspace=AddrSpace.GLOBAL).index(UOp.const(0, dtypes.uint32)).load()
+        value = immediates[p]
+        if value not in self.constants:
+          buf = UOp.placeholder((1,), p.dtype, slot=1024+len(self.constants), addrspace=AddrSpace.REG, tag=f"imm_{int(value.vmin)}")
+          self.constants[value] = buf.after(buf.index(0).store(value))
+        args.append(self.constants[value])
         continue
       actual = aliases.get(p, p)
       role = "dst" if p in writes else "src"
@@ -163,7 +168,7 @@ class _CallGraph:
       formal[p] = UOp.param(i, p.dtype, p.shape, name=operand_name, addrspace=AddrSpace.GLOBAL)
       val = self.values[actual].after(*self.readers[actual]) if actual in writes else self.values[actual]
       args.append(val.after(*self.deps))
-    call = body.substitute(formal, walk=True).call(*args, name=name)
+    call = body.substitute(formal, walk=True).simplify(tracked=True).call(*args, name=name)
     self.calls.append(call)
     self.deps = (call,)
     for p in used - immediates.keys():
