@@ -207,7 +207,7 @@ def reduce_ranges_to_acc(ctx:itertools.count, r:UOp):
   acc_initted = acc.after(acc_init, *r.src[1:])
   inp = r.src[0].reduce(arg=r.arg) if r.arg[1] else r.src[0]
   acc_out = acc_initted.store(acc_initted.alu(r.arg[0], inp)).end(*r.src[1:]).rtag("mergeable")
-  return acc.after(acc_out)
+  return acc.after(acc_out).reshape(r.max_shard_shape)
 
 def expand_horizontal_reduce(r:UOp):
   inp = r.src[0]
