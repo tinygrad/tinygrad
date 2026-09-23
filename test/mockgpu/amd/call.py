@@ -245,6 +245,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   instructions:dict[int, tuple[int, str, UOp, int|None, UOp]] = {}
   immediates:dict[int, dict[UOp, UOp]] = {}
   loops:dict[int, int] = {}
+  barriers:list[int] = []
   while offset < lib_sz:
     try: inst = decode_inst(code[offset:], arch)
     except InstDecodeError as e:
@@ -253,7 +254,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
     if offset + inst.size() > lib_sz: raise RuntimeError(f"truncated instruction at {offset:#x}")
     if _op_name(inst) == "S_CODE_END": break
     name = _op_name(inst)
-    assert "BARRIER" not in name, f"barriers are not supported by ASM_CALL: {name}"
+    if "BARRIER" in name: barriers.append(offset + inst.size())
     branch = name == "S_BRANCH" or name.startswith("S_CBRANCH_")
     if not branch and name != "S_ENDPGM" and hasattr(inst, "op") and inst.op in _get_pcode_dict(inst.op):
       assert not re.search(r'\bPC\b', get_pcode(inst.op)), f"explicit PC access is not supported: {name}"
@@ -320,8 +321,18 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
       pos += size
     if pos == offset and decode_error is not None: raise decode_error
     for _ in forward: graph.guards.pop()
+    return pos < end and instructions[pos][1] == "S_ENDPGM"
 
-  emit(0, offset)
+  phases:list[UOp] = []
+  start = 0
+  for end in [*barriers, offset]:
+    before = len(graph.calls)
+    terminated = emit(start, end)
+    phases.append(graph.calls[-1] if len(graph.calls) > before else UOp(Ops.NOOP))
+    graph.deps = ()
+    for p in graph.operands: graph.values[p], graph.readers[p] = p, []
+    start = end
+    if terminated: break
   wave_size, total_threads = _wave_size(arch), lx * ly * lz
   group = UOp.range(gx*gy*gz, 0, dtype=dtypes.int, tag="workgroup")
   clear_lds = UOp.range(sizes["lds"], 1)
@@ -355,7 +366,16 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
     else: vector_stores.append(buf.index(lane).store((tid_value if name == "v" and reg == 0 else UOp.const(0)).cast(dtypes.uint32)))
   if vector_stores: stores.append(UOp.group(*vector_stores).end(lane))
   init = state_call(UOp.sink(*stores), "init_wave", [*graph.registers, words, group, wave], lds_init, wave)
-  body = graph.calls[-1] if graph.calls else init
-  body = body.substitute({p:p.after(init) for p in graph.operands}, walk=True)
-  sink = UOp.sink(body.end(wave, group), arg=KernelInfo(name=f"asm_call_{next(_call_ids)}")).rtag(1)
+  # Each phase visits every wave before the next phase starts. Register and scratch storage survives the barrier.
+  n_waves = (total_threads+wave_size-1)//wave_size
+  persistent = {p:UOp.placeholder((n_waves*p.max_numel(),), p.dtype, addrspace=AddrSpace.REG, tag=p.tag)
+                for p in [*graph.registers, graph.storage["scratch"]]} if len(phases) > 1 else {}
+  body = lds_init
+  for i, phase in enumerate(phases):
+    phase_wave = wave if i == 0 else UOp.range(n_waves, axis+i, dtype=dtypes.int, tag=f"wave_phase_{i}")
+    views = {p:buf.shrink(((phase_wave*p.max_numel(), phase_wave*p.max_numel()+p.max_numel()),)).simplify() for p,buf in persistent.items()}
+    begin = init.substitute({wave:phase_wave, **views}, walk=True) if i == 0 else body
+    phase = phase.substitute({p:views.get(p, p).after(begin) for p in graph.operands}, walk=True)
+    body = UOp.group(begin, phase).end(phase_wave)
+  sink = UOp.sink(body.end(group), arg=KernelInfo(name=f"asm_call_{next(_call_ids)}")).rtag(1)
   return to_program(sink, ClangRenderer(Device["CPU"].renderer.target))
