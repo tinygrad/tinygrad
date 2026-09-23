@@ -199,7 +199,8 @@ def merge_reduce_ends(sink:UOp):
   return sink.substitute(subs) if subs else None
 
 def reduce_ranges_to_acc(ctx:itertools.count, r:UOp):
-  acc = UOp.placeholder(r.max_shard_shape, r.dtype, next(ctx), AddrSpace.REG, tag=f"acc_{r.arg[0].name.lower()}")
+  acc = UOp.placeholder(r.max_shard_shape, r.dtype, next(ctx), AddrSpace.REG,
+                        tag=r.tag if isinstance(r.tag, str) else f"acc_{r.arg[0].name.lower()}")
   input_ranges = tuple(x for x in r.src[0].ranges if x not in r.src[1:])
   acc_init = acc.after(*input_ranges).store(UOp.const(identity_element(r.arg[0], r.dtype)))
   acc_initted = acc.after(acc_init, *r.src[1:])

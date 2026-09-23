@@ -351,10 +351,10 @@ class _Ctx:
     lane = self.range()
     if self.wave_size <= 32:
       bit = get_lane_bit(lane).cast(dtypes.uint32) << lane.cast(dtypes.uint32)
-      result = bit.reduce(lane, arg=Ops.ADD)
+      result = bit.reduce(lane, arg=Ops.ADD, tag="lane_mask")
     else:
       bit = get_lane_bit(lane).cast(dtypes.uint64) << lane.cast(dtypes.uint64)
-      result = bit.reduce(lane, arg=Ops.ADD)
+      result = bit.reduce(lane, arg=Ops.ADD, tag="lane_mask")
     return result & exec_mask if apply_exec else result
 
   def inst_word(self, dword_idx: int) -> UOp:

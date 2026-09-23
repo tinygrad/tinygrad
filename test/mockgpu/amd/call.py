@@ -15,6 +15,26 @@ class _CallCtx(_Ctx):
     self.code, self.pc = code, pc
     self.targets:dict[int, UOp] = {}
 
+  def wmask(self, reg:UOp, val:UOp) -> list[UOp]:
+    val = val.simplify()
+    reductions = [u for u in val.toposort() if u.op is Ops.REDUCE and u.tag == "lane_mask"]
+    if not reductions: return super().wmask(reg, val)
+    assert len(reductions) == 1, "multiple lane masks in one destination"
+    reduction = reductions[0]
+    lane, = reduction.src[1:]
+    bit = val.substitute({reduction:reduction.src[0]})
+    # Capture scalar inputs (including old VCC/EXEC) before clearing the destination.
+    reads = tuple(u for u in val.toposort() if u.op is Ops.LOAD and not u.ranges)
+    stores = []
+    for word in range(self.wave_size//32):
+      idx = (reg+word).simplify()
+      valid = UOp.const(True) if self.wave_size == 64 else idx.ne(124)
+      dst = self.sgpr.after(*reads).index(idx.valid(valid))
+      init = dst.store(0)
+      dst = self.sgpr.after(init, lane).index(idx.valid(valid))
+      stores.append(dst.store(dst.load() | (bit >> (word*32)).cast(dtypes.uint32)).end(lane))
+    return stores
+
   def inst_word(self, dword_idx:int) -> UOp:
     return UOp.const(int.from_bytes(self.code[dword_idx*4:(dword_idx+1)*4], "little"), dtypes.uint32)
 
