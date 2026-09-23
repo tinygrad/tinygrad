@@ -121,15 +121,28 @@ def state_call(body:UOp, name:str, inputs:list[UOp], *deps:UOp) -> UOp:
             for i, u in enumerate(inputs)}
   return body.substitute(params, walk=True).call(*(u.after(*deps) if u.shape else u for u in inputs), name=name)
 
-def launch(graph:_CallGraph, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int,
-           arch:str, user_words:int) -> tuple[UOp, dict[str, UOp]]:
+def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int,
+                rsrc2:int, scratch_size:int, arch:str, user_words:int) -> UOp:
+  code = ctypes.string_at(lib, lib_sz)
+  offset = 0
+  graph = _CallGraph(_CallCtx(b"", lib, _wave_size(arch)))
+  while offset < lib_sz:
+    try: inst = decode_inst(code[offset:], arch)
+    except InstDecodeError: break
+    if offset + inst.size() > lib_sz: raise RuntimeError(f"truncated instruction at {offset:#x}")
+    if _op_name(inst) == "S_CODE_END": break
+    handler = next((_INST_HANDLERS[cls] for cls in type(inst).__mro__ if cls in _INST_HANDLERS), None)
+    if handler is None: raise RuntimeError(f"unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
+    ctx = _CallCtx(code[offset:offset+inst.size()], lib + offset, _wave_size(arch))
+    body = handler(inst, ctx).simplify(tracked=True)
+    graph.append(body, name=f"{_op_name(inst).lower()}_{offset:x}")
+    offset += inst.size()
   wave_size, total_threads = _wave_size(arch), lx * ly * lz
   sizes = {"s":SGPR_COUNT, "v":256*wave_size, "lds":max(((rsrc2 >> 15) & 0x1ff)*128, 1),
            "scratch":max(scratch_size*wave_size, 1)}
   if wave_size == 64: sizes["a"] = 256*wave_size
-  banks = {name:UOp.placeholder((size,), dtypes.uint8 if name == "scratch" else dtypes.uint32,
-                               slot=i, addrspace=AddrSpace.REG, tag={"s":"sgpr", "v":"vgpr", "a":"accvgpr"}.get(name, name))
-           for i, (name, size) in enumerate(sizes.items())}
+  banks = {name:UOp.placeholder((size,), dtypes.uint8 if name == "scratch" else dtypes.uint32, slot=i, addrspace=AddrSpace.REG,
+                                tag={"s":"sgpr", "v":"vgpr", "a":"accvgpr"}.get(name, name)) for i, (name, size) in enumerate(sizes.items())}
   group = UOp.range(gx*gy*gz, 0, dtype=dtypes.int)
   clear_lds = UOp.range(sizes["lds"], 1)
   lds_init = state_call(UOp.sink(banks["lds"].index(clear_lds).store(0).end(clear_lds)), "init_workgroup", [banks["lds"]], group)
@@ -165,23 +178,5 @@ def launch(graph:_CallGraph, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsr
   roots = [c for c in graph.calls if c not in referenced]
   body = roots[-1].after(*roots[:-1]) if roots else init
   body = body.substitute({p:p.after(init) for p in graph.operands}, walk=True)
-  return UOp.sink(body.end(wave, group), arg=KernelInfo(name="asm_call")).rtag(1), banks
-
-def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int,
-                rsrc2:int, scratch_size:int, arch:str, user_words:int) -> UOp:
-  code = ctypes.string_at(lib, lib_sz)
-  offset = 0
-  graph = _CallGraph(_CallCtx(b"", lib, _wave_size(arch)))
-  while offset < lib_sz:
-    try: inst = decode_inst(code[offset:], arch)
-    except InstDecodeError: break
-    if offset + inst.size() > lib_sz: raise RuntimeError(f"truncated instruction at {offset:#x}")
-    if _op_name(inst) == "S_CODE_END": break
-    handler = next((_INST_HANDLERS[cls] for cls in type(inst).__mro__ if cls in _INST_HANDLERS), None)
-    if handler is None: raise RuntimeError(f"unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
-    ctx = _CallCtx(code[offset:offset+inst.size()], lib + offset, _wave_size(arch))
-    body = handler(inst, ctx).simplify(tracked=True)
-    graph.append(body, name=f"{_op_name(inst).lower()}_{offset:x}")
-    offset += inst.size()
-  sink, banks = launch(graph, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, user_words)
+  sink = UOp.sink(body.end(wave, group), arg=KernelInfo(name="asm_call")).rtag(1)
   return to_program(sink, _CallRenderer(Device["CPU"].renderer.target, banks))
