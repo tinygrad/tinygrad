@@ -52,8 +52,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   assert A.shape[1] == B.shape[0]
   i, j, k = UOp.range(C.shape[0], 0), UOp.range(C.shape[1], 1), UOp.range(A.shape[1], 2, axis_type=AxisType.REDUCE)
   C = C[i, j].set(0.0)
-  C = C[i, j].set(C.after(k)[i, j] + A[i, k] * B[k, j], end=k)
-  prog = C.end(i, j)
+  prog = C[i, j].store(C.after(k)[i, j] + A[i, k] * B[k, j]).end(k).end(i, j)
   return prog.sink(arg=KernelInfo(name=f"custom_gemm_{C.shape[0]}_{C.shape[1]}_{A.shape[1]}", opts_to_apply=()))
 
 def custom_sum(B:UOp, A:UOp) -> UOp:
@@ -304,7 +303,7 @@ class TestCustomKernel(unittest.TestCase):
     def kernel(ACC:UOp, A:UOp, B:UOp) -> UOp:
       t, j, k = UOp.range(A.shape[0], 0, AxisType.LOOP), UOp.range(B.shape[1], 1), UOp.range(A.shape[1], 2, AxisType.REDUCE)
       mm = (A[t, k] * B[k, j]).cast(dtypes.float).reduce(k, arg=Ops.ADD)
-      return ACC[j].set(ACC.after(t)[j] + mm, end=t).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (i, 0, 1)),)))
+      return ACC[j].store(ACC.after(t)[j] + mm).end(t).end(j).sink(arg=KernelInfo(opts_to_apply=(Opt(OptOps.TC, 0, (i, 0, 1)),)))
     N, M, K = tc.dims
     a, b, acc = Tensor.empty(M, K, dtype=dtypes.half), Tensor.empty(K, N, dtype=dtypes.half), Tensor.empty(N, dtype=dtypes.float)
     ast = Tensor.custom_kernel(acc, a, b, fxn=kernel)[0].schedule_linear().src[-1].src[0]
@@ -316,7 +315,7 @@ class TestCustomKernel(unittest.TestCase):
       l, t = UOp.range(4, 0, AxisType.LOCAL), UOp.range(8, 1, AxisType.LOOP)
       tmp = UOp.placeholder((4,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
       v = tmp.after(tmp[l].store(A[t%2, l]))[(l+1)%4]
-      return C[l].set(C.after(t)[l] + v, end=t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
+      return C[l].store(C.after(t)[l] + v).end(t).end(l).sink(arg=KernelInfo(opts_to_apply=()))
     ast = Tensor.custom_kernel(Tensor.empty(4), Tensor.empty(2, 4), fxn=kernel)[0].schedule_linear().src[-1].src[0]
     uops = to_program(ast, AMDLLVMRenderer(Target("AMD", arch="gfx1100"))).src[1].src
     self.assertEqual(len([u for u in uops if u.op is Ops.BARRIER]), 2)
