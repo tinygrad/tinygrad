@@ -71,7 +71,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     if x.op is Ops.STORE:
       # don't look inside stores, this doesn't count toward buffer accesses
       return False
-    if x.op is Ops.PARAM:
+    if x.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC}:
       accessed_buffers.append(x)
     if x.op is Ops.INDEX:
       indexes.append(x)
@@ -88,7 +88,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   buffer_in_reduce = False
   def buf_gate(x:UOp):
     nonlocal buffer_in_reduce
-    if x.op in {Ops.PARAM, Ops.STAGE, Ops.AFTER}: buffer_in_reduce = True
+    if x.op in {Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.STAGE, Ops.AFTER}: buffer_in_reduce = True
     return not buffer_in_reduce
   UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
   del buf_gate
@@ -179,7 +179,7 @@ def _limit_bufs(ctx:LimitBufsContext, root:UOp):
   if not (MAX_BUFS:=MAX_KERNEL_BUFFERS.value or DEVICE_MAX_BUFS.get(device, 0)): return None
 
   def visitor(u:UOp) -> frozenset[UOp]:
-    if u.op in {Ops.STAGE, Ops.AFTER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK}: return frozenset((u,))
+    if u.op in {Ops.STAGE, Ops.AFTER, Ops.PARAM, Ops.BUFFER, Ops.ALLOC, Ops.MSELECT, Ops.MSTACK}: return frozenset((u,))
     if len(u.src) == 1: return ctx.buf_cache[u.src[0]]
     return frozenset().union(*[ctx.buf_cache[s] for s in u.src])
   bufs = root.topovisit(visitor, ctx.buf_cache)

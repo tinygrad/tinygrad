@@ -8,6 +8,39 @@ from tinygrad.schedule.indexing import apply_movement_op
 from tinygrad.schedule.allreduce import create_allreduce_function
 from tinygrad.schedule.multi import multi_pm
 
+def contiguous_mops_to_view(c:UOp, src:UOp, views:dict[UOp, UOp]|None=None):
+  """Fold contiguous movement into a storage view, optionally exposing it as a BUFFER for rangeify."""
+  if not all_int(c.shape): return None
+  buf = src.base
+  while buf.op is Ops.BITCAST: buf = buf.src[0].base
+  if views is not None and buf in views: return None
+  if buf.op is Ops.UNSHARD:
+    if isinstance(c.device, str): return None
+    if (unshard := graph_rewrite(src, multi_pm, name="multi_buffer_view")).op is not Ops.UNSHARD: return None
+    view = contiguous_mops_to_view(unshard.src[0], unshard.src[0], views)
+    return None if view is None else view.unshard(unshard.arg, unshard.src[1:])
+  if buf.op is not Ops.BUFFER or (cv := src.contiguous_view()) is None or cv[0].op is not Ops.BUFFER: return None
+  buf, offset = cv
+  view = buf[offset:offset + src.max_numel() * src.element_size() // buf.element_size()].bitcast(src.dtype)
+  if views is not None:
+    # This is only a storage handle, not an allocation/copy. Restore the view expression in the final
+    # call arguments so JIT input substitution and buffer lifetime tracking still reach the original buffer.
+    views[storage:=UOp.from_buffer(view.buffer, view.device)] = view
+    view = storage
+  view = view.reshape(c.shape)
+  return c.replace(src=(view,)+c.src[1:]) if c.op in {Ops.COPY, Ops.STORE} else view
+
+pm_buffer_views = PatternMatcher([
+  (UPat((Ops.COPY, Ops.STAGE), src=(UPat(GroupOp.Movement|{Ops.BITCAST}, name="src"),), name="c"),
+   lambda ctx,c,src: contiguous_mops_to_view(c, src, ctx)),
+  (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, name="src"), UPat()), name="c", allow_any_len=True),
+   lambda ctx,c,src: contiguous_mops_to_view(c, src, ctx)),
+])
+
+def bufferize_views(sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+  views:dict[UOp, UOp] = {}
+  return graph_rewrite(sink, pm_buffer_views, ctx=views, name="buffer views"), views
+
 def forward_call_outputs(sink:UOp) -> UOp:
   placed:dict[UOp, UOp] = {}
   items:list[UOp] = []

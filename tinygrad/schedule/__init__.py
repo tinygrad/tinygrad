@@ -1,4 +1,6 @@
 import time, inspect
+from dataclasses import replace
+from tinygrad.dtype import AddrSpace
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, rewrite_group, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, spec_tensor
@@ -70,7 +72,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       else:
         k = rk.src[0] if rk.op is Ops.END else rk
         assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if not s.is_bound_var)
+        buf_uops = tuple(s if s.is_bound_var else _unwrap_src(s).buf_uop for s in k.src[1:])
         linearized.append(k.replace(src=(k.body, *buf_uops)))
       for x in children.get(rk, []):
         in_degree[x] -= 1
@@ -80,10 +82,31 @@ def create_schedule(sched_sink:UOp) -> UOp:
 
 from tinygrad.schedule.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing, pm_flatten_linear
-from tinygrad.schedule.prepare import prepare_rangeify
+from tinygrad.schedule.prepare import prepare_rangeify, bufferize_views
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
-from tinygrad.uop.ops import PatternMatcher, UPat
+from tinygrad.uop.ops import PatternMatcher, UPat, remove_all_tags
+
+# Parameterization is a cache/interface operation, not the graph that rangeify consumes.
+def canonicalize_alloc(ctx:dict[UOp, UOp], b:UOp):
+  if b.arg.slot >= 0 and b not in ctx: ctx[b] = b.replace(arg=replace(b.arg, slot=-1-len(ctx)))
+  return ctx.get(b)
+
+pm_canonicalize_alloc:PatternMatcher = PatternMatcher([
+  (UPat(Ops.ALLOC, name="b"), canonicalize_alloc),
+  (UPat(Ops.CALL, name="c"), lambda c:
+   c.replace(src=(graph_rewrite(c.body, pm_canonicalize_alloc, ctx={}, bottom_up=True),)+c.src[1:])),
+])
+
+def parameterize(sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+  inputs:dict[UOp, UOp] = {}
+  sink = graph_rewrite(sink, pm_canonicalize_alloc+remove_all_tags, ctx={}, bottom_up=True, name="canonicalize allocations")
+  return graph_rewrite(sink, pm_parameterize, ctx=inputs, bottom_up=True, name="parameterize cache key"), inputs
+
+pm_parameterize = PatternMatcher([
+  (UPat((Ops.BUFFER, Ops.AFTER), name="b"), lambda ctx,b:
+   ctx.setdefault(b, b.param_like(len(ctx))) if (b.op is Ops.BUFFER and b.addrspace is AddrSpace.GLOBAL) or b.is_bound_var else None),
+])
 
 def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
   if (ret:=ctx[0].get(b, None)) is None:
@@ -91,24 +114,29 @@ def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
     ctx[0][b] = ret = UOp.new_buffer(device, b.max_numel(), b.dtype)
   return ret
 
-pm_post_sched_cache = PatternMatcher([
-  # only resolve buffer PARAMs (slot>=0); ALU/shape vars use slot=-1 and must not be swapped for call args
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg.slot] if x.arg.slot >= 0 else None),
-  # bind ALLOCs to fresh BUFFERs for this invocation
+pm_bind_allocs = PatternMatcher([
   (UPat(Ops.ALLOC, src=(), name="b"), create_new_buffer),
 ])
 
-def resolve_linear_call(linear_call:UOp, outer_binds:dict[str, UOp]|None=None):
-  linear = graph_rewrite(linear_call.body, pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
+pm_post_sched_cache = PatternMatcher([
+  # only resolve buffer PARAMs (slot>=0); ALU/shape vars use slot=-1 and must not be swapped for call args
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg.slot] if x.arg.slot >= 0 else None),
+])+pm_bind_allocs
+
+def resolve_linear(linear:UOp, inputs:tuple[UOp, ...], outer_binds:dict[str, UOp]|None=None):
+  linear = graph_rewrite(linear, pm_post_sched_cache, ctx=({}, inputs), walk=True, name="params to buffers")
   # nested LINEAR calls are lexical scopes: their positional params shadow the enclosing scope, while calls without
   # scalar args (e.g. precompiled allreduce) inherit it
   binds = {**(outer_binds or {}),
-           **{f"p{i}":x.src[0].replace(op=Ops.PARAM) for i,x in enumerate(linear_call.src[1:]) if x.is_bound_var}}
+           **{f"p{i}":x.src[0].replace(op=Ops.PARAM) for i,x in enumerate(inputs) if x.is_bound_var}}
   def apply_binds(si:UOp) -> UOp:
     if si.op is Ops.CALL and si.body.op is Ops.LINEAR: return resolve_linear_call(si, binds)
     subs = {v:binds[v.expr] for v in si.variables() if v.expr in binds}
     return si.replace(src=tuple(s.substitute(subs, name="resolve scalar params") for s in si.src))
   return linear.replace(src=tuple(apply_binds(si) for si in linear.src))
+
+def resolve_linear_call(linear_call:UOp, outer_binds:dict[str, UOp]|None=None):
+  return resolve_linear(linear_call.body, linear_call.src[1:], outer_binds)
 
 pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
@@ -146,6 +174,21 @@ pm_schedule = PatternMatcher([
   (UPat(Ops.CALL, name="call"), lower_sink_to_linear),
 ])
 
+def schedule_buffers(sink:UOp) -> UOp:
+  # The key/template use PARAMs; the cache miss is scheduled with concrete BUFFERs intact.
+  key_sink, inputs = parameterize(sink)
+  if not SCACHE or (linear:=schedule_cache.get(key_sink.key)) is None:
+    sink = graph_rewrite(sink, pm_canonicalize_alloc+remove_all_tags, ctx={}, bottom_up=True, name="canonicalize allocations")
+    sink = graph_rewrite(sink, pm_schedule, enter_calls=True, name="schedule explicit calls")
+    linear = create_schedule(get_kernel_graph(prepare_rangeify(sink)))
+    linear = graph_rewrite(linear, pm_schedule, enter_calls=True, name="schedule nested calls")
+    linear = linear.substitute(inputs, walk=True, name="parameterize schedule")
+    # Kernel scalar parameters refer to bound Variables by name. Give the cached template formal names too.
+    variables = {b.src[0].replace(op=Ops.PARAM):p.replace(arg=replace(p.arg, slot=-1)) for b,p in inputs.items() if b.is_bound_var}
+    linear = linear.substitute(variables, walk=True, enter_calls=True, name="parameterize scalar bindings")
+    if SCACHE: schedule_cache[key_sink.key] = linear
+  return resolve_linear(linear, tuple(inputs))
+
 def assert_all_same_devices(ast:UOp):
   devices = dedup([x.device for x in ast.toposort() if x.op is Ops.PARAM and x.device is not None])
   if len(devices) >= 2: raise RuntimeError(f"all buffers must be on the same device: {devices}")
@@ -181,11 +224,12 @@ pm_copy_from_store = PatternMatcher([
 
 @rewrite_group(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
 def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
-  # big_sink srcs are all the Tensors
-  linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
-
-  # this recursively resolves the linear_call and allocates buffers
-  linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
+  # Keep concrete storage through rangeify. Only kernel splitting introduces buffer PARAMs.
+  inputs = tuple(b for b in big_sink.toposort(enter_calls=False) if b.op is Ops.BUFFER)
+  sink, views = bufferize_views(big_sink)
+  linear = schedule_buffers(sink) if sink.op is Ops.SINK else graph_rewrite(sink, pm_schedule, name="schedule to linear", enter_calls=True)
+  linear = graph_rewrite(linear, pm_resolve_linear_call, name="resolve linear call")
+  linear = linear.substitute(views, walk=True, name="restore buffer views")
 
   # create copies
   linear = graph_rewrite(linear, pm_copy_from_store, name="lower copy kernels to STORE calls")
@@ -194,7 +238,7 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
   # get var_vals from the bound Variables in the call args
   var_vals: dict[str, int] = {}
-  for b in big_sink.src[1:]:
+  for b in big_sink.toposort(enter_calls=False):
     if b.is_bound_var:
       v, val = b.unbind()
       nm = v.expr
@@ -207,5 +251,4 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
     capturing[0].add_linear(linear, var_vals)
     return UOp(Ops.LINEAR, src=()), var_vals
 
-  held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
-  return memory_plan_rewrite(linear, held_bufs), var_vals
+  return memory_plan_rewrite(linear, set(inputs)), var_vals
