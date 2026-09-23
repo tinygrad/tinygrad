@@ -294,12 +294,6 @@ class Tensor(RandMixin):
       if u is not x: tensor_map[x] = u
     _apply_map_to_tensors(tensor_map, name="bufferize")
 
-  def callify(self, *lst:Tensor) -> Tensor:
-    self._bufferize_outputs(*lst)
-    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
-    _apply_map_to_tensors({x:y.after(big_sink) for x,y in becomes_map.items()}, name="callify")
-    return self
-
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
     self._bufferize_outputs(*lst)
