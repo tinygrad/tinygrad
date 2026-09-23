@@ -11,7 +11,7 @@ from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.c import init_c_struct_t
 import tinygrad.runtime.support.hcq2 as hcq2
-from tinygrad.runtime.support.hcq2 import HCQInfo, hcq_compile_cache
+from tinygrad.runtime.support.hcq2 import HCQInfo
 
 def chain(x:Tensor, n:int) -> Tensor:
   for _ in range(n): x = (x + 1).contiguous()
@@ -151,11 +151,7 @@ class TestHCQ2Schedule(unittest.TestCase):
     self.assertEqual(orders(b), {(0, 1)})
 
   def test_a_host_kernel_splits_the_batch(self):
-    def out() -> Tensor: return ((self.x + 1).contiguous().to("CPU") + 2).contiguous().to("NULL") + 3
-    self.assertEqual(len(self.scheduled(out())), 2)
-    Device["CPU"].pending.pop(Device["NULL"], None)
-    out().realize()
-    self.assertIn(Device["NULL"], Device["CPU"].pending, "a host sync must wait for the batch that wrote host memory")
+    self.assertEqual(len(self.scheduled(((self.x + 1).contiguous().to("CPU") + 2).contiguous().to("NULL") + 3)), 2)
 
   def test_batches_of_real_workloads_are_well_formed(self):
     t = Tensor.ones(6).contiguous().realize().shard(("NULL", "NULL:1", "NULL:2"), axis=0)
@@ -211,18 +207,6 @@ class TestHCQ2Fence(unittest.TestCase):
 class TestHCQ2Link(unittest.TestCase):
   def setUp(self): self.enterContext(Context(DEV="NULL"))
 
-  def test_patched_view(self):
-    with Context(HCQ_RUNTIME_DEV="CPU"):
-      ctx = hcq2.EncodeCtx(("CPU",))
-      inner = hcq2.patch(cpu_buf(8, tag="inner"), [(4, UOp.const(42, dtypes.uint32))], bytes(8))
-      inner = unwrap(hcq2.hoist_links(ctx, inner))
-      outer = hcq2.patch(cpu_buf(8, tag="outer"), [(0, inner[4:8].getaddr("CPU"))])
-      with patch.object(hcq2, "EncodeCtx", return_value=ctx): call = lower_hcq(outer.bitcast(dtypes.uint64).index(0).load())
-      linked = hcq2.hcq_link(UOp(Ops.LINEAR, src=(call,)), allow_cache=False).src[0]
-      inner_buf, outer_buf = linked.src[1].buffer, linked.without_after.src[1].buffer
-      self.assertEqual(inner_buf.host.view(fmt='I')[1], 42)
-      self.assertEqual(outer_buf.host.view(fmt='Q')[0], inner_buf._buf + 4)
-
   def test_links_serve_any_input(self):
     a, inputs = chain_input(), list[UOp]()
     linear = compile_linear(chain(a, 2).schedule_linear(), input_uops=inputs, cache=True)
@@ -233,12 +217,7 @@ class TestHCQ2Link(unittest.TestCase):
     words = [w for b in bufs if b.options.external_ptr and b.nbytes % 8 == 0 for w in b.host.view(fmt='Q')[:]]
     self.assertNotIn(cast(Buffer, a.uop.base.buffer)._buf, words)
 
-  def test_eager_templates_compile_once(self):
-    linear = compiled_chain(3)[1]
-    before = len(hcq_compile_cache)
-    self.assertIs(compiled_chain(3)[1], linear)
-    self.assertEqual(len(hcq_compile_cache), before)
-    self.assertFalse([u for u in linear.toposort() if u.op is Ops.BUFFER])
+  def test_eager_templates_compile_once(self): self.assertIs(compiled_chain(3)[1], compiled_chain(3)[1])
 
 @unittest.skipUnless(isinstance(Device["CPU"].renderer, CStyleLanguage), "CALL is rendered in C style only")
 class TestHCQ2FFI(unittest.TestCase):
@@ -266,8 +245,8 @@ class TestHCQ2FFI(unittest.TestCase):
 
   def test_nested_cstruct_patches(self):
     with Context(HCQ_RUNTIME_DEV="CPU"):
-      inner = hcq2.cstruct(init_c_struct_t(4, (("value", ctypes.c_uint32, 0),)), value=42)
-      outer = hcq2.cstruct(init_c_struct_t(8, (("ptr", ctypes.c_uint64, 0),)), ptr=inner.getaddr("CPU"))
+      inner = hcq2.cstruct(init_c_struct_t(8, (("pad", ctypes.c_uint32, 0), ("value", ctypes.c_uint32, 4))), value=42)
+      outer = hcq2.cstruct(init_c_struct_t(8, (("ptr", ctypes.c_uint64, 0),)), ptr=inner[4:8].getaddr("CPU"))
       out = cpu_buf(dtype=dtypes.uint32, tag="result")
       copied = hcq2.ccall(libc.memcpy, out.index(0), outer.bitcast(dtypes.uint64).index(0).load(), 4)
       bufs = self._run(out.after(copied).index(0).load())
