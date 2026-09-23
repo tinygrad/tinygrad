@@ -1,13 +1,13 @@
-import ctypes, itertools
+import ctypes
 from tinygrad.codegen import pm_add_loads, to_program
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Device
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.engine.realize import get_runtime
 from tinygrad.renderer.amd import InstDecodeError, decode_inst
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import KernelInfo, Ops, UOp, UPat, PatternMatcher, graph_rewrite
-from test.mockgpu.amd.emu import _Ctx, _INST_HANDLERS, _MXCSRContext, _init_wave, _op_name, _wave_size
-from test.mockgpu.amd.emu import PC_LO_IDX, PC_HI_IDX
+from test.mockgpu.amd.emu import _Ctx, _INST_HANDLERS, _MXCSRContext, _op_name, _wave_size
+from test.mockgpu.amd.emu import PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE, EXEC_LO, ttmp, hsa
 
 class _CallCtx(_Ctx):
   def __init__(self, code:bytes, pc:int, wave_size:int):
@@ -19,6 +19,18 @@ class _CallCtx(_Ctx):
 
   def rpc(self) -> UOp: return UOp.const(self.pc, dtypes.uint64)
   def inc_pc(self) -> list[UOp]: return []
+
+  def rsgpr_dyn(self, reg:UOp, valid:UOp|None=None) -> UOp:
+    reg = reg.simplify()
+    if reg.vmin == reg.vmax:
+      idx = int(reg.vmin)
+      value = idx-128 if 128 <= idx <= 192 else (192-idx)&0xffffffff if 193 <= idx <= 208 else None
+      # Operand reads are gated. Ungated reads in this range also hold the emulator's HW registers.
+      if idx in F32_INLINE and valid is not None: value = F32_INLINE[idx]
+      if value is not None:
+        ret = UOp.const(value, dtypes.uint32)
+        return valid.where(ret, UOp.const(0, dtypes.uint32)) if valid is not None else ret
+    return super().rsgpr_dyn(reg, valid)
 
   def wsgpr_dyn(self, reg:UOp, val:UOp) -> UOp:
     if reg.vmin == reg.vmax and reg.vmin in (PC_LO_IDX, PC_HI_IDX):
@@ -61,6 +73,7 @@ class _CallGraph:
   def append(self, body:UOp, name:str):
     body = graph_rewrite(body, pm_add_loads, name="explicit instruction loads")
     body = graph_rewrite(body, pm_register_operands, ctx=self, name="bind instruction registers")
+    if not any(u.op is Ops.STORE for u in body.toposort()): return
     used = {p for p in body.toposort() if p.op is Ops.PARAM}
     if not used <= self.operands: raise NotImplementedError("unbound register bank")
     writes = {u.src[0].buf_uop for u in body.toposort() if u.op is Ops.STORE}
@@ -90,18 +103,69 @@ pm_register_operands = PatternMatcher([
   (UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx.param(p) if p not in ctx.banks and p not in ctx.operands else None),
 ])
 
-def lower_register(p:UOp) -> UOp|None:
-  if p.addrspace is not AddrSpace.REG: return None
-  if p.arg.name == "s": bank = _Ctx.sgpr
-  elif p.arg.name in ("v", "a"):
-    bank = UOp.param(1 if p.arg.name == "v" else 5, dtypes.uint32, 256 * p.arg.size,
-                     name="vgpr" if p.arg.name == "v" else "accvgpr")
-  else: raise ValueError(f"unknown register bank: {p.arg.name}")
+def lower_register(ctx, p:UOp) -> UOp|None:
+  if p.addrspace is not AddrSpace.REG: return ctx.banks.get(p.arg.name)
   start = p.arg.slot * p.arg.size
-  return bank.shrink(((start, start + p.arg.size),))
+  return ctx.banks[p.arg.name].shrink(((start, start + p.arg.size),))
 
 class _CallRenderer(ClangRenderer):
   pre_matcher = PatternMatcher([(UPat(Ops.PARAM, name="p"), lower_register)])
+
+  def __init__(self, target, banks:dict[str, UOp]):
+    super().__init__(target)
+    self.banks = banks
+
+  def __reduce__(self): return self.__class__, (self.target, self.banks)
+
+def state_call(body:UOp, name:str, inputs:list[UOp], *deps:UOp) -> UOp:
+  params = {u:UOp.param(i, u.dtype, u.shape, addrspace=AddrSpace.ALU if u.shape == () else AddrSpace.GLOBAL)
+            for i, u in enumerate(inputs)}
+  return body.substitute(params, walk=True).call(*(u.after(*deps) if u.shape else u for u in inputs), name=name)
+
+def launch(graph:_CallGraph, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsrc2:int, scratch_size:int,
+           arch:str, user_words:int) -> tuple[UOp, dict[str, UOp]]:
+  wave_size, total_threads = _wave_size(arch), lx * ly * lz
+  sizes = {"s":SGPR_COUNT, "v":256*wave_size, "lds":max(((rsrc2 >> 15) & 0x1ff)*128, 1),
+           "scratch":max(scratch_size*wave_size, 1)}
+  if wave_size == 64: sizes["a"] = 256*wave_size
+  banks = {name:UOp.placeholder((size,), dtypes.uint8 if name == "scratch" else dtypes.uint32,
+                               slot=i, addrspace=AddrSpace.REG) for i, (name, size) in enumerate(sizes.items())}
+  group = UOp.range(gx*gy*gz, 0, dtype=dtypes.int)
+  clear_lds = UOp.range(sizes["lds"], 1)
+  lds_init = state_call(UOp.sink(banks["lds"].index(clear_lds).store(0).end(clear_lds)), "init_workgroup", [banks["lds"]], group)
+  wave = UOp.range((total_threads+wave_size-1)//wave_size, 2, dtype=dtypes.int)
+  clears = []
+  for i, name in enumerate(("s", "v", "a") if wave_size == 64 else ("s", "v")):
+    idx = UOp.range(sizes[name], 3+i)
+    clears.append(banks[name].index(idx).store(0).end(idx))
+  sgpr = banks["s"].after(*clears)
+  words = UOp.param(6, dtypes.uint32, user_words, name="user_data")
+  stores = [sgpr.index(i).store(words.index(i)) for i in range(user_words)]
+  n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
+  for i in range(wave_size//32):
+    bits = (n_lanes-i*32).maximum(0).minimum(32).cast(dtypes.uint64)
+    stores.append(sgpr.index(EXEC_LO.offset+i).store(((UOp.const(1, dtypes.uint64) << bits)-1).cast(dtypes.uint32)))
+  gidx, gidy, gidz = group%gx, (group//gx)%gy, group//(gx*gy)
+  if arch == "rdna4":
+    stores += [sgpr.index(ttmp[7].offset).store((gidy & 0xffff) | ((gidz & 0xffff) << 16)), sgpr.index(ttmp[9].offset).store(gidx)]
+  else:
+    slot = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
+    for flag, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
+                      (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
+                      (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
+      if rsrc2 & flag:
+        stores.append(sgpr.index(slot).store(gid))
+        slot += 1
+  stores += [sgpr.index(SCRATCH_STRIDE_IDX).store(scratch_size), sgpr.index(SGPR_COUNT-12).store((wave & 15) | ((wave & 3) << 4))]
+  lane = UOp.range(n_lanes, 6)
+  tid = wave*wave_size+lane
+  stores.append(banks["v"].after(*clears).index(lane).store(((tid//(lx*ly)) << 20) | (((tid//lx)%ly) << 10) | (tid%lx)).end(lane))
+  init = state_call(UOp.sink(*stores), "init_wave", [banks[n] for n in ("s", "v", "a") if n in banks]+[words, group, wave], lds_init, wave)
+  referenced = {u for c in graph.calls for a in c.src[1:] for u in a.toposort(enter_calls=False) if u.op is Ops.CALL}
+  roots = [c for c in graph.calls if c not in referenced]
+  body = roots[-1].after(*roots[:-1]) if roots else init
+  body = body.substitute({p:p.after(init) for p in graph.operands}, walk=True)
+  return UOp.sink(body.end(wave, group), arg=KernelInfo(name="asm_call")).rtag(1), banks
 
 def run_asm(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, args_ptr:int, rsrc2:int=0x19c,
             scratch_size:int=0, arch:str="rdna3", user_data:list[int]|None=None) -> int:
@@ -119,18 +183,12 @@ def run_asm(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int,
     body = handler(inst, ctx).simplify(tracked=True)
     graph.append(body, name=f"{_op_name(inst).lower()}_{offset:x}")
     offset += inst.size()
-  sink = UOp.sink(*graph.calls, arg=KernelInfo(name="asm_call")).rtag(1)
-  prg = to_program(sink, _CallRenderer(Device["CPU"].renderer.target))
+  words = user_data or [args_ptr & 0xffffffff, args_ptr >> 32]
+  sink, banks = launch(graph, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(words))
+  prg = to_program(sink, _CallRenderer(Device["CPU"].renderer.target, banks))
   runtime = get_runtime("CPU", prg)
-  wave_size, total_threads = _wave_size(arch), lx * ly * lz
-  lds_size = ((rsrc2 >> 15) & 0x1ff) * 512
-  lds = Buffer("CPU", max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
-  scratch = Buffer("CPU", max(scratch_size * wave_size, 1), dtypes.uint8).ensure_allocated()
+  data = (ctypes.c_uint32 * len(words))(*words)
+  bufs = {2:0, 6:ctypes.addressof(data)}
   with _MXCSRContext():
-    for gidz, gidy, gidx in itertools.product(range(gz), range(gy), range(gx)):
-      ctypes.memset(lds._buf, 0, max(lds_size, 4))
-      for wave_start in range(0, total_threads, wave_size):
-        st = _init_wave(lib, wave_start, total_threads, lx, ly, lz, args_ptr, rsrc2, scratch_size, arch, gidx, gidy, gidz, user_data, wave_size)
-        bufs = [st.sgpr_buf._buf, st.vgpr_buf._buf, 0, lds._buf, scratch._buf, st.accvgpr_buf._buf]
-        runtime(*[bufs[g] for g in prg.arg.globals])
+    runtime(*[bufs[g] for g in prg.arg.globals])
   return 0
