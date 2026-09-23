@@ -72,6 +72,11 @@ class TestQ8Quantize(unittest.TestCase):
       with self.subTest(ggml_type=typ):
         self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=1280, out_features=3, token_counts=(1,))
 
+  def test_quant_linear_bias(self):
+    for typ in (12, 21, 23):
+      with self.subTest(ggml_type=typ):
+        self._test_quant_linear(typ, QUANT_SIZES[typ], in_features=256, out_features=16, token_counts=(1, 3, 16), bias=True)
+
   def test_quant_linear_partial_output_tile(self):
     # Cover a sub-tile output, a trailing tile, and IQ4's larger-output tile selection.
     for typ, size, outputs, tokens in ((12, 144, 16, 16), (12, 144, 48, 32), (13, 176, 48, 16), (23, 136, 4112, 32)):
@@ -165,7 +170,7 @@ class TestQ8Quantize(unittest.TestCase):
         x = rng.normal(size=(tokens, 128)).astype(np.float16)
         np.testing.assert_allclose(linear(Tensor(x)).numpy(), x.astype(np.float32) @ w.astype(np.float32).T + bias, rtol=2e-3, atol=2e-3)
 
-  def _test_quant_linear(self, ggml_type, block_bytes, in_features=2048, out_features=64, token_counts=(1, 3, 32, 64, 128)):
+  def _test_quant_linear(self, ggml_type, block_bytes, in_features=2048, out_features=64, token_counts=(1, 3, 32, 64, 128), bias=False):
     if not amd_custom_kernels_supported(Tensor.empty(1).device): self.skipTest("RDNA3 required")
     rng = np.random.default_rng(42)
     packed = rng.integers(0, 256, (out_features*in_features//256, block_bytes), dtype=np.uint8)
@@ -181,6 +186,8 @@ class TestQ8Quantize(unittest.TestCase):
     weight = decoded.numpy()
     linear = Linear(in_features, out_features, bias=False)
     linear.weight = decoded
+    bias_value = rng.normal(size=out_features).astype(np.float32) if bias else 0
+    if bias: linear.bias = Tensor(bias_value)
     @function(allow_implicit=True)
     def run(x:Tensor): return linear(x)
     for tokens in token_counts:
@@ -194,10 +201,10 @@ class TestQ8Quantize(unittest.TestCase):
         reference_w = weight if tokens < 16 or ggml_type not in (12, 13, 23) else weight.astype(np.float16).astype(np.float32)
         actual = (run if tokens == 1 else linear)(Tensor(x)).numpy()
         self.assertEqual(linear.ggml_type, ggml_type)
-        np.testing.assert_allclose(actual, reference_x @ reference_w.T, rtol=3e-3, atol=2e-2)
+        np.testing.assert_allclose(actual, reference_x @ reference_w.T + bias_value, rtol=3e-3, atol=2e-2)
         if tokens == 3 and ggml_type not in (12, 13, 14, 23):
           sym = Tensor(np.pad(x, ((0, 1), (0, 0)))).contiguous()[:UOp.variable("tokens", 1, 4).bind(3)]
-          np.testing.assert_allclose(linear(sym)[:3].numpy(), reference_x @ reference_w.T, rtol=3e-3, atol=2e-2)
+          np.testing.assert_allclose(linear(sym)[:3].numpy(), reference_x @ reference_w.T + bias_value, rtol=3e-3, atol=2e-2)
     self.assertEqual(linear.ggml_type, ggml_type)
 
   def test_q6_linear_multiple_tokens(self):
