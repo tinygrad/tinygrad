@@ -122,7 +122,7 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple
   return out_buf.as_memoryview().cast(uop.dtype.fmt or "").tolist()[0]
 
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
-  sink = UOp.group(*u)
+  sink = UOp.sink(*u)
   for r in sink.ranges: sink = sink.end(r)
   ret = get_uops(sink.sink(arg=KernelInfo(opts_to_apply=())), ren)
   assert ret[-1].op is Ops.SINK

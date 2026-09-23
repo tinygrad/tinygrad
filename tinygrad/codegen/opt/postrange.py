@@ -117,7 +117,6 @@ class Scheduler:
       amt, new_type, top = (*cast(tuple, opt.arg), False)[0:3]
       check(type(amt) is int and (amt == 0 or amt > 1) and isinstance(new_type, AxisType) and new_type in split_targets and isinstance(top, bool),
             f"invalid split arg {opt.arg}")
-      check(not top or new_type is AxisType.GROUP_REDUCE, "top is only for group reduce")
       if new_type in (AxisType.LOCAL, AxisType.GROUP_REDUCE): check(self.ren.has_local, "locals needed for opt")
 
       if amt == 0: amt = int(rng.vmax+1)

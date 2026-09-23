@@ -251,6 +251,7 @@ class CStyleLanguage(Renderer):
       else:
         if u.op not in {Ops.RANGE, Ops.BUFFER} and u.dtype != dtypes.void:
           l = f"{self.render_type(u)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
+        elif u.op is Ops.CAST: l += ";"  # a discarded value renders as a bare statement
         kernel.append("\n".join("  "*depth + line for line in l.split("\n")))
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {Ops.IF, Ops.RANGE}: depth += 1

@@ -1,7 +1,8 @@
 from __future__ import annotations
 import os, mmap, array, functools, contextlib, itertools, struct, socket, subprocess, time, enum, atexit
 from tinygrad.helpers import getenv, temp, ceildiv, unwrap, fetch, system, _ensure_downloads_dir, DEBUG, flatten
-from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface
+from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.runtime.support.system import PCIDevice, System
 
 class RemoteCmd(enum.IntEnum):

@@ -6,7 +6,7 @@ from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq2 import HCQ_RUNTIME_DEV, HCQ_DEVS, ccall, cfield, patch, unwrap_view, all_devices_in
-from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.memory import MMIOInterface
 from tinygrad.runtime.support import c
 
 def alloc_cbuffer(sz:int) -> tuple[ctypes.Array, memoryview]: return (buf:=(ctypes.c_ubyte * sz)()), to_mv(ctypes.addressof(buf), sz)
@@ -234,10 +234,10 @@ def usb_stack(dt:DType, *vals:UOp|int) -> UOp: # stack array for transfer data
   return r.after(*[r.index(i).store(usb_word(v, dt)) for i, v in enumerate(vals)])
 
 def usb_ctrl(h:UOp, rtype:int, req:int, val:UOp|int, idx:UOp|int, data:UOp, n:UOp|int, timeout:int=1000) -> UOp:
-  return ccall(libusb.libusb_control_transfer, h.index(0).load(), rtype, req, val, idx, data, n, timeout)
+  return ccall(libusb.libusb_control_transfer, h.index(0).load(), rtype, req, val, idx, data, n, timeout).cast(dtypes.void)
 
 def usb_bulk(h:UOp, ep:int, data:UOp, n:UOp|int, timeout:int=10000) -> UOp: # NULL actual_length
-  return ccall(libusb.libusb_bulk_transfer, h.index(0).load(), ep, data, n, UOp.const(0, dtypes.uint64), timeout)
+  return ccall(libusb.libusb_bulk_transfer, h.index(0).load(), ep, data, n, UOp.const(0, dtypes.uint64), timeout).cast(dtypes.void)
 
 def usb_poke(h:UOp, addr:UOp, val:UOp) -> UOp: # 0xF0 mode 0: write a dword
   return usb_ctrl(h, 0x40, 0xF0, 0x60 | 0x0F00, 0, usb_stack(dtypes.uint64, addr, val.bitcast(dtypes.uint32).cast(dtypes.uint64)).index(0), 12, 5000)
@@ -349,7 +349,7 @@ def usb_chunk(h:UOp, table:UOp, i:UOp, half:int, run:int) -> UOp: # send chunk i
   field = functools.partial(cfield, xfer:=xfer.after(h), libusb.struct_libusb_transfer)
   xfer = xfer.after(field("status").store(0xff), field("length").store(wire.cast(dtypes.uint)),
                     field("buffer").store(stage.getaddr("CPU") + (end - wire).cast(dtypes.uint64)))
-  return ccall(libusb.libusb_submit_transfer, xfer.index(0))
+  return ccall(libusb.libusb_submit_transfer, xfer.index(0)).cast(dtypes.void)
 
 def usb_copyin(h:UOp, table:UOp, n:int, run:int) -> UOp: # pipeline writes through two halves
   h = h.after(usb_drained(h, UOp.const(run + 1, dtypes.uint64))) # both halves must be free
@@ -376,8 +376,8 @@ def usb_copyout(h:UOp, table:UOp, n:int, run:int) -> UOp: # read back through bo
   hi = hi.after(usb_poke(hi, usb_go(h.device).getaddr("CPU"), (i + run + 1).cast(dtypes.uint32)))
   hi = hi.after(usb_bulk(hi, 0x81, stage.index(0), wire))
   hi = hi.after(ccall(libc.memcpy, addr, stage.after(hi).index(0), first.cast(dtypes.uint64)))
-  hi = hi.after(ccall(libc.memcpy, addr + CHUNK, stage.after(hi).index(HALF), second.cast(dtypes.uint64)))
-  return h.after(hi.end(i))
+  done = ccall(libc.memcpy, addr + CHUNK, stage.after(hi).index(HALF), second.cast(dtypes.uint64)).cast(dtypes.void)
+  return h.after(done.end(i))
 
 # lower device memory accesses to USB transfers
 def is_remote(b:UOp) -> bool:

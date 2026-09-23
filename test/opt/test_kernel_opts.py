@@ -380,6 +380,10 @@ class TestKernelOpts(unittest.TestCase):
     with self.assertRaises(KernelOptError):
       helper_linearizer_opt(Tensor.rand(64, 64).sum(1), [[Opt(OptOps.SPLIT, 0, (16, AxisType.GROUP_REDUCE, True))]])
 
+  def test_top_split_non_reduce_axis(self):
+    # top puts the new range as the outer factor of any split
+    helper_linearizer_opt(Tensor.rand(64, 64).sum(1), [[Opt(OptOps.SPLIT, 0, (16, AxisType.UPCAST, True))]])
+
   def test_double_sum_group(self):
     a = Tensor.rand(4, 4, 4)
     r = a.sum((1, 2)).sum()

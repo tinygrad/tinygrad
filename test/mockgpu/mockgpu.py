@@ -1,6 +1,6 @@
 import ctypes, time, os, builtins, fcntl, typing
 from tinygrad.helpers import DEV
-from tinygrad.runtime.support.hcq import FileIOInterface
+from tinygrad.runtime.support.system import FileIOInterface
 from tinygrad.runtime.autogen import libc
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver

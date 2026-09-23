@@ -5,7 +5,9 @@ from typing import Any
 from dataclasses import dataclass, replace
 from tinygrad.runtime.support.hcq2 import HWQueue, encode_submit, patch, to_name, unwrap_view, make_submit, timeline, HCQInfo, lower_call, hcq_link
 from tinygrad.runtime.support.hcq2 import layout_args
-from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, BumpAllocator, hcq_filter_visible_devices
+from tinygrad.runtime.support.memory import MMIOInterface, BumpAllocator
+from tinygrad.runtime.support.system import FileIOInterface
+from tinygrad.runtime.support.system import filter_visible_devices
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, KernelInfo
 from tinygrad.engine.realize import get_call_arg_uops, get_call_var_uops, lower_and_compile, run_linear
 from tinygrad.device import BufferStorage, Buffer, BufferSpec, Allocator, Compiled, Device, TinyELF
@@ -367,7 +369,7 @@ class NVKIface:
       with contextlib.suppress(RuntimeError): self.uvm(nv_gpu.UVM_MM_INITIALIZE, nv_gpu.UVM_MM_INITIALIZE_PARAMS(uvmFd=self.fd_uvm.fd), self.fd_uvm_2)
 
       nv_iowr(NVKIface.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, gpus_info:=(nv_gpu.nv_ioctl_card_info_t*64)())
-      NVKIface.gpus_info = hcq_filter_visible_devices([gi for gi in gpus_info if gi.valid], "NV")
+      NVKIface.gpus_info = filter_visible_devices([gi for gi in gpus_info if gi.valid], "NV")
       NVKIface.count = len(NVKIface.gpus_info)
 
     self.dev, self.device_id = dev, device_id
