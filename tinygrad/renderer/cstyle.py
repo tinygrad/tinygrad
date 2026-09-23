@@ -4,7 +4,7 @@ from collections import defaultdict, Counter
 from tinygrad.renderer import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
 from tinygrad.uop.weak import commit_weak_consts
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, IMAGE, FLOAT16, is_image_shape, to_function_name
 from tinygrad.dtype import dtypes, DType, AddrSpace, truncate, to_storage_scalar
 from tinygrad.renderer import Renderer
 
@@ -232,7 +232,8 @@ class CStyleLanguage(Renderer):
       # naming
       prefix = None
       if u.op is Ops.SPECIAL: r[u] = u.arg
-      elif u.op is Ops.RANGE: r[u] = f"{axis_letters[u.axis_type]}idx"+range_str(u)
+      elif u.op is Ops.RANGE:
+        r[u] = (to_function_name(u.tag)+"_idx" if isinstance(u.tag, str) else f"{axis_letters[u.axis_type]}idx")+range_str(u)
       elif u.op is Ops.BUFFER and u.arg.name is not None:
         prefix = u.arg.name.replace(":", "_")
         r[u] = prefix if c[prefix] == 0 else f"{prefix}_{c[prefix]}"

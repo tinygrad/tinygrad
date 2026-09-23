@@ -226,10 +226,10 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   banks = {name:UOp.placeholder((size,), dtypes.uint8 if name == "scratch" else dtypes.uint32, slot=i, addrspace=AddrSpace.REG,
                                 tag={"s":"sgpr", "v":"vgpr", "a":"accvgpr"}.get(name, name)) for i, (name, size) in enumerate(sizes.items())}
   banks.update(graph.storage)
-  group = UOp.range(gx*gy*gz, 0, dtype=dtypes.int)
+  group = UOp.range(gx*gy*gz, 0, dtype=dtypes.int, tag="workgroup")
   clear_lds = UOp.range(sizes["lds"], 1)
   lds_init = state_call(UOp.sink(banks["lds"].index(clear_lds).store(0).end(clear_lds)), "init_workgroup", [banks["lds"]], group)
-  wave = UOp.range((total_threads+wave_size-1)//wave_size, 2, dtype=dtypes.int)
+  wave = UOp.range((total_threads+wave_size-1)//wave_size, 2, dtype=dtypes.int, tag="wave")
   clears = []
   for i, name in enumerate(("s", "v", "a") if wave_size == 64 else ("s", "v")):
     idx = UOp.range(sizes[name], 3+i)
