@@ -2,11 +2,10 @@ import ctypes
 from tinygrad.codegen import pm_add_loads, to_program
 from tinygrad.device import Device
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.engine.realize import get_runtime
 from tinygrad.renderer.amd import InstDecodeError, decode_inst
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import KernelInfo, Ops, UOp, UPat, PatternMatcher, graph_rewrite
-from test.mockgpu.amd.emu import _Ctx, _INST_HANDLERS, _MXCSRContext, _op_name, _wave_size
+from test.mockgpu.amd.emu import _Ctx, _INST_HANDLERS, _op_name, _wave_size
 from test.mockgpu.amd.emu import PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE, EXEC_LO, ttmp, hsa
 
 class _CallCtx(_Ctx):
@@ -168,15 +167,15 @@ def launch(graph:_CallGraph, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, rsr
   body = body.substitute({p:p.after(init) for p in graph.operands}, walk=True)
   return UOp.sink(body.end(wave, group), arg=KernelInfo(name="asm_call")).rtag(1), banks
 
-def run_asm(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int, args_ptr:int, rsrc2:int=0x19c,
-            scratch_size:int=0, arch:str="rdna3", user_data:list[int]|None=None) -> int:
+def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int,
+                rsrc2:int, scratch_size:int, arch:str, user_words:int) -> UOp:
   code = ctypes.string_at(lib, lib_sz)
   offset = 0
   graph = _CallGraph(_CallCtx(b"", lib, _wave_size(arch)))
-  while offset < len(code):
+  while offset < lib_sz:
     try: inst = decode_inst(code[offset:], arch)
     except InstDecodeError: break
-    if offset + inst.size() > len(code): raise RuntimeError(f"truncated instruction at {offset:#x}")
+    if offset + inst.size() > lib_sz: raise RuntimeError(f"truncated instruction at {offset:#x}")
     if _op_name(inst) == "S_CODE_END": break
     handler = next((_INST_HANDLERS[cls] for cls in type(inst).__mro__ if cls in _INST_HANDLERS), None)
     if handler is None: raise RuntimeError(f"unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
@@ -184,12 +183,5 @@ def run_asm(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:int,
     body = handler(inst, ctx).simplify(tracked=True)
     graph.append(body, name=f"{_op_name(inst).lower()}_{offset:x}")
     offset += inst.size()
-  words = user_data or [args_ptr & 0xffffffff, args_ptr >> 32]
-  sink, banks = launch(graph, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, len(words))
-  prg = to_program(sink, _CallRenderer(Device["CPU"].renderer.target, banks))
-  runtime = get_runtime("CPU", prg)
-  data = (ctypes.c_uint32 * len(words))(*words)
-  bufs = {2:0, 6:ctypes.addressof(data)}
-  with _MXCSRContext():
-    runtime(*[bufs[g] for g in prg.arg.globals])
-  return 0
+  sink, banks = launch(graph, gx, gy, gz, lx, ly, lz, rsrc2, scratch_size, arch, user_words)
+  return to_program(sink, _CallRenderer(Device["CPU"].renderer.target, banks))
