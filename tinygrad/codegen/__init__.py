@@ -7,6 +7,7 @@ from tinygrad.uop.weak import pm_lower_weak, pm_commit_weak, pm_cast_const
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
+from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.dtype import dtypes, AddrSpace
 
@@ -22,11 +23,11 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_reduce_unparented
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.schedule.prepare import pm_mops, resolve_function
+from tinygrad.schedule.prepare import pm_mops, resolve_function, bind_call_args
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 from tinygrad.codegen.late.coalesce import memory_coalescing, pm_simplify_add_image
-from tinygrad.helpers import all_same, all_int, argsort, partition
+from tinygrad.helpers import all_same, all_int, argsort, partition, to_function_name
 from tinygrad.uop.ops import _broadcast_shape, identity_element
 from tinygrad.schedule.rangeify import BufferizeOpts
 
@@ -299,11 +300,34 @@ def lower_inline_call(ctx, call:UOp) -> UOp|None:
 
 pm_call_linear = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), lower_call_linear), (UPat(Ops.CALL, name="call"), lower_inline_call)])
 
+def outline_call(ctx:ClangRenderer, call:UOp) -> UOp|None:
+  if not call.is_inline_call: return None
+  bindings = bind_call_args(call)
+  if not any(p.addrspace is AddrSpace.REG for p in bindings): return None
+  params, args = list(bindings), list(bindings.values())
+  formal = [UOp.param(i, p.dtype, p.shape, addrspace=AddrSpace.GLOBAL if p.shape else AddrSpace.ALU,
+                      name=f"{p.arg.name}{p.arg.slot}" if p.addrspace is AddrSpace.REG else p.arg.name) for i,p in enumerate(params)]
+  name = to_function_name(call.arg.name or "call")
+  if name in {p.arg.name for p in params}: name += "_call"
+  if name in ctx.call_functions: name += f"_{len(ctx.call_functions)}"
+  body = call.body.substitute(dict(zip(params, formal)), walk=True).replace(arg=KernelInfo(name=name))
+  renderer = ClangRenderer(ctx.target)
+  lowered = full_rewrite_to_sink(body, renderer, optimize=False)
+  uops = line_rewrite(linearize(lowered), pm_linearize_cleanups)
+  ctx.call_functions.update(renderer.call_functions)
+  ctx.call_functions[name] = uops
+  return UOp.custom_function(name).call(*(args[p.arg.slot] for p in uops if p.op is Ops.PARAM), name=call.arg.name)
+
+pm_outline_calls = PatternMatcher([(UPat(Ops.CALL, name="call"), outline_call)])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
   if SPEC: type_verify(ast, spec_tensor)
 
+  if isinstance(ren, ClangRenderer):
+    ren.call_functions = {}
+    ast = graph_rewrite(ast, pm_outline_calls, ctx=ren, name="outline calls")
   ast = graph_rewrite(ast, pm_call_linear, ctx=itertools.count(max((r.arg[0] for r in ast.toposort() if r.op is Ops.RANGE), default=0)+1),
                       name="lower calls")
   if ren.pre_matcher is not None: ast = graph_rewrite(ast, ren.pre_matcher, ctx=ren, name="lower renderer inputs")

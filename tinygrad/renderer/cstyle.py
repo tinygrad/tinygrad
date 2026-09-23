@@ -65,6 +65,8 @@ base_rewrite = PatternMatcher([
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
     *([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[v] for v in x.src]), x.dtype)),
 
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, src=(), name="fn"),), allow_any_len=True, name="x"),
+   lambda ctx,x,fn: f"{fn.arg}({', '.join(ctx[y] for y in x.src[1:])})" + (";" if x.dtype is dtypes.void else "")),
   # call an external function: the CUSTOM_FUNCTION body holds the callee (a function pointer), the other srcs are the args
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, src=(UPat(name="fptr"),)),), allow_any_len=True, name="x"), lambda ctx,x,fptr:
    f"((({ctx.abi}{ctx.render_dtype(x.dtype)}(*)({', '.join(ctx.render_type(y) for y in x.src[1:])}))({ctx[fptr]}))" +
@@ -309,8 +311,16 @@ class ClangRenderer(CStyleLanguage):
   def supported_dtypes(self):
     return {d for d in super().supported_dtypes() if (d != dtypes.bfloat16 or self.target.arch.startswith(("x86", "arm"))) and d not in dtypes.fp8s}
 
+  def render(self, uops:list[UOp]) -> str:
+    if not self.call_functions: return super().render(uops)
+    functions = ClangRenderer(self.target)
+    functions.kernel_typedef = "static void"
+    functions.buffer_suffix = ""  # operands of an instruction may alias
+    return '\n\n'.join([*(functions.render(body).strip() for body in self.call_functions.values()), super().render(uops)])
+
   def __init__(self, target:Target):
     super().__init__(target)
+    self.call_functions:dict[str, list[UOp]] = {}
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     self.compiler = ClangCompiler(target.arch.split(","))
 

@@ -128,8 +128,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   # reduce original axes, then split
   return splitted._rop(reduce.arg[0], tuple(range(reduce.arg[1]))).contiguous()._rop(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
-def resolve_function(c:UOp) -> UOp|None:
-  if not c.is_inline_call: return None
+def bind_call_args(c:UOp) -> dict[UOp, UOp]:
   nodes = c.body.toposort(enter_calls=False)
   # Register operands retain their identity through STACK and AFTER.
   args = c.src[1:]
@@ -164,6 +163,12 @@ def resolve_function(c:UOp) -> UOp|None:
     elif a.shape != ():
       raise TypeError(f"arg {p.arg.slot} shape mismatch: expected scalar, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {p.arg.slot} dtype mismatch: expected {p.dtype}, got {a.dtype}")
+  return dict_map
+
+def resolve_function(c:UOp) -> UOp|None:
+  if not c.is_inline_call: return None
+  dict_map = bind_call_args(c)
+  nodes = c.body.toposort(enter_calls=False)
   # Inlining removes the call scope, so its local allocations need fresh identities.
   dict_map.update({b:b.replace(arg=replace(b.arg, slot=next(UOp.unique_num))) for b in nodes if b.op is Ops.ALLOC})
   return c.body.substitute(dict_map, walk=True)
