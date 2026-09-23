@@ -174,7 +174,33 @@ class _CallGraph:
       formal[p] = UOp.param(i, p.dtype, p.shape, name=operand_name, addrspace=AddrSpace.GLOBAL)
       val = self.values[actual].after(*self.readers[actual]) if actual in writes else self.values[actual]
       args.append(val.after(*self.deps))
-    call = body.substitute(formal, walk=True).simplify(tracked=True).call(*args, name=name)
+    body = body.substitute(formal, walk=True).simplify(tracked=True)
+    # Adjacent registers with the same operand role form one STACK argument.
+    groups:list[list[int]] = []
+    remaining = set(range(len(params)))
+    for i, p in enumerate(params):
+      if i not in remaining: continue
+      group = [i]
+      actual = aliases.get(p, p)
+      if actual in self.registers:
+        bank, reg = self.registers[actual]
+        if bank != "s" or reg < 106:
+          candidates = {self.registers[a][1]:j for j,q in enumerate(params) if j in remaining and
+                        (a:=aliases.get(q, q)) in self.registers and self.registers[a][0] == bank and (q in writes) == (p in writes)}
+          while reg+1 in candidates and (bank != "s" or reg+1 < 106):
+            reg += 1
+            group.append(candidates[reg])
+      remaining.difference_update(group)
+      groups.append(group)
+    replacements, grouped_args = {}, []
+    for slot, group in enumerate(groups):
+      originals = [next(u for u in formal[params[i]].toposort() if u.op is Ops.PARAM) for i in group]
+      first = originals[0]
+      shape = (len(group), *first.shape) if len(group) > 1 else first.shape
+      param = UOp.param(slot, first.dtype, shape, name=first.arg.name, addrspace=AddrSpace.GLOBAL)
+      for j, p in enumerate(originals): replacements[p] = param.index(j) if len(group) > 1 else param
+      grouped_args.append(UOp.stack(*(args[i] for i in group)) if len(group) > 1 else args[group[0]])
+    call = body.substitute(replacements, walk=True).call(*grouped_args, name=name)
     self.calls.append(call)
     self.deps = (call,)
     for p in used - immediates.keys():

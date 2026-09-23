@@ -233,7 +233,8 @@ def is_shape_changing_bitcast(u:UOp): return u.op is Ops.BITCAST and u.shape != 
 def maybe_load(u:UOp): return u.load() if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG) else u
 pm_add_loads = PatternMatcher([
   (UPat(GroupOp.Elementwise|{Ops.REDUCE,Ops.WMMA,Ops.STACK}, name="x"),
-   lambda x: None if is_shape_changing_bitcast(x) else x.replace(src=tuple(map(maybe_load, x.src)))),
+   lambda x: None if is_shape_changing_bitcast(x) or (x.op is Ops.STACK and x.tag == "call_args")
+   else x.replace(src=tuple(map(maybe_load, x.src)))),
   (UPat(Ops.STORE, name="x"), lambda x: x.replace(src=(x.src[0], maybe_load(x.src[1]))+x.src[2:])),
 ])
 
@@ -304,14 +305,32 @@ def outline_call(ctx:tuple[ClangRenderer, dict[tuple[str, UOp], tuple[str, list[
   if not call.is_inline_call: return None
   ren, cache = ctx
   bindings = bind_call_args(call)
-  if not any(a.addrspace is AddrSpace.REG for a in bindings.values()): return None
-  params, args = list(bindings), list(bindings.values())
-  formal = [UOp.param(i, p.dtype, p.shape, addrspace=AddrSpace.GLOBAL if p.shape else AddrSpace.ALU,
-                      name=f"{p.arg.name}{p.arg.slot}" if p.addrspace is AddrSpace.REG else p.arg.name) for i,p in enumerate(params)]
+  if not any(a.addrspace is AddrSpace.REG or a.base.op is Ops.STACK for a in bindings.values()): return None
+  params = list(bindings)
+  args:list[UOp] = []
+  formal, groups = {}, {}
+  arg_groups:dict[int, tuple[str, int]] = {}
+  for p in params:
+    actual = call.src[p.arg.slot+1]
+    stack = actual.without_after
+    if stack.op is Ops.STACK and all(s.addrspace is not AddrSpace.ALU for s in stack.src):
+      members = []
+      slots = []
+      for j, a in enumerate(stack.src):
+        slot = len(args)
+        slots.append(slot)
+        members.append(UOp.param(slot, p.dtype, a.shape, name=f"{p.arg.name}_{j}", addrspace=AddrSpace.GLOBAL))
+        args.append(a.after(*actual.src[1:]) if actual.op is Ops.AFTER else a)
+        arg_groups[slot] = (p.arg.name or f"data{p.arg.slot}", j)
+      formal[p] = UOp.stack(*members).reshape(p.shape)
+      groups[slots[0]] = slots
+    else:
+      formal[p] = UOp.param(len(args), p.dtype, p.shape, addrspace=AddrSpace.GLOBAL if p.shape else AddrSpace.ALU, name=p.arg.name)
+      args.append(bindings[p])
   name = to_function_name(call.arg.name or "call")
   if name in {p.arg.name for p in params}: name += "_call"
-  body = call.body.substitute(dict(zip(params, formal)), walk=True)
-  key = (name, body)
+  body = call.body.substitute(formal, walk=True)
+  key = (name, call.body)
   if key in cache: name, uops = cache[key]
   else:
     if name in ren.call_functions: name += f"_{sum(n == name for n,_ in cache)}"
@@ -319,9 +338,17 @@ def outline_call(ctx:tuple[ClangRenderer, dict[tuple[str, UOp], tuple[str, list[
     lowered = full_rewrite_to_sink(body.replace(arg=KernelInfo(name=name)), renderer, optimize=False)
     uops = line_rewrite(linearize(lowered), pm_linearize_cleanups)
     ren.call_functions.update(renderer.call_functions)
+    ren.call_arg_groups.update(renderer.call_arg_groups)
     ren.call_functions[name] = uops
+    ren.call_arg_groups[name] = arg_groups
     cache[key] = (name, uops)
-  return UOp.custom_function(name).call(*(args[p.arg.slot] for p in uops if p.op is Ops.PARAM), name=call.arg.name)
+  call_args, emitted = [], set()
+  for p in uops:
+    if p.op is not Ops.PARAM or p.arg.slot in emitted: continue
+    slots = next((g for g in groups.values() if p.arg.slot in g), [p.arg.slot])
+    emitted.update(slots)
+    call_args.append(UOp.stack(*(args[i] for i in slots)).rtag("call_args") if len(slots) > 1 else args[slots[0]])
+  return UOp.custom_function(name).call(*call_args, name=call.arg.name)
 
 pm_outline_calls = PatternMatcher([(UPat(Ops.CALL, name="call"), outline_call)])
 
@@ -332,6 +359,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   if isinstance(ren, ClangRenderer):
     ren.call_functions = {}
+    ren.call_arg_groups = {}
     ast = graph_rewrite(ast, pm_outline_calls, ctx=(ren, {}), name="outline calls")
   ast = graph_rewrite(ast, pm_call_linear, ctx=itertools.count(max((r.arg[0] for r in ast.toposort() if r.op is Ops.RANGE), default=0)+1),
                       name="lower calls")
