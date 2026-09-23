@@ -269,8 +269,8 @@ def add_war_barrier(end:UOp):
   # only stores that are inside this loop body (not in the backward slice through AFTER chains from other loops)
   store_bufs = {x.buf_uop for x in sl if _is_local_store(x) and any(r in x.ranges for r in rngs)}
   # a load whose buffer matches a local store's buffer is necessarily a local load
-  if not (loads:=[x for x in sl if x.op is Ops.LOAD and x.src[0].buf_uop in store_bufs]): return None
-  return end.replace(src=(UOp(Ops.BARRIER, src=(end.src[0], *loads)),)+end.src[1:])
+  if not any(x.op is Ops.LOAD and x.src[0].buf_uop in store_bufs for x in sl): return None
+  return end.replace(src=(UOp(Ops.BARRIER, src=(end.src[0],)),)+end.src[1:])
 
 pm_implicit_barriers = PatternMatcher([
   (UPat(Ops.AFTER, name="after"), add_raw_barrier),
