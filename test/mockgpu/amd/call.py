@@ -149,8 +149,7 @@ class _CallGraph:
         continue
       actual = aliases.get(p, p)
       role = "dst" if p in writes else "src"
-      bank_name = {"s":"sgpr", "v":"vgpr", "a":"agpr"}.get(actual.arg.name, actual.arg.name)
-      prefix = f"{bank_name}_{role}"
+      prefix = f"{actual.arg.name}_{role}"
       operand_name = prefix
       if p.addrspace is not AddrSpace.REG: operand_name = p.arg.name or operand_name
       elif actual.arg.name == "s":
@@ -285,8 +284,8 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   sizes = {"s":SGPR_COUNT, "v":256*wave_size, "lds":max(((rsrc2 >> 15) & 0x1ff)*128, 1),
            "scratch":max(scratch_size*wave_size, 1)}
   if wave_size == 64: sizes["a"] = 256*wave_size
-  banks = {name:UOp.placeholder((size,), dtypes.uint8 if name == "scratch" else dtypes.uint32, slot=i, addrspace=AddrSpace.REG,
-                                tag={"s":"sgpr", "v":"vgpr", "a":"accvgpr"}.get(name, name)) for i, (name, size) in enumerate(sizes.items())}
+  banks = {name:UOp.placeholder((size,), dtypes.uint8 if name == "scratch" else dtypes.uint32, slot=i, addrspace=AddrSpace.REG, tag=name)
+           for i, (name, size) in enumerate(sizes.items())}
   banks.update(graph.storage)
   group = UOp.range(gx*gy*gz, 0, dtype=dtypes.int, tag="workgroup")
   clear_lds = UOp.range(sizes["lds"], 1)
