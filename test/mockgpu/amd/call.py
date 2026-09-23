@@ -1,22 +1,32 @@
 import ctypes
+import re
 from tinygrad.codegen import pm_add_loads, to_program
 from tinygrad.device import Device
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.renderer.amd import InstDecodeError, decode_inst
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.uop.ops import KernelInfo, Ops, UOp, UPat, PatternMatcher, graph_rewrite
-from test.mockgpu.amd.emu import _Ctx, _INST_HANDLERS, _op_name, _wave_size
+from test.mockgpu.amd.emu import _Ctx, _INST_HANDLERS, _op_name, _wave_size, get_pcode, _get_pcode_dict
 from test.mockgpu.amd.emu import PC_LO_IDX, PC_HI_IDX, SGPR_COUNT, SCRATCH_STRIDE_IDX, F32_INLINE, EXEC_LO, ttmp, hsa
 
 class _CallCtx(_Ctx):
   def __init__(self, code:bytes, pc:int, wave_size:int):
     super().__init__(len(code), wave_size)
     self.code, self.pc = code, pc
+    self.targets:dict[int, UOp] = {}
 
   def inst_word(self, dword_idx:int) -> UOp:
     return UOp.const(int.from_bytes(self.code[dword_idx*4:(dword_idx+1)*4], "little"), dtypes.uint32)
 
   def rpc(self) -> UOp: return UOp.const(self.pc, dtypes.uint64)
+  def inc_pc(self) -> list[UOp]: return []
+
+  def wsgpr_dyn(self, reg:UOp, val:UOp) -> UOp:
+    reg = reg.simplify()
+    if reg.vmin == reg.vmax and reg.vmin in (PC_LO_IDX, PC_HI_IDX):
+      self.targets[int(reg.vmin)] = val
+      return UOp.sink()
+    return super().wsgpr_dyn(reg, val)
 
   def rsgpr_dyn(self, reg:UOp, valid:UOp|None=None) -> UOp:
     reg = reg.simplify()
@@ -39,11 +49,13 @@ class _CallGraph:
     self.values:dict[UOp, UOp] = {}
     self.readers:dict[UOp, list[UOp]] = {}
     self.calls:list[UOp] = []
-    self.loop = UOp.loop(7)
+    self.deps:tuple[UOp, ...] = ()
+    self.guards:list[UOp] = []
+    self.storage:dict[str, UOp] = {}
 
-  def pc(self, *deps:UOp) -> UOp:
-    lo, hi = [self.param(_Ctx.sgpr, i).after(*deps).index(0).load().cast(dtypes.uint64) for i in (PC_LO_IDX, PC_HI_IDX)]
-    return lo | (hi << 32)
+  def condition(self, cond:UOp) -> UOp:
+    cond = graph_rewrite(cond, pm_register_operands, ctx=self)
+    return cond.substitute({p:p.after(*self.deps) for p in self.operands}, walk=True)
 
   def param(self, bank:UOp, reg:int=0) -> UOp:
     if (key:=(bank, reg)) not in self.params:
@@ -66,11 +78,14 @@ class _CallGraph:
     if idx.src[0].op is Ops.AFTER: buf = buf.after(*idx.src[0].src[1:])
     return buf.index((offset % width).valid(idx.src[1].get_valid()))
 
-  def append(self, body:UOp, name:str, pc:int):
+  def append(self, body:UOp, name:str):
     body = graph_rewrite(body, pm_add_loads, name="explicit instruction loads")
     body = graph_rewrite(body, pm_register_operands, ctx=self, name="bind instruction registers")
     if not any(u.op is Ops.STORE for u in body.toposort()): return
-    body = graph_rewrite(body, pm_gate_instruction, ctx=self.pc().eq(pc), walk=True, name="gate instruction memory")
+    if self.guards:
+      gate = UOp.const(True)
+      for p in self.guards: gate = gate & p.index(0).load()
+      body = graph_rewrite(body, pm_gate_instruction, ctx=gate, walk=True, name="gate instruction memory")
     used = {p for p in body.toposort() if p.op is Ops.PARAM}
     if not used <= self.operands: raise NotImplementedError("unbound register bank")
     writes = {u.src[0].buf_uop for u in body.toposort() if u.op is Ops.STORE}
@@ -89,10 +104,11 @@ class _CallGraph:
       vals = [self.values[p].after(*self.readers[p]) if p in writes else self.values[p] for p in group]
       arg = UOp.stack(*vals) if len(vals) > 1 else vals[0]
       args.append(arg)
-    deps = (self.calls[-1],) if self.calls else (self.loop,)
+    deps = self.deps
     args = [UOp.stack(*(v.after(*deps) for v in a.src)) if a.op is Ops.STACK else a.after(*deps) for a in args]
     call = body.call(*args, name=name)
     self.calls.append(call)
+    self.deps = (call,)
     for p in used:
       if p in writes: self.values[p], self.readers[p] = p.after(call), []
       elif p in reads: self.readers[p].append(call)
@@ -130,23 +146,86 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   code = ctypes.string_at(lib, lib_sz)
   offset = 0
   graph = _CallGraph(_CallCtx(b"", lib, _wave_size(arch)))
+  instructions:dict[int, tuple[int, str, UOp, int|None, UOp]] = {}
+  loops:dict[int, int] = {}
   while offset < lib_sz:
     try: inst = decode_inst(code[offset:], arch)
     except InstDecodeError: break
     if offset + inst.size() > lib_sz: raise RuntimeError(f"truncated instruction at {offset:#x}")
     if _op_name(inst) == "S_CODE_END": break
+    name = _op_name(inst)
+    branch = name == "S_BRANCH" or name.startswith("S_CBRANCH_")
+    if not branch and name != "S_ENDPGM" and hasattr(inst, "op") and inst.op in _get_pcode_dict(inst.op):
+      assert not re.search(r'\bPC\b', get_pcode(inst.op)), f"explicit PC access is not supported: {name}"
+    assert not any(x in name for x in ('GETPC', 'SETPC', 'SWAPPC', 'RFE', 'CALL_B64')), f"explicit PC access is not supported: {name}"
     handler = next((_INST_HANDLERS[cls] for cls in type(inst).__mro__ if cls in _INST_HANDLERS), None)
     if handler is None: raise RuntimeError(f"unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
-    ctx = _CallCtx(code[offset:offset+inst.size()], lib + offset, _wave_size(arch))
+    ctx = _CallCtx(code[offset:offset+inst.size()], offset, _wave_size(arch))
     body = handler(inst, ctx).simplify(tracked=True)
-    graph.append(body, name=f"{_op_name(inst).lower()}_{offset:x}", pc=lib+offset)
+    target, cond = None, UOp.const(False)
+    if branch:
+      assert ctx.targets, f"missing branch semantics: {name}"
+      displacement = int(getattr(inst, "simm16")) & 0xffff
+      if displacement & 0x8000: displacement -= 0x10000
+      target = offset + 4 + displacement*4
+      dest = ctx.targets[PC_LO_IDX].cast(dtypes.uint64) | (ctx.targets[PC_HI_IDX].cast(dtypes.uint64) << 32)
+      cond = dest.eq(target).simplify()
+      if target <= offset: loops[target] = max(loops.get(target, offset), offset)
+    instructions[offset] = (inst.size(), name, body, target, cond)
     offset += inst.size()
+  for _, _, _, target, _ in instructions.values():
+    assert target is None or target in instructions or target == offset, f"branch target is not an instruction boundary: {target}"
+  axis = 7
+
+  def emit(start:int, end:int, active_loop:int|None=None):
+    nonlocal axis
+    pos = start
+    forward:list[int] = []
+    while pos < end:
+      while forward and forward[-1] == pos:
+        forward.pop()
+        graph.guards.pop()
+      if pos in loops and pos != active_loop:
+        latch = loops[pos]
+        assert latch < end, "overlapping branch regions"
+        loop = UOp.loop(axis)
+        axis += 1
+        graph.deps += (loop,)
+        emit(pos, latch, pos)
+        cond = graph.condition(instructions[latch][4])
+        for guard in graph.guards: cond = cond & guard.after(*graph.deps).index(0).load()
+        effect = UOp.group(*graph.deps).backedge(loop, cond)
+        graph.calls.append(effect)
+        graph.deps = (effect,)
+        for p in graph.operands: graph.values[p], graph.readers[p] = p.after(effect), []
+        pos = latch + instructions[latch][0]
+        continue
+      size, name, body, target, cond = instructions[pos]
+      if name == "S_ENDPGM":
+        assert not graph.guards and active_loop is None, "conditional termination is not supported"
+        break
+      if target is not None:
+        assert pos < target <= end, f"branch crosses region boundary: {pos:#x} -> {target:#x}"
+        assert not forward or target <= forward[-1], "overlapping forward branch regions are not supported"
+        flag_name = f"branch_{pos:x}"
+        bank = UOp.param(7+len(graph.storage), dtypes.bool, 1, name=flag_name)
+        graph.storage[flag_name] = UOp.placeholder((1,), dtypes.bool, addrspace=AddrSpace.REG, tag=flag_name)
+        flag = graph.param(bank)
+        graph.append(UOp.sink(flag.index(0).store(cond.logical_not())), name=f"branch_{pos:x}")
+        graph.guards.append(flag)
+        forward.append(target)
+      else: graph.append(body, name=f"{name.lower()}_{pos:x}")
+      pos += size
+    for _ in forward: graph.guards.pop()
+
+  emit(0, offset)
   wave_size, total_threads = _wave_size(arch), lx * ly * lz
   sizes = {"s":SGPR_COUNT, "v":256*wave_size, "lds":max(((rsrc2 >> 15) & 0x1ff)*128, 1),
            "scratch":max(scratch_size*wave_size, 1)}
   if wave_size == 64: sizes["a"] = 256*wave_size
   banks = {name:UOp.placeholder((size,), dtypes.uint8 if name == "scratch" else dtypes.uint32, slot=i, addrspace=AddrSpace.REG,
                                 tag={"s":"sgpr", "v":"vgpr", "a":"accvgpr"}.get(name, name)) for i, (name, size) in enumerate(sizes.items())}
+  banks.update(graph.storage)
   group = UOp.range(gx*gy*gz, 0, dtype=dtypes.int)
   clear_lds = UOp.range(sizes["lds"], 1)
   lds_init = state_call(UOp.sink(banks["lds"].index(clear_lds).store(0).end(clear_lds)), "init_workgroup", [banks["lds"]], group)
@@ -158,7 +237,6 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   sgpr = banks["s"].after(*clears)
   words = UOp.param(6, dtypes.uint32, user_words, name="user_data")
   stores = [sgpr.index(i).store(words.index(i)) for i in range(user_words)]
-  stores += [sgpr.index(PC_LO_IDX).store(lib & 0xffffffff), sgpr.index(PC_HI_IDX).store(lib >> 32)]
   n_lanes = (total_threads-wave*wave_size).minimum(wave_size)
   for i in range(wave_size//32):
     bits = (n_lanes-i*32).maximum(0).minimum(32).cast(dtypes.uint64)
@@ -179,7 +257,7 @@ def render_call(lib:int, lib_sz:int, gx:int, gy:int, gz:int, lx:int, ly:int, lz:
   tid = wave*wave_size+lane
   stores.append(banks["v"].after(*clears).index(lane).store(((tid//(lx*ly)) << 20) | (((tid//lx)%ly) << 10) | (tid%lx)).end(lane))
   init = state_call(UOp.sink(*stores), "init_wave", [banks[n] for n in ("s", "v", "a") if n in banks]+[words, group, wave], lds_init, wave)
-  body = graph.calls[-1].backedge(graph.loop, graph.pc(graph.calls[-1]).ne(0xffffffffffffffff)) if graph.calls else init
+  body = graph.calls[-1] if graph.calls else init
   body = body.substitute({p:p.after(init) for p in graph.operands}, walk=True)
   sink = UOp.sink(body.end(wave, group), arg=KernelInfo(name="asm_call")).rtag(1)
   return to_program(sink, _CallRenderer(Device["CPU"].renderer.target, banks))
