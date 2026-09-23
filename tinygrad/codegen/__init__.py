@@ -293,7 +293,12 @@ def lower_call_linear(ctx, linear:UOp) -> UOp|None:
     prev = UOp.sink(prev, resolved)
   return prev
 
-pm_call_linear = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), lower_call_linear)])
+def lower_inline_call(ctx, call:UOp) -> UOp|None:
+  if not call.is_inline_call: return None
+  body = call.body.substitute({r:r.replace(arg=(next(ctx), *r.arg[1:])) for r in call.body.toposort() if r.op is Ops.RANGE})
+  return resolve_function(call.replace(src=(body, *call.src[1:])))
+
+pm_call_linear = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), lower_call_linear), (UPat(Ops.CALL, name="call"), lower_inline_call)])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
@@ -301,7 +306,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if SPEC: type_verify(ast, spec_tensor)
 
   ast = graph_rewrite(ast, pm_call_linear, ctx=itertools.count(max((r.arg[0] for r in ast.toposort() if r.op is Ops.RANGE), default=0)+1),
-                      name="lower linear call")
+                      name="lower calls")
+  if ren.pre_matcher is not None: ast = graph_rewrite(ast, ren.pre_matcher, name="lower renderer inputs")
 
   # resolve UNSHARDs (multi-device UNSHARDs are already resolved by the scheduler; this handles in-kernel shards, e.g. fragments)
   sink = graph_rewrite(ast, multi_pm, name="multi_pm")

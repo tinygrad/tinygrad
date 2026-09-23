@@ -1,5 +1,5 @@
 from dataclasses import replace
-from tinygrad.dtype import dtypes, to_dtype
+from tinygrad.dtype import AddrSpace, dtypes, to_dtype
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, ParamArg
 from tinygrad.uop.ops import graph_rewrite, rewrite_group, identity_element, resolve_returned_after
 from tinygrad.uop.movement import mop_cleanup
@@ -74,6 +74,10 @@ def _mop_index(r:UOp, idx:UOp):
       return ret if ret.shape == idx.shape else None
 
 pm_mops = PatternMatcher([
+  # A register selected from a STACK retains the dependencies on the whole operand.
+  (UPat(Ops.INDEX, src=(UPat(Ops.AFTER, src=(UPat(Ops.STACK, name="stk"),), allow_any_len=True, name="a"), UPat.cvar("i")),
+        allow_any_len=True, name="idx"),
+   lambda stk,a,i,idx: stk.src[i.val].after(*a.src[1:]).index(*idx.src[2:]) if len(idx.src) > 2 else stk.src[i.val].after(*a.src[1:])),
   # handle movement ops on INDEX
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
   # move movement ops and INDEX after AFTER
@@ -127,7 +131,7 @@ def split_reduceop(reduce:UOp, x:UOp):
 def resolve_function(c:UOp) -> UOp|None:
   if not c.is_inline_call: return None
   nodes = c.body.toposort(enter_calls=False)
-  # Input and output PARAMs both bind to explicit arguments by slot; unused arguments are allowed.
+  # Register operands retain their identity through STACK and AFTER.
   args = c.src[1:]
 
   # params have a flat storage size in the arg, the logical shape is a view (RESHAPE/SHRINK/UNSHARD) on top of it.
@@ -136,7 +140,22 @@ def resolve_function(c:UOp) -> UOp|None:
     shp = a.max_shard_shape if a.axis is not None and isinstance(a.device, tuple) else a.max_shape
     if a.op is Ops.SHRINK and a.src[0].shape == shp and all(s == 0 for s,_ in a.marg): a = a.src[0]
     return (n:=prod(shp)), a if a.shape == (n,) else a.pad_to(shp).reshape((n,))
-  dict_map = {p:args[p.arg.slot] for p in nodes if p.op is Ops.PARAM and p.arg.slot >= 0}
+  identities:dict[UOp, UOp] = {}
+  def collect(arg:UOp):
+    base = arg.without_after
+    if base.op is Ops.STACK:
+      for child in base.src: collect(child.after(*arg.src[1:]) if arg.op is Ops.AFTER else child)
+    elif base.op is Ops.PARAM:
+      identities[base] = identities[base].after(arg) if base in identities else arg
+  for arg in args: collect(arg)
+  dict_map:dict[UOp, UOp] = {}
+  register_call = any(p.op is Ops.PARAM and p.addrspace is AddrSpace.REG for p in nodes)
+  for p in nodes:
+    if p.op is not Ops.PARAM or p.arg.slot < 0: continue
+    if register_call:
+      if p not in identities: raise ValueError(f"CALL has an unbound operand: {p.arg}")
+      dict_map[p] = identities[p]
+    else: dict_map[p] = args[p.arg.slot]
   for p, a in dict_map.items():
     if p.arg.size is not None:
       n, flat = flat_storage(a)
