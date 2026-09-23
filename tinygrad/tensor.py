@@ -5,12 +5,12 @@ from typing import Any, Callable, cast, get_args, ParamSpec, TypeVar, Generic, T
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import all_int, getenv, fetch, Metadata, TRACEMETA, TracingKey, is_numpy_ndarray, prod
-from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, pluralize, SPEC
+from tinygrad.helpers import cpu_profile, suppress_finalizing, disable_gc, VIZ, SPEC
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, Variable, ConstLike, UPat, PatternMatcher, GroupOp, graph_rewrite, rewrite_group
 from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.mixin.rand import RandMixin
-from tinygrad.schedule import create_linear_with_vars, parameterize
-from tinygrad.schedule.prepare import contiguous_mops_to_view, bufferize_views
+from tinygrad.schedule import create_linear_with_vars
+from tinygrad.schedule.prepare import contiguous_mops_to_view
 from tinygrad.device import Buffer, canonicalize_device, is_disk_device
 from tinygrad.engine.realize import run_linear
 
@@ -25,13 +25,6 @@ def collect_tensor_graph(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
             and (u.src[0].unsharded_base.op is not Ops.ALLOC or u.src[1].op is Ops.STORE)]
   becomes = {u:graph_rewrite(u.src[0], pm_drop_after, bottom_up=True, name="drop after").shrink_to(u.shape) for u in stores}
   return UOp.sink(*stores), becomes
-
-@rewrite_group(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
-def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
-  sink, becomes = collect_tensor_graph(big_sink)
-  sink, views = bufferize_views(sink)
-  body, inputs = parameterize(sink)
-  return body.call(*(views.get(b, b) for b in inputs), precompile=True), becomes
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 

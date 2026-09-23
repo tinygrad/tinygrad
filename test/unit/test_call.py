@@ -3,9 +3,11 @@ import numpy as np
 from tinygrad import Tensor, function, Device
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.tensor import transform_to_call
+from tinygrad.tensor import collect_tensor_graph
+from tinygrad.schedule import parameterize
+from tinygrad.schedule.prepare import bufferize_views
 
-def sched_key(t:Tensor): return transform_to_call(UOp.sink(t.uop))[0].src[0].key
+def sched_key(t:Tensor): return parameterize(bufferize_views(collect_tensor_graph(UOp.sink(t.uop))[0])[0])[0].key
 
 class TestCall(unittest.TestCase):
   def test_call_plus(self):
