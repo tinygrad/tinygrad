@@ -268,6 +268,26 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
     self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does not support dynamic register indexing")
+  def test_reg_stage_then_reduce(self):
+    # the REG buffer of the STAGE and the accumulator of the reduce are different buffers
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j, jj = UOp.range(4, 0), UOp.range(8, 1, AxisType.LOOP), UOp.range(8, 2, AxisType.LOOP)
+      stage = (A[i, j] * 2).bufferize(j, arg=BufferizeOpts(None, AddrSpace.REG))
+      return C[i].store(stage.index(jj).reduce(jj, arg=Ops.ADD)).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a*2).sum(1).tolist())
+
+  def test_reg_placeholder_then_reduce(self):
+    # the accumulator of the reduce does not reuse the slot of a REG placeholder in the kernel
+    def kernel(C:UOp, A:UOp) -> UOp:
+      i, j = UOp.range(4, 0), UOp.range(8, 1, AxisType.REDUCE)
+      reg = UOp.placeholder((1,), dtypes.float, 0, addrspace=AddrSpace.REG)
+      reg = reg.after(i)[0].set(A[i, 0])
+      return C[i].store(A[i, j].reduce(j, arg=Ops.ADD) + reg[0]).end(i).sink(arg=KernelInfo(opts_to_apply=()))
+    a = Tensor.arange(32).reshape(4, 8).float().contiguous().realize()
+    self.assertEqual(Tensor.custom_kernel(Tensor.empty(4), a, fxn=kernel)[0].tolist(), (a.sum(1) + a[:, 0]).tolist())
+
   def test_upcast_split_range(self):
     # j%2 splits j into two UPCAST ranges, the expander expands both, so no loop is left
     def kernel(C:UOp, A:UOp) -> UOp:
